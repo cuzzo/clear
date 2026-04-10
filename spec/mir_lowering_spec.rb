@@ -260,7 +260,8 @@ RSpec.describe MIRLowering do
       right = make_id("b", full_type: :Int64)
       node = make_binop(left, :ADD, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Call)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(result.stdlib_def).to include(borrows: :all)
       expect(emit(result)).to eq("CheatLib.intAdd(a, b)")
     end
 
@@ -278,7 +279,8 @@ RSpec.describe MIRLowering do
       right = make_lit(:STRING, "alice")
       node = make_binop(left, :EQ, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Call)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(result.stdlib_def).to include(borrows: :all)
       expect(emit(result)).to include("CheatLib.eql(name,")
     end
 
@@ -295,7 +297,8 @@ RSpec.describe MIRLowering do
       right = make_id("b")
       node = make_binop(left, :WRAP_ADD, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Call)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(result.stdlib_def).to include(borrows: :all)
       expect(emit(result)).to eq("CheatLib.wrapAdd(a, b)")
     end
 
@@ -355,7 +358,8 @@ RSpec.describe MIRLowering do
       node = AST::GetIndex.new(tok, target, index)
       node.full_type = :Int64
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Call)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(result.stdlib_def).to include(borrows: :all)
       expect(emit(result)).to eq("CheatLib.getAt(items, 0)")
     end
   end
@@ -810,7 +814,8 @@ RSpec.describe MIRLowering do
       node = AST::Assert.new(tok, cond, "should be true")
       node.full_type = :Void
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Call)
+      expect(result).to be_a(MIR::InlineZig)
+      expect(result.stdlib_def).to include(borrows: :all)
       expect(emit(result)).to include("CheatLib.assert(true,")
     end
 

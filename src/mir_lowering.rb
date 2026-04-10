@@ -2089,12 +2089,12 @@ class MIRLowering
     # String comparison
     if Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?
       cmp_node = case node.op
-            when :EQ  then MIR::Call.new("CheatLib.eql", [left, right], false)
-            when :NEQ then MIR::UnaryOp.new("!", MIR::Call.new("CheatLib.eql", [left, right], false))
-            when :LT  then MIR::BinOp.new("<",  MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
-            when :LTE then MIR::BinOp.new("<=", MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
-            when :GT  then MIR::BinOp.new(">",  MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
-            when :GTE then MIR::BinOp.new(">=", MIR::Call.new("CheatLib.strcmp", [left, right], false), MIR::Lit.new("0"))
+            when :EQ  then emit_builtin(:eql, [left, right])
+            when :NEQ then MIR::UnaryOp.new("!", emit_builtin(:eql, [left, right]))
+            when :LT  then MIR::BinOp.new("<",  emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
+            when :LTE then MIR::BinOp.new("<=", emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
+            when :GT  then MIR::BinOp.new(">",  emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
+            when :GTE then MIR::BinOp.new(">=", emit_builtin(:strcmp, [left, right]), MIR::Lit.new("0"))
             end
       return cmp_node if cmp_node
     end
@@ -2110,14 +2110,14 @@ class MIRLowering
 
     # Wrapping operators
     if %i[WRAP_ADD WRAP_SUB WRAP_MUL].include?(node.op)
-      fn = { WRAP_ADD: "wrapAdd", WRAP_SUB: "wrapSub", WRAP_MUL: "wrapMul" }[node.op]
-      return MIR::Call.new("CheatLib.#{fn}", [left, right], false)
+      fn = { WRAP_ADD: :wrapAdd, WRAP_SUB: :wrapSub, WRAP_MUL: :wrapMul }[node.op]
+      return emit_builtin(fn, [left, right])
     end
 
     # Checked operators
     if %i[CHECK_ADD CHECK_SUB CHECK_MUL].include?(node.op)
-      fn = { CHECK_ADD: "checkAdd", CHECK_SUB: "checkSub", CHECK_MUL: "checkMul" }[node.op]
-      return MIR::Call.new("CheatLib.#{fn}", [left, right], false)
+      fn = { CHECK_ADD: :checkAdd, CHECK_SUB: :checkSub, CHECK_MUL: :checkMul }[node.op]
+      return emit_builtin(fn, [left, right])
     end
 
     # Default integer arithmetic: checked in debug
@@ -2131,8 +2131,8 @@ class MIRLowering
       no_float_coerce = !node.left.respond_to?(:coerced_type) || node.left.coerced_type.nil? || Type.new(node.left.coerced_type).integer?
       no_float_coerce &&= !node.right.respond_to?(:coerced_type) || node.right.coerced_type.nil? || Type.new(node.right.coerced_type).integer?
       if both_int && no_lits && no_float_coerce
-        fn = { ADD: "intAdd", SUB: "intSub", MUL: "intMul" }[node.op]
-        return MIR::Call.new("CheatLib.#{fn}", [left, right], false)
+        fn = { ADD: :intAdd, SUB: :intSub, MUL: :intMul }[node.op]
+        return emit_builtin(fn, [left, right])
       end
     end
 
@@ -2392,21 +2392,21 @@ class MIRLowering
       if map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
         key_zig = map_ft.key_type.zig_type
         val_zig = map_ft.value_type.zig_type
-        MIR::Call.new("CheatLib.numericMapGet", [MIR::Ident.new(key_zig), MIR::Ident.new(val_zig), target, index], false)
+        emit_builtin(:numericMapGet, [MIR::Ident.new(key_zig), MIR::Ident.new(val_zig), target, index])
       else
         MIR::MethodCall.new(target, "get", [index], false)
       end
     elsif ti&.pool?
       MIR::MethodCall.new(target, "get", [index], false)
     elsif ti&.string?
-      MIR::Call.new("CheatLib.charAt", [target, index], false)
+      emit_builtin(:charAt, [target, index])
     elsif node.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
       items = MIR::FieldGet.new(target, "items")
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
     else
-      MIR::Call.new("CheatLib.getAt", [target, index], false)
+      emit_builtin(:getAt, [target, index])
     end
   end
 
@@ -2524,7 +2524,7 @@ class MIRLowering
   def lower_assert(node)
     cond = lower(node.condition)
     msg = node.message.to_s.gsub('"', '\\"')
-    MIR::Call.new("CheatLib.assert", [cond, MIR::Lit.new("\"#{msg}\"")], false)
+    emit_builtin(:assert, [cond, MIR::Lit.new("\"#{msg}\"")])
   end
 
   def lower_raise(node)
@@ -2811,8 +2811,7 @@ class MIRLowering
 
     # Fallback for unknown container types or missing registry entries
     unless op
-      call = MIR::Call.new("CheatLib.setAt", [target, idx, val], false)
-      return MIR::ExprStmt.new(call, false)
+      return MIR::ExprStmt.new(emit_builtin(:setAt, [target, idx, val]), false)
     end
 
     # Pick sharded zig variant if applicable
@@ -2841,9 +2840,7 @@ class MIRLowering
         unless val_ti&.string?
           if should_dupe_borrowed_union?(val_node, val_ti)
             zig_t = transpile_type(val_ti)
-            val = MIR::Call.new("CheatLib.dupeUnionValue", [
-              MIR::Ident.new(zig_t), val, MIR::Ident.new("#{rt_name}.heapAlloc()")
-            ], true)
+            val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new("#{rt_name}.heapAlloc()")])
           end
         end
       when :container_promote
@@ -3160,7 +3157,7 @@ class MIRLowering
           MIR::BinOp.new("==", tag_check, MIR::Ident.new(".#{variant}"))
         elsif node.string_match
           val = lower(c[:value])
-          MIR::Call.new("CheatLib.strEql", [subject, val], false)
+          emit_builtin(:strEql, [subject, val])
         elsif c[:kind] == :struct_pattern
           pat = c[:value]
           cond_parts, bind_stmts = lower_struct_pattern(subject, pat)
@@ -3351,6 +3348,18 @@ class MIRLowering
 
   # Quick emit for an MIR expression (used when embedding in InlineZig).
   # This is a temporary bridge -- ideally all expressions stay as MIR nodes.
+  # Emit a builtin operation from BUILTIN_OPS registry as MIR::InlineZig
+  # with stdlib_def attached so the MIR checker can verify ownership.
+  def emit_builtin(name, args)
+    entry = BUILTIN_OPS[name]
+    raise "emit_builtin: unknown builtin :#{name}" unless entry
+    pattern = entry[:zig].dup
+    args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}", emit_expr(a)) }
+    iz = MIR::InlineZig.new(pattern, "builtin_#{name}")
+    iz.stdlib_def = entry
+    iz
+  end
+
   def emit_expr(node)
     @_emitter ||= begin
       require_relative "mir_emitter"

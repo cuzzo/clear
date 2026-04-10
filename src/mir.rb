@@ -215,11 +215,27 @@ module MIR
 
   # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
   # Every use is tracked by `reason` for auditing. Goal: zero RawZig nodes.
+  #
+  # WARNING: RawZig BYPASSES ownership verification. The MIR checker cannot
+  # see inside raw Zig code. Any allocation, deallocation, or ownership
+  # transfer inside a RawZig block is INVISIBLE to the checker.
+  #
+  # SAFETY RULES:
+  #   - NEVER allocate heap memory inside RawZig without a matching
+  #     MIR::AllocMark + MIR::Cleanup outside it (leak).
+  #   - NEVER free/deinit a binding inside RawZig that has a Cleanup
+  #     outside it (double-free).
+  #   - NEVER move ownership of a binding into RawZig without a
+  #     MIR::MoveMark + guarded Cleanup outside it (double-free or leak).
+  #   - NEVER return a frame-allocated value from RawZig without
+  #     MIR::EscapePromote outside it (use-after-free).
+  #   - ALWAYS declare ownership_contract so the checker can cross-reference.
+  #
   # ownership_contract: { consumes: [name, ...], produces: [name, ...], borrows: [name, ...] }
   #   consumes: bindings whose ownership transfers into the raw block (must have SuppressCleanup)
   #   produces: bindings the raw block creates (must have MIR::Alloc + MIR::Drop)
   #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
-  #   nil = unaudited (legacy; verifier warns about unaudited RawZig nodes)
+  #   nil = unaudited (legacy; to be eliminated)
   RawZig = Struct.new(:code, :reason, :ownership_contract) do
     include Stmt
     def expr?; true; end  # can appear in expression position too
@@ -643,8 +659,30 @@ module MIR
     # fn_def: MIR::FnDef with the lambda's implementation
   end
 
-  # Inline Zig expression. Tracked escape hatch.
-  # ownership_contract: same as RawZig. nil = unaudited.
+  # Inline Zig expression. Tracked escape hatch for expression-level Zig code.
+  #
+  # WARNING: InlineZig BYPASSES ownership verification unless stdlib_def is set.
+  # The MIR checker cannot see inside inline Zig expressions. Any function call
+  # that allocates, deallocates, or transfers ownership is INVISIBLE to the
+  # checker unless the stdlib_def field declares it.
+  #
+  # SAFETY RULES:
+  #   - NEVER call a function that allocates (append, getOrPut, dupe, concat)
+  #     without setting stdlib_def = { allocates: true }.
+  #   - NEVER call a function that frees memory without a corresponding
+  #     MIR::Cleanup marker outside the InlineZig.
+  #   - NEVER embed multi-statement code -- InlineZig is for expressions only.
+  #     Use RawZig (with ownership_contract) for statement-level escape hatches.
+  #   - All CheatLib.* calls MUST go through BUILTIN_OPS or STD_LIB registries,
+  #     not be emitted as raw InlineZig strings.
+  #   - Pure expressions (casts, ranges, field access, Zig builtins) are safe
+  #     without stdlib_def.
+  #
+  # stdlib_def: hash from BUILTIN_OPS/STD_LIB with ownership metadata
+  #   { allocates: true }  -- call allocates; checker uses for HPT_LEAK
+  #   { borrows: :all }    -- call borrows all args; no ownership transfer
+  #   nil = unaudited or pure expression (safe if no allocation/deallocation)
+  # ownership_contract: same as RawZig (for RawZig-converted nodes).
   InlineZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
     include Expr
   end

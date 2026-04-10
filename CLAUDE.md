@@ -168,6 +168,15 @@ These invariants MUST remain true. Verify them before every commit.
 8. **All stdlib behavior is registry-driven.** Intrinsic function allocation, cleanup, and method dispatch are defined in std_lib.rb and type.rb. No other file may contain type-specific memory logic. (Enforced by: code review)
 9. **Error paths preserve allocator identity.** If an operation can fail (try/catch), the error path must not change the allocator identity of any live value. No `catch` fallbacks that return data from a different allocator. (Enforced by: no `catch original_value` patterns in runtime)
 10. **Union variant cleanup uses the union's allocator.** When cleaning up a union, the allocator passed to cleanup() must match the allocator used to create the variant's payload. Guaranteed by INV-1 (single allocator). (Enforced by: INV-1 + comptime cleanup dispatch)
+11. **All CheatLib calls go through registries.** Every `CheatLib.*` function call must be emitted via STD_LIB, BUILTIN_OPS, or collection method registries (POOL_METHODS, SET_METHODS, MAP_METHODS, INDEX_OPS) so the MIR checker can verify ownership. The only exception is Category C calls (cleanup, promote, promoteDeep, rcCreate, Locked.init) which implement MIR markers and are verified at the marker level. (Enforced by: `grep 'MIR::Call.new("CheatLib.'` returns only marker implementation code)
+12. **RawZig and InlineZig are unsafe escape hatches.** The MIR checker CANNOT see inside raw/inline Zig code. These nodes bypass all ownership verification. Misuse causes silent memory bugs:
+    - **NEVER** allocate heap memory inside RawZig/InlineZig without a matching MIR::AllocMark + MIR::Cleanup outside it (causes leak).
+    - **NEVER** free/deinit a binding inside RawZig/InlineZig that has a Cleanup outside it (causes double-free).
+    - **NEVER** move ownership of a binding into RawZig/InlineZig without a MIR::MoveMark + guarded Cleanup (causes double-free or leak).
+    - **NEVER** return a frame-allocated value from RawZig/InlineZig without MIR::EscapePromote (causes use-after-free).
+    - **ALWAYS** set `ownership_contract` on RawZig and `stdlib_def` on InlineZig that call functions which allocate or transfer ownership.
+    - **ALWAYS** use BUILTIN_OPS registry for CheatLib calls instead of raw InlineZig strings.
+    - Pure expressions (casts, ranges, field access, Zig builtins like `@intCast`) are safe without annotations.
 
 ## Language Semantics
 

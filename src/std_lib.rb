@@ -24,16 +24,17 @@ STD_LIB = {
   "remove" => {
     args: [:"Any[]", :Int64],
     return: :infer_element_type,
-    return_alloc: :heap,  # removed element may contain heap data
+    return_alloc: :heap,  # removed element is now owned by caller
     zig: "{0}.orderedRemove(@intCast({1}))",
     mutates_receiver: true,
+    borrows: :all,  # borrows list + index; returns owned element
   },
 
 
   # 1. String.length()
   "length" => [
-    { args: [STRING_TYPE], return: :Int64, zig: "CheatLib.len({0})" },
-    { args: [:"Any[]"], return: :Int64, zig: "CheatLib.len({0})" }
+    { args: [STRING_TYPE], return: :Int64, zig: "CheatLib.len({0})", borrows: :all },
+    { args: [:"Any[]"], return: :Int64, zig: "CheatLib.len({0})", borrows: :all }
   ],
 
   # 2. String.substr(start, len)
@@ -49,12 +50,13 @@ STD_LIB = {
   "eql?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
-    zig: "CheatLib.eql({0}, {1})"
+    zig: "CheatLib.eql({0}, {1})",
+    borrows: :all,
   },
 
   # toInt() (Overloaded)
   "toInt" => [
-    { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})", can_fail: true },
+    { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})", can_fail: true, borrows: :all },
     { args: [:Float64], return: :Int64, zig: "@intFromFloat({0})" },
     { args: [:Int64], return: :Int64, zig: "{0}" }
   ],
@@ -68,7 +70,7 @@ STD_LIB = {
 
   # toFloat() (Overloaded)
   "toFloat" => [
-    { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})", can_fail: true },
+    { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})", can_fail: true, borrows: :all },
     { args: [:Int64],      return: :Float64, zig: "@as(f64, @floatFromInt({0}))" },
     { args: [:Float64],    return: :Float64, zig: "{0}" }
   ],
@@ -90,21 +92,24 @@ STD_LIB = {
   "codepointCount" => {
     args: [STRING_TYPE],
     return: :Int64,
-    zig: "CheatLib.codepointCount({0})"
+    zig: "CheatLib.codepointCount({0})",
+    borrows: :all,
   },
 
   # bytes(string) → Int64 — byte length (O(1), explicit intent)
   "bytes" => {
     args: [STRING_TYPE],
     return: :Int64,
-    zig: "CheatLib.len({0})"
+    zig: "CheatLib.len({0})",
+    borrows: :all,
   },
 
   # toNumber(string) → ?Float64 — safe parse, returns null on failure
   "toNumber" => {
     args: [STRING_TYPE],
     return: :"?Float64",
-    zig: "(std.fmt.parseFloat(f64, {0}) catch null)"
+    zig: "(std.fmt.parseFloat(f64, {0}) catch null)",
+    borrows: :all,
   },
 
   # 5. print()
@@ -129,6 +134,7 @@ STD_LIB = {
     return: :Void,
     zig: "try CheatLib.writeFile({0}, {1})",
     can_fail: true,
+    borrows: :all,
   },
 
   # 6. Read Line from stdin
@@ -175,28 +181,32 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: STRING_TYPE,
     lifetime: "self",  # returns a sub-slice of the input; no allocation
-    zig: "std.mem.trim(u8, {0}, &std.ascii.whitespace)"
+    zig: "std.mem.trim(u8, {0}, &std.ascii.whitespace)",
+    borrows: :all,
   },
 
   # startsWith("file.txt", "file") -> true
   "startsWith?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
-    zig: "std.mem.startsWith(u8, {0}, {1})"
+    zig: "std.mem.startsWith(u8, {0}, {1})",
+    borrows: :all,
   },
 
   # endsWith?("image.png", ".png") -> true
   "endsWith?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
-    zig: "std.mem.endsWith(u8, {0}, {1})"
+    zig: "std.mem.endsWith(u8, {0}, {1})",
+    borrows: :all,
   },
 
   # indexOf("hello world", "world") -> 6  (or nil if not found)
   "indexOf" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :"?Int64",
-    zig: "CheatLib.indexOf({0}, {1})"
+    zig: "CheatLib.indexOf({0}, {1})",
+    borrows: :all,
   },
 
   # replace("hello world", "world", "CLEAR") -> "hello CLEAR"
@@ -230,7 +240,8 @@ STD_LIB = {
   "contains?" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
-    zig: "(std.mem.indexOf(u8, {0}, {1}) != null)"
+    zig: "(std.mem.indexOf(u8, {0}, {1}) != null)",
+    borrows: :all,
   },
 
   # max(a, b) -> larger value
@@ -297,6 +308,7 @@ STD_LIB = {
     return: :Void,
     zig: "try CheatLib.fileWrite({0}, {1})",
     can_fail: true,
+    borrows: :all,
   },
 
   # List all files in a directory. Returns a list of filenames (not full paths).
@@ -324,7 +336,8 @@ STD_LIB = {
   "fileSize" => {
     args: [STRING_TYPE],
     return: :Int64,
-    zig: "CheatLib.fileSize({0})"
+    zig: "CheatLib.fileSize({0})",
+    borrows: :all,
   },
 
   # Count non-overlapping occurrences of needle in haystack.
@@ -332,7 +345,8 @@ STD_LIB = {
   "countOccurrences" => {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Int64,
-    zig: "CheatLib.countOccurrences({0}, {1})"
+    zig: "CheatLib.countOccurrences({0}, {1})",
+    borrows: :all,
   },
 
   # -------------------------------------------------------------------------
@@ -348,6 +362,8 @@ STD_LIB = {
     return: :TCPClient,
     zig: "try CheatLib.socketAccept({0})",
     can_fail: true,
+    allocates: true,  # produces owned resource (TCPClient)
+    borrows: :all,
   },
 
   # Read up to 4096 bytes from a connected TCP client into a heap String.
@@ -369,6 +385,7 @@ STD_LIB = {
     return: :Void,
     zig: "try CheatLib.socketWriteVoid({0}, {1})",
     can_fail: true,
+    borrows: :all,
   },
 
   # -------------------------------------------------------------------------
@@ -472,16 +489,20 @@ POOL_METHODS = {
     arity: 1, tag: :pool_method,
     zig: "{0}.get({1})",
     return_type: ->(obj_type) { Type.new(:"?#{obj_type.element_type.resolved}") },
+    borrows: :all,  # returns borrowed pointer into pool storage
   },
   "remove" => {
     arity: 1, tag: :pool_method,
     zig: "{0}.remove({1})",
+    mutates_receiver: true,
     return_type: ->(_) { :Void },
+    borrows: :all,  # pool frees the slot internally
   },
   "count" => {
     arity: 0, tag: :pool_method,
     zig: "{0}.count()",
     return_type: ->(_) { Type.new(:Int64) },
+    borrows: :all,
   },
 }.freeze
 
@@ -490,6 +511,8 @@ SET_METHODS = {
     arity: 1, tag: :set_method, allocates: true,
     zig: "try {0}.insert({alloc}, {1})",
     alloc: :heap,
+    mutates_receiver: true,
+    borrows: :all,  # set dupes strings internally; caller retains ownership
     args: [:"Any[]", :Any],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
@@ -504,17 +527,21 @@ SET_METHODS = {
     arity: 1, tag: :set_method,
     zig: "{0}.contains({1})",
     return_type: ->(_) { :Bool },
+    borrows: :all,
   },
   "remove" => {
     arity: 1, tag: :set_method,
     zig: "{0}.remove({alloc}, {1})",
     alloc: :heap,
+    mutates_receiver: true,
     return_type: ->(_) { :Void },
+    borrows: :all,  # set frees the element internally
   },
   "count" => {
     arity: 0, tag: :set_method,
     zig: "{0}.count()",
     return_type: ->(_) { Type.new(:Int64) },
+    borrows: :all,
   },
 }.freeze
 
@@ -541,6 +568,7 @@ MAP_METHODS = {
     arity: 1, tag: :map_method,
     zig: "{0}.remove({alloc}, {1})",
     alloc: :heap,
+    mutates_receiver: true,
     numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {
       arg_type = Type.new(args[0].resolved_type)
@@ -551,6 +579,7 @@ MAP_METHODS = {
       end
     },
     return_type: ->(_) { :Void },
+    borrows: :all,  # map frees key+value internally
   },
   "contains?" => {
     arity: 1, tag: :map_method,
@@ -565,12 +594,14 @@ MAP_METHODS = {
       end
     },
     return_type: ->(_) { :Bool },
+    borrows: :all,
   },
   "count" => {
     arity: 0, tag: :map_method,
     zig: "{0}.count()",
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
     return_type: ->(_) { Type.new(:Int64) },
+    borrows: :all,
   },
   "keys" => {
     arity: 0, tag: :map_method, allocates: true,
@@ -580,6 +611,7 @@ MAP_METHODS = {
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})",
     return_type: ->(_) { :"String[]" },
+    borrows: :all,  # borrows map; returns new owned list
   },
   "values" => {
     arity: 0, tag: :map_method, allocates: true,
@@ -589,6 +621,7 @@ MAP_METHODS = {
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})",
     return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]" },
+    borrows: :all,  # borrows map; returns new owned list
   },
 }.freeze
 
@@ -680,5 +713,50 @@ INDEX_OPS = {
       value_transforms: [],
     },
   },
+}.freeze
+
+# ============================================================================
+# Builtin Operations Registry -- CheatLib runtime functions used by operators,
+# indexing, assertions, and deep copy. NOT user-callable -- emitted by the
+# lowering for operators/expressions. Each entry gets attached as stdlib_def
+# on the MIR::InlineZig node so the MIR checker can verify ownership.
+# ============================================================================
+# Pattern placeholders: {0}, {1}, {2} = positional args
+# All entries implicitly borrow their args unless noted otherwise.
+
+BUILTIN_OPS = {
+  # --- String comparison ---
+  eql:    { zig: "CheatLib.eql({0}, {1})", borrows: :all },
+  strcmp: { zig: "CheatLib.strcmp({0}, {1})", borrows: :all },
+  strEql: { zig: "CheatLib.strEql({0}, {1})", borrows: :all },
+
+  # --- String indexing ---
+  charAt: { zig: "CheatLib.charAt({0}, {1})", borrows: :all },
+
+  # --- Collection indexing (fallback for non-registry paths) ---
+  getAt: { zig: "CheatLib.getAt({0}, {1})", borrows: :all },
+  setAt: { zig: "CheatLib.setAt({0}, {1}, {2})", borrows: :all },
+  numericMapGet: { zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", borrows: :all },
+
+  # --- Checked integer arithmetic ---
+  intAdd: { zig: "CheatLib.intAdd({0}, {1})", borrows: :all },
+  intSub: { zig: "CheatLib.intSub({0}, {1})", borrows: :all },
+  intMul: { zig: "CheatLib.intMul({0}, {1})", borrows: :all },
+
+  # --- Wrapping arithmetic ---
+  wrapAdd: { zig: "CheatLib.wrapAdd({0}, {1})", borrows: :all },
+  wrapSub: { zig: "CheatLib.wrapSub({0}, {1})", borrows: :all },
+  wrapMul: { zig: "CheatLib.wrapMul({0}, {1})", borrows: :all },
+
+  # --- Overflow-checked arithmetic ---
+  checkAdd: { zig: "CheatLib.checkAdd({0}, {1})", borrows: :all },
+  checkSub: { zig: "CheatLib.checkSub({0}, {1})", borrows: :all },
+  checkMul: { zig: "CheatLib.checkMul({0}, {1})", borrows: :all },
+
+  # --- Assertion ---
+  assert: { zig: "CheatLib.assert({0}, {1})", borrows: :all },
+
+  # --- Deep copy (allocates heap copy of union value) ---
+  dupeUnionValue: { zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", allocates: true },
 }.freeze
 

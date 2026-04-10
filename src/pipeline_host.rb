@@ -322,14 +322,21 @@ class PipelineHost
 
   HEAP_ALLOC = "rt.heapAlloc()"
 
+  # stdlib_def for InlineZig nodes that pass an allocator (borrows only).
+  ALLOC_REF_DEF = { borrows: :all }.freeze
+  # stdlib_def for InlineZig nodes that allocate via the passed allocator.
+  ALLOCATING_DEF = { allocates: true }.freeze
+
   # Common: var pipe_mat = ArrayListUnmanaged(T){}; defer pipe_mat.deinit(alloc);
   def mat_var_and_defer(elem_zig)
     var_decl = MIR::Let.new("pipe_mat",
       MIR::InlineZig.new("std.ArrayListUnmanaged(#{elem_zig}){}", "mat_init"),
       true, nil, nil)
+    alloc_ref = MIR::InlineZig.new(HEAP_ALLOC, "alloc")
+    alloc_ref.stdlib_def = ALLOC_REF_DEF
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
-        [MIR::InlineZig.new(HEAP_ALLOC, "alloc")], false)
+        [alloc_ref], false)
     )
     [var_decl, defer]
   end
@@ -341,16 +348,20 @@ class PipelineHost
 
   # try pipe_mat.append(rt.heapAlloc(), value_expr)
   def mat_append(value_expr)
+    alloc_ref = MIR::InlineZig.new(HEAP_ALLOC, "alloc")
+    alloc_ref.stdlib_def = ALLOC_REF_DEF
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "append",
-        [MIR::InlineZig.new(HEAP_ALLOC, "alloc"), value_expr], true), false)
+        [alloc_ref, value_expr], true), false)
   end
 
   # try pipe_mat.appendSlice(rt.heapAlloc(), slice_expr)
   def mat_append_slice(slice_expr)
+    alloc_ref = MIR::InlineZig.new(HEAP_ALLOC, "alloc")
+    alloc_ref.stdlib_def = ALLOC_REF_DEF
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "appendSlice",
-        [MIR::InlineZig.new(HEAP_ALLOC, "alloc"), slice_expr], true), false)
+        [alloc_ref, slice_expr], true), false)
   end
 
   # Sharded pool: for each shard, for each slot, append alive values.
@@ -634,7 +645,7 @@ class PipelineHost
           MIR::IfStmt.new(MIR::Ident.new("matches"), [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("it")], true), nil)
+              [MIR::InlineZig.new(alloc, "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("it")], true), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -655,7 +666,7 @@ class PipelineHost
           MIR::Let.new("val", expr_mir, false, nil, nil),
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("res_list"), "append",
-            [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("val")], true), nil)
+            [MIR::InlineZig.new(alloc, "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("val")], true), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
@@ -697,7 +708,7 @@ class PipelineHost
             [MIR::BreakStmt.new(nil, nil)], nil),
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("res_list"), "append",
-            [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("it")], true), nil)
+            [MIR::InlineZig.new(alloc, "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("it")], true), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
@@ -757,7 +768,7 @@ class PipelineHost
           MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("dist_found")), [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("it")], true), nil)
+              [MIR::InlineZig.new(alloc, "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("it")], true), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -785,7 +796,7 @@ class PipelineHost
           MIR::ForStmt.new(MIR::Ident.new("unn_inner_items"), "inner_it", [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("inner_it")], true), nil)
+              [MIR::InlineZig.new(alloc, "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("inner_it")], true), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -844,7 +855,7 @@ class PipelineHost
                   MIR::Let.new("val", expr_mir, false, nil, nil),
                   MIR::ExprStmt.new(MIR::MethodCall.new(
                     MIR::Ident.new("res_list"), "append",
-                    [MIR::InlineZig.new(alloc, "alloc"), MIR::Ident.new("val")],
+                    [MIR::InlineZig.new(alloc, "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("val")],
                     true), nil)
                 ],
                 nil,
@@ -895,7 +906,7 @@ class PipelineHost
           MIR::Let.new("gop",
             MIR::InlineZig.new(
               "idx_result.inner.getOrPut(#{alloc}, idx_key) catch @panic(\"INDEX allocation failed\")",
-              "idx_get_or_put"), false, nil, nil),
+              "idx_get_or_put").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
           MIR::IfStmt.new(
             MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing")),
             [MIR::ExprStmt.new(
@@ -906,7 +917,7 @@ class PipelineHost
           MIR::ExprStmt.new(
             MIR::InlineZig.new(
               "gop.value_ptr.append(#{alloc}, it) catch @panic(\"INDEX append failed\")",
-              "idx_append"), nil)
+              "idx_append").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
       ]
@@ -967,7 +978,7 @@ class PipelineHost
         ], nil),
         MIR::ExprStmt.new(MIR::MethodCall.new(
           MIR::Ident.new("res_list"), "append",
-          [MIR::InlineZig.new(alloc, "alloc"),
+          [MIR::InlineZig.new(alloc, "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF },
            MIR::InlineZig.new(".{ .left = __jl, .right = __match }", "join_pair")],
           true), nil)
       ], nil),
