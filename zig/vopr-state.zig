@@ -75,7 +75,7 @@ pub const SimScheduler = struct {
     pinned_queue: std.ArrayListUnmanaged(*Task) = .{},
     sleeping_queue: std.ArrayListUnmanaged(*Task),
     current_task: ?*Task,
-    epoll_fds: std.AutoHashMapUnmanaged(i32, *Task),
+    poll_fds: std.AutoHashMapUnmanaged(i32, *Task),
     index: u32,
     active_tasks: usize,
     ticks_since_poll: u32,
@@ -89,7 +89,7 @@ pub const SimScheduler = struct {
             .ready_queue = rq,
             .sleeping_queue = .{},
             .current_task = null,
-            .epoll_fds = .{},
+            .poll_fds = .{},
             .index = idx,
             .active_tasks = 0,
             .ticks_since_poll = 0,
@@ -99,7 +99,7 @@ pub const SimScheduler = struct {
     pub fn deinit(self: *SimScheduler, allocator: std.mem.Allocator) void {
         self.sleeping_queue.deinit(allocator);
         self.pinned_queue.deinit(allocator);
-        self.epoll_fds.deinit(allocator);
+        self.poll_fds.deinit(allocator);
         self.pending_shard_ops.deinit(allocator);
         self.ready_queue.deinit();
         allocator.destroy(self.ready_queue);
@@ -287,7 +287,7 @@ pub const VoprState = struct {
             .ready = false,
             .ready_since_tick = 0,
         }) catch unreachable;
-        self.schedulers[sched_idx].epoll_fds.put(self.allocator, fd, task) catch unreachable;
+        self.schedulers[sched_idx].poll_fds.put(self.allocator, fd, task) catch unreachable;
         return fd;
     }
 

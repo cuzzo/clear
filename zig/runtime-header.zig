@@ -66,10 +66,6 @@ pub const CheatLib = struct {
                 if (err == error.WouldBlock) {
                     const sched = fp.active_scheduler;
                     const task = sched.getCurrent();
-                    // Unregister from any previous scheduler's epoll
-                    if (task.epoll_fd >= 0 and task.epoll_io_fd == fd and task.epoll_fd != sched.poller.epoll_fd) {
-                        std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
-                    }
                     try sched.registerFd(fd, task);
                     task.status.store(.Blocked, .release);
                     task.base.yield();

@@ -46,12 +46,12 @@ const linux = std.os.linux;
 const posix = std.posix;
 const IoUring = linux.IoUring;
 
-// Comptime poller type selection: SimPoller in Loom mode, real Poller otherwise.
-// When the root module exports SimPoller (vopr-loom.zig), all epoll operations
+// Comptime io_uring type selection: SimRing in Loom mode, real IoUring otherwise.
+// When the root module exports SimRing (vopr-loom.zig), all io_uring submissions
 // become yield points for deterministic interleaving.
-pub const PollerType = blk: {
+pub const RingType = blk: {
     const root = @import("root");
-    break :blk if (@hasDecl(root, "SimPoller")) root.SimPoller else Poller;
+    break :blk if (@hasDecl(root, "SimRing")) root.SimRing else IoUring;
 };
 
 const FiberNode = struct {
@@ -133,12 +133,12 @@ pub const SmartEventFd = struct {
         _ = std.posix.read(self.fd, buf) catch {};
     }
 
-    // Called before entering epoll
+    // Called before entering io_uring wait
     pub fn markSleeping(self: *SmartEventFd) void {
         self.state.store(1, .seq_cst);
     }
 
-    // Called immediately after exiting epoll
+    // Called immediately after exiting io_uring wait
     pub fn markAwake(self: *SmartEventFd) void {
         self.state.store(0, .seq_cst);
     }
@@ -173,22 +173,15 @@ pub const Scheduler = struct {
     // 3. IO & Memory
     allocator: std.mem.Allocator,
     global_ebr: *EbrContext,
-    poller: PollerType,
 
-    // 4a. io_uring — used for async file I/O (readFile).
-    // Network I/O stays on epoll.  The ring fd is registered with epoll so the
-    // scheduler's existing event loop drains CQEs alongside socket events.
-    ring: IoUring,
+    // 4a. io_uring — unified I/O ring for poll-based socket I/O, async file
+    // I/O, and eventfd wakeups. In Loom mode, this is SimRing.
+    ring: RingType,
     uring_cqes: [128]linux.io_uring_cqe = undefined,
 
     // 4. Main Thread Context (To return to OS)
     main_ctx: Context,
     current_task: ?*Task,
-
-    // Buffer for epoll events (reused)
-    // Max of 128 for now, likely want to increase
-    // Only works on Linux
-    epoll_events: [128]std.os.linux.epoll_event = undefined,
 
     // -------------------------------------------------------------------------
     // PERFORMANCE NOTE: ATOMIC SCALABILITY & CACHE LINE SAFETY
@@ -229,12 +222,24 @@ pub const Scheduler = struct {
     local_arena: std.heap.ArenaAllocator,
 
     pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, stack_pool: *StackPool) !Scheduler {
-        const p = if (PollerType == Poller) Poller.init() catch unreachable else PollerType.init(allocator, 0);
         const efd = try SmartEventFd.init();
 
-        // io_uring ring for async file I/O (256 SQE slots).
-        const ring = try IoUring.init(256, 0);
-        var sched = Scheduler{
+        // io_uring ring for all I/O: poll-based socket I/O, async file reads,
+        // and eventfd wakeups. 256 SQE slots.
+        // In Loom mode, this is SimRing (no real syscalls).
+        var ring = try RingType.init(256, 0);
+
+        // Register the eventfd with the ring using multishot POLL_ADD.
+        // Multishot means each eventfd write produces a new CQE without
+        // re-submitting. user_data = EVENTFD_SENTINEL (0).
+        if (RingType != @import("vopr-ring.zig").SimRing) {
+            const sqe = try ring.poll_add(EVENTFD_SENTINEL, efd.fd, linux.POLL.IN);
+            // Set POLL_ADD_MULTI so this poll persists across multiple fires.
+            sqe.len = linux.IORING_POLL_ADD_MULTI;
+            _ = try ring.submit();
+        }
+
+        const sched = Scheduler{
             .stack_pool = stack_pool,
             .fiber_pool = .{},
             .ready_queue = try RunQueue.initWithAllocator(allocator),
@@ -244,7 +249,6 @@ pub const Scheduler = struct {
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
             .global_ebr = global_ebr,
-            .poller = p,
             .ring = ring,
             .main_ctx = undefined,
             .current_task = null,
@@ -255,13 +259,6 @@ pub const Scheduler = struct {
             // (per-thread arenas, no lock contention), GPA in debug (leak detection).
             .local_arena = std.heap.ArenaAllocator.init(allocator),
         };
-
-        try sched.poller.registerPersistent(sched.event_fd.fd, 0);
-
-        // Register the io_uring fd with epoll so CQE readiness wakes the
-        // scheduler from epoll_wait.  Use a sentinel user_data value (1) to
-        // distinguish from the eventfd sentinel (0) and task pointers (>4096).
-        try sched.poller.registerPersistent(ring.fd, 1);
 
         return sched;
     }
@@ -321,7 +318,6 @@ pub const Scheduler = struct {
         }
         self.local_arena.deinit();
         self.ring.deinit();
-        self.poller.deinit();
     }
 
     // ------------------------------------------------------------
@@ -509,7 +505,7 @@ pub const Scheduler = struct {
                                 continue;
                             };
                             // Zero-initialize all fields via aggregate init, then
-                            // set the fiber pointer. This ensures epoll_fd, wake_time,
+                            // set the fiber pointer. This ensures wake_time,
                             // inbox_link, etc. are properly initialized — not garbage
                             // from the allocator.
                             t.* = Task{ .base = fiber_ptr, .user_fn = msg.user_fn.? };
@@ -579,7 +575,7 @@ pub const Scheduler = struct {
             }
 
             // ── Fast path: if any queue has work, run it immediately.
-            // Every 64 fast-path iterations, drain inbox + poll epoll to
+            // Every 64 fast-path iterations, drain inbox + poll ring to
             // pick up newly spawned tasks and wake I/O-blocked fibers.
             if (self.hasWork()) {
                 self.fast_path_counter +%= 1;
@@ -587,7 +583,7 @@ pub const Scheduler = struct {
                 if (self.fast_path_counter & 63 == 0) {
                     self.drainChannels();
                 }
-                self.pollEpollNonBlocking();
+                self.pollNonBlocking();
             } else {
                 // ── Slow path: no ready work — check all sources.
                 self.drainChannels();
@@ -681,23 +677,22 @@ pub const Scheduler = struct {
                 }
             }
 
-            // Drain any io_uring completions before sleeping.  This catches CQEs
-            // that arrived while we were busy running fibers, without waiting for
-            // epoll to fire on the ring fd.
-            self.drainCqes();
+            // Drain any pending CQEs before sleeping. This catches completions
+            // that arrived while we were busy running fibers.
+            self.pollNonBlocking();
             if (self.hasWork()) continue;
 
-            // IF IDLE: Poll for IO
-            // Determine timeout based on next timer
-            // If we have a sleeper in 50ms, poll(50). If empty, poll(-1) [Wait Forever].
-            var timeout: i32 = -1;
+            // IF IDLE: Wait for I/O completions via io_uring.
+            // Determine wait_nr: 0 = non-blocking, 1 = block until at least one CQE.
+            var wait_nr: u32 = 1;
 
             if (self.sleeping_queue.items.len > 0) {
-                // Simplification: Just poll for 1ms if we have timers pending
-                timeout = 1;
-            }
-            else if (self.shutdown_on_idle and self.active_tasks.load(.monotonic) == 0) {
-                timeout = 0;
+                // Submit a 1ms timeout so we wake up to check sleepers.
+                const ts = linux.kernel_timespec{ .sec = 0, .nsec = 1_000_000 };
+                _ = self.ring.timeout(TIMEOUT_SENTINEL, &ts, 0, 0) catch {};
+                _ = self.ring.submit() catch {};
+            } else if (self.shutdown_on_idle and self.active_tasks.load(.monotonic) == 0) {
+                wait_nr = 0;
             }
 
             // A. Announce we are going to sleep
@@ -712,14 +707,14 @@ pub const Scheduler = struct {
                 continue; // Restart loop to process the new work
             }
 
-            // C. Actually Sleep
-            const count = self.poller.poll(&self.epoll_events, timeout);
+            // C. Actually Sleep -- wait for at least `wait_nr` CQEs.
+            const count = self.ring.copy_cqes(&self.uring_cqes, wait_nr) catch 0;
 
             // D. We are awake
             self.event_fd.markAwake();
 
             if (count > 0) {
-                self.processEpollEvents(self.epoll_events[0..count]);
+                self.processCqes(self.uring_cqes[0..count]);
             }
 
             // If no IO and no Tasks and no Sleepers -> Break
@@ -772,102 +767,116 @@ pub const Scheduler = struct {
         self.sleeping_queue.append(self.allocator, task) catch unreachable;
     }
 
-    // Register fd for read-readiness with this scheduler's epoll.
+    // Register fd for read-readiness with this scheduler's io_uring.
+    // Submits POLL_ADD with POLLIN. The CQE user_data is the task pointer
+    // (bit 0 clear) so processCqes dispatches via wakeTaskFromIo.
+    //
     // If the fd was previously registered with a DIFFERENT scheduler (fiber
-    // was stolen), unregister from the old one first to prevent double-wake.
+    // was stolen), the old ring may still have a pending POLL_ADD for this fd.
+    // The stale CQE is harmless: wakeTaskFromIo does a CAS Blocked->Ready
+    // that fails if the task is no longer Blocked on the old scheduler.
     pub fn registerFd(self: *Scheduler, fd: i32, task: *Task) !void {
-        if (task.epoll_fd >= 0 and task.epoll_fd != self.poller.epoll_fd) {
-            // Unregister from old scheduler's epoll
-            if (PollerType == Poller) {
-                std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
-            }
-        }
-        task.epoll_fd = self.poller.epoll_fd;
-        task.epoll_io_fd = fd;
-        try self.poller.register(fd, @intFromPtr(task));
+        _ = try self.ring.poll_add(@intFromPtr(task), fd, linux.POLL.IN);
+        _ = try self.ring.submit();
     }
 
     // Register fd for write-readiness (used by socketWrite EAGAIN path).
     pub fn registerWriteFd(self: *Scheduler, fd: i32, task: *Task) !void {
-        if (task.epoll_fd >= 0 and task.epoll_fd != self.poller.epoll_fd) {
-            if (PollerType == Poller) {
-                std.posix.epoll_ctl(task.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
-            }
-        }
-        task.epoll_fd = self.poller.epoll_fd;
-        task.epoll_io_fd = fd;
-        try self.poller.registerWrite(fd, @intFromPtr(task));
+        _ = try self.ring.poll_add(@intFromPtr(task), fd, linux.POLL.OUT);
+        _ = try self.ring.submit();
     }
 
-    // Remove fd from epoll (called by socketClose before closing the fd).
-    pub fn unregisterFd(self: *Scheduler, fd: i32) void {
-        self.poller.unregister(fd);
-    }
+    // No-op for io_uring. POLL_ADD is oneshot: the poll is removed when
+    // the CQE fires. If the fd is closed with a poll still pending, the
+    // kernel delivers -ECANCELED in the CQE, and wakeTaskFromIo safely
+    // ignores it (CAS Blocked->Ready fails because task is not Blocked).
+    // Kept for API compatibility with socketClose().
+    pub fn unregisterFd(_: *Scheduler, _: i32) void {}
 
     // -----------------------------------------------------------------
-    // io_uring helpers — async file I/O
+    // io_uring helpers
     // -----------------------------------------------------------------
+
+    // CQE user_data encoding:
+    //   0           = eventfd sentinel (cross-scheduler wakeup)
+    //   1           = timeout sentinel (ignore)
+    //   ptr & 1 == 1 = IoWaiter pointer (file I/O completion). Real ptr = user_data & ~1.
+    //   ptr & 1 == 0 = Task pointer (poll readiness wakeup). Real ptr = user_data.
+    //
+    // Task and IoWaiter are both aligned >= 4, so bit 0 is always free.
+    const EVENTFD_SENTINEL: u64 = 0;
+    const TIMEOUT_SENTINEL: u64 = 1;
 
     /// Per-operation handle placed on the fiber's (blocked) stack frame.
-    /// Its address goes into the SQE user_data field.  The scheduler
-    /// writes the CQE result before waking the fiber, so the fiber
-    /// reads `waiter.result` immediately after resume.
+    /// Its address goes into the SQE user_data field (tagged with bit 0 = 1).
+    /// The scheduler writes the CQE result before waking the fiber, so the
+    /// fiber reads `waiter.result` immediately after resume.
     pub const IoWaiter = struct {
         task: *Task,
         result: i32 = undefined,
+
+        /// Encode this IoWaiter's address as a user_data value (bit 0 set).
+        fn encode(self: *IoWaiter) u64 {
+            return @intFromPtr(self) | 1;
+        }
+
+        /// Decode a user_data value back to an IoWaiter pointer.
+        fn decode(user_data: u64) *IoWaiter {
+            return @ptrFromInt(user_data & ~@as(u64, 1));
+        }
     };
 
     /// Submit an IORING_OP_READ for `fd` into `buffer` and park `waiter.task`.
     pub fn submitRead(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []u8) !void {
-        _ = try self.ring.read(@intFromPtr(waiter), fd, .{ .buffer = buffer }, 0);
+        _ = try self.ring.read(waiter.encode(), fd, .{ .buffer = buffer }, 0);
         _ = try self.ring.submit();
         waiter.task.status.store(.Blocked, .release);
     }
 
-    /// Core epoll wakeup logic: CAS from Blocked -> Ready, push to queue.
-    /// Only the CAS winner pushes, preventing double-push when stale epoll
-    /// events race with other wakeup paths.  Extracted so Loom scenarios
+    /// Core I/O wakeup logic: CAS from Blocked -> Ready, push to queue.
+    /// Only the CAS winner pushes, preventing double-push when stale
+    /// CQEs race with other wakeup paths. Extracted so Loom scenarios
     /// can exercise this code path under deterministic interleaving.
-    pub fn wakeTaskFromEpoll(self: *Scheduler, task: *Task) void {
+    pub fn wakeTaskFromIo(self: *Scheduler, task: *Task) void {
         if (task.status.cmpxchgStrong(.Blocked, .Ready, .acq_rel, .monotonic) == null) {
             self.enqueueTask(task);
         }
     }
 
-    /// Process a slice of epoll events, dispatching sentinels and waking
-    /// I/O-blocked tasks.  Used by both the fast path (non-blocking) and
-    /// slow path (blocking) epoll polls.
-    fn processEpollEvents(self: *Scheduler, events: []const std.os.linux.epoll_event) void {
-        for (events) |event| {
-            const data_ptr = event.data.ptr;
-            if (data_ptr == 0) {
+    // Keep old name as alias for backward compatibility with existing callers.
+    pub const wakeTaskFromEpoll = wakeTaskFromIo;
+
+    /// Process CQEs from the io_uring ring. Unified handler for:
+    /// - Poll readiness (POLL_ADD completions) -> wake blocked task
+    /// - File I/O completions (READ/WRITE) -> write result to IoWaiter, wake task
+    /// - Eventfd wakeup (sentinel 0) -> consume eventfd
+    /// - Timeout (sentinel 1) -> ignore
+    fn processCqes(self: *Scheduler, cqes: []const linux.io_uring_cqe) void {
+        for (cqes) |cqe| {
+            const ud = cqe.user_data;
+            if (ud == EVENTFD_SENTINEL) {
                 self.event_fd.consume();
-            } else if (data_ptr == 1) {
-                self.drainCqes();
+            } else if (ud == TIMEOUT_SENTINEL) {
+                // Timeout expired or cancelled -- no action needed.
+            } else if (ud & 1 == 1) {
+                // IoWaiter: file I/O completion (READ, WRITE, etc.)
+                const waiter = IoWaiter.decode(ud);
+                waiter.result = cqe.res;
+                waiter.task.status.store(.Ready, .release);
+                self.enqueueTask(waiter.task);
             } else {
-                self.wakeTaskFromEpoll(@ptrFromInt(data_ptr));
+                // Task pointer: poll readiness (POLL_ADD completion)
+                self.wakeTaskFromIo(@ptrFromInt(ud));
             }
         }
     }
 
-    /// Drain all ready CQEs from the io_uring, writing the result into each
-    /// IoWaiter and pushing the corresponding task back onto the ready queue.
-    // Non-blocking epoll poll: check for I/O readiness without sleeping.
-    // Wakes any Blocked fibers whose fds have data ready.
-    fn pollEpollNonBlocking(self: *Scheduler) void {
-        const count = self.poller.poll(&self.epoll_events, 0);
-        if (count > 0) {
-            self.processEpollEvents(self.epoll_events[0..count]);
-        }
-    }
-
-    fn drainCqes(self: *Scheduler) void {
+    /// Non-blocking CQE drain: check for completions without sleeping.
+    /// Wakes any Blocked fibers whose I/O has completed.
+    fn pollNonBlocking(self: *Scheduler) void {
         const n = self.ring.copy_cqes(&self.uring_cqes, 0) catch return;
-        for (self.uring_cqes[0..n]) |cqe| {
-            const waiter: *IoWaiter = @ptrFromInt(cqe.user_data);
-            waiter.result = cqe.res;
-            waiter.task.status.store(.Ready, .release);
-            self.enqueueTask(waiter.task);
+        if (n > 0) {
+            self.processCqes(self.uring_cqes[0..n]);
         }
     }
 };
@@ -1178,90 +1187,6 @@ pub const Semaphore = struct {
             self.lock.store(0, .release);
             _ = self.counter.fetchAdd(1, .seq_cst);
         }
-    }
-};
-
-// Poller lets us make IO & other sys calls without blocking
-// Without this, green fibers are pretty much useless
-// This only works on Linux for now
-pub const Poller = struct {
-    epoll_fd: i32,
-
-    // This only works on Linux for now
-    pub fn init() !Poller {
-        // Create epoll instance
-        // flags=0 is standard
-        const fd = try std.posix.epoll_create1(0);
-        return Poller{ .epoll_fd = fd };
-    }
-
-    pub fn deinit(self: *Poller) void {
-        std.posix.close(self.epoll_fd);
-    }
-
-    // Register a fd for persistent edge-triggered monitoring (no ONESHOT).
-    // Used ONLY for scheduler-internal fds (eventfd, io_uring ring fd) that
-    // must fire on every edge without re-arming.
-    pub fn registerPersistent(self: *Poller, fd: i32, user_data: usize) !void {
-        var event = std.os.linux.epoll_event{
-            .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET,
-            .data = .{ .ptr = user_data },
-        };
-        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event) catch |err| {
-            if (err == error.FileDescriptorAlreadyPresentInSet) {
-                try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, fd, &event);
-            } else return err;
-        };
-    }
-
-    // Register a file descriptor (socket) to watch for READ events.
-    // user_data: We will store the *Task pointer here so we know who to wake up.
-    // ONESHOT: the fd is disabled after each event, preventing stale events
-    // when a fiber is stolen to another scheduler. Re-armed on next WouldBlock.
-    pub fn register(self: *Poller, fd: i32, user_data: usize) !void {
-        var event = std.os.linux.epoll_event{
-            .events = std.os.linux.EPOLL.IN | std.os.linux.EPOLL.ET | std.os.linux.EPOLL.ONESHOT,
-            .data = .{ .ptr = user_data },
-        };
-        // Try CTL_ADD first; if the fd is already registered (e.g. after a prior
-        // socketConnect registered it for EPOLLOUT), fall back to CTL_MOD.
-        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event) catch |err| {
-            if (err == error.FileDescriptorAlreadyPresentInSet) {
-                try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, fd, &event);
-            } else return err;
-        };
-    }
-
-    // Register a file descriptor to watch for WRITE readiness (non-blocking sends).
-    // ONESHOT: disabled after each event to prevent stale cross-scheduler wakes.
-    pub fn registerWrite(self: *Poller, fd: i32, user_data: usize) !void {
-        var event = std.os.linux.epoll_event{
-            .events = std.os.linux.EPOLL.OUT | std.os.linux.EPOLL.ET | std.os.linux.EPOLL.ONESHOT,
-            .data = .{ .ptr = user_data },
-        };
-        // Use MOD if already registered for reads, ADD if new.
-        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_MOD, fd, &event) catch |err| {
-            if (err == error.FileDescriptorNotRegistered) {
-                try std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_ADD, fd, &event);
-            } else return err;
-        };
-    }
-
-    // Remove a fd from epoll. Safe to call even if fd was never registered.
-    pub fn unregister(self: *Poller, fd: i32) void {
-        std.posix.epoll_ctl(self.epoll_fd, std.os.linux.EPOLL.CTL_DEL, fd, null) catch {};
-    }
-
-    // Wait for events. Returns the number of events ready.
-    // events: A slice to store the results
-    // timeout_ms: How long to sleep if nothing happens (-1 = forever, 0 = return immediately)
-    // Only works on Linux
-    pub fn poll(self: *Poller, events: []std.os.linux.epoll_event, timeout_ms: i32) usize {
-        const count = std.os.linux.epoll_wait(self.epoll_fd, events.ptr, @intCast(events.len), timeout_ms);
-        // epoll_wait returns error codes as large usize values (negative isize).
-        // Treat any value above maxInt(isize) as an error and return 0.
-        if (count > std.math.maxInt(isize)) return 0;
-        return count;
     }
 };
 

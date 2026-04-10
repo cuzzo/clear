@@ -216,7 +216,7 @@ fn checkEpollSingleRegistration(state: *VoprState) InvariantError!void {
         var second_sched: u32 = 0;
 
         for (state.schedulers[0..state.sched_count], 0..) |*sched, sched_idx| {
-            if (sched.epoll_fds.contains(fd)) {
+            if (sched.poll_fds.contains(fd)) {
                 registrations += 1;
                 if (registrations == 1) first_sched = @intCast(sched_idx);
                 if (registrations == 2) second_sched = @intCast(sched_idx);
@@ -236,7 +236,7 @@ fn checkEpollSingleRegistration(state: *VoprState) InvariantError!void {
 /// root cause of stale epoll fires leading to double-push.
 fn checkEpollStatusConsistency(state: *VoprState) InvariantError!void {
     for (state.schedulers[0..state.sched_count], 0..) |*sched, sched_idx| {
-        var fd_iter = sched.epoll_fds.iterator();
+        var fd_iter = sched.poll_fds.iterator();
         while (fd_iter.next()) |entry| {
             const task = entry.value_ptr.*;
             const status = task.status.load(.monotonic);

@@ -104,8 +104,6 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
             const fd = state.allocFd(task, sim.owner_sched);
             sim.io_fd = fd;
             task.status.store(.Blocked, .release);
-            task.epoll_fd = @intCast(sim.owner_sched); // Simulated epoll identity
-            task.epoll_io_fd = fd;
             state.blocked_tasks.put(state.allocator, task, fd) catch unreachable;
             state.task_registry.put(state.allocator, task, .Blocked) catch unreachable;
             // Give it more steps for when it resumes
@@ -180,7 +178,7 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
     var to_wake = std.ArrayListUnmanaged(*Task){};
     defer to_wake.deinit(state.allocator);
 
-    var fd_iter = sched.epoll_fds.iterator();
+    var fd_iter = sched.poll_fds.iterator();
     while (fd_iter.next()) |entry| {
         const fd = entry.key_ptr.*;
         if (state.sim_fds.getPtr(fd)) |sim_fd| {
@@ -208,7 +206,7 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
         // Clean up fd registration
         if (state.getSimTask(task)) |sim| {
             if (sim.io_fd >= 0) {
-                _ = sched.epoll_fds.remove(sim.io_fd);
+                _ = sched.poll_fds.remove(sim.io_fd);
                 if (state.sim_fds.getPtr(sim.io_fd)) |sfd| {
                     sfd.registered_sched = null;
                 }
@@ -295,7 +293,7 @@ fn executeInjectFault(state: *VoprState, sched_idx: usize) void {
             // Bug 4: try to push a task that's already Ready in the queue.
             // The production code guards with `if (task.status.load(.acquire) != .Ready)`.
             // We simulate what happens if epoll fires for an already-ready task.
-            var fd_iter = sched.epoll_fds.iterator();
+            var fd_iter = sched.poll_fds.iterator();
             while (fd_iter.next()) |entry| {
                 const task = entry.value_ptr.*;
                 if (task.status.load(.acquire) == .Ready) {

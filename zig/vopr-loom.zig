@@ -62,8 +62,8 @@ const qs = @import("queues.zig");
 
 // Re-export SimAtomic so queues.zig picks it up via @import("root").SimAtomic
 pub const SimAtomic = @import("vopr-atomic.zig").SimAtomic;
-// Re-export SimPoller so scheduler.zig picks it up via @import("root").SimPoller
-pub const SimPoller = @import("vopr-poller.zig").SimPoller;
+// Re-export SimRing so scheduler.zig picks it up via @import("root").SimRing
+pub const SimRing = @import("vopr-ring.zig").SimRing;
 
 const Fiber = fc.Fiber;
 const Context = fc.Context;
