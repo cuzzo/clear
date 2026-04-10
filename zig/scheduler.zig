@@ -95,7 +95,7 @@ pub const RemoteCall = struct {
 // A thread-safe wake-up signal
 pub const SmartEventFd = struct {
     fd: i32,
-    // 0 = Awake (Busy processing), 1 = Sleeping (Waiting on Epoll)
+    // 0 = Awake (Busy processing), 1 = Sleeping (Waiting on io_uring)
     state: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
     pub fn init() !SmartEventFd {
@@ -629,7 +629,7 @@ pub const Scheduler = struct {
 
                 // For @arena BG blocks, expose the thread-local arena so the
                 // Runtime's frameAlloc() resolves to the lock-free local arena.
-                // Regular @pinned fibers (epoll affinity only) do NOT use this —
+                // Regular @pinned fibers (scheduler affinity) do NOT use this —
                 // they get normal frame arena + loop marks like any other fiber.
                 if (task.config.use_arena) {
                     __pinned_local_alloc = self.local_arena.allocator();
