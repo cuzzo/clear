@@ -1423,4 +1423,53 @@ RSpec.describe ZigTranspiler do
       expect { transpile(src) }.not_to raise_error
     end
   end
+
+  # ===========================================================================
+  # SOA EACH placeholder rewriting (benchmark 28)
+  # ===========================================================================
+  describe "SOA EACH pipeline placeholder" do
+    it "rewrites _ placeholder to SOA field accessors in EACH body" do
+      src = <<~CLEAR
+        STRUCT Point { x: Float64, y: Float64 }
+        FN main() RETURNS Void ->
+            MUTABLE soa: Point[100]@soa = [];
+            soa.append(Point{ x: 1.0, y: 2.0 });
+            soa s> EACH { _.x = _.x + _.y; };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # The EACH body must not contain literal '_.x' or '_.y' --
+      # they should be rewritten to __soa_x[__soa_i] etc.
+      expect(zig).not_to include("_.x")
+      expect(zig).not_to include("_.y")
+    end
+  end
+
+  # ===========================================================================
+  # SHARD pipeline variable suppression (benchmark 19)
+  # ===========================================================================
+  describe "SHARD pipeline variable suppression" do
+    it "does not emit pointless _ = var discard for used variables" do
+      src = <<~CLEAR
+        FN makeKey(seed: Int64) RETURNS String ->
+            RETURN toString(seed);
+        END
+        FN main() RETURNS Void ->
+            MUTABLE counts: HashMap<Int64>@sharded(32) = {};
+            MUTABLE seeds: Int64[]@list = [];
+            seeds.append(1_i64);
+            seeds.append(2_i64);
+            (0..<2) s> SHARD(makeKey(seeds[_]), counts) s> CONCURRENT EACH {
+                cur = counts[_] OR 0;
+                counts[_] = cur + 1;
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Must not have "_ = cur;" which Zig rejects as pointless discard
+      expect(zig).not_to match(/;\s*_ = cur;/)
+    end
+  end
 end

@@ -24,6 +24,7 @@ class PipelineHost
     @fn_sigs = lowering.fn_sigs
     # Pipeline context state (managed by with_pipeline_context)
     @soa_rewrite_active = false
+    @soa_each_mode = false
     @soa_needed_fields = Set.new
     @transpiler_context_stack = []
     @mir_mode = false
@@ -112,7 +113,16 @@ class PipelineHost
   # and join param names with their Zig loop variable names.
   # Returns the node (possibly modified) or a new synthetic Identifier.
   def substitute_placeholders(node)
-    return node unless @placeholder_name || @acc_placeholder || @join_param_map
+    return node unless @placeholder_name || @acc_placeholder || @join_param_map || @soa_each_mode
+
+    # SOA EACH: _.field -> synthetic identifier __soa_field[__soa_i]
+    if @soa_each_mode && node.is_a?(AST::GetField) &&
+       node.target.is_a?(AST::Identifier) && node.target.name == "_"
+      @soa_needed_fields << node.field
+      new_id = AST::Identifier.new(node.token, "__soa_#{node.field}[__soa_i]")
+      copy_type_info(node, new_id)
+      return new_id
+    end
 
     case node
     when AST::Identifier
@@ -211,6 +221,7 @@ class PipelineHost
     dst.type_info = src.type_info if src.respond_to?(:type_info) && src.type_info && dst.respond_to?(:type_info=)
     dst.coerced_type = src.coerced_type if src.respond_to?(:coerced_type) && src.coerced_type && dst.respond_to?(:coerced_type=)
     dst.storage = src.storage if src.respond_to?(:storage) && src.storage && dst.respond_to?(:storage=)
+    dst.var_used = src.var_used if src.respond_to?(:var_used) && dst.respond_to?(:var_used=)
   end
 
   public
@@ -988,6 +999,7 @@ class PipelineHost
       prev_soa_active = @soa_rewrite_active
       prev_soa_fields = @soa_needed_fields
       @soa_rewrite_active = true
+      @soa_each_mode = true
       @soa_needed_fields = Set.new
 
       body_code = with_pipeline_context(placeholder: "_") do
@@ -1005,6 +1017,7 @@ class PipelineHost
       alive_check = lhs_type&.pool? ? "if (!__soa_src.alive[__soa_i]) continue;\n        " : ""
 
       @soa_rewrite_active = prev_soa_active
+      @soa_each_mode = false
       @soa_needed_fields = prev_soa_fields
 
       return MIR::ScopeBlock.new([
