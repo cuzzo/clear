@@ -1,20 +1,15 @@
 # static_leak_checker.rb -- Pre-MIR ownership verification.
 #
 # Runs BEFORE MIRLowering on the AST+markers. Checks that require AST
-# structure, dataflow summary, or schema lookup live here. All structural
-# checks (LEAK, ORPHAN, ESCAPE, FRAME_ESCAPE, ALLOC_MISMATCH, etc.) have
+# structure or schema lookup live here. Structural checks (LEAK, ORPHAN,
+# ESCAPE, FRAME_ESCAPE, ALLOC_MISMATCH, CLASSIFIER_GAP, etc.) have
 # migrated to MIRChecker which runs on the post-lowering MIR tree.
 #
 # Checks performed:
-#   GUARD          -- maybe-moved binding's Drop lacks moved guard (double-free)
-#   INDEPENDENT    -- cross-check type-system vs MIR events (classifier gap detector)
 #   FIELD_LEAK     -- field reassignment without pre-cleanup (old value leaks)
 #   BG_ESCAPE      -- BG block captures frame-allocated var without promotion
 #   HPT_LEAK       -- heap-returning call not hoisted into VarDecl
-#   LAMBDA_CAPTURE -- non-Copy lambda capture warning
-#   BG_HEAP_DECL   -- BG capture should be heap at declaration
 #   ALLOC_MISMATCH -- error path changes allocator identity (INV-9)
-#   RAW_CONTRACT   -- RawZig/InlineZig ownership contract violation
 
 class StaticLeakChecker
   attr_reader :errors
@@ -22,7 +17,6 @@ class StaticLeakChecker
   def initialize(fn_node, bindings:, can_fail_fns: nil, schema_lookup: nil)
     @fn = fn_node
     @bindings = bindings || {}
-    @can_fail_fns = can_fail_fns
     @schema_lookup = schema_lookup
     @errors = []
   end
@@ -34,38 +28,18 @@ class StaticLeakChecker
 
     # Collect MIR events from the post-MIR body.
     allocs = {}
-    drops  = {}
     promotes = {}
-    escapes = Set.new
-    suppresses = Set.new
-    reassign_cleanups = {}
-    field_cleanups = []
-    collect_mir_nodes(@fn.body, allocs, drops, promotes, escapes, suppresses,
-                      reassign_cleanups, field_cleanups)
+    collect_mir_nodes(@fn.body, allocs, promotes)
     # Walk catch clause bodies for MIR nodes (e.g., MIR::Promote for catch_string_dupe).
     (@fn.catch_clauses || []).each do |clause|
-      collect_mir_nodes(clause[:body], allocs, drops, promotes, escapes, suppresses,
-                        reassign_cleanups, field_cleanups) if clause[:body]
+      collect_mir_nodes(clause[:body], allocs, promotes) if clause[:body]
     end
     if @fn.default_catch.is_a?(Array)
-      collect_mir_nodes(@fn.default_catch, allocs, drops, promotes, escapes, suppresses,
-                        reassign_cleanups, field_cleanups)
+      collect_mir_nodes(@fn.default_catch, allocs, promotes)
     end
 
-    has_bindings = !@bindings.empty? || !takes_param_names.empty?
-
-    if has_bindings
-      # Path-sensitive move analysis for guard checks.
-      df = OwnershipDataflow.analyze(@fn, can_fail_fns: @can_fail_fns)
-      df_summary = df.cleanup_summary
-      check_guards!(drops, df_summary)
-    end
-
-    # Independent ownership verification (classifier gap detector).
+    # Field ownership verification (requires schema lookup for type info).
     if @schema_lookup
-      df ||= OwnershipDataflow.analyze(@fn, can_fail_fns: @can_fail_fns)
-      df_summary ||= df.cleanup_summary
-      check_independent_ownership!(allocs, drops, df_summary)
       check_field_ownership!(@fn.body)
     end
 
@@ -75,12 +49,6 @@ class StaticLeakChecker
     # Safety net: catch heap-returning calls that HPT hoisting missed.
     check_unhoisted_heap_calls!(@fn.body)
 
-    # BG captures should be heap-allocated at declaration.
-    check_bg_capture_heap_at_decl!(allocs)
-
-    # Lambda USE captures of non-Copy bindings.
-    check_lambda_captures!(@fn.body)
-
     # INV-9: error paths must not change allocator identity.
     check_error_path_consistency!(allocs)
 
@@ -89,175 +57,40 @@ class StaticLeakChecker
 
   private
 
-  # Dataflow says maybe-moved -> Drop must be guarded.
-  def check_guards!(drops, df_summary)
-    drops.each do |name, drop_nodes|
-      df_entry = df_summary[name]
-      next unless df_entry
-
-      drop_nodes.each do |drop|
-        if df_entry[:has_moved_guard] && !drop.has_moved_guard
-          @errors << error(:GUARD, name, "dataflow says maybe-moved but Drop lacks guard")
-        end
-      end
-    end
-  end
-
-  def collect_mir_nodes(stmts, allocs, drops, promotes, escapes, suppresses,
-                        reassign_cleanups, field_cleanups)
+  def collect_mir_nodes(stmts, allocs, promotes)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       case stmt
       when MIR::Alloc  then (allocs[stmt.name] ||= []) << stmt
-      when MIR::Drop   then (drops[stmt.name] ||= []) << stmt
       when MIR::Promote then (promotes[stmt.name || :"__container_promote_#{promotes.size}"] ||= []) << stmt
-      when MIR::Return then (stmt.escaped_vars || []).each { |v| escapes << v }
-      when MIR::SuppressCleanup then suppresses << stmt.name
-      when MIR::ReassignCleanup then reassign_cleanups[stmt.name] = stmt
-      when MIR::FieldCleanup then field_cleanups << stmt
       when AST::IfStatement
-        collect_mir_nodes(stmt.then_branch, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-        collect_mir_nodes(stmt.else_branch, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(stmt.then_branch, allocs, promotes)
+        collect_mir_nodes(stmt.else_branch, allocs, promotes)
       when AST::WhileLoop
-        collect_mir_nodes(stmt.do_branch, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(stmt.do_branch, allocs, promotes)
       when AST::ForRange, AST::ForEach
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(stmt.body, allocs, promotes)
       when AST::MatchStatement
-        stmt.cases&.each { |c| collect_mir_nodes(c[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
-        collect_mir_nodes(stmt.default_case, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        stmt.cases&.each { |c| collect_mir_nodes(c[:body], allocs, promotes) }
+        collect_mir_nodes(stmt.default_case, allocs, promotes)
       when AST::WithBlock
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(stmt.body, allocs, promotes)
       when AST::DoBlock
-        stmt.branches&.each { |b| collect_mir_nodes(b[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
+        stmt.branches&.each { |b| collect_mir_nodes(b[:body], allocs, promotes) }
       when AST::BgBlock, AST::BgStreamBlock
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-      # MIR control-flow nodes (from migrated pipeline operators)
+        collect_mir_nodes(stmt.body, allocs, promotes)
       when MIR::IfStmt
-        collect_mir_nodes(stmt.then_body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-        collect_mir_nodes(stmt.else_body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-      when MIR::WhileStmt
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-      when MIR::ForStmt
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-      when MIR::BlockExpr
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-      when MIR::ScopeBlock
-        collect_mir_nodes(stmt.body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(stmt.then_body, allocs, promotes)
+        collect_mir_nodes(stmt.else_body, allocs, promotes)
+      when MIR::WhileStmt, MIR::ForStmt
+        collect_mir_nodes(stmt.body, allocs, promotes)
+      when MIR::BlockExpr, MIR::ScopeBlock
+        collect_mir_nodes(stmt.body, allocs, promotes)
       when MIR::DeferStmt, MIR::ErrDeferStmt
-        collect_mir_nodes(Array(stmt.body), allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
+        collect_mir_nodes(Array(stmt.body), allocs, promotes)
       when MIR::SwitchStmt
-        stmt.arms&.each { |a| collect_mir_nodes(a[:body], allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups) }
-        collect_mir_nodes(stmt.default_body, allocs, drops, promotes, escapes, suppresses, reassign_cleanups, field_cleanups)
-      end
-    end
-  end
-
-  def takes_param_names
-    Set.new((@fn.deferred_drops || [])
-      .select { |dd| @fn.params&.any? { |p| p[:name] == dd[:name] && p[:takes] } }
-      .map { |dd| dd[:name].to_s })
-  end
-
-  # ── Independent Ownership Verification ──────────────────────────
-  #
-  # Re-derives what needs cleanup from first principles:
-  #   1. OwnershipDataflow says which bindings are OWNED at function exit
-  #   2. Type + provenance says which of those need cleanup
-  #   3. Cross-reference against MIR events to find mismatches
-  #
-  # This catches any binding that the classifier missed. If the dataflow
-  # says OWNED + the type says needs_cleanup but there's no MIR::Drop,
-  # that's a guaranteed leak and compilation must fail.
-  def check_independent_ownership!(allocs, drops, df_summary)
-    # Build declaration map: { var_name => AST::VarDecl/BindExpr }
-    declarations = {}
-    collect_declarations(@fn.body, declarations)
-    # Also check TAKES parameters via deferred_drops
-    (@fn.deferred_drops || []).each do |dd|
-      name = dd.is_a?(Hash) ? dd[:name].to_s : dd.to_s
-      declarations[name] ||= dd
-    end
-
-    takes = takes_param_names
-
-    df_summary.each do |name, df_entry|
-      next unless df_entry[:needs_cleanup]  # MOVED on all paths -> skip
-
-      # Skip if already in @bindings with needs_cleanup -- existing checks handle it
-      next if @bindings.key?(name) && @bindings[name][:needs_cleanup]
-
-      # Skip TAKES params that are already handled
-      next if takes.include?(name) && @bindings.key?(name)
-
-      # Find declaration and get type info
-      decl = declarations[name]
-      next unless decl
-
-      ti = if decl.is_a?(Hash)
-        # deferred_drops entry
-        t = decl[:type]
-        t.is_a?(Type) ? t : (t ? Type.new(t) : nil)
-      else
-        t = decl.type_info rescue nil
-        t && !t.is_a?(Type) ? Type.new(t) : t
-      end
-      next unless ti
-
-      # Does this type independently need cleanup?
-      next unless ti.needs_cleanup?(@schema_lookup)
-
-      # This binding needs cleanup but the classifier missed it.
-      # Verify MIR nodes exist.
-      has_alloc = allocs.key?(name) || takes.include?(name)
-      has_drop = drops.key?(name)
-
-      # If NEITHER alloc nor drop exists, the binding is a container
-      # borrow or shallow copy (e.g. `item = map["key"]`).  The
-      # container owns the data -- individual cleanup would double-free.
-      # Only flag when alloc exists without matching drop (real leak).
-      next if !has_alloc && !has_drop
-
-      unless has_alloc
-        @errors << error(:LEAK, name,
-          "ownership verifier: OWNED at exit, type #{ti.resolved} needs cleanup, " \
-          "but no MIR::Alloc (missed by classifier)")
-      end
-      unless has_drop
-        @errors << error(:LEAK, name,
-          "ownership verifier: OWNED at exit, type #{ti.resolved} needs cleanup, " \
-          "but no MIR::Drop (missed by classifier)")
-      end
-    end
-  end
-
-  # Walk function body collecting VarDecl/BindExpr(decl) declarations.
-  def collect_declarations(stmts, declarations)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      case stmt
-      when AST::VarDecl
-        declarations[stmt.name.to_s] = stmt
-      when AST::BindExpr
-        declarations[stmt.name.to_s] = stmt if stmt.mode == :decl
-      end
-      # Recurse into all control flow
-      case stmt
-      when AST::IfStatement
-        collect_declarations(stmt.then_branch, declarations)
-        collect_declarations(stmt.else_branch, declarations)
-      when AST::WhileLoop
-        collect_declarations(stmt.do_branch, declarations)
-      when AST::ForRange, AST::ForEach
-        collect_declarations(stmt.body, declarations)
-      when AST::MatchStatement
-        stmt.cases&.each { |c| collect_declarations(c[:body], declarations) }
-        collect_declarations(stmt.default_case, declarations)
-      when AST::WithBlock
-        collect_declarations(stmt.body, declarations)
-      when AST::DoBlock
-        stmt.branches&.each { |b| collect_declarations(b[:body], declarations) }
-      when AST::BgBlock, AST::BgStreamBlock
-        collect_declarations(stmt.body, declarations)
+        stmt.arms&.each { |a| collect_mir_nodes(a[:body], allocs, promotes) }
+        collect_mir_nodes(stmt.default_body, allocs, promotes)
       end
     end
   end
@@ -492,97 +325,6 @@ class StaticLeakChecker
       node.fields&.each_value { |v| scan_expr_for_unhoisted_heap!(v, inside_bind_value: inside_bind_value) }
     when AST::ListLit
       node.items&.each { |v| scan_expr_for_unhoisted_heap!(v, inside_bind_value: inside_bind_value) }
-    end
-  end
-
-  # Lambda USE captures: verify captured bindings are declared and tracked.
-  # Currently USE captures are borrows (no ownership transfer). This check
-  # collects lambda capture sites for future enforcement when USE TAKES is added.
-  def check_lambda_captures!(stmts)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      case stmt
-      when AST::VarDecl, AST::BindExpr
-        walk_expr_for_lambdas(stmt.value) if stmt.value
-      when AST::Assignment
-        walk_expr_for_lambdas(stmt.value) if stmt.value
-      when AST::ReturnNode
-        walk_expr_for_lambdas(stmt.value) if stmt.value
-      when AST::FuncCall
-        stmt.args&.each { |a| walk_expr_for_lambdas(a) }
-      when AST::MethodCall
-        walk_expr_for_lambdas(stmt.object) if stmt.object
-        stmt.args&.each { |a| walk_expr_for_lambdas(a) }
-      when AST::IfStatement
-        check_lambda_captures!(stmt.then_branch)
-        check_lambda_captures!(stmt.else_branch)
-      when AST::WhileLoop then check_lambda_captures!(stmt.do_branch)
-      when AST::ForRange, AST::ForEach then check_lambda_captures!(stmt.body)
-      when AST::MatchStatement
-        stmt.cases&.each { |c| check_lambda_captures!(c[:body]) }
-        check_lambda_captures!(stmt.default_case)
-      when AST::WithBlock then check_lambda_captures!(stmt.body)
-      when AST::DoBlock
-        stmt.branches&.each { |b| check_lambda_captures!(b[:body]) }
-      end
-    end
-  end
-
-  def walk_expr_for_lambdas(expr)
-    return unless expr
-    case expr
-    when AST::LambdaLit
-      # Lambda with USE captures: currently borrows only.
-      # When USE TAKES is added, non-Copy captures would need SuppressCleanup.
-    when AST::FuncCall
-      expr.args&.each { |a| walk_expr_for_lambdas(a) }
-    when AST::MethodCall
-      walk_expr_for_lambdas(expr.object)
-      expr.args&.each { |a| walk_expr_for_lambdas(a) }
-    end
-  end
-
-  # BG captures that are frame-allocated with a later promote are architecturally
-  # risky: the value briefly lives on the frame before promotion. Ideally BG
-  # captures should be heap-allocated at declaration. This is advisory -- it
-  # collects cases but doesn't block compilation, since frame+promote IS safe.
-  def check_bg_capture_heap_at_decl!(allocs)
-    collect_bg_captures(@fn.body) do |name, bg_node|
-      alloc_nodes = allocs[name]
-      next unless alloc_nodes
-      alloc_nodes.each do |alloc_node|
-        next unless alloc_node.alloc == :frame
-        entry = @bindings[name]
-        next unless entry && entry[:needs_cleanup]
-        # Frame alloc + BG capture = suboptimal (should be heap at decl).
-        # Advisory only: logged but not added to @errors.
-      end
-    end
-  end
-
-  # Yield (capture_name, bg_node) for each BG capture found in stmts.
-  def collect_bg_captures(stmts, &block)
-    return unless stmts.is_a?(Array)
-    stmts.each do |stmt|
-      each_bg_in_stmt(stmt) do |bg|
-        captures = bg.capture_analysis&.captures
-        captures&.each do |name, _|
-          yield name.to_s, bg
-        end
-      end
-      case stmt
-      when AST::IfStatement
-        collect_bg_captures(stmt.then_branch, &block)
-        collect_bg_captures(stmt.else_branch, &block)
-      when AST::WhileLoop then collect_bg_captures(stmt.do_branch, &block)
-      when AST::ForRange, AST::ForEach then collect_bg_captures(stmt.body, &block)
-      when AST::MatchStatement
-        stmt.cases&.each { |c| collect_bg_captures(c[:body], &block) }
-        collect_bg_captures(stmt.default_case, &block)
-      when AST::WithBlock then collect_bg_captures(stmt.body, &block)
-      when AST::DoBlock
-        stmt.branches&.each { |b| collect_bg_captures(b[:body], &block) }
-      end
     end
   end
 

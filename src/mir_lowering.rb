@@ -301,6 +301,11 @@ class MIRLowering
     end
   end
 
+  def schema_lookup_fn(name)
+    name = name.to_sym if name.is_a?(String)
+    @struct_schemas[name] || @union_schemas[name] || @enum_schemas[name]
+  end
+
   # Produce a MIR::Cast node for type coercion, or nil if no cast needed.
   # Mirrors transpile_cast logic but returns MIR nodes instead of strings.
   def mir_cast(mir_node, from_type, to_type)
@@ -2732,7 +2737,8 @@ class MIRLowering
       (node.var_used || has_mir_drop) ? nil : "_ = #{safe_name};"
     end
 
-    MIR::Let.new(safe_name, init, keyword_mutable, annotation, suppression)
+    type_needs_cleanup = ft.needs_cleanup?(method(:schema_lookup_fn))
+    MIR::Let.new(safe_name, init, keyword_mutable, annotation, suppression, type_needs_cleanup)
   end
 
   def lower_bind_expr(node)

@@ -216,6 +216,24 @@ RSpec.describe MIRChecker do
       errors = checker.check_fn!(fn_def("heap_loop", body))
       expect(errors.select { |e| e.include?("FRAME_OVERFLOW") }).to be_empty
     end
+
+    it "detects CLASSIFIER_GAP for Let with needs_cleanup but no AllocMark/Cleanup" do
+      body = [
+        MIR::Let.new("x", MIR::Lit.new("val"), false, nil, nil, true),
+      ]
+      errors = checker.check_fn!(fn_def("gap", body))
+      expect(errors.any? { |e| e.include?("CLASSIFIER_GAP") }).to be true
+    end
+
+    it "passes for Let with needs_cleanup when AllocMark+Cleanup exist" do
+      body = [
+        MIR::AllocMark.new("x", :list, :heap),
+        MIR::Let.new("x", MIR::Lit.new("val"), false, nil, nil, true),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :heap, has_moved_guard: false }),
+      ]
+      errors = checker.check_fn!(fn_def("ok_gap", body))
+      expect(errors.select { |e| e.include?("CLASSIFIER_GAP") }).to be_empty
+    end
   end
 
   describe "#check_program!" do

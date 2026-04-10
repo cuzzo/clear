@@ -118,7 +118,7 @@ module MIR
   # mutable: false -> const, true -> var
   # annotation: optional explicit type string (nil -> Zig infers)
   # suppression: optional "_ = &name;" or "_ = name;" for Zig warnings
-  Let = Struct.new(:name, :init, :mutable, :annotation, :suppression) do
+  Let = Struct.new(:name, :init, :mutable, :annotation, :suppression, :needs_cleanup) do
     include Stmt
   end
 

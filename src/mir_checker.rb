@@ -37,6 +37,7 @@ class MIRChecker
     reassigns  = {}  # name => ReassignMark
     field_marks = [] # FieldCleanupMark nodes
     raw_nodes  = []  # RawZig/InlineZig nodes
+    owned_lets = {}  # name => Let (bindings whose type needs cleanup)
 
     # Single pass: collect all marker nodes from the MIR tree.
     walk_mir(fn_def.body) do |node|
@@ -58,6 +59,8 @@ class MIRChecker
         field_marks << node
       when MIR::RawZig, MIR::InlineZig
         raw_nodes << node
+      when MIR::Let
+        owned_lets[node.name.to_s] = node if node.needs_cleanup
       end
     end
 
@@ -82,6 +85,7 @@ class MIRChecker
     check_guard_suppress_completeness!(cleanups, moves, escapes)
     check_reassign_completeness!(allocs, reassigns, fn_def.body)
     check_frame_overflow!(fn_def.body)
+    check_independent_ownership!(owned_lets, allocs, cleanups)
     check_orphans!(allocs, cleanups, moves, reassigns, field_marks)
     check_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
 
@@ -350,6 +354,19 @@ class MIRChecker
             "Cleanup has moved guard but no MoveMark or ReturnMark escape")
         end
       end
+    end
+  end
+
+  # Independent ownership verification: every Let whose type needs cleanup
+  # must have AllocMark + Cleanup. Catches classifier gaps where the type
+  # system says cleanup is needed but MIR lowering forgot the events.
+  def check_independent_ownership!(owned_lets, allocs, cleanups)
+    owned_lets.each do |name, let_node|
+      # If AllocMark exists, completeness check already verifies Cleanup.
+      # Only flag when NEITHER exists (classifier completely missed it).
+      next if allocs.key?(name) || cleanups.key?(name)
+      @errors << error(:CLASSIFIER_GAP, name,
+        "type needs cleanup but no AllocMark or Cleanup found (classifier missed this binding)")
     end
   end
 
