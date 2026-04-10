@@ -833,6 +833,45 @@ pub const Scheduler = struct {
         waiter.task.status.store(.Blocked, .release);
     }
 
+    /// Submit an IORING_OP_WRITE for `fd` from `buffer` and park `waiter.task`.
+    pub fn submitWrite(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []const u8) !void {
+        _ = try self.ring.write(waiter.encode(), fd, buffer, 0);
+        _ = try self.ring.submit();
+        waiter.task.status.store(.Blocked, .release);
+    }
+
+    /// Submit an IORING_OP_ACCEPT for `server_fd` and park `waiter.task`.
+    /// CQE result: client fd on success, negative errno on error.
+    pub fn submitAccept(self: *Scheduler, waiter: *IoWaiter, server_fd: posix.fd_t) !void {
+        _ = try self.ring.accept(waiter.encode(), server_fd, null, null, std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC);
+        _ = try self.ring.submit();
+        waiter.task.status.store(.Blocked, .release);
+    }
+
+    /// Submit an IORING_OP_CONNECT for `fd` to `addr` and park `waiter.task`.
+    /// CQE result: 0 on success, negative errno on error.
+    pub fn submitConnect(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, addr: *const posix.sockaddr, addr_len: posix.socklen_t) !void {
+        _ = try self.ring.connect(waiter.encode(), fd, addr, addr_len);
+        _ = try self.ring.submit();
+        waiter.task.status.store(.Blocked, .release);
+    }
+
+    /// Submit an IORING_OP_RECV for `fd` into `buffer` and park `waiter.task`.
+    /// CQE result: bytes received, 0 = EOF, negative = -errno.
+    pub fn submitRecv(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []u8) !void {
+        _ = try self.ring.recv(waiter.encode(), fd, .{ .buffer = buffer }, 0);
+        _ = try self.ring.submit();
+        waiter.task.status.store(.Blocked, .release);
+    }
+
+    /// Submit an IORING_OP_SEND for `fd` from `buffer` and park `waiter.task`.
+    /// CQE result: bytes sent, negative = -errno.
+    pub fn submitSend(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []const u8) !void {
+        _ = try self.ring.send(waiter.encode(), fd, buffer, 0);
+        _ = try self.ring.submit();
+        waiter.task.status.store(.Blocked, .release);
+    }
+
     /// Core I/O wakeup logic: CAS from Blocked -> Ready, push to queue.
     /// Only the CAS winner pushes, preventing double-push when stale
     /// CQEs race with other wakeup paths. Extracted so Loom scenarios

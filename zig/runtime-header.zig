@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const linux = std.os.linux;
 pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
@@ -57,24 +58,19 @@ pub const CheatLib = struct {
     };
 
 
-    // Mostly for green fibers
-    // Read from a non-blocking socket
-    // Only works on Linux
+    // Read from a socket via io_uring IORING_OP_RECV.
+    // Submits a single recv and yields; CQE result is the byte count.
     pub noinline fn read(fd: i32, buffer: []u8) !usize {
-        while (true) {
-            const n = std.posix.read(fd, buffer) catch |err| {
-                if (err == error.WouldBlock) {
-                    const sched = fp.active_scheduler;
-                    const task = sched.getCurrent();
-                    try sched.registerFd(fd, task);
-                    task.status.store(.Blocked, .release);
-                    task.base.yield();
-                    continue;
-                }
-                return err;
-            };
-            return n;
+        const sched = fp.active_scheduler;
+        const task = sched.getCurrent();
+        var waiter = fp.Scheduler.IoWaiter{ .task = task };
+        try sched.submitRecv(&waiter, fd, buffer);
+        task.base.yield();
+        if (waiter.result < 0) {
+            const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
+            return std.posix.unexpectedErrno(e);
         }
+        return @intCast(waiter.result);
     }
 
     // List / Dynamic Array
@@ -495,46 +491,48 @@ pub const CheatLib = struct {
 
     // Read File (Allocates on HEAP)
     //
-    // When a scheduler is active (BG fibers), the actual read(2) syscall is
-    // submitted via io_uring (IORING_OP_READ).  The fiber parks itself as
-    // .Blocked and yields; the kernel completes the read asynchronously and
-    // the scheduler's CQE drain wakes the fiber.  Other fibers run in the
-    // meantime, giving genuine concurrency on a single OS thread.
+    // When a scheduler is active (BG fibers), the bulk read is submitted
+    // via io_uring (IORING_OP_READ). The fiber parks as .Blocked and yields;
+    // the kernel completes the read asynchronously and the scheduler's CQE
+    // drain wakes the fiber. Other fibers run in the meantime.
+    //
+    // open/fstat remain synchronous -- fast VFS metadata lookups that don't
+    // benefit from async submission.
     //
     // Fallback: Outside a scheduler context (unit tests), a plain blocking
-    // readAll is used — no io_uring, no yield.
-    const ReadFileCtx = struct {
-        allocator: std.mem.Allocator,
-        path: []const u8,
-        result: []const u8 = &.{},
-        err: ?anyerror = null,
-        fn run(ptr: ?*anyopaque) callconv(.c) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            const fd = openPathFd(self.path, .{ .ACCMODE = .RDONLY }, 0) catch |e| { self.err = e; return; };
-            defer std.posix.close(fd);
-            const stat = std.posix.fstat(fd) catch |e| { self.err = e; return; };
-            const size: usize = @intCast(stat.size);
-            const buffer = self.allocator.alloc(u8, size) catch |e| { self.err = e; return; };
+    // readAll is used -- no io_uring, no yield.
+    pub noinline fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+        const fd = try openPathFd(path, .{ .ACCMODE = .RDONLY }, 0);
+        defer std.posix.close(fd);
+        const stat = try std.posix.fstat(fd);
+        const size: usize = @intCast(stat.size);
+        const buffer = try allocator.alloc(u8, size);
+        errdefer allocator.free(buffer);
+
+        if (fp.scheduler_running) {
+            // Async path: submit IORING_OP_READ, yield, resume on CQE.
+            const sched = fp.active_scheduler;
+            const task = sched.getCurrent();
             var total: usize = 0;
             while (total < buffer.len) {
-                const n = std.posix.read(fd, buffer[total..]) catch |e| { self.err = e; return; };
+                var waiter = fp.Scheduler.IoWaiter{ .task = task };
+                try sched.submitRead(&waiter, fd, buffer[total..]);
+                task.base.yield();
+                // waiter.result: positive = bytes read, 0 = EOF, negative = -errno
+                if (waiter.result <= 0) break;
+                total += @intCast(waiter.result);
+            }
+            return buffer[0..total];
+        } else {
+            // Blocking fallback (no scheduler -- unit tests, CLI tools).
+            var total: usize = 0;
+            while (total < buffer.len) {
+                const n = std.posix.read(fd, buffer[total..]) catch break;
                 if (n == 0) break;
                 total += n;
             }
-            self.result = buffer[0..total];
+            return buffer[0..total];
         }
-    };
-
-    pub noinline fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
-        var ctx = ReadFileCtx{ .allocator = allocator, .path = path };
-        if (fp.scheduler_running) {
-            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
-            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &ReadFileCtx.run), @ptrCast(&ctx));
-        } else {
-            ReadFileCtx.run(@ptrCast(&ctx));
-        }
-        if (ctx.err) |e| return e;
-        return ctx.result;
     }
 
     // List all files in a directory. Returns an ArrayListUnmanaged of heap-allocated
@@ -606,30 +604,31 @@ pub const CheatLib = struct {
     }
 
     // Write File
-    const WriteFileCtx = struct {
-        path: []const u8,
-        content: []const u8,
-        err: ?anyerror = null,
-        fn run(ptr: ?*anyopaque) callconv(.c) void {
-            const self: *@This() = @ptrCast(@alignCast(ptr));
-            const fd = openPathFd(self.path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644) catch |e| { self.err = e; return; };
-            defer std.posix.close(fd);
+    //
+    // Async path mirrors readFile: open is synchronous, bulk write uses
+    // io_uring IORING_OP_WRITE. Handles short writes by resubmitting
+    // the remainder.
+    pub noinline fn writeFile(path: []const u8, content: []const u8) !void {
+        const fd = try openPathFd(path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+        defer std.posix.close(fd);
+
+        if (fp.scheduler_running) {
+            const sched = fp.active_scheduler;
+            const task = sched.getCurrent();
             var written: usize = 0;
-            while (written < self.content.len) {
-                written += std.posix.write(fd, self.content[written..]) catch |e| { self.err = e; return; };
+            while (written < content.len) {
+                var waiter = fp.Scheduler.IoWaiter{ .task = task };
+                try sched.submitWrite(&waiter, fd, content[written..]);
+                task.base.yield();
+                if (waiter.result <= 0) return error.WriteError;
+                written += @intCast(waiter.result);
+            }
+        } else {
+            var written: usize = 0;
+            while (written < content.len) {
+                written += std.posix.write(fd, content[written..]) catch return error.WriteError;
             }
         }
-    };
-
-    pub noinline fn writeFile(path: []const u8, content: []const u8) !void {
-        var ctx = WriteFileCtx{ .path = path, .content = content };
-        if (fp.scheduler_running) {
-            const rt: *Runtime = @ptrCast(@alignCast(fp.active_scheduler.getCurrent().runtime_ptr.?));
-            rt.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &WriteFileCtx.run), @ptrCast(&ctx));
-        } else {
-            WriteFileCtx.run(@ptrCast(&ctx));
-        }
-        if (ctx.err) |e| return e;
     }
 
     // Read Line from stdin
@@ -1449,87 +1448,66 @@ pub const CheatLib = struct {
         return fd;
     }
 
-    // Accept one incoming connection on `server_fd`.
-    // If no connection is ready yet (EAGAIN/WouldBlock), registers with epoll
-    // and yields the current fiber until a connection arrives.
-    // Returns the client fd (set non-blocking via fcntl). Caller owns it.
+    // Accept one incoming connection on `server_fd` via io_uring.
+    // Submits IORING_OP_ACCEPT and yields; the CQE result is the client fd
+    // (already non-blocking via SOCK_NONBLOCK flag in the SQE).
+    // Returns the client fd; caller owns it (close via socketClose / RAII).
     pub noinline fn socketAccept(server_fd: i32) !i32 {
-        while (true) {
-            var client_addr: std.posix.sockaddr = undefined;
-            var addr_len: std.posix.socklen_t = @sizeOf(std.posix.sockaddr);
-
-            const client_fd = std.posix.accept(
-                server_fd, &client_addr, &addr_len,
-                std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
-            ) catch |err| {
-                if (err == error.WouldBlock) {
-                    // Reload scheduler/task on every yield (fiber may be stolen).
-                    const sched = fp.active_scheduler;
-                    const task = sched.getCurrent();
-                    try sched.registerFd(server_fd, task);
-                    task.status.store(.Blocked, .release);
-                    task.base.yield();
-                    continue;
-                }
-                return err;
-            };
-
-            return client_fd;
+        const sched = fp.active_scheduler;
+        const task = sched.getCurrent();
+        var waiter = fp.Scheduler.IoWaiter{ .task = task };
+        try sched.submitAccept(&waiter, server_fd);
+        task.base.yield();
+        if (waiter.result < 0) {
+            const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
+            return std.posix.unexpectedErrno(e);
         }
+        return waiter.result;
     }
 
     // -----------------------------------------------------------------------
-    // Socket I/O: runs on the FIBER stack (epoll + yield, non-blocking).
+    // Socket I/O: completion-based via io_uring.
     //
-    // Unlike file I/O (readFile/writeFile) which trampolines to g0 via
-    // onRootStack because std.fs needs deep stack frames, socket I/O uses
-    // direct posix read/write syscalls with epoll-backed yield. The fiber
-    // yields on EAGAIN and resumes when data is ready. Minimal stack usage
-    // (~4KB temp buffer for reads, no std.fs overhead).
+    // Each operation submits a single SQE and yields the fiber. The CQE
+    // result contains the byte count (or negative errno). No EAGAIN retry
+    // loops -- the kernel handles the wait internally.
     // -----------------------------------------------------------------------
 
-    // Write `data` to a non-blocking socket fd.
-    // Loops until all bytes are sent, yielding the fiber on EAGAIN.
+    // Write `data` to a socket via io_uring IORING_OP_SEND.
+    // Loops on short sends (resubmits remainder), yielding between each.
     // Returns the total bytes sent (== data.len on success).
     pub noinline fn socketWrite(fd: i32, data: []const u8) !usize {
+        const sched = fp.active_scheduler;
+        const task = sched.getCurrent();
         var sent: usize = 0;
         while (sent < data.len) {
-            const n = std.posix.write(fd, data[sent..]) catch |err| {
-                if (err == error.WouldBlock) {
-                    // Reload scheduler/task on every yield (fiber may be stolen).
-                    const sched = fp.active_scheduler;
-                    const task = sched.getCurrent();
-                    try sched.registerWriteFd(fd, task);
-                    task.status.store(.Blocked, .release);
-                    task.base.yield();
-                    continue;
-                }
-                return err;
-            };
-            sent += n;
+            var waiter = fp.Scheduler.IoWaiter{ .task = task };
+            try sched.submitSend(&waiter, fd, data[sent..]);
+            task.base.yield();
+            if (waiter.result < 0) {
+                const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
+                return std.posix.unexpectedErrno(e);
+            }
+            if (waiter.result == 0) return sent;
+            sent += @intCast(waiter.result);
         }
         return sent;
     }
 
-    // Close a TCP socket fd, removing it from epoll first so no stale events fire.
+    // Close a TCP socket fd. With io_uring, any in-flight poll for this fd
+    // produces a -ECANCELED CQE that processCqes handles safely.
     pub noinline fn socketClose(fd: i32) void {
         fp.active_scheduler.unregisterFd(fd);
         std.posix.close(fd);
     }
 
-    // Read up to 4096 bytes from a connected client socket.
-    // Yields the fiber (via epoll) until data is available.
+    // Read up to 4096 bytes from a connected client socket via io_uring.
+    // Submits IORING_OP_RECV and yields until data is available.
     //
-    // Reads into a stack-local buffer then dupes into the frame arena
-    // (the allocator passed by the transpiler is rt.frameAlloc()).
-    // The returned slice lives until the enclosing loop iteration's
-    // restoreLoopMark rewinds the arena — zero GPA calls in the hot path.
+    // Reads into a frame-arena buffer (the allocator passed by the transpiler
+    // is rt.frameAlloc()). The returned slice lives until the enclosing loop
+    // iteration's restoreLoopMark rewinds the arena.
     //
-    // Usage: data = tcpRead(client)
-    // After a successful read, yields the fiber so other fibers on the same
-    // scheduler get a turn. Without this, a single client with pipelined
-    // data can monopolize the scheduler indefinitely.
-    // Usage: data = tcpRead(client)
     // Yields after successful read for I/O fairness among concurrent client fibers.
     pub noinline fn socketRead(allocator: std.mem.Allocator, fd: i32) ![]const u8 {
         // Allocate read buffer on the frame arena (not the fiber stack)
@@ -1547,15 +1525,15 @@ pub const CheatLib = struct {
     }
 
     // Write all bytes from `data` to a connected client socket, discarding the byte count.
-    // Yields the fiber if the send buffer is temporarily full (epoll-backed).
+    // Yields the fiber via io_uring IORING_OP_SEND.
     // Usage: tcpWrite(client, "hello")
     pub noinline fn socketWriteVoid(fd: i32, data: []const u8) !void {
         _ = try CheatLib.socketWrite(fd, data);
     }
 
     // Connect to a TCP server at `host:port` (dotted-decimal IPv4 only).
-    // Non-blocking: if the kernel returns EINPROGRESS the fiber yields until
-    // epoll signals write-readiness, then the connection result is verified.
+    // Submits IORING_OP_CONNECT and yields; the CQE result is 0 on success
+    // or negative errno on error. No getsockoptError post-check needed.
     // Returns the client fd; caller owns it (close via socketClose / RAII).
     pub noinline fn socketConnect(host: []const u8, port: u16) !i32 {
         const fd = try std.posix.socket(
@@ -1573,17 +1551,15 @@ pub const CheatLib = struct {
             .zero   = [_]u8{0} ** 8,
         };
 
-        std.posix.connect(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr))) catch |err| {
-            if (err != error.WouldBlock) return err;
-            // Reload scheduler/task at yield point (fiber may be stolen).
-            const sched = fp.active_scheduler;
-            const task = sched.getCurrent();
-            try sched.registerWriteFd(fd, task);
-            task.status.store(.Blocked, .release);
-            task.base.yield();
-            // Check SO_ERROR to distinguish success from async errors (e.g. ECONNREFUSED).
-            try std.posix.getsockoptError(fd);
-        };
+        const sched = fp.active_scheduler;
+        const task = sched.getCurrent();
+        var waiter = fp.Scheduler.IoWaiter{ .task = task };
+        try sched.submitConnect(&waiter, fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
+        task.base.yield();
+        if (waiter.result < 0) {
+            const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
+            return std.posix.unexpectedErrno(e);
+        }
 
         return fd;
     }
