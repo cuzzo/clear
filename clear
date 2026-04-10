@@ -106,8 +106,18 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   transpile_flag += " #{pkg_flags}" if pkg_flags.length > 0
   # MIR is the only pipeline (--mir flag no longer needed)
 
+  # Create per-process build directory with symlinks to shared runtime files.
+  # This isolates parallel builds so they don't corrupt each other's temp
+  # files, caches, or output binaries.
+  build_dir = File.join(ZIG_DIR, ".build-#{$$}")
+  FileUtils.mkdir_p(build_dir)
+  Dir.glob(File.join(ZIG_DIR, '*.{zig,S}')).each do |f|
+    dst = File.join(build_dir, File.basename(f))
+    File.symlink(f, dst) unless File.exist?(dst)
+  end
+
   tmp_name = "._clear_tmp_#{base_name}.zig"
-  tmp_zig = File.join(ZIG_DIR, tmp_name)
+  tmp_zig = File.join(build_dir, tmp_name)
 
   zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source} 2>/dev/null`
   unless $?.success?
@@ -122,7 +132,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     zig_code = "pub const CLEAR_PROFILE = true;\n" + zig_code
   end
   # When packages are present, rewrite package @import("name") to @import("name.zig")
-  # so all files live in zig/ as file-path imports (avoids Zig module system complexity).
+  # so all files live as file-path imports (avoids Zig module system complexity).
   if pkg_requires.any?
     pkg_requires.each do |pkg_name|
       zig_code = zig_code.gsub("@import(\"#{pkg_name}\")", "@import(\"#{pkg_name}.zig\")")
@@ -138,8 +148,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     !m.start_with?('std.') && File.exist?(File.join(source_dir, "#{m}.zig"))
   }
 
-  # Copy FFI modules to zig/ for compilation
-  ffi_modules.each { |m| FileUtils.cp(File.join(source_dir, "#{m}.zig"), File.join(ZIG_DIR, "#{m}.zig")) }
+  # Copy FFI modules to build dir for compilation
+  ffi_modules.each { |m| FileUtils.cp(File.join(source_dir, "#{m}.zig"), File.join(build_dir, "#{m}.zig")) }
 
   # Transpile package modules to .zig files
   pkg_modules = pkg_requires.map do |pkg_name|
@@ -156,20 +166,20 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       system("ruby #{TRANSPILER} --module #{nested_flags} #{pkg_path} > /dev/null")
       error "Package '#{pkg_name}' transpilation failed"
     end
-    # Rewrite module imports to file-path imports (all files live in zig/).
-    # cheat_runtime → runtime-header.zig, nested packages → name.zig
+    # Rewrite module imports to file-path imports.
+    # cheat_runtime -> runtime-header.zig, nested packages -> name.zig
     pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime-header.zig")')
     nested_pkgs.each do |np|
       pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
     end
-    pkg_zig_file = File.join(ZIG_DIR, "#{pkg_name}.zig")
+    pkg_zig_file = File.join(build_dir, "#{pkg_name}.zig")
     File.write(pkg_zig_file, pkg_zig)
     pkg_name
   end
 
-  # Build Zig command (runs from zig/ directory where runtime files live).
+  # Build Zig command (runs from per-process build dir).
   # All files use file-path imports (no Zig module system) since everything
-  # lives in zig/.  FFI modules use --dep/-M for named imports.
+  # is in the build dir.  FFI modules use --dep/-M for named imports.
   all_modules = ffi_modules  # Only FFI modules need Zig named-module wiring
 
   if module_mode
@@ -193,12 +203,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
 
   cmd = cmd_parts.join(' ')
-  compile_output = `cd #{ZIG_DIR} && #{cmd} 2>&1`
+  compile_output = `cd #{build_dir} && #{cmd} 2>&1`
   success = $?.success?
 
-  # Move binary to output location (zig puts it in zig/)
+  # Move binary to output location (zig puts it in the build dir)
   if success && !module_mode
-    zig_binary = File.join(ZIG_DIR, File.basename(output))
+    zig_binary = File.join(build_dir, File.basename(output))
     if File.exist?(zig_binary)
       FileUtils.mv(zig_binary, output)
     end
@@ -212,10 +222,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     FileUtils.cp(tmp_zig, File.join(profile_dir_path, "transpiled.zig")) rescue nil
   end
 
-  # Cleanup temp files
-  FileUtils.rm_f(tmp_zig)
-  ffi_modules.each { |m| FileUtils.rm_f(File.join(ZIG_DIR, "#{m}.zig")) }
-  pkg_modules.each { |m| FileUtils.rm_f(File.join(ZIG_DIR, "#{m}.zig")) }
+  # Cleanup build dir
+  FileUtils.rm_rf(build_dir)
 
   unless success
     # Map known Zig errors to CLEAR-level messages

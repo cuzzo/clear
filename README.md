@@ -125,8 +125,8 @@ FFI modules (`.zig` files referenced via `EXTERN ... FROM`) are auto-detected an
 ### Test Suites
 
 ```bash
-# Ruby compiler specs (1343 examples)
-bundle exec rspec
+# Ruby compiler specs (parallel)
+bundle exec prspec spec/
 
 # Transpile integration tests - two ways:
 ./clear test transpile-tests/                    # Run all at once (139 tests)

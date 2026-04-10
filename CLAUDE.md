@@ -24,7 +24,7 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 # --- Full test suites ---
 bundle install                       # Install Ruby dependencies
-bundle exec rspec                    # Run all Ruby specs (1476 examples)
+bundle exec prspec spec/              # Run all Ruby specs in parallel
 
 # Package integration test
 cd transpile-tests/module-integration && zig build test
@@ -53,7 +53,7 @@ fiber stacks compensate for the larger stack frames that safety instrumentation 
 ### Test Suites
 
 Run **all three** after making changes to the compiler:
-- **Ruby specs**: `bundle exec rspec` (1343 examples)
+- **Ruby specs**: `bundle exec prspec spec/` (parallel)
 - **transpile-tests**: `./clear test transpile-tests/` (130 tests)
 - **module-integration**: `cd transpile-tests/module-integration && zig build test`
 - **ffi-integration**: `cd transpile-tests/ffi-integration && zig build test`
@@ -206,7 +206,7 @@ Verify the Memory Safety Invariants (INV-1 through INV-10 above) are not violate
 - If you added a new type or collection: is its cleanup driven by MIR nodes, not transpiler heuristics? (INV-7, INV-8)
 - If you changed escape analysis or storage decisions: does every escaping value get heap-allocated at declaration, not frame-then-promoted? (INV-1, INV-5)
 - If you changed error handling: does the error path preserve allocator identity? No `catch` fallbacks returning data from a different allocator? (INV-9)
-- Run `bundle exec rspec` and `./clear test transpile-tests/` to verify no regressions.
+- Run `bundle exec prspec spec/` and `./clear test transpile-tests/` to verify no regressions.
 
 ### When fixing a bug:
 
