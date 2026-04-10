@@ -2,16 +2,16 @@
 
 ## Executive Summary
 
-The CLEAR runtime (`zig/`) uses a **hybrid I/O model**: epoll for network sockets, io_uring
-for file reads (partially), and blocking syscalls via `onRootStack` for file writes,
-directory listing, and stdin. Migrating fully to io_uring would eliminate the epoll
-subsystem, remove the `onRootStack` trampoline for file I/O, and unify all I/O behind a
-single completion-based interface.
+**Status: COMPLETE.** The core migration landed in 4 commits (070a226..3c48c19).
 
-**Effort estimate**: 3-4 weeks for a senior engineer familiar with the codebase. The
-migration is largely mechanical -- the fiber scheduler already has the right shape (block
-fiber, yield, resume on completion). The risk is in edge cases: work-stealing with
-in-flight SQEs, ONESHOT re-arming semantics, and the SimPoller (VOPR) test harness.
+All file and socket I/O now goes through io_uring. Epoll has been fully removed.
+The scheduler uses a single ring per scheduler with unified CQE processing.
+Loom exhaustive scenarios cover the new IoWaiter completion path (26,528 total
+interleavings across 4 io_uring-specific scenarios).
+
+See `io_uring_tracking.md` for remaining performance optimizations.
+
+The rest of this document is the original migration plan, preserved for reference.
 
 ---
 

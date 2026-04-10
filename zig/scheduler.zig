@@ -177,6 +177,7 @@ pub const Scheduler = struct {
     // 4a. io_uring — unified I/O ring for poll-based socket I/O, async file
     // I/O, and eventfd wakeups. In Loom mode, this is SimRing.
     ring: RingType,
+    ring_dirty: bool = false,
     uring_cqes: [128]linux.io_uring_cqe = undefined,
 
     // 4. Main Thread Context (To return to OS)
@@ -677,8 +678,9 @@ pub const Scheduler = struct {
                 }
             }
 
-            // Drain any pending CQEs before sleeping. This catches completions
-            // that arrived while we were busy running fibers.
+            // Flush any SQEs queued by fibers during this tick, then drain
+            // completions. This batches all per-fiber submit() calls into one.
+            self.flushRing();
             self.pollNonBlocking();
             if (self.hasWork()) continue;
 
@@ -690,10 +692,13 @@ pub const Scheduler = struct {
                 // Submit a 1ms timeout so we wake up to check sleepers.
                 const ts = linux.kernel_timespec{ .sec = 0, .nsec = 1_000_000 };
                 _ = self.ring.timeout(TIMEOUT_SENTINEL, &ts, 0, 0) catch {};
-                _ = self.ring.submit() catch {};
+                self.ring_dirty = true;
             } else if (self.shutdown_on_idle and self.active_tasks.load(.monotonic) == 0) {
                 wait_nr = 0;
             }
+
+            // Flush any pending SQEs (e.g. the timeout above) before sleeping.
+            self.flushRing();
 
             // A. Announce we are going to sleep
             self.event_fd.markSleeping();
@@ -803,14 +808,14 @@ pub const Scheduler = struct {
     /// Submit an IORING_OP_READ for `fd` into `buffer` and park `waiter.task`.
     pub fn submitRead(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []u8) !void {
         _ = try self.ring.read(waiter.encode(), fd, .{ .buffer = buffer }, 0);
-        _ = try self.ring.submit();
+        self.ring_dirty = true;
         waiter.task.status.store(.Blocked, .release);
     }
 
     /// Submit an IORING_OP_WRITE for `fd` from `buffer` and park `waiter.task`.
     pub fn submitWrite(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []const u8) !void {
         _ = try self.ring.write(waiter.encode(), fd, buffer, 0);
-        _ = try self.ring.submit();
+        self.ring_dirty = true;
         waiter.task.status.store(.Blocked, .release);
     }
 
@@ -818,7 +823,7 @@ pub const Scheduler = struct {
     /// CQE result: client fd on success, negative errno on error.
     pub fn submitAccept(self: *Scheduler, waiter: *IoWaiter, server_fd: posix.fd_t) !void {
         _ = try self.ring.accept(waiter.encode(), server_fd, null, null, std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC);
-        _ = try self.ring.submit();
+        self.ring_dirty = true;
         waiter.task.status.store(.Blocked, .release);
     }
 
@@ -826,7 +831,7 @@ pub const Scheduler = struct {
     /// CQE result: 0 on success, negative errno on error.
     pub fn submitConnect(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, addr: *const posix.sockaddr, addr_len: posix.socklen_t) !void {
         _ = try self.ring.connect(waiter.encode(), fd, addr, addr_len);
-        _ = try self.ring.submit();
+        self.ring_dirty = true;
         waiter.task.status.store(.Blocked, .release);
     }
 
@@ -834,7 +839,7 @@ pub const Scheduler = struct {
     /// CQE result: bytes received, 0 = EOF, negative = -errno.
     pub fn submitRecv(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []u8) !void {
         _ = try self.ring.recv(waiter.encode(), fd, .{ .buffer = buffer }, 0);
-        _ = try self.ring.submit();
+        self.ring_dirty = true;
         waiter.task.status.store(.Blocked, .release);
     }
 
@@ -842,7 +847,7 @@ pub const Scheduler = struct {
     /// CQE result: bytes sent, negative = -errno.
     pub fn submitSend(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []const u8) !void {
         _ = try self.ring.send(waiter.encode(), fd, buffer, 0);
-        _ = try self.ring.submit();
+        self.ring_dirty = true;
         waiter.task.status.store(.Blocked, .release);
     }
 
@@ -888,6 +893,15 @@ pub const Scheduler = struct {
         const n = self.ring.copy_cqes(&self.uring_cqes, 0) catch return;
         if (n > 0) {
             self.processCqes(self.uring_cqes[0..n]);
+        }
+    }
+
+    /// Flush pending SQEs to the kernel. Called once per scheduler tick
+    /// instead of after every individual submit call.
+    fn flushRing(self: *Scheduler) void {
+        if (self.ring_dirty) {
+            _ = self.ring.submit() catch {};
+            self.ring_dirty = false;
         }
     }
 };
