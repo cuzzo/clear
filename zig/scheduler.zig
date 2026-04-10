@@ -805,6 +805,18 @@ pub const Scheduler = struct {
         }
     };
 
+    /// Convert a negative CQE result (negative errno) to a Zig error.
+    /// Widens to i64 before negation to prevent overflow when result == minInt(i32).
+    /// Kernel errno values are in [1, 4095]; out-of-range values return Unexpected.
+    pub fn ioError(result: i32) std.posix.UnexpectedError {
+        const raw = -@as(i64, result);
+        if (raw >= 1 and raw <= 4095) {
+            const e: linux.E = @enumFromInt(@as(u16, @intCast(raw)));
+            return std.posix.unexpectedErrno(e);
+        }
+        return error.Unexpected;
+    }
+
     /// Submit an IORING_OP_READ for `fd` into `buffer` and park `waiter.task`.
     pub fn submitRead(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []u8) !void {
         _ = try self.ring.read(waiter.encode(), fd, .{ .buffer = buffer }, 0);
@@ -898,6 +910,11 @@ pub const Scheduler = struct {
 
     /// Flush pending SQEs to the kernel. Called once per scheduler tick
     /// instead of after every individual submit call.
+    ///
+    /// On failure (EAGAIN, EBUSY): SQEs remain in the ring because flush_sq()
+    /// already updated the kernel-visible SQ tail before enter() was called.
+    /// The next io_uring_enter (from copy_cqes with wait_nr>0) will process them.
+    /// No SQEs are lost; blocked fibers just wait slightly longer.
     fn flushRing(self: *Scheduler) void {
         if (self.ring_dirty) {
             _ = self.ring.submit() catch {};
@@ -1220,4 +1237,92 @@ pub const Semaphore = struct {
 pub threadlocal var active_scheduler: *Scheduler = undefined;
 // True when a Scheduler has been initialised on this thread (safe to call coopYield).
 pub threadlocal var scheduler_running: bool = false;
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+test "ioError: common errno values" {
+    // EINVAL = 22
+    const err1 = Scheduler.ioError(-22);
+    try std.testing.expectEqual(error.Unexpected, err1);
+
+    // ENOMEM = 12
+    const err2 = Scheduler.ioError(-12);
+    try std.testing.expectEqual(error.Unexpected, err2);
+
+    // ENOSPC = 28
+    const err3 = Scheduler.ioError(-28);
+    try std.testing.expectEqual(error.Unexpected, err3);
+
+    // EIO = 5
+    const err4 = Scheduler.ioError(-5);
+    try std.testing.expectEqual(error.Unexpected, err4);
+}
+
+test "ioError: boundary errno values" {
+    // -1 (EPERM) -- smallest valid errno
+    const err1 = Scheduler.ioError(-1);
+    try std.testing.expectEqual(error.Unexpected, err1);
+
+    // -4095 -- largest errno the kernel returns (MAX_ERRNO)
+    const err2 = Scheduler.ioError(-4095);
+    try std.testing.expectEqual(error.Unexpected, err2);
+}
+
+test "ioError: i32 min does not overflow" {
+    // This is the case that overflows with naive `-waiter.result` on i32.
+    // The i64 widening in ioError prevents undefined behavior.
+    const err = Scheduler.ioError(std.math.minInt(i32));
+    try std.testing.expectEqual(error.Unexpected, err);
+}
+
+test "IoWaiter: encode/decode roundtrip" {
+    var dummy_fiber = fc.Fiber{
+        .stack = fc.Stack{ .memory = &[_]u8{} },
+        .ctx = fc.Context{ .sp = 0 },
+        .parent_ctx = undefined,
+        .size_class = .Standard,
+        .stack_limit = 0,
+        .stack_guard_head = null,
+    };
+    var task = qs.Task{
+        .base = &dummy_fiber,
+        .user_fn = @ptrCast(&dummyTaskFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+        .config = .{},
+    };
+    var waiter = Scheduler.IoWaiter{ .task = &task };
+    const encoded = waiter.encode();
+    // Bit 0 must be set (IoWaiter tag)
+    try std.testing.expect(encoded & 1 == 1);
+    // Decode must recover the original pointer
+    const decoded = Scheduler.IoWaiter.decode(encoded);
+    try std.testing.expectEqual(&waiter, decoded);
+    try std.testing.expectEqual(&task, decoded.task);
+}
+
+test "IoWaiter: encode is distinct from sentinels" {
+    var dummy_fiber = fc.Fiber{
+        .stack = fc.Stack{ .memory = &[_]u8{} },
+        .ctx = fc.Context{ .sp = 0 },
+        .parent_ctx = undefined,
+        .size_class = .Standard,
+        .stack_limit = 0,
+        .stack_guard_head = null,
+    };
+    var task = qs.Task{
+        .base = &dummy_fiber,
+        .user_fn = @ptrCast(&dummyTaskFn),
+        .status = qs.Atomic(qs.TaskStatus).init(.Ready),
+        .config = .{},
+    };
+    var waiter = Scheduler.IoWaiter{ .task = &task };
+    const encoded = waiter.encode();
+    // Must not collide with EVENTFD_SENTINEL (0) or TIMEOUT_SENTINEL (1)
+    try std.testing.expect(encoded != Scheduler.EVENTFD_SENTINEL);
+    try std.testing.expect(encoded != Scheduler.TIMEOUT_SENTINEL);
+}
+
+fn dummyTaskFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
 

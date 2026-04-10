@@ -66,10 +66,7 @@ pub const CheatLib = struct {
         var waiter = fp.Scheduler.IoWaiter{ .task = task };
         try sched.submitRecv(&waiter, fd, buffer);
         task.base.yield();
-        if (waiter.result < 0) {
-            const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
-            return std.posix.unexpectedErrno(e);
-        }
+        if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
         return @intCast(waiter.result);
     }
 
@@ -518,8 +515,8 @@ pub const CheatLib = struct {
                 var waiter = fp.Scheduler.IoWaiter{ .task = task };
                 try sched.submitRead(&waiter, fd, buffer[total..]);
                 task.base.yield();
-                // waiter.result: positive = bytes read, 0 = EOF, negative = -errno
-                if (waiter.result <= 0) break;
+                if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
+                if (waiter.result == 0) break; // EOF
                 total += @intCast(waiter.result);
             }
             return buffer[0..total];
@@ -620,7 +617,8 @@ pub const CheatLib = struct {
                 var waiter = fp.Scheduler.IoWaiter{ .task = task };
                 try sched.submitWrite(&waiter, fd, content[written..]);
                 task.base.yield();
-                if (waiter.result <= 0) return error.WriteError;
+                if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
+                if (waiter.result == 0) return error.WriteError; // zero bytes written
                 written += @intCast(waiter.result);
             }
         } else {
@@ -1458,10 +1456,7 @@ pub const CheatLib = struct {
         var waiter = fp.Scheduler.IoWaiter{ .task = task };
         try sched.submitAccept(&waiter, server_fd);
         task.base.yield();
-        if (waiter.result < 0) {
-            const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
-            return std.posix.unexpectedErrno(e);
-        }
+        if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
         return waiter.result;
     }
 
@@ -1484,10 +1479,7 @@ pub const CheatLib = struct {
             var waiter = fp.Scheduler.IoWaiter{ .task = task };
             try sched.submitSend(&waiter, fd, data[sent..]);
             task.base.yield();
-            if (waiter.result < 0) {
-                const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
-                return std.posix.unexpectedErrno(e);
-            }
+            if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
             if (waiter.result == 0) return sent;
             sent += @intCast(waiter.result);
         }
@@ -1555,10 +1547,7 @@ pub const CheatLib = struct {
         var waiter = fp.Scheduler.IoWaiter{ .task = task };
         try sched.submitConnect(&waiter, fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
         task.base.yield();
-        if (waiter.result < 0) {
-            const e: linux.E = @enumFromInt(@as(u32, @intCast(-waiter.result)));
-            return std.posix.unexpectedErrno(e);
-        }
+        if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
 
         return fd;
     }
