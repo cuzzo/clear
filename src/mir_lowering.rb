@@ -285,18 +285,27 @@ class MIRLowering
   end
 
   def alloc_for_node(node)
-    kind = (node.respond_to?(:storage) && node.storage == :heap) ? :heap : :frame
-    alloc_expr(kind, @rt_name)
+    (node.respond_to?(:storage) && node.storage == :heap) ? :heap : :frame
   end
 
-  def alloc_expr(kind, rt_name = @rt_name)
-    kind == :heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()"
+  def alloc_expr(kind, _rt_name = nil)
+    kind == :heap ? :heap : :frame
   end
 
   def alloc_from_sym(sym)
     case sym
-    when :heap  then "#{@rt_name}.heapAlloc()"
-    when :frame then "#{@rt_name}.frameAlloc()"
+    when :heap  then :heap
+    when :frame then :frame
+    else :heap
+    end
+  end
+
+  # Resolve allocator symbol to Zig string (for InlineZig/RawZig patterns only).
+  def alloc_zig_str(kind)
+    case kind
+    when :heap    then "#{@rt_name}.heapAlloc()"
+    when :frame   then "#{@rt_name}.frameAlloc()"
+    when :cleanup then "#{@rt_name}.cleanupAlloc()"
     else "#{@rt_name}.heapAlloc()"
     end
   end
@@ -907,7 +916,7 @@ class MIRLowering
     # Heap dupe result
     if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
       inner_call = MIR::Call.new(fn_zig, all_args, can_fail)
-      return MIR::DupeSlice.new(inner_call, "#{@rt_name}.heapAlloc()")
+      return MIR::DupeSlice.new(inner_call, :heap)
     end
 
     call = MIR::Call.new(fn_zig, all_args, can_fail)
@@ -959,7 +968,7 @@ class MIRLowering
 
     if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
       inner_call = MIR::Call.new(fn_zig, all_args, can_fail)
-      return MIR::DupeSlice.new(inner_call, "#{@rt_name}.heapAlloc()")
+      return MIR::DupeSlice.new(inner_call, :heap)
     end
 
     call = MIR::Call.new(fn_zig, all_args, can_fail)
@@ -1014,7 +1023,8 @@ class MIRLowering
           storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
           next if storage == :heap
           next if arg_node.is_a?(AST::CopyNode)
-          mir_args[mir_idx] = MIR::DupeSlice.new(mir_args[mir_idx], resolved_alloc)
+          dupe_alloc = alloc_sym == :heap ? :heap : alloc_for_node(arg_node)
+          mir_args[mir_idx] = MIR::DupeSlice.new(mir_args[mir_idx], dupe_alloc)
         end
       end
     end
@@ -1179,7 +1189,7 @@ class MIRLowering
     # HashMaps are always heap-allocated
     ti = node.coerced_type_info || node.type_info || Type.new(node.full_type || :Any)
     rt_name = @rt_name
-    alloc = "#{rt_name}.heapAlloc()"
+    alloc_str = "#{rt_name}.heapAlloc()"
 
     # For Arc/Rc-wrapped maps, build bare inner type for init, then wrap
     is_arc = ti.respond_to?(:shared?) && ti.shared?
@@ -1193,7 +1203,7 @@ class MIRLowering
       needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
                     (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("NumericMapType"))
       inner = if needs_alloc
-        MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc) }])
+        MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
       else
         MIR::StructInit.new(zig_t, [])
       end
@@ -1208,7 +1218,7 @@ class MIRLowering
       end
 
       wrap_fn = is_arc ? "arcCreate" : "rcCreate"
-      inner = MIR::Call.new("CheatLib.#{wrap_fn}", [MIR::Ident.new(zig_t), MIR::Ident.new(alloc), inner], true)
+      inner = MIR::Call.new("CheatLib.#{wrap_fn}", [MIR::Ident.new(zig_t), MIR::Ident.new(alloc_str), inner], true)
       return inner if node.pairs.empty?
     end
 
@@ -1218,7 +1228,9 @@ class MIRLowering
       # PartitionedStringMap and NumericMapType don't have an .alloc field
       needs_alloc = !zig_t.include?("PartitionedStringMap") && !zig_t.include?("NumericMapType")
       strategy = needs_alloc ? :map_bare : :map_empty
-      return MIR::ContainerInit.new(zig_t, strategy, alloc, nil)
+      # Numeric maps are frame-allocated; string maps are heap-allocated.
+      map_alloc = (ti.respond_to?(:numeric_map?) && ti.numeric_map?) ? :frame : :heap
+      return MIR::ContainerInit.new(zig_t, strategy, map_alloc, nil)
     end
 
     # Non-empty hash: init + puts
@@ -2430,7 +2442,7 @@ class MIRLowering
       # @indirect field: wrap in HeapCreate
       if v.respond_to?(:needs_heap_create) && v.needs_heap_create
         zig_t = v.type_info ? transpile_type(v.type_info.resolved.to_s) : "UNKNOWN"
-        val = MIR::HeapCreate.new(zig_t, val, "#{@rt_name}.heapAlloc()", "blk_#{k}")
+        val = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
       end
       { name: k.to_s, value: val }
     }
@@ -2463,7 +2475,7 @@ class MIRLowering
       val = lower(v)
       if indirect.include?(k)
         zig_t = transpile_type(var_data[:fields][k])
-        val = MIR::HeapCreate.new(zig_t, val, "#{@rt_name}.heapAlloc()", "blk_#{k}")
+        val = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
       end
       { name: k.to_s, value: val }
     }
@@ -2552,7 +2564,7 @@ class MIRLowering
   def lower_copy(node)
     source = lower(node.value)
     ti = node.value.type_info
-    alloc = "#{@rt_name}.heapAlloc()"
+    alloc = :heap
 
     if ti && @union_schemas&.key?(ti.resolved)
       MIR::DeepCopy.new(source, transpile_type(ti), nil, :union, alloc)
@@ -2582,7 +2594,7 @@ class MIRLowering
     inner = lower(node.value)
     base_type = node.value.resolved_type.to_s
     zig_base = transpile_type(base_type)
-    alloc = "#{@rt_name}.heapAlloc()"
+    alloc = :heap
 
     sync_fn = case node.sync
               when :locked then "lockedCreate"
@@ -2661,10 +2673,12 @@ class MIRLowering
                        (node.value.is_a?(AST::Literal) && node.value.type == :NIL)
     annotation = needs_annotation ? zig_type : nil
 
-    # Resolve init value - special handling for collection types
+    # Resolve init value - special handling for collection types.
+    # Allocator comes from the cleanup plan (single source of truth).
+    decl_alloc = node.cleanup_alloc || :heap
     init = if ft.pool?
       cap = ft.capacity
-      MIR::ContainerInit.new(transpile_type(ft), :pool, "#{@rt_name}.heapAlloc()", cap)
+      MIR::ContainerInit.new(transpile_type(ft), :pool, decl_alloc, cap)
     elsif ft.set_collection?
       MIR::ContainerInit.new(transpile_type(ft), :set_empty, nil, nil)
     elsif ft.list_collection?
@@ -2673,7 +2687,7 @@ class MIRLowering
       if rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall)
         lower(node.value)
       elsif ft.capacity.is_a?(Integer) && ft.capacity > 0
-        MIR::ContainerInit.new(transpile_type(ft), :list_capacity, "#{@rt_name}.heapAlloc()", ft.capacity)
+        MIR::ContainerInit.new(transpile_type(ft), :list_capacity, decl_alloc, ft.capacity)
       else
         MIR::ContainerInit.new(transpile_type(ft), :list_empty, nil, nil)
       end
@@ -2834,13 +2848,13 @@ class MIRLowering
       case transform
       when :dupe_string_literal
         if val_ti&.string? && !val_node.is_a?(AST::CopyNode)
-          val = MIR::DupeSlice.new(val, "#{rt_name}.heapAlloc()")
+          val = MIR::DupeSlice.new(val, :heap)
         end
       when :dupe_borrowed_union
         unless val_ti&.string?
           if should_dupe_borrowed_union?(val_node, val_ti)
             zig_t = transpile_type(val_ti)
-            val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new("#{rt_name}.heapAlloc()")])
+            val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
           end
         end
       when :container_promote
@@ -2893,7 +2907,7 @@ class MIRLowering
     field = node.name.field.to_s
     value = lower(node.value)
     fpc = node.field_pre_cleanup
-    alloc = MIR::Ident.new(alloc_from_sym(fpc[:alloc] || :heap))
+    alloc = MIR::Ident.new(alloc_zig_str(fpc[:alloc] || :heap))
     cleanup_call = MIR::Call.new("CheatLib.cleanup", [
       MIR::Ident.new(fpc[:zig_type]), alloc,
       MIR::AddressOf.new(MIR::FieldGet.new(target, field))
@@ -2915,7 +2929,7 @@ class MIRLowering
       value_zig = emit_expr(lower(node.value))
       fpc = node.field_pre_cleanup
       if fpc
-        alloc = alloc_from_sym(fpc[:alloc] || :heap)
+        alloc = alloc_zig_str(fpc[:alloc] || :heap)
         code = "{ const __old = #{zig_var}.get().#{field}; #{zig_var}.get().#{field} = #{value_zig}; if (__old.len > 0) #{alloc}.free(__old); }"
       else
         code = "#{zig_var}.get().#{field} = #{value_zig};"
@@ -2929,7 +2943,7 @@ class MIRLowering
       @locked_unwrap_map = prev_locked
       fpc = node.field_pre_cleanup
       if fpc
-        alloc = alloc_from_sym(fpc[:alloc] || :heap)
+        alloc = alloc_zig_str(fpc[:alloc] || :heap)
         code = "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\nconst __old = #{alias_var}.#{field};\n#{alias_var}.#{field} = #{value_zig};\nif (__old.len > 0) #{alloc}.free(__old);\n}"
       else
         code = "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value_zig};\n}"
@@ -3233,9 +3247,8 @@ class MIRLowering
       rt = MIR::Ident.new(rt_name)
       case hpt_promote.strategy
       when :hpt_string_dupe
-        alloc_fn = hpt_promote.fields == :heap ? "heapAlloc" : "frameAlloc"
-        alloc_zig = "#{rt_name}.#{alloc_fn}()"
-        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, alloc_zig))
+        dupe_alloc = hpt_promote.fields == :heap ? :heap : :frame
+        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, dupe_alloc))
       when :hpt_promote
         zig_t = hpt_promote.zig_type
         stmts = [
@@ -3251,7 +3264,7 @@ class MIRLowering
     elsif needs_string_dupe && value
       ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
       if ret_type&.string?
-        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, "#{rt_name}.heapAlloc()"))
+        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, :heap))
       else
         MIR::ReturnStmt.new(value)
       end
@@ -3365,6 +3378,7 @@ class MIRLowering
       require_relative "mir_emitter"
       MIREmitter.new
     end
+    @_emitter.rt_name = @rt_name
     @_emitter.emit(node)
   end
 

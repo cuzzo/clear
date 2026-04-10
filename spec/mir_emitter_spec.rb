@@ -65,7 +65,7 @@ RSpec.describe MIREmitter do
   end
 
   it "emits reassignment with cleanup" do
-    node = MIR::ReassignWithCleanup.new("buf", MIR::Lit.new("new_val"), "[]const u8", "rt.heapAlloc()")
+    node = MIR::ReassignWithCleanup.new("buf", MIR::Lit.new("new_val"), "[]const u8", :heap)
     zig = e.emit(node)
     expect(zig).to include("const __new_buf = new_val;")
     expect(zig).to include("CheatLib.cleanup([]const u8, rt.heapAlloc(), &buf);")
@@ -377,7 +377,7 @@ RSpec.describe MIREmitter do
 
   describe "HeapCreate" do
     it "emits heap allocation + init pattern" do
-      node = MIR::HeapCreate.new("MyStruct", MIR::Ident.new("value"), "rt.heapAlloc()", "blk_f")
+      node = MIR::HeapCreate.new("MyStruct", MIR::Ident.new("value"), :heap, "blk_f")
       zig = e.emit(node)
       expect(zig).to include("try rt.heapAlloc().create(MyStruct)")
       expect(zig).to include("errdefer rt.heapAlloc().destroy(__p)")
@@ -388,19 +388,19 @@ RSpec.describe MIREmitter do
 
   describe "DupeSlice" do
     it "emits heap dupe" do
-      node = MIR::DupeSlice.new(MIR::Ident.new("src"), "rt.heapAlloc()")
+      node = MIR::DupeSlice.new(MIR::Ident.new("src"), :heap)
       expect(e.emit(node)).to eq("try rt.heapAlloc().dupe(u8, src)")
     end
 
     it "emits frame dupe" do
-      node = MIR::DupeSlice.new(MIR::Ident.new("src"), "rt.frameAlloc()")
+      node = MIR::DupeSlice.new(MIR::Ident.new("src"), :frame)
       expect(e.emit(node)).to eq("try rt.frameAlloc().dupe(u8, src)")
     end
   end
 
   describe "AllocSlice" do
     it "emits typed slice allocation" do
-      node = MIR::AllocSlice.new("i64", MIR::Lit.new("100"), "rt.heapAlloc()")
+      node = MIR::AllocSlice.new("i64", MIR::Lit.new("100"), :heap)
       expect(e.emit(node)).to eq("try rt.heapAlloc().alloc(i64, 100)")
     end
   end
@@ -486,24 +486,24 @@ RSpec.describe MIREmitter do
 
   describe "DeepCopy" do
     it "emits string copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("src"), nil, nil, :string, "rt.heapAlloc()")
+      node = MIR::DeepCopy.new(MIR::Ident.new("src"), nil, nil, :string, :heap)
       expect(e.emit(node)).to eq("try rt.heapAlloc().dupe(u8, src)")
     end
 
     it "emits union copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :union, "rt.heapAlloc()")
+      node = MIR::DeepCopy.new(MIR::Ident.new("val"), "Result", nil, :union, :heap)
       expect(e.emit(node)).to eq("try CheatLib.dupeUnionValue(Result, val, rt.heapAlloc())")
     end
 
     it "emits shallow list copy" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "i64", :list_shallow, "rt.heapAlloc()")
+      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "i64", :list_shallow, :heap)
       zig = e.emit(node)
       expect(zig).to include("@memcpy(__buf, __src)")
       expect(zig).to include("rt.heapAlloc().alloc(i64, __src.len)")
     end
 
     it "emits deep list copy with union elements" do
-      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "Value", :list_deep, "rt.heapAlloc()")
+      node = MIR::DeepCopy.new(MIR::Ident.new("items"), nil, "Value", :list_deep, :heap)
       zig = e.emit(node)
       expect(zig).to include("dupeUnionValue(Value, __src[__i], rt.heapAlloc())")
       expect(zig).to include("errdefer rt.heapAlloc().free(__buf)")
@@ -517,7 +517,7 @@ RSpec.describe MIREmitter do
 
   describe "ContainerInit" do
     it "emits pool init" do
-      node = MIR::ContainerInit.new("Pool(User)", :pool, "rt.heapAlloc()", 64)
+      node = MIR::ContainerInit.new("Pool(User)", :pool, :heap, 64)
       expect(e.emit(node)).to eq("try Pool(User).initCapacity(rt.heapAlloc(), 64)")
     end
 
@@ -527,30 +527,30 @@ RSpec.describe MIREmitter do
     end
 
     it "emits map with allocator" do
-      node = MIR::ContainerInit.new("StringMap(i64)", :map_bare, "rt.heapAlloc()", nil)
+      node = MIR::ContainerInit.new("StringMap(i64)", :map_bare, :heap, nil)
       expect(e.emit(node)).to eq("StringMap(i64){ .alloc = rt.heapAlloc() }")
     end
   end
 
   describe "CapWrap" do
     it "emits local create" do
-      node = MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :local, nil, nil, nil, "rt.heapAlloc()")
+      node = MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :local, nil, nil, nil, :heap)
       expect(e.emit(node)).to eq("try CheatLib.localCreate(Counter, rt.heapAlloc(), val)")
     end
 
     it "emits sync-only (locked)" do
-      node = MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :sync_only, "lockedCreate", nil, nil, "rt.heapAlloc()")
+      node = MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :sync_only, "lockedCreate", nil, nil, :heap)
       expect(e.emit(node)).to eq("try CheatLib.lockedCreate(Counter, rt.heapAlloc(), val)")
     end
 
     it "emits own-only (arc)" do
-      node = MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :own_only, nil, nil, "arcCreate", "rt.heapAlloc()")
+      node = MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :own_only, nil, nil, "arcCreate", :heap)
       expect(e.emit(node)).to eq("try CheatLib.arcCreate(Counter, rt.heapAlloc(), val)")
     end
 
     it "emits both sync + ownership" do
       node = MIR::CapWrap.new(MIR::Ident.new("val"), "Counter", :both,
-        "lockedCreate", "CheatLib.Locked(Counter)", "arcCreate", "rt.heapAlloc()")
+        "lockedCreate", "CheatLib.Locked(Counter)", "arcCreate", :heap)
       zig = e.emit(node)
       expect(zig).to include("CheatLib.lockedCreate(Counter, rt.heapAlloc(), val)")
       expect(zig).to include("rt.heapAlloc().destroy(__cap_inner)")
@@ -567,12 +567,12 @@ RSpec.describe MIREmitter do
 
   describe "MakeList" do
     it "emits makeList with items" do
-      node = MIR::MakeList.new("i64", [MIR::Lit.new("1"), MIR::Lit.new("2")], "rt.frameAlloc()")
+      node = MIR::MakeList.new("i64", [MIR::Lit.new("1"), MIR::Lit.new("2")], :frame)
       expect(e.emit(node)).to eq("try CheatLib.makeList(i64, rt.frameAlloc(), &.{ 1, 2 })")
     end
 
     it "emits makeList empty" do
-      node = MIR::MakeList.new("i64", [], "rt.frameAlloc()")
+      node = MIR::MakeList.new("i64", [], :frame)
       expect(e.emit(node)).to eq("try CheatLib.makeList(i64, rt.frameAlloc(), &.{})")
     end
   end
@@ -674,7 +674,7 @@ RSpec.describe MIREmitter do
     node = MIR::MakeList.new("i64", [
       MIR::BinOp.new("+", MIR::Ident.new("a"), MIR::Lit.new("1")),
       MIR::BinOp.new("*", MIR::Ident.new("b"), MIR::Lit.new("2"))
-    ], "rt.frameAlloc()")
+    ], :frame)
     expect(e.emit(node)).to eq("try CheatLib.makeList(i64, rt.frameAlloc(), &.{ (a + 1), (b * 2) })")
   end
 
@@ -683,7 +683,7 @@ RSpec.describe MIREmitter do
       { name: "value", value: MIR::Lit.new("42") },
       { name: "next", value: MIR::Lit.new("null") }
     ])
-    node = MIR::HeapCreate.new("Node", inner, "rt.heapAlloc()", "blk_indirect")
+    node = MIR::HeapCreate.new("Node", inner, :heap, "blk_indirect")
     zig = e.emit(node)
     expect(zig).to include("try rt.heapAlloc().create(Node)")
     expect(zig).to include("__p.* = Node{ .value = 42, .next = null }")

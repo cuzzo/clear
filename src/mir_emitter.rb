@@ -14,8 +14,11 @@
 require_relative "mir"
 
 class MIREmitter
+  attr_accessor :rt_name
+
   def initialize
     @indent = 0
+    @rt_name = "rt"
   end
 
   # Emit Zig code from an MIR node. Returns a String.
@@ -205,7 +208,8 @@ class MIREmitter
   def emit_reassign_cleanup(node)
     tmp = "__new_#{node.name}"
     val = emit(node.value)
-    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(#{node.zig_type}, #{node.alloc_expr}, &#{node.name});\n#{node.name} = #{tmp};\n}"
+    alloc = alloc_zig(node.alloc)
+    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(#{node.zig_type}, #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
   end
 
   def emit_if_stmt(node)
@@ -311,7 +315,7 @@ class MIREmitter
   def emit_heap_create(node)
     label = node.label || "__hc"
     init = emit(node.init)
-    alloc = node.alloc_expr
+    alloc = alloc_zig(node.alloc)
     "#{label}: {\n" \
     "    const __p = try #{alloc}.create(#{node.zig_type});\n" \
     "    errdefer #{alloc}.destroy(__p);\n" \
@@ -321,19 +325,19 @@ class MIREmitter
   end
 
   def emit_dupe_slice(node)
-    "try #{node.alloc_expr}.dupe(u8, #{emit(node.source)})"
+    "try #{alloc_zig(node.alloc)}.dupe(u8, #{emit(node.source)})"
   end
 
   def emit_alloc_slice(node)
-    "try #{node.alloc_expr}.alloc(#{node.elem_type}, #{emit(node.len)})"
+    "try #{alloc_zig(node.alloc)}.alloc(#{node.elem_type}, #{emit(node.len)})"
   end
 
   def emit_free_slice(node)
-    "#{node.alloc_expr}.free(#{emit(node.slice)})"
+    "#{alloc_zig(node.alloc)}.free(#{emit(node.slice)})"
   end
 
   def emit_destroy_ptr(node)
-    "#{node.alloc_expr}.destroy(#{emit(node.ptr)})"
+    "#{alloc_zig(node.alloc)}.destroy(#{emit(node.ptr)})"
   end
 
   def emit_cleanup(node)
@@ -444,7 +448,7 @@ class MIREmitter
 
   def emit_deep_copy(node)
     src = emit(node.source)
-    alloc = node.alloc_expr
+    alloc = node.alloc ? alloc_zig(node.alloc) : nil
     case node.strategy
     when :string
       "try #{alloc}.dupe(u8, #{src})"
@@ -481,11 +485,11 @@ class MIREmitter
   def emit_container_init(node)
     case node.strategy
     when :pool, :list_capacity
-      "try #{node.zig_type}.initCapacity(#{node.alloc_expr}, #{node.capacity})"
+      "try #{node.zig_type}.initCapacity(#{alloc_zig(node.alloc)}, #{node.capacity})"
     when :list_empty, :set_empty, :map_empty
       "#{node.zig_type}{}"
     when :map_bare
-      "#{node.zig_type}{ .alloc = #{node.alloc_expr} }"
+      "#{node.zig_type}{ .alloc = #{alloc_zig(node.alloc)} }"
     else
       raise "MIREmitter#emit_container_init: unhandled strategy :#{node.strategy}"
     end
@@ -493,7 +497,7 @@ class MIREmitter
 
   def emit_cap_wrap(node)
     inner = emit(node.inner)
-    alloc = node.alloc_expr
+    alloc = alloc_zig(node.alloc)
     case node.strategy
     when :local
       "try CheatLib.localCreate(#{node.zig_base}, #{alloc}, #{inner})"
@@ -532,7 +536,7 @@ class MIREmitter
   def emit_make_list(node)
     items = node.items.map { |i| emit(i) }.join(", ")
     items_expr = node.items.empty? ? "&.{}" : "&.{ #{items} }"
-    "try CheatLib.makeList(#{node.elem_type}, #{node.alloc_expr}, #{items_expr})"
+    "try CheatLib.makeList(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{items_expr})"
   end
 
   def emit_frame_save(node)
@@ -618,7 +622,7 @@ class MIREmitter
 
   def emit_concat(node)
     parts = node.parts.map { |p| emit(p) }.join(", ")
-    "try std.mem.concat(#{node.alloc_expr}, u8, &.{ #{parts} })"
+    "try std.mem.concat(#{alloc_zig(node.alloc)}, u8, &.{ #{parts} })"
   end
 
   def emit_cast(node)
@@ -699,18 +703,21 @@ class MIREmitter
   end
 
   def alloc_from_entry(entry)
-    case entry[:alloc]
-    when :heap  then "rt.heapAlloc()"
-    when :frame then "rt.frameAlloc()"
-    else "rt.heapAlloc()"
-    end
+    alloc_zig(entry[:alloc])
   end
 
   def alloc_from_sym(sym)
+    alloc_zig(sym)
+  end
+
+  # Single source of truth: symbol -> Zig allocator expression.
+  def alloc_zig(sym)
+    rt = @rt_name || "rt"
     case sym
-    when :heap  then "rt.heapAlloc()"
-    when :frame then "rt.frameAlloc()"
-    else "rt.heapAlloc()"
+    when :heap    then "#{rt}.heapAlloc()"
+    when :frame   then "#{rt}.frameAlloc()"
+    when :cleanup then "#{rt}.cleanupAlloc()"
+    else raise "alloc_zig: unknown allocator symbol :#{sym.inspect}"
     end
   end
 

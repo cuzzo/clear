@@ -133,7 +133,8 @@ module MIR
 
   # Reassignment with old-value cleanup.
   # Zig: { const __new = value; CheatLib.cleanup(T, alloc, &old); old = __new; }
-  ReassignWithCleanup = Struct.new(:name, :value, :zig_type, :alloc_expr) do
+  # alloc: symbol (:heap, :frame, :cleanup) -- resolved to Zig by emitter.
+  ReassignWithCleanup = Struct.new(:name, :value, :zig_type, :alloc) do
     include Stmt
   end
 
@@ -287,41 +288,46 @@ module MIR
 
   # Heap pointer allocation + initialization.
   # Zig: blk: {
-  #     const __p = try alloc_expr.create(zig_type);
-  #     errdefer alloc_expr.destroy(__p);
+  #     const __p = try alloc.create(zig_type);
+  #     errdefer alloc.destroy(__p);
   #     __p.* = init;
   #     break :blk __p;
   # }
   # Used for: @indirect fields, heap struct literals, capability boxing.
-  HeapCreate = Struct.new(:zig_type, :init, :alloc_expr, :label) do
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
     include Expr
   end
 
   # Byte slice duplication.
-  # Zig: try alloc_expr.dupe(u8, source)
+  # Zig: try alloc.dupe(u8, source)
   # Used for: string copies, HPT return dupes, BG captures.
-  DupeSlice = Struct.new(:source, :alloc_expr) do
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  DupeSlice = Struct.new(:source, :alloc) do
     include Expr
   end
 
   # Typed slice allocation (uninitialized).
-  # Zig: try alloc_expr.alloc(elem_type, len)
+  # Zig: try alloc.alloc(elem_type, len)
   # Used for: COPY list deep-copy buffer.
-  AllocSlice = Struct.new(:elem_type, :len, :alloc_expr) do
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  AllocSlice = Struct.new(:elem_type, :len, :alloc) do
     include Expr
   end
 
   # Free a slice.
-  # Zig: alloc_expr.free(slice)
+  # Zig: alloc.free(slice)
   # Used for: errdefer cleanup of AllocSlice.
-  FreeSlice = Struct.new(:slice, :alloc_expr) do
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  FreeSlice = Struct.new(:slice, :alloc) do
     include Expr
   end
 
   # Destroy a heap pointer.
-  # Zig: alloc_expr.destroy(ptr)
+  # Zig: alloc.destroy(ptr)
   # Used for: errdefer cleanup of HeapCreate, intermediate cap wrap cleanup.
-  DestroyPtr = Struct.new(:ptr, :alloc_expr) do
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  DestroyPtr = Struct.new(:ptr, :alloc) do
     include Expr
   end
 
@@ -375,8 +381,9 @@ module MIR
   #   :list_shallow -> blk: { alloc + memcpy }
   #   :list_deep    -> blk: { alloc + per-element dupeUnionValue }
   #   :passthrough  -> source (no copy needed, value type)
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
-                        :alloc_expr) do
+                        :alloc) do
     include Expr
   end
 
@@ -390,7 +397,8 @@ module MIR
   #   :set_empty      -> T{}
   #   :map_bare       -> T{ .alloc = alloc }
   #   :map_empty      -> T{}
-  ContainerInit = Struct.new(:zig_type, :strategy, :alloc_expr,
+  # alloc: symbol (:heap, :frame, nil) -- resolved to Zig by emitter.
+  ContainerInit = Struct.new(:zig_type, :strategy, :alloc,
                              :capacity) do
     include Expr
   end
@@ -403,11 +411,12 @@ module MIR
   #   :sync_only -> try CheatLib.lockedCreate(T, alloc, inner)
   #   :own_only  -> try CheatLib.arcCreate(T, alloc, inner)
   #   :both      -> blk: { sync_create; deref; destroy_inner; own_create; }
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
   CapWrap = Struct.new(:inner, :zig_base, :strategy,
                        :sync_fn,   # "lockedCreate", "rwLockedCreate", "refCellCreate", nil
                        :sync_type, # "CheatLib.Locked(T)", nil
                        :own_fn,    # "arcCreate", "rcCreate", nil
-                       :alloc_expr) do
+                       :alloc) do
     include Expr
   end
 
@@ -432,7 +441,8 @@ module MIR
 
   # Make a list from items.
   # Zig: try CheatLib.makeList(elem_type, alloc, &.{ items })
-  MakeList = Struct.new(:elem_type, :items, :alloc_expr) do
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  MakeList = Struct.new(:elem_type, :items, :alloc) do
     include Expr
   end
 
@@ -575,9 +585,10 @@ module MIR
   end
 
   # String concatenation.
-  # Zig: try CheatLib.concat(rt, alloc, &.{ parts })
-  # or   try rt.frameConcat(&.{ parts })
-  ConcatStr = Struct.new(:parts, :alloc_expr, :rt_expr) do
+  # Zig: try std.mem.concat(alloc, u8, &.{ parts })
+  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  # rt_expr: Zig expression for runtime (e.g. "rt") -- used for rt-dependent calls.
+  ConcatStr = Struct.new(:parts, :alloc, :rt_expr) do
     include Expr
   end
 

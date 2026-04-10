@@ -55,6 +55,9 @@ class MIRChecker
     hpt_leaks        = []       # ExprStmt with discarded heap calls
     loop_stack       = []       # tracks current loop nesting for frame overflow
 
+    # Init allocs: name => symbol from ContainerInit/MakeList/HeapCreate/DupeSlice
+    init_allocs  = {}
+
     # Single pass: collect all markers and detect inline issues.
     walk_mir(fn_def.body) do |node, context|
       case node
@@ -74,6 +77,11 @@ class MIRChecker
         moves << node.name.to_s
       when MIR::ReassignMark
         reassigns[node.name] = node
+      when MIR::Let
+        # Track init allocator for consistency verification
+        init = node.init
+        init_sym = extract_init_alloc(init)
+        init_allocs[node.name] = init_sym if node.name && init_sym
       when MIR::Set
         # Collect reassignment targets
         reassign_targets << node.target.name.to_s if node.target.is_a?(MIR::Ident)
@@ -103,6 +111,10 @@ class MIRChecker
 
     # Rule 2: Allocation and cleanup agree on allocator identity.
     verify_allocator_consistency!(allocs, cleanups, promotes, catch_wrappers)
+
+    # Rule 2b: Init expression allocator matches AllocMark.
+    # Skip mutable variables that get reassigned -- their allocator can legitimately change.
+    verify_init_alloc_consistency!(allocs, init_allocs, reassigns, reassign_targets)
 
     # Rule 3: Moves/returns have correct guard setup.
     verify_move_guards!(cleanups, moves, escapes, promotes, allocs)
@@ -395,6 +407,45 @@ class MIRChecker
     end
     if node.is_a?(MIR::Call) && node.args
       node.args.each { |a| scan_expr_for_hpt_leak!(a, leaks) }
+    end
+  end
+
+  # Rule 2b: Init expression allocator must match AllocMark allocator.
+  # Catches the case where lowering emits heapAlloc() but cleanup plan says :frame.
+  def verify_init_alloc_consistency!(allocs, init_allocs, reassigns, reassign_targets)
+    init_allocs.each do |name, init_sym|
+      # Skip mutable variables that get reassigned -- the init allocator may
+      # legitimately differ from the cleanup allocator when the variable is
+      # reassigned with a value from a different allocator.
+      next if reassigns.key?(name) || reassign_targets.include?(name)
+
+      anodes = allocs[name]
+      next unless anodes
+      anodes.each do |anode|
+        if anode.alloc != init_sym
+          @errors << error(:ALLOC_MISMATCH, name,
+            "init uses :#{init_sym} but AllocMark uses :#{anode.alloc}")
+        end
+      end
+    end
+  end
+
+  # Extract allocator symbol from a Let init expression.
+  # Returns :heap, :frame, or nil (if init doesn't carry an allocator).
+  def extract_init_alloc(node)
+    case node
+    when MIR::ContainerInit
+      # list_empty and set_empty don't actually allocate -- skip.
+      return nil if node.strategy == :list_empty || node.strategy == :set_empty
+      node.alloc
+    when MIR::MakeList
+      return nil if node.items.empty?
+      node.alloc
+    when MIR::HeapCreate    then node.alloc
+    when MIR::DupeSlice     then node.alloc
+    when MIR::DeepCopy      then node.alloc
+    when MIR::CapWrap       then node.alloc
+    else nil
     end
   end
 
