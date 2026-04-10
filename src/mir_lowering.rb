@@ -459,7 +459,8 @@ class MIRLowering
         body = deinit_lines.join("\n")
         deinit_fn = MIR::RawZig.new(
           "pub fn deinit(self: *@This(), alloc: std.mem.Allocator) void {\n#{body}\n    }",
-          "union_inline_struct_deinit"
+          "union_inline_struct_deinit",
+          { consumes: [], produces: [], borrows: [] }
         )
         [deinit_fn]
       end
@@ -709,7 +710,8 @@ class MIRLowering
 
       catch_zig = build_catch_clauses(node, fn_can_fail)
       outer_body = [
-        MIR::RawZig.new("return #{inner_call} catch {\n    #{catch_zig}\n};", "catch_wrapper")
+        MIR::RawZig.new("return #{inner_call} catch {\n    #{catch_zig}\n};", "catch_wrapper",
+          { consumes: [], produces: [], borrows: [] })
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
@@ -1334,7 +1336,12 @@ class MIRLowering
     @rc_unwrap_map = prev_rc
 
     all_bindings = bindings.reject(&:empty?).join("\n")
-    MIR::RawZig.new("{\n#{all_bindings}\n#{body_zig}\n}", "with_block")
+    borrows = (node.capabilities || []).filter_map { |c|
+      vn = c[:var_node]
+      vn.respond_to?(:name) ? vn.name.to_s : nil
+    }
+    MIR::RawZig.new("{\n#{all_bindings}\n#{body_zig}\n}", "with_block",
+      { consumes: [], produces: [], borrows: borrows })
   end
 
   def lower_do_block(node)
@@ -1391,7 +1398,7 @@ class MIRLowering
     }
 
     inner = branch_parts.join("\n")
-    MIR::RawZig.new(<<~ZIG.chomp, "do_block")
+    do_code = <<~ZIG.chomp
       {
           var #{wg_var} = CheatHeader.WaitGroup.init(rt.getSched());
           #{wg_var}.add(#{n});
@@ -1399,6 +1406,8 @@ class MIRLowering
           #{wg_var}.wait();
       }
     ZIG
+    MIR::RawZig.new(do_code, "do_block",
+      { consumes: [], produces: [], borrows: [] })
   end
 
   def lower_bg_block(node)
@@ -1511,7 +1520,8 @@ class MIRLowering
     task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
     spawn_call = bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
 
-    MIR::RawZig.new(<<~ZIG.chomp, "bg_block")
+    borrows = captured.map { |name, _| name.to_s }
+    bg_code = <<~ZIG.chomp
       #{blk_label}: {
           const #{ctx_type} = struct {
               inner: *#{promise_zig}.Inner,
@@ -1541,6 +1551,8 @@ class MIRLowering
           break :#{blk_label} #{promise_var};
       }
     ZIG
+    MIR::RawZig.new(bg_code, "bg_block",
+      { consumes: [], produces: [], borrows: borrows })
   end
 
   def lower_bg_stream_block(node)
@@ -1602,7 +1614,8 @@ class MIRLowering
 
     task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
 
-    MIR::RawZig.new(<<~ZIG.chomp, "bg_stream_block")
+    borrows = captured.map { |name, _| name.to_s }
+    sg_code = <<~ZIG.chomp
       #{blk_label}: {
           const #{ctx_type} = struct {
               stream_inner: *#{stream_zig}.Inner,
@@ -1636,6 +1649,8 @@ class MIRLowering
           break :#{blk_label} #{stream_var};
       }
     ZIG
+    MIR::RawZig.new(sg_code, "bg_stream_block",
+      { consumes: [], produces: [], borrows: borrows })
   end
 
   def lower_yield(node)
@@ -1728,7 +1743,8 @@ class MIRLowering
       @active_stubs = prev_stubs
     end
 
-    MIR::RawZig.new(tests.join("\n"), "test_block")
+    MIR::RawZig.new(tests.join("\n"), "test_block",
+      { consumes: [], produces: [], borrows: [] })
   end
 
   def lower_assert_raises(node)
@@ -1736,7 +1752,7 @@ class MIRLowering
     kind = node.kind
     expr_zig = emit_expr(lower(node.expression))
     error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(\"#{node.error_name}\")" : ""
-    MIR::RawZig.new(<<~ZIG.chomp, "assert_raises")
+    ar_code = <<~ZIG.chomp
       {
           if (#{expr_zig}) |_| {
               @panic("ASSERT_RAISES: expected #{kind} error but none raised");
@@ -1747,6 +1763,8 @@ class MIRLowering
           }
       }
     ZIG
+    MIR::RawZig.new(ar_code, "assert_raises",
+      { consumes: [], produces: [], borrows: [] })
   end
 
   def lower_stub_decl(node)
@@ -1774,7 +1792,8 @@ class MIRLowering
       arr_items = items.join(", ")
       MIR::RawZig.new(
         "const #{stub_var}_seq = [_][]const u8{ #{arr_items} };\nvar #{stub_var}_idx: usize = 0; _ = &#{stub_var}_idx;",
-        "stub_sequence"
+        "stub_sequence",
+        { consumes: [], produces: [], borrows: [] }
       )
     when :with
       val = lower(node.value)
@@ -1835,7 +1854,8 @@ class MIRLowering
       lines = []
       lines << file_scope_types if file_scope_types && !file_scope_types.strip.empty?
       lines << "const #{node.namespace} = struct {\n#{indented}\n};"
-      MIR::RawZig.new(lines.join("\n"), "require_local")
+      MIR::RawZig.new(lines.join("\n"), "require_local",
+        { consumes: [], produces: [], borrows: [] })
     end
   end
 
@@ -2291,7 +2311,8 @@ class MIRLowering
           promos = string_fields.map { |f| "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch @panic(\"out of memory\");" }.join(" ")
           return MIR::RawZig.new(
             "(#{left_raw} catch __fb: { var __fb = #{right_zig}; #{promos} break :__fb __fb; })",
-            "or_fallback_dupe"
+            "or_fallback_dupe",
+            { consumes: [], produces: [], borrows: [] }
           )
         end
       end
@@ -2807,7 +2828,8 @@ class MIRLowering
         code = "{\nvar #{guard_var} = #{acquire};\ndefer #{guard_var}.release();\nconst #{alias_var} = #{guard_var}.get();\n#{alias_var}.#{field} = #{value_zig};\n}"
       end
     end
-    MIR::RawZig.new(code, "auto_lock_assign")
+    MIR::RawZig.new(code, "auto_lock_assign",
+      { consumes: [], produces: [], borrows: [var_name.to_s] })
   end
 
   # ================================================================

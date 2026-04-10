@@ -150,6 +150,38 @@ class FunctionCFG
 
         current_block = join_block
 
+      when AST::WithBlock
+        current_block.stmts << stmt
+        body_block = cfg.new_block
+        after_block = cfg.new_block
+        current_block.add_successor(body_block)
+        current_block.add_successor(after_block)  # WITH can fail to acquire
+        body_exit = build_body(stmt.body || [], body_block, exit_target, cfg)
+        body_exit&.add_successor(after_block) if body_exit
+        current_block = after_block
+
+      when AST::DoBlock
+        current_block.stmts << stmt
+        join_block = cfg.new_block
+        (stmt.branches || []).each do |b|
+          branch_block = cfg.new_block
+          current_block.add_successor(branch_block)
+          branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg)
+          branch_exit&.add_successor(join_block) if branch_exit
+        end
+        current_block.add_successor(join_block)  # fallthrough if no branches
+        current_block = join_block
+
+      when AST::BgBlock, AST::BgStreamBlock
+        current_block.stmts << stmt
+        body_block = cfg.new_block
+        after_block = cfg.new_block
+        current_block.add_successor(body_block)
+        current_block.add_successor(after_block)
+        build_body(stmt.body || [], body_block, exit_target, cfg)
+        # BG body runs in separate fiber -- no fall-through back to parent
+        current_block = after_block
+
       when AST::ReturnNode
         current_block.stmts << stmt
         current_block.add_successor(cfg.exit_block)
@@ -427,6 +459,20 @@ class OwnershipDataflow
       # ForEach/ForRange: loop variable is owned in the body block.
       if stmt.is_a?(AST::ForRange) || stmt.is_a?(AST::ForEach)
         state[stmt.var_name.to_s] = OWNED
+      end
+
+    when AST::WithBlock
+      # WITH block capabilities borrow the source variable -- no ownership transfer.
+      # The source variable remains OWNED (it's borrowed, not moved).
+
+    when AST::DoBlock
+      # DO block header -- no moves in the header itself.
+
+    when AST::BgBlock, AST::BgStreamBlock
+      # BG block: resource captures transfer ownership to the fiber.
+      # String captures are promoted (borrowed), not moved.
+      stmt.capture_analysis&.resource_captures&.each do |name|
+        state[name] = MOVED if state[name]
       end
     end
   end

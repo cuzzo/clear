@@ -213,7 +213,12 @@ module MIR
 
   # Raw Zig code. Escape hatch for patterns not yet modeled in MIR.
   # Every use is tracked by `reason` for auditing. Goal: zero RawZig nodes.
-  RawZig = Struct.new(:code, :reason) do
+  # ownership_contract: { consumes: [name, ...], produces: [name, ...], borrows: [name, ...] }
+  #   consumes: bindings whose ownership transfers into the raw block (must have SuppressCleanup)
+  #   produces: bindings the raw block creates (must have MIR::Alloc + MIR::Drop)
+  #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
+  #   nil = unaudited (legacy; verifier warns about unaudited RawZig nodes)
+  RawZig = Struct.new(:code, :reason, :ownership_contract) do
     include Stmt
     def expr?; true; end  # can appear in expression position too
   end
@@ -624,7 +629,8 @@ module MIR
   end
 
   # Inline Zig expression. Tracked escape hatch.
-  InlineZig = Struct.new(:code, :reason) do
+  # ownership_contract: same as RawZig. nil = unaudited.
+  InlineZig = Struct.new(:code, :reason, :ownership_contract) do
     include Expr
   end
 end

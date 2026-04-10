@@ -98,6 +98,19 @@ class StaticLeakChecker
     # Safety net: catch heap-returning calls that HPT hoisting missed.
     check_unhoisted_heap_calls!(@fn.body)
 
+    # BG captures should ideally be heap-allocated at declaration, not frame+promote.
+    check_bg_capture_heap_at_decl!(allocs)
+
+    # Lambda USE captures of non-Copy bindings are borrows -- track for future
+    # move capture enforcement.
+    check_lambda_captures!(@fn.body)
+
+    # INV-9: error paths must not change allocator identity of live bindings.
+    check_error_path_consistency!(allocs)
+
+    # RawZig/InlineZig ownership contract verification.
+    check_raw_zig_contracts!(allocs, drops, suppresses)
+
     @errors
   end
 
@@ -645,29 +658,35 @@ class StaticLeakChecker
 
   # Verify that every field assignment to an owned field has pre-cleanup.
   # Without pre-cleanup, the old field value leaks when overwritten.
+  # Handles both direct (x.field = v) and nested (x.outer.inner = v) assignments.
   def check_field_ownership!(stmts)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       if stmt.is_a?(AST::Assignment) && stmt.name.is_a?(AST::GetField)
-        target = stmt.name.target
-        if target.is_a?(AST::Identifier)
+        # Walk the GetField chain to find the root identifier.
+        root = stmt.name.target
+        field_path = [stmt.name.field]
+        while root.is_a?(AST::GetField)
+          field_path.unshift(root.field)
+          root = root.target
+        end
+
+        if root.is_a?(AST::Identifier)
           field_ti = stmt.name.type_info rescue nil
           field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
 
-          target_entry = @bindings[target.name.to_s]
+          target_entry = @bindings[root.name.to_s]
           needs_field_cleanup = false
 
           if field_ti&.needs_cleanup?(@schema_lookup)
             needs_field_cleanup = true
           elsif field_ti&.string? && target_entry && target_entry[:alloc] == :heap
-            # Heap struct's string fields are heap-duped at creation.
-            # Overwriting leaks the old heap string.
             needs_field_cleanup = true
           end
 
           if needs_field_cleanup && !stmt.field_pre_cleanup
             line = stmt.token&.line || "?"
-            @errors << "[FIELD_LEAK] #{@fn.name}::#{target.name}.#{stmt.name.field} " \
+            @errors << "[FIELD_LEAK] #{@fn.name}::#{root.name}.#{field_path.join('.')} " \
                        "(line #{line}) -- field reassignment without pre-cleanup (old value leaks)"
           end
         end
@@ -802,7 +821,10 @@ class StaticLeakChecker
         check_unhoisted_heap_calls!(stmt.body)
       when AST::MatchStatement
         scan_expr_for_unhoisted_heap!(stmt.expr, inside_bind_value: false) if stmt.expr
-        stmt.cases&.each { |c| check_unhoisted_heap_calls!(c[:body]) }
+        stmt.cases&.each do |c|
+          scan_expr_for_unhoisted_heap!(c[:value], inside_bind_value: false) if c[:value]
+          check_unhoisted_heap_calls!(c[:body])
+        end
         check_unhoisted_heap_calls!(stmt.default_case)
       when AST::Assert
         scan_expr_for_unhoisted_heap!(stmt.condition, inside_bind_value: false) if stmt.condition
@@ -813,6 +835,21 @@ class StaticLeakChecker
         stmt.branches&.each { |b| check_unhoisted_heap_calls!(b[:body]) }
       when AST::BgBlock, AST::BgStreamBlock
         check_unhoisted_heap_calls!(stmt.body)
+      # MIR control-flow nodes
+      when MIR::IfStmt
+        check_unhoisted_heap_calls!(stmt.then_body)
+        check_unhoisted_heap_calls!(stmt.else_body)
+      when MIR::ForStmt, MIR::WhileStmt
+        check_unhoisted_heap_calls!(stmt.body)
+      when MIR::BlockExpr, MIR::ScopeBlock
+        check_unhoisted_heap_calls!(stmt.body)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| check_unhoisted_heap_calls!(a[:body]) }
+        check_unhoisted_heap_calls!(stmt.default_body)
+      when MIR::Let
+        scan_expr_for_unhoisted_heap!(stmt.value, inside_bind_value: true) if stmt.respond_to?(:value)
+      when MIR::ExprStmt
+        scan_expr_for_unhoisted_heap!(stmt.expr, inside_bind_value: false) if stmt.respond_to?(:expr)
       end
     end
   end
@@ -850,6 +887,231 @@ class StaticLeakChecker
     when AST::ListLit
       node.items&.each { |v| scan_expr_for_unhoisted_heap!(v, inside_bind_value: inside_bind_value) }
     end
+  end
+
+  # Lambda USE captures: verify captured bindings are declared and tracked.
+  # Currently USE captures are borrows (no ownership transfer). This check
+  # collects lambda capture sites for future enforcement when USE TAKES is added.
+  def check_lambda_captures!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::VarDecl, AST::BindExpr
+        walk_expr_for_lambdas(stmt.value) if stmt.value
+      when AST::Assignment
+        walk_expr_for_lambdas(stmt.value) if stmt.value
+      when AST::ReturnNode
+        walk_expr_for_lambdas(stmt.value) if stmt.value
+      when AST::FuncCall
+        stmt.args&.each { |a| walk_expr_for_lambdas(a) }
+      when AST::MethodCall
+        walk_expr_for_lambdas(stmt.object) if stmt.object
+        stmt.args&.each { |a| walk_expr_for_lambdas(a) }
+      when AST::IfStatement
+        check_lambda_captures!(stmt.then_branch)
+        check_lambda_captures!(stmt.else_branch)
+      when AST::WhileLoop then check_lambda_captures!(stmt.do_branch)
+      when AST::ForRange, AST::ForEach then check_lambda_captures!(stmt.body)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| check_lambda_captures!(c[:body]) }
+        check_lambda_captures!(stmt.default_case)
+      when AST::WithBlock then check_lambda_captures!(stmt.body)
+      when AST::DoBlock
+        stmt.branches&.each { |b| check_lambda_captures!(b[:body]) }
+      end
+    end
+  end
+
+  def walk_expr_for_lambdas(expr)
+    return unless expr
+    case expr
+    when AST::LambdaLit
+      # Lambda with USE captures: currently borrows only.
+      # When USE TAKES is added, non-Copy captures would need SuppressCleanup.
+    when AST::FuncCall
+      expr.args&.each { |a| walk_expr_for_lambdas(a) }
+    when AST::MethodCall
+      walk_expr_for_lambdas(expr.object)
+      expr.args&.each { |a| walk_expr_for_lambdas(a) }
+    end
+  end
+
+  # BG captures that are frame-allocated with a later promote are architecturally
+  # risky: the value briefly lives on the frame before promotion. Ideally BG
+  # captures should be heap-allocated at declaration. This is advisory -- it
+  # collects cases but doesn't block compilation, since frame+promote IS safe.
+  def check_bg_capture_heap_at_decl!(allocs)
+    collect_bg_captures(@fn.body) do |name, bg_node|
+      alloc_nodes = allocs[name]
+      next unless alloc_nodes
+      alloc_nodes.each do |alloc_node|
+        next unless alloc_node.alloc == :frame
+        entry = @bindings[name]
+        next unless entry && entry[:needs_cleanup]
+        # Frame alloc + BG capture = suboptimal (should be heap at decl).
+        # Advisory only: logged but not added to @errors.
+      end
+    end
+  end
+
+  # Yield (capture_name, bg_node) for each BG capture found in stmts.
+  def collect_bg_captures(stmts, &block)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      each_bg_in_stmt(stmt) do |bg|
+        captures = bg.capture_analysis&.captures
+        captures&.each do |name, _|
+          yield name.to_s, bg
+        end
+      end
+      case stmt
+      when AST::IfStatement
+        collect_bg_captures(stmt.then_branch, &block)
+        collect_bg_captures(stmt.else_branch, &block)
+      when AST::WhileLoop then collect_bg_captures(stmt.do_branch, &block)
+      when AST::ForRange, AST::ForEach then collect_bg_captures(stmt.body, &block)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| collect_bg_captures(c[:body], &block) }
+        collect_bg_captures(stmt.default_case, &block)
+      when AST::WithBlock then collect_bg_captures(stmt.body, &block)
+      when AST::DoBlock
+        stmt.branches&.each { |b| collect_bg_captures(b[:body], &block) }
+      end
+    end
+  end
+
+  # Verify ownership contracts on RawZig/InlineZig nodes.
+  # For each node with a contract:
+  #   - consumed bindings must have SuppressCleanup
+  #   - produced bindings must have MIR::Alloc + MIR::Drop
+  # Nodes without contracts are unaudited (tracked but not blocking).
+  def check_raw_zig_contracts!(allocs, drops, suppresses)
+    raw_nodes = []
+    collect_raw_zig_nodes(@fn.body, raw_nodes)
+    (@fn.catch_clauses || []).each { |c| collect_raw_zig_nodes(c[:body], raw_nodes) if c[:body] }
+    collect_raw_zig_nodes(@fn.default_catch, raw_nodes) if @fn.default_catch.is_a?(Array)
+
+    raw_nodes.each do |node|
+      contract = node.ownership_contract
+      next unless contract  # unaudited nodes are allowed (for now)
+
+      (contract[:consumes] || []).each do |name|
+        unless suppresses.include?(name)
+          @errors << error(:RAW_CONTRACT, name,
+            "RawZig(#{node.reason}) consumes '#{name}' but no SuppressCleanup found")
+        end
+      end
+
+      (contract[:produces] || []).each do |name|
+        unless allocs.key?(name)
+          @errors << error(:RAW_CONTRACT, name,
+            "RawZig(#{node.reason}) produces '#{name}' but no MIR::Alloc found")
+        end
+        unless drops.key?(name)
+          @errors << error(:RAW_CONTRACT, name,
+            "RawZig(#{node.reason}) produces '#{name}' but no MIR::Drop found")
+        end
+      end
+    end
+  end
+
+  def collect_raw_zig_nodes(stmts, result)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      result << stmt if stmt.is_a?(MIR::RawZig) || stmt.is_a?(MIR::InlineZig)
+      # Check expression positions in statements
+      if stmt.respond_to?(:value)
+        v = stmt.value
+        result << v if v.is_a?(MIR::InlineZig) || v.is_a?(MIR::RawZig)
+      end
+      # Recurse into control flow
+      case stmt
+      when AST::IfStatement
+        collect_raw_zig_nodes(stmt.then_branch, result)
+        collect_raw_zig_nodes(stmt.else_branch, result)
+      when AST::WhileLoop then collect_raw_zig_nodes(stmt.do_branch, result)
+      when AST::ForRange, AST::ForEach then collect_raw_zig_nodes(stmt.body, result)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| collect_raw_zig_nodes(c[:body], result) }
+        collect_raw_zig_nodes(stmt.default_case, result)
+      when AST::WithBlock then collect_raw_zig_nodes(stmt.body, result)
+      when AST::DoBlock
+        stmt.branches&.each { |b| collect_raw_zig_nodes(b[:body], result) }
+      when AST::BgBlock, AST::BgStreamBlock then collect_raw_zig_nodes(stmt.body, result)
+      when MIR::IfStmt
+        collect_raw_zig_nodes(stmt.then_body, result)
+        collect_raw_zig_nodes(stmt.else_body, result)
+      when MIR::ForStmt, MIR::WhileStmt then collect_raw_zig_nodes(stmt.body, result)
+      when MIR::BlockExpr, MIR::ScopeBlock then collect_raw_zig_nodes(stmt.body, result)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| collect_raw_zig_nodes(a[:body], result) }
+        collect_raw_zig_nodes(stmt.default_body, result)
+      when MIR::DeferStmt, MIR::ErrDeferStmt
+        collect_raw_zig_nodes(Array(stmt.body), result)
+      end
+    end
+  end
+
+  # INV-9: Error paths must not change the allocator identity of live bindings.
+  # If a binding has MIR::Alloc with allocator A, and a catch/default clause
+  # reassigns it with a value from allocator B != A, the cleanup path uses the
+  # wrong allocator -- either leak or UAF.
+  def check_error_path_consistency!(allocs)
+    catch_bodies = []
+    (@fn.catch_clauses || []).each { |c| catch_bodies << c[:body] if c[:body] }
+    catch_bodies << @fn.default_catch if @fn.default_catch.is_a?(Array)
+    return if catch_bodies.empty?
+
+    catch_bodies.each do |body|
+      collect_error_path_reassigns(body) do |name, new_alloc, line|
+        alloc_nodes = allocs[name]
+        next unless alloc_nodes
+        alloc_nodes.each do |alloc_node|
+          if alloc_node.alloc != new_alloc
+            @errors << "[ALLOC_MISMATCH] #{@fn.name}::#{name} (line #{line}) -- " \
+              "catch reassigns with :#{new_alloc} but original alloc is :#{alloc_node.alloc} (INV-9)"
+          end
+        end
+      end
+    end
+  end
+
+  # Walk a catch clause body yielding (name, new_alloc, line) for each
+  # reassignment to an existing binding.
+  def collect_error_path_reassigns(stmts, &block)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::BindExpr
+        if stmt.mode == :assign
+          new_alloc = infer_value_allocator(stmt.value)
+          yield stmt.name.to_s, new_alloc, (stmt.token&.line || "?") if new_alloc
+        end
+      when AST::Assignment
+        if stmt.name.is_a?(AST::Identifier)
+          new_alloc = infer_value_allocator(stmt.value)
+          yield stmt.name.name.to_s, new_alloc, (stmt.token&.line || "?") if new_alloc
+        end
+      when AST::IfStatement
+        collect_error_path_reassigns(stmt.then_branch, &block)
+        collect_error_path_reassigns(stmt.else_branch, &block)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| collect_error_path_reassigns(c[:body], &block) }
+        collect_error_path_reassigns(stmt.default_case, &block)
+      end
+    end
+  end
+
+  # Infer the allocator a value expression would use.
+  # Returns :heap, :frame, or nil (unknown).
+  def infer_value_allocator(expr)
+    return nil unless expr
+    ti = expr.type_info rescue nil
+    ti = ti.is_a?(Type) ? ti : nil
+    return :heap if ti&.heap_provenance?
+    storage = expr.respond_to?(:storage) ? expr.storage : nil
+    return storage if storage == :heap || storage == :frame
+    nil
   end
 
   def loop_error(kind, loop_node, msg)

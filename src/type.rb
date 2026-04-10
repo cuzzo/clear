@@ -1024,6 +1024,8 @@ class Type
     return true if pool?
     return true if set_collection?
     return true if string? && heap_provenance?
+    return true if array? && !string?  # bare []T slices (Zig needsCleanup returns true for all slices)
+    return true if any_sync?           # Locked/RwLocked heap wrappers
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash)
