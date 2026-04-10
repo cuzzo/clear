@@ -2835,14 +2835,16 @@ class MIRLowering
       case transform
       when :dupe_string_literal
         if val_ti&.string? && !val_node.is_a?(AST::CopyNode)
-          val_zig = emit_expr(val)
-          val = MIR::InlineZig.new("try #{rt_name}.heapAlloc().dupe(u8, #{val_zig})", "index_dupe_string")
+          val = MIR::DupeSlice.new(val, "#{rt_name}.heapAlloc()")
         end
       when :dupe_borrowed_union
         unless val_ti&.string?
-          val_zig = emit_expr(val)
-          new_zig = dupe_borrowed_union_zig(val_zig, val_node, rt_name)
-          val = MIR::InlineZig.new(new_zig, "index_dupe_union") if new_zig != val_zig
+          if should_dupe_borrowed_union?(val_node, val_ti)
+            zig_t = transpile_type(val_ti)
+            val = MIR::Call.new("CheatLib.dupeUnionValue", [
+              MIR::Ident.new(zig_t), val, MIR::Ident.new("#{rt_name}.heapAlloc()")
+            ], true)
+          end
         end
       when :container_promote
         unless val_ti&.string?
@@ -3412,15 +3414,14 @@ class MIRLowering
   private
 
   # Dupe a borrowed non-Copy union value before storing into a TAKES container.
-  def dupe_borrowed_union_zig(val_ref, val_node, rt_name)
-    return val_ref if val_node.is_a?(AST::MoveNode) || val_node.is_a?(AST::CopyNode)
-    return val_ref unless val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
-    val_ti = val_node.type_info rescue nil
-    return val_ref unless val_ti && @union_schemas&.key?(val_ti.resolved)
+  def should_dupe_borrowed_union?(val_node, val_ti = nil)
+    return false if val_node.is_a?(AST::MoveNode) || val_node.is_a?(AST::CopyNode)
+    return false unless val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
+    val_ti ||= (val_node.type_info rescue nil)
+    return false unless val_ti && @union_schemas&.key?(val_ti.resolved)
     schema_lookup = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
-    return val_ref if val_ti.respond_to?(:implicitly_copyable?) && val_ti.implicitly_copyable?(schema_lookup)
-    zig_t = transpile_type(val_ti)
-    "try CheatLib.dupeUnionValue(#{zig_t}, #{val_ref}, #{rt_name}.heapAlloc())"
+    return false if val_ti.respond_to?(:implicitly_copyable?) && val_ti.implicitly_copyable?(schema_lookup)
+    true
   end
 
   # Apply container_promote: consume pending promote from MIR::Promote(:container_store)
