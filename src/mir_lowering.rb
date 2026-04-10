@@ -980,39 +980,47 @@ class MIRLowering
       end
     end
 
-    # Template-based intrinsics: resolve placeholders
-    args_zig = if node.is_a?(AST::MethodCall)
+    # Template-based intrinsics: lower args to MIR, apply ownership transforms, emit
+    mir_args = if node.is_a?(AST::MethodCall)
       obj_mir = lower(node.object)
       # Auto-deref Arc/Rc-wrapped receivers: obj.ctrl.data.*
       obj_ti = node.object.type_info
       if obj_ti&.shared? || obj_ti&.multiowned?
         obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
       end
-      [emit_expr(obj_mir)] + node.args.map { |a| emit_expr(lower(a)) }
+      [obj_mir] + node.args.map { |a| lower(a) }
     else
-      node.args.map { |a| emit_expr(lower(a)) }
+      node.args.map { |a| lower(a) }
     end
 
     pattern = node.zig_pattern.dup
 
-    # Resolve {alloc}
+    # Resolve {alloc} and wrap TAKES string args in MIR::DupeSlice
     if pattern.include?("{alloc}")
       alloc_sym = node.matched_stdlib_def&.dig(:alloc) || :node_storage
       resolved_alloc = resolve_intrinsic_alloc(alloc_sym, node)
       pattern = pattern.gsub("{alloc}", resolved_alloc)
 
-      # Dupe non-heap strings at TAKES positions
+      # Wrap non-heap strings at TAKES positions in DupeSlice (visible to MIR checker)
       stdlib_args = node.matched_stdlib_def&.dig(:args)
       if stdlib_args.is_a?(Array)
         raw_args = node.is_a?(AST::MethodCall) ? node.args : node.args[1..]
         raw_args&.each_with_index do |arg_node, ai|
           param_def = stdlib_args[ai + 1]
           next unless param_def.is_a?(Hash) && param_def[:takes]
-          zig_idx = node.is_a?(AST::MethodCall) ? ai + 1 : ai
-          args_zig[zig_idx] = heap_dupe_takes_string_zig(args_zig[zig_idx], arg_node, resolved_alloc)
+          mir_idx = node.is_a?(AST::MethodCall) ? ai + 1 : ai
+          ti = arg_node.type_info rescue nil
+          next unless ti&.string?
+          storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
+          next if storage == :heap
+          next if arg_node.is_a?(AST::CopyNode)
+          mir_args[mir_idx] = MIR::DupeSlice.new(mir_args[mir_idx], resolved_alloc)
         end
       end
     end
+
+    # Emit all args to Zig strings
+    args_zig = mir_args.map { |a| emit_expr(a) }
 
     # Resolve {key_zig} and {val_zig} from receiver type (numeric/sharded maps)
     if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
@@ -1062,15 +1070,6 @@ class MIRLowering
     end
   end
 
-  def heap_dupe_takes_string_zig(arg_zig, arg_node, alloc_zig)
-    ti = arg_node.type_info
-    return arg_zig unless ti&.string?
-    storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
-    return arg_zig if storage == :heap
-    # COPY already produces a heap dupe via MIR::DeepCopy -- don't double-dupe.
-    return arg_zig if arg_node.is_a?(AST::CopyNode)
-    "try #{alloc_zig}.dupe(u8, #{arg_zig})"
-  end
 
   def lower_extern_call(node)
     args = node.args.map { |a| lower(a) }
