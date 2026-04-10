@@ -645,7 +645,7 @@ module MIR
 
   # Inline Zig expression. Tracked escape hatch.
   # ownership_contract: same as RawZig. nil = unaudited.
-  InlineZig = Struct.new(:code, :reason, :ownership_contract) do
+  InlineZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
     include Expr
   end
 end

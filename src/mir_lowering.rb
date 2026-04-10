@@ -1028,7 +1028,9 @@ class MIRLowering
     # Substitute positional args
     args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}", val) }
 
-    MIR::InlineZig.new(pattern, "intrinsic")
+    iz = MIR::InlineZig.new(pattern, "intrinsic")
+    iz.stdlib_def = node.matched_stdlib_def if node.respond_to?(:matched_stdlib_def)
+    iz
   end
 
   def resolve_intrinsic_alloc(alloc_sym, node)

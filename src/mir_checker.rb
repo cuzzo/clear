@@ -508,6 +508,17 @@ class MIRChecker
       @errors << error(:HPT_LEAK, node.callee,
         "heap-returning call result not bound to variable (leak)")
     end
+    # Stdlib intrinsic that allocates, used as discarded expression.
+    if node.is_a?(MIR::InlineZig) && node.stdlib_def&.dig(:allocates)
+      ret = node.stdlib_def[:return]
+      # Only flag if the stdlib call returns a value (not :Void).
+      # Void-returning allocators (e.g. append, put) allocate internally
+      # but don't produce an ownable return value.
+      unless ret == :Void || ret.nil?
+        @errors << error(:HPT_LEAK, node.reason,
+          "stdlib call with allocates:true result not bound to variable (leak)")
+      end
+    end
     # Recurse into call arguments for nested heap calls.
     if node.is_a?(MIR::Call) && node.args
       node.args.each { |a| scan_expr_for_hpt_leak!(a) }
