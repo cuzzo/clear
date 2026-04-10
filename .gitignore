@@ -9,6 +9,7 @@ zig/.zig-cache
 zig/fiber-stack-check/pass/build
 zig/*.bc
 zig/*.o
+zig/data
 transpile-tests/ffi-integration/.zig-cache
 transpile-tests/module-integration/.zig-cache
 benchmarks/**/bench_c
