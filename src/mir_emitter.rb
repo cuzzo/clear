@@ -354,7 +354,7 @@ class MIREmitter
     when :list, :string_map, :numeric_map
       guarded_cleanup(name, zig_type, alloc, g)
 
-    when :pool
+    when :pool, :fixed_soa
       "defer #{name}.deinit(#{alloc});\n"
 
     when :set

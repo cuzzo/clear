@@ -1367,4 +1367,60 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("heapAlloc")
     end
   end
+
+  # ===========================================================================
+  # Pipeline on slice parameter (no .items on []T)
+  # ===========================================================================
+  describe "pipeline on slice parameter" do
+    it "does not emit .items on a slice parameter in WHERE pipeline" do
+      src = <<~CLEAR
+        FN filterSum(data: Float64[]) RETURNS Float64 ->
+            RETURN data s> WHERE _ > 5.0 s> SUM _;
+        END
+        FN main() RETURNS Void ->
+            MUTABLE data: Float64[]@list = [];
+            data.append(10.0);
+            result = filterSum(data);
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # The for loop inside filterSum must not use .items on a slice param.
+      # (The call site may use @hasField conditional -- that's fine.)
+      expect(zig).not_to match(/for\s*\(data\.items\)/)
+    end
+
+    it "does not emit .items on a slice parameter in SUM pipeline" do
+      src = <<~CLEAR
+        FN sumAll(data: Float64[]) RETURNS Float64 ->
+            RETURN data s> SUM _;
+        END
+        FN main() RETURNS Void ->
+            MUTABLE data: Float64[]@list = [];
+            data.append(1.0);
+            result = sumAll(data);
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to match(/for\s*\(data\.items\)/)
+    end
+  end
+
+  # ===========================================================================
+  # Fixed SOA cleanup
+  # ===========================================================================
+  describe "fixed SOA array cleanup" do
+    it "transpiles T[N]@soa without crashing on cleanup" do
+      src = <<~CLEAR
+        STRUCT Point { x: Float64, y: Float64 }
+        FN main() RETURNS Void ->
+            MUTABLE soa: Point[10]@soa = [];
+            soa.append(Point{ x: 1.0, y: 2.0 });
+            RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.not_to raise_error
+    end
+  end
 end

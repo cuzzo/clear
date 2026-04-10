@@ -594,6 +594,9 @@ class MIRLowering
       p_type_obj.needs_pointer_passing?
     }.map { |p| p[:name] }.to_set
 
+    # All param names: used to distinguish params (slices) from locals (ArrayLists)
+    @current_fn_param_names = (node.params || []).map { |p| p[:name] }.to_set
+
     # Build param list
     params_mir = (node.params || []).map { |param|
       p_name = mutable_scalar_params.include?(param[:name]) ? "_m_#{param[:name]}" : param[:name]
@@ -2954,10 +2957,12 @@ class MIRLowering
       MIR::ScopeBlock.new([iter_init, while_stmt])
     else
       is_field_access = node.collection.is_a?(AST::GetField)
-      is_list = ct.list_collection? || (ct.array? && ct.dynamic? && !ct.string? && !is_field_access)
-      iter = if is_list
+      is_param = node.collection.is_a?(AST::Identifier) &&
+                 @current_fn_param_names&.include?(node.collection.name)
+      is_arraylist = ct.array? && ct.dynamic? && !ct.string? && !is_param && !is_field_access
+      iter = if is_arraylist
         MIR::FieldGet.new(coll, "items")
-      elsif is_field_access && ct.array? && ct.dynamic?
+      elsif is_param || (is_field_access && ct.array? && ct.dynamic?)
         coll
       else
         MIR::AddressOf.new(coll)
