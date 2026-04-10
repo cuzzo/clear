@@ -880,7 +880,7 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       # HPT dupe in caller! should use heapAlloc (return_provenance == :heap)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, __hpt_ret\)/)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, /)
     end
   end
 
@@ -1335,7 +1335,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void -> result = caller!(); RETURN; END
       CLEAR
       zig = transpile(src)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, __hpt_ret\)/)
+      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, /)
     end
   end
 

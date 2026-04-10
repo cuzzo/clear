@@ -3235,14 +3235,8 @@ class MIRLowering
       case hpt_promote.strategy
       when :hpt_string_dupe
         alloc_fn = hpt_promote.fields == :heap ? "heapAlloc" : "frameAlloc"
-        alloc_call = MIR::MethodCall.new(rt, alloc_fn, [], false)
-        stmts = [
-          MIR::Let.new("__hpt_ret", value, true, "[]const u8", nil),
-          MIR::Set.new(MIR::Ident.new("__hpt_ret"),
-            MIR::MethodCall.new(alloc_call, "dupe", [MIR::Ident.new("u8"), MIR::Ident.new("__hpt_ret")], true)),
-          MIR::ReturnStmt.new(MIR::Ident.new("__hpt_ret"))
-        ]
-        MIR::ScopeBlock.new(stmts)
+        alloc_zig = "#{rt_name}.#{alloc_fn}()"
+        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, alloc_zig))
       when :hpt_promote
         zig_t = hpt_promote.zig_type
         stmts = [
@@ -3258,9 +3252,7 @@ class MIRLowering
     elsif needs_string_dupe && value
       ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
       if ret_type&.string?
-        rt = MIR::Ident.new(rt_name)
-        dupe = MIR::MethodCall.new(MIR::MethodCall.new(rt, "heapAlloc", [], false), "dupe", [MIR::Ident.new("u8"), value], true)
-        MIR::ReturnStmt.new(dupe)
+        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, "#{rt_name}.heapAlloc()"))
       else
         MIR::ReturnStmt.new(value)
       end
