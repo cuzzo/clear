@@ -37,7 +37,7 @@ END
 FN zipfNext!(MUTABLE state: Int64, n: Int64, s: Float64, hIntegral: Float64, hFraction: Float64) RETURNS Int64 ->
     hIntHalf = hInt(0.5, s);
     WHILE TRUE DO
-        state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+        state = state %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
         MUTABLE uBits = state;
         IF uBits < 0 THEN uBits = 0 - uBits; END
         MUTABLE u = (uBits MOD 1000000000) / 1000000000.0;
@@ -115,7 +115,7 @@ FN main() RETURNS Void ->
             MUTABLE state: Int64 = seed;
             FOR idx IN (0_i64 ..< cnt) DO
                 k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
-                state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+                state = state %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
                 got = map["key:${k.toString()}"] OR "";
                 IF got.length() > 0 THEN hits += 1; END
             END
@@ -140,7 +140,7 @@ FN main() RETURNS Void ->
             MUTABLE val: String = "";
             FOR idx IN (0_i64 ..< cnt) DO
                 k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
-                state = state * 6364136223846793005_i64 + 1442695040888963407_i64;
+                state = state %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
                 MUTABLE decision = state MOD 100;
                 IF decision < 0 THEN decision = 0 - decision; END
                 IF decision < 80 THEN
