@@ -3301,7 +3301,7 @@ private
   def handle_assign_borrow(node)
     return unless node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
     call_node = node.value
-    return if call_node.is_a?(AST::MethodCall) && call_node.pool_method
+    return if call_node.is_a?(AST::MethodCall) && (call_node.pool_method || call_node.set_method || call_node.map_method)
 
     # Resolve the borrowed argument from either user-defined or stdlib functions.
     actual_arg = resolve_borrow_source(call_node)

@@ -456,6 +456,9 @@ POOL_METHODS = {
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
+    zig: "try {0}.insert({alloc}, {1})",
+    alloc: :heap,
+    args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type
@@ -467,14 +470,17 @@ POOL_METHODS = {
   },
   "get" => {
     arity: 1, tag: :pool_method,
+    zig: "{0}.get({1})",
     return_type: ->(obj_type) { Type.new(:"?#{obj_type.element_type.resolved}") },
   },
   "remove" => {
     arity: 1, tag: :pool_method,
+    zig: "{0}.remove({1})",
     return_type: ->(_) { :Void },
   },
   "count" => {
     arity: 0, tag: :pool_method,
+    zig: "{0}.count()",
     return_type: ->(_) { Type.new(:Int64) },
   },
 }.freeze
@@ -483,6 +489,9 @@ SET_METHODS = {
   "insert" => {
     arity: 1, tag: :set_method, allocates: true,
     takes_args: [0],
+    zig: "try {0}.insert({alloc}, {1})",
+    alloc: :heap,
+    args: [:"Any[]", { type: :Any, takes: true }],
     validate: ->(node, args, obj_type, error_fn) {
       elem = obj_type.element_type
       arg_type = args[0].resolved_type
@@ -494,14 +503,18 @@ SET_METHODS = {
   },
   "contains?" => {
     arity: 1, tag: :set_method,
+    zig: "{0}.contains({1})",
     return_type: ->(_) { :Bool },
   },
   "remove" => {
     arity: 1, tag: :set_method,
+    zig: "{0}.remove({alloc}, {1})",
+    alloc: :heap,
     return_type: ->(_) { :Void },
   },
   "count" => {
     arity: 0, tag: :set_method,
+    zig: "{0}.count()",
     return_type: ->(_) { Type.new(:Int64) },
   },
 }.freeze
@@ -511,6 +524,10 @@ MAP_METHODS = {
     arity: 2, tag: :map_method, allocates: true,
     mutates_receiver: true,
     takes_args: [1],  # value (arg 1) is TAKES
+    zig: "try {0}.put({alloc}, {alloc}, {1}, {2})",
+    alloc: :heap,
+    args: [:"String{}", :String, { type: :Any, takes: true }],
+    numeric_zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{0}, {1}, {2})",
     validate: ->(node, args, obj_type, error_fn) {
       key_type = Type.new(args[0].resolved_type)
       if obj_type.numeric_map?
@@ -523,6 +540,9 @@ MAP_METHODS = {
   },
   "delete" => {
     arity: 1, tag: :map_method,
+    zig: "{0}.remove({alloc}, {1})",
+    alloc: :heap,
+    numeric_zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {
       arg_type = Type.new(args[0].resolved_type)
       if obj_type.numeric_map?
@@ -535,6 +555,8 @@ MAP_METHODS = {
   },
   "contains?" => {
     arity: 1, tag: :map_method,
+    zig: "{0}.contains({1})",
+    numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {
       arg_type = Type.new(args[0].resolved_type)
       if obj_type.numeric_map?
@@ -547,14 +569,26 @@ MAP_METHODS = {
   },
   "count" => {
     arity: 0, tag: :map_method,
+    zig: "{0}.count()",
+    numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
     return_type: ->(_) { Type.new(:Int64) },
   },
   "keys" => {
-    arity: 0, tag: :map_method,
+    arity: 0, tag: :map_method, allocates: true,
+    zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)",
+    alloc: :frame,
+    sharded_zig: "try {0}.keys({alloc})",
+    sharded_alloc: :heap,
+    numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})",
     return_type: ->(_) { :"String[]" },
   },
   "values" => {
-    arity: 0, tag: :map_method,
+    arity: 0, tag: :map_method, allocates: true,
+    zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)",
+    alloc: :frame,
+    sharded_zig: "try {0}.values({alloc})",
+    sharded_alloc: :heap,
+    numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})",
     return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]" },
   },
 }.freeze
@@ -649,55 +683,3 @@ INDEX_OPS = {
   },
 }.freeze
 
-# ============================================================================
-# Method Operations Registry — container method Zig patterns with allocators
-# ============================================================================
-# Per-container-kind method entries for operations that take an allocator arg.
-# Methods without allocators (contains?, count, pool.get/remove) are not listed
-# here and remain trivial inline in the transpiler.
-#
-# Fields mirror INDEX_OPS :set: zig, alloc, sharded_zig, sharded_alloc.
-# Positional arg placeholders: {0}, {1}, etc.
-# Note: StringMap.remove ignores key_alloc (uses stored alloc), but we pass
-# :heap for API consistency.
-
-METHOD_OPS = {
-  string_map: {
-    delete: {
-      zig: "{target}.remove({alloc}, {0})",
-      alloc: :heap,
-    },
-    keys: {
-      zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {target}.inner)",
-      alloc: :frame,
-      sharded_zig: "try {target}.keys({alloc})",
-      sharded_alloc: :heap,
-    },
-    values: {
-      zig: "try CheatLib.mapValues({val_zig}, {alloc}, {target}.inner)",
-      alloc: :frame,
-      sharded_zig: "try {target}.values({alloc})",
-      sharded_alloc: :heap,
-    },
-  },
-  numeric_map: {
-    delete: {
-      zig: "CheatLib.numericMapDelete({key_zig}, {val_zig}, {alloc}, &{target}, {0})",
-      alloc: :frame,
-    },
-    keys: {
-      zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {target})",
-      alloc: :frame,
-    },
-    values: {
-      zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {target})",
-      alloc: :frame,
-    },
-  },
-  set_collection: {
-    remove: {
-      zig: "{target}.remove({alloc}, {0})",
-      alloc: :heap,
-    },
-  },
-}.freeze

@@ -70,8 +70,6 @@ module AllocHelper
       return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
       node.args&.any? { |a| node_allocates_frame?(a, outer_vars) } || false
     when AST::MethodCall
-      return false if node.respond_to?(:pool_method) && node.pool_method
-      return false if node.respond_to?(:set_method) && node.set_method
       # Same as FuncCall: the mutation targets the container's backing, but VALUE
       # args may still contain frame-allocating subexpressions.
       if node.respond_to?(:mutates_receiver) && node.mutates_receiver && outer_vars

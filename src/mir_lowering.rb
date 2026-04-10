@@ -924,11 +924,6 @@ class MIRLowering
       return lower_extern_method(node)
     end
 
-    # Pool/set/map methods
-    return lower_pool_method(node) if node.respond_to?(:pool_method) && node.pool_method
-    return lower_set_method(node) if node.respond_to?(:set_method) && node.set_method
-    return lower_map_method(node) if node.respond_to?(:map_method) && node.map_method
-
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
     args_mir = node.args.map { |a|
@@ -987,7 +982,13 @@ class MIRLowering
 
     # Template-based intrinsics: resolve placeholders
     args_zig = if node.is_a?(AST::MethodCall)
-      [emit_expr(lower(node.object))] + node.args.map { |a| emit_expr(lower(a)) }
+      obj_mir = lower(node.object)
+      # Auto-deref Arc/Rc-wrapped receivers: obj.ctrl.data.*
+      obj_ti = node.object.type_info
+      if obj_ti&.shared? || obj_ti&.multiowned?
+        obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
+      end
+      [emit_expr(obj_mir)] + node.args.map { |a| emit_expr(lower(a)) }
     else
       node.args.map { |a| emit_expr(lower(a)) }
     end
@@ -1012,6 +1013,17 @@ class MIRLowering
         end
       end
     end
+
+    # Resolve {key_zig} and {val_zig} from receiver type (numeric/sharded maps)
+    if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
+      obj_ti = node.is_a?(AST::MethodCall) ? node.object.type_info : nil
+      map_ft = obj_ti ? Type.new(obj_ti) : nil
+      pattern = pattern.gsub("{key_zig}", map_ft&.key_type&.zig_type || "i64")
+      pattern = pattern.gsub("{val_zig}", map_ft&.value_type&.zig_type || "f64")
+    end
+
+    # Resolve &{N} as address-of for positional args
+    args_zig.each_with_index { |val, i| pattern = pattern.gsub("&{#{i}}", "&#{val}") }
 
     # Substitute positional args
     args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}", val) }
@@ -1070,104 +1082,6 @@ class MIRLowering
     MIR::MethodCall.new(obj, node.name.to_s, args, false)
   end
 
-  def lower_pool_method(node)
-    obj = lower(node.object)
-    args = node.args.map { |a| lower(a) }
-    rt = MIR::Ident.new(@rt_name)
-    case node.pool_method
-    when :get    then MIR::MethodCall.new(obj, "get", [args[0]], false)
-    when :remove then MIR::MethodCall.new(obj, "remove", [args[0]], false)
-    when :count  then MIR::MethodCall.new(obj, "count", [], false)
-    when :insert
-      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-      MIR::MethodCall.new(obj, "insert", [heap_alloc, args[0]], true)
-    else
-      MIR::MethodCall.new(obj, node.pool_method.to_s, args, false)
-    end
-  end
-
-  def lower_set_method(node)
-    obj = lower(node.object)
-    args = node.args.map { |a| lower(a) }
-    rt = MIR::Ident.new(@rt_name)
-    case node.set_method
-    when :insert
-      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-      MIR::MethodCall.new(obj, "insert", [heap_alloc, args[0]], true)
-    when :remove
-      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-      MIR::MethodCall.new(obj, "remove", [heap_alloc, args[0]], false)
-    else
-      method_name = zig_safe_name(node.set_method.to_s)
-      MIR::MethodCall.new(obj, method_name, args, false)
-    end
-  end
-
-  def lower_map_method(node)
-    obj = lower(node.object)
-    args = node.args.map { |a| lower(a) }
-    map_ft = Type.new(node.object.full_type)
-    rt_name = @rt_name
-    rt = MIR::Ident.new(rt_name)
-
-    # Auto-deref Arc-wrapped maps: obj.ctrl.data.*
-    obj_ti = node.object.type_info
-    if obj_ti&.shared? || obj_ti&.multiowned?
-      obj = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj, "ctrl"), "data"))
-    end
-
-    case node.map_method
-    when :put
-      # StringMap.put takes (key_alloc, bucket_alloc, key, value)
-      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-      val = args[1]
-      val_ti = node.args[1]&.type_info rescue nil
-      if val_ti&.string?
-        # try rt.heapAlloc().dupe(u8, val)
-        val = MIR::MethodCall.new(
-          MIR::MethodCall.new(rt, "heapAlloc", [], false),
-          "dupe", [MIR::Ident.new("u8"), val], true
-        )
-      end
-      MIR::MethodCall.new(obj, "put", [heap_alloc, heap_alloc, args[0], val], true)
-    when :delete
-      heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-      if map_ft.numeric_map?
-        key_zig = map_ft.key_type.zig_type
-        val_zig = map_ft.value_type.zig_type
-        MIR::Call.new("CheatLib.numericMapDelete",
-          [MIR::Ident.new(key_zig), MIR::Ident.new(val_zig), heap_alloc, MIR::AddressOf.new(obj), args[0]], false)
-      else
-        MIR::MethodCall.new(obj, "remove", [heap_alloc, args[0]], false)
-      end
-    when :"contains?"
-      method_name = zig_safe_name(node.map_method.to_s)
-      MIR::MethodCall.new(obj, method_name, args, false)
-    when :keys
-      if map_ft.sharded? || map_ft.striped?
-        heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-        MIR::MethodCall.new(obj, "keys", [heap_alloc], true)
-      else
-        frame_alloc = MIR::MethodCall.new(rt, "frameAlloc", [], false)
-        val_zig = map_ft.value_type.zig_type
-        MIR::Call.new("CheatLib.mapKeys",
-          [MIR::Ident.new(val_zig), frame_alloc, MIR::FieldGet.new(obj, "inner")], true)
-      end
-    when :values
-      if map_ft.sharded? || map_ft.striped?
-        heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)
-        MIR::MethodCall.new(obj, "values", [heap_alloc], true)
-      else
-        frame_alloc = MIR::MethodCall.new(rt, "frameAlloc", [], false)
-        val_zig = map_ft.value_type.zig_type
-        MIR::Call.new("CheatLib.mapValues",
-          [MIR::Ident.new(val_zig), frame_alloc, MIR::FieldGet.new(obj, "inner")], true)
-      end
-    else
-      method_name = zig_safe_name(node.map_method.to_s)
-      MIR::MethodCall.new(obj, method_name, args, false)
-    end
-  end
 
   # ================================================================
   # Lambda

@@ -81,7 +81,34 @@ module MethodAnalysis
     node.send(:"#{tag_field}=", node.name.to_sym)
     node.full_type = defn[:return_type].call(obj_type)
 
-    # Narrow Set element type on first insert (Any[] → T[])
+    # Resolve zig pattern -- pick variant based on receiver type
+    zig = if obj_type&.numeric_map? && defn[:numeric_zig]
+      defn[:numeric_zig]
+    elsif (obj_type&.sharded? || obj_type&.striped?) && defn[:sharded_zig]
+      defn[:sharded_zig]
+    else
+      defn[:zig]
+    end
+
+    # Resolve alloc variant for sharded types
+    alloc = if (obj_type&.sharded? || obj_type&.striped?) && defn[:sharded_alloc]
+      defn[:sharded_alloc]
+    else
+      defn[:alloc]
+    end
+
+    # Set zig_pattern and matched_stdlib_def so lower_intrinsic handles emission
+    if zig
+      resolved_defn = defn.merge(zig: zig)
+      resolved_defn = resolved_defn.merge(alloc: alloc) if alloc
+      node.zig_pattern = zig
+      node.matched_stdlib_def = resolved_defn
+    end
+
+    node.stdlib_allocates = true if defn[:allocates]
+    node.mutates_receiver = true if defn[:mutates_receiver]
+
+    # Narrow Set element type on first insert (Any[] -> T[])
     if tag_field == :set_method && node.name == "insert" && obj_type.element_type&.resolved == :Any && node.args.length == 1
       val_type = node.args[0].resolved_type
       new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
@@ -107,7 +134,7 @@ module MethodAnalysis
       end
     end
 
-    # Methods that allocate on the heap — record so needs_rt is computed correctly.
+    # Methods that allocate on the heap -- record so needs_rt is computed correctly.
     if defn[:allocates] && current_fn_ctx
       current_fn_ctx.heap_count += 1
     end
