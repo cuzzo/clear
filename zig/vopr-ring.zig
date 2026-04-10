@@ -52,6 +52,11 @@ const OpType = enum {
 
 const CAPACITY = 256;
 
+/// Dummy SQE returned by SimRing submission methods. Callers discard it
+/// (scheduler.zig uses `_ = try self.ring.read(...)`) but the returned
+/// pointer must be validly aligned to satisfy Debug-mode checks.
+var dummy_sqe: linux.io_uring_sqe = std.mem.zeroes(linux.io_uring_sqe);
+
 /// Drop-in replacement for std.os.linux.IoUring.
 /// Same public API used by scheduler.zig, simulated state, yields at every operation.
 pub const SimRing = struct {
@@ -108,9 +113,7 @@ pub const SimRing = struct {
             .op = .Read,
             .fd = fd,
         });
-        // SimRing doesn't have real SQEs. Return a dummy pointer.
-        // Callers only use the return value to set flags (which we ignore).
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn write(
@@ -125,7 +128,7 @@ pub const SimRing = struct {
             .op = .Write,
             .fd = fd,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn poll_add(
@@ -140,7 +143,7 @@ pub const SimRing = struct {
             .fd = fd,
             .poll_mask = poll_mask,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn poll_remove(
@@ -153,7 +156,7 @@ pub const SimRing = struct {
             .op = .PollRemove,
             .fd = -1,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn accept(
@@ -169,7 +172,7 @@ pub const SimRing = struct {
             .op = .Accept,
             .fd = fd,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn connect(
@@ -184,7 +187,7 @@ pub const SimRing = struct {
             .op = .Connect,
             .fd = fd,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn recv(
@@ -199,7 +202,7 @@ pub const SimRing = struct {
             .op = .Recv,
             .fd = fd,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn send(
@@ -214,7 +217,7 @@ pub const SimRing = struct {
             .op = .Send,
             .fd = fd,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     pub fn timeout(
@@ -229,7 +232,7 @@ pub const SimRing = struct {
             .op = .Timeout,
             .fd = -1,
         });
-        return @ptrFromInt(@intFromPtr(&self.staged_buf) + 1);
+        return &dummy_sqe;
     }
 
     // -----------------------------------------------------------------

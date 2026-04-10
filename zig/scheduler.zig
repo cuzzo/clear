@@ -795,7 +795,7 @@ pub const Scheduler = struct {
         result: i32 = undefined,
 
         /// Encode this IoWaiter's address as a user_data value (bit 0 set).
-        fn encode(self: *IoWaiter) u64 {
+        pub fn encode(self: *IoWaiter) u64 {
             return @intFromPtr(self) | 1;
         }
 
@@ -879,7 +879,7 @@ pub const Scheduler = struct {
     /// - File I/O completions (READ/WRITE) -> write result to IoWaiter, wake task
     /// - Eventfd wakeup (sentinel 0) -> consume eventfd
     /// - Timeout (sentinel 1) -> ignore
-    fn processCqes(self: *Scheduler, cqes: []const linux.io_uring_cqe) void {
+    pub fn processCqes(self: *Scheduler, cqes: []const linux.io_uring_cqe) void {
         for (cqes) |cqe| {
             const ud = cqe.user_data;
             if (ud == EVENTFD_SENTINEL) {
@@ -901,7 +901,7 @@ pub const Scheduler = struct {
 
     /// Non-blocking CQE drain: check for completions without sleeping.
     /// Wakes any Blocked fibers whose I/O has completed.
-    fn pollNonBlocking(self: *Scheduler) void {
+    pub fn pollNonBlocking(self: *Scheduler) void {
         const n = self.ring.copy_cqes(&self.uring_cqes, 0) catch return;
         if (n > 0) {
             self.processCqes(self.uring_cqes[0..n]);
@@ -915,7 +915,7 @@ pub const Scheduler = struct {
     /// already updated the kernel-visible SQ tail before enter() was called.
     /// The next io_uring_enter (from copy_cqes with wait_nr>0) will process them.
     /// No SQEs are lost; blocked fibers just wait slightly longer.
-    fn flushRing(self: *Scheduler) void {
+    pub fn flushRing(self: *Scheduler) void {
         if (self.ring_dirty) {
             _ = self.ring.submit() catch {};
             self.ring_dirty = false;

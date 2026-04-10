@@ -74,6 +74,10 @@ const Context = fc.Context;
 const Stack = fc.Stack;
 const RunQueue = qs.RunQueue;
 const Task = qs.Task;
+const TaskStatus = qs.TaskStatus;
+const fp = @import("scheduler.zig");
+const EbrContext = @import("ebr.zig").EbrContext;
+const fm = @import("fiber-memory.zig");
 
 const MAX_THREADS = 4;
 const MAX_RESULTS = 8;
@@ -1033,6 +1037,244 @@ test "loom: queue wraparound" {
 }
 
 // -----------------------------------------------------------------------
+// SimRing I/O lifecycle tests
+// -----------------------------------------------------------------------
+// These exercise the scheduler's I/O lifecycle through SimRing, testing
+// the full path: submit -> flushRing -> inject CQE -> processCqes ->
+// waiter.result / task wakeup.  Unlike the queue-level Loom scenarios
+// above, these test the scheduler's I/O machinery directly.
+//
+// These run as functions from main() (not test blocks) because the
+// Scheduler needs @import("root").SimRing to use SimRing instead of
+// real IoUring.  In zig test mode, @import("root") resolves to the
+// test runner, which doesn't export SimRing.
+
+/// Create a stub Fiber + Task suitable for IoWaiter tests.
+/// The task is stack-allocated -- caller MUST pop it from the ready queue
+/// before Scheduler.deinit() to avoid double-free.
+fn initStubFiber(fiber: *Fiber, task: *Task) void {
+    fiber.* = Fiber{
+        .stack = Stack{ .memory = &[_]u8{} },
+        .ctx = Context{ .sp = 0 },
+        .parent_ctx = undefined,
+        .size_class = .Standard,
+        .stack_limit = 0,
+        .stack_guard_head = null,
+    };
+    task.* = Task{
+        .base = fiber,
+        .user_fn = @ptrCast(&LoomHarness.dummyFn),
+        .status = qs.Atomic(TaskStatus).init(.Ready),
+        .config = .{},
+    };
+}
+
+const linux = std.os.linux;
+
+fn simringFullLifecycle(allocator: std.mem.Allocator) !void {
+    var ebr = EbrContext{};
+    defer ebr.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer sched.deinit();
+
+    var fiber: Fiber = undefined;
+    var task: Task = undefined;
+    initStubFiber(&fiber, &task);
+    var waiter = fp.Scheduler.IoWaiter{ .task = &task };
+
+    // 1. Submit a read SQE
+    var buf: [64]u8 = undefined;
+    try sched.submitRead(&waiter, 42, &buf);
+    if (!sched.ring_dirty) return error.TestFailed;
+    if (task.status.load(.acquire) != .Blocked) return error.TestFailed;
+
+    // 2. Flush SQEs to pending
+    sched.flushRing();
+    if (sched.ring_dirty) return error.TestFailed;
+    if (sched.ring.pendingCount() != 1) return error.TestFailed;
+
+    // 3. Inject CQE: 42 bytes read
+    if (!sched.ring.complete(waiter.encode(), 42)) return error.TestFailed;
+
+    // 4. Process CQEs -- should write result and wake task
+    sched.pollNonBlocking();
+    if (waiter.result != 42) return error.TestFailed;
+    if (task.status.load(.acquire) != .Ready) return error.TestFailed;
+
+    // Task should be in the ready queue; pop before deinit
+    const popped = sched.ready_queue.pop();
+    if (popped != &task) return error.TestFailed;
+}
+
+fn simringBatchedFlush(allocator: std.mem.Allocator) !void {
+    var ebr = EbrContext{};
+    defer ebr.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer sched.deinit();
+
+    var fibers: [3]Fiber = undefined;
+    var tasks: [3]Task = undefined;
+    var waiters: [3]fp.Scheduler.IoWaiter = undefined;
+    var bufs: [3][64]u8 = undefined;
+
+    for (0..3) |i| {
+        initStubFiber(&fibers[i], &tasks[i]);
+        waiters[i] = fp.Scheduler.IoWaiter{ .task = &tasks[i] };
+        try sched.submitRead(&waiters[i], @intCast(10 + i), &bufs[i]);
+    }
+
+    // All 3 staged, ring dirty
+    if (!sched.ring_dirty) return error.TestFailed;
+
+    // Single flush moves all 3 to pending
+    sched.flushRing();
+    if (sched.ring_dirty) return error.TestFailed;
+    if (sched.ring.pendingCount() != 3) return error.TestFailed;
+
+    // Inject 3 CQEs with distinct results
+    for (0..3) |i| {
+        const result: i32 = @intCast((i + 1) * 10); // 10, 20, 30
+        if (!sched.ring.complete(waiters[i].encode(), result)) return error.TestFailed;
+    }
+
+    // Process all 3 CQEs
+    sched.pollNonBlocking();
+
+    // Verify each waiter got its result and task is Ready
+    for (0..3) |i| {
+        const expected: i32 = @intCast((i + 1) * 10);
+        if (waiters[i].result != expected) return error.TestFailed;
+        if (tasks[i].status.load(.acquire) != .Ready) return error.TestFailed;
+    }
+
+    // Pop all 3 tasks before deinit
+    for (0..3) |_| {
+        if (sched.ready_queue.pop() == null) return error.TestFailed;
+    }
+}
+
+fn simringShortReadResubmit(allocator: std.mem.Allocator) !void {
+    var ebr = EbrContext{};
+    defer ebr.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer sched.deinit();
+
+    var fiber: Fiber = undefined;
+    var task: Task = undefined;
+    initStubFiber(&fiber, &task);
+    var waiter = fp.Scheduler.IoWaiter{ .task = &task };
+
+    // Round 1: submit read for 10 bytes, get partial (5 bytes)
+    var buf: [10]u8 = undefined;
+    try sched.submitRead(&waiter, 42, &buf);
+    sched.flushRing();
+    if (!sched.ring.complete(waiter.encode(), 5)) return error.TestFailed;
+    sched.pollNonBlocking();
+
+    if (waiter.result != 5) return error.TestFailed;
+    if (task.status.load(.acquire) != .Ready) return error.TestFailed;
+
+    // Simulate fiber resuming: pop task, read partial result
+    const popped1 = sched.ready_queue.pop();
+    if (popped1 != &task) return error.TestFailed;
+    const bytes_read: usize = @intCast(waiter.result);
+
+    // Round 2: resubmit for remaining bytes (same waiter, adjusted buffer)
+    try sched.submitRead(&waiter, 42, buf[bytes_read..]);
+    if (task.status.load(.acquire) != .Blocked) return error.TestFailed;
+
+    sched.flushRing();
+    if (!sched.ring.complete(waiter.encode(), 5)) return error.TestFailed;
+    sched.pollNonBlocking();
+
+    if (waiter.result != 5) return error.TestFailed;
+    if (task.status.load(.acquire) != .Ready) return error.TestFailed;
+
+    // Total: 5 + 5 = 10 bytes
+    if (bytes_read + @as(usize, @intCast(waiter.result)) != 10) return error.TestFailed;
+
+    // Pop before deinit
+    if (sched.ready_queue.pop() != &task) return error.TestFailed;
+}
+
+fn simringErrorPropagation(allocator: std.mem.Allocator) !void {
+    var ebr = EbrContext{};
+    defer ebr.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+    defer sched.deinit();
+
+    var fiber: Fiber = undefined;
+    var task: Task = undefined;
+    initStubFiber(&fiber, &task);
+    var waiter = fp.Scheduler.IoWaiter{ .task = &task };
+
+    // Submit a read, inject EIO (-5) as CQE result
+    var buf: [64]u8 = undefined;
+    try sched.submitRead(&waiter, 42, &buf);
+    sched.flushRing();
+    const eio = -@as(i32, @intCast(@intFromEnum(linux.E.IO)));
+    if (!sched.ring.complete(waiter.encode(), eio)) return error.TestFailed;
+    sched.pollNonBlocking();
+
+    // processCqes must still wake the task (error is in waiter.result, not swallowed)
+    if (waiter.result != eio) return error.TestFailed;
+    if (task.status.load(.acquire) != .Ready) return error.TestFailed;
+
+    // ioError must convert the negative result without panicking
+    const err = fp.Scheduler.ioError(waiter.result);
+    if (err != error.Unexpected) return error.TestFailed;
+
+    // Test ECONNREFUSED to verify a different errno
+    var fiber2: Fiber = undefined;
+    var task2: Task = undefined;
+    initStubFiber(&fiber2, &task2);
+    var waiter2 = fp.Scheduler.IoWaiter{ .task = &task2 };
+
+    try sched.submitRecv(&waiter2, 99, &buf);
+    sched.flushRing();
+    const econnrefused = -@as(i32, @intCast(@intFromEnum(linux.E.CONNREFUSED)));
+    if (!sched.ring.complete(waiter2.encode(), econnrefused)) return error.TestFailed;
+    sched.pollNonBlocking();
+
+    if (waiter2.result != econnrefused) return error.TestFailed;
+    if (task2.status.load(.acquire) != .Ready) return error.TestFailed;
+    const err2 = fp.Scheduler.ioError(waiter2.result);
+    if (err2 != error.Unexpected) return error.TestFailed;
+
+    // Pop both tasks before deinit
+    _ = sched.ready_queue.pop();
+    _ = sched.ready_queue.pop();
+}
+
+fn runSimRingLifecycleTests(allocator: std.mem.Allocator) !void {
+    const tests = [_]struct {
+        name: []const u8,
+        func: *const fn (std.mem.Allocator) anyerror!void,
+    }{
+        .{ .name = "full_lifecycle", .func = &simringFullLifecycle },
+        .{ .name = "batched_flush", .func = &simringBatchedFlush },
+        .{ .name = "short_read_resubmit", .func = &simringShortReadResubmit },
+        .{ .name = "error_propagation", .func = &simringErrorPropagation },
+    };
+
+    for (tests) |t| {
+        t.func(allocator) catch |err| {
+            std.debug.print("  FAILED: {s}: {}\n", .{ t.name, err });
+            return err;
+        };
+        std.debug.print("  {s}: OK\n", .{t.name});
+    }
+}
+
+// -----------------------------------------------------------------------
 // Main -- PRNG mode for 3+ thread scenarios + exhaustive for 2-thread
 // -----------------------------------------------------------------------
 
@@ -1088,6 +1330,13 @@ pub fn main() !void {
                 seed_start = std.fmt.parseInt(u64, val, 10) catch 0;
         }
     }
+
+    // SimRing I/O lifecycle tests (requires SimRing as root, not available in zig test)
+    std.debug.print("SimRing I/O lifecycle:\n", .{});
+    runSimRingLifecycleTests(allocator) catch |err| {
+        std.debug.print("SimRing lifecycle FAILED: {}\n", .{err});
+        std.process.exit(1);
+    };
 
     // Exhaustive 2-thread scenarios first
     std.debug.print("LOOM exhaustive (2-thread, all interleavings):\n", .{});
