@@ -1411,8 +1411,7 @@ RSpec.describe MIRLowering do
       node.full_type = :"~Void"
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(result.reason).to eq("bg_block")
+      expect(result).to be_a(MIR::BgBlock)
       zig = emit(result)
       expect(zig).to include("__BgCtx")
       expect(zig).to include(".spawn(")
@@ -1507,8 +1506,7 @@ RSpec.describe MIRLowering do
       node.full_type = :"~Void[?]"
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(result.reason).to eq("bg_stream_block")
+      expect(result).to be_a(MIR::BgBlock)
       zig = emit(result)
       expect(zig).to include("__SgCtx")
       expect(zig).to include("spawnNew")

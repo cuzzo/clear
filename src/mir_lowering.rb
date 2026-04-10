@@ -712,9 +712,9 @@ class MIRLowering
       inner_call = "#{inner_name}(#{call_args.join(', ')})"
 
       catch_zig = build_catch_clauses(node, fn_can_fail)
+      error_reassigns = collect_catch_reassigns(node)
       outer_body = [
-        MIR::RawZig.new("return #{inner_call} catch {\n    #{catch_zig}\n};", "catch_wrapper",
-          { consumes: [], produces: [], borrows: [] })
+        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_zig}\n};", error_reassigns)
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
@@ -776,6 +776,55 @@ class MIRLowering
     end
 
     "#{parts}#{default_code}"
+  end
+
+  # Extract error-path reassignment metadata from catch clauses (INV-9).
+  # Returns [{ name:, alloc:, line: }] for each reassignment to an existing
+  # binding inside a catch body. Used by MIRChecker to verify allocator consistency.
+  def collect_catch_reassigns(node)
+    reassigns = []
+    catch_bodies = []
+    (node.catch_clauses || []).each { |c| catch_bodies << c[:body] if c[:body] }
+    catch_bodies << node.default_catch if node.default_catch.is_a?(Array)
+
+    catch_bodies.each do |body|
+      walk_catch_body_for_reassigns(body, reassigns)
+    end
+    reassigns
+  end
+
+  def walk_catch_body_for_reassigns(stmts, reassigns)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::BindExpr
+        if stmt.mode == :assign
+          alloc = infer_catch_value_allocator(stmt.value)
+          reassigns << { name: stmt.name.to_s, alloc: alloc, line: (stmt.token&.line || 0) } if alloc
+        end
+      when AST::Assignment
+        if stmt.name.is_a?(AST::Identifier)
+          alloc = infer_catch_value_allocator(stmt.value)
+          reassigns << { name: stmt.name.name.to_s, alloc: alloc, line: (stmt.token&.line || 0) } if alloc
+        end
+      when AST::IfStatement
+        walk_catch_body_for_reassigns(stmt.then_branch, reassigns)
+        walk_catch_body_for_reassigns(stmt.else_branch, reassigns)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| walk_catch_body_for_reassigns(c[:body], reassigns) }
+        walk_catch_body_for_reassigns(stmt.default_case, reassigns)
+      end
+    end
+  end
+
+  def infer_catch_value_allocator(expr)
+    return nil unless expr
+    ti = expr.type_info rescue nil
+    ti = ti.is_a?(Type) ? ti : nil
+    return :heap if ti&.heap_provenance?
+    storage = expr.respond_to?(:storage) ? expr.storage : nil
+    return storage if storage == :heap || storage == :frame
+    nil
   end
 
   # ================================================================
@@ -1528,7 +1577,6 @@ class MIRLowering
     task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
     spawn_call = bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
 
-    borrows = captured.map { |name, _| name.to_s }
     bg_code = <<~ZIG.chomp
       #{blk_label}: {
           const #{ctx_type} = struct {
@@ -1559,8 +1607,7 @@ class MIRLowering
           break :#{blk_label} #{promise_var};
       }
     ZIG
-    MIR::RawZig.new(bg_code, "bg_block",
-      { consumes: [], produces: [], borrows: borrows })
+    MIR::BgBlock.new(bg_code, captured)
   end
 
   def lower_bg_stream_block(node)
@@ -1622,7 +1669,6 @@ class MIRLowering
 
     task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
 
-    borrows = captured.map { |name, _| name.to_s }
     sg_code = <<~ZIG.chomp
       #{blk_label}: {
           const #{ctx_type} = struct {
@@ -1657,8 +1703,7 @@ class MIRLowering
           break :#{blk_label} #{stream_var};
       }
     ZIG
-    MIR::RawZig.new(sg_code, "bg_stream_block",
-      { consumes: [], produces: [], borrows: borrows })
+    MIR::BgBlock.new(sg_code, captured)
   end
 
   def lower_yield(node)

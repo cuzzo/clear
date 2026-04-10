@@ -223,6 +223,21 @@ module MIR
     def expr?; true; end  # can appear in expression position too
   end
 
+  # Background block. Wraps raw Zig code for a fiber spawn but exposes
+  # capture_analysis for ownership verification (BG_ESCAPE check).
+  # captures: { name => Type-like object } from capture_analysis.captures
+  BgBlock = Struct.new(:code, :captures) do
+    include Stmt
+    def expr?; true; end
+  end
+
+  # Catch wrapper. Wraps raw Zig code for try/catch but exposes
+  # error-path reassignment metadata for allocator consistency (INV-9).
+  # error_reassigns: [{ name: String, alloc: :heap/:frame, line: int }]
+  CatchWrapper = Struct.new(:code, :error_reassigns) do
+    include Stmt
+  end
+
   # No-op. Emits nothing. Used as placeholder for verification-only nodes.
   Noop = Struct.new(:reason) do
     include Stmt

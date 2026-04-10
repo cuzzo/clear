@@ -9,12 +9,15 @@
 #   LEAK           -- AllocMark without matching Cleanup (missing cleanup)
 #   GUARD          -- maybe-moved binding's Cleanup lacks moved guard (double-free)
 #   ORPHAN         -- Cleanup/AllocMark without counterpart
-#   ALLOC_MISMATCH -- AllocMark and Cleanup disagree on allocator
+#   ALLOC_MISMATCH -- AllocMark and Cleanup disagree on allocator; INV-9 catch paths
 #   ESCAPE         -- ReturnMark escape without guarded Cleanup
 #   FRAME_ESCAPE   -- frame binding escapes without EscapePromote
+#   BG_ESCAPE      -- BG capture needs escape promotion but no EscapePromote found
 #   GUARD_NO_SUPPRESS -- guarded Cleanup with no MoveMark (dead guard)
 #
 # Design: ONE generic walk, ~15 MIR node types, zero AST dependencies.
+
+require_relative "type"
 
 class MIRChecker
   attr_reader :errors
@@ -37,6 +40,9 @@ class MIRChecker
     reassigns  = {}  # name => ReassignMark
     field_marks = [] # FieldCleanupMark nodes
     raw_nodes  = []  # RawZig/InlineZig nodes
+    bg_blocks  = []  # BgBlock nodes
+    catch_wrappers = [] # CatchWrapper nodes
+
     # Single pass: collect all marker nodes from the MIR tree.
     walk_mir(fn_def.body) do |node|
       case node
@@ -57,6 +63,10 @@ class MIRChecker
         field_marks << node
       when MIR::RawZig, MIR::InlineZig
         raw_nodes << node
+      when MIR::BgBlock
+        bg_blocks << node
+      when MIR::CatchWrapper
+        catch_wrappers << node
       end
     end
 
@@ -81,6 +91,8 @@ class MIRChecker
     check_guard_suppress_completeness!(cleanups, moves, escapes)
     check_reassign_completeness!(allocs, reassigns, fn_def.body)
     check_frame_overflow!(fn_def.body)
+    check_bg_capture_escapes!(bg_blocks, promotes)
+    check_error_path_consistency!(catch_wrappers, allocs)
     check_orphans!(allocs, cleanups, moves, reassigns, field_marks)
     check_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
 
@@ -138,6 +150,10 @@ class MIRChecker
       walk_mir_node(node.body, &block) if node.body
     when MIR::ErrDeferStmt
       walk_mir_node(node.body, &block) if node.body
+    when MIR::BgBlock
+      # Code is opaque Zig, but captures are visible for verification.
+    when MIR::CatchWrapper
+      # Code is opaque Zig, but error_reassigns are visible for verification.
     when MIR::RawZig
       # Opaque -- cannot walk inside. Marker already yielded above.
     end
@@ -347,6 +363,43 @@ class MIRChecker
         unless moves.include?(name) || escapes.include?(name)
           @errors << error(:GUARD_NO_SUPPRESS, name,
             "Cleanup has moved guard but no MoveMark or ReturnMark escape")
+        end
+      end
+    end
+  end
+
+  # BG blocks that capture frame-allocated variables needing escape promotion
+  # must have a corresponding MIR::EscapePromote. Without promotion the fiber
+  # outlives the parent frame -- use-after-free.
+  def check_bg_capture_escapes!(bg_blocks, promotes)
+    bg_blocks.each do |bg|
+      (bg.captures || {}).each do |name, type_obj|
+        t = type_obj ? Type.new(type_obj) : nil
+        next unless t && t.needs_escape_promotion? && !t.needs_pointer_passing?
+        name_s = name.to_s
+        unless promotes.key?(name_s) || promotes.key?(name.to_sym)
+          @errors << error(:BG_ESCAPE, name_s,
+            "BG capture needs escape promotion but no EscapePromote found (use-after-free)")
+        end
+      end
+    end
+  end
+
+  # INV-9: Error paths must not change the allocator identity of live bindings.
+  # CatchWrapper nodes carry pre-extracted reassignment metadata from catch
+  # clause bodies. Cross-reference against AllocMark allocators.
+  def check_error_path_consistency!(catch_wrappers, allocs)
+    catch_wrappers.each do |cw|
+      (cw.error_reassigns || []).each do |reassign|
+        name = reassign[:name]
+        new_alloc = reassign[:alloc]
+        alloc_nodes = allocs[name]
+        next unless alloc_nodes
+        alloc_nodes.each do |alloc_node|
+          if alloc_node.alloc != new_alloc
+            @errors << error(:ALLOC_MISMATCH, name,
+              "catch reassigns with :#{new_alloc} but original alloc is :#{alloc_node.alloc} (INV-9)")
+          end
         end
       end
     end

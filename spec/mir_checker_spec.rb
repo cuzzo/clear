@@ -217,6 +217,59 @@ RSpec.describe MIRChecker do
       expect(errors.select { |e| e.include?("FRAME_OVERFLOW") }).to be_empty
     end
 
+    it "detects BG_ESCAPE for BgBlock capture needing promotion" do
+      body = [
+        MIR::AllocMark.new("s", :string, :frame),
+        MIR::Cleanup.new("s", { kind: :string, alloc: :frame, has_moved_guard: false }),
+        MIR::BgBlock.new("raw zig", { "s" => :String }),
+      ]
+      errors = checker.check_fn!(fn_def("bg_escape", body))
+      expect(errors.any? { |e| e.include?("BG_ESCAPE") }).to be true
+    end
+
+    it "passes for BgBlock capture with EscapePromote" do
+      body = [
+        MIR::AllocMark.new("s", :string, :frame),
+        MIR::EscapePromote.new("s", "[]const u8", :string, nil, nil),
+        MIR::Cleanup.new("s", { kind: :string, alloc: :frame, has_moved_guard: true }),
+        MIR::BgBlock.new("raw zig", { "s" => :String }),
+        MIR::ReturnMark.new(["s"]),
+        MIR::MoveMark.new("s"),
+      ]
+      errors = checker.check_fn!(fn_def("bg_ok", body))
+      expect(errors.select { |e| e.include?("BG_ESCAPE") }).to be_empty
+    end
+
+    it "detects ALLOC_MISMATCH from CatchWrapper error reassign" do
+      body = [
+        MIR::AllocMark.new("x", :list, :heap),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :heap, has_moved_guard: false }),
+        MIR::CatchWrapper.new("raw zig", [{ name: "x", alloc: :frame, line: 5 }]),
+      ]
+      errors = checker.check_fn!(fn_def("catch_mismatch", body))
+      expect(errors.any? { |e| e.include?("ALLOC_MISMATCH") && e.include?("INV-9") }).to be true
+    end
+
+    it "passes for CatchWrapper with matching allocator" do
+      body = [
+        MIR::AllocMark.new("x", :list, :heap),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :heap, has_moved_guard: false }),
+        MIR::CatchWrapper.new("raw zig", [{ name: "x", alloc: :heap, line: 5 }]),
+      ]
+      errors = checker.check_fn!(fn_def("catch_ok", body))
+      expect(errors.select { |e| e.include?("ALLOC_MISMATCH") && e.include?("INV-9") }).to be_empty
+    end
+
+    it "passes for CatchWrapper with no error reassigns" do
+      body = [
+        MIR::AllocMark.new("x", :list, :heap),
+        MIR::Cleanup.new("x", { kind: :list, alloc: :heap, has_moved_guard: false }),
+        MIR::CatchWrapper.new("raw zig", []),
+      ]
+      errors = checker.check_fn!(fn_def("catch_empty", body))
+      expect(errors.select { |e| e.include?("ALLOC_MISMATCH") }).to be_empty
+    end
+
   end
 
   describe "#check_program!" do

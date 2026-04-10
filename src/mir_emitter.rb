@@ -52,6 +52,8 @@ class MIREmitter
     when MIR::ExprStmt         then emit_expr_stmt(node)
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::RawZig           then node.code
+    when MIR::BgBlock          then node.code
+    when MIR::CatchWrapper     then node.code
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"
     when MIR::PubConst         then "pub const #{node.name} = #{node.value};"
