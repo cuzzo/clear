@@ -270,54 +270,15 @@ class PipelineHost
   # Pool/sharded sources materialize live items into a temp buffer.
   def build_pipe_items_mir(lhs_type)
     if lhs_type&.pool? && lhs_type&.sharded?
-      elem_zig = lhs_type.element_type.zig_type
-      n = lhs_type.shard_count
-      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
-             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
-             "for (0..#{n}) |__psi| {\n" \
-             "    for (pipe_src_list.shards[__psi].slots) |*__pslot| {\n" \
-             "        if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);\n" \
-             "    }\n" \
-             "}\n" \
-             "const pipe_items = pipe_mat.items;"
-      [[MIR::RawZig.new(code, "mat_sharded_pool")], "pipe_items"]
+      [build_mat_sharded_pool(lhs_type), "pipe_items"]
     elsif lhs_type&.pool? && lhs_type&.soa?
-      elem_zig = lhs_type.element_type.zig_type
-      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
-             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
-             "for (0..@intCast(pipe_src_list.data.len)) |__psi| {\n" \
-             "    if (pipe_src_list.alive[__psi]) try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));\n" \
-             "}\n" \
-             "const pipe_items = pipe_mat.items;"
-      [[MIR::RawZig.new(code, "mat_soa_pool")], "pipe_items"]
+      [build_mat_soa_pool(lhs_type), "pipe_items"]
     elsif lhs_type&.pool?
-      elem_zig = lhs_type.element_type.zig_type
-      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
-             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
-             "for (pipe_src_list.slots) |*__pslot| {\n" \
-             "    if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);\n" \
-             "}\n" \
-             "const pipe_items = pipe_mat.items;"
-      [[MIR::RawZig.new(code, "mat_pool")], "pipe_items"]
+      [build_mat_pool(lhs_type), "pipe_items"]
     elsif (lhs_type&.list_collection? || lhs_type&.fixed_soa?) && lhs_type&.soa?
-      elem_zig = lhs_type.element_type.zig_type
-      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
-             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
-             "for (0..@intCast(pipe_src_list.data.len)) |__psi| {\n" \
-             "    try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));\n" \
-             "}\n" \
-             "const pipe_items = pipe_mat.items;"
-      [[MIR::RawZig.new(code, "mat_soa_list")], "pipe_items"]
+      [build_mat_soa_list(lhs_type), "pipe_items"]
     elsif lhs_type&.list_collection? && lhs_type&.sharded?
-      elem_zig = lhs_type.element_type.zig_type
-      n = lhs_type.shard_count
-      code = "var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
-             "defer pipe_mat.deinit(rt.heapAlloc());\n" \
-             "for (0..#{n}) |__psi| {\n" \
-             "    try pipe_mat.appendSlice(rt.heapAlloc(), pipe_src_list.shards[__psi].items);\n" \
-             "}\n" \
-             "const pipe_items = pipe_mat.items;"
-      [[MIR::RawZig.new(code, "mat_sharded_list")], "pipe_items"]
+      [build_mat_sharded_list(lhs_type), "pipe_items"]
     else
       # Plain array/list: hasField check for .items vs raw slice
       init = MIR::InlineZig.new(
@@ -326,6 +287,142 @@ class PipelineHost
       [[MIR::Let.new("pipe_items", init, false, nil, nil)], "pipe_items"]
     end
   end
+
+  private
+
+  HEAP_ALLOC = "rt.heapAlloc()"
+
+  # Common: var pipe_mat = ArrayListUnmanaged(T){}; defer pipe_mat.deinit(alloc);
+  def mat_var_and_defer(elem_zig)
+    var_decl = MIR::Let.new("pipe_mat",
+      MIR::InlineZig.new("std.ArrayListUnmanaged(#{elem_zig}){}", "mat_init"),
+      true, nil, nil)
+    defer = MIR::DeferStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
+        [MIR::InlineZig.new(HEAP_ALLOC, "alloc")], false)
+    )
+    [var_decl, defer]
+  end
+
+  # Common: const pipe_items = pipe_mat.items;
+  def mat_items_let
+    MIR::Let.new("pipe_items", MIR::FieldGet.new(MIR::Ident.new("pipe_mat"), "items"), false, nil, nil)
+  end
+
+  # try pipe_mat.append(rt.heapAlloc(), value_expr)
+  def mat_append(value_expr)
+    MIR::ExprStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "append",
+        [MIR::InlineZig.new(HEAP_ALLOC, "alloc"), value_expr], true), false)
+  end
+
+  # try pipe_mat.appendSlice(rt.heapAlloc(), slice_expr)
+  def mat_append_slice(slice_expr)
+    MIR::ExprStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "appendSlice",
+        [MIR::InlineZig.new(HEAP_ALLOC, "alloc"), slice_expr], true), false)
+  end
+
+  # Sharded pool: for each shard, for each slot, append alive values.
+  def build_mat_sharded_pool(lhs_type)
+    elem_zig = lhs_type.element_type.zig_type
+    n = lhs_type.shard_count
+    var_decl, defer = mat_var_and_defer(elem_zig)
+
+    inner_loop = MIR::ForStmt.new(
+      MIR::FieldGet.new(
+        MIR::IndexGet.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "shards"),
+                          MIR::Ident.new("__psi")),
+        "slots"),
+      "*__pslot",
+      [MIR::IfStmt.new(
+        MIR::FieldGet.new(MIR::Ident.new("__pslot"), "alive"),
+        [mat_append(MIR::FieldGet.new(MIR::Ident.new("__pslot"), "value"))],
+        nil)],
+      nil)
+
+    outer_loop = MIR::ForStmt.new(
+      MIR::InlineZig.new("0..#{n}", "range"), "__psi", [inner_loop], nil)
+
+    [var_decl, defer, outer_loop, mat_items_let]
+  end
+
+  # SOA pool: iterate data.len, check alive[i], append data.get(i).
+  def build_mat_soa_pool(lhs_type)
+    elem_zig = lhs_type.element_type.zig_type
+    var_decl, defer = mat_var_and_defer(elem_zig)
+
+    value_expr = MIR::MethodCall.new(
+      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data"),
+      "get", [MIR::Ident.new("__psi")], false)
+    alive_check = MIR::IndexGet.new(
+      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "alive"),
+      MIR::Ident.new("__psi"))
+
+    loop_node = MIR::ForStmt.new(
+      MIR::InlineZig.new("0..@intCast(pipe_src_list.data.len)", "range"),
+      "__psi",
+      [MIR::IfStmt.new(alive_check, [mat_append(value_expr)], nil)],
+      nil)
+
+    [var_decl, defer, loop_node, mat_items_let]
+  end
+
+  # Plain pool: iterate slots, check alive, append value.
+  def build_mat_pool(lhs_type)
+    elem_zig = lhs_type.element_type.zig_type
+    var_decl, defer = mat_var_and_defer(elem_zig)
+
+    loop_node = MIR::ForStmt.new(
+      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "slots"),
+      "*__pslot",
+      [MIR::IfStmt.new(
+        MIR::FieldGet.new(MIR::Ident.new("__pslot"), "alive"),
+        [mat_append(MIR::FieldGet.new(MIR::Ident.new("__pslot"), "value"))],
+        nil)],
+      nil)
+
+    [var_decl, defer, loop_node, mat_items_let]
+  end
+
+  # SOA list: iterate data.len, append data.get(i).
+  def build_mat_soa_list(lhs_type)
+    elem_zig = lhs_type.element_type.zig_type
+    var_decl, defer = mat_var_and_defer(elem_zig)
+
+    value_expr = MIR::MethodCall.new(
+      MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data"),
+      "get", [MIR::Ident.new("__psi")], false)
+
+    loop_node = MIR::ForStmt.new(
+      MIR::InlineZig.new("0..@intCast(pipe_src_list.data.len)", "range"),
+      "__psi",
+      [mat_append(value_expr)],
+      nil)
+
+    [var_decl, defer, loop_node, mat_items_let]
+  end
+
+  # Sharded list: iterate shards, appendSlice each shard's items.
+  def build_mat_sharded_list(lhs_type)
+    elem_zig = lhs_type.element_type.zig_type
+    n = lhs_type.shard_count
+    var_decl, defer = mat_var_and_defer(elem_zig)
+
+    shard_items = MIR::FieldGet.new(
+      MIR::IndexGet.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "shards"),
+                        MIR::Ident.new("__psi")),
+      "items")
+
+    loop_node = MIR::ForStmt.new(
+      MIR::InlineZig.new("0..#{n}", "range"), "__psi",
+      [mat_append_slice(shard_items)],
+      nil)
+
+    [var_decl, defer, loop_node, mat_items_let]
+  end
+
+  public
 
   # Visit pipeline expression in MIR mode with placeholder substitution.
   def visit_pipeline_expr_mir(list_node, expr_node, placeholder = "it")
