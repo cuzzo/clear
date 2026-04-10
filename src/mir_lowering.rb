@@ -1053,6 +1053,8 @@ class MIRLowering
     return arg_zig unless ti&.string?
     storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
     return arg_zig if storage == :heap
+    # COPY already produces a heap dupe via MIR::DeepCopy -- don't double-dupe.
+    return arg_zig if arg_node.is_a?(AST::CopyNode)
     "try #{alloc_zig}.dupe(u8, #{arg_zig})"
   end
 
@@ -2882,6 +2884,11 @@ class MIRLowering
         [MIR::Ident.new(key_zig), MIR::Ident.new(val_type_zig), frame_alloc, MIR::AddressOf.new(target), idx, val], true)
       MIR::ExprStmt.new(call, false)
     elsif receiver_type&.map?
+      # Map keys are duped internally by put -- always frame-allocate the key
+      # expression so it's cleaned by arena rewind (no orphaned heap temporary).
+      if idx.is_a?(MIR::ConcatStr)
+        idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
+      end
       val_node = node.value
       val_ti = val_node.type_info rescue nil
       heap_alloc = MIR::MethodCall.new(rt, "heapAlloc", [], false)

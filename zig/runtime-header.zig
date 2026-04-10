@@ -411,7 +411,11 @@ pub const CheatLib = struct {
     }
 
     pub fn numericMapPut(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K, value: V) !void {
-        try map.put(alloc, key, value);
+        const gop = try map.getOrPut(alloc, key);
+        if (gop.found_existing) {
+            if (comptime needsCleanup(V)) cleanup(V, alloc, gop.value_ptr);
+        }
+        gop.value_ptr.* = value;
     }
 
     pub fn numericMapGet(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) ?V {
@@ -419,8 +423,12 @@ pub const CheatLib = struct {
     }
 
     pub fn numericMapDelete(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V), key: K) void {
-        _ = map.remove(key);
-        _ = alloc;
+        if (map.fetchRemove(key)) |kv| {
+            if (comptime needsCleanup(V)) {
+                var val = kv.value;
+                cleanup(V, alloc, &val);
+            }
+        }
     }
 
     pub fn numericMapContains(comptime K: type, comptime V: type, map: NumericMapType(K, V), key: K) bool {
@@ -432,6 +440,10 @@ pub const CheatLib = struct {
     }
 
     pub fn numericMapDeinit(comptime K: type, comptime V: type, alloc: std.mem.Allocator, map: *NumericMapType(K, V)) void {
+        if (comptime needsCleanup(V)) {
+            var it = map.valueIterator();
+            while (it.next()) |val_ptr| cleanup(V, alloc, val_ptr);
+        }
         map.deinit(alloc);
     }
 
@@ -2102,6 +2114,12 @@ pub const CheatLib = struct {
 
         // 4. Numeric map (AutoHashMapUnmanaged or custom hash)
         if (comptime isNumericMap(T)) {
+            const VT = @TypeOf(ptr.values());
+            const ElemT = std.meta.Elem(VT);
+            if (comptime needsCleanup(ElemT)) {
+                var vit = ptr.valueIterator();
+                while (vit.next()) |val_ptr| cleanup(ElemT, alloc, val_ptr);
+            }
             ptr.deinit(alloc);
             return;
         }
@@ -3790,7 +3808,7 @@ pub const CheatLib = struct {
                 done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
                 fn run(raw: *anyopaque) void {
                     const c: *@This() = @ptrCast(@alignCast(raw));
-                    // For slice values (e.g. []const u8), dupe the value too —
+                    // For slice values (e.g. []const u8), dupe the value too --
                     // the original may point to the caller's stack.
                     const safe_val = if (comptime is_slice_value)
                         remote_alloc.dupe(@typeInfo(V).pointer.child, c.value) catch {
@@ -3800,11 +3818,22 @@ pub const CheatLib = struct {
                         }
                     else
                         c.value;
-                    c.map.shards[c.shard].map.put(remote_alloc, c.key, safe_val) catch {
+                    const gop = c.map.shards[c.shard].map.getOrPut(remote_alloc, c.key) catch {
                         remote_alloc.free(c.key);
                         if (comptime is_slice_value) remote_alloc.free(safe_val);
                         c.err = true;
+                        c.done.store(true, .release);
+                        return;
                     };
+                    if (gop.found_existing) {
+                        // Cleanup old value before overwriting.
+                        if (comptime needsCleanup(V)) cleanup(V, remote_alloc, gop.value_ptr);
+                        remote_alloc.free(gop.key_ptr.*);
+                        gop.key_ptr.* = c.key;
+                    } else {
+                        gop.key_ptr.* = c.key;
+                    }
+                    gop.value_ptr.* = safe_val;
                     c.done.store(true, .release);
                 }
             };
@@ -3894,13 +3923,16 @@ pub const CheatLib = struct {
             // ONE path for every operation. No hot/cold split.
             // Always routes through the owning scheduler via SPSC.
 
-            pub fn put(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator, key: []const u8, value: V) !void {
+            pub fn put(self: *Self, _: std.mem.Allocator, caller_alloc: std.mem.Allocator, key: []const u8, value: V) !void {
                 self.ensureOwnership();
                 const s = shardIndex(key);
                 const safe_key = try remote_alloc.dupe(u8, key);
                 var ctx = PutCtx{ .map = self, .shard = s, .key = safe_key, .value = value };
                 sendAndWait(self.owners[s].?, @ptrCast(&PutCtx.run), @ptrCast(&ctx), &ctx.done);
                 if (ctx.err) return error.OutOfMemory;
+                // PutCtx.run dupes slice values with remote_alloc for thread safety.
+                // Free the caller's copy since ownership has been transferred.
+                if (comptime is_slice_value) caller_alloc.free(value);
             }
 
             pub fn get(self: *Self, key: []const u8) ?V {
@@ -4384,7 +4416,11 @@ pub const CheatLib = struct {
                 const elided = self.locks_elided.load(.monotonic);
                 acquire(&self.shards[s], elided);
                 defer release(&self.shards[s], elided);
-                try self.shards[s].map.put(alloc, key, value);
+                const gop = try self.shards[s].map.getOrPut(alloc, key);
+                if (gop.found_existing) {
+                    if (comptime needsCleanup(V)) cleanup(V, alloc, gop.value_ptr);
+                }
+                gop.value_ptr.* = value;
             }
 
             pub fn get(self: *Self, key: K) ?V {
@@ -4408,8 +4444,12 @@ pub const CheatLib = struct {
                 const elided = self.locks_elided.load(.monotonic);
                 acquire(&self.shards[s], elided);
                 defer release(&self.shards[s], elided);
-                _ = alloc;
-                _ = self.shards[s].map.fetchRemove(key);
+                if (self.shards[s].map.fetchRemove(key)) |kv| {
+                    if (comptime needsCleanup(V)) {
+                        var val = kv.value;
+                        cleanup(V, alloc, &val);
+                    }
+                }
             }
 
             pub fn count(self: *Self) i64 {
@@ -4425,6 +4465,10 @@ pub const CheatLib = struct {
 
             pub fn deinit(self: *Self, key_alloc: std.mem.Allocator, bucket_alloc: std.mem.Allocator) void {
                 for (&self.shards) |*shard| {
+                    if (comptime needsCleanup(V)) {
+                        var vit = shard.map.valueIterator();
+                        while (vit.next()) |val_ptr| cleanup(V, bucket_alloc, val_ptr);
+                    }
                     // Free duped key strings before releasing bucket array.
                     var it = shard.map.keyIterator();
                     while (it.next()) |k| key_alloc.free(k.*);
