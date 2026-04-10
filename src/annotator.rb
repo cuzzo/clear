@@ -3884,8 +3884,12 @@ private
           ti.provenance = :borrow
           return
         end
-        if matched_def[:return_alloc]
-          ti.cleanup_alloc = matched_def[:return_alloc]
+        ret_alloc = matched_def[:return_alloc]
+        # For allocating methods without explicit return_alloc, the method's
+        # alloc IS the return alloc (e.g. map.values() on sharded maps).
+        ret_alloc ||= matched_def[:alloc] if matched_def[:allocates]
+        if ret_alloc
+          ti.cleanup_alloc = ret_alloc
           # Only set provenance when the function always allocates on heap
           # (alloc: :heap), not when it uses the call site's allocator
           # (alloc: :node_storage) which could be frame or heap.
