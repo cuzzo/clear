@@ -920,10 +920,9 @@ class MIRLowering
       when :macro_print
         return lower_macro_print(node)
       when :macro_map
-        # map is handled by PipelineRewriter; if we get here, emit a no-op
-        return MIR::Comment.new("map intrinsic (should be rewritten)")
+        raise "BUG: macro_map should have been rewritten by PipelineRewriter"
       else
-        return MIR::Comment.new("intrinsic: #{node.zig_pattern}")
+        raise "MIRLowering: unhandled symbol intrinsic: #{node.zig_pattern}"
       end
     end
 
@@ -1800,7 +1799,7 @@ class MIRLowering
       @active_stubs[fn_name] = { kind: :with, var: stub_var }
       MIR::Let.new(stub_var, val, false, nil, nil)
     else
-      MIR::Comment.new("stub: #{fn_name} (unhandled kind: #{node.kind})")
+      raise "MIRLowering: unhandled StubDecl kind: #{node.kind} for #{fn_name}"
     end
   end
 
@@ -1821,7 +1820,7 @@ class MIRLowering
       MIR::Import.new(node.namespace || node.path, node.namespace || node.path, nil)
     else
       # Local require: compile the module and inline the Zig body
-      return MIR::Comment.new("REQUIRE \"#{node.path}\" -- no importer available") unless @importer
+      raise "MIRLowering: REQUIRE \"#{node.path}\" but no importer available" unless @importer
 
       mod = @importer.compile_file(node.path, caller_dir: @source_dir)
 
