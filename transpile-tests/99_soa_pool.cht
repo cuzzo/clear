@@ -1,6 +1,6 @@
--- Test: @pool:soa — Structure of Arrays generational pool.
--- All higher-order pipeline operators work on SOA pools with
--- field-slice iteration (no materialization for aggregates).
+-- Test: @pool:soa and T[N]@soa — Structure of Arrays layouts.
+-- Both SOA pools and fixed SOA arrays use field-slice iteration
+-- (no materialization for aggregates).
 
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
 
@@ -18,53 +18,78 @@ FN main() RETURNS Void ->
     pool.insert(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
     pool.insert(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
+    -- Same data in a fixed SOA array (T[N]@soa).
+    MUTABLE fixed: Entity[100]@soa = [];
+    fixed.append(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
+    fixed.append(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
+    fixed.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
+
     -- SUM
     arr_sum = entities s> SUM _.health;
     pool_sum = pool s> SUM _.health;
+    fixed_sum = fixed s> SUM _.health;
     ASSERT arr_sum == 300, "arr SUM health should be 300";
     ASSERT pool_sum == 300, "pool SUM health should be 300";
+    ASSERT fixed_sum == 300, "fixed SUM health should be 300";
 
     -- MIN
     arr_min = entities s> MIN _.x;
     pool_min = pool s> MIN _.x;
+    fixed_min = fixed s> MIN _.x;
     ASSERT arr_min == 10, "arr MIN x should be 10";
     ASSERT pool_min == 10, "pool MIN x should be 10";
+    ASSERT fixed_min == 10, "fixed MIN x should be 10";
 
     -- MAX
     arr_max = entities s> MAX _.y;
     pool_max = pool s> MAX _.y;
+    fixed_max = fixed s> MAX _.y;
     ASSERT arr_max == 60, "arr MAX y should be 60";
     ASSERT pool_max == 60, "pool MAX y should be 60";
+    ASSERT fixed_max == 60, "fixed MAX y should be 60";
 
     -- AVERAGE
     arr_avg = entities s> AVERAGE _.vx;
     pool_avg = pool s> AVERAGE _.vx;
+    fixed_avg = fixed s> AVERAGE _.vx;
     ASSERT arr_avg == 3, "arr AVERAGE vx should be 3";
     ASSERT pool_avg == 3, "pool AVERAGE vx should be 3";
+    ASSERT fixed_avg == 3, "fixed AVERAGE vx should be 3";
 
     -- COUNT
     arr_cnt = entities s> COUNT _.health > 0;
     pool_cnt = pool s> COUNT _.health > 0;
+    fixed_cnt = fixed s> COUNT _.health > 0;
     ASSERT arr_cnt == 2, "arr COUNT health > 0 should be 2";
     ASSERT pool_cnt == 2, "pool COUNT health > 0 should be 2";
+    ASSERT fixed_cnt == 2, "fixed COUNT health > 0 should be 2";
 
     -- ANY
     arr_any = entities s> ANY _.health == 0;
     pool_any = pool s> ANY _.health == 0;
+    fixed_any = fixed s> ANY _.health == 0;
     ASSERT arr_any == TRUE, "arr ANY health == 0 should be true";
     ASSERT pool_any == TRUE, "pool ANY health == 0 should be true";
+    ASSERT fixed_any == TRUE, "fixed ANY health == 0 should be true";
 
     -- ALL
     arr_all = entities s> ALL _.x > 0;
     pool_all = pool s> ALL _.x > 0;
+    fixed_all = fixed s> ALL _.x > 0;
     ASSERT arr_all == TRUE, "arr ALL x > 0 should be true";
     ASSERT pool_all == TRUE, "pool ALL x > 0 should be true";
+    ASSERT fixed_all == TRUE, "fixed ALL x > 0 should be true";
 
     -- WHERE (requires whole-struct reassembly for output)
     arr_alive = entities s> WHERE _.health > 0;
     pool_alive = pool s> WHERE _.health > 0;
     ASSERT length(arr_alive) == 2, "arr WHERE health > 0 should have 2";
     ASSERT length(pool_alive) == 2, "pool WHERE health > 0 should have 2";
+
+    -- EACH (mutate via SOA field-slice rewriting)
+    fixed s> EACH { _.x = _.x + 1.0; };
+    fixed_sum2 = fixed s> SUM _.x;
+    ASSERT fixed_sum2 == 93, "fixed SUM x after EACH should be 93";
 
     RETURN;
 END

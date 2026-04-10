@@ -2760,6 +2760,9 @@ class MIRLowering
       else
         MIR::ContainerInit.new(transpile_type(ft), :list_empty, nil, nil)
       end
+    elsif ft.fixed_soa?
+      # T[N]@soa: init as SoaList, not a plain fixed array
+      MIR::ContainerInit.new(transpile_type(ft), :list_empty, nil, nil)
     else
       rhs = node.value.is_a?(AST::MoveNode) ? node.value.value : node.value
       is_move = node.value.is_a?(AST::MoveNode)

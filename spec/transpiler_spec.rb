@@ -1411,7 +1411,7 @@ RSpec.describe ZigTranspiler do
   # Fixed SOA cleanup
   # ===========================================================================
   describe "fixed SOA array cleanup" do
-    it "transpiles T[N]@soa without crashing on cleanup" do
+    it "emits SoaList type for T[N]@soa, not a plain fixed array" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
@@ -1420,7 +1420,10 @@ RSpec.describe ZigTranspiler do
             RETURN;
         END
       CLEAR
-      expect { transpile(src) }.not_to raise_error
+      zig = transpile(src)
+      # Must declare as SoaList, not [10]Point or [0]Point
+      expect(zig).to include("CheatLib.SoaList(Point){}")
+      expect(zig).not_to match(/\[\d+\]Point/)
     end
   end
 
