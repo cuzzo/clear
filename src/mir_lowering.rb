@@ -312,11 +312,17 @@ class MIRLowering
     when :receiver_storage
       needs_heap = receiver_type&.needs_heap_backing?
       needs_heap ||= (target_node.respond_to?(:storage) && target_node.storage == :heap)
-      # For method calls, check the receiver object's storage (e.g., parts.append -> parts.storage)
+      # For method calls, check the receiver object's storage (e.g., parts.append -> parts.storage).
+      # Also check the declaration node (symbol.reg) in case Phase 2.5 heap-promoted the container
+      # after the Identifier was annotated (Identifier.storage may be stale).
       needs_heap ||= if node.is_a?(AST::MethodCall)
-        node.object.respond_to?(:storage) && node.object.storage == :heap
+        obj = node.object
+        (obj.respond_to?(:storage) && obj.storage == :heap) ||
+          (obj.respond_to?(:symbol) && obj.symbol&.reg.respond_to?(:storage) && obj.symbol.reg.storage == :heap)
       elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver
-        node.args&.first&.respond_to?(:storage) && node.args.first.storage == :heap
+        first = node.args&.first
+        (first&.respond_to?(:storage) && first.storage == :heap) ||
+          (first.respond_to?(:symbol) && first&.symbol&.reg.respond_to?(:storage) && first.symbol.reg.storage == :heap)
       end
       needs_heap ||= (node.respond_to?(:storage) && node.storage == :heap)
       needs_heap ? :heap : :frame
