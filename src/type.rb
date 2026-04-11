@@ -1051,6 +1051,76 @@ class Type
     false
   end
 
+  # Does this type+allocator combination need explicit cleanup at scope exit?
+  # For frame-allocated values, only types with heap internals (RC, resources,
+  # mutexes) need cleanup -- the frame arena bulk-frees everything else.
+  # For heap-allocated values, all non-Copy types need cleanup.
+  #
+  # This is the ownership-aware version of needs_cleanup?. It answers:
+  # "if this variable is :live at scope exit, must we emit a defer?"
+  def needs_explicit_cleanup?(allocator, schema_lookup = nil)
+    return false if primitive? || void? || any?
+    # Copy types never need cleanup regardless of allocator
+    return false if string? && !heap_provenance? && allocator == :frame
+
+    # Heap-allocated non-Copy: always needs cleanup
+    return true if allocator == :heap
+
+    # Frame-allocated: only if type has heap internals that arena rewind won't handle
+    return true if any_rc? || link?       # RC refcount is heap-managed
+    return true if any_sync?              # mutex is OS resource
+    return true if resource?              # file handle, socket, etc.
+
+    # Frame collections/maps: backing buffer uses frame allocator, arena rewind handles it.
+    # UNLESS elements have heap internals (e.g. list of RC pointers).
+    if list_collection? || (map? && !numeric_map?) || numeric_map? || pool? || set_collection?
+      return elem_has_heap_internals?(schema_lookup)
+    end
+
+    # Frame structs/unions: check fields recursively
+    if schema_lookup
+      schema = schema_lookup.call(resolved) rescue nil
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        return (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      elsif schema.is_a?(Hash) && !schema[:kind]
+        return schema.any? { |k, v|
+          next false if k.is_a?(Symbol)
+          ft = v.is_a?(Hash) ? v[:type] : v
+          t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
+          next false unless t
+          t.any_rc? || t.link? || t.any_sync? || t.resource?
+        }
+      end
+    end
+
+    false
+  end
+
+  # Check if collection elements have heap internals (RC, resource, etc.)
+  def elem_has_heap_internals?(schema_lookup = nil)
+    et = element_type
+    return false unless et
+    t = et.is_a?(Type) ? et : (Type.new(et) rescue nil)
+    return false unless t
+    return true if t.any_rc? || t.link? || t.any_sync? || t.resource?
+    # Check struct/union element types via schema
+    if schema_lookup
+      schema = schema_lookup.call(t.resolved) rescue nil
+      if schema.is_a?(Hash) && schema[:kind] == :union
+        return (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      elsif schema.is_a?(Hash) && !schema[:kind]
+        return schema.any? { |k, v|
+          next false if k.is_a?(Symbol)
+          ft = v.is_a?(Hash) ? v[:type] : v
+          ft2 = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
+          next false unless ft2
+          ft2.any_rc? || ft2.link? || ft2.any_sync? || ft2.resource?
+        }
+      end
+    end
+    false
+  end
+
   # Determine the allocator needed for cleanup of this type.
   # Returns :heap or :frame. Centralizes the type-specific logic that
   # was previously inline in annotator.rb's set_cleanup_alloc!.

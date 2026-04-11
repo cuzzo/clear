@@ -1,0 +1,348 @@
+# PLAN: Rust-Like Ownership Verification for CLEAR
+
+## Foundation: What Makes Rust's System Work
+
+Rust's memory safety comes from **one analysis** enforcing **three rules** at **every program point**.
+
+### The One Analysis: Forward Ownership Dataflow
+
+At every statement in the CFG, every variable has a known state:
+
+```
+State = :uninit | :live | :moved | :maybe_moved
+```
+
+Transitions:
+- **Declaration**: `uninit -> live`
+- **Move** (assign non-Copy, GIVE, TAKES arg, return): `live -> moved`
+- **Branch merge**: `live + moved -> maybe_moved`
+
+### The Three Rules
+
+**Rule 1 - No use after move.** At every READ of variable `x`, state must be `:live`. If `:moved` or `:maybe_moved` -- compile error.
+
+**Rule 2 - Cleanup at scope exit.** At every scope exit, for each variable in scope:
+- `:live` with cleanup-needing type -> unconditional cleanup
+- `:maybe_moved` -> conditional cleanup (runtime flag)
+- `:moved` -> nothing
+- `:uninit` -> nothing
+
+**Rule 3 - No double free.** A `:moved` variable must never be cleaned up. Falls out of Rule 2 mechanically.
+
+Leaks caught by Rule 2. Use-after-free caught by Rule 1. Double-free caught by Rule 3.
+
+---
+
+## How CLEAR Adapts This
+
+CLEAR has a **frame arena** (bump allocator). This changes one thing about Rule 2:
+
+### Not all live variables need explicit cleanup
+
+- **Heap-allocated, any type** -> needs explicit cleanup
+- **Frame-allocated, pure frame** (list, map, struct where everything is frame) -> **no cleanup**. Frame rewind bulk-frees.
+- **Frame-allocated, has heap internals** (RC field, resource, mutex) -> needs cleanup of those internals
+
+So:
+```
+needs_explicit_cleanup?(type, allocator) =
+  false   if type is Copy (primitives, strings, enums)
+  true    if allocator == :heap
+  true    if type has heap internals (RC, resource, mutex) regardless of allocator
+  false   otherwise (pure frame - arena rewind handles it)
+```
+
+### Promotion is an ownership transfer
+
+```
+promote(x) =
+  heap_copy = CheatLib.promote(T, rt, &x)   # new heap allocation
+  x -> :moved                                 # frame original abandoned
+  return heap_copy                            # caller owns heap copy
+```
+
+Frame rewind handles the physical memory of the original. The caller owns the heap copy. PreserveAndRewind is the mechanism - it's correct and stays.
+
+### CheatLib.cleanup is the unified drop
+
+Already equivalent to Rust's `Drop::drop()`. Handles every type through Zig comptime dispatch. The 20+ cleanup kinds in CleanupClassifier are just routing to this one function. The runtime is correct.
+
+---
+
+## What's Broken in the Current System
+
+### 1. No use-after-move checking
+`OwnershipDataflow` tracks moves for cleanup decisions but never reports an error when a moved variable is used. Every use-after-free bug is invisible.
+
+### 2. Cleanup decisions are separate from ownership state
+`CleanupClassifier.classify` runs independently from `OwnershipDataflow`. It determines `needs_cleanup` and `has_moved_guard` from type context. Then `refine_moved_guards!` patches results using dataflow. When they disagree: leaks or double-frees.
+
+### 3. Verification is global, not per-path
+`MIRChecker` collects all `AllocMark` and `Cleanup` nodes into flat sets and checks set containment. A cleanup that exists on one branch but not another passes. A variable that leaks on an error path passes.
+
+### 4. Too many concepts
+Current pipeline: `PromotionClassifier` -> `CleanupClassifier` -> `OwnershipDataflow` -> `refine_moved_guards!` -> 7 MIR marker types -> `MIRChecker` with 13 error codes.
+
+Target: `OwnershipState` -> 3 rules -> done.
+
+---
+
+## Phases
+
+### Phase 1: Enrich OwnershipDataflow
+
+**Current**: Tracks `{ var_name => :owned | :moved | :maybe_moved | :uninit }` per block.
+
+**Target**: Tracks `{ var_name => OwnerEntry }` per statement.
+
+```ruby
+OwnerEntry = Struct.new(
+  :state,          # :live, :moved, :uninit, :maybe_moved
+  :allocator,      # :frame or :heap (fixed at declaration)
+  :needs_cleanup   # bool - does this type+allocator need explicit cleanup?
+)
+```
+
+Changes:
+- `OwnershipDataflow#analyze!` stores per-statement snapshots
+- `init_entry_state` populates allocator + needs_cleanup for TAKES params
+- `transfer_stmt` for VarDecl/BindExpr sets allocator + needs_cleanup from type info
+- Join logic carries allocator + needs_cleanup through merges
+
+Stays the same:
+- CFG construction
+- Transfer functions for moves (GIVE, was_moved, BG captures)
+- Join rules (live+moved=maybe_moved)
+- Copy type detection
+
+**Files**: `src/control_flow.rb` (OwnershipDataflow class)
+
+#### Tasks
+- [ ] 1.1: Define OwnerEntry struct with state/allocator/needs_cleanup
+- [ ] 1.2: Add per-statement snapshot storage to OwnershipDataflow (`@point_states`)
+- [ ] 1.3: Populate allocator + needs_cleanup in `init_entry_state` for TAKES params
+- [ ] 1.4: Populate allocator + needs_cleanup in `transfer_stmt` for VarDecl/BindExpr
+- [ ] 1.5: Carry allocator + needs_cleanup through join logic (merge preserves these fields)
+- [ ] 1.6: Store state snapshot after each statement in `apply_transfer`
+- [ ] 1.7: Update `cleanup_summary` to read from enriched OwnerEntry
+- [ ] 1.8: Tests: verify enriched dataflow produces identical cleanup_summary as current for all existing tests
+- [ ] 1.9: Implement `needs_explicit_cleanup?` helper: Copy->false, heap->true, frame+heap_internals->true, else false
+
+### Phase 2: Use-After-Move Checking (Rule 1)
+
+New verification pass that walks every expression and checks:
+
+```ruby
+def check_use_after_move!(fn_node)
+  # For each statement at each program point:
+  #   For each Identifier read in the statement:
+  #     Look up state in point_states
+  #     If :moved -> error: "use of moved variable"
+  #     If :maybe_moved -> error: "use of possibly moved variable"
+end
+```
+
+Catches:
+- `GIVE x` followed by `print(x)` -> use after move
+- `RETURN x` in one branch, `x.append(y)` after the if -> use of maybe_moved
+- `foo(GIVE x)` followed by `bar(x)` -> use after move
+
+**Files**: `src/control_flow.rb` (new method on OwnershipDataflow or companion class)
+
+#### Tasks
+- [ ] 2.1: Implement expression walker that collects all Identifier reads from a statement
+- [ ] 2.2: Implement `check_use_after_move!` that walks statements and checks each read against point_state
+- [ ] 2.3: Handle edge cases: CopyNode (source NOT consumed), was_moved args (legitimate move at call site)
+- [ ] 2.4: Report errors with source location (line/col from token)
+- [ ] 2.5: Wire into compilation pipeline (after OwnershipDataflow.analyze!, before MIR insertion)
+- [ ] 2.6: Tests: write spec cases for use-after-move, use-after-GIVE, use-of-maybe-moved, valid-use-after-COPY
+- [ ] 2.7: Run full test suite - fix any false positives from existing code patterns
+
+### Phase 3: Derive Cleanup Decisions from Ownership State (Rule 2)
+
+Replace CleanupClassifier's needs_cleanup/has_moved_guard logic with ownership state.
+
+New method on OwnershipDataflow:
+```ruby
+def cleanup_decisions
+  decisions = {}
+  exit_states.each do |name, entry|
+    case entry.state
+    when :live
+      decisions[name] = { needs_cleanup: true, has_moved_guard: false, allocator: entry.allocator } if entry.needs_cleanup
+    when :maybe_moved
+      decisions[name] = { needs_cleanup: true, has_moved_guard: true, allocator: entry.allocator } if entry.needs_cleanup
+    end
+  end
+  decisions
+end
+```
+
+CleanupClassifier reduced to template lookup only:
+```ruby
+# Given type + allocator, return the cleanup kind (Zig template selector)
+# Purely about HOW to clean up, not WHETHER.
+def self.cleanup_template(type, allocator, schema_lookup)
+  return :resource if type.resource?(schema_lookup)
+  return :list if type.list_collection?
+  return :rc if type.any_rc? || type.link?
+  # ... same type dispatch, no ownership context
+end
+```
+
+Deleted:
+- `CleanupClassifier`'s needs_cleanup / has_moved_guard logic
+- `refine_moved_guards!`
+- `pre_mark_bg_resource_captures!`
+
+**Files**: `src/control_flow.rb`, `src/promotion_plan.rb`
+
+#### Tasks
+- [ ] 3.1: Implement `cleanup_decisions` method on OwnershipDataflow
+- [ ] 3.2: Implement `cleanup_template(type, allocator, schema_lookup)` - pure type->kind lookup
+- [ ] 3.3: Validation gate: assert `cleanup_decisions` agrees with current CleanupClassifier + refine_moved_guards on ALL tests
+- [ ] 3.4: Update `MIRPass#transform_function!` to use `cleanup_decisions` for needs_cleanup/has_moved_guard
+- [ ] 3.5: Update `MIRPass#insert_drop!` to get has_moved_guard from cleanup_decisions, kind from cleanup_template
+- [ ] 3.6: Delete `refine_moved_guards!` method
+- [ ] 3.7: Delete `pre_mark_bg_resource_captures!` method
+- [ ] 3.8: Simplify CleanupClassifier: remove ownership-dependent logic, keep type dispatch
+- [ ] 3.9: Delete `walk_takes_params` ownership logic (TAKES needs_cleanup comes from dataflow)
+- [ ] 3.10: Delete `walk_match_as_bindings` ownership logic (match-as needs_cleanup comes from dataflow)
+- [ ] 3.11: Run full test suite - all transpile-tests and specs must pass with identical Zig output
+
+### Phase 4: Flow-Based Verification (Replace MIRChecker)
+
+Rewrite MIRChecker to use per-statement state.
+
+```ruby
+class FlowChecker
+  def check_fn!(fn_def, point_states)
+    # At each MIR::Drop: verify variable is live or maybe_moved (not :moved without guard)
+    # At each MIR::SuppressCleanup: verify variable was actually moved
+    # At function exit: verify no live cleanup-needing variable lacks a Drop
+  end
+end
+```
+
+Error codes reduce from 13 to 5:
+1. `USE_AFTER_MOVE` - from Phase 2
+2. `LEAK` - live variable without cleanup at scope exit
+3. `DOUBLE_FREE` - cleanup of moved variable without guard
+4. `ORPHAN_SUPPRESS` - suppress on non-moved variable
+5. `FRAME_OVERFLOW` - loop without rewind (unchanged)
+
+Gone: `ALLOC_MISMATCH` (allocator fixed at declaration), `ESCAPE`/`FRAME_ESCAPE`/`BG_ESCAPE` (promotion modeled as move), `GUARD_NO_SUPPRESS` (guards from state), `REASSIGN_LEAK`/`FIELD_LEAK` (Rule 2 handles), `HPT_LEAK` (simple expression check), `RAW_CONTRACT` (deprecated).
+
+**Files**: `src/mir_checker.rb` (rewrite)
+
+#### Tasks
+- [ ] 4.1: Design FlowChecker interface: `check_fn!(fn_def, point_states)` returns errors
+- [ ] 4.2: Implement LEAK check: at function exit, every live+needs_cleanup var has MIR::Drop in scope
+- [ ] 4.3: Implement DOUBLE_FREE check: MIR::Drop on :moved variable without guard
+- [ ] 4.4: Implement ORPHAN_SUPPRESS check: MIR::SuppressCleanup on non-moved variable
+- [ ] 4.5: Keep FRAME_OVERFLOW check (loop without rewind, unchanged logic)
+- [ ] 4.6: Keep HPT_LEAK check (discarded heap-returning calls, simple expression scan)
+- [ ] 4.7: Wire FlowChecker into pipeline alongside old MIRChecker (dual-run for validation)
+- [ ] 4.8: Validate: FlowChecker catches everything MIRChecker catches on all existing tests
+- [ ] 4.9: Remove old MIRChecker, rename FlowChecker to MIRChecker
+- [ ] 4.10: Run full test suite
+
+### Phase 5: Model Promotion as Move in Dataflow
+
+Ensure `OwnershipDataflow` correctly models promotion as ownership transfer.
+
+The transfer function for ReturnNode already marks returned identifiers as moved. Verify this covers all promotion paths:
+- `RETURN x` where x is frame-allocated -> x moved, caller gets heap copy
+- `RETURN Struct{ field: x }` -> x moved via struct literal
+- BG capture of x -> x moved to fiber
+- Container store of frame value -> value moved to container's allocator
+
+PromotionClassifier stays but becomes optimization-only (allocate on heap from start to avoid runtime promote call). Not a correctness requirement.
+
+**Files**: `src/control_flow.rb` (verify transfer functions), `src/promotion_plan.rb` (document as optimization)
+
+#### Tasks
+- [ ] 5.1: Audit transfer_stmt for ReturnNode: verify all return patterns mark sources as :moved
+- [ ] 5.2: Audit transfer_stmt for BG captures: verify captures mark sources as :moved
+- [ ] 5.3: Add transfer function for container store (e.g. `heap_list.append(frame_val)`) - mark source as :moved
+- [ ] 5.4: Verify upgrade_always_escaped_to_heap! still works as optimization (not correctness)
+- [ ] 5.5: Verify upgrade_bg_captures_to_heap! still works as optimization (not correctness)
+- [ ] 5.6: Document PromotionClassifier as performance optimization, not safety requirement
+- [ ] 5.7: Tests: frame value returned (promoted), frame value captured by BG, frame value stored in heap container
+
+### Phase 6: Borrow Checking
+
+Track borrows in the ownership state. WITH blocks create borrows. Borrows prevent moves.
+
+```ruby
+# In state: { borrows: { source_name => [borrow_entries] } }
+
+# Can't move while borrowed
+if state.borrows[name]
+  error("MOVE_WHILE_BORROWED: #{name}")
+end
+
+# Can't create mutable borrow while any borrow exists
+if WITH RESTRICT && state.borrows[source]
+  error("ALIAS_VIOLATION: #{source}")
+end
+```
+
+**Files**: `src/control_flow.rb` (extend OwnershipDataflow state)
+
+#### Tasks
+- [ ] 6.1: Add borrows tracking to OwnerEntry (or separate borrow map in dataflow state)
+- [ ] 6.2: Update transfer_stmt for WithBlock: create borrow entry for source variable
+- [ ] 6.3: Track borrow end: at WITH block scope exit, release borrow
+- [ ] 6.4: Check MOVE_WHILE_BORROWED: at every move, verify no active borrow on source
+- [ ] 6.5: Check ALIAS_VIOLATION: at WITH RESTRICT, verify no existing borrow on source
+- [ ] 6.6: Handle nested WITH blocks (borrow of borrow)
+- [ ] 6.7: Tests: move-while-borrowed, alias-violation, valid-sequential-borrows, nested-borrows
+- [ ] 6.8: Run full test suite
+
+---
+
+## What Stays, What Changes, What's Deleted
+
+### Stays exactly as-is
+- Frame arena strategy (allocate on frame, promote if escaped)
+- `CheatLib.cleanup(T, alloc, &var)` - the unified drop
+- `CheatLib.promote(T, rt, &var)` - frame-to-heap promotion
+- `PreserveAndRewind` - return mechanism
+- CFG construction (`FunctionCFG.build`)
+- MIR nodes (`MIR::Drop`, `MIR::Alloc`, `MIR::Promote`, `MIR::SuppressCleanup`)
+- Transpiler emission (`emit_cleanup_from_entry` and all Zig templates)
+- Runtime header (runtime-header.zig, runtime.zig)
+- `upgrade_always_escaped_to_heap!` / `upgrade_bg_captures_to_heap!` (optimizations)
+
+### Changes
+- `OwnershipDataflow`: enriched state (allocator, needs_cleanup), per-statement snapshots
+- `CleanupClassifier`: simplified to template lookup only (no ownership decisions)
+- `MIRChecker`: rewritten to use per-statement state (13 error codes -> 5)
+- `MIRPass#transform_function!`: cleanup decisions from dataflow, not classifier
+
+### Deleted
+- `refine_moved_guards!` (dataflow handles it)
+- `pre_mark_bg_resource_captures!` (dataflow handles BG as moves)
+- `CleanupClassifier`'s needs_cleanup / has_moved_guard logic
+- 8 MIRChecker error codes (`ALLOC_MISMATCH`, `ESCAPE`, `FRAME_ESCAPE`, `BG_ESCAPE`, `GUARD_NO_SUPPRESS`, `REASSIGN_LEAK`, `FIELD_LEAK`, `RAW_CONTRACT`)
+
+### New
+- Use-after-move checking (Rule 1) - the critical missing piece
+- Per-statement ownership snapshots
+- Flow-based verification
+- Borrow checking (Phase 6)
+
+---
+
+## Dependency Order
+
+```
+Phase 1 (enrich dataflow) --> Phase 2 (use-after-move)
+                          --> Phase 3 (cleanup from state)
+                          --> Phase 4 (flow-based checker)
+                          --> Phase 5 (promotion as move)
+                          --> Phase 6 (borrows) [after Phase 2]
+```
+
+Phase 1 is the foundation. Phases 2-5 can be done in any order after Phase 1. Phase 6 depends on Phase 2.

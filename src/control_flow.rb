@@ -280,13 +280,33 @@ class OwnershipDataflow
   MOVED       = :moved
   MAYBE_MOVED = :maybe_moved
 
-  attr_reader :block_in, :block_out
+  # Enriched ownership entry: carries allocator and cleanup info alongside state.
+  # Equality is based on :state only (for fixpoint convergence -- allocator and
+  # needs_cleanup are immutable properties set at declaration, never change).
+  OwnerEntry = Struct.new(:state, :allocator, :needs_cleanup, keyword_init: true) do
+    def ==(other)
+      case other
+      when OwnerEntry then state == other.state
+      when Symbol     then state == other  # backward compat with raw symbols
+      else false
+      end
+    end
+    alias_method :eql?, :==
 
-  def initialize(cfg, fn_node)
+    def hash
+      state.hash
+    end
+  end
+
+  attr_reader :block_in, :block_out, :point_states
+
+  def initialize(cfg, fn_node, schema_lookup: nil)
     @cfg = cfg
     @fn_node = fn_node
-    @block_in  = {}  # block.id => { var_name => state }
-    @block_out = {}  # block.id => { var_name => state }
+    @schema_lookup = schema_lookup
+    @block_in  = {}  # block.id => { var_name => OwnerEntry }
+    @block_out = {}  # block.id => { var_name => OwnerEntry }
+    @point_states = {} # [block.id, stmt_index] => { var_name => OwnerEntry }
   end
 
   # Run the forward dataflow to fixpoint. Returns self for chaining.
@@ -343,10 +363,12 @@ class OwnershipDataflow
   end
 
   # Per-variable summary: { name => { needs_cleanup: bool, has_moved_guard: bool } }
+  # Backward-compatible: reads .state from OwnerEntry.
   def cleanup_summary
     summary = {}
-    exit_states.each do |name, state|
-      case state
+    exit_states.each do |name, entry|
+      st = entry.is_a?(OwnerEntry) ? entry.state : entry
+      case st
       when OWNED
         summary[name] = { needs_cleanup: true, has_moved_guard: false }
       when MAYBE_MOVED
@@ -360,20 +382,27 @@ class OwnershipDataflow
 
   # Build CFG + run dataflow for a function node. Returns the analysis.
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail
-  def self.analyze(fn_node, can_fail_fns: nil)
+  # @param schema_lookup [Proc, nil] type schema resolver for needs_explicit_cleanup
+  def self.analyze(fn_node, can_fail_fns: nil, schema_lookup: nil)
     cfg = FunctionCFG.build(fn_node, can_fail_fns: can_fail_fns)
-    new(cfg, fn_node).analyze!
+    new(cfg, fn_node, schema_lookup: schema_lookup).analyze!
   end
 
   private
 
   # TAKES params start as :owned (callee must clean them up).
+  # TAKES params are always heap-allocated (caller passes heap ownership).
   def init_entry_state
     state = {}
     (@fn_node.deferred_drops || []).each do |dd|
       name = dd.is_a?(Hash) ? dd[:name].to_s : dd.to_s
       param_def = @fn_node.params&.find { |p| p[:name] == name }
-      state[name] = OWNED if param_def&.dig(:takes)
+      if param_def&.dig(:takes)
+        ti = dd.is_a?(Hash) ? dd[:type] : nil
+        ti = ti.is_a?(Type) ? ti : (Type.new(ti || :Any) rescue nil)
+        needs = ti ? ti.needs_explicit_cleanup?(:heap, @schema_lookup) : true
+        state[name] = OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: needs)
+      end
     end
     state
   end
@@ -389,13 +418,35 @@ class OwnershipDataflow
       all_vars = (result.keys | pred_out.keys)
       merged = {}
       all_vars.each do |var|
-        a = result[var] || UNINIT
-        b = pred_out[var] || UNINIT
-        merged[var] = join_state(a, b)
+        a = result[var]
+        b = pred_out[var]
+        merged[var] = join_entry(a, b)
       end
       result = merged
     end
     result
+  end
+
+  # Join two OwnerEntry values (or nil for absent variables).
+  def join_entry(a, b)
+    return b if a.nil?
+    return a if b.nil?
+
+    a_st = a.is_a?(OwnerEntry) ? a.state : a
+    b_st = b.is_a?(OwnerEntry) ? b.state : b
+
+    joined_state = join_state(a_st, b_st)
+
+    # Preserve allocator/needs_cleanup from whichever side has them.
+    # These are immutable per-variable properties, so both sides agree
+    # (or one side is nil/UNINIT and has no entry).
+    if a.is_a?(OwnerEntry)
+      OwnerEntry.new(state: joined_state, allocator: a.allocator, needs_cleanup: a.needs_cleanup)
+    elsif b.is_a?(OwnerEntry)
+      OwnerEntry.new(state: joined_state, allocator: b.allocator, needs_cleanup: b.needs_cleanup)
+    else
+      joined_state
+    end
   end
 
   def join_state(a, b)
@@ -406,11 +457,44 @@ class OwnershipDataflow
   end
 
   # Process all statements in a block, updating the state map.
+  # Stores per-statement snapshots in @point_states.
   def apply_transfer(block, state)
-    block.stmts.each do |stmt|
+    block.stmts.each_with_index do |stmt, idx|
       transfer_stmt(stmt, state)
+      @point_states[[block.id, idx]] = dup_state(state)
     end
     state
+  end
+
+  # Transition a variable to :moved, preserving OwnerEntry metadata.
+  def mark_moved!(state, name)
+    existing = state[name]
+    if existing.is_a?(OwnerEntry)
+      state[name] = OwnerEntry.new(state: MOVED, allocator: existing.allocator, needs_cleanup: existing.needs_cleanup)
+    else
+      state[name] = MOVED
+    end
+  end
+
+  # Create an OwnerEntry for a new declaration from its type info.
+  def make_owner_entry(node)
+    ti = node.type_info rescue nil
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+
+    allocator = if ti
+      prov = ti.provenance_alloc rescue nil
+      prov || (ti.heap_provenance? ? :heap : :frame)
+    else
+      :frame
+    end
+
+    needs = if ti
+      ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false
+    else
+      false
+    end
+
+    OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
   end
 
   # Transfer function for a single statement.
@@ -418,32 +502,32 @@ class OwnershipDataflow
     case stmt
     when AST::VarDecl
       # RHS of declaration: non-Copy identifier = ownership transfer.
-      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
-      state[stmt.name.to_s] = OWNED
+      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }
+      state[stmt.name.to_s] = make_owner_entry(stmt)
 
     when AST::BindExpr
-      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
-      state[stmt.name.to_s] = OWNED if stmt.mode == :decl
+      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }
+      state[stmt.name.to_s] = make_owner_entry(stmt) if stmt.mode == :decl
 
     when AST::Assignment
-      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
+      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }
 
     when AST::ReturnNode
-      collect_binding_moves(stmt.value, state).each { |n| state[n] = MOVED }
+      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }
 
     when AST::MoveNode
       # Standalone GIVE statement: GIVE f;
       inner = stmt.value
       if inner.is_a?(AST::Identifier)
         name = inner.name.to_s
-        state[name] = MOVED if state[name]
+        mark_moved!(state, name) if state[name]
       end
 
     when AST::FuncCall, AST::MethodCall
       # Function args: only was_moved (TAKES/GIVE) triggers a move.
-      collect_explicit_moves(stmt, state).each { |n| state[n] = MOVED }
+      collect_explicit_moves(stmt, state).each { |n| mark_moved!(state, n) }
       # BG blocks in args transfer ownership of captured resources.
-      collect_bg_captures_in_args(stmt, state).each { |n| state[n] = MOVED }
+      collect_bg_captures_in_args(stmt, state).each { |n| mark_moved!(state, n) }
 
     when AST::IfStatement, AST::WhileLoop, AST::ForRange, AST::ForEach, AST::MatchStatement
       # Control flow headers: only process condition/expr for explicit moves.
@@ -454,11 +538,11 @@ class OwnershipDataflow
              when AST::ForRange then nil
              when AST::ForEach then stmt.collection
              end
-      collect_explicit_moves(cond, state).each { |n| state[n] = MOVED } if cond
+      collect_explicit_moves(cond, state).each { |n| mark_moved!(state, n) } if cond
 
       # ForEach/ForRange: loop variable is owned in the body block.
       if stmt.is_a?(AST::ForRange) || stmt.is_a?(AST::ForEach)
-        state[stmt.var_name.to_s] = OWNED
+        state[stmt.var_name.to_s] = make_owner_entry(stmt)
       end
 
     when AST::WithBlock
@@ -472,7 +556,7 @@ class OwnershipDataflow
       # BG block: resource captures transfer ownership to the fiber.
       # String captures are promoted (borrowed), not moved.
       stmt.capture_analysis&.resource_captures&.each do |name|
-        state[name] = MOVED if state[name]
+        mark_moved!(state, name) if state[name]
       end
     end
   end
