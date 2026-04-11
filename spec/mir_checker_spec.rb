@@ -349,6 +349,57 @@ RSpec.describe MIRChecker do
       expect(errors).to be_empty
     end
 
+    it "detects INLINE_ALLOC_MISMATCH for heap append on frame list" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :heap }
+      iz.target_var = "parts"
+      body = [
+        MIR::AllocMark.new("parts", :list, :frame),
+        MIR::Cleanup.new("parts", { kind: :list, alloc: :frame, has_moved_guard: false }),
+        MIR::ExprStmt.new(iz, false),
+      ]
+      errors = checker.check_fn!(fn_def("mismatch_inline", body))
+      expect(errors.any? { |e| e.include?("INLINE_ALLOC_MISMATCH") && e.include?("parts") }).to be true
+    end
+
+    it "passes for frame append on frame list" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :frame }
+      iz.target_var = "parts"
+      body = [
+        MIR::AllocMark.new("parts", :list, :frame),
+        MIR::Cleanup.new("parts", { kind: :list, alloc: :frame, has_moved_guard: false }),
+        MIR::ExprStmt.new(iz, false),
+      ]
+      errors = checker.check_fn!(fn_def("ok_inline", body))
+      expect(errors.select { |e| e.include?("INLINE_ALLOC_MISMATCH") }).to be_empty
+    end
+
+    it "skips INLINE_ALLOC_MISMATCH for key_alloc/val_alloc (dead params in StringMap.put)" do
+      iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", "index_set")
+      iz.allocs = { key_alloc: :heap, val_alloc: :frame }
+      iz.target_var = "map"
+      body = [
+        MIR::AllocMark.new("map", :string_map, :heap),
+        MIR::Cleanup.new("map", { kind: :string_map, alloc: :heap, has_moved_guard: false }),
+        MIR::ExprStmt.new(iz, false),
+      ]
+      errors = checker.check_fn!(fn_def("skip_map_params", body))
+      expect(errors.select { |e| e.include?("INLINE_ALLOC_MISMATCH") }).to be_empty
+    end
+
+    it "skips INLINE_ALLOC_MISMATCH for operations on non-local containers" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :heap }
+      iz.target_var = "external_list"
+      body = [
+        # No AllocMark for external_list -- it's a parameter
+        MIR::ExprStmt.new(iz, false),
+      ]
+      errors = checker.check_fn!(fn_def("external_ok", body))
+      expect(errors.select { |e| e.include?("INLINE_ALLOC_MISMATCH") }).to be_empty
+    end
+
   end
 
   describe "#check_program!" do

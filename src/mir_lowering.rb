@@ -288,6 +288,7 @@ class MIRLowering
     (node.respond_to?(:storage) && node.storage == :heap) ? :heap : :frame
   end
 
+
   def alloc_expr(kind, _rt_name = nil)
     kind == :heap ? :heap : :frame
   end
@@ -297,6 +298,41 @@ class MIRLowering
     when :heap  then :heap
     when :frame then :frame
     else :heap
+    end
+  end
+
+  # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
+  # to a concrete :heap/:frame symbol. Used by InlineZig allocs field.
+  def resolve_alloc_sym(alloc_sym, receiver_type = nil, target_node = nil, node = nil)
+    case alloc_sym
+    when :heap  then :heap
+    when :frame then :frame
+    when :receiver_storage
+      needs_heap = receiver_type&.needs_heap_backing?
+      needs_heap ||= (target_node.respond_to?(:storage) && target_node.storage == :heap)
+      # For method calls, check the receiver object's storage (e.g., parts.append -> parts.storage)
+      needs_heap ||= if node.is_a?(AST::MethodCall)
+        node.object.respond_to?(:storage) && node.object.storage == :heap
+      elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver
+        node.args&.first&.respond_to?(:storage) && node.args.first.storage == :heap
+      end
+      needs_heap ||= (node.respond_to?(:storage) && node.storage == :heap)
+      needs_heap ? :heap : :frame
+    when :node_storage
+      storage = node.respond_to?(:storage) ? node.storage : nil
+      storage == :heap ? :heap : :frame
+    else :heap
+    end
+  end
+
+  # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
+  def extract_root_var_name(node)
+    case node
+    when AST::Identifier then node.name.to_s
+    when AST::GetField   then extract_root_var_name(node.target)
+    when AST::GetIndex   then extract_root_var_name(node.target)
+    else
+      node.respond_to?(:target) ? extract_root_var_name(node.target) : nil
     end
   end
 
@@ -1004,11 +1040,21 @@ class MIRLowering
 
     pattern = node.zig_pattern.dup
 
-    # Resolve {alloc} and wrap TAKES string args in MIR::DupeSlice
+    # Resolve {alloc} to a symbol and wrap TAKES string args in MIR::DupeSlice.
+    # The {alloc} PLACEHOLDER stays in the pattern -- the emitter substitutes it.
+    resolved_allocs = {}
     if pattern.include?("{alloc}")
       alloc_sym = node.matched_stdlib_def&.dig(:alloc) || :node_storage
-      resolved_alloc = resolve_intrinsic_alloc(alloc_sym, node)
-      pattern = pattern.gsub("{alloc}", resolved_alloc)
+      # Resolve receiver type: MethodCall -> receiver object; UFCS FuncCall -> first arg
+      receiver_type = if node.is_a?(AST::MethodCall)
+        ti = node.object.type_info rescue nil
+        ti ? Type.new(ti) : nil
+      else
+        ti = node.args&.first&.type_info rescue nil
+        ti ? Type.new(ti) : nil
+      end
+      resolved = resolve_alloc_sym(alloc_sym, receiver_type, nil, node)
+      resolved_allocs[:alloc] = resolved
 
       # Wrap non-heap strings at TAKES positions in DupeSlice (visible to MIR checker)
       stdlib_args = node.matched_stdlib_def&.dig(:args)
@@ -1048,6 +1094,13 @@ class MIRLowering
 
     iz = MIR::InlineZig.new(pattern, "intrinsic")
     iz.stdlib_def = node.matched_stdlib_def if node.respond_to?(:matched_stdlib_def)
+    iz.allocs = resolved_allocs unless resolved_allocs.empty?
+    # Store target variable name for checker cross-reference with AllocMark.
+    if node.is_a?(AST::MethodCall) && node.object.respond_to?(:name)
+      iz.target_var = node.object.name.to_s
+    elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver && node.args&.first&.respond_to?(:name)
+      iz.target_var = node.args.first.name.to_s  # UFCS: first arg is receiver
+    end
     iz
   end
 
@@ -2866,7 +2919,7 @@ class MIRLowering
       end
     end
 
-    # Resolve allocator placeholders
+    # Substitute non-allocator placeholders into the pattern
     target_zig = emit_expr(target)
     idx_zig = emit_expr(idx)
     val_zig = emit_expr(val)
@@ -2877,21 +2930,19 @@ class MIRLowering
     pattern = pattern.gsub("{index}", idx_zig)
     pattern = pattern.gsub("{value}", val_zig)
 
-    # Resolve allocator placeholders -- use target_node for :receiver_storage
+    # Resolve allocator placeholders to SYMBOLS (not Zig strings).
+    # Placeholders ({key_alloc}, {val_alloc}, {alloc}) stay in the code.
+    # The emitter substitutes them using iz.allocs at emit time.
+    resolved_allocs = {}
     [:alloc, :key_alloc, :val_alloc].each do |alloc_key|
       placeholder = "{#{alloc_key}}"
       next unless pattern.include?(placeholder)
       alloc_sym = op[alloc_key] || :heap
-      if alloc_sym == :receiver_storage
-        needs_heap = receiver_type&.needs_heap_backing?
-        needs_heap ||= (target_node.respond_to?(:storage) && target_node.storage == :heap)
-        pattern = pattern.gsub(placeholder, needs_heap ? "#{rt_name}.heapAlloc()" : "#{rt_name}.frameAlloc()")
-      else
-        pattern = pattern.gsub(placeholder, resolve_intrinsic_alloc(alloc_sym, node))
-      end
+      resolved = resolve_alloc_sym(alloc_sym, receiver_type, target_node, node)
+      resolved_allocs[alloc_key] = resolved
     end
 
-    # Resolve type placeholders from receiver
+    # Resolve type placeholders from receiver (not allocators -- safe to inline)
     if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
       pattern = pattern.gsub("{key_zig}", receiver_type.key_type&.zig_type || "i64")
       pattern = pattern.gsub("{val_zig}", receiver_type.value_type&.zig_type || "f64")
@@ -2899,6 +2950,9 @@ class MIRLowering
 
     iz = MIR::InlineZig.new(pattern, "index_set")
     iz.stdlib_def = op
+    iz.allocs = resolved_allocs unless resolved_allocs.empty?
+    # Store target variable name for checker cross-reference with AllocMark.
+    iz.target_var = extract_root_var_name(target_node)
     MIR::ExprStmt.new(iz, false)
   end
 
@@ -3394,7 +3448,11 @@ class MIRLowering
       mir_node.expr
     when MIR::InlineZig
       code = mir_node.code.sub(/\Atry /, '')
-      MIR::InlineZig.new(code, mir_node.reason)
+      iz = MIR::InlineZig.new(code, mir_node.reason)
+      iz.stdlib_def = mir_node.stdlib_def
+      iz.allocs = mir_node.allocs
+      iz.target_var = mir_node.target_var
+      iz
     when MIR::RawZig
       code = mir_node.code.sub(/\Atry /, '')
       MIR::RawZig.new(code, mir_node.reason)

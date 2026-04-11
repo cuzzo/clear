@@ -19,6 +19,7 @@
 #   HPT_LEAK         -- heap-returning call result discarded
 #   FRAME_OVERFLOW   -- loop allocates from frame arena without per-iteration rewind
 #   RAW_CONTRACT     -- RawZig ownership contract violation (deprecated)
+#   INLINE_ALLOC_MISMATCH -- operation allocator doesn't match container's AllocMark
 #
 # Design: single tree walk collects all data; simple set comparisons verify.
 
@@ -57,6 +58,8 @@ class MIRChecker
 
     # Init allocs: name => symbol from ContainerInit/MakeList/HeapCreate/DupeSlice
     init_allocs  = {}
+    # InlineZig nodes with allocs field -- for collection allocation verification
+    inline_alloc_nodes = []
 
     # Single pass: collect all markers and detect inline issues.
     walk_mir(fn_def.body) do |node, context|
@@ -92,9 +95,16 @@ class MIRChecker
       when MIR::ExprStmt
         # Detect discarded heap-returning calls inline
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
+        # Collect InlineZig with structured allocs for verification
+        if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
+          inline_alloc_nodes << node.expr
+        end
       when MIR::RawZig, MIR::InlineZig
         contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
         raw_nodes << node if contract
+        if node.is_a?(MIR::InlineZig) && node.allocs && !inline_alloc_nodes.include?(node)
+          inline_alloc_nodes << node
+        end
       when MIR::BgBlock
         bg_blocks << node
       when MIR::CatchWrapper
@@ -131,6 +141,9 @@ class MIRChecker
 
     # Rule 7: Loops with frame allocations have per-iteration rewind.
     check_frame_overflow!(fn_def.body)
+
+    # Rule 8: InlineZig embedded allocations are consistent with ownership.
+    verify_inline_alloc_contracts!(inline_alloc_nodes, allocs, cleanups)
 
     # Deprecated: RawZig ownership contracts. Remove when RawZig is eliminated.
     verify_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
@@ -375,6 +388,34 @@ class MIRChecker
         unless cleanups.key?(name)
           @errors << error(:RAW_CONTRACT, name,
             "RawZig(#{node.reason}) produces '#{name}' but no Cleanup found")
+        end
+      end
+    end
+  end
+
+  # Rule 8: InlineZig allocator verification.
+  # Now that InlineZig.allocs carries resolved allocator symbols (not opaque
+  # Zig strings), the checker can inspect them directly -- same as DupeSlice.alloc.
+  #
+  # Currently verifies: InlineZig with heap allocs targets a container that has
+  # cleanup. Future: can add per-operation rules (e.g., map key must be frame).
+  def verify_inline_alloc_contracts!(inline_nodes, allocs, cleanups)
+    inline_nodes.each do |iz|
+      next unless iz.allocs
+      target = iz.target_var
+
+      # Check: If the operation targets a locally-owned container and uses
+      # the :alloc placeholder (lists, pools, sets, numeric maps -- NOT
+      # key_alloc/val_alloc which are dead params in StringMap.put), verify
+      # the operation allocator matches the container's AllocMark allocator.
+      # This catches: frameAlloc append to a heap list, heapAlloc append to
+      # a frame list, etc.
+      if target && allocs.key?(target) && iz.allocs.key?(:alloc)
+        container_alloc = allocs[target].first.alloc  # :heap or :frame
+        op_alloc = iz.allocs[:alloc]
+        if op_alloc != container_alloc
+          @errors << error(:INLINE_ALLOC_MISMATCH, target,
+            "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
         end
       end
     end

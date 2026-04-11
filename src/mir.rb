@@ -694,7 +694,17 @@ module MIR
   #   { borrows: :all }    -- call borrows all args; no ownership transfer
   #   nil = unaudited or pure expression (safe if no allocation/deallocation)
   # ownership_contract: same as RawZig (for RawZig-converted nodes).
-  InlineZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
+  #
+  # allocs: resolved allocator symbols for placeholders left in code.
+  #   { key_alloc: :heap, val_alloc: :frame, alloc: :heap }
+  #   Emitter substitutes {key_alloc} -> "rt.heapAlloc()" etc.
+  #   Checker inspects symbols directly (same as DupeSlice.alloc, etc.)
+  #   nil = no allocator placeholders (pure expression).
+  #
+  # target_var: CLEAR variable name of the container being operated on.
+  #   Used by the checker to cross-reference with AllocMark for consistency.
+  #   nil = no target (intrinsic call, not a container operation).
+  InlineZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def, :allocs, :target_var) do
     include Expr
   end
 end

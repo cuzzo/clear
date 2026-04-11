@@ -114,7 +114,7 @@ class MIREmitter
     when MIR::HasField         then emit_has_field(node)
     when MIR::ItemsAccess      then emit_items_access(node)
     when MIR::LambdaExpr       then emit_lambda(node)
-    when MIR::InlineZig        then node.code
+    when MIR::InlineZig        then emit_inline_zig(node)
 
     else
       raise "MIREmitter: unknown node type #{node.class}"
@@ -122,6 +122,17 @@ class MIREmitter
   end
 
   private
+
+  # Emit InlineZig, resolving allocator placeholders from the allocs field.
+  def emit_inline_zig(node)
+    code = node.code
+    if node.allocs
+      node.allocs.each do |key, sym|
+        code = code.gsub("{#{key}}", alloc_zig(sym))
+      end
+    end
+    code
+  end
 
   # --- Top-level emitters ---
 
