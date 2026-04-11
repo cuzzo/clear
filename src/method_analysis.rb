@@ -4,23 +4,15 @@
 # in std_lib.rb (POOL_METHODS, MAP_METHODS) instead of hard-coded case
 # statements. Mixed into SemanticAnnotator.
 module MethodAnalysis
-  # Attempt to resolve a method call on a collection type (Pool or HashMap).
+  # Attempt to resolve a method call on a collection type (Pool, Set, or HashMap).
   # Returns true if handled, false if the caller should fall through to UFCS.
+  # Dispatch is driven by COLLECTION_METHOD_CONFIGS keyed on Type#dispatch_key.
   def resolve_collection_method(node)
     obj_type = node.object.type_info
-
-    if obj_type&.pool?
-      resolve_typed_method(node, obj_type, POOL_METHODS, :pool_method,
-        "Pool<#{obj_type.element_type.resolved}>")
-    elsif obj_type&.set_collection?
-      resolve_typed_method(node, obj_type, SET_METHODS, :set_method,
-        "Set<#{obj_type.element_type.resolved}>")
-    elsif obj_type&.map?
-      resolve_typed_method(node, obj_type, MAP_METHODS, :map_method,
-        "HashMap<#{obj_type.value_type.resolved}>")
-    else
-      false
-    end
+    config = COLLECTION_METHOD_CONFIGS[obj_type&.dispatch_key]
+    return false unless config
+    resolve_typed_method(node, obj_type, config[:registry], config[:tag],
+                         config[:label].call(obj_type))
   end
 
   # Narrow a collection's element type after an intrinsic call with
@@ -145,18 +137,9 @@ module MethodAnalysis
 
   # Look up the INDEX_OPS entry for a container type.
   # Returns the :get or :set sub-entry, or nil.
+  # Dispatch is driven by Type#dispatch_key — add new indexable types there.
   def resolve_index_op(type_info, op)
-    # Non-raw String and promise lists are not registry-indexable.
-    # String requires .codepoints() or @raw; promise lists yield ~T via NEXT.
-    return nil if type_info&.string? && !type_info&.raw?
     return nil if type_info&.promise_list?
-
-    kind = if type_info&.numeric_map? then :numeric_map
-           elsif type_info&.map? then :string_map
-           elsif type_info&.pool? then :pool
-           elsif type_info&.array? || type_info&.list_collection? then :array
-           end
-    return nil unless kind
-    INDEX_OPS.dig(kind, op)
+    INDEX_OPS.dig(type_info&.dispatch_key, op)
   end
 end

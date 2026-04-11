@@ -2098,16 +2098,16 @@ private
         end
       end
 
-    # Special cases not in registry (no container ownership semantics)
+    # Special cases not covered by INDEX_OPS
     elsif target_type_info.promise_list?
+      # Promise list indexing yields ~T (tense type); dispatch_key returns :array
+      # but resolve_index_op guards against this above.
       elem_t = target_type_info.tense_type.element_type
       node.full_type = Type.new(:"~#{elem_t.resolved}")
     elsif target_type_info.string? && !target_type_info.raw?
       error!(node, "Cannot index String by integer. Use String@raw for byte access, or .codepoints() for iteration.")
-    elsif target_type_info.string? && target_type_info.raw?
-      node.full_type = Type.new(:String, sync: :raw)
-    elsif target_type_info.array? || node.target.metatype == :struct
-      # Fallback for struct field access via index (rare)
+    elsif node.target.metatype == :struct
+      # Struct field access via index (rare legacy path)
       node.full_type = target_type_info.element_type
       node.container_borrow = true
     else

@@ -592,6 +592,21 @@ class Type
     map? || pool? || list_collection? || set_collection?
   end
 
+  # Returns the canonical registry key for this type.
+  # Used as the single lookup key for INDEX_OPS, COLLECTION_METHOD_CONFIGS, etc.
+  # All type-to-dispatch mappings must go through here — never add new if/elsif
+  # chains on type predicates in lowering or annotation code.
+  def dispatch_key
+    if numeric_map?         then :numeric_map
+    elsif map?              then :string_map
+    elsif pool?             then :pool
+    elsif set_collection?   then :set_collection
+    elsif list_collection? || (array? && !string?) then :array
+    elsif string? && raw?   then :string_raw
+    end
+    # Returns nil for non-dispatchable types (plain String, primitives, etc.)
+  end
+
   # Collections that need shared mutable state across call boundaries.
   # Passed by pointer (&) at call sites, use anytype params, tracked in
   # @current_fn_collection_params to prevent double-& in recursive calls.

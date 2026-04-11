@@ -2479,15 +2479,16 @@ class MIRLowering
       end
     elsif ti&.pool?
       MIR::MethodCall.new(target, "get", [index], false)
-    elsif ti&.string?
-      emit_builtin(:charAt, [target, index])
     elsif node.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
       items = MIR::FieldGet.new(target, "items")
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
     else
-      emit_builtin(:getAt, [target, index])
+      # Registry-driven: dispatch_key → INDEX_OPS get :builtin (string_raw → charAt,
+      # array → getAt, etc.). Falls back to :getAt for unregistered types.
+      builtin = INDEX_OPS.dig(ti&.dispatch_key, :get, :builtin) || :getAt
+      emit_builtin(builtin, [target, index])
     end
   end
 
@@ -2875,12 +2876,8 @@ class MIRLowering
     receiver_type = Type.new(ti)
     rt_name = @rt_name
 
-    # Resolve INDEX_OPS :set entry for this container kind
-    kind = if ti&.numeric_map? then :numeric_map
-           elsif ti&.map? then :string_map
-           elsif ti&.pool? then :pool
-           elsif ti&.array? || ti&.list_collection? then :array
-           end
+    # Resolve INDEX_OPS :set entry via dispatch_key
+    kind = ti&.dispatch_key
     op = kind && INDEX_OPS.dig(kind, :set)
 
     target = lower(target_node)

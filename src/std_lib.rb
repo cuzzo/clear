@@ -720,6 +720,33 @@ INDEX_OPS = {
       value_transforms: [],
     },
   },
+  string_raw: {
+    get: {
+      # O(1) byte access on String@raw. No allocation.
+      builtin: :charAt,
+      return_type: ->(_t) { Type.new(:String, sync: :raw) },
+      container_borrow: true,
+    },
+    # No :set — strings are immutable.
+  },
+}.freeze
+
+# ============================================================================
+# Collection Method Dispatch Configuration
+#
+# Maps Type#dispatch_key → { registry, tag, label }.
+# `resolve_collection_method` uses this instead of an if/elsif chain so that
+# new collection types only need a dispatch_key entry + this table entry.
+# ============================================================================
+COLLECTION_METHOD_CONFIGS = {
+  pool:           { registry: POOL_METHODS, tag: :pool_method,
+                    label: ->(t) { "Pool<#{t.element_type.resolved}>" } },
+  set_collection: { registry: SET_METHODS,  tag: :set_method,
+                    label: ->(t) { "Set<#{t.element_type.resolved}>" } },
+  string_map:     { registry: MAP_METHODS,  tag: :map_method,
+                    label: ->(t) { "HashMap<#{t.value_type.resolved}>" } },
+  numeric_map:    { registry: MAP_METHODS,  tag: :map_method,
+                    label: ->(t) { "HashMap<#{t.value_type.resolved}>" } },
 }.freeze
 
 # ============================================================================
