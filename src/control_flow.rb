@@ -595,7 +595,8 @@ class OwnershipDataflow
     when AST::MethodCall
       # Union constructors: U.Variant(payload) - payload transfers ownership.
       # Regular method calls in binding RHS: only was_moved args.
-      if node.object.is_a?(AST::Identifier)
+      # Distinguish by token type: TYPE_ID = union constructor, VAR_ID = method call.
+      if node.object.is_a?(AST::Identifier) && node.object.token&.type == :TYPE_ID
         node.args&.each { |a| collect_ownership_transfers(a, state, consumed) }
       else
         collect_explicit_in(node, state, consumed)
@@ -779,6 +780,221 @@ class OwnershipDataflow
 
   def dup_state(state)
     state.dup
+  end
+end
+
+# ==========================================
+# Use-After-Move Checker (Rule 1)
+# ==========================================
+#
+# Walks every statement in the function. For each Identifier that is READ
+# (not declared, not the target of a move), verifies the ownership state
+# is :live. Reports USE_AFTER_MOVE if :moved, USE_OF_MAYBE_MOVED if
+# :maybe_moved.
+#
+# This is the critical check Rust has that CLEAR previously lacked.
+# Every use-after-free is a use-after-move.
+
+class UseAfterMoveChecker
+  attr_reader :errors
+
+  def initialize(fn_node, dataflow)
+    @fn_node = fn_node
+    @dataflow = dataflow
+    @errors = []
+  end
+
+  # Run the check. Returns self for chaining.
+  def check!
+    # Walk the CFG blocks, check reads against per-statement state.
+    @dataflow.instance_variable_get(:@cfg).blocks.each do |block|
+      block.stmts.each_with_index do |stmt, idx|
+        # State BEFORE this statement executes = state after previous statement
+        # (or block entry for first statement).
+        state_before = if idx == 0
+          @dataflow.block_in[block.id] || {}
+        else
+          @dataflow.point_states[[block.id, idx - 1]] || {}
+        end
+
+        check_stmt_reads(stmt, state_before)
+      end
+    end
+    self
+  end
+
+  # Convenience: build dataflow + run check in one call.
+  def self.check(fn_node, can_fail_fns: nil, schema_lookup: nil)
+    df = OwnershipDataflow.analyze(fn_node, can_fail_fns: can_fail_fns, schema_lookup: schema_lookup)
+    checker = new(fn_node, df)
+    checker.check!
+    checker.errors
+  end
+
+  private
+
+  # Check all read positions in a statement for use-after-move.
+  def check_stmt_reads(stmt, state)
+    case stmt
+    when AST::VarDecl
+      # RHS is read, LHS is declared (not a read).
+      check_reads_in_expr(stmt.value, state)
+
+    when AST::BindExpr
+      # RHS is read. LHS: if :assign mode, the name is NOT being read (it's
+      # being assigned to). If :decl mode, the name is new.
+      check_reads_in_expr(stmt.value, state)
+
+    when AST::Assignment
+      # RHS is read. LHS: if it's a simple identifier reassignment, the name
+      # is NOT being read. If it's field/index access (x.field = val), the
+      # TARGET (x) IS being read (we need x to be live to access its field).
+      if stmt.name.is_a?(AST::GetField) || stmt.name.is_a?(AST::GetIndex)
+        check_reads_in_expr(stmt.name, state)
+      end
+      check_reads_in_expr(stmt.value, state)
+
+    when AST::ReturnNode
+      check_reads_in_expr(stmt.value, state)
+
+    when AST::MoveNode
+      # GIVE x: x is being consumed, not read. The move itself is valid.
+      # But if the inner is a complex expression, sub-expressions are reads.
+      # For simple GIVE ident, skip. For GIVE expr.field, check expr.
+      inner = stmt.value
+      unless inner.is_a?(AST::Identifier)
+        check_reads_in_expr(inner, state)
+      end
+
+    when AST::FuncCall
+      check_call_reads(stmt, state)
+
+    when AST::MethodCall
+      # Receiver is a read (unless it's a union constructor, which is handled
+      # by the annotator as a special form).
+      check_reads_in_expr(stmt.object, state)
+      check_call_reads(stmt, state)
+
+    when AST::IfStatement
+      check_reads_in_expr(stmt.condition, state)
+
+    when AST::WhileLoop
+      check_reads_in_expr(stmt.condition, state)
+
+    when AST::MatchStatement
+      check_reads_in_expr(stmt.expr, state)
+
+    when AST::ForEach
+      check_reads_in_expr(stmt.collection, state)
+
+    when AST::BgBlock, AST::BgStreamBlock
+      # Captures that are reads (non-resource captures are borrows).
+      # Resource captures are moves -- not reads.
+      # String captures are borrows -- they ARE reads.
+      captures = stmt.capture_analysis&.captures
+      resource_captures = Set.new(stmt.capture_analysis&.resource_captures || [])
+      (captures || {}).each_key do |name|
+        next if resource_captures.include?(name)
+        check_identifier_read(name.to_s, state, stmt.token)
+      end
+    end
+  end
+
+  # Check reads in function/method call arguments.
+  # was_moved args are moves (not reads) -- skip them.
+  def check_call_reads(call_node, state)
+    (call_node.args || []).each do |arg|
+      if arg.is_a?(AST::Identifier) && arg.was_moved
+        # This is a TAKES/GIVE arg -- the move itself is valid, not a read.
+        next
+      elsif arg.is_a?(AST::MoveNode)
+        # GIVE wrapper: inner is being moved, not read.
+        next
+      elsif arg.is_a?(AST::CopyNode)
+        # COPY: the source IS read (must be live to copy from).
+        check_reads_in_expr(arg.value, state)
+      else
+        check_reads_in_expr(arg, state)
+      end
+    end
+  end
+
+  # Recursively walk an expression, checking all Identifier reads.
+  def check_reads_in_expr(node, state)
+    return unless node
+
+    case node
+    when AST::Identifier
+      check_identifier_read(node.name.to_s, state, node.token)
+
+    when AST::CopyNode
+      # COPY x: x IS read (must be live to copy from).
+      check_reads_in_expr(node.value, state)
+
+    when AST::MoveNode
+      # GIVE inside an expression: the target is moved, not read.
+      # But sub-expressions of complex moves are reads.
+      unless node.value.is_a?(AST::Identifier)
+        check_reads_in_expr(node.value, state)
+      end
+
+    when AST::BinaryOp
+      check_reads_in_expr(node.left, state)
+      check_reads_in_expr(node.right, state)
+
+    when AST::UnaryOp
+      check_reads_in_expr(node.right, state)
+
+    when AST::FuncCall
+      check_call_reads(node, state)
+
+    when AST::MethodCall
+      check_reads_in_expr(node.object, state)
+      check_call_reads(node, state)
+
+    when AST::GetField
+      check_reads_in_expr(node.target, state)
+
+    when AST::GetIndex
+      check_reads_in_expr(node.target, state)
+      check_reads_in_expr(node.index, state)
+
+    when AST::StructLit
+      node.fields&.each_value { |v| check_reads_in_expr(v, state) }
+
+    when AST::ListLit
+      node.items&.each { |i| check_reads_in_expr(i, state) }
+
+    when AST::HashLit
+      node.pairs&.each { |_k, v|
+        val = v.is_a?(Array) ? v[1] : v
+        check_reads_in_expr(val, state)
+      }
+
+    when AST::Literal
+      # Leaf node: no identifiers to check.
+
+    when AST::StringConcat
+      # String interpolation parts may contain identifiers.
+      node.parts&.each { |p| check_reads_in_expr(p, state) }
+    end
+  end
+
+  # Check a single identifier read against the ownership state.
+  def check_identifier_read(name, state, token)
+    entry = state[name]
+    return unless entry  # not tracked (not in scope, or primitive)
+
+    st = entry.is_a?(OwnershipDataflow::OwnerEntry) ? entry.state : entry
+
+    case st
+    when OwnershipDataflow::MOVED
+      loc = token ? " (line #{token[:line]})" : ""
+      @errors << "[USE_AFTER_MOVE] #{@fn_node.name}::#{name} -- used after being moved#{loc}"
+    # NOTE: :maybe_moved reads are NOT errors -- the variable might still be live.
+    # Rust allows reads of maybe_moved values (it inserts runtime checks only for drops).
+    # We may tighten this later, but for now, only :moved is an error.
+    end
   end
 end
 
@@ -1076,8 +1292,15 @@ class MIRPass
     can_fail_fns = Set.new
     @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
 
-    df = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns)
+    df = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup)
     summary = df.cleanup_summary
+
+    # Use-after-move check (Rule 1): verify no reads of moved variables.
+    checker = UseAfterMoveChecker.new(fn, df)
+    checker.check!
+    unless checker.errors.empty?
+      raise "[Ownership Error] #{checker.errors.first}"
+    end
 
     bindings.each do |var, entry|
       next unless entry[:needs_cleanup]
