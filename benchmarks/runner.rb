@@ -50,12 +50,12 @@ def run_bench(dir)
   if has_rust
     if File.exist?("#{dir}/Cargo.toml")
       puts "Compiling Rust baseline (cargo)..."
-      Dir.chdir(dir) { `cargo build --release -q 2>&1` }
+      Dir.chdir(dir) { `RUSTFLAGS="-A warnings" cargo build --release -q 2>&1` }
       src = "#{dir}/target/release/bench_rust"
       FileUtils.cp(src, "#{dir}/bench_rust") if File.exist?(src)
     else
       puts "Compiling Rust baseline..."
-      `rustc -C opt-level=3 #{dir}/bench.rs -o #{dir}/bench_rust`
+      `rustc -C opt-level=3 -A warnings #{dir}/bench.rs -o #{dir}/bench_rust`
     end
   end
 
@@ -312,7 +312,7 @@ def run_server_bench(dir)
   if has_rust
     if File.exist?("#{dir}/Cargo.toml")
       puts "Compiling Rust server (cargo)..."
-      Dir.chdir(dir) { `cargo build --release -q 2>&1` }
+      Dir.chdir(dir) { `RUSTFLAGS="-A warnings" cargo build --release -q 2>&1` }
       src = "#{dir}/target/release/bench_rust"
       FileUtils.cp(src, "#{dir}/bench_rust") if File.exist?(src)
     end

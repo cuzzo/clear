@@ -41,8 +41,16 @@ static double get_bench_scale() {
 #define N_BASE   1000000
 #define N        ((int)(N_BASE * get_bench_scale()))
 /* 2M buckets → ~50% load factor for 1M items; power-of-2 for cheap masking */
-#define CAP_BASE (1u << 21)
-#define CAP      ( (uint32_t)(CAP_BASE * get_bench_scale()) > (1u << 10) ? (uint32_t)(CAP_BASE * get_bench_scale()) : (1u << 10) )
+static uint32_t next_pow2(uint32_t v) {
+    v--; v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v |= v >> 16; v++;
+    return v < 1024 ? 1024 : v;
+}
+static uint32_t _bench_cap = 0;
+static uint32_t get_cap(void) {
+    if (!_bench_cap) _bench_cap = next_pow2((uint32_t)((1u << 21) * get_bench_scale()));
+    return _bench_cap;
+}
+#define CAP      get_cap()
 #define MASK     (CAP - 1)
 
 
@@ -123,9 +131,9 @@ int main(void) {
     struct timespec t0, t1;
 
     /* Pre-generate string keys */
-    char (*keys)[8] = malloc((size_t)N * 8);
+    char (*keys)[16] = malloc((size_t)N * 16);
     assert(keys);
-    for (int i = 0; i < N; i++) snprintf(keys[i], 8, "%d", i);
+    for (int i = 0; i < N; i++) snprintf(keys[i], 16, "%d", i);
 
     /* ---- String-keyed benchmark ---- */
     {
