@@ -13,17 +13,15 @@ class Type
   attr_accessor :elem_sync      # Element-level sync: T@locked[] = Array<Locked<T>>
   attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
   attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
-  attr_accessor :cleanup_alloc  # :heap or :frame — which allocator to use for cleanup. Set once, read everywhere.
-  attr_accessor :storage_alloc  # :heap or :frame — which allocator for NEW allocations (backing stores, concat buffers).
   attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
 
   # Unified provenance: where was this data allocated?
   #   :rodata — string literal in binary, valid forever, never freed
   #   :frame  — frame arena, reclaimed on function exit
   #   :heap   — heap allocated, must be explicitly freed
-  #   nil     — not yet computed (shadow mode: fall back to existing flags)
+  #   :borrow — borrowed reference, caller owns data, no cleanup needed
+  #   nil     — stack (primitives, small structs); no allocation needed
   attr_accessor :provenance
-  attr_reader :location  # Use location= setter for cache invalidation
 
   # Enum constants for clarity
   LOCATIONS = [:stack, :frame, :heap, :multiowned, :shared]
@@ -168,7 +166,6 @@ class Type
       @collection         = other.instance_variable_get(:@collection)
       @shard_count        = other.instance_variable_get(:@shard_count)
       @soa                = other.instance_variable_get(:@soa)
-      @location           = other.instance_variable_get(:@location)
       @is_error_union     = other.instance_variable_get(:@is_error_union)
       @payload_type_raw   = other.instance_variable_get(:@payload_type_raw)
       @is_optional        = other.instance_variable_get(:@is_optional)
@@ -199,25 +196,18 @@ class Type
     end
 
     # Capability fields — set after parse/copy so they can override.
-    # location must come before ownership/sync so their setters can still adjust it.
-    @location  = location  if location
+    @provenance = location if location && location != :stack
     @ownership = ownership if ownership
     @sync      = sync      if sync
+    # Sync types need a stable heap address (mirrors sync= setter behavior).
+    @provenance = :heap if @sync && @ownership == :affine
     # Pool collection always lives on the heap (owns internal slot array).
     if collection
       @collection = collection
       @zig_type_cache = nil
-      @location = :heap if collection == :pool
+      @provenance = :heap if collection == :pool
     end
     @shard_count = shard_count if shard_count
-
-    # Auto-infer provenance from location when not already set.
-    # This covers the common cases without manual annotation.
-    @provenance ||= case @location
-                    when :rodata then :rodata
-                    when :heap   then :heap
-                    else nil  # :stack/:frame determined by annotator context
-                    end
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
@@ -469,43 +459,54 @@ class Type
   end
 
   def heap?
-    @location == :heap
-  end
-
-  def frame?
-    @location == :frame
-  end
-
-  def rodata?
-    @location == :rodata
-  end
-
-  # Provenance predicates (shadow mode: fall back to existing flags when nil)
-  def heap_provenance?
     @provenance == :heap
   end
 
-  def frame_provenance?
+  def frame?
     @provenance == :frame
   end
 
-  def rodata_provenance?
+  def rodata?
     @provenance == :rodata
   end
+
+  # Aliases: provenance predicates (same as heap?/frame?/rodata? now that provenance is authoritative)
+  alias heap_provenance?   heap?
+  alias frame_provenance?  frame?
+  alias rodata_provenance? rodata?
 
   def borrow_provenance?
     @provenance == :borrow
   end
 
-  # Returns the allocator symbol for this provenance (:heap or :frame).
-  # Falls back to cleanup_alloc when provenance is not yet set.
+  # Returns the allocator symbol for this provenance (:heap or :frame), or nil.
   def provenance_alloc
     case @provenance
-    when :heap then :heap
+    when :heap  then :heap
     when :frame then :frame
-    when :rodata then nil  # rodata never freed
-    else @cleanup_alloc    # fallback during migration
+    else nil
     end
+  end
+
+  # Computed cleanup_alloc: derived from provenance. No longer a stored field.
+  def cleanup_alloc
+    case @provenance
+    when :heap, :frame then @provenance
+    else nil
+    end
+  end
+
+  # Setter: writes provenance. :none (legacy borrow sentinel) maps to :borrow.
+  def cleanup_alloc=(value)
+    case value
+    when :heap, :frame then @provenance = value
+    when :none         then @provenance = :borrow
+    end
+  end
+
+  # location is provenance (kept as alias for backward-compat callers).
+  def location
+    @provenance
   end
 
   def multiowned?
@@ -1182,27 +1183,25 @@ class Type
     (t.collection? || t.map? || t.string? || (t.array? && !t.fixed?)) rescue false
   end
 
-  # Custom setter for location that invalidates zig_type cache
+  # location= setter: writes provenance. Kept for backward compat with callers.
   def location=(value)
     @zig_type_cache = nil
-    @location = value
+    case value
+    when :heap, :frame, :rodata then @provenance = value
+    when :stack then @provenance = nil  # stack = no provenance
+    end
   end
 
   def ownership=(value)
     @zig_type_cache = nil
     @ownership = value
-    # Keep @location in sync for backwards compat
-    case value
-    when :multiowned then @location = :multiowned
-    when :shared     then @location = :shared
-    end
   end
 
   def sync=(value)
     @zig_type_cache = nil
     @sync = value
     # Sync types need a stable heap address
-    @location = :heap if value && @ownership == :affine
+    @provenance = :heap if value && @ownership == :affine
   end
 
   # Returns the Zig type string representation of this type.

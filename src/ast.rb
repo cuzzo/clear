@@ -192,18 +192,16 @@ module AST
       when :link
         t.ownership = :link
       when :rodata
-        t.location = :rodata        # string literal — static data, never freed
         t.provenance = :rodata
       when :frame
-        t.location = :frame         # marks variable as frame-arena pointer (*T in Zig)
         t.provenance = :frame
       when :heap
         if value_sync == :locked
-          t.sync = :locked          # sync= setter sets location = :heap
+          t.sync = :locked          # sync= setter sets provenance = :heap
         elsif value_sync == :write_locked
-          t.sync = :write_locked    # sync= setter sets location = :heap
+          t.sync = :write_locked    # sync= setter sets provenance = :heap
         else
-          t.location = :heap
+          t.provenance = :heap
         end
         t.provenance = :heap
       # :stack — leave provenance nil; set_cleanup_alloc! may upgrade via ||= alloc
@@ -241,11 +239,11 @@ module AST
     end
 
     def storage
-      @storage_override || @type_object&.location
+      @storage_override || (@type_object && (@type_object.provenance || :stack))
     end
 
     def storage=(val)
-      # Use a node-local override rather than mutating @type_object.location.
+      # Use a node-local override rather than mutating @type_object.provenance.
       # @type_object may be a shared Type (e.g. STRING_TYPE from std_lib, or the
       # function return type from FunctionSignature). Mutating it would corrupt every
       # other AST node that shares the same Type object. The override is node-local

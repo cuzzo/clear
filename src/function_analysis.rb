@@ -182,7 +182,10 @@ module FunctionAnalysis
       else
         call_node = Struct.new(:token, :name, :args).new(node.token, func_name, args)
         verify_function_signature!(call_node, func_type)
-        node.full_type = func_type.return_type
+        # Copy the return type so per-call-site mutations (provenance, cleanup_alloc)
+        # don't corrupt the function signature's shared Type object.
+        rt = func_type.return_type
+        node.full_type = rt.is_a?(Type) ? Type.new(rt) : rt
       end
 
 

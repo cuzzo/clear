@@ -63,15 +63,10 @@ RSpec.describe PromotionClassifier do
       CLEAR
     end
 
-    it "promotes the HashMap variable" do
-      expect(plan[:var_promotes].map { |vp| vp[:var] }).to include("m")
-    end
-
-    it "does NOT need struct-level promote (CopyNode already owns string)" do
-      # The string literal is wrapped in CopyNode by ensure_owned_value!,
-      # which heap-dupes it. promoteFields would double-dupe. So struct_promote
-      # should be nil when all promotable fields are already CopyNode-handled.
-      expect(plan[:struct_promote]).to be_nil
+    it "produces an empty plan (HashMap is heap-allocated, no promotion needed)" do
+      # HashMap is always heap-allocated (Phase B+C). Returning a heap HashMap
+      # doesn't need promotion — it's already on the heap.
+      expect(plan).to be_empty
     end
 
     # suppress_defers removed: collect_escaping_identifiers handles defer suppression
@@ -141,8 +136,10 @@ RSpec.describe PromotionClassifier do
       CLEAR
     end
 
-    it "promotes the map variable" do
-      expect(plan[:var_promotes].map { |vp| vp[:var] }).to eq(["m"])
+    it "produces an empty plan (HashMap is heap-allocated, no promotion needed)" do
+      # HashMap is always heap-allocated (Phase B+C). Direct HashMap return
+      # doesn't need promotion — it's already on the heap.
+      expect(plan).to be_empty
     end
 
     # suppress_defers removed: collect_escaping_identifiers handles defer suppression

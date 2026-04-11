@@ -10,11 +10,7 @@ module OwnershipGenerator
 
   # Returns the Zig allocator expression for NEW allocations (backing stores, buffers).
   def storage_alloc_expr(type_info)
-    case type_info&.storage_alloc
-    when :heap then "rt.heapAlloc()"
-    when :frame then "rt.frameAlloc()"
-    else "rt.frameAlloc()" # default: frame arena
-    end
+    type_info&.heap_provenance? ? "rt.heapAlloc()" : "rt.frameAlloc()"
   end
 
   def alloc_expr_from_plan(entry)

@@ -313,7 +313,7 @@ module GenericAnalysis
     end
     if coll_src
       node.type_info.collection  = coll_src.collection
-      node.type_info.location    = :heap if coll_src.collection == :pool || coll_src.collection == :set
+      node.type_info.provenance  = :heap if coll_src.collection == :pool || coll_src.collection == :set
       node.type_info.shard_count = coll_src.shard_count if coll_src.shard_count
       node.type_info.soa         = coll_src.soa if coll_src.respond_to?(:soa) && coll_src.soa
       if node.full_type.is_a?(Type)

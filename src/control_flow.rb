@@ -1203,13 +1203,13 @@ module LoopFrameAnalysis
       when AST::VarDecl
         ti = s.type_info
         next unless ti.is_a?(Type)
-        is_frame = (ti.frame_provenance? || ti.cleanup_alloc == :frame) &&
+        is_frame = ti.frame_provenance? &&
                    (ti.list_collection? || ti.map? || ti.string?)
         decls << s if is_frame && s.name.is_a?(String)
       when AST::BindExpr
         ti = s.type_info rescue nil
         next unless ti.is_a?(Type)
-        is_frame = (ti.frame_provenance? || ti.cleanup_alloc == :frame) &&
+        is_frame = ti.frame_provenance? &&
                    (ti.list_collection? || ti.map? || ti.string?)
         decls << s if s.mode == :decl && is_frame && s.name.is_a?(String)
       end
@@ -1342,8 +1342,7 @@ module LoopFrameAnalysis
     return if ti.heap_provenance?  # already heap
     if node.respond_to?(:storage=)
       node.storage = :heap
-      ti.provenance    = :heap
-      ti.cleanup_alloc = :heap if ti.respond_to?(:cleanup_alloc=)
+      ti.provenance = :heap
     end
   end
 
@@ -1354,8 +1353,7 @@ module LoopFrameAnalysis
     decl_ti = decl_node.type_info rescue nil
     return unless decl_ti.is_a?(Type)
     return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
-    decl_ti.provenance    = :heap
-    decl_ti.cleanup_alloc = :heap
+    decl_ti.provenance = :heap
     decl_node.storage = :heap if decl_node.respond_to?(:storage=)
     if decl_node.respond_to?(:value) && decl_node.value.respond_to?(:storage=)
       decl_node.value.storage = :heap
@@ -1951,7 +1949,6 @@ class MIRPass
       decl_ti = decl&.type_info rescue nil
       if decl_ti.is_a?(Type)
         decl_ti.provenance = :heap
-        decl_ti.cleanup_alloc = :heap
         # Clear escaped_return so CleanupClassifier's escape hatch (line 420)
         # doesn't suppress cleanup. The variable is heap from the start now --
         # it doesn't need runtime promotion, so "escaped" is no longer true.
@@ -2045,7 +2042,6 @@ class MIRPass
       ti = node.type_info rescue nil
       if ti.is_a?(Type)
         ti.provenance = :heap
-        ti.cleanup_alloc = :heap
       end
     end
   end

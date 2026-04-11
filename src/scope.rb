@@ -102,16 +102,16 @@ class Scope
       base_type.ownership = :link
       base_type.link_source = entry.link_source
     when :rodata
-      base_type.location = :rodata  # string literal: static data, never freed
+      base_type.provenance = :rodata  # string literal: static data, never freed
     when :frame
-      base_type.location = :frame   # large local var: arena pointer (*T in Zig)
+      base_type.provenance = :frame   # large local var: arena pointer (*T in Zig)
     when :heap
       if entry.sync == :locked
         base_type.sync = :locked
       elsif entry.sync == :write_locked
         base_type.sync = :write_locked
       else
-        base_type.location = :heap
+        base_type.provenance = :heap
       end
     end
 

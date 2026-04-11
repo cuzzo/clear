@@ -2387,7 +2387,7 @@ private
         t = Type.new(:"Any[]", collection: coll)
         t.soa = true if node.instance_variable_get(:@constructor_soa)
         t.shard_count = node.instance_variable_get(:@constructor_shard_count)
-        t.location = :heap if coll == :pool || coll == :set
+        t.provenance = :heap if coll == :pool || coll == :set
         node.full_type = t
         node.storage = (coll == :pool || coll == :set) ? :heap : :stack
         record_effect(EffectTracker::HEAP)
@@ -2697,7 +2697,7 @@ private
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
     # @indirect forces heap location (same as @local, but different intent).
-    ti.location  = :heap           if node.layout == :indirect
+    ti.provenance = :heap           if node.layout == :indirect
 
     # CapabilityWrap always allocates on the heap.
     if node.ownership || node.sync || node.layout
@@ -3858,7 +3858,7 @@ private
   # ── Ownership Graph Operations ─────────────────────────────────
 
   # Determine which allocator cleanup should use for this binding.
-  # Set once on the type_info, read by the transpiler's emit_cleanup.
+  # Sets provenance on the type_info; cleanup_alloc is now derived from provenance.
   def set_cleanup_alloc!(node)
     ti = node.type_info
     return unless ti
@@ -3870,7 +3870,6 @@ private
       if matched_def.is_a?(Hash)
         # Borrow returns (lifetime:) need no cleanup -- the caller owns the data
         if matched_def[:lifetime]
-          ti.cleanup_alloc = :none
           ti.provenance = :borrow
           return
         end
@@ -3879,29 +3878,17 @@ private
         # alloc IS the return alloc (e.g. map.values() on sharded maps).
         ret_alloc ||= matched_def[:alloc] if matched_def[:allocates]
         if ret_alloc
-          ti.cleanup_alloc = ret_alloc
-          # Only set provenance when the function always allocates on heap
-          # (alloc: :heap), not when it uses the call site's allocator
-          # (alloc: :node_storage) which could be frame or heap.
-          ti.provenance ||= :heap if matched_def[:alloc] == :heap
+          ti.provenance ||= ret_alloc if [:heap, :frame].include?(ret_alloc)
           return
         end
       end
     end
 
     alloc = ti.cleanup_allocator(->(name) { lookup_type_schema(name) })
-    ti.cleanup_alloc = alloc
-
     # Propagate provenance: prefer value's provenance, then computed alloc.
-    val = node.respond_to?(:value) ? node.value : nil
     val_ti = val&.type_info
     val_ti = val_ti.is_a?(Type) ? val_ti : nil
     ti.provenance ||= val_ti&.provenance || alloc
-
-    # Storage allocator: where to allocate NEW data (backing stores, buffers).
-    # Determined by the binding's storage location, not its content.
-    storage = node.respond_to?(:storage) ? node.storage : nil
-    ti.storage_alloc = (storage == :heap) ? :heap : :frame
   end
 
   def og_declare(name, node, type_info, storage)

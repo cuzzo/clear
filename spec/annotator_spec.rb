@@ -1923,10 +1923,11 @@ RSpec.describe SemanticAnnotator do
         expect(result).to eq(:"String")
       end
 
-      it "sets cleanup_alloc to :none (borrow, no allocation)" do
+      it "sets provenance to :borrow (no cleanup, caller owns data)" do
         decl = ast.statements.first
         ti = decl.type_info
-        expect(ti.cleanup_alloc).to eq(:none)
+        expect(ti.provenance).to eq(:borrow)
+        expect(ti.cleanup_alloc).to be_nil
       end
 
       it "sets provenance to :borrow" do

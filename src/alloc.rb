@@ -11,8 +11,8 @@ module AllocHelper
     return storage unless storage == :frame && (current_fn_ctx&.loop_depth || @loop_depth) > 0
     return storage unless node.value.is_a?(AST::StructLit)
 
-    node.type_info.location = :stack
-    node.storage            = :stack
+    node.type_info.provenance = nil  # nil = stack, no allocation needed
+    node.storage              = :stack
     node.value.storage      = :stack
     :stack
   end

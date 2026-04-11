@@ -434,7 +434,7 @@ module CleanupClassifier
   private_class_method def self.classify_binding(name, ti, node, promoted_fns, schema_lookup)
     return nil unless ti
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
-    return nil if ti.borrow_provenance? || ti.cleanup_alloc == :none  # borrow return -- caller owns data
+    return nil if ti.borrow_provenance?  # borrow return -- caller owns data
 
     classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||
@@ -527,8 +527,6 @@ module CleanupClassifier
     return nil unless ti.heap_provenance?
     return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
     return nil if ti.collection? || ti.map? || ti.pool? || ti.set_collection?
-    storage = node.respond_to?(:storage) ? node.storage : nil
-    return nil if storage == :heap # heap_struct_plain handles this
 
     return entry(:heap_string) if ti.string?
     return entry(:heap_slice) if ti.array? && !ti.collection?

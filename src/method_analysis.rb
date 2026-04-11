@@ -37,7 +37,7 @@ module MethodAnalysis
     new_type = Type.new(:"#{val_type}[]", collection: ti.collection)
     new_type.soa = ti.soa if ti.respond_to?(:soa) && ti.soa
     new_type.shard_count = ti.shard_count if ti.shard_count
-    new_type.location = ti.location
+    new_type.provenance = ti.provenance
     new_type.elem_ownership = ti.elem_ownership if ti.elem_ownership
     new_type.elem_sync = ti.elem_sync if ti.elem_sync
     scope_entry.type = new_type
@@ -104,7 +104,7 @@ module MethodAnalysis
     if tag_field == :set_method && node.name == "insert" && obj_type.element_type&.resolved == :Any && node.args.length == 1
       val_type = node.args[0].resolved_type
       new_type = Type.new(:"#{val_type}[]", collection: obj_type.collection)
-      new_type.location = obj_type.location
+      new_type.provenance = obj_type.provenance
       if node.object.is_a?(AST::Identifier)
         entry = node.object.symbol
         if entry

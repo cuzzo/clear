@@ -110,8 +110,8 @@ RSpec.describe "Provenance annotation" do
     end
   end
 
-  describe "provenance agrees with cleanup_alloc" do
-    it "frame list has :frame provenance" do
+  describe "provenance is authoritative for allocation decisions" do
+    it "frame list has :frame provenance and :frame cleanup_alloc" do
       ast, _ = annotate(<<~CLEAR)
         FN main() RETURNS Void ->
             MUTABLE items: Int64[]@list = [];
@@ -121,10 +121,8 @@ RSpec.describe "Provenance annotation" do
       binding = find_binding(ast, "main", "items")
       ti = binding.type_info
       ti = Type.new(ti) if !ti.is_a?(Type)
-      if ti.cleanup_alloc && ti.provenance
-        expect(ti.provenance).to eq(ti.cleanup_alloc),
-          "cleanup_alloc=#{ti.cleanup_alloc.inspect} disagrees with provenance=#{ti.provenance.inspect}"
-      end
+      expect(ti.provenance).to eq(:frame)
+      expect(ti.cleanup_alloc).to eq(:frame)
     end
   end
 end
