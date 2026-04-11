@@ -918,10 +918,23 @@ class PipelineHost
           true, map_type, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("idx_key", expr_mir, false, nil, nil),
+          # Dupe the key so the HashMap owns its own copy. If found_existing, the duped
+          # copy is unused — free it immediately to avoid a leak.
+          MIR::Let.new("idx_key_owned",
+            MIR::InlineZig.new(
+              "try #{alloc_zig_str(alloc)}.dupe(u8, idx_key)",
+              "idx_key_dupe").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
           MIR::Let.new("gop",
             MIR::InlineZig.new(
-              "idx_result.inner.getOrPut(#{alloc_zig_str(alloc)}, idx_key) catch @panic(\"INDEX allocation failed\")",
+              "idx_result.inner.getOrPut(#{alloc_zig_str(alloc)}, idx_key_owned) catch @panic(\"INDEX allocation failed\")",
               "idx_get_or_put").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
+          MIR::IfStmt.new(
+            MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing"),
+            [MIR::ExprStmt.new(
+              MIR::InlineZig.new(
+                "#{alloc_zig_str(alloc)}.free(idx_key_owned)",
+                "idx_key_free"), nil)
+            ], nil),
           MIR::IfStmt.new(
             MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing")),
             [MIR::ExprStmt.new(

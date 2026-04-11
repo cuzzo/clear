@@ -135,8 +135,10 @@ module AST
       if respond_to?(:value) && value.respond_to?(:type_object) && value.type_object
         value_type = value.type_object
         storage = value_type.finalize_storage(@slot_size, value.storage)
-        # Declared type may require heap: pointer types (%Type annotation)
-        storage = :heap if type_obj.heap?
+        # Declared type overrides: pointer types (%Type annotation) or sync types
+        storage = :heap if type_obj.heap? || type_obj.any_sync?
+        # Declared @list annotation requires frame (unless already upgraded to heap)
+        storage = :frame if type_obj.list_collection? && storage != :heap
         value.storage = storage if value.respond_to?(:storage=)
       else
         storage = type_obj.finalize_storage(@slot_size, nil)
@@ -191,8 +193,10 @@ module AST
         t.ownership = :link
       when :rodata
         t.location = :rodata        # string literal — static data, never freed
+        t.provenance = :rodata
       when :frame
         t.location = :frame         # marks variable as frame-arena pointer (*T in Zig)
+        t.provenance = :frame
       when :heap
         if value_sync == :locked
           t.sync = :locked          # sync= setter sets location = :heap
@@ -201,6 +205,8 @@ module AST
         else
           t.location = :heap
         end
+        t.provenance = :heap
+      # :stack — leave provenance nil; set_cleanup_alloc! may upgrade via ||= alloc
       end
 
       # Propagate additional capability fields from the value's type_object

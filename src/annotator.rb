@@ -2182,6 +2182,9 @@ private
     #    Assumption: Maps are homogeneous for now (e.g. all Int64)
     if node.pairs.empty?
       node.full_type = :"HashMap<Any>"
+      node.storage = :heap
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
+      record_effect(EffectTracker::HEAP)
       return
     end
 

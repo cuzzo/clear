@@ -493,6 +493,10 @@ class Type
     @provenance == :rodata
   end
 
+  def borrow_provenance?
+    @provenance == :borrow
+  end
+
   # Returns the allocator symbol for this provenance (:heap or :frame).
   # Falls back to cleanup_alloc when provenance is not yet set.
   def provenance_alloc
@@ -1233,6 +1237,9 @@ class Type
 
     # If already heap, keep it heap
     return :heap if current_storage == :heap || heap?
+
+    # Frame-arena containers: explicit @list (non-sharded, non-sync)
+    return :frame if list_collection?
 
     # Primitives stay on stack
     return :stack if primitive? && !requires_move?

@@ -382,7 +382,9 @@ module PipelineGenerator
       <<~ZIG
         for (pipe_items) |it| {
             const idx_key = #{expr_code};
-            const gop = idx_result.inner.getOrPut(#{alloc}, idx_key) catch @panic("INDEX allocation failed");
+            const idx_key_owned = try #{alloc}.dupe(u8, idx_key);
+            const gop = idx_result.inner.getOrPut(#{alloc}, idx_key_owned) catch @panic("INDEX allocation failed");
+            if (gop.found_existing) #{alloc}.free(idx_key_owned);
             if (!gop.found_existing) {
                 gop.value_ptr.* = std.ArrayListUnmanaged(#{element_zig_type}){};
             }
