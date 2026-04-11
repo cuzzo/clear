@@ -1,27 +1,14 @@
-# mir_checker.rb -- Post-MIRLowering ownership verification.
+# mir_checker.rb -- Post-lowering MIR verification.
 #
-# Enforces the same invariants as Rust's ownership model:
-#   1. Every heap allocation has exactly one owner (binding with cleanup).
-#   2. At scope exit, cleanup all owned bindings.
-#   3. Moves transfer ownership; source cleanup is suppressed via guard.
-#   4. Frame-allocated values cannot escape their scope without promotion.
-#
-# Error codes:
-#   LEAK             -- allocation without matching cleanup
-#   ORPHAN           -- cleanup/move without matching allocation
-#   ALLOC_MISMATCH   -- allocation and cleanup disagree on allocator
-#   ESCAPE           -- value escapes via return without guarded cleanup
-#   FRAME_ESCAPE     -- frame value escapes without promotion (use-after-free)
-#   BG_ESCAPE        -- BG capture needs promotion but none found (use-after-free)
-#   GUARD_NO_SUPPRESS -- guarded cleanup with no move/return to trigger it
-#   REASSIGN_LEAK    -- reassignment without pre-cleanup of old value
-#   FIELD_LEAK       -- field assignment without pre-cleanup of old value
-#   HPT_LEAK         -- heap-returning call result discarded
-#   FRAME_OVERFLOW   -- loop allocates from frame arena without per-iteration rewind
-#   RAW_CONTRACT     -- RawZig ownership contract violation (deprecated)
+# Checks that require lowered MIR (not available pre-lowering):
+#   HPT_LEAK              -- heap-returning call result discarded (leak)
 #   INLINE_ALLOC_MISMATCH -- operation allocator doesn't match container's AllocMark
+#   FRAME_NO_REWIND       -- scope frame-allocates without save/restore (post-lowering)
 #
-# Design: single tree walk collects all data; simple set comparisons verify.
+# All other ownership checks run pre-lowering:
+#   FlowChecker          -- LEAK, ORPHAN_DROP, ORPHAN_GUARD, FRAME_OVERFLOW
+#   UseAfterMoveChecker  -- use-after-move (Rule 1)
+#   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 
 require_relative "type"
 
@@ -33,131 +20,42 @@ class MIRChecker
     @errors = []
   end
 
-  # Verify a single MIR::FnDef. Returns array of error strings.
   def check_fn!(fn_def)
     @fn_name = fn_def.name
     @errors = []
 
-    # Collection bins -- populated by single tree walk.
-    allocs     = {}       # name => [AllocMark]
-    cleanups   = {}       # name => [Cleanup]
-    promotes   = {}       # name => [EscapePromote]
-    escapes    = Set.new  # var names from ReturnMark
-    moves      = Set.new  # var names from MoveMark
-    reassigns  = {}       # name => ReassignMark
-    raw_nodes  = []       # RawZig/InlineZig with ownership_contract
-    bg_blocks  = []       # BgBlock nodes
-    catch_wrappers = []   # CatchWrapper nodes
-    lambdas    = []       # LambdaExpr fn_defs (checked as separate scopes)
-
-    # Inline detections -- collected during the same walk.
-    reassign_targets = Set.new  # names targeted by MIR::Set
-    field_leaks      = []       # MIR::Set with needs_field_cleanup
-    hpt_leaks        = []       # ExprStmt with discarded heap calls
-    loop_stack       = []       # tracks current loop nesting for frame overflow
-
-    # Init allocs: name => symbol from ContainerInit/MakeList/HeapCreate/DupeSlice
-    init_allocs  = {}
-    # InlineZig nodes with allocs field -- for collection allocation verification
+    allocs = {}
+    hpt_leaks = []
     inline_alloc_nodes = []
 
-    # Single pass: collect all markers and detect inline issues.
-    walk_mir(fn_def.body) do |node, context|
+    walk_mir(fn_def.body) do |node|
       case node
       when MIR::AllocMark
         (allocs[node.name] ||= []) << node
-        # Track frame allocs inside loops for FRAME_OVERFLOW
-        if context[:in_loop] && node.alloc == :frame
-          context[:in_loop][:has_frame_alloc] = true
-        end
-      when MIR::Cleanup
-        (cleanups[node.name] ||= []) << node
-      when MIR::EscapePromote
-        (promotes[node.name] ||= []) << node if node.name
-      when MIR::ReturnMark
-        (node.escaped_vars || []).each { |v| escapes << v.to_s }
-      when MIR::MoveMark
-        moves << node.name.to_s
-      when MIR::ReassignMark
-        reassigns[node.name] = node
-      when MIR::Let
-        # Track init allocator for consistency verification
-        init = node.init
-        init_sym = extract_init_alloc(init)
-        init_allocs[node.name] = init_sym if node.name && init_sym
-      when MIR::Set
-        # Collect reassignment targets
-        reassign_targets << node.target.name.to_s if node.target.is_a?(MIR::Ident)
-        # Detect field leaks inline
-        if node.needs_field_cleanup
-          field_leaks << extract_field_path(node.target)
-        end
       when MIR::ExprStmt
-        # Detect discarded heap-returning calls inline
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
-        # Collect InlineZig with structured allocs for verification
         if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
           inline_alloc_nodes << node.expr
         end
-      when MIR::RawZig, MIR::InlineZig
-        contract = node.respond_to?(:ownership_contract) ? node.ownership_contract : nil
-        raw_nodes << node if contract
-        if node.is_a?(MIR::InlineZig) && node.allocs && !inline_alloc_nodes.include?(node)
+      when MIR::InlineZig
+        if node.allocs && !inline_alloc_nodes.include?(node)
           inline_alloc_nodes << node
         end
-      when MIR::BgBlock
-        bg_blocks << node
-      when MIR::CatchWrapper
-        catch_wrappers << node
       when MIR::LambdaExpr
-        lambdas << node.fn_def if node.fn_def
+        if node.fn_def
+          sub = MIRChecker.new
+          @errors.concat(sub.check_fn!(node.fn_def))
+        end
       end
     end
 
-    # --- Verify ownership invariants ---
-
-    # Rule 1: Every allocation has exactly one cleanup (and vice versa).
-    verify_alloc_cleanup_pairs!(allocs, cleanups, moves)
-
-    # Rule 2: Allocation and cleanup agree on allocator identity.
-    verify_allocator_consistency!(allocs, cleanups, promotes, catch_wrappers)
-
-    # Rule 2b: Init expression allocator matches AllocMark.
-    # Skip mutable variables that get reassigned -- their allocator can legitimately change.
-    verify_init_alloc_consistency!(allocs, init_allocs, reassigns, reassign_targets)
-
-    # Rule 3: Moves/returns have correct guard setup.
-    verify_move_guards!(cleanups, moves, escapes, promotes, allocs)
-
-    # Rule 4: Frame values cannot escape without promotion.
-    verify_frame_safety!(escapes, allocs, cleanups, promotes, bg_blocks)
-
-    # Rule 5: Reassignments and field assignments clean up old values.
-    verify_reassign_cleanup!(allocs, reassigns, reassign_targets)
-    field_leaks.each { |path| @errors << error(:FIELD_LEAK, path, "field assignment without pre-cleanup (old value leaks)") }
-
-    # Rule 6: Heap-returning calls must be bound to a variable.
     hpt_leaks.each { |e| @errors << e }
-
-    # Rule 7: Loops with frame allocations have per-iteration rewind.
-    check_frame_overflow!(fn_def.body)
-
-    # Rule 8: InlineZig embedded allocations are consistent with ownership.
-    verify_inline_alloc_contracts!(inline_alloc_nodes, allocs, cleanups)
-
-    # Deprecated: RawZig ownership contracts. Remove when RawZig is eliminated.
-    verify_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
-
-    # Verify nested lambda scopes independently.
-    lambdas.each do |lambda_fn|
-      sub = MIRChecker.new
-      @errors.concat(sub.check_fn!(lambda_fn))
-    end
+    verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
+    verify_frame_rewind!(fn_def.body)
 
     @errors
   end
 
-  # Verify all functions in a MIR::Program.
   def check_program!(program)
     all_errors = []
     program.items.each do |item|
@@ -169,270 +67,38 @@ class MIRChecker
 
   private
 
-  # ================================================================
-  # Tree walker -- single pass, yields (node, context) for every node.
-  # Context tracks loop nesting for frame overflow detection.
-  # ================================================================
-
-  def walk_mir(stmts, context = {}, &block)
+  # Tree walker -- yields every node in the MIR tree.
+  def walk_mir(stmts, &block)
     return unless stmts.is_a?(Array)
-    stmts.each { |s| walk_mir_node(s, context, &block) }
+    stmts.each { |s| walk_mir_node(s, &block) }
   end
 
-  def walk_mir_node(node, context, &block)
+  def walk_mir_node(node, &block)
     return unless node
-    yield node, context
+    yield node
 
     case node
-    when MIR::FnDef
-      walk_mir(node.body, context, &block)
+    when MIR::FnDef       then walk_mir(node.body, &block)
     when MIR::IfStmt
-      walk_mir(node.then_body, context, &block)
-      walk_mir(node.else_body, context, &block)
+      walk_mir(node.then_body, &block)
+      walk_mir(node.else_body, &block)
     when MIR::WhileStmt, MIR::ForStmt
-      loop_ctx = { has_frame_alloc: false, node: node }
-      inner = context.merge(in_loop: loop_ctx)
-      walk_mir(node.body, inner, &block)
-      # After walking body, check frame overflow for this loop
-      if !node.tight && !node.mark_per_iter && loop_ctx[:has_frame_alloc]
-        @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
-      end
-    when MIR::ScopeBlock
-      walk_mir(node.body, context, &block)
-    when MIR::BlockExpr
-      walk_mir(node.body, context, &block)
+      walk_mir(node.body, &block)
+    when MIR::ScopeBlock, MIR::BlockExpr
+      walk_mir(node.body, &block)
     when MIR::SwitchStmt
-      node.arms&.each { |a| walk_mir(a[:body], context, &block) }
-      walk_mir(node.default_body, context, &block)
+      node.arms&.each { |a| walk_mir(a[:body], &block) }
+      walk_mir(node.default_body, &block)
     when MIR::IfChain
-      node.branches&.each { |b| walk_mir(b[:body], context, &block) }
-      walk_mir(node.default_body, context, &block)
-    when MIR::Let
-      yield node.init, context if node.init.is_a?(MIR::LambdaExpr)
-    when MIR::DeferStmt
-      walk_mir_node(node.body, context, &block) if node.body
-    when MIR::ErrDeferStmt
-      walk_mir_node(node.body, context, &block) if node.body
+      node.branches&.each { |b| walk_mir(b[:body], &block) }
+      walk_mir(node.default_body, &block)
+    when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
+    when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
+    when MIR::Let          then yield node.init, {} if node.init.is_a?(MIR::LambdaExpr)
     end
   end
 
-  # ================================================================
-  # Verification rules
-  # ================================================================
-
-  # Rule 1: Every AllocMark has a Cleanup. Every Cleanup has an AllocMark.
-  def verify_alloc_cleanup_pairs!(allocs, cleanups, moves)
-    allocs.each do |name, _|
-      unless cleanups.key?(name)
-        @errors << error(:LEAK, name, "AllocMark without matching Cleanup (leak)")
-      end
-    end
-    cleanups.each do |name, _|
-      next if allocs.key?(name)
-      @errors << error(:ORPHAN, name, "Cleanup without matching AllocMark")
-    end
-    moves.each do |name|
-      cnodes = cleanups[name]
-      next if cnodes&.any? { |c| c.cleanup_entry&.dig(:has_moved_guard) }
-      next if allocs.key?(name)
-      @errors << error(:ORPHAN, name, "MoveMark without matching guarded Cleanup")
-    end
-  end
-
-  # Rule 2: Allocator identity is consistent across alloc/cleanup/promote/catch.
-  def verify_allocator_consistency!(allocs, cleanups, promotes, catch_wrappers)
-    # AllocMark vs Cleanup
-    allocs.each do |name, anodes|
-      cnodes = cleanups[name]
-      next unless cnodes
-      anodes.each do |anode|
-        cnodes.each do |cnode|
-          calloc = cnode.cleanup_entry&.dig(:alloc)
-          next unless calloc
-          if anode.alloc != calloc
-            @errors << error(:ALLOC_MISMATCH, name,
-              "AllocMark uses :#{anode.alloc} but Cleanup uses :#{calloc}")
-            return
-          end
-        end
-      end
-    end
-
-    # EscapePromote: frame cleanup after promote must be guarded
-    promotes.each do |name, promote_nodes|
-      promote_nodes.each do |promote|
-        next unless [:list, :string_map, :generic].include?(promote.strategy)
-        cnodes = cleanups[name]
-        next unless cnodes
-        cnodes.each do |cnode|
-          entry = cnode.cleanup_entry || {}
-          next unless entry[:alloc] == :frame
-          unless entry[:has_moved_guard]
-            @errors << error(:ALLOC_MISMATCH, name,
-              "EscapePromote converts to heap but Cleanup uses :frame without moved guard")
-          end
-        end
-      end
-    end
-
-    # INV-9: catch paths must not change allocator identity
-    catch_wrappers.each do |cw|
-      (cw.error_reassigns || []).each do |reassign|
-        name = reassign[:name]
-        alloc_nodes = allocs[name]
-        next unless alloc_nodes
-        alloc_nodes.each do |alloc_node|
-          if alloc_node.alloc != reassign[:alloc]
-            @errors << error(:ALLOC_MISMATCH, name,
-              "catch reassigns with :#{reassign[:alloc]} but original alloc is :#{alloc_node.alloc} (INV-9)")
-          end
-        end
-      end
-    end
-  end
-
-  # Rule 3: Moved/returned values have correct guard setup.
-  GUARD_EXEMPT_KINDS = Set[:takes_union, :takes_string, :takes_slice,
-                           :match_as_inline_struct, :match_as_slice].freeze
-
-  def verify_move_guards!(cleanups, moves, escapes, promotes, allocs)
-    # Escaped vars must have guarded cleanup
-    escapes.each do |name|
-      cnodes = cleanups[name]
-      next unless cnodes
-      cnodes.each do |cnode|
-        unless cnode.cleanup_entry&.dig(:has_moved_guard)
-          @errors << error(:ESCAPE, name, "escapes via return but Cleanup lacks moved guard")
-        end
-      end
-    end
-
-    # Every guarded cleanup must have a MoveMark or ReturnMark to trigger it
-    cleanups.each do |name, cnodes|
-      cnodes.each do |cnode|
-        entry = cnode.cleanup_entry || {}
-        next unless entry[:has_moved_guard]
-        next if GUARD_EXEMPT_KINDS.include?(entry[:kind])
-        unless moves.include?(name) || escapes.include?(name)
-          @errors << error(:GUARD_NO_SUPPRESS, name,
-            "Cleanup has moved guard but no MoveMark or ReturnMark escape")
-        end
-      end
-    end
-  end
-
-  # Rule 4: Frame-allocated values cannot escape their scope.
-  def verify_frame_safety!(escapes, allocs, cleanups, promotes, bg_blocks)
-    # Frame bindings that escape via return need EscapePromote
-    escapes.each do |name|
-      anodes = allocs[name]
-      next unless anodes&.any? { |a| a.alloc == :frame }
-      next if promotes.key?(name)
-      @errors << error(:FRAME_ESCAPE, name,
-        "frame-allocated binding escapes via return without promotion (UAF)")
-    end
-
-    # BG blocks capturing frame variables need EscapePromote
-    bg_blocks.each do |bg|
-      (bg.captures || {}).each do |name, type_obj|
-        t = type_obj ? Type.new(type_obj) : nil
-        next unless t && t.needs_escape_promotion? && !t.needs_pointer_passing?
-        name_s = name.to_s
-        unless promotes.key?(name_s) || promotes.key?(name.to_sym)
-          @errors << error(:BG_ESCAPE, name_s,
-            "BG capture needs escape promotion but no EscapePromote found (use-after-free)")
-        end
-      end
-    end
-  end
-
-  # Rule 5: Reassignment of owned bindings must pre-cleanup old value.
-  def verify_reassign_cleanup!(allocs, reassigns, reassign_targets)
-    reassign_targets.each do |name|
-      next unless allocs.key?(name)
-      unless reassigns.key?(name)
-        @errors << error(:REASSIGN_LEAK, name,
-          "reassignment without pre-cleanup (old value leaks)")
-      end
-    end
-  end
-
-  # FRAME_OVERFLOW: loops with frame allocations need per-iteration rewind.
-  # This is detected inline during the walk (via loop context tracking).
-  # This method handles recursive checking into nested control flow that
-  # contains loops -- the walk already handles the top-level detection.
-  def check_frame_overflow!(stmts)
-    # Frame overflow is now detected during the single walk pass.
-    # This method is a no-op kept for structural clarity.
-  end
-
-  # Deprecated: RawZig ownership contract verification.
-  # To be removed when all RawZig nodes are eliminated from the pipeline.
-  def verify_raw_zig_contracts!(raw_nodes, allocs, cleanups, moves)
-    raw_nodes.each do |node|
-      contract = node.ownership_contract
-      next unless contract
-
-      (contract[:consumes] || []).each do |name|
-        unless moves.include?(name)
-          @errors << error(:RAW_CONTRACT, name,
-            "RawZig(#{node.reason}) consumes '#{name}' but no MoveMark found")
-        end
-      end
-
-      (contract[:produces] || []).each do |name|
-        unless allocs.key?(name)
-          @errors << error(:RAW_CONTRACT, name,
-            "RawZig(#{node.reason}) produces '#{name}' but no AllocMark found")
-        end
-        unless cleanups.key?(name)
-          @errors << error(:RAW_CONTRACT, name,
-            "RawZig(#{node.reason}) produces '#{name}' but no Cleanup found")
-        end
-      end
-    end
-  end
-
-  # Rule 8: InlineZig allocator verification.
-  # Now that InlineZig.allocs carries resolved allocator symbols (not opaque
-  # Zig strings), the checker can inspect them directly -- same as DupeSlice.alloc.
-  #
-  # Currently verifies: InlineZig with heap allocs targets a container that has
-  # cleanup. Future: can add per-operation rules (e.g., map key must be frame).
-  def verify_inline_alloc_contracts!(inline_nodes, allocs, cleanups)
-    inline_nodes.each do |iz|
-      next unless iz.allocs
-      target = iz.target_var
-
-      # Check: If the operation targets a locally-owned container and uses
-      # the :alloc placeholder (lists, pools, sets, numeric maps -- NOT
-      # key_alloc/val_alloc which are dead params in StringMap.put), verify
-      # the operation allocator matches the container's AllocMark allocator.
-      # This catches: frameAlloc append to a heap list, heapAlloc append to
-      # a frame list, etc.
-      if target && allocs.key?(target) && iz.allocs.key?(:alloc)
-        container_alloc = allocs[target].first.alloc  # :heap or :frame
-        op_alloc = iz.allocs[:alloc]
-        if op_alloc != container_alloc
-          @errors << error(:INLINE_ALLOC_MISMATCH, target,
-            "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
-        end
-      end
-    end
-  end
-
-  # ================================================================
-  # Helpers
-  # ================================================================
-
-  def extract_field_path(node)
-    case node
-    when MIR::FieldGet then "#{extract_field_path(node.object)}.#{node.field}"
-    when MIR::Ident    then node.name.to_s
-    else "?"
-    end
-  end
-
+  # HPT_LEAK: heap-returning call result discarded.
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
     if node.is_a?(MIR::Call) && node.heap_provenance
@@ -451,42 +117,104 @@ class MIRChecker
     end
   end
 
-  # Rule 2b: Init expression allocator must match AllocMark allocator.
-  # Catches the case where lowering emits heapAlloc() but cleanup plan says :frame.
-  def verify_init_alloc_consistency!(allocs, init_allocs, reassigns, reassign_targets)
-    init_allocs.each do |name, init_sym|
-      # Skip mutable variables that get reassigned -- the init allocator may
-      # legitimately differ from the cleanup allocator when the variable is
-      # reassigned with a value from a different allocator.
-      next if reassigns.key?(name) || reassign_targets.include?(name)
+  # INLINE_ALLOC_MISMATCH: InlineZig operation allocator must match container.
+  #
+  # Checks ALL allocator params (:alloc, :key_alloc, :val_alloc) against the
+  # container's AllocMark. A frame-allocated key/value stored in a heap
+  # container becomes a dangling pointer after frame rewind.
+  def verify_inline_alloc_contracts!(inline_nodes, allocs)
+    inline_nodes.each do |iz|
+      next unless iz.allocs
+      target = iz.target_var
+      next unless target && allocs.key?(target)
 
-      anodes = allocs[name]
-      next unless anodes
-      anodes.each do |anode|
-        if anode.alloc != init_sym
-          @errors << error(:ALLOC_MISMATCH, name,
-            "init uses :#{init_sym} but AllocMark uses :#{anode.alloc}")
+      container_alloc = allocs[target].first.alloc
+
+      # Check primary allocator
+      if iz.allocs.key?(:alloc)
+        op_alloc = iz.allocs[:alloc]
+        if op_alloc != container_alloc
+          @errors << error(:INLINE_ALLOC_MISMATCH, target,
+            "operation uses :#{op_alloc} but container '#{target}' is :#{container_alloc}")
+        end
+      end
+
+      # Check key/value allocators: frame-allocated stored data in a heap
+      # container = use-after-free when the frame rewinds.
+      [:key_alloc, :val_alloc].each do |alloc_key|
+        next unless iz.allocs.key?(alloc_key)
+        stored_alloc = iz.allocs[alloc_key]
+        if stored_alloc == :frame && container_alloc == :heap
+          @errors << error(:INLINE_ALLOC_MISMATCH, target,
+            "#{alloc_key} is :frame but container '#{target}' is :heap " \
+            "(stored data will dangle after frame rewind)")
         end
       end
     end
   end
 
-  # Extract allocator symbol from a Let init expression.
-  # Returns :heap, :frame, or nil (if init doesn't carry an allocator).
-  def extract_init_alloc(node)
-    case node
-    when MIR::ContainerInit
-      # list_empty and set_empty don't actually allocate -- skip.
-      return nil if node.strategy == :list_empty || node.strategy == :set_empty
-      node.alloc
-    when MIR::MakeList
-      return nil if node.items.empty?
-      node.alloc
-    when MIR::HeapCreate    then node.alloc
-    when MIR::DupeSlice     then node.alloc
-    when MIR::DeepCopy      then node.alloc
-    when MIR::CapWrap       then node.alloc
-    else nil
+  # FRAME_NO_REWIND: every loop that frame-allocates must rewind per iteration.
+  #
+  # Post-lowering check: walks the MIR tree looking for loops that contain
+  # frame AllocMarks or InlineZig with frame allocs but lack mark_per_iter.
+  # Without per-iteration rewind, frame arena grows unboundedly across iterations.
+  def verify_frame_rewind!(body)
+    return unless body.is_a?(Array)
+    check_loop_rewind!(body)
+  end
+
+  def check_loop_rewind!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when MIR::WhileStmt
+        unless stmt.mark_per_iter || stmt.tight
+          if body_has_frame_alloc?(stmt.body)
+            @errors << error(:FRAME_NO_REWIND, @fn_name,
+              "loop body frame-allocates but has no mark_per_iter rewind")
+          end
+        end
+        check_loop_rewind!(stmt.body)
+
+      when MIR::ForStmt
+        unless stmt.mark_per_iter || stmt.tight
+          if body_has_frame_alloc?(stmt.body)
+            @errors << error(:FRAME_NO_REWIND, @fn_name,
+              "loop body frame-allocates but has no mark_per_iter rewind")
+          end
+        end
+        check_loop_rewind!(stmt.body)
+
+      when MIR::IfStmt
+        check_loop_rewind!(stmt.then_body)
+        check_loop_rewind!(stmt.else_body)
+      when MIR::ScopeBlock, MIR::BlockExpr
+        check_loop_rewind!(stmt.body)
+      when MIR::SwitchStmt
+        stmt.arms&.each { |a| check_loop_rewind!(a[:body]) }
+        check_loop_rewind!(stmt.default_body)
+      when MIR::IfChain
+        stmt.branches&.each { |b| check_loop_rewind!(b[:body]) }
+        check_loop_rewind!(stmt.default_body)
+      end
+    end
+  end
+
+  # Does this statement list contain frame allocations (directly, not in nested scopes)?
+  def body_has_frame_alloc?(stmts)
+    return false unless stmts.is_a?(Array)
+    stmts.any? do |s|
+      case s
+      when MIR::AllocMark
+        s.alloc == :frame
+      when MIR::ExprStmt
+        s.expr.is_a?(MIR::InlineZig) && s.expr.allocs&.any? { |_k, v| v == :frame }
+      when MIR::Let
+        # Let with frame-allocating init (e.g., InlineZig call)
+        s.init.is_a?(MIR::InlineZig) && s.init.allocs&.any? { |_k, v| v == :frame }
+      else
+        false
+      end
     end
   end
 

@@ -326,14 +326,14 @@ end
 ### Changes
 - `OwnershipDataflow`: enriched state (allocator, needs_cleanup), per-statement snapshots
 - `CleanupClassifier`: simplified to template lookup only (no ownership decisions)
-- `MIRChecker`: rewritten to use per-statement state (13 error codes -> 5)
+- `MIRChecker`: reduced to 2 post-lowering checks (HPT_LEAK, INLINE_ALLOC_MISMATCH)
 - `MIRPass#transform_function!`: cleanup decisions from dataflow, not classifier
 
 ### Deleted
 - `refine_moved_guards!` (dataflow handles it)
 - `pre_mark_bg_resource_captures!` (dataflow handles BG as moves)
 - `CleanupClassifier`'s needs_cleanup / has_moved_guard logic
-- 8 MIRChecker error codes (`ALLOC_MISMATCH`, `ESCAPE`, `FRAME_ESCAPE`, `BG_ESCAPE`, `GUARD_NO_SUPPRESS`, `REASSIGN_LEAK`, `FIELD_LEAK`, `RAW_CONTRACT`)
+- 11 MIRChecker error codes (`LEAK`, `ORPHAN`, `ALLOC_MISMATCH`, `ESCAPE`, `FRAME_ESCAPE`, `BG_ESCAPE`, `GUARD_NO_SUPPRESS`, `REASSIGN_LEAK`, `FIELD_LEAK`, `RAW_CONTRACT`, `FRAME_OVERFLOW`) -- replaced by FlowChecker/UseAfterMoveChecker/BorrowChecker pre-lowering
 
 ### New
 - Use-after-move checking (Rule 1) - the critical missing piece

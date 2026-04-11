@@ -602,7 +602,7 @@ class Type
   # True when backing storage operations require the heap allocator.
   # Used by the transpiler to resolve :receiver_storage allocator symbols.
   def needs_heap_backing?
-    pool? || sharded? || heap_provenance?
+    pool? || sharded? || heap_provenance? || map?
   end
 
   # True when this map type stores an allocator in its Zig struct initializer.

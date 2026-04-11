@@ -677,6 +677,10 @@ class OwnershipDataflow
     when AST::CopyNode
       # COPY does NOT move the source.
 
+    when AST::CapabilityWrap
+      # Unwrap: S{ field: x } @shared still consumes x.
+      collect_ownership_transfers(node.value, state, consumed)
+
     when AST::BgBlock, AST::BgStreamBlock
       # Resources captured by BG fibers transfer ownership.
       node.capture_analysis&.resource_captures&.each do |name|
@@ -788,6 +792,8 @@ class OwnershipDataflow
       walk_expr(node.value, &block)
     when AST::MoveNode
       walk_expr(node.value, &block)
+    when AST::CapabilityWrap
+      walk_expr(node.value, &block)
     when AST::ReturnNode
       walk_expr(node.value, &block)
     when AST::Assignment
@@ -827,6 +833,8 @@ class OwnershipDataflow
     when AST::HashLit
       node.pairs&.each { |_k, v| walk_expr_skip_copy(v.is_a?(Array) ? v[1] : v, &block) }
     when AST::MoveNode
+      walk_expr_skip_copy(node.value, &block)
+    when AST::CapabilityWrap
       walk_expr_skip_copy(node.value, &block)
     when AST::ReturnNode
       walk_expr_skip_copy(node.value, &block)
@@ -1428,6 +1436,9 @@ class BorrowChecker
       names << inner.name.to_s if inner.is_a?(AST::Identifier)
     when AST::CopyNode
       # COPY does NOT move the source.
+    when AST::CapabilityWrap
+      # Unwrap: S{ field: x } @shared still consumes x.
+      _collect_moves(node.value, names)
     when AST::BgBlock, AST::BgStreamBlock
       node.capture_analysis&.resource_captures&.each { |n| names << n }
     else
@@ -1468,6 +1479,8 @@ class BorrowChecker
     when AST::ListLit
       node.items&.each { |i| walk_for_was_moved(i, &block) }
     when AST::MoveNode
+      walk_for_was_moved(node.value, &block)
+    when AST::CapabilityWrap
       walk_for_was_moved(node.value, &block)
     end
   end
@@ -2193,6 +2206,9 @@ class MIRPass
   def walk_consumed(node, names, bindings)
     return unless node
     case node
+    when AST::CapabilityWrap
+      # Unwrap: S{ field: x } @shared still consumes x.
+      walk_consumed(node.value, names, bindings)
     when AST::StructLit
       node.fields.each_value do |v|
         if v.is_a?(AST::Identifier)

@@ -554,6 +554,9 @@ module CleanupClassifier
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
     return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
+    # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
+    # even if storage was incorrectly set to :heap by upstream passes.
+    return nil if ti.primitive?
     entry(:heap_struct_plain)
   end
 
