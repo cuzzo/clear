@@ -166,10 +166,7 @@ RSpec.describe ZigTranspiler do
   # WhileLoop per-iteration frame marks
   # ===========================================================================
   describe "WhileLoop per-iteration frame marks" do
-    # Phase 2 (LoopFrameAnalysis): mark_per_iter is set in Pass 2 after
-    # CleanupClassifier finalizes allocators. These tests will pass when
-    # LoopFrameAnalysis is implemented in control_flow.rb.
-    pending "Phase 2: emits saveLoopMark/restoreLoopMark when loop-local list is appended" do
+    it "emits saveLoopMark/restoreLoopMark when loop-local list is appended" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
@@ -330,9 +327,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("checkYield()")
     end
 
-    # Phase 2 (LoopFrameAnalysis): checkYield is co-emitted with saveLoopMark.
-    # Will pass when LoopFrameAnalysis correctly sets mark_per_iter for loop-local lists.
-    pending "Phase 2: emits checkYield alongside saveLoopMark for frame-allocating loops" do
+    it "emits checkYield alongside saveLoopMark for frame-allocating loops" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;

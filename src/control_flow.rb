@@ -1066,6 +1066,356 @@ class UseAfterMoveChecker
 end
 
 # ==========================================
+# LoopFrameAnalysis (Pass 2, Phase 2.5)
+# ==========================================
+#
+# Sets mark_per_iter on every loop AST node and updates SHARD shard_context
+# frame-alloc flags.  Runs after CleanupClassifier has finalised every
+# binding's allocator, before MIR node insertion (Phase 3).
+#
+# Invariant: mark_per_iter = true  iff  the loop body contains at least one
+# local, non-escaping, frame-allocated VarDecl.
+#
+#   "local"      -- declared inside THIS loop (not a nested loop or outer scope)
+#   "frame"      -- node.storage == :frame  (set by annotator / upgrade phases)
+#   "non-escaping" -- not passed as a value argument to a mutates_receiver
+#                    call on an outer-scope container (where the stored pointer
+#                    must survive the per-iteration rewind)
+#
+# If mark_per_iter becomes true and the direct body also contains
+# mutates_receiver calls on OUTER containers, those containers are promoted to
+# heap so the per-iteration rewind cannot corrupt their backing store.
+#
+# Scope of rewind:
+#   - FOR / WHILE / FOREACH loops -- regular AST loops
+#   - IF / MATCH / WITH  -- NOT a rewind boundary; always recurse into branches
+#   - Nested loops       -- analysed first (inner→outer); their outer-mutation
+#                          promotions are applied before the enclosing loop runs
+#   - Functions/lambdas  -- their own frame; the callee rewinds on return
+#
+module LoopFrameAnalysis
+
+  # Entry point.  Call once per pass, after CleanupClassifier.
+  def self.analyze!(fn_nodes)
+    fn_nodes.each_value do |fn|
+      next unless fn.body
+      walk_stmts!(fn.body)
+      update_shard_contexts!(fn.body, fn_nodes)
+    end
+  end
+
+  # ── recursive AST walk ────────────────────────────────────────────────────
+
+  def self.walk_stmts!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each { |s| walk_stmt!(s) }
+  end
+
+  def self.walk_stmt!(stmt)
+    case stmt
+    when AST::WhileLoop
+      walk_stmts!(stmt.do_branch)          # inner loops first
+      process_loop!(stmt, stmt.do_branch)
+    when AST::ForRange
+      walk_stmts!(stmt.body)
+      process_loop!(stmt, stmt.body)
+    when AST::ForEach
+      walk_stmts!(stmt.body)
+      process_loop!(stmt, stmt.body)
+    when AST::IfStatement
+      walk_stmts!(stmt.then_branch)
+      walk_stmts!(stmt.else_branch)
+    when AST::MatchStatement
+      stmt.cases&.each { |c| walk_stmts!(c[:body]) }
+      walk_stmts!(stmt.default_case)
+    when AST::WithBlock
+      walk_stmts!(stmt.body)
+    when AST::DoBlock
+      stmt.branches&.each { |b| walk_stmts!(b[:body]) }
+    end
+  end
+
+  # ── loop analysis ─────────────────────────────────────────────────────────
+
+  def self.process_loop!(loop_node, body)
+    return if loop_node.tight  # tight loops suppress all frame marks
+
+    local_names = collect_local_names(body)
+
+    # Find frame-allocated local VarDecls that don't escape into outer containers.
+    non_escaping = local_frame_decls(body, local_names).reject do |decl|
+      escapes_to_outer?(decl.name.to_s, body, local_names)
+    end
+
+    loop_node.mark_per_iter = non_escaping.any?
+
+    if loop_node.mark_per_iter
+      frame_local_names = non_escaping.map { |d| d.name.to_s }.to_set
+
+      # When the loop rewinds, backing-store extensions of OUTER frame containers
+      # in the DIRECT body are corrupted.  Promote them to heap.
+      direct_outer_mutations(body, local_names).each do |receiver_node|
+        promote_to_heap!(receiver_node)
+      end
+
+      # Outer string variables reassigned with frame-allocated expressions
+      # (e.g. resp = resp + result) need preserve-and-rewind rather than
+      # heap promotion; the old value is discarded each iteration so promoting
+      # to heap would leak every intermediate string.
+      loop_node.loop_preserve_vars = outer_string_reassigns(body, local_names, frame_local_names)
+    else
+      loop_node.loop_preserve_vars = nil
+    end
+
+    # Always: promote string-typed RHS expressions to heap when assigned to outer
+    # struct/map fields (outer_var.field = expr or outer_var[key] = expr).
+    # This prevents allocator mismatches: the cleanup-before-reassign MIR node
+    # uses the field's declared allocator (heap), so the new value must also be heap.
+    promote_outer_field_assigns!(body, local_names)
+  end
+
+  # ── helpers: local name / frame-decl collection ──────────────────────────
+
+  # Collect names declared directly in body (stop at nested loop / fn boundaries).
+  def self.collect_local_names(body)
+    names = Set.new
+    scan_direct(body) do |s|
+      case s
+      when AST::VarDecl
+        names << s.name.to_s if s.name.is_a?(String)
+      when AST::BindExpr
+        names << s.name.to_s if s.name.is_a?(String) && s.mode == :decl
+      end
+    end
+    names
+  end
+
+  # Frame-allocated VarDecl/BindExpr declared directly in body.
+  # Use type_info.frame_provenance? (provenance-based) rather than storage == :frame
+  # (location-based) because lists/strings annotated with @list have provenance=:frame
+  # but location=nil (their storage field stays :stack after finalize_storage!).
+  # Only includes types that actually make frame-arena allocations (collections,
+  # strings) -- primitives like Int64 are excluded even when frame_provenance? is set.
+  def self.local_frame_decls(body, _local_names)
+    decls = []
+    scan_direct(body) do |s|
+      case s
+      when AST::VarDecl
+        ti = s.type_info
+        next unless ti.is_a?(Type)
+        is_frame = (ti.frame_provenance? || ti.cleanup_alloc == :frame) &&
+                   (ti.list_collection? || ti.map? || ti.string?)
+        decls << s if is_frame && s.name.is_a?(String)
+      when AST::BindExpr
+        ti = s.type_info rescue nil
+        next unless ti.is_a?(Type)
+        is_frame = (ti.frame_provenance? || ti.cleanup_alloc == :frame) &&
+                   (ti.list_collection? || ti.map? || ti.string?)
+        decls << s if s.mode == :decl && is_frame && s.name.is_a?(String)
+      end
+    end
+    decls
+  end
+
+  # Does var_name appear as a value arg to a mutates_receiver call on an outer
+  # container anywhere in the loop body (including nested loops)?
+  def self.escapes_to_outer?(var_name, body, local_names)
+    found = false
+    AST.walk_body(body) do |node|
+      next unless node.respond_to?(:mutates_receiver) && node.mutates_receiver
+      case node
+      when AST::MethodCall
+        receiver = node.object
+        next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
+        found = true if node.args&.any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+      when AST::FuncCall
+        receiver = node.args&.first
+        next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
+        found = true if node.args&.drop(1)&.any? { |a| a.is_a?(AST::Identifier) && a.name == var_name }
+      end
+    end
+    found
+  end
+
+  # mutates_receiver calls in DIRECT body where receiver is an outer container.
+  # Returns the receiver Identifier nodes for promotion.
+  def self.direct_outer_mutations(body, local_names)
+    receivers = []
+    scan_direct(body) do |s|
+      next unless s.respond_to?(:mutates_receiver) && s.mutates_receiver
+      receiver = case s
+                 when AST::MethodCall then s.object
+                 when AST::FuncCall   then s.args&.first
+                 end
+      if receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
+        receivers << receiver
+      end
+    end
+    receivers
+  end
+
+  # Outer-scope string variables that are reassigned with frame-allocating
+  # expressions (e.g. resp = resp + result where result is a frame local).
+  # These need loopPreserveAndRewind rather than heap promotion.
+  # Returns a Set of variable name strings, or nil if none.
+  def self.outer_string_reassigns(body, local_names, frame_local_names)
+    preserve = Set.new
+    AST.walk_body(body) do |node|
+      next unless node.is_a?(AST::BindExpr) && node.mode == :assign
+      next unless node.name.is_a?(String) && !local_names.include?(node.name)
+      ti = node.type_info rescue nil
+      next unless ti.is_a?(Type) && ti.string?
+      # Check if the RHS references any local frame variable.
+      next unless rhs_references_any?(node.value, frame_local_names)
+      preserve << node.name
+    end
+    preserve.any? ? preserve : nil
+  end
+
+  # Does expr (or any sub-expression) contain an Identifier whose name is in
+  # the given set?  Performs a deep structural walk of expression nodes.
+  def self.rhs_references_any?(expr, names)
+    return false unless expr
+    case expr
+    when AST::Identifier
+      return names.include?(expr.name)
+    when AST::BinaryOp
+      return rhs_references_any?(expr.left, names) || rhs_references_any?(expr.right, names)
+    when AST::UnaryOp
+      return rhs_references_any?(expr.operand, names)
+    when AST::FuncCall
+      return expr.args&.any? { |a| rhs_references_any?(a, names) } || false
+    when AST::MethodCall
+      return rhs_references_any?(expr.object, names) ||
+             (expr.args&.any? { |a| rhs_references_any?(a, names) } || false)
+    when AST::GetField
+      return rhs_references_any?(expr.target, names)
+    when AST::GetIndex
+      return rhs_references_any?(expr.target, names) || rhs_references_any?(expr.index, names)
+    when AST::IfExpr
+      return rhs_references_any?(expr.condition, names) ||
+             rhs_references_any?(expr.then_expr, names) ||
+             rhs_references_any?(expr.else_expr, names)
+    end
+    false
+  end
+
+  # Promote frame-allocating string expressions assigned to outer struct/map fields.
+  # Pattern: outer_var.field = expr  or  outer_var[key] = expr
+  # where outer_var is not a loop-local AND expr is frame-allocating (string concat,
+  # toString, etc.). The MIR cleanup-before-reassign uses the field's declared
+  # allocator (heap), so the new value must also be heap to avoid a mismatch.
+  def self.promote_outer_field_assigns!(body, local_names)
+    AST.walk_body(body) do |node|
+      next unless node.is_a?(AST::Assignment)
+      target = node.name
+      next unless target.is_a?(AST::GetField) || target.is_a?(AST::GetIndex)
+      receiver = case target
+                 when AST::GetField  then target.target
+                 when AST::GetIndex  then target.target
+                 end
+      next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
+      val = node.value
+      next unless val
+      val_ti = val.type_info rescue nil
+      next unless val_ti.is_a?(Type) && val_ti.string?
+      # Promote the value expression so the concat/dupe uses heapAlloc.
+      promote_value_to_heap!(val)
+    end
+  end
+
+  # Set storage=:heap on an expression node so it uses heapAlloc.
+  # Handles FuncCall/MethodCall (mark heap_dupe_result) and direct string literals.
+  def self.promote_value_to_heap!(node)
+    return unless node
+    ti = node.type_info rescue nil
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    return unless ti&.string?
+    return if ti.heap_provenance?  # already heap
+    if node.respond_to?(:storage=)
+      node.storage = :heap
+      ti.provenance    = :heap
+      ti.cleanup_alloc = :heap if ti.respond_to?(:cleanup_alloc=)
+    end
+  end
+
+  # Promote a container Identifier's declaration to heap.
+  def self.promote_to_heap!(ident_node)
+    decl_node = ident_node.symbol&.reg
+    return unless decl_node
+    decl_ti = decl_node.type_info rescue nil
+    return unless decl_ti.is_a?(Type)
+    return unless decl_ti.list_collection? || decl_ti.map? || decl_ti.array? || decl_ti.string?
+    decl_ti.provenance    = :heap
+    decl_ti.cleanup_alloc = :heap
+    decl_node.storage = :heap if decl_node.respond_to?(:storage=)
+    if decl_node.respond_to?(:value) && decl_node.value.respond_to?(:storage=)
+      decl_node.value.storage = :heap
+    end
+  end
+
+  # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
+  # nested loops and function definitions.
+  def self.scan_direct(body, &block)
+    return unless body.is_a?(Array)
+    body.each do |s|
+      yield s
+      case s
+      when AST::WhileLoop, AST::ForRange, AST::ForEach, AST::FunctionDef
+        next  # boundary -- do not enter nested loop / fn body
+      when AST::IfStatement
+        scan_direct(s.then_branch, &block)
+        scan_direct(s.else_branch, &block)
+      when AST::MatchStatement
+        s.cases&.each { |c| scan_direct(c[:body], &block) }
+        scan_direct(s.default_case, &block)
+      when AST::WithBlock
+        scan_direct(s.body, &block)
+      when AST::DoBlock
+        s.branches&.each { |b| scan_direct(b[:body], &block) }
+      end
+    end
+  end
+
+  # ── SHARD context frame-alloc flags ──────────────────────────────────────
+
+  # Walk for pipeline nodes that carry a shard_context and update
+  # key_allocates_frame / body_allocates_frame.
+  def self.update_shard_contexts!(body, fn_nodes)
+    AST.walk_body(body) do |node|
+      next unless node.respond_to?(:shard_context) && node.shard_context
+      ctx = node.shard_context
+
+      # key_allocates_frame: does the routing key expression allocate from frame?
+      key_expr = ctx[:key_expr]
+      ctx[:key_allocates_frame] = key_allocates_frame?(key_expr, fn_nodes) if key_expr
+
+      # body_allocates_frame: does the EACH body contain local frame allocs?
+      each_body = node.respond_to?(:op) && node.op.respond_to?(:body) ? node.op.body : nil
+      if each_body
+        local_names = collect_local_names(each_body)
+        ctx[:body_allocates_frame] = local_frame_decls(each_body, local_names).any?
+      end
+    end
+  end
+
+  # Returns true when expr is a call to a frame-allocating function
+  # (uses_frame=true and NOT heap-promoted on return).
+  def self.key_allocates_frame?(expr, fn_nodes)
+    case expr
+    when AST::FuncCall
+      fn = fn_nodes[expr.name]
+      fn&.uses_frame && fn.return_provenance != :heap
+    when AST::MethodCall
+      false  # method calls on types are not frame-allocating routing keys
+    else
+      false
+    end
+  end
+
+end
+
+# ==========================================
 # Flow-Based Verification (Phase 4)
 # ==========================================
 #
@@ -1546,6 +1896,9 @@ class MIRPass
     @fn_nodes.each do |name, fn|
       @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
     end
+
+    # Phase 2.5: set mark_per_iter on all loops (requires finalised allocators from Phase 2).
+    LoopFrameAnalysis.analyze!(@fn_nodes)
 
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|

@@ -86,9 +86,7 @@ RSpec.describe FlowChecker do
       CLEAR
     end
 
-    # Phase 2 (LoopFrameAnalysis): mark_per_iter=true is set in Pass 2 for
-    # loop-local frame lists. Will pass when LoopFrameAnalysis is implemented.
-    pending "Phase 2: loop with rewind -- loop-local list gets mark_per_iter" do
+    it "loop with rewind -- loop-local list gets mark_per_iter" do
       expect_no_error(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE i = 0;

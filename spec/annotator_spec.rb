@@ -1345,11 +1345,22 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "WhileLoop mark_per_iter" do
-      # Phase 2 (LoopFrameAnalysis): mark_per_iter is now set in Pass 2 after
-      # CleanupClassifier finalizes allocators, not in Pass 1 (annotator).
-      # Tests that require mark_per_iter=true are pending until LoopFrameAnalysis
-      # is implemented in control_flow.rb.
-      pending "Phase 2: marks loop as safe for per-iter frame marks when list is loop-local" do
+      # Run full MIRPass pipeline (LoopFrameAnalysis runs in Phase 2.5 of MIRPass).
+      def run_mir(src)
+        tokens = Lexer.new(src).tokenize
+        ast = Parser.new(tokens, src).parse
+        PipelineRewriter.new.rewrite!(ast)
+        annotator = SemanticAnnotator.new
+        annotator.annotate!(ast)
+        StringConcatRewriter.new.rewrite!(ast)
+        fn_nodes = {}
+        ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+        mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
+        mir.transform!(ast)
+        ast
+      end
+
+      it "marks loop as safe for per-iter frame marks when list is loop-local" do
         src = <<~CLEAR
           FN foo() RETURNS Void ->
             MUTABLE i = 0_i64;
@@ -1361,8 +1372,8 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        annotated = run(src)
-        fn = annotated.statements.first
+        ast = run_mir(src)
+        fn = ast.statements.first
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
         expect(loop_node.mark_per_iter).to be true
       end
