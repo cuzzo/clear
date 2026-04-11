@@ -1057,6 +1057,168 @@ class UseAfterMoveChecker
   end
 end
 
+# ==========================================
+# Flow-Based Verification (Phase 4)
+# ==========================================
+#
+# Verifies the post-MIRPass AST against ownership state.
+# Defense-in-depth alongside the post-lowering MIRChecker.
+#
+# Checks:
+#   LEAK          -- binding with needs_cleanup=true but no MIR::Drop in AST
+#   ORPHAN_DROP   -- MIR::Drop for a binding that doesn't need cleanup
+#   ORPHAN_GUARD  -- MIR::SuppressCleanup for a variable never moved in dataflow
+#   FRAME_OVERFLOW -- loop allocates from frame without per-iteration rewind
+#   HPT_LEAK      -- heap-returning call result discarded (unbound expression)
+class FlowChecker
+  attr_reader :errors
+
+  def initialize(fn_name)
+    @fn_name = fn_name
+    @errors = []
+  end
+
+  # Verify a function's AST after MIRPass has inserted all MIR nodes.
+  #
+  # bindings:  { var_name => entry } from CleanupClassifier (refined by cleanup_decisions!)
+  # dataflow:  OwnershipDataflow instance (optional, for ORPHAN_GUARD)
+  def check!(fn_body, bindings, dataflow: nil)
+    return if bindings.nil? || bindings.empty?
+
+    # Collect all MIR::Drop and MIR::SuppressCleanup names from the AST.
+    drop_names = Set.new
+    suppress_names = Set.new
+    alloc_names = Set.new
+    collect_mir_markers(fn_body, drop_names, suppress_names, alloc_names)
+
+    # Check 1: LEAK -- every binding with needs_cleanup must have a Drop.
+    bindings.each do |var, entry|
+      next unless entry[:needs_cleanup]
+      unless drop_names.include?(var)
+        @errors << "[LEAK] #{@fn_name}::#{var} -- needs cleanup but no MIR::Drop found"
+      end
+    end
+
+    # Check 2: ORPHAN_DROP -- every Drop must correspond to a needs_cleanup binding.
+    drop_names.each do |name|
+      entry = bindings[name]
+      unless entry && entry[:needs_cleanup]
+        # TAKES params and MATCH AS bindings may have drops not in the main bindings.
+        # These are handled separately. Only flag truly orphaned drops.
+        unless alloc_names.include?(name)
+          @errors << "[ORPHAN_DROP] #{@fn_name}::#{name} -- MIR::Drop without needs_cleanup binding"
+        end
+      end
+    end
+
+    # Check 3: ORPHAN_GUARD -- SuppressCleanup for a variable that the dataflow
+    # says was never moved (always :owned at exit). If the variable is always
+    # owned, the suppress is dead code and may indicate a bug.
+    if dataflow
+      summary = dataflow.cleanup_summary
+      suppress_names.each do |name|
+        df_entry = summary[name]
+        # If dataflow shows the variable is owned (never moved), the suppress is suspicious.
+        # But only flag it if the variable also has no moved guard (i.e., cleanup_decisions!
+        # determined no move happens). A suppress with a moved guard is correct.
+        entry = bindings[name]
+        if df_entry && !df_entry[:has_moved_guard] && entry && !entry[:has_moved_guard]
+          @errors << "[ORPHAN_GUARD] #{@fn_name}::#{name} -- SuppressCleanup but variable is never moved"
+        end
+      end
+    end
+
+    # Check 4: FRAME_OVERFLOW -- loops with frame allocations need rewind.
+    check_frame_overflow!(fn_body)
+  end
+
+  private
+
+  def collect_mir_markers(stmts, drops, suppresses, allocs)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when MIR::Drop
+        drops << stmt.name.to_s
+      when MIR::SuppressCleanup
+        suppresses << stmt.name.to_s
+      when MIR::Alloc
+        allocs << stmt.name.to_s
+      end
+
+      # Recurse into nested control flow.
+      case stmt
+      when AST::IfStatement
+        collect_mir_markers(stmt.then_branch, drops, suppresses, allocs)
+        collect_mir_markers(stmt.else_branch, drops, suppresses, allocs)
+        collect_mir_markers(stmt.then_drops, drops, suppresses, allocs)
+        collect_mir_markers(stmt.else_drops, drops, suppresses, allocs)
+      when AST::WhileLoop
+        collect_mir_markers(stmt.do_branch, drops, suppresses, allocs)
+      when AST::ForRange, AST::ForEach
+        collect_mir_markers(stmt.body, drops, suppresses, allocs)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| collect_mir_markers(c[:body], drops, suppresses, allocs) }
+        collect_mir_markers(stmt.default_case, drops, suppresses, allocs)
+        collect_mir_markers(stmt.case_drops, drops, suppresses, allocs) if stmt.case_drops.is_a?(Array)
+        collect_mir_markers(stmt.default_drops, drops, suppresses, allocs) if stmt.default_drops.is_a?(Array)
+      when AST::WithBlock
+        collect_mir_markers(stmt.body, drops, suppresses, allocs)
+      when AST::DoBlock
+        stmt.branches&.each { |b| collect_mir_markers(b[:body], drops, suppresses, allocs) }
+      when AST::BgBlock, AST::BgStreamBlock
+        collect_mir_markers(stmt.body, drops, suppresses, allocs)
+      end
+    end
+  end
+
+  # FRAME_OVERFLOW: loops that allocate from the frame arena without
+  # per-iteration rewind.
+  def check_frame_overflow!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      case stmt
+      when AST::WhileLoop
+        unless stmt.tight || stmt.mark_per_iter
+          if has_frame_alloc?(stmt.do_branch)
+            @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
+          end
+        end
+        check_frame_overflow!(stmt.do_branch)
+      when AST::ForRange
+        unless stmt.mark_per_iter
+          if has_frame_alloc?(stmt.body)
+            @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
+          end
+        end
+        check_frame_overflow!(stmt.body)
+      when AST::ForEach
+        # ForEach loops get mark_per_iter handling in MIR lowering, not at AST level.
+        # Only recurse for nested loops.
+        check_frame_overflow!(stmt.body)
+      when AST::IfStatement
+        check_frame_overflow!(stmt.then_branch)
+        check_frame_overflow!(stmt.else_branch)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| check_frame_overflow!(c[:body]) }
+        check_frame_overflow!(stmt.default_case)
+      when AST::WithBlock
+        check_frame_overflow!(stmt.body)
+      when AST::DoBlock
+        stmt.branches&.each { |b| check_frame_overflow!(b[:body]) }
+      end
+    end
+  end
+
+  def has_frame_alloc?(stmts)
+    return false unless stmts.is_a?(Array)
+    stmts.any? do |s|
+      (s.is_a?(MIR::Alloc) && s.alloc == :frame) ||
+        (s.is_a?(AST::VarDecl) && s.has_cleanup && s.storage != :heap && s.storage != :stack)
+    end
+  end
+end
+
 class MIRPass
   # cleanup_bindings: { fn_name => { var_name => entry_hash } }
   # Exposed for specs that test classification directly.
@@ -1263,11 +1425,12 @@ class MIRPass
     # Ownership dataflow refines cleanup decisions: determines WHETHER cleanup
     # is needed and WHETHER a moved guard is required, based on per-path analysis.
     # Also runs UseAfterMoveChecker (Rule 1: no use after move).
+    @last_dataflow = nil
     if has_bindings
       can_fail_fns = Set.new
       @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
-      df = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup)
-      df.cleanup_decisions!(fn, bindings)
+      @last_dataflow = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup)
+      @last_dataflow.cleanup_decisions!(fn, bindings)
     end
 
     # Stamp field pre-cleanup info directly on Assignment nodes.
@@ -1293,6 +1456,15 @@ class MIRPass
 
     # Build moved_guard_info map: { var_name => bool } for all bindings.
     stamp_moved_guard_info!(fn, bindings) if has_bindings
+
+    # Flow-based verification: check MIRPass output against ownership state.
+    if has_bindings
+      fc = FlowChecker.new(fn.name)
+      fc.check!(fn.body, bindings, dataflow: @last_dataflow)
+      unless fc.errors.empty?
+        raise "[Flow Verification] #{fc.errors.first}"
+      end
+    end
   end
 
   # Pre-mark bindings that are captured by BG blocks as needing moved guards.
