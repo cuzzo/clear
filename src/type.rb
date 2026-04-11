@@ -1543,7 +1543,11 @@ class Type
     if array?
       base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
       if dynamic? && !is_param && !is_field
-        zig = "std.ArrayListUnmanaged(#{base_zig})"
+        # Dynamic arrays (ArrayListUnmanaged) are always value-typed locals.
+        # The list header is a struct value; the backing store lives on the heap internally.
+        # heap? provenance means the backing store is heap-managed, NOT that the header
+        # itself is a pointer. Never apply *-prefix here.
+        return "std.ArrayListUnmanaged(#{base_zig})"
       elsif fixed?
         zig = "[#{capacity}]#{base_zig}"
       else

@@ -525,7 +525,7 @@ module CleanupClassifier
 
   private_class_method def self.classify_heap_provenance(ti, node, schema_lookup)
     return nil unless ti.heap_provenance?
-    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
+    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked? || ti.always_mutable?
     return nil if ti.collection? || ti.map? || ti.pool? || ti.set_collection?
 
     return entry(:heap_string) if ti.string?

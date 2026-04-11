@@ -496,7 +496,7 @@ RSpec.describe MIREmitter do
   describe "DeepCopy" do
     it "emits string copy" do
       node = MIR::DeepCopy.new(MIR::Ident.new("src"), nil, nil, :string, :heap)
-      expect(e.emit(node)).to eq("try rt.heapAlloc().dupe(u8, src)")
+      expect(e.emit(node)).to eq("@as([]const u8, try rt.heapAlloc().dupe(u8, src))")
     end
 
     it "emits union copy" do

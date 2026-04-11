@@ -462,7 +462,9 @@ class MIREmitter
     alloc = node.alloc ? alloc_zig(node.alloc) : nil
     case node.strategy
     when :string
-      "try #{alloc}.dupe(u8, #{src})"
+      # dupe returns []u8 (mutable); cast to []const u8 so comparisons with
+      # string literals type-check (CLEAR strings are always []const u8).
+      "@as([]const u8, try #{alloc}.dupe(u8, #{src}))"
     when :union
       "try CheatLib.dupeUnionValue(#{node.zig_type}, #{src}, #{alloc})"
     when :list_shallow
