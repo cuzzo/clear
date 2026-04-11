@@ -1298,6 +1298,21 @@ RSpec.describe SemanticAnnotator do
   end
 
   describe "Control Flow Validation" do
+    # Run full MIRPass pipeline -- LoopFrameAnalysis runs in Phase 2.5 of MIRPass.
+    def run_mir(src)
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      PipelineRewriter.new.rewrite!(ast)
+      annotator = SemanticAnnotator.new
+      annotator.annotate!(ast)
+      StringConcatRewriter.new.rewrite!(ast)
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
+      mir.transform!(ast)
+      ast
+    end
+
     context "While Loops (visit_WhileLoop)" do
       context "Valid Loops" do
         let(:code) {
@@ -1345,21 +1360,6 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "WhileLoop mark_per_iter" do
-      # Run full MIRPass pipeline (LoopFrameAnalysis runs in Phase 2.5 of MIRPass).
-      def run_mir(src)
-        tokens = Lexer.new(src).tokenize
-        ast = Parser.new(tokens, src).parse
-        PipelineRewriter.new.rewrite!(ast)
-        annotator = SemanticAnnotator.new
-        annotator.annotate!(ast)
-        StringConcatRewriter.new.rewrite!(ast)
-        fn_nodes = {}
-        ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
-        mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { annotator.lookup_type_schema(n) })
-        mir.transform!(ast)
-        ast
-      end
-
       it "marks loop as safe for per-iter frame marks when list is loop-local" do
         src = <<~CLEAR
           FN foo() RETURNS Void ->
@@ -1461,6 +1461,76 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "foo" }
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+        expect(loop_node.mark_per_iter).to be false
+      end
+    end
+
+    context "ForRange mark_per_iter" do
+      it "marks FOR range loop as per-iter when list is loop-local" do
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            FOR i IN (0_i64 ..< 5) DO
+              MUTABLE parts: String[]@list = [];
+              parts.append(i.toString());
+            END
+            RETURN;
+          END
+        CLEAR
+        ast = run_mir(src)
+        fn = ast.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::ForRange) }
+        expect(loop_node.mark_per_iter).to be true
+      end
+
+      it "does NOT mark FOR range loop when appending to outer list" do
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            MUTABLE all: String[]@list = [];
+            FOR i IN (0_i64 ..< 5) DO
+              all.append(i.toString());
+            END
+            RETURN;
+          END
+        CLEAR
+        ast = run_mir(src)
+        fn = ast.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::ForRange) }
+        expect(loop_node.mark_per_iter).to be false
+      end
+    end
+
+    context "ForEach mark_per_iter" do
+      it "marks FOR..IN (ForEach) as per-iter when list is loop-local" do
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            MUTABLE items: Int64[] = [1_i64, 2_i64];
+            FOR item IN items DO
+              MUTABLE parts: String[]@list = [];
+              parts.append(item.toString());
+            END
+            RETURN;
+          END
+        CLEAR
+        ast = run_mir(src)
+        fn = ast.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::ForEach) }
+        expect(loop_node.mark_per_iter).to be true
+      end
+
+      it "does NOT mark FOR..IN (ForEach) when appending to outer list" do
+        src = <<~CLEAR
+          FN foo() RETURNS Void ->
+            MUTABLE items: Int64[] = [1_i64, 2_i64];
+            MUTABLE all: String[]@list = [];
+            FOR item IN items DO
+              all.append(item.toString());
+            END
+            RETURN;
+          END
+        CLEAR
+        ast = run_mir(src)
+        fn = ast.statements.first
+        loop_node = fn.body.find { |s| s.is_a?(AST::ForEach) }
         expect(loop_node.mark_per_iter).to be false
       end
     end

@@ -3093,6 +3093,30 @@ class MIRLowering
     coll_type = node.collection.full_type
     ct = coll_type.is_a?(Type) ? coll_type : Type.new(coll_type)
     is_mutable = node.is_mutable == true
+    mark_per_iter = node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil
+    tight = node.respond_to?(:tight) && node.tight
+
+    # Inject saveLoopMark/restoreLoopMark when the body has loop-local frame allocs.
+    # Mirrors the same injection done in lower_while and lower_for_range.
+    if !tight && mark_per_iter && @current_fn_has_rt
+      @loop_mark_counter = (@loop_mark_counter || 0) + 1
+      mark_var = "__loop_mark_#{@loop_mark_counter}"
+      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
+      if node.loop_preserve_vars&.any?
+        body = [save] + body
+        node.loop_preserve_vars.each do |v|
+          body << MIR::Set.new(
+            MIR::Ident.new(zig_safe_name(v)),
+            MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
+          )
+        end
+      else
+        restore = MIR::DeferStmt.new(
+          MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
+        )
+        body = [save, restore] + body
+      end
+    end
 
     # Yield check at end of body
     if @current_fn_has_rt
@@ -3104,10 +3128,9 @@ class MIRLowering
       iter_var = "__kit_#{@for_counter}"
       # { var iter = coll.keyIterator(); while (iter.next()) |var| { body } }
       iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false), true, nil, nil)
-      tight = node.respond_to?(:tight) && node.tight
       while_stmt = MIR::WhileStmt.new(
         MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
-        body, var, nil, node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil, tight
+        body, var, nil, mark_per_iter, tight
       )
       MIR::ScopeBlock.new([iter_init, while_stmt])
     else
@@ -3123,8 +3146,7 @@ class MIRLowering
         MIR::AddressOf.new(coll)
       end
       capture = is_mutable ? "*#{var}" : var
-      tight = node.respond_to?(:tight) && node.tight
-      MIR::ForStmt.new(iter, capture, body, nil, node.respond_to?(:mark_per_iter) ? node.mark_per_iter : nil, tight)
+      MIR::ForStmt.new(iter, capture, body, nil, mark_per_iter, tight)
     end
   end
 

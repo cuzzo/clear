@@ -1551,8 +1551,11 @@ class FlowChecker
         end
         check_frame_overflow!(stmt.body)
       when AST::ForEach
-        # ForEach loops get mark_per_iter handling in MIR lowering, not at AST level.
-        # Only recurse for nested loops.
+        unless stmt.mark_per_iter
+          if has_frame_alloc?(stmt.body)
+            @errors << "[FRAME_OVERFLOW] #{@fn_name} -- loop body allocates from frame arena without per-iteration rewind"
+          end
+        end
         check_frame_overflow!(stmt.body)
       when AST::IfStatement
         check_frame_overflow!(stmt.then_branch)

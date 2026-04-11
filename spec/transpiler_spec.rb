@@ -183,6 +183,37 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("restoreLoopMark")
     end
 
+    it "emits saveLoopMark/restoreLoopMark for FOR..IN (ForEach) with loop-local list" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE items: Int64[] = [1_i64, 2_i64, 3_i64];
+          FOR item IN items DO
+            MUTABLE parts: String[]@list = [];
+            parts.append(item.toString());
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("saveLoopMark")
+      expect(zig).to include("restoreLoopMark")
+    end
+
+    it "emits saveLoopMark/restoreLoopMark for FOR..IN range (ForRange) with loop-local list" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          FOR i IN (0_i64 ..< 10) DO
+            MUTABLE parts: String[]@list = [];
+            parts.append(i.toString());
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("saveLoopMark")
+      expect(zig).to include("restoreLoopMark")
+    end
+
     it "does NOT promote outer list to heap or add loop marks when appending literal in loop" do
       # append(outer, 1.0): the literal is a value type, no frame allocation.
       # The backing store grows under the container's own allocator (frame).
