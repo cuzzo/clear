@@ -55,13 +55,14 @@ module AllocHelper
       return true if node.storage == :frame
       node_allocates_frame?(node.value, outer_vars)
     when AST::FuncCall
-      # mutates_receiver (e.g. append(outer_list, val)): the mutation itself targets
-      # the receiver's backing, not the iteration's frame scope. But the VALUE args
-      # may still contain frame-allocating subexpressions (toString, concat, etc.).
+      # mutates_receiver (e.g. append(outer_list, val)): check VALUE args for
+      # frame-allocating subexpressions (toString, concat, etc.). If none found,
+      # fall through to stdlib_allocates -- the mutation itself grows the receiver's
+      # backing store, which IS a frame allocation when the receiver is frame-backed.
       if node.respond_to?(:mutates_receiver) && node.mutates_receiver && outer_vars
         receiver = node.args&.first
         if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
-          return node.args&.drop(1)&.any? { |a| node_allocates_frame?(a, outer_vars) } || false
+          return true if node.args&.drop(1)&.any? { |a| node_allocates_frame?(a, outer_vars) }
         end
       end
       return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
@@ -70,12 +71,12 @@ module AllocHelper
       return true if fn && fn.respond_to?(:uses_frame) && fn.uses_frame
       node.args&.any? { |a| node_allocates_frame?(a, outer_vars) } || false
     when AST::MethodCall
-      # Same as FuncCall: the mutation targets the container's backing, but VALUE
-      # args may still contain frame-allocating subexpressions.
+      # Same as FuncCall: check VALUE args for frame-allocating subexpressions.
+      # If none found, fall through to stdlib_allocates.
       if node.respond_to?(:mutates_receiver) && node.mutates_receiver && outer_vars
         receiver = node.object
         if receiver.is_a?(AST::Identifier) && outer_vars.include?(receiver.name)
-          return node.args&.any? { |a| node_allocates_frame?(a, outer_vars) } || false
+          return true if node.args&.any? { |a| node_allocates_frame?(a, outer_vars) }
         end
       end
       return true if node.respond_to?(:stdlib_allocates) && node.stdlib_allocates
@@ -260,10 +261,10 @@ module AllocHelper
     ti = node.type_info rescue nil
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
     # Strings: storage controls which allocator std.mem.concat / dupe uses.
-    # Collections (@list, @pool, HashMap): storage controls backing allocator.
+    # Arrays/Collections (T[], @list, @pool, HashMap): storage controls backing allocator.
     # Value types (Int64, Bool, enums, plain unions/structs): copied by value
     # into the container - no allocator involved, don't change storage.
-    if ti&.string? || ti&.list_collection? || ti&.map?
+    if ti&.string? || ti&.array? || ti&.list_collection? || ti&.map?
       # node.storage = :heap uses @storage_override (node-local) so it does NOT
       # mutate the shared Type object (e.g. STRING_TYPE, or function return types).
       node.storage = :heap
@@ -274,6 +275,12 @@ module AllocHelper
       if node.is_a?(AST::Identifier)
         scope = lookup_scope_for(node.name) rescue nil
         decl_node = scope&.locals&.dig(node.name)&.reg
+        # Update declaration storage so alloc_for_node sees :heap at init site.
+        decl_node.storage = :heap if decl_node.respond_to?(:storage=)
+        # Update the init value expression (e.g., ListLit) so lower_list_lit sees heap storage.
+        if decl_node.respond_to?(:value) && decl_node.value.respond_to?(:storage=)
+          decl_node.value.storage = :heap
+        end
         decl_ti = decl_node&.type_info rescue nil
         if decl_ti.is_a?(Type)
           decl_ti.provenance = :heap

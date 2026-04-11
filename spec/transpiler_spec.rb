@@ -183,7 +183,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("restoreLoopMark")
     end
 
-    it "skips loop marks when only appending to outer list (no per-iteration waste)" do
+    it "promotes outer list to heap and adds loop marks when appending in loop" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE all: Float64[]@list = [];
@@ -196,10 +196,10 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # append to outer list: allocation is into receiver's backing, not per-iteration.
-      # No loop marks needed, container stays frame-allocated.
-      expect(zig).not_to include("saveLoopMark")
-      expect(zig).to include("frameAlloc")
+      # append to outer frame list grows backing store via frameAlloc() -- unbounded
+      # frame arena growth. Escape analysis promotes to heap, loop marks added.
+      expect(zig).to include("saveLoopMark")
+      expect(zig).to include("heapAlloc")
     end
   end
 
