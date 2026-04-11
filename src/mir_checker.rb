@@ -259,13 +259,28 @@ class MIRChecker
       when MIR::AllocMark
         s.alloc == :frame
       when MIR::ExprStmt
-        s.expr.is_a?(MIR::InlineZig) && s.expr.allocs&.any? { |_k, v| v == :frame }
+        expr_has_frame_alloc?(s.expr)
       when MIR::Let
-        # Let with frame-allocating init (e.g., InlineZig call)
-        s.init.is_a?(MIR::InlineZig) && s.init.allocs&.any? { |_k, v| v == :frame }
+        expr_has_frame_alloc?(s.init)
       else
         false
       end
+    end
+  end
+
+  # Does this MIR expression node perform a frame allocation?
+  def expr_has_frame_alloc?(expr)
+    return false unless expr
+    case expr
+    when MIR::InlineZig
+      expr.allocs&.any? { |_k, v| v == :frame }
+    when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
+         MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap
+      expr.alloc == :frame
+    when MIR::RawZig
+      expr.code.is_a?(String) && expr.code.include?("frameAlloc()")
+    else
+      false
     end
   end
 
