@@ -13,10 +13,12 @@ ZIG = [
 
 RUN_TIMEOUT = (ENV['BENCH_TIMEOUT'] || 2).to_i
 
-# Per-benchmark timeout: read TIMEOUT file from directory if present.
+# Per-benchmark timeout: read TIMEOUT file if present.
+# Returns nil for server benchmarks with no file (no timeout = original behavior).
+# Returns integer for standalone benchmarks with no file (falls back to RUN_TIMEOUT).
 def bench_timeout(dir)
   f = "#{dir}/TIMEOUT"
-  File.exist?(f) ? File.read(f).strip.to_i : RUN_TIMEOUT
+  File.exist?(f) ? File.read(f).strip.to_i : nil
 end
 
 def measure_min(command, runs = 5, timeout: RUN_TIMEOUT)
@@ -41,6 +43,7 @@ def run_bench(dir)
       puts "=== LEAK CHECK: #{dir} === SKIP (server benchmark)"
       return
     end
+    # Server benchmarks: only apply timeout if TIMEOUT file exists.
     return run_server_bench(dir, timeout: bto)
   end
 
@@ -206,20 +209,20 @@ def run_bench(dir)
 
   if has_c && File.exist?("#{dir}/bench_c")
     puts "Running C baseline (best of #{runs}, scale=#{scale})..."
-    results[:c] = measure_min("BENCH_SCALE=#{scale} ./#{dir}/bench_c", runs, timeout: bto)
+    results[:c] = measure_min("BENCH_SCALE=#{scale} ./#{dir}/bench_c", runs, timeout: bto || RUN_TIMEOUT)
   end
 
   if has_rust && File.exist?("#{dir}/bench_rust")
     puts "Running Rust baseline (best of #{runs}, scale=#{scale})..."
     # Rust benchmarks using Tokio can be configured with TOKIO_WORKER_THREADS
     cores = ENV['BENCH_CORES'] || `nproc 2>/dev/null`.strip
-    results[:rust] = measure_min("BENCH_SCALE=#{scale} TOKIO_WORKER_THREADS=#{cores} ./#{dir}/bench_rust", runs, timeout: bto)
+    results[:rust] = measure_min("BENCH_SCALE=#{scale} TOKIO_WORKER_THREADS=#{cores} ./#{dir}/bench_rust", runs, timeout: bto || RUN_TIMEOUT)
   end
 
   if has_go && File.exist?("#{dir}/bench_go")
     puts "Running Go baseline (best of #{runs}, scale=#{scale})..."
     cores = ENV['BENCH_CORES'] || `nproc 2>/dev/null`.strip
-    results[:go] = measure_min("BENCH_SCALE=#{scale} GOMAXPROCS=#{cores} ./#{dir}/bench_go", runs, timeout: bto)
+    results[:go] = measure_min("BENCH_SCALE=#{scale} GOMAXPROCS=#{cores} ./#{dir}/bench_go", runs, timeout: bto || RUN_TIMEOUT)
   end
 
   if has_clear
@@ -239,7 +242,7 @@ def run_bench(dir)
     jemalloc_note = jemalloc_lib ? ", jemalloc" : ""
 
     puts "Running CLEAR (best of #{runs}, CLEAR_THREADS=#{threads}#{jemalloc_note}, scale=#{scale})..."
-    results[:clear] = measure_min("#{jemalloc_preload}BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs, timeout: bto)
+    results[:clear] = measure_min("#{jemalloc_preload}BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs, timeout: bto || RUN_TIMEOUT)
   end
 
   # 6. Capture peak RSS for each lang via /usr/bin/time
@@ -254,7 +257,7 @@ def run_bench(dir)
     next unless bin && File.exist?(bin)
     env = lang == :clear ? "#{jemalloc_preload}CLEAR_THREADS=#{threads} " : ""
     rss_cmd = "#{env}/usr/bin/time -v #{bin}"
-    output = `timeout #{bto}s sh -c "#{rss_cmd.gsub('"', '\\"')}" 2>&1`
+    output = `timeout #{bto || RUN_TIMEOUT}s sh -c "#{rss_cmd.gsub('"', '\\"')}" 2>&1`
     if output =~ /Maximum resident set size.*?:\s*(\d+)/
       peak_rss[lang] = $1.to_i
     end
@@ -271,7 +274,7 @@ def run_bench(dir)
   results.each do |lang, t|
     rss_str = peak_rss[lang] ? "  RSS: #{peak_rss[lang]} KB" : ""
     if t.nil?
-      puts "#{'%-22s' % label_map[lang]} TIMEOUT (#{bto}s)#{rss_str}"
+      puts "#{'%-22s' % label_map[lang]} TIMEOUT (#{bto || RUN_TIMEOUT}s)#{rss_str}"
     else
       puts "#{'%-22s' % label_map[lang]} #{'%.4f' % t} s#{rss_str}"
     end
@@ -402,8 +405,10 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
     pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
     sleep 1
 
-    # Run client
-    output = `timeout #{timeout}s ./#{dir}/client_go #{pid} #{PORT} #{num_gets} #{CONCURRENCY} 2>&1`
+    # Run client (timeout only if TIMEOUT file present; otherwise no cap like original)
+    client_cmd = "./#{dir}/client_go #{pid} #{PORT} #{num_gets} #{CONCURRENCY} 2>&1"
+    client_cmd = "timeout #{timeout}s #{client_cmd}" if timeout
+    output = `#{client_cmd}`
     puts output
 
     # Kill server

@@ -59,8 +59,7 @@ FN main() RETURNS Void ->
     -- TIGHT WHILE is the apples-to-apples comparison with C/Rust.
     -- Regular FOR shows overhead from checkYield + per-iteration frame marks.
     print("total = ${totalT.toString()}");
-    print("Time: ${(tightMs.toFloat() / 1000.0).toString()} seconds");
-    print("TIGHT WHILE: ${tightMs.toString()} ms");
+    print("TIGHT WHILE: ${tightMs.toString()} ms  (vs C/Rust)");
     print("Regular FOR: ${regularMs.toString()} ms");
     RETURN;
 END
