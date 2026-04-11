@@ -1300,10 +1300,6 @@ module LoopFrameAnalysis
       return rhs_references_any?(expr.target, names)
     when AST::GetIndex
       return rhs_references_any?(expr.target, names) || rhs_references_any?(expr.index, names)
-    when AST::IfExpr
-      return rhs_references_any?(expr.condition, names) ||
-             rhs_references_any?(expr.then_expr, names) ||
-             rhs_references_any?(expr.else_expr, names)
     end
     false
   end

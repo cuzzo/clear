@@ -200,7 +200,8 @@ class Type
     @ownership = ownership if ownership
     @sync      = sync      if sync
     # Sync types need a stable heap address (mirrors sync= setter behavior).
-    @provenance = :heap if @sync && @ownership == :affine
+    # :raw is a data-access mode, not a lock — raw strings are borrow/stack, not heap.
+    @provenance = :heap if @sync && @sync != :raw && @ownership == :affine
     # Pool collection always lives on the heap (owns internal slot array).
     if collection
       @collection = collection
