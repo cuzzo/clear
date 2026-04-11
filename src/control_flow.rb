@@ -1219,6 +1219,267 @@ class FlowChecker
   end
 end
 
+# ==========================================
+# Borrow Checking (Phase 6)
+# ==========================================
+#
+# Verifies that borrowed variables (via WITH RESTRICT / WITH BORROWED) are not
+# moved while the borrow is active, and that overlapping borrows don't violate
+# aliasing rules.
+#
+# AST walk (not CFG) -- WITH blocks are lexically scoped, so a stack-based
+# approach suffices. No NLL or inter-procedural lifetime analysis needed.
+#
+# Checks:
+#   MOVE_WHILE_BORROWED  -- GIVE/move/return of a variable with an active borrow
+#   ALIAS_VIOLATION      -- mutable borrow (RESTRICT) while already borrowed,
+#                           or any borrow while mutably borrowed
+#
+# Only RESTRICT and BORROWED create compile-time borrows. EXCLUSIVE, multiowned,
+# shared, and write_locked_read use runtime protection (locks / Rc / Arc).
+class BorrowChecker
+  attr_reader :errors
+
+  def self.check(fn_node, schema_lookup:)
+    checker = new(fn_node, schema_lookup: schema_lookup)
+    checker.check!
+    checker.errors
+  end
+
+  def initialize(fn_node, schema_lookup:)
+    @fn_name = fn_node.name
+    @fn_node = fn_node
+    @schema_lookup = schema_lookup
+    @errors = []
+    @active_borrows = {} # { source_name => [{ kind: :mutable/:immutable }] }
+  end
+
+  def check!
+    check_stmts(@fn_node.body || [])
+  end
+
+  private
+
+  # Extract the root variable name from a capability's var_node.
+  def cap_source_name(var_node)
+    case var_node
+    when AST::Identifier then var_node.name.to_s
+    when AST::GetField then cap_source_name(var_node.target)
+    when AST::GetIndex then cap_source_name(var_node.target)
+    else nil
+    end
+  end
+
+  def line_info(token)
+    token&.line ? " (line #{token.line})" : ""
+  end
+
+  def check_stmts(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each { |stmt| check_stmt(stmt) }
+  end
+
+  def check_stmt(stmt)
+    case stmt
+    when AST::WithBlock
+      handle_with_block(stmt)
+
+    when AST::VarDecl, AST::BindExpr
+      check_binding_moves(stmt.value, stmt.token)
+
+    when AST::Assignment
+      check_binding_moves(stmt.value, stmt.token)
+
+    when AST::ReturnNode
+      check_binding_moves(stmt.value, stmt.token)
+
+    when AST::MoveNode
+      # Standalone GIVE statement
+      inner = stmt.value
+      if inner.is_a?(AST::Identifier)
+        check_borrowed_move(inner.name.to_s, stmt.token)
+      end
+
+    when AST::FuncCall, AST::MethodCall
+      check_explicit_moves(stmt, stmt.token)
+
+    when AST::IfStatement
+      check_stmts(stmt.then_branch)
+      check_stmts(stmt.else_branch)
+
+    when AST::WhileLoop
+      check_stmts(stmt.do_branch)
+
+    when AST::ForRange, AST::ForEach
+      check_stmts(stmt.body)
+
+    when AST::MatchStatement
+      stmt.cases&.each { |c| check_stmts(c[:body]) }
+      check_stmts(stmt.default_case)
+
+    when AST::DoBlock
+      stmt.branches&.each { |b| check_stmts(b[:body]) }
+
+    when AST::BgBlock, AST::BgStreamBlock
+      # BG resource captures are ownership transfers
+      stmt.capture_analysis&.resource_captures&.each do |name|
+        check_borrowed_move(name, stmt.token)
+      end
+      check_stmts(stmt.body)
+    end
+  end
+
+  def handle_with_block(stmt)
+    added = []
+
+    (stmt.capabilities || []).each do |cap|
+      source = cap_source_name(cap[:var_node])
+      next unless source
+
+      # Only RESTRICT and BORROWED create compile-time borrows.
+      capability = cap[:capability]
+      next unless capability == :RESTRICT || capability == :BORROWED
+
+      kind = (capability == :RESTRICT) ? :mutable : :immutable
+      token = (cap[:var_node].respond_to?(:token) ? cap[:var_node].token : nil) || stmt.token
+
+      # ALIAS_VIOLATION: conflicting borrows
+      existing = @active_borrows[source]
+      if existing&.any?
+        if kind == :mutable
+          @errors << "[ALIAS_VIOLATION] #{@fn_name}::#{source} -- " \
+                     "mutable borrow (RESTRICT) while already borrowed#{line_info(token)}"
+        elsif existing.any? { |b| b[:kind] == :mutable }
+          @errors << "[ALIAS_VIOLATION] #{@fn_name}::#{source} -- " \
+                     "immutable borrow while mutably borrowed (RESTRICT)#{line_info(token)}"
+        end
+        # Multiple immutable borrows are fine (shared reads).
+      end
+
+      @active_borrows[source] ||= []
+      @active_borrows[source] << { kind: kind }
+      added << source
+    end
+
+    # Check body with borrows active
+    check_stmts(stmt.body)
+
+    # Release borrows (LIFO)
+    added.reverse_each do |source|
+      @active_borrows[source]&.pop
+      @active_borrows.delete(source) if @active_borrows[source]&.empty?
+    end
+  end
+
+  # Check if any identifier being moved in a binding RHS is currently borrowed.
+  # Mirrors OwnershipDataflow#collect_binding_moves.
+  def check_binding_moves(expr, token)
+    return unless expr
+    moved = collect_moved_names(expr)
+    moved.each { |name| check_borrowed_move(name, token) }
+  end
+
+  # Check explicit moves (was_moved) in function/method call arguments.
+  def check_explicit_moves(stmt, token)
+    walk_for_was_moved(stmt) do |ident|
+      next if copy_type?(ident)
+      check_borrowed_move(ident.name.to_s, ident.token || token)
+    end
+  end
+
+  def check_borrowed_move(name, token)
+    borrows = @active_borrows[name]
+    return unless borrows&.any?
+    borrow_kind = borrows.last[:kind]
+    @errors << "[MOVE_WHILE_BORROWED] #{@fn_name}::#{name} -- " \
+               "cannot move while #{borrow_kind} borrow is active#{line_info(token)}"
+  end
+
+  # Collect variable names being moved by an expression (binding RHS context).
+  # Non-Copy identifiers in ownership-transferring positions are moves.
+  def collect_moved_names(node)
+    names = Set.new
+    _collect_moves(node, names)
+    names
+  end
+
+  def _collect_moves(node, names)
+    return unless node
+    case node
+    when AST::Identifier
+      return if copy_type?(node)
+      names << node.name.to_s
+    when AST::StructLit
+      node.fields&.each_value { |v| _collect_moves(v, names) }
+    when AST::MethodCall
+      # Union constructors (TYPE_ID): payload transfers ownership.
+      # Regular method calls: only was_moved args.
+      if node.object.is_a?(AST::Identifier) && node.object.token&.type == :TYPE_ID
+        node.args&.each { |a| _collect_moves(a, names) }
+      else
+        _collect_was_moved(node, names)
+      end
+    when AST::FuncCall
+      _collect_was_moved(node, names)
+    when AST::ListLit
+      node.items&.each { |i| _collect_moves(i, names) }
+    when AST::MoveNode
+      inner = node.value
+      names << inner.name.to_s if inner.is_a?(AST::Identifier)
+    when AST::CopyNode
+      # COPY does NOT move the source.
+    when AST::BgBlock, AST::BgStreamBlock
+      node.capture_analysis&.resource_captures&.each { |n| names << n }
+    else
+      _collect_was_moved(node, names)
+    end
+  end
+
+  def _collect_was_moved(node, names)
+    walk_for_was_moved(node) do |ident|
+      next if copy_type?(ident)
+      names << ident.name.to_s
+    end
+  end
+
+  # Walk expression tree for was_moved identifiers, skipping CopyNode.
+  def walk_for_was_moved(node, &block)
+    return unless node
+    case node
+    when AST::CopyNode then return
+    when AST::Identifier then yield node if node.was_moved
+    when AST::BinaryOp
+      walk_for_was_moved(node.left, &block)
+      walk_for_was_moved(node.right, &block)
+    when AST::UnaryOp
+      walk_for_was_moved(node.right, &block)
+    when AST::FuncCall
+      node.args&.each { |a| walk_for_was_moved(a, &block) }
+    when AST::MethodCall
+      walk_for_was_moved(node.object, &block)
+      node.args&.each { |a| walk_for_was_moved(a, &block) }
+    when AST::GetField
+      walk_for_was_moved(node.target, &block)
+    when AST::GetIndex
+      walk_for_was_moved(node.target, &block)
+      walk_for_was_moved(node.index, &block)
+    when AST::StructLit
+      node.fields&.each_value { |v| walk_for_was_moved(v, &block) }
+    when AST::ListLit
+      node.items&.each { |i| walk_for_was_moved(i, &block) }
+    when AST::MoveNode
+      walk_for_was_moved(node.value, &block)
+    end
+  end
+
+  def copy_type?(ident)
+    ti = ident.type_info rescue nil
+    return true unless ti
+    ti = Type.new(ti) if !ti.is_a?(Type)
+    ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? rescue false)
+  end
+end
+
 class MIRPass
   # cleanup_bindings: { fn_name => { var_name => entry_hash } }
   # Exposed for specs that test classification directly.
@@ -1422,6 +1683,12 @@ class MIRPass
     has_bg_escapes = body_has_bg_escape_promotes?(fn.body)
     has_catch = fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
     return unless has_bindings || promo || has_bg_escapes || has_catch
+
+    # Borrow checking: verify no moves of borrowed variables inside WITH blocks.
+    bc_errors = BorrowChecker.check(fn, schema_lookup: @schema_lookup)
+    unless bc_errors.empty?
+      raise "[Borrow Error] #{bc_errors.first}"
+    end
 
     # Pre-mark bindings captured by BG blocks so has_moved_guard is correct
     # BEFORE cleanup_decisions! runs and Drops snapshot cleanup_entry.

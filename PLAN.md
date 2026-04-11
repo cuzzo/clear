@@ -299,14 +299,14 @@ end
 **Files**: `src/control_flow.rb` (extend OwnershipDataflow state)
 
 #### Tasks
-- [ ] 6.1: Add borrows tracking to OwnerEntry (or separate borrow map in dataflow state)
-- [ ] 6.2: Update transfer_stmt for WithBlock: create borrow entry for source variable
-- [ ] 6.3: Track borrow end: at WITH block scope exit, release borrow
-- [ ] 6.4: Check MOVE_WHILE_BORROWED: at every move, verify no active borrow on source
-- [ ] 6.5: Check ALIAS_VIOLATION: at WITH RESTRICT, verify no existing borrow on source
-- [ ] 6.6: Handle nested WITH blocks (borrow of borrow)
-- [ ] 6.7: Tests: move-while-borrowed, alias-violation, valid-sequential-borrows, nested-borrows
-- [ ] 6.8: Run full test suite
+- [x] 6.1: BorrowChecker class: AST-walk with stack-based borrow tracking (not CFG -- WITH blocks are lexically scoped)
+- [x] 6.2: Track RESTRICT as mutable borrow, BORROWED as immutable borrow (EXCLUSIVE/multiowned/shared use runtime protection)
+- [x] 6.3: Borrow release on WITH block scope exit (LIFO stack pop)
+- [x] 6.4: MOVE_WHILE_BORROWED: check at every move (GIVE, non-Copy assignment, return, BG capture)
+- [x] 6.5: ALIAS_VIOLATION: mutable+any overlap or any+mutable overlap (multiple immutable borrows OK)
+- [x] 6.6: Nested WITH blocks: stack-based tracking handles naturally
+- [x] 6.7: 22 tests: 14 valid programs (no false positives), 4 MOVE_WHILE_BORROWED, 4 ALIAS_VIOLATION
+- [x] 6.8: Full suite: 2105 specs + 269 transpile tests + 0 leaks
 
 ---
 
