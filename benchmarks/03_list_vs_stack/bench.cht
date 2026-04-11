@@ -43,20 +43,24 @@ FN main() RETURNS Void ->
     warmR = benchRegular(100);
     warmT = benchTight(100);
 
-    -- Regular loops
+    -- Tight inner loops (apples-to-apples vs C malloc + Rust Vec::with_capacity)
     t0 = timestampMs();
-    totalR = benchRegular(n);
-    regularMs = timestampMs() - t0;
-
-    -- Tight inner loops
-    t1 = timestampMs();
     totalT = benchTight(n);
-    tightMs = timestampMs() - t1;
+    tightMs = timestampMs() - t0;
 
-    ASSERT totalR == totalT, "results must match";
-    ASSERT totalR > 0.0, "total must be positive";
+    -- Regular FOR loops (reference: includes checkYield + frame marks)
+    t1 = timestampMs();
+    totalR = benchRegular(n);
+    regularMs = timestampMs() - t1;
 
-    print("Regular FOR:  ${regularMs.toString()} ms");
-    print("TIGHT inner:  ${tightMs.toString()} ms");
+    ASSERT totalT == totalR, "results must match";
+    ASSERT totalT > 0.0, "total must be positive";
+
+    -- TIGHT WHILE is the apples-to-apples comparison with C/Rust.
+    -- Regular FOR shows overhead from checkYield + per-iteration frame marks.
+    print("total = ${totalT.toString()}");
+    print("Time: ${(tightMs.toFloat() / 1000.0).toString()} seconds");
+    print("TIGHT WHILE: ${tightMs.toString()} ms");
+    print("Regular FOR: ${regularMs.toString()} ms");
     RETURN;
 END
