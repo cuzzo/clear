@@ -21,6 +21,13 @@ class TestGenerator
     )
     program = lowering.lower_program(result.ast)
 
+    # Post-MIR verification: catch allocator mismatches before emitting Zig.
+    checker = MIRChecker.new
+    mir_errors = checker.check_program!(program)
+    unless mir_errors.empty?
+      raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
+    end
+
     # Emit Zig - skip imports/aliases (test harness provides them)
     emitter = MIREmitter.new
     body_items = program.items.reject { |item|

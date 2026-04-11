@@ -470,7 +470,7 @@ module CleanupClassifier
     return entry(:list, has_moved_guard: !ti.sharded?) if ti.list_collection?
     return entry(:rc) if ti.map? && !ti.numeric_map? && ti.shared?
     return entry(:string_map) if ti.map? && !ti.numeric_map?
-    return entry(:numeric_map, alloc: :frame) if ti.numeric_map?
+    return entry(:numeric_map) if ti.numeric_map?
     return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.pool?
     return entry(:set, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.set_collection?
     nil
