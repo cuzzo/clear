@@ -1449,7 +1449,8 @@ class MIRLowering
       }
     ZIG
     MIR::RawZig.new(do_code, "do_block",
-      { consumes: [], produces: [], borrows: [] })
+      { consumes: [], produces: [], borrows: [] },
+      { allocates: false, return: :Void })
   end
 
   def lower_bg_block(node)

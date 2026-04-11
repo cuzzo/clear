@@ -114,11 +114,12 @@ class MIRChecker
       leaks << error(:HPT_LEAK, node.callee,
         "heap-returning call result not bound to variable (leak)")
     end
-    if node.is_a?(MIR::InlineZig) && node.stdlib_def&.dig(:allocates)
+    if (node.is_a?(MIR::InlineZig) || node.is_a?(MIR::RawZig)) && node.stdlib_def&.dig(:allocates)
       ret = node.stdlib_def[:return]
       unless ret == :Void || ret.nil?
+        label = node.is_a?(MIR::RawZig) ? "RawZig block" : "stdlib call"
         leaks << error(:HPT_LEAK, node.reason,
-          "stdlib call with allocates:true result not bound to variable (leak)")
+          "#{label} with allocates:true result not bound to variable (leak)")
       end
     end
     if node.is_a?(MIR::Call) && node.args

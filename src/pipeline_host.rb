@@ -278,6 +278,7 @@ class PipelineHost
     when AST::JoinOp    then lower_join(lhs, rhs, node)
     when AST::TapOp     then lower_tap(lhs, rhs, node)
     when AST::EachOp    then lower_each(lhs, rhs, node)
+    when AST::ConcurrentOp then lower_concurrent(lhs, rhs, node)
     else nil
     end
   end
@@ -1109,6 +1110,27 @@ class PipelineHost
     end
 
     nil  # Fall through to string path
+  end
+
+  # CONCURRENT pipeline: worker dispatch stays as RawZig string (struct defs,
+  # atomics, spawn -- too complex for MIR nodes), but with stdlib_def so the
+  # checker knows the allocation effects.
+  def lower_concurrent(_lhs, conc_op, smooth_node)
+    inner = conc_op.op
+    zig_code = transpile_concurrent(smooth_node)
+
+    allocates = case inner
+                when AST::SelectOp, AST::WhereOp then true
+                else false
+                end
+
+    stdlib_def = { allocates: allocates }
+    stdlib_def[:return] = :Void unless allocates
+
+    MIR::RawZig.new(zig_code,
+      "concurrent_#{inner.class.name.split('::').last.downcase}",
+      { consumes: [], produces: [], borrows: [] },
+      stdlib_def)
   end
 
   # String entry point for SMOOTH pipeline nodes from MIRLowering.
