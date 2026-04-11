@@ -380,6 +380,65 @@ class OwnershipDataflow
     summary
   end
 
+  # Refine CleanupClassifier bindings using ownership state at scope exit.
+  #
+  # Determines WHETHER cleanup is needed and WHETHER a moved guard is required
+  # for each binding, based on ownership dataflow analysis.
+  #
+  # Also runs UseAfterMoveChecker (Rule 1).
+  #
+  # Three refinements:
+  #   1. Remove unnecessary moved guards: variable is never moved on any path
+  #      -> unconditional cleanup, no guard.
+  #   2. Eliminate cleanup entirely: variable is moved on ALL paths (including
+  #      error unwind) -> no defer needed.
+  #   3. Exception: MATCH TAKES unions that are moved on all paths still need
+  #      a guard because non-AS branches don't extract ownership.
+  def cleanup_decisions!(fn_node, bindings)
+    summary = cleanup_summary
+
+    # Rule 1: Use-after-move check.
+    checker = UseAfterMoveChecker.new(fn_node, self)
+    checker.check!
+    unless checker.errors.empty?
+      raise "[Ownership Error] #{checker.errors.first}"
+    end
+
+    bindings.each do |var, entry|
+      next unless entry[:needs_cleanup]
+      df_entry = summary[var]
+      next unless df_entry # variable not tracked by dataflow - keep plan
+
+      if !df_entry[:needs_cleanup]
+        # Moved on ALL paths -> normally no cleanup needed.
+        # Exception: MATCH TAKES unions need the defer with a moved guard.
+        if entry[:kind] == :takes_union || match_takes_var?(fn_node, var)
+          entry[:has_moved_guard] = true
+        else
+          entry[:needs_cleanup] = false
+          entry[:has_moved_guard] = false
+        end
+      elsif !df_entry[:has_moved_guard] && entry[:has_moved_guard]
+        # Never moved on any path -> unconditional cleanup, no guard.
+        entry[:has_moved_guard] = false
+      end
+    end
+  end
+
+  private
+
+  # Returns true if the given variable is the subject of a MATCH TAKES statement.
+  def match_takes_var?(fn_node, var_name)
+    found = false
+    AST.walk_body(fn_node.body) do |stmt|
+      if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
+         stmt.expr.is_a?(AST::Identifier) && stmt.expr.name.to_s == var_name
+        found = true
+      end
+    end
+    found
+  end
+
   # Build CFG + run dataflow for a function node. Returns the analysis.
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail
   # @param schema_lookup [Proc, nil] type schema resolver for needs_explicit_cleanup
@@ -1198,14 +1257,18 @@ class MIRPass
     return unless has_bindings || promo || has_bg_escapes || has_catch
 
     # Pre-mark bindings captured by BG blocks so has_moved_guard is correct
-    # BEFORE refine_moved_guards! runs and Drops snapshot cleanup_entry.
+    # BEFORE cleanup_decisions! runs and Drops snapshot cleanup_entry.
     pre_mark_bg_resource_captures!(fn, bindings) if has_bindings
 
-    # Use dataflow analysis to tighten has_moved_guard decisions.
-    # The classifier conservatively sets has_moved_guard=true for all non-trivial
-    # types. Dataflow precisely tracks which variables are actually consumed on
-    # some paths, so we can remove unnecessary guards.
-    refine_moved_guards!(fn, bindings) if has_bindings
+    # Ownership dataflow refines cleanup decisions: determines WHETHER cleanup
+    # is needed and WHETHER a moved guard is required, based on per-path analysis.
+    # Also runs UseAfterMoveChecker (Rule 1: no use after move).
+    if has_bindings
+      can_fail_fns = Set.new
+      @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
+      df = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup)
+      df.cleanup_decisions!(fn, bindings)
+    end
 
     # Stamp field pre-cleanup info directly on Assignment nodes.
     CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings, schema_lookup: @schema_lookup) if has_bindings
@@ -1274,67 +1337,6 @@ class MIRPass
         walk_for_bg_captures(stmt.body, bindings)
       end
     end
-  end
-
-  # Tighten cleanup decisions using ownership dataflow analysis.
-  #
-  # Two refinements:
-  #   1. Remove unnecessary moved guards: variable is never moved on any path
-  #      → unconditional cleanup, no guard needed.
-  #   2. Eliminate cleanup entirely: variable is moved on ALL paths (including
-  #      error unwind) → no defer needed at all.
-  #
-  # Error edges in the CFG ensure that (2) is safe: if a can_fail call exists
-  # between declaration and GIVE, the dataflow sees MAYBE_MOVED (not MOVED)
-  # and keeps the cleanup.
-  def refine_moved_guards!(fn, bindings)
-    # Compute which functions can fail for error-edge modeling.
-    can_fail_fns = Set.new
-    @fn_nodes.each { |name, f| can_fail_fns << name if f.can_fail }
-
-    df = OwnershipDataflow.analyze(fn, can_fail_fns: can_fail_fns, schema_lookup: @schema_lookup)
-    summary = df.cleanup_summary
-
-    # Use-after-move check (Rule 1): verify no reads of moved variables.
-    checker = UseAfterMoveChecker.new(fn, df)
-    checker.check!
-    unless checker.errors.empty?
-      raise "[Ownership Error] #{checker.errors.first}"
-    end
-
-    bindings.each do |var, entry|
-      next unless entry[:needs_cleanup]
-      df_entry = summary[var]
-      next unless df_entry # variable not tracked by dataflow - keep plan
-
-      if !df_entry[:needs_cleanup]
-        # Moved on ALL paths (including error edges) → normally no cleanup needed.
-        # Exception: unions consumed by MATCH TAKES need the defer with a moved
-        # guard because non-AS branches (DEFAULT, cases without bindings) don't
-        # extract ownership - the source must still be cleaned up on those paths.
-        if entry[:kind] == :takes_union || match_takes_var?(fn, var)
-          entry[:has_moved_guard] = true
-        else
-          entry[:needs_cleanup] = false
-          entry[:has_moved_guard] = false
-        end
-      elsif !df_entry[:has_moved_guard] && entry[:has_moved_guard]
-        # Never moved on any path → unconditional cleanup, no guard needed.
-        entry[:has_moved_guard] = false
-      end
-    end
-  end
-
-  # Returns true if the given variable is the subject of a MATCH TAKES statement.
-  def match_takes_var?(fn, var_name)
-    found = false
-    AST.walk_body(fn.body) do |stmt|
-      if stmt.is_a?(AST::MatchStatement) && stmt.takes &&
-         stmt.expr.is_a?(AST::Identifier) && stmt.expr.name.to_s == var_name
-        found = true
-      end
-    end
-    found
   end
 
   # Recursively transform a statement list, inserting MIR nodes.
