@@ -1272,10 +1272,18 @@ module LoopFrameAnalysis
     preserve.any? ? preserve : nil
   end
 
-  # Does expr (or any sub-expression) contain an Identifier whose name is in
-  # the given set?  Performs a deep structural walk of expression nodes.
+  # Does expr (or any sub-expression) contain a frame-allocating expression?
+  # "Frame-allocating" means: references a local frame variable (by name) OR
+  # calls a stdlib function with stdlib_allocates=true (toString, intToString,
+  # concat, etc.).  Used to detect outer-string-reassignment patterns like
+  # `resp = resp + i.toString()` where the RHS creates a frame string.
   def self.rhs_references_any?(expr, names)
     return false unless expr
+    # stdlib_allocates=true: the call itself creates a frame-allocated string
+    if (expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)) &&
+       expr.respond_to?(:stdlib_allocates) && expr.stdlib_allocates
+      return true
+    end
     case expr
     when AST::Identifier
       return names.include?(expr.name)
@@ -2253,6 +2261,18 @@ class MIRPass
     # MATCH AS bindings are handled by stamp_match_as_cleanup!, not here.
     # Skip to avoid name collisions (e.g., MATCH AS si vs MUTABLE si in different branches).
     return if entry[:match_as]
+
+    # LoopFrameAnalysis (Phase 2.5) may have heap-promoted a container that
+    # CleanupClassifier (Phase 2) initially classified as :frame.  The AST
+    # node's type_info reflects the updated provenance; sync the entry so the
+    # transpiler emits heapAlloc for the cleanup.
+    if entry[:alloc] == :frame
+      ti = stmt.type_info rescue nil
+      if ti.is_a?(Type) && ti.heap_provenance?
+        entry = entry.merge(alloc: :heap)
+        bindings[name] = entry
+      end
+    end
 
     # Stamp declaration with cleanup info for transpiler.
     if stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)
