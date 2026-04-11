@@ -251,24 +251,32 @@ Gone: `ALLOC_MISMATCH` (allocator fixed at declaration), `ESCAPE`/`FRAME_ESCAPE`
 
 Ensure `OwnershipDataflow` correctly models promotion as ownership transfer.
 
-The transfer function for ReturnNode already marks returned identifiers as moved. Verify this covers all promotion paths:
-- `RETURN x` where x is frame-allocated -> x moved, caller gets heap copy
-- `RETURN Struct{ field: x }` -> x moved via struct literal
-- BG capture of x -> x moved to fiber
-- Container store of frame value -> value moved to container's allocator
+Key finding: CLEAR's arena model means promotion = copy, not move. The annotator wraps
+values in CopyNode for frame-to-heap promotion. CopyNode does NOT consume the source --
+the frame original stays alive until frame rewind. This differs from Rust where `return x`
+moves x.
 
-PromotionClassifier stays but becomes optimization-only (allocate on heap from start to avoid runtime promote call). Not a correctness requirement.
+Promotion paths and their dataflow modeling:
+- `RETURN x` (direct identifier) -> x marked as :moved by collect_binding_moves
+- `RETURN Struct{ field: x }` -> x wrapped in CopyNode, stays :owned (copy semantics)
+- `GIVE x` on @list -> x wrapped in CopyNode, stays :owned (frame-to-heap copy)
+- `GIVE x` on heap type -> x has was_moved flag, marked as :moved
+- BG capture of resource x -> x marked as :moved via capture_analysis
+- Container store -> value copied/promoted, stays :owned (no ownership transfer)
 
-**Files**: `src/control_flow.rb` (verify transfer functions), `src/promotion_plan.rb` (document as optimization)
+PromotionClassifier, upgrade_always_escaped_to_heap!, upgrade_bg_captures_to_heap! are
+performance optimizations only. Safety is enforced by OwnershipDataflow regardless.
+
+**Files**: `src/control_flow.rb` (verified), `src/promotion_plan.rb` (documented)
 
 #### Tasks
-- [ ] 5.1: Audit transfer_stmt for ReturnNode: verify all return patterns mark sources as :moved
-- [ ] 5.2: Audit transfer_stmt for BG captures: verify captures mark sources as :moved
-- [ ] 5.3: Add transfer function for container store (e.g. `heap_list.append(frame_val)`) - mark source as :moved
-- [ ] 5.4: Verify upgrade_always_escaped_to_heap! still works as optimization (not correctness)
-- [ ] 5.5: Verify upgrade_bg_captures_to_heap! still works as optimization (not correctness)
-- [ ] 5.6: Document PromotionClassifier as performance optimization, not safety requirement
-- [ ] 5.7: Tests: frame value returned (promoted), frame value captured by BG, frame value stored in heap container
+- [x] 5.1: Audit transfer_stmt for ReturnNode: direct identifiers marked :moved, struct literal fields wrapped in CopyNode stay :owned
+- [x] 5.2: Audit transfer_stmt for BG captures: resource_captures marked :moved, string captures are Copy
+- [x] 5.3: Container store: NOT needed -- CLEAR copies/promotes values into containers, frame original stays alive
+- [x] 5.4: Verified upgrade_always_escaped_to_heap! as optimization (dataflow marks returns as moved regardless)
+- [x] 5.5: Verified upgrade_bg_captures_to_heap! as optimization (dataflow marks captures as moved regardless)
+- [x] 5.6: Documented PromotionClassifier + upgrade methods as performance optimizations
+- [x] 5.7: Tests: 6 new specs verify promotion-as-move modeling (direct return, struct literal, CopyNode, GIVE, assignment, TAKES)
 
 ### Phase 6: Borrow Checking
 

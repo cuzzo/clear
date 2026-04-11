@@ -16,6 +16,13 @@ require_relative "type"
 # Ruby just decides WHICH variables/values to call it on.
 
 module PromotionClassifier
+  # Performance optimization: identifies frame variables that always escape via return
+  # and upgrades them to heap at declaration (avoiding runtime CheatLib.promote calls).
+  #
+  # NOT a correctness requirement. Safety is enforced by OwnershipDataflow which marks
+  # returned identifiers as :moved regardless of allocator. Without PromotionClassifier,
+  # programs still work correctly -- they just do more runtime frame-to-heap promotions.
+  #
   # Classify escape promotions for a single function.
   #
   # @param fn_node [AST::FunctionDef] the annotated function

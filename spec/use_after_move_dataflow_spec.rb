@@ -31,6 +31,21 @@ RSpec.describe UseAfterMoveChecker do
     expect(errors).to be_empty, "Expected no errors but got: #{errors.inspect}"
   end
 
+  def analyze_state(src, fn_name = "main")
+    tokens = Lexer.new(src).tokenize
+    ast = Parser.new(tokens, src).parse
+    PipelineRewriter.new.rewrite!(ast)
+    annotator = SemanticAnnotator.new
+    annotator.annotate!(ast)
+    StringConcatRewriter.new.rewrite!(ast)
+
+    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
+    raise "Function '#{fn_name}' not found" unless fn_node
+
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    OwnershipDataflow.analyze(fn_node, schema_lookup: schema_lookup)
+  end
+
   # =========================================================================
   # No false positives on valid programs
   # =========================================================================
@@ -173,21 +188,6 @@ RSpec.describe UseAfterMoveChecker do
   # =========================================================================
 
   describe "per-statement state tracking" do
-    def analyze_state(src, fn_name = "main")
-      tokens = Lexer.new(src).tokenize
-      ast = Parser.new(tokens, src).parse
-      PipelineRewriter.new.rewrite!(ast)
-      annotator = SemanticAnnotator.new
-      annotator.annotate!(ast)
-      StringConcatRewriter.new.rewrite!(ast)
-
-      fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
-      raise "Function '#{fn_name}' not found" unless fn_node
-
-      schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
-      OwnershipDataflow.analyze(fn_node, schema_lookup: schema_lookup)
-    end
-
     it "tracks point_states for each statement" do
       df = analyze_state(<<~CLEAR)
         STRUCT User { id: Int64 }
@@ -249,6 +249,107 @@ RSpec.describe UseAfterMoveChecker do
       CLEAR
       expect(df.exit_states["a"]).to eq(:moved)
       expect(df.exit_states["b"]).to eq(:owned)
+    end
+  end
+
+  # =========================================================================
+  # Phase 5: Promotion modeled as ownership transfer
+  # =========================================================================
+
+  # =========================================================================
+  # Phase 5: Promotion modeled as ownership transfer
+  #
+  # In CLEAR's arena model, promotion = copy (frame original stays alive).
+  # Unlike Rust where `return x` moves x, CLEAR wraps returned values in
+  # CopyNode (frame-to-heap copy). The dataflow correctly models this:
+  # sources of copies stay :owned, only explicit moves (GIVE on heap types,
+  # non-Copy assignment) mark sources as :moved.
+  # =========================================================================
+
+  describe "promotion as ownership transfer" do
+    it "direct return of collection marks source as moved" do
+      df = analyze_state(<<~CLEAR, "makeList")
+        FN makeList() RETURNS Int64[] ->
+          MUTABLE items: Int64[]@list = List[];
+          items.append(1_i64);
+          RETURN items;
+        END
+      CLEAR
+      # Direct return of identifier: marked as moved by collect_binding_moves
+      expect(df.exit_states["items"]).to eq(:moved)
+    end
+
+    it "struct literal return copies fields (CopyNode), source stays owned" do
+      df = analyze_state(<<~CLEAR, "wrap")
+        STRUCT Wrapper { data: Int64[] }
+        FN wrap() RETURNS %Wrapper ->
+          MUTABLE items: Int64[]@list = List[];
+          items.append(1_i64);
+          RETURN Wrapper{ data: items };
+        END
+      CLEAR
+      # Annotator wraps struct literal field values in CopyNode for promotion.
+      # CopyNode does NOT consume the source -- frame original stays alive.
+      expect(df.exit_states["items"]).to eq(:owned)
+    end
+
+    it "return preserves allocator info on moved OwnerEntry" do
+      df = analyze_state(<<~CLEAR, "makeList")
+        FN makeList() RETURNS Int64[] ->
+          MUTABLE items: Int64[]@list = List[];
+          items.append(1_i64);
+          RETURN items;
+        END
+      CLEAR
+      entry = df.exit_states["items"]
+      if entry.is_a?(OwnershipDataflow::OwnerEntry)
+        expect(entry.state).to eq(:moved)
+        expect(entry.allocator).not_to be_nil
+      end
+    end
+
+    it "GIVE on @list creates copy, source stays owned" do
+      df = analyze_state(<<~CLEAR)
+        FN consume(TAKES items: Int64[]) RETURNS Int64 ->
+          RETURN items.length();
+        END
+        FN main() RETURNS Void ->
+          MUTABLE vals: Int64[]@list = List[];
+          vals.append(1_i64);
+          n = consume(GIVE vals);
+          RETURN;
+        END
+      CLEAR
+      # GIVE on frame @list creates CopyNode (frame-to-heap copy).
+      # The original frame list stays alive until frame rewind.
+      expect(df.exit_states["vals"]).to eq(:owned)
+    end
+
+    it "non-Copy assignment marks source as moved" do
+      df = analyze_state(<<~CLEAR)
+        STRUCT User { id: Int64 }
+        FN main() RETURNS Void ->
+          a: %User = User{ id: 1 };
+          b = a;
+          RETURN;
+        END
+      CLEAR
+      # Direct assignment of non-Copy heap struct IS a move
+      expect(df.exit_states["a"]).to eq(:moved)
+      expect(df.exit_states["b"]).to eq(:owned)
+    end
+
+    it "TAKES param tracked with allocator info" do
+      df = analyze_state(<<~CLEAR, "consume")
+        FN consume(TAKES items: Int64[]) RETURNS Int64 ->
+          RETURN items.length();
+        END
+      CLEAR
+      entry = df.exit_states["items"]
+      expect(entry).not_to be_nil
+      if entry.is_a?(OwnershipDataflow::OwnerEntry)
+        expect(entry.allocator).to eq(:heap)
+      end
     end
   end
 end

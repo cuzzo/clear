@@ -1287,6 +1287,9 @@ class MIRPass
   # A variable is always-escaped if it's in var_promotes AND referenced in
   # every return node. For those, heap allocation at declaration is correct
   # and cheaper than frame-then-promote.
+  # Performance optimization: allocate on heap from the start instead of frame+promote.
+  # NOT a correctness requirement. OwnershipDataflow marks returned values as :moved
+  # regardless of allocator. Without this, programs work but do runtime promotions.
   def upgrade_always_escaped_to_heap!(fn, plan)
     return_nodes = []
     AST.walk_body(fn.body) { |n| return_nodes << n if n.is_a?(AST::ReturnNode) }
@@ -1366,8 +1369,10 @@ class MIRPass
     end
   end
 
-  # Upgrade BG-captured collection variables to heap at declaration.
-  # BG captures are always escapes -- the captured data must survive frame rewind.
+  # Performance optimization: allocate BG-captured collections on heap from the start.
+  # NOT a correctness requirement. OwnershipDataflow marks resource captures as :moved
+  # regardless of allocator. Without this, programs work but do runtime promotions.
+  #
   # Only collections (list/map) benefit: their allocator controls backing storage.
   # Strings still need MIR::Promote(:bg_string) because the data comes from
   # external sources and must be physically duped to heap at capture time.
