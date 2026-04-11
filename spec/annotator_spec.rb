@@ -2177,13 +2177,23 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "range with Int64 bounds (auto-coerced to Float64)" do
+    context "range with Int64 bounds (stays Int64)" do
       let(:code) { "r = (0_i64..<5_i64);" }
 
       it "resolves to :Range without error" do
         expect { ast }.not_to raise_error
         expect(result).to eq(:Range)
       end
+
+      it "does not coerce Int64 bounds to Float64" do
+        range_node = ast.statements.last.value
+        expect(range_node.start.coerced_type).to be_nil
+        expect(range_node.finish.coerced_type).to be_nil
+      end
+    end
+
+    context "range with mixed Int64/Float64 bounds" do
+      let(:code) { "r = (0_i64..<5.0);" }
 
       it "coerces Int64 start to Float64" do
         range_node = ast.statements.last.value

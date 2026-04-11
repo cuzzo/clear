@@ -3976,15 +3976,15 @@ pub const CheatLib = struct {
             // owning scheduler, and the shard index is known from routing.
             // Zero overhead: no shardIndex(), no sendAndWait(), no key dupe.
 
-            pub fn putDirect(self: *Self, shard: usize, alloc: std.mem.Allocator, key: []const u8, value: V) !void {
-                const gop = try self.shards[shard].map.getOrPut(alloc, key);
+            pub fn putDirect(self: *Self, shard: usize, _: std.mem.Allocator, key: []const u8, value: V) !void {
+                const gop = try self.shards[shard].map.getOrPut(remote_alloc, key);
                 if (gop.found_existing) {
-                    CheatLib.cleanup(V, alloc, gop.value_ptr);
+                    CheatLib.cleanup(V, remote_alloc, gop.value_ptr);
                 } else {
-                    gop.key_ptr.* = try alloc.dupe(u8, key);
+                    gop.key_ptr.* = try remote_alloc.dupe(u8, key);
                 }
                 gop.value_ptr.* = if (comptime is_slice_value)
-                    try alloc.dupe(@typeInfo(V).pointer.child, value)
+                    try remote_alloc.dupe(@typeInfo(V).pointer.child, value)
                 else
                     value;
             }
@@ -3992,10 +3992,10 @@ pub const CheatLib = struct {
             /// Insert using a pre-computed hash. The hash MUST have been computed
             /// by shardIndexWithHash (Wyhash) — the same function StringHashMap uses.
             /// Skips rehashing the key, saving ~50% of hash work in SHARD pipelines.
-            pub fn putPrehashed(self: *Self, shard: usize, precomputed_hash: u64, alloc: std.mem.Allocator, key: []const u8, value: V) !void {
-                const owned_key = try alloc.dupe(u8, key);
+            pub fn putPrehashed(self: *Self, shard: usize, precomputed_hash: u64, _: std.mem.Allocator, key: []const u8, value: V) !void {
+                const owned_key = try remote_alloc.dupe(u8, key);
                 const safe_val = if (comptime is_slice_value)
-                    try alloc.dupe(@typeInfo(V).pointer.child, value)
+                    try remote_alloc.dupe(@typeInfo(V).pointer.child, value)
                 else
                     value;
                 const PrehashedCtx = struct {
@@ -4003,16 +4003,16 @@ pub const CheatLib = struct {
                     pub fn hash(self_ctx: @This(), _: []const u8) u64 { return self_ctx.h; }
                     pub fn eql(_: @This(), a: []const u8, b: []const u8) bool { return std.mem.eql(u8, a, b); }
                 };
-                const gop = self.shards[shard].map.getOrPutAdapted(alloc, owned_key, PrehashedCtx{ .h = precomputed_hash }) catch |e| {
-                    alloc.free(owned_key);
-                    if (comptime is_slice_value) alloc.free(safe_val);
+                const gop = self.shards[shard].map.getOrPutAdapted(remote_alloc, owned_key, PrehashedCtx{ .h = precomputed_hash }) catch |e| {
+                    remote_alloc.free(owned_key);
+                    if (comptime is_slice_value) remote_alloc.free(safe_val);
                     return e;
                 };
                 if (gop.found_existing) {
-                    alloc.free(owned_key);
+                    remote_alloc.free(owned_key);
                     if (comptime is_slice_value) {
                         const old = gop.value_ptr.*;
-                        alloc.free(old);
+                        remote_alloc.free(old);
                     }
                 } else {
                     gop.key_ptr.* = owned_key;
@@ -4028,10 +4028,10 @@ pub const CheatLib = struct {
                 return self.shards[shard].map.contains(key);
             }
 
-            pub fn removeDirect(self: *Self, shard: usize, alloc: std.mem.Allocator, key: []const u8) void {
+            pub fn removeDirect(self: *Self, shard: usize, _: std.mem.Allocator, key: []const u8) void {
                 if (self.shards[shard].map.fetchRemove(key)) |kv| {
-                    alloc.free(kv.key);
-                    if (is_slice_value) alloc.free(kv.value);
+                    remote_alloc.free(kv.key);
+                    if (is_slice_value) remote_alloc.free(kv.value);
                 }
             }
 

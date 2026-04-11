@@ -1438,6 +1438,7 @@ private
 
     node.zig_pattern = method_def[:zig]
     node.full_type   = method_def[:return]
+    node.matched_stdlib_def = method_def
     node.stdlib_allocates = true if method_def[:allocates]
     node.mutates_receiver = true if method_def[:mutates_receiver]
     node.can_fail = true if method_def[:can_fail]
@@ -2461,9 +2462,19 @@ private
       error!(node, "Range end must be a numeric type, got #{finish_type}")
     end
 
-    # Coerce integer types to Number (f64) for uniform Range representation
-    node.start.coerced_type = :Float64 if start_type != :Float64 && Type.new(start_type).numeric?
-    node.finish.coerced_type = :Float64 if finish_type != :Float64 && Type.new(finish_type).numeric?
+    # Only coerce to Float64 when mixing int and float bounds.
+    # Pure-integer ranges stay Int64 (no unnecessary float conversion).
+    start_is_float = Type.new(start_type).float?
+    finish_is_float = Type.new(finish_type).float?
+    if start_is_float != finish_is_float
+      # Mixed: coerce both to Float64
+      node.start.coerced_type = :Float64 unless start_is_float
+      node.finish.coerced_type = :Float64 unless finish_is_float
+    elsif start_is_float
+      # Both float: no coercion needed
+    else
+      # Both integer: keep as-is (Int64 range)
+    end
 
     node.full_type = :Range
   end

@@ -672,7 +672,12 @@ class MIREmitter
   end
 
   def emit_range_lit(node)
-    "CheatLib.Range{ .start = #{emit(node.start)}, .end = #{emit(node.end_val)} }"
+    s = emit(node.start)
+    e = emit(node.end_val)
+    # Range struct fields are f64 -- ensure integer bounds are converted.
+    s = "@as(f64, @floatFromInt(#{s}))" unless s.include?("f64") || s.include?("float")
+    e = "@as(f64, @floatFromInt(#{e}))" unless e.include?("f64") || e.include?("float")
+    "CheatLib.Range{ .start = #{s}, .end = #{e} }"
   end
 
   def emit_has_field(node)

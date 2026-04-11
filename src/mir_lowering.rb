@@ -20,6 +20,7 @@ class MIRLowering
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
 
   attr_reader :fn_sigs
+  attr_accessor :shard_context
 
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
@@ -31,6 +32,7 @@ class MIRLowering
     @fn_sigs = fn_sigs || {}
     @moved_guard_info = moved_guard_info || {}
     @rt_name = "rt"
+    @shard_context = nil  # { map: "varname", idx: "__sh0_sh.shard", key: "__sh0_key" }
     @emitted_extern_modules = Set.new
     @block_expr_counter = 0
     @indirect_fields = {}
@@ -1707,7 +1709,9 @@ class MIRLowering
     pattern = node.zig_pattern.dup
     arg_strs = node.args.map { |a| emit_expr(lower(a)) }
     arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}", arg) }
-    MIR::InlineZig.new(pattern, "static_call")
+    iz = MIR::InlineZig.new(pattern, "static_call")
+    iz.stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
+    iz
   end
 
   def lower_or_exit(node)
@@ -2453,8 +2457,19 @@ class MIRLowering
     end
 
     if node.target.metatype == :hashmap
+      target_var = node.target.is_a?(AST::Identifier) ? node.target.name : nil
       map_ft = Type.new(node.target.full_type)
-      if map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
+      if @shard_context && target_var == @shard_context[:map]
+        # Inside SHARD body: use getDirect (no routing, no sendAndWait)
+        target_zig = emit_expr(target)
+        kind = map_ft.numeric_map? ? :numeric_map : :string_map
+        op = INDEX_OPS.dig(kind, :get)
+        pattern = op[:shard_direct_zig].dup
+        pattern = pattern.gsub("{target}", target_zig)
+        pattern = pattern.gsub("{shard_idx}", @shard_context[:idx])
+        pattern = pattern.gsub("{shard_key}", @shard_context[:key])
+        MIR::InlineZig.new(pattern, "shard_direct_get")
+      elsif map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
         key_zig = map_ft.key_type.zig_type
         val_zig = map_ft.value_type.zig_type
         emit_builtin(:numericMapGet, [MIR::Ident.new(key_zig), MIR::Ident.new(val_zig), target, index])
@@ -2881,8 +2896,12 @@ class MIRLowering
       return MIR::ExprStmt.new(emit_builtin(:setAt, [target, idx, val]), false)
     end
 
-    # Pick sharded zig variant if applicable
-    zig = if (receiver_type&.sharded? || receiver_type&.striped?) && op[:sharded_zig]
+    # Pick shard-direct zig when inside a SHARD pipeline body and target matches
+    target_var = target_node.is_a?(AST::Identifier) ? target_node.name : nil
+    shard_direct = @shard_context && target_var == @shard_context[:map] && op[:shard_direct_zig]
+    zig = if shard_direct
+      op[:shard_direct_zig]
+    elsif (receiver_type&.sharded? || receiver_type&.striped?) && op[:sharded_zig]
       op[:sharded_zig]
     else
       op[:zig]
@@ -2894,10 +2913,14 @@ class MIRLowering
       idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
     end
 
-    # Apply value transforms from registry
+    # Select value transforms for the chosen zig variant. Each variant declares
+    # its own transforms (e.g. shard_direct_value_transforms for putDirect).
     val_node = node.value
     val_ti = val_node.type_info rescue nil
-    (op[:value_transforms] || []).each do |transform|
+    transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
+                 else op[:value_transforms] || []
+                 end
+    transforms.each do |transform|
       case transform
       when :dupe_string_literal
         if val_ti&.string? && !val_node.is_a?(AST::CopyNode)
@@ -2914,7 +2937,10 @@ class MIRLowering
         unless val_ti&.string?
           val_zig = emit_expr(val)
           new_zig = apply_container_promote_zig(val_zig, rt_name)
-          val = MIR::InlineZig.new(new_zig, "index_promote") if new_zig != val_zig
+          if new_zig != val_zig
+            val = MIR::InlineZig.new(new_zig, "index_promote")
+            val.stdlib_def = { allocates: true }
+          end
         end
       end
     end
@@ -2930,11 +2956,17 @@ class MIRLowering
     pattern = pattern.gsub("{index}", idx_zig)
     pattern = pattern.gsub("{value}", val_zig)
 
+    # Substitute shard-direct placeholders when inside SHARD body
+    if @shard_context && pattern.include?("{shard_idx}")
+      pattern = pattern.gsub("{shard_idx}", @shard_context[:idx])
+      pattern = pattern.gsub("{shard_key}", @shard_context[:key])
+    end
+
     # Resolve allocator placeholders to SYMBOLS (not Zig strings).
     # Placeholders ({key_alloc}, {val_alloc}, {alloc}) stay in the code.
     # The emitter substitutes them using iz.allocs at emit time.
     resolved_allocs = {}
-    [:alloc, :key_alloc, :val_alloc].each do |alloc_key|
+    [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
       placeholder = "{#{alloc_key}}"
       next unless pattern.include?(placeholder)
       alloc_sym = op[alloc_key] || :heap

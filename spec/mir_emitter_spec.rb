@@ -355,9 +355,18 @@ RSpec.describe MIREmitter do
     expect(e.emit(MIR::OptionalUnwrap.new(MIR::Ident.new("maybe")))).to eq("maybe.?")
   end
 
-  it "emits range literal" do
+  it "emits range literal with integer bounds (auto-cast to f64)" do
     node = MIR::RangeLit.new(MIR::Lit.new("0"), MIR::Lit.new("10"))
-    expect(e.emit(node)).to eq("CheatLib.Range{ .start = 0, .end = 10 }")
+    expect(e.emit(node)).to eq("CheatLib.Range{ .start = @as(f64, @floatFromInt(0)), .end = @as(f64, @floatFromInt(10)) }")
+  end
+
+  it "emits range literal with float bounds (no cast)" do
+    s = MIR::Cast.new(MIR::Cast.new(MIR::Lit.new("0"), nil, :floatFromInt), "f64", :as)
+    f = MIR::Cast.new(MIR::Cast.new(MIR::Lit.new("10"), nil, :floatFromInt), "f64", :as)
+    node = MIR::RangeLit.new(s, f)
+    result = e.emit(node)
+    expect(result).to include("CheatLib.Range{")
+    expect(result).not_to include("@floatFromInt(@as(f64")  # no double-cast
   end
 
   it "emits items access (safe)" do

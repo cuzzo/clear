@@ -1414,7 +1414,6 @@ module PipelineGenerator
                   #{key_needs_frame_mark ? "const __sh#{id}_loop_mark = #{rt_name}.saveLoopMark(); defer #{rt_name}.restoreLoopMark(__sh#{id}_loop_mark);" : ""}
                   const __sh#{id}_key = #{key_code};
                   const __sh#{id}_sh = @TypeOf(__sh#{id}_map.*).shardIndexWithHash(__sh#{id}_key);
-                  _ = __sh#{id}_sh;
                   #{body_code}
               }
           }

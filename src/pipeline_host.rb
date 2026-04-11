@@ -85,6 +85,11 @@ class PipelineHost
     # so it won't call back to us for sub-expressions.
     substituted = substitute_placeholders(node)
 
+    # Propagate shard-direct context so MIRLowering emits putDirect/getDirect
+    @lowering.shard_context = if @shard_direct_map
+      { map: @shard_direct_map, idx: @shard_direct_idx, key: @shard_direct_key }
+    end
+
     # General case: lower to MIR, emit to Zig
     mir_node = @lowering.lower(substituted)
     @emitter.emit(mir_node)
@@ -697,7 +702,7 @@ class PipelineHost
         MIR::BreakStmt.new(label,
           MIR::InlineZig.new(
             "try CheatLib.makeList(#{elem_zig}, #{alloc_zig_str(alloc)}, #{items}[0..lim_actual])",
-            "make_limited_list"))
+            "make_limited_list").tap { |iz| iz.stdlib_def = ALLOCATING_DEF })
       ]
     end
   end
@@ -893,7 +898,7 @@ class PipelineHost
         MIR::Let.new("ord_result",
           MIR::InlineZig.new(
             "try CheatLib.makeList(#{elem_zig}, #{alloc_zig_str(alloc)}, #{items})",
-            "make_ord_list"), true, nil, "_ = &ord_result;"),
+            "make_ord_list").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, true, nil, "_ = &ord_result;"),
         MIR::ExprStmt.new(MIR::InlineZig.new(sort_code, "order_by_sort"), nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("ord_result"))
       ]
@@ -976,7 +981,7 @@ class PipelineHost
       MIR::Let.new("res_list",
         MIR::InlineZig.new(
           "try CheatLib.makeList(#{result_zig}, #{alloc_zig_str(alloc)}, &.{})",
-          "join_make_list"), true, nil, nil),
+          "join_make_list").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, true, nil, nil),
       MIR::ForStmt.new(MIR::Ident.new("__jl_items"), "__jl", [
         MIR::Let.new("__match", MIR::Lit.new("null"), true, "?#{right_zig}", nil),
         MIR::ForStmt.new(MIR::Ident.new("__jr_items"), "__jr", [

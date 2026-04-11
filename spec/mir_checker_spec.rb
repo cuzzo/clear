@@ -264,6 +264,42 @@ RSpec.describe MIRChecker do
   end
 
   # ===========================================================================
+  # INLINE_NO_CONTRACT -- InlineZig with CheatLib calls must have stdlib_def
+  # ===========================================================================
+
+  describe "INLINE_NO_CONTRACT" do
+    it "detects InlineZig calling CheatLib without stdlib_def" do
+      iz = MIR::InlineZig.new("try CheatLib.makeList(u8, alloc, items)", "bad_call")
+      body = [MIR::ExprStmt.new(iz, false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") }).to be true
+      expect(errors.any? { |e| e.include?("CheatLib.makeList") }).to be true
+    end
+
+    it "passes when stdlib_def is set" do
+      iz = MIR::InlineZig.new("try CheatLib.makeList(u8, alloc, items)", "ok_call")
+      iz.stdlib_def = { allocates: true }
+      body = [MIR::ExprStmt.new(iz, false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.select { |e| e.include?("INLINE_NO_CONTRACT") }).to be_empty
+    end
+
+    it "passes for exempt CheatLib calls (pure reads/arithmetic)" do
+      iz = MIR::InlineZig.new("CheatLib.intAdd(a, b)", "math")
+      body = [MIR::ExprStmt.new(iz, false)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.select { |e| e.include?("INLINE_NO_CONTRACT") }).to be_empty
+    end
+
+    it "detects unaudited CheatLib call in Let init" do
+      iz = MIR::InlineZig.new("try CheatLib.promote(T, rt, &val)", "promote")
+      body = [MIR::Let.new("x", iz, false, nil, nil)]
+      errors = checker.check_fn!(fn_def("f", body))
+      expect(errors.any? { |e| e.include?("INLINE_NO_CONTRACT") }).to be true
+    end
+  end
+
+  # ===========================================================================
   # check_program! -- verifies all functions
   # ===========================================================================
 

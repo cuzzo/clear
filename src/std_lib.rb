@@ -650,6 +650,7 @@ INDEX_OPS = {
   string_map: {
     get: {
       zig: "{target}.get({index})",
+      shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})",
       return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
       container_borrow: true,
     },
@@ -661,6 +662,8 @@ INDEX_OPS = {
       val_alloc: :receiver_storage,
       value_transforms: [:dupe_string_literal, :dupe_borrowed_union, :container_promote],
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
+      shard_direct_value_transforms: [],  # putDirect dupes key+value internally; no caller-side transforms
+      shard_alloc: :heap,
     },
   },
   numeric_map: {

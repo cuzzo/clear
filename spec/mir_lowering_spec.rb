@@ -787,8 +787,8 @@ RSpec.describe MIRLowering do
       expect(result).to be_a(MIR::RangeLit)
       zig = emit(result)
       expect(zig).to include("CheatLib.Range")
-      expect(zig).to include(".start = 0")
-      expect(zig).to include(".end = 10")
+      expect(zig).to include("@floatFromInt(0)")
+      expect(zig).to include("@floatFromInt(10)")
     end
 
     it "lowers inclusive range (adds 1 to end)" do

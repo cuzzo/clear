@@ -226,7 +226,7 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("saveLoopMark")
     end
 
-    it "emits putDirect in SHARD worker body (not generic put)", :pending => "MIR pipeline: SHARD putDirect optimization not yet implemented" do
+    it "emits putDirect in SHARD worker body (not generic put)" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS String ->
             RETURN "k:${toString(n)}";
@@ -245,7 +245,44 @@ RSpec.describe ZigTranspiler do
       # Worker must use putDirect (zero-overhead shard-local), not generic put
       # (which re-hashes, re-dupes key, and routes through sendAndWait).
       expect(zig).to include("putDirect")
-      expect(zig).not_to match(/map_ptr\.put\(/)
+      expect(zig).not_to match(/counts\.put\(/)
+    end
+
+    it "emits getDirect in SHARD worker body (not generic get)" do
+      src = <<~CLEAR
+        FN makeKey(n: Int64) RETURNS String ->
+            RETURN "k:${toString(n)}";
+        END
+
+        FN main() RETURNS Void ->
+            MUTABLE counts: HashMap<Int64>@sharded(4) = {};
+            (0_i64 ..< 100_i64) s> SHARD(makeKey(_), counts) s> CONCURRENT EACH {
+                cur = counts[_] OR 0;
+                counts[_] = cur + 1;
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("getDirect")
+      expect(zig).not_to match(/counts\.get\(/)
+    end
+
+    it "shard-direct putDirect does not emit caller-side dupe (putDirect dupes internally)" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            MUTABLE map: HashMap<String>@sharded(4) = {};
+            (0_i64 ..< 10_i64) s> SHARD("k:" + toString(_), map) s> CONCURRENT EACH {
+                map[_] = "value";
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("putDirect")
+      # putDirect dupes key+value internally. No caller-side heapAlloc().dupe()
+      # on the value -- that would leak (putDirect doesn't free caller's copy).
+      expect(zig).not_to match(/heapAlloc\(\)\.dupe\(u8.*"value"/)
     end
 
     it "skips saveLoopMark in SHARD producer when key is a pre-built array lookup (no frame alloc)" do
