@@ -11,9 +11,14 @@ ZIG = [
   `which zig 2>/dev/null`.strip
 ].find { |p| !p.empty? && File.exist?(p) } || "zig"
 
+RUN_TIMEOUT = (ENV['BENCH_TIMEOUT'] || 2).to_i
+
 def measure_min(command, runs = 5)
-  times = runs.times.map { Benchmark.measure { `#{command}` }.real }
-  times.min
+  times = runs.times.filter_map do
+    t = Benchmark.measure { `timeout #{RUN_TIMEOUT}s sh -c "#{command.gsub('"', '\\"')}"` }.real
+    $?.success? ? t : nil
+  end
+  times.empty? ? nil : times.min
 end
 
 # -------------------------------------------------------------------------
@@ -240,7 +245,8 @@ def run_bench(dir)
           end
     next unless bin && File.exist?(bin)
     env = lang == :clear ? "#{jemalloc_preload}CLEAR_THREADS=#{threads} " : ""
-    output = `#{env}/usr/bin/time -v #{bin} 2>&1`
+    rss_cmd = "#{env}/usr/bin/time -v #{bin}"
+    output = `timeout #{RUN_TIMEOUT}s sh -c "#{rss_cmd.gsub('"', '\\"')}" 2>&1`
     if output =~ /Maximum resident set size.*?:\s*(\d+)/
       peak_rss[lang] = $1.to_i
     end
@@ -256,7 +262,11 @@ def run_bench(dir)
 
   results.each do |lang, t|
     rss_str = peak_rss[lang] ? "  RSS: #{peak_rss[lang]} KB" : ""
-    puts "#{'%-22s' % label_map[lang]} #{'%.4f' % t} s#{rss_str}"
+    if t.nil?
+      puts "#{'%-22s' % label_map[lang]} TIMEOUT (#{RUN_TIMEOUT}s)#{rss_str}"
+    else
+      puts "#{'%-22s' % label_map[lang]} #{'%.4f' % t} s#{rss_str}"
+    end
   end
 
   [:c, :go, :rust].each do |k|

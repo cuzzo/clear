@@ -237,7 +237,7 @@ module MIR
   #   produces: bindings the raw block creates (must have MIR::Alloc + MIR::Drop)
   #   borrows:  bindings read but not moved/freed (must not be moved during raw block)
   #   nil = unaudited (legacy; to be eliminated)
-  RawZig = Struct.new(:code, :reason, :ownership_contract) do
+  RawZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def) do
     include Stmt
     def expr?; true; end  # can appear in expression position too
   end

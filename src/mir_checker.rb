@@ -28,7 +28,7 @@ class MIRChecker
     allocs = {}
     hpt_leaks = []
     inline_alloc_nodes = []
-    all_inline_zig = []
+    all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
 
     walk_mir(fn_def.body) do |node|
       case node
@@ -39,14 +39,16 @@ class MIRChecker
         if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
           inline_alloc_nodes << node.expr
         end
-        all_inline_zig << node.expr if node.expr.is_a?(MIR::InlineZig)
+        all_zig_nodes << node.expr if node.expr.is_a?(MIR::InlineZig)
       when MIR::InlineZig
         if node.allocs && !inline_alloc_nodes.include?(node)
           inline_alloc_nodes << node
         end
-        all_inline_zig << node unless all_inline_zig.include?(node)
+        all_zig_nodes << node unless all_zig_nodes.include?(node)
+      when MIR::RawZig
+        all_zig_nodes << node unless all_zig_nodes.include?(node)
       when MIR::Let
-        all_inline_zig << node.init if node.init.is_a?(MIR::InlineZig)
+        all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::LambdaExpr
         if node.fn_def
           sub = MIRChecker.new
@@ -57,7 +59,7 @@ class MIRChecker
 
     hpt_leaks.each { |e| @errors << e }
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
-    verify_inline_zig_contracts!(all_inline_zig)
+    verify_zig_contracts!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
 
     @errors
@@ -160,36 +162,43 @@ class MIRChecker
     end
   end
 
-  # INLINE_NO_CONTRACT: InlineZig with CheatLib calls must have stdlib_def.
+  # NO_CONTRACT: InlineZig/RawZig with CheatLib calls must have stdlib_def.
   #
   # CheatLib.* functions allocate, free, or transfer ownership. Without stdlib_def,
   # the checker cannot verify HPT_LEAK or INLINE_ALLOC_MISMATCH. This makes the
-  # InlineZig node opaque -- ownership bugs inside it are invisible.
+  # node opaque -- ownership bugs inside it are invisible.
   #
   # Exempt: CheatLib calls that are pure reads or comparisons (no ownership effect).
   CHEATLIB_EXEMPT = %w[
     CheatLib.timestampMs CheatLib.threadCount CheatLib.assert
     CheatLib.intAdd CheatLib.intSub CheatLib.intMul CheatLib.intDiv
     CheatLib.wrapAdd CheatLib.wrapMul CheatLib.wrapSub
-    CheatLib.getAt CheatLib.numericMapGet
+    CheatLib.getAt CheatLib.numericMapGet CheatLib.setAt
     CheatLib.Range CheatLib.Promise CheatLib.BoundedStream
+    CheatLib.len CheatLib.countOccurrences CheatLib.intToString
+    CheatLib.listDir CheatLib.readFile CheatLib.eql
+    CheatLib.needsCleanup
   ].freeze
 
-  def verify_inline_zig_contracts!(inline_nodes)
-    inline_nodes.each do |iz|
-      next if iz.stdlib_def
-      next unless iz.code.is_a?(String)
+  def verify_zig_contracts!(zig_nodes)
+    zig_nodes.each do |node|
+      next if node.stdlib_def
+      next unless node.code.is_a?(String)
+
+      kind = node.is_a?(MIR::RawZig) ? :RAW_NO_CONTRACT : :INLINE_NO_CONTRACT
 
       # Find CheatLib calls in the code string
-      calls = iz.code.scan(/CheatLib\.\w+/)
+      calls = node.code.scan(/CheatLib\.\w+/)
       next if calls.empty?
 
-      # Filter out exempt (pure read / arithmetic) calls
-      unaudited = calls.reject { |c| CHEATLIB_EXEMPT.include?(c) }
+      # Filter out exempt calls: type references (CheatLib.Pool, CheatLib.Locked, etc.)
+      # and pure read/arithmetic functions.
+      unaudited = calls.reject { |c| CHEATLIB_EXEMPT.include?(c) || c.match?(/\ACheatLib\.[A-Z]/) }
       next if unaudited.empty?
 
-      @errors << error(:INLINE_NO_CONTRACT, iz.reason || "inline_zig",
-        "InlineZig calls #{unaudited.uniq.join(', ')} without stdlib_def " \
+      label = node.is_a?(MIR::RawZig) ? "RawZig" : "InlineZig"
+      @errors << error(kind, node.reason || label.downcase,
+        "#{label} calls #{unaudited.uniq.join(', ')} without stdlib_def " \
         "(ownership effects invisible to checker)")
     end
   end
