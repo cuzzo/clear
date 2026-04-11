@@ -1542,7 +1542,10 @@ private
     # Dynamic resolver methods are named `infer_*` to avoid collisions with
     # Ruby Kernel conversion methods (Integer, String, Array, etc.).
     ret = matched_def[:return]
-    if ret.is_a?(Symbol) && ret.to_s.start_with?("infer_") && respond_to?(ret, true)
+    if ret.is_a?(Hash) && ret[:type]
+      # Structured return: { type: :String, sync: :raw } etc. — preserves capabilities.
+      node.full_type = Type.new(ret[:type], sync: ret[:sync], ownership: ret[:ownership])
+    elsif ret.is_a?(Symbol) && ret.to_s.start_with?("infer_") && respond_to?(ret, true)
       node.full_type = send(ret, args, node)
     else
       node.full_type = ret
@@ -2102,7 +2105,7 @@ private
     elsif target_type_info.string? && !target_type_info.raw?
       error!(node, "Cannot index String by integer. Use String@raw for byte access, or .codepoints() for iteration.")
     elsif target_type_info.string? && target_type_info.raw?
-      node.full_type = :String
+      node.full_type = Type.new(:String, sync: :raw)
     elsif target_type_info.array? || node.target.metatype == :struct
       # Fallback for struct field access via index (rare)
       node.full_type = target_type_info.element_type

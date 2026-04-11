@@ -1062,6 +1062,14 @@ pub const CheatLib = struct {
         return allocator.dupe(u8, slice);
     }
 
+    // O(1) sub-slice for String@raw — zero copy, no allocation.
+    // Caller guarantees lifetime: the result borrows from `str`.
+    pub fn substrRaw(str: []const u8, start: i64, length: i64) []const u8 {
+        const u_start: usize = @intCast(start);
+        const u_len: usize = @intCast(length);
+        return str[u_start .. u_start + u_len];
+    }
+
     // String Equality (Content check)
     pub fn strEql(s1: []const u8, s2: []const u8) bool {
         return std.mem.eql(u8, s1, s2);

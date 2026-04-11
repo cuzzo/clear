@@ -38,13 +38,17 @@ STD_LIB = {
   ],
 
   # 2. String.substr(start, len)
-  "substr" => {
-    args: [STRING_TYPE, :Int64, :Int64],
-    return: STRING_TYPE, return_alloc: :frame,
-    zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})",
-    allocates: true,
-    alloc: :node_storage,
-  },
+  # String@raw: O(1) zero-copy sub-slice, no allocation. Returns String@raw.
+  # String:     Allocates a copy on the frame arena.
+  "substr" => [
+    { args: [{type: STRING_TYPE, sync: :raw}, :Int64, :Int64],
+      return: {type: STRING_TYPE, sync: :raw},
+      zig: "CheatLib.substrRaw({0}, {1}, {2})" },
+    { args: [STRING_TYPE, :Int64, :Int64],
+      return: STRING_TYPE, return_alloc: :frame,
+      zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})",
+      allocates: true, alloc: :node_storage },
+  ],
 
   # 3. String Equality
   "eql?" => {
@@ -80,7 +84,7 @@ STD_LIB = {
   # String:     O(n) UTF-8 codepoint indexing, allocates result.
   "charAt" => [
     { args: [{type: STRING_TYPE, sync: :raw}, :Int64],
-      return: STRING_TYPE,
+      return: {type: STRING_TYPE, sync: :raw},
       zig: "CheatLib.charAt({0}, {1})" },
     { args: [STRING_TYPE, :Int64],
       return: STRING_TYPE, return_alloc: :frame,
