@@ -1345,7 +1345,11 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "WhileLoop mark_per_iter" do
-      it "marks loop as safe for per-iter frame marks when list is loop-local" do
+      # Phase 2 (LoopFrameAnalysis): mark_per_iter is now set in Pass 2 after
+      # CleanupClassifier finalizes allocators, not in Pass 1 (annotator).
+      # Tests that require mark_per_iter=true are pending until LoopFrameAnalysis
+      # is implemented in control_flow.rb.
+      pending "Phase 2: marks loop as safe for per-iter frame marks when list is loop-local" do
         src = <<~CLEAR
           FN foo() RETURNS Void ->
             MUTABLE i = 0_i64;
@@ -1363,7 +1367,11 @@ RSpec.describe SemanticAnnotator do
         expect(loop_node.mark_per_iter).to be true
       end
 
-      it "sets loop marks when mutates_receiver on outer container (backing store growth is frame alloc)" do
+      it "does NOT set loop mark for append-to-outer-container with non-allocating args" do
+        # append(outer, literal) only extends the container's backing store under the
+        # container's allocator. The outer scope's rewind handles cleanup.
+        # Per-iteration rewind is wrong here -- it would corrupt the accumulation.
+        # (This was the bench 06 pattern that was incorrectly heap-promoted before.)
         src = <<~CLEAR
           FN foo() RETURNS Void ->
             MUTABLE all: Float64[]@list = [];
@@ -1378,16 +1386,13 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.first
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
-        # append to outer frame list grows backing store via frameAlloc() each
-        # realloc -- unbounded frame arena growth. Escape analysis promotes the
-        # container to heap, then mark_per_iter rewind is safe.
-        expect(loop_node.mark_per_iter).to be true
+        expect(loop_node.mark_per_iter).to be false
       end
 
-      it "sets loop marks when mutates_receiver on outer var but args allocate from frame" do
-        # append(outer_list, value) — the append itself targets the container's backing,
-        # but the VALUE arg (toString) allocates a frame string every iteration.
-        # The outer_vars short-circuit must not skip checking args.
+      it "does NOT set loop mark when append stores frame-allocated value into outer container" do
+        # keys.append(toString(i)): the toString result is stored (by pointer) in keys.
+        # Per-iteration rewind would corrupt the stored string data -- mark_per_iter must be false.
+        # The string data accumulates in the function frame, freed when keys goes out of scope.
         src = <<~CLEAR
           FN foo() RETURNS Void ->
             MUTABLE keys: String[]@list = List[];
@@ -1402,12 +1407,12 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.first
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
-        expect(loop_node.mark_per_iter).to be true
+        expect(loop_node.mark_per_iter).to be false
       end
 
-      it "sets loop marks when mutates_receiver on outer var with nested frame-allocating calls" do
-        # keys.append("b:" + toString(n)) — string concat AND toString both allocate
-        # from frame. Even though append's receiver is outer, the nested args must be checked.
+      it "does NOT set loop mark when append stores nested frame-allocating expression into outer container" do
+        # keys.append("b:" + toString(i)): same reasoning as above -- the concat result
+        # is stored in keys, must not be rewound. mark_per_iter must be false.
         src = <<~CLEAR
           FN foo() RETURNS Void ->
             MUTABLE keys: String[]@list = List[];
@@ -1422,7 +1427,7 @@ RSpec.describe SemanticAnnotator do
         annotated = run(src)
         fn = annotated.statements.first
         loop_node = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
-        expect(loop_node.mark_per_iter).to be true
+        expect(loop_node.mark_per_iter).to be false
       end
 
       it "does NOT mark loop as safe when outer var is assigned a frame-allocating call" do

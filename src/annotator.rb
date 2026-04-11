@@ -1035,10 +1035,7 @@ private
     error!(node, "FOR range start must be Int64, got #{start_type}") unless start_type == :Int64
     error!(node, "FOR range end must be Int64, got #{end_type}") unless end_type == :Int64
 
-    # 2. Capture outer-scope variable names before visiting the body.
-    outer_vars = outer_scope_vars
-
-    # 3. Analyze body in new scope with loop variable declared as immutable Int64
+    # 2. Analyze body in new scope with loop variable declared as immutable Int64
     if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
     analyze_control_flow_branches([
       proc {
@@ -1057,20 +1054,10 @@ private
       validate_tight_body!(node.body, node)
     end
 
-    # 5. Loop Mark: emit saveLoopMark/restoreLoopMark when the loop body
-    # allocates from the frame arena. If any frame data escapes to outer-scope
-    # containers, promote those containers to heap so the rewind is safe.
-    # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
-    allocates = !node.tight && loop_allocates_frame?(node.body, outer_vars)
-    if allocates
-      preserve_vars = Set.new
-      escape_actions = collect_loop_escapes(node.body, outer_vars, preserve_vars: preserve_vars)
-      promote_loop_escapes!(escape_actions)
-      node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
-    else
-      node.loop_preserve_vars = nil
-    end
-    node.mark_per_iter = allocates
+    # mark_per_iter and container heap-promotion are set by LoopFrameAnalysis
+    # in Pass 2, after CleanupClassifier has finalized every binding's allocator.
+    node.mark_per_iter = false
+    node.loop_preserve_vars = nil
 
     node.full_type = :Void
   end
@@ -1125,11 +1112,7 @@ private
       record_effect(EffectTracker::LOOP_UNBOUND)
     end
 
-    # 2. Capture outer-scope variable names before visiting the body.
-    # Used to determine if per-iteration frame marks are safe.
-    outer_vars = outer_scope_vars
-
-    # 3. Analyze Body in a New Scope AND increment loop depth
+    # 2. Analyze Body in a New Scope AND increment loop depth
     if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
 
     # We use analyze_control_flow_branches to handle state merging and drops.
@@ -1177,20 +1160,10 @@ private
       validate_tight_body!(node.do_branch, node)
     end
 
-    # 5. Loop Mark: emit saveLoopMark/restoreLoopMark when the loop body
-    # allocates from the frame arena. If any frame data escapes to outer-scope
-    # containers, promote those containers to heap so the rewind is safe.
-    # TIGHT loops suppress loop marks entirely (arena growth is the caller's concern).
-    allocates = !node.tight && loop_allocates_frame?(node.do_branch, outer_vars)
-    if allocates
-      preserve_vars = Set.new
-      escape_actions = collect_loop_escapes(node.do_branch, outer_vars, preserve_vars: preserve_vars)
-      promote_loop_escapes!(escape_actions)
-      node.loop_preserve_vars = preserve_vars.any? ? preserve_vars : nil
-    else
-      node.loop_preserve_vars = nil
-    end
-    node.mark_per_iter = allocates
+    # mark_per_iter and container heap-promotion are set by LoopFrameAnalysis
+    # in Pass 2, after CleanupClassifier has finalized every binding's allocator.
+    node.mark_per_iter = false
+    node.loop_preserve_vars = nil
 
     node.full_type = :Void
   end

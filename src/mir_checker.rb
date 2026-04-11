@@ -269,10 +269,15 @@ class MIRChecker
   end
 
   # Does this MIR expression node perform a frame allocation?
+  # Backing-store mutations (mutates_receiver) are excluded: they extend an
+  # existing container's backing store under that container's own allocator.
+  # The container's outer-scope rewind handles cleanup — per-iteration rewind
+  # would corrupt accumulated data. Only NEW ephemeral objects need loop marks.
   def expr_has_frame_alloc?(expr)
     return false unless expr
     case expr
     when MIR::InlineZig
+      return false if expr.stdlib_def&.dig(:mutates_receiver)
       expr.allocs&.any? { |_k, v| v == :frame }
     when MIR::DupeSlice, MIR::ConcatStr, MIR::HeapCreate, MIR::AllocSlice,
          MIR::ContainerInit, MIR::MakeList, MIR::DeepCopy, MIR::CapWrap

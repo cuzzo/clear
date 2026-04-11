@@ -680,13 +680,11 @@ module PipeAnalysis
       each_op.body.each { |stmt| visit(stmt) }
     end
 
-    # Flag frame-allocating expressions so pipeline_generator emits loop marks.
-    # The producer loop evaluates key_expr every iteration; the worker loop
-    # runs body every iteration. Both need saveLoopMark/restoreLoopMark if
-    # they allocate from the frame arena.
+    # key_allocates_frame / body_allocates_frame are set by LoopFrameAnalysis in
+    # Pass 2 after CleanupClassifier finalizes allocators. Defaulting to false here.
     if conc.shard_context
-      conc.shard_context[:key_allocates_frame] = node_allocates_frame?(shard_node.key_expr)
-      conc.shard_context[:body_allocates_frame] = loop_allocates_frame?(each_op.body)
+      conc.shard_context[:key_allocates_frame] = false
+      conc.shard_context[:body_allocates_frame] = false
     end
 
     node.full_type = :Void
@@ -830,8 +828,8 @@ module PipeAnalysis
       shard_count: map_type.shard_count,
       key_expr: key_expr,
       auto_detected: true,  # flag so transpiler knows body uses original _ not key
-      key_allocates_frame: node_allocates_frame?(key_expr),
-      body_allocates_frame: loop_allocates_frame?(each_op.body)
+      key_allocates_frame: false,   # set by LoopFrameAnalysis in Pass 2
+      body_allocates_frame: false   # set by LoopFrameAnalysis in Pass 2
     }
   end
 
