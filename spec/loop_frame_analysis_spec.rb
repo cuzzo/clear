@@ -308,6 +308,28 @@ RSpec.describe LoopFrameAnalysis do
       expect(loop.loop_preserve_vars).to include("last")
     end
 
+    it "outer string reassigned with concat of outer (non-local) vars → loop_preserve_vars" do
+      # result = prefix + "-" + suffix: ALL parts are outer vars, not frame locals.
+      # StringConcat is ALWAYS frame-allocated (std.mem.concat uses frameAlloc),
+      # so the result needs loopPreserveAndRewind regardless of what's being concat'd.
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE prefix = "hello";
+          MUTABLE suffix = "world";
+          MUTABLE result = "";
+          FOR i IN (1_i64 ..= 5) DO
+            tmp = i.toString();
+            result = prefix + "-" + suffix;
+          END
+          RETURN;
+        END
+      CLEAR
+      fn = main_fn(ast)
+      loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
+      expect(loop.mark_per_iter).to be true
+      expect(loop.loop_preserve_vars).to include("result")
+    end
+
   end
 
   # ===========================================================================

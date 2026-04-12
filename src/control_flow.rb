@@ -1307,7 +1307,10 @@ module LoopFrameAnalysis
     when AST::GetIndex
       return rhs_references_any?(expr.target, names) || rhs_references_any?(expr.index, names)
     when AST::StringConcat
-      return expr.parts&.any? { |p| rhs_references_any?(p, names) } || false
+      # StringConcat ALWAYS allocates in the frame arena (std.mem.concat uses
+      # frameAlloc). Even if all parts are outer vars / literals, the result is
+      # frame-allocated and will be freed by the per-iteration rewind.
+      return true
     end
     false
   end
