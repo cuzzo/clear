@@ -1201,8 +1201,8 @@ class Type
   def sync=(value)
     @zig_type_cache = nil
     @sync = value
-    # Sync types need a stable heap address
-    @provenance = :heap if value && @ownership == :affine
+    # Sync types need a stable heap address (:raw is a data-access mode, not a real lock)
+    @provenance = :heap if value && value != :raw && @ownership == :affine
   end
 
   # Returns the Zig type string representation of this type.

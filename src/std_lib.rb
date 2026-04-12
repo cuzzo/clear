@@ -126,10 +126,10 @@ STD_LIB = {
   # 4. Read File
   "readFile" => {
     args: [STRING_TYPE],
-    return: STRING_TYPE, return_alloc: :heap,
+    return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.readFile({alloc}, {0})",
     allocates: true,
-    alloc: :node_storage,
+    alloc: :frame,
   },
 
   # 5. Write File
@@ -145,10 +145,10 @@ STD_LIB = {
   "readLine!" => {
     args: [],
     return: STRING_TYPE,
-    return_alloc: :heap,
+    return_alloc: :frame,
     zig: "try CheatLib.readLine({alloc})",
     allocates: true,
-    alloc: :node_storage,
+    alloc: :frame,
     can_fail: true,
   },
 
@@ -156,10 +156,10 @@ STD_LIB = {
   "readLinePrompt!" => {
     args: [STRING_TYPE],
     return: STRING_TYPE,
-    return_alloc: :heap,
+    return_alloc: :frame,
     zig: "try CheatLib.readLinePrompt({alloc}, {0})",
     allocates: true,
-    alloc: :node_storage,
+    alloc: :frame,
     can_fail: true,
   },
 
