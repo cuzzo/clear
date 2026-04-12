@@ -339,6 +339,21 @@ pub const Runtime = struct {
         return new_buf;
     }
 
+    /// Copy a string at the current arena cursor without rewinding.
+    /// Used after loopPreserveAndRewind when multiple variables need preserving
+    /// in the same loop iteration: the first call rewinds to the shared mark,
+    /// subsequent calls use this to copy sequentially so strings don't overlap.
+    pub fn loopPreserveVar(self: *Runtime, data: []const u8) ![]const u8 {
+        if (self.arena_mode) return data;
+        if (data.len == 0) return data;
+        const raw_ptr = self.overflow_arena.alloc(data.len, 1, 0) orelse return error.OutOfMemory;
+        const new_buf = raw_ptr[0..data.len];
+        if (@intFromPtr(new_buf.ptr) != @intFromPtr(data.ptr)) {
+            std.mem.copyForwards(u8, new_buf, data);
+        }
+        return new_buf;
+    }
+
     /// Preserve a slice across a frame mark rewind. Resets the arena cursor
     /// to the saved mark, re-allocates the result at the rewound position,
     /// then trims excess blocks. All intermediate allocations are reclaimed;

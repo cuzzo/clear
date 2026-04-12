@@ -1144,6 +1144,14 @@ class MIRLowering
 
   def lower_extern_call(node)
     args = node.args.map { |a| lower(a) }
+    # Inject allocator as first arg for EXTERN FN with EFFECTS :alloc.
+    if node.respond_to?(:extern_effects) && (alloc_kind = node.extern_effects&.dig(:alloc))
+      rt = MIR::Ident.new(@rt_name)
+      alloc_call = alloc_kind == :heap \
+        ? MIR::MethodCall.new(rt, "heapAlloc",  [], false) \
+        : MIR::MethodCall.new(rt, "frameAlloc", [], false)
+      args = [alloc_call] + args
+    end
     mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
     MIR::Call.new("#{mod_prefix}#{node.name}", args, false)
   end
@@ -3066,13 +3074,19 @@ class MIRLowering
       # Prologue: save loop mark
       save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
       if node.loop_preserve_vars&.any?
-        # Preserve vars + explicit rewind (no defer)
+        # Preserve vars + explicit rewind (no defer).
+        # First var: loopPreserveAndRewind (rewinds to mark then copies).
+        # Subsequent vars: loopPreserveVar (copies at current cursor, no rewind).
+        # Without this distinction all vars land at the same arena position,
+        # each overwriting the previous one.
         body = [save] + body
-        node.loop_preserve_vars.each do |v|
-          body << MIR::Set.new(
-            MIR::Ident.new(zig_safe_name(v)),
+        node.loop_preserve_vars.each_with_index do |v, idx|
+          call = if idx == 0
             MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
-          )
+          else
+            MIR::MethodCall.new(rt, "loopPreserveVar", [MIR::Ident.new(zig_safe_name(v))], true)
+          end
+          body << MIR::Set.new(MIR::Ident.new(zig_safe_name(v)), call)
         end
       else
         # defer restore
@@ -3110,11 +3124,13 @@ class MIRLowering
       save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
       if node.loop_preserve_vars&.any?
         body = [save] + body
-        node.loop_preserve_vars.each do |v|
-          body << MIR::Set.new(
-            MIR::Ident.new(zig_safe_name(v)),
+        node.loop_preserve_vars.each_with_index do |v, idx|
+          call = if idx == 0
             MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
-          )
+          else
+            MIR::MethodCall.new(rt, "loopPreserveVar", [MIR::Ident.new(zig_safe_name(v))], true)
+          end
+          body << MIR::Set.new(MIR::Ident.new(zig_safe_name(v)), call)
         end
       else
         restore = MIR::DeferStmt.new(
@@ -3176,11 +3192,13 @@ class MIRLowering
       save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
       if node.loop_preserve_vars&.any?
         body = [save, var_decl] + body
-        node.loop_preserve_vars.each do |v|
-          body << MIR::Set.new(
-            MIR::Ident.new(zig_safe_name(v)),
+        node.loop_preserve_vars.each_with_index do |v, idx|
+          call = if idx == 0
             MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
-          )
+          else
+            MIR::MethodCall.new(rt, "loopPreserveVar", [MIR::Ident.new(zig_safe_name(v))], true)
+          end
+          body << MIR::Set.new(MIR::Ident.new(zig_safe_name(v)), call)
         end
       else
         restore = MIR::DeferStmt.new(
