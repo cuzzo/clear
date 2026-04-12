@@ -267,6 +267,47 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).not_to include("defer rt.restoreLoopMark")
     end
 
+    it "outer string reassigned with user function call result → added to loop_preserve_vars" do
+      # last = makePrefix(i): makePrefix returns a frame-preserved string (via
+      # preserveAndRewind). The loop has mark_per_iter=true (tmp forces it).
+      # Without loopPreserveAndRewind, last is dangling after loop rewind.
+      ast = run_mir(<<~CLEAR)
+        FN makePrefix(i: Int64) RETURNS String ->
+          RETURN "entry-" + i.toString();
+        END
+        FN main() RETURNS Void ->
+          MUTABLE last = "";
+          FOR i IN (1_i64 ..= 5) DO
+            tmp = i.toString();
+            last = makePrefix(i);
+          END
+          RETURN;
+        END
+      CLEAR
+      fn = main_fn(ast)
+      loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
+      expect(loop.mark_per_iter).to be true
+      expect(loop.loop_preserve_vars).to include("last")
+    end
+
+    it "outer string reassigned with method call result → added to loop_preserve_vars" do
+      # last = val.format(): returns a frame-preserved string. Same issue.
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE last = "";
+          FOR i IN (1_i64 ..= 5) DO
+            tmp = i.toString();
+            last = i.toString();
+          END
+          RETURN;
+        END
+      CLEAR
+      fn = main_fn(ast)
+      loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
+      expect(loop.mark_per_iter).to be true
+      expect(loop.loop_preserve_vars).to include("last")
+    end
+
   end
 
   # ===========================================================================

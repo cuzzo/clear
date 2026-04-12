@@ -1274,15 +1274,21 @@ module LoopFrameAnalysis
 
   # Does expr (or any sub-expression) contain a frame-allocating expression?
   # "Frame-allocating" means: references a local frame variable (by name) OR
-  # calls a stdlib function with stdlib_allocates=true (toString, intToString,
-  # concat, etc.).  Used to detect outer-string-reassignment patterns like
-  # `resp = resp + i.toString()` where the RHS creates a frame string.
+  # calls a function (stdlib or user-defined) that returns a String (frame via
+  # preserveAndRewind protocol), OR calls a stdlib function with stdlib_allocates=true.
+  # Used to detect outer-string-reassignment patterns like
+  # `resp = resp + i.toString()` or `last = makePrefix(i)` where the RHS creates
+  # a frame string that would be freed by the loop's per-iteration rewind.
   def self.rhs_references_any?(expr, names)
     return false unless expr
-    # stdlib_allocates=true: the call itself creates a frame-allocated string
-    if (expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)) &&
-       expr.respond_to?(:stdlib_allocates) && expr.stdlib_allocates
-      return true
+    # COPY expr produces a heap-allocated value -- never needs loopPreserveAndRewind
+    return false if expr.is_a?(AST::CopyNode)
+    # Any call (stdlib or user-defined) that returns a String is frame-allocated
+    # via the preserveAndRewind protocol. This covers both stdlib_allocates=true
+    # calls (toString, intToString, etc.) and user-defined string-returning functions.
+    if expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
+      ti = expr.type_info rescue nil
+      return true if ti.is_a?(Type) && ti.string?
     end
     case expr
     when AST::Identifier
