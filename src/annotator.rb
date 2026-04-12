@@ -1801,8 +1801,12 @@ private
     sym_type.escaped_return = true if sym_type.is_a?(Type)
   end
 
-  # This allows the transpiler to skip `_ = &name;` for mutable variables that
-  # are genuinely reassigned — LLVM can then SROA struct fields to registers.
+  # DEPRECATED (SROA hint only, no memory safety role): Sets ownership_kind on scope entries
+  # to guide the LLVM backend's SROA pass (whether to emit `_ = &name;` suppression).
+  # This has no effect on correctness or memory safety — it is purely a performance annotation.
+  # When SROA is revisited (likely as part of a dedicated LLVM codegen pass), this method and
+  # all call sites should be removed. The MIR layer owns all memory decisions; this is a
+  # leftover from before that architecture was established. Do not add new cases here.
   def classify_ownership!(entry)
     return unless entry
     t = entry.type
@@ -3266,6 +3270,11 @@ private
     end
   end
 
+  # DEPRECATED: Only handles Identifier RHS, misses FuncCall/MethodCall/StringConcat/GetField.
+  # The MIR layer (OwnershipDataflow in control_flow.rb) is the authority for escape propagation.
+  # This method is a partial early approximation that predates MIR lowering. It should be removed
+  # once OwnershipDataflow is extended to cover assignment-based escape (tracking that a frame value
+  # flows into a heap-allocated container or global-scope binding). Do not add new cases here.
   def handle_assign_escape(node)
     return unless node.value.is_a?(AST::Identifier)
     rhs_name = node.value.name
@@ -3632,12 +3641,21 @@ private
           end
         end
 
-        # Case 2: RETURN obj.field where obj came from a heap-returning call
+        # Case 2: RETURN obj.field where obj was assigned from a heap-returning call.
+        # Bug fix: the previous version matched by type name against all functions,
+        # producing false positives when multiple functions return the same type but
+        # only some are heap-returning. Now checks the specific declaration of `root`.
         if ret.value.is_a?(AST::GetField)
           root = get_root_object(ret.value)
-          if root.is_a?(AST::Identifier)
-            root_type = root.resolved_type
-            if @fn_nodes.any? { |_, cfn| heap_return.call(cfn) && cfn.return_type.to_s.delete_prefix("!") == root_type.to_s }
+          if root.is_a?(AST::Identifier) && root.symbol
+            decl = root.symbol.reg
+            decl_val = decl&.respond_to?(:value) ? decl.value : nil
+            callee_name = case decl_val
+                          when AST::FuncCall   then decl_val.name
+                          when AST::MethodCall then decl_val.name
+                          end
+            callee = callee_name && @fn_nodes[callee_name]
+            if callee && heap_return.call(callee)
               ret_type = ret.value.respond_to?(:full_type) ? Type.new(ret.value.full_type) : nil
               if ret_type&.string? || ret_type&.collection? || ret_type&.map?
                 fn.return_provenance = :heap
@@ -3659,7 +3677,16 @@ private
         next if heap_return.call(fn)
         if callees.any? { |c| cfn = @fn_nodes[c]; cfn && heap_return.call(cfn) }
           returns = collect_return_nodes(fn.body)
-          if returns.any? { |r| r.value.is_a?(AST::FuncCall) && (cfn = @fn_nodes[r.value.name]) && heap_return.call(cfn) }
+          # Check both FuncCall and MethodCall returns (previously only FuncCall).
+          if returns.any? { |r|
+               call = r.value
+               callee_name = case call
+                             when AST::FuncCall   then call.name
+                             when AST::MethodCall then call.name
+                             end
+               cfn = callee_name && @fn_nodes[callee_name]
+               cfn && heap_return.call(cfn)
+             }
             fn.return_provenance = :heap
             changed = true
           end
@@ -3675,6 +3702,13 @@ private
     returns
   end
 
+  # DEPRECATED: Redundant with PromotionPlan (Pass 2). This walk propagates return_provenance=:heap
+  # from callee to the declaration's type_info.provenance so the transpiler emits the correct
+  # allocator. PromotionPlan already does this more correctly by reading MIR::Promote nodes and
+  # the escaped_return/heap_provenance flags set during Pass 1. This method is kept alive because
+  # removing it requires verifying PromotionPlan covers every case it handles (FuncCall, BindExpr
+  # reassignment). When that verification is done, delete walk_promote_callers and its call site
+  # in recompute_return_provenance!. Do not add new cases here.
   def walk_promote_callers(nodes)
     AST.walk_body(nodes) do |node|
       case node
@@ -3759,7 +3793,12 @@ private
     end
   end
 
-  # Annotate a variable declaration with ownership metadata on the graph node.
+  # DEPRECATED: Redundant with PromotionPlan (Pass 2). This annotates graph nodes with
+  # storage=:heap for declarations whose value comes from a heap-returning function, and marks
+  # aliased variables so the transpiler skips cleanup. Both of these are now handled by
+  # MIR::Promote / MIR::SuppressCleanup nodes emitted by OwnershipDataflow. When PromotionPlan
+  # is confirmed to cover @fn_returns_heap_union and @og.aliases? checks, delete this method,
+  # walk_ownership, and their call site in recompute_return_provenance!. Do not add new cases here.
   def annotate_var_ownership(decl_node)
     name = decl_node.name.to_s
     graph_node = @og[name]
@@ -3950,9 +3989,17 @@ private
     was_frame = entry.storage == :frame || entry.storage == :stack
     return false if [:multiowned, :shared, :heap].include?(entry.storage)
     entry.storage = :heap
+    # Also set provenance=:heap so PromotionPlan's !ti.heap_provenance? guard fires.
+    # Without this, mark_escaping_collections! can set escaped_return=true on the
+    # same node after handle_return_escape pre-promotes it, and PromotionPlan's guard
+    # (escaped_return && !heap_provenance?) would emit a redundant MIR::Promote.
+    entry.type.provenance = :heap if entry.type.is_a?(Type)
     if entry.reg&.respond_to?(:storage=)
       entry.reg.storage = :heap
       entry.reg.value.storage = :heap if entry.reg.respond_to?(:value) && entry.reg.value&.respond_to?(:storage=)
+      if entry.reg.respond_to?(:type_info) && entry.reg.type_info.is_a?(Type)
+        entry.reg.type_info.provenance = :heap
+      end
     end
     was_frame
   end
