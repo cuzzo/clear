@@ -2280,7 +2280,12 @@ class MIRPass
     compute_drop_type_strings!(drop_entry, stmt.type_info, stmt)
 
     # MIR::Alloc: explicit allocation marker for static leak checker.
-    result << MIR::Alloc.new(stmt.token, name, entry[:kind], entry[:alloc])
+    # Use the stdlib's resolved alloc symbol (what {alloc} will emit in Zig) when
+    # available -- this is independent of entry[:alloc] (which comes from cleanup
+    # classifier / provenance) and lets ALLOC_CLEANUP_MISMATCH catch cases where
+    # alloc: and return_alloc: in the registry specify different allocators.
+    mir_alloc = resolve_stmt_stdlib_alloc(stmt) || entry[:alloc]
+    result << MIR::Alloc.new(stmt.token, name, entry[:kind], mir_alloc)
 
     drop = MIR::Drop.new(
       stmt.token, name, entry[:kind], entry[:alloc],
@@ -2289,6 +2294,25 @@ class MIRPass
     )
     drop.cleanup_entry = drop_entry
     result << drop
+  end
+
+  # Resolve the stdlib alloc: symbol for an AllocMark, using the FuncCall node's
+  # own storage -- the same resolution the Zig emitter applies for {alloc}.
+  # Returns nil when no stdlib alloc is available (non-stdlib, or lazy symbol we
+  # can't resolve here), falling back to the cleanup entry alloc.
+  def resolve_stmt_stdlib_alloc(stmt)
+    val = stmt.respond_to?(:value) ? stmt.value : nil
+    return nil unless val
+    mdef = val.respond_to?(:matched_stdlib_def) ? val.matched_stdlib_def : nil
+    return nil unless mdef.is_a?(Hash)
+    case mdef[:alloc]
+    when :heap, :frame then mdef[:alloc]
+    when :node_storage
+      # Mirror resolve_alloc_sym(:node_storage) in mir_lowering.rb:
+      # uses FuncCall's storage field, NOT provenance.
+      val.respond_to?(:storage) && val.storage == :heap ? :heap : :frame
+    end
+    # :receiver_storage and unknown symbols: return nil (fall back to entry alloc)
   end
 
   # Insert MIR::Alloc + MIR::Drop nodes for TAKES parameters at the start

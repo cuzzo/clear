@@ -300,6 +300,82 @@ RSpec.describe MIRChecker do
   end
 
   # ===========================================================================
+  # ALLOC_CLEANUP_MISMATCH -- AllocMark allocator must match Cleanup allocator
+  # ===========================================================================
+
+  describe "ALLOC_CLEANUP_MISMATCH" do
+    it "detects frame alloc with heap cleanup" do
+      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      body = [
+        MIR::AllocMark.new("data", :heap_string, :frame),
+        MIR::Cleanup.new("data", cleanup_entry),
+      ]
+      errors = checker.check_fn!(fn_def("frame_alloc_heap_cleanup", body))
+      expect(errors.any? { |e| e.include?("ALLOC_CLEANUP_MISMATCH") && e.include?("data") }).to be true
+    end
+
+    it "detects heap alloc with frame cleanup" do
+      cleanup_entry = { kind: :heap_string, alloc: :frame, has_moved_guard: false }
+      body = [
+        MIR::AllocMark.new("data", :heap_string, :heap),
+        MIR::Cleanup.new("data", cleanup_entry),
+      ]
+      errors = checker.check_fn!(fn_def("heap_alloc_frame_cleanup", body))
+      expect(errors.any? { |e| e.include?("ALLOC_CLEANUP_MISMATCH") && e.include?("data") }).to be true
+    end
+
+    it "passes for matching frame alloc and frame cleanup" do
+      cleanup_entry = { kind: :heap_string, alloc: :frame, has_moved_guard: false }
+      body = [
+        MIR::AllocMark.new("data", :heap_string, :frame),
+        MIR::Cleanup.new("data", cleanup_entry),
+      ]
+      errors = checker.check_fn!(fn_def("ok_frame", body))
+      expect(errors.select { |e| e.include?("ALLOC_CLEANUP_MISMATCH") }).to be_empty
+    end
+
+    it "passes for matching heap alloc and heap cleanup" do
+      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: true }
+      body = [
+        MIR::AllocMark.new("data", :heap_string, :heap),
+        MIR::Cleanup.new("data", cleanup_entry),
+      ]
+      errors = checker.check_fn!(fn_def("ok_heap", body))
+      expect(errors.select { |e| e.include?("ALLOC_CLEANUP_MISMATCH") }).to be_empty
+    end
+
+    it "passes for cleanup with no AllocMark (TAKES parameter)" do
+      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      body = [
+        MIR::Cleanup.new("data", cleanup_entry),
+      ]
+      errors = checker.check_fn!(fn_def("takes_param", body))
+      expect(errors.select { |e| e.include?("ALLOC_CLEANUP_MISMATCH") }).to be_empty
+    end
+
+    it "passes for alloc with no cleanup (moved/escaped via return)" do
+      body = [
+        MIR::AllocMark.new("data", :heap_string, :heap),
+      ]
+      errors = checker.check_fn!(fn_def("moved", body))
+      expect(errors.select { |e| e.include?("ALLOC_CLEANUP_MISMATCH") }).to be_empty
+    end
+
+    it "detects mismatch inside an if branch" do
+      cleanup_entry = { kind: :heap_string, alloc: :heap, has_moved_guard: false }
+      branch_body = [
+        MIR::AllocMark.new("line", :heap_string, :frame),
+        MIR::Cleanup.new("line", cleanup_entry),
+      ]
+      body = [
+        MIR::IfStmt.new(MIR::Lit.new("true"), branch_body, []),
+      ]
+      errors = checker.check_fn!(fn_def("branch_mismatch", body))
+      expect(errors.any? { |e| e.include?("ALLOC_CLEANUP_MISMATCH") && e.include?("line") }).to be true
+    end
+  end
+
+  # ===========================================================================
   # check_program! -- verifies all functions
   # ===========================================================================
 

@@ -26,6 +26,7 @@ class MIRChecker
     @errors = []
 
     allocs = {}
+    cleanups = {}
     hpt_leaks = []
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
@@ -34,6 +35,8 @@ class MIRChecker
       case node
       when MIR::AllocMark
         (allocs[node.name] ||= []) << node
+      when MIR::Cleanup
+        (cleanups[node.name] ||= []) << node
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
         if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
@@ -59,6 +62,7 @@ class MIRChecker
 
     hpt_leaks.each { |e| @errors << e }
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
+    verify_alloc_cleanup_match!(allocs, cleanups)
     verify_zig_contracts!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
 
@@ -159,6 +163,30 @@ class MIRChecker
             "#{alloc_key} is :frame but container '#{target}' is :heap " \
             "(stored data will dangle after frame rewind)")
         end
+      end
+    end
+  end
+
+  # ALLOC_CLEANUP_MISMATCH: allocator at AllocMark must match allocator in Cleanup.
+  #
+  # Every binding has a single allocator for its entire lifetime (INV-1). If the
+  # allocator used to create a value (:heap/:frame on AllocMark) differs from the
+  # allocator used to free it (:alloc in cleanup_entry), the generated Zig will
+  # call heapAlloc().free() on frame memory or vice versa -> runtime crash.
+  #
+  # Only checks bindings that have BOTH an AllocMark and a Cleanup -- bindings
+  # with only a Cleanup are TAKES parameters (caller owns them, no local alloc),
+  # and bindings with only an AllocMark were moved/escaped (no local free needed).
+  def verify_alloc_cleanup_match!(allocs, cleanups)
+    allocs.each do |name, alloc_marks|
+      next unless cleanups.key?(name)
+
+      alloc_sym   = alloc_marks.first.alloc
+      cleanup_sym = cleanups[name].first.cleanup_entry[:alloc]
+
+      if alloc_sym != cleanup_sym
+        @errors << error(:ALLOC_CLEANUP_MISMATCH, name,
+          "allocated with :#{alloc_sym} but cleanup uses :#{cleanup_sym}")
       end
     end
   end
