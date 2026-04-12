@@ -1162,6 +1162,17 @@ module LoopFrameAnalysis
       # (e.g. resp = resp + result) need preserve-and-rewind rather than
       # heap promotion; the old value is discarded each iteration so promoting
       # to heap would leak every intermediate string.
+      #
+      # TODO: generalize to ALL non-copy outer vars reassigned in a rewinding loop.
+      # Currently only String is handled. Lists, maps, and large structs with
+      # frame-allocated subfields currently fall back to heap promotion (correct
+      # but suboptimal for the "compute-and-replace" pattern: every discarded
+      # candidate is heap-allocated rather than frame-reclaimed per iteration).
+      #
+      # When the runtime adds loopPreserveAndRewindT (see runtime.zig TODO), update
+      # outer_string_reassigns -> outer_noncopymutable_reassigns to detect all
+      # non-copy outer vars and emit the type-appropriate preserve call instead of
+      # heap promotion via direct_outer_mutations.
       loop_node.loop_preserve_vars = outer_string_reassigns(body, local_names, frame_local_names)
     else
       loop_node.loop_preserve_vars = nil

@@ -282,6 +282,40 @@ pub const Runtime = struct {
         self.overflow_arena.rewind(mark);
     }
 
+    /// TODO: loopPreserveAndRewindT -- generic preserve-and-rewind for non-string types.
+    ///
+    /// Currently only strings ([]const u8) get the frame-preserve optimization.
+    /// Lists, maps, and large structs with frame-allocated subfields are instead
+    /// heap-promoted by the compiler (direct_outer_mutations / COPY enforcement),
+    /// which is correct but suboptimal for the "compute-and-replace" loop pattern:
+    /// every discarded candidate is heap-allocated and freed, adding per-iteration
+    /// heap pressure and fragmentation.
+    ///
+    /// The correct general mechanism is a comptime generic:
+    ///
+    ///   pub fn loopPreserveAndRewindT(
+    ///       self: *Runtime,
+    ///       comptime T: type,
+    ///       mark: CheatArena.Mark,
+    ///       value: T,
+    ///   ) !T
+    ///
+    /// For scalar types and shallow structs (no frame-slice fields): softRewind,
+    /// alloc @sizeOf(T) bytes at mark, copy value inline.
+    /// For []const u8: delegate to loopPreserveAndRewind (copy pointed-to bytes).
+    /// For structs with []const u8 fields: copy inline bytes + recursively preserve
+    /// each string field into the rewound frame.
+    /// For ArrayLists / HashMaps: copy the container struct inline (items pointer +
+    /// metadata stay valid; backing store is heap-allocated and unaffected by rewind).
+    ///
+    /// The compiler must also be updated to:
+    ///   1. Detect all non-copy outer vars reassigned inside rewinding loops
+    ///      (not just String -- see outer_string_reassigns in control_flow.rb).
+    ///   2. Emit loopPreserveAndRewindT(<Type>, mark, var) instead of heap promotion
+    ///      for the "replace each iteration" pattern.
+    ///   3. Optionally: allow list backing stores to use frameAlloc() in loop bodies
+    ///      so they participate in per-iteration rewind rather than always using heap.
+
     /// Preserve a string across a loop mark rewind. Rewinds the arena to the
     /// mark, re-allocates the string at the rewound position, then trims excess.
     /// Used at loop boundaries to reclaim dead MUTABLE string values.
