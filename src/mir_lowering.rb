@@ -42,6 +42,46 @@ class MIRLowering
     @source_dir = source_dir
     @emitted_types = Set.new
     @debug_mode = debug_mode
+    @pending_stmts = []
+    @tmp_counter = 0
+  end
+
+  # Flush and return all pending hoisted Let statements accumulated since the
+  # last flush. Called by lower_body before appending the main statement so
+  # hoisted Lets precede the statement that uses them.
+  def flush_pending
+    stmts = @pending_stmts
+    @pending_stmts = []
+    stmts
+  end
+
+  # Returns true when an MIR expression node allocates heap or frame memory.
+  # Used by hoist_alloc to decide whether to hoist to a named Let.
+  def mir_allocates?(node)
+    case node
+    when MIR::ConcatStr, MIR::DupeSlice, MIR::AllocSlice,
+         MIR::MakeList, MIR::HeapCreate, MIR::CapWrap, MIR::DeepCopy
+      true
+    when MIR::ContainerInit
+      !node.alloc.nil?
+    when MIR::Call
+      node.heap_provenance ? true : false
+    when MIR::InlineZig
+      node.stdlib_def&.dig(:allocates) ? true : false
+    else
+      false
+    end
+  end
+
+  # If expr allocates, hoist it to a named Let (pushed to @pending_stmts)
+  # and return an Ident pointing to it. Otherwise return expr unchanged.
+  # name_hint: optional fixed name; otherwise auto-generates __tmp_N.
+  def hoist_alloc(expr, name_hint: nil)
+    return expr unless mir_allocates?(expr)
+    @tmp_counter += 1
+    name = name_hint || "__tmp_#{@tmp_counter}"
+    @pending_stmts << MIR::Let.new(name, expr, true, nil, nil)
+    MIR::Ident.new(name)
   end
 
   # Lower an AST node (or old MIR node) into a new MIR node.
@@ -164,11 +204,15 @@ class MIRLowering
   end
 
   # Lower a body (array of statements) into an array of MIR nodes.
+  # Flushes @pending_stmts before each statement so hoisted Lets (from
+  # hoist_alloc calls inside lower()) precede the statement that uses them.
   def lower_body(stmts)
     return [] unless stmts
-    stmts.filter_map { |s|
+    result = []
+    stmts.each { |s|
       mir = lower(s)
-      next nil unless mir
+      pending = flush_pending
+      next unless mir
       # Non-void function-like expressions used as statements need explicit discard (_ =)
       needs_discard = (s.is_a?(AST::FuncCall) || s.is_a?(AST::MethodCall)) ||
                       (s.is_a?(AST::BinaryOp) && (s.op == :OR_RESCUE || s.op == :PIPE_ERR))
@@ -176,8 +220,10 @@ class MIRLowering
          s.respond_to?(:resolved_type) && s.resolved_type && s.resolved_type != :Void
         mir = MIR::ExprStmt.new(mir, true)
       end
-      mir
+      result.concat(pending)
+      result << mir
     }
+    result
   end
 
   def statement_node?(node)
