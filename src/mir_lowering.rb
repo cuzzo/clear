@@ -80,7 +80,7 @@ class MIRLowering
     return expr unless mir_allocates?(expr)
     @tmp_counter += 1
     name = name_hint || "__tmp_#{@tmp_counter}"
-    @pending_stmts << MIR::Let.new(name, expr, true, nil, nil)
+    @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     MIR::Ident.new(name)
   end
 
@@ -948,7 +948,7 @@ class MIRLowering
 
     # Standard call
     args_mir = node.args.map { |a|
-      arg = lower(a)
+      arg = hoist_alloc(lower(a))
       # Array/List args: convert to slice via .items (skip strings - already []const u8)
       ti = a.type_info
       if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
@@ -1013,7 +1013,7 @@ class MIRLowering
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
     args_mir = node.args.map { |a|
-      arg = lower(a)
+      arg = hoist_alloc(lower(a))
       ti = a.type_info
       if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
