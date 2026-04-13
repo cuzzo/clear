@@ -1,0 +1,66 @@
+-- Test: lazy range fold terminals -- range s> stages s> FOLD compiles to a
+-- single accumulating while loop with no intermediate list materialization.
+
+FN main() RETURNS Void ->
+    -- COUNT: count elements matching predicate
+    c: Int64 = (0_i64 ..< 10) s> COUNT _ > 4;
+    -- 5,6,7,8,9 -> 5 elements
+    ASSERT c == 5, "count >4 should be 5";
+
+    -- SUM: sum all elements
+    s: Float64 = (1_i64 ..< 6) s> SUM _;
+    -- 1+2+3+4+5 = 15
+    ASSERT s == 15.0, "sum 1..6 should be 15";
+
+    -- SUM with WHERE stage
+    sw: Float64 = (0_i64 ..< 10) s> WHERE _ > 5 s> SUM _;
+    -- 6+7+8+9 = 30
+    ASSERT sw == 30.0, "sum where >5 should be 30";
+
+    -- AVERAGE
+    avg: Float64 = (1_i64 ..< 5) s> AVERAGE _;
+    -- (1+2+3+4)/4 = 2.5
+    ASSERT avg == 2.5, "average 1..5 should be 2.5";
+
+    -- AVERAGE on empty (should return 0)
+    avg_empty: Float64 = (5_i64 ..< 5) s> AVERAGE _;
+    ASSERT avg_empty == 0.0, "average empty range should be 0";
+
+    -- ANY: short-circuit search
+    found: Bool = (0_i64 ..< 10) s> ANY _ == 7;
+    ASSERT found == TRUE, "any ==7 in 0..10 should be true";
+
+    not_found: Bool = (0_i64 ..< 5) s> ANY _ > 10;
+    ASSERT not_found == FALSE, "any >10 in 0..5 should be false";
+
+    -- ALL: vacuous truth on empty range
+    all_empty: Bool = (5_i64 ..< 5) s> ALL _ > 0;
+    ASSERT all_empty == TRUE, "all on empty range is vacuously true";
+
+    all_true: Bool = (1_i64 ..< 5) s> ALL _ > 0;
+    ASSERT all_true == TRUE, "all >0 in 1..5 should be true";
+
+    all_false: Bool = (0_i64 ..< 5) s> ALL _ > 0;
+    ASSERT all_false == FALSE, "all >0 in 0..5 should be false (0 fails)";
+
+    -- FIND: first matching element (optional)
+    f: ?Int64 = (0_i64 ..< 10) s> FIND _ > 5;
+    ASSERT f != NIL, "find >5 should not be NIL";
+    ASSERT f? == 6, "find >5 should be 6";
+
+    f_none: ?Int64 = (0_i64 ..< 5) s> FIND _ > 10;
+    ASSERT f_none == NIL, "find >10 in 0..5 should be NIL";
+
+    -- COUNT with SELECT stage
+    cs: Int64 = (1_i64 ..< 10) s> SELECT _ * 2 s> COUNT _ > 10;
+    -- 1..10 -> *2: 2,4,6,8,10,12,14,16,18 -> >10: 12,14,16,18 = 4
+    ASSERT cs == 4, "count select*2 >10 should be 4";
+
+    -- SUM with SELECT + WHERE
+    ssw: Float64 = (1_i64 ..< 6) s> SELECT _ * _ s> WHERE _ > 5 s> SUM _;
+    -- squares: 1,4,9,16,25 -> >5: 9,16,25 = 50
+    ASSERT ssw == 50.0, "sum squares >5 should be 50";
+
+    print("PASS");
+    RETURN;
+END

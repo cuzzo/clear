@@ -524,9 +524,10 @@ module PipeAnalysis
   # =========================================================
 
   def analyze_find_op(node)
-    # FIND: list s> FIND predicate  → ?ElemType (first match or null)
-    require_array_input!(node, "FIND")
-    item_type = node.left.type_info.element_type.resolved
+    # FIND: list s> FIND predicate  → ?ElemType (first match or null; also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "FIND", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -542,9 +543,10 @@ module PipeAnalysis
   end
 
   def analyze_any_op(node)
-    # ANY: list s> ANY predicate  → Bool (true if any element matches; short-circuits)
-    require_array_input!(node, "ANY")
-    item_type = node.left.type_info.element_type.resolved
+    # ANY: list s> ANY predicate  → Bool (short-circuits; also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "ANY", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -560,10 +562,10 @@ module PipeAnalysis
   end
 
   def analyze_all_op(node)
-    # ALL: list s> ALL predicate  → Bool (true iff every element matches; short-circuits on first failure)
-    # Vacuous truth: ALL on an empty list returns true.
-    require_array_input!(node, "ALL")
-    item_type = node.left.type_info.element_type.resolved
+    # ALL: list s> ALL predicate  → Bool (vacuous truth on empty; also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "ALL", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -579,9 +581,10 @@ module PipeAnalysis
   end
 
   def analyze_count_op(node)
-    # COUNT: list s> COUNT predicate  → Int64 (number of elements matching predicate)
-    require_array_input!(node, "COUNT")
-    item_type = node.left.type_info.element_type.resolved
+    # COUNT: list s> COUNT predicate  → Int64 (also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "COUNT", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -604,9 +607,10 @@ module PipeAnalysis
   # Covers :Float64, :Int64, :Byte, :Float64.
 
   def analyze_sum_op(node)
-    # SUM: list s> SUM _.field  → Number (sum of numeric projection; 0 for empty list)
-    require_array_input!(node, "SUM")
-    item_type = node.left.type_info.element_type.resolved
+    # SUM: list s> SUM expr  → Float64 (0 for empty; also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "SUM", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -623,9 +627,10 @@ module PipeAnalysis
   end
 
   def analyze_average_op(node)
-    # AVERAGE: list s> AVERAGE _.field  → Number (arithmetic mean; 0 for empty list)
-    require_array_input!(node, "AVERAGE")
-    item_type = node.left.type_info.element_type.resolved
+    # AVERAGE: list s> AVERAGE expr  → Float64 (0 for empty; also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "AVERAGE", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -642,9 +647,10 @@ module PipeAnalysis
   end
 
   def analyze_min_op(node)
-    # MIN: list s> MIN _.field  → Number (minimum value; panics on empty list)
-    require_array_input!(node, "MIN")
-    item_type = node.left.type_info.element_type.resolved
+    # MIN: list s> MIN expr  → Float64 (panics on empty; also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "MIN", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -661,9 +667,10 @@ module PipeAnalysis
   end
 
   def analyze_max_op(node)
-    # MAX: list s> MAX _.field  → Number (maximum value; panics on empty list)
-    require_array_input!(node, "MAX")
-    item_type = node.left.type_info.element_type.resolved
+    # MAX: list s> MAX expr  → Float64 (panics on empty; also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "MAX", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)

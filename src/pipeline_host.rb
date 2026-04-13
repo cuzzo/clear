@@ -267,6 +267,9 @@ class PipelineHost
 
   # MIR entry point: returns MIR node tree for migrated pipeline operators.
   # Returns nil for non-migrated operators (caller falls back to string path).
+  RANGE_FOLD_OPS = [AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp,
+                    AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp].freeze
+
   def lower_pipeline(node)
     rhs = node.right
     lhs = node.left
@@ -276,9 +279,14 @@ class PipelineHost
     # string generator is strictly better (no materialization overhead).
     # Let them fall through to the string path where field-slice optimization applies.
     is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
-    scalar_op = [AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp,
-                 AST::MaxOp, AST::AnyOp, AST::AllOp, AST::FindOp].any? { |t| rhs.is_a?(t) }
+    scalar_op = RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
     return nil if is_soa && scalar_op
+
+    # Range source with fold terminal: fuse into a single accumulating while loop.
+    if RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
+      range_chain = unwrap_range_chain(lhs)
+      return lower_range_fold(range_chain[:source], range_chain[:stages], rhs, node) if range_chain
+    end
 
     case rhs
     when AST::CountOp   then lower_count(lhs, rhs, node)
@@ -1180,9 +1188,24 @@ class PipelineHost
     { source: cursor, stages: stages }
   end
 
-  # Emit a fused while loop for a range source with zero or more fusible stages.
-  # Produces a single LazyRange-based while loop -- no intermediate materialization.
-  def lower_each_range(range_lit, stages, each_op)
+  # Lower a fold expression and wrap in @floatFromInt if the expression is an integer type.
+  # SUM/AVERAGE/MIN/MAX accumulators are f64; integer range elements need coercion.
+  def numeric_fold_expr_f64(expr_ast, item_var)
+    expr_mir = with_pipeline_context(placeholder: item_var) { visit_mir(expr_ast) }
+    expr_type = expr_ast.respond_to?(:full_type) ? expr_ast.full_type : nil
+    if expr_type && Type.new(expr_type).integer?
+      MIR::InlineZig.new("@as(f64, @floatFromInt(#{@emitter.emit(expr_mir)}))", "to_f64")
+    else
+      expr_mir
+    end
+  end
+
+  # Build the LazyRange init + stage prefix shared by lower_each_range and lower_range_fold.
+  # Returns a hash: { range_let, outer_stmts, stage_stmts, item_var, initial_capture,
+  #                   item_used, elem_zig }
+  # `item_used` tracks whether the initial capture (`__each_item`) is referenced
+  # by any stage -- used by callers to decide between |__each_item| and |_| in Zig.
+  def build_lazy_range_prefix(range_lit, stages)
     start_mir  = visit_mir(range_lit.start)
     end_mir    = visit_mir(range_lit.finish)
     start_code = @emitter.emit(start_mir)
@@ -1192,19 +1215,17 @@ class PipelineHost
     start_ft = range_lit.start.respond_to?(:full_type) ? range_lit.start.full_type : nil
     elem_zig  = (start_ft && Type.new(start_ft).zig_type) || "i64"
 
-    # Track current item name; SELECT stages may rename it.
     initial_capture = "__each_item"
     item_var    = initial_capture
     item_counter = 0
-    item_used   = false  # true when initial_capture is referenced by a stage or body
-
-    outer_stmts = []  # counter inits declared before the while loop
-    stage_stmts = []  # stmts emitted inside the while loop before the body
+    item_used   = false
+    outer_stmts = []
+    stage_stmts = []
 
     stages.each do |stage|
       case stage
       when AST::SelectOp
-        item_used = true  # SELECT transforms the initial capture
+        item_used = true
         next_item = "__each_item_#{item_counter += 1}"
         expr_mir = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
         stage_stmts << MIR::Let.new(next_item, expr_mir, false, nil, nil)
@@ -1214,15 +1235,13 @@ class PipelineHost
         item_used = true if item_var == initial_capture
         pred_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
         stage_stmts << MIR::IfStmt.new(
-          MIR::UnaryOp.new("!", pred_mir),
-          [MIR::ContinueStmt.new(nil)], nil)
+          MIR::UnaryOp.new("!", pred_mir), [MIR::ContinueStmt.new(nil)], nil)
 
       when AST::TakeWhileOp
         item_used = true if item_var == initial_capture
         pred_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
         stage_stmts << MIR::IfStmt.new(
-          MIR::UnaryOp.new("!", pred_mir),
-          [MIR::BreakStmt.new(nil, nil)], nil)
+          MIR::UnaryOp.new("!", pred_mir), [MIR::BreakStmt.new(nil, nil)], nil)
 
       when AST::LimitOp
         cvar = "__limit_cnt_#{item_counter += 1}"
@@ -1247,31 +1266,167 @@ class PipelineHost
 
       when AST::TapOp
         item_used = true if item_var == initial_capture
-        tap_stmts = visit_pipeline_body_mir(stage.body, placeholder: item_var)
-        stage_stmts.concat(tap_stmts)
+        stage_stmts.concat(visit_pipeline_body_mir(stage.body, placeholder: item_var))
       end
     end
 
-    # Lower EACH body with the final item name as placeholder.
+    range_let = MIR::Let.new("__range_src",
+      MIR::InlineZig.new(
+        "CheatLib.LazyRange(#{elem_zig}).init(@as(#{elem_zig}, #{start_code}), @as(#{elem_zig}, #{end_expr}))",
+        "lazy_range"),
+      true, nil, nil)
+
+    { range_let: range_let, outer_stmts: outer_stmts, stage_stmts: stage_stmts,
+      item_var: item_var, initial_capture: initial_capture, item_used: item_used,
+      elem_zig: elem_zig }
+  end
+
+  # Emit a fused while loop for a range source with zero or more fusible stages.
+  # Produces a single LazyRange-based while loop -- no intermediate materialization.
+  def lower_each_range(range_lit, stages, each_op)
+    p = build_lazy_range_prefix(range_lit, stages)
+    item_var        = p[:item_var]
+    initial_capture = p[:initial_capture]
+    item_used       = p[:item_used]
+
     body_mir = visit_pipeline_body_mir(each_op.body, placeholder: item_var)
 
-    # Use |_| as the while capture only when the initial capture is never
-    # referenced by any stage or the body (avoids Zig "unused capture" error).
+    # Use |_| only when the initial capture is never referenced (avoids Zig
+    # "unused capture" error).
     body_uses_initial = (item_var == initial_capture) && ast_stmts_use_placeholder?(each_op.body)
     item_used ||= body_uses_initial
     capture_name = item_used ? initial_capture : "_"
 
     MIR::ScopeBlock.new([
-      MIR::Let.new("__range_src",
-        MIR::InlineZig.new(
-          "CheatLib.LazyRange(#{elem_zig}).init(@as(#{elem_zig}, #{start_code}), @as(#{elem_zig}, #{end_expr}))",
-          "lazy_range"),
-        true, nil, nil),
-      *outer_stmts,
+      p[:range_let], *p[:outer_stmts],
       MIR::WhileStmt.new(
         MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
-        [*stage_stmts, *body_mir],
+        [*p[:stage_stmts], *body_mir],
         capture_name, nil, nil, nil)
+    ])
+  end
+
+  # Emit a single fused accumulating while loop for range s> stages s> fold.
+  # fold_op is one of CountOp, SumOp, AverageOp, AnyOp, AllOp, FindOp, MinOp, MaxOp.
+  # Returns a MIR::BlockExpr (labeled) so the accumulated result can be used as an expression.
+  def lower_range_fold(range_lit, stages, fold_op, smooth_node)
+    p = build_lazy_range_prefix(range_lit, stages)
+    item_var = p[:item_var]
+    elem_zig = p[:elem_zig]
+
+    # Fold always references the element; always use the initial capture name.
+    capture_name = p[:initial_capture]
+
+    label          = next_pipe_label
+    acc_init_stmts = []   # accumulator var declarations (before while)
+    loop_acc_stmts = []   # accumulator update stmts (inside while, after stages)
+    post_loop_stmts = []  # post-loop checks (panic for MIN/MAX on empty)
+    result_expr    = nil  # MIR expression evaluated as the block result
+
+    case fold_op
+    when AST::CountOp
+      pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
+      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("0"), true, "i64", nil)
+      loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
+        MIR::Set.new(MIR::Ident.new("__fold_acc"),
+          MIR::BinOp.new("+", MIR::Ident.new("__fold_acc"), MIR::Lit.new("1")))
+      ], nil)
+      result_expr = MIR::Ident.new("__fold_acc")
+
+    when AST::SumOp
+      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
+      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("0"), true, "f64", nil)
+      loop_acc_stmts << MIR::Set.new(MIR::Ident.new("__fold_acc"),
+        MIR::BinOp.new("+", MIR::Ident.new("__fold_acc"), expr_f64))
+      result_expr = MIR::Ident.new("__fold_acc")
+
+    when AST::AverageOp
+      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
+      acc_init_stmts << MIR::Let.new("__fold_sum", MIR::Lit.new("0"), true, "f64", nil)
+      acc_init_stmts << MIR::Let.new("__fold_cnt", MIR::Lit.new("0"), true, "i64", nil)
+      loop_acc_stmts << MIR::Set.new(MIR::Ident.new("__fold_sum"),
+        MIR::BinOp.new("+", MIR::Ident.new("__fold_sum"), expr_f64))
+      loop_acc_stmts << MIR::Set.new(MIR::Ident.new("__fold_cnt"),
+        MIR::BinOp.new("+", MIR::Ident.new("__fold_cnt"), MIR::Lit.new("1")))
+      result_expr = MIR::Conditional.new(
+        MIR::BinOp.new("==", MIR::Ident.new("__fold_cnt"), MIR::Lit.new("0")),
+        MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
+        MIR::BinOp.new("/", MIR::Ident.new("__fold_sum"),
+          MIR::InlineZig.new("@as(f64, @floatFromInt(__fold_cnt))", "int_to_f64")))
+
+    when AST::MinOp
+      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
+      acc_init_stmts << MIR::Let.new("__fold_acc",
+        MIR::InlineZig.new("std.math.floatMax(f64)", "float_max"), true, "f64", nil)
+      acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
+      loop_acc_stmts << MIR::Let.new("__fold_val", expr_f64, false, nil, nil)
+      loop_acc_stmts << MIR::IfStmt.new(
+        MIR::BinOp.new("<", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
+        [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
+         MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true"))], nil)
+      post_loop_stmts << MIR::ExprStmt.new(MIR::InlineZig.new(
+        "if (!__fold_found) @panic(\"MIN applied to empty sequence\")", "min_check"), nil)
+      result_expr = MIR::Ident.new("__fold_acc")
+
+    when AST::MaxOp
+      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
+      acc_init_stmts << MIR::Let.new("__fold_acc",
+        MIR::InlineZig.new("-std.math.floatMax(f64)", "float_min"), true, "f64", nil)
+      acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
+      loop_acc_stmts << MIR::Let.new("__fold_val", expr_f64, false, nil, nil)
+      loop_acc_stmts << MIR::IfStmt.new(
+        MIR::BinOp.new(">", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
+        [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
+         MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true"))], nil)
+      post_loop_stmts << MIR::ExprStmt.new(MIR::InlineZig.new(
+        "if (!__fold_found) @panic(\"MAX applied to empty sequence\")", "max_check"), nil)
+      result_expr = MIR::Ident.new("__fold_acc")
+
+    when AST::AnyOp
+      pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
+      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("false"), true, nil, nil)
+      loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
+        MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Lit.new("true")),
+        MIR::BreakStmt.new(nil, nil)
+      ], nil)
+      result_expr = MIR::Ident.new("__fold_acc")
+
+    when AST::AllOp
+      pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
+      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("true"), true, nil, nil)
+      loop_acc_stmts << MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), [
+        MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Lit.new("false")),
+        MIR::BreakStmt.new(nil, nil)
+      ], nil)
+      result_expr = MIR::Ident.new("__fold_acc")
+
+    when AST::FindOp
+      # Element type after stages: derive from smooth_node.full_type (?ElemType)
+      result_ft = Type.new(smooth_node.full_type)
+      find_zig  = result_ft.optional? ? transpile_type(result_ft.wrapped_type.resolved.to_s) : elem_zig
+      pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
+      acc_init_stmts << MIR::Let.new("__fold_result",
+        MIR::InlineZig.new("undefined", "undef"), true, find_zig, nil)
+      acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
+      loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
+        MIR::Set.new(MIR::Ident.new("__fold_result"), MIR::Ident.new(item_var)),
+        MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true")),
+        MIR::BreakStmt.new(nil, nil)
+      ], nil)
+      result_expr = MIR::Conditional.new(
+        MIR::Ident.new("__fold_found"),
+        MIR::Cast.new(MIR::Ident.new("__fold_result"), "?#{find_zig}", :as),
+        MIR::Lit.new("null"))
+    end
+
+    MIR::BlockExpr.new(label, [
+      p[:range_let], *p[:outer_stmts], *acc_init_stmts,
+      MIR::WhileStmt.new(
+        MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+        [*p[:stage_stmts], *loop_acc_stmts],
+        capture_name, nil, nil, nil),
+      *post_loop_stmts,
+      MIR::BreakStmt.new(label, result_expr)
     ])
   end
 
