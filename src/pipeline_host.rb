@@ -1173,6 +1173,38 @@ class PipelineHost
       ])
     end
 
+    # Range source: zero-allocation lazy iteration via LazyRange(T).
+    # `(start..<end) s> EACH { body }` emits a while loop that pulls items
+    # one-by-one from a LazyRange without materializing the range into a list.
+    if list_node.is_a?(AST::RangeLit)
+      start_mir = visit_mir(list_node.start)
+      end_mir   = visit_mir(list_node.finish)
+      start_code = @emitter.emit(start_mir)
+      end_code   = @emitter.emit(end_mir)
+      end_expr   = list_node.inclusive ? "#{end_code} + 1" : end_code
+
+      start_ft = list_node.start.respond_to?(:full_type) ? list_node.start.full_type : nil
+      elem_zig = (start_ft && Type.new(start_ft).zig_type) || "i64"
+
+      body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
+
+      # Use `|_|` as the while capture when the body doesn't reference the
+      # element, to avoid Zig's "unused capture" error. Use `|__each_item|`
+      # when the body does reference it.
+      capture_name = ast_stmts_use_placeholder?(each_op.body) ? "__each_item" : "_"
+
+      return MIR::ScopeBlock.new([
+        MIR::Let.new("__range_src",
+          MIR::InlineZig.new(
+            "CheatLib.LazyRange(#{elem_zig}).init(@as(#{elem_zig}, #{start_code}), @as(#{elem_zig}, #{end_expr}))",
+            "lazy_range"),
+          true, nil, nil),
+        MIR::WhileStmt.new(
+          MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+          body_mir, capture_name, nil, nil, nil)
+      ])
+    end
+
     nil  # Fall through to string path
   end
 
