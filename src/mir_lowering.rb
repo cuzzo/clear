@@ -1750,7 +1750,7 @@ class MIRLowering
                   #{is_void ? "__ctx_#{id}.inner.result = {};" : ""}
               }
           };
-          const #{alloc_var} = #{rt_name}.getSched().allocator;
+          const #{alloc_var} = #{node.pinned == true || node.pinned == :local ? "#{rt_name}.getSched().allocator" : "#{rt_name}.heapAlloc()"};
           const #{promise_var} = try #{promise_zig}.spawn(#{alloc_var}, #{rt_name}.getSched());
           #{promoted_decls}
           const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
