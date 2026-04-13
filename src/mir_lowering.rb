@@ -793,6 +793,8 @@ class MIRLowering
     parts = (node.catch_clauses || []).map { |clause|
       kind = clause[:kind]
       error_name = clause[:error_name]
+      # PHASE-3: catch bodies are assembled as raw Zig strings; allocating stmts inside
+      # are invisible to the checker until MIR::TryCatch replaces this assembly.
       clause_body_zig = clause[:body].map { |s| emit_expr(lower(s)) }.join("\n            ")
 
       cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
@@ -803,6 +805,7 @@ class MIRLowering
     }.join(" else ")
 
     default_code = if node.default_catch.is_a?(Array) && node.default_catch.any?
+      # PHASE-3: same as catch_clauses above; raw Zig string assembly.
       default_body = node.default_catch.map { |s| emit_expr(lower(s)) }.join("\n            ")
       " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
     elsif fn_can_fail
@@ -878,6 +881,7 @@ class MIRLowering
         args_mir = node.args.map { |a| lower(a) }
         return MIR::Call.new(stub_info[:var], args_mir, false)
       when :captures, :sequence
+        # TEST-INFRA: stub call args are discarded (stub ignores values); no allocation escapes.
         args_zig = node.args.map { |a| emit_expr(lower(a)) }
         stub_code = if stub_info[:kind] == :captures
           "{ #{stub_info[:var]} += 1; }"
@@ -1194,6 +1198,8 @@ class MIRLowering
       promise_zig = "CheatLib.Promise(#{elem_zig})"
       stream_zig = ti.zig_type
 
+      # PHASE-3: bounded-stream literal is emitted as InlineZig; item allocations
+      # inside are invisible to the checker until this path is structured as MIR.
       promise_decls = node.items.each_with_index.map { |item, i|
         item_code = emit_expr(lower(item))
         "const __stream#{s_id}_item#{i} = #{item_code};"
@@ -1336,10 +1342,12 @@ class MIRLowering
         lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         bindings << "var #{guard_var} = #{lock_expr}.read();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
       when :BORROWED
+        # PURE: cap[:var_node] is always an Identifier or field ref; never allocating.
         source_zig = emit_expr(lower(cap[:var_node]))
         bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
       when :RESTRICT
         if !resolved&.any_sync?
+          # PURE: same as BORROWED; var_node is a simple variable reference.
           source_zig = emit_expr(lower(cap[:var_node]))
           if cap[:alias_mutable]
             bindings << "const #{zig_safe_name(alias_name)} = &#{source_zig};"
@@ -1403,6 +1411,9 @@ class MIRLowering
 
       capture_inits = ([".wg = &#{wg_var}"] + captured.map { |name, _| ".#{name} = &#{name}" }).join(", ")
 
+      # PHASE-3 (task #52): DO branch bodies are assembled as raw Zig strings inside
+      # a fiber run fn; allocating stmts are invisible to the checker until this
+      # path is replaced with MIR::FnDef for each branch.
       body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}.*"] }.to_h, rt_override: "__rt") do
         branch[:body].map { |e|
           code = emit_expr(lower(e))
@@ -1515,6 +1526,9 @@ class MIRLowering
     bg_capture_map = captured.map { |name, _| [name, "__ctx_#{id}.#{name}"] }.to_h
     prev_bg_ptr_caps = @current_bg_pointer_captures
     @current_bg_pointer_captures = pointer_captures
+    # PHASE-3 (task #51): BG stream pipeline steps are assembled as raw Zig strings
+    # inside a fiber run fn; allocating steps are invisible to the checker until
+    # this path is replaced with MIR::FnDef.
     stmt_code, result_line = with_fiber_capture_map(bg_capture_map, rt_override: bg_rt) do
       sc = pre_steps.map { |step|
         code = emit_expr(lower(step[:expr]))
@@ -1532,12 +1546,14 @@ class MIRLowering
       last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
       rl = if last_step.nil? || is_void || last_is_assign
         if last_step
+          # PHASE-3 (task #51): last step (void/assign) in BG stream fiber body.
           last_code = emit_expr(lower(last_step[:expr]))
           (last_code.strip.end_with?("}") || last_code.strip.end_with?(";")) ? last_code : "#{last_code};"
         else
           ""
         end
       else
+        # PHASE-3 (task #51): result step in BG stream fiber body.
         result_code = emit_expr(lower(last_step[:expr]))
         # Apply scope-exit promotion: frame strings must be heap-duped so they
         # outlive the fiber's frame, which is rewound when the fiber exits.
@@ -1645,6 +1661,8 @@ class MIRLowering
     @current_stream_is_inf = is_inf
 
     stream_capture_map = captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
+    # PHASE-3 (task #51): BG stream body assembled as raw Zig string inside fiber
+    # run fn; allocating exprs are invisible to the checker until this uses MIR::FnDef.
     body_code = with_fiber_capture_map(stream_capture_map, rt_override: "__rt") do
       node.body.map { |expr|
         code = emit_expr(lower(expr))
@@ -1706,6 +1724,8 @@ class MIRLowering
     if node.yield_dupe
       # Frame string: dupe to stream allocator before push so the value outlives
       # the fiber's frame rewind (or loop mark rewind between yields).
+      # PHASE-3 (task #46, blocked by task #51): the dupe is embedded in an InlineZig
+      # arg; hoisting requires a structured MIR::FnDef for the BG stream fiber body.
       inner_code = emit_expr(lowered)
       dupe_iz = MIR::InlineZig.new(
         "try #{stream_local}.alloc.dupe(u8, #{inner_code})",
@@ -1724,6 +1744,10 @@ class MIRLowering
 
   def lower_static_call(node)
     pattern = node.zig_pattern.dup
+    # PHASE-3: args are substituted into an InlineZig pattern string; allocating
+    # sub-expressions (e.g. string concat in an arg) are invisible to the checker
+    # inside the opaque InlineZig boundary. HPT hoisting covers heap-returning
+    # FuncCall/MethodCall args, but BinaryOp string concat is not yet HPT-hoisted.
     arg_strs = node.args.map { |a| emit_expr(lower(a)) }
     arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}", arg) }
     iz = MIR::InlineZig.new(pattern, "static_call")
@@ -1770,6 +1794,7 @@ class MIRLowering
       stubs = when_block.setup.select { |s| s.is_a?(AST::StubDecl) }
       non_stub_setup = when_block.setup.reject { |s| s.is_a?(AST::StubDecl) }
       when_setup_zig = emit_stmts_zig(lower_body(non_stub_setup), indent: "    ")
+      # TEST-INFRA: stub decls emit Zig test scaffolding; not program memory.
       stub_decls = stubs.map { |s| emit_expr(lower(s)) }.join("\n    ")
 
       (when_block.tests || []).each do |test_that|
@@ -1789,6 +1814,7 @@ class MIRLowering
 
       (when_block.benchmarks || []).each do |b|
         bench_name = "#{test_name}: #{when_desc}: benchmark"
+        # TEST-INFRA: benchmark expression for Zig test block; not program memory.
         bench_zig = emit_expr(lower(b))
         tests << <<~ZIG
           test "#{bench_name}" {
@@ -1810,6 +1836,7 @@ class MIRLowering
   def lower_assert_raises(node)
     rt_name = @rt_name
     kind = node.kind
+    # TEST-INFRA: ASSERT_RAISES expression assembled as raw Zig; not program memory.
     expr_zig = emit_expr(lower(node.expression))
     error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(\"#{node.error_name}\")" : ""
     ar_code = <<~ZIG.chomp
@@ -1843,6 +1870,7 @@ class MIRLowering
       MIR::Let.new(cap_name, MIR::Lit.new("0"), true, "i64", "_ = &#{cap_name};")
     when :sequence
       values = node.value
+      # TEST-INFRA: stub sequence values for test scaffolding; not program memory.
       items = if values.respond_to?(:items)
         values.items.map { |v| emit_expr(lower(v)) }
       else
@@ -3079,6 +3107,10 @@ class MIRLowering
     rt_name = @rt_name
 
     if sync == :always_mutable
+      # PHASE-3: output is RawZig (checker-opaque). HPT hoisting covers heap FuncCall
+      # RHS values, but BinaryOp string concat is not yet covered; a concat here would
+      # produce a ConcatStr invisible to the checker. Full fix requires RawZig consumes
+      # support or replacing this with structured MIR.
       value_zig = emit_expr(lower(node.value))
       fpc = node.field_pre_cleanup
       if fpc
@@ -3092,6 +3124,7 @@ class MIRLowering
       # Lower RHS with locked unwrap map so field accesses on the locked var use the alias
       prev_locked = @locked_unwrap_map
       @locked_unwrap_map = (prev_locked || {}).merge({ alias_var => true, var_name => alias_var })
+      # PHASE-3: same as always_mutable path above; RawZig-opaque, BinaryOp concat not covered.
       value_zig = emit_expr(lower(node.value))
       @locked_unwrap_map = prev_locked
       fpc = node.field_pre_cleanup
@@ -3271,6 +3304,7 @@ class MIRLowering
         pattern = if is_enum_match
           ".#{c[:value].field}"
         else
+          # PURE: int match case value is always an integer literal; never allocating.
           emit_expr(lower(c[:value]))
         end
         { pattern: pattern, body: body }
@@ -3291,6 +3325,7 @@ class MIRLowering
           variant = case c[:value]
                     when AST::GetField then c[:value].field
                     when AST::MethodCall then c[:value].name
+                    # PURE: fallback case value for union/string match is a literal or identifier.
                     else emit_expr(lower(c[:value]))
                     end
           # Union AS binding: const alias = subject.Variant;
