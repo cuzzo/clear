@@ -112,10 +112,13 @@ module PipeAnalysis
     end
   end
 
-  # SELECT, WHERE, INDEX, ORDER_BY share similar structure
+  # SELECT, WHERE, INDEX, ORDER_BY share similar structure.
+  # SELECT and WHERE also accept a RangeLit source (fused lazy path).
   def analyze_select_family_op(node)
-    require_array_input!(node, "SELECT")
-    item_type = node.left.type_info.element_type.resolved
+    is_range = node.left.is_a?(AST::RangeLit) &&
+               (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
+    require_array_input!(node, "SELECT", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     # Create a temporary Scope for the body
     with_new_scope do
@@ -159,8 +162,9 @@ module PipeAnalysis
   end
 
   def analyze_take_while_op(node)
-    require_array_input!(node, "TAKE_WHILE")
-    item_type = node.left.type_info.element_type.resolved
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "TAKE_WHILE", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -296,9 +300,10 @@ module PipeAnalysis
   end
 
   def analyze_limit_op(node)
-    # LIMIT: list s> LIMIT n
-    require_array_input!(node, "LIMIT")
-    item_type = node.left.type_info.element_type.resolved
+    # LIMIT: list s> LIMIT n (also accepts range source for fused lazy path)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "LIMIT", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     # Analyze the count expression
     visit(node.right.count)
@@ -472,9 +477,10 @@ module PipeAnalysis
   end
 
   def analyze_skip_op(node)
-    # SKIP: list s> SKIP n -> same list type with first n elements removed
-    require_array_input!(node, "SKIP")
-    item_type = node.left.type_info.element_type.resolved
+    # SKIP: list s> SKIP n -> same list type with first n elements removed (also accepts range)
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "SKIP", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     visit(node.right.count)
     count_type = node.right.count.resolved_type
@@ -487,19 +493,20 @@ module PipeAnalysis
   end
 
   def analyze_tap_op(node)
-    # TAP: list s> TAP { body } -> same list type (pass-through)
+    # TAP: list s> TAP { body } -> same list type (pass-through); also accepts range source.
     lhs_type = node.left.type_info
+    is_range = node.left.is_a?(AST::RangeLit)
     is_pool  = lhs_type&.pool?
     is_list  = lhs_type&.list_collection?
     is_array = node.left.metatype == :array
 
-    unless is_pool || is_list || is_array
+    unless is_pool || is_list || is_array || is_range
       error!(node.left, "Cannot TAP non-collection type #{node.left.resolved_type}.")
       node.full_type = :Void
       return
     end
 
-    item_type = lhs_type.element_type.resolved
+    item_type = is_range ? range_element_type(node.left) : lhs_type.element_type.resolved
 
     with_new_scope do
       # Read-only: TAP is for observation, not mutation
@@ -507,7 +514,7 @@ module PipeAnalysis
       node.right.body.each { |stmt| visit(stmt) }
     end
 
-    # TAP returns the original collection (pass-through)
+    # TAP returns the original collection (pass-through); range stays range
     node.full_type = node.left.full_type
     node.storage = node.left.storage
   end
@@ -1068,16 +1075,23 @@ module PipeAnalysis
   #   - Array types (metatype :array)
   #   - @pool and @pool:sharded(N) collection types
   #   - @list and @list:sharded(N) collection types
-  def require_array_input!(node, op_name)
+  def require_array_input!(node, op_name, allow_range: false)
     lhs_type = node.left.type_info
     return if node.left.metatype == :array
     return if lhs_type&.collection?
+    return if allow_range && node.left.is_a?(AST::RangeLit)
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")
     else
       error!(node.left, "Cannot #{op_name} non-list type #{node.left.resolved_type}")
     end
+  end
+
+  # Element type for a range source (used by fusible stage ops applied to ranges).
+  def range_element_type(range_node)
+    start_ft = range_node.start.respond_to?(:full_type) ? range_node.start.full_type : :Number
+    start_ft || :Number
   end
 
   # =========================================================

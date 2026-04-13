@@ -1147,39 +1147,132 @@ class PipelineHost
       ])
     end
 
-    # Range source: zero-allocation lazy iteration via LazyRange(T).
-    # `(start..<end) s> EACH { body }` emits a while loop that pulls items
-    # one-by-one from a LazyRange without materializing the range into a list.
-    if list_node.is_a?(AST::RangeLit)
-      start_mir = visit_mir(list_node.start)
-      end_mir   = visit_mir(list_node.finish)
-      start_code = @emitter.emit(start_mir)
-      end_code   = @emitter.emit(end_mir)
-      end_expr   = list_node.inclusive ? "#{end_code} + 1" : end_code
-
-      start_ft = list_node.start.respond_to?(:full_type) ? list_node.start.full_type : nil
-      elem_zig = (start_ft && Type.new(start_ft).zig_type) || "i64"
-
-      body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
-
-      # Use `|_|` as the while capture when the body doesn't reference the
-      # element, to avoid Zig's "unused capture" error. Use `|__each_item|`
-      # when the body does reference it.
-      capture_name = ast_stmts_use_placeholder?(each_op.body) ? "__each_item" : "_"
-
-      return MIR::ScopeBlock.new([
-        MIR::Let.new("__range_src",
-          MIR::InlineZig.new(
-            "CheatLib.LazyRange(#{elem_zig}).init(@as(#{elem_zig}, #{start_code}), @as(#{elem_zig}, #{end_expr}))",
-            "lazy_range"),
-          true, nil, nil),
-        MIR::WhileStmt.new(
-          MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
-          body_mir, capture_name, nil, nil, nil)
-      ])
-    end
+    # Range source (plain or with fused fusible stages): zero-allocation lazy
+    # iteration via LazyRange(T). Handles both bare RangeLit and chains like
+    # `(range s> SELECT f s> WHERE g)` that PipelineRewriter bypassed.
+    range_chain = unwrap_range_chain(list_node)
+    return lower_each_range(range_chain[:source], range_chain[:stages], each_op) if range_chain
 
     nil  # Fall through to string path
+  end
+
+  # Walk a BinaryOp(SMOOTH) left-spine looking for a RangeLit root with
+  # only fusible stages between. Returns { source: RangeLit, stages: [...] }
+  # or nil if the node is not a pure-fusible range chain.
+  def unwrap_range_chain(node)
+    return { source: node, stages: [] } if node.is_a?(AST::RangeLit)
+    return nil unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+
+    stages = []
+    cursor = node
+    while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
+      rhs = cursor.right
+      if rhs.is_a?(AST::SelectOp)   || rhs.is_a?(AST::WhereOp)     ||
+         rhs.is_a?(AST::TakeWhileOp) || rhs.is_a?(AST::LimitOp)    ||
+         rhs.is_a?(AST::SkipOp)      || rhs.is_a?(AST::TapOp)
+        stages.unshift(rhs)
+        cursor = cursor.left
+      else
+        return nil
+      end
+    end
+    return nil unless cursor.is_a?(AST::RangeLit)
+    { source: cursor, stages: stages }
+  end
+
+  # Emit a fused while loop for a range source with zero or more fusible stages.
+  # Produces a single LazyRange-based while loop -- no intermediate materialization.
+  def lower_each_range(range_lit, stages, each_op)
+    start_mir  = visit_mir(range_lit.start)
+    end_mir    = visit_mir(range_lit.finish)
+    start_code = @emitter.emit(start_mir)
+    end_code   = @emitter.emit(end_mir)
+    end_expr   = range_lit.inclusive ? "#{end_code} + 1" : end_code
+
+    start_ft = range_lit.start.respond_to?(:full_type) ? range_lit.start.full_type : nil
+    elem_zig  = (start_ft && Type.new(start_ft).zig_type) || "i64"
+
+    # Track current item name; SELECT stages may rename it.
+    initial_capture = "__each_item"
+    item_var    = initial_capture
+    item_counter = 0
+    item_used   = false  # true when initial_capture is referenced by a stage or body
+
+    outer_stmts = []  # counter inits declared before the while loop
+    stage_stmts = []  # stmts emitted inside the while loop before the body
+
+    stages.each do |stage|
+      case stage
+      when AST::SelectOp
+        item_used = true  # SELECT transforms the initial capture
+        next_item = "__each_item_#{item_counter += 1}"
+        expr_mir = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
+        stage_stmts << MIR::Let.new(next_item, expr_mir, false, nil, nil)
+        item_var = next_item
+
+      when AST::WhereOp
+        item_used = true if item_var == initial_capture
+        pred_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
+        stage_stmts << MIR::IfStmt.new(
+          MIR::UnaryOp.new("!", pred_mir),
+          [MIR::ContinueStmt.new(nil)], nil)
+
+      when AST::TakeWhileOp
+        item_used = true if item_var == initial_capture
+        pred_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
+        stage_stmts << MIR::IfStmt.new(
+          MIR::UnaryOp.new("!", pred_mir),
+          [MIR::BreakStmt.new(nil, nil)], nil)
+
+      when AST::LimitOp
+        cvar = "__limit_cnt_#{item_counter += 1}"
+        cnt_code = @emitter.emit(visit_mir(stage.count))
+        outer_stmts << MIR::Let.new(cvar,
+          MIR::InlineZig.new("@as(i64, 0)", "zero"), true, nil, nil)
+        stage_stmts << MIR::IfStmt.new(
+          MIR::InlineZig.new("#{cvar} >= #{cnt_code}", "limit_chk"),
+          [MIR::BreakStmt.new(nil, nil)], nil)
+        stage_stmts << MIR::ExprStmt.new(
+          MIR::InlineZig.new("#{cvar} += 1", "limit_inc"), nil)
+
+      when AST::SkipOp
+        cvar = "__skip_cnt_#{item_counter += 1}"
+        cnt_code = @emitter.emit(visit_mir(stage.count))
+        outer_stmts << MIR::Let.new(cvar,
+          MIR::InlineZig.new("@as(i64, 0)", "zero"), true, nil, nil)
+        stage_stmts << MIR::IfStmt.new(
+          MIR::InlineZig.new("#{cvar} < #{cnt_code}", "skip_chk"),
+          [MIR::ExprStmt.new(MIR::InlineZig.new("#{cvar} += 1", "skip_inc"), nil),
+           MIR::ContinueStmt.new(nil)], nil)
+
+      when AST::TapOp
+        item_used = true if item_var == initial_capture
+        tap_stmts = visit_pipeline_body_mir(stage.body, placeholder: item_var)
+        stage_stmts.concat(tap_stmts)
+      end
+    end
+
+    # Lower EACH body with the final item name as placeholder.
+    body_mir = visit_pipeline_body_mir(each_op.body, placeholder: item_var)
+
+    # Use |_| as the while capture only when the initial capture is never
+    # referenced by any stage or the body (avoids Zig "unused capture" error).
+    body_uses_initial = (item_var == initial_capture) && ast_stmts_use_placeholder?(each_op.body)
+    item_used ||= body_uses_initial
+    capture_name = item_used ? initial_capture : "_"
+
+    MIR::ScopeBlock.new([
+      MIR::Let.new("__range_src",
+        MIR::InlineZig.new(
+          "CheatLib.LazyRange(#{elem_zig}).init(@as(#{elem_zig}, #{start_code}), @as(#{elem_zig}, #{end_expr}))",
+          "lazy_range"),
+        true, nil, nil),
+      *outer_stmts,
+      MIR::WhileStmt.new(
+        MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+        [*stage_stmts, *body_mir],
+        capture_name, nil, nil, nil)
+    ])
   end
 
   # CONCURRENT pipeline: worker dispatch stays as RawZig string (struct defs,

@@ -116,10 +116,13 @@ class PipelineRewriter
       return node
     end
 
-    # Phase 2+: range source with EACH terminal and no intermediate stages uses
-    # the lazy MIR path (LazyRange(T) in lower_each). Bypass fusion so the
-    # BinaryOp reaches lower_smooth -> lower_each intact.
-    if real_source.is_a?(AST::RangeLit) && stages.empty? && terminal.is_a?(AST::EachOp)
+    # Phase 2+: range source with EACH terminal and only fusible intermediate
+    # stages uses the lazy MIR path (LazyRange(T) in lower_each). Bypass
+    # PipelineRewriter fusion so the BinaryOp chain reaches lower_smooth ->
+    # lower_each intact; lower_each unwraps the chain and emits a single fused
+    # while loop.
+    if real_source.is_a?(AST::RangeLit) && terminal.is_a?(AST::EachOp) &&
+       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node
     end
