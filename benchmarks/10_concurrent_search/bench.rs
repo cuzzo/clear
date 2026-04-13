@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use memchr::memmem;
 
-const N_FILES: usize = 128;
+const N_FILES: usize = 2000;
 const FILE_SIZE: usize = 10 * 1024;
 const NEEDLE: &str = "the";
 const DATA_DIR: &str = "benchmarks/10_concurrent_search/data";
@@ -70,7 +70,7 @@ fn generate_test_data() -> std::io::Result<()> {
         }
         while buf.len() < FILE_SIZE { buf.push('\n'); }
 
-        let path = PathBuf::from(DATA_DIR).join(format!("file{:03}.txt", i));
+        let path = PathBuf::from(DATA_DIR).join(format!("file{:04}.txt", i));
         std::fs::write(&path, buf.as_bytes())?;
     }
     Ok(())
@@ -101,7 +101,7 @@ async fn main() {
 
     // Pre-build paths (deterministic, not timed).
     let paths: Vec<PathBuf> = (0..N_FILES)
-        .map(|i| PathBuf::from(DATA_DIR).join(format!("file{:03}.txt", i)))
+        .map(|i| PathBuf::from(DATA_DIR).join(format!("file{:04}.txt", i)))
         .collect();
 
     let t0 = Instant::now();
@@ -128,7 +128,7 @@ async fn main() {
 
     println!("Top 10 files by '{}' count:", NEEDLE);
     for r in results.iter().take(10) {
-        println!("  file{:03}.txt  {}", r.file_idx, r.count);
+        println!("  file{:04}.txt  {}", r.file_idx, r.count);
     }
     println!("Time: {:.4} s", elapsed);
 }

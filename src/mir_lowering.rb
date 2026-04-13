@@ -1882,22 +1882,24 @@ class MIRLowering
     MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true)
   end
 
-  def lower_next_expr(node)
+  def lower_next_expr(node, alloc_sym = :frame)
     promise_type = node.expr.respond_to?(:full_type) ? Type.new(node.expr.full_type || :Void) : nil
 
     if promise_type&.promise_list?
       # NEXT on ~T[]@list: iterate the promise list, await each promise, collect results.
-      # Produces T[]@list (frame-backed list of results).
+      # alloc_sym determines whether results are heap- or frame-allocated (caller passes
+      # decl_alloc from the enclosing VarDecl so the allocator matches the cleanup plan).
       inner = lower(node.expr)
       inner_str = emit_expr(inner)
       elem_zig = promise_type.tense_type.element_type.zig_type
       @tmp_counter += 1
       blk_label = "__next_all_#{@tmp_counter}"
       results_var = "__next_results_#{@tmp_counter}"
+      alloc_fn = alloc_sym == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
       code = "#{blk_label}: {\n" \
              "    var #{results_var} = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
              "    for (#{inner_str}.items) |__p| {\n" \
-             "        try #{results_var}.append(#{@rt_name}.frameAlloc(), try __p.next());\n" \
+             "        try #{results_var}.append(#{alloc_fn}, try __p.next());\n" \
              "    }\n" \
              "    break :#{blk_label} #{results_var};\n" \
              "}"
@@ -3035,8 +3037,11 @@ class MIRLowering
     elsif ft.list_collection?
       rhs = node.value
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
-      if rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall) ||
-         rhs_unwrapped.is_a?(AST::NextExpr)
+      if rhs_unwrapped.is_a?(AST::NextExpr)
+        # Pass decl_alloc so NEXT ~T[]@list uses the right allocator (heap when result
+        # escapes via return, frame when it stays local).
+        lower_next_expr(rhs_unwrapped, decl_alloc)
+      elsif rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall)
         lower(node.value)
       elsif ft.capacity.is_a?(Integer) && ft.capacity > 0
         MIR::ContainerInit.new(transpile_type(ft), :list_capacity, decl_alloc, ft.capacity)

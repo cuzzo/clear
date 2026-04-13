@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	nFiles   = 128
+	nFiles   = 2000
 	fileSize = 10 * 1024 // 10 KB
 	needle   = "the"
 	dataDir  = "benchmarks/10_concurrent_search/data"
@@ -88,7 +88,7 @@ func generateTestData() error {
 			sb.WriteByte('\n')
 		}
 
-		path := fmt.Sprintf("%s/file%03d.txt", dataDir, i)
+		path := fmt.Sprintf("%s/file%04d.txt", dataDir, i)
 		if err := os.WriteFile(path, []byte(sb.String()), 0644); err != nil {
 			return err
 		}
@@ -114,7 +114,7 @@ func main() {
 	// Pre-build all file paths — deterministic, no Sprintf in the hot path.
 	paths := make([]string, nFiles)
 	for i := 0; i < nFiles; i++ {
-		paths[i] = fmt.Sprintf("%s/file%03d.txt", dataDir, i)
+		paths[i] = fmt.Sprintf("%s/file%04d.txt", dataDir, i)
 	}
 
 	t0 := time.Now()
@@ -152,7 +152,7 @@ func main() {
 		top = len(results)
 	}
 	for _, r := range results[:top] {
-		fmt.Printf("  file%03d.txt  %d\n", r.fileIdx, r.count)
+		fmt.Printf("  file%04d.txt  %d\n", r.fileIdx, r.count)
 	}
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }
