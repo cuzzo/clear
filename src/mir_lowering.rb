@@ -2508,6 +2508,11 @@ class MIRLowering
   end
 
   def lower_struct_lit(node)
+    # Collect hoisted statements for @indirect fields.
+    # Each @indirect field is allocated to a temp Let before the StructInit so
+    # the HeapCreate is in Let-init position (not an anonymous sub-expression).
+    hoisted = []
+
     fields = node.fields.map { |k, v|
       val = if rc_retain_needed?(v)
         make_rc_retain(v)
@@ -2524,10 +2529,21 @@ class MIRLowering
       elsif needs_items
         val = MIR::ItemsAccess.new(val, false)
       end
-      # @indirect field: wrap in HeapCreate
+      # @indirect field: hoist HeapCreate to a named temp so it is a Let-init,
+      # not an anonymous sub-expression (INV-H).
       if v.respond_to?(:needs_heap_create) && v.needs_heap_create
         zig_t = v.type_info ? transpile_type(v.type_info.resolved.to_s) : "UNKNOWN"
-        val = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
+        @block_expr_counter += 1
+        temp = "__ind_#{@block_expr_counter}_#{k}"
+        hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
+        hoisted << MIR::AllocMark.new(temp, :indirect, :heap)
+        hoisted << MIR::Let.new(temp, hc, false, nil, nil)
+        # errdefer cleans this field if a later allocation (another field or
+        # the outer struct pointer) fails.
+        hoisted << MIR::ErrDeferStmt.new(
+          MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap)
+        )
+        val = MIR::Ident.new(temp)
       end
       { name: k.to_s, value: val }
     }
@@ -2542,11 +2558,22 @@ class MIRLowering
     init = MIR::StructInit.new(type_name, fields)
 
     # Heap/frame allocated struct → pointer
-    if node.storage == :heap || node.storage == :frame
+    result = if node.storage == :heap || node.storage == :frame
       alloc = alloc_for_node(node)
       MIR::HeapCreate.new(type_name, init, alloc, "blk")
     else
       init
+    end
+
+    # Wrap in BlockExpr if @indirect fields were hoisted, so the AllocMark
+    # nodes are visible to the MIR checker.
+    if hoisted.any?
+      @block_expr_counter += 1
+      label = "__ind_blk_#{@block_expr_counter}"
+      hoisted << MIR::BreakStmt.new(label, result)
+      MIR::BlockExpr.new(label, hoisted)
+    else
+      result
     end
   end
 
@@ -2555,20 +2582,40 @@ class MIRLowering
     var_data = schema&.dig(node.variant_name)
     indirect = (var_data.is_a?(Hash) && var_data[:indirect_fields]) || Set.new
 
+    # Collect hoisted statements for @indirect fields (same pattern as lower_struct_lit).
+    hoisted = []
+
     variant_struct_name = "#{node.union_name}_#{node.variant_name}"
     field_values = node.fields.map { |k, v|
       val = lower(v)
       if indirect.include?(k)
         zig_t = transpile_type(var_data[:fields][k])
-        val = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
+        @block_expr_counter += 1
+        temp = "__ind_#{@block_expr_counter}_#{k}"
+        hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
+        hoisted << MIR::AllocMark.new(temp, :indirect, :heap)
+        hoisted << MIR::Let.new(temp, hc, false, nil, nil)
+        hoisted << MIR::ErrDeferStmt.new(
+          MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap)
+        )
+        val = MIR::Ident.new(temp)
       end
       { name: k.to_s, value: val }
     }
 
     inner = MIR::StructInit.new(variant_struct_name, field_values)
-    MIR::StructInit.new(node.union_name.to_s, [
+    result = MIR::StructInit.new(node.union_name.to_s, [
       { name: node.variant_name.to_s, value: inner }
     ])
+
+    if hoisted.any?
+      @block_expr_counter += 1
+      label = "__ind_blk_#{@block_expr_counter}"
+      hoisted << MIR::BreakStmt.new(label, result)
+      MIR::BlockExpr.new(label, hoisted)
+    else
+      result
+    end
   end
 
   def lower_string_concat(node)
