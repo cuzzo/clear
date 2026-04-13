@@ -55,19 +55,31 @@ class MIRLowering
     stmts
   end
 
-  # Returns true when an MIR expression node allocates heap or frame memory.
+  # Returns true when an MIR expression node performs a HEAP allocation.
   # Used by hoist_alloc to decide whether to hoist to a named Let.
+  #
+  # Frame allocations are intentionally excluded: they're ephemeral (cleaned
+  # up by frame mark/rewind) and don't need cleanup tracking. Only heap
+  # allocations require hoisting so the checker can verify their cleanup paths.
   def mir_allocates?(node)
     case node
-    when MIR::ConcatStr, MIR::DupeSlice, MIR::AllocSlice,
-         MIR::MakeList, MIR::HeapCreate, MIR::CapWrap, MIR::DeepCopy
-      true
+    when MIR::DupeSlice    then node.alloc == :heap
+    when MIR::AllocSlice   then node.alloc == :heap
+    when MIR::MakeList     then node.alloc == :heap
+    when MIR::HeapCreate   then true  # always heap by definition
+    when MIR::CapWrap      then node.alloc == :heap
+    when MIR::DeepCopy     then node.alloc == :heap
+    when MIR::ConcatStr    then node.alloc == :heap
     when MIR::ContainerInit
-      !node.alloc.nil?
+      node.alloc == :heap
     when MIR::Call
       node.heap_provenance ? true : false
     when MIR::InlineZig
-      node.stdlib_def&.dig(:allocates) ? true : false
+      # Only hoist if the node heap-allocates (stdlib_def allocates: true AND
+      # allocs contains a :heap entry -- frame-only intrinsics are excluded).
+      return false unless node.stdlib_def&.dig(:allocates)
+      return true unless node.allocs
+      node.allocs.any? { |_k, v| v == :heap }
     else
       false
     end
@@ -1262,7 +1274,7 @@ class MIRLowering
       return MIR::InlineZig.new(code, "bounded_stream_init")
     end
 
-    items_mir = node.items.map { |i| lower(i) }
+    items_mir = node.items.map { |i| hoist_alloc(lower(i)) }
 
     if node.storage == :stack && ti.respond_to?(:fixed?) && ti.fixed?
       # Stack-allocated fixed array
@@ -2229,8 +2241,8 @@ class MIRLowering
 
     # String concat (2-part) uses std.mem.concat
     if node.string_concat
-      left = lower(node.left)
-      right = lower(node.right)
+      left = hoist_alloc(lower(node.left))
+      right = hoist_alloc(lower(node.right))
       alloc = alloc_for_node(node)
       return MIR::ConcatStr.new([left, right], alloc, nil)
     end
@@ -2600,7 +2612,7 @@ class MIRLowering
       val = if rc_retain_needed?(v)
         make_rc_retain(v)
       else
-        lower(v)
+        hoist_alloc(lower(v))
       end
       vt = v.type_info.is_a?(Type) ? v.type_info : nil
       needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) &&
@@ -2670,7 +2682,7 @@ class MIRLowering
 
     variant_struct_name = "#{node.union_name}_#{node.variant_name}"
     field_values = node.fields.map { |k, v|
-      val = lower(v)
+      val = hoist_alloc(lower(v))
       if indirect.include?(k)
         zig_t = transpile_type(var_data[:fields][k])
         @block_expr_counter += 1
@@ -2702,7 +2714,7 @@ class MIRLowering
   end
 
   def lower_string_concat(node)
-    parts = node.parts.map { |p| lower(p) }
+    parts = node.parts.map { |p| hoist_alloc(lower(p)) }
     alloc = alloc_for_node(node)
     MIR::ConcatStr.new(parts, alloc, @rt_name)
   end
