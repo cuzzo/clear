@@ -453,14 +453,22 @@ when 'test'
   test_args = ARGV[1..] || []
   profile_mode = test_args.delete('--profile')
   strict_mode = test_args.delete('--strict')
+  frame_debug = test_args.delete('--no-frame')  # --no-frame enables debug arena (off by default)
   test_args.delete('--mir')  # No-op: MIR is the only pipeline
   source = test_args.first
-  error "Usage: clear test <file.cht|directory> [--profile] [--strict]" unless source
+  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--no-frame]" unless source
+  # By default disable the debug frame arena (routes every alloc through large_objects,
+  # causes 700x slowdown). Use --no-frame to enable it for use-after-rewind detection.
+  FRAME_DEBUG_DECL = frame_debug ? "" : "pub const CLEAR_FRAME_DEBUG = false;\n"
 
   if File.directory?(source)
     gen_script = File.join(CLEAR_ROOT, 'transpile-tests', 'gen.rb')
     puts "Generating tests..."
     system("ruby #{gen_script}")
+    unless FRAME_DEBUG_DECL.empty?
+      all_tests = File.join(ZIG_DIR, 'all-tests.zig')
+      File.write(all_tests, FRAME_DEBUG_DECL + File.read(all_tests))
+    end
     puts "Running tests..."
     passed = 0
     failed = 0
@@ -557,7 +565,7 @@ when 'test'
     end
     tmp_name = "._clear_tmp_#{base_name}.zig"
     tmp_zig = File.join(build_dir, tmp_name)
-    File.write(tmp_zig, zig_code)
+    File.write(tmp_zig, FRAME_DEBUG_DECL + zig_code)
 
     # Compile and run with zig test
     cmd = "#{ZIG} test #{tmp_name} -lc switch.S onRoot.S --test-filter \"#{File.basename(source)}\""
@@ -788,8 +796,9 @@ when 'help', '--help', '-h', nil
     Usage:
       clear build <file.cht> [-o output] [--optimized|--safe|--debug]
       clear run <file.cht> [-- args...]
-      clear test <file.cht>         Test a single file
-      clear test <directory>        Test all .cht files in directory
+      clear test <file.cht>          Test a single file
+      clear test <directory>         Test all .cht files in directory
+      clear test ... --no-frame      Enable debug frame arena (slow, detects use-after-rewind)
       clear profile <file.cht>      Build + run with profiling (heap + CPU)
       clear doctor <profile-dir>    Analyze profile data
 
