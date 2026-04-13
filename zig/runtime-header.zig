@@ -3134,11 +3134,16 @@ pub const CheatLib = struct {
 
             /// Generator pushes a value. Lock-free fast path when buffer has space.
             /// Blocks (yields fiber) only when buffer is full.
+            /// Takes ownership of val: if the stream is closed, frees val before returning
+            /// StreamClosed so callers that pre-allocate (e.g. string dupe) don't leak.
             pub fn push(self: *Self, val: T) error{StreamClosed}!void {
                 const inner = self.inner;
 
                 while (true) {
-                    if (inner.closed) return error.StreamClosed;
+                    if (inner.closed) {
+                        CheatLib.cleanup(T, self.alloc, &val);
+                        return error.StreamClosed;
+                    }
 
                     const h = inner.head.load(.monotonic);
                     const t = inner.tail.load(.acquire);
@@ -3165,7 +3170,11 @@ pub const CheatLib = struct {
 
                     // Buffer full — block until consumer drains at least one slot.
                     while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                    if (inner.closed) { inner.lock.store(0, .release); return error.StreamClosed; }
+                    if (inner.closed) {
+                        inner.lock.store(0, .release);
+                        CheatLib.cleanup(T, self.alloc, &val);
+                        return error.StreamClosed;
+                    }
                     // Re-check after acquiring lock (consumer may have drained).
                     const t2 = inner.tail.load(.acquire);
                     if (h -% t2 < BUF_SIZE) {
@@ -3306,10 +3315,28 @@ pub const CheatLib = struct {
             /// Signal the generator fiber to stop.
             /// Sets closed flag and wakes the producer if blocked.
             /// The producer will see closed=true, return error.StreamClosed, and free Inner.
+            /// For string streams (T = []const u8), drains and frees unconsumed buffered items
+            /// before signaling the producer, preventing leaks on early consumer exit.
             pub fn deinit(self: *Self) void {
                 const inner = self.inner;
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                 inner.closed = true;
+
+                // Drain and free unconsumed items. Read head under the lock so we capture
+                // exactly the items committed before closed=true; producer cannot add more.
+                if (comptime (T == []const u8 or T == []u8)) {
+                    const h = inner.head.load(.acquire);
+                    const t = inner.tail.load(.acquire);
+                    var i: u32 = t;
+                    while (i != h) : (i +%= 1) {
+                        const item = inner.buf[i & MASK];
+                        if (item.len > 0) self.alloc.free(item);
+                    }
+                    // Mark buffer as empty so destroy(stream_inner) in the generator fiber
+                    // cannot double-free (the generator exits cleanly without touching buf).
+                    inner.tail.store(h, .release);
+                }
+
                 if (inner.producer_task) |producer| {
                     inner.producer_task = null;
                     inner.lock.store(0, .release);

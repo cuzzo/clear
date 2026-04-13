@@ -586,11 +586,15 @@ module AST
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
     attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the stream run fn
+    attr_accessor :yields_frame_strings  # true when any YIELD expr is a frame string (NEXT caller owns the duped copy)
   end
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.
   # Only valid inside a BgStreamBlock body. expr: the value to yield.
-  YieldExpr         = Struct.new(:token, :expr) { include Locatable }
+  YieldExpr         = Struct.new(:token, :expr) do
+    include Locatable
+    attr_accessor :yield_dupe  # true when the yielded value must be heap-duped before push (frame string)
+  end
 
   # NextExpr: consume a Promise (~T), blocking the current fiber until the result is ready.
   # expr: the ~T expression to wait on (must be a tense type). Marks the promise as moved.

@@ -1433,6 +1433,7 @@ class MIRLowering
             &#{ctx_var},
             #{task_cfg}
         );
+        #{wg_var}.add(1);
       ZIG
     }
 
@@ -1440,7 +1441,7 @@ class MIRLowering
     do_code = <<~ZIG.chomp
       {
           var #{wg_var} = CheatHeader.WaitGroup.init(rt.getSched());
-          #{wg_var}.add(#{n});
+          errdefer #{wg_var}.wait();
           #{inner}
           #{wg_var}.wait();
       }
@@ -1701,8 +1702,19 @@ class MIRLowering
 
   def lower_yield(node)
     stream_local = @current_stream_local || "__stream_local"
-    expr = lower(node.expr)
-    MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [expr], true)
+    lowered = lower(node.expr)
+    if node.yield_dupe
+      # Frame string: dupe to stream allocator before push so the value outlives
+      # the fiber's frame rewind (or loop mark rewind between yields).
+      inner_code = emit_expr(lowered)
+      dupe_iz = MIR::InlineZig.new(
+        "try #{stream_local}.alloc.dupe(u8, #{inner_code})",
+        "yield_string_dupe"
+      )
+      dupe_iz.stdlib_def = { allocates: true }
+      return MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [dupe_iz], true)
+    end
+    MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true)
   end
 
   def lower_next_expr(node)

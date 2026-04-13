@@ -2375,7 +2375,13 @@ class MIRPass
 
       # BG scope-exit promotion: annotate BgBlocks with what their exit value needs.
       # Must run after recurse_branches! so the BgBlock body is already transformed.
-      each_bg_in_stmt(stmt) { |bg| annotate_bg_exit_promote!(bg) if bg.is_a?(AST::BgBlock) }
+      each_bg_in_stmt(stmt) do |bg|
+        if bg.is_a?(AST::BgBlock)
+          annotate_bg_exit_promote!(bg)
+        elsif bg.is_a?(AST::BgStreamBlock)
+          annotate_yield_string_dupes!(bg)
+        end
+      end
 
       # OrRescue fallback dupe: when success path is heap-promoted and fallback
       # is a struct literal, string fields need heap-duping for consistent cleanup.
@@ -2733,6 +2739,32 @@ class MIRPass
       return true if msd.is_a?(Hash) && msd[:return_alloc] == :frame
     end
     false
+  end
+
+  # Annotate YieldExpr nodes inside a BgStreamBlock that yield frame-allocated strings.
+  # Sets yield_node.yield_dupe = true; the lowerer then wraps the push arg in a heap dupe.
+  def annotate_yield_string_dupes!(stream_node)
+    walk_stream_yields(stream_node.body)
+  end
+
+  def walk_stream_yields(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      if stmt.is_a?(AST::YieldExpr)
+        ft = stmt.expr.respond_to?(:full_type) ? stmt.expr.full_type : nil
+        t = ft.is_a?(Type) ? ft : (ft ? Type.new(ft) : nil)
+        stmt.yield_dupe = true if t && bg_exit_needs_string_dupe?(stmt.expr, t)
+      else
+        case stmt
+        when AST::WhileLoop    then walk_stream_yields(stmt.do_branch)
+        when AST::ForRange, AST::ForEach then walk_stream_yields(stmt.body)
+        when AST::IfStatement
+          walk_stream_yields(stmt.then_branch)
+          walk_stream_yields(stmt.else_branch)
+        when AST::BgStreamBlock  # stop at nested stream boundaries
+        end
+      end
+    end
   end
 
   # Insert MIR::Promote for frame-allocated variables captured by BG/stream fibers.

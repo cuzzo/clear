@@ -148,7 +148,6 @@ pub fn build(b: *std.Build) void {
         "vopr.zig",
         "vopr-loom.zig",
         "yield-test.zig",
-        "test_preserve_rewind.zig",
     };
 
     for (test_files) |filename| {
@@ -191,7 +190,8 @@ pub fn build(b: *std.Build) void {
         "slab-alloc-benchmark-test.zig",
         "queues-benchmark-test.zig",
         "scheduler-benchmark-test.zig",
-        "preserve-rewind-bench-test.zig",
+        "frame-cache-bench-test.zig",
+        "heap-string-return-bench-test.zig",
     };
 
     for (benchmark_files) |filename| {

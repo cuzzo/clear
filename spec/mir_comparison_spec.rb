@@ -425,7 +425,7 @@ RSpec.describe "MIR pipeline comparison" do
       expect(fn[:new_zig]).to include("f64")
     end
 
-    it "lowers function with string return using alloc (preserveAndRewind)" do
+    it "lowers function with string return using alloc (frame string, no mark needed)" do
       src = <<~CLEAR
         FN getName() RETURNS String ->
           s = toString(42);
@@ -435,9 +435,10 @@ RSpec.describe "MIR pipeline comparison" do
       results = compare_top_level(src)
       fn = results.find { |r| r[:name] == "getName" }
       expect(fn[:error]).to be_nil
-      # toString triggers uses_alloc=true + needs_rt=true → frame save + preserveAndRewind
-      expect(fn[:new_zig]).to include("saveFrameMark")
-      expect(fn[:new_zig]).to include("preserveAndRewind")
+      # Frame-string return: no frame mark/restore (result lives in caller's frame region).
+      expect(fn[:new_zig]).not_to include("saveFrameMark")
+      expect(fn[:new_zig]).not_to include("preserveAndRewind")
+      expect(fn[:new_zig]).not_to include("__pr_body")
     end
 
     it "lowers function calling another function" do

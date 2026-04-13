@@ -186,6 +186,67 @@ test "InfStream.nextOrNull() with struct element type" {
 }
 
 // ---------------------------------------------------------------------------
+// String stream memory safety
+// ---------------------------------------------------------------------------
+
+test "InfStream(string).deinit() frees unconsumed buffered strings" {
+    // Regression: before the fix, deinit() only signalled closed=true but did
+    // not free []const u8 items already committed to the ring buffer, leaking
+    // them when the consumer exits early (e.g. reads 3 items from an infinite
+    // stream then drops it).
+    const S = CheatLib.InfStream([]const u8);
+    const alloc = std.testing.allocator;
+    const inner = try alloc.create(S.Inner);
+    inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
+    var s = S{ .inner = inner, .alloc = alloc };
+
+    // Push 4 strings (fast path, no blocking).
+    const a = try alloc.dupe(u8, "hello");
+    const b = try alloc.dupe(u8, "world");
+    const c = try alloc.dupe(u8, "foo");
+    const d = try alloc.dupe(u8, "bar");
+    try s.push(a);
+    try s.push(b);
+    try s.push(c);
+    try s.push(d);
+
+    // Consume only 2 — "foo" and "bar" are still in the buffer.
+    const v1 = try s.next();
+    defer alloc.free(v1);
+    const v2 = try s.next();
+    defer alloc.free(v2);
+
+    try std.testing.expectEqualStrings("hello", v1);
+    try std.testing.expectEqualStrings("world", v2);
+
+    // deinit() must free "foo" and "bar" before destroying inner.
+    // GPA will catch any leak.
+    s.deinit();
+    alloc.destroy(inner);
+}
+
+test "InfStream(string).push() frees value when stream is closed" {
+    // Regression: the generator pre-allocates a value (dupe), then calls push().
+    // If the stream was closed between the dupe and the push(), push() returns
+    // StreamClosed and the value was leaked.  push() must free it before returning.
+    const S = CheatLib.InfStream([]const u8);
+    const alloc = std.testing.allocator;
+    const inner = try alloc.create(S.Inner);
+    inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
+    defer alloc.destroy(inner);
+    var s = S{ .inner = inner, .alloc = alloc };
+
+    // Close the stream first so any subsequent push() sees closed=true.
+    inner.closed = true;
+
+    // push() must free the slice before returning StreamClosed.
+    const val = try alloc.dupe(u8, "leaked?");
+    const result = s.push(val);
+    try std.testing.expectError(error.StreamClosed, result);
+    // GPA would report val as leaked if push() didn't free it.
+}
+
+// ---------------------------------------------------------------------------
 // Type distinctness
 // ---------------------------------------------------------------------------
 

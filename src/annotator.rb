@@ -3002,8 +3002,35 @@ private
 
     node.full_type = :"~#{elem_syms.first}[?]"
 
+    # Detect YIELD of frame strings: when any YIELD expression is frame-allocated,
+    # the MIR pass will heap-dupe it before push. NEXT callers own the duped copy.
+    node.yields_frame_strings = true if stream_body_yields_frame_string?(node.body)
+
     # Compute captures for transpiler (same as BG blocks).
     node.capture_analysis = analyze_fiber_captures(node.body)
+  end
+
+  # Returns true if any YieldExpr in the stream body yields a frame-allocated string.
+  # Stops recursion at nested BgStreamBlock boundaries.
+  def stream_body_yields_frame_string?(stmts)
+    return false unless stmts.is_a?(Array)
+    stmts.any? do |stmt|
+      case stmt
+      when AST::YieldExpr
+        bg_exit_frame_string?(stmt.expr)
+      when AST::WhileLoop
+        stream_body_yields_frame_string?(stmt.do_branch)
+      when AST::ForRange, AST::ForEach
+        stream_body_yields_frame_string?(stmt.body)
+      when AST::IfStatement
+        stream_body_yields_frame_string?(stmt.then_branch) ||
+          stream_body_yields_frame_string?(stmt.else_branch)
+      when AST::BgStreamBlock
+        false  # nested stream boundary — don't descend
+      else
+        false
+      end
+    end
   end
 
   def visit_YieldExpr(node)
@@ -3171,14 +3198,17 @@ private
       node.full_type = promise_type.tense_type.to_sym
     end
 
-    # Propagate heap provenance through NEXT: if the BG block's exit value was
-    # frame-allocated and heap-duped by the fiber, the NEXT caller owns that
-    # heap allocation and must free it.
+    # Propagate heap provenance through NEXT: if the fiber's exit/yield value was
+    # frame-allocated and heap-duped, the NEXT caller owns that heap allocation
+    # and must free it.
     if node.expr.is_a?(AST::Identifier)
       sym = node.expr.symbol
       decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
       bg_value = decl_node.respond_to?(:value) ? decl_node.value : nil
-      if bg_value.is_a?(AST::BgBlock) && (bg_value.return_provenance == :heap)
+      needs_heap =
+        (bg_value.is_a?(AST::BgBlock) && bg_value.return_provenance == :heap) ||
+        (bg_value.is_a?(AST::BgStreamBlock) && bg_value.yields_frame_strings)
+      if needs_heap
         ti = node.type_info
         ti.provenance = :heap if ti.is_a?(Type)
       end

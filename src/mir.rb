@@ -56,6 +56,7 @@ module MIR
                      :comptime_params # ["comptime T: type", ...]
                     ) do
     include Stmt
+    def has_own_frame? = true
   end
 
   # Function parameter.
@@ -456,12 +457,6 @@ module MIR
   # Zig: defer rt.restoreFrameMark(frame_mark);
   FrameRestore = Struct.new(:rt_expr) do
     include Stmt
-  end
-
-  # Preserve and rewind (for string-returning functions).
-  # Zig: return try rt.preserveAndRewind(frame_mark, value);
-  PreserveAndRewind = Struct.new(:value, :rt_expr) do
-    include Expr
   end
 
   # ================================================================

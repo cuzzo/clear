@@ -1503,8 +1503,10 @@ class Type
     # 3. Handle Special primitive mapping
     # String and Byte[N] (fixed-size string literals) both map to []const u8.
     # Byte[N] is the inferred type for string literals; their contents are always const.
+    # Strings are already fat pointers (slice = ptr + len); heap vs frame provenance
+    # only affects where the backing bytes live, not the Zig type.
     if resolved == :String || string?
-      return is_pointer ? "*[]const u8" : "[]const u8"
+      return "[]const u8"
     end
 
     # 3b. Handle Pool / ShardedPool collection

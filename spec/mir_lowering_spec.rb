@@ -993,13 +993,14 @@ RSpec.describe MIRLowering do
       expect(zig).to include("restoreFrameMark")
     end
 
-    it "skips frame restore for string-returning functions" do
+    it "skips frame mark for frame-string-returning functions (no heap_carry_return)" do
       fn = make_fn("getName", return_type: :String, uses_frame: true)
       result = lowering.lower(fn)
       zig = emit(result)
-      expect(zig).to include("saveFrameMark")
-      expect(zig).to include("preserveAndRewind")
+      # Frame string returns: no mark/restore (result lives in caller's frame region).
+      expect(zig).not_to include("saveFrameMark")
       expect(zig).not_to include("restoreFrameMark")
+      expect(zig).not_to include("preserveAndRewind")
     end
 
     it "emits _ = &rt when no frame allocation" do
@@ -1358,8 +1359,11 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include(".add(2)")
       expect(zig).to include("__DoBranchCtx")
+      # Per-spawn add(1) replaces upfront add(N); errdefer guards partial-spawn failures.
+      expect(zig).to include(".add(1)")
+      expect(zig).not_to include(".add(2)")
+      expect(zig).to include("errdefer")
       # Pinned branch uses submitSpawn, unpinned uses spawnBest
       expect(zig).to include("spawnBest")
       expect(zig).to include("submitSpawn")

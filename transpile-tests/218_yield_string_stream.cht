@@ -1,0 +1,25 @@
+-- Test: YIELD of frame-allocated strings in BG STREAM.
+-- Generator dupes each frame string to the stream allocator before push.
+-- Consumer (NEXT) owns the heap copy and cleans it up.
+
+FN main() RETURNS Void ->
+    -- Test 1: YIELD of toString() (frame string from stdlib intrinsic).
+    counter: ~String[INF] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE TRUE DO
+            YIELD i.toString();
+            i = i + 1_i64;
+        END
+    };
+
+    s0: String = NEXT counter;
+    s1: String = NEXT counter;
+    s2: String = NEXT counter;
+
+    ASSERT s0 == "0", "yield string stream: first value";
+    ASSERT s1 == "1", "yield string stream: second value";
+    ASSERT s2 == "2", "yield string stream: third value";
+
+    print("218: yield string stream PASSED");
+    RETURN;
+END

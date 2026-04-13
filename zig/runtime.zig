@@ -24,7 +24,21 @@ fn milliTimestamp() i64 {
 const Scheduler = fp.Scheduler;
 const Task = qs.Task;
 const Fiber = qs.Fiber;
-pub const CheatArena = @import("frame.zig").CheatArena;
+const frame_mod = @import("frame.zig");
+pub const CheatArena = frame_mod.CheatArena;
+
+// In Debug/ReleaseSafe builds (or when CLEAR_FRAME_DEBUG=true in root), route
+// every frame allocation through large_objects (individual heap allocs). rewind()
+// frees them one by one, so use-after-rewind faults immediately under GPA/ASAN.
+// Set pub const CLEAR_FRAME_DEBUG = false in your root module to opt out.
+const use_debug_arena = if (@hasDecl(@import("root"), "CLEAR_FRAME_DEBUG"))
+    @import("root").CLEAR_FRAME_DEBUG
+else blk: {
+    const mode = @import("builtin").mode;
+    break :blk mode == .Debug or mode == .ReleaseSafe;
+};
+
+const OverflowArena = frame_mod.CheatArenaType(use_debug_arena);
 
 // This forces Zig to generate the exported panic symbols
 comptime {
@@ -131,7 +145,7 @@ pub const Runtime = struct {
     // OVERFLOW (The Safety Valve)
     // We use an Arena so we can track all the overflow allocations
     // and free them in one go when the task resets.
-    overflow_arena: CheatArena,
+    overflow_arena: OverflowArena,
 
     // THREE ALLOCATORS
     heap_allocator: std.mem.Allocator,    // GPA or tcmalloc/jemalloc/mimalloc/malloc
@@ -175,7 +189,7 @@ pub const Runtime = struct {
             .deadline = deadline,
             .frame_allocator = undefined,
             .heap_allocator = heap_allocator,
-            .overflow_arena = CheatArena.init(heap_allocator, slice),
+            .overflow_arena = OverflowArena.init(heap_allocator, slice),
         };
     }
 
@@ -249,7 +263,7 @@ pub const Runtime = struct {
 
     pub const FrameMark = struct {
         stack_index: usize,
-        overflow_mark: CheatArena.Mark,
+        overflow_mark: OverflowArena.Mark,
     };
 
     // Stack Helper: Get current Mark (Offset)
@@ -274,111 +288,17 @@ pub const Runtime = struct {
         return self.overflow_arena.getPeakBytes();
     }
 
-    pub fn saveLoopMark(self: *Runtime) CheatArena.Mark {
+    pub fn saveLoopMark(self: *Runtime) OverflowArena.Mark {
         return self.overflow_arena.getMark();
     }
 
-    pub fn restoreLoopMark(self: *Runtime, mark: CheatArena.Mark) void {
-        self.overflow_arena.rewind(mark);
-    }
-
-    /// TODO: loopPreserveAndRewindT -- generic preserve-and-rewind for non-string types.
-    ///
-    /// Currently only strings ([]const u8) get the frame-preserve optimization.
-    /// Lists, maps, and large structs with frame-allocated subfields are instead
-    /// heap-promoted by the compiler (direct_outer_mutations / COPY enforcement),
-    /// which is correct but suboptimal for the "compute-and-replace" loop pattern:
-    /// every discarded candidate is heap-allocated and freed, adding per-iteration
-    /// heap pressure and fragmentation.
-    ///
-    /// The correct general mechanism is a comptime generic:
-    ///
-    ///   pub fn loopPreserveAndRewindT(
-    ///       self: *Runtime,
-    ///       comptime T: type,
-    ///       mark: CheatArena.Mark,
-    ///       value: T,
-    ///   ) !T
-    ///
-    /// For scalar types and shallow structs (no frame-slice fields): softRewind,
-    /// alloc @sizeOf(T) bytes at mark, copy value inline.
-    /// For []const u8: delegate to loopPreserveAndRewind (copy pointed-to bytes).
-    /// For structs with []const u8 fields: copy inline bytes + recursively preserve
-    /// each string field into the rewound frame.
-    /// For ArrayLists / HashMaps: copy the container struct inline (items pointer +
-    /// metadata stay valid; backing store is heap-allocated and unaffected by rewind).
-    ///
-    /// The compiler must also be updated to:
-    ///   1. Detect all non-copy outer vars reassigned inside rewinding loops
-    ///      (not just String -- see outer_string_reassigns in control_flow.rb).
-    ///   2. Emit loopPreserveAndRewindT(<Type>, mark, var) instead of heap promotion
-    ///      for the "replace each iteration" pattern.
-    ///   3. Optionally: allow list backing stores to use frameAlloc() in loop bodies
-    ///      so they participate in per-iteration rewind rather than always using heap.
-
-    /// Preserve a string across a loop mark rewind. Rewinds the arena to the
-    /// mark, re-allocates the string at the rewound position, then trims excess.
-    /// Used at loop boundaries to reclaim dead MUTABLE string values.
-    pub fn loopPreserveAndRewind(self: *Runtime, mark: CheatArena.Mark, data: []const u8) ![]const u8 {
-        if (self.arena_mode) return data;
-        if (data.len == 0) {
-            self.overflow_arena.rewind(mark);
-            return data;
-        }
-        // softRewind moves cursor back to mark but keeps blocks alive.
-        // We alloc at the rewound position and copy the data there.
-        // No trimExcess — blocks stay allocated and will be reused next
-        // iteration or freed by the function-level frame mark restore.
-        // trimExcess could free blocks the preserved data spans.
+    pub fn restoreLoopMark(self: *Runtime, mark: OverflowArena.Mark) void {
+        // Per-iteration rewind: reset cursor only, do NOT free overflow blocks.
+        // Overflow blocks may contain data allocated earlier in the same outer
+        // iteration (e.g. socketRead results, outer-scope strings). trimExcess
+        // would free those blocks while they're still live. restoreFrameMark
+        // calls rewind (with trimExcess) at function exit, which is correct.
         self.overflow_arena.softRewind(mark);
-        const raw_ptr = self.overflow_arena.alloc(data.len, 1, 0) orelse return error.OutOfMemory;
-        const new_buf = raw_ptr[0..data.len];
-        if (@intFromPtr(new_buf.ptr) != @intFromPtr(data.ptr)) {
-            std.mem.copyForwards(u8, new_buf, data);
-        }
-        return new_buf;
-    }
-
-    /// Copy a string at the current arena cursor without rewinding.
-    /// Used after loopPreserveAndRewind when multiple variables need preserving
-    /// in the same loop iteration: the first call rewinds to the shared mark,
-    /// subsequent calls use this to copy sequentially so strings don't overlap.
-    pub fn loopPreserveVar(self: *Runtime, data: []const u8) ![]const u8 {
-        if (self.arena_mode) return data;
-        if (data.len == 0) return data;
-        const raw_ptr = self.overflow_arena.alloc(data.len, 1, 0) orelse return error.OutOfMemory;
-        const new_buf = raw_ptr[0..data.len];
-        if (@intFromPtr(new_buf.ptr) != @intFromPtr(data.ptr)) {
-            std.mem.copyForwards(u8, new_buf, data);
-        }
-        return new_buf;
-    }
-
-    /// Preserve a slice across a frame mark rewind. Resets the arena cursor
-    /// to the saved mark, re-allocates the result at the rewound position,
-    /// then trims excess blocks. All intermediate allocations are reclaimed;
-    /// only the returned slice survives.
-    pub fn preserveAndRewind(self: *Runtime, mark: FrameMark, data: []const u8) ![]const u8 {
-        if (self.arena_mode) return data; // fiber arena mode — no rewind
-        if (data.len == 0) {
-            self.restoreFrameMark(mark);
-            return data;
-        }
-        // 1. Soft rewind: move cursor back, keep blocks alive
-        self.overflow_arena.softRewind(mark.overflow_mark);
-        // 2. Allocate at the rewound position via raw arena alloc (NOT std Allocator,
-        //    which @memset's to undefined and would destroy the data when same-address).
-        const raw_ptr = self.overflow_arena.alloc(data.len, 1, 0) orelse return error.OutOfMemory;
-        const new_buf = raw_ptr[0..data.len];
-        // 3. Copy from old location (still physically present in arena blocks).
-        //    Skip when pointers match (result was the first alloc after mark).
-        if (@intFromPtr(new_buf.ptr) != @intFromPtr(data.ptr)) {
-            // copyForwards is safe when dest < src (always true: dest is at mark, src is later).
-            std.mem.copyForwards(u8, new_buf, data);
-        }
-        // 4. Trim excess blocks and large objects
-        self.overflow_arena.trimExcess(mark.overflow_mark);
-        return new_buf;
     }
 
     pub fn frameAlloc(self: *Runtime) std.mem.Allocator {
@@ -414,14 +334,20 @@ pub const Runtime = struct {
     fn cleanupFree(ctx: *anyopaque, buf: []u8, buf_align: std.mem.Alignment, ret_addr: usize) void {
         const self: *Runtime = @ptrCast(@alignCast(ctx));
         const p = @intFromPtr(buf.ptr);
-        // Check if pointer is in the frame arena's static block — if so, skip.
-        // Frame arena data is reclaimed by rewind, not individual free.
-        const frame_mem = self.overflow_arena.static_block;
-        const frame_base = @intFromPtr(frame_mem.ptr);
-        if (p >= frame_base and p < frame_base + frame_mem.len) {
-            return; // frame-arena owned — no-op
-        }
-        // Everything else (heap, overflow): delegate to real heap allocator.
+        // Determine if this pointer is frame-arena-owned (should be skipped —
+        // rewind/restoreFrameMark will reclaim it).
+        //
+        // Production: check if pointer falls within the static block (O(1)).
+        // Debug mode: every alloc is a large_object; scan the list (O(n), acceptable).
+        const is_frame = if (use_debug_arena)
+            self.overflow_arena.isLargeObject(buf.ptr)
+        else blk: {
+            const frame_mem = self.overflow_arena.static_block;
+            const frame_base = @intFromPtr(frame_mem.ptr);
+            break :blk (p >= frame_base and p < frame_base + frame_mem.len);
+        };
+        if (is_frame) return; // frame-arena owned — rewind reclaims it
+        // Everything else (heap, overflow blocks): delegate to real heap allocator.
         self.heap_allocator.rawFree(buf, buf_align, ret_addr);
     }
 

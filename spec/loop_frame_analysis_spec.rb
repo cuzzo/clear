@@ -205,13 +205,15 @@ RSpec.describe LoopFrameAnalysis do
   end
 
   # ===========================================================================
-  # Group C: loop_preserve_vars (outer string reassignment with frame concat)
+  # Group C: heap carry var promotion (outer string reassigned in mark_per_iter loop)
   # ===========================================================================
-  describe "Group C: loop_preserve_vars for outer string preserve-and-rewind" do
+  # Previously used loopPreserveAndRewind (frame-copy before rewind).
+  # Now: carry vars are promoted to heap so they survive the per-iter rewind.
+  describe "Group C: heap carry var promotion for outer string reassignment" do
 
-    it "outer string reassigned with frame concat → added to loop_preserve_vars" do
-      # resp = resp + result: resp is outer, result is loop-local frame string.
-      # loopPreserveAndRewind copies resp before rewind so it survives.
+    it "outer string reassigned with frame concat → declaration promoted to heap" do
+      # resp = resp + i.toString(): resp is outer, i.toString() is loop-local frame string.
+      # Phase 1.5c promotes resp's declaration to heap so it survives the per-iter rewind.
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE resp = "";
@@ -225,12 +227,15 @@ RSpec.describe LoopFrameAnalysis do
           RETURN;
         END
       CLEAR
-      loop = main_fn(ast).body.find { |s| s.is_a?(AST::WhileLoop) }
+      fn = main_fn(ast)
+      loop = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
+      resp_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "resp" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to include("resp")
+      expect(loop.loop_preserve_vars).to be_nil
+      expect(resp_decl.type_info.heap_provenance?).to be true
     end
 
-    it "loop_preserve_vars is nil when no outer string reassignment occurs" do
+    it "loop_preserve_vars stays nil when no outer string reassignment occurs" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
@@ -247,7 +252,7 @@ RSpec.describe LoopFrameAnalysis do
       expect(loop.loop_preserve_vars).to be_nil
     end
 
-    it "Zig output uses loopPreserveAndRewind for outer string variable" do
+    it "Zig output uses heap concat (not loopPreserveAndRewind) for outer string variable" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
           MUTABLE resp = "";
@@ -262,15 +267,15 @@ RSpec.describe LoopFrameAnalysis do
         END
       CLEAR
       zig = transpile(src)
-      expect(zig).to include("loopPreserveAndRewind")
+      expect(zig).not_to include("loopPreserveAndRewind")
       expect(zig).to include("saveLoopMark")
-      expect(zig).not_to include("defer rt.restoreLoopMark")
+      expect(zig).to include("defer rt.restoreLoopMark")
+      expect(zig).to include("rt.heapAlloc()")
     end
 
-    it "outer string reassigned with user function call result → added to loop_preserve_vars" do
-      # last = makePrefix(i): makePrefix returns a frame-preserved string (via
-      # preserveAndRewind). The loop has mark_per_iter=true (tmp forces it).
-      # Without loopPreserveAndRewind, last is dangling after loop rewind.
+    it "outer string reassigned with user function call result → declaration promoted to heap" do
+      # last = makePrefix(i): the loop has mark_per_iter=true (tmp forces it).
+      # Phase 1.5c promotes last's declaration to heap so it survives the rewind.
       ast = run_mir(<<~CLEAR)
         FN makePrefix(i: Int64) RETURNS String ->
           RETURN "entry-" + i.toString();
@@ -286,12 +291,14 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       fn = main_fn(ast)
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
+      last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to include("last")
+      expect(loop.loop_preserve_vars).to be_nil
+      expect(last_decl.type_info.heap_provenance?).to be true
     end
 
-    it "outer string reassigned with method call result → added to loop_preserve_vars" do
-      # last = val.format(): returns a frame-preserved string. Same issue.
+    it "outer string reassigned with method call result → declaration promoted to heap" do
+      # last = i.toString(): loop has mark_per_iter=true (tmp forces it).
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE last = "";
@@ -304,14 +311,16 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       fn = main_fn(ast)
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
+      last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to include("last")
+      expect(loop.loop_preserve_vars).to be_nil
+      expect(last_decl.type_info.heap_provenance?).to be true
     end
 
-    it "outer string reassigned with concat of outer (non-local) vars → loop_preserve_vars" do
+    it "outer string reassigned with concat of outer (non-local) vars → declaration promoted to heap" do
       # result = prefix + "-" + suffix: ALL parts are outer vars, not frame locals.
-      # StringConcat is ALWAYS frame-allocated (std.mem.concat uses frameAlloc),
-      # so the result needs loopPreserveAndRewind regardless of what's being concat'd.
+      # The concat is still frame-allocated by default and corrupted by the rewind.
+      # Phase 1.5c promotes result's declaration to heap.
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE prefix = "hello";
@@ -326,8 +335,10 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       fn = main_fn(ast)
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
+      result_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "result" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to include("result")
+      expect(loop.loop_preserve_vars).to be_nil
+      expect(result_decl.type_info.heap_provenance?).to be true
     end
 
   end
@@ -529,6 +540,94 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       zig = transpile(src)
       expect(zig.scan("saveLoopMark").length).to eq(1)
+    end
+
+    # --- heap carry string in doubly-nested loops (server pattern) ---
+    # The outer loop is mark_per_iter (frame-local prefix string).
+    # The inner loop is mark_per_iter (frame-local parts list).
+    # resp is a heap carry var: outer-scoped string reassigned in the inner loop.
+    # Both outer and inner emit saveLoopMark/restoreLoopMark.
+    it "doubly-nested loops both emit saveLoopMark when both have frame-locals" do
+      # Outer loop: prefix is a frame-local string -> outer loop gets mark_per_iter.
+      # Inner loop: parts is a frame-local list -> inner loop gets mark_per_iter.
+      # Both loops must emit saveLoopMark / restoreLoopMark.
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE outer = 0_i64;
+          WHILE outer < 3 DO
+            prefix = "O" + outer.toString();
+            MUTABLE resp = "";
+            MUTABLE i = 0_i64;
+            WHILE i < 5 DO
+              MUTABLE parts: String[]@list = [];
+              parts.append(i.toString());
+              resp = resp + i.toString() + ";" + prefix.length().toString();
+              i = i + 1_i64;
+            END
+            outer = outer + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Both outer (prefix is frame-local) and inner (parts is frame-local) get marks
+      expect(zig.scan("saveLoopMark").length).to eq(2)
+      expect(zig.scan("restoreLoopMark").length).to eq(2)
+    end
+
+    it "heap carry string in nested loop: initial value heap-duped, not comptime literal" do
+      # When resp is promoted to heap (carry var), its initial value "" must be
+      # heap-duped so defer heapAlloc().free(resp) does not free a comptime literal.
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          WHILE i < 3 DO
+            prefix = "O" + i.toString();
+            MUTABLE resp = "";
+            MUTABLE j = 0_i64;
+            WHILE j < 5 DO
+              MUTABLE parts: String[]@list = [];
+              parts.append(j.toString());
+              resp = resp + j.toString() + ";" + prefix.length().toString();
+              j = j + 1_i64;
+            END
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # resp's initial value must be a heap dupe, not the comptime literal ""
+      expect(zig).to include('heapAlloc().dupe(u8, "")')
+      expect(zig).not_to match(/var resp.*=\s*""\s*;/)
+    end
+
+    it "heap carry string in nested loop: reassignment uses ReassignWithCleanup" do
+      # resp = resp + ... must free the old resp before assigning new.
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE i = 0_i64;
+          WHILE i < 3 DO
+            prefix = "O" + i.toString();
+            MUTABLE resp = "";
+            MUTABLE j = 0_i64;
+            WHILE j < 5 DO
+              MUTABLE parts: String[]@list = [];
+              parts.append(j.toString());
+              resp = resp + j.toString() + ";" + prefix.length().toString();
+              j = j + 1_i64;
+            END
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # The pattern is: allocate __new_resp, cleanup old resp, assign new
+      expect(zig).to include("__new_resp")
+      expect(zig).to include("CheatLib.cleanup([]const u8")
+      # And the final defer must free resp
+      expect(zig).to include("defer rt.heapAlloc().free(resp)")
     end
 
   end
