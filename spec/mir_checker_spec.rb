@@ -177,78 +177,86 @@ RSpec.describe MIRChecker do
   # ===========================================================================
 
   describe "FRAME_NO_REWIND" do
-    # Function-level frame rewind is NOT checked (AllocMark is verification-only,
-    # not actual allocation). Only loop-level is checked.
+    # Structural check: the checker looks for an actual DeferStmt(restoreLoopMark)
+    # in the loop body, not a flag. If the loop body has frame allocs but no
+    # restoreLoopMark defer, FRAME_NO_REWIND fires regardless of mark_per_iter.
 
-    it "passes for function body with frame alloc (no function-level check)" do
-      body = [
-        MIR::AllocMark.new("x", :list, :frame),
-      ]
+    # Helper: the DeferStmt(restoreLoopMark) emitted by the lowerer for mark_per_iter loops.
+    def loop_restore_defer
+      MIR::DeferStmt.new(
+        MIR::MethodCall.new(MIR::Ident.new("rt"), "restoreLoopMark",
+                            [MIR::Ident.new("__mark")], false)
+      )
+    end
+
+    it "passes for function body with frame alloc (only loop-level checked)" do
+      body = [MIR::AllocMark.new("x", :list, :frame)]
       errors = checker.check_fn!(fn_def("no_save", body))
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end
 
     it "passes for function body with only heap allocs" do
-      body = [
-        MIR::AllocMark.new("x", :list, :heap),
-      ]
+      body = [MIR::AllocMark.new("x", :list, :heap)]
       errors = checker.check_fn!(fn_def("heap_only", body))
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end
 
-    it "detects loop with frame alloc but no mark_per_iter" do
-      loop_body = [
-        MIR::AllocMark.new("tmp", :string, :frame),
-      ]
+    it "detects loop with frame alloc but no restoreLoopMark defer" do
+      loop_body = [MIR::AllocMark.new("tmp", :string, :frame)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
       ]
-      errors = checker.check_fn!(fn_def("loop_no_mark", body))
+      errors = checker.check_fn!(fn_def("loop_no_restore", body))
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
     end
 
-    it "passes for loop with mark_per_iter" do
-      loop_body = [
-        MIR::AllocMark.new("tmp", :string, :frame),
-      ]
+    it "passes for loop with restoreLoopMark defer (structural check)" do
+      loop_body = [loop_restore_defer, MIR::AllocMark.new("tmp", :string, :frame)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
       ]
-      errors = checker.check_fn!(fn_def("loop_with_mark", body))
+      errors = checker.check_fn!(fn_def("loop_with_restore", body))
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end
 
-    it "detects loop with frame InlineZig alloc but no mark_per_iter" do
+    it "detects loop with mark_per_iter flag but no restoreLoopMark defer (lowerer bug)" do
+      # mark_per_iter=true but lowerer failed to emit the defer -- checker catches it
+      loop_body = [MIR::AllocMark.new("tmp", :string, :frame)]
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
+      ]
+      errors = checker.check_fn!(fn_def("flag_without_defer", body))
+      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
+    end
+
+    it "detects loop with frame InlineZig alloc but no restoreLoopMark defer" do
       iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
       iz.allocs = { alloc: :frame }
-      loop_body = [
-        MIR::ExprStmt.new(iz, false),
-      ]
+      loop_body = [MIR::ExprStmt.new(iz, false)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
       ]
-      errors = checker.check_fn!(fn_def("iz_loop_no_mark", body))
+      errors = checker.check_fn!(fn_def("iz_loop_no_restore", body))
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
     end
 
-    it "detects loop with frame Let init but no mark_per_iter" do
+    it "detects ForStmt with frame Let init but no restoreLoopMark defer" do
       iz = MIR::InlineZig.new("try CheatLib.init({alloc})", "intrinsic")
       iz.allocs = { alloc: :frame }
-      loop_body = [
-        MIR::Let.new("tmp", iz, false, nil, nil),
-      ]
+      loop_body = [MIR::Let.new("tmp", iz, false, nil, nil)]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::ForStmt.new("i", MIR::Ident.new("items"), loop_body, nil, nil, nil),
       ]
-      errors = checker.check_fn!(fn_def("let_loop_no_mark", body))
+      errors = checker.check_fn!(fn_def("for_no_restore", body))
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
     end
 
-    it "detects loop with frame alloc inside an if-branch" do
+    it "detects loop with frame alloc inside an if-branch (no restore)" do
       if_body = [MIR::AllocMark.new("tmp", :string, :frame)]
       loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), if_body, [])]
       body = [
@@ -259,7 +267,7 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
     end
 
-    it "detects loop with frame alloc inside an else-branch" do
+    it "detects loop with frame alloc inside an else-branch (no restore)" do
       else_body = [MIR::AllocMark.new("tmp", :string, :frame)]
       loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), [], else_body)]
       body = [
@@ -270,7 +278,7 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
     end
 
-    it "detects loop with frame alloc inside a ScopeBlock" do
+    it "detects loop with frame alloc inside a ScopeBlock (no restore)" do
       scope_body = [MIR::AllocMark.new("tmp", :string, :frame)]
       loop_body = [MIR::ScopeBlock.new(scope_body)]
       body = [
@@ -290,32 +298,26 @@ RSpec.describe MIRChecker do
         MIR::WhileStmt.new(MIR::Lit.new("true"), outer_loop_body, nil, nil, nil),
       ]
       errors = checker.check_fn!(fn_def("nested_loop_alloc", body))
-      # Inner loop has no mark_per_iter -- flags it; outer loop body has no direct alloc -- clean
-      inner_errors = errors.select { |e| e.include?("FRAME_NO_REWIND") }
-      expect(inner_errors.length).to eq(1)
+      # Inner loop has no restore -- flags it; outer loop body has no frame allocs -- clean
+      expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }.length).to eq(1)
     end
 
-    it "passes for loop with frame alloc inside an if-branch when mark_per_iter set" do
+    it "passes for loop with frame alloc inside if-branch when restoreLoopMark defer present" do
       if_body = [MIR::AllocMark.new("tmp", :string, :frame)]
-      loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), if_body, [])]
+      loop_body = [loop_restore_defer, MIR::IfStmt.new(MIR::Lit.new("cond"), if_body, [])]
       body = [
         MIR::FrameSave.new("rt"),
         MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
       ]
-      errors = checker.check_fn!(fn_def("if_branch_with_mark", body))
+      errors = checker.check_fn!(fn_def("if_branch_with_restore", body))
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end
 
     it "passes for tight loop (no frame rewind needed)" do
-      loop_body = [
-        MIR::AllocMark.new("tmp", :string, :frame),
-      ]
+      loop_body = [MIR::AllocMark.new("tmp", :string, :frame)]
       ws = MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil)
       ws.tight = true
-      body = [
-        MIR::FrameSave.new("rt"),
-        ws,
-      ]
+      body = [MIR::FrameSave.new("rt"), ws]
       errors = checker.check_fn!(fn_def("tight_loop", body))
       expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
     end

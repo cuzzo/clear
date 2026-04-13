@@ -260,20 +260,14 @@ class MIRChecker
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
       case stmt
-      when MIR::WhileStmt
-        unless stmt.mark_per_iter || stmt.tight
+      when MIR::WhileStmt, MIR::ForStmt
+        # Structural check: verify the actual DeferStmt(restoreLoopMark) is present,
+        # not a flag. This catches lowerer bugs where mark_per_iter is set but the
+        # defer was not emitted, and unifies the check with the actual MIR structure.
+        unless stmt.tight || body_has_loop_restore?(stmt.body)
           if body_has_frame_alloc?(stmt.body)
             @errors << error(:FRAME_NO_REWIND, @fn_name,
-              "loop body frame-allocates but has no mark_per_iter rewind")
-          end
-        end
-        check_loop_rewind!(stmt.body)
-
-      when MIR::ForStmt
-        unless stmt.mark_per_iter || stmt.tight
-          if body_has_frame_alloc?(stmt.body)
-            @errors << error(:FRAME_NO_REWIND, @fn_name,
-              "loop body frame-allocates but has no mark_per_iter rewind")
+              "loop body frame-allocates but has no restoreLoopMark defer")
           end
         end
         check_loop_rewind!(stmt.body)
@@ -289,6 +283,34 @@ class MIRChecker
       when MIR::IfChain
         stmt.branches&.each { |b| check_loop_rewind!(b[:body]) }
         check_loop_rewind!(stmt.default_body)
+      end
+    end
+  end
+
+  # Does this statement list contain a per-iteration loop restore?
+  # Looks for DeferStmt(MethodCall("restoreLoopMark")) -- the actual structure
+  # emitted by the lowerer when mark_per_iter is true.
+  # Uses the same traversal rules as body_has_frame_alloc? and check_loop_rewind!:
+  # recurse into branches/blocks, stop at nested loops (they have their own restore).
+  def body_has_loop_restore?(stmts)
+    return false unless stmts.is_a?(Array)
+    stmts.any? do |s|
+      case s
+      when MIR::DeferStmt
+        s.body.is_a?(MIR::MethodCall) && s.body.method == "restoreLoopMark"
+      when MIR::IfStmt
+        body_has_loop_restore?(s.then_body) || body_has_loop_restore?(s.else_body)
+      when MIR::ScopeBlock, MIR::BlockExpr
+        body_has_loop_restore?(s.body)
+      when MIR::SwitchStmt
+        (s.arms&.any? { |a| body_has_loop_restore?(a[:body]) }) ||
+          body_has_loop_restore?(s.default_body)
+      when MIR::IfChain
+        (s.branches&.any? { |b| body_has_loop_restore?(b[:body]) }) ||
+          body_has_loop_restore?(s.default_body)
+      # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops checked independently
+      else
+        false
       end
     end
   end
