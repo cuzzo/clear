@@ -248,6 +248,64 @@ RSpec.describe MIRChecker do
       expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
     end
 
+    it "detects loop with frame alloc inside an if-branch" do
+      if_body = [MIR::AllocMark.new("tmp", :string, :frame)]
+      loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), if_body, [])]
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("if_branch_alloc", body))
+      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
+    end
+
+    it "detects loop with frame alloc inside an else-branch" do
+      else_body = [MIR::AllocMark.new("tmp", :string, :frame)]
+      loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), [], else_body)]
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("else_branch_alloc", body))
+      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
+    end
+
+    it "detects loop with frame alloc inside a ScopeBlock" do
+      scope_body = [MIR::AllocMark.new("tmp", :string, :frame)]
+      loop_body = [MIR::ScopeBlock.new(scope_body)]
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("scope_block_alloc", body))
+      expect(errors.any? { |e| e.include?("FRAME_NO_REWIND") }).to be true
+    end
+
+    it "does NOT flag outer loop for frame alloc only inside a nested inner loop" do
+      inner_loop_body = [MIR::AllocMark.new("tmp", :string, :frame)]
+      inner_loop = MIR::WhileStmt.new(MIR::Lit.new("true"), inner_loop_body, nil, nil, nil)
+      outer_loop_body = [inner_loop]
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::WhileStmt.new(MIR::Lit.new("true"), outer_loop_body, nil, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("nested_loop_alloc", body))
+      # Inner loop has no mark_per_iter -- flags it; outer loop body has no direct alloc -- clean
+      inner_errors = errors.select { |e| e.include?("FRAME_NO_REWIND") }
+      expect(inner_errors.length).to eq(1)
+    end
+
+    it "passes for loop with frame alloc inside an if-branch when mark_per_iter set" do
+      if_body = [MIR::AllocMark.new("tmp", :string, :frame)]
+      loop_body = [MIR::IfStmt.new(MIR::Lit.new("cond"), if_body, [])]
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, true),
+      ]
+      errors = checker.check_fn!(fn_def("if_branch_with_mark", body))
+      expect(errors.select { |e| e.include?("FRAME_NO_REWIND") }).to be_empty
+    end
+
     it "passes for tight loop (no frame rewind needed)" do
       loop_body = [
         MIR::AllocMark.new("tmp", :string, :frame),

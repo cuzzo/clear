@@ -174,9 +174,13 @@ class MIRChecker
   # allocator used to free it (:alloc in cleanup_entry), the generated Zig will
   # call heapAlloc().free() on frame memory or vice versa -> runtime crash.
   #
-  # Only checks bindings that have BOTH an AllocMark and a Cleanup -- bindings
-  # with only a Cleanup are TAKES parameters (caller owns them, no local alloc),
-  # and bindings with only an AllocMark were moved/escaped (no local free needed).
+  # Only checks bindings that have BOTH an AllocMark and a Cleanup. Bindings with
+  # only an AllocMark were moved/escaped (no local free needed). Bindings with only
+  # a Cleanup indicate a missing AllocMark -- every locally-allocated binding
+  # (including TAKES params via insert_takes_drops! and heap carry vars via
+  # insert_drop!) must have a corresponding AllocMark. A Cleanup with no AllocMark
+  # is a compiler bug: the allocation event is invisible to the checker, so
+  # ALLOC_CLEANUP_MISMATCH cannot fire even if the allocators diverge.
   def verify_alloc_cleanup_match!(allocs, cleanups)
     allocs.each do |name, alloc_marks|
       next unless cleanups.key?(name)
@@ -188,6 +192,16 @@ class MIRChecker
         @errors << error(:ALLOC_CLEANUP_MISMATCH, name,
           "allocated with :#{alloc_sym} but cleanup uses :#{cleanup_sym}")
       end
+    end
+
+    # CLEANUP_WITHOUT_ALLOC: every binding with a Cleanup must also have an
+    # AllocMark. A missing AllocMark means the allocation event was not emitted
+    # (compiler bug in MIRPass/insert_drop!/insert_takes_drops!) -- the checker
+    # cannot verify allocator consistency for this binding.
+    cleanups.each do |name, _cleanup_nodes|
+      next if allocs.key?(name)
+      @errors << error(:CLEANUP_WITHOUT_ALLOC, name,
+        "MIR::Cleanup present but no MIR::AllocMark (allocation event missing from MIR)")
     end
   end
 
@@ -279,7 +293,11 @@ class MIRChecker
     end
   end
 
-  # Does this statement list contain frame allocations (directly, not in nested scopes)?
+  # Does this statement list contain frame allocations, recursing into all
+  # branch/block nodes (IfStmt, SwitchStmt, IfChain, ScopeBlock, BlockExpr)
+  # but stopping at nested loop and fiber/lambda boundaries.
+  # Mirrors the same traversal used by check_loop_rewind! so both methods
+  # see the same nodes -- no special-cased paths.
   def body_has_frame_alloc?(stmts)
     return false unless stmts.is_a?(Array)
     stmts.any? do |s|
@@ -290,6 +308,18 @@ class MIRChecker
         expr_has_frame_alloc?(s.expr)
       when MIR::Let
         expr_has_frame_alloc?(s.init)
+      when MIR::IfStmt
+        body_has_frame_alloc?(s.then_body) || body_has_frame_alloc?(s.else_body)
+      when MIR::ScopeBlock, MIR::BlockExpr
+        body_has_frame_alloc?(s.body)
+      when MIR::SwitchStmt
+        (s.arms&.any? { |a| body_has_frame_alloc?(a[:body]) }) ||
+          body_has_frame_alloc?(s.default_body)
+      when MIR::IfChain
+        (s.branches&.any? { |b| body_has_frame_alloc?(b[:body]) }) ||
+          body_has_frame_alloc?(s.default_body)
+      # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops are checked independently
+      # MIR::BgBlock, MIR::LambdaExpr: stop -- separate fiber/function frame scopes
       else
         false
       end
