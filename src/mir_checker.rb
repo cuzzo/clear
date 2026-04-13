@@ -21,7 +21,13 @@ class MIRChecker
     @errors = []
   end
 
-  def check_fn!(fn_def)
+  # strict: true enables the UNHOISTED_ALLOC check.
+  # Disabled by default until Phase 1-3 hoisting is complete -- enabling it
+  # on the current codebase would flag every string return, @indirect field,
+  # and list literal that hasn't been hoisted yet.  Each phase task fixes a
+  # category and re-enables the check for that category.  Once all violations
+  # are resolved this parameter will be removed and the check always runs.
+  def check_fn!(fn_def, strict: false)
     @fn_name = fn_def.name
     @errors = []
 
@@ -55,7 +61,7 @@ class MIRChecker
       when MIR::LambdaExpr
         if node.fn_def
           sub = MIRChecker.new
-          @errors.concat(sub.check_fn!(node.fn_def))
+          @errors.concat(sub.check_fn!(node.fn_def, strict: strict))
         end
       end
     end
@@ -65,6 +71,7 @@ class MIRChecker
     verify_alloc_cleanup_match!(allocs, cleanups)
     verify_zig_contracts!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
+    verify_unhoisted_allocs!(fn_def.body) if strict
 
     @errors
   end
@@ -371,5 +378,172 @@ class MIRChecker
 
   def error(kind, name, msg)
     "[#{kind}] #{@fn_name}::#{name} -- #{msg}"
+  end
+
+  # ================================================================
+  # UNHOISTED_ALLOC -- every allocating expression must be a Let init
+  # ================================================================
+  #
+  # INV-H: every MIR node that allocates memory must appear as the direct
+  # init of a MIR::Let.  If an allocating expression appears in argument,
+  # return, field-value, or any other sub-expression position it has no
+  # AllocMark, so the checker cannot verify its lifetime, allocator
+  # consistency, or cleanup.
+  #
+  # Allocating types:
+  #   DupeSlice, HeapCreate, ConcatStr, AllocSlice, MakeList, CapWrap,
+  #   DeepCopy (strategy != :passthrough), ContainerInit (alloc != nil)
+  #
+  # Called only when strict: true because the codebase still has open
+  # violations that are fixed progressively in Phase 1-3 tasks.
+
+  def verify_unhoisted_allocs!(body)
+    check_stmts_for_unhoisted(body)
+  end
+
+  def check_stmts_for_unhoisted(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each { |s| check_stmt_for_unhoisted(s) }
+  end
+
+  def check_stmt_for_unhoisted(node)
+    return unless node
+    case node
+    when MIR::Let
+      # init is the one allowed position for an allocating expression.
+      # Recurse into sub-expressions of init (nested allocs still flagged).
+      check_expr_for_unhoisted(node.init, allow_top: true)
+    when MIR::Set
+      check_expr_for_unhoisted(node.target, allow_top: false)
+      check_expr_for_unhoisted(node.value, allow_top: false)
+    when MIR::ReassignWithCleanup
+      check_expr_for_unhoisted(node.value, allow_top: false)
+    when MIR::ExprStmt
+      check_expr_for_unhoisted(node.expr, allow_top: false)
+    when MIR::ReturnStmt
+      check_expr_for_unhoisted(node.value, allow_top: false)
+    when MIR::BreakStmt
+      check_expr_for_unhoisted(node.value, allow_top: false)
+    when MIR::IfStmt
+      check_expr_for_unhoisted(node.cond, allow_top: false)
+      check_stmts_for_unhoisted(node.then_body)
+      check_stmts_for_unhoisted(node.else_body)
+    when MIR::WhileStmt
+      check_expr_for_unhoisted(node.cond, allow_top: false)
+      check_stmts_for_unhoisted(node.body)
+    when MIR::ForStmt
+      check_expr_for_unhoisted(node.iter, allow_top: false)
+      check_stmts_for_unhoisted(node.body)
+    when MIR::ScopeBlock, MIR::BlockExpr
+      check_stmts_for_unhoisted(node.body)
+    when MIR::SwitchStmt
+      check_expr_for_unhoisted(node.subject, allow_top: false)
+      node.arms&.each { |a| check_stmts_for_unhoisted(a[:body]) }
+      check_stmts_for_unhoisted(node.default_body)
+    when MIR::IfChain
+      node.branches&.each do |b|
+        check_expr_for_unhoisted(b[:cond], allow_top: false)
+        check_stmts_for_unhoisted(b[:body])
+      end
+      check_stmts_for_unhoisted(node.default_body)
+    when MIR::DeferStmt    then check_stmt_for_unhoisted(node.body)
+    when MIR::ErrDeferStmt then check_stmt_for_unhoisted(node.body)
+    when MIR::FnDef
+      check_stmts_for_unhoisted(node.body)
+    end
+  end
+
+  # Check expr for allocating nodes in non-Let-init position.
+  # allow_top: true  => expr itself may be an allocating node (it IS the Let.init)
+  # allow_top: false => flag expr if it is an allocating node
+  # In both cases, recurse into sub-expressions with allow_top: false.
+  def check_expr_for_unhoisted(expr, allow_top:)
+    return unless expr
+    if !allow_top && allocating_expr?(expr)
+      kind = expr.class.name.split("::").last
+      @errors << error(:UNHOISTED_ALLOC, @fn_name,
+        "#{kind} in non-Let-init position (must be hoisted to a named variable)")
+      return  # one error per site -- don't recurse into nested allocs
+    end
+    each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub, allow_top: false) }
+  end
+
+  def allocating_expr?(expr)
+    case expr
+    when MIR::DupeSlice, MIR::HeapCreate, MIR::ConcatStr,
+         MIR::AllocSlice, MIR::MakeList, MIR::CapWrap
+      true
+    when MIR::ContainerInit
+      !expr.alloc.nil?
+    when MIR::DeepCopy
+      expr.strategy != :passthrough
+    else
+      false
+    end
+  end
+
+  # Yield each immediate sub-expression of expr.
+  # Stops at opaque boundaries (RawZig, InlineZig, BgBlock).
+  # BlockExpr bodies are walked separately by check_stmts_for_unhoisted.
+  def each_sub_expr(expr)
+    return unless expr
+    case expr
+    when MIR::HeapCreate    then yield expr.init    if expr.init
+    when MIR::DupeSlice     then yield expr.source  if expr.source
+    when MIR::AllocSlice    then yield expr.len     if expr.len
+    when MIR::FreeSlice     then yield expr.slice   if expr.slice
+    when MIR::DestroyPtr    then yield expr.ptr     if expr.ptr
+    when MIR::DeepCopy      then yield expr.source  if expr.source
+    when MIR::CapWrap       then yield expr.inner   if expr.inner
+    when MIR::ContainerInit then yield expr.capacity if expr.capacity
+    when MIR::ConcatStr     then expr.parts&.each { |p| yield p }
+    when MIR::MakeList      then expr.items&.each  { |i| yield i }
+    when MIR::RcRetain      then yield expr.source  if expr.source
+    when MIR::Call
+      expr.args&.each { |a| yield a }
+    when MIR::TailCall
+      expr.args&.each { |a| yield a }
+    when MIR::MethodCall
+      yield expr.receiver if expr.receiver
+      expr.args&.each { |a| yield a }
+    when MIR::FieldGet      then yield expr.object if expr.object
+    when MIR::IndexGet
+      yield expr.object if expr.object
+      yield expr.index  if expr.index
+    when MIR::BinOp
+      yield expr.left  if expr.left
+      yield expr.right if expr.right
+    when MIR::UnaryOp        then yield expr.operand    if expr.operand
+    when MIR::Cast           then yield expr.expr       if expr.expr
+    when MIR::TryExpr        then yield expr.expr       if expr.expr
+    when MIR::TryCatch
+      yield expr.expr if expr.expr
+      yield expr.catch_body if expr.catch_body.is_a?(MIR::Emittable)
+    when MIR::Orelse
+      yield expr.expr     if expr.expr
+      yield expr.fallback if expr.fallback
+    when MIR::Conditional
+      yield expr.cond     if expr.cond
+      yield expr.then_val if expr.then_val
+      yield expr.else_val if expr.else_val
+    when MIR::AddressOf      then yield expr.expr if expr.expr
+    when MIR::Deref          then yield expr.expr if expr.expr
+    when MIR::OptionalUnwrap then yield expr.expr if expr.expr
+    when MIR::StructInit
+      expr.fields&.each { |f| yield f[:value] if f[:value] }
+    when MIR::ArrayInit
+      expr.items&.each { |i| yield i }
+    when MIR::SliceExpr
+      yield expr.target   if expr.target
+      yield expr.start    if expr.start
+      yield expr.end_expr if expr.end_expr
+    when MIR::ItemsAccess    then yield expr.expr if expr.expr
+    when MIR::RangeLit
+      yield expr.start   if expr.start
+      yield expr.end_val if expr.end_val
+    # Opaque: RawZig, InlineZig, BgBlock, CatchWrapper
+    # Leaf: Lit, Ident, FnRef, RcDowngrade, WeakUpgrade, HasField
+    # BlockExpr: body is statements, walked by check_stmts_for_unhoisted
+    end
   end
 end

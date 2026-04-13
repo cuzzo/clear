@@ -436,6 +436,177 @@ RSpec.describe MIRChecker do
   end
 
   # ===========================================================================
+  # UNHOISTED_ALLOC -- allocating expressions must appear only as Let.init
+  # ===========================================================================
+  #
+  # Enabled via strict: true.  Disabled by default because the codebase still
+  # has open violations being fixed in Phase 1-3 tasks.
+  # ===========================================================================
+
+  describe "UNHOISTED_ALLOC" do
+    # --- DupeSlice ---
+
+    it "passes: DupeSlice as Let.init" do
+      body = [
+        MIR::Let.new("s", MIR::DupeSlice.new(MIR::Ident.new("src"), :heap), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("ok_dupe", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "flags: DupeSlice in ReturnStmt" do
+      body = [
+        MIR::ReturnStmt.new(MIR::DupeSlice.new(MIR::Ident.new("src"), :heap)),
+      ]
+      errors = checker.check_fn!(fn_def("ret_dupe", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("DupeSlice") }).to be true
+    end
+
+    it "flags: DupeSlice as Call argument" do
+      inner = MIR::DupeSlice.new(MIR::Ident.new("s"), :heap)
+      body = [
+        MIR::ExprStmt.new(MIR::Call.new("push", [inner], true), false),
+      ]
+      errors = checker.check_fn!(fn_def("arg_dupe", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("DupeSlice") }).to be true
+    end
+
+    # --- HeapCreate ---
+
+    it "passes: HeapCreate as Let.init" do
+      init = MIR::StructInit.new("Node", [])
+      body = [
+        MIR::Let.new("n", MIR::HeapCreate.new("Node", init, :heap, "blk"), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("ok_heap_create", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "flags: HeapCreate inside StructInit field (nested alloc)" do
+      inner_hc = MIR::HeapCreate.new("Child", MIR::StructInit.new("Child", []), :heap, "blk_f")
+      outer_init = MIR::StructInit.new("Parent", [{ name: "child", value: inner_hc }])
+      body = [
+        MIR::Let.new("p", MIR::HeapCreate.new("Parent", outer_init, :heap, "blk"), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("nested_hc", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("HeapCreate") }).to be true
+    end
+
+    it "flags: HeapCreate in ReturnStmt" do
+      body = [
+        MIR::ReturnStmt.new(MIR::HeapCreate.new("T", MIR::StructInit.new("T", []), :heap, "blk")),
+      ]
+      errors = checker.check_fn!(fn_def("ret_hc", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("HeapCreate") }).to be true
+    end
+
+    # --- ConcatStr ---
+
+    it "passes: ConcatStr as Let.init" do
+      body = [
+        MIR::Let.new("s", MIR::ConcatStr.new([MIR::Ident.new("a"), MIR::Ident.new("b")], :heap, "rt"), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("ok_concat", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "flags: ConcatStr in ReturnStmt" do
+      body = [
+        MIR::ReturnStmt.new(MIR::ConcatStr.new([MIR::Ident.new("a")], :heap, "rt")),
+      ]
+      errors = checker.check_fn!(fn_def("ret_concat", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("ConcatStr") }).to be true
+    end
+
+    # --- MakeList ---
+
+    it "passes: MakeList as Let.init" do
+      body = [
+        MIR::Let.new("xs", MIR::MakeList.new("i64", [], :heap), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("ok_make", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "flags: MakeList in ExprStmt (discarded)" do
+      body = [
+        MIR::ExprStmt.new(MIR::MakeList.new("i64", [], :heap), true),
+      ]
+      errors = checker.check_fn!(fn_def("discard_make", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("MakeList") }).to be true
+    end
+
+    # --- ContainerInit ---
+
+    it "passes: ContainerInit with nil alloc (stack value type)" do
+      body = [
+        MIR::Let.new("m", MIR::ContainerInit.new("MyMap", :map_empty, nil, nil), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("ok_ci_nil", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "passes: ContainerInit with non-nil alloc as Let.init" do
+      body = [
+        MIR::Let.new("pool", MIR::ContainerInit.new("Pool", :pool, :heap, 10), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("ok_ci_heap", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "flags: ContainerInit with non-nil alloc in Call arg" do
+      ci = MIR::ContainerInit.new("Pool", :pool, :heap, 10)
+      body = [
+        MIR::ExprStmt.new(MIR::Call.new("setup", [ci], false), false),
+      ]
+      errors = checker.check_fn!(fn_def("ci_arg", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("ContainerInit") }).to be true
+    end
+
+    # --- DeepCopy ---
+
+    it "passes: DeepCopy(passthrough) anywhere (no-op, not an allocation)" do
+      body = [
+        MIR::ReturnStmt.new(MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :passthrough, nil)),
+      ]
+      errors = checker.check_fn!(fn_def("passthrough", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "flags: DeepCopy(string) in ReturnStmt" do
+      body = [
+        MIR::ReturnStmt.new(MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :string, :heap)),
+      ]
+      errors = checker.check_fn!(fn_def("deep_copy_ret", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("DeepCopy") }).to be true
+    end
+
+    # --- Nesting / control flow ---
+
+    it "flags: DupeSlice inside if-branch" do
+      then_body = [MIR::ReturnStmt.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap))]
+      body = [MIR::IfStmt.new(MIR::Lit.new("cond"), then_body, [])]
+      errors = checker.check_fn!(fn_def("if_dupe", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("DupeSlice") }).to be true
+    end
+
+    it "flags: DupeSlice inside while loop body" do
+      loop_body = [MIR::ReturnStmt.new(MIR::DupeSlice.new(MIR::Ident.new("s"), :heap))]
+      body = [MIR::WhileStmt.new(MIR::Lit.new("true"), loop_body, nil, nil, nil)]
+      errors = checker.check_fn!(fn_def("while_dupe", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("DupeSlice") }).to be true
+    end
+
+    it "does not flag existing non-strict checks for non-allocating expressions" do
+      # Ensure strict mode doesn't accidentally break the normal HPT_LEAK check
+      call = MIR::Call.new("makeList", [MIR::Ident.new("rt")], false, true)
+      body = [MIR::ExprStmt.new(call, true)]
+      errors = checker.check_fn!(fn_def("hpt_still_works", body), strict: true)
+      expect(errors.any? { |e| e.include?("HPT_LEAK") }).to be true
+    end
+  end
+
+  # ===========================================================================
   # check_program! -- verifies all functions
   # ===========================================================================
 
