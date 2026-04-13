@@ -4729,20 +4729,22 @@ pub const CheatLib = struct {
 /// is pinned to that scheduler (config.pinned = true).  This gives each
 /// scheduler its own set of fibers — the shared-nothing model.
 pub fn spawnPinned(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+    var pinned_config = config;
+    pinned_config.pinned = true; // fiber must not be stolen — it owns its scheduler's io_uring ring
     const n = fp.global_registry.len.load(.acquire);
     if (n == 0) {
         if (fp.scheduler_running) {
-            try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+            try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, pinned_config);
             return;
         }
         return error.NoSchedulerAvailable;
     }
     const idx = fp.global_registry.next.fetchAdd(1, .monotonic) % n;
     const sched = fp.global_registry.slots[idx].load(.acquire) orelse {
-        try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, config);
+        try fp.active_scheduler.submitSpawn(trampoline_addr, user_fn, args, pinned_config);
         return;
     };
-    try sched.submitSpawn(trampoline_addr, user_fn, args, config);
+    try sched.submitSpawn(trampoline_addr, user_fn, args, pinned_config);
 }
 
 /// Module-level spawnBest: distribute a fiber to the least-loaded scheduler.
