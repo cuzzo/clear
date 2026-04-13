@@ -154,6 +154,61 @@ Two sub-passes that lower all allocation/deallocation/move decisions into MIR no
 - Never allocate on the frame and then unconditionally promote to the heap. If a value is ALWAYS promoted, allocate directly on the heap at declaration time. Escape analysis in Pass 1 must propagate provenance back to declarations so finalize_decl_storage! makes the correct choice upfront.
 - See `mir-bugs.md` for known MIR violations. See `alloc-bugs.md` for frame-then-always-promote gaps. See `memory-safety.md` for the full plan.
 
+### MIR Pipeline: What Goes Where (Zero UAF / Double-Free)
+
+The MIR pipeline has three strict roles. Violating the role boundaries is what causes UAF, double-free, and leaks.
+
+**Role 1 -- MIRLowering (`src/mir_lowering.rb`): Makes ALL decisions.**
+
+Everything that determines memory correctness is decided here and encoded in MIR node types and pre-computed fields. The checker and emitter never re-derive these decisions.
+
+What MUST be done in MIRLowering before the checker can guarantee safety:
+
+- **Every heap allocation** must be paired with a `MIR::AllocMark` and either a `MIR::Cleanup` or `MIR::ErrCleanup`. No naked allocations. Use `hoist_alloc` for sub-expression allocations.
+- **Cleanup node type encodes the lifetime contract** -- this is the structural rule that makes the checker simple:
+  - `MIR::Cleanup` = freed on BOTH success and error paths (regular `defer`). Use when the current scope owns the binding for its full lifetime.
+  - `MIR::ErrCleanup` = freed ONLY on error (`errdefer`). Use when ownership transfers out on success: TAKES args, struct/union field temps, return value temps.
+  - NEVER use flags or tags to distinguish these. The node type IS the policy.
+- **Return value hoisted temps** must use `MIR::ErrCleanup` (caller owns on success). Borrow-position arg temps (not TAKES) must use regular `MIR::Cleanup` (freed locally after the call).
+- **Moved values** (`GIVE`, TAKES consumption, return) must have `MIR::MoveMark` before the move so the guarded `defer` in `Cleanup` does not double-free. Never emit MoveMark after the move.
+- **Frame values that escape** must be promoted to heap AT DECLARATION TIME (before any use). Never allocate on the frame and promote later; that is a concurrent-use window.
+- **Loop bodies that frame-allocate** must emit `FrameSave`/`FrameRestore` (restoreLoopMark) per iteration. No naked frame allocs in loops without rewind.
+
+**Role 2 -- MIRChecker (`src/mir_checker.rb`): Verifies the decisions, nothing else.**
+
+The checker enforces exactly 7 invariants and MUST NOT grow beyond them. Each new check added to the checker is a signal that the lowering made a decision incorrectly and is asking the checker to compensate. That is wrong. Fix the lowering.
+
+The 7 invariants:
+1. Every `AllocMark` has a matching `Cleanup` or `ErrCleanup` (no leak).
+2. Every `Cleanup`/`ErrCleanup` has a matching `AllocMark` (no orphan cleanup).
+3. AllocMark allocator matches Cleanup/ErrCleanup allocator (no allocator mismatch).
+4. Heap-returning call in statement position is bound to a variable (HPT_LEAK).
+5. InlineZig/RawZig with CheatLib ownership effects declares `stdlib_def` (not opaque).
+6. InlineZig allocator symbols match container's AllocMark (no frame-in-heap).
+7. Loop bodies with frame allocs have per-iteration restoreLoopMark defer.
+
+NEVER add:
+- Flag inspection (`node.some_flag`) -- use node type distinction instead.
+- "Consuming position" analysis -- the lowering must emit `ErrCleanup` structurally.
+- Heuristic pattern matching on names or types -- the lowering must tag via MIR nodes.
+- Cross-referencing return values with cleanup nodes -- the lowering handles this.
+
+**Role 3 -- MIREmitter (`src/mir_emitter.rb`): Pure template engine, zero decisions.**
+
+The emitter maps each MIR node to a fixed Zig text fragment. It makes NO ownership decisions, inspects NO types, and chooses NO allocators. Every choice was made by the lowering and is encoded in the node type or its pre-computed fields.
+
+- `MIR::Cleanup(name, entry)` -> `defer [if (!name_moved)] cleanup(name)` (always)
+- `MIR::ErrCleanup(name, entry)` -> `errdefer cleanup(name)` (always, no guard)
+- `MIR::MoveMark(name)` -> `name_moved = true;` (always)
+- `MIR::AllocMark` -> (no code; checker marker only)
+
+NEVER add logic to the emitter that:
+- Decides whether to emit `defer` vs `errdefer` based on context.
+- Inspects the caller's type or position to determine cleanup behavior.
+- Makes allocation choices (which allocator, whether to allocate).
+
+The moment the emitter makes a decision not already secured by the MIRChecker, the system is unsafe -- the emitter runs AFTER the checker, so its decisions are unverified.
+
 ### Memory Safety Invariants
 
 These invariants MUST remain true. Verify them before every commit.
