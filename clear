@@ -369,16 +369,9 @@ when 'build'
               exit 1
             end
           else
-            # No user annotation. Downsize if possible, error if too large.
-            if tier_order.fetch(optimal_tier, 0) > tier_order[:standard]
-              $stderr.puts "\e[31m[stack error]\e[0m BG##{idx}: deepest call path is #{r[:path_cost]} bytes " \
-                           "(needs #{optimal_tier}). Standard (#{StackVerifier::TIER_BUDGET[:standard]} bytes) " \
-                           "is too small. Add @large or @xl to the BG block."
-              exit 1
-            end
-            # Downsize if optimal is smaller than what heuristic assigned
+            # No user annotation. Auto-size: upgrade or downsize as needed.
             current_tier = computed || :standard
-            if tier_order.fetch(optimal_tier, 0) < tier_order.fetch(current_tier, 0)
+            if tier_order.fetch(optimal_tier, 0) != tier_order.fetch(current_tier, 0)
               exact[idx] = optimal_tier
               needs_rebuild = true
             end
@@ -388,7 +381,7 @@ when 'build'
         # Phase 3: Rebuild with exact tiers
         if needs_rebuild
           $stderr.puts ""
-          exact.each { |idx, tier| $stderr.puts "  [exact] BG##{idx}: #{tier} (downsized)" }
+          exact.each { |idx, tier| $stderr.puts "  [exact] BG##{idx}: #{tier} (auto-sized)" }
           $stderr.puts "  Rebuilding with exact stack sizes..."
           do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags,
                    default_stack: default_stack, force: true, exact_tiers: exact)

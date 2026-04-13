@@ -135,18 +135,6 @@ def run_bench(dir)
     if use_zt
       puts "Compiling CLEAR (runtime Zig, .zt)..."
       FileUtils.cp("#{dir}/bench.zt", "zig/bench.zig")
-    elsif use_zig
-      puts "Compiling CLEAR (native Zig, scheduler required)..."
-      FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
-    elsif File.exist?("#{dir}/bench.cht")
-      puts "Transpiling CLEAR..."
-      `ruby src/transpiler.rb #{dir}/bench.cht > zig/bench.zig`
-      puts "Compiling CLEAR (Zig output)..."
-    else
-      puts "No CLEAR source found, skipping CLEAR."
-    end
-
-    if File.exist?("zig/bench.zig")
       Dir.chdir("zig") do
         `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
       end
@@ -157,6 +145,29 @@ def run_bench(dir)
         puts "WARNING: bench_clear was not generated."
       end
       FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
+    elsif use_zig
+      puts "Compiling CLEAR (native Zig, scheduler required)..."
+      FileUtils.cp("#{dir}/bench.zig", "zig/bench.zig")
+      Dir.chdir("zig") do
+        `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc`
+      end
+      if File.exist?("zig/bench_clear")
+        FileUtils.mv("zig/bench_clear", "#{dir}/bench_clear")
+        has_clear = true
+      else
+        puts "WARNING: bench_clear was not generated."
+      end
+      FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
+    elsif File.exist?("#{dir}/bench.cht")
+      puts "Compiling CLEAR..."
+      output = `./clear build --optimized #{dir}/bench.cht -o #{dir}/bench_clear 2>&1`
+      if File.exist?("#{dir}/bench_clear")
+        has_clear = true
+      else
+        puts "WARNING: CLEAR build failed: #{output.lines.last&.strip}"
+      end
+    else
+      puts "No CLEAR source found, skipping CLEAR."
     end
   end
 
@@ -342,36 +353,13 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
   # CLEAR server
   has_clear = false
   if File.exist?("#{dir}/server.cht")
-    puts "Transpiling CLEAR server..."
-    `ruby src/transpiler.rb #{dir}/server.cht 2>/dev/null > zig/bench.zig`
-
-    # Detect FFI modules: any .zig files in the benchmark dir
-    ffi_modules = Dir.glob("#{dir}/*.zig").map { |f| File.basename(f, ".zig") }
-
-    Dir.chdir("zig") do
-      ffi_modules.each { |m| FileUtils.cp("../#{dir}/#{m}.zig", "#{m}.zig") }
-
-      if ffi_modules.any?
-        # Build with --dep/-M flags for each FFI module.
-        # Flag order matters: --dep before -Mroot, -lc/asm after root, -Mffi last.
-        dep_flags = ffi_modules.map { |m| "--dep #{m}" }.join(" ")
-        mod_flags = ffi_modules.map { |m| "-M#{m}=#{m}.zig" }.join(" ")
-        cmd = "#{ZIG} build-exe #{dep_flags} -Mroot=bench.zig -lc switch.S onRoot.S #{mod_flags} -O ReleaseFast --name bench_clear"
-        `#{cmd} 2>&1`
-      else
-        `#{ZIG} build-exe bench.zig switch.S onRoot.S --name bench_clear -O ReleaseFast -lc 2>&1`
-      end
-
-      ffi_modules.each { |m| FileUtils.rm("#{m}.zig") if File.exist?("#{m}.zig") }
-    end
-
-    if File.exist?("zig/bench_clear")
-      FileUtils.mv("zig/bench_clear", "#{dir}/server_clear")
+    puts "Compiling CLEAR server..."
+    output = `./clear build --optimized #{dir}/server.cht -o #{dir}/server_clear 2>&1`
+    if File.exist?("#{dir}/server_clear")
       has_clear = true
     else
-      puts "WARNING: CLEAR server failed to compile."
+      puts "WARNING: CLEAR server failed to compile: #{output.lines.last&.strip}"
     end
-    FileUtils.rm("zig/bench.zig") if File.exist?("zig/bench.zig")
   end
 
   threads = ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip

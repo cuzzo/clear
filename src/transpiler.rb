@@ -31,20 +31,49 @@ class ZigTranspiler
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
   end
 
+  private
+
+  def collect_bg_blocks(node, result)
+    case node
+    when Array
+      node.each { |n| collect_bg_blocks(n, result) }
+    when AST::BgBlock
+      result << node
+      collect_bg_blocks(node.body, result)
+    else
+      node.each_pair { |_, v| collect_bg_blocks(v, result) } if node.respond_to?(:each_pair)
+    end
+  end
+
+  public
+
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false)
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
-                  use_c_allocator: use_c_allocator, test_mode: test_mode, strict_test: strict_test)
+                  use_c_allocator: use_c_allocator, test_mode: test_mode, strict_test: strict_test,
+                  exact_tiers: exact_tiers)
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false)
+  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)
 
     result = CompilerFrontend.compile(cheat_code, importer: @importer, source_dir: @source_dir, strict_test: strict_test)
+
+    # Apply exact stack tier overrides (from post-build binary analysis).
+    if exact_tiers && !exact_tiers.empty?
+      bg_nodes = []
+      result.ast.statements.each do |stmt|
+        next unless stmt.is_a?(AST::FunctionDef)
+        collect_bg_blocks(stmt.body, bg_nodes)
+      end
+      exact_tiers.each do |idx, tier|
+        bg_nodes[idx]&.tap { |n| n.computed_stack_tier = tier }
+      end
+    end
 
     lowering = MIRLowering.new(
       struct_schemas: result.struct_schemas,
@@ -189,6 +218,10 @@ if __FILE__ == $0
     opts.on('--mir', 'Use MIR pipeline (ignored, MIR is now the only path)') do
       # No-op: MIR is always used. Flag kept for backward compatibility.
     end
+    opts.on('--exact-tiers JSON', 'Override computed stack tiers for BG blocks {"index":"tier"}') do |json|
+      require 'json'
+      options[:exact_tiers] = JSON.parse(json).transform_keys(&:to_i).transform_values(&:to_sym)
+    end
   end.parse!
 
   script_file = ARGV.first
@@ -205,7 +238,8 @@ if __FILE__ == $0
                                 test_mode: true, strict_test: !!options[:strict])
     else
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
-                                use_c_allocator: !!options[:use_c_allocator])
+                                use_c_allocator: !!options[:use_c_allocator],
+                                exact_tiers: options[:exact_tiers])
     end
   else
     $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.cht] <script.cht>"
