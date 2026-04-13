@@ -3339,7 +3339,11 @@ class MIRLowering
       case hpt_promote.strategy
       when :hpt_string_dupe
         dupe_alloc = hpt_promote.fields == :heap ? :heap : :frame
-        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, dupe_alloc))
+        MIR::ScopeBlock.new([
+          MIR::AllocMark.new("__ret_dupe", :string_dupe, dupe_alloc),
+          MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, dupe_alloc), false, nil, nil),
+          MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
+        ])
       when :hpt_promote
         zig_t = hpt_promote.zig_type
         stmts = [
@@ -3355,7 +3359,11 @@ class MIRLowering
     elsif needs_string_dupe && value
       ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
       if ret_type&.string?
-        MIR::ReturnStmt.new(MIR::DupeSlice.new(value, :heap))
+        MIR::ScopeBlock.new([
+          MIR::AllocMark.new("__ret_dupe", :string_dupe, :heap),
+          MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, :heap), false, nil, nil),
+          MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
+        ])
       else
         MIR::ReturnStmt.new(value)
       end
