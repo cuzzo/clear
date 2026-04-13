@@ -1304,6 +1304,9 @@ module LoopFrameAnalysis
       next unless receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
       val = node.value
       next unless val
+      # Identifiers are already handled by :dupe_string_literal in lower_indexed_assignment
+      # (for map puts) and are a no-op for struct fields -- skip them to avoid double-dupe.
+      next if val.is_a?(AST::Identifier)
       val_ti = val.type_info rescue nil
       next unless val_ti.is_a?(Type) && val_ti.string?
       # Promote the value expression so the concat/dupe uses heapAlloc.
@@ -1333,6 +1336,12 @@ module LoopFrameAnalysis
       node.storage = :heap
       ti.provenance = :heap
     when AST::FuncCall, AST::MethodCall
+      node.heap_dupe_result = true
+      ti.provenance = :heap
+    when AST::Identifier
+      # Identifier referencing a frame string: mark for heap dupe at the assignment
+      # site rather than promoting the declaration (which would cause double-free
+      # if the declaration's scope is shorter than the carry variable's scope).
       node.heap_dupe_result = true
       ti.provenance = :heap
     else

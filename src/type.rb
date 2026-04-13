@@ -1461,7 +1461,7 @@ class Type
     # Only apply capability wrapping when there's an actual capability set.
     # Sharded maps with sync use StripedMap (sync built into the map type) —
     # skip Locked/RwLocked wrapping but still apply Arc/Rc if @shared/@multiowned.
-    if (@ownership != :affine || @sync) && !(map? && striped? && @ownership == :affine)
+    if (@ownership != :affine || any_sync?) && !(map? && striped? && @ownership == :affine)
       # For shared striped maps, the inner type is the striped map itself (sync built-in).
       # For other types, get the plain inner type and wrap with Locked/RwLocked.
       if map? && striped?

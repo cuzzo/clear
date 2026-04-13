@@ -2297,7 +2297,11 @@ class MIRLowering
     capture_map = @do_capture_map || {}
     return MIR::Ident.new(capture_map[node.name]) if capture_map.key?(node.name)
 
-    MIR::Ident.new(zig_safe_name(node.name))
+    ident = MIR::Ident.new(zig_safe_name(node.name))
+    # Loop-carry string: identifier was marked for heap dupe at the use site
+    # (frame string being assigned to a heap-carry outer variable).
+    return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
+    ident
   end
 
   def lower_unary_op(node)
