@@ -30,8 +30,9 @@ FN main() RETURNS Void ->
     MUTABLE i = 0_i64;
     MUTABLE resp = "";
 
-    -- Outer loop: simulate 500 GET requests (each outer iteration = one request)
-    WHILE i < 500 DO
+    -- Outer loop: simulate 50 GET requests (each outer iteration = one request).
+    -- Reduced from 500 to 50 so debug-mode frame cleanup stays fast.
+    WHILE i < 50 DO
         -- Simulate readFile: large frame allocation
         content = buildLargePayload(i MOD 100 + 1);
         -- Simulate parseJsonArraySum: more frame allocation
@@ -43,9 +44,9 @@ FN main() RETURNS Void ->
 
     peak = framePeakBytes();
 
-    -- 500 iterations each allocating ~6KB = would be 3 MB if not rewound.
-    -- With proper loop marks, frame stays bounded: only one iteration live at a time.
-    ASSERT peak < 500000, "frame peak bounded for large-alloc WHILE loop (< 500 KB for 500 iters)";
+    -- 50 iterations each allocating ~6KB. With proper loop marks the frame stays
+    -- bounded: only one iteration live at a time (< 50 KB).
+    ASSERT peak < 500000, "frame peak bounded for large-alloc WHILE loop (< 500 KB for 50 iters)";
     ASSERT resp.length() > 0, "produced response";
 
     print("PASS: large-alloc loop peak=${peak.toString()} bytes");

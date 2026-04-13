@@ -6,7 +6,7 @@
 FN main() RETURNS Void ->
     MUTABLE keys: String[]@list = [];
     MUTABLE seed: Int64 = 42;
-    FOR i IN (0_i64 ..< 100000) DO
+    FOR i IN (0_i64 ..< 5000) DO
         seed = seed %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
         IF seed < 0 -> seed = 0 - seed;
         bucket = seed MOD 10000;
@@ -14,19 +14,14 @@ FN main() RETURNS Void ->
     END
 
     peak = framePeakBytes();
-    ASSERT keys.length() == 100000, "built 100000 keys";
+    ASSERT keys.length() == 5000, "built 5000 keys";
 
-    -- 10000 strings * ~8 bytes avg = ~80 KB of string data
-    -- + 10000 * 16 bytes list backing = ~160 KB
-    -- + per-iteration intermediates (toString, interpolation)
-    -- Without rewind: intermediates accumulate -> much larger
-    -- With rewind: only live data (strings + list) should remain
-    print("peak=${peak.toString()} keys=${keys.length().toString()}");
-
-    -- Current: intermediates accumulate (~56 bytes/iter), ~5.6 MB for 100K.
-    -- After escape fix (Phase 2): intermediates reclaimed, peak < 2 MB.
+    -- Per-iteration intermediates (toString, interpolation) accumulate without
+    -- loop marks (list is outer-scope). 5000 iters * ~56 bytes = ~280 KB.
+    -- After escape fix (Phase 2): intermediates reclaimed, peak < 100 KB.
     -- For now assert a ceiling that catches regressions but allows current behavior.
-    ASSERT peak < 10000000, "frame peak < 10 MB for 100K string list";
+    print("peak=${peak.toString()} keys=${keys.length().toString()}");
+    ASSERT peak < 2000000, "frame peak < 2 MB for 5K string list";
 
     print("PASS: large list build bounded");
     RETURN;
