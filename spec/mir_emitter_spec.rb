@@ -486,7 +486,7 @@ RSpec.describe MIREmitter do
     end
 
     it "returns nil for pending strategies" do
-      %i[ret_fields catch_string_dupe hpt_string_dupe hpt_promote].each do |s|
+      %i[ret_fields catch_string_dupe].each do |s|
         node = MIR::EscapePromote.new("x", nil, s, nil, "rt")
         expect(e.emit(node)).to be_nil
       end

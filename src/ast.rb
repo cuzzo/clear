@@ -294,7 +294,6 @@ module AST
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     include Locatable
-    attr_accessor :hpt_hoisted  # true when this VarDecl was synthesized by HPT hoisting
     attr_accessor :cleanup_alloc  # stamped by MIRPass: :heap or :frame allocator for this binding
     attr_accessor :has_cleanup    # stamped by MIRPass: true when MIR::Drop follows this decl
   end
@@ -393,7 +392,6 @@ module AST
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
     attr_accessor :promote_ret_wrap       # :const or :var — set by MIRPass for return wrapping
-    attr_accessor :hpt_return_promote     # MIR::Promote node — :hpt_string_dupe or :hpt_promote strategy
     attr_accessor :catch_string_dupe_ret  # true: frame string in catch fn needs heap dupe on return
     attr_accessor :ret_field_promote_data # Hash { zig_type:, fields: } for struct field promotion on return
   end

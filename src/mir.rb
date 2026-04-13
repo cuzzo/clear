@@ -353,12 +353,15 @@ module MIR
   # The cleanup_entry carries ALL pre-computed data: kind, zig_type,
   # elem_zig_type, alloc, has_moved_guard, rc_* fields, etc.
   # The emitter applies templates mechanically from the entry.
-  Cleanup = Struct.new(:name, :cleanup_entry) do
+  Cleanup = Struct.new(:name, :cleanup_entry, :errdefer_only) do
     include Stmt
     # cleanup_entry: Hash with :kind, :zig_type, :elem_zig_type, :alloc,
     #   :has_moved_guard, :resource_close_zig, :is_fixed,
     #   :rc_variant, :rc_alloc, :rc_release_func, :base_zig,
     #   :needs_release_fields
+    # errdefer_only: when true, emit `errdefer` instead of `defer` -- used for
+    #   heap temps that are returned (ownership transferred to caller on success;
+    #   cleanup only needed on error to avoid leak on partial failure).
   end
 
   # Move mark: suppress cleanup for a transferred binding.
@@ -380,8 +383,6 @@ module MIR
   #   :bg_string    -> (pending flag for BG block)
   #   :catch_string_dupe -> (pending flag for ReturnStmt)
   #   :or_fallback_dupe  -> (pending flag for OrRescue)
-  #   :hpt_string_dupe   -> (consumed by ReturnStmt with HPT)
-  #   :hpt_promote       -> (consumed by ReturnStmt with HPT)
   EscapePromote = Struct.new(:name, :zig_type, :strategy, :data, :rt_expr) do
     include Stmt
     # data: strategy-specific payload (field set, alloc symbol, etc.)

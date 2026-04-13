@@ -33,9 +33,12 @@ class MIRChecker
 
     allocs = {}
     cleanups = {}
+    move_marks = {}
+    return_refs = {}  # bindings in consuming position in ReturnStmt values
     hpt_leaks = []
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
+    struct_field_refs = {}  # bindings in consuming position as struct/union field values
 
     walk_mir(fn_def.body) do |node|
       case node
@@ -43,6 +46,17 @@ class MIRChecker
         (allocs[node.name] ||= []) << node
       when MIR::Cleanup
         (cleanups[node.name] ||= []) << node
+      when MIR::MoveMark
+        move_marks[node.name] = true
+      when MIR::ReturnStmt
+        collect_consuming_idents(node.value, return_refs) if node.value
+      when MIR::Let
+        # Collect bindings consumed as struct/union field values.
+        # Use collect_consuming_idents so we recurse into HeapCreate and BlockExpr
+        # wrappers (heap-allocated structs wrap StructInit in HeapCreate; @indirect
+        # hoisting wraps in BlockExpr with BreakStmt).
+        collect_consuming_idents(node.init, struct_field_refs)
+        all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::ExprStmt
         scan_expr_for_hpt_leak!(node.expr, hpt_leaks)
         if node.expr.is_a?(MIR::InlineZig) && node.expr.allocs
@@ -56,8 +70,6 @@ class MIRChecker
         all_zig_nodes << node unless all_zig_nodes.include?(node)
       when MIR::RawZig
         all_zig_nodes << node unless all_zig_nodes.include?(node)
-      when MIR::Let
-        all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::LambdaExpr
         if node.fn_def
           sub = MIRChecker.new
@@ -69,6 +81,9 @@ class MIRChecker
     hpt_leaks.each { |e| @errors << e }
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups)
+    consuming_refs = return_refs.merge(struct_field_refs)
+    verify_return_cleanup!(allocs, cleanups, move_marks, consuming_refs)
+    verify_errdefer_leak!(allocs, cleanups, move_marks, consuming_refs)
     verify_zig_contracts!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
     verify_unhoisted_allocs!(fn_def.body) if strict
@@ -381,6 +396,99 @@ class MIRChecker
 
   def error(kind, name, msg)
     "[#{kind}] #{@fn_name}::#{name} -- #{msg}"
+  end
+
+  # ================================================================
+  # TRANSFER_CLEANUP -- heap temps transferred to caller/container must use errdefer
+  # ================================================================
+  #
+  # INV-TC: A heap binding whose ownership is transferred (via return, struct
+  # field, or container store) must either:
+  #   (a) have a MIR::MoveMark (ownership explicitly suppressed), or
+  #   (b) have all its MIR::Cleanup nodes marked errdefer_only.
+  #
+  # A non-errdefer Cleanup on a transferred binding means `defer cleanup(x)`
+  # fires on the success path, freeing data that the receiver now holds -> UAF.
+  #
+  # Covers:
+  #   ReturnStmt value -> caller takes ownership
+  #   StructInit field value -> struct takes ownership of its fields
+
+  def verify_return_cleanup!(allocs, cleanups, move_marks, consuming_refs)
+    consuming_refs.each_key do |name|
+      next unless cleanups.key?(name)       # no cleanup = moved or primitive, ok
+      next if move_marks.key?(name)         # (a) explicitly moved, ok
+
+      # (b) every Cleanup for this binding must be errdefer_only
+      bad = cleanups[name].reject(&:errdefer_only)
+      next if bad.empty?
+
+      @errors << error(:TRANSFER_CLEANUP, name,
+        "heap binding '#{name}' is transferred (returned or used as struct field) " \
+        "but has non-errdefer cleanup (defer fires after transfer, " \
+        "freeing receiver's data -- use-after-free)")
+    end
+  end
+
+  # ================================================================
+  # ERRDEFER_LEAK -- errdefer-only Cleanup must be in a consuming position
+  # ================================================================
+  #
+  # INV-EL: A binding with errdefer-only Cleanup is only freed on error.
+  # On success, the caller must own it (consuming position: direct return ident
+  # or struct/union field value).  If it only appears as a borrow argument to a
+  # function call, errdefer fires only on error; on success the binding leaks.
+  #
+  # Exempt:
+  #   (a) Bindings with MoveMark -- ownership transferred to callee, cleanup
+  #       suppressed by moved guard.
+  #   (b) AllocMark kind :hoisted_takes -- temp was passed as a TAKES arg;
+  #       callee takes ownership on success, errdefer covers error path.
+  #   (c) Bindings in consuming_refs -- direct return value or struct/union field
+  #       in a Let.init or ReturnStmt (caller/struct takes ownership on success).
+  #   (d) AllocMark kind :hoisted_field -- temp is a struct/union field value;
+  #       the struct/union takes ownership on success (tagged by lower_struct_lit
+  #       and lower_union_variant_lit to distinguish from borrow-position temps).
+  def verify_errdefer_leak!(allocs, cleanups, move_marks, consuming_refs)
+    cleanups.each do |name, cleanup_nodes|
+      next unless cleanup_nodes.all?(&:errdefer_only)  # skip if any non-errdefer cleanup
+      next if move_marks.key?(name)                    # (a) moved, callee takes ownership
+      next if consuming_refs.key?(name)                # (c) in consuming position
+
+      alloc_marks = allocs[name]
+      # (b) TAKES arg: callee takes ownership, errdefer covers error path.
+      # (d) struct/union field: struct/union takes ownership, errdefer covers error path.
+      next if alloc_marks&.any? { |am| am.kind == :hoisted_takes || am.kind == :hoisted_field }
+
+      @errors << error(:ERRDEFER_LEAK, name,
+        "binding '#{name}' has errdefer-only cleanup but is not in a consuming " \
+        "position (not returned directly, not a struct/union field, not a TAKES arg) " \
+        "-- success-path memory leak")
+    end
+  end
+
+  # Collect MIR::Ident names from CONSUMING positions only.
+  # Conservative: only direct Ident nodes and values in StructInit fields,
+  # HeapCreate inits, and BlockExpr break values (for @indirect hoisting).
+  # Does NOT recurse into Call/MethodCall args (borrows), BinOp operands,
+  # FieldGet objects, Deref, AddressOf, or Cast -- those are reads, not transfers.
+  def collect_consuming_idents(expr, out)
+    return unless expr
+    case expr
+    when MIR::Ident
+      out[expr.name] = true
+    when MIR::StructInit
+      # Struct takes ownership of its field values.
+      expr.fields&.each { |f| collect_consuming_idents(f[:value], out) }
+    when MIR::HeapCreate
+      # HeapCreate wraps StructInit for heap-allocated structs; recurse into init.
+      collect_consuming_idents(expr.init, out)
+    when MIR::BlockExpr
+      # @indirect field hoisting: body ends with BreakStmt(:label, HeapCreate/StructInit).
+      expr.body&.each do |s|
+        collect_consuming_idents(s.value, out) if s.is_a?(MIR::BreakStmt)
+      end
+    end
   end
 
   # ================================================================

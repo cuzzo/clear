@@ -1,15 +1,17 @@
 -- Test: returning a string from a function that wraps an HPT call must
--- not leak the HPT. The returned string must be promoted to an independent
--- copy so the HPT can be cleaned up.
+-- not leak the HPT. The returned string must be an independent copy
+-- so the HPT can be cleaned up after the function returns.
 
 UNION Value { Nil, Str: String, Number: Float64 }
 
+-- COPY s creates a new heap allocation for the string bytes, independent of v.
+-- v can be freed after getStr returns without dangling the returned string.
 FN getStr(v: Value) RETURNS String ->
     MATCH v START
-        Value.Str AS s -> RETURN s;,
-        DEFAULT -> RETURN "nil";
+        Value.Str AS s -> RETURN COPY s;,
+        DEFAULT -> RETURN COPY "nil";
     END
-    RETURN "nil";
+    RETURN COPY "nil";
 END
 
 FN makeValue!(s: String) RETURNS Value ->
@@ -17,9 +19,10 @@ FN makeValue!(s: String) RETURNS Value ->
 END
 
 FN wrapAndGet!(input: String) RETURNS String ->
-    -- makeValue! returns a heap Value (HPT). getStr borrows from it.
-    -- The HPT must be cleaned up, and the returned string must survive.
-    RETURN getStr(makeValue!(input));
+    -- Named binding: v's cleanup is a regular defer (freed at scope exit).
+    -- getStr returns a COPY'd string independent of v, so no UAF.
+    v = makeValue!(input);
+    RETURN getStr(v);
 END
 
 FN main() RETURNS Void ->

@@ -493,38 +493,6 @@ RSpec.describe CleanupClassifier do
   end
 
   # =========================================================================
-  # HPT classification (tested through heap_temps entries)
-  # =========================================================================
-  describe "HPT hoisting via MIRPass" do
-    it "hoists heap string sub-expression into VarDecl" do
-      plan, _, fn = hpt_for(<<~CLEAR, "main")
-        FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
-        FN consume(s: String) RETURNS Void -> RETURN; END
-        FN main() RETURNS Void ->
-            consume(makeStr!());
-            RETURN;
-        END
-      CLEAR
-      expect(count_hoisted_hpts(fn)).to eq(1)
-      hpt_var = fn.body.find { |s| s.is_a?(AST::VarDecl) && s.hpt_hoisted }
-      entry = plan[hpt_var.name]
-      expect(entry[:kind]).to eq(:heap_string)
-    end
-
-    it "does not hoist primitive return" do
-      _, _, fn = hpt_for(<<~CLEAR, "main")
-        FN getNum() RETURNS Int64 -> RETURN 42_i64; END
-        FN consume(n: Int64) RETURNS Void -> RETURN; END
-        FN main() RETURNS Void ->
-            consume(getNum());
-            RETURN;
-        END
-      CLEAR
-      expect(count_hoisted_hpts(fn)).to eq(0)
-    end
-  end
-
-  # =========================================================================
   # Struct with rodata string fields: no cleanup needed
   # =========================================================================
   describe "struct with rodata string fields" do
@@ -695,7 +663,8 @@ RSpec.describe CleanupClassifier do
 
   # ── HPT hoisting: MIRPass hoists sub-expression calls into VarDecls ──
 
-  def hpt_for(src, fn_name)
+  # Run the full MIRPass pipeline and return the cleanup plan for a function.
+  def mir_plan_for(src, fn_name)
     tokens = Lexer.new(src).tokenize
     ast = Parser.new(tokens, src).parse
     annotator = SemanticAnnotator.new
@@ -705,146 +674,7 @@ RSpec.describe CleanupClassifier do
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
     mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
     mir.transform!(ast)
-    fn_node = fn_nodes[fn_name]
-    plan = mir.cleanup_bindings[fn_name]
-    [plan, ast, fn_node]
-  end
-
-  # Count hoisted VarDecls (__hpt_N) in a function body.
-  def count_hoisted_hpts(fn_node)
-    fn_node.body.count { |s| s.is_a?(AST::VarDecl) && s.hpt_hoisted }
-  end
-
-  describe "HPT hoisting: MIRPass hoists sub-expression calls into VarDecls" do
-    context "sub-expression call gets hoisted" do
-      it "hoists heap FuncCall inside another call's args" do
-        _, _, fn = hpt_for(<<~CLEAR, "main")
-          UNION Value { Nil, Str: String }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN wrap(v: Value) RETURNS Value -> RETURN v; END
-          FN main() RETURNS Void ->
-              result = wrap(makeVal!());
-              RETURN;
-          END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to be >= 1, "sub-expression makeVal!() should be hoisted"
-      end
-    end
-
-    context "direct bind call does NOT get hoisted" do
-      it "skips FuncCall that is the direct RHS of a binding" do
-        _, _, fn = hpt_for(<<~CLEAR, "main")
-          UNION Value { Nil, Str: String }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN main() RETURNS Void ->
-              v = makeVal!();
-              RETURN;
-          END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to eq(0), "direct bind call should NOT be hoisted"
-      end
-    end
-
-    context "direct return skips hoisting (ownership transfers to caller)" do
-      it "does NOT hoist direct return" do
-        _, _, fn = hpt_for(<<~CLEAR, "wrapper")
-          UNION Value { Nil, Str: String }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN wrapper() RETURNS Value -> RETURN makeVal!(); END
-          FN main() RETURNS Void -> v = wrapper(); RETURN; END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to eq(0), "direct return should not be hoisted"
-      end
-    end
-
-    context "nested sub-expression" do
-      it "hoists heap call nested in another call" do
-        _, _, fn = hpt_for(<<~CLEAR, "main")
-          UNION Value { Nil, Str: String }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN wrap(v: Value) RETURNS Value -> RETURN v; END
-          FN outer(v: Value) RETURNS Value -> RETURN v; END
-          FN main() RETURNS Void ->
-              result = outer(wrap(makeVal!()));
-              RETURN;
-          END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to be >= 1, "nested makeVal!() should be hoisted"
-      end
-    end
-
-    context "struct literal as bind target" do
-      it "does NOT hoist direct field that is a heap FuncCall" do
-        _, _, fn = hpt_for(<<~CLEAR, "main")
-          UNION Value { Nil, Str: String }
-          STRUCT Wrapper { val: Value }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN main() RETURNS Void ->
-              w = Wrapper{ val: makeVal!() };
-              RETURN;
-          END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to eq(0),
-          "direct struct field makeVal!() should NOT be hoisted — struct owns the value"
-      end
-
-      it "still hoists heap call nested in a function arg within a struct field" do
-        _, _, fn = hpt_for(<<~CLEAR, "main")
-          UNION Value { Nil, Str: String }
-          STRUCT Wrapper { val: Value }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN wrap(v: Value) RETURNS Value -> RETURN v; END
-          FN main() RETURNS Void ->
-              w = Wrapper{ val: wrap(makeVal!()) };
-              RETURN;
-          END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to be >= 1,
-          "makeVal!() as arg to wrap() inside a struct field should still be hoisted"
-      end
-    end
-
-    context "list literal as bind target" do
-      it "does NOT hoist direct list item that is a heap FuncCall" do
-        _, _, fn = hpt_for(<<~CLEAR, "main")
-          UNION Value { Nil, Str: String }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN main() RETURNS Void ->
-              items: Value[] = [makeVal!()];
-              RETURN;
-          END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to eq(0),
-          "direct list item makeVal!() should NOT be hoisted — list owns the value"
-      end
-    end
-
-    context "heap arg to non-TAKES callee in return expression" do
-      it "hoists heap arg passed to the direct-return function" do
-        _, _, fn = hpt_for(<<~CLEAR, "caller")
-          UNION Value { Nil, Str: String }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN prStr(v: Value) RETURNS String -> RETURN "result"; END
-          FN caller() RETURNS String -> RETURN prStr(makeVal!()); END
-        CLEAR
-        expect(count_hoisted_hpts(fn)).to be >= 1,
-          "makeVal!() is non-TAKES arg to prStr — needs HPT hoisting"
-      end
-
-      it "does NOT hoist the direct-return FuncCall itself" do
-        plan, _, fn = hpt_for(<<~CLEAR, "caller")
-          UNION Value { Nil, Str: String }
-          FN makeVal!() RETURNS Value -> RETURN Value{ Str: COPY "hi" }; END
-          FN prStr(v: Value) RETURNS String -> RETURN "result"; END
-          FN caller() RETURNS String -> RETURN prStr(makeVal!()); END
-        CLEAR
-        # Only makeVal!() should be hoisted, not prStr()
-        hoisted = fn.body.select { |s| s.is_a?(AST::VarDecl) && s.hpt_hoisted }
-        hoisted_values = hoisted.map { |v| v.value }
-        expect(hoisted_values.none? { |v| v.is_a?(AST::FuncCall) && v.name == "prStr" }).to be(true),
-          "prStr() is the direct return — should NOT be hoisted"
-      end
-    end
+    mir.cleanup_bindings[fn_name]
   end
 
   # ===========================================================================
@@ -852,7 +682,7 @@ RSpec.describe CleanupClassifier do
   # ===========================================================================
   describe "COPY non-Copy union consumed by MATCH TAKES" do
     it "keeps cleanup for COPY result after refine_moved_guards" do
-      plan, _, _ = hpt_for(<<~CLEAR, "main")
+      plan = mir_plan_for(<<~CLEAR, "main")
         UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
         FN makeNested() RETURNS Data ->
             inner = Data{ Text: "hello" };

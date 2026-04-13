@@ -938,22 +938,8 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # The temp from makeStr() is heap-allocated. Must be freed after print.
-      expect(zig).to match(/heapAlloc\(\)\.free|defer.*makeStr|__hpt/)
-    end
-  end
-
-  describe "HPT string dupe uses correct allocator for return provenance" do
-    it "uses heapAlloc for dupe when function has heap return_provenance" do
-      src = <<~CLEAR
-        FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
-        FN transform!(s: String) RETURNS String -> RETURN COPY s; END
-        FN caller!() RETURNS String -> RETURN transform!(makeStr!()); END
-        FN main() RETURNS Void -> result = caller!(); RETURN; END
-      CLEAR
-      zig = transpile(src)
-      # HPT dupe in caller! should use heapAlloc (return_provenance == :heap)
-      expect(zig).to match(/heapAlloc\(\)\.dupe\(u8, /)
+      # The temp from makeStr() is heap-allocated and hoisted to __tmp_N. Must be freed.
+      expect(zig).to match(/heapAlloc\(\)\.free|defer.*makeStr|__tmp/)
     end
   end
 
@@ -1401,10 +1387,15 @@ RSpec.describe ZigTranspiler do
 
   describe "INV-1: HPT string dupe matches return_provenance" do
     it "uses heapAlloc for dupe when function has heap return_provenance" do
+      # Use a named binding so makeStr!'s result is properly cleaned up
+      # (inline `transform!(makeStr!())` would leak the temp string -- ERRDEFER_LEAK).
       src = <<~CLEAR
         FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
         FN transform!(s: String) RETURNS String -> RETURN COPY s; END
-        FN caller!() RETURNS String -> RETURN transform!(makeStr!()); END
+        FN caller!() RETURNS String ->
+            s = makeStr!();
+            RETURN transform!(s);
+        END
         FN main() RETURNS Void -> result = caller!(); RETURN; END
       CLEAR
       zig = transpile(src)

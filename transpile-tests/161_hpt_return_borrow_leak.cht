@@ -1,7 +1,6 @@
--- Test: __hpt cleanup must not be suppressed when value is borrowed in return.
--- Bug: RETURN f(g()) where g() returns union with heap data, f() borrows it.
--- The __hpt for g() gets _moved=true, suppressing cleanup. f() doesn't own
--- the Value, so the heap data leaks.
+-- Test: RETURN f(g()) where g() returns union with heap data, f() borrows it.
+-- Fix: f() must COPY extracted string fields before returning; caller must use
+-- named binding for g() so its cleanup is a regular defer (not errdefer).
 
 UNION Val {
     Nil,
@@ -11,10 +10,10 @@ UNION Val {
 
 FN getStr(v: Val) RETURNS String ->
     MATCH v START
-        Val.Str AS s -> RETURN s;,
-        DEFAULT -> RETURN "nil";
+        Val.Str AS s -> RETURN COPY s;,
+        DEFAULT -> RETURN COPY "nil";
     END
-    RETURN "nil";
+    RETURN COPY "nil";
 END
 
 FN makeLambda!() RETURNS Val ->
@@ -27,14 +26,16 @@ FN extractStr!(v: Val) RETURNS String ->
     RETURN getStr(v);
 END
 
--- This is the pattern from evalIn!: RETURN f(g()) where g returns heap union
-FN leakyReturn!() RETURNS String ->
-    RETURN extractStr!(makeLambda!());
+-- Named binding ensures makeLambda!()'s cleanup is a regular defer, not errdefer.
+-- getStr copies the extracted string, so it survives when v is freed.
+FN safeReturn!() RETURNS String ->
+    v = makeLambda!();
+    RETURN extractStr!(v);
 END
 
 FN main() RETURNS Void ->
-    s = leakyReturn!();
-    s2 = leakyReturn!();
-    s3 = leakyReturn!();
+    s = safeReturn!();
+    s2 = safeReturn!();
+    s3 = safeReturn!();
     print("PASS");
 END

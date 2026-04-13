@@ -355,77 +355,81 @@ class MIREmitter
     alloc = alloc_from_entry(entry)
     name = node.name
     g = entry[:has_moved_guard]
+    ed = node.errdefer_only  # emit errdefer instead of defer (returned temp)
     zig_type = entry[:zig_type] || "UNKNOWN"
     elem_zig = entry[:elem_zig_type] || "UNKNOWN"
 
     case entry[:kind]
     when :resource
       close = entry[:resource_close_zig].gsub("{0}", name)
-      guarded_defer(name, close, g)
+      guarded_defer(name, close, g, ed)
 
     when :list_with_elem_cleanup
       body = "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); }"
-      guarded_defer(name, body, g)
+      guarded_defer(name, body, g, ed)
 
     when :list, :string_map, :numeric_map
-      guarded_cleanup(name, zig_type, alloc, g)
+      guarded_cleanup(name, zig_type, alloc, g, ed)
 
     when :pool, :fixed_soa
-      "defer #{name}.deinit(#{alloc});\n"
+      kw = ed ? "errdefer" : "defer"
+      "#{kw} #{name}.deinit(#{alloc});\n"
 
     when :set
-      "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+      kw = ed ? "errdefer" : "defer"
+      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
 
     when :rc
       rc_alloc = entry[:rc_alloc] ? alloc_from_sym(entry[:rc_alloc]) : alloc
       case entry[:rc_variant]
       when :link
-        guarded_defer(name, "CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{name})", g)
+        guarded_defer(name, "CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{name})", g, ed)
       when :optional
-        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{rc_alloc}, _strong_ref); }", g)
+        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{rc_alloc}, _strong_ref); }", g, ed)
       else
-        result = guarded_cleanup(name, zig_type, rc_alloc, g)
+        result = guarded_cleanup(name, zig_type, rc_alloc, g, ed)
         if entry[:needs_release_fields]
           guard = g ? "if (!#{name}_moved) " : ""
-          result += "defer #{guard}CheatLib.releaseFields(#{entry[:base_zig]}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
+          kw = ed ? "errdefer" : "defer"
+          result += "#{kw} #{guard}CheatLib.releaseFields(#{entry[:base_zig]}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
         end
         result
       end
 
     when :locked
-      guarded_defer(name, "CheatLib.lockedDestroy(#{zig_type}, #{alloc}, #{name})", g)
+      guarded_defer(name, "CheatLib.lockedDestroy(#{zig_type}, #{alloc}, #{name})", g, ed)
 
     when :write_locked
-      guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", g)
+      guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", g, ed)
 
     when :heap_string, :takes_string
-      guarded_defer(name, "#{alloc}.free(#{name})", g)
+      guarded_defer(name, "#{alloc}.free(#{name})", g, ed)
 
     when :heap_slice, :heap_union, :heap_struct
-      guarded_cleanup(name, zig_type, alloc, g)
+      guarded_cleanup(name, zig_type, alloc, g, ed)
 
     when :struct_with_cleanup_fields, :struct_rc, :non_copy_union
-      guarded_cleanup(name, zig_type, alloc, g)
+      guarded_cleanup(name, zig_type, alloc, g, ed)
 
     when :heap_struct_plain
-      guarded_defer(name, "CheatLib.free(rt, #{name})", g)
+      guarded_defer(name, "CheatLib.free(rt, #{name})", g, ed)
 
     when :array_with_struct_strings
       if entry[:is_fixed]
-        guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g)
+        guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, ed)
       else
-        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g)
+        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, ed)
       end
 
     when :takes_union
-      guarded_cleanup(name, zig_type, alloc, g)
+      guarded_cleanup(name, zig_type, alloc, g, ed)
 
     when :takes_slice, :match_as_slice
       body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"
-      guarded_defer(name, body, g)
+      guarded_defer(name, body, g, ed)
 
     when :match_as_inline_struct
-      guarded_cleanup(name, zig_type, alloc, g)
+      guarded_cleanup(name, zig_type, alloc, g, ed)
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry[:kind]} for '#{name}'"
@@ -446,7 +450,7 @@ class MIREmitter
       "#{node.name}.alloc = #{rt}.heapAlloc();"
     when :generic
       "try CheatLib.promote(#{node.zig_type}, #{rt}, &#{node.name});"
-    when :ret_fields, :catch_string_dupe, :hpt_string_dupe, :hpt_promote
+    when :ret_fields, :catch_string_dupe
       # Annotation now lives on AST nodes; EscapePromote with these strategies is a no-op.
       nil
     else
@@ -732,21 +736,23 @@ class MIREmitter
     end
   end
 
-  def guarded_defer(name, body, guarded)
+  def guarded_defer(name, body, guarded, errdefer_only = false)
+    kw = errdefer_only ? "errdefer" : "defer"
     if guarded
-      "var #{name}_moved = false; _ = &#{name}_moved;\ndefer if (!#{name}_moved) #{body};\n"
+      "var #{name}_moved = false; _ = &#{name}_moved;\n#{kw} if (!#{name}_moved) #{body};\n"
     elsif body.start_with?("{") && body.end_with?("}")
-      "defer #{body}\n"
+      "#{kw} #{body}\n"
     else
-      "defer #{body};\n"
+      "#{kw} #{body};\n"
     end
   end
 
-  def guarded_cleanup(name, zig_type, alloc, guarded)
+  def guarded_cleanup(name, zig_type, alloc, guarded, errdefer_only = false)
+    kw = errdefer_only ? "errdefer" : "defer"
     if guarded
-      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})", true)
+      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})", true, errdefer_only)
     else
-      "defer CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
     end
   end
 end
