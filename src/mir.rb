@@ -257,7 +257,10 @@ module MIR
   # Catch wrapper. Wraps raw Zig code for try/catch but exposes
   # error-path reassignment metadata for allocator consistency (INV-9).
   # error_reassigns: [{ name: String, alloc: :heap/:frame, line: int }]
-  CatchWrapper = Struct.new(:code, :error_reassigns) do
+  # clause_bodies: Array<Array<MIR::Stmt>> — one per catch clause + default.
+  #   Carries the lowered MIR so the checker can see allocations inside each
+  #   catch body. Emission still uses code (raw Zig). nil for legacy callers.
+  CatchWrapper = Struct.new(:code, :error_reassigns, :clause_bodies) do
     include Stmt
   end
 

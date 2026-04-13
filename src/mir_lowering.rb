@@ -817,10 +817,10 @@ class MIRLowering
       call_args = fn_needs_rt ? ["rt"] + (node.params || []).map { |p| p[:name] } : (node.params || []).map { |p| p[:name] }
       inner_call = "#{inner_name}(#{call_args.join(', ')})"
 
-      catch_zig = build_catch_clauses(node, fn_can_fail)
+      catch_zig, catch_clause_bodies = build_catch_clauses(node, fn_can_fail)
       error_reassigns = collect_catch_reassigns(node)
       outer_body = [
-        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_zig}\n};", error_reassigns)
+        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_zig}\n};", error_reassigns, catch_clause_bodies)
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
@@ -834,8 +834,12 @@ class MIRLowering
     end
   end
 
+  # Returns [zig_string, clause_bodies] where clause_bodies is an array of
+  # MIR stmt arrays (one per clause + optional default). Using lower_body
+  # ensures flush_pending is called per statement so hoisted Lets stay in scope.
   def build_catch_clauses(node, fn_can_fail)
     rt_name = @rt_name
+    clause_bodies = []
 
     # Build snapshot declaration if function has exactly one snapshot type
     snap_types = node.respond_to?(:snapshot_types) ? (node.snapshot_types || Set.new) : Set.new
@@ -851,9 +855,11 @@ class MIRLowering
     parts = (node.catch_clauses || []).map { |clause|
       kind = clause[:kind]
       error_name = clause[:error_name]
-      # PHASE-3: catch bodies are assembled as raw Zig strings; allocating stmts inside
-      # are invisible to the checker until MIR::TryCatch replaces this assembly.
-      clause_body_zig = clause[:body].map { |s| emit_expr(lower(s)) }.join("\n            ")
+      # Use lower_body to flush pending hoisted Lets per statement (prevents
+      # hoist_alloc-produced Lets from escaping the catch body scope).
+      clause_mir = lower_body(clause[:body])
+      clause_bodies << clause_mir
+      clause_body_zig = clause_mir.map { |m| emit_expr(m) }.join("\n            ")
 
       cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
       cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
@@ -863,8 +869,10 @@ class MIRLowering
     }.join(" else ")
 
     default_code = if node.default_catch.is_a?(Array) && node.default_catch.any?
-      # PHASE-3: same as catch_clauses above; raw Zig string assembly.
-      default_body = node.default_catch.map { |s| emit_expr(lower(s)) }.join("\n            ")
+      # Use lower_body for the same reason as above.
+      default_mir = lower_body(node.default_catch)
+      clause_bodies << default_mir
+      default_body = default_mir.map { |m| emit_expr(m) }.join("\n            ")
       " else {\n            const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{default_body}\n        }"
     elsif fn_can_fail
       " else {\n            #{rt_name}.freeSnapshot();\n            return error.CheatError;\n        }"
@@ -872,7 +880,7 @@ class MIRLowering
       " else {\n            #{rt_name}.freeSnapshot();\n            unreachable;\n        }"
     end
 
-    "#{parts}#{default_code}"
+    ["#{parts}#{default_code}", clause_bodies]
   end
 
   # Extract error-path reassignment metadata from catch clauses (INV-9).

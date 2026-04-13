@@ -117,6 +117,7 @@ class MIRChecker
     when MIR::Let          then yield node.init, {} if node.init.is_a?(MIR::LambdaExpr)
     when MIR::BgBlock      then walk_mir(node.run_body, &block)
     when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
+    when MIR::CatchWrapper then node.clause_bodies&.each { |b| walk_mir(b, &block) }
     end
   end
 
