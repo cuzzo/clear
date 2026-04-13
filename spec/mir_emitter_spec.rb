@@ -602,7 +602,7 @@ RSpec.describe MIREmitter do
   # =========================================================================
 
   it "emits nil for AllocMark" do
-    expect(e.emit(MIR::AllocMark.new("x", :list, :frame))).to be_nil
+    expect(e.emit(MIR::AllocMark.new("x", :frame))).to be_nil
   end
 
   it "emits nil for ReturnMark" do

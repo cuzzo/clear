@@ -92,7 +92,7 @@ class MIRLowering
     return expr unless mir_allocates?(expr)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
-    @pending_stmts << MIR::AllocMark.new(name, :hoisted, :heap)
+    @pending_stmts << MIR::AllocMark.new(name, :heap)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     @pending_stmts << MIR::Cleanup.new(name, entry) if entry
@@ -157,7 +157,7 @@ class MIRLowering
     when MIR::Drop              then lower_drop(node)
     when MIR::Promote           then lower_promote(node)
     when MIR::SuppressCleanup   then MIR::MoveMark.new(zig_safe_name(node.name))
-    when MIR::Alloc             then MIR::AllocMark.new(node.name, node.kind, node.alloc)
+    when MIR::Alloc             then MIR::AllocMark.new(node.name, node.alloc)
     when MIR::Return            then MIR::ReturnMark.new(node.escaped_vars)
     when MIR::ReassignCleanup   then MIR::ReassignMark.new(node.name, node.alloc)
     when MIR::FieldCleanup      then MIR::FieldCleanupMark.new(node.target_name, node.field, node.alloc)
@@ -1018,14 +1018,12 @@ class MIRLowering
       before = @pending_stmts.length
       arg = hoist_alloc(lower(a), a)
       # CopyNode/MoveNode args transfer ownership to the callee (TAKES semantics).
-      # Mark any hoisted temp cleanups as errdefer: cleanup only on error (partial
-      # failure), not on success (callee owns the value).
+      # Replace hoisted temp Cleanups with ErrCleanup: cleanup only on error
+      # (partial failure), not on success (callee owns the value).
       if a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
-        @pending_stmts[before..].each do |s|
-          s.errdefer_only = true if s.is_a?(MIR::Cleanup)
-          # Tag AllocMark as :hoisted_takes so the checker knows this temp's
-          # errdefer is intentional -- callee takes ownership, not a borrow leak.
-          s.kind = :hoisted_takes if s.is_a?(MIR::AllocMark) && s.kind == :hoisted
+        before.upto(@pending_stmts.length - 1) do |i|
+          s = @pending_stmts[i]
+          @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
         end
       end
       # Array/List args: convert to slice via .items (skip strings - already []const u8)
@@ -1095,9 +1093,9 @@ class MIRLowering
       before = @pending_stmts.length
       arg = hoist_alloc(lower(a), a)
       if a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
-        @pending_stmts[before..].each do |s|
-          s.errdefer_only = true if s.is_a?(MIR::Cleanup)
-          s.kind = :hoisted_takes if s.is_a?(MIR::AllocMark) && s.kind == :hoisted
+        before.upto(@pending_stmts.length - 1) do |i|
+          s = @pending_stmts[i]
+          @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
         end
       end
       ti = a.type_info
@@ -2694,13 +2692,11 @@ class MIRLowering
         hoist_alloc(lower(v), v)
       end
       # The struct owns its fields: any heap temp hoisted for this field
-      # transfers ownership to the struct.  Use errdefer so cleanup only fires
-      # on error (partial failure), not on success.
-      # Tag AllocMark as :hoisted_field so the checker knows errdefer is
-      # intentional -- the struct takes ownership, not a borrow leak.
-      @pending_stmts[before..].each do |s|
-        s.errdefer_only = true if s.is_a?(MIR::Cleanup)
-        s.kind = :hoisted_field if s.is_a?(MIR::AllocMark) && s.kind == :hoisted
+      # transfers ownership to the struct.  Replace Cleanup with ErrCleanup so
+      # cleanup only fires on error (partial failure), not on success.
+      before.upto(@pending_stmts.length - 1) do |i|
+        s = @pending_stmts[i]
+        @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
       end
       vt = v.type_info.is_a?(Type) ? v.type_info : nil
       needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) &&
@@ -2719,7 +2715,7 @@ class MIRLowering
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
-        hoisted << MIR::AllocMark.new(temp, :indirect, :heap)
+        hoisted << MIR::AllocMark.new(temp, :heap)
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
         # errdefer cleans this field if a later allocation (another field or
         # the outer struct pointer) fails.
@@ -2773,19 +2769,18 @@ class MIRLowering
       before = @pending_stmts.length
       val = hoist_alloc(lower(v), v)
       # The union owns its payload: any heap temp hoisted for this field
-      # transfers ownership to the union.  errdefer so cleanup fires only on error.
-      # Tag AllocMark as :hoisted_field so the checker knows errdefer is
-      # intentional -- the union takes ownership, not a borrow leak.
-      @pending_stmts[before..].each do |s|
-        s.errdefer_only = true if s.is_a?(MIR::Cleanup)
-        s.kind = :hoisted_field if s.is_a?(MIR::AllocMark) && s.kind == :hoisted
+      # transfers ownership to the union.  Replace Cleanup with ErrCleanup so
+      # cleanup fires only on error (partial failure), not on success.
+      before.upto(@pending_stmts.length - 1) do |i|
+        s = @pending_stmts[i]
+        @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
       end
       if indirect.include?(k)
         zig_t = transpile_type(var_data[:fields][k])
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
-        hoisted << MIR::AllocMark.new(temp, :indirect, :heap)
+        hoisted << MIR::AllocMark.new(temp, :heap)
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
         hoisted << MIR::ErrDeferStmt.new(
           MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap)
@@ -3540,10 +3535,17 @@ class MIRLowering
     value = node.value ? lower(node.value) : nil
     rt_name = @rt_name
 
-    # Hoisted temps that are part of the return value transfer ownership to the
-    # caller on success.  Their cleanup must use errdefer (not defer) so they are
-    # only freed on error (partial failure), not on success.
-    @pending_stmts.each { |s| s.errdefer_only = true if s.is_a?(MIR::Cleanup) }
+    # If the return value is a hoisted temp, convert its Cleanup to ErrCleanup:
+    # the caller takes ownership on success, so we only clean up on error.
+    # Borrow-position temps (intermediates, not the return value) keep regular
+    # Cleanup (defer) -- they are freed normally when the function exits.
+    if value.is_a?(MIR::Ident)
+      @pending_stmts.each_with_index do |s, i|
+        if s.is_a?(MIR::Cleanup) && s.name == value.name
+          @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry)
+        end
+      end
+    end
 
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
@@ -3561,7 +3563,7 @@ class MIRLowering
       # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
       # fields of __ret.  Phase 4 will replace this frame+promote pattern with a
       # direct HeapCreate so the AllocMark reflects an actual upfront allocation.
-      stmts << MIR::AllocMark.new("__ret", :promote, :heap)
+      stmts << MIR::AllocMark.new("__ret", :heap)
       if ret_field_promote[:fields]
         ret_field_promote[:fields].each do |fname|
           stmts << MIR::ExprStmt.new(
@@ -3590,7 +3592,7 @@ class MIRLowering
       ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
       if ret_type&.string?
         MIR::ScopeBlock.new([
-          MIR::AllocMark.new("__ret_dupe", :string_dupe, :heap),
+          MIR::AllocMark.new("__ret_dupe", :heap),
           MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, :heap), false, nil, nil),
           MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
         ])

@@ -74,7 +74,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(alloc)
       expect(result).to be_a(MIR::AllocMark)
       expect(result.name).to eq("x")
-      expect(result.kind).to eq(:list)
+      expect(result.alloc).to eq(:heap)
       expect(emit(result)).to be_nil
     end
 

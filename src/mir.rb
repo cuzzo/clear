@@ -348,20 +348,29 @@ module MIR
 
   # --- Cleanup / Lifecycle ---
 
-  # Deferred cleanup for a binding. Subsumes old MIR::Drop.
-  # Emits a defer (or guarded defer) block using the cleanup_entry hash.
-  # The cleanup_entry carries ALL pre-computed data: kind, zig_type,
+  # Deferred cleanup for a binding. Always emits `defer` (with optional moved
+  # guard). cleanup_entry carries all pre-computed data: kind, zig_type,
   # elem_zig_type, alloc, has_moved_guard, rc_* fields, etc.
   # The emitter applies templates mechanically from the entry.
-  Cleanup = Struct.new(:name, :cleanup_entry, :errdefer_only) do
+  #
+  # cleanup_entry keys: :kind, :zig_type, :elem_zig_type, :alloc,
+  #   :has_moved_guard, :resource_close_zig, :is_fixed,
+  #   :rc_variant, :rc_alloc, :rc_release_func, :base_zig,
+  #   :needs_release_fields
+  #
+  # Use ErrCleanup instead when ownership transfers to a callee or container
+  # and cleanup is only needed on the error path.
+  Cleanup = Struct.new(:name, :cleanup_entry) do
     include Stmt
-    # cleanup_entry: Hash with :kind, :zig_type, :elem_zig_type, :alloc,
-    #   :has_moved_guard, :resource_close_zig, :is_fixed,
-    #   :rc_variant, :rc_alloc, :rc_release_func, :base_zig,
-    #   :needs_release_fields
-    # errdefer_only: when true, emit `errdefer` instead of `defer` -- used for
-    #   heap temps that are returned (ownership transferred to caller on success;
-    #   cleanup only needed on error to avoid leak on partial failure).
+  end
+
+  # Error-path-only cleanup for a binding. Always emits `errdefer`.
+  # Used when ownership transfers out of this scope on the success path
+  # (TAKES arg, struct/union field) -- the callee/container owns on success,
+  # but the binding must be freed if an error occurs after allocation.
+  # The emitter emits `errdefer cleanup(name)` unconditionally (no guard).
+  ErrCleanup = Struct.new(:name, :cleanup_entry) do
+    include Stmt
   end
 
   # Move mark: suppress cleanup for a transferred binding.
@@ -479,7 +488,7 @@ module MIR
   # ================================================================
 
   # Marks an allocation point. Subsumes old MIR::Alloc.
-  AllocMark = Struct.new(:name, :kind, :alloc) do
+  AllocMark = Struct.new(:name, :alloc) do
     include Stmt
     def stmt?; true; end
   end

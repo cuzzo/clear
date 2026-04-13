@@ -1,12 +1,20 @@
-# src/mir_emitter.rb - Zig code emitter from MIR nodes
+# src/mir_emitter.rb -- MIR -> Zig template engine.
 #
-# This class takes an MIR tree (produced by the lowering pass) and emits
-# Zig source code. It makes ZERO memory decisions -- every allocator,
-# cleanup kind, and copy strategy is pre-computed in the MIR nodes.
+# CONTRACT: This file is a pure template engine. Each MIR node type maps to
+# exactly one fixed Zig text fragment. There is no ownership logic, no
+# allocator decisions, no type introspection. Every choice (which allocator,
+# which cleanup strategy, defer vs errdefer) was made by the lowering pass
+# and is encoded structurally in the MIR node type or its pre-computed fields.
 #
-# The emitter is deliberately simple: a case dispatch over node types,
-# each case filling a Zig template. If a case requires type introspection
-# or schema lookup, the MIR is wrong -- fix the lowering, not the emitter.
+# THE MOMENT this file makes a decision not already secured by the MIRChecker,
+# the system is unsafe. Unverified emitter logic is silent corruption:
+# double-frees, leaks, and use-after-frees with no compile-time signal.
+#
+# Node -> Zig template mapping (ownership nodes):
+#   MIR::Cleanup(name, entry)    -> defer [if (!name_moved)] cleanup(name)
+#   MIR::ErrCleanup(name, entry) -> errdefer cleanup(name)
+#   MIR::MoveMark(name)          -> name_moved = true;
+#   MIR::AllocMark               -> (no Zig emitted; checker marker only)
 #
 # IMPORTANT: This file must NOT require type.rb, annotator.rb, scope.rb,
 # or any analysis module. It depends only on mir.rb.
@@ -69,7 +77,8 @@ class MIREmitter
     when MIR::AllocSlice       then emit_alloc_slice(node)
     when MIR::FreeSlice        then emit_free_slice(node)
     when MIR::DestroyPtr       then emit_destroy_ptr(node)
-    when MIR::Cleanup          then emit_cleanup(node)
+    when MIR::Cleanup          then emit_cleanup(node, errdefer: false)
+    when MIR::ErrCleanup       then emit_cleanup(node, errdefer: true)
     when MIR::MoveMark         then emit_move_mark(node)
     when MIR::EscapePromote    then emit_escape_promote(node)
     when MIR::DeepCopy         then emit_deep_copy(node)
@@ -350,86 +359,90 @@ class MIREmitter
     "#{alloc_zig(node.alloc)}.destroy(#{emit(node.ptr)})"
   end
 
-  def emit_cleanup(node)
+  # Emit cleanup for MIR::Cleanup (defer) and MIR::ErrCleanup (errdefer).
+  # errdefer: true  -> always emits `errdefer cleanup(name)` (no moved guard).
+  # errdefer: false -> emits `defer cleanup(name)` with optional moved guard
+  #                    based on entry[:has_moved_guard].
+  # The caller (emit dispatch) decides which; this method applies the template.
+  def emit_cleanup(node, errdefer: false)
     entry = node.cleanup_entry
     alloc = alloc_from_entry(entry)
     name = node.name
-    g = entry[:has_moved_guard]
-    ed = node.errdefer_only  # emit errdefer instead of defer (returned temp)
+    g = !errdefer && entry[:has_moved_guard]
     zig_type = entry[:zig_type] || "UNKNOWN"
     elem_zig = entry[:elem_zig_type] || "UNKNOWN"
 
     case entry[:kind]
     when :resource
       close = entry[:resource_close_zig].gsub("{0}", name)
-      guarded_defer(name, close, g, ed)
+      guarded_defer(name, close, g, errdefer:)
 
     when :list_with_elem_cleanup
       body = "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); }"
-      guarded_defer(name, body, g, ed)
+      guarded_defer(name, body, g, errdefer:)
 
     when :list, :string_map, :numeric_map
-      guarded_cleanup(name, zig_type, alloc, g, ed)
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     when :pool, :fixed_soa
-      kw = ed ? "errdefer" : "defer"
+      kw = errdefer ? "errdefer" : "defer"
       "#{kw} #{name}.deinit(#{alloc});\n"
 
     when :set
-      kw = ed ? "errdefer" : "defer"
+      kw = errdefer ? "errdefer" : "defer"
       "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
 
     when :rc
       rc_alloc = entry[:rc_alloc] ? alloc_from_sym(entry[:rc_alloc]) : alloc
       case entry[:rc_variant]
       when :link
-        guarded_defer(name, "CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{name})", g, ed)
+        guarded_defer(name, "CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{name})", g, errdefer:)
       when :optional
-        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{rc_alloc}, _strong_ref); }", g, ed)
+        guarded_defer(name, "{ if (#{name}) |_strong_ref| CheatLib.#{entry[:rc_release_func]}(#{entry[:base_zig]}, #{rc_alloc}, _strong_ref); }", g, errdefer:)
       else
-        result = guarded_cleanup(name, zig_type, rc_alloc, g, ed)
+        result = guarded_cleanup(name, zig_type, rc_alloc, g, errdefer:)
         if entry[:needs_release_fields]
           guard = g ? "if (!#{name}_moved) " : ""
-          kw = ed ? "errdefer" : "defer"
+          kw = errdefer ? "errdefer" : "defer"
           result += "#{kw} #{guard}CheatLib.releaseFields(#{entry[:base_zig]}, #{rc_alloc}, #{name}.ctrl.data.*);\n"
         end
         result
       end
 
     when :locked
-      guarded_defer(name, "CheatLib.lockedDestroy(#{zig_type}, #{alloc}, #{name})", g, ed)
+      guarded_defer(name, "CheatLib.lockedDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
 
     when :write_locked
-      guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", g, ed)
+      guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
 
     when :heap_string, :takes_string
-      guarded_defer(name, "#{alloc}.free(#{name})", g, ed)
+      guarded_defer(name, "#{alloc}.free(#{name})", g, errdefer:)
 
     when :heap_slice, :heap_union, :heap_struct
-      guarded_cleanup(name, zig_type, alloc, g, ed)
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     when :struct_with_cleanup_fields, :struct_rc, :non_copy_union
-      guarded_cleanup(name, zig_type, alloc, g, ed)
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     when :heap_struct_plain
-      guarded_defer(name, "CheatLib.free(rt, #{name})", g, ed)
+      guarded_defer(name, "CheatLib.free(rt, #{name})", g, errdefer:)
 
     when :array_with_struct_strings
       if entry[:is_fixed]
-        guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, ed)
+        guarded_defer(name, "{ for (&#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
       else
-        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, ed)
+        guarded_defer(name, "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } }", g, errdefer:)
       end
 
     when :takes_union
-      guarded_cleanup(name, zig_type, alloc, g, ed)
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     when :takes_slice, :match_as_slice
       body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"
-      guarded_defer(name, body, g, ed)
+      guarded_defer(name, body, g, errdefer:)
 
     when :match_as_inline_struct
-      guarded_cleanup(name, zig_type, alloc, g, ed)
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     else
       raise "MIREmitter#emit_cleanup: unhandled kind :#{entry[:kind]} for '#{name}'"
@@ -736,8 +749,8 @@ class MIREmitter
     end
   end
 
-  def guarded_defer(name, body, guarded, errdefer_only = false)
-    kw = errdefer_only ? "errdefer" : "defer"
+  def guarded_defer(name, body, guarded, errdefer: false)
+    kw = errdefer ? "errdefer" : "defer"
     if guarded
       "var #{name}_moved = false; _ = &#{name}_moved;\n#{kw} if (!#{name}_moved) #{body};\n"
     elsif body.start_with?("{") && body.end_with?("}")
@@ -747,10 +760,10 @@ class MIREmitter
     end
   end
 
-  def guarded_cleanup(name, zig_type, alloc, guarded, errdefer_only = false)
-    kw = errdefer_only ? "errdefer" : "defer"
+  def guarded_cleanup(name, zig_type, alloc, guarded, errdefer: false)
+    kw = errdefer ? "errdefer" : "defer"
     if guarded
-      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})", true, errdefer_only)
+      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})", true, errdefer:)
     else
       "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
     end
