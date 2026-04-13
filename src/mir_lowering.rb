@@ -1811,11 +1811,11 @@ class MIRLowering
 
   def lower_static_call(node)
     pattern = node.zig_pattern.dup
-    # PHASE-3: args are substituted into an InlineZig pattern string; allocating
-    # sub-expressions (e.g. string concat in an arg) are invisible to the checker
-    # inside the opaque InlineZig boundary. HPT hoisting covers heap-returning
-    # FuncCall/MethodCall args, but BinaryOp string concat is not yet HPT-hoisted.
-    arg_strs = node.args.map { |a| emit_expr(lower(a)) }
+    # Hoist any heap-allocating args to named Lets via hoist_alloc so the
+    # checker can verify their cleanup. Non-allocating args (and frame allocs)
+    # are left inline -- the pending Lets are emitted by lower_body's
+    # flush_pending before the enclosing statement.
+    arg_strs = node.args.map { |a| emit_expr(hoist_alloc(lower(a))) }
     arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}", arg) }
     iz = MIR::InlineZig.new(pattern, "static_call")
     iz.stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
