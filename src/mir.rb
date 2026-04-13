@@ -689,6 +689,21 @@ module MIR
     # fn_def: MIR::FnDef with the lambda's implementation
   end
 
+  # Pipeline IR node. Wraps the pre-computed MIR output of a s> chain.
+  # Phase 1: inner carries old-path MIR (RawZig or MIR tree); all other fields nil.
+  # Future phases: source_type, stages, sink, sink_alloc encode streaming structure.
+  #
+  # ast_node:    original s> BinaryOp AST node (needed by future pipeline_emitter)
+  # inner:       pre-computed MIR from existing paths (Phase 1), nil in Phase 2+
+  # source_type: :range/:slice/:list/:pool/:sharded/:inf_stream (Phase 2+)
+  # stages:      Array of stage descriptors (Phase 3+)
+  # sink:        sink descriptor (Phase 4+)
+  # sink_alloc:  :frame/:heap for sink output (Phase 4+)
+  Pipeline = Struct.new(:ast_node, :inner, :source_type, :stages, :sink, :sink_alloc) do
+    include Stmt
+    def expr?; true; end  # can appear in both expression and statement position
+  end
+
   # Inline Zig expression. Tracked escape hatch for expression-level Zig code.
   #
   # WARNING: InlineZig BYPASSES ownership verification unless stdlib_def is set.

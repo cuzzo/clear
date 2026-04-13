@@ -2454,20 +2454,25 @@ class MIRLowering
       # Test fallback bypasses pipeline host entirely
       if @pipeline_fallback
         zig_code = @pipeline_fallback.call(node)
-        return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}",
+        inner = MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}",
           { consumes: [], produces: [], borrows: [] })
+        return MIR::Pipeline.new(node, inner, nil, nil, nil, nil)
       end
 
       host = pipeline_host
 
+      # Detect source type for pipeline IR metadata.
+      source_type = node.left.is_a?(AST::RangeLit) ? :range : nil
+
       # Try MIR path first (migrated operators return MIR node tree)
       mir_result = host.lower_pipeline(node)
-      return mir_result if mir_result
+      return MIR::Pipeline.new(node, mir_result, source_type, nil, nil, nil) if mir_result
 
       # Fall back to string path (non-migrated operators)
       zig_code = host.transpile_pipeline(node)
-      return MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}",
+      inner = MIR::RawZig.new(zig_code, "pipeline_#{rhs.class.name.split('::').last.downcase}",
         { consumes: [], produces: [], borrows: [] })
+      return MIR::Pipeline.new(node, inner, source_type, nil, nil, nil)
     end
 
     # RecoverOp: x s> RECOVER(default) -> (x catch default)

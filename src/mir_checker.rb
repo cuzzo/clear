@@ -153,6 +153,7 @@ class MIRChecker
     when MIR::BgBlock      then walk_mir(node.run_body, &block)
     when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
     when MIR::CatchWrapper then node.clause_bodies&.each { |b| walk_mir(b, &block) }
+    when MIR::Pipeline     then walk_mir_node(node.inner, &block)
     end
   end
 

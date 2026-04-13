@@ -116,6 +116,14 @@ class PipelineRewriter
       return node
     end
 
+    # Phase 2+: range source with EACH terminal and no intermediate stages uses
+    # the lazy MIR path (LazyRange(T) in lower_each). Bypass fusion so the
+    # BinaryOp reaches lower_smooth -> lower_each intact.
+    if real_source.is_a?(AST::RangeLit) && stages.empty? && terminal.is_a?(AST::EachOp)
+      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+      return node
+    end
+
     # CASE 1: Fusion candidate (chained fusible stages or ending in a fold/EachOp)
     is_fold = terminal.nil? || terminal.is_a?(AST::EachOp) ||
               TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) } ||

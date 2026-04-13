@@ -434,26 +434,33 @@ module PipeAnalysis
   end
 
   def analyze_each_op(node)
-    # EACH accepts arrays (metatype :array), pools, and @list:sharded collections.
+    # EACH accepts arrays (metatype :array), pools, @list:sharded collections, and ranges.
     lhs_type  = node.left.type_info
     is_pool   = lhs_type&.pool?
     is_list   = lhs_type&.list_collection?
     is_array  = node.left.metatype == :array
+    is_range  = node.left.is_a?(AST::RangeLit)
 
-    unless is_pool || is_list || is_array
-      error!(node.left, "Cannot EACH non-collection type #{node.left.resolved_type}. EACH requires an array, @list, @list:sharded(N), @pool, or @pool:sharded(N)")
+    unless is_pool || is_list || is_array || is_range
+      error!(node.left, "Cannot EACH non-collection type #{node.left.resolved_type}. EACH requires an array, @list, @list:sharded(N), @pool, @pool:sharded(N), or a range")
       node.full_type = :Void
       return
     end
 
-    item_type = if is_pool
+    item_type = if is_range
+      # Element type matches the range bound type (start expression's type)
+      start_ft = node.left.start.respond_to?(:full_type) ? node.left.start.full_type : :Number
+      start_ft || :Number
+    elsif is_pool || is_list
       lhs_type.element_type.resolved
     else
       lhs_type.element_type.resolved
     end
 
-    with_new_scope do
+    with_new_scope(current_scope) do
       # Mutable: EACH body may mutate the item via field assignment (_.field = value)
+      # Use current_scope as parent so outer variables remain visible for reassignment
+      # (sum = sum + _ inside EACH should reassign the outer sum, not shadow it).
       current_scope.declare("_", nil, item_type, true, false, nil, :stack)
       with_soa_tracking(node, item_type) do
         node.right.body.each { |stmt| visit(stmt) }

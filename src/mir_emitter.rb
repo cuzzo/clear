@@ -62,6 +62,7 @@ class MIREmitter
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
     when MIR::ScopeBlock        then emit_scope_block(node)
+    when MIR::Pipeline         then emit(node.inner)
     when MIR::RawZig           then node.code
     when MIR::BgBlock          then node.code
     when MIR::DoBlock          then node.code

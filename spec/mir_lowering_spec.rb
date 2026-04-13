@@ -1874,8 +1874,9 @@ RSpec.describe MIRLowering do
 
       fallback_lowering = MIRLowering.new(pipeline_fallback: ->(n) { "fallback_zig_code" })
       result = fallback_lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(result.code).to eq("fallback_zig_code")
+      expect(result).to be_a(MIR::Pipeline)
+      expect(result.inner).to be_a(MIR::RawZig)
+      expect(result.inner.code).to eq("fallback_zig_code")
     end
 
     it "raises on unhandled SMOOTH RHS" do

@@ -58,6 +58,25 @@ pub const CheatLib = struct {
         }
     };
 
+    // -----------------------------------------------------------------------
+    // LazyRange(T): zero-allocation lazy iterator over a half-open range [start, end).
+    // Used by the pipeline system for `(start..<end) s> EACH { ... }`.
+    // Protocol: var src = LazyRange(T).init(s, e); while (try src.next(rt)) |item| { ... }
+    pub fn LazyRange(comptime T: type) type {
+        return struct {
+            current: T,
+            end: T,
+            pub fn init(start: T, end: T) @This() {
+                return .{ .current = start, .end = end };
+            }
+            pub fn next(self: *@This(), _: *Runtime) !?T {
+                if (self.current >= self.end) return null;
+                defer self.current += 1;
+                return self.current;
+            }
+            pub fn deinit(_: *@This(), _: std.mem.Allocator) void {}
+        };
+    }
 
     // Read from a socket via io_uring IORING_OP_RECV.
     // Submits a single recv and yields; CQE result is the byte count.
