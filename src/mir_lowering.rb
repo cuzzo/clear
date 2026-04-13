@@ -693,7 +693,9 @@ class MIRLowering
         member_chain = mod_parts[1..].any? ? mod_parts[1..].join(".") : nil
         items << MIR::Import.new(mod_alias, mod_parts.first, member_chain)
       end
-      items << MIR::TypeAlias.new(node.name, "#{mod_alias}.#{node.name}")
+      # AS "ZigTypeExpr" allows aliasing to parameterized types like Parsed(JsonRecord).
+      zig_rhs = node.as_type ? "#{mod_alias}.#{node.as_type}" : "#{mod_alias}.#{node.name}"
+      items << MIR::TypeAlias.new(node.name, zig_rhs)
       items.length == 1 ? items.first : items
     elsif node.fields.empty?
       MIR::Noop.new("empty_local_extern_struct")
@@ -1261,13 +1263,17 @@ class MIRLowering
 
   def lower_extern_call(node)
     args = node.args.map { |a| lower(a) }
-    # Inject allocator as first arg for EXTERN FN with EFFECTS :alloc.
+    # Inject allocator for EXTERN FN with EFFECTS :alloc.
+    # Comptime type args (full_type == :Type) must precede the allocator in Zig
+    # (e.g., parseFromSlice(comptime T: type, allocator, ...)).
+    # Count leading type args from the ORIGINAL AST args to determine inject position.
     if node.respond_to?(:extern_effects) && (alloc_kind = node.extern_effects&.dig(:alloc))
       rt = MIR::Ident.new(@rt_name)
       alloc_call = alloc_kind == :heap \
         ? MIR::MethodCall.new(rt, "heapAlloc",  [], false) \
         : MIR::MethodCall.new(rt, "frameAlloc", [], false)
-      args = [alloc_call] + args
+      n_comptime = node.args.count { |a| a.respond_to?(:full_type) && a.full_type == :Type }
+      args = args[0, n_comptime] + [alloc_call] + args[n_comptime..]
     end
     mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
     MIR::Call.new("#{mod_prefix}#{node.name}", args, false)

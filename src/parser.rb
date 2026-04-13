@@ -778,6 +778,12 @@ class Parser
       close_method = consume(:STRING).value
     end
 
+    # Optional: AS "ZigTypeExpr" — alias to parameterized Zig type (e.g. Parsed(JsonRecord))
+    as_type = nil
+    if match!(:KEYWORD, 'AS')
+      as_type = consume(:STRING).value
+    end
+
     from_module = nil
     if match!(:KEYWORD, 'FROM')
       from_module = consume(:STRING).value
@@ -786,6 +792,7 @@ class Parser
     node = AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
     node.type_params = type_params if type_params.any?
     node.close_method = close_method
+    node.as_type = as_type
     node
   end
 

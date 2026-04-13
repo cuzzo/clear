@@ -521,6 +521,7 @@ module AST
     include Locatable
     attr_accessor :type_params   # [:T, :U] for EXTERN STRUCT Name<T, U>
     attr_accessor :close_method  # "deinit" for CLOSE "deinit" — auto-defer on scope exit
+    attr_accessor :as_type       # "Parsed(JsonRecord)" for AS "ZigTypeExpr" — parameterized alias
   }
   # EnumDef: ENUM Name { Variant1, Variant2, ... }
   # Declares a Zig enum type. variants is an Array of variant name strings.
