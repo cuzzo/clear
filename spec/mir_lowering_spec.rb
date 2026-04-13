@@ -1335,8 +1335,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(result.reason).to eq("do_block")
+      expect(result).to be_a(MIR::DoBlock)
       zig = emit(result)
       expect(zig).to include("WaitGroup")
       expect(zig).to include(".add(1)")

@@ -56,6 +56,7 @@ class MIREmitter
     when MIR::ScopeBlock        then emit_scope_block(node)
     when MIR::RawZig           then node.code
     when MIR::BgBlock          then node.code
+    when MIR::DoBlock          then node.code
     when MIR::CatchWrapper     then node.code
     when MIR::Comment          then "// #{node.text}"
     when MIR::Suppress         then "_ = &#{node.name};"

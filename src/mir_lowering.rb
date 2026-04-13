@@ -1397,6 +1397,7 @@ class MIRLowering
     n = node.branches.length
     wg_var = "__do#{id}_wg"
 
+    all_branch_bodies = []
     branch_parts = node.branches.each_with_index.map { |branch, i|
       ctx_type = "__DoBranchCtx#{id}_#{i}"
       ctx_var = "__do#{id}_ctx#{i}"
@@ -1411,16 +1412,18 @@ class MIRLowering
 
       capture_inits = ([".wg = &#{wg_var}"] + captured.map { |name, _| ".#{name} = &#{name}" }).join(", ")
 
-      # PHASE-3 (task #52): DO branch bodies are assembled as raw Zig strings inside
-      # a fiber run fn; allocating stmts are invisible to the checker until this
-      # path is replaced with MIR::FnDef for each branch.
+      # Lower branch body to MIR nodes (for checker visibility) and emit Zig code.
+      branch_mir = nil
       body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}.*"] }.to_h, rt_override: "__rt") do
-        branch[:body].map { |e|
-          code = emit_expr(lower(e))
+        body_stmts = branch[:body].map { |e| lower(e) }
+        branch_mir = body_stmts
+        body_stmts.map { |mir|
+          code = emit_expr(mir)
           code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
           code
         }.join("\n        ")
       end
+      all_branch_bodies << (branch_mir || [])
 
       task_cfg = task_config_zig(branch[:stack_size], branch[:computed_stack_tier])
       spawn_fn = pinned ? "try #{wg_var}.sched.submitSpawn" : "try CheatHeader.spawnBest"
@@ -1457,9 +1460,7 @@ class MIRLowering
           #{wg_var}.wait();
       }
     ZIG
-    MIR::RawZig.new(do_code, "do_block",
-      { consumes: [], produces: [], borrows: [] },
-      { allocates: false, return: :Void })
+    MIR::DoBlock.new(do_code, all_branch_bodies)
   end
 
   def lower_bg_block(node)
@@ -1526,12 +1527,15 @@ class MIRLowering
     bg_capture_map = captured.map { |name, _| [name, "__ctx_#{id}.#{name}"] }.to_h
     prev_bg_ptr_caps = @current_bg_pointer_captures
     @current_bg_pointer_captures = pointer_captures
-    # PHASE-3 (task #51): BG stream pipeline steps are assembled as raw Zig strings
-    # inside a fiber run fn; allocating steps are invisible to the checker until
-    # this path is replaced with MIR::FnDef.
+    # Lower the fiber body to MIR nodes (for checker visibility) and build Zig strings.
+    # run_body carries the MIR stmts so the checker can walk allocations inside the fiber.
+    run_body = nil
     stmt_code, result_line = with_fiber_capture_map(bg_capture_map, rt_override: bg_rt) do
+      body_mir = []
       sc = pre_steps.map { |step|
-        code = emit_expr(lower(step[:expr]))
+        mir = lower(step[:expr])
+        code = emit_expr(mir)
+        body_mir << (step[:binding] ? MIR::Let.new(step[:binding], mir, false, nil, nil) : mir)
         if step[:binding]
           "const #{step[:binding]} = #{code};"
         elsif code.strip.end_with?(";") || code.strip.end_with?("}")
@@ -1546,15 +1550,17 @@ class MIRLowering
       last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
       rl = if last_step.nil? || is_void || last_is_assign
         if last_step
-          # PHASE-3 (task #51): last step (void/assign) in BG stream fiber body.
-          last_code = emit_expr(lower(last_step[:expr]))
+          last_mir = lower(last_step[:expr])
+          body_mir << last_mir
+          last_code = emit_expr(last_mir)
           (last_code.strip.end_with?("}") || last_code.strip.end_with?(";")) ? last_code : "#{last_code};"
         else
           ""
         end
       else
-        # PHASE-3 (task #51): result step in BG stream fiber body.
-        result_code = emit_expr(lower(last_step[:expr]))
+        last_mir = lower(last_step[:expr])
+        body_mir << last_mir
+        result_code = emit_expr(last_mir)
         # Apply scope-exit promotion: frame strings must be heap-duped so they
         # outlive the fiber's frame, which is rewound when the fiber exits.
         if node.exit_promote&.dig(:strategy) == :string_dupe
@@ -1566,6 +1572,7 @@ class MIRLowering
           "__ctx_#{id}.inner.result = #{result_code};"
         end
       end
+      run_body = body_mir
       [sc, rl]
     end
     @current_bg_pointer_captures = prev_bg_ptr_caps
@@ -1617,7 +1624,7 @@ class MIRLowering
           break :#{blk_label} #{promise_var};
       }
     ZIG
-    MIR::BgBlock.new(bg_code, captured)
+    MIR::BgBlock.new(bg_code, captured, run_body || [])
   end
 
   def lower_bg_stream_block(node)
@@ -1715,7 +1722,8 @@ class MIRLowering
           break :#{blk_label} #{stream_var};
       }
     ZIG
-    MIR::BgBlock.new(sg_code, captured)
+    # run_body populated in Phase 3b (task #51)
+    MIR::BgBlock.new(sg_code, captured, [])
   end
 
   def lower_yield(node)

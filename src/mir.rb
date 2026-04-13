@@ -246,7 +246,10 @@ module MIR
   # Background block. Wraps raw Zig code for a fiber spawn but exposes
   # capture_analysis for ownership verification (BG_ESCAPE check).
   # captures: { name => Type-like object } from capture_analysis.captures
-  BgBlock = Struct.new(:code, :captures) do
+  # run_body: [MIR::Stmt] — lowered MIR for the fiber run function body.
+  #   Carries the MIR so the checker can see allocations inside the fiber.
+  #   Emission still uses code (raw Zig). nil for legacy callers; checker skips.
+  BgBlock = Struct.new(:code, :captures, :run_body) do
     include Stmt
     def expr?; true; end
   end
@@ -255,6 +258,14 @@ module MIR
   # error-path reassignment metadata for allocator consistency (INV-9).
   # error_reassigns: [{ name: String, alloc: :heap/:frame, line: int }]
   CatchWrapper = Struct.new(:code, :error_reassigns) do
+    include Stmt
+  end
+
+  # DO block. Wraps raw Zig code for fork-join parallel branches.
+  # branch_bodies: Array<Array<MIR::Stmt>> — one per branch, lowered MIR.
+  #   Carries the MIR so the checker can see allocations inside DO branches.
+  #   Emission still uses code (raw Zig).
+  DoBlock = Struct.new(:code, :branch_bodies) do
     include Stmt
   end
 

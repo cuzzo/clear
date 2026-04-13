@@ -115,6 +115,8 @@ class MIRChecker
     when MIR::DeferStmt   then walk_mir_node(node.body, &block) if node.body
     when MIR::ErrDeferStmt then walk_mir_node(node.body, &block) if node.body
     when MIR::Let          then yield node.init, {} if node.init.is_a?(MIR::LambdaExpr)
+    when MIR::BgBlock      then walk_mir(node.run_body, &block)
+    when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
     end
   end
 
