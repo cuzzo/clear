@@ -486,7 +486,7 @@ RSpec.describe MIREmitter do
     end
 
     it "returns nil for pending strategies" do
-      %i[container_store ret_fields bg_string catch_string_dupe or_fallback_dupe hpt_string_dupe hpt_promote].each do |s|
+      %i[ret_fields catch_string_dupe hpt_string_dupe hpt_promote].each do |s|
         node = MIR::EscapePromote.new("x", nil, s, nil, "rt")
         expect(e.emit(node)).to be_nil
       end
@@ -595,10 +595,6 @@ RSpec.describe MIREmitter do
       expect(e.emit(MIR::FrameRestore.new("rt"))).to eq("defer rt.restoreFrameMark(frame_mark);")
     end
 
-    it "emits preserve and rewind" do
-      node = MIR::PreserveAndRewind.new(MIR::Ident.new("result"), "rt")
-      expect(e.emit(node)).to eq("try rt.preserveAndRewind(frame_mark, result)")
-    end
   end
 
   # =========================================================================

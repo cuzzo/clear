@@ -80,8 +80,6 @@ class MIREmitter
     when MIR::MakeList         then emit_make_list(node)
     when MIR::FrameSave        then emit_frame_save(node)
     when MIR::FrameRestore     then emit_frame_restore(node)
-    when MIR::PreserveAndRewind then emit_preserve_rewind(node)
-
     # --- Verification-only (no codegen) ---
     when MIR::AllocMark, MIR::ReturnMark, MIR::ReassignMark, MIR::FieldCleanupMark
       nil
@@ -447,10 +445,8 @@ class MIREmitter
       "#{node.name}.alloc = #{rt}.heapAlloc();"
     when :generic
       "try CheatLib.promote(#{node.zig_type}, #{rt}, &#{node.name});"
-    when :container_store, :ret_fields, :bg_string,
-         :catch_string_dupe, :or_fallback_dupe,
-         :hpt_string_dupe, :hpt_promote
-      # Pending/consumed by downstream handlers. No direct emission.
+    when :ret_fields, :catch_string_dupe, :hpt_string_dupe, :hpt_promote
+      # Annotation now lives on AST nodes; EscapePromote with these strategies is a no-op.
       nil
     else
       raise "MIREmitter#emit_escape_promote: unhandled strategy :#{node.strategy}"
@@ -558,10 +554,6 @@ class MIREmitter
 
   def emit_frame_restore(node)
     "defer #{node.rt_expr}.restoreFrameMark(frame_mark);"
-  end
-
-  def emit_preserve_rewind(node)
-    "try #{node.rt_expr}.preserveAndRewind(frame_mark, #{emit(node.value)})"
   end
 
   # --- Expression emitters ---

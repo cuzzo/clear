@@ -881,7 +881,7 @@ end
 # (post-lowering). See spec/mir_checker_spec.rb for unit tests.
 
 # ===========================================================================
-# BG escape promotion: MIR::Promote(:bg_string) for string captures
+# BG escape promotion: BgBlock.capture_string_dupes annotation for string captures
 # (Tests MIRPass behavior, not checker)
 # ===========================================================================
 RSpec.describe "BG escape promotion for string captures" do
@@ -899,11 +899,33 @@ RSpec.describe "BG escape promotion for string captures" do
       fn_nodes[fn_name].body
     end
 
-    def bg_string_promotes_in(body)
-      body.select { |s| s.is_a?(MIR::Promote) && s.strategy == :bg_string }.map(&:name)
+    def bg_string_dupes_in(body)
+      # Find all BgBlock nodes (direct or nested in VarDecl/BindExpr/MethodCall args)
+      dupes = []
+      body.each do |stmt|
+        collect_bg_string_dupes(stmt, dupes)
+      end
+      dupes
     end
 
-    it "emits MIR::Promote(:bg_string) for direct BG assignment capturing a string" do
+    def collect_bg_string_dupes(node, result)
+      return unless node
+      if node.is_a?(AST::BgBlock)
+        result.concat(node.capture_string_dupes&.to_a || [])
+        return
+      end
+      # Recurse into value/args
+      [:value, :args, :target, :receiver].each do |field|
+        val = node.respond_to?(field) ? node.send(field) : nil
+        if val.is_a?(Array)
+          val.each { |v| collect_bg_string_dupes(v, result) }
+        else
+          collect_bg_string_dupes(val, result)
+        end
+      end
+    end
+
+    it "annotates capture_string_dupes on BgBlock for direct BG assignment capturing a string" do
       body = mir_body_for(<<~CLEAR, "test")
         FN greet!(name: String) RETURNS String -> RETURN name; END
         FN test() RETURNS Void ->
@@ -913,10 +935,10 @@ RSpec.describe "BG escape promotion for string captures" do
             RETURN;
         END
       CLEAR
-      expect(bg_string_promotes_in(body)).to include("msg")
+      expect(bg_string_dupes_in(body)).to include("msg")
     end
 
-    it "emits MIR::Promote(:bg_string) for BG inside a MethodCall arg" do
+    it "annotates capture_string_dupes on BgBlock inside a MethodCall arg" do
       body = mir_body_for(<<~CLEAR, "test")
         FN greet!(name: String) RETURNS String -> RETURN name; END
         FN test() RETURNS Void ->
@@ -927,10 +949,10 @@ RSpec.describe "BG escape promotion for string captures" do
             RETURN;
         END
       CLEAR
-      expect(bg_string_promotes_in(body)).to include("msg")
+      expect(bg_string_dupes_in(body)).to include("msg")
     end
 
-    it "emits MIR::Promote(:bg_string) for BG inside a FuncCall arg" do
+    it "annotates capture_string_dupes on BgBlock inside a FuncCall arg" do
       body = mir_body_for(<<~CLEAR, "test")
         FN greet!(name: String) RETURNS String -> RETURN name; END
         FN consume(p: ~Void) RETURNS Void -> NEXT p; RETURN; END
@@ -940,10 +962,10 @@ RSpec.describe "BG escape promotion for string captures" do
             RETURN;
         END
       CLEAR
-      expect(bg_string_promotes_in(body)).to include("msg")
+      expect(bg_string_dupes_in(body)).to include("msg")
     end
 
-    it "does NOT emit MIR::Promote(:bg_string) for string literals (no frame alloc)" do
+    it "does NOT annotate capture_string_dupes for string literals (no frame alloc)" do
       body = mir_body_for(<<~CLEAR, "test")
         FN test() RETURNS Void ->
             p: ~Void = BG { print("hello"); };
@@ -951,7 +973,7 @@ RSpec.describe "BG escape promotion for string captures" do
             RETURN;
         END
       CLEAR
-      # "hello" is a literal, not a frame-allocated binding — no promote needed
-      expect(bg_string_promotes_in(body)).to be_empty
+      # "hello" is a literal, not a frame-allocated binding — no dupe annotation needed
+      expect(bg_string_dupes_in(body)).to be_empty
     end
 end

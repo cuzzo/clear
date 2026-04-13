@@ -302,6 +302,7 @@ module AST
     include Locatable
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
+    attr_accessor :container_promote_zig_type  # stamped by MIRPass: Zig type string when indexed store needs frame-to-heap promote
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do
@@ -315,6 +316,7 @@ module AST
     include Locatable
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :storage        # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
+    attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
   end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
@@ -567,6 +569,7 @@ module AST
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash + safety flags
     attr_accessor :exit_promote  # Hash { strategy: :string_dupe } when exit value needs scope-exit promotion
+    attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the BG run fn
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.
@@ -582,6 +585,7 @@ module AST
     include Locatable
     attr_accessor :computed_stack_tier
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
+    attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the stream run fn
   end
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.

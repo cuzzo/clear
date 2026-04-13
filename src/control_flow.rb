@@ -2747,8 +2747,13 @@ class MIRPass
         next unless t && t.needs_escape_promotion?
         next if t.needs_pointer_passing?
         next if @bg_heap_upgraded&.include?(name)  # Already heap from Phase 1.5b
-        strategy = t.list_collection? ? :list : :bg_string
-        result << MIR::Promote.new(bg.token, name, t.zig_type, strategy, nil)
+        if t.list_collection?
+          result << MIR::Promote.new(bg.token, name, t.zig_type, :list, nil)
+        else
+          # :bg_string: annotate directly on BgBlock (no MIR::Promote needed)
+          bg.capture_string_dupes ||= Set.new
+          bg.capture_string_dupes.add(name)
+        end
       end
     end
   end
@@ -2775,7 +2780,8 @@ class MIRPass
     return unless or_node
     return unless or_node.right.is_a?(AST::StructLit)
     return unless or_rescue_needs_fallback_dupe?(or_node)
-    result << MIR::Promote.new(or_node.token, :__or_fallback, nil, :or_fallback_dupe, nil)
+    # Annotate directly on BinaryOp node (no MIR::Promote needed)
+    or_node.or_fallback_dupe = true
   end
 
   # Walk into a statement's value expression to find an OrRescue node.
@@ -2986,7 +2992,8 @@ class MIRPass
     val_ti = Type.new(val_ti) if val_ti && !val_ti.is_a?(Type)
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
-    result << MIR::Promote.new(stmt.token, nil, val_ti.zig_type, :container_store, nil)
+    # Annotate directly on Assignment node (no MIR::Promote needed)
+    stmt.container_promote_zig_type = val_ti.zig_type
   end
 
   # Resolve the INDEX_OPS :set entry for a container type.

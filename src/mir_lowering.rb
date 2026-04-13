@@ -425,12 +425,8 @@ class MIRLowering
     when :hpt_string_dupe, :hpt_promote
       # Annotation now lives on the ReturnNode (.hpt_return_promote). No-op here.
       nil
-    when :container_store
-      @pending_container_promote = { zig_type: node.zig_type }
-      nil
-    when :bg_string
-      @pending_bg_string_promotes ||= Set.new
-      @pending_bg_string_promotes.add(node.name)
+    when :container_store, :bg_string, :or_fallback_dupe
+      # These strategies now use direct node annotations; MIR::Promote is no longer inserted for them.
       nil
     else
       MIR::EscapePromote.new(
@@ -1486,9 +1482,8 @@ class MIRLowering
       pointer_captures.include?(name) ? "#{name}: *#{zig_t}," : "#{name}: #{zig_t},"
     }.join("\n        ")
 
-    # String promotions from MIR::Promote(:bg_string)
-    bg_string_promotes = @pending_bg_string_promotes || Set.new
-    @pending_bg_string_promotes = nil
+    # String captures annotated directly on BgBlock.capture_string_dupes
+    bg_string_promotes = node.capture_string_dupes || Set.new
     promoted_names = {}
     bg_string_promotes.each { |name| promoted_names[name] = "__bgp_#{id}_#{name}" }
 
@@ -1627,8 +1622,8 @@ class MIRLowering
     captured = analysis&.captures || {}
     rt_name = @rt_name
 
-    bg_string_promotes = @pending_bg_string_promotes || Set.new
-    @pending_bg_string_promotes = nil
+    # String captures annotated directly on BgStreamBlock.capture_string_dupes
+    bg_string_promotes = node.capture_string_dupes || Set.new
     promoted_names = {}
     bg_string_promotes.each { |name| promoted_names[name] = "__sgp_#{id}_#{name}" }
 
@@ -2375,9 +2370,8 @@ class MIRLowering
     right = lower(node.right)
 
     if is_error
-      # MIR::Promote(:or_fallback_dupe) for struct fallbacks with string fields
-      if @pending_or_fallback_dupe && node.right.is_a?(AST::StructLit)
-        @pending_or_fallback_dupe = false
+      # or_fallback_dupe annotated directly on BinaryOp node
+      if node.or_fallback_dupe && node.right.is_a?(AST::StructLit)
         ret_type = node.right.full_type
         ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
         resolved = ret_type&.resolved
@@ -2948,9 +2942,10 @@ class MIRLowering
         end
       when :container_promote
         unless val_ti&.string?
-          val_zig = emit_expr(val)
-          new_zig = apply_container_promote_zig(val_zig, rt_name)
-          if new_zig != val_zig
+          zig_type = node.container_promote_zig_type
+          if zig_type
+            val_zig = emit_expr(val)
+            new_zig = apply_container_promote_zig(val_zig, rt_name, zig_type)
             val = MIR::InlineZig.new(new_zig, "index_promote")
             val.stdlib_def = { allocates: true }
           end
@@ -3535,13 +3530,9 @@ class MIRLowering
     true
   end
 
-  # Apply container_promote: consume pending promote from MIR::Promote(:container_store)
-  def apply_container_promote_zig(val_ref, rt_name)
-    promote = @pending_container_promote
-    return val_ref unless promote
-    @pending_container_promote = nil
-    zig_t = promote[:zig_type]
-    "blk_prm: {\n    var __prm = #{val_ref};\n    try CheatLib.promote(#{zig_t}, #{rt_name}, &__prm);\n    break :blk_prm __prm;\n}"
+  # Apply container_promote: zig_type comes from Assignment.container_promote_zig_type annotation
+  def apply_container_promote_zig(val_ref, rt_name, zig_type)
+    "blk_prm: {\n    var __prm = #{val_ref};\n    try CheatLib.promote(#{zig_type}, #{rt_name}, &__prm);\n    break :blk_prm __prm;\n}"
   end
 
   # Check if a value node is an Rc/Arc identifier that needs retain (not moved, not unwrapped)
