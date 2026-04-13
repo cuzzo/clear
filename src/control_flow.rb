@@ -1391,10 +1391,36 @@ module LoopFrameAnalysis
 
   # ── SHARD context frame-alloc flags ──────────────────────────────────────
 
+  # Deep walk that descends into all struct children, including BinaryOp and
+  # DoBlock branches (which are Arrays of Hashes with :body keys).
+  # AST.walk_body only recurses into control-flow nodes; pipeline BinaryOp
+  # chains are not in that list, so ConcurrentOp nested inside them is missed.
+  def self.walk_all_nodes(nodes, visited = Set.new, &block)
+    return unless nodes
+    nodes = [nodes] unless nodes.is_a?(Array)
+    nodes.each do |node|
+      case node
+      when AST::Locatable
+        next unless visited.add?(node.object_id)
+        yield node
+        next unless node.class.respond_to?(:members)
+        node.class.members.each do |m|
+          child = node.send(m) rescue next
+          walk_all_nodes(child, visited, &block) if child
+        end
+      when Array
+        walk_all_nodes(node, visited, &block)
+      when Hash
+        # DoBlock branches: { label:, body: [...] } and similar hash-wrapped bodies
+        node.each_value { |v| walk_all_nodes(v, visited, &block) if v }
+      end
+    end
+  end
+
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
   def self.update_shard_contexts!(body, fn_nodes)
-    AST.walk_body(body) do |node|
+    walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
       ctx = node.shard_context
 
@@ -1417,7 +1443,11 @@ module LoopFrameAnalysis
     case expr
     when AST::FuncCall
       fn = fn_nodes[expr.name]
-      fn&.uses_frame && fn.return_provenance != :heap
+      # uses_frame=true means the function frame-allocates internally (e.g. intToString
+      # intermediates). Even when return_provenance=:heap (string heap-dup on return),
+      # those intermediate frame allocations accumulate in the caller's frame arena.
+      # The SHARD loop must saveLoopMark/restoreLoopMark to rewind them each iteration.
+      fn&.uses_frame ? true : false
     when AST::MethodCall
       false  # method calls on types are not frame-allocating routing keys
     else

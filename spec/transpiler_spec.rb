@@ -242,7 +242,7 @@ RSpec.describe ZigTranspiler do
   describe "SHARD pipeline producer loop frame marks" do
     # Phase 2 (LoopFrameAnalysis): SHARD key/body frame-alloc flags are computed
     # in Pass 2. This test will pass when LoopFrameAnalysis sets them correctly.
-    pending "Phase 2: emits saveLoopMark in SHARD producer when key expression allocates from frame" do
+    it "Phase 2: emits saveLoopMark in SHARD producer when key expression allocates from frame" do
       src = <<~CLEAR
         FN makeKey(n: Int64) RETURNS String ->
             RETURN "k:${toString(n)}";
