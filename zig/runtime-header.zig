@@ -2641,9 +2641,11 @@ pub const CheatLib = struct {
     /// Locked(T): a mutex-protected heap-allocated value.
     /// Must remain at a stable address — never copy or move after first use.
     /// Acquire exclusive access via acquire(); release via guard.release().
+    /// align(64): each Locked(T) occupies at least one full cache line, preventing
+    /// false sharing when multiple Locked values are heap-allocated adjacently.
     pub fn Locked(comptime T: type) type {
         return struct {
-            mutex: std.Thread.Mutex = .{},
+            mutex: std.Thread.Mutex align(64) = .{},
             data: T,
 
             const Self = @This();

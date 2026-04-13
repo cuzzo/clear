@@ -1,16 +1,16 @@
 require "rspec"
 require_relative "../src/transpiler"
 
-# Tests for LoopFrameAnalysis (Pass 2.5) -- the module that sets mark_per_iter,
-# loop_preserve_vars, and promotes outer containers/fields to heap.
+# Tests for LoopFrameAnalysis (Pass 2.5) -- the module that sets mark_per_iter
+# and promotes outer containers/fields to heap.
 #
 # Groups:
 #   A  mark_per_iter = true  (loop-local frame collections)
 #   B  mark_per_iter = false (no frame locals, or locals that escape)
-#   C  loop_preserve_vars    (outer string reassignment with frame concat)
+#   C  heap carry var promotion (outer string reassignment upgraded to heap)
 #   D  outer container heap promotion (direct_outer_mutations)
 #   E  outer struct/map field promotion (promote_outer_field_assigns!)
-#   F  Zig output: saveLoopMark/restoreLoopMark / loopPreserveAndRewind emitted
+#   F  Zig output: saveLoopMark/restoreLoopMark emitted
 
 RSpec.describe LoopFrameAnalysis do
 
@@ -231,11 +231,10 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::WhileLoop) }
       resp_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "resp" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to be_nil
-      expect(resp_decl.type_info.heap_provenance?).to be true
+            expect(resp_decl.type_info.heap_provenance?).to be true
     end
 
-    it "loop_preserve_vars stays nil when no outer string reassignment occurs" do
+    it "no heap carry promotion when no outer string reassignment occurs" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE i = 0_i64;
@@ -249,8 +248,7 @@ RSpec.describe LoopFrameAnalysis do
       CLEAR
       loop = main_fn(ast).body.find { |s| s.is_a?(AST::WhileLoop) }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to be_nil
-    end
+          end
 
     it "Zig output uses heap concat (not loopPreserveAndRewind) for outer string variable" do
       src = <<~CLEAR
@@ -293,8 +291,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to be_nil
-      expect(last_decl.type_info.heap_provenance?).to be true
+            expect(last_decl.type_info.heap_provenance?).to be true
     end
 
     it "outer string reassigned with method call result → declaration promoted to heap" do
@@ -313,8 +310,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       last_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "last" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to be_nil
-      expect(last_decl.type_info.heap_provenance?).to be true
+            expect(last_decl.type_info.heap_provenance?).to be true
     end
 
     it "outer string reassigned with concat of outer (non-local) vars → declaration promoted to heap" do
@@ -337,8 +333,7 @@ RSpec.describe LoopFrameAnalysis do
       loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       result_decl = fn.body.find { |s| (s.is_a?(AST::VarDecl) || s.is_a?(AST::BindExpr)) && s.name.to_s == "result" }
       expect(loop.mark_per_iter).to be true
-      expect(loop.loop_preserve_vars).to be_nil
-      expect(result_decl.type_info.heap_provenance?).to be true
+            expect(result_decl.type_info.heap_provenance?).to be true
     end
 
   end

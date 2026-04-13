@@ -1054,10 +1054,9 @@ private
       validate_tight_body!(node.body, node)
     end
 
-    # mark_per_iter and container heap-promotion are set by LoopFrameAnalysis
-    # in Pass 2, after CleanupClassifier has finalized every binding's allocator.
+    # mark_per_iter is set by LoopFrameAnalysis in Pass 2, after CleanupClassifier
+    # has finalized every binding's allocator.
     node.mark_per_iter = false
-    node.loop_preserve_vars = nil
 
     node.full_type = :Void
   end
@@ -1160,10 +1159,9 @@ private
       validate_tight_body!(node.do_branch, node)
     end
 
-    # mark_per_iter and container heap-promotion are set by LoopFrameAnalysis
-    # in Pass 2, after CleanupClassifier has finalized every binding's allocator.
+    # mark_per_iter is set by LoopFrameAnalysis in Pass 2, after CleanupClassifier
+    # has finalized every binding's allocator.
     node.mark_per_iter = false
-    node.loop_preserve_vars = nil
 
     node.full_type = :Void
   end

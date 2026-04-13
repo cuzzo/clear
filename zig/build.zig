@@ -191,7 +191,6 @@ pub fn build(b: *std.Build) void {
         "queues-benchmark-test.zig",
         "scheduler-benchmark-test.zig",
         "frame-cache-bench-test.zig",
-        "heap-string-return-bench-test.zig",
     };
 
     for (benchmark_files) |filename| {

@@ -293,12 +293,13 @@ pub const Runtime = struct {
     }
 
     pub fn restoreLoopMark(self: *Runtime, mark: OverflowArena.Mark) void {
-        // Per-iteration rewind: reset cursor only, do NOT free overflow blocks.
-        // Overflow blocks may contain data allocated earlier in the same outer
-        // iteration (e.g. socketRead results, outer-scope strings). trimExcess
-        // would free those blocks while they're still live. restoreFrameMark
-        // calls rewind (with trimExcess) at function exit, which is correct.
-        self.overflow_arena.softRewind(mark);
+        // Per-iteration loop rewind: reset cursor + free large_objects, keep blocks.
+        // Large objects (allocs > next page size, e.g. 80KB ArrayLists) must be freed
+        // each iteration or they accumulate unboundedly across N iterations.
+        // Overflow blocks are kept for reuse -- freeing and re-allocating them every
+        // iteration adds malloc pressure for tight string loops.
+        // restoreFrameMark calls full rewind() at function exit to release blocks.
+        self.overflow_arena.loopRewind(mark);
     }
 
     pub fn frameAlloc(self: *Runtime) std.mem.Allocator {

@@ -203,13 +203,28 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
             self.trimExcess(mark);
         }
 
-        /// Reset cursor and block index to mark position WITHOUT freeing blocks.
-        /// Used for per-iteration loop marks: keeps overflow blocks alive until
-        /// restoreFrameMark fires at function exit (which calls full rewind).
-        /// In debug mode all allocations are large_objects (no bump blocks), so
-        /// we must also free large objects here — otherwise per-iteration marks
-        /// never reclaim memory and the large_objects list grows unboundedly.
-        pub fn softRewind(self: *Self, mark: Mark) void {
+        /// Per-iteration loop rewind: reset cursor + free large objects allocated
+        /// after the mark, but keep overflow blocks for reuse next iteration.
+        /// Large objects (allocs larger than the next page size, e.g. 80KB ArrayLists)
+        /// must be freed each iteration or they accumulate unboundedly. Overflow
+        /// blocks are kept because freeing and re-allocating them every iteration
+        /// adds unnecessary malloc pressure for tight string loops.
+        /// restoreFrameMark calls full rewind() at function exit to release blocks.
+        pub fn loopRewind(self: *Self, mark: Mark) void {
+            self.softRewind(mark);
+            // softRewind already frees large_objects in debug_mode.
+            // In production mode, free them here to prevent unbounded accumulation.
+            if (!debug_mode) {
+                while (self.large_objects.items.len > mark.large_obj_count) {
+                    const popped = self.large_objects.pop().?;
+                    self.child_allocator.rawFree(popped.slice, popped.alignment, @returnAddress());
+                }
+            }
+        }
+
+        /// Reset cursor and block index to mark position WITHOUT freeing blocks or
+        /// large objects. Internal implementation step used by rewind() and loopRewind().
+        fn softRewind(self: *Self, mark: Mark) void {
             const has_static = (self.static_block.len > 0);
             if (has_static) {
                 self.current_block_index = if (mark.block_index == 0) 0 else mark.block_index - 1;
