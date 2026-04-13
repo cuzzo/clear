@@ -1668,11 +1668,13 @@ class MIRLowering
     @current_stream_is_inf = is_inf
 
     stream_capture_map = captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
-    # PHASE-3 (task #51): BG stream body assembled as raw Zig string inside fiber
-    # run fn; allocating exprs are invisible to the checker until this uses MIR::FnDef.
+    # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
+    stream_run_body = nil
     body_code = with_fiber_capture_map(stream_capture_map, rt_override: "__rt") do
-      node.body.map { |expr|
-        code = emit_expr(lower(expr))
+      body_mir = node.body.map { |expr| lower(expr) }
+      stream_run_body = body_mir
+      body_mir.map { |mir|
+        code = emit_expr(mir)
         code += ";" unless code.strip.end_with?(";") || code.strip.end_with?("}")
         code
       }.join("\n            ")
@@ -1722,8 +1724,7 @@ class MIRLowering
           break :#{blk_label} #{stream_var};
       }
     ZIG
-    # run_body populated in Phase 3b (task #51)
-    MIR::BgBlock.new(sg_code, captured, [])
+    MIR::BgBlock.new(sg_code, captured, stream_run_body || [])
   end
 
   def lower_yield(node)
