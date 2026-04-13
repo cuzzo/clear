@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
     -- loop_appends_outer_list? ensures mark_per_iter = false (no frame rewind
     -- per iteration, so captured 'filepath' slices stay valid until NEXT).
     MUTABLE futures: ~Int64[]@list = [];
-    FOR i IN (0_i64 ..< n) DO
+    FOR i IN (0 ..< n) DO
         filepath = "${data_dir}/${files[i]}";
         futures.append(BG {
             content = readFile(filepath);
@@ -49,13 +49,13 @@ FN main() RETURNS Void ->
     -- NEXT calls .next() which blocks until the fiber completes.
     -- files[j] gives the actual filename for future j, regardless of listDir order.
     MUTABLE results: SearchResult[]@list = [];
-    FOR j IN (0_i64 ..< n) DO
+    FOR j IN (0 ..< n) DO
         c: Int64 = NEXT futures[j];
         results.append(SearchResult{ file_idx: j, count: c });
     END
 
     -- Selection sort: find top-10 by swapping into the first 10 positions.
-    FOR k IN (0_i64 ..< 10) DO
+    FOR k IN (0 ..< 10) DO
         MUTABLE best: Int64 = k;
         FOR m IN (k + 1 ..< n) DO
             IF results[m].count > results[best].count THEN
