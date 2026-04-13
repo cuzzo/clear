@@ -275,8 +275,10 @@ module PipeAnalysis
 
   def analyze_reduce_op(node)
     # REDUCE: list s> REDUCE(initial) acc + _.value
-    require_array_input!(node, "REDUCE")
-    item_type = node.left.type_info.element_type.resolved
+    # Also accepts range source for the fused lazy path.
+    is_range = node.left.is_a?(AST::RangeLit)
+    require_array_input!(node, "REDUCE", allow_range: is_range)
+    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
 
     # Analyze the initial value to get the accumulator type
     visit(node.right.initial_value)

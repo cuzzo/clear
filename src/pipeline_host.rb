@@ -288,6 +288,12 @@ class PipelineHost
       return lower_range_fold(range_chain[:source], range_chain[:stages], rhs, node) if range_chain
     end
 
+    # Range source with REDUCE: fuse into a single accumulating while loop.
+    if rhs.is_a?(AST::ReduceOp)
+      range_chain = unwrap_range_chain(lhs)
+      return lower_range_reduce(range_chain[:source], range_chain[:stages], rhs) if range_chain
+    end
+
     case rhs
     when AST::CountOp   then lower_count(lhs, rhs, node)
     when AST::SumOp     then lower_sum(lhs, rhs, node)
@@ -1427,6 +1433,30 @@ class PipelineHost
         capture_name, nil, nil, nil),
       *post_loop_stmts,
       MIR::BreakStmt.new(label, result_expr)
+    ])
+  end
+
+  # Emit a single fused accumulating while loop for range s> stages s> REDUCE(init) body.
+  # Returns a MIR::BlockExpr so the accumulated result can be used as an expression.
+  def lower_range_reduce(range_lit, stages, reduce_op)
+    p = build_lazy_range_prefix(range_lit, stages)
+    item_var = p[:item_var]
+
+    label    = next_pipe_label
+    acc_zig  = transpile_type(reduce_op.full_type.to_s)
+    init_mir = visit_mir(reduce_op.initial_value)
+    expr_mir = with_pipeline_context(placeholder: item_var, acc: "acc") {
+      visit_mir(reduce_op.expression)
+    }
+
+    MIR::BlockExpr.new(label, [
+      p[:range_let], *p[:outer_stmts],
+      MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+      MIR::WhileStmt.new(
+        MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+        [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)],
+        p[:initial_capture], nil, nil, nil),
+      MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
     ])
   end
 
