@@ -3357,6 +3357,10 @@ class MIRLowering
     if node.promote_ret_wrap == :var && ret_field_promote && value
       rt = MIR::Ident.new(rt_name)
       stmts = [MIR::Let.new("__ret", value, true, nil, nil)]
+      # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
+      # fields of __ret.  Phase 4 will replace this frame+promote pattern with a
+      # direct HeapCreate so the AllocMark reflects an actual upfront allocation.
+      stmts << MIR::AllocMark.new("__ret", :promote, :heap)
       if ret_field_promote[:fields]
         ret_field_promote[:fields].each do |fname|
           stmts << MIR::ExprStmt.new(
@@ -3395,6 +3399,9 @@ class MIRLowering
         zig_t = hpt_promote.zig_type
         stmts = [
           MIR::Let.new("__hpt_ret", value, true, zig_t, nil),
+          # AllocMark documents heap allocations done by promoteDeep.
+          # Phase 4 will replace this with a direct HeapCreate at declaration.
+          MIR::AllocMark.new("__hpt_ret", :promote, :heap),
           MIR::ExprStmt.new(
             MIR::Call.new("CheatLib.promoteDeep", [MIR::Ident.new(zig_t), rt, MIR::AddressOf.new(MIR::Ident.new("__hpt_ret"))], true), false),
           MIR::ReturnStmt.new(MIR::Ident.new("__hpt_ret"))
