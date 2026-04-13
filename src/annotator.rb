@@ -3166,11 +3166,20 @@ private
     end
 
     # ~T[] (bare dynamic tense array) is not a valid form — give a directed error.
-    if promise_type.tense_type.array? && promise_type.tense_type.dynamic?
+    # Exception: ~T[]@list (promise_list) is valid — it's a dynamic list of promises.
+    if promise_type.tense_type.array? && promise_type.tense_type.dynamic? && !promise_type.promise_list?
       error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, or ~T[?] for an open/closeable stream.")
     end
 
-    if promise_type.bounded_stream?
+    if promise_type.promise_list?
+      # NEXT on ~T[]@list: await all promises, return T[]@list.
+      # The promise list is linearly consumed — each inner promise is freed by its next() call.
+      if node.expr.is_a?(AST::Identifier)
+        og_set_moved(node.expr.name)
+      end
+      elem_sym = promise_type.tense_type.element_type.to_sym
+      node.full_type = Type.new(:"#{elem_sym}[]", collection: :list)
+    elsif promise_type.bounded_stream?
       # NEXT on ~T[N]: returns T (the element type).
       # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
       node.full_type = promise_type.stream_element_type.to_sym

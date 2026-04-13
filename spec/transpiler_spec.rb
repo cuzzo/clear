@@ -1353,6 +1353,30 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
+  # NEXT on ~T[]@list (promise list await-all)
+  # ===========================================================================
+  describe "NEXT on promise list (~T[]@list)" do
+    it "emits an await-all loop that collects results into a frame list" do
+      src = <<~CLEAR
+        FN work(n: Int64) RETURNS Int64 -> RETURN n; END
+        FN main() RETURNS Void ->
+            MUTABLE futures: ~Int64[]@list = [];
+            futures.append(BG { work(1); });
+            futures.append(BG { work(2); });
+            results: Int64[]@list = NEXT futures;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # Should emit the labeled block with for-loop over futures.items
+      expect(zig).to include("for (futures.items)")
+      expect(zig).to include(".append(")
+      expect(zig).to include("__p.next()")
+      expect(zig).to include("frameAlloc()")
+    end
+  end
+
+  # ===========================================================================
   # INV regression: memory safety invariant checks
   # ===========================================================================
 
