@@ -9,14 +9,16 @@
 -- JSON format: {"id":N,"data":[1,2,3,...,size]}
 -- Size distribution: size(id) = ((id * 7 + 13) MOD 997) + 10
 --
--- Direct FFI to std.json — no shim .zig files needed.
+-- Pure FFI: all native Zig operations declared via EXTERN, no shim files.
 
 EXTERN STRUCT ParseOptions {} FROM "std.json";
-EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] } FROM "json_native";
+EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
 EXTERN STRUCT Parsed { value: JsonRecord } CLOSE "deinit" AS "Parsed(JsonRecord)" FROM "std.json";
 EXTERN FN parseFromSlice<T>(comptime: T, content: String, options: ParseOptions) RETURNS !Parsed EFFECTS :alloc:heap FROM "std.json";
 
-EXTERN FN ensureDir(path: String) RETURNS Void FROM "json_native";
+EXTERN STRUCT Dir {} FROM "std.fs";
+EXTERN FN cwd() RETURNS Dir FROM "std.fs";
+EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS !Void FROM "std.fs";
 
 FN sizeForId(id: Int64) RETURNS Int64 ->
     RETURN ((id * 7 + 13) MOD 997) + 10;
@@ -90,7 +92,7 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
 END
 
 FN main() RETURNS Void ->
-    ensureDir("data");
+    cwd().makePath("data") OR RAISE;
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
