@@ -3040,6 +3040,11 @@ private
     last_expr = node.body.last
     if has_heap_promoted_call?(last_expr)
       node.return_provenance = :heap
+    elsif bg_exit_frame_string?(last_expr)
+      # Last expression is a frame-allocated string. The MIR pass will heap-dup it
+      # so the fiber's result outlives the frame rewind. The NEXT caller owns that
+      # heap string and must free it.
+      node.return_provenance = :heap
     end
 
     # @arena implies @pinned — thread-local arena memory can't be stolen.
@@ -3166,13 +3171,16 @@ private
       node.full_type = promise_type.tense_type.to_sym
     end
 
-    # Propagate heap_promoted through NEXT: if the BG block's body called a
-    # function with returns_promoted, the NEXT caller must free promoted fields.
+    # Propagate heap provenance through NEXT: if the BG block's exit value was
+    # frame-allocated and heap-duped by the fiber, the NEXT caller owns that
+    # heap allocation and must free it.
     if node.expr.is_a?(AST::Identifier)
       sym = node.expr.symbol
       decl_node = sym&.reg  # the declaration's AST node (BindExpr/VarDecl)
       bg_value = decl_node.respond_to?(:value) ? decl_node.value : nil
       if bg_value.is_a?(AST::BgBlock) && (bg_value.return_provenance == :heap)
+        ti = node.type_info
+        ti.provenance = :heap if ti.is_a?(Type)
       end
     end
   end

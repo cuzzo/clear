@@ -288,6 +288,8 @@ module AST
     attr_accessor :stack_vars_bytes  # lower-bound estimate of stack-local variable bytes
     attr_accessor :has_promotion     # set by MIRPass when function has escape promotions
     attr_accessor :moved_guard_info  # stamped by MIRPass: { var_name => bool } for has_moved_guard lookups
+    attr_accessor :heap_carry_return      # true when a heap carry var is the return value (caller must free)
+    attr_accessor :heap_carry_return_vars # Set of var names that are heap carry return vars (their cleanup is skipped inside __pr_body)
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
@@ -312,6 +314,7 @@ module AST
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
     include Locatable
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
+    attr_accessor :storage        # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
   end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
@@ -387,8 +390,10 @@ module AST
   Cast         = Struct.new(:token, :value, :target) { include Locatable }
   ReturnNode   = Struct.new(:token, :value) do
     include Locatable
-    attr_accessor :promote_ret_wrap    # :const or :var — set by MIRPass for return wrapping
-    attr_accessor :hpt_return_promote  # MIR::Promote node — :hpt_string_dupe or :hpt_promote strategy
+    attr_accessor :promote_ret_wrap       # :const or :var — set by MIRPass for return wrapping
+    attr_accessor :hpt_return_promote     # MIR::Promote node — :hpt_string_dupe or :hpt_promote strategy
+    attr_accessor :catch_string_dupe_ret  # true: frame string in catch fn needs heap dupe on return
+    attr_accessor :ret_field_promote_data # Hash { zig_type:, fields: } for struct field promotion on return
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
@@ -478,7 +483,10 @@ module AST
   # parts: Array of AST nodes (strings, identifiers, expressions)
   # Rewritten from chained BinaryOp(:ADD) on string types.
   # Any backend emits a single allocation covering all parts.
-  StringConcat   = Struct.new(:token, :parts) { include Locatable }
+  StringConcat   = Struct.new(:token, :parts) do
+    include Locatable
+    attr_accessor :storage  # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
+  end
 
   # CapabilityWrap: single AST node for all capability wrapping.
   # ownership: nil | :multiowned | :shared
@@ -558,6 +566,7 @@ module AST
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash + safety flags
+    attr_accessor :exit_promote  # Hash { strategy: :string_dupe } when exit value needs scope-exit promotion
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.

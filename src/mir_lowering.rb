@@ -417,17 +417,16 @@ class MIRLowering
   def lower_promote(node)
     case node.strategy
     when :ret_fields
-      # Pending: consumed by next lower_return to emit promoteFields
-      @pending_ret_field_promote = { zig_type: node.zig_type, fields: node.fields }
+      # Annotation now lives on the ReturnNode (.ret_field_promote_data). No-op here.
       nil
     when :catch_string_dupe
-      @pending_catch_string_dupe = true
+      # Annotation now lives on the ReturnNode (.catch_string_dupe_ret). No-op here.
+      nil
+    when :hpt_string_dupe, :hpt_promote
+      # Annotation now lives on the ReturnNode (.hpt_return_promote). No-op here.
       nil
     when :container_store
       @pending_container_promote = { zig_type: node.zig_type }
-      nil
-    when :hpt_string_dupe, :hpt_promote
-      @pending_hpt_return_promote = node
       nil
     when :bg_string
       @pending_bg_string_promotes ||= Set.new
@@ -705,14 +704,17 @@ class MIRLowering
     returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && ret_type_obj.payload_type&.string?)
     has_promotion = node.has_promotion
 
+    heap_carry_return = node.respond_to?(:heap_carry_return) && node.heap_carry_return
     if fn_needs_rt
       prologue << MIR::ExprStmt.new(MIR::Call.new("@setEvalBranchQuota", [MIR::Lit.new("100000")], false), false)
-      if uses_frame_or_alloc && returns_value_type
+      # FrameRestore is safe only when the return value is NOT frame-allocated:
+      #   - value types (primitives, enums): no frame pointer returned
+      #   - heap carry return strings: result is on heap, frame rewind is safe
+      # For frame-string returns (no heap_carry_return), we skip the mark/restore
+      # entirely: the returned string lives in the caller's frame region.
+      if uses_frame_or_alloc && (returns_value_type || (returns_string && heap_carry_return)) && !has_promotion
         prologue << MIR::FrameSave.new(@rt_name)
         prologue << MIR::FrameRestore.new(@rt_name)
-      elsif uses_frame_or_alloc && returns_string && !has_promotion
-        prologue << MIR::FrameSave.new(@rt_name)
-        # No FrameRestore -- preserveAndRewind at return sites
       else
         prologue << MIR::Suppress.new("rt")
       end
@@ -743,9 +745,6 @@ class MIRLowering
       prologue << MIR::Let.new(name, MIR::Ident.new("_m_#{name}"), true, nil, "_ = &#{name};")
     end
 
-    # Track preserveAndRewind state for return lowering
-    @current_fn_preserve_rewind = fn_needs_rt && uses_frame_or_alloc && returns_string && !has_promotion
-
     # Lower body (track snapshot types for catch blocks)
     has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
     @current_fn_has_catch = has_catch
@@ -775,18 +774,6 @@ class MIRLowering
 
       # Return both FnDefs as an array (lower_program/lower_module flatten arrays)
       [inner_fn, outer_fn]
-    elsif @current_fn_preserve_rewind
-      # Wrap body in a labeled block for preserveAndRewind
-      rt = MIR::Ident.new(@rt_name)
-      block_expr = MIR::BlockExpr.new("__pr_body", body_mir)
-      pr_body = prologue + [
-        MIR::Let.new("__pr_val", block_expr, false, nil, nil),
-        MIR::ReturnStmt.new(
-          MIR::MethodCall.new(rt, "preserveAndRewind", [MIR::Ident.new("frame_mark"), MIR::Ident.new("__pr_val")], true)
-        )
-      ]
-      MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
-                      pr_body, vis, false, comptime_params)
     else
       MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
                       prologue + body_mir, vis, false, comptime_params)
@@ -1556,8 +1543,16 @@ class MIRLowering
         end
       else
         result_code = emit_expr(lower(last_step[:expr]))
-        result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
-        "__ctx_#{id}.inner.result = #{result_code};"
+        # Apply scope-exit promotion: frame strings must be heap-duped so they
+        # outlive the fiber's frame, which is rewound when the fiber exits.
+        if node.exit_promote&.dig(:strategy) == :string_dupe
+          # Use __ctx_N.alloc — __bg_alloc is the same allocator but declared
+          # in the outer block, not accessible inside the run fn.
+          "__ctx_#{id}.inner.result = try __ctx_#{id}.alloc.dupe(u8, #{result_code});"
+        else
+          result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
+          "__ctx_#{id}.inner.result = #{result_code};"
+        end
       end
       [sc, rl]
     end
@@ -2754,7 +2749,8 @@ class MIRLowering
 
     zig_type = transpile_type(node.full_type)
     needs_annotation = ZigTypeMapper::ZIG_PRIMITIVES.include?(zig_type) || ft.fn_type? ||
-                       (node.value.is_a?(AST::Literal) && node.value.type == :NIL)
+                       (node.value.is_a?(AST::Literal) && node.value.type == :NIL) ||
+                       (ft.string? && ft.heap_provenance?)  # ""/literal infers *const [0:0]u8 without annotation
     annotation = needs_annotation ? zig_type : nil
 
     # Resolve init value - special handling for collection types.
@@ -2783,6 +2779,11 @@ class MIRLowering
       is_move = node.value.is_a?(AST::MoveNode)
       if !is_move && rc_retain_needed?(rhs)
         make_rc_retain(rhs)
+      elsif ft.string? && ft.heap_provenance? && !is_move &&
+            rhs.is_a?(AST::Literal) && rhs.type == :STRING
+        # Heap carry var with string literal initial value: dupe to heap so the
+        # defer free() on the var doesn't attempt to free a comptime literal.
+        MIR::DupeSlice.new(lower(rhs), :heap)
       else
         lower(node.value)
       end
@@ -3073,28 +3074,10 @@ class MIRLowering
       mark_var = "__loop_mark_#{@loop_mark_counter}"
       # Prologue: save loop mark
       save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-      if node.loop_preserve_vars&.any?
-        # Preserve vars + explicit rewind (no defer).
-        # First var: loopPreserveAndRewind (rewinds to mark then copies).
-        # Subsequent vars: loopPreserveVar (copies at current cursor, no rewind).
-        # Without this distinction all vars land at the same arena position,
-        # each overwriting the previous one.
-        body = [save] + body
-        node.loop_preserve_vars.each_with_index do |v, idx|
-          call = if idx == 0
-            MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
-          else
-            MIR::MethodCall.new(rt, "loopPreserveVar", [MIR::Ident.new(zig_safe_name(v))], true)
-          end
-          body << MIR::Set.new(MIR::Ident.new(zig_safe_name(v)), call)
-        end
-      else
-        # defer restore
-        restore = MIR::DeferStmt.new(
-          MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
-        )
-        body = [save, restore] + body
-      end
+      restore = MIR::DeferStmt.new(
+        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
+      )
+      body = [save, restore] + body
     end
 
     # Yield check at end of loop body
@@ -3122,22 +3105,10 @@ class MIRLowering
       @loop_mark_counter = (@loop_mark_counter || 0) + 1
       mark_var = "__loop_mark_#{@loop_mark_counter}"
       save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-      if node.loop_preserve_vars&.any?
-        body = [save] + body
-        node.loop_preserve_vars.each_with_index do |v, idx|
-          call = if idx == 0
-            MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
-          else
-            MIR::MethodCall.new(rt, "loopPreserveVar", [MIR::Ident.new(zig_safe_name(v))], true)
-          end
-          body << MIR::Set.new(MIR::Ident.new(zig_safe_name(v)), call)
-        end
-      else
-        restore = MIR::DeferStmt.new(
-          MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
-        )
-        body = [save, restore] + body
-      end
+      restore = MIR::DeferStmt.new(
+        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
+      )
+      body = [save, restore] + body
     end
 
     # Yield check at end of body
@@ -3190,22 +3161,10 @@ class MIRLowering
       @loop_mark_counter = (@loop_mark_counter || 0) + 1
       mark_var = "__loop_mark_#{@loop_mark_counter}"
       save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
-      if node.loop_preserve_vars&.any?
-        body = [save, var_decl] + body
-        node.loop_preserve_vars.each_with_index do |v, idx|
-          call = if idx == 0
-            MIR::MethodCall.new(rt, "loopPreserveAndRewind", [MIR::Ident.new(mark_var), MIR::Ident.new(zig_safe_name(v))], true)
-          else
-            MIR::MethodCall.new(rt, "loopPreserveVar", [MIR::Ident.new(zig_safe_name(v))], true)
-          end
-          body << MIR::Set.new(MIR::Ident.new(zig_safe_name(v)), call)
-        end
-      else
-        restore = MIR::DeferStmt.new(
-          MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
-        )
-        body = [save, restore, var_decl] + body
-      end
+      restore = MIR::DeferStmt.new(
+        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
+      )
+      body = [save, restore, var_decl] + body
     else
       body = [var_decl] + body
     end
@@ -3336,17 +3295,12 @@ class MIRLowering
       return MIR::ReturnStmt.new(MIR::TailCall.new(value.callee, value.args))
     end
 
-    # Consume pending promote flags
-    needs_string_dupe = @pending_catch_string_dupe
-    @pending_catch_string_dupe = false
-    ret_field_promote = @pending_ret_field_promote
-    @pending_ret_field_promote = nil
-    hpt_promote = @pending_hpt_return_promote
-    @pending_hpt_return_promote = nil
+    # Read scope-exit promotion from node annotations (no global flags).
+    needs_string_dupe = node.catch_string_dupe_ret
+    ret_field_promote = node.ret_field_promote_data
+    hpt_promote       = node.hpt_return_promote
 
-    if @current_fn_preserve_rewind && value
-      MIR::BreakStmt.new("__pr_body", value)
-    elsif node.promote_ret_wrap == :var && ret_field_promote && value
+    if node.promote_ret_wrap == :var && ret_field_promote && value
       rt = MIR::Ident.new(rt_name)
       stmts = [MIR::Let.new("__ret", value, true, nil, nil)]
       if ret_field_promote[:fields]

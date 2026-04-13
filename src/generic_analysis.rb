@@ -416,4 +416,22 @@ module GenericAnalysis
     end
     false
   end
+
+  # Returns true when a BG block's last expression is a string that will be
+  # frame-allocated and thus needs heap-duping before the fiber exits.
+  # Mirrors bg_exit_needs_string_dupe? in MIRPass but runs at annotation time.
+  def bg_exit_frame_string?(expr)
+    return false unless expr
+    ti = expr.type_info rescue nil
+    t = ti.is_a?(Type) ? ti : (ti ? Type.new(ti) : nil)
+    return false unless t&.string?
+    return false if t.heap? || t.rodata?
+    return true  if t.frame?
+    # Check stdlib def for explicit frame allocation (provenance not yet set on expr).
+    if expr.respond_to?(:matched_stdlib_def)
+      msd = expr.matched_stdlib_def
+      return true if msd.is_a?(Hash) && msd[:return_alloc] == :frame
+    end
+    false
+  end
 end

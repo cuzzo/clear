@@ -1150,32 +1150,11 @@ module LoopFrameAnalysis
     loop_node.mark_per_iter = non_escaping.any?
 
     if loop_node.mark_per_iter
-      frame_local_names = non_escaping.map { |d| d.name.to_s }.to_set
-
       # When the loop rewinds, backing-store extensions of OUTER frame containers
       # in the DIRECT body are corrupted.  Promote them to heap.
       direct_outer_mutations(body, local_names).each do |receiver_node|
         promote_to_heap!(receiver_node)
       end
-
-      # Outer string variables reassigned with frame-allocated expressions
-      # (e.g. resp = resp + result) need preserve-and-rewind rather than
-      # heap promotion; the old value is discarded each iteration so promoting
-      # to heap would leak every intermediate string.
-      #
-      # TODO: generalize to ALL non-copy outer vars reassigned in a rewinding loop.
-      # Currently only String is handled. Lists, maps, and large structs with
-      # frame-allocated subfields currently fall back to heap promotion (correct
-      # but suboptimal for the "compute-and-replace" pattern: every discarded
-      # candidate is heap-allocated rather than frame-reclaimed per iteration).
-      #
-      # When the runtime adds loopPreserveAndRewindT (see runtime.zig TODO), update
-      # outer_string_reassigns -> outer_noncopymutable_reassigns to detect all
-      # non-copy outer vars and emit the type-appropriate preserve call instead of
-      # heap promotion via direct_outer_mutations.
-      loop_node.loop_preserve_vars = outer_string_reassigns(body, local_names, frame_local_names)
-    else
-      loop_node.loop_preserve_vars = nil
     end
 
     # Always: promote string-typed RHS expressions to heap when assigned to outer
@@ -1265,24 +1244,6 @@ module LoopFrameAnalysis
     receivers
   end
 
-  # Outer-scope string variables that are reassigned with frame-allocating
-  # expressions (e.g. resp = resp + result where result is a frame local).
-  # These need loopPreserveAndRewind rather than heap promotion.
-  # Returns a Set of variable name strings, or nil if none.
-  def self.outer_string_reassigns(body, local_names, frame_local_names)
-    preserve = Set.new
-    AST.walk_body(body) do |node|
-      next unless node.is_a?(AST::BindExpr) && node.mode == :assign
-      next unless node.name.is_a?(String) && !local_names.include?(node.name)
-      ti = node.type_info rescue nil
-      next unless ti.is_a?(Type) && ti.string?
-      # Check if the RHS references any local frame variable.
-      next unless rhs_references_any?(node.value, frame_local_names)
-      preserve << node.name
-    end
-    preserve.any? ? preserve : nil
-  end
-
   # Does expr (or any sub-expression) contain a frame-allocating expression?
   # "Frame-allocating" means: references a local frame variable (by name) OR
   # calls a function (stdlib or user-defined) that returns a String (frame via
@@ -1292,10 +1253,10 @@ module LoopFrameAnalysis
   # a frame string that would be freed by the loop's per-iteration rewind.
   def self.rhs_references_any?(expr, names)
     return false unless expr
-    # COPY expr produces a heap-allocated value -- never needs loopPreserveAndRewind
+    # COPY expr produces a heap-allocated value -- carry var doesn't need promotion
     return false if expr.is_a?(AST::CopyNode)
-    # Any call (stdlib or user-defined) that returns a String is frame-allocated
-    # via the preserveAndRewind protocol. This covers both stdlib_allocates=true
+    # Any call (stdlib or user-defined) that returns a String may produce a
+    # carry value needing heap promotion. This covers both stdlib_allocates=true
     # calls (toString, intToString, etc.) and user-defined string-returning functions.
     if expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
       ti = expr.type_info rescue nil
@@ -1351,16 +1312,34 @@ module LoopFrameAnalysis
   end
 
   # Set storage=:heap on an expression node so it uses heapAlloc.
-  # Handles FuncCall/MethodCall (mark heap_dupe_result) and direct string literals.
+  # Handles BinaryOp, StringConcat, FuncCall/MethodCall (via heap_dupe_result),
+  # and nodes with a direct storage= accessor.
   def self.promote_value_to_heap!(node)
     return unless node
     ti = node.type_info rescue nil
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
     return unless ti&.string?
     return if ti.heap_provenance?  # already heap
-    if node.respond_to?(:storage=)
+    case node
+    when AST::BinaryOp
+      if node.string_concat
+        node.storage = :heap
+        ti.provenance = :heap
+      else
+        promote_value_to_heap!(node.left)
+        promote_value_to_heap!(node.right)
+      end
+    when AST::StringConcat
       node.storage = :heap
       ti.provenance = :heap
+    when AST::FuncCall, AST::MethodCall
+      node.heap_dupe_result = true
+      ti.provenance = :heap
+    else
+      if node.respond_to?(:storage=)
+        node.storage = :heap
+        ti.provenance = :heap
+      end
     end
   end
 
@@ -1888,7 +1867,31 @@ class MIRPass
   # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
   # that the classifier depends on.
   def transform!(ast)
+    # Phase 1.5c: upgrade loop-carry string variables to heap.
+    # Outer string variables reassigned inside a rewinding loop need heap
+    # allocation so the carry value survives the per-iteration frame rewind.
+    # Must run before Phase 0 (HPT) and Phase 2 (CleanupClassifier) so that
+    # heap_carry_return flags are visible to both.
+    @fn_nodes.each do |_name, fn|
+      upgrade_loop_string_carries_to_heap!(fn) if fn&.body
+    end
+
+    # Phase 1.5d: mark call sites to heap-carry-return functions as heap-provenance.
+    # After Phase 1.5c, functions with heap_carry_return=true return heap strings
+    # (caller must free).  Propagate heap_provenance to their call-site expressions
+    # so Phase 0 (HPT hoisting) can register cleanup at the call site.
+    carry_return_fns = @fn_nodes.select { |_, f|
+      f.respond_to?(:heap_carry_return) && f.heap_carry_return
+    }.keys.to_set
+    unless carry_return_fns.empty?
+      @fn_nodes.each do |_name, fn|
+        next unless fn&.body
+        mark_heap_carry_call_sites!(fn, carry_return_fns)
+      end
+    end
+
     # Phase 0: hoist HPT sub-expression FuncCalls into VarDecl nodes.
+    # Runs after Phase 1.5c/1.5d so heap_carry_return call sites are marked.
     @fn_nodes.each do |_name, fn|
       hoist_heap_temps!(fn) if fn.body
     end
@@ -2064,6 +2067,152 @@ class MIRPass
     end
   end
 
+  # Upgrade outer string variables used as loop-carry vars to heap.
+  # These are outer string variables reassigned with frame-allocating expressions
+  # inside a loop that has per-iteration rewinds (i.e., has non-escaping frame locals).
+  # Without this promotion, the carry var's old frame value would be freed by the
+  # per-iter rewind, leaving a dangling pointer.
+  # Must run before Phase 2 (CleanupClassifier) so :heap provenance is visible.
+  def upgrade_loop_string_carries_to_heap!(fn)
+    carry_names = Set.new
+
+    AST.walk_body(fn.body) do |node|
+      body = case node
+      when AST::WhileLoop  then (node.tight ? nil : node.do_branch)
+      when AST::ForRange   then node.body
+      when AST::ForEach    then node.body
+      end
+      next unless body
+
+      local_names = LoopFrameAnalysis.collect_local_names(body)
+      non_escaping = LoopFrameAnalysis.local_frame_decls(body, local_names).reject { |d|
+        LoopFrameAnalysis.escapes_to_outer?(d.name.to_s, body, local_names)
+      }
+      next unless non_escaping.any?  # only when loop WILL have mark_per_iter
+
+      frame_local_names = non_escaping.map { |d| d.name.to_s }.to_set
+
+      # Identify carry vars: any outer string var reassigned inside a mark_per_iter loop.
+      # The per-iter rewind corrupts ANY string value produced inside the loop body
+      # (concats, method calls, function calls all use frameAlloc by default).
+      # Promote ALL such reassignments to heap so the value survives the rewind.
+      AST.walk_body(body) do |bind|
+        next unless bind.is_a?(AST::BindExpr) && bind.mode == :assign
+        next unless bind.name.is_a?(String) && !local_names.include?(bind.name)
+        ti = bind.type_info rescue nil
+        next unless ti.is_a?(Type) && ti.string?
+        carry_names << bind.name
+        LoopFrameAnalysis.promote_value_to_heap!(bind.value)
+      end
+    end
+    return if carry_names.empty?
+
+    # Promote initial declarations of carry vars to heap.
+    AST.walk_body(fn.body) do |node|
+      next unless node.is_a?(AST::VarDecl) || (node.is_a?(AST::BindExpr) && node.mode == :decl)
+      var_name = node.name.is_a?(String) ? node.name : node.name.to_s
+      next unless carry_names.include?(var_name)
+      node.storage = :heap if node.respond_to?(:storage=)
+      ti = node.type_info rescue nil
+      if ti.is_a?(Type)
+        ti.provenance = :heap
+      end
+      if node.respond_to?(:value) && node.value.respond_to?(:storage=)
+        node.value.storage = :heap
+      end
+    end
+
+    # If the function returns a carry var directly (heap string), mark it so
+    # collect_return_escapes can add a moved guard and SuppressCleanup before return.
+    ret_type = fn.return_type.is_a?(Type) ? fn.return_type : (fn.return_type ? Type.new(fn.return_type) : Type.new(:Void))
+    if ret_type.string?
+      carry_return_names = Set.new
+      AST.walk_body(fn.body) do |node|
+        next unless node.is_a?(AST::ReturnNode) && node.value.is_a?(AST::Identifier)
+        carry_return_names << node.value.name if carry_names.include?(node.value.name)
+      end
+      unless carry_return_names.empty?
+        fn.heap_carry_return = true
+        fn.heap_carry_return_vars = carry_return_names
+      end
+    end
+  end
+
+  # Phase 1.5d: walk fn body and set heap_provenance on call-site expressions
+  # whose callee is in carry_fns (set of function names with heap_carry_return=true).
+  # This allows Phase 0 (HPT hoisting) to register cleanup at call sites.
+  # Also upgrades direct bind declarations whose RHS is a carry call, so that
+  # CleanupClassifier (Phase 2) sees heap_provenance on the binding itself.
+  def mark_heap_carry_call_sites!(fn, carry_fns)
+    AST.walk_body(fn.body) do |stmt|
+      # For direct binds whose value is a carry call, upgrade the binding type too.
+      if (stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl))
+        val = stmt.value
+        if val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall)
+          fn_name = val.is_a?(AST::FuncCall) ? val.name.to_s : val.name.to_s
+          if carry_fns.include?(fn_name)
+            # Upgrade the call's type_info
+            call_ti = val.type_info rescue nil
+            call_ti.provenance = :heap if call_ti.is_a?(Type) && !call_ti.heap_provenance?
+            # Upgrade the binding's full_type so CleanupClassifier sees heap_provenance
+            bind_ti = stmt.type_info rescue nil
+            bind_ti.provenance = :heap if bind_ti.is_a?(Type) && !bind_ti.heap_provenance?
+            bt2 = stmt.respond_to?(:full_type) ? stmt.full_type : nil
+            bt2.provenance = :heap if bt2.is_a?(Type) && !bt2.heap_provenance?
+          end
+        end
+        next  # no need to recurse into sub-expressions for declaration bind values
+      end
+      exprs = stmt_top_level_exprs(stmt)
+      exprs.each { |e| mark_heap_expr_if_carry!(e, carry_fns) }
+    end
+  end
+
+  def stmt_top_level_exprs(stmt)
+    case stmt
+    when AST::VarDecl, AST::BindExpr then [stmt.value]
+    when AST::Assignment              then [stmt.value]
+    when AST::ReturnNode              then [stmt.value]
+    when AST::Assert                  then [stmt.condition, stmt.message]
+    when AST::FuncCall, AST::MethodCall then [stmt]
+    when AST::IfStatement             then [stmt.condition]
+    when AST::MatchStatement          then [stmt.expr]
+    when AST::ForEach                 then [stmt.collection]
+    else []
+    end.compact
+  end
+
+  def mark_heap_expr_if_carry!(node, carry_fns)
+    return unless node
+    case node
+    when AST::FuncCall
+      fn_name = node.name.to_s
+      if carry_fns.include?(fn_name)
+        ti = node.type_info rescue nil
+        ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
+      end
+      node.args&.each { |a| mark_heap_expr_if_carry!(a, carry_fns) }
+    when AST::MethodCall
+      fn_name = node.name.to_s
+      if carry_fns.include?(fn_name)
+        ti = node.type_info rescue nil
+        ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
+      end
+      mark_heap_expr_if_carry!(node.object, carry_fns)
+      node.args&.each { |a| mark_heap_expr_if_carry!(a, carry_fns) }
+    when AST::BinaryOp
+      mark_heap_expr_if_carry!(node.left, carry_fns)
+      mark_heap_expr_if_carry!(node.right, carry_fns)
+    when AST::UnaryOp
+      mark_heap_expr_if_carry!(node.right, carry_fns)
+    when AST::GetField
+      mark_heap_expr_if_carry!(node.target, carry_fns)
+    when AST::GetIndex
+      mark_heap_expr_if_carry!(node.target, carry_fns)
+      mark_heap_expr_if_carry!(node.index, carry_fns)
+    end
+  end
+
   def transform_function!(fn, promo)
     bindings = @cleanup_bindings[fn.name]
     has_bindings = bindings && !bindings.empty?
@@ -2073,6 +2222,11 @@ class MIRPass
 
     has_bg_escapes = body_has_bg_escape_promotes?(fn.body)
     has_catch = fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
+
+    # BG scope-exit annotation runs unconditionally: the function may have no
+    # bindings/promotions but still contain BG blocks returning frame values.
+    annotate_bg_exits_in_body!(fn.body)
+
     return unless has_bindings || promo || has_bg_escapes || has_catch
 
     # Borrow checking: verify no moves of borrowed variables inside WITH blocks.
@@ -2096,11 +2250,26 @@ class MIRPass
       @last_dataflow.cleanup_decisions!(fn, bindings)
     end
 
+    # Patch heap carry return vars: refine_moved_guards! (called inside cleanup_decisions!)
+    # sets has_moved_guard=false for string vars because strings are Copy types and
+    # are never GIVE'd in OwnershipDataflow.  But carry return vars ARE transferred to the
+    # caller implicitly via RETURN.  Override the flag so MIR::Drop emits a guarded defer
+    # and collect_return_escapes emits SuppressCleanup before the return.
+    if fn.respond_to?(:heap_carry_return_vars) && fn.heap_carry_return_vars&.any? && bindings
+      fn.heap_carry_return_vars.each do |var_name|
+        entry = bindings[var_name.to_s]
+        next unless entry && entry[:needs_cleanup]
+        entry[:has_moved_guard] = true
+      end
+    end
+
     # Stamp field pre-cleanup info directly on Assignment nodes.
     CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings, schema_lookup: @schema_lookup) if has_bindings
 
     @fn_has_catch = has_catch
+    @current_transform_fn = fn
     fn.body = transform_body(fn.body, bindings, promo)
+    @current_transform_fn = nil
 
     # Transform catch clause bodies so MIR::Promote(:catch_string_dupe) is
     # inserted before string returns in error recovery paths.
@@ -2185,7 +2354,7 @@ class MIRPass
 
       # Insert Return (escape markers) + Promote before ReturnNode.
       if stmt.is_a?(AST::ReturnNode)
-        insert_return!(result, stmt, bindings)
+        insert_return!(result, stmt, bindings, fn_node: @current_transform_fn)
         insert_promotion!(result, stmt, promo)
         # HPT return promotion: insert MIR::Promote for checker verification.
         result << stmt.hpt_return_promote if stmt.hpt_return_promote
@@ -2203,6 +2372,10 @@ class MIRPass
 
       # BG escape promotions: frame-allocated captures must be promoted to heap.
       insert_bg_escape_promote!(result, stmt)
+
+      # BG scope-exit promotion: annotate BgBlocks with what their exit value needs.
+      # Must run after recurse_branches! so the BgBlock body is already transformed.
+      each_bg_in_stmt(stmt) { |bg| annotate_bg_exit_promote!(bg) if bg.is_a?(AST::BgBlock) }
 
       # OrRescue fallback dupe: when success path is heap-promoted and fallback
       # is a struct literal, string fields need heap-duping for consistent cleanup.
@@ -2487,6 +2660,81 @@ class MIRPass
     end
   end
 
+  # Annotate a BgBlock with the scope-exit promotion its last expression needs.
+  # Mirrors the logic insert_promotion!/insert_catch_string_dupe! apply to
+  # function ReturnNodes, but for the BG fiber's implicit return value.
+  # Currently handles strings; struct field promotion is left for future work.
+  # Walk a statement list looking for BgBlocks (in expression position) and
+  # annotate each with the scope-exit promotion its last expression needs.
+  # Must run unconditionally — the outer function may have no bindings/promotions
+  # but still contain BG blocks that return frame-allocated values.
+  def annotate_bg_exits_in_body!(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |stmt|
+      each_bg_in_stmt(stmt) { |bg| annotate_bg_exit_promote!(bg) if bg.is_a?(AST::BgBlock) }
+      # Recurse into control-flow branches.
+      case stmt
+      when AST::IfStatement
+        annotate_bg_exits_in_body!(stmt.then_branch)
+        annotate_bg_exits_in_body!(stmt.else_branch)
+      when AST::WhileLoop
+        annotate_bg_exits_in_body!(stmt.do_branch)
+      when AST::ForRange, AST::ForEach
+        annotate_bg_exits_in_body!(stmt.body)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| annotate_bg_exits_in_body!(c[:body]) }
+        annotate_bg_exits_in_body!(stmt.default_case)
+      when AST::WithBlock
+        annotate_bg_exits_in_body!(stmt.body)
+      when AST::DoBlock
+        stmt.branches&.each { |b| annotate_bg_exits_in_body!(b[:body]) }
+      end
+    end
+  end
+
+  def annotate_bg_exit_promote!(bg_node)
+    body = bg_node.body
+    return unless body.is_a?(Array)
+
+    # Walk backward past MIR marker nodes to find the last real expression.
+    last_expr = nil
+    body.reverse_each do |stmt|
+      next if stmt.is_a?(MIR::Alloc) || stmt.is_a?(MIR::Drop) ||
+              stmt.is_a?(MIR::SuppressCleanup) || stmt.is_a?(MIR::Return) ||
+              stmt.is_a?(MIR::Promote) || stmt.is_a?(MIR::AllocMark) ||
+              stmt.is_a?(MIR::Cleanup) || stmt.is_a?(MIR::MoveMark)
+      last_expr = stmt.is_a?(AST::ThenChain) ? stmt.steps.last&.dig(:expr) : stmt
+      break
+    end
+
+    return unless last_expr
+    return if last_expr.is_a?(AST::Assignment)
+
+    ft = last_expr.respond_to?(:full_type) ? last_expr.full_type : nil
+    return unless ft
+    t = ft.is_a?(Type) ? ft : Type.new(ft)
+    return if t.void?
+
+    bg_node.exit_promote = { strategy: :string_dupe } if bg_exit_needs_string_dupe?(last_expr, t)
+  end
+
+  # Returns true when a BG block's last expression is a frame-allocated string
+  # that will be invalidated when the fiber's frame is rewound on exit.
+  # - rodata strings (literals) live in the binary — safe without dupe.
+  # - heap strings are already owned by the caller — no dupe needed.
+  # - frame strings (from allocating stdlib calls or frame-provenance types) must be duped.
+  def bg_exit_needs_string_dupe?(expr, t)
+    return false unless t.string?
+    return false if t.heap? || t.rodata?
+    return true  if t.frame?
+    # No explicit provenance: check the stdlib def for frame allocation.
+    if expr.respond_to?(:matched_stdlib_def)
+      msd = expr.matched_stdlib_def
+      return true if msd.is_a?(Hash) && msd[:return_alloc] == :frame
+    end
+    false
+  end
+
   # Insert MIR::Promote for frame-allocated variables captured by BG/stream fibers.
   # Lists get :list strategy (in-place promoteList). Strings get :bg_string
   # strategy (transpiler emits dupe inside the BG block where the allocator is available).
@@ -2505,16 +2753,17 @@ class MIRPass
     end
   end
 
-  # Insert MIR::Promote(:catch_string_dupe) before a ReturnNode in a catch
-  # function when the return value is string-typed. Both success and error
-  # paths must return heap-backed strings for consistent caller cleanup.
+  # Annotate the ReturnNode when a catch function returns a string type.
+  # Both success and error paths must return heap-backed strings for
+  # consistent caller cleanup. Annotation on the node replaces the old
+  # MIR::Promote(:catch_string_dupe) pending-flag mechanism.
   def insert_catch_string_dupe!(result, ret_node)
     return unless ret_node.value
     ft = ret_node.value.respond_to?(:full_type) ? ret_node.value.full_type : nil
     return unless ft
     t = Type.new(ft)
     return unless t.string?
-    result << MIR::Promote.new(ret_node.token, :__catch_ret, "[]const u8", :catch_string_dupe, nil)
+    ret_node.catch_string_dupe_ret = true
   end
 
   # Insert MIR::Promote(:or_fallback_dupe) before a statement that contains
@@ -2730,10 +2979,12 @@ class MIRPass
     return unless set_op && set_op[:takes_value]
 
     # Check if the value type needs frame-to-heap promotion.
+    # Strings are handled by the :dupe_string_literal transform in the lowerer;
+    # :container_promote only fires for !string? values.
     val_ti = stmt.value.type_info rescue nil
     return unless val_ti
     val_ti = Type.new(val_ti) if val_ti && !val_ti.is_a?(Type)
-    return unless val_ti.needs_promotion?(@schema_lookup)
+    return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
     result << MIR::Promote.new(stmt.token, nil, val_ti.zig_type, :container_store, nil)
   end
@@ -2778,16 +3029,14 @@ class MIRPass
       result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil)
     end
 
-    # Struct-level field promotion: insert MIR::Promote with :ret_fields strategy
-    # so the StaticLeakChecker can verify it. The transpiler consumes this as a
-    # pending flag and wraps the return value in `var __ret` + per-field promote calls.
+    # Struct-level field promotion: annotate the ReturnNode directly so
+    # lower_return can apply promotion without global pending-flag state.
     if filtered[:struct_promote] && PromotionClassifier.needs_promote?(filtered, ret_node)
       ret_node.promote_ret_wrap = :var
-      result << MIR::Promote.new(
-        ret_node.token, :__ret,
-        filtered[:struct_promote], :ret_fields,
-        filtered[:unhandled_promote_fields]
-      )
+      ret_node.ret_field_promote_data = {
+        zig_type: filtered[:struct_promote],
+        fields:   filtered[:unhandled_promote_fields]
+      }
     elsif filtered[:var_promotes]&.any?
       ret_node.promote_ret_wrap = :const
     end
@@ -2796,9 +3045,9 @@ class MIRPass
   # Insert MIR::Return before a ReturnNode to mark which local variables'
   # ownership escapes to the caller. The checker uses this to know that
   # escaped vars don't need local cleanup.
-  def insert_return!(result, ret_node, bindings)
+  def insert_return!(result, ret_node, bindings, fn_node: nil)
     return unless bindings
-    escaped = collect_return_escapes(ret_node, bindings)
+    escaped = collect_return_escapes(ret_node, bindings, fn_node: fn_node)
     return if escaped.empty?
     result << MIR::Return.new(ret_node.token, escaped)
     # Insert SuppressCleanup for each escaped var so the transpiler doesn't
@@ -2811,7 +3060,7 @@ class MIRPass
   # Walk a return expression and collect variable names whose ownership
   # transfers to the caller. Mirrors transpiler's collect_escaping_identifiers
   # but filters to bindings with has_moved_guard (those needing suppression).
-  def collect_return_escapes(ret_node, bindings)
+  def collect_return_escapes(ret_node, bindings, fn_node: nil)
     return [] unless ret_node.value
     ids = collect_escaping_ids(ret_node.value)
     ids.map { |id| id.name.to_s }
