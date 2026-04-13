@@ -3174,11 +3174,10 @@ class MIRLowering
     rt_name = @rt_name
 
     if sync == :always_mutable
-      # PHASE-3: output is RawZig (checker-opaque). HPT hoisting covers heap FuncCall
-      # RHS values, but BinaryOp string concat is not yet covered; a concat here would
-      # produce a ConcatStr invisible to the checker. Full fix requires RawZig consumes
-      # support or replacing this with structured MIR.
-      value_zig = emit_expr(lower(node.value))
+      # Hoist heap-allocating RHS to a named Let via hoist_alloc so the checker
+      # can verify cleanup. The pending Let is flushed by lower_body's
+      # flush_pending before this RawZig statement.
+      value_zig = emit_expr(hoist_alloc(lower(node.value)))
       fpc = node.field_pre_cleanup
       if fpc
         alloc = alloc_zig_str(fpc[:alloc] || :heap)
@@ -3191,8 +3190,7 @@ class MIRLowering
       # Lower RHS with locked unwrap map so field accesses on the locked var use the alias
       prev_locked = @locked_unwrap_map
       @locked_unwrap_map = (prev_locked || {}).merge({ alias_var => true, var_name => alias_var })
-      # PHASE-3: same as always_mutable path above; RawZig-opaque, BinaryOp concat not covered.
-      value_zig = emit_expr(lower(node.value))
+      value_zig = emit_expr(hoist_alloc(lower(node.value)))
       @locked_unwrap_map = prev_locked
       fpc = node.field_pre_cleanup
       if fpc
