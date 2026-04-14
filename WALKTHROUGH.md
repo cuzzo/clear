@@ -671,7 +671,66 @@ CLEAR handles these issues through its **Control Plane** -- an active runtime ob
 
 See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages the reality of high-performance systems.
 
----
+## 19. Function Lifetimes
+
+Functions cannot returned borrowed data freely, but can with a lifetime.  This is simplified from Rust.
+
+```ruby clear
+FN grandChild(n: Node) RETURNS n.left.?Node ->
+  RETURN n?.left?.right;
+END
+```
+
+Lifetimes are scoped with `<param>.<path>.`.  `n.left.` is the path and `?Node` is the return type.
+
+This is a less restrictive lifetime than `n.?Node`.
+
+Standard `IMMUTABLE` returned borrows *just work*:
+
+```ruby clear illustrative
+gc = node.grandChild();
+print(gc?.value OR 0);
+```
+
+`MUTABLE` returned borrows require a scope - because the object you're borrowing from is restricted while you hold the borrow to prevent use-after-free:
+
+```ruby clear illustrative
+WITH RESTRICT node AS n {
+  MUTABLE gc = n.grandChild();
+  gc.value = 0;
+  node.left = Nil; -- COMPIILER ERROR: `node` is RESTRICTED.  It's immutable in this scope.
+  n.left = Nil;    -- COMPIILER ERROR: `n` is RESTRICTED.  It's immutable in this scope.
+}
+```
+
+## 20. STRUCT lifetimes
+
+It's sometimes useful to define a STRUCT with a borrowed field (iterators are a prime example):
+
+```
+STRUCT SliceIter {
+    source: BORROWED Int64[], -- Allows `source` to be a BORROW, must be initialized in a scope.
+    pos: Int64,
+    len: Int64
+}
+
+FN hasNext(iter: SliceIter) RETURNS Bool ->
+    RETURN iter.pos < iter.len;
+END
+
+FN iterExample() RETURNS Void ->
+  WITH BORROWED data AS ref { -- create a borrowed version
+    MUTABLE iter = SliceIter{ source: ref, pos: 0, len: n };
+    WHILE hasNext(iter) DO
+      total += currentVal(iter);
+      iter = advance(iter);
+    END
+    RETURN iter;       -- COMPILER ERROR: You can't return `iter`.  It's BORROWED.  You don't own it.
+  }
+END
+```
+
+--
 
 ## Quick Reference: Capabilities
 
