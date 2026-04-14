@@ -730,7 +730,7 @@ FN iterExample() RETURNS Void ->
 END
 ```
 
---
+---
 
 ## Quick Reference: Capabilities
 
