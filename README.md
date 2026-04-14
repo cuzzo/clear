@@ -71,7 +71,7 @@ BG { @micro:arena -> foo() }
 
 In CLEAR, the compiler can tell when you're *probably* employing a bad strategy, and changing it is typically just a one-line fix, rather than a full-app rearchitecture.
 
-In CLEAR, at runtime, the Control Plane can detect when you've employed a bad strategy and *typically* self correct.  Some issues, like sharding a heavily skewed workload, require a recompile and restart to fix.
+For the v0.1-pre release, CLEAR comes with a Control Plane and it can detect when you've employed a bad strategy.  It works with the profiler to help you pick better strategies.  For some, it can self-correct (like if you picked a bad stack-size for a reentrant fiber).  In the near future, it will correct from contention issues.  In the far future, the Control Plane aims to be able to protect you from even heavily skewed workloads (when you picked the wrong strategy, like shared-nothing).
 
 CLEAR is designed such that you can override default compiler behviors if you know what you're doing, but you don't have the tools to shoot yourself in the foot.
 
