@@ -175,10 +175,11 @@ See [docs/benchmarks.md](docs/benchmarks.md) for table comparisons.
 
 CLEAR is currently in **v0.1-pre** release. It is an architectural preview and is NOT production-ready.
 
-- **Benchmarks**: While we have performed extensive benchmarking, "apples to apples" comparisons with mature ecosystems (Go, Rust, C) are difficult. Our results demonstrate raw engine potential, not feature-complete parity.
-- **Tail Latency**: While throughput is high, CLEAR's p99.9 latency is **NOT** expected to be competitive with Go's preemptive scheduler across all adversarial workloads in this release.
+- **Benchmarks**: There's an extensive set of benchmarks, but it is hard to make "apples to apples" comparisons with mature ecosystems (Go, Rust, C). The current state of benchmarks should serve as evidence CLEAR is currently competitive for most cases. Take it with a grain of salt.  It should not be considered *proof* of anything.
+- **Tail Latency**: While throughput is high in the benchmarks, CLEAR's p99.9 latency is **NOT** expected to be competitive with Go's preemptive scheduler across all adversarial workloads in this release (and probably not until the v0.4 release).
 - **Standard Library**: The current "standard library" is a barebones shim used for bootstrapping and internal testing. It is highly likely that none of the current internal APIs will survive into the v0.3 release.
-- **Stability**: Although CLEAR has an extensive test suite, several significant bugs were identified in the final week before this pre-release. The current state is an unstable preview and is not representative of the stability goals for v0.2.
+- **Stability**: Although CLEAR has an extensive test suite, several significant bugs were identified in the final week before the demo-release. The v0.1-pre release required a major refactor to reach a reasonable level of assurance use-after-free, double-free, and memory leaks won't compile for *most* of the supported language. The v0.1 release will still be an unstable preview and is not representative of the stability goals for v0.2.
+- **Safety**: The examples, benchmarks, and transpile-tests cover a wide range of the language and there are no use-after-free, double-free, or memory leaks.  Do not expect that everything you can compile will be as safe as Rust for the v0.1 release (and certainly not before).
 - **Linux Only**: CLEAR is not currently cross platform. It will only support x86 Linux until v0.3+.
 
 ## KNOWN SCALING ISSUES
@@ -192,7 +193,10 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 The goal of CLEAR is:
 
   1. To be able to run a REPL / VM, to live-debug like you can in Ruby, to write working code *faster* than you can even in scripting languages.
-  2. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
-  3. For code, even at the highest-level of optimization, to be easily understandable.
-  4. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible workloads, it can glide through it gracefully.
-  5. To be able to distribute loads across multiple machines effortlessly like BEAM, but with native speeds.
+     a. CLEAR aims to achieve a level of fearless concurrency above Rust.
+     b. Rust guarantees memory safety.  But you can still have higher-level logic races / non-deterministic state transitions that are very painful to debug.
+     c. CLEAR **aspires** to make this as easy as debugging sequential code in a scripting language with an world-class debugger.
+  3. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
+  4. For code, even at the highest-level of optimization, to be easily understandable.
+  5. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible workloads, it can glide through it gracefully.
+  6. To be able to distribute loads across multiple machines effortlessly like BEAM, but with native speeds.
