@@ -9,32 +9,36 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
 
  - [ ] FREEZE + profiling support
  - [ ] STRUCT/FN DEFAULTS
- - [ ] Deadlock protection
- - [ ] HashMap string interning (as default)
+ - [ ] Partial Deadlock protection (in progress - may cancel)
+ - [ ] String@symbol
+ - [ ] HashMap string interning as default
 
 ## v0.2
 
- - [ ] Enable MVCC in the language as a syncronization capability
- - [ ] io_uring for networking
+ - [ ] Finite State Machines for non-conditional, non-reeentrant, and non-nested looping fibers
+ - [ ] Cancelable fibers
+ - [ ] Built-in support for fiber RACEs
+ - [ ] Enable MVCC in the language as a syncronization capability (in progress)
+ - [ ] io_uring for networking (in progress)
  - [ ] STRICT mode compilation
  - [ ] VM supporting the vast majority of the language, near Python/Ruby non-JIT speed
+ - [ ] VM can automatically generate and run LOOM tests for concurrent code
  - [ ] An RSpec like testing framework as the first standard library module
  - [ ] A statistical benchmarking & profiling framework like Go/Rust
  - [ ] `./clear doctor` to automatically fix most syntax, conversion, affine errors and profiling recomendations if you choose
- - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand
- - [ ] Ability to write custom Control Plane strategies
+ - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
 
 Milestone: *Basic* SQL/CLEAR database
 
 ## v0.3
 
+ - [ ] CPS to support conditional & nested-looping fibers
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
- - [ ] MacOS support
- - [ ] actors as an ownership capability
+ - [ ] Actors as an ownership capability
  - [ ] copyOnWrite
- - [ ] EXTREME STRICT compilation: ADA-levels of safety
- - [ ] Control Plane Capability Migration -> live shift contented, skewed workloads to other strategies
+ - [ ] Ability to write custom Control Plane strategies
+ - [ ] Control Plane Capability Migration -> live shift contented workloads
  - [ ] VM supports entire language, gradual typing.
 
 Milestone: CLEAR-DB with native queries and hot-reload
@@ -45,6 +49,17 @@ Vision is clear: Gradual Typing (Ruby/Python) -> Typed (Rust) -> STRICT Typed (H
 
 ## v0.4
 
+ - [ ] EXTREME STRICT compilation pt 1: en route to ADA-levels of safety (just blocking compilation where required, ensuring the syntax is forward compatible)
+ - [ ] MacOS support
  - [ ] Ability to write custom capabilities
  - [ ] Full Ruby/Elixir Standard Library
  - [ ] DISTRIBUTED as a topology
+ - [ ] Fiber priorities
+ - [ ] Naive fiber memory budgets (only spawned & transfered memory, not shared memory)
+ - [ ] Improved fiber fault tolerence
+
+## v0.5
+
+ - [ ] EXTREME STRICT compilation pt 2: *most* of ADA's safety
+ - [ ] Supervisor to kill killable / cancelable bad fibers
+ - [ ] Control Plane Capability Migration -> live shift skewed workloads
