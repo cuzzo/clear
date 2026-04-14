@@ -193,9 +193,10 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 The goal of CLEAR is:
 
   1. To be able to run a REPL / VM, to live-debug like you can in Ruby, to write working code *faster* than you can even in scripting languages.
-     - CLEAR aims to achieve a level of fearless concurrency above Rust.
-     - Rust guarantees memory safety.  But you can still have higher-level logic races / non-deterministic state transitions that are very painful to debug.
+     - CLEAR aims to achieve a level of fearless concurrency above Rust, Pony, or Elixir.
+     - Rust and actor models guarantee memory safety.  But you can still have higher-level logic races / non-deterministic state transitions that are very painful to debug.
      - CLEAR **aspires** to make this as easy as debugging sequential code in a scripting language with an world-class debugger by providing deterministic replay of concurrent events (in the VM).
+     - In other languages, Stateless Model Checking is a separate, difficult tool you have to opt into. In CLEAR, it's just how `./clear test` works.
   3. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
   4. For code, even at the highest-level of optimization, to be easily understandable.
   5. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible workloads, it can glide through it gracefully.
