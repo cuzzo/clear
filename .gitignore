@@ -22,6 +22,7 @@ benchmarks/**/client_go
 benchmarks/**/server_go
 benchmarks/**/server
 benchmarks/10_concurrent_search/data/
+PLAN.md
 
 **/*.profile/
 **/.zig-cache/
