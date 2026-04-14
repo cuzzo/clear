@@ -1,6 +1,6 @@
 # CLEAR Language Walkthrough
 
-This guide showcases CLEAR: a memory-safe language that combines the ergonomics of scripting with the safety of affine types and the performance of arena-based memory.
+This guide showcases CLEAR: a memory-safe language that combines the ergonomics of scripting with the safety of affine types and the performance of hand-optimized C.
 
 ## 1. Immutability & Mutability
 
@@ -24,6 +24,7 @@ CLEAR provides a comprehensive set of primitives for precise control over memory
 | Type | Description | Example |
 | :--- | :--- | :--- |
 | `Int8` .. `Int64` | Signed integers (8, 16, 32, 64-bit) | `42_i64`, `-1_i8` |
+| `UInt8` .. `UInt64` | Unsigned integers (8, 16, 32, 64-bit) | `42_u64`, `-1_u8` |
 | `Float32`, `Float64` | IEEE-754 floating point | `3.14159_f64`, `1.0_f32` |
 | `Bool` | Boolean logic | `TRUE`, `FALSE` |
 | `Byte` | Raw 8-bit data | `0x41_b` |
@@ -97,7 +98,9 @@ FN main() RETURNS Void ->
 
     process(msg);                   -- OKAY: Implicit transfer (by FN signature)
 
-    print(GIVE msg);                -- OKAY: Superfluous, but compiles
+    print(GIVE msg);                -- COMPILER ERROR: USE AFTER MOVE: You can't GIVE `msg`.  `process(msg)` TOOK it away.
+    print(msg);                     -- COMPILER ERROR: USE AFTER MOVE: You can't use `msg`.  `process(msg)` TOOK it away.
+
     RETURN;
 END
 ```
@@ -161,6 +164,8 @@ MUTABLE logs: String[]@list:sharded(2) = [];
 -- data skew if keys/items are not uniformly distributed.
 ```
 
+NOTE: shared-nothing architectures present problems if your workloads can be heavily skewed.
+
 ## 6. Function Signatures
 
 Functions support explicit types, failable returns (`!T`), and optional types (`?T`).
@@ -222,7 +227,8 @@ WHILE i < 10 DO
 END
 
 -- 3. FOR loops (Range iteration)
-FOR j IN (1_i64 ..= 5) DO print(j.toString()); END     -- OKAY: Inclusive range
+FOR j IN (1 ..= 5) -> print(j.toString());     -- OKAY: Inclusive range
+FOR j IN (1 ..< 5) -> print(j.toString());     -- OKAY: Exclusive range
 ```
 
 ## 8. Enums, Unions, and Pattern Matching
@@ -348,6 +354,8 @@ END
 
 See [docs/pipelines.md#operators](docs/pipelines.md#operators) for a full list of higher-order function operators.
 
+Pipelines are automatically fused for efficiency.
+
 ## 10. Time as Tense (~T)
 
 Tense represents a value that will exist in the future. CLEAR eliminates the complexity of `Future/Promise/Observable` with a single unified tense.
@@ -385,6 +393,8 @@ All collections are **automatically monomorphized** -- the compiler generates ze
 | `T[N]` | `Array` | Fixed-size, stack-allocated (if small) |
 | `T[]@list` | `List` | Dynamic-size, heap-backed |
 | `T[N]@pool` | `Pool` | Fixed-capacity, generational handles |
+| `T[]@set` | `Set` | Dynamic-size, heap-backed, distinct items |
+
 
 ```ruby clear
 STRUCT User { name: String }
@@ -394,7 +404,7 @@ vals = [10, 20, 30];
 
 -- 2. Dynamic List
 MUTABLE items: Int64[]@list = [];
-items.append(42_i64);
+items.append(42);
 
 -- 3. Generational Pool
 -- Pools provide peak cache locality. Switching from List to @pool:soa
@@ -405,7 +415,7 @@ id = users.insert(User{ name: "Alice" });           -- Returns stable handle
 user = users.get(id) OR RAISE;                      -- Returns ?T (checks stale handles)
 ```
 
-### Element-Level Capabilities (v0.2)
+### Element-Level Capabilities
 
 Capabilities normally apply to the **collection** (`T[]@shared` = one shared list). For rare cases where each **element** needs its own capability, place the capability before the array suffix:
 
@@ -436,7 +446,9 @@ z = COPY y;                    -- OK: explicit deep-copy
 full = "foo" + "bar";          -- "foobar" (single allocation, no intermediate)
 ```
 
-**Planned for v0.2:** `String@raw` (mutable byte buffer) and `String@ring` (circular buffer for streaming).
+Like arrays, Strings have capabilities:
+
+`String@raw` (byte buffer) and `String@ring` (v0.2 - circular buffer for streaming).
 
 ## 13. Graphs, Cycles, and @indirect
 
@@ -453,13 +465,15 @@ STRUCT Node {
 -- Recursive traversal must be @reentrant
 FN sumTree(n: Node) RETURNS Int64 @reentrant ->
     MUTABLE total = n.value;
-    IF n.left -> total += sumTree(n.left OR RAISE);
-    IF n.right -> total += sumTree(n.right OR RAISE);
+    IF n.left -> total += sumTree(n?.left OR 0);
+    IF n.right -> total += sumTree(n?.right OR 0);
     RETURN total;
 END
 ```
 
 `@indirect` gives the node a stable heap address, enabling graph structures. `@multiowned` (Rc) enables shared ownership for DAGs. For cyclic graphs, use `@link` -- CLEAR's weak reference.
+
+`?.` is the safe navigate operator to peak into optional types.  It combines with `OR` to handle missing data like an error.
 
 ### Weak References with @link
 
@@ -487,11 +501,10 @@ FN main() RETURNS Void ->
     weak_p = LINK p;
 
     -- RESOLVE upgrades back to ?Parent@multiowned (optional)
-    IF RESOLVE weak_p -> |strong|
+    WITH RESOLVE weak_p AS strong {
         ASSERT strong.name == "Alice", "resolved";
-    ELSE ->
-        ASSERT FALSE, "should have resolved";
-    END
+    }
+    ELSE -> ASSERT FALSE, "should have resolved";
 
     RETURN;
 END
@@ -604,7 +617,8 @@ buf = createBuffer("hello");
 -- defer buf.deinit() emitted automatically
 ```
 
-See [docs/ffi.md](docs/ffi.md) for the complete FFI guide.
+ * See [json_api](benchmarks/24_json_api/server.cht) for an example.
+ * See [docs/ffi.md](docs/ffi.md) for the complete FFI guide.
 
 ## 17. Memory Model
 
@@ -626,6 +640,18 @@ Every function has its own memory arena. Variables live as long as the function 
 
 Inside loops, the frame arena is rewound each iteration to prevent unbounded growth. Mutable variables that accumulate across iterations (like string concatenation) are automatically detected and excluded from the rewind.
 
+CLEAR additionally inserts cooperative yielding into loops to prevent head-of-line blocking, etc.
+
+This destroys SIMD optimizations. CLEAR can detect when a SIMD optimization is possible and warn you to use `TIGHT` loops:
+
+```ruby clear illustrative
+TIGHT FOR i IN (1..<1000) -> ...
+```
+
+CLEAR will also warn you when you're using a `TIGHT` loop and you should not.  
+
+NOTE: misusing `TIGHT` loops can destroy your p99 latency.
+
 ## 18. The Reality of Concurrency
 
 In an ideal world, every workload would distribute perfectly across available cores and memory. In reality, concurrency is difficult because of the "messy middle":
@@ -638,8 +664,10 @@ In an ideal world, every workload would distribute perfectly across available co
 CLEAR handles these issues through its **Control Plane** -- an active runtime observer that uses live telemetry to manage execution.
 
 - **Fiber Overflow:** The runtime detects imminent stack overflows and auto-upsizes future tasks to `@large` or `@xl` stacks.
-- **Workload Migration (v0.2):** Telemetry-driven migration allows the runtime to detect skewed workloads and move fibers away from bottlenecked schedulers.
+- **Workload Mismatch (v0.2):** Telemetry-driven alerting when the runtime detects contented or skewed workloads. `./clear profile` can automatically suggest fixes.  
 - **Shared-Nothing Safety:** By enforcing sharding and affine moves at the language level, the Control Plane can optimize memory layout without fear of data races.
+- **Workload Migration (v0.4+):** Telemetry-driven migration allows the runtime to detect contention and skew in real-time and react to it, *IF* you have the protection enabled (added memory).  
+
 
 See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages the reality of high-performance systems.
 
