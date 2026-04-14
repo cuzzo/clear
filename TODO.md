@@ -32,7 +32,7 @@ Milestone: *Basic* SQL/CLEAR database
 
 ## v0.3
 
- - [ ] CPS to support conditional & nested-looping fibers
+ - [ ] CPS to support conditional & nested-looping Finite State Machine fibers
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
  - [ ] Actors as an ownership capability
