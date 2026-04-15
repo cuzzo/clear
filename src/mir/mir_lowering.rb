@@ -4273,7 +4273,8 @@ class MIRLowering
 
   # Apply container_promote: zig_type comes from Assignment.container_promote_zig_type annotation
   def apply_container_promote_zig(val_ref, rt_name, zig_type)
-    "blk_prm: {\n    var __prm = #{val_ref};\n    try CheatLib.promote(#{zig_type}, #{rt_name}, &__prm);\n    break :blk_prm __prm;\n}"
+    promote_type = zig_type.sub(/\A\*/, '')
+    "blk_prm: {\n    var __prm = #{val_ref};\n    try CheatLib.promote(#{promote_type}, #{rt_name}, &__prm);\n    break :blk_prm __prm;\n}"
   end
 
   # Check if a value node is an Rc/Arc identifier that needs retain (not moved, not unwrapped)

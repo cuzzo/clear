@@ -108,6 +108,14 @@ RSpec.describe MIRLowering do
     end
   end
 
+  describe "#apply_container_promote_zig" do
+    it "uses the bare pointee type for promoted values" do
+      zig = lowering.send(:apply_container_promote_zig, "val", "rt", "*Value")
+      expect(zig).to include("CheatLib.promote(Value, rt, &__prm)")
+      expect(zig).not_to include("CheatLib.promote(*Value")
+    end
+  end
+
   # =========================================================================
   # Literals
   # =========================================================================
