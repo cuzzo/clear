@@ -1850,9 +1850,7 @@ class MIRLowering
     }.join("\n        ")
 
     # String captures annotated directly on BgBlock.capture_string_dupes
-    bg_string_promotes = node.capture_string_dupes || Set.new
-    promoted_names = {}
-    bg_string_promotes.each { |name| promoted_names[name] = "__bgp_#{id}_#{name}" }
+    bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "bg")
 
     capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
       captured.map { |name, _|
@@ -1943,12 +1941,11 @@ class MIRLowering
       end
     }.join("\n                    ")
 
-    promoted_decls = promoted_names.map { |name, promoted|
-      "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});"
-    }.join("\n            ")
+    promoted_decls = fiber_promoted_decls_zig(promoted_names, alloc_var)
 
-    task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
-    spawn_call = bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
+    task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
+    pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
+    spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, pin_mode)
 
     bg_code = <<~ZIG.chomp
       #{blk_label}: {
@@ -2003,9 +2000,7 @@ class MIRLowering
     rt_name = @rt_name
 
     # String captures annotated directly on BgStreamBlock.capture_string_dupes
-    bg_string_promotes = node.capture_string_dupes || Set.new
-    promoted_names = {}
-    bg_string_promotes.each { |name| promoted_names[name] = "__sgp_#{id}_#{name}" }
+    bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "sg")
 
     capture_fields = captured.map { |name, type_obj|
       zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
@@ -2039,12 +2034,11 @@ class MIRLowering
     @current_stream_local = prev_stream_local
     @current_stream_is_inf = prev_stream_is_inf
 
-    promoted_decls = promoted_names.map { |name, promoted|
-      "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});"
-    }.join("\n            ")
+    promoted_decls = fiber_promoted_decls_zig(promoted_names, alloc_var)
     string_frees = bg_string_promotes.filter_map { |n| "defer ctx.alloc.free(ctx.#{n});" }.join("\n                    ")
 
-    task_cfg = task_config_zig(node.stack_size, node.respond_to?(:computed_stack_tier) ? node.computed_stack_tier : nil)
+    task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
+    spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, :local)
 
     sg_code = <<~ZIG.chomp
       #{blk_label}: {
@@ -2071,12 +2065,7 @@ class MIRLowering
           const #{ctx_var} = try #{alloc_var}.create(#{ctx_type});
           errdefer #{alloc_var}.destroy(#{ctx_var});
           #{ctx_var}.* = .{ #{capture_inits} };
-          try #{rt_name}.getSched().submitSpawn(
-              @intFromPtr(&Runtime.entryWrapper),
-              @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
-              #{ctx_var},
-              #{task_cfg}
-          );
+          #{spawn_call}
           break :#{blk_label} #{stream_var};
       }
     ZIG
@@ -2462,8 +2451,7 @@ class MIRLowering
     ".{ .stack_size = .#{variant} }"
   end
 
-  def bg_spawn_call_zig(node, rt_name, ctx_type, ctx_var, task_cfg)
-    pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
+  def fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, pin_mode)
     spawn_args = "@intFromPtr(&Runtime.entryWrapper),\n" \
       "    @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),\n" \
       "    #{ctx_var},\n" \
@@ -2476,6 +2464,19 @@ class MIRLowering
     else
       "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
     end
+  end
+
+  def fiber_string_promotes(node, id, prefix)
+    promotes = node.capture_string_dupes || Set.new
+    names = {}
+    promotes.each { |name| names[name] = "__#{prefix}p_#{id}_#{name}" }
+    [promotes, names]
+  end
+
+  def fiber_promoted_decls_zig(promoted_names, alloc_var)
+    promoted_names.map { |name, promoted|
+      "const #{promoted} = try #{alloc_var}.dupe(u8, #{name});\n            errdefer #{alloc_var}.free(#{promoted});"
+    }.join("\n            ")
   end
 
   # ================================================================
