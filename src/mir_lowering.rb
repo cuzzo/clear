@@ -2828,7 +2828,18 @@ class MIRLowering
           rt_name = @rt_name
           left_raw = emit_expr(strip_try(left))
           right_zig = emit_expr(right)
-          promos = string_fields.map { |f| "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch @panic(\"out of memory\");" }.join(" ")
+          # Dupe each string field with proper cleanup on partial failure:
+          # - First field: `try dupe(...)` — propagates OOM, no prior state to clean up.
+          # - Each subsequent field: catch, free all previously-duped fields, re-return error.
+          #   This prevents leaking heap-duped fields if a later dupe fails under OOM.
+          promos = string_fields.each_with_index.map { |f, i|
+            if i == 0
+              "__fb.#{f} = try #{rt_name}.heapAlloc().dupe(u8, __fb.#{f});"
+            else
+              frees = string_fields[0...i].map { |prev| "#{rt_name}.heapAlloc().free(__fb.#{prev});" }.join(" ")
+              "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch |__dupe_err| { #{frees} return __dupe_err; };"
+            end
+          }.join(" ")
           return MIR::RawZig.new(
             "(#{left_raw} catch __fb: { var __fb = #{right_zig}; #{promos} break :__fb __fb; })",
             "or_fallback_dupe",

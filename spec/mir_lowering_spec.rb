@@ -2087,5 +2087,56 @@ RSpec.describe MIRLowering do
       zig = emit(result)
       expect(zig).to include("catch undefined")
     end
+
+    context "or_fallback_dupe with struct string fields" do
+      def make_fallback_struct(full_type)
+        node = AST::StructLit.new(tok, full_type.to_s, {})
+        node.full_type = full_type
+        node
+      end
+
+      let(:struct_schema) do
+        { "name" => { type: Type.new(:String) }, "code" => { type: Type.new(:Int64) } }
+      end
+      let(:schema_with_two_strings) do
+        { "first" => { type: Type.new(:String) }, "second" => { type: Type.new(:String) } }
+      end
+
+      it "generates try dupe (not @panic) for single string field fallback" do
+        left  = make_error_expr("fetchUser")
+        right = make_fallback_struct(:User)
+        node  = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+        node.full_type = :User
+        node.or_fallback_dupe = true
+
+        l = lowering(struct_schemas: { User: struct_schema })
+        result = l.lower(node)
+        zig = emit(result)
+
+        expect(zig).not_to include("@panic")
+        expect(zig).to include("try rt.heapAlloc().dupe(u8")
+        expect(zig).to include("__fb.name")
+      end
+
+      it "frees already-duped fields on OOM for multi-string-field fallback" do
+        left  = make_error_expr("fetchRecord")
+        right = make_fallback_struct(:Record)
+        node  = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+        node.full_type = :Record
+        node.or_fallback_dupe = true
+
+        l = lowering(struct_schemas: { Record: schema_with_two_strings })
+        result = l.lower(node)
+        zig = emit(result)
+
+        expect(zig).not_to include("@panic")
+        # First field uses try
+        expect(zig).to match(/try rt\.heapAlloc\(\)\.dupe\(u8, __fb\.first\)/)
+        # Second field uses catch with cleanup of first
+        expect(zig).to match(/catch \|__dupe_err\|/)
+        expect(zig).to include("rt.heapAlloc().free(__fb.first)")
+        expect(zig).to include("return __dupe_err")
+      end
+    end
   end
 end
