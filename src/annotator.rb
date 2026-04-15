@@ -2673,11 +2673,17 @@ private
     inner_type = node.value.full_type
     node.full_type = inner_type.is_a?(Type) ? Type.new(inner_type) : inner_type
     node.storage = :stack
-    # COPY always produces heap-owned data.
     ti = node.type_info
-    ti.provenance = :heap if ti.is_a?(Type)
-    # Mark as heap usage - COPY allocates via heapAlloc
-    current_fn_ctx.heap_count += 1 if current_fn_ctx
+    resolver = ->(name) { lookup_type_schema(name) rescue nil }
+
+    # COPY of an implicitly-copyable value is a semantic no-op: keep it
+    # value-like instead of forcing heap ownership/cleanup.
+    unless ti&.implicitly_copyable?(resolver)
+      # COPY always produces heap-owned data for non-Copy values.
+      ti.provenance = :heap if ti.is_a?(Type)
+      # Mark as heap usage - COPY allocates via heapAlloc
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
+    end
 
     # Determine if elements need deep copy (dupeUnionValue) vs shallow (memcpy).
     # For list/array types, check if element type is a non-Copy union.
@@ -3150,6 +3156,8 @@ private
   # and capability tracking. All ownership state is in the OwnershipGraph.
 
   def handle_assign_move(node)
+    return if node.value.is_a?(AST::CopyNode)
+
     # Non-escaping values (WITH block aliases) cannot be moved/consumed
     if node.value.is_a?(AST::Identifier) && node.value.symbol&.non_escaping
       error!(node, "Cannot move WITH-scoped '#{node.value.name}'. WITH bindings cannot escape their block.")

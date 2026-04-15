@@ -1254,6 +1254,34 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to include("defer CheatLib.free(rt, tcoEnv)")
       expect(zig).not_to include("CheatLib.cleanup(u64")
     end
+
+    it "does not free Id<T> copied into a reentrant call path" do
+      src = <<~CLEAR
+        STRUCT Env { vars: String[]@list }
+        UNION Value {
+          Nil,
+          Tco { tcoAst: String @indirect, tcoEnv: Id<Env> }
+        }
+
+        FN eval!(TAKES ast: String, envId: Id<Env>, MUTABLE pool: Env[8]@pool) RETURNS String @reentrant ->
+          RETURN ast;
+        END
+
+        FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS String @reentrant ->
+          MATCH v START
+            Value.Tco AS tco ->
+              tcoAst = COPY tco.tcoAst;
+              tcoEnv = COPY tco.tcoEnv;
+              RETURN eval!(GIVE tcoAst, tcoEnv, pool);,
+            DEFAULT -> RETURN "";
+          END
+          RETURN "";
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to include("defer CheatLib.free(rt, tcoEnv)")
+      expect(zig).not_to include("CheatLib.cleanup(u64")
+    end
   end
 
   # ===========================================================================
