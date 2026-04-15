@@ -6,7 +6,6 @@ pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const streams = @import("../lib/streams.zig");
-const stream_helpers = @import("../lib/stream.zig");
 
 pub const EbrContext = @import("ebr").EbrContext;
 const Task = @import("queues.zig").Task;
@@ -66,7 +65,7 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(R) {
-        return stream_helpers.concurrentBoundedSelect(
+        return streams.concurrentBoundedSelect(
             fp.WaitGroup, T, R, N, mapFn,
             struct {
                 fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
@@ -99,7 +98,7 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(T) {
-        return stream_helpers.concurrentBoundedWhere(
+        return streams.concurrentBoundedWhere(
             fp.WaitGroup, T, N, predFn,
             struct {
                 fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
@@ -131,7 +130,7 @@ pub const CheatLib = struct {
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
     ) !void {
-        return stream_helpers.concurrentBoundedEach(
+        return streams.concurrentBoundedEach(
             fp.WaitGroup, T, N, eachFn,
             struct {
                 fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {

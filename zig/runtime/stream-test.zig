@@ -11,6 +11,7 @@ const CheatHeader = @import("runtime-header.zig");
 const CheatLib = CheatHeader.CheatLib;
 const Runtime = CheatHeader.Runtime;
 const EbrContext = CheatHeader.EbrContext;
+const fc = @import("fiber-core.zig");
 const fp = CheatHeader.scheduler;
 const fm = CheatHeader.fiber_memory;
 const qs = @import("queues.zig");
@@ -21,8 +22,8 @@ fn fakeSched() *CheatHeader.scheduler.Scheduler {
 
 fn splitNodeCount(comptime T: type, inner: *CheatLib.SplitStream(T).Inner) usize {
     var count: usize = 0;
-    var cur = inner.items_head;
-    while (cur) |node| : (cur = node.next) count += 1;
+    var cur = inner.chunks_head;
+    while (cur) |chunk| : (cur = chunk.next) count += chunk.len.load(.acquire);
     return count;
 }
 
@@ -30,6 +31,9 @@ fn makeProducer(comptime T: type, stream: CheatLib.SplitStream(T)) CheatLib.Spli
     return .{
         .inner = stream.inner,
         .alloc = stream.alloc,
+        .subscriber_id = std.math.maxInt(usize),
+        .next_seq = stream.next_seq,
+        .active = false,
     };
 }
 
@@ -286,25 +290,22 @@ test "Range nextOrNull and toList work" {
     try std.testing.expectEqual(@as(f64, 1.5), list.items[1]);
 }
 
-test "SplitStream has inner, alloc, next_node, started, and active fields" {
+test "SplitStream has inner, alloc, next_seq, and active fields" {
     const S = CheatLib.SplitStream(i64);
     const fields = @typeInfo(S).@"struct".fields;
     var found_inner = false;
     var found_alloc = false;
-    var found_next_node = false;
-    var found_started = false;
+    var found_next_seq = false;
     var found_active = false;
     inline for (fields) |f| {
         if (std.mem.eql(u8, f.name, "inner")) found_inner = true;
         if (std.mem.eql(u8, f.name, "alloc")) found_alloc = true;
-        if (std.mem.eql(u8, f.name, "next_node")) found_next_node = true;
-        if (std.mem.eql(u8, f.name, "started")) found_started = true;
+        if (std.mem.eql(u8, f.name, "next_seq")) found_next_seq = true;
         if (std.mem.eql(u8, f.name, "active")) found_active = true;
     }
     try std.testing.expect(found_inner);
     try std.testing.expect(found_alloc);
-    try std.testing.expect(found_next_node);
-    try std.testing.expect(found_started);
+    try std.testing.expect(found_next_seq);
     try std.testing.expect(found_active);
 }
 
@@ -349,11 +350,12 @@ test "SplitStream keeps a memoized item until all owners consume it" {
     try std.testing.expectEqual(@as(usize, 2), splitNodeCount(i64, stream.inner));
     try std.testing.expectEqual(@as(?i64, 11), try stream.next());
     try std.testing.expectEqual(@as(usize, 2), splitNodeCount(i64, stream.inner));
-    try std.testing.expectEqual(@as(usize, 1), stream.inner.items_head.?.remaining_readers);
 
     try std.testing.expectEqual(@as(?i64, 11), try clone.next());
-    try std.testing.expectEqual(@as(usize, 1), splitNodeCount(i64, stream.inner));
-    try std.testing.expectEqual(@as(i64, 22), stream.inner.items_head.?.value);
+    try std.testing.expectEqual(@as(usize, 2), splitNodeCount(i64, stream.inner));
+    try std.testing.expectEqual(@as(i64, 11), stream.inner.chunks_head.?.values[0]);
+    try std.testing.expectEqual(@as(usize, 1), stream.inner.subscribers.items[stream.subscriber_id].seq.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), stream.inner.subscribers.items[clone.subscriber_id].seq.load(.acquire));
 }
 
 test "SplitStream retain clones from the source handle current unread position" {
@@ -394,9 +396,9 @@ test "SplitStream deinit releases unread items for a lagging owner" {
 
     clone.deinit();
 
-    try std.testing.expectEqual(@as(usize, 1), splitNodeCount(i64, stream.inner));
-    try std.testing.expectEqual(@as(i64, 8), stream.inner.items_head.?.value);
-    try std.testing.expectEqual(@as(usize, 1), stream.inner.owner_count);
+    try std.testing.expectEqual(@as(usize, 2), splitNodeCount(i64, stream.inner));
+    try std.testing.expectEqual(@as(i64, 8), stream.inner.chunks_head.?.values[1]);
+    try std.testing.expectEqual(@as(usize, 1), stream.inner.active_subscribers);
 }
 
 test "SplitStream drops producer values immediately when no owners remain" {
@@ -529,6 +531,7 @@ const SplitParallelSubscriberState = struct {
     stream: CheatLib.SplitStream(i64),
     total: i64 = 0,
     count: usize = 0,
+    completed: *std.atomic.Value(usize),
 };
 
 fn splitParallelSubscriber(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
@@ -547,11 +550,13 @@ fn splitParallelSubscriber(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
 
     state.total = total;
     state.count = count;
+    _ = state.completed.fetchAdd(1, .acq_rel);
 }
 
 const SplitParallelProducerState = struct {
     stream: CheatLib.SplitStream(i64),
     message_count: usize,
+    completed: *std.atomic.Value(usize),
 };
 
 fn splitParallelProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
@@ -563,6 +568,7 @@ fn splitParallelProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
         try state.stream.push(@as(i64, @intCast(i)));
         if ((i & 63) == 0) rt.checkYield();
     }
+    _ = state.completed.fetchAdd(1, .acq_rel);
 }
 
 test "SplitStream preserves order across two OS-thread consumers" {
@@ -656,6 +662,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     var stack_pool = fm.StackPool.init(allocator);
     defer stack_pool.deinit();
     var shutdown = std.atomic.Value(bool).init(false);
+    var completed = std.atomic.Value(usize).init(0);
 
     const WorkerCtx = struct {
         allocator: std.mem.Allocator,
@@ -711,12 +718,13 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     var producer_state = SplitParallelProducerState{
         .stream = makeProducer(i64, seed_stream),
         .message_count = message_count,
+        .completed = &completed,
     };
 
     var subscribers: [subscriber_count]SplitParallelSubscriberState = undefined;
-    subscribers[0] = .{ .stream = seed_stream };
+    subscribers[0] = .{ .stream = seed_stream, .completed = &completed };
     for (1..subscriber_count) |i| {
-        subscribers[i] = .{ .stream = subscribers[0].stream.retain() };
+        subscribers[i] = .{ .stream = subscribers[0].stream.retain(), .completed = &completed };
     }
 
     for (&subscribers) |*subscriber| {
@@ -735,11 +743,38 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
         .{},
     );
 
-    sched.run();
+    const expected_completed = subscriber_count + 1;
+    const deadline = std.time.milliTimestamp() + 15_000;
+    while (completed.load(.acquire) < expected_completed and std.time.milliTimestamp() < deadline) {
+        sched.drainChannels();
+        if (sched.ready_queue.len() > 0) {
+            const task = sched.ready_queue.pop() orelse continue;
+            sched.current_task = task;
+            fc.__current_task_fn = @intFromPtr(task.user_fn);
+            fc.__current_task_size = task.base.size_class;
+            task.base.switchTo(&sched.main_ctx);
+            switch (task.status.load(.acquire)) {
+                .Finished => {
+                    _ = sched.active_tasks.fetchSub(1, .monotonic);
+                    sched.stack_pool.free(task.base.stack.memory);
+                    sched.allocator.destroy(task.base);
+                    sched.allocator.destroy(task);
+                },
+                .Ready => {
+                    sched.ready_queue.push(sched.allocator, task) catch unreachable;
+                },
+                .Blocked => {},
+            }
+        } else {
+            std.Thread.yield() catch {};
+        }
+    }
 
     shutdown.store(true, .release);
     fp.global_registry.notifyAll();
     for (&workers) |*worker| worker.join();
+
+    try std.testing.expectEqual(expected_completed, completed.load(.acquire));
 
     const expected_total = blk: {
         var total: i64 = 0;
