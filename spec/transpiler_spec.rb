@@ -1110,6 +1110,21 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "optional unwrap on non-identifier receivers" do
+    it "transpiles pool index unwrap followed by field method call" do
+      src = <<~CLEAR
+        STRUCT Env { vars: HashMap<Int64> }
+
+        FN has!(envId: Id<Env>, name: String, MUTABLE pool: Env[10]@pool) RETURNS Bool ->
+            RETURN pool[envId]?.vars.contains?(name);
+        END
+      CLEAR
+
+      zig = transpile(src)
+      expect(zig).to include("contains(name)")
+    end
+  end
+
   describe "Union construction auto-dupes rodata strings" do
     it "dupes string literal in union variant construction" do
       src = <<~CLEAR

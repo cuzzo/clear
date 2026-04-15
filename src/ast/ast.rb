@@ -457,7 +457,10 @@ module AST
   end
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
-  OptionalUnwrap = Struct.new(:token, :target) { include Locatable }
+  OptionalUnwrap = Struct.new(:token, :target) do
+    include Locatable
+    def name; target.respond_to?(:name) ? target.name : nil end
+  end
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
   OrExit         = Struct.new(:token, :message) { include Locatable }  # OR EXIT "msg" - set error context + raise
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
