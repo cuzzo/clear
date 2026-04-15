@@ -142,18 +142,15 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
 END
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    val = COPY (pool[envId]?.vars[name] OR Value{ Number: 0.0 - 777777.0 });
-    MATCH val START
-        Value.Number AS n ->
-            IF n == 0.0 - 777777.0 THEN
-                parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
-                MATCH parentVal START
-                    Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
-                    DEFAULT -> RETURN Value.Nil;
-                END
-            END
-            RETURN val;,
-        DEFAULT -> RETURN val;
+    env = pool[envId]?;
+    IF env.vars.contains?(name) THEN
+        RETURN COPY (env.vars[name] OR Value.Nil);
+    END
+
+    parentVal = env.vars["__p"] OR Value.Nil;
+    MATCH parentVal START
+        Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
+        DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
 END
