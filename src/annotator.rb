@@ -1296,15 +1296,7 @@ private
     actual = node.value.resolved_type
     expected = current_fn_ctx.return_type
 
-    # 2. Ownership Tracking
-    was_promoted = handle_return_escape(node.value, expected)
-    if was_promoted
-      current_fn_ctx.frame_count -= 1
-      current_fn_ctx.heap_count  += 1
-      record_effect(EffectTracker::HEAP)
-    end
-
-    # 3. Move marking: returning a non-Copy value moves it out of the function.
+    # 2. Move marking: returning a non-Copy value moves it out of the function.
     # Set was_moved so the transpiler emits _moved = true before return.
     if node.value.is_a?(AST::Identifier)
       vti = node.value.type_info
@@ -1331,8 +1323,7 @@ private
     end
 
     # Promote non-identifier literals to heap when the expected return type requires it.
-    # handle_return_escape only handles identifier variables; literals need this explicit check.
-    unless was_promoted || node.value.is_a?(AST::Identifier)
+    unless node.value.is_a?(AST::Identifier)
       expected_type = Type.new(expected) if expected
       if expected_type && (expected_type.heap? || expected_type.dynamic?) &&
          node.value.respond_to?(:storage=) &&
@@ -1681,7 +1672,6 @@ private
       validate_assignment_type(node, scope.resolve_type(node.name), node.value.resolved_type)
       node.full_type = scope.resolve_type(node.name)
 
-      handle_assign_escape(node)
       handle_assign_move(node)
       handle_assign_borrow(node)
 
@@ -1838,7 +1828,6 @@ private
       error!(node, "Invalid assignment target: #{target.class}")
     end
 
-    handle_assign_escape(node)
     handle_assign_move(node)
     handle_assign_borrow(node)
 
@@ -3266,33 +3255,6 @@ private
     end
   end
 
-  # DEPRECATED: Only handles Identifier RHS, misses FuncCall/MethodCall/StringConcat/GetField.
-  # The MIR layer (OwnershipDataflow in control_flow.rb) is the authority for escape propagation.
-  # This method is a partial early approximation that predates MIR lowering. It should be removed
-  # once OwnershipDataflow is extended to cover assignment-based escape (tracking that a frame value
-  # flows into a heap-allocated container or global-scope binding). Do not add new cases here.
-  def handle_assign_escape(node)
-    return unless node.value.is_a?(AST::Identifier)
-    rhs_name = node.value.name
-    rhs_scope = lookup_scope_for(rhs_name)
-    target_is_heap = false
-
-    if node.name.is_a?(AST::Identifier)
-      lhs_scope = lookup_scope_for(node.name.name)
-      target_is_heap = true if lhs_scope && (lhs_scope.is_on_heap?(node.name.name) || is_global_scope?(lhs_scope))
-    elsif node.name.is_a?(AST::GetField) || node.name.is_a?(AST::GetIndex)
-      root = get_root_object(node.name)
-      if root.is_a?(AST::Identifier)
-        root_scope = lookup_scope_for(root.name)
-        target_is_heap = true if root_scope && (is_global_scope?(root_scope) || root_scope.is_on_heap?(root.name))
-      end
-    end
-
-    if target_is_heap && rhs_scope && Type.new(rhs_scope.resolve_type(rhs_name)).requires_move?
-      promote_to_heap(rhs_name, rhs_scope)
-    end
-  end
-
   def handle_assign_borrow(node)
     return unless node.value.is_a?(AST::FuncCall) || node.value.is_a?(AST::MethodCall)
     call_node = node.value
@@ -3350,32 +3312,6 @@ private
 
     args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
     args[param_index]
-  end
-
-  def handle_return_escape(value_node, expected_type = nil)
-    return false if value_node.nil?
-    if expected_type
-      expected = Type.new(expected_type)
-      return false unless expected.heap? || expected.dynamic?
-    end
-
-    root = get_root_object(value_node)
-    return false unless root.is_a?(AST::Identifier)
-
-    var_name = root.name
-    sym = root.symbol
-    return false unless sym
-
-    owner_scope = sym.scope
-    return false unless owner_scope
-    return false if sym.storage == :multiowned || sym.storage == :shared || sym.sync
-
-    type = owner_scope.resolve_type(var_name)
-    return false unless Type.new(type).requires_move?
-
-    result = promote_to_heap(var_name, owner_scope)
-    root.storage = :heap if owner_scope.is_on_heap?(var_name) && root.respond_to?(:storage=)
-    result
   end
 
   def verify_unrestricted!(node)
@@ -3735,35 +3671,10 @@ private
     error!(val_node, "Cannot store borrowed value '#{borrowed_name}' into #{container_desc}. Use COPY for an explicit deep-copy.")
   end
   def og_set_live(name)  = (@og[name]&.state = :live)
-  def og_escape(name)    = @og.escape(name)
   def og_drop(name)      = @og.drop(name)
   def og_fork            = @og.fork
   def og_push_scope      = (@og_scope_depth += 1)
   def og_pop_scope       = (@og_scope_depth -= 1)
-
-  # Unified escape: updates graph + scope storage + AST node.
-  # Returns true if the variable was promoted from frame (for frame counter tracking).
-  def promote_to_heap(name, scope = nil)
-    og_escape(name)
-    scope ||= lookup_scope_for(name)
-    return false unless scope
-    entry = scope.locals[name]
-    return false unless entry
-    was_frame = entry.storage == :frame || entry.storage == :stack
-    return false if [:multiowned, :shared, :heap].include?(entry.storage)
-    entry.storage = :heap
-    # Also set provenance=:heap so PromotionClassifier's !heap_provenance? guard fires,
-    # preventing a redundant MIR::Promote on a node already promoted to heap.
-    entry.type.provenance = :heap if entry.type.is_a?(Type)
-    if entry.reg&.respond_to?(:storage=)
-      entry.reg.storage = :heap
-      entry.reg.value.storage = :heap if entry.reg.respond_to?(:value) && entry.reg.value&.respond_to?(:storage=)
-      if entry.reg.respond_to?(:type_info) && entry.reg.type_info.is_a?(Type)
-        entry.reg.type_info.provenance = :heap
-      end
-    end
-    was_frame
-  end
 
   def og_merge(snapshot)
     @og.merge(snapshot) if snapshot

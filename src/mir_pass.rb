@@ -83,6 +83,22 @@ class MIRPass
       upgrade_bg_captures_to_heap!(fn) if fn&.body
     end
 
+    # Phase 1.5e: upgrade frame vars returned from heap-pointer functions to heap.
+    # RETURNS %Struct functions must return heap-allocated values; upgrade at
+    # declaration so the allocator is finalized before CleanupClassifier runs.
+    @fn_nodes.each do |name, fn|
+      upgrade_heap_ptr_returns_to_heap!(fn) if fn&.body
+    end
+
+    # Phase 1.5f: upgrade frame collections assigned to heap targets to heap.
+    # When a frame-allocated collection is assigned to a field/index of a
+    # heap-allocated struct/array, allocate it on heap at declaration instead
+    # of emitting a runtime MIR::Promote. Replaces handle_assign_escape from
+    # the annotator; runs post-MIR so allocators are fully resolved.
+    @fn_nodes.each do |name, fn|
+      upgrade_assign_escapes_to_heap!(fn) if fn&.body
+    end
+
     # Phase 2: classify cleanup bindings (uses cleared provenance from Phase 1).
     @fn_nodes.each do |name, fn|
       @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
@@ -220,6 +236,77 @@ class MIRPass
       if ti.is_a?(Type)
         ti.provenance = :heap
       end
+    end
+  end
+
+  # Upgrade frame variables returned from heap-pointer functions to heap at declaration.
+  # When RETURNS %Struct, every RETURN identifier must be heap-allocated so the
+  # returned pointer is valid after the frame is rewound.
+  def upgrade_heap_ptr_returns_to_heap!(fn)
+    ret_type = fn.return_type
+    ret_type = ret_type.is_a?(Type) ? ret_type : (Type.new(ret_type) rescue nil)
+    return unless ret_type&.heap?
+
+    AST.walk_body(fn.body) do |node|
+      next unless node.is_a?(AST::ReturnNode) && node.value.is_a?(AST::Identifier)
+      ident = node.value
+      next unless ident.symbol
+      next unless ident.symbol.storage == :frame || ident.symbol.storage == :stack
+      next unless ident.symbol.type && (ident.symbol.type.is_a?(Type) ? ident.symbol.type : (Type.new(ident.symbol.type) rescue nil))&.requires_move?
+
+      ident.symbol.storage = :heap
+      sym_type = ident.symbol.type
+      sym_type.provenance = :heap if sym_type.is_a?(Type)
+      decl = ident.symbol.reg
+      if decl&.respond_to?(:storage=)
+        decl.storage = :heap
+      end
+      decl_ti = decl&.type_info rescue nil
+      decl_ti.provenance = :heap if decl_ti.is_a?(Type)
+    end
+  end
+
+  # Upgrade frame collections assigned directly to heap struct/array fields to heap.
+  # When `heap_struct.field = frame_list` or `heap_arr[i] = frame_list`, the list
+  # must be heap-allocated so it survives beyond the current frame. Runs after
+  # BG-capture upgrade so allocators are stable before CleanupClassifier runs.
+  def upgrade_assign_escapes_to_heap!(fn)
+    AST.walk_body(fn.body) do |node|
+      next unless node.is_a?(AST::Assignment)
+      rhs = node.value
+      next unless rhs.is_a?(AST::Identifier) && rhs.symbol
+
+      # RHS must be frame/stack allocated
+      rhs_storage = rhs.symbol.storage
+      next unless rhs_storage == :frame || rhs_storage == :stack
+
+      # RHS type must require explicit cleanup (non-copy heap collection)
+      rhs_ti = rhs.symbol.type
+      rhs_ti = rhs_ti.is_a?(Type) ? rhs_ti : (Type.new(rhs_ti) rescue nil)
+      next unless rhs_ti&.requires_move?
+
+      # LHS root must be heap-allocated
+      lhs_root = extract_root_ident(node.name)
+      next unless lhs_root.is_a?(AST::Identifier) && lhs_root.symbol
+      next unless [:heap, :multiowned, :shared].include?(lhs_root.symbol.storage)
+
+      # Upgrade: scope entry + declaration node
+      rhs.symbol.storage = :heap
+      rhs.symbol.type.provenance = :heap if rhs.symbol.type.is_a?(Type)
+      decl = rhs.symbol.reg
+      if decl&.respond_to?(:storage=)
+        decl.storage = :heap
+      end
+      decl_ti = decl&.type_info rescue nil
+      decl_ti.provenance = :heap if decl_ti.is_a?(Type)
+    end
+  end
+
+  def extract_root_ident(node)
+    case node
+    when AST::GetField, AST::GetIndex then extract_root_ident(node.target)
+    when AST::Identifier then node
+    else nil
     end
   end
 

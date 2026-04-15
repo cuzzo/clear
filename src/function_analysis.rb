@@ -536,14 +536,6 @@ module FunctionAnalysis
         owner_scope = current_scope
       end
 
-      # FORCE HEAP PROMOTION for captures:
-      # If captured by a closure, it must be on the heap so it outlives its stack frame.
-      entry = owner_scope.locals[cap_name]
-      if (entry.storage == :frame || entry.storage == :stack) && Type.new(entry.type).requires_move?
-        promote_to_heap(cap_name, owner_scope)
-      end
-
-      # SAVE TYPE AND STORAGE (Re-fetch entry after potential promotion)
       entry = owner_scope.locals[cap_name]
 
       if cap[:mutable] && !entry.mutable

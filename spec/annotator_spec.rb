@@ -1998,7 +1998,40 @@ RSpec.describe SemanticAnnotator do
   # Higher-Order specs moved to spec/higher_order_spec.rb
 
   describe "Escape Analysis (Heap Promotion)" do
-    # Check that a variable was promoted to heap via the ownership graph.
+    # Run annotation + MIRPass; sets @_mir_ast so after-block checks SymbolEntry storage.
+    def run_mir_escape(src)
+      tokens = Lexer.new(src).tokenize
+      ast = Parser.new(tokens, src).parse
+      PipelineRewriter.new.rewrite!(ast)
+      @annotator = SemanticAnnotator.new
+      @annotator.annotate!(ast)
+      StringConcatRewriter.new.rewrite!(ast)
+      fn_nodes = {}
+      ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+      mir = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: ->(n) { @annotator.lookup_type_schema(n) })
+      mir.transform!(ast)
+      @_mir_ast = ast
+      ast
+    end
+
+    # Walk direct struct-member children of each statement in every function body;
+    # returns the first SymbolEntry whose identifier name matches var_name.
+    def find_symbol_in_mir_ast(var_name)
+      @_mir_ast.statements.each do |stmt|
+        next unless stmt.respond_to?(:body)
+        AST.walk_body(stmt.body) do |node|
+          next unless node.respond_to?(:members)
+          node.members.each do |m|
+            child = node[m]
+            if child.is_a?(AST::Identifier) && child.name == var_name && child.symbol
+              return child.symbol
+            end
+          end
+        end
+      end
+      nil
+    end
+
     def expect_escape(var_name)
       @_escape_check = var_name
     end
@@ -2009,9 +2042,14 @@ RSpec.describe SemanticAnnotator do
 
     after do
       if @_escape_check
-        og = @annotator.send(:instance_variable_get, :@og)
-        node = og[@_escape_check]
-        expect(node&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
+        if @_mir_ast
+          sym = find_symbol_in_mir_ast(@_escape_check)
+          expect(sym&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap after MIRPass"
+        else
+          og = @annotator.send(:instance_variable_get, :@og)
+          node = og[@_escape_check]
+          expect(node&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
+        end
       end
       if @_no_escape_check
         og = @annotator.send(:instance_variable_get, :@og)
@@ -2031,7 +2069,7 @@ RSpec.describe SemanticAnnotator do
     context "Return Statements" do
       it "promotes a variable when it is returned (Pass-by-Reference requirement)" do
         expect_escape("x")
-        run(<<~FLUX)
+        run_mir_escape(<<~FLUX)
           STRUCT Config { id: Float64 }
           FN create() RETURNS %Config ->
             x = Config { id: 1 };
@@ -2058,7 +2096,7 @@ RSpec.describe SemanticAnnotator do
     context "Assignment to Persistent Storage" do
       it "promotes a variable assigned to a Global" do
         expect_escape("local")
-        run(<<~FLUX)
+        run_mir_escape(<<~FLUX)
           STRUCT Item { id: Float64, name: Byte[100] }
           STRUCT Container { item: %Item }
 
@@ -2085,13 +2123,13 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Lambda/Function Captures (USE)" do
-      it "promotes a variable when it is captured by USE" do
-        expect_escape("x")
+      it "does NOT promote a plain struct captured by USE (struct moves by value into closure)" do
+        expect_no_escape("x")
         run(<<~FLUX)
           STRUCT Node { id: Float64 }
           FN main() ->
             x = Node { id: 1 };
-            -- x is captured by lambda, must be on heap
+            -- USE(x) borrows x into the closure; plain struct stays on stack
             f = %(n: Float64) USE(x) -> x.id + n;
             RETURN;
           END
