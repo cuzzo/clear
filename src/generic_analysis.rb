@@ -81,7 +81,7 @@ module GenericAnalysis
     end
 
     # @list/@pool/@set require an array type.
-    if type_obj.list_collection? && !type_obj.array?
+    if type_obj.list_collection? && !type_obj.array? && !type_obj.promise_list?
       error!(node, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
     end
     if type_obj.pool? && !type_obj.array?
@@ -281,7 +281,7 @@ module GenericAnalysis
   def propagate_declared_type_to_value!(node, final_type)
     return unless node.type.is_a?(Type)
 
-    # BgStreamBlock infers ~T[?]; declared ~T[INF] picks the runtime wrapper.
+    # BgStreamBlock infers ~?T[]; declared ~T[INF] picks the runtime wrapper.
     if node.value.is_a?(AST::BgStreamBlock) && node.type.inf_stream?
       node.value.full_type = final_type
     end

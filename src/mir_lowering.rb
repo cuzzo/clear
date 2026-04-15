@@ -1767,7 +1767,7 @@ class MIRLowering
     @stream_gen_counter = (@stream_gen_counter || 0) + 1
     id = @stream_gen_counter - 1
 
-    tense_t = Type.new(node.full_type || :"~Void[?]")
+    tense_t = Type.new(node.full_type || :"~?Void[]")
     is_inf = tense_t.inf_stream?
     stream_zig = tense_t.zig_type
 

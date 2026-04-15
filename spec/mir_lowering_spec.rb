@@ -1511,7 +1511,7 @@ RSpec.describe MIRLowering do
       yield_node = AST::YieldExpr.new(tok, yield_expr)
       yield_node.full_type = :Void
       node = AST::BgStreamBlock.new(tok, [yield_node], nil, nil)
-      node.full_type = :"~Void[?]"
+      node.full_type = :"~?Void[]"
 
       result = lowering.lower(node)
       expect(result).to be_a(MIR::BgBlock)

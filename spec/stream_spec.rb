@@ -437,7 +437,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /NEXT requires a Promise/)
+        expect { run(src) }.to raise_error(SourceError, /NEXT requires a future value/)
       end
     end
 
@@ -538,9 +538,9 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===================================================================
-  # ~T[?] Open Streams — Phase 3
+  # ~?T[] Open Streams — Phase 3
   # ===================================================================
-  describe "~T[?] Open Streams" do
+  describe "~?T[] Open Streams" do
     def transpile_fn(clear_src)
       ZigTranspiler.new.transpile(clear_src)
     end
@@ -549,8 +549,8 @@ RSpec.describe SemanticAnnotator do
     # Type predicates
     # -------------------------------------------------------------------
     describe "Type predicates" do
-      it "open_stream? is true for ~Float64[?]" do
-        t = Type.new(:"~Float64[?]")
+      it "open_stream? is true for ~?Float64[]" do
+        t = Type.new(:"~?Float64[]")
         expect(t.open_stream?).to be true
       end
 
@@ -569,19 +569,26 @@ RSpec.describe SemanticAnnotator do
         expect(t.open_stream?).to be false
       end
 
-      it "open_stream_element_type returns Float64 for ~Float64[?]" do
-        t = Type.new(:"~Float64[?]")
+      it "open_stream_element_type returns Float64 for ~?Float64[]" do
+        t = Type.new(:"~?Float64[]")
         expect(t.open_stream_element_type.resolved).to eq :Float64
       end
 
-      it "open_stream_element_type returns Bool for ~Bool[?]" do
-        t = Type.new(:"~Bool[?]")
+      it "open_stream_element_type returns Bool for ~?Bool[]" do
+        t = Type.new(:"~?Bool[]")
         expect(t.open_stream_element_type.resolved).to eq :Bool
       end
 
       it "requires_move? is false for open streams (resource semantics)" do
-        t = Type.new(:"~Float64[?]")
+        t = Type.new(:"~?Float64[]")
         expect(t.requires_move?).to be false
+      end
+
+      it "bounded optional streams preserve optional element type for ~?Float64[3]" do
+        t = Type.new(:"~?Float64[3]")
+        expect(t.bounded_stream?).to be true
+        expect(t.stream_element_type.resolved).to eq :"?Float64"
+        expect(t.stream_capacity).to eq 3
       end
 
       it "open_stream_marker? is true for Float64[?]" do
@@ -609,13 +616,13 @@ RSpec.describe SemanticAnnotator do
     # Zig type emission
     # -------------------------------------------------------------------
     describe "zig_type" do
-      it "emits CheatLib.Stream(f64) for ~Float64[?]" do
-        t = Type.new(:"~Float64[?]")
+      it "emits CheatLib.Stream(f64) for ~?Float64[]" do
+        t = Type.new(:"~?Float64[]")
         expect(t.zig_type).to eq "CheatLib.Stream(f64)"
       end
 
-      it "emits CheatLib.Stream(bool) for ~Bool[?]" do
-        t = Type.new(:"~Bool[?]")
+      it "emits CheatLib.Stream(bool) for ~?Bool[]" do
+        t = Type.new(:"~?Bool[]")
         expect(t.zig_type).to eq "CheatLib.Stream(bool)"
       end
     end
@@ -624,10 +631,10 @@ RSpec.describe SemanticAnnotator do
     # Parser: [?] in type annotations
     # -------------------------------------------------------------------
     describe "parser" do
-      it "parses ~Float64[?] as a type annotation" do
+      it "parses ~?Float64[] as a type annotation" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -639,10 +646,10 @@ RSpec.describe SemanticAnnotator do
     # Annotator: BgStreamBlock
     # -------------------------------------------------------------------
     describe "BgStreamBlock annotation" do
-      it "infers ~Float64[?] type from YIELD Float64" do
+      it "infers ~?Float64[] type from YIELD Float64" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
@@ -653,10 +660,10 @@ RSpec.describe SemanticAnnotator do
         expect(decl.value.full_type.open_stream_element_type.resolved).to eq :Float64
       end
 
-      it "infers ~Bool[?] from YIELD Bool" do
+      it "infers ~?Bool[] from YIELD Bool" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Bool[?] = BG STREAM { YIELD TRUE; };
+            s: ~?Bool[] = BG STREAM { YIELD TRUE; };
             RETURN;
           END
         CLEAR
@@ -700,11 +707,11 @@ RSpec.describe SemanticAnnotator do
     # -------------------------------------------------------------------
     # Annotator: NextExpr on open streams
     # -------------------------------------------------------------------
-    describe "NextExpr on ~T[?]" do
-      it "NEXT on ~Float64[?] returns ?Float64" do
+    describe "NextExpr on ~?T[]" do
+      it "NEXT on ~?Float64[] returns ?Float64" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[?] = BG STREAM { YIELD 1.0; };
+            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             v: ?Float64 = NEXT s;
             RETURN;
           END
@@ -716,10 +723,10 @@ RSpec.describe SemanticAnnotator do
         expect(next_decl.value.full_type.wrapped_type.resolved).to eq :Float64
       end
 
-      it "NEXT on ~Bool[?] returns ?Bool" do
+      it "NEXT on ~?Bool[] returns ?Bool" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Bool[?] = BG STREAM { YIELD TRUE; };
+            s: ~?Bool[] = BG STREAM { YIELD TRUE; };
             v: ?Bool = NEXT s;
             RETURN;
           END
@@ -1144,18 +1151,18 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    describe "bare ~T[] rejection" do
-      it "raises a directed error on bare ~T[] in BindExpr declaration" do
+    describe "native ~T[] finite streams" do
+      it "allows bare ~T[] in BindExpr declaration for finite streams" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(/~T\[\] is not a valid stream type/)
+        expect { run(src) }.not_to raise_error
       end
 
-      it "raises a directed error on bare ~T[] in VarDecl (MUTABLE declaration) path" do
+      it "allows bare ~T[] in VarDecl (MUTABLE declaration) path" do
         # VarDecl path: MUTABLE declarations
         src = <<~CLEAR
           FN f() RETURNS Void ->
@@ -1163,40 +1170,40 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(/~T\[\] is not a valid stream type/)
+        expect { run(src) }.not_to raise_error
       end
 
-      it "error message mentions ~T[N] as an alternative" do
+      it "still accepts bounded streams as a separate syntax" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[3] = BG STREAM { YIELD 1.0; YIELD 2.0; YIELD 3.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(/~T\[N\]/)
+        expect { run(src) }.not_to raise_error
       end
 
-      it "error message mentions ~T[INF] as an alternative" do
+      it "still accepts infinite streams as a separate syntax" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[] = BG STREAM { YIELD 1.0; };
+            s: ~Float64[INF] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(/~T\[INF\]/)
+        expect { run(src) }.not_to raise_error
       end
 
-      it "error message mentions ~T[?] as an alternative" do
+      it "accepts the new open-stream spelling ~?T[]" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Float64[] = BG STREAM { YIELD 1.0; };
+            s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(/~T\[\?\]/)
+        expect { run(src) }.not_to raise_error
       end
 
-      it "does NOT raise when ~T[?] is used (valid open stream)" do
+      it "still accepts legacy ~T[?] as an alias during migration" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
@@ -1324,14 +1331,14 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "rejects bare ~T[] without @list (not a valid stream type)" do
+      it "rejects initializing bare ~T[] from [] because that is a promise list mismatch" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             MUTABLE futures: ~Int64[] = [];
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /not a valid stream type/)
+        expect { run(src) }.to raise_error(SourceError, /Type Mismatch/)
       end
 
       it "allows append(futures, BG { ... }) where futures is a promise list" do

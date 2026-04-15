@@ -1,4 +1,4 @@
--- Open streams: ~T[?] — a generator-backed stream; NEXT returns ?T (null when exhausted).
+-- Open streams: ~?T[] — a generator-backed stream; NEXT returns ?T (null when exhausted).
 -- BG STREAM { YIELD x; } spawns a generator fiber that buffers values.
 -- NEXT blocks until the generator completes, then pops one value per call.
 
@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: Simple number stream with three YIELD statements.
     -- -------------------------------------------------------
-    s: ~Float64[?] = BG STREAM {
+    s: ~?Float64[] = BG STREAM {
         YIELD 1.0;
         YIELD 4.0;
         YIELD 9.0;
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
     -- Test 2: Stream with a captured variable.
     -- -------------------------------------------------------
     base: Float64 = 10.0;
-    s2: ~Float64[?] = BG STREAM {
+    s2: ~?Float64[] = BG STREAM {
         YIELD base;
         YIELD base * 2.0;
     };
@@ -46,7 +46,7 @@ FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 3: Bool stream.
     -- -------------------------------------------------------
-    flags: ~Bool[?] = BG STREAM {
+    flags: ~?Bool[] = BG STREAM {
         YIELD TRUE;
         YIELD FALSE;
     };

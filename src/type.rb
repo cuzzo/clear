@@ -335,11 +335,16 @@ class Type
         other_elem = other_type.tense_type.element_type
         return self_elem.accepts?(other_elem) if self_elem && other_elem
       end
-      # Stream coercion: ~T[INF] accepts ~T[?] and vice versa (BG STREAM infers [?],
+      if self.open_stream? && other_type.open_stream?
+        self_elem  = self.open_stream_element_type
+        other_elem = other_type.open_stream_element_type
+        return self_elem.accepts?(other_elem) if self_elem && other_elem
+      end
+      # Stream coercion: ~T[INF] accepts ~?T[] and vice versa (BG STREAM infers open-stream syntax,
       # declared type picks the runtime wrapper). Match on element type only.
       if (self.inf_stream? && other_type.open_stream?) || (self.open_stream? && other_type.inf_stream?)
-        self_elem  = self.tense_type.element_type
-        other_elem = other_type.tense_type.element_type
+        self_elem  = self.inf_stream? ? self.inf_stream_element_type : self.open_stream_element_type
+        other_elem = other_type.inf_stream? ? other_type.inf_stream_element_type : other_type.open_stream_element_type
         return self_elem.accepts?(other_elem) if self_elem && other_elem
       end
       return tense_type.accepts?(other_type.tense_type)
@@ -429,7 +434,7 @@ class Type
   end
 
   def array?
-    resolved.to_s.end_with?("]")
+    !!@is_array
   end
 
   def string?
@@ -450,7 +455,7 @@ class Type
     array? && capacity.is_a?(Integer)
   end
 
-  # True when this is the [?] marker (open stream element-type annotation).
+  # True when this is the legacy [?] marker (open stream element-type annotation).
   # Only meaningful as the tense_type of an open stream: ~T[?].
   def open_stream_marker?
     array? && capacity == :STREAM_OPEN
@@ -846,19 +851,35 @@ class Type
   # Finite dynamic stream: ~T[].
   # Used for lazy finite producers like ranges. NEXT returns ?T until exhausted.
   def dynamic_stream?
-    future? && tense_type.dynamic? && !list_collection?
+    future? && tense_type.dynamic? && !tense_type.optional? && !list_collection?
+  end
+
+  # New syntax alias: ~?T[] means an open stream of T (NEXT returns ?T).
+  # Parsed as future of ?T[] by the general type parser, then reinterpreted here.
+  def optional_stream_shape_type
+    return nil unless future? && tense_type.optional?
+    wrapped = tense_type.wrapped_type
+    wrapped if wrapped&.array?
+  end
+
+  def open_stream_alias?
+    shape = optional_stream_shape_type
+    shape&.dynamic? || false
   end
 
   def stream?
     dynamic_stream? || bounded_stream? || open_stream? || inf_stream?
   end
 
-  # Bounded stream: ~T[N] — a fixed array of N promises consumed one-by-one via NEXT.
+  # Bounded stream: ~T[N] or ~?T[N] — a fixed stream of N elements consumed via NEXT.
   # Distinct from a single promise (~T): NEXT can be called N times, not exactly once.
   def bounded_stream?
     # ~T[N] is a bounded stream of N elements. ~String is NOT a bounded stream
     # even though String is internally []const u8 (a fixed array) - it's a Promise.
-    future? && tense_type.fixed? && !tense_type.string?
+    !!(future? && (
+      (tense_type.fixed? && !tense_type.string?) ||
+      (optional_stream_shape_type&.fixed? && !optional_stream_shape_type.string?)
+    ))
   end
 
   # Shared promise: ~T@shared — a memoized promise backed by Arc-style ref counting.
@@ -868,15 +889,17 @@ class Type
     future? && shared?
   end
 
-  # Open stream: ~T[?] — a generator-backed stream; NEXT returns ?T (nil when exhausted).
+  # Open stream: ~?T[] (preferred) or legacy ~T[?].
+  # Generator-backed stream; NEXT returns ?T (nil when exhausted).
   # Resource semantics: call deinit() to free the heap-allocated buffer.
   def open_stream?
-    future? && tense_type.open_stream_marker?
+    future? && (tense_type.open_stream_marker? || open_stream_alias?)
   end
 
-  # The element type T in ~T[?].
+  # The element type T in ~?T[] / ~T[?].
   def open_stream_element_type
     return nil unless open_stream?
+    return optional_stream_shape_type.element_type if open_stream_alias?
     tense_type.element_type
   end
 
@@ -893,16 +916,20 @@ class Type
     tense_type.element_type
   end
 
-  # The element type T in ~T[N].
+  # The element type T in ~T[N], or ?T in ~?T[N].
   def stream_element_type
     return nil unless bounded_stream?
-    tense_type.element_type
+    if optional_stream_shape_type&.fixed?
+      Type.new(:"?#{optional_stream_shape_type.element_type.to_sym}")
+    else
+      tense_type.element_type
+    end
   end
 
-  # The capacity N in ~T[N].
+  # The capacity N in ~T[N] / ~?T[N].
   def stream_capacity
     return nil unless bounded_stream?
-    tense_type.capacity
+    optional_stream_shape_type&.capacity || tense_type.capacity
   end
 
   def element_type

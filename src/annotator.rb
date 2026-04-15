@@ -3004,7 +3004,7 @@ private
       error!(node, "BG STREAM block yields inconsistent types: #{elem_syms.join(', ')}. All YIELD expressions must produce the same type.")
     end
 
-    node.full_type = :"~#{elem_syms.first}[?]"
+    node.full_type = :"~?#{elem_syms.first}[]"
 
     # Detect YIELD of frame strings: when any YIELD expression is frame-allocated,
     # the MIR pass will heap-dupe it before push. NEXT callers own the duped copy.
@@ -3192,7 +3192,7 @@ private
       # Does NOT mark as moved; multiple consumers may hold their own handles.
       node.full_type = promise_type.tense_type.to_sym
     elsif promise_type.open_stream?
-      # NEXT on ~T[?]: returns ?T — null signals stream exhaustion.
+      # NEXT on ~?T[]: returns ?T — null signals stream exhaustion.
       # Does NOT mark as moved — stream is a resource cleaned up via deinit.
       elem_sym = promise_type.open_stream_element_type.to_sym
       node.full_type = :"?#{elem_sym}"
@@ -3454,7 +3454,8 @@ private
         drops << { name: name, type: info.type, resource: true }
         og_drop(name)
       when :affine
-        if Type.new(info.type).future?
+        t = Type.new(info.type)
+        if t.future? && !t.stream? && !t.shared_promise? && !t.promise_list?
           error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
         end
         drops << { name: name, type: info.type }
@@ -3505,7 +3506,8 @@ private
         drops << { name: name, type: info.type, resource: true }
         og_drop(name)
       when :affine
-        if node && Type.new(info.type).future?
+        t = Type.new(info.type)
+        if node && t.future? && !t.stream? && !t.shared_promise? && !t.promise_list?
           error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
         end
         drops << { name: name, type: info.type }

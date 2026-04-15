@@ -369,8 +369,9 @@ Tense represents a value that will exist in the future. CLEAR eliminates the com
 p: ~String = BG { sleep(100); RETURN "Data"; };
 val = NEXT p;                                       -- OKAY: Blocks until ready
 
--- 2. Open Stream (~T[?]): Asynchronous generator
-gen: ~Int64[?] = BG STREAM {
+-- 2. Open Stream (~?T[]): Asynchronous generator
+-- NEXT on ~?T[] returns ?T, with NIL signaling exhaustion.
+gen: ~?Int64[] = BG STREAM {
     YIELD 10;
     YIELD 20;
 };
