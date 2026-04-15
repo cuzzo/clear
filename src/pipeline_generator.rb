@@ -939,6 +939,18 @@ module PipelineGenerator
 
     workers_code = options["workers"] ? visit(options["workers"]) : "CheatLib.threadCount()"
     rt_name = @do_rt_name || "rt"
+    lhs_type = lhs.type_info
+
+    if lhs_type&.bounded_stream?
+      case inner
+      when AST::SelectOp
+        return transpile_concurrent_bounded_select(lhs, inner, id, workers_code, rt_name, options)
+      when AST::WhereOp
+        return transpile_concurrent_bounded_where(lhs, inner, id, workers_code, rt_name, options)
+      when AST::EachOp
+        return transpile_concurrent_bounded_each(lhs, inner, id, workers_code, rt_name, options)
+      end
+    end
 
     case inner
     when AST::SelectOp
@@ -962,6 +974,243 @@ module PipelineGenerator
     when AST::AverageOp
       transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :average)
     end
+  end
+
+  def bounded_stream_source_setup(list_node, id)
+    if list_node.is_a?(AST::Identifier) && list_node.type_info&.bounded_stream?
+      source_name = visit(list_node)
+      {
+        stream_setup: "const __cbs#{id}_items = &#{source_name}.items;",
+        items_ref: "__cbs#{id}_items"
+      }
+    else
+      source_code = visit(list_node)
+      {
+        stream_setup: "var __cbs#{id}_stream = #{source_code};\n      _ = &__cbs#{id}_stream;\n      const __cbs#{id}_items = &__cbs#{id}_stream.items;",
+        items_ref: "__cbs#{id}_items"
+      }
+    end
+  end
+
+  def transpile_concurrent_bounded_select(stream_node, select_op, id, workers_code, rt_name, options = {})
+    @current_pipe_label = next_pipe_label
+    policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
+
+    stream_ti = stream_node.type_info
+    n = stream_ti.stream_capacity
+    item_zig = transpile_type(stream_ti.stream_element_type.resolved)
+    promise_zig = "CheatLib.Promise(#{item_zig})"
+    result_zig = transpile_type(select_op.expression.full_type)
+    source = bounded_stream_source_setup(stream_node, id)
+
+    inner_code = with_pipeline_context(placeholder: "__stream_item") do
+      with_fiber_capture_map({}) { visit(inner_expr) }
+    end
+    bare_code = inner_code.sub(/^try /, '')
+
+    err_field    = policy == :raise ? "\n              err:    *std.atomic.Value(u16)," : ""
+    err_ctx_init = policy == :raise ? "\n                  .err    = &__ccbs#{id}_err," : ""
+    err_decl     = policy == :raise ? "\n      var __ccbs#{id}_err = std.atomic.Value(u16).init(0);" : ""
+    err_check    = policy == :raise ? "\n      const __ccbs#{id}_err_code = __ccbs#{id}_err.load(.seq_cst);\n      if (__ccbs#{id}_err_code != 0) return @errorFromInt(__ccbs#{id}_err_code);" : ""
+
+    result_body = case policy
+    when :prune
+      "const __cv = #{bare_code} catch continue;\n                  ctx.results[__idx] = __cv;"
+    when :raise
+      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      continue;\n                  };\n                  ctx.results[__idx] = __cv;"
+    else
+      "ctx.results[__idx] = #{inner_code};"
+    end
+
+    spawn_call = concurrent_spawn_call(options, "__ccbs#{id}_wg", "__CcbsWorker#{id}", "__ccbs#{id}_workers[__w]")
+
+    <<~ZIG.chomp
+      #{@current_pipe_label}: {
+          #{source[:stream_setup]}
+          const __ccbs#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{result_zig}, #{n});
+          defer #{rt_name}.heapAlloc().free(__ccbs#{id}_results);
+          for (__ccbs#{id}_results) |*__s| __s.* = null;#{err_decl}
+          var __ccbs#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __ccbs#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __CcbsWorker#{id} = struct {
+              wg:      *CheatHeader.WaitGroup,
+              items:   *[#{n}]#{promise_zig},
+              results: []?#{result_zig},
+              next:    *std.atomic.Value(usize),#{err_field}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  while (true) {
+                      const __idx = ctx.next.fetchAdd(1, .monotonic);
+                      if (__idx >= #{n}) break;
+                      const __stream_item = try ctx.items[__idx].next();
+                      #{result_body}
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __ccbs#{id}_next = std.atomic.Value(usize).init(0);
+          var __ccbs#{id}_workers: [64]__CcbsWorker#{id} = undefined;
+          const __ccbs#{id}_actual_workers = @min(__ccbs#{id}_n_workers, 64);
+          __ccbs#{id}_wg.add(__ccbs#{id}_actual_workers);
+          for (0..__ccbs#{id}_actual_workers) |__w| {
+              __ccbs#{id}_workers[__w] = .{
+                  .wg      = &__ccbs#{id}_wg,
+                  .items   = #{source[:items_ref]},
+                  .results = __ccbs#{id}_results,
+                  .next    = &__ccbs#{id}_next,#{err_ctx_init}
+              };
+              #{spawn_call}
+          }
+          __ccbs#{id}_wg.wait();#{err_check}
+          var __ccbs#{id}_final = std.ArrayListUnmanaged(#{result_zig}){};
+          for (__ccbs#{id}_results) |__ccbs#{id}_slot| {
+              if (__ccbs#{id}_slot) |__v| try __ccbs#{id}_final.append(#{rt_name}.heapAlloc(), __v);
+          }
+          break :#{@current_pipe_label} __ccbs#{id}_final;
+      }
+    ZIG
+  end
+
+  def transpile_concurrent_bounded_where(stream_node, where_op, id, workers_code, rt_name, options = {})
+    @current_pipe_label = next_pipe_label
+    policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
+
+    stream_ti = stream_node.type_info
+    n = stream_ti.stream_capacity
+    item_zig = transpile_type(stream_ti.stream_element_type.resolved)
+    promise_zig = "CheatLib.Promise(#{item_zig})"
+    source = bounded_stream_source_setup(stream_node, id)
+
+    inner_code = with_pipeline_context(placeholder: "__stream_item") do
+      with_fiber_capture_map({}) { visit(inner_expr) }
+    end
+    bare_code = inner_code.sub(/^try /, '')
+
+    err_field    = policy == :raise ? "\n              err:    *std.atomic.Value(u16)," : ""
+    err_ctx_init = policy == :raise ? "\n                  .err    = &__ccbw#{id}_err," : ""
+    err_decl     = policy == :raise ? "\n      var __ccbw#{id}_err = std.atomic.Value(u16).init(0);" : ""
+    err_check    = policy == :raise ? "\n      const __ccbw#{id}_err_code = __ccbw#{id}_err.load(.seq_cst);\n      if (__ccbw#{id}_err_code != 0) return @errorFromInt(__ccbw#{id}_err_code);" : ""
+
+    pred_body = case policy
+    when :prune
+      "const __cv = #{bare_code} catch continue;\n                  if (__cv) ctx.results[__idx] = __stream_item;"
+    when :raise
+      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      continue;\n                  };\n                  if (__cv) ctx.results[__idx] = __stream_item;"
+    else
+      "if (#{inner_code}) ctx.results[__idx] = __stream_item;"
+    end
+
+    spawn_call = concurrent_spawn_call(options, "__ccbw#{id}_wg", "__CcbwWorker#{id}", "__ccbw#{id}_workers[__w]")
+
+    <<~ZIG.chomp
+      #{@current_pipe_label}: {
+          #{source[:stream_setup]}
+          const __ccbw#{id}_results = try #{rt_name}.heapAlloc().alloc(?#{item_zig}, #{n});
+          defer #{rt_name}.heapAlloc().free(__ccbw#{id}_results);
+          for (__ccbw#{id}_results) |*__s| __s.* = null;#{err_decl}
+          var __ccbw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __ccbw#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __CcbwWorker#{id} = struct {
+              wg:      *CheatHeader.WaitGroup,
+              items:   *[#{n}]#{promise_zig},
+              results: []?#{item_zig},
+              next:    *std.atomic.Value(usize),#{err_field}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  while (true) {
+                      const __idx = ctx.next.fetchAdd(1, .monotonic);
+                      if (__idx >= #{n}) break;
+                      const __stream_item = try ctx.items[__idx].next();
+                      #{pred_body}
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __ccbw#{id}_next = std.atomic.Value(usize).init(0);
+          var __ccbw#{id}_workers: [64]__CcbwWorker#{id} = undefined;
+          const __ccbw#{id}_actual_workers = @min(__ccbw#{id}_n_workers, 64);
+          __ccbw#{id}_wg.add(__ccbw#{id}_actual_workers);
+          for (0..__ccbw#{id}_actual_workers) |__w| {
+              __ccbw#{id}_workers[__w] = .{
+                  .wg      = &__ccbw#{id}_wg,
+                  .items   = #{source[:items_ref]},
+                  .results = __ccbw#{id}_results,
+                  .next    = &__ccbw#{id}_next,#{err_ctx_init}
+              };
+              #{spawn_call}
+          }
+          __ccbw#{id}_wg.wait();#{err_check}
+          var __ccbw#{id}_final = std.ArrayListUnmanaged(#{item_zig}){};
+          for (__ccbw#{id}_results) |__ccbw#{id}_slot| {
+              if (__ccbw#{id}_slot) |__v| try __ccbw#{id}_final.append(#{rt_name}.heapAlloc(), __v);
+          }
+          break :#{@current_pipe_label} __ccbw#{id}_final;
+      }
+    ZIG
+  end
+
+  def transpile_concurrent_bounded_each(stream_node, each_op, id, workers_code, rt_name, options = {})
+    stream_ti = stream_node.type_info
+    n = stream_ti.stream_capacity
+    item_zig = transpile_type(stream_ti.stream_element_type.resolved)
+    promise_zig = "CheatLib.Promise(#{item_zig})"
+    source = bounded_stream_source_setup(stream_node, id)
+
+    body_code = with_pipeline_context(placeholder: "__each_item") do
+      with_fiber_capture_map({}) do
+        each_op.body.map { |stmt|
+          code = visit(stmt)
+          code.strip.end_with?(";") ? code : "#{code};"
+        }.join("\n                  ")
+      end
+    end
+
+    spawn_call = concurrent_spawn_call(options, "__ccbe#{id}_wg", "__CcbeWorker#{id}", "__ccbe#{id}_workers[__w]")
+
+    <<~ZIG.chomp
+      {
+          #{source[:stream_setup]}
+          var __ccbe#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __ccbe#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __CcbeWorker#{id} = struct {
+              wg:    *CheatHeader.WaitGroup,
+              items: *[#{n}]#{promise_zig},
+              next:  *std.atomic.Value(usize),
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  while (true) {
+                      const __idx = ctx.next.fetchAdd(1, .monotonic);
+                      if (__idx >= #{n}) break;
+                      var __each_item = try ctx.items[__idx].next();
+                      #{body_code}
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __ccbe#{id}_next = std.atomic.Value(usize).init(0);
+          var __ccbe#{id}_workers: [64]__CcbeWorker#{id} = undefined;
+          const __ccbe#{id}_actual_workers = @min(__ccbe#{id}_n_workers, 64);
+          __ccbe#{id}_wg.add(__ccbe#{id}_actual_workers);
+          for (0..__ccbe#{id}_actual_workers) |__w| {
+              __ccbe#{id}_workers[__w] = .{
+                  .wg    = &__ccbe#{id}_wg,
+                  .items = #{source[:items_ref]},
+                  .next  = &__ccbe#{id}_next,
+              };
+              #{spawn_call}
+          }
+          __ccbe#{id}_wg.wait();
+      }
+    ZIG
   end
 
   # Returns the Zig spawn call for CONCURRENT workers.

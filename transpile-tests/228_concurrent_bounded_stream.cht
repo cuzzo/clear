@@ -1,0 +1,53 @@
+STRUCT Total {
+    value: Float64
+}
+
+FN main() RETURNS Void ->
+    nums: ~Int64[4] = [
+        BG { 1; },
+        BG { 2; },
+        BG { 3; },
+        BG { 4; }
+    ];
+
+    doubled = nums s> CONCURRENT(workers: 2) SELECT _ * 2;
+    ASSERT doubled.length() == 4, "concurrent bounded SELECT keeps cardinality";
+    ASSERT doubled[0] == 2, "select item 0";
+    ASSERT doubled[1] == 4, "select item 1";
+    ASSERT doubled[2] == 6, "select item 2";
+    ASSERT doubled[3] == 8, "select item 3";
+
+    vals: ~Int64[5] = [
+        BG { 1; },
+        BG { 2; },
+        BG { 3; },
+        BG { 4; },
+        BG { 5; }
+    ];
+
+    filtered = vals s> CONCURRENT(workers: 3) WHERE _ > 2;
+    ASSERT filtered.length() == 3, "concurrent bounded WHERE filters items";
+    ASSERT filtered[0] == 3, "where item 0";
+    ASSERT filtered[1] == 4, "where item 1";
+    ASSERT filtered[2] == 5, "where item 2";
+
+    total = Total{ value: 0.0 } @shared:locked;
+    sums: ~Float64[4] = [
+        BG { 10.0; },
+        BG { 20.0; },
+        BG { 30.0; },
+        BG { 40.0; }
+    ];
+
+    sums s> CONCURRENT(workers: 2) EACH {
+        WITH EXCLUSIVE total AS t {
+            t.value = t.value + _;
+        }
+    };
+
+    WITH total AS t {
+        ASSERT t.value == 100.0, "concurrent bounded EACH runs all items";
+    }
+
+    RETURN;
+END

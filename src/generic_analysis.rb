@@ -73,11 +73,15 @@ module GenericAnalysis
     # :affine is the default (not a user-set capability). :link is structural (allowed on params).
     # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
     if is_param
-      has_ownership_cap = %i[multiowned shared].include?(type_obj.ownership)
+      has_ownership_cap = %i[multiowned shared split].include?(type_obj.ownership)
       has_sync_cap = type_obj.sync && !%i[raw].include?(type_obj.sync)
       if has_ownership_cap || has_sync_cap
         error!(node, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
+    end
+
+    if type_obj.split? && !type_obj.stream?
+      error!(node, "@split is currently only supported on stream types.")
     end
 
     # @list/@pool/@set require an array type.
@@ -273,6 +277,9 @@ module GenericAnalysis
     if node.type.multiowned?
       error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
     end
+    if node.type.split? && !node.type.open_stream?
+      error!(node, "@split is currently only valid on open streams (~?T[]).")
+    end
   end
 
   # After coerce! validates type compatibility, propagate declared-type metadata
@@ -284,6 +291,10 @@ module GenericAnalysis
     # BgStreamBlock infers ~?T[]; declared ~T[INF] picks the runtime wrapper.
     if node.value.is_a?(AST::BgStreamBlock) && node.type.inf_stream?
       node.value.full_type = final_type
+    end
+
+    if node.value.is_a?(AST::BgStreamBlock) && node.type.split_open_stream?
+      node.value.full_type = Type.new(node.value.full_type, ownership: :split)
     end
 
     # Propagate shard_count from declared type into final_type (lost during coerce!).
@@ -369,8 +380,8 @@ module GenericAnalysis
   # (GetIndex on map/list) or extracts a non-Copy field from a struct (GetField).
   def find_container_source(expr)
     return nil unless expr
-    # COPY produces an owned deep-copy; no borrow relationship.
-    return nil if expr.is_a?(AST::CopyNode)
+    # COPY/CLONE produce owned/retained values; no borrow relationship.
+    return nil if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
     if expr.is_a?(AST::GetIndex) && expr.target.respond_to?(:type_info)
       ti = expr.target.type_info
       if ti&.map? || ti&.pool? || ti&.list_collection? || (ti&.array? && !ti&.string?)

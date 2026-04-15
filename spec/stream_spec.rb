@@ -534,6 +534,44 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("__stream0")
         expect(out).to include("__stream1")
       end
+
+      it "allows CONCURRENT SELECT on a bounded stream" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            vals = s s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows CONCURRENT WHERE on a bounded stream" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            vals = s s> CONCURRENT(workers: 2) WHERE _ > 1.5;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows CONCURRENT EACH on a bounded stream" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            MUTABLE total: Float64@shared:locked = 0.0;
+            s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
+            s s> CONCURRENT(workers: 2) EACH {
+              WITH EXCLUSIVE total AS t {
+                t = t + _;
+              }
+            };
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
     end
   end
 
@@ -838,6 +876,165 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(src)
         expect(out).to include("__sg0")
         expect(out).to include("__sg1")
+      end
+    end
+  end
+
+  # ===================================================================
+  # ~?T[]@split Split Streams
+  # ===================================================================
+  describe "~?T[]@split Split Streams" do
+    def transpile_fn(clear_src)
+      ZigTranspiler.new.transpile(clear_src)
+    end
+
+    describe "Type predicates" do
+      it "split_open_stream? is true for ~?Float64[]@split" do
+        t = Type.new(:"~?Float64[]", ownership: :split)
+        expect(t.split_open_stream?).to be true
+      end
+
+      it "split_open_stream? is false for plain ~?Float64[]" do
+        t = Type.new(:"~?Float64[]")
+        expect(t.split_open_stream?).to be false
+      end
+
+      it "emits CheatLib.SplitStream(f64) for ~?Float64[]@split" do
+        t = Type.new(:"~?Float64[]", ownership: :split)
+        expect(t.zig_type).to eq("CheatLib.SplitStream(f64)")
+      end
+    end
+
+    describe "validation" do
+      it "rejects @split on non-stream types" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            x: Float64 @split = 1.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /@split is currently only supported on stream types/)
+      end
+
+      it "rejects @split on non-open future types" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Float64[INF] @split = BG STREAM { YIELD 1.0; };
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /@split is currently only valid on open streams/)
+      end
+    end
+
+    describe "BgStreamBlock annotation" do
+      it "propagates @split onto the BG STREAM runtime type" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        decl = fn_node.body.first
+        expect(Type.new(decl.value.full_type).split_open_stream?).to be true
+      end
+    end
+
+    describe "NextExpr on ~?T[]@split" do
+      it "NEXT on ~?Float64[]@split returns ?Float64" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            v: ?Float64 = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        ast = run(src)
+        fn_node = ast.statements.first
+        next_decl = fn_node.body[1]
+        expect(next_decl.value.full_type.optional?).to be true
+        expect(next_decl.value.full_type.wrapped_type.resolved).to eq :Float64
+      end
+    end
+
+    describe "transpiler output" do
+      it "emits CheatLib.SplitStream in the BG STREAM binding" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.SplitStream(f64)")
+        expect(out).to include("spawnNew")
+      end
+
+      it "emits CheatLib.splitRetain when CLONE is used on a split stream handle" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            t: ~?Float64[] @split = CLONE s;
+            RETURN;
+          END
+        CLEAR
+        out = transpile_fn(src)
+        expect(out).to include("CheatLib.splitRetain(")
+      end
+
+      it "plain assignment moves a split stream handle" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            t: ~?Float64[] @split = s;
+            v: ?Float64 = NEXT s;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /Use of moved value 's'/)
+      end
+
+      it "allows CLONE inside a BG block capture" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
+            cloned: ~?Float64[] @split = CLONE s;
+            p: ~?Float64 = BG {
+              NEXT cloned;
+            };
+            v: ?Float64 = NEXT p;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows CLONE inline inside DO branches" do
+        src = <<~CLEAR
+          STRUCT Counter { value: Int64 }
+          FN f() RETURNS Void ->
+            s: ~?Int64[] @split = BG STREAM { YIELD 1; };
+            counter = Counter{ value: 0 } @locked;
+            DO {
+              WITH EXCLUSIVE counter AS c { c.value = c.value + (NEXT (CLONE s))?; },
+              WITH EXCLUSIVE counter AS c { c.value = c.value + (NEXT (CLONE s))?; }
+            }
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "allows returning CLONE of a split stream" do
+        src = <<~CLEAR
+          FN tail() RETURNS ~?Int64[] @split ->
+            s: ~?Int64[] @split = BG STREAM { YIELD 1; YIELD 2; };
+            RETURN CLONE s;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
       end
     end
   end
@@ -1173,14 +1370,14 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "still accepts bounded streams as a separate syntax" do
+      it "rejects BG STREAM as a bounded stream source" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Float64[3] = BG STREAM { YIELD 1.0; YIELD 2.0; YIELD 3.0; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.not_to raise_error
+        expect { run(src) }.to raise_error(SourceError, /Type Mismatch: Cannot assign ~\?Float64\[] to ~Float64\[3\]/)
       end
 
       it "still accepts infinite streams as a separate syntax" do
@@ -1221,6 +1418,64 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect { run(src) }.not_to raise_error
+      end
+
+      it "allows variable-backed ~T[] pipelines for fusible EACH chains" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Int64[] = 0 ..< 8;
+            MUTABLE acc: Int64 = 0;
+            s s> SELECT _ * 2 s> WHERE _ > 3 s> EACH {
+              acc = acc + _;
+            };
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "rejects REDUCE on variable-backed ~T[] until fold support exists" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Int64[] = 0 ..< 8;
+            total = s s> REDUCE(0) acc + _;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /Cannot REDUCE non-list type ~Int64\[\]/)
+      end
+
+      it "rejects LIMIT on variable-backed ~T[] until that operator is supported" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~Int64[] = 0 ..< 8;
+            s s> LIMIT 3 s> EACH { print(_); };
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /Cannot LIMIT non-list type ~Int64\[\]/)
+      end
+
+      it "rejects EACH on BG/open streams as non-collection pipeline sources" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
+            s s> EACH { print(_); };
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /Cannot EACH non-collection type ~\?Int64\[\]/)
+      end
+
+      it "rejects REDUCE on BG/open streams as non-list pipeline sources" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
+            total = s s> REDUCE(0) acc + _;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /Cannot REDUCE non-list type ~\?Int64\[\]/)
       end
     end
 

@@ -1,0 +1,51 @@
+FN tailClone() RETURNS ~?Int64[] @split ->
+    s: ~?Int64[] @split = BG STREAM {
+        YIELD 10;
+        YIELD 20;
+        YIELD 30;
+    };
+
+    first: ?Int64 = NEXT s;
+    ASSERT first == 10, "split stream return helper consumes first item before cloning";
+
+    RETURN CLONE s;
+END
+
+FN main() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: CLONE captured by BG keeps an independent replay handle.
+    -- -------------------------------------------------------
+    source: ~?Int64[] @split = BG STREAM {
+        YIELD 1;
+        YIELD 2;
+    };
+    source_bg: ~?Int64[] @split = CLONE source;
+
+    bg_first: ~?Int64 = BG {
+        NEXT source_bg;
+    };
+
+    from_bg: ?Int64 = NEXT bg_first;
+    from_main_1: ?Int64 = NEXT source;
+    from_main_2: ?Int64 = NEXT source;
+    from_main_3: ?Int64 = NEXT source;
+
+    ASSERT from_bg == 1, "BG capture via CLONE reads first split item";
+    ASSERT from_main_1 == 1, "original split stream remains readable after BG capture";
+    ASSERT from_main_2 == 2, "original split stream preserves order after BG capture";
+    ASSERT from_main_3 == NIL, "original split stream still exhausts normally";
+
+    -- -------------------------------------------------------
+    -- Test 2: returned clone keeps only the unread tail.
+    -- -------------------------------------------------------
+    tail: ~?Int64[] @split = tailClone();
+    t1: ?Int64 = NEXT tail;
+    t2: ?Int64 = NEXT tail;
+    t3: ?Int64 = NEXT tail;
+
+    ASSERT t1 == 20, "returned split clone starts at unread tail";
+    ASSERT t2 == 30, "returned split clone preserves order";
+    ASSERT t3 == NIL, "returned split clone exhausts at end";
+
+    RETURN;
+END

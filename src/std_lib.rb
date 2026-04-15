@@ -817,4 +817,16 @@ BUILTIN_OPS = {
 
   # --- Deep copy (allocates heap copy of union value) ---
   dupeUnionValue: { zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", allocates: true },
+  concurrentBoundedSelect: {
+    zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    allocates: true
+  },
+  concurrentBoundedWhere: {
+    zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})",
+    allocates: true
+  },
+  concurrentBoundedEach: {
+    zig: "try CheatLib.concurrentBoundedEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
+    borrows: :all
+  },
 }.freeze

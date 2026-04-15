@@ -1,0 +1,37 @@
+-- Variable-backed finite stream pipeline matrix.
+-- Covers the currently supported fused pipeline path for `s: ~T[] = 0 ..< n`
+-- flowing into EACH, with fusible stages in front.
+
+FN main() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: SELECT + WHERE + EACH over variable-backed finite stream.
+    -- -------------------------------------------------------
+    s1: ~Int64[] = 0 ..< 8;
+    MUTABLE acc1: Int64 = 0;
+    s1 s> SELECT _ * 2 s> WHERE _ > 5 s> EACH {
+        acc1 = acc1 + _;
+    };
+    ASSERT acc1 == 50, "variable stream select+where+each should sum to 50";
+
+    -- -------------------------------------------------------
+    -- Test 2: SKIP + EACH over variable-backed finite stream.
+    -- -------------------------------------------------------
+    s2: ~Int64[] = 0 ..< 6;
+    MUTABLE acc2: Int64 = 0;
+    s2 s> SKIP 3 s> EACH {
+        acc2 = acc2 + _;
+    };
+    ASSERT acc2 == 12, "variable stream skip+each should sum to 12";
+
+    -- -------------------------------------------------------
+    -- Test 3: TAKE_WHILE + EACH over variable-backed finite stream.
+    -- -------------------------------------------------------
+    s3: ~Int64[] = 0 ..< 10;
+    MUTABLE acc3: Int64 = 0;
+    s3 s> TAKE_WHILE _ < 4 s> EACH {
+        acc3 = acc3 + _;
+    };
+    ASSERT acc3 == 6, "variable stream take_while+each should sum to 6";
+
+    RETURN;
+END

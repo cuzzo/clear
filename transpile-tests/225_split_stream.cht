@@ -1,0 +1,55 @@
+-- Split streams: ~?T[]@split — multiple handles can NEXT the same buffered sequence.
+-- Each retained handle sees the same items in the same order.
+
+FN main() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: clone before consumption replays full sequence.
+    -- -------------------------------------------------------
+    s: ~?Int64[] @split = BG STREAM {
+        YIELD 1;
+        YIELD 2;
+        YIELD 3;
+    };
+    s_clone: ~?Int64[] @split = CLONE s;
+
+    a1: ?Int64 = NEXT s;
+    a2: ?Int64 = NEXT s;
+    a3: ?Int64 = NEXT s;
+    a4: ?Int64 = NEXT s;
+
+    b1: ?Int64 = NEXT s_clone;
+    b2: ?Int64 = NEXT s_clone;
+    b3: ?Int64 = NEXT s_clone;
+    b4: ?Int64 = NEXT s_clone;
+
+    ASSERT a1 == 1, "split stream original handle reads first item";
+    ASSERT a2 == 2, "split stream original handle reads second item";
+    ASSERT a3 == 3, "split stream original handle reads third item";
+    ASSERT a4 == NIL, "split stream original handle exhausts to NIL";
+    ASSERT b1 == 1, "split stream clone replays first item";
+    ASSERT b2 == 2, "split stream clone replays second item";
+    ASSERT b3 == 3, "split stream clone replays third item";
+    ASSERT b4 == NIL, "split stream clone exhausts to NIL";
+
+    -- -------------------------------------------------------
+    -- Test 2: late retain starts from the source handle's current point.
+    -- -------------------------------------------------------
+    s2: ~?Int64[] @split = BG STREAM {
+        YIELD 10;
+        YIELD 20;
+        YIELD 30;
+    };
+
+    first: ?Int64 = NEXT s2;
+    late: ~?Int64[] @split = CLONE s2;
+    late1: ?Int64 = NEXT late;
+    late2: ?Int64 = NEXT late;
+    late3: ?Int64 = NEXT late;
+
+    ASSERT first == 10, "split stream original handle consumes first item before retain";
+    ASSERT late1 == 20, "late-retained split stream starts at current unread item";
+    ASSERT late2 == 30, "late-retained split stream preserves order";
+    ASSERT late3 == NIL, "late-retained split stream exhausts to NIL";
+
+    RETURN;
+END

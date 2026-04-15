@@ -126,7 +126,8 @@ Pipelines over futures/streams are currently supported in a narrower subset than
 | `~T` | Single future value | `T` | Not a pipeline source |
 | `~?T[]` | Open stream | `?T` | Not a general pipeline source yet |
 | `~T[INF]` | Infinite stream | `T` | Not a general pipeline source yet |
-| `~T[]` / `~T[N]` | Finite stream | `?T` | Supported for a subset of operators |
+| `~T[]` | Finite stream (unbounded length) | `?T` | Supported for a subset of non-concurrent operators |
+| `~T[N]` | Finite bounded stream | `?T` | Supported for the same non-concurrent subset, plus bounded `CONCURRENT EACH/SELECT/WHERE` |
 
 ### Finite stream operators
 
@@ -149,15 +150,44 @@ t: ~Int64[] = 0 ..< 10;
 t s> SKIP 2 s> TAKE_WHILE _ < 6 s> EACH { print(_); };
 ```
 
-`~T[N]` has also made progress toward native concurrent support:
+Bounded finite streams (`~T[N]`) also support native concurrent pipelines for:
 
-- the Zig runtime now has direct bounded-stream helpers for `CONCURRENT EACH`, `CONCURRENT SELECT`, and `CONCURRENT WHERE`
-- those helpers consume promise slots directly instead of materializing through `.toList()`
-- full compiler/MIR integration is still in progress, so do not treat bounded-stream `CONCURRENT` as generally available at the language level yet
+- `CONCURRENT EACH`
+- `CONCURRENT SELECT`
+- `CONCURRENT WHERE`
+
+These paths are native stream pipelines:
+
+- they consume bounded promise slots directly
+- they do not materialize through `.toList()`
+- they lower through MIR-visible builtin helper calls instead of raw pipeline Zig generation
+
+Example:
+
+```ruby clear illustrative
+STRUCT Total {
+    value: Float64
+}
+
+nums: ~Float64[4] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }, BG { 4.0; }];
+doubled = nums s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+
+total = Total{ value: 0.0 } @shared:locked;
+nums s> CONCURRENT(workers: 2) EACH {
+    WITH EXCLUSIVE total AS t {
+        t.value = t.value + _;
+    }
+};
+```
+
+Current `CONCURRENT` limits for streams:
+
+- only `~T[N]` is supported today
+- direct range expressions still use the non-concurrent finite-stream path unless first bound as `~T[N]`
+- `~T[]`, `~?T[]`, and `~T[INF]` do not yet support native `CONCURRENT`
 
 Currently unsupported for finite streams:
 
-- `CONCURRENT`
 - `SUM`
 - `COUNT`
 - `REDUCE`
@@ -172,6 +202,10 @@ Currently unsupported for finite streams:
 - `AVERAGE`
 - `MIN`
 - `MAX`
+
+Additionally unsupported for `~T[]` specifically:
+
+- `CONCURRENT`
 
 If you need the full collection operator surface, materialize explicitly first:
 

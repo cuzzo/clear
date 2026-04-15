@@ -239,7 +239,7 @@ class FunctionCFG
       stmt_can_fail?(node.left, can_fail_fns) || stmt_can_fail?(node.right, can_fail_fns)
     when AST::UnaryOp
       stmt_can_fail?(node.right, can_fail_fns)
-    when AST::CopyNode, AST::MoveNode, AST::Cast
+    when AST::CopyNode, AST::CloneNode, AST::MoveNode, AST::Cast
       stmt_can_fail?(node.value, can_fail_fns)
     when AST::GetField
       stmt_can_fail?(node.target, can_fail_fns)
@@ -674,7 +674,7 @@ class OwnershipDataflow
         consumed << name if state[name]
       end
 
-    when AST::CopyNode
+    when AST::CopyNode, AST::CloneNode
       # COPY does NOT move the source.
 
     when AST::CapabilityWrap
@@ -788,7 +788,7 @@ class OwnershipDataflow
       node.items&.each { |i| walk_expr(i, &block) }
     when AST::HashLit
       node.pairs&.each { |_k, v| walk_expr(v.is_a?(Array) ? v[1] : v, &block) }
-    when AST::CopyNode
+    when AST::CopyNode, AST::CloneNode
       walk_expr(node.value, &block)
     when AST::MoveNode
       walk_expr(node.value, &block)
@@ -809,7 +809,7 @@ class OwnershipDataflow
     return unless node
     yield node
     case node
-    when AST::CopyNode
+    when AST::CopyNode, AST::CloneNode
       # Do not recurse: COPY means the source is retained.
     when AST::BinaryOp
       walk_expr_skip_copy(node.left, &block)
@@ -977,7 +977,7 @@ class UseAfterMoveChecker
       elsif arg.is_a?(AST::MoveNode)
         # GIVE wrapper: inner is being moved, not read.
         next
-      elsif arg.is_a?(AST::CopyNode)
+      elsif arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode)
         # COPY: the source IS read (must be live to copy from).
         check_reads_in_expr(arg.value, state)
       else
@@ -994,7 +994,7 @@ class UseAfterMoveChecker
     when AST::Identifier
       check_identifier_read(node.name.to_s, state, node.token)
 
-    when AST::CopyNode
+    when AST::CopyNode, AST::CloneNode
       # COPY x: x IS read (must be live to copy from).
       check_reads_in_expr(node.value, state)
 
@@ -1253,8 +1253,8 @@ module LoopFrameAnalysis
   # a frame string that would be freed by the loop's per-iteration rewind.
   def self.rhs_references_any?(expr, names)
     return false unless expr
-    # COPY expr produces a heap-allocated value -- carry var doesn't need promotion
-    return false if expr.is_a?(AST::CopyNode)
+    # COPY/CLONE produce a detached value/handle -- carry var doesn't need promotion
+    return false if expr.is_a?(AST::CopyNode) || expr.is_a?(AST::CloneNode)
     # Any call (stdlib or user-defined) that returns a String may produce a
     # carry value needing heap promotion. This covers both stdlib_allocates=true
     # calls (toString, intToString, etc.) and user-defined string-returning functions.
@@ -1829,7 +1829,7 @@ class BorrowChecker
     when AST::MoveNode
       inner = node.value
       names << inner.name.to_s if inner.is_a?(AST::Identifier)
-    when AST::CopyNode
+    when AST::CopyNode, AST::CloneNode
       # COPY does NOT move the source.
     when AST::CapabilityWrap
       # Unwrap: S{ field: x } @shared still consumes x.
@@ -1852,7 +1852,7 @@ class BorrowChecker
   def walk_for_was_moved(node, &block)
     return unless node
     case node
-    when AST::CopyNode then return
+    when AST::CopyNode, AST::CloneNode then return
     when AST::Identifier then yield node if node.was_moved
     when AST::BinaryOp
       walk_for_was_moved(node.left, &block)
@@ -3147,7 +3147,7 @@ class MIRPass
     when AST::FuncCall, AST::MethodCall
       node.args.select { |a| a.respond_to?(:was_moved) && a.was_moved }
                .flat_map { |a| collect_escaping_ids(a) }
-    when AST::CopyNode then []
+    when AST::CopyNode, AST::CloneNode then []
     else []
     end
   end

@@ -126,6 +126,7 @@ class Parser
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
   primary(:KEYWORD, 'GIVE', AST::MoveNode, ['GIVE', :expression])
   primary(:KEYWORD, 'COPY', AST::CopyNode, ['COPY', :expression])
+  primary(:KEYWORD, 'CLONE', AST::CloneNode, ['CLONE', :expression])
   primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
   primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
   primary(:KEYWORD, 'BG')   { parse_bg_block }
@@ -1958,7 +1959,7 @@ class Parser
   end
 
   # All recognized capability tokens.
-  CAPABILITY_TOKENS = %w[@multiowned @shared @locked @writeLocked @local @indirect @link @raw @list @pool @set @soa @sharded].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @indirect @link @raw @list @pool @set @soa @sharded].freeze
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
   # Returns nil if no capability token is present, or a Hash:
@@ -1996,6 +1997,9 @@ class Parser
     when "@shared"
       error!(token, "Duplicate ownership") if result[:ownership]
       result[:ownership] = :shared
+    when "@split"
+      error!(token, "Duplicate ownership") if result[:ownership]
+      result[:ownership] = :split
     when "@link"
       error!(token, "Duplicate ownership") if result[:ownership]
       result[:ownership] = :link

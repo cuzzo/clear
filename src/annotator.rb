@@ -2901,6 +2901,18 @@ private
     node.full_type = node.value.resolved_type
   end
 
+  def visit_CloneNode(node)
+    visit(node.value)
+    type = node.value.type_info
+
+    unless type&.split_open_stream? || type&.shared_promise?
+      error!(node, "CLONE is only supported on @split streams and @shared promises, got '#{node.value.resolved_type}'")
+    end
+
+    node.full_type = node.value.full_type
+    node.storage = node.value.storage
+  end
+
   def visit_OptionalUnwrap(node)
     visit(node.target)
 
@@ -3191,6 +3203,11 @@ private
       # NEXT on ~T@shared: returns T, idempotent — same handle can be NEXT'd again.
       # Does NOT mark as moved; multiple consumers may hold their own handles.
       node.full_type = promise_type.tense_type.to_sym
+    elsif promise_type.split_open_stream?
+      # NEXT on ~?T[]@split: returns ?T — each handle advances independently through
+      # the shared memoized sequence until exhaustion.
+      elem_sym = promise_type.open_stream_element_type.to_sym
+      node.full_type = :"?#{elem_sym}"
     elsif promise_type.open_stream?
       # NEXT on ~?T[]: returns ?T — null signals stream exhaustion.
       # Does NOT mark as moved — stream is a resource cleaned up via deinit.

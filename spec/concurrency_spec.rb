@@ -1435,7 +1435,7 @@ RSpec.describe SemanticAnnotator do
         annotator = SemanticAnnotator.new
         next_node = make_next_expr(make_num_lit)
         expect { annotator.send(:visit_NextExpr, next_node) }
-          .to raise_error(SourceError, /NEXT requires a Promise/)
+          .to raise_error(SourceError, /NEXT requires a future value/)
       end
     end
 
@@ -1725,7 +1725,7 @@ RSpec.describe SemanticAnnotator do
 
       it "NEXT on a non-tense type raises an annotator error" do
         src = "FN f() RETURNS Void -> x: Float64 = 1.0; r: Float64 = NEXT x; RETURN; END"
-        expect { transpile_fn(src) }.to raise_error(SourceError, /NEXT requires a Promise/)
+        expect { transpile_fn(src) }.to raise_error(SourceError, /NEXT requires a future value/)
       end
     end
   end

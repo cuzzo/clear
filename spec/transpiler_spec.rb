@@ -1217,7 +1217,7 @@ RSpec.describe ZigTranspiler do
   # EXTERN method trampoline
   # ===========================================================================
   describe "EXTERN method calls use onRootStack trampoline" do
-    it "emits method trampoline for EXTERN FN on EXTERN STRUCT", :pending => "MIR pipeline: EXTERN method trampoline not yet implemented" do
+    it "emits method trampoline for EXTERN FN on EXTERN STRUCT" do
       src = <<~CLEAR
         EXTERN STRUCT Dir {} FROM "std.fs";
         EXTERN FN cwd() RETURNS Dir FROM "std.fs";
@@ -1492,6 +1492,101 @@ RSpec.describe ZigTranspiler do
       CLEAR
       zig = transpile(src)
       expect(zig).not_to match(/for\s*\(data\.items\)/)
+    end
+  end
+
+  # ===========================================================================
+  # Variable-backed finite stream pipelines
+  # ===========================================================================
+  describe "variable-backed finite stream pipelines" do
+    it "lowers SELECT/WHERE/EACH over ~T[] variables through .next(), not .items" do
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+            s: ~Int64[] = 0 ..< 5;
+            MUTABLE acc: Int64 = 0;
+            s s> SELECT _ * 2 s> WHERE _ > 3 s> EACH {
+                acc = acc + _;
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("while (try s.next())")
+      expect(zig).not_to include("s.items")
+      expect(zig).to include("const __each_item_1")
+    end
+
+    it "lowers TAKE_WHILE and SKIP over ~T[] variables through the fused .next() loop" do
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+            s: ~Int64[] = 0 ..< 8;
+            MUTABLE acc: Int64 = 0;
+            s s> SKIP 2 s> TAKE_WHILE _ < 6 s> EACH {
+                acc = acc + _;
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("while (try s.next())")
+      expect(zig).to include("var __skip_cnt_1 = @as(i64, 0);")
+      expect(zig).to include("if (__skip_cnt_1 < 2)")
+      expect(zig).to include("continue;")
+      expect(zig).to include("if (!(__each_item < 6))")
+      expect(zig).to include("break;")
+      expect(zig).not_to include("s.items")
+    end
+  end
+
+  describe "concurrent bounded stream pipelines" do
+    it "lowers CONCURRENT SELECT on ~T[N] through the bounded helper call, not materialization" do
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+            s: ~Int64[3] = [BG { 1; }, BG { 2; }, BG { 3; }];
+            vals = s s> CONCURRENT(workers: 2) SELECT _ * 2;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.concurrentBoundedSelect(i64, i64, 3")
+      expect(zig).to include("__BoundedConcurrentCtx1.apply")
+      expect(zig).to include("&s.items")
+      expect(zig).not_to include("s.toList(")
+    end
+
+    it "lowers CONCURRENT WHERE on ~T[N] through the bounded helper call" do
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+            s: ~Int64[4] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }];
+            vals = s s> CONCURRENT(workers: 2) WHERE _ > 2;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.concurrentBoundedWhere(i64, 4")
+      expect(zig).to include("__BoundedConcurrentCtx1.apply")
+      expect(zig).to include("&s.items")
+      expect(zig).not_to include("s.toList(")
+    end
+
+    it "lowers CONCURRENT EACH on ~T[N] through the bounded helper call" do
+      src = <<~CLEAR
+        FN f() RETURNS Void ->
+            MUTABLE total: Int64@shared:locked = 0;
+            s: ~Int64[2] = [BG { 10; }, BG { 20; }];
+            s s> CONCURRENT(workers: 2) EACH {
+                WITH EXCLUSIVE total AS t {
+                    t = t + _;
+                }
+            };
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("CheatLib.concurrentBoundedEach(i64, 2")
+      expect(zig).to include("__BoundedConcurrentCtx1.apply")
+      expect(zig).to include("&s.items")
+      expect(zig).not_to include("s.toList(")
     end
   end
 

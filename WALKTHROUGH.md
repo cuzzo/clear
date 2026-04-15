@@ -385,6 +385,32 @@ counter: ~Int64[INF] = BG STREAM {
 v1 = NEXT counter;                                  -- OKAY: Returns Int64 (never NIL)
 ```
 
+### Stream Capabilities: `@shared` vs `@split`
+
+Streams can also carry sharing capabilities:
+
+- `@shared` means the stream handle may be shared across threads, but it is not ordered replay. Multiple threads calling `NEXT` are sharing access to one producer.
+- `@split` means ordered fanout / pub-sub semantics. Each cloned handle sees the same items in the same order, and memoized items are released once every live split owner has consumed them.
+
+```ruby clear illustrative
+source: ~?Int64[]@split = BG STREAM {
+    YIELD 10;
+    YIELD 20;
+};
+
+a: ~?Int64[]@split = CLONE source;
+b: ~?Int64[]@split = CLONE source;
+
+ASSERT NEXT a == 10, "first subscriber sees first value";
+ASSERT NEXT b == 10, "second subscriber sees the same first value";
+ASSERT NEXT a == 20, "order is preserved";
+ASSERT NEXT b == 20, "order is preserved for all subscribers";
+```
+
+`CLONE` is mandatory for `@split` streams. Plain assignment moves the handle.
+
+This is the model CLEAR intends for pub/sub style workloads. For a concrete benchmark in this area, see [benchmarks/16_pubsub/bench.cht](benchmarks/16_pubsub/bench.cht). That benchmark still uses the older sharing path today, but it is the right benchmark to watch as `@split` becomes the native pub/sub primitive.
+
 ## 11. Collections: Array, List, and Pool
 
 All collections are **automatically monomorphized** -- the compiler generates zero-overhead, type-specific native code for every unique `T`.

@@ -1038,11 +1038,11 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- Float64[3] -> Float64[*]
-            list : Float64[*] = [1, 2, 3];
+            list : Float64[*] = [1.0, 2.0, 3.0];
           FLUX
         }
-        it "succeeds" do
-          expect { ast }.not_to raise_error
+        it "raises a Type Mismatch error" do
+          expect { ast }.to raise_error(/Type Mismatch/)
         end
       end
 
@@ -2224,8 +2224,8 @@ RSpec.describe SemanticAnnotator do
     context "exclusive range (1..<10)" do
       let(:code) { "r = (1..<10);" }
 
-      it "resolves to :Range" do
-        expect(result).to eq(:Range)
+      it "resolves to a finite Int64 stream" do
+        expect(result).to eq(:"~Int64[]")
       end
 
       it "does not raise an error" do
@@ -2236,8 +2236,8 @@ RSpec.describe SemanticAnnotator do
     context "inclusive range (1..<=10)" do
       let(:code) { "r = (1..<=10);" }
 
-      it "resolves to :Range" do
-        expect(result).to eq(:Range)
+      it "resolves to a finite Int64 stream" do
+        expect(result).to eq(:"~Int64[]")
       end
 
       it "does not raise an error" do
@@ -2254,23 +2254,17 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "resolves .start to Float64" do
-        start_decl = ast.statements[-2]
-        expect(start_decl.resolved_type).to eq(:Float64)
-      end
-
-      it "resolves .end to Float64" do
-        end_decl = ast.statements.last
-        expect(end_decl.resolved_type).to eq(:Float64)
+      it "raises because ranges are streams, not Range structs" do
+        expect { ast }.to raise_error(/Cannot determine struct type for field access 'start'/)
       end
     end
 
     context "range with Int64 bounds (stays Int64)" do
       let(:code) { "r = (0_i64..<5_i64);" }
 
-      it "resolves to :Range without error" do
+      it "resolves to a finite Int64 stream without error" do
         expect { ast }.not_to raise_error
-        expect(result).to eq(:Range)
+        expect(result).to eq(:"~Int64[]")
       end
 
       it "does not coerce Int64 bounds to Float64" do
@@ -2292,9 +2286,9 @@ RSpec.describe SemanticAnnotator do
     context "range with arithmetic bounds" do
       let(:code) { "r = ((1 + 2)..<(3 * 4));" }
 
-      it "resolves to :Range without error" do
+      it "resolves to a finite Int64 stream without error" do
         expect { ast }.not_to raise_error
-        expect(result).to eq(:Range)
+        expect(result).to eq(:"~Int64[]")
       end
     end
 
@@ -2900,7 +2894,7 @@ RSpec.describe SemanticAnnotator do
         expect(imports.length).to eq(1)
       end
 
-      it "emits direct call for EXTERN FN (no :safe effect)" do
+      it "emits onRootStack trampoline for EXTERN FN (no :safe effect)" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           FN main() RETURNS Void ->
@@ -2908,6 +2902,8 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("onRootStack")
+        expect(output).to include("__Ext")
         expect(output).to include("native_math.native_add(")
       end
 
@@ -2932,7 +2928,7 @@ RSpec.describe SemanticAnnotator do
         expect(output).to include("const Vec2 = native_math.Vec2;")
       end
 
-      it "emits direct call for EXTERN FN without :safe (default)" do
+      it "emits onRootStack trampoline for EXTERN FN without :safe (default)" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           FN main() RETURNS Void ->
@@ -2940,6 +2936,8 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).to include("onRootStack")
+        expect(output).to include("__Ext")
         expect(output).to include("native_math.native_add(")
       end
 
@@ -2954,7 +2952,7 @@ RSpec.describe SemanticAnnotator do
         expect(output).to include("native_io.fast_log(")
       end
 
-      it "passes arguments directly in the call" do
+      it "stores arguments in the trampoline frame before the extern call" do
         code = <<~CLEAR
           EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           FN main() RETURNS Void ->
@@ -2962,7 +2960,9 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         output = ZigTranspiler.new.transpile_as_module(code)
-        expect(output).to include("native_math.native_add(3.0, 4.0)")
+        expect(output).to include(".a0 = __ext")
+        expect(output).to include(".a1 = __ext")
+        expect(output).to include("native_math.native_add(f.a0, f.a1)")
       end
     end
   end
@@ -3922,4 +3922,3 @@ RSpec.describe SemanticAnnotator do
     end
   end
 end
-

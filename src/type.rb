@@ -4,7 +4,7 @@ BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :e
 class Type
   attr_reader :raw, :name, :generic_args, :capacity, :value_type_raw
   attr_accessor :mutability, :lifetime_constraint
-  attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc)
+  attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
   attr_accessor :sync        # nil (default), :locked, :write_locked
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N) / HashMap:sharded(N))
@@ -532,6 +532,10 @@ class Type
     @ownership == :shared
   end
 
+  def split?
+    @ownership == :split
+  end
+
   def link?
     @ownership == :link
   end
@@ -570,7 +574,7 @@ class Type
 
   def any_rc?
     # SharedPromise uses its own ref-counting internally — it is NOT an Rc/Arc wrapper.
-    return false if shared_promise?
+    return false if shared_promise? || split_open_stream?
     multiowned? || shared?
   end
 
@@ -735,7 +739,7 @@ class Type
   def resolve_resource_close(schema_lookup = nil)
     return [true, "{0}.deinit(rt.heapAlloc())"] if pool?
     return [true, "{0}.deinit(rt.heapAlloc())"] if set_collection?
-    return [true, "{0}.deinit()"] if open_stream? || inf_stream?
+    return [true, "{0}.deinit()"] if open_stream? || inf_stream? || split_open_stream?
 
     return [false, nil] unless schema_lookup
     schema = schema_lookup.call(resolved) rescue nil
@@ -868,7 +872,11 @@ class Type
   end
 
   def stream?
-    dynamic_stream? || bounded_stream? || open_stream? || inf_stream?
+    dynamic_stream? || bounded_stream? || open_stream? || inf_stream? || split_open_stream?
+  end
+
+  def split_open_stream?
+    split? && open_stream?
   end
 
   # Bounded stream: ~T[N] or ~?T[N] — a fixed stream of N elements consumed via NEXT.
@@ -978,6 +986,7 @@ class Type
     return false if shared_promise?         # Shared promises are non-affine — multiple NEXT calls allowed
     return false if open_stream?            # Open streams are resources with deinit cleanup, not linear
     return false if inf_stream?             # Infinite streams are resources with deinit cleanup, not linear
+    return false if split_open_stream?      # Split streams are shared replay handles with deinit cleanup
     return false if list_collection? || pool? || set_collection?  # @list/@pool/@set are arena/heap-managed via defer deinit — not linearly affine
     return false if map?                       # @map is cleaned up via mapDeinit/numericMapDeinit — not linearly affine
     return true if tense?                   # Single promises are linear — must be consumed exactly once
@@ -1479,6 +1488,10 @@ class Type
       if shared_promise?
         inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
         return "CheatLib.SharedPromise(#{inner_zig})"
+      end
+      if split_open_stream?
+        elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)
+        return "CheatLib.SplitStream(#{elem_zig})"
       end
       if open_stream?
         elem_zig = open_stream_element_type.zig_type(is_param: is_param, is_field: is_field)

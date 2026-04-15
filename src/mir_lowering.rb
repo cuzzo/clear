@@ -216,6 +216,7 @@ class MIRLowering
 
     # --- Memory / capability expressions ---
     when AST::CopyNode          then lower_copy(node)
+    when AST::CloneNode         then lower_clone(node)
     when AST::MoveNode          then lower_move(node)
     when AST::CapabilityWrap    then lower_cap_wrap(node)
     when AST::LinkNode          then lower_link(node)
@@ -1262,11 +1263,17 @@ class MIRLowering
 
 
   def lower_extern_call(node)
+    return lower_extern_direct_call(node) if node.respond_to?(:extern_effects) && node.extern_effects&.dig(:safe)
+    build_extern_trampoline_call(node)
+  end
+
+  def lower_extern_method(node)
+    return lower_extern_direct_method(node) if node.respond_to?(:extern_effects) && node.extern_effects&.dig(:safe)
+    build_extern_trampoline_method(node)
+  end
+
+  def lower_extern_direct_call(node)
     args = node.args.map { |a| lower(a) }
-    # Inject allocator for EXTERN FN with EFFECTS :alloc.
-    # Comptime type args (full_type == :Type) must precede the allocator in Zig
-    # (e.g., parseFromSlice(comptime T: type, allocator, ...)).
-    # Count leading type args from the ORIGINAL AST args to determine inject position.
     if node.respond_to?(:extern_effects) && (alloc_kind = node.extern_effects&.dig(:alloc))
       rt = MIR::Ident.new(@rt_name)
       alloc_call = alloc_kind == :heap \
@@ -1279,10 +1286,116 @@ class MIRLowering
     MIR::Call.new("#{mod_prefix}#{node.name}", args, false)
   end
 
-  def lower_extern_method(node)
+  def lower_extern_direct_method(node)
     obj = lower(node.object)
     args = node.args.map { |a| lower(a) }
     MIR::MethodCall.new(obj, node.name.to_s, args, false)
+  end
+
+  def build_extern_trampoline_call(node)
+    @extern_counter = (@extern_counter || 0) + 1
+    id = @extern_counter
+    args = node.args.map { |a| lower(a) }
+    arg_codes = args.map { |a| emit_expr(a) }
+    arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
+    mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
+    fn_zig = "#{mod_prefix}#{node.name}"
+    build_extern_trampoline_common(
+      id: id,
+      prefix: "__Ext",
+      args_tuple_name: "__ext#{id}_args",
+      frame_name: "__ext#{id}_frame",
+      arg_codes: arg_codes,
+      arg_tuple: arg_tuple,
+      alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
+      return_type: node.full_type,
+      call_zig: "#{fn_zig}(#{extern_call_args_zig(arg_codes.length, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil)})",
+      receiver_field: nil
+    )
+  end
+
+  def build_extern_trampoline_method(node)
+    @extern_counter = (@extern_counter || 0) + 1
+    id = @extern_counter
+    obj = lower(node.object)
+    args = node.args.map { |a| lower(a) }
+    arg_codes = args.map { |a| emit_expr(a) }
+    arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
+    receiver_code = emit_expr(obj)
+    build_extern_trampoline_common(
+      id: id,
+      prefix: "__ExtM",
+      args_tuple_name: "__extm#{id}_args",
+      frame_name: "__extm#{id}_frame",
+      arg_codes: arg_codes,
+      arg_tuple: arg_tuple,
+      alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
+      return_type: node.full_type,
+      call_zig: "f.self_val.#{node.name}(#{extern_call_args_zig(arg_codes.length, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil)})",
+      receiver_field: receiver_code
+    )
+  end
+
+  def extern_call_args_zig(argc, alloc_kind)
+    parts = []
+    parts << "f.alloc" if alloc_kind
+    argc.times { |i| parts << "f.a#{i}" }
+    parts.join(", ")
+  end
+
+  def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:)
+    ret_t = return_type.is_a?(Type) ? return_type : Type.new(return_type || :Void)
+    can_fail = ret_t.error_union?
+    payload_t = can_fail ? ret_t.payload_type : ret_t
+    returns_void = payload_t.resolved == :Void
+
+    fields = []
+    fields << "self_val: @TypeOf(#{receiver_field})" if receiver_field
+    fields << "alloc: std.mem.Allocator" if alloc_kind
+    arg_codes.each_index { |i| fields << "a#{i}: @TypeOf(#{args_tuple_name}[#{i}])" }
+    fields << "err: ?anyerror = null" if can_fail
+    fields << "ret: #{payload_t.zig_type} = undefined" unless returns_void
+
+    call_stmt = if can_fail
+      if returns_void
+        "#{call_zig} catch |err| { f.err = err; return; };"
+      else
+        "f.ret = (#{call_zig} catch |err| { f.err = err; return; });"
+      end
+    else
+      returns_void ? "#{call_zig};" : "f.ret = #{call_zig};"
+    end
+
+    init_fields = []
+    init_fields << ".self_val = #{receiver_field}" if receiver_field
+    arg_codes.each_index { |i| init_fields << ".a#{i} = #{args_tuple_name}[#{i}]" }
+    if alloc_kind
+      alloc_expr = alloc_kind == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
+      init_fields << ".alloc = #{alloc_expr}"
+    end
+
+    code = +""
+    if returns_void
+      code << "{ "
+    else
+      code << "blk_ext#{id}: { "
+    end
+    code << "const #{args_tuple_name} = #{arg_tuple}; "
+    code << "const #{prefix}#{id} = struct { #{fields.join(', ')}, fn run(ptr: ?*anyopaque) callconv(.c) void { const f: *@This() = @ptrCast(@alignCast(ptr)); #{call_stmt} } }; "
+    code << "var #{frame_name} = #{prefix}#{id}{ #{init_fields.join(', ')} }; "
+    code << "#{@rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &#{prefix}#{id}.run), @ptrCast(&#{frame_name})); "
+    code << "if (#{frame_name}.err) |e| return e; " if can_fail
+    code << "break :blk_ext#{id} #{frame_name}.ret; " unless returns_void
+    code << "}"
+
+    iz = MIR::InlineZig.new(code, "extern_trampoline")
+    iz.stdlib_def = { allocates: true } if call_heap_provenance_from_type?(payload_t)
+    iz
+  end
+
+  def call_heap_provenance_from_type?(ti)
+    t = ti.is_a?(Type) ? ti : (Type.new(ti) rescue nil)
+    t&.heap_provenance? || false
   end
 
 
@@ -2940,6 +3053,19 @@ class MIRLowering
     end
   end
 
+  def lower_clone(node)
+    ti = node.value.type_info
+    func = if ti&.split_open_stream?
+      "splitRetain"
+    elsif ti&.shared_promise?
+      "arcRetain"
+    else
+      raise "Internal: lower_clone on unsupported type #{ti&.resolved || node.value.resolved_type}"
+    end
+    zig_base = ti&.split_open_stream? ? ti.zig_type : transpile_type(ti.resolved.to_s)
+    MIR::RcRetain.new(lower(node.value), zig_base, func)
+  end
+
   def lower_move(node)
     if node.value.is_a?(AST::Identifier)
       MIR::Ident.new(zig_safe_name(node.value.name))
@@ -3816,7 +3942,7 @@ class MIRLowering
 
   # Dupe a borrowed non-Copy union value before storing into a TAKES container.
   def should_dupe_borrowed_union?(val_node, val_ti = nil)
-    return false if val_node.is_a?(AST::MoveNode) || val_node.is_a?(AST::CopyNode)
+    return false if val_node.is_a?(AST::MoveNode) || val_node.is_a?(AST::CopyNode) || val_node.is_a?(AST::CloneNode)
     return false unless val_node.is_a?(AST::Identifier) || val_node.is_a?(AST::GetIndex)
     val_ti ||= (val_node.type_info rescue nil)
     return false unless val_ti && @union_schemas&.key?(val_ti.resolved)

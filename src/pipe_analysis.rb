@@ -1093,15 +1093,10 @@ module PipeAnalysis
       end
     end
 
-    node.full_type = if bounded_stream_source?(node.left) &&
-                        (conc.op.is_a?(AST::SelectOp) || conc.op.is_a?(AST::WhereOp))
-      proxy.full_type
-    elsif bounded_stream_source?(node.left) && conc.op.is_a?(AST::EachOp)
-      :Void
-    else
-      proxy.full_type
+    unless bounded_stream_source?(node.left)
+      node.full_type = proxy.full_type
+      node.storage   = (node.full_type == :Void) ? :stack : :heap
     end
-    node.storage   = (node.full_type == :Void) ? :stack : :heap
   end
 
   def analyze_concurrent_bounded_select_family_op(node)
