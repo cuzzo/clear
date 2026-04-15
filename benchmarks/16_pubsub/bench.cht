@@ -6,12 +6,9 @@
 -- (2000 LCG iterations per message).
 -- Total work: 100K * 64 * 2000 = 12.8 billion LCG iterations.
 --
--- CLEAR approach: each subscriber is a BG fiber that processes
--- the message range using CONCURRENT(workers: 8, parallel: TRUE).
--- Since the publisher just sends sequential IDs (0..99999), each
--- subscriber generates its own sequence — no shared-memory broadcast
--- needed.  This is the same pattern as multicast market data where
--- each subscriber independently decodes the same feed.
+-- CLEAR approach: one publisher exposes a ~?Msg[] @split stream and
+-- each subscriber BG fiber CLONEs the shared ordered feed. Every
+-- subscriber sees the same messages in the same order.
 --
 -- Compare to Go (64 goroutines + buffered channels) and Rust
 -- (64 Tokio tasks + broadcast channel).
@@ -24,25 +21,31 @@ FN processMessage(seed: Int64) RETURNS Int64 ->
     RETURN x;
 END
 
-FN subscriberWork(n: Int64) RETURNS Int64 ->
-    -- Build local message list
-    MUTABLE msgs: Msg[] = [];
-    FOR i IN (0_i64 ..< n) -> msgs.append(Msg{ seed: i });
-    -- Process all messages with parallel workers
-    results = msgs s> CONCURRENT(workers: 32, parallel: TRUE) SELECT processMessage(_.seed);
-    -- Manual sum (SUM _ returns Float64, we need Int64)
-    MUTABLE total: Int64 = 0;
-    FOR j IN (0_i64 ..< results.length()) -> total = total %+ results[j];
-    RETURN total;
-END
-
 FN main() RETURNS Void ->
     t0 = timestampMs();
+
+    msgs: ~?Msg[] @split = BG STREAM {
+        FOR i IN (0 ..< 100000) -> YIELD Msg{ seed: i };
+    };
+
     MUTABLE futures: ~Int64[]@list = [];
-    FOR i IN (0_i64 ..< 64) -> futures.append(BG { subscriberWork(100000); });
+    FOR i IN (0 ..< 64) DO
+        subscriber_msgs: ~?Msg[] @split = CLONE msgs;
+        futures.append(BG {
+            MUTABLE total: Int64 = 0;
+            WHILE TRUE DO
+                msg = NEXT subscriber_msgs;
+                IF msg == NIL THEN
+                    BREAK;
+                END
+                total = total %+ processMessage(msg?.seed);
+            END
+            total;
+        });
+    END
 
     MUTABLE total: Int64 = 0;
-    FOR j IN (0_i64 ..< 64) DO
+    FOR j IN (0 ..< 64) DO
         result = NEXT futures[j];
         total = total %+ result;
     END
