@@ -8,6 +8,7 @@ pub fn build(b: *std.Build) void {
     const switch_s = b.path("runtime/switch.S");
     const onroot_s = b.path("runtime/onRoot.S");
     const fiber_core_path = b.path("runtime/fiber-core.zig");
+    const runtime_path = b.path("runtime/runtime.zig");
 
     // Named modules for lib/ dependencies (leaf nodes, no cross-imports)
     const safety_mod = b.createModule(.{ .root_source_file = b.path("lib/safety.zig") });
@@ -18,7 +19,7 @@ pub fn build(b: *std.Build) void {
     // MODULES & EXECUTABLES
     // -------------------------------------------------------------------------
     const mod = b.addModule("zig", .{
-        .root_source_file = b.path("runtime/runtime.zig"),
+        .root_source_file = runtime_path,
         .target = target,
     });
 
@@ -124,34 +125,27 @@ pub fn build(b: *std.Build) void {
     // INDIVIDUAL TEST FILES (all in runtime/)
     // -------------------------------------------------------------------------
     const test_files = [_][]const u8{
-        "runtime/arena-mode-test.zig",
-        "runtime/asm-test.zig",
-        "runtime/bounded-stream-test.zig",
-        "runtime/control-plane-test.zig",
-        "runtime/fiber-control-tests.zig",
-        "runtime/fiber-test.zig",
-        "runtime/frame-test.zig",
-        "runtime/inf-stream-test.zig",
-        "runtime/iouring-test.zig",
-        "runtime/ownership-test.zig",
-        "runtime/pool-test.zig",
-        "runtime/promote-list-test.zig",
-        "runtime/queues-test.zig",
-        "runtime/resource-test.zig",
-        "runtime/runtime-header-test.zig",
-        "runtime/semaphore-test.zig",
-        "runtime/shared-promise-test.zig",
-        "runtime/sharded-list-test.zig",
-        "runtime/sharded-pool-test.zig",
-        "runtime/slab-alloc-test.zig",
-        "runtime/soa-list-test.zig",
-        "runtime/soa-pool-test.zig",
-        "runtime/spsc-test.zig",
-        "runtime/spsc-scheduler-test.zig",
-        "runtime/stream-test.zig",
-        "runtime/vopr.zig",
-        "runtime/vopr-loom.zig",
-        "runtime/yield-test.zig",
+        "arena-mode-test.zig",
+        "asm-test.zig",
+        "control-plane-test.zig",
+        "data-structures-test.zig",
+        "fiber-control-tests.zig",
+        "fiber-test.zig",
+        "frame-test.zig",
+        "iouring-test.zig",
+        "ownership-test.zig",
+        "partitioned-map-test.zig",
+        "runtime-isolation-test.zig",
+        "promote-list-test.zig",
+        "queues-test.zig",
+        "resource-test.zig",
+        "runtime-header-test.zig",
+        "semaphore-test.zig",
+        "spsc-test.zig",
+        "spsc-scheduler-test.zig",
+        "vopr-test.zig",
+        "vopr-loom-test.zig",
+        "yield-test.zig",
     };
 
     for (test_files) |filename| {
@@ -162,7 +156,6 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-
         unit_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
         unit_tests.root_module.addImport("safety", safety_mod);
         unit_tests.root_module.addImport("ebr", ebr_mod);

@@ -565,6 +565,6 @@ test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAcc
     // remote op from that task. If sched 0 pops the task and it does a
     // LOCAL access to shard 0, that races with drainChannels processing
     // the pending remote op.
-    const result = vi.checkAll(&state);
+    const result = vi.checkAllSilent(&state);
     try std.testing.expectError(error.ShardConcurrentAccess, result);
 }

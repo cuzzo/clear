@@ -591,4 +591,3 @@ pub const Runtime = struct {
         fc.callOnStack(sched.main_ctx.sp, user_fn, arg);
     }
 };
-

@@ -262,7 +262,7 @@ test "L3: submitResume via SPSC channel" {
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Standard },
+        &runner, .{ .stack_size = .Standard, .pinned = true },
     );
     sched.run();
 }
@@ -319,12 +319,7 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
                     .rc_func = @ptrCast(&RcCtx.execute),
                     .rc_ctx = @ptrCast(&ctx),
                 };
-                const ring = target.channels[my_idx] orelse blk: {
-                    const r = target.allocator.create(spsc.DefaultRing) catch @panic("OOM");
-                    r.* = .{};
-                    target.channels[my_idx] = r;
-                    break :blk r;
-                };
+                const ring = target.ensureChannel(my_idx) catch @panic("OOM");
                 while (!ring.push(msg))
                     std.Thread.yield() catch {};
                 _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(my_idx), .seq_cst);
@@ -484,7 +479,13 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
             const r = self.outer_rt;
 
             for (0..ITERS) |iter| {
-                var map: Map = .{};
+                const map = try r.getSched().allocator.create(Map);
+                map.* = .{};
+                defer {
+                    map.deinit(std.heap.c_allocator, std.heap.c_allocator);
+                    r.getSched().allocator.destroy(map);
+                }
+                map.ensureOwnership();
 
                 var promises: [FIBERS]CheatLib.Promise(i64) = undefined;
                 for (0..FIBERS) |fi| {
@@ -492,7 +493,7 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
                     const promise = try CheatLib.Promise(i64).spawn(sa, r.getSched());
                     const ctx = try sa.create(BgWork);
                     ctx.* = .{
-                        .inner = promise.inner, .bg_alloc = sa, .map = &map,
+                        .inner = promise.inner, .bg_alloc = sa, .map = map,
                         .start = @as(i64, @intCast(fi)) * KEYS, .count = KEYS,
                     };
                     try CheatHeader.spawnPinned(
@@ -511,8 +512,6 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
                     std.debug.print("L6 FAIL iter {d}: {d}/{d}\n", .{ iter, total, expected });
                     return error.DataCorruption;
                 }
-
-                map.deinit(std.heap.c_allocator, std.heap.c_allocator);
             }
         }
     };
@@ -577,12 +576,7 @@ test "L7: pinned fiber sendAndWait yield-poll to remote scheduler" {
             const target_idx = (my_idx + 1) % n;
             const target = fp.global_registry.slots[target_idx].load(.acquire).?;
 
-            // Ensure channel exists
-            if (target.channels[my_idx] == null) {
-                target.channels[my_idx] = target.allocator.create(spsc.DefaultRing) catch @panic("OOM");
-                target.channels[my_idx].?.* = .{};
-            }
-            const ring = target.channels[my_idx].?;
+            const ring = target.ensureChannel(my_idx) catch @panic("OOM");
 
             // Send 10 remote calls, each using sendAndWait-style yield-poll.
             for (0..10) |_| {

@@ -14,6 +14,47 @@ const c = @cImport({
 
 const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;
+const alloc = std.heap.c_allocator;
+
+var global_ebr_ctx: ebr.EbrContext = .{};
+var global_stack_pool: fm.StackPool = undefined;
+var global_shutdown = std.atomic.Value(bool).init(false);
+
+fn initWorkerGlobals() void {
+    global_stack_pool = fm.StackPool.init(alloc);
+}
+
+fn deinitWorkerGlobals() void {
+    global_stack_pool.deinit();
+}
+
+fn schedulerThread(a: std.mem.Allocator) void {
+    var sched = fp.Scheduler.init(a, &global_ebr_ctx, &global_stack_pool) catch return;
+    defer sched.deinit();
+    sched.global_shutdown = &global_shutdown;
+    sched.shutdown_on_idle = false;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    sched.run();
+    fp.scheduler_running = false;
+}
+
+fn startWorkers(threads: []std.Thread, n: usize) void {
+    for (threads[0..n]) |*t| {
+        t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
+    }
+    while (fp.global_registry.count() < n)
+        std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+}
+
+fn stopWorkers(threads: []std.Thread, n: usize) void {
+    global_shutdown.store(true, .release);
+    fp.global_registry.notifyAll();
+    for (threads[0..n]) |*t| t.join();
+    fp.global_registry.deinit(alloc);
+    fp.global_registry = .{};
+    global_shutdown.store(false, .release);
+}
 
 // This is the function the Fiber will run
 fn fiberFfiTask(rt: *Runtime, _: ?*anyopaque) anyerror!void {
@@ -77,137 +118,6 @@ test "Root Stack Trampoline: C Standard Library Integration" {
 // ---------------------------------------------------------------------------
 // Promise(T) tests
 // ---------------------------------------------------------------------------
-//
-// These tests exercise the BG / ~T runtime primitive independently of the
-// CLEAR compiler so the Zig invariants can be verified before Phase 4 wires
-// up the parser and transpiler.
-// ---------------------------------------------------------------------------
-
-// Shared state threaded between producer and consumer fibers via a pointer
-// on the main (test) stack.  The scheduler runs synchronously on that same
-// stack, so the pointer is valid throughout sched.run().
-const PromiseTestState = struct {
-    promise: CheatLib.Promise(f64),
-    result:  f64 = 0.0,
-};
-
-// Producer: receives a *Promise(f64).Inner as args, writes a value, signals done.
-fn promiseProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
-    _ = rt;
-    const inner = @as(*CheatLib.Promise(f64).Inner, @ptrCast(@alignCast(raw_args.?)));
-    inner.result = 42.0;
-    inner.wg.done();
-}
-
-// Consumer: receives *PromiseTestState, calls next() (which blocks until
-// the producer signals), stores the result.
-fn promiseConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
-    _ = rt;
-    const state = @as(*PromiseTestState, @ptrCast(@alignCast(raw_args.?)));
-    state.result = try state.promise.next();
-}
-
-test "Promise(f64): producer writes, consumer next() reads via fiber yield" {
-    const allocator = std.testing.allocator;
-
-    var global_ctx = ebr.EbrContext{};
-    defer global_ctx.deinit(allocator);
-
-    var stack_pool = fm.StackPool.init(allocator);
-    defer stack_pool.deinit();
-
-    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
-    defer sched.deinit();
-
-    fp.active_scheduler = &sched;
-    defer fp.global_registry.deinit(allocator);
-
-    // Create the promise (Inner is heap-allocated by spawn()).
-    var state = PromiseTestState{
-        .promise = try CheatLib.Promise(f64).spawn(allocator, &sched),
-    };
-
-    // Spawn producer first so it may run before the consumer blocks.
-    // The fast-path in WaitGroup.wait() handles the case where done() fires first.
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(qs.TaskFn, @ptrCast(&promiseProducer)),
-        state.promise.inner,   // producer receives the Inner directly
-        .{}
-    );
-
-    // Spawn consumer — calls promise.next() which blocks until producer signals.
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(qs.TaskFn, @ptrCast(&promiseConsumer)),
-        &state,
-        .{}
-    );
-
-    sched.run();
-
-    try std.testing.expectEqual(@as(f64, 42.0), state.result);
-}
-
-// Verify that the fast path works: if the producer completes before the
-// consumer even calls wait(), the counter is already 0 and wait() returns
-// immediately without yielding.
-fn promiseProducerImmediate(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
-    _ = rt;
-    const inner = @as(*CheatLib.Promise(f64).Inner, @ptrCast(@alignCast(raw_args.?)));
-    inner.result = 99.0;
-    inner.wg.done();
-}
-
-fn promiseConsumerAfterDone(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
-    _ = rt;
-    const state = @as(*PromiseTestState, @ptrCast(@alignCast(raw_args.?)));
-    // By the time the consumer runs (LIFO scheduling), the producer may have
-    // already finished.  next() must handle both orderings.
-    state.result = try state.promise.next();
-}
-
-test "Promise(f64): next() fast-path when producer finishes first" {
-    const allocator = std.testing.allocator;
-
-    var global_ctx = ebr.EbrContext{};
-    defer global_ctx.deinit(allocator);
-
-    var stack_pool = fm.StackPool.init(allocator);
-    defer stack_pool.deinit();
-
-    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
-    defer sched.deinit();
-
-    fp.active_scheduler = &sched;
-    defer fp.global_registry.deinit(allocator);
-
-    var state = PromiseTestState{
-        .promise = try CheatLib.Promise(f64).spawn(allocator, &sched),
-    };
-
-    // Consumer spawned first so it lands at the bottom of the LIFO ready queue.
-    // Producer runs first (top of stack), signals done, then consumer runs and
-    // takes the fast path in wait() (counter == 0).
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(qs.TaskFn, @ptrCast(&promiseConsumerAfterDone)),
-        &state,
-        .{}
-    );
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(qs.TaskFn, @ptrCast(&promiseProducerImmediate)),
-        state.promise.inner,
-        .{}
-    );
-
-    sched.run();
-
-    try std.testing.expectEqual(@as(f64, 99.0), state.result);
-}
-
-// ---------------------------------------------------------------------------
 // BG-pattern integration tests
 // ---------------------------------------------------------------------------
 //
@@ -250,7 +160,6 @@ fn bgCheatMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
             ctx.inner.result = ctx.x + 5.0;
         }
     };
-    const alloc = rt.getSched().allocator;
     const p = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
     const bg_ctx = try alloc.create(BgCtx);
     bg_ctx.* = .{ .inner = p.inner, .alloc = alloc, .x = x };
@@ -325,22 +234,22 @@ fn bgConcurrentMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
         }
     };
 
-    const alloc = rt.getSched().allocator;
+    const sched_alloc = rt.getSched().allocator;
 
     // Spawn three concurrent BG fibers.
-    const pa = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
-    const ctx_a = try alloc.create(BgFixed);
-    ctx_a.* = .{ .inner = pa.inner, .alloc = alloc, .value = 10.0 };
+    const pa = try CheatLib.Promise(f64).spawn(sched_alloc, rt.getSched());
+    const ctx_a = try sched_alloc.create(BgFixed);
+    ctx_a.* = .{ .inner = pa.inner, .alloc = sched_alloc, .value = 10.0 };
     try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgFixed.run)), ctx_a, .{});
 
-    const pb = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
-    const ctx_b = try alloc.create(BgFixed);
-    ctx_b.* = .{ .inner = pb.inner, .alloc = alloc, .value = 20.0 };
+    const pb = try CheatLib.Promise(f64).spawn(sched_alloc, rt.getSched());
+    const ctx_b = try sched_alloc.create(BgFixed);
+    ctx_b.* = .{ .inner = pb.inner, .alloc = sched_alloc, .value = 20.0 };
     try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgFixed.run)), ctx_b, .{});
 
-    const pc = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
-    const ctx_c = try alloc.create(BgFixed);
-    ctx_c.* = .{ .inner = pc.inner, .alloc = alloc, .value = 30.0 };
+    const pc = try CheatLib.Promise(f64).spawn(sched_alloc, rt.getSched());
+    const ctx_c = try sched_alloc.create(BgFixed);
+    ctx_c.* = .{ .inner = pc.inner, .alloc = sched_alloc, .value = 30.0 };
     try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgFixed.run)), ctx_c, .{});
 
     // NEXT in reverse order — tests both slow-path (yield) and fast-path (already done).
@@ -405,13 +314,13 @@ fn bgIsolationMain(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
         }
     };
 
-    const alloc = rt.getSched().allocator;
+    const sched_alloc = rt.getSched().allocator;
     var base: f64 = 5.0;
 
     // Spawn BG fiber — captures base=5.0 by value.
-    const p = try CheatLib.Promise(f64).spawn(alloc, rt.getSched());
-    const bg_ctx = try alloc.create(BgCapture);
-    bg_ctx.* = .{ .inner = p.inner, .alloc = alloc, .captured = base };
+    const p = try CheatLib.Promise(f64).spawn(sched_alloc, rt.getSched());
+    const bg_ctx = try sched_alloc.create(BgCapture);
+    bg_ctx.* = .{ .inner = p.inner, .alloc = sched_alloc, .captured = base };
     try rt.getSched().submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&BgCapture.run)), bg_ctx, .{});
 
     // Mutate base AFTER spawning — should not affect the fiber's captured copy.

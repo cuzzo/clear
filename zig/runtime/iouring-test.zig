@@ -215,3 +215,37 @@ test "io_uring concurrent two-fiber readFile" {
     defer cleanupTestFiles();
     try runInScheduler(concurrentReadBody);
 }
+
+// ---------------------------------------------------------------------------
+// Test 4: Repeated read/yield pressure on a live scheduler.
+//         This specifically exercises the run() loop pattern of:
+//           io_uring drain -> fiber switch -> fiber yield -> io_uring drain
+//         many times in succession.
+// ---------------------------------------------------------------------------
+fn repeatedReadYieldBody(rt: *Runtime) !void {
+    var checksum: usize = 0;
+
+    for (0..200) |_| {
+        for (0..4) |i| {
+            var path_buf: [128]u8 = undefined;
+            const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch unreachable;
+
+            const data = try CheatLib.readFile(rt.heapAlloc(), path);
+
+            var expected_buf: [256]u8 = undefined;
+            const expected = std.fmt.bufPrint(&expected_buf, "hello from file {d}\n", .{i}) catch unreachable;
+
+            try std.testing.expectEqualStrings(expected, data);
+            checksum +%= data.len;
+            rt.checkYield();
+        }
+    }
+
+    try std.testing.expect(checksum > 0);
+}
+
+test "io_uring repeated read/yield pressure" {
+    try ensureTestFiles();
+    defer cleanupTestFiles();
+    try runInScheduler(repeatedReadYieldBody);
+}

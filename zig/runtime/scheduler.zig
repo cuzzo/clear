@@ -22,6 +22,7 @@ const TaskStatus = qs.TaskStatus;
 const spsc = @import("spsc.zig");
 pub const SpscMessage = spsc.Message;
 pub const SpscMessageTag = spsc.MessageTag;
+const AtomicRingPtr = std.atomic.Value(?*spsc.DefaultRing);
 pub const TaskConfig = qs.TaskConfig;
 const TaskFn = qs.TaskFn;
 
@@ -35,6 +36,7 @@ const StackPool = fm.StackPool;
 const STANDARD_STACK_SIZE = fm.STANDARD_STACK_SIZE;
 
 const cp = @import("control-plane.zig");
+const IO_HELPER_STACK_SIZE = 16 * 1024;
 
 /// Thread-local allocator for @arena BG fibers.  Set by the scheduler
 /// before switching to a use_arena task; cleared after the task yields.
@@ -89,6 +91,11 @@ pub const RemoteCall = struct {
     func: *const fn (*anyopaque) void,
     ctx: *anyopaque,
     wg: *WaitGroup,
+};
+
+pub const RemoteCompletion = struct {
+    wg: WaitGroup,
+    finished: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 };
 
 
@@ -160,7 +167,7 @@ pub const Scheduler = struct {
     /// channels[i] is the ring FROM scheduler i TO this scheduler.
     /// Null until first message is sent on that channel (~288 KB per ring).
     /// Messages are value-copied — no linked lists, no pointer reuse.
-    channels: [64]?*spsc.DefaultRing = [_]?*spsc.DefaultRing{null} ** 64,
+    channels: [64]AtomicRingPtr = [_]AtomicRingPtr{AtomicRingPtr.init(null)} ** 64,
     /// Bitmask: bit i is set when channel[i] has pending messages.
     dirty_mask: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     /// Re-entrancy guard for drainChannels (prevents RemoteCall → map.put → sendAndWait → drainChannels)
@@ -179,6 +186,9 @@ pub const Scheduler = struct {
     ring: RingType,
     ring_dirty: bool = false,
     uring_cqes: [128]linux.io_uring_cqe = undefined,
+    // Dedicated stack for non-yielding io_uring calls made from run().
+    // This keeps helper frames off the scheduler's suspended switch slot.
+    io_helper_stack: []u8,
 
     // 4. Main Thread Context (To return to OS)
     main_ctx: Context,
@@ -251,6 +261,7 @@ pub const Scheduler = struct {
             .allocator = allocator,
             .global_ebr = global_ebr,
             .ring = ring,
+            .io_helper_stack = try allocator.alloc(u8, IO_HELPER_STACK_SIZE),
             .main_ctx = undefined,
             .current_task = null,
             .active_tasks = std.atomic.Value(usize).init(0),
@@ -315,9 +326,10 @@ pub const Scheduler = struct {
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
         for (&self.channels) |*ch| {
-            if (ch.*) |ring| self.allocator.destroy(ring);
+            if (ch.load(.acquire)) |ring| self.allocator.destroy(ring);
         }
         self.local_arena.deinit();
+        self.allocator.free(self.io_helper_stack);
         self.ring.deinit();
     }
 
@@ -370,11 +382,14 @@ pub const Scheduler = struct {
 
     /// Lazily allocate an SPSC ring for the given sender index.
     /// Called on the producer side (first message to this channel).
-    fn ensureChannel(self: *Scheduler, idx: usize) !*spsc.DefaultRing {
-        if (self.channels[idx]) |ring| return ring;
+    pub fn ensureChannel(self: *Scheduler, idx: usize) !*spsc.DefaultRing {
+        if (self.channels[idx].load(.acquire)) |ring| return ring;
         const ring = try self.allocator.create(spsc.DefaultRing);
+        errdefer self.allocator.destroy(ring);
         ring.* = .{};
-        self.channels[idx] = ring;
+        if (self.channels[idx].cmpxchgStrong(null, ring, .release, .acquire)) |existing| {
+            return existing.?;
+        }
         return ring;
     }
 
@@ -460,7 +475,7 @@ pub const Scheduler = struct {
         while (bits != 0) {
             const sender_idx = @ctz(bits);
             bits &= bits - 1;
-            const ch = self.channels[sender_idx] orelse continue;
+            const ch = self.channels[sender_idx].load(.acquire) orelse continue;
             while (true) {
                 const peeked = ch.peek() orelse break;
                 if (peeked.tag != .RemoteCall) break; // leave for main loop
@@ -468,7 +483,13 @@ pub const Scheduler = struct {
                 _ = ch.pop();
                 const func = peeked.rc_func.?;
                 const ctx = peeked.rc_ctx.?;
+                const completion = peeked.rc_wg;
                 func(ctx);
+                if (completion) |completion_ptr| {
+                    const typed: *RemoteCompletion = @ptrCast(@alignCast(completion_ptr));
+                    typed.wg.done();
+                    typed.finished.store(true, .release);
+                }
             }
         }
     }
@@ -480,7 +501,7 @@ pub const Scheduler = struct {
         while (mask != 0) {
             const sender_idx = @ctz(mask);
             mask &= mask - 1;
-            const ch = self.channels[sender_idx] orelse continue;
+            const ch = self.channels[sender_idx].load(.acquire) orelse continue;
             while (ch.pop()) |msg| {
                 switch (msg.tag) {
                     .Spawn => {
@@ -545,8 +566,14 @@ pub const Scheduler = struct {
                         self.draining = true;
                         const func = msg.rc_func.?;
                         const ctx = msg.rc_ctx.?;
+                        const completion = msg.rc_wg;
                         func(ctx);
                         self.draining = false;
+                        if (completion) |completion_ptr| {
+                            const typed: *RemoteCompletion = @ptrCast(@alignCast(completion_ptr));
+                            typed.wg.done();
+                            typed.finished.store(true, .release);
+                        }
                     },
                 }
             }
@@ -580,10 +607,7 @@ pub const Scheduler = struct {
             // pick up newly spawned tasks and wake I/O-blocked fibers.
             if (self.hasWork()) {
                 self.fast_path_counter +%= 1;
-                self.drainRemoteCalls();
-                if (self.fast_path_counter & 63 == 0) {
-                    self.drainChannels();
-                }
+                self.drainChannels();
                 self.pollNonBlocking();
             } else {
                 // ── Slow path: no ready work — check all sources.
@@ -649,8 +673,12 @@ pub const Scheduler = struct {
                         self.allocator.destroy(task);
                     },
                     .Ready => {
-                        // It yielded, but wants to run again. Put back in queue.
-                        self.enqueueTask(task);
+                        // It yielded, but wants to run again. If a concurrent
+                        // wake already queued it through submitResume, honor the
+                        // in_inbox guard and avoid a duplicate enqueue.
+                        if (!task.in_inbox.load(.acquire)) {
+                            self.enqueueTask(task);
+                        }
                     },
                     .Blocked => {
                         // Do nothing! It is now owned by the WaitGroup/Mutex/Etc.
@@ -691,7 +719,7 @@ pub const Scheduler = struct {
             if (self.sleeping_queue.items.len > 0) {
                 // Submit a 1ms timeout so we wake up to check sleepers.
                 const ts = linux.kernel_timespec{ .sec = 0, .nsec = 1_000_000 };
-                _ = self.ring.timeout(TIMEOUT_SENTINEL, &ts, 0, 0) catch {};
+                self.queueTimeoutOnIoStack(&ts);
                 self.ring_dirty = true;
             } else if (self.shutdown_on_idle and self.active_tasks.load(.monotonic) == 0) {
                 wait_nr = 0;
@@ -713,7 +741,7 @@ pub const Scheduler = struct {
             }
 
             // C. Actually Sleep -- wait for at least `wait_nr` CQEs.
-            const count = self.ring.copy_cqes(&self.uring_cqes, wait_nr) catch 0;
+            const count = self.copyCqesOnIoStack(wait_nr);
 
             // D. We are awake
             self.event_fd.markAwake();
@@ -722,8 +750,17 @@ pub const Scheduler = struct {
                 self.processCqes(self.uring_cqes[0..count]);
             }
 
-            // If no IO and no Tasks and no Sleepers -> Break
-            if (self.shutdown_on_idle and count == 0 and !self.hasWork() and self.sleeping_queue.items.len == 0) {
+            // If still truly idle after waking, exit. This final gate must
+            // include active_tasks and pending channel work, not just ready
+            // queues, otherwise run() can return while blocked tasks or inbox
+            // messages still exist.
+            if (self.shutdown_on_idle and
+                count == 0 and
+                self.active_tasks.load(.monotonic) == 0 and
+                !self.hasWork() and
+                !self.hasChannelMessages() and
+                self.sleeping_queue.items.len == 0)
+            {
                 self.scavengeMemory(true);
                 break;
             }
@@ -807,13 +844,13 @@ pub const Scheduler = struct {
 
     /// Convert a negative CQE result (negative errno) to a Zig error.
     /// Widens to i64 before negation to prevent overflow when result == minInt(i32).
-    /// Kernel errno values are in [1, 4095]; out-of-range values return Unexpected.
+    /// We intentionally collapse kernel errno values to `error.Unexpected` here:
+    /// the runtime does not currently preserve specific errno tags, and
+    /// `std.posix.unexpectedErrno` prints a stack trace that makes the test
+    /// suite noisy without adding useful signal.
     pub fn ioError(result: i32) std.posix.UnexpectedError {
         const raw = -@as(i64, result);
-        if (raw >= 1 and raw <= 4095) {
-            const e: linux.E = @enumFromInt(@as(u16, @intCast(raw)));
-            return std.posix.unexpectedErrno(e);
-        }
+        if (raw >= 1 and raw <= 4095) return error.Unexpected;
         return error.Unexpected;
     }
 
@@ -873,6 +910,52 @@ pub const Scheduler = struct {
         }
     }
 
+    fn ioHelperStackTop(self: *Scheduler) usize {
+        return @intFromPtr(self.io_helper_stack.ptr) + self.io_helper_stack.len;
+    }
+
+    fn queueTimeoutOnIoStack(self: *Scheduler, ts: *const linux.kernel_timespec) void {
+        const Ctx = struct {
+            self: *Scheduler,
+            ts: *const linux.kernel_timespec,
+            fn run(raw: ?*anyopaque) callconv(.c) void {
+                const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+                _ = ctx.self.ring.timeout(TIMEOUT_SENTINEL, ctx.ts, 0, 0) catch {};
+            }
+        };
+
+        var ctx = Ctx{ .self = self, .ts = ts };
+        fc.callOnStack(self.ioHelperStackTop(), &Ctx.run, @ptrCast(&ctx));
+    }
+
+    fn submitRingOnIoStack(self: *Scheduler) void {
+        const Ctx = struct {
+            self: *Scheduler,
+            fn run(raw: ?*anyopaque) callconv(.c) void {
+                const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+                _ = ctx.self.ring.submit() catch {};
+            }
+        };
+
+        var ctx = Ctx{ .self = self };
+        fc.callOnStack(self.ioHelperStackTop(), &Ctx.run, @ptrCast(&ctx));
+    }
+
+    fn copyCqesOnIoStack(self: *Scheduler, wait_nr: u32) usize {
+        const Ctx = struct {
+            self: *Scheduler,
+            wait_nr: u32,
+            result: usize = 0,
+            fn run(raw: ?*anyopaque) callconv(.c) void {
+                const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+                ctx.result = ctx.self.ring.copy_cqes(&ctx.self.uring_cqes, ctx.wait_nr) catch 0;
+            }
+        };
+
+        var ctx = Ctx{ .self = self, .wait_nr = wait_nr };
+        fc.callOnStack(self.ioHelperStackTop(), &Ctx.run, @ptrCast(&ctx));
+        return ctx.result;
+    }
 
     /// Process CQEs from the io_uring ring. Unified handler for:
     /// - Poll readiness (POLL_ADD completions) -> wake blocked task
@@ -902,7 +985,7 @@ pub const Scheduler = struct {
     /// Non-blocking CQE drain: check for completions without sleeping.
     /// Wakes any Blocked fibers whose I/O has completed.
     pub fn pollNonBlocking(self: *Scheduler) void {
-        const n = self.ring.copy_cqes(&self.uring_cqes, 0) catch return;
+        const n = self.copyCqesOnIoStack(0);
         if (n > 0) {
             self.processCqes(self.uring_cqes[0..n]);
         }
@@ -917,7 +1000,7 @@ pub const Scheduler = struct {
     /// No SQEs are lost; blocked fibers just wait slightly longer.
     pub fn flushRing(self: *Scheduler) void {
         if (self.ring_dirty) {
-            _ = self.ring.submit() catch {};
+            self.submitRingOnIoStack();
             self.ring_dirty = false;
         }
     }
@@ -1130,35 +1213,29 @@ pub const WaitGroup = struct {
 
     // Blocking Wait (Yields Fiber)
     pub fn wait(self: *WaitGroup) void {
-        // Fast path: already done
-        if (self.counter.load(.seq_cst) == 0) return;
-
-        // 1. Get current task
         const task = self.sched.getCurrent();
-        task.status.store(.Blocked, .release);
 
-        // 2. Register as waiter (Spinlock protected)
-        // CRITICAL: We must check counter *inside* the lock or right before/after
-        // to avoid the "Lost Wakeup" race where done() happens between check and sleep.
-        while (self.lock.swap(1, .acquire) == 1) {
-             std.Thread.yield() catch {};
-        }
+        while (true) {
+            if (self.counter.load(.seq_cst) == 0) return;
 
-        // Double Check inside lock: Did it finish while we were acquiring lock?
-        if (self.counter.load(.seq_cst) == 0) {
+            task.status.store(.Blocked, .release);
+
+            while (self.lock.swap(1, .acquire) == 1) {
+                std.Thread.yield() catch {};
+            }
+
+            if (self.counter.load(.seq_cst) == 0) {
+                self.lock.store(0, .release);
+                task.status.store(.Ready, .release);
+                return;
+            }
+
+            self.waiting_task = task;
             self.lock.store(0, .release);
-            task.status.store(.Ready, .release); // Undo status change
-            return;
+
+            task.base.yield();
+            task.status.store(.Ready, .release);
         }
-
-        self.waiting_task = task;
-        self.lock.store(0, .release);
-
-        // 3. Yield control
-        task.base.yield();
-
-        // 4. Back (Reset status)
-        task.status.store(.Ready, .release);
     }
 };
 
@@ -1325,4 +1402,3 @@ test "IoWaiter: encode is distinct from sentinels" {
 }
 
 fn dummyTaskFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
-

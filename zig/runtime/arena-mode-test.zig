@@ -26,12 +26,13 @@ test "normal mode: restoreFrameMark reclaims memory" {
     const ptr1 = try rt.frameAlloc().alloc(u8, 1024);
     _ = ptr1;
 
-    // Cursor should have advanced
-    try std.testing.expect(rt.overflow_arena.cursor > 0);
+    // In Debug/ReleaseSafe, the cheat arena routes allocations through
+    // `large_objects`, so raw cursor movement is not a stable signal.
+    try std.testing.expect(rt.overflow_arena.currentBytes() > 0);
 
-    // Restore — cursor should reset
+    // Restore — all frame-owned bytes should be reclaimed
     rt.restoreFrameMark(mark);
-    try std.testing.expectEqual(@as(usize, 0), rt.overflow_arena.cursor);
+    try std.testing.expectEqual(@as(usize, 0), rt.overflow_arena.currentBytes());
 }
 
 test "arena mode: restoreFrameMark is a no-op" {
@@ -49,14 +50,14 @@ test "arena mode: restoreFrameMark is a no-op" {
     const ptr1 = try rt.frameAlloc().alloc(u8, 1024);
     _ = ptr1;
 
-    const cursor_after_alloc = rt.overflow_arena.cursor;
-    try std.testing.expect(cursor_after_alloc > 0);
+    const bytes_after_alloc = rt.overflow_arena.currentBytes();
+    try std.testing.expect(bytes_after_alloc > 0);
 
     // Restore — in arena mode, this should be a NO-OP
     rt.restoreFrameMark(mark);
 
-    // Cursor should NOT have reset
-    try std.testing.expectEqual(cursor_after_alloc, rt.overflow_arena.cursor);
+    // Arena mode keeps frame-owned bytes alive across restoreFrameMark
+    try std.testing.expectEqual(bytes_after_alloc, rt.overflow_arena.currentBytes());
 }
 
 test "arena mode: multiple frame scopes share memory" {
@@ -87,8 +88,8 @@ test "arena mode: multiple frame scopes share memory" {
     try std.testing.expectEqual(@as(u8, 0xBB), buf_b[0]);
     try std.testing.expectEqual(@as(u8, 0xBB), buf_b[2047]);
 
-    // Total cursor should reflect both allocations
-    try std.testing.expect(rt.overflow_arena.cursor >= 4096);
+    // Total live arena bytes should reflect both allocations
+    try std.testing.expect(rt.overflow_arena.currentBytes() >= 4096);
 }
 
 test "arena mode: final rewind reclaims everything" {
@@ -108,7 +109,7 @@ test "arena mode: final rewind reclaims everything" {
         rt.restoreFrameMark(mark); // no-op in arena mode
     }
 
-    try std.testing.expect(rt.overflow_arena.cursor >= 10 * 1024);
+    try std.testing.expect(rt.overflow_arena.currentBytes() >= 10 * 1024);
 
     // Disable arena mode and do a real rewind (simulates fiber completion)
     rt.arena_mode = false;
@@ -119,8 +120,8 @@ test "arena mode: final rewind reclaims everything" {
     };
     rt.overflow_arena.rewind(final_mark);
 
-    // Everything reclaimed — cursor back to 0
-    try std.testing.expectEqual(@as(usize, 0), rt.overflow_arena.cursor);
+    // Everything reclaimed — no frame-owned bytes remain
+    try std.testing.expectEqual(@as(usize, 0), rt.overflow_arena.currentBytes());
 }
 
 test "CheatArena rewind is O(1) — pointer reset only" {
