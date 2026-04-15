@@ -405,13 +405,9 @@ module CleanupClassifier
   # ── Walk TAKES parameters ───────────────────────────────────────
 
   private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
-    drops = fn_node.deferred_drops || []
-    drops.each do |drop|
-      param_def = fn_node.params.find { |p| p[:name] == drop[:name] }
-      next unless param_def&.dig(:takes)
-
-      ti = drop[:type].is_a?(Type) ? drop[:type] : Type.new(drop[:type] || :Any)
-      name = drop[:name].to_s
+    (fn_node.params || []).select { |p| p[:takes] }.each do |p|
+      ti = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+      name = p[:name].to_s
 
       schema = schema_lookup.call(ti.resolved) rescue nil
       is_resource = schema.is_a?(Hash) && schema[:kind] == :resource

@@ -453,15 +453,12 @@ class OwnershipDataflow
   # TAKES params are always heap-allocated (caller passes heap ownership).
   def init_entry_state
     state = {}
-    (@fn_node.deferred_drops || []).each do |dd|
-      name = dd.is_a?(Hash) ? dd[:name].to_s : dd.to_s
-      param_def = @fn_node.params&.find { |p| p[:name] == name }
-      if param_def&.dig(:takes)
-        ti = dd.is_a?(Hash) ? dd[:type] : nil
-        ti = ti.is_a?(Type) ? ti : (Type.new(ti || :Any) rescue nil)
-        needs = ti ? ti.needs_explicit_cleanup?(:heap, @schema_lookup) : true
-        state[name] = OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: needs)
-      end
+    (@fn_node.params || []).each do |p|
+      next unless p[:takes]
+      name = p[:name].to_s
+      ti = p[:type].is_a?(Type) ? p[:type] : (Type.new(p[:type] || :Any) rescue nil)
+      needs = ti ? ti.needs_explicit_cleanup?(:heap, @schema_lookup) : true
+      state[name] = OwnerEntry.new(state: OWNED, allocator: :heap, needs_cleanup: needs)
     end
     state
   end

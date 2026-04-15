@@ -949,16 +949,14 @@ class MIRLowering
     # Emit AllocMark + Cleanup for TAKES parameters (replaces insert_takes_drops! from MIRPass).
     # TAKES params own their value from function entry; cleanup is always defer (Cleanup, not ErrCleanup).
     takes_mir = []
-    (node.deferred_drops || []).each do |dd|
-      param_def = node.params&.find { |p| p[:name] == dd[:name] }
-      next unless param_def&.dig(:takes)
-      entry = @current_bindings[dd[:name].to_s]
+    (node.params || []).select { |p| p[:takes] }.each do |p|
+      entry = @current_bindings[p[:name].to_s]
       next unless entry && entry[:needs_cleanup]
-      ti = dd[:type].is_a?(Type) ? dd[:type] : Type.new(dd[:type] || :Any)
+      ti = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
       drop_entry = entry.dup
       build_drop_entry!(drop_entry, ti, nil)
-      takes_mir << MIR::AllocMark.new(dd[:name].to_s, entry[:alloc])
-      takes_mir << MIR::Cleanup.new(zig_safe_name(dd[:name].to_s), drop_entry)
+      takes_mir << MIR::AllocMark.new(p[:name].to_s, entry[:alloc])
+      takes_mir << MIR::Cleanup.new(zig_safe_name(p[:name].to_s), drop_entry)
     end
 
     # Lower body (track snapshot types for catch blocks)
