@@ -178,7 +178,7 @@ pub const CheatLib = struct {
             pub fn init(start: T, end: T) @This() {
                 return .{ .current = start, .end = end };
             }
-            pub fn next(self: *@This(), _: *Runtime) !?T {
+            pub fn next(self: *@This()) !?T {
                 if (self.current >= self.end) return null;
                 defer self.current += 1;
                 return self.current;
