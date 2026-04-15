@@ -151,9 +151,3 @@ pub fn fileSizeFd(fd: std.posix.fd_t) !u64 {
     const stat = try file.stat(io);
     return stat.size;
 }
-
-pub const TestAllocator = std.heap.DebugAllocator(.{});
-
-pub fn assertNoLeaks(gpa: *TestAllocator) void {
-    std.debug.assert(gpa.deinit() == .ok);
-}

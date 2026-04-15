@@ -98,8 +98,8 @@ fn stressWorker(slab: *Slab, loops: usize, allocs_per_loop: usize) !void {
 
 test "multi-threaded stress test" {
     // 1. Setup
-    var gpa: compat.TestAllocator = .{};
-    defer compat.assertNoLeaks(&gpa);
+    var gpa = std.heap.DebugAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
     const harness_alloc = gpa.allocator();
 
     // Use a small slab size to force frequent grow() calls under contention
