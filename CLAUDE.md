@@ -154,6 +154,29 @@ Two sub-passes that lower all allocation/deallocation/move decisions into MIR no
 - Never allocate on the frame and then unconditionally promote to the heap. If a value is ALWAYS promoted, allocate directly on the heap at declaration time. Escape analysis in Pass 1 must propagate provenance back to declarations so finalize_decl_storage! makes the correct choice upfront.
 - See `mir-bugs.md` for known MIR violations. See `alloc-bugs.md` for frame-then-always-promote gaps. See `memory-safety.md` for the full plan.
 
+### Adding a New Escape Scenario
+
+**How do you know you need to?** A new language feature introduces an escape scenario if it creates a situation where a frame-allocated value must survive past its declaring frame. Ask: can the new feature cause a frame-allocated list, string, map, pool, or struct to be read after the frame that allocated it has been rewound? If yes, it is an escape scenario.
+
+**Concrete triggers:**
+- New syntax that returns a value to the caller (any new `RETURN`-like construct)
+- New syntax that captures a value into a longer-lived context (any new closure, fiber, or async primitive)
+- New syntax that stores a value into a heap-allocated container (any new field assignment or collection mutation)
+- A new function attribute that implies the return value is heap-owned (like `RETURNS %T`)
+- A new inter-function propagation path (e.g., a new higher-order function that forwards its argument's return value)
+
+**What to do:**
+
+1. Write a failing transpile-test or spec that demonstrates the UAF/leak before your fix.
+2. Add the escape condition to `EscapeAnalysis` (`src/escape_analysis.rb`), Phase E2:
+   - Add a detection query in the per-declaration scan (one `when` branch or guard).
+   - Write the correct mutations: `node.storage = :heap`, and `ti.provenance = :heap` unless the type_info is a shared struct Type (see cases `:heap_ptr_return` and `:assign_escape` for the exception pattern).
+   - Return any bookkeeping sets (e.g., `bg_upgraded`) needed by downstream passes.
+3. If the new scenario involves a new category of heap-returning function (like `heap_carry_return`), add the detection to Phase E1 (`compute_heap_return_fns!`) and the call-site tagging to Phase E3.
+4. Do NOT add a new `upgrade_*` method to `MIRPass`. That pattern is being eliminated (tasks #27-#32). Adding a new upgrade method re-introduces the accumulation problem.
+5. Do NOT add a new invariant to `MIRChecker`. The checker's 7 invariants are fixed. If the checker fires unexpectedly after your change, the escape analysis missed a case -- fix it in `EscapeAnalysis`, not in the checker.
+6. Run `bundle exec prspec spec/` and `./clear test transpile-tests/`. Both must pass at 0 failures.
+
 ### MIR Pipeline: What Goes Where (Zero UAF / Double-Free)
 
 The MIR pipeline has three strict roles. Violating the role boundaries is what causes UAF, double-free, and leaks.
