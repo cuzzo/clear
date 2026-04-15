@@ -1265,6 +1265,14 @@ class MIRLowering
       node.args.map { |a| lower(a) }
     end
 
+    # Hot-path collection lengths should lower to direct `.len` / `.items.len`
+    # instead of going through CheatLib.len, which adds avoidable call overhead
+    # in tight loops. Streams are not handled here; they stay on NEXT-based paths.
+    if node.zig_pattern == "CheatLib.len({0})"
+      len_expr = lower_direct_length(node)
+      return len_expr if len_expr
+    end
+
     pattern = node.zig_pattern.dup
 
     # Resolve {alloc} to a symbol and wrap TAKES string args in MIR::DupeSlice.
@@ -2922,6 +2930,8 @@ class MIRLowering
       items = MIR::FieldGet.new(target, "items")
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
+    elsif ti && direct_indexable_collection_type?(ti)
+      direct_index_get(target, index, ti)
     else
       # Registry-driven: dispatch_key → INDEX_OPS get :builtin (string_raw → charAt,
       # array → getAt, etc.). Falls back to :getAt for unregistered types.
@@ -3984,6 +3994,43 @@ class MIRLowering
     iz = MIR::InlineZig.new(pattern, "builtin_#{name}")
     iz.stdlib_def = entry
     iz
+  end
+
+  def direct_indexable_collection_type?(type_info)
+    ti = Type.new(type_info)
+    ti.list_collection? || (ti.array? && !ti.string?)
+  end
+
+  def direct_index_get(target, index, type_info)
+    ti = Type.new(type_info)
+    cast_idx = MIR::Cast.new(index, "usize", :intCast)
+    if ti.list_collection?
+      MIR::IndexGet.new(MIR::FieldGet.new(target, "items"), cast_idx)
+    else
+      MIR::IndexGet.new(target, cast_idx)
+    end
+  end
+
+  def lower_direct_length(node)
+    recv_ast = node.is_a?(AST::MethodCall) ? node.object : node.args.first
+    return nil unless recv_ast
+
+    recv_ti = recv_ast.type_info rescue nil
+    return nil unless recv_ti
+
+    recv = lower(recv_ast)
+    ti = Type.new(recv_ti)
+    len_expr =
+      if ti.list_collection?
+        MIR::FieldGet.new(MIR::FieldGet.new(recv, "items"), "len")
+      elsif ti.string? || (ti.array? && !ti.fixed?)
+        MIR::FieldGet.new(recv, "len")
+      else
+        nil
+      end
+
+    return nil unless len_expr
+    MIR::Cast.new(len_expr, "i64", :intCast)
   end
 
   def emit_expr(node)

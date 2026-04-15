@@ -1681,7 +1681,7 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("futures.append(")
       end
 
-      it "emits CheatLib.getAt(futures, 0).next() for NEXT futures[0]" do
+      it "emits direct indexed access plus .next() for NEXT futures[0]" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             MUTABLE futures: ~Int64[]@list = [];
@@ -1691,7 +1691,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to match(/CheatLib\.getAt\(futures, .*\)\.next\(\)/)
+        expect(out).to match(/futures\.items\[@as\(usize, @intCast\(0\)\)\]\.next\(\)/)
       end
     end
   end

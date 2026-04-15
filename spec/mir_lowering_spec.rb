@@ -352,15 +352,34 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers index access" do
-      target = make_id("items", full_type: :Int64)
+      target = make_id("items", full_type: :"Int64[]")
       index = make_lit(:NUMBER, 0, full_type: :Int64)
       index.coerced_type = :Int64
       node = AST::GetIndex.new(tok, target, index)
       node.full_type = :Int64
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::InlineZig)
-      expect(result.stdlib_def).to include(borrows: :all)
-      expect(emit(result)).to eq("CheatLib.getAt(items, 0)")
+      expect(result).to be_a(MIR::IndexGet)
+      expect(emit(result)).to eq("items[@as(usize, @intCast(0))]")
+    end
+
+    it "lowers string length to direct len" do
+      target = make_id("items", full_type: :String)
+      node = AST::MethodCall.new(tok, target, "length", [])
+      node.full_type = :Int64
+      node.zig_pattern = "CheatLib.len({0})"
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::Cast)
+      expect(emit(result)).to eq("@as(i64, @intCast(items.len))")
+    end
+
+    it "lowers slice length to direct len" do
+      target = make_id("items", full_type: :"Int64[]")
+      node = AST::MethodCall.new(tok, target, "length", [])
+      node.full_type = :Int64
+      node.zig_pattern = "CheatLib.len({0})"
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::Cast)
+      expect(emit(result)).to eq("@as(i64, @intCast(items.len))")
     end
   end
 
