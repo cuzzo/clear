@@ -6,7 +6,7 @@
 // Chase-Lev work-stealing deque in RunQueue.
 //
 // Shared state (heap-allocated, outlives all threads):
-//   - GPA allocator
+//   - allocator
 //   - EbrContext  (thread-safe — has its own registry_lock)
 //   - StackPool   (thread-safe — slab allocator with atomic free lists)
 //   - shutdown    (atomic bool — signals workers to exit after main)
@@ -18,18 +18,15 @@
 pub fn main() !void {
     // 1. Setup Allocator
     // ReleaseFast defaults to c_allocator (libc malloc — jemalloc compatible,
-    // per-thread arenas, zero contention). Debug/ReleaseSafe defaults to GPA
-    // for leak detection. Override with USE_C_ALLOCATOR declaration.
+    // per-thread arenas, zero contention). Debug/ReleaseSafe defaults to
+    // smp_allocator for scalable concurrent allocation. Override with
+    // USE_C_ALLOCATOR declaration.
     const use_c_alloc = if (@hasDecl(@import("root"), "USE_C_ALLOCATOR"))
         @import("root").USE_C_ALLOCATOR
     else
         (@import("builtin").mode == .ReleaseFast or @import("builtin").mode == .ReleaseSmall);
 
-    var gpa = if (use_c_alloc) {} else std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
-    defer if (!use_c_alloc) {
-        _ = gpa.deinit();
-    };
-    const allocator = if (use_c_alloc) std.heap.c_allocator else gpa.allocator();
+    const allocator = if (use_c_alloc) std.heap.c_allocator else std.heap.smp_allocator;
 
     // 2. Setup Contexts
     var global_ctx = EbrContext{};
@@ -55,7 +52,8 @@ pub fn main() !void {
     //    On machines with many cores + large workloads, set CLEAR_THREADS=0 (auto)
     //    or CLEAR_THREADS=N to spawn N-1 worker schedulers.
     const num_workers = blk: {
-        if (std.posix.getenv("CLEAR_THREADS")) |env| {
+        if (std.c.getenv("CLEAR_THREADS")) |env_z| {
+            const env = std.mem.span(env_z);
             const n = std.fmt.parseInt(usize, env, 10) catch 1;
             if (n == 0) {
                 // Auto: use all CPUs
@@ -103,7 +101,7 @@ pub fn main() !void {
     // This prevents ensureOwnership from seeing partial scheduler state.
     if (num_workers > 0) {
         while (fp.global_registry.count() < num_workers) {
-            std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+            CheatLib.sleep(1);
         }
     }
 

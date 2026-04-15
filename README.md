@@ -89,7 +89,7 @@ If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **Ruby 3.x** (for the compiler)
 - **Bundler** (`gem install bundler`)
-- **Zig 0.15.x** (for runtime compilation)
+- **Zig 0.16.0** (for runtime compilation)
 - **Go 1.21+** (for benchmark baselines, optional)
 - **Rust/Cargo** (for benchmark baselines, optional)
 

@@ -116,7 +116,9 @@ class TestGenerator
   # Generate a complete single-file zig test (header + one test block).
   def generate_single_test(filename, cheat_code, source_dir: Dir.pwd)
     block = generate_test_block(filename, cheat_code, source_dir: source_dir)
+    frame_debug = ENV['CLEAR_FRAME_DEBUG'] == '1'
     <<~ZIG
+      pub const CLEAR_FRAME_DEBUG = #{frame_debug};
       const std = @import("std");
       const CheatHeader = @import("runtime-header.zig");
       const CheatLib = CheatHeader.CheatLib;
@@ -158,6 +160,8 @@ File.open(OUTPUT_FILE, "w") do |f|
   # 1. Write the Runtime Header (Once)
   if File.exist?(HEADER_FILE)
     f.puts "// --- RUNTIME HEADER ---"
+    frame_debug = ENV['CLEAR_FRAME_DEBUG'] == '1'
+    f.puts "pub const CLEAR_FRAME_DEBUG = #{frame_debug};"
     f.puts "const std = @import(\"std\");"
     f.puts "const CheatHeader = @import(\"runtime/runtime-header.zig\");"
     f.puts "const CheatLib = CheatHeader.CheatLib;"

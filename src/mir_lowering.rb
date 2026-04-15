@@ -2111,7 +2111,7 @@ class MIRLowering
       results_var = "__next_results_#{@tmp_counter}"
       alloc_fn = alloc_sym == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
       code = "#{blk_label}: {\n" \
-             "    var #{results_var} = std.ArrayListUnmanaged(#{elem_zig}){};\n" \
+             "    var #{results_var} = std.ArrayListUnmanaged(#{elem_zig}).empty;\n" \
              "    for (#{inner_str}.items) |__p| {\n" \
              "        try #{results_var}.append(#{alloc_fn}, try __p.next());\n" \
              "    }\n" \
@@ -2152,9 +2152,9 @@ class MIRLowering
   # ================================================================
 
   TEST_PREAMBLE = <<~ZIG.chomp
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        const allocator = gpa.allocator();
+    var da = std.heap.DebugAllocator(.{}){};
+        defer _ = da.deinit();
+        const allocator = da.allocator();
         var global_ctx = EbrContext{};
         defer global_ctx.deinit(allocator);
         var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);

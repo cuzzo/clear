@@ -44,7 +44,9 @@ pub fn build(b: *std.Build) void {
     mod_tests.root_module.addAssemblyFile(onroot_s);
     mod_tests.root_module.link_libc = true;
 
-    const run_mod_tests = b.addRunArtifact(mod_tests);
+    const run_mod_tests = std.Build.Step.Run.create(b, "run test module");
+    run_mod_tests.addArtifactArg(mod_tests);
+    run_mod_tests.stdio = .inherit;
     test_step.dependOn(&run_mod_tests.step);
 
     // -------------------------------------------------------------------------
@@ -173,7 +175,9 @@ pub fn build(b: *std.Build) void {
         unit_tests.root_module.addAssemblyFile(onroot_s);
         unit_tests.root_module.link_libc = true;
 
-        const run_unit_tests = b.addRunArtifact(unit_tests);
+        const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
+        run_unit_tests.addArtifactArg(unit_tests);
+        run_unit_tests.stdio = .inherit;
         test_step.dependOn(&run_unit_tests.step);
     }
 

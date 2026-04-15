@@ -153,9 +153,9 @@ class ZigTranspiler
       <<~ZIG_TEST
 
         test "cheat main" {
-            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-            defer _ = gpa.deinit();
-            const allocator = gpa.allocator();
+            var da = std.heap.DebugAllocator(.{}){};
+            defer _ = da.deinit();
+            const allocator = da.allocator();
             var global_ctx = EbrContext{};
             defer global_ctx.deinit(allocator);
             var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);

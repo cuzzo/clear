@@ -521,7 +521,12 @@ class MIREmitter
     when :pool, :list_capacity
       "try #{node.zig_type}.initCapacity(#{alloc_zig(node.alloc)}, #{node.capacity})"
     when :list_empty, :set_empty, :map_empty
-      "#{node.zig_type}{}"
+      if node.zig_type.start_with?("std.ArrayListUnmanaged(") ||
+         node.zig_type.start_with?("CheatLib.ArrayListUnmanaged(")
+        "@as(#{node.zig_type}, .empty)"
+      else
+        "#{node.zig_type}{}"
+      end
     when :map_bare
       "#{node.zig_type}{ .alloc = #{alloc_zig(node.alloc)} }"
     else

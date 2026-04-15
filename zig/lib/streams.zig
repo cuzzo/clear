@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 
 pub const Range = struct {
     start: f64,
@@ -95,7 +96,7 @@ pub fn SplitStream(
             err: ?anyerror = null,
             owner_count: usize = 0,
             closed: bool = false,
-            mutex: std.Thread.Mutex = .{},
+            mutex: compat.Mutex = .{},
         };
 
         inner: *Inner,

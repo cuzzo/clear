@@ -1065,7 +1065,7 @@ module PipelineGenerator
               #{spawn_call}
           }
           __ccbs#{id}_wg.wait();#{err_check}
-          var __ccbs#{id}_final = std.ArrayListUnmanaged(#{result_zig}){};
+          var __ccbs#{id}_final = std.ArrayListUnmanaged(#{result_zig}).empty;
           for (__ccbs#{id}_results) |__ccbs#{id}_slot| {
               if (__ccbs#{id}_slot) |__v| try __ccbs#{id}_final.append(#{rt_name}.heapAlloc(), __v);
           }
@@ -1146,7 +1146,7 @@ module PipelineGenerator
               #{spawn_call}
           }
           __ccbw#{id}_wg.wait();#{err_check}
-          var __ccbw#{id}_final = std.ArrayListUnmanaged(#{item_zig}){};
+          var __ccbw#{id}_final = std.ArrayListUnmanaged(#{item_zig}).empty;
           for (__ccbw#{id}_results) |__ccbw#{id}_slot| {
               if (__ccbw#{id}_slot) |__v| try __ccbw#{id}_final.append(#{rt_name}.heapAlloc(), __v);
           }
