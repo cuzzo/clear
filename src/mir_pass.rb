@@ -6,6 +6,7 @@
 # Dependencies are defined in control_flow.rb (required first) and promotion_plan.rb.
 
 require_relative "promotion_plan"
+require_relative "escape_analysis"
 
 class MIRPass
   # cleanup_bindings: { fn_name => { var_name => entry_hash } }
@@ -25,10 +26,9 @@ class MIRPass
   # (scan_for_hpt_downgrade) clears heap provenance on return sub-expressions
   # that the classifier depends on.
   def transform!(ast)
-    # Recompute fn.return_provenance for FuncCall returns and transitive chains.
-    # visit_ReturnNode only handles identifier/COPY/StructLit returns; this catches
-    # the rest. Must run before apply_transitive_heap_promotion! which reads the flag.
-    recompute_fn_return_provenance!
+    # E1: compute which functions return heap-owned values (fixed-point over call graph).
+    # Replaces recompute_fn_return_provenance!. Writes fn.return_provenance = :heap.
+    EscapeAnalysis.compute_heap_return_fns!(@fn_nodes)
 
     # T4: Propagate heap return_provenance from callee to caller binding type_info.
     # Covers transitive promotion (wrapper() -> makeList()) before cleanup classification.
@@ -1250,77 +1250,6 @@ class MIRPass
       :string_map
     else
       :generic
-    end
-  end
-
-  # Recomputes fn.return_provenance for all functions after annotation.
-  # visit_ReturnNode sets it for identifier/COPY/StructLit returns but misses:
-  #   - RETURN someCall() where someCall is heap-returning
-  #   - RETURN obj.field where obj came from a heap-returning call
-  #   - Transitive chains (wrapper -> makeList) especially for forward references
-  # Fixed-point over @fn_nodes; no call graph needed (slightly less efficient but
-  # avoids pulling annotator state into MIRPass).
-  # Must run before apply_transitive_heap_promotion! which reads return_provenance.
-  def recompute_fn_return_provenance!
-    heap_fn = ->(fn) { fn.return_provenance == :heap }
-
-    changed = true
-    while changed
-      changed = false
-      @fn_nodes.each do |_, fn|
-        next unless fn&.body
-        next if heap_fn.call(fn)
-
-        returns = []
-        AST.walk_body(fn.body) { |n| returns << n if n.is_a?(AST::ReturnNode) }
-
-        promoted = returns.any? do |ret|
-          next false unless ret.value
-
-          # Direct FuncCall or MethodCall return
-          callee_name = case ret.value
-                        when AST::FuncCall   then ret.value.name
-                        when AST::MethodCall then ret.value.name
-                        end
-          if callee_name
-            cfn = @fn_nodes[callee_name]
-            next(cfn && heap_fn.call(cfn))
-          end
-
-          # GetField return: RETURN obj.field where obj came from a heap-returning call
-          if ret.value.is_a?(AST::GetField)
-            root = ret.value
-            root = root.target while root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex)
-            if root.is_a?(AST::Identifier) && root.symbol
-              decl = root.symbol.reg
-              decl_val = decl.respond_to?(:value) ? decl.value : nil
-              callee_name2 = case decl_val
-                             when AST::FuncCall   then decl_val.name
-                             when AST::MethodCall then decl_val.name
-                             end
-              cfn = callee_name2 && @fn_nodes[callee_name2]
-              if cfn && heap_fn.call(cfn)
-                ret_type = ret.value.respond_to?(:full_type) ? (Type.new(ret.value.full_type) rescue nil) : nil
-                next(ret_type&.string? || ret_type&.collection? || ret_type&.map?)
-              end
-            end
-          end
-
-          # Identifier return: RETURN var where var is a frame collection needing escape
-          if ret.value.is_a?(AST::Identifier)
-            ti = ret.value.type_info
-            ti = Type.new(ti) if ti && !ti.is_a?(Type)
-            next(ti&.needs_escape_promotion? && !ti&.string? && !ti&.heap_provenance?)
-          end
-
-          false
-        end
-
-        if promoted
-          fn.return_provenance = :heap
-          changed = true
-        end
-      end
     end
   end
 
