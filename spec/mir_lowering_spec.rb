@@ -7,6 +7,8 @@ require_relative "../src/mir_emitter"
 require_relative "../src/ast"
 require_relative "../src/lexer"
 require_relative "../src/type"
+require_relative "../src/importer"
+require_relative "../src/compiler_frontend"
 
 RSpec.describe MIRLowering do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }
@@ -352,7 +354,7 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("user.name")
     end
 
-    it "lowers index access" do
+    it "falls back to getAt for local dynamic-array index access" do
       target = make_id("items", full_type: :"Int64[]")
       index = make_lit(:NUMBER, 0, full_type: :Int64)
       index.coerced_type = :Int64
@@ -361,6 +363,19 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
       expect(emit(result)).to eq("CheatLib.getAt(items, 0)")
+    end
+
+    it "lowers parameter slice index access directly" do
+      target = make_id("items", full_type: :"Int64[]")
+      index = make_lit(:NUMBER, 0, full_type: :Int64)
+      index.coerced_type = :Int64
+      node = AST::GetIndex.new(tok, target, index)
+      node.full_type = :Int64
+      l = lowering
+      l.instance_variable_set(:@current_fn_param_names, ["items"])
+      result = l.lower(node)
+      expect(result).to be_a(MIR::IndexGet)
+      expect(emit(result)).to eq("items[@as(usize, @intCast(0))]")
     end
 
     it "lowers string length to direct len" do
@@ -373,7 +388,7 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("@as(i64, @intCast(items.len))")
     end
 
-    it "lowers slice length via CheatLib.len" do
+    it "falls back to CheatLib.len for local dynamic-array length" do
       target = make_id("items", full_type: :"Int64[]")
       node = AST::MethodCall.new(tok, target, "length", [])
       node.full_type = :Int64
@@ -381,6 +396,18 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::InlineZig)
       expect(emit(result)).to eq("CheatLib.len(items)")
+    end
+
+    it "lowers parameter slice length to direct len" do
+      target = make_id("items", full_type: :"Int64[]")
+      node = AST::MethodCall.new(tok, target, "length", [])
+      node.full_type = :Int64
+      node.zig_pattern = "CheatLib.len({0})"
+      l = lowering
+      l.instance_variable_set(:@current_fn_param_names, ["items"])
+      result = l.lower(node)
+      expect(result).to be_a(MIR::Cast)
+      expect(emit(result)).to eq("@as(i64, @intCast(items.len))")
     end
   end
 
@@ -996,13 +1023,13 @@ RSpec.describe MIRLowering do
       expect(zig).to include("y: f64")
     end
 
-    it "uses anytype for struct params" do
+    it "borrows immutable user struct params by pointer" do
       params = [{ name: "p", type: :Point, mutable: false }]
       l = lowering(struct_schemas: { Point: { x: { type: :Number }, y: { type: :Number } } })
       fn = make_fn("move", params: params)
       result = l.lower(fn)
       zig = emit(result)
-      expect(zig).to include("p: anytype")
+      expect(zig).to include("p: *const Point")
     end
 
     it "includes frame save/restore for value-returning frame functions" do
@@ -1085,6 +1112,50 @@ RSpec.describe MIRLowering do
       result = l.lower(node)
       zig = emit(result)
       expect(zig).to eq("pure()")
+    end
+
+    it "passes immutable user structs by pointer when callee borrows them" do
+      sig = Struct.new(:needs_rt, :can_fail, :params, :return_type)
+                  .new(false, false, [{ name: "p", type: :Point, mutable: false, takes: false }], :Int64)
+      l = lowering(
+        fn_sigs: { "sum3" => sig },
+        struct_schemas: { Point: { x: :Int64, y: :Int64 } }
+      )
+      arg = make_id("point", full_type: :Point)
+      node = AST::FuncCall.new(tok, "sum3", [arg])
+      node.full_type = :Int64
+      result = l.lower(node)
+      expect(emit(result)).to eq("sum3(&point)")
+    end
+
+    it "passes immutable user structs by pointer with real frontend signatures" do
+      code = <<~CHT
+        STRUCT Point { x: Int64, y: Int64 }
+
+        FN sum3(p: Point) RETURNS Int64 -> RETURN p.x + p.y; END
+
+        FN main() RETURNS Int64 ->
+            point = Point { x: 1, y: 2 };
+            RETURN sum3(point);
+        END
+      CHT
+
+      importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
+      result = CompilerFrontend.compile(code, importer: importer, source_dir: Dir.pwd)
+      sig = result.fn_sigs["sum3"]
+      expect(sig).not_to be_nil
+      expect(sig.params).not_to be_empty
+      l = lowering(
+        fn_sigs: result.fn_sigs,
+        struct_schemas: result.struct_schemas,
+        enum_schemas: result.enum_schemas,
+        union_schemas: result.union_schemas
+      )
+
+      main_fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
+      mir = l.lower(main_fn)
+      zig = emit(mir)
+      expect(zig).to include("sum3(&point)")
     end
 
     it "lowers method call as UFCS" do

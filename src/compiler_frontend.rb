@@ -64,7 +64,14 @@ class CompilerFrontend
       if sig.is_a?(FunctionSignature)
         fn_sigs[stmt.name] = sig
       else
-        fs = FunctionSignature.new(params: [], return_type: :Any)
+        fs = FunctionSignature.new(
+          params: stmt.params || [],
+          return_type: stmt.return_type || :Any,
+          return_lifetime: stmt.return_lifetime,
+          visibility: stmt.visibility,
+          type_params: stmt.respond_to?(:type_params) ? stmt.type_params : nil,
+          reentrant: stmt.respond_to?(:reentrant) && stmt.reentrant == :reentrant
+        )
         fs.needs_rt = stmt.needs_rt
         fs.can_fail = stmt.can_fail
         fs.effects = stmt.effects

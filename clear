@@ -283,6 +283,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   FileUtils.mkdir_p(build_dir)
   ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
   ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+  cache_dir = File.join(build_dir, '.zig-cache')
+  global_cache_dir = File.join(build_dir, '.global-zig-cache')
 
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
@@ -366,6 +368,11 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   else
     cmd_parts = [ZIG, 'build-exe']
   end
+
+  # Use per-build cache directories. Reusing the default shared global cache
+  # has produced misoptimized binaries for some benchmarks (e.g. 02_sroa)
+  # after recent build-system changes.
+  cmd_parts += ['--cache-dir', cache_dir, '--global-cache-dir', global_cache_dir]
 
   # Always use -Mroot= mode since lib/ modules require named imports.
   # `--dep` applies to the next `-M...` module, so dependencies must be
