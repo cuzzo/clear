@@ -3662,9 +3662,59 @@ private
     # This catches CATCH wrappers and other cases Pass A missed.
     recompute_return_provenance!
 
-    # Propagate heap_promoted to caller variables. Covers transitive promotion
-    # (wrapper() -> makeList()) not yet handled by MIRPass escape analysis.
+    # Propagate heap return_provenance from callees to caller binding type_info.
+    # CleanupClassifier reads type_info.provenance, so this must run before it.
+    # MIRPass also runs apply_transitive_heap_promotion! for completeness, but
+    # this annotator pass is needed for specs that call CleanupClassifier directly.
     walk_promote_callers(program_node.statements)
+  end
+
+  # Propagates return_provenance=:heap from callee to caller's declaration type_info.
+  def walk_promote_callers(nodes)
+    current_fn = nil
+    AST.walk_body(nodes) do |node|
+      case node
+      when AST::FunctionDef
+        current_fn = node
+      when AST::VarDecl, AST::BindExpr
+        val = node.value
+        callee = val.is_a?(AST::FuncCall) ? @fn_nodes[val.name] : nil
+        if callee && (callee.return_provenance == :heap)
+          node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+          if node.is_a?(AST::BindExpr) && node.mode == :assign
+            decl = find_decl_in_fn(current_fn&.body, node.name)
+            if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+              decl.type_info.provenance = :heap
+            end
+          end
+        end
+      when AST::Assignment
+        val = node.value
+        callee = val.is_a?(AST::FuncCall) ? @fn_nodes[val.name] : nil
+        if callee && (callee.return_provenance == :heap)
+          target = node.name
+          sym = target.respond_to?(:symbol) ? target.symbol : nil
+          decl = sym&.reg
+          if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+            decl.type_info.provenance = :heap
+          end
+        end
+      end
+    end
+  end
+
+  def find_decl_in_fn(body, var_name)
+    return nil unless body
+    body = [body] unless body.is_a?(Array)
+    body.each do |node|
+      case node
+      when AST::VarDecl
+        return node if node.name == var_name
+      when AST::BindExpr
+        return node if node.name == var_name && node.mode == :decl
+      end
+    end
+    nil
   end
 
   # Recompute returns_promoted with complete type information.
@@ -3752,56 +3802,6 @@ private
     returns = []
     AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
     returns
-  end
-
-  # Propagates return_provenance=:heap from callee to caller's declaration
-  # type_info. Covers transitive promotion not yet handled by MIRPass.
-  # TODO(T4): remove once MIRPass escape analysis covers transitive callers.
-  def walk_promote_callers(nodes)
-    AST.walk_body(nodes) do |node|
-      case node
-      when AST::FunctionDef
-        @_walk_current_fn = node
-      when AST::VarDecl, AST::BindExpr
-        val = node.value
-        callee = val.is_a?(AST::FuncCall) ? @fn_nodes[val.name] : nil
-        if callee && (callee.return_provenance == :heap)
-          node.type_info.provenance = :heap if node.type_info.is_a?(Type)
-          if node.is_a?(AST::BindExpr) && node.mode == :assign
-            var_name = node.name
-            decl = find_decl_in_body(@_walk_current_fn&.body, var_name) if @_walk_current_fn
-            if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
-              decl.type_info.provenance = :heap
-            end
-          end
-        end
-      when AST::Assignment
-        val = node.value
-        callee = val.is_a?(AST::FuncCall) ? @fn_nodes[val.name] : nil
-        if callee && (callee.return_provenance == :heap)
-          target = node.name
-          sym = target.respond_to?(:symbol) ? target.symbol : nil
-          decl = sym&.reg
-          if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
-            decl.type_info.provenance = :heap
-          end
-        end
-      end
-    end
-  end
-
-  def find_decl_in_body(body, var_name)
-    return nil unless body
-    body = [body] unless body.is_a?(Array)
-    body.each do |node|
-      case node
-      when AST::VarDecl
-        return node if node.name == var_name
-      when AST::BindExpr
-        return node if node.name == var_name && node.mode == :decl
-      end
-    end
-    nil
   end
 
   # ── Fiber Stack Auto-Sizing ──────────────────────────────────────

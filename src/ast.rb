@@ -286,8 +286,9 @@ module AST
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
     attr_accessor :stack_tier        # recommended fiber tier (:micro, :standard, :large, :xl)
     attr_accessor :stack_vars_bytes  # lower-bound estimate of stack-local variable bytes
-    attr_accessor :has_promotion     # set by MIRPass when function has escape promotions
-    attr_accessor :moved_guard_info  # stamped by MIRPass: { var_name => bool } for has_moved_guard lookups
+    attr_accessor :has_promotion      # set by MIRPass when function has escape promotions
+    attr_accessor :moved_guard_info   # stamped by MIRPass: { var_name => bool } for has_moved_guard lookups
+    attr_accessor :cleanup_bindings   # stamped by MIRPass: { var_name => entry_hash } for MIRLowering
     attr_accessor :heap_carry_return      # true when a heap carry var is the return value (caller must free)
     attr_accessor :heap_carry_return_vars # Set of var names that are heap carry return vars (their cleanup is skipped inside __pr_body)
   end

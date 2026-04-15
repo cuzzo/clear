@@ -44,6 +44,7 @@ class MIRLowering
     @debug_mode = debug_mode
     @pending_stmts = []
     @tmp_counter = 0
+    @current_bindings = {}  # set per-function by lower_function_def from fn.cleanup_bindings
   end
 
   # Flush and return all pending hoisted Let statements accumulated since the
@@ -315,7 +316,12 @@ class MIRLowering
         mir = MIR::ExprStmt.new(mir, true)
       end
       result.concat(pending)
-      result << mir
+      # lower_var_decl may return [AllocMark, Let, Cleanup] when the binding needs cleanup.
+      if mir.is_a?(Array)
+        result.concat(mir.compact)
+      else
+        result << mir
+      end
     }
     result
   end
@@ -547,7 +553,65 @@ class MIRLowering
   end
 
   # ================================================================
-  # Old MIR translation
+  # Cleanup entry helpers (moved from MIRPass/control_flow.rb)
+  # ================================================================
+
+  # Pre-compute zig_type, elem_zig_type, is_fixed into the cleanup entry hash.
+  # Mutates entry in-place. Called by lower_var_decl and lower_function_def
+  # (TAKES params) to avoid deferring type resolution to the emitter.
+  def build_drop_entry!(entry, ti, source_node)
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+
+    zig_type = case entry[:kind]
+    when :heap_slice
+      is_bare = source_node.respond_to?(:value) && source_node.value.is_a?(AST::CopyNode) && !ti&.list_collection?
+      if is_bare
+        elem = ti&.element_type ? Type.new(ti.element_type).zig_type : "UNKNOWN"
+        "[]#{elem}"
+      else
+        ti&.zig_type
+      end
+    when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set, :fixed_soa
+      ti&.zig_type
+    when :heap_union, :heap_struct, :locked, :write_locked,
+         :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
+      Type.new((ti&.resolved || :Any).to_s).zig_type
+    when :rc
+      ti&.zig_type
+    end
+
+    elem_zig = case entry[:kind]
+    when :list_with_elem_cleanup, :takes_slice
+      et = ti&.element_type
+      if et
+        t = et.is_a?(Type) ? et : Type.new(et)
+        Type.new(t.resolved.to_s).zig_type
+      end
+    when :array_with_struct_strings
+      ti&.element_type ? Type.new(ti.element_type).zig_type : nil
+    end
+
+    entry[:zig_type] = zig_type || entry[:zig_type] || "UNKNOWN"
+    entry[:elem_zig_type] = elem_zig || entry[:elem_zig_type]
+    entry[:is_fixed] = ti&.fixed? if entry[:kind] == :array_with_struct_strings
+  end
+
+  # Resolve the stdlib alloc: symbol for an AllocMark from the FuncCall node's
+  # matched_stdlib_def. Returns nil when not available (falls back to entry alloc).
+  def resolve_decl_stdlib_alloc(node)
+    val = node.respond_to?(:value) ? node.value : nil
+    return nil unless val
+    mdef = val.respond_to?(:matched_stdlib_def) ? val.matched_stdlib_def : nil
+    return nil unless mdef.is_a?(Hash)
+    case mdef[:alloc]
+    when :heap, :frame then mdef[:alloc]
+    when :node_storage
+      val.respond_to?(:storage) && val.storage == :heap ? :heap : :frame
+    end
+  end
+
+  # ================================================================
+  # Old MIR translation (MATCH AS bindings still use Drop/Alloc)
   # ================================================================
 
   def lower_drop(node)
@@ -770,6 +834,9 @@ class MIRLowering
     @current_fn_tail_call = node.tail_call
     @current_fn_zig_name = zig_safe_name(node.name)
 
+    # Set current bindings so lower_var_decl can look up cleanup info.
+    @current_bindings = node.cleanup_bindings || {}
+
     # Mutable scalar params: Zig params are const, need shadow vars
     mutable_scalar_params = (node.params || []).select { |p|
       p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
@@ -880,11 +947,26 @@ class MIRLowering
       prologue << MIR::Let.new(name, MIR::Ident.new("_m_#{name}"), true, nil, "_ = &#{name};")
     end
 
+    # Emit AllocMark + Cleanup for TAKES parameters (replaces insert_takes_drops! from MIRPass).
+    # TAKES params own their value from function entry; cleanup is always defer (Cleanup, not ErrCleanup).
+    takes_mir = []
+    (node.deferred_drops || []).each do |dd|
+      param_def = node.params&.find { |p| p[:name] == dd[:name] }
+      next unless param_def&.dig(:takes)
+      entry = @current_bindings[dd[:name].to_s]
+      next unless entry && entry[:needs_cleanup]
+      ti = dd[:type].is_a?(Type) ? dd[:type] : Type.new(dd[:type] || :Any)
+      drop_entry = entry.dup
+      build_drop_entry!(drop_entry, ti, nil)
+      takes_mir << MIR::AllocMark.new(dd[:name].to_s, entry[:alloc])
+      takes_mir << MIR::Cleanup.new(zig_safe_name(dd[:name].to_s), drop_entry)
+    end
+
     # Lower body (track snapshot types for catch blocks)
     has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
     @current_fn_has_catch = has_catch
     @current_fn_snapshot_types = Set.new if has_catch
-    body_mir = lower_body(node.body)
+    body_mir = takes_mir + lower_body(node.body)
 
     if has_catch
       # Emit inner/outer function pair
@@ -3145,8 +3227,13 @@ class MIRLowering
     is_mutable ||= ft.resource? || node.resource_close_zig
     is_mutable = false if ft.local?
 
+    # Look up the cleanup entry from the bindings stamped by MIRPass.
+    decl_name = node.name.to_s
+    binding_entry = @current_bindings[decl_name]
+    has_mir_drop = binding_entry && binding_entry[:needs_cleanup] && !binding_entry[:match_as]
+
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
-    has_mutable_cleanup = node.has_cleanup || ft&.collection? || ft&.dynamic_stream? || ft&.bounded_stream? || ft&.shared_promise? ||
+    has_mutable_cleanup = has_mir_drop || ft&.collection? || ft&.dynamic_stream? || ft&.bounded_stream? || ft&.shared_promise? ||
                           ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
                           ft&.heap_provenance? || ft&.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup
@@ -3166,7 +3253,7 @@ class MIRLowering
 
     # Resolve init value - special handling for collection types.
     # Allocator comes from the cleanup plan (single source of truth).
-    decl_alloc = node.cleanup_alloc || :heap
+    decl_alloc = binding_entry&.dig(:alloc) || node.cleanup_alloc || :heap
     init = if ft.pool?
       cap = ft.capacity
       MIR::ContainerInit.new(transpile_type(ft), :pool, decl_alloc, cap)
@@ -3205,7 +3292,6 @@ class MIRLowering
     end
 
     safe_name = zig_safe_name(node.name)
-    has_mir_drop = node.has_cleanup
 
     suppression = if keyword_mutable
       if actually_mutated && node.var_used && !forced_var
@@ -3217,20 +3303,30 @@ class MIRLowering
       (node.var_used || has_mir_drop) ? nil : "_ = #{safe_name};"
     end
 
-    MIR::Let.new(safe_name, init, keyword_mutable, annotation, suppression)
+    let_node = MIR::Let.new(safe_name, init, keyword_mutable, annotation, suppression)
+
+    # Emit AllocMark + Let + Cleanup triple when the binding needs cleanup.
+    # Replaces the OLD MIR::Alloc/Drop sibling nodes inserted by MIRPass.
+    if has_mir_drop
+      drop_entry = binding_entry.dup
+      build_drop_entry!(drop_entry, node.type_info, node)
+      mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry[:alloc]
+      [MIR::AllocMark.new(decl_name, mir_alloc), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
+    else
+      let_node
+    end
   end
 
   def lower_bind_expr(node)
     if node.mode == :decl
-      # Proxy to VarDecl logic
+      # Proxy to VarDecl logic. cleanup_alloc/has_cleanup are no longer needed
+      # since lower_var_decl reads from @current_bindings[name].
       proxy = AST::VarDecl.new(node.token, node.name, node.type, node.value, false)
       proxy.full_type = node.full_type
       proxy.storage = node.storage
       proxy.slot_size = node.slot_size
       proxy.resource_close_zig = node.resource_close_zig
       proxy.var_used = node.var_used
-      proxy.cleanup_alloc = node.cleanup_alloc
-      proxy.has_cleanup = node.has_cleanup
       lower_var_decl(proxy)
     else
       safe = zig_safe_name(node.name)
