@@ -113,7 +113,7 @@ pub fn SplitStream(
             head_seq: usize = 0,
             tail_seq: usize = 0,
             wg: WaitGroupType = undefined,
-            subscribers: std.ArrayListUnmanaged(SubscriberRecord) = .{},
+            subscribers: std.ArrayListUnmanaged(SubscriberRecord) = .empty,
             active_subscribers: usize = 0,
             err: ?anyerror = null,
             closed: bool = false,
@@ -491,7 +491,7 @@ pub fn concurrentBoundedSelect(
 
     var worker_ctxs: [64]Worker = undefined;
     const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, @as(usize, 64));
-    if (actual_workers == 0) return .{};
+    if (actual_workers == 0) return .empty;
     wg.add(actual_workers);
     for (0..actual_workers) |i| {
         worker_ctxs[i] = .{
@@ -598,7 +598,7 @@ pub fn concurrentBoundedWhere(
 
     var worker_ctxs: [64]Worker = undefined;
     const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, @as(usize, 64));
-    if (actual_workers == 0) return .{};
+    if (actual_workers == 0) return .empty;
     wg.add(actual_workers);
     for (0..actual_workers) |i| {
         worker_ctxs[i] = .{
