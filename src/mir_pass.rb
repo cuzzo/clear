@@ -842,10 +842,9 @@ class MIRPass
     ret_node.catch_string_dupe_ret = true
   end
 
-  # Insert MIR::Promote(:or_fallback_dupe) before a statement that contains
-  # an OrRescue where the success path is heap-promoted and the fallback is
-  # a struct literal. Signals the transpiler to heap-dupe string fields in the
-  # fallback so cleanup semantics match the success path.
+  # Annotate an OrRescue node where the success path is heap-promoted and the
+  # fallback is a struct literal. Sets or_fallback_dupe on the BinaryOp so the
+  # transpiler heap-dupes string fields in the fallback to match cleanup semantics.
   def insert_or_fallback_dupe!(result, stmt)
     or_node = find_or_rescue_in_value(stmt)
     return unless or_node

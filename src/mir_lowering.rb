@@ -619,25 +619,13 @@ class MIRLowering
   end
 
   def lower_promote(node)
-    case node.strategy
-    when :ret_fields
-      # Annotation now lives on the ReturnNode (.ret_field_promote_data). No-op here.
-      nil
-    when :catch_string_dupe
-      # Annotation now lives on the ReturnNode (.catch_string_dupe_ret). No-op here.
-      nil
-    when :container_store, :bg_string, :or_fallback_dupe
-      # These strategies now use direct node annotations; MIR::Promote is no longer inserted for them.
-      nil
-    else
-      MIR::EscapePromote.new(
-        node.name ? zig_safe_name(node.name) : node.name,
-        node.zig_type,
-        node.strategy,
-        node.fields,
-        @rt_name
-      )
-    end
+    MIR::EscapePromote.new(
+      node.name ? zig_safe_name(node.name) : node.name,
+      node.zig_type,
+      node.strategy,
+      node.fields,
+      @rt_name
+    )
   end
 
   # ================================================================

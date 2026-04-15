@@ -387,11 +387,6 @@ module MIR
   #   :list         -> try CheatLib.promoteList(elem, rt, &name);
   #   :string_map   -> name.alloc = rt.heapAlloc();
   #   :generic      -> try CheatLib.promote(zig_type, rt, &name);
-  #   :ret_fields   -> (pending flag for ReturnStmt to consume)
-  #   :container_store -> (pending flag for next assignment)
-  #   :bg_string    -> (pending flag for BG block)
-  #   :catch_string_dupe -> (pending flag for ReturnStmt)
-  #   :or_fallback_dupe  -> (pending flag for OrRescue)
   EscapePromote = Struct.new(:name, :zig_type, :strategy, :data, :rt_expr) do
     include Stmt
     # data: strategy-specific payload (field set, alloc symbol, etc.)
