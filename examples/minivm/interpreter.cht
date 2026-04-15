@@ -401,13 +401,12 @@ END
 -- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
 FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
-    env = pool[envId]?;
-    IF env.vars.contains?(name) THEN
-        env.vars[name] = COPY val;
+    IF pool[envId]?.vars.contains?(name) THEN
+        pool[envId]?.vars[name] = COPY val;
         RETURN TRUE;
     END
 
-    parentVal = env.vars["__p"] OR Value.Nil;
+    parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
     MATCH parentVal START
         Value.EnvRef AS pid -> RETURN envSet!(pid, name, val, pool);,
         DEFAULT -> RETURN FALSE;
@@ -2304,6 +2303,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             DEFAULT ->
+                running = FALSE;
         END
     END
 

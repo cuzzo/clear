@@ -38,31 +38,40 @@ class InterpreterBridge
     @interp_base = main_idx ? @interp_src[0...main_idx] : @interp_src
   end
 
+  def write_scheme_input(combined)
+    path = File.join(DIR, "_vm_scheme_input.scm")
+    File.write(path, combined)
+    path
+  end
+
   # Run a list of S-expression strings on the interpreter.
   # Returns [stdout_output, success_bool]
   def run_scheme(scheme_lines, silent: false)
     combined = scheme_lines.length == 1 ? scheme_lines[0] : "(begin #{scheme_lines.join(' ')})"
-    escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+    scheme_input = write_scheme_input(combined)
 
     main_code = <<~CHT
       FN main() RETURNS Void ->
           MUTABLE pool: Env[50000]@pool = [];
           MUTABLE penv: HashMap<Value> = {};
           rootId = setupEnv!(pool);
-          MUTABLE schemeResult: Value = runTest!("#{escaped}", rootId, pool, penv);
+          schemeInput = readFile("#{scheme_input}") OR RAISE;
+          MUTABLE schemeResult: Value = runTest!(schemeInput, rootId, pool, penv);
           IF isError?(schemeResult) THEN print("ERROR: " + getErrMsg(schemeResult)); END
           RETURN;
       END
     CHT
 
     run_clear(@interp_base + main_code, silent: silent)
+  ensure
+    File.delete(scheme_input) if scheme_input && File.exist?(scheme_input)
   end
 
   # Run a CLEAR source file (the full interpreter + custom main)
   def run_clear(source, silent: false)
     tmp = File.join(DIR, "_vm_run.cht")
     File.write(tmp, source)
-    output = `#{PROJECT_ROOT}/clear run #{tmp} 2>&1`
+    output = `#{PROJECT_ROOT}/clear run --use-c-allocator #{tmp} 2>&1`
     File.delete(tmp) if File.exist?(tmp)
 
     # Filter out noise
@@ -356,7 +365,7 @@ class InterpreterBridge
       display_result = !last_expr&.start_with?("(define ") && !last_expr&.start_with?("(display") && !last_expr&.start_with?("(set!")
 
       combined = all_lines.length == 1 ? all_lines[0] : "(begin #{all_lines.join(' ')})"
-      escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+      scheme_input = write_scheme_input(combined)
 
       if display_result
         main_code = <<~CHT
@@ -364,7 +373,8 @@ class InterpreterBridge
               MUTABLE pool: Env[50000]@pool = [];
               MUTABLE penv: HashMap<Value> = {};
               rootId = setupEnv!(pool);
-              MUTABLE schemeResult: Value = runTest!("#{escaped}", rootId, pool, penv);
+              schemeInput = readFile("#{scheme_input}") OR RAISE;
+              MUTABLE schemeResult: Value = runTest!(schemeInput, rootId, pool, penv);
               IF isError?(schemeResult) THEN
                   print("ERROR: " + getErrMsg(schemeResult));
               ELSE
@@ -380,16 +390,21 @@ class InterpreterBridge
               MUTABLE pool: Env[50000]@pool = [];
               MUTABLE penv: HashMap<Value> = {};
               rootId = setupEnv!(pool);
-              runTest!("#{escaped}", rootId, pool, penv);
+              schemeInput = readFile("#{scheme_input}") OR RAISE;
+              runTest!(schemeInput, rootId, pool, penv);
               RETURN;
           END
         CHT
       end
 
-      if @breakpoints.any?
-        run_with_debug(@interp_base + main_code)
-      else
-        run_clear(@interp_base + main_code, silent: false)
+      begin
+        if @breakpoints.any?
+          run_with_debug(@interp_base + main_code)
+        else
+          run_clear(@interp_base + main_code, silent: false)
+        end
+      ensure
+        File.delete(scheme_input) if scheme_input && File.exist?(scheme_input)
       end
     end
 
@@ -473,17 +488,22 @@ class InterpreterBridge
     if top_level.any?
       all = @fn_defs + top_level
       combined = "(begin #{all.join(' ')})"
-      escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
-      main_code = <<~CHT
-        FN main() RETURNS Void ->
-            MUTABLE pool: Env[50000]@pool = [];
-            MUTABLE penv: HashMap<Value> = {};
-            rootId = setupEnv!(pool);
-            runTest!("#{escaped}", rootId, pool, penv);
-            RETURN;
-        END
-      CHT
-      run_clear(@interp_base + main_code, silent: false)
+      scheme_input = write_scheme_input(combined)
+      begin
+        main_code = <<~CHT
+          FN main() RETURNS Void ->
+              MUTABLE pool: Env[50000]@pool = [];
+              MUTABLE penv: HashMap<Value> = {};
+              rootId = setupEnv!(pool);
+              schemeInput = readFile("#{scheme_input}") OR RAISE;
+              runTest!(schemeInput, rootId, pool, penv);
+              RETURN;
+          END
+        CHT
+        run_clear(@interp_base + main_code, silent: false)
+      ensure
+        File.delete(scheme_input) if scheme_input && File.exist?(scheme_input)
+      end
     end
 
     puts "Loaded #{new_defs.length} definitions from #{File.basename(path)}"
@@ -609,14 +629,15 @@ class InterpreterBridge
   def run_debug_expr(scheme_expr, defs)
     all_lines = defs + [scheme_expr]
     combined = "(begin #{all_lines.join(' ')})"
-    escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
+    scheme_input = write_scheme_input(combined)
 
     main_code = <<~CHT
       FN main() RETURNS Void ->
           MUTABLE pool: Env[50000]@pool = [];
           MUTABLE penv: HashMap<Value> = {};
           rootId = setupEnv!(pool);
-          MUTABLE schemeResult: Value = runTest!("#{escaped}", rootId, pool, penv);
+          schemeInput = readFile("#{scheme_input}") OR RAISE;
+          MUTABLE schemeResult: Value = runTest!(schemeInput, rootId, pool, penv);
           IF isError?(schemeResult) THEN
               print("ERROR: " + getErrMsg(schemeResult));
           ELSE
@@ -627,6 +648,8 @@ class InterpreterBridge
     CHT
 
     run_clear(@interp_base + main_code, silent: false)
+  ensure
+    File.delete(scheme_input) if scheme_input && File.exist?(scheme_input)
   end
 
   private

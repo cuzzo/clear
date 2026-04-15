@@ -8,6 +8,7 @@
 $LOAD_PATH.unshift(File.expand_path("../../src", __dir__))
 
 require "set"
+require "open3"
 require "lexer"
 require "parser"
 require "ast"
@@ -844,6 +845,30 @@ if $PROGRAM_NAME == __FILE__
     interp_src = File.read(interp_path)
     main_idx = interp_src.index(/^FN main\(\)/)
     interp_base = main_idx ? interp_src[0...main_idx] : interp_src
+    completion_marker = "SCHEME: all expressions completed"
+
+    fallback_to_sexpr = lambda do |reason|
+      $stderr.puts "#{reason}, falling back to S-expression mode"
+      lines = scheme.each_line.map(&:strip).reject(&:empty?)
+      combined = lines.length == 1 ? lines[0] : "(begin #{lines.join(' ')})"
+      escaped = combined.dump[1...-1]
+
+      main_code = "FN main() RETURNS Void ->\n"
+      main_code += "    MUTABLE pool: Env[50000]@pool = [];\n"
+      main_code += "    MUTABLE penv: HashMap<Value> = {};\n"
+      main_code += "    rootId = setupEnv!(pool);\n"
+      main_code += "    MUTABLE schemeResult: Value = runTest!(\"#{escaped}\", rootId, pool, penv);\n"
+      main_code += "    IF isError?(schemeResult) THEN print(\"SCHEME ASSERT FAILED: \" + getErrMsg(schemeResult)); END\n"
+      main_code += "    IF isError?(schemeResult) == FALSE THEN print(\"#{completion_marker}\"); END\n"
+      main_code += "    RETURN;\nEND\n"
+
+      tmp_path = File.join(__dir__, "_scheme_run.cht")
+      File.write(tmp_path, interp_base + main_code)
+      output, = Open3.capture2e("#{project_root}/clear", "run", "--use-c-allocator", tmp_path)
+      print output
+    ensure
+      File.delete(tmp_path) if defined?(tmp_path) && tmp_path && File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
+    end
 
     # Compile to bytecode and run via exec!
     require_relative "bytecode_compiler"
@@ -867,37 +892,35 @@ if $PROGRAM_NAME == __FILE__
             bcOps = loadBytecodeOps!("#{ops_file}", pool);
             bcConsts = loadBytecodeConsts!("#{consts_file}", pool);
             bcResult = exec!(bcOps, bcConsts, rootId, pool);
-            print(prStr(bcResult, FALSE));
+            IF isError?(bcResult) THEN
+                print("SCHEME ASSERT FAILED: " + getErrMsg(bcResult));
+            ELSE
+                print(prStr(bcResult, FALSE));
+                print("SCHEME: all expressions completed");
+            END
             RETURN;
         END
       CHT
 
       tmp_path = File.join(__dir__, "_scheme_run.cht")
       File.write(tmp_path, interp_base + main_code)
-      system("#{project_root}/clear", "run", tmp_path)
-      File.delete(tmp_path) if File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
-      File.delete(ops_file) if File.exist?(ops_file)
-      File.delete(consts_file) if File.exist?(consts_file)
+      output, status = Open3.capture2e("#{project_root}/clear", "run", "--use-c-allocator", tmp_path)
+      if status.success? && output.include?(completion_marker)
+        print output
+      else
+        reason = if status.success?
+          "Bytecode execution did not complete cleanly"
+        else
+          "Bytecode execution failed"
+        end
+        fallback_to_sexpr.call(reason)
+      end
     rescue => e
-      # Fallback to S-expression tree-walker on bytecode compilation failure
-      $stderr.puts "Bytecode compilation failed (#{e.message}), falling back to S-expression mode"
-      lines = scheme.each_line.map(&:strip).reject(&:empty?)
-      combined = lines.length == 1 ? lines[0] : "(begin #{lines.join(' ')})"
-      escaped = combined.gsub('\\', '\\\\\\\\').gsub('"', '\\"')
-
-      main_code = "FN main() RETURNS Void ->\n"
-      main_code += "    MUTABLE pool: Env[50000]@pool = [];\n"
-      main_code += "    MUTABLE penv: HashMap<Value> = {};\n"
-      main_code += "    rootId = setupEnv!(pool);\n"
-      main_code += "    MUTABLE schemeResult: Value = runTest!(\"#{escaped}\", rootId, pool, penv);\n"
-      main_code += "    IF isError?(schemeResult) THEN print(\"SCHEME ASSERT FAILED: \" + getErrMsg(schemeResult)); END\n"
-      main_code += "    IF isError?(schemeResult) == FALSE THEN print(\"SCHEME: all expressions completed\"); END\n"
-      main_code += "    RETURN;\nEND\n"
-
-      tmp_path = File.join(__dir__, "_scheme_run.cht")
-      File.write(tmp_path, interp_base + main_code)
-      system("#{project_root}/clear", "run", tmp_path)
-      File.delete(tmp_path) if File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
+      fallback_to_sexpr.call("Bytecode compilation failed (#{e.message})")
+    ensure
+      File.delete(tmp_path) if defined?(tmp_path) && tmp_path && File.exist?(tmp_path) && !ENV["SCHEME_DEBUG"]
+      File.delete(ops_file) if defined?(ops_file) && ops_file && File.exist?(ops_file)
+      File.delete(consts_file) if defined?(consts_file) && consts_file && File.exist?(consts_file)
     end
 
   elsif sexpr_mode

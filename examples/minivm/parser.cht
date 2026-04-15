@@ -61,12 +61,10 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
             start = i;
             i += 1;
             WHILE i < len && charAt(str, i) != "\"" DO
-                IF charAt(str, i) == "\\" THEN i += 2;
-                ELSE i += 1;
-                END
+                i += 1;
             END
             IF i < len THEN i += 1; END
-            penv["__t" + count.toString()] = Value{ Str: substr(str, start, i - start) };
+            penv["__t" + count.toString()] = Value{ Str: COPY substr(str, start, i - start) };
             count += 1;
         ELSE
             -- Symbol/number: scan to next delimiter, extract with substr
@@ -75,7 +73,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
                 i += 1;
             END
             IF i > start THEN
-                penv["__t" + count.toString()] = Value{ Str: substr(str, start, i - start) };
+                penv["__t" + count.toString()] = Value{ Str: COPY substr(str, start, i - start) };
                 count += 1;
             END
         END

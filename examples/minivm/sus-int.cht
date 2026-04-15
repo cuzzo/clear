@@ -284,11 +284,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
         ELSE_IF c == "\"" THEN
             MUTABLE s = "\""; i += 1;
             WHILE i < str.length() && charAt(str, i) != "\"" DO
-                IF charAt(str, i) == "\\" THEN
-                    s = s + charAt(str, i); i += 1;
-                    IF i < str.length() THEN s = s + charAt(str, i); i += 1; END
-                ELSE s = s + charAt(str, i); i += 1;
-                END
+                s = s + charAt(str, i); i += 1;
             END
             s = s + "\"";
             penv["__t" + count.toString()] = Value{ Str: COPY s };
