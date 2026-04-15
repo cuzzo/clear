@@ -264,116 +264,39 @@ class Type
   # Coercion helpers
   # ----------------------------------------------
   def accepts?(other_type)
-    # 0. Function type structural matching (must precede == shortcut because `resolved`
-    #    returns only the return type for fn_types, making two different fn_type signatures
-    #    appear equal if their return types match).
-    if self.fn_type?
-      return true if other_type.is_a?(Type) && other_type.any?
-      other_raw = other_type.is_a?(Type) ? other_type.raw : nil
-      is_fn_or_lambda = other_type.is_a?(Type) &&
-                        (other_type.fn_type? || (other_raw.is_a?(Hash) && other_raw[:lambda]))
-      return false unless is_fn_or_lambda
+    # 0. Function type: must precede == shortcut (resolved strips fn signature to return type)
+    return accepts_fn_type?(other_type) if fn_type?
 
-      self_params  = @raw[:params] || []
-      other_params = (other_raw || {})[:params] || []
-      return false unless self_params.length == other_params.length
+    # 1. Exact match / Any
+    return true if self == other_type || any? || other_type.any?
 
-      self_ret  = @raw.dig(:return, :type)
-      other_ret = (other_raw || {}).dig(:return, :type)
-      self_ret_t  = self_ret.is_a?(Type)  ? self_ret  : Type.new(self_ret  || :Any)
-      other_ret_t = other_ret.is_a?(Type) ? other_ret : Type.new(other_ret || :Any)
-      return false unless self_ret_t.accepts?(other_ret_t)
+    # 2. Primitive widening
+    return true if numeric? && other_type.numeric?
+    return true if string? && (other_type.byte? || other_type.string?)
 
-      self_params.zip(other_params).each do |sp, op|
-        sp_t = sp[:type].is_a?(Type) ? sp[:type] : Type.new(sp[:type] || :Any)
-        op_t = op[:type].is_a?(Type) ? op[:type] : Type.new(op[:type] || :Any)
-        return false unless sp_t.accepts?(op_t)
-      end
-
-      # Reentrant constraint: a @reentrant function cannot be passed to a parameter
-      # that doesn't explicitly allow it (i.e., the param type lacks @reentrant).
-      self_allows_reentrant = @raw[:reentrant] == true
-      other_is_reentrant    = other_raw.is_a?(Hash) && other_raw[:reentrant] == true
-      return false if other_is_reentrant && !self_allows_reentrant
-
-      return true
+    # 3. Optional coercion: ?T accepts T, NIL, or ?T
+    if optional?
+      return true if other_type.resolved == :NIL
+      inner = other_type.optional? ? other_type.wrapped_type : other_type
+      return wrapped_type.accepts?(inner)
     end
 
-    # 1. Exact Match / Any
-    return true if self == other_type || self.any? || other_type.any?
-
-    # 2. Primitives (Widening)
-    return true if self.numeric? && other_type.numeric? # Simplified logic
-    return true if self.string? && other_type.byte?
-    return true if self.string? && other_type.string?  # Byte[N] → String widening
-
-    # 3. Optional Coercion: ?T accepts T, NIL, or ?T
-    if self.optional?
-      return true if other_type.resolved == :NIL  # nil is always valid
-      # Accept the wrapped type (e.g., ?Int64 accepts Int64)
-      return wrapped_type.accepts?(other_type) if !other_type.optional?
-      # Accept same optional type
-      return wrapped_type.accepts?(other_type.wrapped_type) if other_type.optional?
+    # 4. Error union coercion: !T accepts T or !T
+    if error_union?
+      inner = other_type.error_union? ? other_type.payload_type : other_type
+      return payload_type.accepts?(inner)
     end
 
-    # 4. Error Union Coercion: !T accepts T or !T
-    if self.error_union?
-      # Accept the payload type (e.g., !Number accepts Number)
-      return payload_type.accepts?(other_type) if !other_type.error_union?
-      # Accept same error union type
-      return payload_type.accepts?(other_type.payload_type) if other_type.error_union?
-    end
+    # 5. Tense (Promise/Stream) coercion
+    return accepts_future?(other_type) if future?
 
-    # 5a. Tense (Promise) Coercion: ~T only accepts ~T with a compatible inner type
-    if self.future?
-      # Promise list (~T[]@list) accepts an empty list literal [] or another ~T[] type.
-      return true if self.promise_list? && (other_type.empty_list? || (other_type.future? && other_type.tense_type.dynamic?))
-      return false unless other_type.future?
-      if self.dynamic_stream? && other_type.dynamic_stream?
-        self_elem  = self.tense_type.element_type
-        other_elem = other_type.tense_type.element_type
-        return self_elem.accepts?(other_elem) if self_elem && other_elem
-      end
-      if self.open_stream? && other_type.open_stream?
-        self_elem  = self.open_stream_element_type
-        other_elem = other_type.open_stream_element_type
-        return self_elem.accepts?(other_elem) if self_elem && other_elem
-      end
-      # Stream coercion: ~T[INF] accepts ~?T[] and vice versa (BG STREAM infers open-stream syntax,
-      # declared type picks the runtime wrapper). Match on element type only.
-      if (self.inf_stream? && other_type.open_stream?) || (self.open_stream? && other_type.inf_stream?)
-        self_elem  = self.inf_stream? ? self.inf_stream_element_type : self.open_stream_element_type
-        other_elem = other_type.inf_stream? ? other_type.inf_stream_element_type : other_type.open_stream_element_type
-        return self_elem.accepts?(other_elem) if self_elem && other_elem
-      end
-      return tense_type.accepts?(other_type.tense_type)
-    end
+    # 6. Array coercion
+    return accepts_array?(other_type) if array?
 
-    # 5. Array Coercion (The complex part from your Annotator)
-    if self.array?
-      # Any[] accepts stream types for append/list intrinsic matching.
-      if self.element_type.any? && other_type.future?
-        return true if other_type.dynamic_stream? || other_type.promise_list? ||
-                       other_type.bounded_stream? || other_type.open_stream? ||
-                       other_type.inf_stream?
-      end
-      return false if !other_type.array?
-      return true if other_type.empty_list?
-      return false unless self.element_type.accepts?(other_type.element_type)
-      return true if self.dynamic? && other_type.fixed?
-
-      # e.g. var buffer: Number[10] = smaller_buffer (Number[4])
-      if self.fixed? && other_type.fixed?
-        return other_type.capacity <= self.capacity
-      end
-
-      return true if self.dynamic? && other_type.dynamic?
-    end
-
-    # 6. HashMap coercion: HashMap<Any> (empty literal) accepts as any HashMap<T>
-    if self.map? && other_type.map?
+    # 7. HashMap coercion: HashMap<Any> (empty literal) accepts any HashMap<T>
+    if map? && other_type.map?
       return true if other_type.value_type.any?
-      return self.value_type.accepts?(other_type.value_type)
+      return value_type.accepts?(other_type.value_type)
     end
 
     false
@@ -1290,6 +1213,80 @@ class Type
       next false unless t
       (yield t) rescue false
     }
+  end
+
+  # Structural match for function/lambda types. Called by accepts? when self.fn_type?.
+  def accepts_fn_type?(other_type)
+    return true if other_type.is_a?(Type) && other_type.any?
+    other_raw = other_type.is_a?(Type) ? other_type.raw : nil
+    is_fn_or_lambda = other_type.is_a?(Type) &&
+                      (other_type.fn_type? || (other_raw.is_a?(Hash) && other_raw[:lambda]))
+    return false unless is_fn_or_lambda
+
+    self_params  = @raw[:params] || []
+    other_params = (other_raw || {})[:params] || []
+    return false unless self_params.length == other_params.length
+
+    self_ret  = @raw.dig(:return, :type)
+    other_ret = (other_raw || {}).dig(:return, :type)
+    self_ret_t  = self_ret.is_a?(Type)  ? self_ret  : Type.new(self_ret  || :Any)
+    other_ret_t = other_ret.is_a?(Type) ? other_ret : Type.new(other_ret || :Any)
+    return false unless self_ret_t.accepts?(other_ret_t)
+
+    self_params.zip(other_params).each do |sp, op|
+      sp_t = sp[:type].is_a?(Type) ? sp[:type] : Type.new(sp[:type] || :Any)
+      op_t = op[:type].is_a?(Type) ? op[:type] : Type.new(op[:type] || :Any)
+      return false unless sp_t.accepts?(op_t)
+    end
+
+    # Reentrant constraint: a @reentrant function cannot be passed to a parameter
+    # that doesn't explicitly allow it (i.e., the param type lacks @reentrant).
+    self_allows_reentrant = @raw[:reentrant] == true
+    other_is_reentrant    = other_raw.is_a?(Hash) && other_raw[:reentrant] == true
+    return false if other_is_reentrant && !self_allows_reentrant
+
+    true
+  end
+
+  # Promise/Stream coercion. Called by accepts? when self.future?.
+  def accepts_future?(other_type)
+    # ~T[]@list accepts [] or another ~T[]
+    return true if promise_list? && (other_type.empty_list? || (other_type.future? && other_type.tense_type.dynamic?))
+    return false unless other_type.future?
+
+    if dynamic_stream? && other_type.dynamic_stream?
+      se = tense_type.element_type; oe = other_type.tense_type.element_type
+      return se.accepts?(oe) if se && oe
+    end
+    if open_stream? && other_type.open_stream?
+      se = open_stream_element_type; oe = other_type.open_stream_element_type
+      return se.accepts?(oe) if se && oe
+    end
+    # ~T[INF] accepts ~?T[] and vice versa: BG STREAM infers open-stream syntax,
+    # declared type picks the runtime wrapper. Match on element type only.
+    if (inf_stream? && other_type.open_stream?) || (open_stream? && other_type.inf_stream?)
+      se = inf_stream? ? inf_stream_element_type : open_stream_element_type
+      oe = other_type.inf_stream? ? other_type.inf_stream_element_type : other_type.open_stream_element_type
+      return se.accepts?(oe) if se && oe
+    end
+
+    tense_type.accepts?(other_type.tense_type)
+  end
+
+  # Array coercion. Called by accepts? when self.array?.
+  def accepts_array?(other_type)
+    # Any[] accepts stream types for append/list intrinsic matching
+    if element_type.any? && other_type.future?
+      return true if other_type.dynamic_stream? || other_type.promise_list? ||
+                     other_type.bounded_stream? || other_type.open_stream? ||
+                     other_type.inf_stream?
+    end
+    return false unless other_type.array?
+    return true  if other_type.empty_list?
+    return false unless element_type.accepts?(other_type.element_type)
+    return true  if dynamic? && other_type.fixed?
+    return other_type.capacity <= capacity if fixed? && other_type.fixed?
+    dynamic? && other_type.dynamic?
   end
 
   def parse_raw_input
