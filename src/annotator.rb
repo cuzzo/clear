@@ -208,12 +208,7 @@ private
     # PASS 8: Auto-size fiber spawns (BG/DO blocks) from call-graph analysis.
     assign_fiber_stack_tiers!(node)
 
-    # PASS 9: Ownership analysis — build complete ownership picture in the graph.
-    # Runs after all types are resolved. Determines which variables need cleanup,
-    # which alias shared backing data, and what allocator to use.
-    compute_ownership!(node)
-
-    # PASS 10: Copy computed metadata to FunctionSignature objects in scope.
+    # PASS 9: Copy computed metadata to FunctionSignature objects in scope.
     # This allows callers to read needs_rt, can_fail, return_provenance from
     # the signature without needing @fn_nodes.
     @fn_nodes.each do |name, fn|
@@ -3651,103 +3646,6 @@ private
       node.each_pair { |_, v| return true if contains_self_call?(v, fn_name) }
     end
     false
-  end
-
-  # ── Pass B: Ownership Analysis ───────────────────────────────────
-  # Runs after all types are resolved. Builds a complete ownership picture
-  # by walking the AST with full type information available.
-
-  def compute_ownership!(program_node)
-    # Recompute returns_promoted for ALL functions with complete type info.
-    # This catches CATCH wrappers and other cases Pass A missed.
-    recompute_return_provenance!
-  end
-
-  # Recompute returns_promoted with complete type information.
-  # Pass A computes it incrementally during visit_ReturnNode, but misses:
-  # - CATCH wrappers (synthetic outer function doesn't visit returns)
-  # - GetField returns from promoted structs (valid.name where valid is promoted)
-  # - Transitive promotion through call chains
-  def recompute_return_provenance!
-    heap_return = ->(fn) { fn.return_provenance == :heap }
-
-    # Step 1: For each function, check if ANY callee returns :heap
-    # and the function returns the callee's result.
-    @fn_nodes.each do |name, fn|
-      next if heap_return.call(fn)  # already set by Pass A
-
-      returns = collect_return_nodes(fn.body)
-      returns.each do |ret|
-        next unless ret.value
-
-        # Case 1: RETURN someCall() where someCall returns :heap
-        if ret.value.is_a?(AST::FuncCall)
-          callee = @fn_nodes[ret.value.name]
-          if callee && heap_return.call(callee)
-            fn.return_provenance = :heap
-            break
-          end
-        end
-
-        # Case 2: RETURN obj.field where obj was assigned from a heap-returning call.
-        # Bug fix: the previous version matched by type name against all functions,
-        # producing false positives when multiple functions return the same type but
-        # only some are heap-returning. Now checks the specific declaration of `root`.
-        if ret.value.is_a?(AST::GetField)
-          root = get_root_object(ret.value)
-          if root.is_a?(AST::Identifier) && root.symbol
-            decl = root.symbol.reg
-            decl_val = decl&.respond_to?(:value) ? decl.value : nil
-            callee_name = case decl_val
-                          when AST::FuncCall   then decl_val.name
-                          when AST::MethodCall then decl_val.name
-                          end
-            callee = callee_name && @fn_nodes[callee_name]
-            if callee && heap_return.call(callee)
-              ret_type = ret.value.respond_to?(:full_type) ? Type.new(ret.value.full_type) : nil
-              if ret_type&.string? || ret_type&.collection? || ret_type&.map?
-                fn.return_provenance = :heap
-                break
-              end
-            end
-          end
-        end
-      end
-    end
-
-    # Step 2: Propagate transitively through call graph.
-    changed = true
-    while changed
-      changed = false
-      @call_graph.each do |fn_name, callees|
-        fn = @fn_nodes[fn_name]
-        next unless fn
-        next if heap_return.call(fn)
-        if callees.any? { |c| cfn = @fn_nodes[c]; cfn && heap_return.call(cfn) }
-          returns = collect_return_nodes(fn.body)
-          # Check both FuncCall and MethodCall returns (previously only FuncCall).
-          if returns.any? { |r|
-               call = r.value
-               callee_name = case call
-                             when AST::FuncCall   then call.name
-                             when AST::MethodCall then call.name
-                             end
-               cfn = callee_name && @fn_nodes[callee_name]
-               cfn && heap_return.call(cfn)
-             }
-            fn.return_provenance = :heap
-            changed = true
-          end
-        end
-      end
-    end
-
-  end
-
-  def collect_return_nodes(body)
-    returns = []
-    AST.walk_body(body) { |node| returns << node if node.is_a?(AST::ReturnNode) }
-    returns
   end
 
   # ── Fiber Stack Auto-Sizing ──────────────────────────────────────
