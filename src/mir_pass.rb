@@ -99,13 +99,14 @@ class MIRPass
       upgrade_assign_escapes_to_heap!(fn) if fn&.body
     end
 
-    # Phase 2: classify cleanup bindings (uses cleared provenance from Phase 1).
+    # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
+    # provenance before classification (fixes ordering bug: was Phase 2.5).
+    LoopFrameAnalysis.analyze!(@fn_nodes)
+
+    # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
     @fn_nodes.each do |name, fn|
       @cleanup_bindings[name] = CleanupClassifier.classify(fn, fn_nodes: @fn_nodes, schema_lookup: @schema_lookup)
     end
-
-    # Phase 2.5: set mark_per_iter on all loops (requires finalised allocators from Phase 2).
-    LoopFrameAnalysis.analyze!(@fn_nodes)
 
     # Phase 3: insert MIR nodes + stamp AST.
     ast.statements.each do |stmt|
@@ -500,24 +501,6 @@ class MIRPass
         entry = bindings[var_name.to_s]
         next unless entry && entry[:needs_cleanup]
         entry[:has_moved_guard] = true
-      end
-    end
-
-    # Sync frame→heap alloc in entries where LoopFrameAnalysis (Phase 2.5) upgraded
-    # the type_info.  CleanupClassifier may have classified as :frame, but the node's
-    # type_info now says heap_provenance? = true.  Walk the body once to apply the fix.
-    if has_bindings
-      AST.walk_body(fn.body) do |node|
-        name = case node
-               when AST::VarDecl  then node.name.to_s
-               when AST::BindExpr then node.mode == :decl ? node.name.to_s : nil
-               else nil
-               end
-        next unless name
-        entry = bindings[name]
-        next unless entry && entry[:alloc] == :frame
-        ti = node.type_info rescue nil
-        bindings[name] = entry.merge(alloc: :heap) if ti.is_a?(Type) && ti.heap_provenance?
       end
     end
 

@@ -377,6 +377,119 @@ RSpec.describe "Allocation Strategy Invariants" do
   end
 
   # ===========================================================================
+  # Escape Scenario Characterization — one spec per upgrade path.
+  # These specs document and lock in each escape promotion mechanism so that
+  # when we replace the upgrade methods with EscapeAnalysis E2, we can confirm
+  # no regression.
+  # ===========================================================================
+  describe "EscapeAnalysis characterization: escape scenarios" do
+
+    # Scenario: :bg_captured
+    # A list captured by a BG block must be heap-allocated so it survives the
+    # block's separate stack frame. upgrade_bg_captures_to_heap! handles this.
+    it ":bg_captured — BG-captured @list gets cleanup_alloc :heap" do
+      ast = run_mir(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE items: Float64[]@list = [];
+          items.append(1.0);
+          p: ~Void = BG { items.append(2.0); };
+          NEXT p;
+          RETURN;
+        END
+      CLEAR
+      d = find_decl_in(main_fn(ast), "items")
+      expect(d.cleanup_alloc).to eq(:heap)
+    end
+
+    # Scenario: :heap_ptr_return
+    # A variable returned from a RETURNS %Struct function must be heap-allocated
+    # so the returned pointer is valid after the frame is rewound.
+    # upgrade_heap_ptr_returns_to_heap! handles this.
+    it ":heap_ptr_return — returned var in RETURNS %Struct → storage :heap" do
+      ast = run_mir(<<~CLEAR)
+        STRUCT Node { val: Int64 }
+        FN makeNode!() RETURNS %Node ->
+          n = Node { val: 42 };
+          RETURN n;
+        END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "makeNode!" }
+      d = find_decl_in(fn, "n")
+      expect(d.storage).to eq(:heap)
+    end
+
+    # Scenario: :assign_escape
+    # A frame struct value assigned to a heap struct field must be heap-allocated
+    # so the pointer stored in the heap container remains valid.
+    # upgrade_assign_escapes_to_heap! handles this (requires_move? = true for structs).
+    it ":assign_escape — frame struct assigned to heap struct field → storage :heap" do
+      ast = run_mir(<<~CLEAR)
+        STRUCT Inner { val: Float64 }
+        STRUCT Outer { child: Inner }
+        FN test!() RETURNS Void ->
+          MUTABLE outer: %Outer = Outer { child: Inner { val: 0.0 } };
+          child: Inner = Inner { val: 42.0 };
+          outer.child = child;
+          RETURN;
+        END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "test!" }
+      d = find_decl_in(fn, "child")
+      expect(d.storage).to eq(:heap)
+    end
+
+    # Scenario: :loop_carry_string
+    # A string outer variable reassigned inside a loop that has per-iter frame
+    # locals must be heap-allocated: the per-iter rewind would corrupt a
+    # frame-allocated string value.
+    # upgrade_loop_string_carries_to_heap! handles this.
+    it ":loop_carry_string — outer string reassigned inside mark_per_iter loop → cleanup_alloc :heap" do
+      ast = run_mir(<<~CLEAR)
+        FN test() RETURNS Void ->
+          MUTABLE i: Int64 = 0;
+          MUTABLE resp = "";
+          WHILE i < 5 DO
+            MUTABLE tmp: String[]@list = [];
+            tmp.append("x");
+            resp = resp + i.toString();
+            i += 1;
+          END
+          RETURN;
+        END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "test" }
+      d = find_decl_in(fn, "resp")
+      expect(d.cleanup_alloc).to eq(:heap)
+    end
+
+    # Scenario: :transitive_callee
+    # A binding that receives the result of a heap-returning function must be
+    # cleaned up with heapAlloc — regardless of whether it is re-returned.
+    # apply_transitive_heap_promotion! handles this.
+    it ":transitive_callee — binding of heap-returning call → cleanup_alloc :heap" do
+      ast = run_mir(<<~CLEAR)
+        FN build!() RETURNS Float64[]@list ->
+          MUTABLE v: Float64[]@list = [];
+          v.append(1.0);
+          RETURN v;
+        END
+        FN caller!() RETURNS Void ->
+          x = build!();
+          RETURN;
+        END
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      caller_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller!" }
+      d = find_decl_in(caller_fn, "x")
+      expect(d.cleanup_alloc).to eq(:heap)
+    end
+
+  end
+
+  # ===========================================================================
   # Group F: INV-SYNC — sync types are always :heap
   # Locked/write-locked types need a stable heap address for the mutex.
   # ===========================================================================
