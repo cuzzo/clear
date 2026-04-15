@@ -7,11 +7,10 @@
 # before LoopFrameAnalysis and CleanupClassifier.
 #
 # Phases:
-#   E1 - compute_heap_return_fns!  fixed-point: which functions return heap values
-#   E2 - analyze!                  one walk per fn: apply all 6 escape conditions
-#   E3 - call-site tagging         propagate heap provenance to call expressions
-#                                  (currently handled by apply_transitive_heap_promotion!
-#                                   and mark_heap_carry_call_sites! in MIRPass)
+#   E1 - compute_heap_return_fns!   fixed-point: which functions return heap values
+#   E2 - analyze!                   one walk per fn: apply all 6 escape conditions
+#   E3 - tag_transitive_provenance! propagate heap provenance to binding type_infos
+#         tag_carry_call_sites!     stamp heap provenance on carry-call expressions
 
 require_relative "type"
 require_relative "ast"
@@ -401,6 +400,127 @@ module EscapeAnalysis
     when AST::GetField, AST::GetIndex then e2_root_ident(node.target)
     when AST::Identifier              then node
     else nil
+    end
+  end
+
+  # ── Phase E3 ─────────────────────────────────────────────────────────────
+
+  # E3a: Propagate heap return_provenance from callees to caller binding type_info.
+  # Must run BEFORE PromotionClassifier so HPT downgrade sees stable provenance.
+  # Replaces MIRPass#apply_transitive_heap_promotion!
+  #
+  # @param fn_nodes [Hash]  name -> AST::FunctionDef
+  # @param heap_fns [Set]   function names with heap return_provenance (from E1)
+  def self.tag_transitive_provenance!(fn_nodes, heap_fns)
+    fn_nodes.each do |_name, fn|
+      next unless fn&.body
+      AST.walk_body(fn.body) do |node|
+        case node
+        when AST::VarDecl, AST::BindExpr
+          val = node.value
+          callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
+          next unless callee_name && heap_fns.include?(callee_name)
+          node.type_info.provenance = :heap if node.type_info.is_a?(Type)
+          if node.is_a?(AST::BindExpr) && node.mode == :assign
+            decl = e3_find_decl(fn.body, node.name)
+            decl.type_info.provenance = :heap if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+          end
+        when AST::Assignment
+          val = node.value
+          callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
+          next unless callee_name && heap_fns.include?(callee_name)
+          sym = node.name.respond_to?(:symbol) ? node.name.symbol : nil
+          decl = sym&.reg
+          decl.type_info.provenance = :heap if decl&.respond_to?(:type_info) && decl.type_info.is_a?(Type)
+        end
+      end
+    end
+  end
+
+  # E3b: Stamp heap provenance on call expressions that call heap-carry-return functions.
+  # Must run AFTER E2 (which sets fn.heap_carry_return) and BEFORE CleanupClassifier.
+  # Replaces MIRPass#mark_heap_carry_call_sites!
+  #
+  # @param fn_nodes [Hash]  name -> AST::FunctionDef
+  def self.tag_carry_call_sites!(fn_nodes)
+    carry_fns = fn_nodes.each_with_object(Set.new) do |(_, fn), s|
+      s << fn.name.to_s if fn.respond_to?(:heap_carry_return) && fn.heap_carry_return
+    end
+    return if carry_fns.empty?
+
+    fn_nodes.each do |_name, fn|
+      next unless fn&.body
+      AST.walk_body(fn.body) do |stmt|
+        if stmt.is_a?(AST::VarDecl) || (stmt.is_a?(AST::BindExpr) && stmt.mode == :decl)
+          val = stmt.value
+          if val.is_a?(AST::FuncCall) || val.is_a?(AST::MethodCall)
+            fn_name = val.name.to_s
+            if carry_fns.include?(fn_name)
+              call_ti = val.type_info rescue nil
+              call_ti.provenance = :heap if call_ti.is_a?(Type) && !call_ti.heap_provenance?
+              bind_ti = stmt.type_info rescue nil
+              bind_ti.provenance = :heap if bind_ti.is_a?(Type) && !bind_ti.heap_provenance?
+              bt2 = stmt.respond_to?(:full_type) ? stmt.full_type : nil
+              bt2.provenance = :heap if bt2.is_a?(Type) && !bt2.heap_provenance?
+            end
+          end
+          next
+        end
+        e3_top_level_exprs(stmt).each { |e| e3_mark_carry_expr!(e, carry_fns) }
+      end
+    end
+  end
+
+  private_class_method def self.e3_find_decl(body, var_name)
+    return nil unless body
+    body.each do |node|
+      case node
+      when AST::VarDecl  then return node if node.name == var_name
+      when AST::BindExpr then return node if node.name == var_name && node.mode == :decl
+      end
+    end
+    nil
+  end
+
+  private_class_method def self.e3_top_level_exprs(stmt)
+    case stmt
+    when AST::VarDecl, AST::BindExpr then [stmt.value]
+    when AST::Assignment              then [stmt.value]
+    when AST::ReturnNode              then [stmt.value]
+    when AST::Assert                  then [stmt.condition, stmt.message]
+    when AST::FuncCall, AST::MethodCall then [stmt]
+    when AST::IfStatement             then [stmt.condition]
+    when AST::MatchStatement          then [stmt.expr]
+    when AST::ForEach                 then [stmt.collection]
+    else []
+    end.compact
+  end
+
+  private_class_method def self.e3_mark_carry_expr!(node, carry_fns)
+    return unless node
+    case node
+    when AST::FuncCall
+      if carry_fns.include?(node.name.to_s)
+        ti = node.type_info rescue nil
+        ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
+      end
+      node.args&.each { |a| e3_mark_carry_expr!(a, carry_fns) }
+    when AST::MethodCall
+      if carry_fns.include?(node.name.to_s)
+        ti = node.type_info rescue nil
+        ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
+      end
+      e3_mark_carry_expr!(node.object, carry_fns)
+      node.args&.each { |a| e3_mark_carry_expr!(a, carry_fns) }
+    when AST::BinaryOp
+      e3_mark_carry_expr!(node.left, carry_fns)
+      e3_mark_carry_expr!(node.right, carry_fns)
+    when AST::UnaryOp
+      e3_mark_carry_expr!(node.right, carry_fns)
+    when AST::GetField then e3_mark_carry_expr!(node.target, carry_fns)
+    when AST::GetIndex
+      e3_mark_carry_expr!(node.target, carry_fns)
+      e3_mark_carry_expr!(node.index, carry_fns)
     end
   end
 end

@@ -29,9 +29,9 @@ class MIRPass
     # E1: compute which functions return heap-owned values (fixed-point over call graph).
     heap_fns = EscapeAnalysis.compute_heap_return_fns!(@fn_nodes)
 
-    # E3 (pending): propagate heap return_provenance to caller binding type_info.
+    # E3a: propagate heap return_provenance to caller binding type_info.
     # Must run before PromotionClassifier so HPT downgrade sees stable provenance.
-    apply_transitive_heap_promotion!(ast.statements)
+    EscapeAnalysis.tag_transitive_provenance!(@fn_nodes, heap_fns)
 
     # Phase 1: classify promotions for all functions.
     # Must run before E2 so promotion_plans are available for :always_returned detection.
@@ -42,22 +42,14 @@ class MIRPass
 
     # E2: per-declaration escape scan.
     # Applies all 6 escape conditions; replaces the upgrade_* methods below.
-    # Sets fn.heap_carry_return for mark_heap_carry_call_sites! (step E3 below).
+    # Sets fn.heap_carry_return for E3b (tag_carry_call_sites!).
     @bg_heap_upgraded = EscapeAnalysis.analyze!(
       @fn_nodes, heap_fns: heap_fns, promotion_plans: promotion_plans
     )
 
-    # E3 (pending): mark call sites to heap-carry-return functions as heap-provenance.
-    # Runs after E2 because E2 stamps fn.heap_carry_return on loop-carry functions.
-    carry_return_fns = @fn_nodes.select { |_, f|
-      f.respond_to?(:heap_carry_return) && f.heap_carry_return
-    }.keys.to_set
-    unless carry_return_fns.empty?
-      @fn_nodes.each do |_name, fn|
-        next unless fn&.body
-        mark_heap_carry_call_sites!(fn, carry_return_fns)
-      end
-    end
+    # E3b: stamp heap provenance on call-site expressions for carry-return functions.
+    # Runs after E2 because E2 sets fn.heap_carry_return on loop-carry functions.
+    EscapeAnalysis.tag_carry_call_sites!(@fn_nodes)
 
     # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
     # provenance before classification.
