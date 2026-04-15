@@ -316,6 +316,54 @@ module CleanupClassifier
       cleanup = classify_binding(var_name, ti, node, promoted_fns, schema_lookup)
       bindings[var_name] = cleanup if cleanup
     end
+    # AST.walk_body doesn't recurse into MethodCall/FuncCall args, so BgBlock
+    # bodies used as call arguments are invisible to the visitor above.
+    # Walk expression-position BgBlock bodies explicitly so variables declared
+    # inside outer BG fibers (e.g. `~T[INF]` streams) are classified correctly.
+    walk_expression_bg_bodies(body, promoted_fns, schema_lookup, bindings)
+  end
+
+  # Walk BgBlock bodies found in expression positions within a statement list.
+  # Only handles BgBlock (outer consumer fiber), not BgStreamBlock (generator
+  # fiber bodies have special YIELD handling and no heap-cleanup variables).
+  private_class_method def self.walk_expression_bg_bodies(body, promoted_fns, schema_lookup, bindings)
+    return unless body.is_a?(Array)
+    body.each do |stmt|
+      bg_bodies_from_expr(stmt).each do |bg_body|
+        walk_bindings(bg_body, promoted_fns, schema_lookup, bindings)
+      end
+      # Recurse into control-flow containers.
+      case stmt
+      when AST::IfStatement
+        walk_expression_bg_bodies(stmt.then_branch, promoted_fns, schema_lookup, bindings)
+        walk_expression_bg_bodies(stmt.else_branch, promoted_fns, schema_lookup, bindings)
+      when AST::ForRange, AST::ForEach
+        walk_expression_bg_bodies(stmt.body, promoted_fns, schema_lookup, bindings)
+      when AST::WhileLoop
+        walk_expression_bg_bodies(stmt.do_branch, promoted_fns, schema_lookup, bindings)
+      when AST::MatchStatement
+        stmt.cases&.each { |c| walk_expression_bg_bodies(c[:body], promoted_fns, schema_lookup, bindings) }
+        walk_expression_bg_bodies(stmt.default_case, promoted_fns, schema_lookup, bindings)
+      when AST::WithBlock
+        walk_expression_bg_bodies(stmt.body, promoted_fns, schema_lookup, bindings)
+      end
+    end
+  end
+
+  # Extract BgBlock bodies from expression-position BG blocks in a statement.
+  # Returns [] if none; only BgBlock (not BgStreamBlock).
+  private_class_method def self.bg_bodies_from_expr(stmt)
+    result = []
+    case stmt
+    when AST::VarDecl, AST::BindExpr, AST::Assignment
+      val = stmt.respond_to?(:value) ? stmt.value : nil
+      result << val.body if val.is_a?(AST::BgBlock) && val.body
+    when AST::MethodCall
+      stmt.args&.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
+    when AST::FuncCall
+      stmt.args&.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
+    end
+    result
   end
 
   # ── Walk TAKES parameters ───────────────────────────────────────
@@ -436,7 +484,8 @@ module CleanupClassifier
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
     return nil if ti.borrow_provenance?  # borrow return -- caller owns data
 
-    classify_resource(ti, node) ||
+    classify_inf_stream(ti) ||
+      classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||
       classify_array_struct_strings(ti, node, schema_lookup) ||
       classify_rc_or_link(ti, schema_lookup) ||
@@ -457,6 +506,14 @@ module CleanupClassifier
   private_class_method def self.classify_resource(_ti, node)
     return nil unless node.respond_to?(:resource_close_zig) && node.resource_close_zig
     entry(:resource, resource_close_zig: node.resource_close_zig)
+  end
+
+  # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.
+  # deinit() sets closed=true and wakes the generator so it exits cleanly.
+  # No moved guard: streams are not linearly-affine (requires_move? = false).
+  private_class_method def self.classify_inf_stream(ti)
+    return nil unless ti.inf_stream?
+    entry(:inf_stream, has_moved_guard: false)
   end
 
   private_class_method def self.classify_collection(ti, schema_lookup)

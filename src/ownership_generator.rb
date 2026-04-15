@@ -160,6 +160,9 @@ module OwnershipGenerator
     when :match_as_inline_struct
       conditional_cleanup(name, zig_type, alloc, guarded: g)
 
+    when :inf_stream
+      "defer #{name}.deinit();\n"
+
     else
       raise "emit_cleanup_from_entry: unhandled cleanup kind :#{entry[:kind]} for '#{name}'. " \
             "MIR::Drop was generated but the transpiler has no Zig template for this kind."

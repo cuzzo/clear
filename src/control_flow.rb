@@ -1569,6 +1569,17 @@ class FlowChecker
       when AST::BgBlock, AST::BgStreamBlock
         collect_mir_markers(stmt.body, drops, suppresses, allocs)
       end
+      # Also scan BgBlock bodies in expression positions (MethodCall/FuncCall
+      # args, VarDecl values) -- these are not visited by the case above.
+      case stmt
+      when AST::VarDecl, AST::BindExpr, AST::Assignment
+        val = stmt.respond_to?(:value) ? stmt.value : nil
+        collect_mir_markers(val.body, drops, suppresses, allocs) if val.is_a?(AST::BgBlock) && val.body
+      when AST::MethodCall, AST::FuncCall
+        stmt.args&.each do |a|
+          collect_mir_markers(a.body, drops, suppresses, allocs) if a.is_a?(AST::BgBlock) && a.body
+        end
+      end
     end
   end
 
@@ -2466,6 +2477,23 @@ class MIRPass
       end
     when AST::BgBlock, AST::BgStreamBlock
       stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
+    end
+    # Process BgBlock bodies found in expression positions (MethodCall/FuncCall
+    # args, VarDecl/BindExpr values). AST.walk_body misses these since it doesn't
+    # recurse into call arguments. Only BgBlock (outer consumer fiber) -- not
+    # BgStreamBlock (generator fiber has special YIELD handling).
+    case stmt
+    when AST::VarDecl, AST::BindExpr, AST::Assignment
+      val = stmt.respond_to?(:value) ? stmt.value : nil
+      if val.is_a?(AST::BgBlock) && val.body
+        val.body = transform_body(val.body, bindings, promo)
+      end
+    when AST::MethodCall, AST::FuncCall
+      stmt.args&.each do |a|
+        if a.is_a?(AST::BgBlock) && a.body
+          a.body = transform_body(a.body, bindings, promo)
+        end
+      end
     end
   end
 

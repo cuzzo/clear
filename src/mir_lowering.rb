@@ -1781,10 +1781,12 @@ class MIRLowering
     run_body = nil
     stmt_code, result_line = with_fiber_capture_map(bg_capture_map, rt_override: bg_rt) do
       body_mir = []
-      sc = pre_steps.map { |step|
+      sc = pre_steps.filter_map { |step|
         mir = lower(step[:expr])
         code = emit_expr(mir)
         body_mir << (step[:binding] ? MIR::Let.new(step[:binding], mir, false, nil, nil) : mir)
+        # AllocMark and other verification-only nodes emit nil -- skip them.
+        next nil if code.nil?
         if step[:binding]
           "const #{step[:binding]} = #{code};"
         elsif code.strip.end_with?(";") || code.strip.end_with?("}")

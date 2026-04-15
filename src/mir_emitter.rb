@@ -378,6 +378,12 @@ class MIREmitter
       close = entry[:resource_close_zig].gsub("{0}", name)
       guarded_defer(name, close, g, errdefer:)
 
+    when :inf_stream
+      # Signal the generator fiber to stop and free Inner. No moved guard:
+      # InfStream is not linearly-affine (NEXT borrows, not moves).
+      kw = errdefer ? "errdefer" : "defer"
+      "#{kw} #{name}.deinit();\n"
+
     when :list_with_elem_cleanup
       body = "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); }"
       guarded_defer(name, body, g, errdefer:)
