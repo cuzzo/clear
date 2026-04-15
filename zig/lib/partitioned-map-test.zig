@@ -1181,6 +1181,162 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
     try runCheckedMain(&sched, @as(qs.TaskFn, @ptrCast(&MainFn.run)), &runner);
 }
 
+test "PartitionedStringMap: recreated heap-backed map survives repeated concurrent put+get batches" {
+    initWorkerGlobals();
+    defer deinitWorkerGlobals();
+
+    var threads: [2]std.Thread = undefined;
+    startWorkers(&threads, 2);
+    defer stopWorkers(&threads, 2);
+
+    var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var rt = try Runtime.init(alloc, 4 * 1024 * 1024, &global_ebr_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const FIBERS = 4;
+    const KEYS = 500;
+    const ITERS = 6;
+
+    const MainFn = struct {
+        outer_rt: *Runtime,
+
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            const rt_ptr = self.outer_rt;
+            const sa = rt_ptr.getSched().allocator;
+
+            for (0..ITERS) |_| {
+                const map = try sa.create(Map);
+                map.* = .{};
+                errdefer sa.destroy(map);
+                map.ensureOwnership();
+
+                var promises: [FIBERS]CheatLib.Promise(i64) = undefined;
+                for (0..FIBERS) |i| {
+                    promises[i] = try spawnMapWorker(
+                        rt_ptr,
+                        map,
+                        @as(i64, @intCast(i * KEYS)),
+                        KEYS,
+                        .put_get,
+                    );
+                }
+                try std.testing.expectEqual(@as(i64, FIBERS * KEYS), try waitForPromises(&promises));
+                try std.testing.expectEqual(@as(i64, FIBERS * KEYS), map.count());
+
+                map.deinit(std.heap.c_allocator, std.heap.c_allocator);
+                sa.destroy(map);
+            }
+        }
+    };
+
+    var runner = MainFn{ .outer_rt = &rt };
+    try runCheckedMain(&sched, @as(qs.TaskFn, @ptrCast(&MainFn.run)), &runner);
+}
+
+test "PartitionedStringMap: inline L6-shaped put-get batches survive repeated runs" {
+    initWorkerGlobals();
+    defer deinitWorkerGlobals();
+
+    var threads: [2]std.Thread = undefined;
+    startWorkers(&threads, 2);
+    defer stopWorkers(&threads, 2);
+
+    var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var rt = try Runtime.init(alloc, 4 * 1024 * 1024, &global_ebr_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const KEYS = 500;
+    const FIBERS = 4;
+    const ITERS = 3;
+
+    const InlineBgWork = struct {
+        inner: *CheatLib.Promise(i64).Inner,
+        bg_alloc: std.mem.Allocator,
+        map: *Map,
+        start: i64,
+        count: i64,
+
+        fn run(raw_rt: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const r: *Runtime = @ptrCast(@alignCast(raw_rt));
+            const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+            defer ctx.bg_alloc.destroy(ctx);
+            defer ctx.inner.wg.done();
+
+            var buf: [32]u8 = undefined;
+            var i: i64 = ctx.start;
+            while (i < ctx.start + ctx.count) : (i += 1) {
+                const key = std.fmt.bufPrint(&buf, "k{d}", .{i}) catch continue;
+                try ctx.map.put(std.heap.c_allocator, std.heap.c_allocator, key, i);
+                r.checkYield();
+            }
+            var hits: i64 = 0;
+            i = ctx.start;
+            while (i < ctx.start + ctx.count) : (i += 1) {
+                const key = std.fmt.bufPrint(&buf, "k{d}", .{i}) catch continue;
+                if (ctx.map.get(key)) |_| hits += 1;
+                r.checkYield();
+            }
+            ctx.inner.result = hits;
+        }
+    };
+
+    const MainFn = struct {
+        outer_rt: *Runtime,
+
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self: *@This() = @ptrCast(@alignCast(raw.?));
+            const r = self.outer_rt;
+
+            for (0..ITERS) |_| {
+                const map = try r.getSched().allocator.create(Map);
+                map.* = .{};
+                map.ensureOwnership();
+
+                var promises: [FIBERS]CheatLib.Promise(i64) = undefined;
+                for (0..FIBERS) |fi| {
+                    const sa = r.getSched().allocator;
+                    const promise = try CheatLib.Promise(i64).spawn(sa, r.getSched());
+                    const ctx = try sa.create(InlineBgWork);
+                    ctx.* = .{
+                        .inner = promise.inner,
+                        .bg_alloc = sa,
+                        .map = map,
+                        .start = @as(i64, @intCast(fi)) * KEYS,
+                        .count = KEYS,
+                    };
+                    try header.spawnPinned(
+                        @intFromPtr(&Runtime.entryWrapper),
+                        @as(qs.TaskFn, @ptrCast(&InlineBgWork.run)),
+                        ctx,
+                        .{ .stack_size = .Standard, .pinned = true },
+                    );
+                    promises[fi] = promise;
+                }
+
+                try std.testing.expectEqual(@as(i64, FIBERS * KEYS), try waitForPromises(&promises));
+                map.deinit(std.heap.c_allocator, std.heap.c_allocator);
+                r.getSched().allocator.destroy(map);
+            }
+        }
+    };
+
+    var runner = MainFn{ .outer_rt = &rt };
+    try runCheckedMain(&sched, @as(qs.TaskFn, @ptrCast(&MainFn.run)), &runner);
+}
+
 test "PartitionedStringMap: persistent heap-backed map survives repeated concurrent get-only batches" {
     initWorkerGlobals();
     defer deinitWorkerGlobals();

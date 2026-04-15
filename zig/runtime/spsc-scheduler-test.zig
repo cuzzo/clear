@@ -158,6 +158,56 @@ const SpawnCounter = struct {
     }
 };
 
+const MainTaskStatus = struct {
+    done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    err: ?anyerror = null,
+};
+
+const MainTaskCtx = struct {
+    inner_fn: CheatHeader.TaskFn,
+    inner_args: ?*anyopaque,
+    status: *MainTaskStatus,
+
+    fn run(raw_rt: *anyopaque, raw: ?*anyopaque) anyerror!void {
+        const self: *@This() = @ptrCast(@alignCast(raw.?));
+        self.inner_fn(raw_rt, self.inner_args) catch |err| {
+            self.status.err = err;
+            self.status.done.store(true, .release);
+            return;
+        };
+        self.status.done.store(true, .release);
+    }
+};
+
+fn runCheckedMain(sched: *fp.Scheduler, task_fn: CheatHeader.TaskFn, args: ?*anyopaque) !void {
+    var status = MainTaskStatus{};
+    var ctx = MainTaskCtx{
+        .inner_fn = task_fn,
+        .inner_args = args,
+        .status = &status,
+    };
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&MainTaskCtx.run)),
+        &ctx,
+        .{ .stack_size = .Standard, .pinned = true },
+    );
+    sched.run();
+    if (!status.done.load(.acquire)) {
+        std.debug.panic(
+            "runCheckedMain returned early: active_tasks={d} dirty_mask=0x{x} ready={d} pinned={d} sleepers={d}",
+            .{
+                sched.active_tasks.load(.monotonic),
+                sched.dirty_mask.load(.seq_cst),
+                sched.ready_queue.len(),
+                sched.pinned_queue.items.len,
+                sched.sleeping_queue.items.len,
+            },
+        );
+    }
+    if (status.err) |err| return err;
+}
+
 test "L2: submitSpawn via SPSC to remote scheduler" {
     initGlobals();
     defer deinitGlobals();
@@ -259,12 +309,7 @@ test "L3: submitResume via SPSC channel" {
     };
 
     var runner = MainFn{ .outer_rt = &rt };
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Standard, .pinned = true },
-    );
-    sched.run();
+    try runCheckedMain(&sched, @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)), &runner);
 }
 
 // ========================================================================
@@ -338,7 +383,7 @@ test "L4: RemoteCall via SPSC (inside fiber, proper scheduler)" {
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Standard },
+        &runner, .{ .stack_size = .Standard, .pinned = true },
     );
     sched.run();
 }
@@ -458,7 +503,7 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
             var i: i64 = ctx.start;
             while (i < ctx.start + ctx.count) : (i += 1) {
                 const key = std.fmt.bufPrint(&buf, "k{d}", .{i}) catch continue;
-                ctx.map.put(std.heap.c_allocator, std.heap.c_allocator, key, i) catch continue;
+                try ctx.map.put(std.heap.c_allocator, std.heap.c_allocator, key, i);
                 r.checkYield();
             }
             var hits: i64 = 0;
@@ -517,12 +562,7 @@ test "L6: hammer — 4 fibers x 500 keys x 5 iterations via SPSC" {
     };
 
     var runner = MainFn{ .outer_rt = &rt };
-    try sched.submitSpawn(
-        @intFromPtr(&Runtime.entryWrapper),
-        @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)),
-        &runner, .{ .stack_size = .Standard },
-    );
-    sched.run();
+    try runCheckedMain(&sched, @as(CheatHeader.TaskFn, @ptrCast(&MainFn.run)), &runner);
 }
 
 // ========================================================================
