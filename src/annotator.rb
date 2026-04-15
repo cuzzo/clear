@@ -1534,12 +1534,17 @@ private
   # struct on the stack cannot have its address escape the loop body through normal
   # CLEAR operations, so :stack is always safe here.
   def visit_VarDecl(node)
-    # Pre-set :stack on list literals when the declared type is a fixed array (e.g. Number[3]).
     if node.value.is_a?(AST::ListLit) && node.type.is_a?(Type) && node.type.fixed?
       node.value.storage = :stack
     end
     visit(node.value)
+    finalize_decl_node!(node, node.mutable)
+  end
 
+  # Shared declaration body used by visit_VarDecl and the declaration path of
+  # visit_BindExpr. mutable_flag is node.mutable for VarDecl and false for BindExpr
+  # (BindExpr declarations are immutable by default).
+  def finalize_decl_node!(node, mutable_flag)
     verify_unrestricted!(node)
     handle_assign_move(node)
     handle_assign_borrow(node)
@@ -1555,7 +1560,6 @@ private
     storage = finalize_decl_storage!(node, final_type)
     propagate_collection_metadata!(node, final_type)
     propagate_call_flags!(node)
-    # Set cleanup allocator: determines which Zig allocator is used in defer cleanup.
     set_cleanup_alloc!(node)
     is_resource, resource_close = resolve_resource_close(node, final_type)
     node.resource_close_zig = resource_close
@@ -1565,14 +1569,14 @@ private
 
     node_sync = node.type_info&.sync
     current_scope.declare(
-      node.name, node, final_type, node.mutable, false, node.slot_size, storage,
+      node.name, node, final_type, mutable_flag, false, node.slot_size, storage,
       Set.new, [],
       sync: node_sync,
       resource: is_resource,
       close_zig: resource_close
     )
     node.symbol = current_scope.locals[node.name]
-    # Propagate @link_source from the value type to the scope entry
+    # Propagate @link_source from the value type to the scope entry.
     val_ti = node.value&.type_info
     if val_ti&.link?
       link_src = val_ti.link_source
@@ -1606,60 +1610,11 @@ private
     if !scope.locals.key?(node.name)
       # Declaration path
       node.mode = :decl
-
-      verify_unrestricted!(node)
-      handle_assign_move(node)
-      handle_assign_borrow(node)
-
-      validate_type_annotation!(node, node.type) if node.type
-      validate_stream_type!(node)
-
-      final_type, error = node.value.coerce!(node.type)
-      error!(node, error) if error
-
-      # Post-coerce value type updates: coerce! validates compatibility but the
-      # value node's full_type may need updating for the transpiler.
-      propagate_declared_type_to_value!(node, final_type)
-
-      storage = finalize_decl_storage!(node, final_type)
-      propagate_collection_metadata!(node, final_type)
-      propagate_call_flags!(node)
-      set_cleanup_alloc!(node)
-      is_resource, resource_close = resolve_resource_close(node, final_type)
-      node.resource_close_zig = resource_close
-      node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
-
-      Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
-
-      node_sync = node.type_info&.sync
-      current_scope.declare(
-        node.name, node, final_type, false, false, node.slot_size, storage,
-        Set.new, [],
-        sync: node_sync,
-        resource: is_resource,
-        close_zig: resource_close
-      )
-      node.symbol = current_scope.locals[node.name]
-      # Struct with BORROWED fields: propagate non_escaping to the binding
+      finalize_decl_node!(node, false)
+      # Struct with BORROWED fields: propagate non_escaping to the binding.
       if node.value.instance_variable_get(:@has_borrowed_fields)
         node.symbol.non_escaping = true
       end
-      # Propagate @link_source from the value type to the scope entry
-      val_ti = node.value&.type_info
-      if val_ti&.link?
-        link_src = val_ti.link_source
-        node.symbol.link_source = link_src if link_src
-      end
-      classify_ownership!(node.symbol)
-      og_declare(node.name, node, node.type_info || final_type)
-      register_container_borrow!(node)
-      ti = node.type_info
-      if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
-        current_fn_ctx.heap_count += 1 if current_fn_ctx
-      end
-        accumulate_stack_bytes(storage, node)
-      track_union_alias(node.name, node.value)
-      record_capability_binding(node.name, node, final_type, storage)
 
     elsif scope.is_immutable?(node.name)
       error!(node, "Variable '#{node.name}' is immutable")
