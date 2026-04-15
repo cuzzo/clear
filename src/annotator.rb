@@ -2748,7 +2748,7 @@ private
   # Rules:
   # - @list (list_collection): wrap in CopyNode (frame buffer -> heap copy)
   # - Rodata string: wrap in CopyNode (auto-dupe to heap)
-  # - Non-rodata string variable: error (require explicit COPY)
+  # - Non-heap string expression: error (require explicit COPY)
   # - Already CopyNode: no-op
   #
   # +val_node+:      the AST value node being stored
@@ -2789,8 +2789,14 @@ private
       return copy
     end
 
-    if vti.string? && val_node.is_a?(AST::Identifier) && container_desc
-      error!(val_node, "Cannot store string variable '#{val_node.name}' into #{container_desc} without COPY. Strings are frame-arena managed; use COPY for heap ownership.")
+    if vti.string? && container_desc && !vti.heap? && !vti.rodata?
+      expr_desc =
+        if val_node.is_a?(AST::Identifier)
+          "string variable '#{val_node.name}'"
+        else
+          "string expression"
+        end
+      error!(val_node, "Cannot store #{expr_desc} into #{container_desc} without COPY. Strings are frame-arena managed; use COPY for heap ownership.")
     end
 
     nil
