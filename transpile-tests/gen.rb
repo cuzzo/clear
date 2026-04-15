@@ -120,7 +120,7 @@ class TestGenerator
     <<~ZIG
       pub const CLEAR_FRAME_DEBUG = #{frame_debug};
       const std = @import("std");
-      const CheatHeader = @import("runtime-header.zig");
+      const CheatHeader = @import("runtime/runtime-header.zig");
       const CheatLib = CheatHeader.CheatLib;
       const Runtime = CheatHeader.Runtime;
       const EbrContext = CheatHeader.EbrContext;

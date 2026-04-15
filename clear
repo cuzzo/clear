@@ -764,25 +764,32 @@ when 'test'
       error "Transpilation failed"
     end
 
-    # Write to per-process build dir
+    # Write to a minimal per-process build dir matching normal build layout.
     base_name = File.basename(source, '.cht')
     build_dir = File.join(ZIG_DIR, ".build-#{$$}")
     FileUtils.mkdir_p(build_dir)
-    Dir.glob(File.join(ZIG_DIR, '*.{zig,S}')).each do |f|
-      dst = File.join(build_dir, File.basename(f))
-      File.symlink(f, dst) unless File.exist?(dst)
-    end
-    lib_dir = File.join(ZIG_DIR, 'lib')
-    if Dir.exist?(lib_dir)
-      dst = File.join(build_dir, 'lib')
-      File.symlink(lib_dir, dst) unless File.exist?(dst)
-    end
+    ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+    ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
     tmp_name = "._clear_tmp_#{base_name}.zig"
     tmp_zig = File.join(build_dir, tmp_name)
     File.write(tmp_zig, zig_code)
 
-    # Compile and run with zig test
-    cmd = "#{ZIG} test #{tmp_name} -lc switch.S onRoot.S --test-filter \"#{File.basename(source)}\""
+    # Compile and run with zig test (Zig 0.16 module format)
+    lib_modules = {
+      'safety' => 'lib/safety.zig',
+      'ebr' => 'lib/ebr.zig',
+      'ownership' => 'lib/ownership.zig',
+      'compat' => 'lib/compat.zig'
+    }
+    cmd_parts = [ZIG, 'test']
+    lib_modules.each_key { |m| cmd_parts += ['--dep', m] }
+    cmd_parts += ["-Mroot=#{tmp_name}", 'runtime/switch.S', 'runtime/onRoot.S']
+    cmd_parts += ["-Msafety=#{File.join(ZIG_DIR, lib_modules['safety'])}"]
+    cmd_parts += ['--dep', 'compat', "-Mebr=#{File.join(ZIG_DIR, lib_modules['ebr'])}"]
+    cmd_parts += ["-Mownership=#{File.join(ZIG_DIR, lib_modules['ownership'])}"]
+    cmd_parts += ["-Mcompat=#{File.join(ZIG_DIR, lib_modules['compat'])}"]
+    cmd_parts += ['-lc', '--test-filter', "\"#{File.basename(source)}\""]
+    cmd = cmd_parts.join(' ')
     compile_output = `cd #{build_dir} && #{cmd} 2>&1`
     success = $?.success?
     FileUtils.rm_rf(build_dir)
