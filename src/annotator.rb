@@ -1305,20 +1305,39 @@ private
       end
     end
 
-    # RETURN COPY expr or RETURN Struct{ field: COPY ... }: the COPY heap-dupes,
-    # so the caller receives heap-allocated data.
-    if node.value.is_a?(AST::CopyNode)
+    # 4. Escape marking: set escaped_return on variables being returned
+    # so the ownership generator suppresses their defer cleanup.
+    # PromotionClassifier (Pass C) reads these flags to decide what to promote.
+    if mark_escaping_collections!(node.value)
       fn_node = @fn_nodes[current_fn_ctx&.name]
       if fn_node
         fn_node.return_provenance = :heap
       end
-    elsif node.value.is_a?(AST::StructLit)
-      has_copy_field = node.value.fields.any? { |_, v| v.is_a?(AST::CopyNode) }
-      if has_copy_field
-        fn_node = @fn_nodes[current_fn_ctx&.name]
+    end
+
+    # RETURN COPY expr or RETURN Struct{ field: COPY ... } normally heap-dupes,
+    # so the caller receives heap-allocated data.
+    # But COPY of an implicitly-copyable value (e.g. Id<T>) is value-like and
+    # must not force heap return provenance.
+    if node.value.is_a?(AST::CopyNode)
+      fn_node = @fn_nodes[current_fn_ctx&.name]
+      copy_ti = node.value.type_info
+      resolver = ->(name) { lookup_type_schema(name) rescue nil }
+      unless copy_ti&.implicitly_copyable?(resolver)
         if fn_node
           fn_node.return_provenance = :heap
         end
+      end
+    elsif node.value.is_a?(AST::StructLit)
+      resolver = ->(name) { lookup_type_schema(name) rescue nil }
+      has_copy_field = node.value.fields.any? do |_, v|
+        next false unless v.is_a?(AST::CopyNode)
+        vti = v.type_info
+        !vti&.implicitly_copyable?(resolver)
+      end
+      if has_copy_field
+        fn_node = @fn_nodes[current_fn_ctx&.name]
+        fn_node.return_provenance = :heap
       end
     end
 
