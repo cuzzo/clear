@@ -167,7 +167,7 @@ class Parser
     consume(:CHAR, '(')
     expr = parse_expression
     consume(:CHAR, ')')
-    expr
+    parse_suffixes(expr)
   end
 
   # Array Indexing: arr[index]

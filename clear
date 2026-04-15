@@ -75,7 +75,9 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       out_mtime = File.mtime(output)
       src_mtime = File.mtime(source)
       compiler_mtime = Dir.glob(File.join(SRC_DIR, '*.rb')).map { |f| File.mtime(f) }.max
-      runtime_mtime = File.mtime(File.join(ZIG_DIR, 'runtime', 'runtime-header.zig')) rescue Time.at(0)
+      runtime_mtime = Dir.glob(File.join(ZIG_DIR, '**', '*.{zig,S}'))
+                        .map { |f| File.mtime(f) }
+                        .max || Time.at(0)
       newest_dep = [src_mtime, compiler_mtime, runtime_mtime].compact.max
       if out_mtime > newest_dep
         $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
@@ -114,6 +116,11 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   Dir.glob(File.join(ZIG_DIR, '*.{zig,S}')).each do |f|
     dst = File.join(build_dir, File.basename(f))
     File.symlink(f, dst) unless File.exist?(dst)
+  end
+  lib_dir = File.join(ZIG_DIR, 'lib')
+  if Dir.exist?(lib_dir)
+    dst = File.join(build_dir, 'lib')
+    File.symlink(lib_dir, dst) unless File.exist?(dst)
   end
 
   tmp_name = "._clear_tmp_#{base_name}.zig"
@@ -566,6 +573,11 @@ when 'test'
     Dir.glob(File.join(ZIG_DIR, '*.{zig,S}')).each do |f|
       dst = File.join(build_dir, File.basename(f))
       File.symlink(f, dst) unless File.exist?(dst)
+    end
+    lib_dir = File.join(ZIG_DIR, 'lib')
+    if Dir.exist?(lib_dir)
+      dst = File.join(build_dir, 'lib')
+      File.symlink(lib_dir, dst) unless File.exist?(dst)
     end
     tmp_name = "._clear_tmp_#{base_name}.zig"
     tmp_zig = File.join(build_dir, tmp_name)

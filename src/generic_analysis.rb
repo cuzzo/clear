@@ -269,12 +269,9 @@ module GenericAnalysis
 
   # Validate stream type annotations on variable declarations.
   def validate_stream_type!(node)
-    return unless node.type.is_a?(Type) && node.type.tense?
+    return unless node.type.is_a?(Type) && node.type.future?
     if node.type.multiowned?
       error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
-    end
-    if node.type.tense_type.array? && node.type.tense_type.dynamic? && !node.type.list_collection?
-      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, ~T[?] for an open/closeable stream, or ~T[]@list for a dynamic promise list.")
     end
   end
 

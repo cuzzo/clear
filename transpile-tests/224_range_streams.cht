@@ -1,0 +1,34 @@
+-- Test: ranges are finite stream values by default.
+-- Covers:
+-- 1. grouped postfix call: (0 ..< 3).toList()
+-- 2. plain integer bounds stay integer-typed
+-- 3. NEXT on ~T[] yields ?T until exhaustion
+-- 4. variable-backed EACH lowers through the finite-stream MIR path
+
+FN main() RETURNS Void ->
+    vals = (0 ..< 3).toList();
+    ASSERT vals.length() == 3, "toList length";
+    ASSERT vals[0] == 0, "toList[0]";
+    ASSERT vals[1] == 1, "toList[1]";
+    ASSERT vals[2] == 2, "toList[2]";
+
+    stream: ~Int64[] = 0 ..< 3;
+    a: ?Int64 = NEXT stream;
+    b: ?Int64 = NEXT stream;
+    c: ?Int64 = NEXT stream;
+    d: ?Int64 = NEXT stream;
+    ASSERT a == 0, "first NEXT";
+    ASSERT b == 1, "second NEXT";
+    ASSERT c == 2, "third NEXT";
+    ASSERT d == NIL, "stream exhausted";
+
+    vals2: ~Int64[] = 0 ..< 5;
+    MUTABLE sum: Int64 = 0;
+    vals2 s> EACH {
+        sum = sum + _;
+    };
+    ASSERT sum == 10, "variable-backed EACH";
+
+    print("PASS");
+    RETURN;
+END

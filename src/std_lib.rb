@@ -79,6 +79,31 @@ STD_LIB = {
     { args: [:Float64],    return: :Float64, zig: "{0}" }
   ],
 
+  "toList" => [
+    {
+      args: [:"Any[]"],
+      return: lambda { |args, _node|
+        recv_t = Type.new(args[0])
+        elem_t = if recv_t.dynamic_stream? || recv_t.promise_list?
+          recv_t.tense_type.element_type
+        elsif recv_t.bounded_stream?
+          recv_t.stream_element_type
+        elsif recv_t.inf_stream?
+          recv_t.inf_stream_element_type
+        elsif recv_t.open_stream?
+          recv_t.open_stream_element_type
+        else
+          recv_t.element_type
+        end
+        Type.new(:"#{elem_t.resolved}[]", collection: :list)
+      },
+      zig: "try ({0}).toList(rt.heapAlloc())",
+      allocates: true,
+      alloc: :heap,
+      is_method: true,
+    }
+  ],
+
   # charAt(string, index) → String
   # String@raw: O(1) byte indexing, no allocation, no UTF-8 iteration.
   # String:     O(n) UTF-8 codepoint indexing, allocates result.
@@ -793,4 +818,3 @@ BUILTIN_OPS = {
   # --- Deep copy (allocates heap copy of union value) ---
   dupeUnionValue: { zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", allocates: true },
 }.freeze
-

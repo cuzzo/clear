@@ -162,3 +162,32 @@ test "Stream(f64) and BoundedStream(f64, 3) are distinct types" {
     const BS = CheatLib.BoundedStream(f64, 3);
     try std.testing.expect(S != BS);
 }
+
+test "IntRange nextOrNull and toList work" {
+    var range = CheatLib.IntRange{ .start = 0, .end = 3 };
+    try std.testing.expectEqual(@as(?i64, 0), try range.next());
+    try std.testing.expectEqual(@as(?i64, 1), try range.nextOrNull());
+    try std.testing.expectEqual(@as(?i64, 2), try range.nextOrNull());
+    try std.testing.expectEqual(@as(?i64, null), try range.nextOrNull());
+
+    var list = try (CheatLib.IntRange{ .start = 2, .end = 5 }).toList(std.testing.allocator);
+    defer list.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 3), list.items.len);
+    try std.testing.expectEqual(@as(i64, 2), list.items[0]);
+    try std.testing.expectEqual(@as(i64, 3), list.items[1]);
+    try std.testing.expectEqual(@as(i64, 4), list.items[2]);
+}
+
+test "Range nextOrNull and toList work" {
+    var range = CheatLib.Range{ .start = 1.5, .end = 4.5 };
+    try std.testing.expectEqual(@as(?f64, 1.5), try range.next());
+    try std.testing.expectEqual(@as(?f64, 2.5), try range.nextOrNull());
+    try std.testing.expectEqual(@as(?f64, 3.5), try range.nextOrNull());
+    try std.testing.expectEqual(@as(?f64, null), try range.nextOrNull());
+
+    var list = try (CheatLib.Range{ .start = 0.5, .end = 2.5 }).toList(std.testing.allocator);
+    defer list.deinit(std.testing.allocator);
+    try std.testing.expectEqual(@as(usize, 2), list.items.len);
+    try std.testing.expectEqual(@as(f64, 0.5), list.items[0]);
+    try std.testing.expectEqual(@as(f64, 1.5), list.items[1]);
+}

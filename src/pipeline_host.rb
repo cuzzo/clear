@@ -1147,6 +1147,11 @@ class PipelineHost
       ])
     end
 
+    # Finite stream source (direct range or variable-backed ~T[]): zero-allocation
+    # pull iteration via .next().
+    range_chain = unwrap_range_chain(list_node)
+    return lower_each_range(range_chain[:source], range_chain[:stages], each_op) if range_chain
+
     # Non-SOA list collection or fixed_soa: iterate items
     if lhs_type&.list_collection? || lhs_type&.fixed_soa?
       source_mir = visit_mir(list_node)
@@ -1161,20 +1166,17 @@ class PipelineHost
       ])
     end
 
-    # Range source (plain or with fused fusible stages): zero-allocation lazy
-    # iteration via LazyRange(T). Handles both bare RangeLit and chains like
-    # `(range s> SELECT f s> WHERE g)` that PipelineRewriter bypassed.
-    range_chain = unwrap_range_chain(list_node)
-    return lower_each_range(range_chain[:source], range_chain[:stages], each_op) if range_chain
-
     nil  # Fall through to string path
   end
 
-  # Walk a BinaryOp(SMOOTH) left-spine looking for a RangeLit root with
-  # only fusible stages between. Returns { source: RangeLit, stages: [...] }
-  # or nil if the node is not a pure-fusible range chain.
+  def finite_stream_source_node?(node)
+    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream?
+  end
+
+  # Walk a BinaryOp(SMOOTH) left-spine looking for a finite stream source
+  # with only fusible stages between.
   def unwrap_range_chain(node)
-    return { source: node, stages: [] } if node.is_a?(AST::RangeLit)
+    return { source: node, stages: [] } if finite_stream_source_node?(node)
     return nil unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
 
     stages = []
@@ -1190,7 +1192,7 @@ class PipelineHost
         return nil
       end
     end
-    return nil unless cursor.is_a?(AST::RangeLit)
+    return nil unless finite_stream_source_node?(cursor)
     { source: cursor, stages: stages }
   end
 
@@ -1206,20 +1208,20 @@ class PipelineHost
     end
   end
 
-  # Build the LazyRange init + stage prefix shared by lower_each_range and lower_range_fold.
-  # Returns a hash: { range_let, outer_stmts, stage_stmts, item_var, initial_capture,
+  # Build the finite-stream source setup + stage prefix shared by lower_each_range and lower_range_fold.
+  # Returns a hash: { source_setup, outer_stmts, stage_stmts, item_var, initial_capture,
   #                   item_used, elem_zig }
   # `item_used` tracks whether the initial capture (`__each_item`) is referenced
   # by any stage -- used by callers to decide between |__each_item| and |_| in Zig.
-  def build_lazy_range_prefix(range_lit, stages)
-    start_mir  = visit_mir(range_lit.start)
-    end_mir    = visit_mir(range_lit.finish)
-    start_code = @emitter.emit(start_mir)
-    end_code   = @emitter.emit(end_mir)
-    end_expr   = range_lit.inclusive ? "#{end_code} + 1" : end_code
-
-    start_ft = range_lit.start.respond_to?(:full_type) ? range_lit.start.full_type : nil
-    elem_zig  = (start_ft && Type.new(start_ft).zig_type) || "i64"
+  def build_lazy_range_prefix(source_node, stages)
+    source_ti = source_node.type_info
+    elem_t = if source_ti&.dynamic_stream?
+      source_ti.tense_type.element_type
+    else
+      start_ft = source_node.respond_to?(:start) && source_node.start.respond_to?(:full_type) ? source_node.start.full_type : nil
+      Type.new(start_ft || :Int64)
+    end
+    elem_zig = elem_t.zig_type
 
     initial_capture = "__each_item"
     item_var    = initial_capture
@@ -1276,24 +1278,22 @@ class PipelineHost
       end
     end
 
-    range_let = MIR::Let.new("__range_src",
-      MIR::InlineZig.new(
-        "CheatLib.LazyRange(#{elem_zig}).init(@as(#{elem_zig}, #{start_code}), @as(#{elem_zig}, #{end_expr}))",
-        "lazy_range"),
-      true, nil, nil)
+    source_setup = unless source_node.is_a?(AST::Identifier) && source_ti&.dynamic_stream?
+      MIR::Let.new("__range_src", visit_mir(source_node), true, nil, "_ = &__range_src;")
+    end
 
-    { range_let: range_let, outer_stmts: outer_stmts, stage_stmts: stage_stmts,
+    { source_setup: source_setup, outer_stmts: outer_stmts, stage_stmts: stage_stmts,
       item_var: item_var, initial_capture: initial_capture, item_used: item_used,
       elem_zig: elem_zig }
   end
 
-  # Emit a fused while loop for a range source with zero or more fusible stages.
-  # Produces a single LazyRange-based while loop -- no intermediate materialization.
+  # Emit a fused while loop for a finite stream source with zero or more fusible stages.
   def lower_each_range(range_lit, stages, each_op)
     p = build_lazy_range_prefix(range_lit, stages)
     item_var        = p[:item_var]
     initial_capture = p[:initial_capture]
     item_used       = p[:item_used]
+    source_name     = (range_lit.is_a?(AST::Identifier) && range_lit.type_info&.dynamic_stream?) ? visit_mir(range_lit).name : "__range_src"
 
     body_mir = visit_pipeline_body_mir(each_op.body, placeholder: item_var)
 
@@ -1304,9 +1304,9 @@ class PipelineHost
     capture_name = item_used ? initial_capture : "_"
 
     MIR::ScopeBlock.new([
-      p[:range_let], *p[:outer_stmts],
+      *([p[:source_setup]].compact), *p[:outer_stmts],
       MIR::WhileStmt.new(
-        MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+        MIR::InlineZig.new("try #{source_name}.next()", "lazy_range_next"),
         [*p[:stage_stmts], *body_mir],
         capture_name, nil, nil, nil)
     ])
@@ -1319,6 +1319,7 @@ class PipelineHost
     p = build_lazy_range_prefix(range_lit, stages)
     item_var = p[:item_var]
     elem_zig = p[:elem_zig]
+    source_name = (range_lit.is_a?(AST::Identifier) && range_lit.type_info&.dynamic_stream?) ? visit_mir(range_lit).name : "__range_src"
 
     # Fold always references the element; always use the initial capture name.
     capture_name = p[:initial_capture]
@@ -1426,9 +1427,9 @@ class PipelineHost
     end
 
     MIR::BlockExpr.new(label, [
-      p[:range_let], *p[:outer_stmts], *acc_init_stmts,
+      *([p[:source_setup]].compact), *p[:outer_stmts], *acc_init_stmts,
       MIR::WhileStmt.new(
-        MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+        MIR::InlineZig.new("try #{source_name}.next()", "lazy_range_next"),
         [*p[:stage_stmts], *loop_acc_stmts],
         capture_name, nil, nil, nil),
       *post_loop_stmts,
@@ -1441,6 +1442,7 @@ class PipelineHost
   def lower_range_reduce(range_lit, stages, reduce_op)
     p = build_lazy_range_prefix(range_lit, stages)
     item_var = p[:item_var]
+    source_name = (range_lit.is_a?(AST::Identifier) && range_lit.type_info&.dynamic_stream?) ? visit_mir(range_lit).name : "__range_src"
 
     label    = next_pipe_label
     acc_zig  = transpile_type(reduce_op.full_type.to_s)
@@ -1450,10 +1452,10 @@ class PipelineHost
     }
 
     MIR::BlockExpr.new(label, [
-      p[:range_let], *p[:outer_stmts],
+      *([p[:source_setup]].compact), *p[:outer_stmts],
       MIR::Let.new("acc", init_mir, true, acc_zig, nil),
       MIR::WhileStmt.new(
-        MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+        MIR::InlineZig.new("try #{source_name}.next()", "lazy_range_next"),
         [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)],
         p[:initial_capture], nil, nil, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
@@ -1464,6 +1466,10 @@ class PipelineHost
   # atomics, spawn -- too complex for MIR nodes), but with stdlib_def so the
   # checker knows the allocation effects.
   def lower_concurrent(_lhs, conc_op, smooth_node)
+    if unwrap_range_chain(smooth_node.left)
+      raise "CONCURRENT over finite streams is temporarily disabled until it has a MIR-safe lowering path"
+    end
+
     inner = conc_op.op
     zig_code = transpile_concurrent(smooth_node)
 

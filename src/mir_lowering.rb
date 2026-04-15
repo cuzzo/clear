@@ -2861,10 +2861,11 @@ class MIRLowering
   def lower_range_lit(node)
     s = lower(node.start)
     e = lower(node.finish)
+    elem_type = node.type_info&.tense_type&.element_type&.resolved
     if node.inclusive
-      MIR::RangeLit.new(s, MIR::BinOp.new("+", e, MIR::Lit.new("1")))
+      MIR::RangeLit.new(s, MIR::BinOp.new("+", e, MIR::Lit.new("1")), elem_type)
     else
-      MIR::RangeLit.new(s, e)
+      MIR::RangeLit.new(s, e, elem_type)
     end
   end
 
@@ -3007,13 +3008,13 @@ class MIRLowering
   def lower_var_decl(node)
     is_mutable = node.respond_to?(:mutable) && node.mutable
     ft = Type.new(node.full_type || :Void)
-    is_mutable ||= ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
+    is_mutable ||= ft.dynamic_stream? || ft.bounded_stream? || ft.shared_promise? || ft.open_stream? || ft.inf_stream?
     is_mutable ||= ft.collection?
     is_mutable ||= ft.resource? || node.resource_close_zig
     is_mutable = false if ft.local?
 
     actually_mutated = is_mutable && node.respond_to?(:var_mutated) && node.var_mutated == true
-    has_mutable_cleanup = node.has_cleanup || ft&.collection? || ft&.bounded_stream? || ft&.shared_promise? ||
+    has_mutable_cleanup = node.has_cleanup || ft&.collection? || ft&.dynamic_stream? || ft&.bounded_stream? || ft&.shared_promise? ||
                           ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
                           ft&.heap_provenance? || ft&.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup

@@ -326,10 +326,15 @@ class Type
     end
 
     # 5a. Tense (Promise) Coercion: ~T only accepts ~T with a compatible inner type
-    if self.tense?
+    if self.future?
       # Promise list (~T[]@list) accepts an empty list literal [] or another ~T[] type.
-      return true if self.promise_list? && (other_type.empty_list? || (other_type.tense? && other_type.tense_type.dynamic?))
-      return false unless other_type.tense?
+      return true if self.promise_list? && (other_type.empty_list? || (other_type.future? && other_type.tense_type.dynamic?))
+      return false unless other_type.future?
+      if self.dynamic_stream? && other_type.dynamic_stream?
+        self_elem  = self.tense_type.element_type
+        other_elem = other_type.tense_type.element_type
+        return self_elem.accepts?(other_elem) if self_elem && other_elem
+      end
       # Stream coercion: ~T[INF] accepts ~T[?] and vice versa (BG STREAM infers [?],
       # declared type picks the runtime wrapper). Match on element type only.
       if (self.inf_stream? && other_type.open_stream?) || (self.open_stream? && other_type.inf_stream?)
@@ -342,8 +347,12 @@ class Type
 
     # 5. Array Coercion (The complex part from your Annotator)
     if self.array?
-      # Any[] accepts promise list types (~T[]) for append/list intrinsic matching.
-      return true if self.element_type.any? && other_type.tense? && other_type.tense_type.dynamic?
+      # Any[] accepts stream types for append/list intrinsic matching.
+      if self.element_type.any? && other_type.future?
+        return true if other_type.dynamic_stream? || other_type.promise_list? ||
+                       other_type.bounded_stream? || other_type.open_stream? ||
+                       other_type.inf_stream?
+      end
       return false if !other_type.array?
       return true if other_type.empty_list?
       return false unless self.element_type.accepts?(other_type.element_type)
@@ -750,7 +759,7 @@ class Type
   # True when this is a list of promises: ~T[]@list — a dynamic list of BG tasks.
   # Declared as `MUTABLE futures: ~T[]@list = []`; populated via append(futures, BG { ... }).
   def promise_list?
-    tense? && list_collection?
+    future? && list_collection?
   end
 
   # True when the collection has a sharding topology modifier (@pool:sharded(N) / @list:sharded(N)).
@@ -824,9 +833,24 @@ class Type
     !!@is_tense
   end
 
+  # Preferred predicate name for ~T / stream-like future values.
+  def future?
+    tense?
+  end
+
   def tense_type
-    return nil unless tense?
+    return nil unless future?
     @tense_type_obj ||= Type.new(@tense_type_raw || :Void)
+  end
+
+  # Finite dynamic stream: ~T[].
+  # Used for lazy finite producers like ranges. NEXT returns ?T until exhausted.
+  def dynamic_stream?
+    future? && tense_type.dynamic? && !list_collection?
+  end
+
+  def stream?
+    dynamic_stream? || bounded_stream? || open_stream? || inf_stream?
   end
 
   # Bounded stream: ~T[N] — a fixed array of N promises consumed one-by-one via NEXT.
@@ -834,20 +858,20 @@ class Type
   def bounded_stream?
     # ~T[N] is a bounded stream of N elements. ~String is NOT a bounded stream
     # even though String is internally []const u8 (a fixed array) - it's a Promise.
-    tense? && tense_type.fixed? && !tense_type.string?
+    future? && tense_type.fixed? && !tense_type.string?
   end
 
   # Shared promise: ~T@shared — a memoized promise backed by Arc-style ref counting.
   # Multiple holders can call NEXT independently; NEXT is idempotent per handle.
   # NOT linearly affine — can be retained (cloned) without consuming it.
   def shared_promise?
-    tense? && shared?
+    future? && shared?
   end
 
   # Open stream: ~T[?] — a generator-backed stream; NEXT returns ?T (nil when exhausted).
   # Resource semantics: call deinit() to free the heap-allocated buffer.
   def open_stream?
-    tense? && tense_type.open_stream_marker?
+    future? && tense_type.open_stream_marker?
   end
 
   # The element type T in ~T[?].
@@ -860,7 +884,7 @@ class Type
   # Generator and consumer rendezvous on each value: push() blocks until next() reads it.
   # Resource semantics: call deinit() to free the heap-allocated Inner.
   def inf_stream?
-    tense? && tense_type.inf_stream_marker?
+    future? && tense_type.inf_stream_marker?
   end
 
   # The element type T in ~T[INF].
@@ -1416,6 +1440,15 @@ class Type
         elem_zig = stream_element_type.zig_type(is_param: is_param, is_field: is_field)
         return "CheatLib.BoundedStream(#{elem_zig}, #{stream_capacity})"
       end
+      if dynamic_stream?
+        inner_t = tense_type.element_type
+        return case inner_t&.resolved
+               when :Int64 then "CheatLib.IntRange"
+               when :Float64 then "CheatLib.Range"
+               else
+                 "CheatLib.Stream(#{inner_t.zig_type(is_param: is_param, is_field: is_field)})"
+               end
+      end
       if shared_promise?
         inner_zig = tense_type.zig_type(is_param: is_param, is_field: is_field)
         return "CheatLib.SharedPromise(#{inner_zig})"
@@ -1653,4 +1686,3 @@ module TypeHelper
     return storage
   end
 end
-

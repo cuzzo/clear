@@ -664,8 +664,8 @@ module MIR
   end
 
   # Range literal.
-  # Zig: CheatLib.Range{ .start = s, .end = e }
-  RangeLit = Struct.new(:start, :end_val) do
+  # Zig: CheatLib.IntRange{ .start = s, .end = e } or CheatLib.Range{ .start = s, .end = e }
+  RangeLit = Struct.new(:start, :end_val, :elem_type) do
     include Expr
   end
 

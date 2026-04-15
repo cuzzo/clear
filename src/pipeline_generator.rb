@@ -579,6 +579,29 @@ module PipelineGenerator
       }.join("\n        ")
     end
 
+    if lhs_type&.dynamic_stream?
+      stream_code = visit(lhs)
+      source_name, setup =
+        if lhs.is_a?(AST::Identifier)
+          [stream_code, ""]
+        else
+          ["__each_src", "var __each_src = #{stream_code};\n      _ = &__each_src;\n"]
+        end
+
+      if is_soa
+        @soa_rewrite_active = prev_soa_active
+        @soa_needed_fields  = prev_soa_fields
+      end
+
+      return <<~ZIG.chomp
+        {
+            #{setup}while (try #{source_name}.next()) |__each_item| {
+                #{body_code}
+            }
+        }
+      ZIG
+    end
+
     result = if lhs_type&.pool?
       if lhs_type.sharded?
         transpile_each_sharded_pool(lhs, body_code, lhs_type)

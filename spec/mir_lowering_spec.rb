@@ -782,13 +782,13 @@ RSpec.describe MIRLowering do
       e = make_lit(:NUMBER, 10, full_type: :Int64)
       e.coerced_type = :Int64
       node = AST::RangeLit.new(tok, s, e, false)
-      node.full_type = :Range
+      node.full_type = Type.new(:"~Int64[]")
       result = lowering.lower(node)
       expect(result).to be_a(MIR::RangeLit)
       zig = emit(result)
-      expect(zig).to include("CheatLib.Range")
-      expect(zig).to include("@floatFromInt(0)")
-      expect(zig).to include("@floatFromInt(10)")
+      expect(zig).to include("CheatLib.IntRange")
+      expect(zig).to include(".start = 0")
+      expect(zig).to include(".end = 10")
     end
 
     it "lowers inclusive range (adds 1 to end)" do
@@ -797,7 +797,7 @@ RSpec.describe MIRLowering do
       e = make_lit(:NUMBER, 5, full_type: :Int64)
       e.coerced_type = :Int64
       node = AST::RangeLit.new(tok, s, e, true)
-      node.full_type = :Range
+      node.full_type = Type.new(:"~Int64[]")
       result = lowering.lower(node)
       zig = emit(result)
       expect(zig).to include("(5 + 1)")

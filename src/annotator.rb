@@ -1517,6 +1517,8 @@ private
       node.full_type = Type.new(ret[:type], sync: ret[:sync], ownership: ret[:ownership])
     elsif ret.is_a?(Symbol) && ret.to_s.start_with?("infer_") && respond_to?(ret, true)
       node.full_type = send(ret, args, node)
+    elsif ret.respond_to?(:call)
+      node.full_type = ret.call(args.map(&:resolved_type), node)
     else
       node.full_type = ret
     end
@@ -2371,7 +2373,7 @@ private
     # Produces ~T[N] type — a fixed-size stream of N concurrent BG fibers.
     # This must be checked before the general array logic, since ~T items would
     # otherwise produce a bare ~T[] type (which is a compiler error).
-    if !node.items.empty? && node.items.all? { |i| Type.new(i.resolved_type).tense? }
+    if !node.items.empty? && node.items.all? { |i| Type.new(i.resolved_type).future? }
       inner_types = node.items.map { |i| Type.new(i.resolved_type).tense_type.to_sym }.uniq
       if inner_types.size > 1
         error!(node, "Bounded stream literal contains mixed promise types: #{inner_types.join(', ')}. All BG blocks must produce the same type.")
@@ -2456,7 +2458,12 @@ private
       # Both integer: keep as-is (Int64 range)
     end
 
-    node.full_type = :Range
+    base_type = if start_is_float || finish_is_float
+      :Float64
+    else
+      :Int64
+    end
+    node.full_type = Type.new(:"~#{base_type}[]")
   end
 
   def visit_Literal(node)
@@ -3161,14 +3168,8 @@ private
     visit(node.expr)
     promise_type = Type.new(node.expr.full_type || :Void)
 
-    unless promise_type.tense?
-      error!(node, "NEXT requires a Promise (~T) or bounded stream (~T[N]), got #{node.expr.full_type}")
-    end
-
-    # ~T[] (bare dynamic tense array) is not a valid form — give a directed error.
-    # Exception: ~T[]@list (promise_list) is valid — it's a dynamic list of promises.
-    if promise_type.tense_type.array? && promise_type.tense_type.dynamic? && !promise_type.promise_list?
-      error!(node, "~T[] is not a valid stream type. Use ~T[N] for a bounded stream of N concurrent tasks, ~T[INF] for an infinite rendezvous stream, or ~T[?] for an open/closeable stream.")
+    unless promise_type.future?
+      error!(node, "NEXT requires a future value (~T), got #{node.expr.full_type}")
     end
 
     if promise_type.promise_list?
@@ -3179,6 +3180,9 @@ private
       end
       elem_sym = promise_type.tense_type.element_type.to_sym
       node.full_type = Type.new(:"#{elem_sym}[]", collection: :list)
+    elsif promise_type.dynamic_stream?
+      elem_sym = promise_type.tense_type.element_type.to_sym
+      node.full_type = :"?#{elem_sym}"
     elsif promise_type.bounded_stream?
       # NEXT on ~T[N]: returns T (the element type).
       # Does NOT mark the stream as moved — the stream can be NEXT'd up to N times.
@@ -3450,7 +3454,7 @@ private
         drops << { name: name, type: info.type, resource: true }
         og_drop(name)
       when :affine
-        if Type.new(info.type).tense?
+        if Type.new(info.type).future?
           error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
         end
         drops << { name: name, type: info.type }
@@ -3501,7 +3505,7 @@ private
         drops << { name: name, type: info.type, resource: true }
         og_drop(name)
       when :affine
-        if node && Type.new(info.type).tense?
+        if node && Type.new(info.type).future?
           error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
         end
         drops << { name: name, type: info.type }
@@ -4069,4 +4073,3 @@ private
   end
 
 end
-

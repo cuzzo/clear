@@ -30,6 +30,15 @@ module PipeAnalysis
 
   private
 
+  def finite_stream_source?(node)
+    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream?
+  end
+
+  def finite_stream_element_type(node)
+    return range_element_type(node) if node.is_a?(AST::RangeLit)
+    node.type_info.tense_type.element_type.resolved
+  end
+
   def has_catch_blocks?
     fn = @fn_nodes&.dig(current_fn_ctx&.name)
     fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
@@ -115,10 +124,10 @@ module PipeAnalysis
   # SELECT, WHERE, INDEX, ORDER_BY share similar structure.
   # SELECT and WHERE also accept a RangeLit source (fused lazy path).
   def analyze_select_family_op(node)
-    is_range = node.left.is_a?(AST::RangeLit) &&
-               (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
-    require_array_input!(node, "SELECT", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_stream = finite_stream_source?(node.left) &&
+                (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
+    require_array_input!(node, "SELECT", allow_range: is_stream, allow_stream: is_stream)
+    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     # Create a temporary Scope for the body
     with_new_scope do
@@ -162,9 +171,9 @@ module PipeAnalysis
   end
 
   def analyze_take_while_op(node)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "TAKE_WHILE", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_stream = finite_stream_source?(node.left)
+    require_array_input!(node, "TAKE_WHILE", allow_range: is_stream, allow_stream: is_stream)
+    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -441,12 +450,12 @@ module PipeAnalysis
   end
 
   def analyze_each_op(node)
-    # EACH accepts arrays (metatype :array), pools, @list:sharded collections, and ranges.
+    # EACH accepts arrays, collections, and finite streams.
     lhs_type  = node.left.type_info
     is_pool   = lhs_type&.pool?
     is_list   = lhs_type&.list_collection?
     is_array  = node.left.metatype == :array
-    is_range  = node.left.is_a?(AST::RangeLit)
+    is_range  = finite_stream_source?(node.left)
 
     unless is_pool || is_list || is_array || is_range
       error!(node.left, "Cannot EACH non-collection type #{node.left.resolved_type}. EACH requires an array, @list, @list:sharded(N), @pool, @pool:sharded(N), or a range")
@@ -455,9 +464,7 @@ module PipeAnalysis
     end
 
     item_type = if is_range
-      # Element type matches the range bound type (start expression's type)
-      start_ft = node.left.start.respond_to?(:full_type) ? node.left.start.full_type : :Number
-      start_ft || :Number
+      finite_stream_element_type(node.left)
     elsif is_pool || is_list
       lhs_type.element_type.resolved
     else
@@ -480,9 +487,9 @@ module PipeAnalysis
 
   def analyze_skip_op(node)
     # SKIP: list s> SKIP n -> same list type with first n elements removed (also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "SKIP", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "SKIP", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     visit(node.right.count)
     count_type = node.right.count.resolved_type
@@ -497,7 +504,7 @@ module PipeAnalysis
   def analyze_tap_op(node)
     # TAP: list s> TAP { body } -> same list type (pass-through); also accepts range source.
     lhs_type = node.left.type_info
-    is_range = node.left.is_a?(AST::RangeLit)
+    is_range = finite_stream_source?(node.left)
     is_pool  = lhs_type&.pool?
     is_list  = lhs_type&.list_collection?
     is_array = node.left.metatype == :array
@@ -508,7 +515,7 @@ module PipeAnalysis
       return
     end
 
-    item_type = is_range ? range_element_type(node.left) : lhs_type.element_type.resolved
+    item_type = is_range ? finite_stream_element_type(node.left) : lhs_type.element_type.resolved
 
     with_new_scope do
       # Read-only: TAP is for observation, not mutation
@@ -527,9 +534,9 @@ module PipeAnalysis
 
   def analyze_find_op(node)
     # FIND: list s> FIND predicate  → ?ElemType (first match or null; also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "FIND", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "FIND", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -546,9 +553,9 @@ module PipeAnalysis
 
   def analyze_any_op(node)
     # ANY: list s> ANY predicate  → Bool (short-circuits; also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "ANY", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "ANY", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -565,9 +572,9 @@ module PipeAnalysis
 
   def analyze_all_op(node)
     # ALL: list s> ALL predicate  → Bool (vacuous truth on empty; also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "ALL", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "ALL", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -584,9 +591,9 @@ module PipeAnalysis
 
   def analyze_count_op(node)
     # COUNT: list s> COUNT predicate  → Int64 (also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "COUNT", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "COUNT", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -610,9 +617,9 @@ module PipeAnalysis
 
   def analyze_sum_op(node)
     # SUM: list s> SUM expr  → Float64 (0 for empty; also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "SUM", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "SUM", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -630,9 +637,9 @@ module PipeAnalysis
 
   def analyze_average_op(node)
     # AVERAGE: list s> AVERAGE expr  → Float64 (0 for empty; also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "AVERAGE", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "AVERAGE", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -650,9 +657,9 @@ module PipeAnalysis
 
   def analyze_min_op(node)
     # MIN: list s> MIN expr  → Float64 (panics on empty; also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "MIN", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "MIN", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -670,9 +677,9 @@ module PipeAnalysis
 
   def analyze_max_op(node)
     # MAX: list s> MAX expr  → Float64 (panics on empty; also accepts range)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "MAX", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    is_range = finite_stream_source?(node.left)
+    require_array_input!(node, "MAX", allow_range: is_range, allow_stream: is_range)
+    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -782,16 +789,16 @@ module PipeAnalysis
   # Visits the body, then extracts the key expression and sets shard_context.
   def analyze_auto_shard_each_op(smooth_node, conc, proxy)
     lhs_type = smooth_node.left.type_info
-    is_range = smooth_node.left.is_a?(AST::RangeLit)
+    is_range = finite_stream_source?(smooth_node.left)
     is_array = smooth_node.left.metatype == :array
     is_list  = lhs_type&.list_collection?
 
     item_type = if is_range
-      :Int64
+      finite_stream_element_type(smooth_node.left)
     elsif is_array || is_list
       lhs_type.element_type.resolved
     else
-      error!(smooth_node.left, "CONCURRENT EACH input must be a range or collection, got #{smooth_node.left.resolved_type}")
+      error!(smooth_node.left, "CONCURRENT EACH input must be a finite stream or collection, got #{smooth_node.left.resolved_type}")
       :Any
     end
 
@@ -1084,11 +1091,12 @@ module PipeAnalysis
   #   - Array types (metatype :array)
   #   - @pool and @pool:sharded(N) collection types
   #   - @list and @list:sharded(N) collection types
-  def require_array_input!(node, op_name, allow_range: false)
+  def require_array_input!(node, op_name, allow_range: false, allow_stream: false)
     lhs_type = node.left.type_info
     return if node.left.metatype == :array
     return if lhs_type&.collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
+    return if allow_stream && lhs_type&.dynamic_stream?
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")

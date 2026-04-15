@@ -4,6 +4,7 @@ const linux = std.os.linux;
 pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
+const streams = @import("lib/streams.zig");
 
 pub const EbrContext = @import("ebr").EbrContext;
 const Task = @import("queues.zig").Task;
@@ -42,21 +43,8 @@ noinline fn openPathFd(path: []const u8, flags: std.posix.O, mode: std.posix.mod
 }
 
 pub const CheatLib = struct {
-    // -----------------------------------------------------------------------
-    // Range: a contiguous numeric range [start, end) (end is always exclusive)
-    // Created via (start..<end) or (start..<=end) in CLEAR source.
-    pub const Range = struct {
-        start: f64,
-        end: f64,  // exclusive end
-
-        pub fn len(self: Range) f64 {
-            return self.end - self.start;
-        }
-
-        pub fn contains(self: Range, val: f64) bool {
-            return val >= self.start and val < self.end;
-        }
-    };
+    pub const Range = streams.Range;
+    pub const IntRange = streams.IntRange;
 
     // -----------------------------------------------------------------------
     // LazyRange(T): zero-allocation lazy iterator over a half-open range [start, end).
