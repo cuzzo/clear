@@ -1947,29 +1947,6 @@ private
     node.full_type = node.target.to_sym  # TODO: Check is this is needed
   end
 
-  def visit_Require(node)
-    # 1. Resolve Path (Same as Compiler)
-    # Note: You might need to pass source_path to Annotator initialize to resolve relative paths
-    current_dir = Dir.pwd # Or passed in path
-    full_path = File.expand_path(node.path, current_dir)
-
-    unless File.exist?(full_path)
-      error!(node, "Import Error: #{full_path}")
-    end
-
-    # 2. Parse
-    code = File.read(full_path)
-    # Assume you have access to your Lexer/Parser classes here
-    sub_ast = Parser.new(Lexer.new(code).tokenize, code).parse
-
-    # 3. Visit (In the SAME scope context, or new?)
-    # Compiler creates a NEW compiler. Annotator should probably visit
-    # in the current scope so types/functions become visible.
-    visit(sub_ast)
-
-    node.full_type = :Void
-  end
-
   def visit_GetIndex(node)
     visit(node.target)
     visit(node.index)

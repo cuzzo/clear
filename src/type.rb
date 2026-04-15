@@ -1063,29 +1063,14 @@ class Type
   # Returns true if this type contains frame-arena data that must be
   # duped to heap before returning from a function.
   def needs_promotion?(schema_lookup = nil)
-    return true if string?                  # Zig: FT == []const u8
-    return true if list_collection?         # Zig: isArrayList(FT)
-    return true if map? && !numeric_map?    # Zig: isStringMap(FT); NumericMap uses heapAlloc
+    return true if string? || list_collection? || (map? && !numeric_map?)
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash)
         if schema[:kind] == :union
-          return (schema[:variants] || {}).any? { |_, vt|
-            next false unless vt
-            next false if vt.is_a?(Hash) # inline struct
-            t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-            next false unless t
-            t.needs_promotion?(schema_lookup) rescue false
-          }
+          return schema_union_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
         elsif !schema[:kind]
-          # struct: recurse fields
-          return schema.any? { |k, v|
-            next false if k.is_a?(Symbol)
-            ft = v.is_a?(Hash) ? v[:type] : v
-            t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
-            next false unless t
-            t.needs_promotion?(schema_lookup) rescue false
-          }
+          return schema_struct_any?(schema) { |t| t.needs_promotion?(schema_lookup) }
         end
       end
     end
@@ -1098,33 +1083,16 @@ class Type
   # StringMap.freeUnionPayload inside collections, not at top level).
   # Plus: RC, NumericMap, Pool, Set.
   def needs_cleanup?(schema_lookup = nil)
-    return true if any_rc? || link?
-    return true if list_collection?
-    return true if map?  # includes numeric_map
-    return true if pool?
-    return true if set_collection?
-    return true if string? && heap_provenance?
-    return true if array? && !string?  # bare []T slices (Zig needsCleanup returns true for all slices)
-    return true if any_sync?           # Locked/RwLocked heap wrappers
+    return true if any_rc? || link? || list_collection? || map? || pool? ||
+                   set_collection? || (string? && heap_provenance?) ||
+                   (array? && !string?) || any_sync?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash)
         if schema[:kind] == :union
-          return (schema[:variants] || {}).any? { |_, vt|
-            next false unless vt
-            next false if vt.is_a?(Hash)
-            t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
-            next false unless t
-            t.needs_cleanup?(schema_lookup) rescue false
-          }
+          return schema_union_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
         elsif !schema[:kind]
-          return schema.any? { |k, v|
-            next false if k.is_a?(Symbol)
-            ft = v.is_a?(Hash) ? v[:type] : v
-            t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
-            next false unless t
-            t.needs_cleanup?(schema_lookup) rescue false
-          }
+          return schema_struct_any?(schema) { |t| t.needs_cleanup?(schema_lookup) }
         end
       end
     end
@@ -1163,13 +1131,7 @@ class Type
       if schema.is_a?(Hash) && schema[:kind] == :union
         return (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       elsif schema.is_a?(Hash) && !schema[:kind]
-        return schema.any? { |k, v|
-          next false if k.is_a?(Symbol)
-          ft = v.is_a?(Hash) ? v[:type] : v
-          t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
-          next false unless t
-          t.any_rc? || t.link? || t.any_sync? || t.resource?
-        }
+        return schema_struct_any?(schema) { |t| t.any_rc? || t.link? || t.any_sync? || t.resource? }
       end
     end
 
@@ -1189,13 +1151,7 @@ class Type
       if schema.is_a?(Hash) && schema[:kind] == :union
         return (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       elsif schema.is_a?(Hash) && !schema[:kind]
-        return schema.any? { |k, v|
-          next false if k.is_a?(Symbol)
-          ft = v.is_a?(Hash) ? v[:type] : v
-          ft2 = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
-          next false unless ft2
-          ft2.any_rc? || ft2.link? || ft2.any_sync? || ft2.resource?
-        }
+        return schema_struct_any?(schema) { |ft| ft.any_rc? || ft.link? || ft.any_sync? || ft.resource? }
       end
     end
     false
@@ -1210,12 +1166,7 @@ class Type
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash) && !schema[:kind]
-        return :heap if schema.any? { |k, v|
-          next false if k.is_a?(Symbol)
-          ft = v.is_a?(Hash) ? v[:type] : v
-          t = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-          t.link? || t.any_rc? || t.string?
-        }
+        return :heap if schema_struct_any?(schema) { |t| t.link? || t.any_rc? || t.string? }
       elsif schema.is_a?(Hash) && schema[:kind] == :union
         return :heap if (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
       end
@@ -1315,6 +1266,31 @@ class Type
   end
 
   private
+
+  # True if any struct field in schema satisfies the block (block receives Type).
+  # Skips metadata (Symbol) keys; unwraps {:type => T} field hashes.
+  def schema_struct_any?(schema)
+    schema.any? { |k, v|
+      next false if k.is_a?(Symbol)
+      ft = v.is_a?(Hash) ? v[:type] : v
+      t  = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
+      next false unless t
+      yield t
+    }
+  end
+
+  # True if any non-Hash union variant in schema satisfies the block (block receives Type).
+  # Skips nil and Hash variants (inline_struct/indirect); caller handles those via
+  # Type.variant_has_heap? when needed.
+  def schema_union_any?(schema)
+    (schema[:variants] || {}).any? { |_, vt|
+      next false unless vt
+      next false if vt.is_a?(Hash)
+      t = vt.is_a?(Type) ? vt : (Type.new(vt) rescue nil)
+      next false unless t
+      (yield t) rescue false
+    }
+  end
 
   def parse_raw_input
     # Hash and Array raws are function signatures — no string parsing applies.
@@ -1704,24 +1680,4 @@ module TypeHelper
     end
   end
 
-  def finalize_storage(node, final_type, type_size)
-    if (node.value.storage.nil? || node.value.storage == :stack) && node.value.type_object.requires_move?
-      if type_size > 128
-        node.value.storage = :frame
-      else
-        node.value.storage = :stack
-      end
-    end
-
-    # Get storage info
-    # (Assuming your AST::Literal or Value nodes have a storage field)
-    storage = node.value.respond_to?(:storage) ? node.value.storage : :stack
-    # Default to stack if storage is nil (e.g., primitives)
-    storage ||= :stack
-
-    # Increment frame after storage finalized
-    current_fn_ctx.frame_count += 1 if current_fn_ctx && storage == :frame
-
-    return storage
-  end
 end
