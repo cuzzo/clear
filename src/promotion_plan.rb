@@ -533,7 +533,7 @@ module CleanupClassifier
       classify_rc_or_link(ti, schema_lookup) ||
       classify_sync(ti) ||
       classify_heap_provenance(ti, node, schema_lookup) ||
-      classify_heap_struct_plain(ti, node) ||
+      classify_heap_struct_plain(ti, node, schema_lookup) ||
       classify_struct_cleanup_fields(ti, node, schema_lookup) ||
       classify_non_copy_union(ti, schema_lookup)
   end
@@ -646,14 +646,41 @@ module CleanupClassifier
     nil
   end
 
-  # @alwaysMutable / @indirect create heap pointers needing CheatLib.free.
-  private_class_method def self.classify_heap_struct_plain(ti, node)
+  # Catch-all for heap pointers not handled by classify_heap_provenance.
+  # Covers @alwaysMutable / @indirect annotations AND structs promoted to heap
+  # by MIRPass upgrade phases (upgrade_heap_ptr_returns_to_heap! et al.) where
+  # type_info.provenance is not set (only node.@storage_override is set).
+  #
+  # Consults the schema to choose the right cleanup kind:
+  #   - struct with heap-containing fields  -> :heap_struct  (recursive deinit)
+  #   - union with heap variants            -> :heap_union   (tagged deinit)
+  #   - plain struct (all-primitive fields) -> :heap_struct_plain (free only)
+  #
+  # This makes the choice based solely on node.storage, so MIRPass upgrades do
+  # NOT need to mutate type_info.provenance for struct variables.
+  private_class_method def self.classify_heap_struct_plain(ti, node, schema_lookup)
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
     return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
     # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?
+
+    # Consult schema to pick the correct cleanup kind.
+    schema = schema_lookup.call(ti.resolved) rescue nil
+    if schema.is_a?(Hash) && schema[:kind] == :union
+      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      return entry(:heap_union) if has_heap
+    end
+    if schema.is_a?(Hash) && !schema[:kind]
+      has_escapable = schema.any? do |k, v|
+        next false if k.is_a?(Symbol)
+        ft = v.is_a?(Type) ? v : Type.new(v.is_a?(Hash) ? (v[:type] || :Any) : (v || :Any))
+        ft.needs_escape_promotion?
+      end
+      return entry(:heap_struct) if has_escapable
+    end
+
     entry(:heap_struct_plain)
   end
 

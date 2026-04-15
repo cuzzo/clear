@@ -255,14 +255,8 @@ class MIRPass
       next unless ident.symbol.type && (ident.symbol.type.is_a?(Type) ? ident.symbol.type : (Type.new(ident.symbol.type) rescue nil))&.requires_move?
 
       ident.symbol.storage = :heap
-      sym_type = ident.symbol.type
-      sym_type.provenance = :heap if sym_type.is_a?(Type)
       decl = ident.symbol.reg
-      if decl&.respond_to?(:storage=)
-        decl.storage = :heap
-      end
-      decl_ti = decl&.type_info rescue nil
-      decl_ti.provenance = :heap if decl_ti.is_a?(Type)
+      decl.storage = :heap if decl&.respond_to?(:storage=)
     end
   end
 
@@ -290,15 +284,13 @@ class MIRPass
       next unless lhs_root.is_a?(AST::Identifier) && lhs_root.symbol
       next unless [:heap, :multiowned, :shared].include?(lhs_root.symbol.storage)
 
-      # Upgrade: scope entry + declaration node
+      # Upgrade: scope entry + declaration node.
+      # type_info.provenance is intentionally NOT mutated here -- it may be a
+      # shared Type object. classify_heap_struct_plain consults the schema via
+      # node.storage alone, so @storage_override is the only write needed.
       rhs.symbol.storage = :heap
-      rhs.symbol.type.provenance = :heap if rhs.symbol.type.is_a?(Type)
       decl = rhs.symbol.reg
-      if decl&.respond_to?(:storage=)
-        decl.storage = :heap
-      end
-      decl_ti = decl&.type_info rescue nil
-      decl_ti.provenance = :heap if decl_ti.is_a?(Type)
+      decl.storage = :heap if decl&.respond_to?(:storage=)
     end
   end
 

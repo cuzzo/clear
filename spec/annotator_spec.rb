@@ -2078,6 +2078,30 @@ RSpec.describe SemanticAnnotator do
         FLUX
       end
 
+      it "uses heap_struct_plain cleanup for promoted plain struct (no heap fields)" do
+        ast = run_mir_escape(<<~FLUX)
+          STRUCT Config { id: Float64 }
+          FN create() RETURNS %Config ->
+            x = Config { id: 1 };
+            RETURN x;
+          END
+        FLUX
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "create" }
+        expect(fn.cleanup_bindings["x"][:kind]).to eq(:heap_struct_plain)
+      end
+
+      it "uses heap_struct cleanup for promoted struct with String field (no field leak)" do
+        ast = run_mir_escape(<<~FLUX)
+          STRUCT Person { name: String, age: Float64 }
+          FN make() RETURNS %Person ->
+            p = Person { name: "alice", age: 30 };
+            RETURN p;
+          END
+        FLUX
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "make" }
+        expect(fn.cleanup_bindings["p"][:kind]).to eq(:heap_struct)
+      end
+
       it "does NOT promote primitives (Float64)" do
         # Primitives are copied, so mark_escaped guards against them,
         # or the annotator shouldn't even call it.
