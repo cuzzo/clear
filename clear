@@ -10,6 +10,8 @@
 
 require 'fileutils'
 require 'optparse'
+require 'digest'
+require 'set'
 
 # Resolve paths relative to this script (works from any directory)
 CLEAR_ROOT = File.expand_path('..', __FILE__)
@@ -44,6 +46,71 @@ def error(msg)
   exit 1
 end
 
+def write_if_changed(path, content)
+  FileUtils.mkdir_p(File.dirname(path))
+  return false if File.exist?(path) && File.read(path) == content
+  File.write(path, content)
+  true
+end
+
+def ensure_symlink(link_path, target_path)
+  if File.symlink?(link_path)
+    return if File.readlink(link_path) == target_path
+    File.delete(link_path)
+  elsif File.exist?(link_path)
+    FileUtils.rm_rf(link_path)
+  end
+  File.symlink(target_path, link_path)
+end
+
+def find_package_source(pkg_name, start_dir:)
+  dir = File.expand_path(start_dir)
+  loop do
+    candidate = File.join(dir, "packages", pkg_name, "src", "lib.cht")
+    return candidate if File.exist?(candidate)
+    parent = File.dirname(dir)
+    break if parent == dir
+    dir = parent
+  end
+  nil
+end
+
+def resolve_clear_require(raw, caller_dir:)
+  if raw.start_with?('pkg:')
+    pkg_name = raw.sub(/\Apkg:/, '')
+    pkg_path = find_package_source(pkg_name, start_dir: caller_dir)
+    error "Package '#{pkg_name}' not found from #{caller_dir}" unless pkg_path
+    pkg_path
+  else
+    File.expand_path(raw, caller_dir)
+  end
+end
+
+def collect_clear_dependencies(path, seen: Set.new)
+  abs_path = File.expand_path(path)
+  return seen if seen.include?(abs_path)
+  error "File not found: #{abs_path}" unless File.exist?(abs_path)
+
+  seen.add(abs_path)
+  source = File.read(abs_path)
+  caller_dir = File.dirname(abs_path)
+  source.scan(/REQUIRE\s+"([^"]+)"/).flatten.uniq.each do |raw|
+    dep_path = resolve_clear_require(raw, caller_dir: caller_dir)
+    collect_clear_dependencies(dep_path, seen: seen)
+  end
+  seen
+end
+
+def newest_build_dependency_mtime(source)
+  dep_paths = collect_clear_dependencies(source).to_a
+  compiler_paths = Dir.glob(File.join(SRC_DIR, '**', '*.rb'))
+  runtime_paths = Dir.glob(File.join(ZIG_DIR, 'runtime', '**', '*.zig')) +
+                  Dir.glob(File.join(ZIG_DIR, 'runtime', '**', '*.S')) +
+                  Dir.glob(File.join(ZIG_DIR, 'lib', '**', '*.zig'))
+  tracked = dep_paths + compiler_paths + runtime_paths + [__FILE__]
+  tracked.filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max || Time.at(0)
+end
+
 # Walk AST to collect BG block nodes in order (matching transpiler's @bg_block_counter).
 def find_bg_blocks(node, result)
   case node
@@ -73,13 +140,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   unless force || module_mode || profile
     if File.exist?(output)
       out_mtime = File.mtime(output)
-      src_mtime = File.mtime(source)
-      compiler_mtime = Dir.glob(File.join(SRC_DIR, '*.rb')).map { |f| File.mtime(f) }.max
-      runtime_mtime = Dir.glob(File.join(ZIG_DIR, '**', '*.{zig,S}'))
-                        .map { |f| File.mtime(f) }
-                        .max || Time.at(0)
-      newest_dep = [src_mtime, compiler_mtime, runtime_mtime].compact.max
-      if out_mtime > newest_dep
+      newest_dep = newest_build_dependency_mtime(source)
+      if out_mtime >= newest_dep
         $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
         return :up_to_date
       end
@@ -99,34 +161,18 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   source_text = File.read(source)
   pkg_requires = source_text.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
   pkg_flags = pkg_requires.map do |pkg_name|
-    pkg_path = File.join(source_dir, "packages", pkg_name, "src", "lib.cht")
-    unless File.exist?(pkg_path)
-      error "Package '#{pkg_name}' not found at #{pkg_path}"
-    end
+    pkg_path = find_package_source(pkg_name, start_dir: source_dir)
+    error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     "--pkg #{pkg_name}=#{pkg_path}"
   end.join(" ")
   transpile_flag += " #{pkg_flags}" if pkg_flags.length > 0
   # MIR is the only pipeline (--mir flag no longer needed)
 
-  # Create per-process build directory with symlinks to shared runtime files.
-  # This isolates parallel builds so they don't corrupt each other's temp
-  # files, caches, or output binaries.
-  build_dir = File.join(ZIG_DIR, ".build-#{$$}")
+  cache_key = Digest::SHA256.hexdigest(source)[0, 16]
+  build_dir = File.join(ZIG_DIR, ".clear-cache", cache_key)
   FileUtils.mkdir_p(build_dir)
-  Dir.glob(File.join(ZIG_DIR, '*.{zig,S}')).each do |f|
-    dst = File.join(build_dir, File.basename(f))
-    File.symlink(f, dst) unless File.exist?(dst)
-  end
-  lib_dir = File.join(ZIG_DIR, 'lib')
-  if Dir.exist?(lib_dir)
-    dst = File.join(build_dir, 'lib')
-    File.symlink(lib_dir, dst) unless File.exist?(dst)
-  end
-  runtime_dir = File.join(ZIG_DIR, 'runtime')
-  if Dir.exist?(runtime_dir)
-    dst = File.join(build_dir, 'runtime')
-    File.symlink(runtime_dir, dst) unless File.exist?(dst)
-  end
+  ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
+  ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
 
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
@@ -150,7 +196,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       zig_code = zig_code.gsub("@import(\"#{pkg_name}\")", "@import(\"#{pkg_name}.zig\")")
     end
   end
-  File.write(tmp_zig, zig_code)
+  write_if_changed(tmp_zig, zig_code)
 
   # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations
   # and check if a matching .zig file exists in the source directory.
@@ -165,12 +211,14 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Transpile package modules to .zig files
   pkg_modules = pkg_requires.map do |pkg_name|
-    pkg_path = File.join(source_dir, "packages", pkg_name, "src", "lib.cht")
+    pkg_path = find_package_source(pkg_name, start_dir: source_dir)
+    error "Package '#{pkg_name}' not found from #{source_dir}" unless pkg_path
     # Collect transitive package deps for nested REQUIRE "pkg:..."
     pkg_src = File.read(pkg_path)
     nested_pkgs = pkg_src.scan(/REQUIRE\s+"pkg:([^"]+)"/).flatten.uniq
     nested_flags = nested_pkgs.map { |np|
-      np_path = File.join(source_dir, "packages", np, "src", "lib.cht")
+      np_path = find_package_source(np, start_dir: File.dirname(pkg_path))
+      error "Package '#{np}' not found from #{File.dirname(pkg_path)}" unless np_path
       "--pkg #{np}=#{np_path}"
     }.join(" ")
     pkg_zig = `ruby #{TRANSPILER} --module #{nested_flags} #{pkg_path} 2>/dev/null`
@@ -185,7 +233,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       pkg_zig = pkg_zig.gsub("@import(\"#{np}\")", "@import(\"#{np}.zig\")")
     end
     pkg_zig_file = File.join(build_dir, "#{pkg_name}.zig")
-    File.write(pkg_zig_file, pkg_zig)
+    write_if_changed(pkg_zig_file, pkg_zig)
     pkg_name
   end
 
@@ -195,7 +243,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   all_modules = ffi_modules  # FFI modules need Zig named-module wiring
 
   # Standard lib modules (always needed for cross-directory imports)
-  lib_modules = { 'safety' => 'lib/safety.zig', 'ebr' => 'lib/ebr.zig', 'ownership' => 'lib/ownership.zig' }
+  lib_modules = {
+    'safety' => 'lib/safety.zig',
+    'ebr' => 'lib/ebr.zig',
+    'ownership' => 'lib/ownership.zig',
+    'compat' => 'lib/compat.zig'
+  }
 
   if module_mode
     cmd_parts = [ZIG, 'test']
@@ -204,18 +257,23 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   end
 
   # Always use -Mroot= mode since lib/ modules require named imports.
-  # Assembly files must go after -Mroot= but before -Msafety= etc.
+  # `--dep` applies to the next `-M...` module, so dependencies must be
+  # emitted immediately before the module that needs them.
   lib_modules.each_key { |m| cmd_parts += ['--dep', m] }
   all_modules.each { |m| cmd_parts += ['--dep', m] }
-  cmd_parts += ["-Mroot=#{tmp_name}", 'runtime/switch.S', 'runtime/onRoot.S']
-  lib_modules.each { |m, path| cmd_parts += ["-M#{m}=#{path}"] }
-  all_modules.each { |m| cmd_parts += ["-M#{m}=#{m}.zig"] }
+  cmd_parts += ["-Mroot=#{tmp_name}", *RUNTIME_FILES]
+  cmd_parts += ["-Msafety=#{File.join(ZIG_DIR, lib_modules['safety'])}"]
+  cmd_parts += ['--dep', 'compat', "-Mebr=#{File.join(ZIG_DIR, lib_modules['ebr'])}"]
+  cmd_parts += ["-Mownership=#{File.join(ZIG_DIR, lib_modules['ownership'])}"]
+  cmd_parts += ["-Mcompat=#{File.join(ZIG_DIR, lib_modules['compat'])}"]
+  all_modules.each { |m| cmd_parts += ["-M#{m}=#{File.join(build_dir, "#{m}.zig")}"] }
   cmd_parts += ['-lc']
 
   unless module_mode
+    bin_name = "#{File.basename(output)}-#{$$}"
     cmd_parts += ['-O', opt_level] + extra_flags
     cmd_parts += ['-fno-strip'] if profile
-    cmd_parts += ['--name', File.basename(output)]
+    cmd_parts += ['--name', bin_name]
   end
 
   cmd = cmd_parts.join(' ')
@@ -224,7 +282,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Move binary to output location (zig puts it in the build dir)
   if success && !module_mode
-    zig_binary = File.join(build_dir, File.basename(output))
+    zig_binary = File.join(build_dir, "#{File.basename(output)}-#{$$}")
     if File.exist?(zig_binary)
       FileUtils.mv(zig_binary, output)
     end
@@ -237,9 +295,6 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     FileUtils.mkdir_p(profile_dir_path) if File.directory?(File.dirname(profile_dir_path))
     FileUtils.cp(tmp_zig, File.join(profile_dir_path, "transpiled.zig")) rescue nil
   end
-
-  # Cleanup build dir
-  FileUtils.rm_rf(build_dir)
 
   unless success
     # Map known Zig errors to CLEAR-level messages
