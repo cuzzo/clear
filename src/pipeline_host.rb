@@ -1466,6 +1466,10 @@ class PipelineHost
   # atomics, spawn -- too complex for MIR nodes), but with stdlib_def so the
   # checker knows the allocation effects.
   def lower_concurrent(_lhs, conc_op, smooth_node)
+    if smooth_node.left.type_info&.bounded_stream?
+      return lower_concurrent_bounded_stream(smooth_node.left, conc_op)
+    end
+
     if unwrap_range_chain(smooth_node.left)
       raise "CONCURRENT over finite streams is temporarily disabled until it has a MIR-safe lowering path"
     end
@@ -1485,6 +1489,191 @@ class PipelineHost
       "concurrent_#{inner.class.name.split('::').last.downcase}",
       { consumes: [], produces: [], borrows: [] },
       stdlib_def)
+  end
+
+  def lower_concurrent_bounded_stream(lhs, conc_op)
+    inner = conc_op.op
+    case inner
+    when AST::SelectOp
+      lower_concurrent_bounded_select(lhs, conc_op, inner)
+    when AST::WhereOp
+      lower_concurrent_bounded_where(lhs, conc_op, inner)
+    when AST::EachOp
+      lower_concurrent_bounded_each(lhs, conc_op, inner)
+    else
+      raise "CONCURRENT over bounded streams only supports SELECT/WHERE/EACH"
+    end
+  end
+
+  def bounded_concurrent_worker_count_mir(conc_op)
+    if (workers = conc_op.options["workers"])
+      visit_mir(workers)
+    else
+      MIR::Call.new("CheatLib.threadCount", [], false)
+    end
+  end
+
+  def bounded_concurrent_parallel_mir(conc_op)
+    if (par = conc_op.options["parallel"])
+      visit_mir(par)
+    else
+      MIR::Lit.new("false")
+    end
+  end
+
+  def bounded_concurrent_task_cfg_mir(conc_op)
+    size_node = conc_op.options["size"]
+    MIR::InlineZig.new(task_config_zig(size_node&.name&.downcase&.to_sym), "task_cfg")
+  end
+
+  def build_bounded_concurrent_callback(conc_op, item_type, return_type, body_kind)
+    @bounded_conc_counter ||= 0
+    id = (@bounded_conc_counter += 1)
+    ctx_name = "__BoundedConcurrentCtx#{id}"
+    analysis = conc_op.capture_analysis
+    captures = analysis&.captures || {}
+
+    fields = captures.map do |name, type_obj|
+      zig_t = Type.new(type_obj).zig_type
+      MIR::FieldDef.new(name, "*#{zig_t}", nil)
+    end
+
+    raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
+    params = [
+      MIR::Param.new("__rt", "*Runtime"),
+      raw_ctx,
+      MIR::Param.new("__item", Type.new(item_type).zig_type),
+    ]
+
+    body = []
+    capture_map = {}
+    unless captures.empty?
+      ctx_cast = MIR::InlineZig.new("@as(*#{ctx_name}, @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
+      body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
+      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}.*"] }
+    else
+      body << MIR::Suppress.new("raw_ctx")
+    end
+
+    lowered_body = with_pipeline_context(placeholder: "__item") do
+      with_fiber_capture_map(capture_map, rt_override: "__rt") do
+        case body_kind
+        when :expr
+          [MIR::ReturnStmt.new(visit_mir(conc_op.op.expression))]
+        when :each
+          [*visit_pipeline_body_mir(conc_op.op.body, placeholder: "__item"), MIR::ReturnStmt.new(nil)]
+        else
+          raise "unknown bounded concurrent callback kind #{body_kind}"
+        end
+      end
+    end
+    body.concat(lowered_body)
+
+    fn = MIR::FnDef.new("apply", params, Type.new(return_type).zig_type, body, nil, true, nil)
+    ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
+    ctx_init = MIR::StructInit.new(ctx_name, captures.keys.map { |name|
+      { name: name, value: MIR::AddressOf.new(MIR::Ident.new(name)) }
+    })
+    ctx_var = "__bounded_conc_ctx_#{id}"
+    ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
+
+    { id: id, ctx_name: ctx_name, ctx_def: ctx_def, ctx_var: ctx_var, ctx_let: ctx_let }
+  end
+
+  def bounded_stream_items_setup(lhs, id)
+    source = visit_mir(lhs)
+    if lhs.is_a?(AST::Identifier)
+      [[], MIR::AddressOf.new(MIR::FieldGet.new(source, "items"))]
+    else
+      local = "__bounded_conc_stream_#{id}"
+      setup = MIR::Let.new(local, source, true, nil, "_ = &#{local};")
+      [[setup], MIR::AddressOf.new(MIR::FieldGet.new(MIR::Ident.new(local), "items"))]
+    end
+  end
+
+  def lower_concurrent_bounded_select(lhs, conc_op, inner)
+    item_t = lhs.type_info.stream_element_type
+    result_t = Type.new(inner.expression.full_type)
+    cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
+    setup_stmts, items_ptr = bounded_stream_items_setup(lhs, cb[:id])
+
+    call = MIR::Call.new(
+      "CheatLib.concurrentBoundedSelect(#{item_t.zig_type}, #{result_t.zig_type}, #{lhs.type_info.stream_capacity}, #{cb[:ctx_name]}.apply)",
+      [
+        MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+        MIR::Ident.new("rt"),
+        items_ptr,
+        bounded_concurrent_worker_count_mir(conc_op),
+        bounded_concurrent_parallel_mir(conc_op),
+        bounded_concurrent_task_cfg_mir(conc_op),
+        MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+      ],
+      true
+    )
+    call.heap_provenance = true
+
+    label = next_pipe_label
+    MIR::BlockExpr.new(label, [
+      cb[:ctx_def],
+      cb[:ctx_let],
+      *setup_stmts,
+      MIR::BreakStmt.new(label, call),
+    ])
+  end
+
+  def lower_concurrent_bounded_where(lhs, conc_op, _inner)
+    item_t = lhs.type_info.stream_element_type
+    cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
+    setup_stmts, items_ptr = bounded_stream_items_setup(lhs, cb[:id])
+
+    call = MIR::Call.new(
+      "CheatLib.concurrentBoundedWhere(#{item_t.zig_type}, #{lhs.type_info.stream_capacity}, #{cb[:ctx_name]}.apply)",
+      [
+        MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+        MIR::Ident.new("rt"),
+        items_ptr,
+        bounded_concurrent_worker_count_mir(conc_op),
+        bounded_concurrent_parallel_mir(conc_op),
+        bounded_concurrent_task_cfg_mir(conc_op),
+        MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+      ],
+      true
+    )
+    call.heap_provenance = true
+
+    label = next_pipe_label
+    MIR::BlockExpr.new(label, [
+      cb[:ctx_def],
+      cb[:ctx_let],
+      *setup_stmts,
+      MIR::BreakStmt.new(label, call),
+    ])
+  end
+
+  def lower_concurrent_bounded_each(lhs, conc_op, _inner)
+    item_t = lhs.type_info.stream_element_type
+    cb = build_bounded_concurrent_callback(conc_op, item_t, :Void, :each)
+    setup_stmts, items_ptr = bounded_stream_items_setup(lhs, cb[:id])
+
+    call = MIR::Call.new(
+      "CheatLib.concurrentBoundedEach(#{item_t.zig_type}, #{lhs.type_info.stream_capacity}, #{cb[:ctx_name]}.apply)",
+      [
+        MIR::Ident.new("rt"),
+        items_ptr,
+        bounded_concurrent_worker_count_mir(conc_op),
+        bounded_concurrent_parallel_mir(conc_op),
+        bounded_concurrent_task_cfg_mir(conc_op),
+        MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+      ],
+      true
+    )
+
+    MIR::ScopeBlock.new([
+      cb[:ctx_def],
+      cb[:ctx_let],
+      *setup_stmts,
+      MIR::ExprStmt.new(call, false),
+    ])
   end
 
   # String entry point for SMOOTH pipeline nodes from MIRLowering.

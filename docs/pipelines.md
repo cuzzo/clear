@@ -8,6 +8,8 @@ entities s> EACH { _.health = _.health - 1.0; };
 users s> SELECT _.name s> DISTINCT _;
 ```
 
+This document describes both the collection pipeline model and the current stream/future pipeline surface. Stream support is intentionally narrower today than collection support.
+
 ## The Smooth Operator (`s>`)
 
 `s>` pipes a value into a function or operator. It's CLEAR's equivalent of `|>` (Elixir) or `.` method chaining (Ruby), but it also works with collection operators.
@@ -113,6 +115,85 @@ result = scores
     s> SUM _.points;
 ```
 
+## Stream and Future Compatibility
+
+Pipelines over futures/streams are currently supported in a narrower subset than pipelines over collections.
+
+### Stream kinds
+
+| Type | Meaning | `NEXT` result | Pipeline support |
+|---|---|---|---|
+| `~T` | Single future value | `T` | Not a pipeline source |
+| `~?T[]` | Open stream | `?T` | Not a general pipeline source yet |
+| `~T[INF]` | Infinite stream | `T` | Not a general pipeline source yet |
+| `~T[]` / `~T[N]` | Finite stream | `?T` | Supported for a subset of operators |
+
+### Finite stream operators
+
+Finite streams currently support:
+
+- `EACH`
+- `SELECT`
+- `WHERE`
+- `SKIP`
+- `TAKE_WHILE`
+- `TAP`
+
+Examples:
+
+```ruby clear illustrative
+s: ~Int64[] = 0 ..< 8;
+s s> SELECT _ * 2 s> WHERE _ > 5 s> EACH { print(_); };
+
+t: ~Int64[] = 0 ..< 10;
+t s> SKIP 2 s> TAKE_WHILE _ < 6 s> EACH { print(_); };
+```
+
+`~T[N]` has also made progress toward native concurrent support:
+
+- the Zig runtime now has direct bounded-stream helpers for `CONCURRENT EACH`, `CONCURRENT SELECT`, and `CONCURRENT WHERE`
+- those helpers consume promise slots directly instead of materializing through `.toList()`
+- full compiler/MIR integration is still in progress, so do not treat bounded-stream `CONCURRENT` as generally available at the language level yet
+
+Currently unsupported for finite streams:
+
+- `CONCURRENT`
+- `SUM`
+- `COUNT`
+- `REDUCE`
+- `LIMIT`
+- `ORDER_BY`
+- `DISTINCT`
+- `UNNEST`
+- `INDEX`
+- `ANY`
+- `ALL`
+- `FIND`
+- `AVERAGE`
+- `MIN`
+- `MAX`
+
+If you need the full collection operator surface, materialize explicitly first:
+
+```ruby clear illustrative
+s: ~Int64[] = 0 ..< 10;
+vals = s.toList();
+total = vals s> WHERE _ > 3 s> SUM _;
+```
+
+Open streams (`~?T[]`) and infinite streams (`~T[INF]`) are still `NEXT`-driven for now:
+
+```ruby clear illustrative
+gen: ~?Int64[] = BG STREAM {
+    YIELD 1;
+    YIELD 2;
+};
+
+v1 = NEXT gen;
+v2 = NEXT gen;
+v3 = NEXT gen;     -- NIL
+```
+
 ### SKIP and LIMIT (Pagination)
 
 SKIP and LIMIT are complementary: SKIP drops the first N elements, LIMIT takes the first N.
@@ -210,7 +291,7 @@ NOTE: Pipeline accesses 1 of 5 fields (health). Consider @soa
 
 ## Concurrency
 
-The `CONCURRENT` modifier parallelizes SELECT, WHERE, and EACH across shards:
+The `CONCURRENT` modifier currently parallelizes collection pipelines for `SELECT`, `WHERE`, and `EACH`:
 
 ```ruby clear illustrative
 MUTABLE data: Score[10000]@pool:sharded(4) = [];
@@ -223,3 +304,20 @@ results = data s> CONCURRENT(size: LARGE) SELECT _.name;
 ```
 
 Options: `pool_size: N` (fiber pool size), `pin: TRUE` (pin to cores), `size: MICRO|STANDARD|LARGE|XL` (stack size).
+
+### `CONCURRENT` compatibility
+
+| Source kind | `CONCURRENT SELECT` | `CONCURRENT WHERE` | `CONCURRENT EACH` |
+|---|---|---|---|
+| Arrays / `@list` / `@pool` / `@pool:soa` | Yes | Yes | Yes |
+| `@sharded(...)` collections | Yes | Yes | Yes |
+| Finite streams `~T[]` | Not yet | Not yet | Not yet |
+| Bounded streams `~T[N]` | Runtime helpers landed; compiler integration in progress | Runtime helpers landed; compiler integration in progress | Runtime helpers landed; compiler integration in progress |
+| Open streams `~?T[]` | Not yet | Not yet | Not yet |
+| Infinite streams `~T[INF]` | Not yet | Not yet | Not yet |
+
+So today:
+
+- `CONCURRENT` is for collection sources.
+- finite streams can participate in non-concurrent fused pipelines for the supported operators above.
+- stream `CONCURRENT` will come later once the MIR-safe native lowering is in place.

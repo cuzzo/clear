@@ -34,6 +34,10 @@ module PipeAnalysis
     node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream?
   end
 
+  def bounded_stream_source?(node)
+    node.type_info&.bounded_stream?
+  end
+
   def finite_stream_element_type(node)
     return range_element_type(node) if node.is_a?(AST::RangeLit)
     node.type_info.tense_type.element_type.resolved
@@ -970,6 +974,7 @@ module PipeAnalysis
   def analyze_concurrent_op(node)
     conc    = node.right   # the ConcurrentOp node
     options = conc.options
+    lhs_type = node.left.type_info
 
     # Validate workers option if present
     if (ps = options["workers"])
@@ -1032,9 +1037,15 @@ module PipeAnalysis
 
     case conc.op
     when AST::SelectOp, AST::WhereOp
-      analyze_select_family_op(proxy)
+      if bounded_stream_source?(node.left)
+        analyze_concurrent_bounded_select_family_op(node)
+      else
+        analyze_select_family_op(proxy)
+      end
     when AST::EachOp
-      if shard_node
+      if bounded_stream_source?(node.left)
+        analyze_concurrent_bounded_each_op(node)
+      elsif shard_node
         # Explicit SHARD + CONCURRENT EACH: items are String keys.
         analyze_shard_each_op(node, shard_node)
       else
@@ -1082,8 +1093,67 @@ module PipeAnalysis
       end
     end
 
-    node.full_type = proxy.full_type
+    node.full_type = if bounded_stream_source?(node.left) &&
+                        (conc.op.is_a?(AST::SelectOp) || conc.op.is_a?(AST::WhereOp))
+      proxy.full_type
+    elsif bounded_stream_source?(node.left) && conc.op.is_a?(AST::EachOp)
+      :Void
+    else
+      proxy.full_type
+    end
     node.storage   = (node.full_type == :Void) ? :stack : :heap
+  end
+
+  def analyze_concurrent_bounded_select_family_op(node)
+    lhs_type = node.left.type_info
+    item_type = lhs_type.stream_element_type.resolved
+    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
+                  %w[true TRUE].include?(node.right.options["parallel"].name)
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      with_soa_tracking(node, item_type) do
+        visit(node.right.op.expression)
+      end
+    end
+
+    node.right.capture_analysis =
+      validate_fiber_captures!(node.right, [node.right.op.expression], is_parallel, false) ||
+      analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
+
+    if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
+      error!(node.right.op, "WHERE clause must evaluate to Bool")
+    end
+
+    node.full_type = case node.right.op
+    when AST::SelectOp
+      :"#{node.right.op.expression.full_type}[]"
+    when AST::WhereOp
+      :"#{item_type}[]"
+    end
+    node.storage = :heap
+    current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  def analyze_concurrent_bounded_each_op(node)
+    lhs_type = node.left.type_info
+    item_type = lhs_type.stream_element_type.resolved
+    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
+                  %w[true TRUE].include?(node.right.options["parallel"].name)
+
+    with_new_scope(current_scope) do
+      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+      with_soa_tracking(node, item_type) do
+        node.right.op.body.each { |stmt| visit(stmt) }
+      end
+    end
+
+    node.right.capture_analysis =
+      validate_fiber_captures!(node.right, node.right.op.body, is_parallel, false) ||
+      analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
+
+    node.full_type = :Void
+    node.storage   = :stack
   end
 
   # Helper to validate array/pool input for higher-order ops.

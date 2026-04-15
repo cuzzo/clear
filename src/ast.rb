@@ -456,6 +456,7 @@ module AST
   ConcurrentOp = Struct.new(:token, :op, :options) do
     include Locatable
     attr_accessor :shard_context  # set by annotator: { map_var:, shard_count:, key_expr: }
+    attr_accessor :capture_analysis
   end
   Placeholder  = Struct.new(:token) { include Locatable }
   Copy         = Struct.new(:token, :value) { include Locatable }
@@ -495,6 +496,7 @@ module AST
   CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) { include Locatable }
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants
+  CloneNode         = Struct.new(:token, :value) { include Locatable }  # CLONE expr              -> explicit handle retain for non-affine replay/shared futures
   LinkNode          = Struct.new(:token, :value) { include Locatable }  # LINK expr               -> downgrade Rc/Arc to WeakRc/WeakArc
   ResolveNode       = Struct.new(:token, :value) { include Locatable }  # RESOLVE expr            -> upgrade WeakRc/WeakArc to ?Rc/?Arc
   # PassStmt: no-op statement (like Python's `pass`).
@@ -803,4 +805,3 @@ module MIR
     include AST::Locatable
   end
 end
-

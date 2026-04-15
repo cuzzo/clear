@@ -5,6 +5,7 @@ pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const streams = @import("lib/streams.zig");
+const stream_helpers = @import("lib/stream.zig");
 
 pub const EbrContext = @import("ebr").EbrContext;
 const Task = @import("queues.zig").Task;
@@ -45,6 +46,111 @@ noinline fn openPathFd(path: []const u8, flags: std.posix.O, mode: std.posix.mod
 pub const CheatLib = struct {
     pub const Range = streams.Range;
     pub const IntRange = streams.IntRange;
+    pub fn SplitStream(comptime T: type) type {
+        return streams.SplitStream(T, WaitGroup, struct {
+            fn cloneValue(alloc: std.mem.Allocator, value: T) !T {
+                return dupeValue(T, value, alloc);
+            }
+        }.cloneValue, struct {
+            fn cleanupValue(alloc: std.mem.Allocator, ptr: *T) void {
+                cleanup(T, alloc, ptr);
+            }
+        }.cleanupValue);
+    }
+
+    pub fn concurrentBoundedSelect(
+        comptime T: type,
+        comptime R: type,
+        comptime N: usize,
+        comptime mapFn: fn (*Runtime, ?*anyopaque, T) anyerror!R,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        items: *[N]Promise(T),
+        workers: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(R) {
+        return stream_helpers.concurrentBoundedSelect(
+            T, R, N, mapFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            struct {
+                fn cleanupResult(alloc_: std.mem.Allocator, ptr: *R) void {
+                    cleanup(R, alloc_, ptr);
+                }
+            }.cleanupResult,
+            alloc, rt, items, workers, parallel, task_cfg, user_ctx
+        );
+    }
+
+    pub fn concurrentBoundedWhere(
+        comptime T: type,
+        comptime N: usize,
+        comptime predFn: fn (*Runtime, ?*anyopaque, T) anyerror!bool,
+        alloc: std.mem.Allocator,
+        rt: *Runtime,
+        items: *[N]Promise(T),
+        workers: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !std.ArrayListUnmanaged(T) {
+        return stream_helpers.concurrentBoundedWhere(
+            T, N, predFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            struct {
+                fn cleanupItem(alloc_: std.mem.Allocator, ptr: *T) void {
+                    cleanup(T, alloc_, ptr);
+                }
+            }.cleanupItem,
+            alloc, rt, items, workers, parallel, task_cfg, user_ctx
+        );
+    }
+
+    pub fn concurrentBoundedEach(
+        comptime T: type,
+        comptime N: usize,
+        comptime eachFn: fn (*Runtime, ?*anyopaque, T) anyerror!void,
+        rt: *Runtime,
+        items: *[N]Promise(T),
+        workers: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !void {
+        return stream_helpers.concurrentBoundedEach(
+            T, N, eachFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            rt, items, workers, parallel, task_cfg, user_ctx
+        );
+    }
 
     // -----------------------------------------------------------------------
     // LazyRange(T): zero-allocation lazy iterator over a half-open range [start, end).
@@ -1581,6 +1687,10 @@ pub const CheatLib = struct {
         return rc;
     }
 
+    pub fn splitRetain(comptime T: type, stream: T) T {
+        return stream.retain();
+    }
+
     pub fn rcRelease(comptime T: type, alloc: std.mem.Allocator, rc: Rc(T)) void {
         _ = alloc; // alloc stored in control block
         rc.ctrl.strong -= 1;
@@ -2089,6 +2199,58 @@ pub const CheatLib = struct {
         }
 
         // Primitives, enums, untagged unions: no-op (comptime-eliminated)
+    }
+
+    pub fn dupeValue(comptime T: type, value: T, alloc: std.mem.Allocator) std.mem.Allocator.Error!T {
+        const info = @typeInfo(T);
+
+        if (T == []const u8) {
+            return if (value.len > 0) try alloc.dupe(u8, value) else value;
+        }
+        if (T == []u8) {
+            return if (value.len > 0) try alloc.dupe(u8, value) else value;
+        }
+
+        if (info == .@"union" and info.@"union".tag_type != null) {
+            return dupeUnionValue(T, value, alloc);
+        }
+
+        if (info == .pointer and info.pointer.size == .slice) {
+            const ElemT = info.pointer.child;
+            var buf = try alloc.alloc(ElemT, value.len);
+            errdefer alloc.free(buf);
+            if (comptime needsCleanup(ElemT)) {
+                for (value, 0..) |elem, i| {
+                    buf[i] = try dupeValue(ElemT, elem, alloc);
+                }
+            } else {
+                @memcpy(buf, value);
+            }
+            return buf;
+        }
+
+        if (info == .pointer and info.pointer.size == .one and
+            @typeInfo(info.pointer.child) != .@"opaque" and @typeInfo(info.pointer.child) != .@"fn")
+        {
+            const ChildT = info.pointer.child;
+            const new_ptr = try alloc.create(ChildT);
+            errdefer alloc.destroy(new_ptr);
+            new_ptr.* = try dupeValue(ChildT, value.*, alloc);
+            return new_ptr;
+        }
+
+        if (info == .@"struct" and !@hasDecl(T, "deinit")) {
+            var result = value;
+            inline for (info.@"struct".fields) |field| {
+                const FT = field.type;
+                if (comptime needsCleanup(FT)) {
+                    @field(result, field.name) = try dupeValue(FT, @field(value, field.name), alloc);
+                }
+            }
+            return result;
+        }
+
+        return value;
     }
 
     /// Returns true if a type needs cleanup (has heap-allocated data).
