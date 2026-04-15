@@ -28,11 +28,21 @@ class TestGenerator
       raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
     end
 
-    # Emit Zig - skip imports/aliases (test harness provides them)
+    # Emit Zig - keep non-runtime imports/aliases inside the test harness so
+    # local FFI modules and extern struct aliases still resolve without named modules.
     emitter = MIREmitter.new
-    body_items = program.items.reject { |item|
-      item.is_a?(MIR::Import) || item.is_a?(MIR::TypeAlias)
+    preamble_items = program.items.select { |item|
+      case item
+      when MIR::Import
+        !(%w[std CheatHeader].include?(item.alias_name))
+      when MIR::TypeAlias
+        !(%w[CheatLib Runtime EbrContext].include?(item.name))
+      else
+        false
+      end
     }
+    body_items = program.items.reject { |item| preamble_items.include?(item) || item.is_a?(MIR::Import) || item.is_a?(MIR::TypeAlias) }
+    preamble = preamble_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
     transpiled_body = body_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     # Detect if test uses DO/BG blocks, TCP resources, or sharded EACH
@@ -86,11 +96,9 @@ class TestGenerator
       ZIG
     end
 
-    needs_safety = transpiled_body.include?("safety.")
-    safety_import = needs_safety ? "const safety = @import(\"safety\");" : ""
     <<~ZIG
       test "#{filename}" {
-          #{safety_import}
+          #{preamble}
           const S = struct {
               #{transpiled_body}
           };

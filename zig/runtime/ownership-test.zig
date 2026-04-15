@@ -2,10 +2,10 @@ const std = @import("std");
 
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const rt_mod = @import("runtime.zig");
-const own = @import("ownership");
+const own = @import("../lib/ownership.zig");
 
 const Runtime = rt_mod.Runtime;
-const EbrContext = @import("ebr").EbrContext;
+const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const Rc = own.Rc;
 const Arc = own.Arc;
 const Weak = own.Weak;

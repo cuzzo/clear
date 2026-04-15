@@ -12,7 +12,7 @@ const std = @import("std");
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const rt_mod = @import("runtime.zig");
-const ebr = @import("ebr");
+const ebr = @import("../lib/ebr.zig");
 const CheatLib = @import("runtime-header.zig").CheatLib;
 
 var global_ebr: ebr.EbrContext = .{};

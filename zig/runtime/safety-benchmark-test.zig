@@ -1,5 +1,5 @@
 const std = @import("std");
-const safety = @import("safety");
+const safety = @import("../lib/safety.zig");
 
 // -------------------------------------------------------------------------
 // 1. TRIVIAL: Fibonacci (Tight Loop Recursion)
@@ -231,4 +231,3 @@ test "Benchmark: Safety Guards Overhead" {
         std.mem.doNotOptimizeAway(sum);
     }
 }
-

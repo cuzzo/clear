@@ -350,18 +350,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     pkg_name
   end
 
-  # Build Zig command (runs from zig/ directory where runtime files live).
-  # Named modules are always required for cross-directory lib/ imports.
-  # FFI modules are added alongside the standard lib modules.
-  all_modules = ffi_modules  # FFI modules need Zig named-module wiring
-
-  # Standard lib modules (always needed for cross-directory imports)
-  lib_modules = {
-    'safety' => 'lib/safety.zig',
-    'ebr' => 'lib/ebr.zig',
-    'ownership' => 'lib/ownership.zig',
-    'compat' => 'lib/compat.zig'
-  }
+  # Build Zig command from the temp build dir. Keep the runtime/lib layout,
+  # but rely on ordinary file imports instead of Zig named modules.
 
   if module_mode
     cmd_parts = [ZIG, 'test']
@@ -374,17 +364,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # after recent build-system changes.
   cmd_parts += ['--cache-dir', cache_dir, '--global-cache-dir', global_cache_dir]
 
-  # Always use -Mroot= mode since lib/ modules require named imports.
-  # `--dep` applies to the next `-M...` module, so dependencies must be
-  # emitted immediately before the module that needs them.
-  lib_modules.each_key { |m| cmd_parts += ['--dep', m] }
-  all_modules.each { |m| cmd_parts += ['--dep', m] }
-  cmd_parts += ["-Mroot=#{tmp_name}", *RUNTIME_FILES]
-  cmd_parts += ["-Msafety=#{File.join(ZIG_DIR, lib_modules['safety'])}"]
-  cmd_parts += ['--dep', 'compat', "-Mebr=#{File.join(ZIG_DIR, lib_modules['ebr'])}"]
-  cmd_parts += ["-Mownership=#{File.join(ZIG_DIR, lib_modules['ownership'])}"]
-  cmd_parts += ["-Mcompat=#{File.join(ZIG_DIR, lib_modules['compat'])}"]
-  all_modules.each { |m| cmd_parts += ["-M#{m}=#{File.join(build_dir, "#{m}.zig")}"] }
+  cmd_parts += [tmp_name, *RUNTIME_FILES]
   cmd_parts += ['-lc']
 
   unless module_mode
@@ -670,16 +650,8 @@ when 'test'
     leak_seen = {}
     zig_test_cmd = [
       ZIG, 'test',
-      '--dep', 'safety',
-      '--dep', 'ebr',
-      '--dep', 'ownership',
-      '--dep', 'compat',
-      '-Mroot=all-tests.zig',
+      'all-tests.zig',
       *RUNTIME_FILES,
-      '-Msafety=lib/safety.zig',
-      '--dep', 'compat', '-Mebr=lib/ebr.zig',
-      '-Mownership=lib/ownership.zig',
-      '-Mcompat=lib/compat.zig',
       '-lc'
     ].join(' ')
 
@@ -781,24 +753,19 @@ when 'test'
     FileUtils.mkdir_p(build_dir)
     ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
     ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+    source_dir = File.dirname(File.expand_path(source))
+    extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
+    ffi_modules = extern_modules.select { |m|
+      !m.start_with?('std.') && File.exist?(File.join(source_dir, "#{m}.zig"))
+    }
+    ffi_modules.each { |m| FileUtils.cp(File.join(source_dir, "#{m}.zig"), File.join(build_dir, "#{m}.zig")) }
     tmp_name = "._clear_tmp_#{base_name}.zig"
     tmp_zig = File.join(build_dir, tmp_name)
     File.write(tmp_zig, zig_code)
 
-    # Compile and run with zig test (Zig 0.16 module format)
-    lib_modules = {
-      'safety' => 'lib/safety.zig',
-      'ebr' => 'lib/ebr.zig',
-      'ownership' => 'lib/ownership.zig',
-      'compat' => 'lib/compat.zig'
-    }
+    # Compile and run with zig test
     cmd_parts = [ZIG, 'test']
-    lib_modules.each_key { |m| cmd_parts += ['--dep', m] }
-    cmd_parts += ["-Mroot=#{tmp_name}", 'runtime/switch.S', 'runtime/onRoot.S']
-    cmd_parts += ["-Msafety=#{File.join(ZIG_DIR, lib_modules['safety'])}"]
-    cmd_parts += ['--dep', 'compat', "-Mebr=#{File.join(ZIG_DIR, lib_modules['ebr'])}"]
-    cmd_parts += ["-Mownership=#{File.join(ZIG_DIR, lib_modules['ownership'])}"]
-    cmd_parts += ["-Mcompat=#{File.join(ZIG_DIR, lib_modules['compat'])}"]
+    cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
     cmd_parts += ['-lc', '--test-filter', "\"#{File.basename(source)}\""]
     cmd = cmd_parts.join(' ')
     compile_output = `cd #{build_dir} && #{cmd} 2>&1`

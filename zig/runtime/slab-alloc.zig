@@ -1,5 +1,5 @@
 const std = @import("std");
-const compat = @import("compat");
+const compat = @import("../lib/compat.zig");
 
 pub fn SlabAllocator(comptime T: type) type {
     return struct {

@@ -2,9 +2,9 @@ const std = @import("std");
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const qs = @import("queues.zig");
-const ebr_mod = @import("ebr");
+const ebr_mod = @import("../lib/ebr.zig");
 const alloc_profile = @import("alloc-profile.zig");
-const compat = @import("compat");
+const compat = @import("../lib/compat.zig");
 
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 const EbrContext = ebr_mod.EbrContext;

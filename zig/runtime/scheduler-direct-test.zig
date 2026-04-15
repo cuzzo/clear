@@ -3,7 +3,7 @@ const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const fc = @import("fiber-core.zig");
 const qs = @import("queues.zig");
-const ebr = @import("ebr");
+const ebr = @import("../lib/ebr.zig");
 const spsc = @import("spsc.zig");
 
 const alloc = std.testing.allocator;

@@ -363,7 +363,7 @@ class MIRLowering
     items << MIR::TypeAlias.new("CheatLib", "CheatHeader.CheatLib")
     items << MIR::TypeAlias.new("Runtime", "CheatHeader.Runtime")
     items << MIR::TypeAlias.new("EbrContext", "CheatHeader.EbrContext")
-    items << MIR::Import.new("safety", "safety", nil) if needs_safety
+    items << MIR::Import.new("safety", "runtime/../lib/safety.zig", nil) if needs_safety
 
     if use_c_allocator || @used_sharded_map
       items << MIR::PubConst.new("USE_C_ALLOCATOR", "true")
@@ -760,7 +760,8 @@ class MIRLowering
       mod_parts = mod.split(".")
       import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
       mod_alias = mod.gsub(".", "_")
-      MIR::Import.new(mod_alias, mod_parts.first, mod_parts.length > 1 ? mod_parts[1..].join(".") : nil)
+      module_path = mod_parts.first == "std" ? mod_parts.first : "#{mod_parts.first}.zig"
+      MIR::Import.new(mod_alias, module_path, mod_parts.length > 1 ? mod_parts[1..].join(".") : nil)
     else
       MIR::Noop.new("extern_fn_import_already_emitted")
     end
@@ -775,7 +776,8 @@ class MIRLowering
       items = []
       if @emitted_extern_modules.add?(mod)
         member_chain = mod_parts[1..].any? ? mod_parts[1..].join(".") : nil
-        items << MIR::Import.new(mod_alias, mod_parts.first, member_chain)
+        module_path = mod_parts.first == "std" ? mod_parts.first : "#{mod_parts.first}.zig"
+        items << MIR::Import.new(mod_alias, module_path, member_chain)
       end
       # AS "ZigTypeExpr" allows aliasing to parameterized types like Parsed(JsonRecord).
       zig_rhs = node.as_type ? "#{mod_alias}.#{node.as_type}" : "#{mod_alias}.#{node.name}"
@@ -1411,6 +1413,7 @@ class MIRLowering
       args_tuple_name: "__ext#{id}_args",
       frame_name: "__ext#{id}_frame",
       arg_codes: arg_codes,
+      arg_field_types: nil,
       arg_tuple: arg_tuple,
       alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
       return_type: node.full_type,
@@ -1433,6 +1436,7 @@ class MIRLowering
       args_tuple_name: "__extm#{id}_args",
       frame_name: "__extm#{id}_frame",
       arg_codes: arg_codes,
+      arg_field_types: nil,
       arg_tuple: arg_tuple,
       alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
       return_type: node.full_type,
@@ -1448,7 +1452,7 @@ class MIRLowering
     parts.join(", ")
   end
 
-  def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:)
+  def build_extern_trampoline_common(id:, prefix:, args_tuple_name:, frame_name:, arg_codes:, arg_field_types:, arg_tuple:, alloc_kind:, return_type:, call_zig:, receiver_field:)
     ret_t = return_type.is_a?(Type) ? return_type : Type.new(return_type || :Void)
     can_fail = ret_t.error_union?
     payload_t = can_fail ? ret_t.payload_type : ret_t
@@ -1457,7 +1461,10 @@ class MIRLowering
     fields = []
     fields << "self_val: @TypeOf(#{receiver_field})" if receiver_field
     fields << "alloc: std.mem.Allocator" if alloc_kind
-    arg_codes.each_index { |i| fields << "a#{i}: @TypeOf(#{args_tuple_name}[#{i}])" }
+    arg_codes.each_index do |i|
+      field_type = arg_field_types&.[](i)
+      fields << "a#{i}: #{field_type || "@TypeOf(#{args_tuple_name}[#{i}])"}"
+    end
     fields << "err: ?anyerror = null" if can_fail
     fields << "ret: #{payload_t.zig_type} = undefined" unless returns_void
 
@@ -2283,7 +2290,7 @@ class MIRLowering
 
   def lower_require(node)
     if node.kind == :package
-      MIR::Import.new(node.namespace || node.path, node.namespace || node.path, nil)
+      MIR::Import.new(node.namespace || node.path, "#{node.namespace || node.path}.zig", nil)
     else
       # Local require: compile the module and inline the Zig body
       raise "MIRLowering: REQUIRE \"#{node.path}\" but no importer available" unless @importer
@@ -2940,8 +2947,11 @@ class MIRLowering
       items = MIR::FieldGet.new(target, "items")
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
-    elsif ti && direct_indexable_collection_type?(ti, node.target)
-      direct_index_get(target, index, ti)
+    elsif ti && direct_indexable_collection_type?(ti)
+      direct_index_get(target, index, node.target, ti) || begin
+        builtin = INDEX_OPS.dig(ti&.dispatch_key, :get, :builtin) || :getAt
+        emit_builtin(builtin, [target, index])
+      end
     else
       # Registry-driven: dispatch_key → INDEX_OPS get :builtin (string_raw → charAt,
       # array → getAt, etc.). Falls back to :getAt for unregistered types.
@@ -3927,7 +3937,7 @@ class MIRLowering
 
   def callee_needs_rt?(name)
     return true if name.nil? || name.to_s.empty?
-    sig = @fn_sigs&.dig(name)
+    sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
     sig ? (sig.needs_rt.nil? ? true : sig.needs_rt) : true
   end
 
@@ -3975,7 +3985,7 @@ class MIRLowering
 
   def callee_can_fail?(name)
     return true if name.nil? || name.to_s.empty?
-    sig = @fn_sigs&.dig(name)
+    sig = @fn_sigs&.dig(name) || @fn_sigs&.dig(name.to_sym) || @fn_sigs&.dig(name.to_s)
     sig ? (sig.can_fail.nil? ? true : sig.can_fail) : true
   end
 
@@ -4009,25 +4019,31 @@ class MIRLowering
     iz
   end
 
-  def direct_indexable_collection_type?(type_info, target_node = nil)
+  def direct_indexable_collection_type?(type_info)
     ti = Type.new(type_info)
-    return true if ti.list_collection?
-    # Slice params (function parameters typed as T[]) support direct indexing.
-    # Local dynamic arrays are ambiguous at lowering time — leave them to CheatLib.getAt.
-    return true if ti.array? && !ti.string? &&
-                   target_node.is_a?(AST::Identifier) &&
-                   @current_fn_param_names&.include?(target_node.name)
-    false
+    ti.list_collection? || (ti.array? && !ti.string?)
   end
 
-  def direct_index_get(target, index, type_info)
+  def direct_slice_backed_expr?(ast_node, type_info)
     ti = Type.new(type_info)
+    return true if ti.fixed?
+    return true if ast_node.is_a?(AST::GetField)
+    ast_node.is_a?(AST::Identifier) &&
+      @current_fn_param_names&.include?(ast_node.name)
+  end
+
+  def direct_index_get(target, index, ast_node, type_info)
     cast_idx = MIR::Cast.new(index, "usize", :intCast)
-    if ti.list_collection?
-      MIR::IndexGet.new(MIR::FieldGet.new(target, "items"), cast_idx)
-    else
-      MIR::IndexGet.new(target, cast_idx)
-    end
+    ti = Type.new(type_info)
+    base =
+      if ti.list_collection?
+        MIR::FieldGet.new(target, "items")
+      elsif direct_slice_backed_expr?(ast_node, ti)
+        target
+      else
+        return nil
+      end
+    MIR::IndexGet.new(base, cast_idx)
   end
 
   def lower_direct_length(node)
@@ -4039,14 +4055,11 @@ class MIRLowering
 
     recv = lower(recv_ast)
     ti = Type.new(recv_ti)
-    is_param_slice = ti.array? && !ti.string? &&
-                     recv_ast.is_a?(AST::Identifier) &&
-                     @current_fn_param_names&.include?(recv_ast.name)
     len_expr =
       if ti.list_collection?
         # Explicit @list: always std.ArrayListUnmanaged — safe to go direct.
         MIR::FieldGet.new(MIR::FieldGet.new(recv, "items"), "len")
-      elsif ti.string? || is_param_slice
+      elsif ti.string? || (ti.array? && !ti.string? && direct_slice_backed_expr?(recv_ast, ti))
         MIR::FieldGet.new(recv, "len")
       else
         # Local dynamic arrays: CheatLib.len handles both ArrayListUnmanaged

@@ -1,5 +1,5 @@
 const std = @import("std");
-const compat = @import("compat");
+const compat = @import("compat.zig");
 const fp = @import("../runtime/scheduler.zig");
 const Task = @import("../runtime/queues.zig").Task;
 

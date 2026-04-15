@@ -1,13 +1,13 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
-const compat = @import("compat");
+const compat = @import("../lib/compat.zig");
 pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const streams = @import("../lib/streams.zig");
 
-pub const EbrContext = @import("ebr").EbrContext;
+pub const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const Task = @import("queues.zig").Task;
 const Fiber = fc.Fiber;
 
@@ -1170,10 +1170,10 @@ pub const CheatLib = struct {
     /// Returns the high-water mark of physical memory used by this process.
     /// Cross-language comparable — works identically in C, Go, Zig, etc.
     pub fn peakMemoryKb() i64 {
-        const file = std.fs.openFileAbsolute("/proc/self/status", .{}) catch return -1;
-        defer file.close();
+        const fd = openPathFd("/proc/self/status", .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0) catch return -1;
+        defer compat.closeFd(fd);
         var buf: [4096]u8 = undefined;
-        const n = file.readAll(&buf) catch return -1;
+        const n = std.posix.read(fd, &buf) catch return -1;
         const content = buf[0..n];
         // Find "VmHWM:" line and parse the KB value
         if (std.mem.indexOf(u8, content, "VmHWM:")) |pos| {
@@ -1190,10 +1190,10 @@ pub const CheatLib = struct {
 
     /// Current resident set size (VmRSS) in KB, from /proc/self/status.
     pub fn currentMemoryKb() i64 {
-        const file = std.fs.openFileAbsolute("/proc/self/status", .{}) catch return -1;
-        defer file.close();
+        const fd = openPathFd("/proc/self/status", .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0) catch return -1;
+        defer compat.closeFd(fd);
         var buf: [4096]u8 = undefined;
-        const n = file.readAll(&buf) catch return -1;
+        const n = std.posix.read(fd, &buf) catch return -1;
         const content = buf[0..n];
         if (std.mem.indexOf(u8, content, "VmRSS:")) |pos| {
             var i = pos + 6; // skip "VmRSS:"

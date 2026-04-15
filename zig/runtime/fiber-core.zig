@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const safety = @import("safety");
+const safety = @import("../lib/safety.zig");
 
 // Fibers
 
@@ -268,4 +268,3 @@ pub const Fiber = struct {
         // No need to clear registers; they get overwritten on switchContext
     }
 };
-

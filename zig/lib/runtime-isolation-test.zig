@@ -4,9 +4,9 @@ const rt_mod = @import("../runtime/runtime.zig");
 const fp = @import("../runtime/scheduler.zig");
 const qs = @import("../runtime/queues.zig");
 const fm = @import("../runtime/fiber-memory.zig");
-const ebr = @import("ebr");
+const ebr = @import("ebr.zig");
 const header = @import("../runtime/runtime-header.zig");
-const compat = @import("compat");
+const compat = @import("compat.zig");
 
 const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;

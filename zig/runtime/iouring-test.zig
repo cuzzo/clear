@@ -15,7 +15,7 @@ const Runtime = header.Runtime;
 const TaskFn = header.TaskFn;
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
-const EbrContext = @import("ebr").EbrContext;
+const EbrContext = @import("../lib/ebr.zig").EbrContext;
 
 const TEST_DIR = "/tmp/clear_iouring_test";
 

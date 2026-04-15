@@ -1,5 +1,5 @@
 const std = @import("std");
-const compat = @import("compat");
+const compat = @import("compat.zig");
 
 // EBR
 pub const RetiredPtr = struct {

@@ -1,6 +1,6 @@
 const std = @import("std");
 const Runtime = @import("runtime.zig").Runtime;
-const compat = @import("compat");
+const compat = @import("../lib/compat.zig");
 
 // -------------------------------------------------------------------------
 // Concurrency Primitives (Locked<T>)

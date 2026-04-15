@@ -1,7 +1,7 @@
 const std = @import("std");
 const rt_mod = @import("runtime.zig");
 const fp = @import("scheduler.zig");
-const ebr = @import("ebr");
+const ebr = @import("../lib/ebr.zig");
 
 const Runtime = rt_mod.Runtime;
 const alloc = std.testing.allocator;

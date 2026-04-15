@@ -11,7 +11,7 @@ const std = @import("std");
 const CheatHeader = @import("runtime-header.zig");
 const CheatLib = CheatHeader.CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
-const EbrContext = @import("ebr").EbrContext;
+const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 

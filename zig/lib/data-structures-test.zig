@@ -3,7 +3,7 @@ const rt_mod = @import("../runtime/runtime.zig");
 const fp = @import("../runtime/scheduler.zig");
 const qs = @import("../runtime/queues.zig");
 const fm = @import("../runtime/fiber-memory.zig");
-const ebr = @import("ebr");
+const ebr = @import("ebr.zig");
 const CheatLib = @import("../runtime/runtime-header.zig").CheatLib;
 const Runtime = rt_mod.Runtime;
 

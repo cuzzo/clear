@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const compat = @import("compat");
+const compat = @import("../lib/compat.zig");
 
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
@@ -16,7 +16,7 @@ fn milliTimestamp() i64 {
 const Stack = fc.Stack;
 const Fiber = fc.Fiber;
 const Context = fc.Context;
-const EbrContext = @import("ebr").EbrContext;
+const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const Scheduler = fp.Scheduler;
 const WaitGroup = fp.WaitGroup;
 const StackPool = fm.StackPool;
@@ -29,10 +29,20 @@ comptime {
 // Stack
 
 fn allocTestMemory(size: usize) ![]align(4096) u8 {
+    if (builtin.zig_version.minor >= 16) {
+        return std.posix.mmap(
+            null,
+            size,
+            .{ .READ = true, .WRITE = true },
+            .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
+            -1,
+            0
+        );
+    }
     return std.posix.mmap(
         null,
         size,
-        .{ .READ = true, .WRITE = true },
+        std.posix.PROT.READ | std.posix.PROT.WRITE,
         .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
         -1,
         0

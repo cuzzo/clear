@@ -1,5 +1,5 @@
 const std = @import("std");
-const compat = @import("compat");
+const compat = @import("../lib/compat.zig");
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
 // To avoid linker errors

@@ -1062,7 +1062,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         zig = transpile(code)
-        expect(zig).to include('const safety = @import("safety")')
+        expect(zig).to include('const safety = @import("runtime/../lib/safety.zig")')
       end
 
       it "does not emit safety import when no @nonReentrant functions exist" do

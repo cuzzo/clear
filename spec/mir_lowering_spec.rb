@@ -1789,7 +1789,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::Import)
       zig = emit(result)
-      expect(zig).to include('@import("math")')
+      expect(zig).to include('@import("math.zig")')
     end
 
     it "raises on local require when no importer available" do
@@ -1878,7 +1878,7 @@ RSpec.describe MIRLowering do
       prog = AST::Program.new(tok, [])
       result = lowering.lower_program(prog, needs_safety: true)
       zig = emit(result)
-      expect(zig).to include('@import("safety")')
+      expect(zig).to include('@import("runtime/../lib/safety.zig")')
     end
 
     it "includes USE_C_ALLOCATOR when requested" do
