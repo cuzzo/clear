@@ -1,21 +1,19 @@
--- Pub-Sub Benchmark — streaming promises with backpressure — CLEAR
+-- @leak: 100000 -> 1000
+-- Pub-Sub Benchmark — CLEAR
 --
--- 64 subscribers each receive 100K messages via a dedicated ~Int64[INF]
--- stream generator. The 64-slot lock-free ring buffer blocks the generator
--- when the subscriber falls behind — true per-subscriber backpressure.
--- No intermediate Msg[] list is materialized.
---
--- Architecture:
---   Publisher: one BG STREAM fiber per subscriber (SPSC InfStream).
---   Subscriber: one BG fiber per subscriber reads lazily via NEXT.
---   Backpressure: generator yields when ring buffer is full; consumer
---     wakes producer after draining a slot.
---
--- Contrast with previous approach (materializes Msg[] then CONCURRENT):
---   Previous: ~420 MB peak RSS (100K * 64 structs)
---   Current:  ~32 KB peak RSS (64 * 64-slot ring buffers)
---
+-- Models 1 publisher broadcasting 100K messages to 64 subscribers.
+-- Each subscriber processes every message with CPU-bound work
+-- (2000 LCG iterations per message).
 -- Total work: 100K * 64 * 2000 = 12.8 billion LCG iterations.
+--
+-- CLEAR approach: one publisher exposes a ~?Msg[] @split stream and
+-- each subscriber BG fiber CLONEs the shared ordered feed. Every
+-- subscriber sees the same messages in the same order.
+--
+-- Compare to Go (64 goroutines + buffered channels) and Rust
+-- (64 Tokio tasks + broadcast channel).
+
+STRUCT Msg { seed: Int64 }
 
 FN processMessage(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
@@ -26,33 +24,34 @@ END
 FN main() RETURNS Void ->
     t0 = timestampMs();
 
-    -- 64 subscriber BG fibers. Each spawns its own InfStream generator and
-    -- reads lazily. The 64-slot ring buffer provides backpressure: the
-    -- generator blocks when the subscriber hasn't drained the next slot.
+    msgs: ~?Msg[] @split = BG STREAM {
+        FOR i IN (0 ..< 100000) -> YIELD Msg{ seed: i };
+    };
+
     MUTABLE futures: ~Int64[]@list = [];
-    FOR i IN (0_i64 ..< 64) DO
+    FOR i IN (0 ..< 64) DO
+        subscriber_msgs: ~?Msg[] @split = CLONE msgs;
         futures.append(BG {
-            stream: ~Int64[INF] = BG STREAM {
-                MUTABLE j: Int64 = 0;
-                WHILE TRUE DO
-                    YIELD j;
-                    j = j + 1;
-                END
-            };
+            @parallel ->
             MUTABLE total: Int64 = 0;
-            FOR k IN (0_i64 ..< 100000) DO
-                msg = NEXT stream;
-                total = total %+ processMessage(msg);
+            WHILE TRUE DO
+                msg = NEXT subscriber_msgs;
+                IF msg == NIL THEN
+                    BREAK;
+                END
+                total = total %+ processMessage(msg?.seed);
             END
             total;
         });
     END
 
     MUTABLE total: Int64 = 0;
-    FOR j IN (0_i64 ..< 64) ->
-        total = total %+ NEXT futures[j];
-
+    FOR j IN (0 ..< 64) DO
+        result = NEXT futures[j];
+        total = total %+ result;
+    END
     elapsed = timestampMs() - t0;
+
     checksum = total MOD 1000000000;
     print("Checksum: ${checksum.toString()}");
     print("Messages: 100000");

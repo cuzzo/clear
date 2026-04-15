@@ -1,5 +1,10 @@
 const std = @import("std");
 const compat = @import("compat");
+const fp = @import("../runtime/scheduler.zig");
+const qs = @import("../runtime/queues.zig");
+
+const Scheduler = fp.Scheduler;
+const Task = qs.Task;
 
 pub const Range = struct {
     start: f64,
@@ -93,10 +98,17 @@ pub fn SplitStream(
             items_head: ?*ItemNode = null,
             items_tail: ?*ItemNode = null,
             wg: WaitGroupType = undefined,
+            waiters: ?*Waiter = null,
             err: ?anyerror = null,
             owner_count: usize = 0,
             closed: bool = false,
             mutex: compat.Mutex = .{},
+        };
+
+        const Waiter = struct {
+            task: *Task,
+            sched: *Scheduler,
+            next: ?*Waiter = null,
         };
 
         inner: *Inner,
@@ -146,6 +158,15 @@ pub fn SplitStream(
             inner.alloc.destroy(inner);
         }
 
+        fn wakeWaiters(list: ?*Waiter) void {
+            var cur = list;
+            while (cur) |waiter| {
+                const next_waiter = waiter.next;
+                waiter.sched.schedule(waiter.task);
+                cur = next_waiter;
+            }
+        }
+
         pub fn spawnNew(alloc: std.mem.Allocator, sched: anytype) !Self {
             const inner = try alloc.create(Inner);
             inner.* = .{
@@ -161,10 +182,11 @@ pub fn SplitStream(
         }
 
         pub fn push(self: *Self, val: T) !void {
+            var waiters: ?*Waiter = null;
             self.inner.mutex.lock();
-            defer self.inner.mutex.unlock();
 
             if (self.inner.owner_count == 0) {
+                self.inner.mutex.unlock();
                 var tmp = val;
                 cleanupValue(self.inner.alloc, &tmp);
                 return;
@@ -181,15 +203,22 @@ pub fn SplitStream(
                 self.inner.items_head = node;
             }
             self.inner.items_tail = node;
+            waiters = self.inner.waiters;
+            self.inner.waiters = null;
+            self.inner.mutex.unlock();
+            wakeWaiters(waiters);
         }
 
         pub fn close(self: *Self) void {
+            var waiters: ?*Waiter = null;
             self.inner.mutex.lock();
             self.inner.closed = true;
+            waiters = self.inner.waiters;
+            self.inner.waiters = null;
             const should_destroy = self.inner.owner_count == 0;
             self.inner.mutex.unlock();
 
-            self.inner.wg.done();
+            wakeWaiters(waiters);
 
             if (should_destroy) {
                 self.inner.mutex.lock();
@@ -200,9 +229,13 @@ pub fn SplitStream(
         }
 
         pub fn setError(self: *Self, err: anyerror) void {
+            var waiters: ?*Waiter = null;
             self.inner.mutex.lock();
-            defer self.inner.mutex.unlock();
             self.inner.err = err;
+            waiters = self.inner.waiters;
+            self.inner.waiters = null;
+            self.inner.mutex.unlock();
+            wakeWaiters(waiters);
         }
 
         pub fn retain(self: Self) Self {
@@ -227,24 +260,43 @@ pub fn SplitStream(
 
         pub fn next(self: *Self) anyerror!?T {
             std.debug.assert(self.active);
+            while (true) {
+                self.inner.mutex.lock();
 
-            if (!self.inner.closed and self.firstUnread() == null and self.inner.err == null) {
-                self.inner.wg.wait();
+                if (self.inner.err) |err| {
+                    self.inner.mutex.unlock();
+                    return err;
+                }
+
+                if (self.firstUnread()) |current| {
+                    const out = try cloneValue(self.inner.alloc, current.value);
+                    self.started = true;
+                    self.next_node = current.next;
+                    std.debug.assert(current.remaining_readers > 0);
+                    current.remaining_readers -= 1;
+                    releaseConsumedPrefix(self.inner);
+                    self.inner.mutex.unlock();
+                    return out;
+                }
+
+                if (self.inner.closed) {
+                    self.inner.mutex.unlock();
+                    return null;
+                }
+
+                if (fp.scheduler_running and fp.active_scheduler.current_task != null) {
+                    const task = fp.active_scheduler.getCurrent();
+                    var waiter = Waiter{ .task = task, .sched = fp.active_scheduler };
+                    waiter.next = self.inner.waiters;
+                    self.inner.waiters = &waiter;
+                    task.status.store(.Blocked, .release);
+                    self.inner.mutex.unlock();
+                    task.base.yield();
+                } else {
+                    self.inner.mutex.unlock();
+                    std.Thread.yield() catch {};
+                }
             }
-
-            self.inner.mutex.lock();
-            defer self.inner.mutex.unlock();
-
-            if (self.inner.err) |err| return err;
-
-            const current = self.firstUnread() orelse return null;
-            const out = try cloneValue(self.inner.alloc, current.value);
-            self.started = true;
-            self.next_node = current.next;
-            std.debug.assert(current.remaining_readers > 0);
-            current.remaining_readers -= 1;
-            releaseConsumedPrefix(self.inner);
-            return out;
         }
 
         pub fn deinit(self: *Self) void {

@@ -487,6 +487,84 @@ fn readSplitStream(stream: *CheatLib.SplitStream(i64), result: *ThreadResult) !v
     }
 }
 
+const SplitFiberReadState = struct {
+    stream: CheatLib.SplitStream(i64),
+    out: *[3]i64,
+    count: usize = 0,
+};
+
+fn splitFiberReader(_: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*SplitFiberReadState, @ptrCast(@alignCast(raw_args.?)));
+    defer state.stream.deinit();
+    while (try state.stream.next()) |value| {
+        state.out[state.count] = value;
+        state.count += 1;
+    }
+}
+
+const SplitFiberProducerState = struct {
+    stream: CheatLib.SplitStream(i64),
+};
+
+fn splitFiberProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*SplitFiberProducerState, @ptrCast(@alignCast(raw_args.?)));
+    defer state.stream.close();
+    try state.stream.push(101);
+    rt.checkYield();
+    try state.stream.push(102);
+    rt.checkYield();
+    try state.stream.push(103);
+}
+
+fn splitHammerMix(seed: i64) i64 {
+    var x = seed;
+    var i: usize = 0;
+    while (i < 64) : (i += 1) {
+        x = x *% 6364136223846793005 +% 1442695040888963407;
+    }
+    return x;
+}
+
+const SplitParallelSubscriberState = struct {
+    stream: CheatLib.SplitStream(i64),
+    total: i64 = 0,
+    count: usize = 0,
+};
+
+fn splitParallelSubscriber(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*SplitParallelSubscriberState, @ptrCast(@alignCast(raw_args.?)));
+    defer state.stream.deinit();
+
+    var total: i64 = 0;
+    var count: usize = 0;
+    while (true) {
+        const msg = try state.stream.next();
+        if (msg == null) break;
+        total = total +% splitHammerMix(msg.?);
+        count += 1;
+        if ((count & 63) == 0) rt.checkYield();
+    }
+
+    state.total = total;
+    state.count = count;
+}
+
+const SplitParallelProducerState = struct {
+    stream: CheatLib.SplitStream(i64),
+    message_count: usize,
+};
+
+fn splitParallelProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*SplitParallelProducerState, @ptrCast(@alignCast(raw_args.?)));
+    defer state.stream.close();
+
+    var i: usize = 0;
+    while (i < state.message_count) : (i += 1) {
+        try state.stream.push(@as(i64, @intCast(i)));
+        if ((i & 63) == 0) rt.checkYield();
+    }
+}
+
 test "SplitStream preserves order across two OS-thread consumers" {
     const S = CheatLib.SplitStream(i64);
     var stream = try S.spawnNew(std.testing.allocator, fakeSched());
@@ -513,6 +591,169 @@ test "SplitStream preserves order across two OS-thread consumers" {
     try std.testing.expectEqual(@as(usize, 3), right.count);
     try std.testing.expectEqualSlices(i64, left.values[0..left.count], &[_]i64{ 101, 102, 103 });
     try std.testing.expectEqualSlices(i64, right.values[0..right.count], &[_]i64{ 101, 102, 103 });
+}
+
+test "SplitStream wakes multiple waiting fibers as items arrive" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const S = CheatLib.SplitStream(i64);
+    var stream = try S.spawnNew(allocator, &sched);
+
+    var left_values = [_]i64{0} ** 3;
+    var right_values = [_]i64{0} ** 3;
+    var left_state = SplitFiberReadState{ .stream = stream, .out = &left_values };
+    var right_state = SplitFiberReadState{ .stream = stream.retain(), .out = &right_values };
+    var producer_state = SplitFiberProducerState{ .stream = makeProducer(i64, stream) };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&splitFiberReader)),
+        &left_state,
+        .{},
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&splitFiberReader)),
+        &right_state,
+        .{},
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&splitFiberProducer)),
+        &producer_state,
+        .{},
+    );
+
+    sched.run();
+
+    try std.testing.expectEqual(@as(usize, 3), left_state.count);
+    try std.testing.expectEqual(@as(usize, 3), right_state.count);
+    try std.testing.expectEqualSlices(i64, left_values[0..left_state.count], &[_]i64{ 101, 102, 103 });
+    try std.testing.expectEqualSlices(i64, right_values[0..right_state.count], &[_]i64{ 101, 102, 103 });
+}
+
+test "SplitStream survives multithreaded spawnBest pubsub hammer" {
+    const allocator = std.testing.allocator;
+    const subscriber_count = 16;
+    const message_count = 4096;
+    const worker_count = 7;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var shutdown = std.atomic.Value(bool).init(false);
+
+    const WorkerCtx = struct {
+        allocator: std.mem.Allocator,
+        global_ctx: *EbrContext,
+        stack_pool: *fm.StackPool,
+        shutdown: *std.atomic.Value(bool),
+    };
+
+    const workerMain = struct {
+        fn run(ctx: *WorkerCtx) void {
+            var worker_sched = fp.Scheduler.init(ctx.allocator, ctx.global_ctx, ctx.stack_pool) catch return;
+            defer worker_sched.deinit();
+            worker_sched.shutdown_on_idle = false;
+            worker_sched.global_shutdown = ctx.shutdown;
+            fp.active_scheduler = &worker_sched;
+            fp.scheduler_running = true;
+            worker_sched.run();
+            fp.scheduler_running = false;
+        }
+    }.run;
+
+    var worker_ctx = WorkerCtx{
+        .allocator = allocator,
+        .global_ctx = &global_ctx,
+        .stack_pool = &stack_pool,
+        .shutdown = &shutdown,
+    };
+
+    var workers: [worker_count]std.Thread = undefined;
+    for (0..worker_count) |i| {
+        workers[i] = try std.Thread.spawn(.{}, workerMain, .{&worker_ctx});
+    }
+    while (fp.global_registry.count() < worker_count) {
+        std.posix.nanosleep(0, std.time.ns_per_ms);
+    }
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer {
+        sched.deinit();
+        fp.global_registry.deinit(allocator);
+    }
+    sched.global_shutdown = &shutdown;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const S = CheatLib.SplitStream(i64);
+    const seed_stream = try S.spawnNew(allocator, &sched);
+    var producer_state = SplitParallelProducerState{
+        .stream = makeProducer(i64, seed_stream),
+        .message_count = message_count,
+    };
+
+    var subscribers: [subscriber_count]SplitParallelSubscriberState = undefined;
+    subscribers[0] = .{ .stream = seed_stream };
+    for (1..subscriber_count) |i| {
+        subscribers[i] = .{ .stream = subscribers[0].stream.retain() };
+    }
+
+    for (&subscribers) |*subscriber| {
+        try CheatHeader.spawnBest(
+            @intFromPtr(&Runtime.entryWrapper),
+            @as(qs.TaskFn, @ptrCast(&splitParallelSubscriber)),
+            subscriber,
+            .{ .stack_size = .Large },
+        );
+    }
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&splitParallelProducer)),
+        &producer_state,
+        .{},
+    );
+
+    sched.run();
+
+    shutdown.store(true, .release);
+    fp.global_registry.notifyAll();
+    for (&workers) |*worker| worker.join();
+
+    const expected_total = blk: {
+        var total: i64 = 0;
+        var i: usize = 0;
+        while (i < message_count) : (i += 1) {
+            total = total +% splitHammerMix(@as(i64, @intCast(i)));
+        }
+        break :blk total;
+    };
+
+    for (subscribers) |subscriber| {
+        try std.testing.expectEqual(@as(usize, message_count), subscriber.count);
+        try std.testing.expectEqual(expected_total, subscriber.total);
+    }
 }
 
 test "concurrentBoundedSelect returns all mapped items in source order" {
