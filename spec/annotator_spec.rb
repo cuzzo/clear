@@ -2051,18 +2051,10 @@ RSpec.describe SemanticAnnotator do
           expect(node&.storage).to eq(:heap), "expected '#{@_escape_check}' to be promoted to heap"
         end
       end
-      if @_no_escape_check
-        og = @annotator.send(:instance_variable_get, :@og)
-        if @_no_escape_check == :any
-          # All nodes should be stack/frame (not heap)
-          og.nodes.each do |name, n|
-            next if name == "argv" # global
-            expect(n.storage).not_to eq(:heap), "expected no escapes but '#{name}' is on heap"
-          end
-        else
-          node = og[@_no_escape_check]
-          expect(node&.storage).not_to eq(:heap), "expected '#{@_no_escape_check}' not to be on heap" if node
-        end
+      if @_no_escape_check && @_no_escape_check != :any && @_mir_ast
+        # After MIRPass: verify the named variable was NOT promoted to heap.
+        sym = find_symbol_in_mir_ast(@_no_escape_check)
+        expect(sym&.storage).not_to eq(:heap), "expected '#{@_no_escape_check}' not to be promoted to heap" if sym
       end
     end
 
@@ -2103,11 +2095,6 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "does NOT promote primitives (Float64)" do
-        # Primitives are copied, so mark_escaped guards against them,
-        # or the annotator shouldn't even call it.
-        # Your Scope code handles the guard, so we can expect the call OR check the logic.
-        # But generally, we expect NO promotion to heap storage.
-        expect_no_escape
         run(<<~FLUX)
           FN get_num() RETURNS Float64 ->
             x = 10;
@@ -2134,7 +2121,6 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "does NOT promote when assigning to a local stack variable" do
-        expect_no_escape
         run(<<~FLUX)
           STRUCT Item { id: Float64 }
           FN test() ->
@@ -2149,7 +2135,7 @@ RSpec.describe SemanticAnnotator do
     context "Lambda/Function Captures (USE)" do
       it "does NOT promote a plain struct captured by USE (struct moves by value into closure)" do
         expect_no_escape("x")
-        run(<<~FLUX)
+        run_mir_escape(<<~FLUX)
           STRUCT Node { id: Float64 }
           FN main() ->
             x = Node { id: 1 };

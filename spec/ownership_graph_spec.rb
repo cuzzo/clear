@@ -11,10 +11,9 @@ RSpec.describe OwnershipGraph do
       expect(graph.live?("x")).to be true
     end
 
-    it "sets storage and scope_depth" do
-      graph.declare("x", storage: :heap, scope_depth: 2, line: 10)
+    it "sets scope_depth and line" do
+      graph.declare("x", scope_depth: 2, line: 10)
       node = graph["x"]
-      expect(node.storage).to eq(:heap)
       expect(node.scope_depth).to eq(2)
       expect(node.line).to eq(10)
     end
@@ -29,14 +28,6 @@ RSpec.describe OwnershipGraph do
       graph.transfer("x", "y")
       expect(graph.live?("y")).to be true
       expect(graph.moved?("x")).to be true
-    end
-
-    it "records a :moves edge" do
-      graph.transfer("x", "y")
-      move_edge = graph.edges.find { |e| e.kind == :moves }
-      expect(move_edge).not_to be_nil
-      expect(move_edge.from).to eq("y")
-      expect(move_edge.to).to eq("x")
     end
 
     it "invalidates children of source" do
@@ -130,18 +121,6 @@ RSpec.describe OwnershipGraph do
     end
   end
 
-  describe "#escape" do
-    it "promotes storage to heap" do
-      graph.declare("x", storage: :stack)
-      graph.escape("x")
-      expect(graph["x"].storage).to eq(:heap)
-    end
-
-    it "is a no-op for undeclared path" do
-      graph.escape("ghost") # should not raise
-    end
-  end
-
   describe "#drop" do
     it "drops a live node and returns cleanup paths" do
       graph.declare("x")
@@ -211,39 +190,51 @@ RSpec.describe OwnershipGraph do
   end
 
 
-  describe "#fork and #merge" do
-    it "creates an independent snapshot" do
+  describe "#fork_lightweight and #restore_lightweight" do
+    it "captures and restores node states" do
       graph.declare("x")
-      snapshot = graph.fork
+      snapshot = graph.fork_lightweight
       graph.transfer("x", "y")
-      expect(snapshot.live?("x")).to be true
       expect(graph.moved?("x")).to be true
+      graph.restore_lightweight(snapshot)
+      expect(graph.live?("x")).to be true
     end
 
-    it "merges cleanly when both branches agree" do
+    it "captures edge count for restoration" do
       graph.declare("x")
-      snapshot = graph.fork
+      snapshot = graph.fork_lightweight
+      expect(snapshot[:edge_count]).to eq(graph.edges.size)
+    end
+  end
+
+  describe "#merge" do
+    it "merges cleanly when both branches agree" do
+      other = OwnershipGraph.new
+      other.declare("x")
+      graph.declare("x")
       graph.transfer("x", "y")
-      snapshot.transfer("x", "z")
-      errors = graph.merge(snapshot)
+      other.transfer("x", "z")
+      errors = graph.merge(other)
       expect(errors).to be_empty
     end
 
     it "reports error when one branch moves and other doesn't" do
+      other = OwnershipGraph.new
+      other.declare("x")
       graph.declare("x")
-      snapshot = graph.fork
       graph.transfer("x", "y")
-      # snapshot leaves x live
-      errors = graph.merge(snapshot)
+      # other leaves x live
+      errors = graph.merge(other)
       expect(errors.size).to eq(1)
       expect(errors.first).to include("moved in one branch")
     end
 
     it "takes the more restrictive state on merge" do
+      other = OwnershipGraph.new
+      other.declare("x")
       graph.declare("x")
-      snapshot = graph.fork
       graph.transfer("x", "y")
-      graph.merge(snapshot)
+      graph.merge(other)
       expect(graph.moved?("x")).to be true
     end
   end

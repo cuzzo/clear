@@ -200,7 +200,7 @@ module CapabilityHelper
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       current_scope.locals[alias_name].non_escaping = true
-      og_declare(alias_name, nil, inner_type, :stack)
+      og_declare(alias_name, nil, inner_type)
       current_scope.declare_with_new_capability(cap)
     else
       current_scope.declare_with_new_capability(cap)
@@ -220,14 +220,14 @@ module CapabilityHelper
         resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         current_scope.locals[alias_name].non_escaping = true
-        og_declare(alias_name, nil, resolved_type, :stack)
+        og_declare(alias_name, nil, resolved_type)
       end
     elsif cap[:capability] == :BORROWED
       alias_name = cap[:alias] || var_name
       resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       current_scope.locals[alias_name].non_escaping = true
-      og_declare(alias_name, nil, resolved_type, :stack)
+      og_declare(alias_name, nil, resolved_type)
       @og.borrow("__borrowed_#{var_name}", var_name, mutable: false)
     end
   end

@@ -1473,7 +1473,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           annotator.send(:with_new_scope) do
             annotator.send(:current_scope).declare('p', nil, :"~Float64", false, false, nil, :stack)
-            annotator.send(:og_declare, 'p', nil, :"~Float64", :stack)
+            annotator.send(:og_declare, 'p', nil, :"~Float64")
             annotator.send(:finalize_scope, dummy_node)
           end
         }.to raise_error(SourceError, /Promise 'p' must be consumed/)
@@ -1487,7 +1487,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           annotator.send(:with_new_scope) do
             annotator.send(:current_scope).declare('p', nil, :"~Float64", false, false, nil, :stack)
-            annotator.send(:og_declare, 'p', nil, :"~Float64", :stack)
+            annotator.send(:og_declare, 'p', nil, :"~Float64")
             annotator.send(:og_set_moved, 'p')
             annotator.send(:finalize_scope, dummy_node)
           end

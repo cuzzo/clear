@@ -1,37 +1,28 @@
 # ownership_graph.rb — Ownership graph for CLEAR's affine type system.
 #
-# Replaces the flat per-variable state machine with a graph that tracks
-# ownership relationships between variables and their fields.
-#
 # Nodes: variables and field paths (e.g., "x", "x.child", "x.child.name")
-# Edges: ownership relationships (:owns, :borrows, :borrows_mut, :moves, :rc_share)
+# Edges: ownership relationships (:borrows, :borrows_mut)
 #
 # Core operations:
-#   declare(path, kind, type, storage) — add a node
+#   declare(path, kind, type)          — add a node
 #   transfer(from, to)                 — move: invalidate source + children
 #   borrow(borrower, source, mutable:) — add borrow edge, check conflicts
 #   release_borrow(borrower)           — remove borrow edge
-#   escape(path)                       — mark for heap promotion
 #   drop(path)                         — finalize: remove node + owned children
 #   can_write?(path)                   — any borrow edges to this path or ancestors?
-#   fork / merge(other)                — branch analysis (IF/ELSE)
+#   fork_lightweight / merge(other)    — branch analysis (IF/ELSE)
 
 class OwnershipGraph
-  Node = Struct.new(:path, :kind, :state, :storage, :type_info, :scope_depth, :line, keyword_init: true) do
+  Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line, keyword_init: true) do
     def live?;    state == :live; end
     def moved?;   state == :moved; end
     def dropped?; state == :dropped; end
-    def aliased?; kind == :aliased; end
   end
 
   Edge = Struct.new(:from, :to, :kind, keyword_init: true)
   # Edge kinds:
-  #   :owns        — parent owns child (x owns x.child)
   #   :borrows     — immutable borrow (y borrows x)
   #   :borrows_mut — mutable borrow (y mutably borrows x)
-  #   :moves       — ownership transferred (y moved from x)
-  #   :rc_share    — reference-counted share (y is an Rc clone of x)
-  #   :aliases     — y is a shallow copy sharing backing data with x (skip cleanup on y)
 
   attr_reader :nodes, :edges
 
@@ -57,21 +48,12 @@ class OwnershipGraph
     @edges_by_source[edge.from]&.delete(edge)
   end
 
-  def rebuild_target_index!
-    @edges_by_target = Hash.new { |h, k| h[k] = [] }
-    @edges_by_source = Hash.new { |h, k| h[k] = [] }
-    @edges.each do |e|
-      @edges_by_target[e.to] << e
-      @edges_by_source[e.from] << e
-    end
-  end
-
   # ── Core Operations ───────────────────────────────────────────────
 
   # Declare a new variable or field path.
-  def declare(path, kind: :affine, type_info: nil, storage: :stack, scope_depth: 0, line: 0)
+  def declare(path, kind: :affine, type_info: nil, scope_depth: 0, line: 0)
     @nodes[path] = Node.new(
-      path: path, kind: kind, state: :live, storage: storage,
+      path: path, kind: kind, state: :live,
       type_info: type_info, scope_depth: scope_depth, line: line
     )
     # Register as child of parent path (e.g., "x.child" is child of "x")
@@ -88,12 +70,9 @@ class OwnershipGraph
 
     # Create target node with source's type
     @nodes[to] = Node.new(
-      path: to, kind: source.kind, state: :live, storage: source.storage,
+      path: to, kind: source.kind, state: :live,
       type_info: source.type_info, scope_depth: source.scope_depth, line: source.line
     )
-
-    # Record the move edge
-    add_edge(Edge.new(from: to, to: from, kind: :moves))
 
     # Invalidate source and all owned children
     invalidate(from)
@@ -123,13 +102,6 @@ class OwnershipGraph
   def release_borrow(borrower)
     to_remove = @edges_by_source[borrower]&.select { |e| e.kind == :borrows || e.kind == :borrows_mut } || []
     to_remove.each { |e| remove_edge(e) }
-  end
-
-  # Mark a path for heap promotion (escapes the current frame).
-  def escape(path)
-    node = @nodes[path]
-    return unless node
-    node.storage = :heap
   end
 
   # Drop a path and all owned children. Returns list of paths to emit cleanup for.
@@ -168,38 +140,12 @@ class OwnershipGraph
     @nodes[path]&.live? || false
   end
 
-  # Does this path alias another variable's backing data? (skip cleanup)
-  def aliases?(path)
-    @edges_by_source[path]&.any? { |e| e.kind == :aliases } || false
-  end
-
-  # Does this variable need cleanup? (owns heap data and not aliased)
-  def needs_cleanup?(path)
-    node = @nodes[path]
-    return false unless node
-    return false if node.aliased?
-    return false unless node.live? || node.dropped?
-    node.storage == :heap
-  end
-
   # Is the path moved?
   def moved?(path)
     @nodes[path]&.moved? || false
   end
 
   # ── Branch Analysis ───────────────────────────────────────────────
-
-  # Snapshot the graph state for branching (IF/ELSE).
-  def fork
-    snapshot = OwnershipGraph.new
-    @nodes.each { |k, v| snapshot.nodes[k] = v.dup }
-    snapshot.instance_variable_set(:@edges, @edges.map(&:dup))
-    # Snapshot children index (avoids recomputing from node paths)
-    children_copy = Hash.new { |h, k| h[k] = Set.new }
-    @children.each { |k, v| children_copy[k] = v.dup }
-    snapshot.instance_variable_set(:@children, children_copy)
-    snapshot
-  end
 
   # Lightweight snapshot: only saves node states, not full graph.
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
@@ -221,19 +167,6 @@ class OwnershipGraph
       @edges_by_target[removed.to]&.delete(removed)
       @edges_by_source[removed.from]&.delete(removed)
     end
-  end
-
-  # Restore graph state from a snapshot (destructive).
-  def restore_from(snapshot)
-    @nodes = {}
-    snapshot.nodes.each { |k, v| @nodes[k] = v.dup }
-    @children = Hash.new { |h, k| h[k] = Set.new }
-    children_snap = snapshot.instance_variable_get(:@children)
-    children_snap&.each { |k, v| @children[k] = v.dup }
-    # Preserve alias edges (permanent facts) across branch analysis.
-    alias_edges = @edges.select { |e| e.kind == :aliases }
-    @edges = snapshot.instance_variable_get(:@edges).map(&:dup) + alias_edges
-    rebuild_target_index!
   end
 
   # Merge a branch's graph state back. Both branches must agree on

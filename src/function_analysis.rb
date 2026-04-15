@@ -507,7 +507,7 @@ module FunctionAnalysis
       # TAKES parameters own the data — force :affine so cleanup is emitted.
       current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])
-      og_declare(param[:name], nil, param[:type], :stack)
+      og_declare(param[:name], nil, param[:type])
       # Non-TAKES parameters are implicit borrows. Mark in OG so the
       # annotator prevents storing borrowed data into owned containers.
       unless param[:takes]

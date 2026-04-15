@@ -736,7 +736,7 @@ private
           field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
           field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
           current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
-          og_declare(f[:name], nil, field_type, :stack)
+          og_declare(f[:name], nil, field_type)
         end
       else
         visit(f[:value])
@@ -903,20 +903,20 @@ private
                 elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
                   synthetic_type = :"#{type_name}_#{variant_name}"
                   current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
-                  og_declare(c[:binding], nil, Type.new(synthetic_type), :stack)
+                  og_declare(c[:binding], nil, Type.new(synthetic_type))
                   classify_ownership!(current_scope.locals[c[:binding]])
                 elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :indirect_payload
                   # @indirect payload: bind to the dereferenced inner type (not the *T pointer).
                   inner_type = raw_payload[:type].is_a?(Type) ? raw_payload[:type] : Type.new(raw_payload[:type])
                   inner_type = union_subst.any? ? apply_type_subst(inner_type, union_subst) : inner_type
                   current_scope.declare(c[:binding], nil, inner_type, false, false, nil, :stack)
-                  og_declare(c[:binding], nil, inner_type, :stack)
+                  og_declare(c[:binding], nil, inner_type)
                   classify_ownership!(current_scope.locals[c[:binding]])
                   c[:indirect_payload_as] = true  # transpiler must emit subject.Variant.* (deref *T)
                 else
                   payload_type = union_subst.any? ? apply_type_subst(raw_payload, union_subst) : Type.new(raw_payload)
                   current_scope.declare(c[:binding], nil, payload_type, false, false, nil, :stack)
-                  og_declare(c[:binding], nil, payload_type, :stack)
+                  og_declare(c[:binding], nil, payload_type)
                   classify_ownership!(current_scope.locals[c[:binding]])
                 end
                 # MATCH AS: borrow view into the source union's payload.
@@ -956,7 +956,7 @@ private
                   field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
                   field_type = field_type.is_a?(Type) ? field_type : Type.new(field_type)
                   current_scope.declare(f[:name], nil, field_type, false, false, nil, :stack)
-                  og_declare(f[:name], nil, field_type, :stack)
+                  og_declare(f[:name], nil, field_type)
                 end
               end
             end
@@ -1110,7 +1110,7 @@ private
 
     # We use analyze_control_flow_branches to handle state merging and drops.
     # Note: For a loop, if a variable dies in the body, it dies for the next iteration (merged to parent).
-    pre_loop_og = @og&.fork
+    pre_loop_states = @og&.fork_lightweight
 
     analyze_control_flow_branches([
       proc {
@@ -1127,7 +1127,7 @@ private
         # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
         loop_body_names = collect_body_identifier_names(node.do_branch)
         current_scope.locals.each do |name, _entry|
-          was_live = pre_loop_og&.live?(name)
+          was_live = pre_loop_states&.dig(:node_states, name) == :live
           is_moved = @og&.moved?(name)
           if was_live && is_moved
             next unless loop_body_names.include?(name)
@@ -1249,7 +1249,7 @@ private
       cap_name = node.value  # the variable name string
       # Declare as Int64 counter (tracks number of calls captured)
       current_scope.declare(cap_name, node, :Int64, true, false, nil, :stack)
-      og_declare(cap_name, node, :Int64, :stack)
+      og_declare(cap_name, node, :Int64)
     end
     node.full_type = :Void
   end
@@ -1579,7 +1579,7 @@ private
       node.symbol.link_source = link_src if link_src
     end
     classify_ownership!(node.symbol)
-    og_declare(node.name, node, node.type_info || final_type, storage)
+    og_declare(node.name, node, node.type_info || final_type)
     register_container_borrow!(node)
     # Non-Copy union locals need rt for cleanup (heapAlloc for *T/@indirect fields).
     ti = node.type_info
@@ -1651,7 +1651,7 @@ private
         node.symbol.link_source = link_src if link_src
       end
       classify_ownership!(node.symbol)
-      og_declare(node.name, node, node.type_info || final_type, storage)
+      og_declare(node.name, node, node.type_info || final_type)
       register_container_borrow!(node)
       ti = node.type_info
       if ti && !ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
@@ -3629,10 +3629,10 @@ private
     ti.provenance ||= val_ti&.provenance || alloc
   end
 
-  def og_declare(name, node, type_info, storage)
+  def og_declare(name, node, type_info)
     kind = classify_og_kind(type_info)
     ti = type_info.is_a?(Type) ? type_info : (type_info ? Type.new(type_info) : nil)
-    @og.declare(name, kind: kind, type_info: ti, storage: storage,
+    @og.declare(name, kind: kind, type_info: ti,
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end
 
@@ -3672,7 +3672,6 @@ private
   end
   def og_set_live(name)  = (@og[name]&.state = :live)
   def og_drop(name)      = @og.drop(name)
-  def og_fork            = @og.fork
   def og_push_scope      = (@og_scope_depth += 1)
   def og_pop_scope       = (@og_scope_depth -= 1)
 
