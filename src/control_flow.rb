@@ -2086,7 +2086,7 @@ class MIRPass
         captured.each do |name, type_obj|
           t = type_obj ? Type.new(type_obj) : nil
           next unless t && !t.needs_pointer_passing?
-          next unless t.list_collection? || (t.map? && !t.numeric_map?)
+          next unless t.list_collection? || (t.map? && !t.numeric_map?) || t.pool? || t.set_collection?
           bg_capture_names << name
         end
       end

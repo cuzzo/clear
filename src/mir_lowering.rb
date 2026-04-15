@@ -123,6 +123,24 @@ class MIRLowering
       when :union
         { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: mir.zig_type }
       else
+        raise "hoist_cleanup_entry: MIR::DeepCopy with unknown strategy :#{mir.strategy} -- " \
+              "mir_allocates? returned true but no cleanup entry defined. Add a case."
+      end
+    when MIR::CapWrap
+      # CapWrap creates an Rc/Arc/Locked/RwLocked wrapper on the heap.
+      if mir.sync_fn
+        kind = mir.sync_fn == "rwLockedCreate" ? :write_locked : :locked
+        { kind: kind, alloc: :heap, has_moved_guard: false, zig_type: mir.sync_type }
+      elsif mir.own_fn
+        ti = ast_node.respond_to?(:type_info) ? (ast_node.type_info rescue nil) : nil
+        ti = ti.is_a?(Type) ? ti : nil
+        zig_t = ti&.zig_type
+        raise "hoist_cleanup_entry: MIR::CapWrap (own_fn=#{mir.own_fn}) has no zig_type -- " \
+              "ast_node type_info unavailable" unless zig_t
+        { kind: :rc, alloc: :heap, has_moved_guard: false, zig_type: zig_t,
+          rc_variant: :standard, rc_alloc: :heap }
+      else
+        # :passthrough / :local -- inner value passes through; no additional cleanup.
         nil
       end
     when MIR::Call
@@ -133,8 +151,6 @@ class MIRLowering
       if ti.respond_to?(:string?) && ti.string?
         { kind: :heap_string, alloc: :heap, has_moved_guard: false }
       else
-        # Use the base resolved type (no heap? flag) so zig_type doesn't add a * prefix.
-        # CheatLib.cleanup takes T (not *T) — the pointer-to-heap semantics are implicit.
         resolved = ti.respond_to?(:resolved) ? ti.resolved : nil
         return nil unless resolved
         zig_t = (Type.new(resolved).zig_type rescue nil)
@@ -142,7 +158,8 @@ class MIRLowering
         { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
       end
     else
-      nil
+      raise "hoist_cleanup_entry: unhandled allocating MIR node #{mir.class} -- " \
+            "mir_allocates? returned true but no cleanup entry is defined. Add a case."
     end
   end
 
@@ -3730,11 +3747,16 @@ class MIRLowering
 
     if node.promote_ret_wrap == :var && ret_field_promote && value
       rt = MIR::Ident.new(rt_name)
+      zig_type = ret_field_promote[:zig_type]
       stmts = [MIR::Let.new("__ret", value, true, nil, nil)]
       # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
       # fields of __ret.  Phase 4 will replace this frame+promote pattern with a
       # direct HeapCreate so the AllocMark reflects an actual upfront allocation.
       stmts << MIR::AllocMark.new("__ret", :heap)
+      # ErrCleanup: if any promote call fails, free partially-promoted fields.
+      # Uses struct_with_cleanup_fields (same Zig template as non_copy_union).
+      stmts << MIR::ErrCleanup.new("__ret",
+        { kind: :struct_with_cleanup_fields, alloc: :heap, has_moved_guard: false, zig_type: zig_type })
       if ret_field_promote[:fields]
         ret_field_promote[:fields].each do |fname|
           stmts << MIR::ExprStmt.new(
@@ -3765,6 +3787,7 @@ class MIRLowering
         MIR::ScopeBlock.new([
           MIR::AllocMark.new("__ret_dupe", :heap),
           MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, :heap), false, nil, nil),
+          MIR::ErrCleanup.new("__ret_dupe", { kind: :heap_string, alloc: :heap, has_moved_guard: false }),
           MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
         ])
       else

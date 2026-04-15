@@ -68,6 +68,7 @@ class MIRChecker
 
     allocs = {}
     cleanups = {}
+    errdefer_destroy_names = Set.new
     hpt_leaks = []
     inline_alloc_nodes = []
     all_zig_nodes = []  # InlineZig + RawZig -- both scanned for CheatLib contracts
@@ -78,6 +79,12 @@ class MIRChecker
         (allocs[node.name] ||= []) << node
       when MIR::Cleanup, MIR::ErrCleanup
         (cleanups[node.name] ||= []) << node
+      when MIR::ErrDeferStmt
+        # @indirect field temps use ErrDeferStmt(DestroyPtr) instead of ErrCleanup.
+        # Track their names so ALLOC_WITHOUT_CLEANUP does not false-positive on them.
+        if node.body.is_a?(MIR::DestroyPtr) && node.body.ptr.is_a?(MIR::Ident)
+          errdefer_destroy_names << node.body.ptr.name
+        end
       when MIR::Let
         all_zig_nodes << node.init if node.init.is_a?(MIR::InlineZig)
       when MIR::ExprStmt
@@ -103,7 +110,7 @@ class MIRChecker
 
     hpt_leaks.each { |e| @errors << e }
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
-    verify_alloc_cleanup_match!(allocs, cleanups)
+    verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names)
     verify_zig_contracts!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
     verify_unhoisted_allocs!(fn_def.body) if strict
@@ -227,7 +234,7 @@ class MIRChecker
   # insert_drop!) must have a corresponding AllocMark. A Cleanup with no AllocMark
   # is a compiler bug: the allocation event is invisible to the checker, so
   # ALLOC_CLEANUP_MISMATCH cannot fire even if the allocators diverge.
-  def verify_alloc_cleanup_match!(allocs, cleanups)
+  def verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names = Set.new)
     allocs.each do |name, alloc_marks|
       next unless cleanups.key?(name)
 
@@ -248,6 +255,18 @@ class MIRChecker
       next if allocs.key?(name)
       @errors << error(:CLEANUP_WITHOUT_ALLOC, name,
         "MIR::Cleanup present but no MIR::AllocMark (allocation event missing from MIR)")
+    end
+
+    # ALLOC_WITHOUT_CLEANUP: every HEAP AllocMark must have a Cleanup, ErrCleanup, or
+    # ErrDeferStmt(DestroyPtr). Frame allocations are freed by the arena rewind and
+    # do not require an explicit cleanup node.
+    # Exception: @indirect field temps use ErrDeferStmt(DestroyPtr) (errdefer_destroy_names).
+    allocs.each do |name, alloc_marks|
+      next if cleanups.key?(name)
+      next if errdefer_destroy_names.include?(name)
+      next if alloc_marks.all? { |m| m.alloc == :frame }
+      @errors << error(:ALLOC_WITHOUT_CLEANUP, name,
+        "AllocMark with no Cleanup, ErrCleanup, or ErrDeferStmt(DestroyPtr) -- leaked allocation")
     end
   end
 

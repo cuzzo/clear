@@ -139,9 +139,12 @@ RSpec.describe MIRChecker do
       iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {index}, {value})", "index_set")
       iz.allocs = { key_alloc: :heap, val_alloc: :heap }
       iz.target_var = "map"
+      cleanup = MIR::Cleanup.new("map", { kind: :string_map, alloc: :heap, has_moved_guard: false,
+                                           zig_type: "CheatLib.StringMap(i64)" })
       body = [
         MIR::AllocMark.new("map", :heap),
         MIR::ExprStmt.new(iz, false),
+        cleanup,
       ]
       errors = checker.check_fn!(fn_def("heap_map_ok", body))
       expect(errors).to be_empty

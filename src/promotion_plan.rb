@@ -408,6 +408,17 @@ module CleanupClassifier
           needs_cleanup: true, alloc: :heap, kind: :takes_slice,
           has_moved_guard: true, source_kind: :takes_param
         }
+      elsif ti.list_collection?
+        bindings[name] = entry(:list)
+      elsif ti.map? && !ti.numeric_map?
+        bindings[name] = entry(:string_map)
+      elsif ti.numeric_map?
+        bindings[name] = entry(:numeric_map)
+      else
+        # Struct with cleanup fields (strings, collections, rc refs).
+        # Pass nil as node -- skips rodata optimization, conservatively adds cleanup.
+        result = classify_struct_cleanup_fields(ti, nil, schema_lookup)
+        bindings[name] = result if result
       end
     end
   end
