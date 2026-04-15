@@ -12,7 +12,6 @@ class Type
   attr_accessor :elem_ownership # Element-level ownership: T@shared[] = Array<Arc<T>>
   attr_accessor :elem_sync      # Element-level sync: T@locked[] = Array<Locked<T>>
   attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
-  attr_accessor :escaped_return # true when the collection is returned — ownership transferred, no cleanup
   attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
 
   # Unified provenance: where was this data allocated?

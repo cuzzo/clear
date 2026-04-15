@@ -1313,16 +1313,6 @@ private
       end
     end
 
-    # 4. Escape marking: set escaped_return on variables being returned
-    # so the ownership generator suppresses their defer cleanup.
-    # PromotionClassifier (Pass C) reads these flags to decide what to promote.
-    if mark_escaping_collections!(node.value)
-      fn_node = @fn_nodes[current_fn_ctx&.name]
-      if fn_node
-        fn_node.return_provenance = :heap
-      end
-    end
-
     # RETURN COPY expr or RETURN Struct{ field: COPY ... }: the COPY heap-dupes,
     # so the caller receives heap-allocated data.
     if node.value.is_a?(AST::CopyNode)
@@ -1739,60 +1729,6 @@ private
     owner = lookup_scope_for(node.name)
     owner&.mark_read(node.name)
     node.symbol = owner&.locals&.[](node.name)
-  end
-
-  # Mark a variable's declaration node as mutated (reassigned after declaration).
-  # Recursively find ALL frame-allocated collections reachable from a value node
-  # and mark them for heap promotion. Returns true if any escaping data was found.
-  # Handles: direct collections, struct literal fields, struct/union variables
-  # containing collection fields (via schema lookup), and arbitrary nesting.
-  def mark_escaping_collections!(node)
-    return false unless node
-
-    if node.is_a?(AST::Identifier)
-      ti = node.type_info
-      # Frame-allocated collections (@list, HashMap) must be promoted to heap on escape.
-      # Strings are excluded at THIS level — bare string returns live in the caller's
-      # frame arena. But strings inside struct/union literals ARE marked (handled below
-      # in the StructLit branch) because the union cleanup path needs to know about them.
-      if ti&.needs_escape_promotion? && !ti&.string?
-        mark_symbol_escaped!(node, ti)
-        return true
-      end
-      # Struct/union variable containing collection fields — walk type schema
-      resolved = ti&.resolved
-      schema = lookup_type_schema(resolved) if resolved
-      if schema.is_a?(Hash) && !schema[:kind]
-        found = false
-        schema.each do |fname, ftype|
-          next if fname.is_a?(Symbol)
-          ft = ftype.is_a?(Type) ? ftype : Type.new(ftype)
-          if ft.needs_escape_promotion?
-            mark_symbol_escaped!(node, ft)
-            found = true
-          end
-        end
-        return found
-      end
-    elsif node.is_a?(AST::StructLit)
-      found = false
-      node.fields.each do |_fname, fval|
-        found = true if mark_escaping_collections!(fval)
-      end
-      return found
-    end
-    false
-  end
-
-  # Mark a symbol's declaration as escaped — suppress defer-deinit, set heap flags.
-  def mark_symbol_escaped!(node, field_type)
-    decl_reg = node.symbol&.reg
-    if decl_reg&.respond_to?(:type_info)
-      decl_reg.type_info.escaped_return = true
-    end
-    # Also set on the SymbolEntry's type so the transpiler can read it
-    sym_type = node.symbol&.type
-    sym_type.escaped_return = true if sym_type.is_a?(Type)
   end
 
   # DEPRECATED (SROA hint only, no memory safety role): Sets ownership_kind on scope entries
@@ -3816,10 +3752,8 @@ private
     was_frame = entry.storage == :frame || entry.storage == :stack
     return false if [:multiowned, :shared, :heap].include?(entry.storage)
     entry.storage = :heap
-    # Also set provenance=:heap so PromotionPlan's !ti.heap_provenance? guard fires.
-    # Without this, mark_escaping_collections! can set escaped_return=true on the
-    # same node after handle_return_escape pre-promotes it, and PromotionPlan's guard
-    # (escaped_return && !heap_provenance?) would emit a redundant MIR::Promote.
+    # Also set provenance=:heap so PromotionClassifier's !heap_provenance? guard fires,
+    # preventing a redundant MIR::Promote on a node already promoted to heap.
     entry.type.provenance = :heap if entry.type.is_a?(Type)
     if entry.reg&.respond_to?(:storage=)
       entry.reg.storage = :heap

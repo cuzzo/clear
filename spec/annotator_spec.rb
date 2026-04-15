@@ -1536,7 +1536,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "Escape marking for returned collections" do
-      it "sets return_provenance on function returning @list" do
+      it "sets return_provenance on function returning @list (via MIRPass)" do
         src = <<~CLEAR
           FN buildList() RETURNS Float64[]@list ->
             MUTABLE vals: Float64[]@list = [];
@@ -1544,24 +1544,9 @@ RSpec.describe SemanticAnnotator do
             RETURN vals;
           END
         CLEAR
-        annotated = run(src)
-        fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
+        ast = run_mir(src)
+        fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
         expect(fn.return_provenance).to eq(:heap)
-      end
-
-      it "sets escaped_return on @list variable being returned" do
-        src = <<~CLEAR
-          FN buildList() RETURNS Float64[]@list ->
-            MUTABLE vals: Float64[]@list = [];
-            append(vals, 1.0);
-            RETURN vals;
-          END
-        CLEAR
-        annotated = run(src)
-        fn = annotated.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "buildList" }
-        ret = fn.body.find { |s| s.is_a?(AST::ReturnNode) }
-        ti = ret.value.type_info
-        expect(ti.escaped_return).to be true
       end
     end
 

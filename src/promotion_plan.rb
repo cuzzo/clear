@@ -237,9 +237,8 @@ end
 # Data sources (all from annotator, no re-inference):
 #   - type_info (cleanup_alloc, collection?, map?, etc.)
 #   - node.container_borrow (set by register_container_borrow!)
-#   - type_info.escaped_return (set by mark_symbol_escaped!)
 #   - node.resource_close_zig (set by annotator)
-#   - deferred_drops (TAKES params)
+#   - fn_node.params (TAKES params, via walk_takes_params)
 #   - MatchStatement cases with bindings + was_moved
 #   - union/struct schemas (for non-Copy checks)
 # =========================================================================
@@ -259,7 +258,7 @@ module CleanupClassifier
     # 1. Walk all VarDecl/BindExpr in the function body.
     walk_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
 
-    # 2. TAKES parameters from deferred_drops.
+    # 2. TAKES parameters from fn_node.params.
     walk_takes_params(fn_node, schema_lookup, bindings)
 
     # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).

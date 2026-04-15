@@ -131,10 +131,6 @@ class MIRPass
       decl_ti = decl&.type_info rescue nil
       if decl_ti.is_a?(Type)
         decl_ti.provenance = :heap
-        # Clear escaped_return so CleanupClassifier's escape hatch (line 420)
-        # doesn't suppress cleanup. The variable is heap from the start now --
-        # it doesn't need runtime promotion, so "escaped" is no longer true.
-        decl_ti.escaped_return = false
       end
 
       # Upgrade scope entry
@@ -143,7 +139,6 @@ class MIRPass
         sym_type = ident.symbol.type
         if sym_type.is_a?(Type)
           sym_type.provenance = :heap
-          sym_type.escaped_return = false
         end
       end
 
@@ -981,7 +976,6 @@ class MIRPass
 
     ti = ident.type_info
     return if ti&.string?
-    return if ti&.escaped_return && (ti.collection? || ti.string?)
 
     # RC types: only consume on explicit GIVE
     if ti && (ti.any_rc? rescue false)
