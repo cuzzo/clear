@@ -27,16 +27,19 @@ RSpec.describe CleanupClassifier do
     annotator = SemanticAnnotator.new
     annotator.annotate!(ast)
 
-    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
-    raise "Function '#{fn_name}' not found" unless fn_node
-
     fn_nodes = {}
     ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+
+    schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
+    MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup).transform!(ast)
+
+    fn_node = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == fn_name }
+    raise "Function '#{fn_name}' not found" unless fn_node
 
     CleanupClassifier.classify(
       fn_node,
       fn_nodes: fn_nodes,
-      schema_lookup: ->(name) { annotator.lookup_type_schema(name) },
+      schema_lookup: schema_lookup,
     )
   end
 
