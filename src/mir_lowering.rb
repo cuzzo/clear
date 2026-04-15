@@ -3998,17 +3998,14 @@ class MIRLowering
 
   def direct_indexable_collection_type?(type_info)
     ti = Type.new(type_info)
-    ti.list_collection? || (ti.array? && !ti.string?)
+    # Only optimize explicitly-tagged @list collections. Dynamic arrays (WHERE results,
+    # slice params) are ambiguous at lowering time — leave them to CheatLib.getAt.
+    ti.list_collection?
   end
 
-  def direct_index_get(target, index, type_info)
-    ti = Type.new(type_info)
+  def direct_index_get(target, index, _type_info)
     cast_idx = MIR::Cast.new(index, "usize", :intCast)
-    if ti.list_collection?
-      MIR::IndexGet.new(MIR::FieldGet.new(target, "items"), cast_idx)
-    else
-      MIR::IndexGet.new(target, cast_idx)
-    end
+    MIR::IndexGet.new(MIR::FieldGet.new(target, "items"), cast_idx)
   end
 
   def lower_direct_length(node)
@@ -4022,10 +4019,13 @@ class MIRLowering
     ti = Type.new(recv_ti)
     len_expr =
       if ti.list_collection?
+        # Explicit @list: always std.ArrayListUnmanaged — safe to go direct.
         MIR::FieldGet.new(MIR::FieldGet.new(recv, "items"), "len")
-      elsif ti.string? || (ti.array? && !ti.fixed?)
+      elsif ti.string?
         MIR::FieldGet.new(recv, "len")
       else
+        # Dynamic arrays and other types: CheatLib.len handles both ArrayListUnmanaged
+        # (via .items.len) and slices (via .len) at runtime — fall back to it.
         nil
       end
 
