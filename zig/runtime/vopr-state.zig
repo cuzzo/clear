@@ -78,7 +78,7 @@ pub const SimTask = struct {
 /// RunQueue is ~512KB (65536 atomic slots) — cannot live on the stack.
 pub const SimScheduler = struct {
     ready_queue: *RunQueue,
-    pinned_queue: std.ArrayListUnmanaged(*Task) = .{},
+    pinned_queue: std.ArrayListUnmanaged(*Task) = .empty,
     sleeping_queue: std.ArrayListUnmanaged(*Task),
     current_task: ?*Task,
     poll_fds: std.AutoHashMapUnmanaged(i32, *Task),
@@ -86,14 +86,14 @@ pub const SimScheduler = struct {
     active_tasks: usize,
     ticks_since_poll: u32,
     /// Pending remote shard ops queued to this scheduler (simulated SPSC inbox).
-    pending_shard_ops: std.ArrayListUnmanaged(PendingShardOp) = .{},
+    pending_shard_ops: std.ArrayListUnmanaged(PendingShardOp) = .empty,
 
     pub fn init(allocator: std.mem.Allocator, idx: u32) !SimScheduler {
         const rq = try allocator.create(RunQueue);
         rq.* = try RunQueue.initWithAllocator(allocator);
         return SimScheduler{
             .ready_queue = rq,
-            .sleeping_queue = .{},
+            .sleeping_queue = .empty,
             .current_task = null,
             .poll_fds = .{},
             .index = idx,
@@ -175,13 +175,13 @@ pub const VoprState = struct {
             .task_registry = .{},
             .total_spawned = 0,
             .total_finished = 0,
-            .blocked_tasks = .{},
-            .sim_fds = .{},
+            .blocked_tasks = .empty,
+            .sim_fds = .empty,
             .next_fd = 100,
             .tick = 0,
             .sim_time_ms = 0,
-            .pending_spawns = .{},
-            .scratch_seen = .{},
+            .pending_spawns = .empty,
+            .scratch_seen = .empty,
         };
         state.random = state.rng.random();
         return state;

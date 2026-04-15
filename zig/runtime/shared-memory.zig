@@ -1,5 +1,6 @@
 const std = @import("std");
 const Runtime = @import("runtime.zig").Runtime;
+const compat = @import("compat");
 
 // -------------------------------------------------------------------------
 // Concurrency Primitives (Locked<T>)
@@ -8,7 +9,7 @@ const Runtime = @import("runtime.zig").Runtime;
 pub fn Locked(comptime T: type) type {
     return struct {
         // The mutex protects the data below
-        mutex: std.Thread.Mutex = .{},
+        mutex: compat.Mutex = .{},
         data: T,
 
         const Self = @This();
@@ -191,88 +192,5 @@ pub fn RefCell(comptime T: type) type {
 // -------------------------------------------------------------------------
 
 pub fn RwLocked(comptime T: type) type {
-    return struct {
-        lock: std.c.pthread_rwlock_t = .{},
-        data: T,
-
-        const Self = @This();
-
-        /// PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP (glibc extension).
-        /// Prevents writer starvation by blocking new readers when a writer waits.
-        const PREFER_WRITER_NONRECURSIVE_NP: c_int = 2;
-
-        const pthread_rwlockattr_t = extern struct {
-            data: [8]u8 align(@alignOf(c_long)) = [_]u8{0} ** 8,
-        };
-
-        extern "c" fn pthread_rwlock_init(rwl: *std.c.pthread_rwlock_t, attr: ?*const pthread_rwlockattr_t) callconv(.c) std.c.E;
-        extern "c" fn pthread_rwlockattr_init(attr: *pthread_rwlockattr_t) callconv(.c) std.c.E;
-        extern "c" fn pthread_rwlockattr_destroy(attr: *pthread_rwlockattr_t) callconv(.c) std.c.E;
-        extern "c" fn pthread_rwlockattr_setkind_np(attr: *pthread_rwlockattr_t, kind: c_int) callconv(.c) std.c.E;
-
-        pub fn init(val: T) Self {
-            var self = Self{ .data = val };
-            var attr: pthread_rwlockattr_t = .{};
-            var rc = pthread_rwlockattr_init(&attr);
-            std.debug.assert(rc == .SUCCESS);
-            rc = pthread_rwlockattr_setkind_np(&attr, PREFER_WRITER_NONRECURSIVE_NP);
-            std.debug.assert(rc == .SUCCESS);
-            rc = pthread_rwlock_init(&self.lock, &attr);
-            std.debug.assert(rc == .SUCCESS);
-            rc = pthread_rwlockattr_destroy(&attr);
-            std.debug.assert(rc == .SUCCESS);
-            return self;
-        }
-
-        // 1. Read Access
-        // Allows multiple concurrent readers. Blocks if a Writer is active.
-        pub fn read(self: *Self) ReadGuard {
-            const rc = std.c.pthread_rwlock_rdlock(&self.lock);
-            std.debug.assert(rc == .SUCCESS);
-            return ReadGuard{ .parent = self };
-        }
-
-        // 2. Write Access
-        // Exclusive access. Blocks until all Readers AND Writers are gone.
-        pub fn write(self: *Self) WriteGuard {
-            const rc = std.c.pthread_rwlock_wrlock(&self.lock);
-            std.debug.assert(rc == .SUCCESS);
-            return WriteGuard{ .parent = self };
-        }
-
-        pub const ReadGuard = struct {
-            parent: *Self,
-
-            // CRITICAL: We only return a CONST pointer here.
-            // This prevents the user from accidentally modifying data inside a read lock.
-            pub fn get(self: *ReadGuard) *const T {
-                return &self.parent.data;
-            }
-
-            pub fn release(self: *ReadGuard) void {
-                const rc = std.c.pthread_rwlock_unlock(&self.parent.lock);
-                std.debug.assert(rc == .SUCCESS);
-            }
-        };
-
-        pub const WriteGuard = struct {
-            parent: *Self,
-
-            // Mutable pointer allowed here.
-            pub fn get(self: *WriteGuard) *T {
-                return &self.parent.data;
-            }
-
-            // You can also get const if you want
-            pub fn getConst(self: *WriteGuard) *const T {
-                return &self.parent.data;
-            }
-
-            pub fn release(self: *WriteGuard) void {
-                const rc = std.c.pthread_rwlock_unlock(&self.parent.lock);
-                std.debug.assert(rc == .SUCCESS);
-            }
-        };
-    };
+    return compat.RwLocked(T);
 }
-

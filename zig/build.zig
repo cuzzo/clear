@@ -14,6 +14,8 @@ pub fn build(b: *std.Build) void {
     const safety_mod = b.createModule(.{ .root_source_file = b.path("lib/safety.zig") });
     const ebr_mod = b.createModule(.{ .root_source_file = b.path("lib/ebr.zig") });
     const ownership_mod = b.createModule(.{ .root_source_file = b.path("lib/ownership.zig") });
+    const compat_mod = b.createModule(.{ .root_source_file = b.path("lib/compat.zig") });
+    ebr_mod.addImport("compat", compat_mod);
 
     // -------------------------------------------------------------------------
     // MODULES & EXECUTABLES
@@ -37,9 +39,10 @@ pub fn build(b: *std.Build) void {
     mod_tests.root_module.addImport("safety", safety_mod);
     mod_tests.root_module.addImport("ebr", ebr_mod);
     mod_tests.root_module.addImport("ownership", ownership_mod);
-    mod_tests.addAssemblyFile(switch_s);
-    mod_tests.addAssemblyFile(onroot_s);
-    mod_tests.linkLibC();
+    mod_tests.root_module.addImport("compat", compat_mod);
+    mod_tests.root_module.addAssemblyFile(switch_s);
+    mod_tests.root_module.addAssemblyFile(onroot_s);
+    mod_tests.root_module.link_libc = true;
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
     test_step.dependOn(&run_mod_tests.step);
@@ -165,9 +168,10 @@ pub fn build(b: *std.Build) void {
         unit_tests.root_module.addImport("safety", safety_mod);
         unit_tests.root_module.addImport("ebr", ebr_mod);
         unit_tests.root_module.addImport("ownership", ownership_mod);
-        unit_tests.addAssemblyFile(switch_s);
-        unit_tests.addAssemblyFile(onroot_s);
-        unit_tests.linkLibC();
+        unit_tests.root_module.addImport("compat", compat_mod);
+        unit_tests.root_module.addAssemblyFile(switch_s);
+        unit_tests.root_module.addAssemblyFile(onroot_s);
+        unit_tests.root_module.link_libc = true;
 
         const run_unit_tests = b.addRunArtifact(unit_tests);
         test_step.dependOn(&run_unit_tests.step);
@@ -200,9 +204,10 @@ pub fn build(b: *std.Build) void {
         bench_tests.root_module.addImport("safety", safety_mod);
         bench_tests.root_module.addImport("ebr", ebr_mod);
         bench_tests.root_module.addImport("ownership", ownership_mod);
-        bench_tests.addAssemblyFile(switch_s);
-        bench_tests.addAssemblyFile(onroot_s);
-        bench_tests.linkLibC();
+        bench_tests.root_module.addImport("compat", compat_mod);
+        bench_tests.root_module.addAssemblyFile(switch_s);
+        bench_tests.root_module.addAssemblyFile(onroot_s);
+        bench_tests.root_module.link_libc = true;
 
         const run_bench = b.addRunArtifact(bench_tests);
         run_bench.has_side_effects = true;
@@ -231,9 +236,10 @@ pub fn build(b: *std.Build) void {
         hammer_tests.root_module.addImport("safety", safety_mod);
         hammer_tests.root_module.addImport("ebr", ebr_mod);
         hammer_tests.root_module.addImport("ownership", ownership_mod);
-        hammer_tests.addAssemblyFile(switch_s);
-        hammer_tests.addAssemblyFile(onroot_s);
-        hammer_tests.linkLibC();
+        hammer_tests.root_module.addImport("compat", compat_mod);
+        hammer_tests.root_module.addAssemblyFile(switch_s);
+        hammer_tests.root_module.addAssemblyFile(onroot_s);
+        hammer_tests.root_module.link_libc = true;
         const run_hammer = b.addRunArtifact(hammer_tests);
         run_hammer.has_side_effects = true;
         hammer_step.dependOn(&run_hammer.step);
@@ -261,9 +267,10 @@ pub fn build(b: *std.Build) void {
         hammer_exe.root_module.addImport("safety", safety_mod);
         hammer_exe.root_module.addImport("ebr", ebr_mod);
         hammer_exe.root_module.addImport("ownership", ownership_mod);
-        hammer_exe.addAssemblyFile(switch_s);
-        hammer_exe.addAssemblyFile(onroot_s);
-        hammer_exe.linkLibC();
+        hammer_exe.root_module.addImport("compat", compat_mod);
+        hammer_exe.root_module.addAssemblyFile(switch_s);
+        hammer_exe.root_module.addAssemblyFile(onroot_s);
+        hammer_exe.root_module.link_libc = true;
         const run_hammer_exe = b.addRunArtifact(hammer_exe);
         run_hammer_exe.has_side_effects = true;
         hammer_step.dependOn(&run_hammer_exe.step);
@@ -281,7 +288,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         }),
     });
-    vopr_exe.linkLibC();
+    vopr_exe.root_module.link_libc = true;
     const run_vopr = b.addRunArtifact(vopr_exe);
     run_vopr.has_side_effects = true;
     vopr_step.dependOn(&run_vopr.step);
@@ -302,9 +309,10 @@ pub fn build(b: *std.Build) void {
     loom_exe.root_module.addImport("safety", safety_mod);
     loom_exe.root_module.addImport("ebr", ebr_mod);
     loom_exe.root_module.addImport("ownership", ownership_mod);
-    loom_exe.addAssemblyFile(switch_s);
-    loom_exe.addAssemblyFile(onroot_s);
-    loom_exe.linkLibC();
+    loom_exe.root_module.addImport("compat", compat_mod);
+    loom_exe.root_module.addAssemblyFile(switch_s);
+    loom_exe.root_module.addAssemblyFile(onroot_s);
+    loom_exe.root_module.link_libc = true;
     const run_loom = b.addRunArtifact(loom_exe);
     run_loom.has_side_effects = true;
     loom_step.dependOn(&run_loom.step);
@@ -326,8 +334,9 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addImport("safety", safety_mod);
     lib.root_module.addImport("ebr", ebr_mod);
     lib.root_module.addImport("ownership", ownership_mod);
-    lib.addAssemblyFile(switch_s);
-    lib.addAssemblyFile(onroot_s);
-    lib.linkLibC();
+    lib.root_module.addImport("compat", compat_mod);
+    lib.root_module.addAssemblyFile(switch_s);
+    lib.root_module.addAssemblyFile(onroot_s);
+    lib.root_module.link_libc = true;
     b.installArtifact(lib);
 }

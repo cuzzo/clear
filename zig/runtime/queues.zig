@@ -104,7 +104,7 @@ pub const RunQueue = struct {
 
     array: Atomic(?*CircularArray),
     allocator: std.mem.Allocator,
-    old_arrays: std.ArrayListUnmanaged(*CircularArray) = .{},
+    old_arrays: std.ArrayListUnmanaged(*CircularArray) = .empty,
 
     top: Atomic(u32) = Atomic(u32).init(0),
     bottom: Atomic(u32) = Atomic(u32).init(0),
@@ -269,4 +269,3 @@ pub const Task = struct {
     in_inbox: Atomic(bool) = Atomic(bool).init(false),
     wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
 };
-

@@ -19,6 +19,7 @@ const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const rt_mod = @import("runtime.zig");
 const ebr = @import("ebr");
+const compat = @import("compat");
 const CheatHeader = @import("runtime-header.zig");
 const CheatLib = CheatHeader.CheatLib;
 const Runtime = rt_mod.Runtime;
@@ -138,7 +139,7 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
         t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
     }
     while (fp.global_registry.count() < n)
-        std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+        compat.sleepNs(1 * std.time.ns_per_ms);
 }
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {
@@ -242,7 +243,7 @@ test "L2: submitSpawn via SPSC to remote scheduler" {
     // Wait for all fibers to complete
     var wait: usize = 0;
     while (counter.load(.seq_cst) < 20 and wait < 5000) : (wait += 1) {
-        std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+        compat.sleepNs(1 * std.time.ns_per_ms);
     }
     try std.testing.expect(counter.load(.seq_cst) == 20);
 }

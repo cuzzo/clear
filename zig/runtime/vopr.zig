@@ -185,7 +185,7 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
     sched.ticks_since_poll = 0;
 
     // Check our registered fds for readiness
-    var to_wake = std.ArrayListUnmanaged(*Task){};
+    var to_wake: std.ArrayListUnmanaged(*Task) = .empty;
     defer to_wake.deinit(state.allocator);
 
     var fd_iter = sched.poll_fds.iterator();

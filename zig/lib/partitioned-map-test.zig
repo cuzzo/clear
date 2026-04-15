@@ -6,6 +6,7 @@ const qs = @import("../runtime/queues.zig");
 const fm = @import("../runtime/fiber-memory.zig");
 const ebr = @import("ebr");
 const header = @import("../runtime/runtime-header.zig");
+const compat = @import("compat");
 
 const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;
@@ -40,7 +41,7 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
         t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
     }
     while (fp.global_registry.count() < n) {
-        std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+        compat.sleepNs(1 * std.time.ns_per_ms);
     }
 }
 

@@ -4,12 +4,12 @@ const builtin = @import("builtin");
 const qs = @import("queues.zig");
 const fc = @import("fiber-core.zig");
 const fm = @import("fiber-memory.zig");
+const compat = @import("compat");
 const EbrContext = @import("ebr").EbrContext;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
 fn milliTimestamp() i64 {
-    const ts = std.posix.clock_gettime(.MONOTONIC) catch return 0;
-    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+    return compat.milliTimestamp();
 }
 
 const InboxType = qs.InboxType;
@@ -109,7 +109,7 @@ pub const SmartEventFd = struct {
         // EFD_SEMAPHORE: Reads decrement counter by 1.
         // We use this so we can consume exactly one wake-up if needed.
         const flags = std.os.linux.EFD.CLOEXEC | std.os.linux.EFD.NONBLOCK | std.os.linux.EFD.SEMAPHORE;
-        const fd = try std.posix.eventfd(0, flags);
+        const fd = try compat.eventFd(0, flags);
         return SmartEventFd{ .fd = fd };
     }
 
@@ -129,7 +129,7 @@ pub const SmartEventFd = struct {
         // each of which already costs 1-10us for SPSC push + channel drain.
         const val: u64 = 1;
         const bytes = std.mem.asBytes(&val);
-        _ = std.posix.write(self.fd, bytes) catch {};
+        _ = std.c.write(self.fd, bytes.ptr, bytes.len);
     }
 
     // Called by Scheduler loop to reset the signal drain
@@ -156,11 +156,11 @@ const STACK_CACHE_LIMIT: usize = 128;
 
 pub const Scheduler = struct {
     // 1. The Manager State
-    fiber_pool: std.ArrayListUnmanaged(*Task) = .{},
+    fiber_pool: std.ArrayListUnmanaged(*Task) = .empty,
     ready_queue: RunQueue,
-    pinned_queue: std.ArrayListUnmanaged(*Task) = .{},
-    stack_cache: std.ArrayListUnmanaged([]u8) = .{},   // LIFO Cache for Stacks
-    sleeping_queue: std.ArrayListUnmanaged(*Task) = .{},
+    pinned_queue: std.ArrayListUnmanaged(*Task) = .empty,
+    stack_cache: std.ArrayListUnmanaged([]u8) = .empty,   // LIFO Cache for Stacks
+    sleeping_queue: std.ArrayListUnmanaged(*Task) = .empty,
 
     // 2. Communication — Pure SPSC (no MPSC linked list)
     /// SPSC channels: lazily allocated, one per potential sender (max 64).
@@ -252,10 +252,10 @@ pub const Scheduler = struct {
 
         const sched = Scheduler{
             .stack_pool = stack_pool,
-            .fiber_pool = .{},
+            .fiber_pool = .empty,
             .ready_queue = try RunQueue.initWithAllocator(allocator),
-            .stack_cache = .{},
-            .sleeping_queue = .{},
+            .stack_cache = .empty,
+            .sleeping_queue = .empty,
             .event_fd = efd,
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
@@ -1031,7 +1031,7 @@ pub const SchedulerRegistry = struct {
 
     // For backward compat — spawnOn(thread_id) needs ThreadId → *Scheduler.
     // Cold path only (not used by spawnBest or work-stealing).
-    id_mutex: std.Thread.Mutex = .{},
+    id_mutex: compat.Mutex = .{},
     id_map: std.AutoHashMapUnmanaged(std.Thread.Id, *Scheduler) = .{},
 
     pub const Pair = struct { a: ?*Scheduler, b: ?*Scheduler };

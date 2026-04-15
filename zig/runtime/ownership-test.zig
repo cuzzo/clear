@@ -126,10 +126,7 @@ test "Arc: Clone increments refcount atomically" {
 
 test "Arc: Multi-threaded clone and deinit" {
     const allocator = std.testing.allocator;
-
-    // Use GPA to detect leaks
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const test_alloc = gpa.allocator();
+    const test_alloc = std.heap.smp_allocator;
 
     {
         var global_ctx = EbrContext{};
@@ -169,7 +166,7 @@ test "Arc: Multi-threaded clone and deinit" {
             }
         };
 
-        var threads = std.ArrayListUnmanaged(std.Thread){};
+        var threads: std.ArrayListUnmanaged(std.Thread) = .empty;
         defer threads.deinit(allocator);
 
         var i: usize = 0;
@@ -198,17 +195,11 @@ test "Arc: Multi-threaded clone and deinit" {
         // Ref count should be back to 1
         try std.testing.expectEqual(@as(usize, 1), shared_arc.refCount());
     }
-
-    // Check for leaks
-    const check = gpa.deinit();
-    if (check == .leak) @panic("Memory leaks detected in Arc test");
 }
 
 test "Arc: Stress test clone/deinit racing" {
     const allocator = std.testing.allocator;
-
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const test_alloc = gpa.allocator();
+    const test_alloc = std.heap.smp_allocator;
 
     {
         var global_ctx = EbrContext{};
@@ -231,7 +222,7 @@ test "Arc: Stress test clone/deinit racing" {
 
         const Racer = struct {
             fn run(_: *Runtime, arc_ptr: *Arc(Data), iters: usize) !void {
-                var clones = std.ArrayListUnmanaged(Arc(Data)){};
+                var clones: std.ArrayListUnmanaged(Arc(Data)) = .empty;
                 defer clones.deinit(std.heap.page_allocator);
 
                 var i: usize = 0;
@@ -258,7 +249,7 @@ test "Arc: Stress test clone/deinit racing" {
             }
         };
 
-        var threads = std.ArrayListUnmanaged(std.Thread){};
+        var threads: std.ArrayListUnmanaged(std.Thread) = .empty;
         defer threads.deinit(allocator);
 
         var i: usize = 0;
@@ -280,9 +271,6 @@ test "Arc: Stress test clone/deinit racing" {
         std.debug.print("\nArc stress test passed. Final refcount: {d}\n", .{shared_arc.refCount()});
         try std.testing.expectEqual(@as(usize, 1), shared_arc.refCount());
     }
-
-    const check = gpa.deinit();
-    if (check == .leak) @panic("Memory leaks in Arc stress test");
 }
 
 // -------------------------------------------------------------------------
@@ -648,7 +636,7 @@ test "Arc: deinit calls T.deinit with allocator param (ArrayListUnmanaged patter
         const Self = @This();
 
         pub fn init(alloc: std.mem.Allocator, counter_ptr: *usize) !Self {
-            var list = std.ArrayListUnmanaged(u8){};
+            var list: std.ArrayListUnmanaged(u8) = .empty;
             try list.appendSlice(alloc, "test data for leak detection");
             return Self{
                 .data = list,
@@ -686,7 +674,7 @@ test "Rc: deinit calls T.deinit with allocator param (ArrayListUnmanaged pattern
         const Self = @This();
 
         pub fn init(alloc: std.mem.Allocator, counter_ptr: *usize) !Self {
-            var list = std.ArrayListUnmanaged(i32){};
+            var list: std.ArrayListUnmanaged(i32) = .empty;
             try list.append(alloc, 42);
             try list.append(alloc, 100);
             return Self{

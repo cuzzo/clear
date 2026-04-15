@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 const fp = @import("../runtime/scheduler.zig");
 const Task = @import("../runtime/queues.zig").Task;
 
@@ -324,7 +325,7 @@ pub fn bind(comptime deps: type) type {
     /// false sharing when multiple Locked values are heap-allocated adjacently.
     pub fn Locked(comptime T: type) type {
         return struct {
-            mutex: std.Thread.Mutex align(64) = .{},
+            mutex: compat.Mutex align(64) = .{},
             data: T,
 
             const Self = @This();
@@ -427,81 +428,7 @@ pub fn bind(comptime deps: type) type {
     /// PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP blocks new readers once
     /// a writer is waiting, matching Go's sync.RWMutex and Rust's futex_rwlock.
     pub fn RwLocked(comptime T: type) type {
-        return struct {
-            lock: std.c.pthread_rwlock_t = .{},
-            data: T,
-
-            const Self = @This();
-
-            /// PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP (glibc extension).
-            /// Prevents writer starvation by blocking new readers when a writer waits.
-            const PREFER_WRITER_NONRECURSIVE_NP: c_int = 2;
-
-            const pthread_rwlockattr_t = extern struct {
-                data: [8]u8 align(@alignOf(c_long)) = [_]u8{0} ** 8,
-            };
-
-            extern "c" fn pthread_rwlock_init(rwl: *std.c.pthread_rwlock_t, attr: ?*const pthread_rwlockattr_t) callconv(.c) std.c.E;
-            extern "c" fn pthread_rwlockattr_init(attr: *pthread_rwlockattr_t) callconv(.c) std.c.E;
-            extern "c" fn pthread_rwlockattr_destroy(attr: *pthread_rwlockattr_t) callconv(.c) std.c.E;
-            extern "c" fn pthread_rwlockattr_setkind_np(attr: *pthread_rwlockattr_t, kind: c_int) callconv(.c) std.c.E;
-
-            pub fn init(val: T) Self {
-                var self = Self{ .data = val };
-                var attr: pthread_rwlockattr_t = .{};
-                var rc = pthread_rwlockattr_init(&attr);
-                std.debug.assert(rc == .SUCCESS);
-                rc = pthread_rwlockattr_setkind_np(&attr, PREFER_WRITER_NONRECURSIVE_NP);
-                std.debug.assert(rc == .SUCCESS);
-                rc = pthread_rwlock_init(&self.lock, &attr);
-                std.debug.assert(rc == .SUCCESS);
-                rc = pthread_rwlockattr_destroy(&attr);
-                std.debug.assert(rc == .SUCCESS);
-                return self;
-            }
-
-            pub fn read(self: *Self) ReadGuard {
-                const rc = std.c.pthread_rwlock_rdlock(&self.lock);
-                std.debug.assert(rc == .SUCCESS);
-                return ReadGuard{ .parent = self };
-            }
-
-            pub fn write(self: *Self) WriteGuard {
-                const rc = std.c.pthread_rwlock_wrlock(&self.lock);
-                std.debug.assert(rc == .SUCCESS);
-                return WriteGuard{ .parent = self };
-            }
-
-            pub const ReadGuard = struct {
-                parent: *Self,
-
-                pub fn get(self: *ReadGuard) *const T {
-                    return &self.parent.data;
-                }
-
-                pub fn release(self: *ReadGuard) void {
-                    const rc = std.c.pthread_rwlock_unlock(&self.parent.lock);
-                    std.debug.assert(rc == .SUCCESS);
-                }
-            };
-
-            pub const WriteGuard = struct {
-                parent: *Self,
-
-                pub fn get(self: *WriteGuard) *T {
-                    return &self.parent.data;
-                }
-
-                pub fn getConst(self: *WriteGuard) *const T {
-                    return &self.parent.data;
-                }
-
-                pub fn release(self: *WriteGuard) void {
-                    const rc = std.c.pthread_rwlock_unlock(&self.parent.lock);
-                    std.debug.assert(rc == .SUCCESS);
-                }
-            };
-        };
+        return compat.RwLocked(T);
     }
 
     /// Heap-allocate a new RwLocked(T) wrapping a value of type T.
@@ -711,7 +638,7 @@ pub fn bind(comptime deps: type) type {
             const Self = @This();
 
             pub const Inner = struct {
-                items: std.ArrayListUnmanaged(T) = .{},
+                items: std.ArrayListUnmanaged(T) = .empty,
                 wg: WaitGroup = undefined,
                 err: ?anyerror = null, // terminal error from generator fiber
             };
@@ -723,7 +650,7 @@ pub fn bind(comptime deps: type) type {
             /// Allocate an Inner on the heap, initialize the WaitGroup, and return the Stream handle.
             pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
                 const inner = try alloc.create(Inner);
-                inner.* = .{ .items = .{}, .wg = WaitGroup.init(sched) };
+                inner.* = .{ .items = .empty, .wg = WaitGroup.init(sched) };
                 inner.wg.add(1);
                 return Self{ .inner = inner, .alloc = alloc, .head = 0 };
             }
@@ -1377,7 +1304,7 @@ pub fn bind(comptime deps: type) type {
         return struct {
             const Self = @This();
 
-            shards: [N]std.ArrayListUnmanaged(T) = [_]std.ArrayListUnmanaged(T){.{}} ** N,
+            shards: [N]std.ArrayListUnmanaged(T) = [_]std.ArrayListUnmanaged(T){.empty} ** N,
             round_robin: usize = 0,
 
             pub fn deinit(self: *Self, allocator: std.mem.Allocator) void {
@@ -1849,7 +1776,7 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
-                var list = std.ArrayListUnmanaged([]const u8){};
+                var list: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (&self.shards) |*shard| {
                     var it = shard.map.keyIterator();
                     while (it.next()) |k| try list.append(alloc, k.*);
@@ -1858,7 +1785,7 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
-                var list = std.ArrayListUnmanaged(V){};
+                var list: std.ArrayListUnmanaged(V) = .empty;
                 for (&self.shards) |*shard| {
                     var it = shard.map.valueIterator();
                     while (it.next()) |v| try list.append(alloc, v.*);
@@ -1896,7 +1823,7 @@ pub fn bind(comptime deps: type) type {
 
             const Shard = struct {
                 map: Map = .{},
-                lock: std.Thread.RwLock = .{},
+                lock: compat.RwLock = .{},
                 ops: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
 
@@ -1959,7 +1886,7 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
-                var list = std.ArrayListUnmanaged([]const u8){};
+                var list: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (&self.shards) |*shard| {
                     shard.lock.lockShared();
                     defer shard.lock.unlockShared();
@@ -1970,7 +1897,7 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
-                var list = std.ArrayListUnmanaged(V){};
+                var list: std.ArrayListUnmanaged(V) = .empty;
                 for (&self.shards) |*shard| {
                     shard.lock.lockShared();
                     defer shard.lock.unlockShared();
@@ -2018,7 +1945,7 @@ pub fn bind(comptime deps: type) type {
 
             const Shard = struct {
                 map: Map = .{},
-                lock: std.Thread.Mutex = .{},
+                lock: compat.Mutex = .{},
                 contention_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
                 lock_count: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
             };
@@ -2138,7 +2065,7 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn keys(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged([]const u8) {
-                var list = std.ArrayListUnmanaged([]const u8){};
+                var list: std.ArrayListUnmanaged([]const u8) = .empty;
                 for (&self.shards) |*shard| {
                     shard.lock.lock();
                     defer shard.lock.unlock();
@@ -2149,7 +2076,7 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn values(self: *Self, alloc: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
-                var list = std.ArrayListUnmanaged(V){};
+                var list: std.ArrayListUnmanaged(V) = .empty;
                 for (&self.shards) |*shard| {
                     shard.lock.lock();
                     defer shard.lock.unlock();
@@ -2203,7 +2130,7 @@ pub fn bind(comptime deps: type) type {
 
             const Shard = struct {
                 map: Map = .{},
-                lock: std.Thread.Mutex = .{},
+                lock: compat.Mutex = .{},
             };
 
             shards: [N]Shard = [_]Shard{.{}} ** N,

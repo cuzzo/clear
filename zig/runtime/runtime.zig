@@ -4,6 +4,7 @@ const fp = @import("scheduler.zig");
 const qs = @import("queues.zig");
 const ebr_mod = @import("ebr");
 const alloc_profile = @import("alloc-profile.zig");
+const compat = @import("compat");
 
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 const EbrContext = ebr_mod.EbrContext;
@@ -18,8 +19,7 @@ else
 
 // Compat: std.time.milliTimestamp was removed in newer Zig versions.
 fn milliTimestamp() i64 {
-    const ts = std.posix.clock_gettime(.MONOTONIC) catch return 0;
-    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+    return compat.milliTimestamp();
 }
 const Scheduler = fp.Scheduler;
 const Task = qs.Task;
@@ -176,7 +176,7 @@ pub const Runtime = struct {
         heap_allocator: std.mem.Allocator,
         timeout_ms: u64
     ) !Runtime {
-        const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .{} };
+        const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .empty };
 
         var deadline: i64 = 0;
         if (timeout_ms > 0) {

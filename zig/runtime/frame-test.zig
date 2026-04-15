@@ -186,7 +186,7 @@ test "CheatArena: Integration with ArrayList (Dynamic Growth)" {
     };
 
     // 1. Start List
-    var list = std.ArrayListUnmanaged(u64){};
+    var list: std.ArrayListUnmanaged(u64) = .empty;
 
     // 2. Add items until we grow significantly
     var i: usize = 0;
@@ -505,7 +505,7 @@ test "Runtime.saveLoopMark/restoreLoopMark: arena rewinds per iteration" {
         defer rt.restoreLoopMark(iter_mark);
 
         // Simulate a @list growing inside the loop body.
-        var list = std.ArrayListUnmanaged(f64){};
+        var list: std.ArrayListUnmanaged(f64) = .empty;
         defer list.deinit(rt.frameAlloc()); // no-op on arena allocator
 
         var j: usize = 0;

@@ -26,7 +26,7 @@ test "promoteList on empty list is a no-op" {
     defer rt.deinit();
     rt.wireAllocator();
 
-    var list = std.ArrayListUnmanaged(f64){};
+    var list: std.ArrayListUnmanaged(f64) = .empty;
     // Empty list: promoteList should do nothing (no heap allocation).
     try CheatLib.promoteList(f64, &rt, &list);
 

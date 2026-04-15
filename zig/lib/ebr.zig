@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 
 // EBR
 pub const RetiredPtr = struct {
@@ -29,11 +30,11 @@ pub const EbrContext = struct {
     global_epoch: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
     // A registry so the memory reclaimer can find all active threads
-    registry_lock: std.Thread.Mutex = .{},
-    registry: std.ArrayListUnmanaged(*ThreadLocalEbr) = .{},
+    registry_lock: compat.Mutex = .{},
+    registry: std.ArrayListUnmanaged(*ThreadLocalEbr) = .empty,
 
     // The Graveyard for dead threads' garbage
-    orphans: std.ArrayListUnmanaged(RetiredPtr) = .{},
+    orphans: std.ArrayListUnmanaged(RetiredPtr) = .empty,
 
     pub fn deinit(self: *EbrContext, allocator: std.mem.Allocator) void {
         self.registry.deinit(allocator);
@@ -112,7 +113,7 @@ pub const EbrContext = struct {
 
 pub const ThreadLocalEbr = struct {
     // Things I have deleted but not freed
-    limbo_list: std.ArrayListUnmanaged(RetiredPtr) = .{},
+    limbo_list: std.ArrayListUnmanaged(RetiredPtr) = .empty,
 
     // local_epoch: "The time I saw when I started reading"
     local_epoch: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
@@ -179,5 +180,3 @@ pub const ThreadLocalEbr = struct {
         self.is_active.store(false, .seq_cst);
     }
 };
-
-

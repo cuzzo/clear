@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 
 pub fn SlabAllocator(comptime T: type) type {
     return struct {
@@ -40,7 +41,7 @@ pub fn SlabAllocator(comptime T: type) type {
         partial_slabs: ?*SlabHeader = null,
         full_slabs: ?*SlabHeader = null,
 
-        lock: std.Thread.Mutex = .{},
+        lock: compat.Mutex = .{},
 
         const object_size = @sizeOf(T);
         const object_align = @max(16, @max(@alignOf(T), @alignOf(Node)));
@@ -302,56 +303,11 @@ pub fn SlabAllocator(comptime T: type) type {
 
         fn freeSlabMemory(self: *Self, slab: *SlabHeader) void {
             const raw_ptr: [*]u8 = @ptrCast(slab);
-
-            // We cast to `[*]align(...)` (Many-Pointer), NOT `*align(...)` (Single-Pointer).
-            // This allows us to perform the slice syntax `[0..size]` below.
-            switch (self.slab_size) {
-                4096 => {
-                    const p: [*]align(4096) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..4096]);
-                },
-                8192 => {
-                    const p: [*]align(8192) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..8192]);
-                },
-                16384 => {
-                    const p: [*]align(16384) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..16384]);
-                },
-                32768 => {
-                    const p: [*]align(32768) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..32768]);
-                },
-                65536 => {
-                    const p: [*]align(65536) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..65536]);
-                },
-                131072 => {
-                    const p: [*]align(131072) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..131072]);
-                },
-                262144 => {
-                    const p: [*]align(262144) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..262144]);
-                },
-                524288 => {
-                    const p: [*]align(524288) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..524288]);
-                },
-                1048576 => {
-                    const p: [*]align(1048576) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..1048576]);
-                },
-                2097152 => {
-                    const p: [*]align(2097152) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..2097152]);
-                },
-                4194304 => {
-                    const p: [*]align(4194304) u8 = @alignCast(raw_ptr);
-                    self.allocator.free(p[0..4194304]);
-                },
-                else => unreachable,
-            }
+            self.allocator.rawFree(
+                raw_ptr[0..self.slab_size],
+                std.mem.Alignment.fromByteUnits(self.slab_size),
+                @returnAddress(),
+            );
         }
 
         fn prependSlab(_: *Self, slab: *SlabHeader, list_head: *?*SlabHeader) void {
@@ -439,4 +395,3 @@ pub fn SlabAllocator(comptime T: type) type {
         }
     };
 }
-

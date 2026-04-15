@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("compat");
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
 // To avoid linker errors
@@ -73,7 +74,7 @@ fn stressWorker(slab: *Slab, loops: usize, allocs_per_loop: usize) !void {
     const allocator = std.testing.allocator;
 
     // Each thread gets its own random seed if needed, or just churns memory
-    var list = std.ArrayListUnmanaged(*TestObj){};
+    var list: std.ArrayListUnmanaged(*TestObj) = .empty;
     defer list.deinit(allocator);
 
     for (0..loops) |_| {
@@ -97,11 +98,8 @@ fn stressWorker(slab: *Slab, loops: usize, allocs_per_loop: usize) !void {
 
 test "multi-threaded stress test" {
     // 1. Setup
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer {
-        const check = gpa.deinit();
-        if (check == .leak) @panic("Leak detected in Stress Test");
-    }
+    var gpa: compat.TestAllocator = .{};
+    defer compat.assertNoLeaks(&gpa);
     const harness_alloc = gpa.allocator();
 
     // Use a small slab size to force frequent grow() calls under contention
@@ -118,7 +116,7 @@ test "multi-threaded stress test" {
     const loops = 1000;
     const batch_size = 50;
 
-    var threads = std.ArrayListUnmanaged(std.Thread){};
+    var threads: std.ArrayListUnmanaged(std.Thread) = .empty;
     defer threads.deinit(harness_alloc);
 
     // 3. Spawn "Hammer" Threads
@@ -143,7 +141,7 @@ test "PROVE memory reclamation (interleaved free)" {
     // 3. Allocate enough objects to span roughly 3 slabs
     // ~170 objects fit in 4096 bytes. 500 objects ensures ~3 slabs.
     const obj_count = 500;
-    var list = std.ArrayListUnmanaged(*TestObj){};
+    var list: std.ArrayListUnmanaged(*TestObj) = .empty;
     defer list.deinit(std.testing.allocator);
     try list.ensureTotalCapacity(std.testing.allocator, obj_count);
 
@@ -184,7 +182,7 @@ test "PROVE slab reuse (Swiss Cheese scenario)" {
     // 4056 / 24 = 169 objects per slab.
     // We'll alloc 520 objects to be safe (3+ slabs).
     const obj_count = 520;
-    var list = std.ArrayListUnmanaged(*TestObj){};
+    var list: std.ArrayListUnmanaged(*TestObj) = .empty;
     defer list.deinit(std.testing.allocator);
 
     for (0..obj_count) |_| {
@@ -205,7 +203,7 @@ test "PROVE slab reuse (Swiss Cheese scenario)" {
     // These should fit into the holes we just made in Slab #1.
     // If reuse works, memory usage should NOT increase.
     // If reuse fails, we would allocate a 4th/5th slab, increasing memory.
-    var reuse_list = std.ArrayListUnmanaged(*TestObj){};
+    var reuse_list: std.ArrayListUnmanaged(*TestObj) = .empty;
     defer reuse_list.deinit(std.testing.allocator);
 
     for (0..100) |_| {
@@ -578,4 +576,3 @@ test "Large slab: cross-thread producer-consumer" {
 
     slab.flushThreadCache();
 }
-

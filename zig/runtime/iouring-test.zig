@@ -68,7 +68,11 @@ fn runInScheduler(comptime userFn: fn (*Runtime) anyerror!void) !void {
 // Helpers: create / cleanup test files.
 // ---------------------------------------------------------------------------
 fn ensureTestFiles() !void {
-    std.fs.cwd().makePath(TEST_DIR) catch {};
+    var dir_path: [256]u8 = undefined;
+    if (TEST_DIR.len >= dir_path.len) return error.NameTooLong;
+    @memcpy(dir_path[0..TEST_DIR.len], TEST_DIR);
+    dir_path[TEST_DIR.len] = 0;
+    _ = std.c.mkdir(dir_path[0..TEST_DIR.len :0], 0o755);
 
     for (0..4) |i| {
         var path_buf: [128]u8 = undefined;
@@ -77,14 +81,27 @@ fn ensureTestFiles() !void {
         var content_buf: [256]u8 = undefined;
         const content = std.fmt.bufPrint(&content_buf, "hello from file {d}\n", .{i}) catch unreachable;
 
-        const f = try std.fs.cwd().createFile(path, .{});
+        const f = try CheatLib.fileCreate(path);
         defer f.close();
         try f.writeAll(content);
     }
 }
 
 fn cleanupTestFiles() void {
-    std.fs.cwd().deleteTree(TEST_DIR) catch {};
+    for (0..4) |i| {
+        var path_buf: [128]u8 = undefined;
+        const path = std.fmt.bufPrint(&path_buf, TEST_DIR ++ "/file{d}.txt", .{i}) catch continue;
+        var c_path: [129]u8 = undefined;
+        @memcpy(c_path[0..path.len], path);
+        c_path[path.len] = 0;
+        _ = std.c.unlink(c_path[0..path.len :0]);
+    }
+    var dir_path: [256]u8 = undefined;
+    if (TEST_DIR.len < dir_path.len) {
+        @memcpy(dir_path[0..TEST_DIR.len], TEST_DIR);
+        dir_path[TEST_DIR.len] = 0;
+        _ = std.c.rmdir(dir_path[0..TEST_DIR.len :0]);
+    }
 }
 
 // ---------------------------------------------------------------------------

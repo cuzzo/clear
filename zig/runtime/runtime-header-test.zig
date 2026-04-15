@@ -5,6 +5,7 @@ const qs = @import("queues.zig");
 const fm = @import("fiber-memory.zig");
 const ebr = @import("ebr");
 const header = @import("runtime-header.zig");
+const compat = @import("compat");
 
 // Import the C library
 const c = @cImport({
@@ -44,7 +45,7 @@ fn startWorkers(threads: []std.Thread, n: usize) void {
         t.* = std.Thread.spawn(.{}, schedulerThread, .{alloc}) catch continue;
     }
     while (fp.global_registry.count() < n)
-        std.posix.nanosleep(0, 1 * std.time.ns_per_ms);
+        compat.sleepNs(1 * std.time.ns_per_ms);
 }
 
 fn stopWorkers(threads: []std.Thread, n: usize) void {

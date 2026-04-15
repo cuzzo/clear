@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const compat = @import("compat");
 
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
@@ -9,8 +10,7 @@ const fm = @import("fiber-memory.zig");
 const fp = @import("scheduler.zig");
 
 fn milliTimestamp() i64 {
-    const ts = std.posix.clock_gettime(.MONOTONIC) catch return 0;
-    return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
+    return compat.milliTimestamp();
 }
 
 const Stack = fc.Stack;
@@ -32,7 +32,7 @@ fn allocTestMemory(size: usize) ![]align(4096) u8 {
     return std.posix.mmap(
         null,
         size,
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        .{ .READ = true, .WRITE = true },
         .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
         -1,
         0
@@ -127,8 +127,7 @@ fn userTask2(_: *Runtime) !void {
 }
 
 test "Full Scheduler Integration" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     // 1. Setup Global Context (EBR)
     var global_ctx = EbrContext{};
@@ -219,8 +218,7 @@ fn mainTask(_: *Runtime) !void {
 }
 
 test "Structured Concurrency with WaitGroup" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
@@ -275,8 +273,7 @@ fn infiniteLoop(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
 }
 
 test "Timeout Cancellation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
@@ -325,8 +322,7 @@ fn slowTask(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
 }
 
 test "Non-Blocking Sleep" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
@@ -373,8 +369,16 @@ test "Non-Blocking Sleep" {
 // We MUST do this, otherwise the OS will block the thread before our Runtime can yield.
 // Only works on Linux
 fn setNonBlocking(fd: i32) !void {
-    const flags = try std.posix.fcntl(fd, std.os.linux.F.GETFL, 0);
-    _ = try std.posix.fcntl(fd, std.os.linux.F.SETFL, flags | std.os.linux.SOCK.NONBLOCK);
+    const raw_flags = std.os.linux.fcntl(fd, std.os.linux.F.GETFL, 0);
+    const flags = switch (std.posix.errno(raw_flags)) {
+        .SUCCESS => raw_flags,
+        else => return error.Unexpected,
+    };
+    const set_rc = std.os.linux.fcntl(fd, std.os.linux.F.SETFL, flags | @as(usize, std.os.linux.SOCK.NONBLOCK));
+    switch (std.posix.errno(set_rc)) {
+        .SUCCESS => {},
+        else => return error.Unexpected,
+    }
 }
 
 // Global sockets for the test
@@ -405,13 +409,13 @@ fn writerTask(raw_rt: *anyopaque, _: ?*anyopaque) anyerror!void {
     rt.sleep(100);
 
     std.debug.print("\n[Writer] Waking up and writing 'Hello'...", .{});
-    _ = try std.posix.write(write_fd, "Hello Fiber!");
+    const msg = "Hello Fiber!";
+    if (std.c.write(write_fd, msg.ptr, msg.len) < 0) return error.Unexpected;
 }
 
 // Only works on Linux
 test "Async I/O with Epoll" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
@@ -434,8 +438,8 @@ test "Async I/O with Epoll" {
     try setNonBlocking(read_fd);
     try setNonBlocking(write_fd);
 
-    defer std.posix.close(read_fd);
-    defer std.posix.close(write_fd);
+    defer _ = std.c.close(read_fd);
+    defer _ = std.c.close(write_fd);
 
     std.debug.print("\n\n--- Start I/O Test ---", .{});
 
@@ -494,8 +498,7 @@ fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack
 }
 
 test "Multi-Threaded Shared Nothing" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
@@ -555,8 +558,7 @@ fn testRootStackBasic(rt: *Runtime) !void {
 }
 
 test "Root Stack Trampoline: Stack Isolation" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
     var stack_pool = StackPool.init(allocator);
@@ -600,8 +602,7 @@ fn testRootStackRecursion(rt: *Runtime) !void {
 }
 
 test "Root Stack Trampoline: Deep Recursion (OS Stack Capacity)" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     // 1. Setup Global Context (EBR)
     var global_ctx = EbrContext{};
@@ -657,8 +658,7 @@ fn testRegisterIntegrity(rt: *Runtime) !void {
 }
 
 test "Root Stack Trampoline: Register Integrity" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const allocator = gpa.allocator();
+    const allocator = std.heap.smp_allocator;
 
     // 1. Setup Global Context (EBR)
     var global_ctx = EbrContext{};
@@ -677,4 +677,3 @@ test "Root Stack Trampoline: Register Integrity" {
         null, .{});
     sched.run();
 }
-

@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const linux = std.os.linux;
+const compat = @import("compat");
 pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
@@ -23,14 +24,8 @@ pub var partitioned_map_delay_ctx_destroy = false;
 
 
 // Helper Functions
-// Cached cwd file descriptor — resolved once, used by readFile/writeFile
-// so they can use openat() (a single syscall) instead of std.fs.cwd()
-// which needs deep stack frames.
-var __cwd_fd: ?std.posix.fd_t = null;
 fn getCwdFd() std.posix.fd_t {
-    if (__cwd_fd) |fd| return fd;
-    __cwd_fd = std.fs.cwd().fd;
-    return __cwd_fd.?;
+    return std.posix.AT.FDCWD;
 }
 
 // Open a file relative to cwd using direct openat syscall.
@@ -151,6 +146,27 @@ pub const CheatLib = struct {
             rt, items, workers, parallel, task_cfg, user_ctx
         );
     }
+    pub const File = struct {
+        fd: std.posix.fd_t,
+
+        pub fn close(self: File) void {
+            compat.closeFd(self.fd);
+        }
+
+        pub fn read(self: File, buffer: []u8) !usize {
+            return try std.posix.read(self.fd, buffer);
+        }
+
+        pub fn writeAll(self: File, data: []const u8) !void {
+            var written: usize = 0;
+            while (written < data.len) {
+                const n = std.c.write(self.fd, data.ptr + written, data.len - written);
+                if (n < 0) return error.Unexpected;
+                if (n == 0) return error.WriteFailed;
+                written += @intCast(n);
+            }
+        }
+    };
 
     // -----------------------------------------------------------------------
     // LazyRange(T): zero-allocation lazy iterator over a half-open range [start, end).
@@ -389,33 +405,42 @@ pub const CheatLib = struct {
     // Open a file as a linear resource. Caller is responsible for calling .close().
     // Designed for use with CLEAR's resource system: `f = File::open("path")`.
     // The compiler auto-injects `defer f.close()` at the declaration site.
-    pub fn fileOpen(path: []const u8) !std.fs.File {
-        return std.fs.cwd().openFile(path, .{ .mode = .read_only });
+    pub fn fileOpen(path: []const u8) !File {
+        return .{
+            .fd = try openPathFd(path, .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0),
+        };
     }
 
     // Read all bytes from an open file resource into a heap-allocated buffer.
     // Intended for use as `f.readAll()` on a File resource.
-    pub fn fileReadAll(allocator: std.mem.Allocator, file: std.fs.File) ![]const u8 {
-        const stat = try file.stat();
-        const buffer = try allocator.alloc(u8, stat.size);
-        var total: usize = 0;
-        while (total < buffer.len) {
-            const n = try std.posix.read(file.handle, buffer[total..]);
+    pub fn fileReadAll(allocator: std.mem.Allocator, file: File) ![]const u8 {
+        var out: std.ArrayListUnmanaged(u8) = .empty;
+        errdefer out.deinit(allocator);
+        var buf: [4096]u8 = undefined;
+        while (true) {
+            const n = try file.read(&buf);
             if (n == 0) break;
-            total += n;
+            try out.appendSlice(allocator, buf[0..n]);
         }
-        return buffer[0..total];
+        return try out.toOwnedSlice(allocator);
     }
 
     // Create (or truncate) a file for writing. Caller owns the returned File resource.
     // The compiler auto-injects `defer f.close()` at the declaration site.
-    pub fn fileCreate(path: []const u8) !std.fs.File {
-        return std.fs.cwd().createFile(path, .{ .truncate = true });
+    pub fn fileCreate(path: []const u8) !File {
+        return .{
+            .fd = try openPathFd(path, .{
+                .ACCMODE = .WRONLY,
+                .CREAT = true,
+                .TRUNC = true,
+                .CLOEXEC = true,
+            }, 0o644),
+        };
     }
 
     // Write `data` to an open writable File resource.
     // Usage: fileWrite(f, "hello world")
-    pub fn fileWrite(file: std.fs.File, data: []const u8) !void {
+    pub fn fileWrite(file: File, data: []const u8) !void {
         return file.writeAll(data);
     }
 
@@ -433,9 +458,8 @@ pub const CheatLib = struct {
     // readAll is used -- no io_uring, no yield.
     pub noinline fn readFile(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
         const fd = try openPathFd(path, .{ .ACCMODE = .RDONLY }, 0);
-        defer std.posix.close(fd);
-        const stat = try std.posix.fstat(fd);
-        const size: usize = @intCast(stat.size);
+        defer compat.closeFd(fd);
+        const size: usize = @intCast(try compat.fileSizeFd(fd));
         const buffer = try allocator.alloc(u8, size);
         errdefer allocator.free(buffer);
 
@@ -469,18 +493,23 @@ pub const CheatLib = struct {
     // filename slices (not full paths). Caller owns the list and each string.
     // Usage: files = listDir(allocator, "/some/dir")
     pub fn listDir(allocator: std.mem.Allocator, path: []const u8) !std.ArrayListUnmanaged([]const u8) {
-        var list = std.ArrayListUnmanaged([]const u8){};
+        var list: std.ArrayListUnmanaged([]const u8) = .empty;
         errdefer {
             for (list.items) |s| allocator.free(s);
             list.deinit(allocator);
         }
-        var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
-        defer dir.close();
-        var it = dir.iterate();
-        while (try it.next()) |entry| {
-            if (entry.kind == .file) {
-                const name = try allocator.dupe(u8, entry.name);
-                try list.append(allocator, name);
+        if (path.len > 255) return error.NameTooLong;
+        var path_buf: [256]u8 = undefined;
+        @memcpy(path_buf[0..path.len], path);
+        path_buf[path.len] = 0;
+        const dir = std.c.opendir(path_buf[0..path.len :0]) orelse return error.FileNotFound;
+        defer _ = std.c.closedir(dir);
+        while (std.c.readdir(dir)) |entry| {
+            const name = std.mem.sliceTo(&entry.name, 0);
+            if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+            if (entry.type == std.c.DT.REG) {
+                const dup = try allocator.dupe(u8, name);
+                try list.append(allocator, dup);
             }
         }
         return list;
@@ -490,21 +519,26 @@ pub const CheatLib = struct {
     // Returns entries prefixed with "f:" for files or "d:" for directories.
     // Usage: entries = listAll(allocator, "/some/dir")
     pub fn listAll(allocator: std.mem.Allocator, path: []const u8) !std.ArrayListUnmanaged([]const u8) {
-        var list = std.ArrayListUnmanaged([]const u8){};
+        var list: std.ArrayListUnmanaged([]const u8) = .empty;
         errdefer {
             for (list.items) |s| allocator.free(s);
             list.deinit(allocator);
         }
-        var dir = try std.fs.cwd().openDir(path, .{ .iterate = true });
-        defer dir.close();
-        var it = dir.iterate();
-        while (try it.next()) |entry| {
-            const prefix: []const u8 = switch (entry.kind) {
-                .file => "f:",
-                .directory => "d:",
+        if (path.len > 255) return error.NameTooLong;
+        var path_buf: [256]u8 = undefined;
+        @memcpy(path_buf[0..path.len], path);
+        path_buf[path.len] = 0;
+        const dir = std.c.opendir(path_buf[0..path.len :0]) orelse return error.FileNotFound;
+        defer _ = std.c.closedir(dir);
+        while (std.c.readdir(dir)) |entry| {
+            const name = std.mem.sliceTo(&entry.name, 0);
+            if (std.mem.eql(u8, name, ".") or std.mem.eql(u8, name, "..")) continue;
+            const prefix: []const u8 = switch (entry.type) {
+                std.c.DT.REG => "f:",
+                std.c.DT.DIR => "d:",
                 else => continue,
             };
-            const full = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, entry.name });
+            const full = try std.fmt.allocPrint(allocator, "{s}{s}", .{ prefix, name });
             try list.append(allocator, full);
         }
         return list;
@@ -513,10 +547,10 @@ pub const CheatLib = struct {
     // Get file size in bytes. Returns -1 on error.
     // Usage: size = fileSize("/some/file.txt")
     pub fn fileSize(path: []const u8) i64 {
-        const file = std.fs.cwd().openFile(path, .{}) catch return -1;
-        defer file.close();
-        const stat = file.stat() catch return -1;
-        return @intCast(stat.size);
+        const fd = openPathFd(path, .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0) catch return -1;
+        defer compat.closeFd(fd);
+        const size = compat.fileSizeFd(fd) catch return -1;
+        return @intCast(size);
     }
 
     // Count non-overlapping occurrences of needle in haystack.
@@ -533,6 +567,11 @@ pub const CheatLib = struct {
         return @intCast(std.mem.count(u8, haystack, needle));
     }
 
+    // Sleep for milliseconds using a blocking OS sleep. Intended for tests / utility code.
+    pub fn sleep(ms: u64) void {
+        compat.sleepNs(ms * std.time.ns_per_ms);
+    }
+
     // Write File
     //
     // Async path mirrors readFile: open is synchronous, bulk write uses
@@ -540,7 +579,7 @@ pub const CheatLib = struct {
     // the remainder.
     pub noinline fn writeFile(path: []const u8, content: []const u8) !void {
         const fd = try openPathFd(path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
-        defer std.posix.close(fd);
+        defer compat.closeFd(fd);
 
         if (fp.scheduler_running) {
             const sched = fp.active_scheduler;
@@ -1272,7 +1311,7 @@ pub const CheatLib = struct {
 
     // Split: String -> List
     pub fn split(allocator: std.mem.Allocator, str: []const u8, delimiter: []const u8) !std.ArrayListUnmanaged([]const u8) {
-        var list = std.ArrayListUnmanaged([]const u8){};
+        var list: std.ArrayListUnmanaged([]const u8) = .empty;
 
         // splitSequence handles string delimiters (e.g. ", ")
         var iter = std.mem.splitSequence(u8, str, delimiter);
@@ -1296,7 +1335,7 @@ pub const CheatLib = struct {
     // replace(str, old, new) -> String with all occurrences replaced
     pub fn stringReplace(allocator: std.mem.Allocator, haystack: []const u8, needle: []const u8, replacement: []const u8) ![]const u8 {
         Runtime.profileAlloc(0);
-        var result = std.ArrayListUnmanaged(u8){};
+        var result: std.ArrayListUnmanaged(u8) = .empty;
         var i: usize = 0;
         while (i < haystack.len) {
             if (i + needle.len <= haystack.len and std.mem.eql(u8, haystack[i..][0..needle.len], needle)) {

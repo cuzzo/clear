@@ -42,8 +42,8 @@ pub fn CheatArenaType(comptime debug_mode: bool) type {
 
         pub fn init(child_allocator: std.mem.Allocator, static_block: []u8) Self {
             return .{
-                .blocks = .{},
-                .large_objects = .{},
+                .blocks = .empty,
+                .large_objects = .empty,
                 .child_allocator = child_allocator,
                 .static_block = static_block,
             };
