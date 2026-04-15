@@ -3235,7 +3235,7 @@ class MIRLowering
     alloc = :heap
 
     if ti && @union_schemas&.key?(ti.resolved)
-      MIR::DeepCopy.new(source, transpile_type(ti), nil, :union, alloc)
+      MIR::DeepCopy.new(source, transpile_type(ti.resolved.to_s), nil, :union, alloc)
     elsif ti&.string?
       MIR::DeepCopy.new(source, nil, nil, :string, alloc)
     elsif ti&.list_collection? || (ti&.array? && !ti&.string?)

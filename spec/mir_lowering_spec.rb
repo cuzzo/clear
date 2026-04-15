@@ -782,6 +782,21 @@ RSpec.describe MIRLowering do
       expect(result.strategy).to eq(:union)
       expect(emit(result)).to include("dupeUnionValue")
     end
+
+    it "lowers COPY of borrowed union using bare union type" do
+      borrowed_union = Type.new(:Value)
+      borrowed_union.ownership = :borrow
+      inner = make_id("val", full_type: borrowed_union)
+      node = AST::CopyNode.new(tok, inner)
+      node.full_type = :Value
+
+      l = lowering(union_schemas: { Value: { Num: :Number, Str: :String } })
+      result = l.lower(node)
+      expect(result).to be_a(MIR::DeepCopy)
+      expect(result.strategy).to eq(:union)
+      expect(result.zig_type).to eq("Value")
+      expect(emit(result)).to eq("try CheatLib.dupeUnionValue(Value, val, rt.heapAlloc())")
+    end
   end
 
   # =========================================================================
