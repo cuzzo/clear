@@ -4135,6 +4135,10 @@ class MIRLowering
     entry = BUILTIN_OPS[name]
     raise "emit_builtin: unknown builtin :#{name}" unless entry
     pattern = entry[:zig].dup
+    if name == :dupeUnionValue && args.first.is_a?(MIR::Ident)
+      args = args.dup
+      args[0] = MIR::Ident.new(args[0].name.sub(/\A\*/, ''))
+    end
     args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}", emit_expr(a)) }
     iz = MIR::InlineZig.new(pattern, "builtin_#{name}")
     iz.stdlib_def = entry
