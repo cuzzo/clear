@@ -91,7 +91,7 @@ class ZigTranspiler
 
     # Post-MIR verification: check the ACTUAL code that will be emitted.
     checker = MIRChecker.new
-    mir_errors = checker.check_program!(program)
+    mir_errors = checker.check_program!(program, strict: true)
     unless mir_errors.empty?
       raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
     end

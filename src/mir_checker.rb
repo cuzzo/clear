@@ -118,11 +118,11 @@ class MIRChecker
     @errors
   end
 
-  def check_program!(program)
+  def check_program!(program, strict: false)
     all_errors = []
     program.items.each do |item|
       next unless item.is_a?(MIR::FnDef)
-      all_errors.concat(check_fn!(item))
+      all_errors.concat(check_fn!(item, strict: strict))
     end
     all_errors
   end
@@ -473,9 +473,12 @@ class MIRChecker
       check_expr_for_unhoisted(node.init, allow_top: true)
     when MIR::Set
       check_expr_for_unhoisted(node.target, allow_top: false)
-      check_expr_for_unhoisted(node.value, allow_top: false)
+      # Set.value: the receiving variable's Cleanup covers the allocation.
+      check_expr_for_unhoisted(node.value, allow_top: true)
     when MIR::ReassignWithCleanup
-      check_expr_for_unhoisted(node.value, allow_top: false)
+      # ReassignWithCleanup.value: the emitter wraps this in `const __new_x = value;`
+      # inside a block, so it IS in a named binding. The variable's Cleanup covers it.
+      check_expr_for_unhoisted(node.value, allow_top: true)
     when MIR::ExprStmt
       check_expr_for_unhoisted(node.expr, allow_top: false)
     when MIR::ReturnStmt
@@ -517,6 +520,13 @@ class MIRChecker
   # In both cases, recurse into sub-expressions with allow_top: false.
   def check_expr_for_unhoisted(expr, allow_top:)
     return unless expr
+    # Cast is a transparent wrapper (no allocation itself). Propagate allow_top so
+    # an allocating expr (e.g. MakeList) inside a Cast in Let-init position is not
+    # flagged. lower() wraps MakeList in Cast for element-type coercions.
+    if expr.is_a?(MIR::Cast)
+      check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
+      return
+    end
     if !allow_top && allocating_expr?(expr)
       kind = expr.class.name.split("::").last
       @errors << error(:UNHOISTED_ALLOC, @fn_name,
@@ -527,14 +537,18 @@ class MIRChecker
   end
 
   def allocating_expr?(expr)
+    # Only flag HEAP allocations. Frame allocations are managed by the frame
+    # arena and do not need AllocMark/Cleanup tracking. Matching mir_allocates?.
     case expr
-    when MIR::DupeSlice, MIR::HeapCreate, MIR::ConcatStr,
-         MIR::AllocSlice, MIR::MakeList, MIR::CapWrap
-      true
-    when MIR::ContainerInit
-      !expr.alloc.nil?
+    when MIR::HeapCreate   then true              # always heap by definition
+    when MIR::DupeSlice    then expr.alloc == :heap
+    when MIR::AllocSlice   then expr.alloc == :heap
+    when MIR::MakeList     then expr.alloc == :heap
+    when MIR::ConcatStr    then expr.alloc == :heap
+    when MIR::CapWrap      then expr.alloc == :heap
+    when MIR::ContainerInit then expr.alloc == :heap
     when MIR::DeepCopy
-      expr.strategy != :passthrough
+      expr.strategy != :passthrough && expr.alloc == :heap
     else
       false
     end

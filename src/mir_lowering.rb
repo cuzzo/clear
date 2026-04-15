@@ -74,6 +74,10 @@ class MIRLowering
       node.alloc == :heap
     when MIR::Call
       node.heap_provenance ? true : false
+    when MIR::Cast
+      # Cast is a type coercion wrapper with no allocation of its own.
+      # Delegate to the wrapped expression.
+      mir_allocates?(node.expr)
     when MIR::InlineZig
       # Only hoist if the node heap-allocates (stdlib_def allocates: true AND
       # allocs contains a :heap entry -- frame-only intrinsics are excluded).
@@ -88,14 +92,21 @@ class MIRLowering
   # If expr allocates, hoist it to a named Let (pushed to @pending_stmts)
   # and return an Ident pointing to it. Otherwise return expr unchanged.
   # ast_node: the original AST node for type info (used to compute cleanup entry).
-  def hoist_alloc(expr, ast_node = nil)
+  # err_cleanup: true => emit ErrCleanup (ownership transfers on success; only clean
+  #   up on error). Use when the value is consumed by a TAKES arg, a struct/union
+  #   field init, or any position where the receiver takes ownership on success.
+  #   false (default) => emit Cleanup (defer; freed on all paths).
+  def hoist_alloc(expr, ast_node = nil, err_cleanup: false)
     return expr unless mir_allocates?(expr)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     @pending_stmts << MIR::AllocMark.new(name, :heap)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
-    @pending_stmts << MIR::Cleanup.new(name, entry) if entry
+    if entry
+      cleanup = err_cleanup ? MIR::ErrCleanup.new(name, entry) : MIR::Cleanup.new(name, entry)
+      @pending_stmts << cleanup
+    end
     MIR::Ident.new(name)
   end
 
@@ -143,6 +154,9 @@ class MIRLowering
         # :passthrough / :local -- inner value passes through; no additional cleanup.
         nil
       end
+    when MIR::Cast
+      # Cast is a transparent wrapper; the cleanup is the same as the inner expr.
+      hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::Call
       ti = ast_node.respond_to?(:type_info) ? (ast_node.type_info rescue nil) : nil
       ti = ti.is_a?(Type) ? ti : nil
@@ -1035,17 +1049,10 @@ class MIRLowering
 
     # Standard call
     args_mir = node.args.map { |a|
-      before = @pending_stmts.length
-      arg = hoist_alloc(lower(a), a)
-      # CopyNode/MoveNode args transfer ownership to the callee (TAKES semantics).
-      # Replace hoisted temp Cleanups with ErrCleanup: cleanup only on error
-      # (partial failure), not on success (callee owns the value).
-      if a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
-        before.upto(@pending_stmts.length - 1) do |i|
-          s = @pending_stmts[i]
-          @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
-        end
-      end
+      # CopyNode/MoveNode = TAKES: callee owns the value on success, so only clean
+      # up on error (partial failure). Non-TAKES args are borrowed; use Cleanup.
+      takes = a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
+      arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       # Array/List args: convert to slice via .items (skip strings - already []const u8)
       ti = a.type_info
       if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
@@ -1110,14 +1117,8 @@ class MIRLowering
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
     args_mir = node.args.map { |a|
-      before = @pending_stmts.length
-      arg = hoist_alloc(lower(a), a)
-      if a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
-        before.upto(@pending_stmts.length - 1) do |i|
-          s = @pending_stmts[i]
-          @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
-        end
-      end
+      takes = a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
+      arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.type_info
       if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
@@ -2855,18 +2856,11 @@ class MIRLowering
     hoisted = []
 
     fields = node.fields.map { |k, v|
-      before = @pending_stmts.length
       val = if rc_retain_needed?(v)
         make_rc_retain(v)
       else
-        hoist_alloc(lower(v), v)
-      end
-      # The struct owns its fields: any heap temp hoisted for this field
-      # transfers ownership to the struct.  Replace Cleanup with ErrCleanup so
-      # cleanup only fires on error (partial failure), not on success.
-      before.upto(@pending_stmts.length - 1) do |i|
-        s = @pending_stmts[i]
-        @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
+        # err_cleanup: struct owns its fields on success; only clean up on error.
+        hoist_alloc(lower(v), v, err_cleanup: true)
       end
       vt = v.type_info.is_a?(Type) ? v.type_info : nil
       needs_items = vt&.list_collection? && !v.is_a?(AST::CopyNode) &&
@@ -2936,15 +2930,8 @@ class MIRLowering
 
     variant_struct_name = "#{node.union_name}_#{node.variant_name}"
     field_values = node.fields.map { |k, v|
-      before = @pending_stmts.length
-      val = hoist_alloc(lower(v), v)
-      # The union owns its payload: any heap temp hoisted for this field
-      # transfers ownership to the union.  Replace Cleanup with ErrCleanup so
-      # cleanup fires only on error (partial failure), not on success.
-      before.upto(@pending_stmts.length - 1) do |i|
-        s = @pending_stmts[i]
-        @pending_stmts[i] = MIR::ErrCleanup.new(s.name, s.cleanup_entry) if s.is_a?(MIR::Cleanup)
-      end
+      # err_cleanup: union owns its payload on success; only clean up on error.
+      val = hoist_alloc(lower(v), v, err_cleanup: true)
       if indirect.include?(k)
         zig_t = transpile_type(var_data[:fields][k])
         @block_expr_counter += 1
@@ -3798,6 +3785,12 @@ class MIRLowering
       if node.value && rc_retain_needed?(node.value)
         MIR::ReturnStmt.new(make_rc_retain(node.value))
       else
+        # Hoist allocating expressions (DeepCopy, ConcatStr, Cast wrapping these,
+        # etc.) to a named Let so the checker sees it in Let-init position.
+        # ErrCleanup: the caller takes ownership on success.
+        # Skip Call nodes: they are not flagged by UNHOISTED_ALLOC and the test
+        # contract requires heap-returning calls to remain inline (no __tmp wrap).
+        value = hoist_alloc(value, node.value, err_cleanup: true) if value && !value.is_a?(MIR::Call)
         MIR::ReturnStmt.new(value)
       end
     end
