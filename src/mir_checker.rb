@@ -41,8 +41,7 @@
 # Which type is emitted is determined by the lowering pass, not the checker.
 # The checker does NOT inspect flags or tags -- it reads the node type.
 #
-# All other ownership checks run pre-lowering:
-#   FlowChecker          -- LEAK, ORPHAN_DROP, ORPHAN_GUARD, FRAME_OVERFLOW
+# Other ownership checks run pre-lowering:
 #   UseAfterMoveChecker  -- use-after-move (Rule 1)
 #   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 

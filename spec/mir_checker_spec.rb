@@ -6,8 +6,7 @@ require_relative '../src/mir_checker'
 #   HPT_LEAK              -- heap-returning call result discarded (leak)
 #   INLINE_ALLOC_MISMATCH -- operation allocator doesn't match container's AllocMark
 #
-# All other ownership checks now run pre-lowering:
-#   FlowChecker          -- LEAK, ORPHAN_DROP, ORPHAN_GUARD, FRAME_OVERFLOW
+# Other ownership checks run pre-lowering:
 #   UseAfterMoveChecker  -- use-after-move (Rule 1)
 #   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 
