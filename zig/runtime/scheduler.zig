@@ -114,7 +114,7 @@ pub const SmartEventFd = struct {
     }
 
     pub fn deinit(self: *SmartEventFd) void {
-        std.posix.close(self.fd);
+        compat.closeFd(self.fd);
     }
 
     // HOT PATH: This is what makes it fast!

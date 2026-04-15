@@ -159,7 +159,7 @@ module PipelineGenerator
       n = lhs_type.shard_count
       elem_zig = lhs_type.element_type.zig_type
       <<~ZIG.strip
-        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}).empty;
         defer pipe_mat.deinit(rt.heapAlloc());
         for (0..#{n}) |__psi| {
             for (pipe_src_list.shards[__psi].slots) |*__pslot| {
@@ -171,7 +171,7 @@ module PipelineGenerator
     elsif lhs_type&.pool? && lhs_type&.soa?
       elem_zig = lhs_type.element_type.zig_type
       <<~ZIG.strip
-        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}).empty;
         defer pipe_mat.deinit(rt.heapAlloc());
         for (0..@intCast(pipe_src_list.data.len)) |__psi| {
             if (pipe_src_list.alive[__psi]) try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));
@@ -181,7 +181,7 @@ module PipelineGenerator
     elsif lhs_type&.list_collection? && lhs_type&.soa?
       elem_zig = lhs_type.element_type.zig_type
       <<~ZIG.strip
-        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}).empty;
         defer pipe_mat.deinit(rt.heapAlloc());
         for (0..@intCast(pipe_src_list.data.len)) |__psi| {
             try pipe_mat.append(rt.heapAlloc(), pipe_src_list.data.get(__psi));
@@ -191,7 +191,7 @@ module PipelineGenerator
     elsif lhs_type&.pool?
       elem_zig = lhs_type.element_type.zig_type
       <<~ZIG.strip
-        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}).empty;
         defer pipe_mat.deinit(rt.heapAlloc());
         for (pipe_src_list.slots) |*__pslot| {
             if (__pslot.alive) try pipe_mat.append(rt.heapAlloc(), __pslot.value);
@@ -202,7 +202,7 @@ module PipelineGenerator
       n = lhs_type.shard_count
       elem_zig = lhs_type.element_type.zig_type
       <<~ZIG.strip
-        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}){};
+        var pipe_mat = std.ArrayListUnmanaged(#{elem_zig}).empty;
         defer pipe_mat.deinit(rt.heapAlloc());
         for (0..#{n}) |__psi| {
             try pipe_mat.appendSlice(rt.heapAlloc(), pipe_src_list.shards[__psi].items);
@@ -386,7 +386,7 @@ module PipelineGenerator
             const gop = idx_result.inner.getOrPut(#{alloc}, idx_key_owned) catch @panic("INDEX allocation failed");
             if (gop.found_existing) #{alloc}.free(idx_key_owned);
             if (!gop.found_existing) {
-                gop.value_ptr.* = std.ArrayListUnmanaged(#{element_zig_type}){};
+                gop.value_ptr.* = .empty;
             }
             gop.value_ptr.append(#{alloc}, it) catch @panic("INDEX append failed");
         }
@@ -1323,7 +1323,7 @@ module PipelineGenerator
               #{spawn_call}
           }
           __ccs#{id}_wg.wait();#{err_check}
-          var __ccs#{id}_final = std.ArrayListUnmanaged(#{result_zig}){};
+          var __ccs#{id}_final = std.ArrayListUnmanaged(#{result_zig}).empty;
           for (__ccs#{id}_results) |__ccs#{id}_slot| {
               if (__ccs#{id}_slot) |__v| try __ccs#{id}_final.append(#{rt_name}.heapAlloc(), __v);
           }
@@ -1408,7 +1408,7 @@ module PipelineGenerator
               #{spawn_call}
           }
           __ccw#{id}_wg.wait();#{err_check}
-          var __ccw#{id}_final = std.ArrayListUnmanaged(#{item_zig}){};
+          var __ccw#{id}_final = std.ArrayListUnmanaged(#{item_zig}).empty;
           for (__ccw#{id}_results) |__ccw#{id}_slot| {
               if (__ccw#{id}_slot) |__v| try __ccw#{id}_final.append(#{rt_name}.heapAlloc(), __v);
           }

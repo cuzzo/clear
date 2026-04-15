@@ -721,7 +721,7 @@ class Type
     Float32:   "f32",
     Any:       "f64",
     Range:     "CheatLib.Range",
-    File:      "std.fs.File",
+    File:      "CheatLib.File",
     TCPServer: "i32",
     TCPClient: "i32",
   }.freeze

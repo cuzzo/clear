@@ -702,18 +702,15 @@ See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages
 
 Functions cannot returned borrowed data freely, but can with a lifetime.  This is simplified from Rust.
 
-```ruby clear
-STRUCT Bar { index: Float64 }
-STRUCT Baz { name: Byte[] }
-STRUCT Foo { bar: Bar, baz: Baz }
-STRUCT Root { foo: Foo }
+```ruby clear illustrative
+STRUCT Node { left: ?Node, right: ?Node }
 
-FN identity(r: Root) RETURNS r.foo.bar:Bar ->
-  RETURN r.foo.bar;
+FN grandChild(n: Node) RETURNS n.left:?Node ->
+  RETURN n.left?.right;
 END
 ```
 
-Lifetimes are scoped with `<param>.<path>:Type`. `r.foo.bar` is the path and `Bar` is the return type.
+Lifetimes are scoped with `<param>.<path>:Type`. In the example above, `n.left` is the path and `?Node` is the return type.
 
 This is a less restrictive lifetime than `r:Bar`.
 

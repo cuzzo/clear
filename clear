@@ -22,6 +22,7 @@ TRANSPILER_CACHE_DIR = File.join(ZIG_DIR, '.clear-transpile-cache')
 
 # Find Zig compiler
 ZIG = [
+  File.join(File.expand_path('~'), 'zig-x86_64-linux-0.16.0', 'zig'),
   File.join(ZIG_DIR, 'zig-new', 'zig'),
   File.join(ZIG_DIR, 'zig', 'zig'),
   `which zig 2>/dev/null`.strip
@@ -130,11 +131,21 @@ def compiler_signature
   end
 end
 
+def transpile_dependency_signature(source_path)
+  digest = Digest::SHA256.new
+  collect_clear_dependencies(source_path).to_a.sort.each do |path|
+    digest << File.expand_path(path)
+    digest << File.read(path)
+  end
+  digest.hexdigest
+end
+
 def transpile_cache_key(source_path:, mode:, transpile_flag:, source_text:)
   Digest::SHA256.hexdigest([
     mode,
     transpile_flag,
     compiler_signature,
+    transpile_dependency_signature(source_path),
     File.expand_path(source_path),
     source_text
   ].join("\0"))
@@ -603,7 +614,24 @@ when 'test'
     current_test = nil
     last_completed_test = nil
     leak_seen = {}
-    IO.popen("cd #{ZIG_DIR} && #{ZIG} test --dep safety --dep ebr --dep ownership -Mroot=all-tests.zig runtime/switch.S runtime/onRoot.S -Msafety=lib/safety.zig -Mebr=lib/ebr.zig -Mownership=lib/ownership.zig -lc 2>&1") do |io|
+    zig_test_cmd = [
+      ZIG, 'test',
+      '--dep', 'safety',
+      '--dep', 'ebr',
+      '--dep', 'ownership',
+      '--dep', 'compat',
+      '-Mroot=all-tests.zig',
+      *RUNTIME_FILES,
+      '-Msafety=lib/safety.zig',
+      '--dep', 'compat',
+      '-Mebr=lib/ebr.zig',
+      '-Mownership=lib/ownership.zig',
+      '-Mcompat=lib/compat.zig',
+      '-lc'
+    ].join(' ')
+
+    zig_test_status = nil
+    IO.popen("cd #{ZIG_DIR} && #{zig_test_cmd} 2>&1") do |io|
       io.each_line do |line|
         # Zig test result format: "N/M all-tests.test.NAME...OK" or "...FAIL"
         # Result may be on the same line (inline) or a standalone "OK"/"FAIL" line.
@@ -647,6 +675,12 @@ when 'test'
           current_test = nil
         end
       end
+      Process.wait(io.pid)
+      zig_test_status = $?
+    end
+
+    unless zig_test_status&.success?
+      error "Directory test run failed"
     end
     puts
     puts

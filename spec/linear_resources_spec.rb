@@ -151,8 +151,8 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("defer if (!f_moved) f.close();")
       end
 
-      it "maps File to std.fs.File Zig type" do
-        expect(Type.new(:File).zig_type).to eq("std.fs.File")
+      it "maps File to CheatLib.File Zig type" do
+        expect(Type.new(:File).zig_type).to eq("CheatLib.File")
       end
     end
 

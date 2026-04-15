@@ -132,14 +132,44 @@ pub fn milliTimestamp() i64 {
     return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
 }
 
+pub fn randomBytes(buf: []u8) !void {
+    var filled: usize = 0;
+    while (filled < buf.len) {
+        const rc = std.c.getrandom(buf[filled..].ptr, buf.len - filled, 0);
+        if (rc < 0) return error.Unexpected;
+        if (rc == 0) return error.Unexpected;
+        filled += @intCast(rc);
+    }
+}
+
 pub fn eventFd(initval: u32, flags: u32) !std.posix.fd_t {
     const fd = std.c.eventfd(initval, flags);
     if (fd < 0) return error.Unexpected;
     return fd;
 }
 
+pub fn socket(domain: c_uint, sock_type: c_uint, protocol: c_uint) !std.posix.fd_t {
+    const fd = std.c.socket(domain, sock_type, protocol);
+    if (fd < 0) return error.Unexpected;
+    return fd;
+}
+
+pub fn bind(fd: std.posix.fd_t, addr: *const anyopaque, len: std.posix.socklen_t) !void {
+    if (std.c.bind(fd, @ptrCast(@alignCast(addr)), len) != 0) return error.Unexpected;
+}
+
+pub fn listen(fd: std.posix.fd_t, backlog: c_uint) !void {
+    if (std.c.listen(fd, backlog) != 0) return error.Unexpected;
+}
+
 pub fn closeFd(fd: std.posix.fd_t) void {
     _ = std.c.close(fd);
+}
+
+pub fn writeFd(fd: std.posix.fd_t, buf: []const u8) !usize {
+    const rc = std.c.write(fd, buf.ptr, buf.len);
+    if (rc < 0) return error.Unexpected;
+    return @intCast(rc);
 }
 
 pub fn fileSizeFd(fd: std.posix.fd_t) !u64 {

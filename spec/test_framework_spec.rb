@@ -239,7 +239,7 @@ RSpec.describe "Test Framework DSL" do
       CLEAR
       zig = transpile(src)
       expect(zig).to include('test "Math: add: works"')
-      expect(zig).to include("GeneralPurposeAllocator")
+      expect(zig).to include("DebugAllocator")
     end
 
     it "makes private functions pub in test mode" do
@@ -269,7 +269,7 @@ RSpec.describe "Test Framework DSL" do
       expect(zig).to include('test "Setup: group: first"')
       expect(zig).to include('test "Setup: group: second"')
       # Each test should have its own runtime init
-      expect(zig.scan("GeneralPurposeAllocator").count).to be >= 2
+      expect(zig.scan("DebugAllocator").count).to be >= 2
     end
   end
 

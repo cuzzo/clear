@@ -596,7 +596,7 @@ pub const CheatLib = struct {
         } else {
             var written: usize = 0;
             while (written < content.len) {
-                written += std.posix.write(fd, content[written..]) catch return error.WriteError;
+                written += compat.writeFd(fd, content[written..]) catch return error.WriteError;
             }
         }
     }
@@ -1156,7 +1156,7 @@ pub const CheatLib = struct {
 
     /// Wall clock milliseconds since Unix epoch.
     pub fn timestampMs() i64 {
-        return std.time.milliTimestamp();
+        return compat.milliTimestamp();
     }
 
     /// Returns the total number of scheduler threads.
@@ -1215,7 +1215,7 @@ pub const CheatLib = struct {
     /// Random float in [0.0, 1.0). Uses OS CSPRNG.
     pub fn random() f64 {
         var bytes: [8]u8 = undefined;
-        std.crypto.random.bytes(&bytes);
+        compat.randomBytes(&bytes) catch return 0.0;
         // Use top 52 bits as mantissa of a double in [1.0, 2.0), then subtract 1.0
         const bits = std.mem.readInt(u64, &bytes, .little);
         const mantissa = (bits >> 12) | (0x3FF << 52); // exponent = 1023 = 1.0
@@ -1227,7 +1227,7 @@ pub const CheatLib = struct {
         if (max <= 0) return 0;
         const umax: u64 = @intCast(max);
         var bytes: [8]u8 = undefined;
-        std.crypto.random.bytes(&bytes);
+        compat.randomBytes(&bytes) catch return 0;
         const val = std.mem.readInt(u64, &bytes, .little);
         return @intCast(val % umax);
     }
@@ -1372,30 +1372,28 @@ pub const CheatLib = struct {
     // shell
 
     pub fn shell(allocator: std.mem.Allocator, cmd: []const u8) ![]const u8 {
-        // 1. Prepare Command (Wrap in sh -c to support pipes/globbing)
-        //    Note: For Windows support, you'd check builtin.os.tag and use "cmd", "/C"
-        const argv = if (builtin.os.tag == .windows)
-            &[_][]const u8{ "cmd", "/C", cmd }
-        else
-            &[_][]const u8{ "/bin/sh", "-c", cmd };
+        const libc = struct {
+            extern "c" fn popen(command: [*:0]const u8, mode: [*:0]const u8) ?*std.c.FILE;
+            extern "c" fn pclose(stream: *std.c.FILE) c_int;
+        };
 
-        // 2. Initialize Process
-        var child = std.process.Child.init(argv, allocator);
-        child.stdout_behavior = .Pipe; // Capture StdOut
-        child.stderr_behavior = .Inherit; // Print StdErr to console (helpful for debugging)
+        const c_cmd = try allocator.dupeZ(u8, cmd);
+        defer allocator.free(c_cmd);
 
-        // 3. Run
-        try child.spawn();
+        const pipe = libc.popen(c_cmd.ptr, "r") orelse return error.Unexpected;
+        defer _ = libc.pclose(pipe);
 
-        // 4. Read Output
-        //    readToEndAlloc will allocate exactly enough memory for the output.
-        //    We set a safety limit (e.g., 10MB) to prevent crashing on massive output.
-        const stdout = try child.stdout.?.readToEndAlloc(allocator, 10 * 1024 * 1024);
+        var out = std.ArrayListUnmanaged(u8).empty;
+        errdefer out.deinit(allocator);
 
-        // 5. Cleanup
-        _ = try child.wait(); // Wait for finish
+        var buf: [4096]u8 = undefined;
+        while (true) {
+            const n = std.c.fread(&buf, 1, buf.len, pipe);
+            if (n == 0) break;
+            try out.appendSlice(allocator, buf[0..n]);
+        }
 
-        return stdout;
+        return out.toOwnedSlice(allocator);
     }
 
     // -------------------------------------------------------------------------
@@ -1405,12 +1403,12 @@ pub const CheatLib = struct {
     // Create a non-blocking TCP server socket, bind it to `port`, and begin
     // listening. Returns the raw server fd; caller owns it (must socketClose).
     pub fn socketListen(port: u16) !i32 {
-        const fd = try std.posix.socket(
+        const fd = try compat.socket(
             std.posix.AF.INET,
             std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
             0,
         );
-        errdefer std.posix.close(fd);
+        errdefer compat.closeFd(fd);
 
         // SO_REUSEADDR so we can restart quickly without TIME_WAIT stalls.
         try std.posix.setsockopt(fd, std.posix.SOL.SOCKET, std.posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
@@ -1421,8 +1419,8 @@ pub const CheatLib = struct {
             .addr   = 0, // INADDR_ANY
             .zero   = [_]u8{0} ** 8,
         };
-        try std.posix.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
-        try std.posix.listen(fd, 128);
+        try compat.bind(fd, @ptrCast(&addr), @sizeOf(@TypeOf(addr)));
+        try compat.listen(fd, 128);
         return fd;
     }
 
@@ -1469,7 +1467,7 @@ pub const CheatLib = struct {
     // Close a TCP socket fd. With io_uring completion-based I/O, there are
     // no pending polls to cancel -- the fd is simply closed.
     pub noinline fn socketClose(fd: i32) void {
-        std.posix.close(fd);
+        compat.closeFd(fd);
     }
 
     // Read up to 4096 bytes from a connected client socket via io_uring.
@@ -1507,12 +1505,12 @@ pub const CheatLib = struct {
     // or negative errno on error. No getsockoptError post-check needed.
     // Returns the client fd; caller owns it (close via socketClose / RAII).
     pub noinline fn socketConnect(host: []const u8, port: u16) !i32 {
-        const fd = try std.posix.socket(
+        const fd = try compat.socket(
             std.posix.AF.INET,
             std.posix.SOCK.STREAM | std.posix.SOCK.NONBLOCK | std.posix.SOCK.CLOEXEC,
             0,
         );
-        errdefer std.posix.close(fd);
+        errdefer compat.closeFd(fd);
 
         const s_addr = try parseIpv4Addr(host);
         const addr = std.posix.sockaddr.in{

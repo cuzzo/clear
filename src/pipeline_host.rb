@@ -391,7 +391,7 @@ class PipelineHost
   # Common: var pipe_mat = ArrayListUnmanaged(T){}; defer pipe_mat.deinit(alloc);
   def mat_var_and_defer(elem_zig)
     var_decl = MIR::Let.new("pipe_mat",
-      MIR::InlineZig.new("std.ArrayListUnmanaged(#{elem_zig}){}", "mat_init"),
+      MIR::InlineZig.new("std.ArrayListUnmanaged(#{elem_zig}).empty", "mat_init"),
       true, nil, nil)
     alloc_ref = MIR::InlineZig.new(HEAP_ALLOC, "alloc")
     alloc_ref.stdlib_def = ALLOC_REF_DEF
@@ -985,7 +985,7 @@ class PipelineHost
             MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing")),
             [MIR::ExprStmt.new(
               MIR::InlineZig.new(
-                "gop.value_ptr.* = std.ArrayListUnmanaged(#{elem_zig}){}",
+                "gop.value_ptr.* = .empty",
                 "idx_init_slot"), nil)
             ], nil),
           MIR::ExprStmt.new(

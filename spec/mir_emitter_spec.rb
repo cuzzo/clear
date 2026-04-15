@@ -532,7 +532,7 @@ RSpec.describe MIREmitter do
 
     it "emits empty list" do
       node = MIR::ContainerInit.new("CheatLib.ArrayListUnmanaged(i64)", :list_empty, nil, nil)
-      expect(e.emit(node)).to eq("CheatLib.ArrayListUnmanaged(i64){}")
+      expect(e.emit(node)).to eq("@as(CheatLib.ArrayListUnmanaged(i64), .empty)")
     end
 
     it "emits map with allocator" do
