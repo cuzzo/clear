@@ -473,9 +473,6 @@ class MIREmitter
       "#{node.name}.alloc = #{rt}.heapAlloc();"
     when :generic
       "try CheatLib.promote(#{node.zig_type}, #{rt}, &#{node.name});"
-    when :ret_fields, :catch_string_dupe
-      # Annotation now lives on AST nodes; EscapePromote with these strategies is a no-op.
-      nil
     else
       raise "MIREmitter#emit_escape_promote: unhandled strategy :#{node.strategy}"
     end

@@ -3272,7 +3272,7 @@ class MIRLowering
 
     # Resolve init value - special handling for collection types.
     # Allocator comes from the cleanup plan (single source of truth).
-    decl_alloc = binding_entry&.dig(:alloc) || node.cleanup_alloc || :heap
+    decl_alloc = binding_entry&.dig(:alloc) || :heap
     init = if ft.pool?
       cap = ft.capacity
       MIR::ContainerInit.new(transpile_type(ft), :pool, decl_alloc, cap)

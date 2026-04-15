@@ -485,11 +485,9 @@ RSpec.describe MIREmitter do
       expect(e.emit(node)).to eq("try CheatLib.promote(User, rt, &val);")
     end
 
-    it "returns nil for pending strategies" do
-      %i[ret_fields catch_string_dupe].each do |s|
-        node = MIR::EscapePromote.new("x", nil, s, nil, "rt")
-        expect(e.emit(node)).to be_nil
-      end
+    it "raises on unknown strategy" do
+      node = MIR::EscapePromote.new("x", nil, :unknown_strategy, nil, "rt")
+      expect { e.emit(node) }.to raise_error(RuntimeError, /unhandled strategy/)
     end
   end
 

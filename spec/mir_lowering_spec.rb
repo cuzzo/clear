@@ -484,7 +484,6 @@ RSpec.describe MIRLowering do
       node.full_type = :Int64
       node.var_used = true
       node.var_mutated = true
-      node.has_cleanup = true
       result = lowering.lower(node)
       expect(result).to be_a(MIR::Let)
       expect(result.mutable).to eq(true)

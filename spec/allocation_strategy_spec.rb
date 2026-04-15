@@ -60,6 +60,11 @@ RSpec.describe "Allocation Strategy Invariants" do
     find_decl(fn, name) || raise("no decl for '#{name}' in #{fn.name}")
   end
 
+  # Look up the cleanup binding entry for a variable in a function.
+  def cleanup_entry(fn, name)
+    fn.cleanup_bindings&.[](name.to_s)
+  end
+
   # ===========================================================================
   # Group A: INV-PRIM — primitives are always :stack
   # ===========================================================================
@@ -72,9 +77,10 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "x")
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "x")
       expect(d.storage).to eq(:stack)
-      expect(d.has_cleanup).to be_falsey
+      expect(cleanup_entry(fn, "x")&.dig(:needs_cleanup)).to be_falsey
     end
 
     it "Float64 → storage :stack, no cleanup" do
@@ -84,9 +90,10 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "x")
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "x")
       expect(d.storage).to eq(:stack)
-      expect(d.has_cleanup).to be_falsey
+      expect(cleanup_entry(fn, "x")&.dig(:needs_cleanup)).to be_falsey
     end
 
     it "Bool → storage :stack, no cleanup" do
@@ -96,9 +103,10 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "x")
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "x")
       expect(d.storage).to eq(:stack)
-      expect(d.has_cleanup).to be_falsey
+      expect(cleanup_entry(fn, "x")&.dig(:needs_cleanup)).to be_falsey
     end
 
     it "primitive stays :stack even in a loop — never over-promoted" do
@@ -206,7 +214,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     # collections — they fall through to `current_storage || :stack`. The storage
     # field ends up :stack even though cleanup_alloc is correctly :frame.
     # Fix (Phase B): finalize_storage must return :frame when collection == :list.
-    it "local @list → storage :frame, cleanup_alloc :frame [CURRENTLY FAILS storage]" do
+    it "local @list → storage :frame, cleanup :frame [CURRENTLY FAILS storage]" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE parts: String[]@list = [];
@@ -214,10 +222,11 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "parts")
-      # cleanup_alloc IS correct — CleanupClassifier independently classifies :frame
-      expect(d.has_cleanup).to be true
-      expect(d.cleanup_alloc).to eq(:frame)
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "parts")
+      entry = cleanup_entry(fn, "parts")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:frame)
       # storage is WRONG: should be :frame but is currently :stack
       expect(d.storage).to eq(:frame)
     end
@@ -230,11 +239,12 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "resp")
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "resp")
       # resp is reassigned with frame-allocated concat. The declaration (rodata "")
       # must not be over-promoted to :heap.
       expect([:frame, :stack, :rodata]).to include(d.storage)
-      expect(d.cleanup_alloc).not_to eq(:heap)
+      expect(cleanup_entry(fn, "resp")&.dig(:alloc)).not_to eq(:heap)
     end
 
     # [CURRENTLY FAILS] same finalize_storage gap as local @list above
@@ -248,17 +258,19 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      loop = main_fn(ast).body.find { |s| s.is_a?(AST::ForRange) }
+      fn = main_fn(ast)
+      loop = fn.body.find { |s| s.is_a?(AST::ForRange) }
       decl = loop.body.find { |s| s.is_a?(AST::VarDecl) && s.name == "parts" }
-      expect(decl.has_cleanup).to be true
-      expect(decl.cleanup_alloc).to eq(:frame)
+      entry = cleanup_entry(fn, "parts")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:frame)
       # storage is WRONG: :stack instead of :frame
       expect(decl.storage).to eq(:frame)
     end
 
     # [CURRENTLY FAILS] finalize_storage has no :heap case for map? types.
     # Fix (Phase B): finalize_storage must return :heap when map? is true.
-    it "HashMap → storage :heap, cleanup_alloc :heap [CURRENTLY FAILS storage]" do
+    it "HashMap → storage :heap, cleanup :heap [CURRENTLY FAILS storage]" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE m: HashMap<Int64> = {};
@@ -266,10 +278,11 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "m")
-      # cleanup_alloc IS correct
-      expect(d.has_cleanup).to be true
-      expect(d.cleanup_alloc).to eq(:heap)
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "m")
+      entry = cleanup_entry(fn, "m")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:heap)
       # storage is WRONG: :stack instead of :heap
       expect(d.storage).to eq(:heap)
     end
@@ -282,7 +295,7 @@ RSpec.describe "Allocation Strategy Invariants" do
   # ===========================================================================
   describe "Group D: INV-HEAP — escaping values get :heap" do
 
-    it "returned @list → cleanup_alloc :heap" do
+    it "returned @list → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
         FN get_list() RETURNS String[]@list ->
           MUTABLE parts: String[]@list = [];
@@ -292,12 +305,12 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
-      d = find_decl_in(fn, "parts")
-      expect(d.has_cleanup).to be true
-      expect(d.cleanup_alloc).to eq(:heap)
+      entry = cleanup_entry(fn, "parts")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:heap)
     end
 
-    it "returned String@list → cleanup_alloc :heap" do
+    it "returned String@list → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
         FN build() RETURNS String[]@list ->
           MUTABLE s: String[]@list = [];
@@ -306,9 +319,9 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
-      d = find_decl_in(fn, "s")
-      expect(d.has_cleanup).to be true
-      expect(d.cleanup_alloc).to eq(:heap)
+      entry = cleanup_entry(fn, "s")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:heap)
     end
 
     it "non-returned sibling of a returned binding stays :frame" do
@@ -324,8 +337,8 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
-      expect(find_decl_in(fn, "result").cleanup_alloc).to eq(:heap)
-      expect(find_decl_in(fn, "scratch").cleanup_alloc).to eq(:frame)
+      expect(cleanup_entry(fn, "result")&.dig(:alloc)).to eq(:heap)
+      expect(cleanup_entry(fn, "scratch")&.dig(:alloc)).to eq(:frame)
     end
 
   end
@@ -350,8 +363,8 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
-      expect(find_decl_in(fn, "local").cleanup_alloc).to eq(:frame)
-      expect(find_decl_in(fn, "result").cleanup_alloc).to eq(:heap)
+      expect(cleanup_entry(fn, "local")&.dig(:alloc)).to eq(:frame)
+      expect(cleanup_entry(fn, "result")&.dig(:alloc)).to eq(:heap)
     end
 
     it "three bindings: only the returned one is :heap; others stay :frame" do
@@ -369,9 +382,9 @@ RSpec.describe "Allocation Strategy Invariants" do
         END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) }
-      expect(find_decl_in(fn, "a").cleanup_alloc).to eq(:frame)
-      expect(find_decl_in(fn, "b").cleanup_alloc).to eq(:frame)
-      expect(find_decl_in(fn, "out").cleanup_alloc).to eq(:heap)
+      expect(cleanup_entry(fn, "a")&.dig(:alloc)).to eq(:frame)
+      expect(cleanup_entry(fn, "b")&.dig(:alloc)).to eq(:frame)
+      expect(cleanup_entry(fn, "out")&.dig(:alloc)).to eq(:heap)
     end
 
   end
@@ -387,7 +400,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     # Scenario: :bg_captured
     # A list captured by a BG block must be heap-allocated so it survives the
     # block's separate stack frame. upgrade_bg_captures_to_heap! handles this.
-    it ":bg_captured — BG-captured @list gets cleanup_alloc :heap" do
+    it ":bg_captured — BG-captured @list gets cleanup :heap" do
       ast = run_mir(<<~CLEAR)
         FN main() RETURNS Void ->
           MUTABLE items: Float64[]@list = [];
@@ -397,8 +410,8 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "items")
-      expect(d.cleanup_alloc).to eq(:heap)
+      fn = main_fn(ast)
+      expect(cleanup_entry(fn, "items")&.dig(:alloc)).to eq(:heap)
     end
 
     # Scenario: :heap_ptr_return
@@ -445,7 +458,7 @@ RSpec.describe "Allocation Strategy Invariants" do
     # locals must be heap-allocated: the per-iter rewind would corrupt a
     # frame-allocated string value.
     # upgrade_loop_string_carries_to_heap! handles this.
-    it ":loop_carry_string — outer string reassigned inside mark_per_iter loop → cleanup_alloc :heap" do
+    it ":loop_carry_string — outer string reassigned inside mark_per_iter loop → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
         FN test() RETURNS Void ->
           MUTABLE i: Int64 = 0;
@@ -461,15 +474,14 @@ RSpec.describe "Allocation Strategy Invariants" do
         FN main() RETURNS Void -> RETURN; END
       CLEAR
       fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "test" }
-      d = find_decl_in(fn, "resp")
-      expect(d.cleanup_alloc).to eq(:heap)
+      expect(cleanup_entry(fn, "resp")&.dig(:alloc)).to eq(:heap)
     end
 
     # Scenario: :transitive_callee
     # A binding that receives the result of a heap-returning function must be
     # cleaned up with heapAlloc — regardless of whether it is re-returned.
     # apply_transitive_heap_promotion! handles this.
-    it ":transitive_callee — binding of heap-returning call → cleanup_alloc :heap" do
+    it ":transitive_callee — binding of heap-returning call → cleanup :heap" do
       ast = run_mir(<<~CLEAR)
         FN build!() RETURNS Float64[]@list ->
           MUTABLE v: Float64[]@list = [];
@@ -483,8 +495,7 @@ RSpec.describe "Allocation Strategy Invariants" do
         FN main() RETURNS Void -> RETURN; END
       CLEAR
       caller_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "caller!" }
-      d = find_decl_in(caller_fn, "x")
-      expect(d.cleanup_alloc).to eq(:heap)
+      expect(cleanup_entry(caller_fn, "x")&.dig(:alloc)).to eq(:heap)
     end
 
   end
@@ -508,10 +519,11 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "counter")
-      # cleanup_alloc IS correct (CleanupClassifier handles sync types)
-      expect(d.has_cleanup).to be true
-      expect(d.cleanup_alloc).to eq(:heap)
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "counter")
+      entry = cleanup_entry(fn, "counter")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:heap)
       # storage is WRONG: :stack instead of :heap
       expect(d.storage).to eq(:heap)
     end
@@ -523,9 +535,10 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "counter")
-      expect(d.has_cleanup).to be true
-      expect(d.cleanup_alloc).to eq(:heap)
+      fn = main_fn(ast)
+      entry = cleanup_entry(fn, "counter")
+      expect(entry&.dig(:needs_cleanup)).to be true
+      expect(entry&.dig(:alloc)).to eq(:heap)
     end
 
   end
@@ -544,10 +557,12 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "trimmed")
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "trimmed")
+      entry = cleanup_entry(fn, "trimmed")
       expect(d.type_info.provenance).to eq(:borrow)
-      expect(d.has_cleanup).to be_falsey
-      expect(d.cleanup_alloc).to be_nil
+      expect(entry&.dig(:needs_cleanup)).to be_falsey
+      expect(entry&.dig(:alloc)).to be_nil
     end
 
     it "borrow return has no MIR::Drop in function body" do
@@ -579,11 +594,12 @@ RSpec.describe "Allocation Strategy Invariants" do
           RETURN;
         END
       CLEAR
-      d = find_decl_in(main_fn(ast), "s")
+      fn = main_fn(ast)
+      d = find_decl_in(fn, "s")
       # A string literal binding is :rodata — the data is in the binary.
       # No frame or heap allocation occurs.
       expect(d.storage).to eq(:rodata)
-      expect(d.has_cleanup).to be_falsey
+      expect(cleanup_entry(fn, "s")&.dig(:needs_cleanup)).to be_falsey
     end
 
     it "string literal provenance :rodata (not :frame or :heap)" do

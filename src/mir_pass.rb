@@ -124,10 +124,6 @@ class MIRPass
     # allocator + cleanup info without relying on OLD MIR::Alloc/Drop siblings.
     fn.cleanup_bindings = bindings
 
-    # Stamp has_cleanup / cleanup_alloc on each decl node for spec/external compatibility.
-    # (These fields are no longer read by MIRLowering; cleanup is driven by cleanup_bindings.)
-    stamp_decl_cleanup_fields!(fn.body, bindings) if has_bindings
-
     # Stamp field pre-cleanup info directly on Assignment nodes.
     CleanupClassifier.stamp_field_pre_cleanups!(fn.body, bindings, schema_lookup: @schema_lookup) if has_bindings
 
@@ -136,8 +132,7 @@ class MIRPass
     fn.body = transform_body(fn.body, bindings, promo)
     @current_transform_fn = nil
 
-    # Transform catch clause bodies so MIR::Promote(:catch_string_dupe) is
-    # inserted before string returns in error recovery paths.
+    # Transform catch clause bodies so string returns are annotated for heap-dupe.
     if has_catch
       fn.catch_clauses.each do |clause|
         clause[:body] = transform_body(clause[:body], nil, nil) if clause[:body]
@@ -849,24 +844,6 @@ class MIRPass
       :string_map
     else
       :generic
-    end
-  end
-
-  # Stamp has_cleanup and cleanup_alloc on each VarDecl/BindExpr that needs cleanup.
-  # These fields are no longer read by MIRLowering (which uses cleanup_bindings instead),
-  # but are preserved for spec compatibility and external tooling.
-  def stamp_decl_cleanup_fields!(body, bindings)
-    AST.walk_body(body) do |node|
-      name = case node
-             when AST::VarDecl  then node.name.to_s
-             when AST::BindExpr then node.mode == :decl ? node.name.to_s : nil
-             else nil
-             end
-      next unless name
-      entry = bindings[name]
-      next unless entry && entry[:needs_cleanup] && !entry[:match_as]
-      node.cleanup_alloc = entry[:alloc]
-      node.has_cleanup = true
     end
   end
 

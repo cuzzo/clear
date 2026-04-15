@@ -295,8 +295,6 @@ module AST
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
     include Locatable
-    attr_accessor :cleanup_alloc  # stamped by MIRPass: :heap or :frame allocator for this binding
-    attr_accessor :has_cleanup    # stamped by MIRPass: true when MIR::Drop follows this decl
   end
   Assignment   = Struct.new(:token, :name, :value) do
     include Locatable
@@ -309,8 +307,6 @@ module AST
     include Locatable
     attr_accessor :mode
     attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
-    attr_accessor :cleanup_alloc     # stamped by MIRPass: :heap or :frame (for decl mode proxy)
-    attr_accessor :has_cleanup       # stamped by MIRPass: true when MIR::Drop follows (for decl mode proxy)
   end
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
     include Locatable

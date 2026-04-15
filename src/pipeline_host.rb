@@ -228,8 +228,6 @@ class PipelineHost
         new_bind = AST::BindExpr.new(node.token, new_name, node.type, new_value)
         new_bind.mode = node.mode
         new_bind.reassign_cleanup = node.reassign_cleanup
-        new_bind.cleanup_alloc = node.cleanup_alloc
-        new_bind.has_cleanup = node.has_cleanup
         copy_type_info(node, new_bind)
         return new_bind
       end
