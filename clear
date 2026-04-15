@@ -18,6 +18,7 @@ CLEAR_ROOT = File.expand_path('..', __FILE__)
 ZIG_DIR    = File.join(CLEAR_ROOT, 'zig')
 SRC_DIR    = File.join(CLEAR_ROOT, 'src')
 TRANSPILER = File.join(SRC_DIR, 'transpiler.rb')
+TRANSPILER_CACHE_DIR = File.join(ZIG_DIR, '.clear-transpile-cache')
 
 # Find Zig compiler
 ZIG = [
@@ -44,6 +45,10 @@ end
 def error(msg)
   $stderr.puts "\e[31merror:\e[0m #{msg}"
   exit 1
+end
+
+def debug_cache(msg)
+  $stderr.puts("[transpile-cache] #{msg}") if ENV['CLEAR_DEBUG_CACHE'] == '1'
 end
 
 def write_if_changed(path, content)
@@ -109,6 +114,55 @@ def newest_build_dependency_mtime(source)
                   Dir.glob(File.join(ZIG_DIR, 'lib', '**', '*.zig'))
   tracked = dep_paths + compiler_paths + runtime_paths + [__FILE__]
   tracked.filter_map { |p| File.exist?(p) ? File.mtime(p) : nil }.max || Time.at(0)
+end
+
+def compiler_signature
+  @compiler_signature ||= begin
+    tracked = Dir.glob(File.join(SRC_DIR, '**', '*.rb')).sort +
+              Dir.glob(File.join(ZIG_DIR, 'runtime', 'runtime-footer.zig')).sort +
+              Dir.glob(File.join(ZIG_DIR, 'runtime', 'runtime-header.zig')).sort
+    digest = Digest::SHA256.new
+    tracked.each do |path|
+      digest << path
+      digest << File.read(path)
+    end
+    digest.hexdigest
+  end
+end
+
+def transpile_cache_key(source_path:, mode:, transpile_flag:, source_text:)
+  Digest::SHA256.hexdigest([
+    mode,
+    transpile_flag,
+    compiler_signature,
+    File.expand_path(source_path),
+    source_text
+  ].join("\0"))
+end
+
+def transpile_cached(source_path:, mode:, transpile_flag:, source_text:)
+  cache_key = transpile_cache_key(
+    source_path: source_path,
+    mode: mode,
+    transpile_flag: transpile_flag,
+    source_text: source_text
+  )
+  cache_file = File.join(TRANSPILER_CACHE_DIR, "#{cache_key}.zig")
+
+  if File.exist?(cache_file)
+    debug_cache("hit #{mode} #{File.basename(source_path)}")
+    return [File.read(cache_file), cache_file]
+  end
+
+  debug_cache("miss #{mode} #{File.basename(source_path)}")
+  zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source_path} 2>/dev/null`
+  unless $?.success?
+    system("ruby #{TRANSPILER} #{transpile_flag} #{source_path} > /dev/null")
+    error "Transpilation failed"
+  end
+
+  write_if_changed(cache_file, zig_code)
+  [zig_code, cache_file]
 end
 
 # Walk AST to collect BG block nodes in order (matching transpiler's @bg_block_counter).
@@ -177,12 +231,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)
 
-  zig_code = `ruby #{TRANSPILER} #{transpile_flag} #{source} 2>/dev/null`
-  unless $?.success?
-    # Re-run with stderr visible for error messages
-    system("ruby #{TRANSPILER} #{transpile_flag} #{source} > /dev/null")
-    error "Transpilation failed"
-  end
+  zig_code, _cache_file = transpile_cached(
+    source_path: source,
+    mode: module_mode ? :test_root : :build_root,
+    transpile_flag: transpile_flag,
+    source_text: source_text
+  )
   # Inject comptime profiling flag when building with `clear profile`.
   # This enables allocation tracking in the runtime allocator VTable
   # with zero overhead in production builds.
@@ -221,11 +275,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       error "Package '#{np}' not found from #{File.dirname(pkg_path)}" unless np_path
       "--pkg #{np}=#{np_path}"
     }.join(" ")
-    pkg_zig = `ruby #{TRANSPILER} --module #{nested_flags} #{pkg_path} 2>/dev/null`
-    unless $?.success?
-      system("ruby #{TRANSPILER} --module #{nested_flags} #{pkg_path} > /dev/null")
-      error "Package '#{pkg_name}' transpilation failed"
-    end
+    pkg_zig, _pkg_cache_file = transpile_cached(
+      source_path: pkg_path,
+      mode: :module,
+      transpile_flag: "--module #{nested_flags}".strip,
+      source_text: pkg_src
+    )
     # Rewrite module imports to file-path imports (all files live in zig/).
     # cheat_runtime → runtime-header.zig, nested packages → name.zig
     pkg_zig = pkg_zig.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')

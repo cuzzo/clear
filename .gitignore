@@ -6,6 +6,8 @@ zig/all-tests.zig
 zig/transpile-test.zig
 zig/zig-out
 zig/.zig-cache
+zig/.clear-cache
+zig/.clear-transpile-cache
 zig/fiber-stack-check/pass/build
 zig/*.bc
 zig/*.o
