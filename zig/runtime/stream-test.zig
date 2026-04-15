@@ -11,6 +11,7 @@ const CheatHeader = @import("runtime-header.zig");
 const CheatLib = CheatHeader.CheatLib;
 const Runtime = CheatHeader.Runtime;
 const EbrContext = CheatHeader.EbrContext;
+const compat = @import("compat");
 const fc = @import("fiber-core.zig");
 const fp = CheatHeader.scheduler;
 const fm = CheatHeader.fiber_memory;
@@ -696,7 +697,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
         workers[i] = try std.Thread.spawn(.{}, workerMain, .{&worker_ctx});
     }
     while (fp.global_registry.count() < worker_count) {
-        std.posix.nanosleep(0, std.time.ns_per_ms);
+        compat.sleepNs(std.time.ns_per_ms);
     }
 
     var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
@@ -744,8 +745,8 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     );
 
     const expected_completed = subscriber_count + 1;
-    const deadline = std.time.milliTimestamp() + 15_000;
-    while (completed.load(.acquire) < expected_completed and std.time.milliTimestamp() < deadline) {
+    const deadline = compat.milliTimestamp() + 15_000;
+    while (completed.load(.acquire) < expected_completed and compat.milliTimestamp() < deadline) {
         sched.drainChannels();
         if (sched.ready_queue.len() > 0) {
             const task = sched.ready_queue.pop() orelse continue;
@@ -766,7 +767,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
                 .Blocked => {},
             }
         } else {
-            std.Thread.yield() catch {};
+            compat.sleepNs(std.time.ns_per_ms);
         }
     }
 

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub const Mutex = struct {
     inner: std.c.pthread_mutex_t = std.c.PTHREAD_MUTEX_INITIALIZER,
@@ -173,11 +174,20 @@ pub fn writeFd(fd: std.posix.fd_t, buf: []const u8) !usize {
 }
 
 pub fn fileSizeFd(fd: std.posix.fd_t) !u64 {
-    const io = std.Options.debug_io;
-    const file: std.Io.File = .{
-        .handle = fd,
-        .flags = .{ .nonblocking = false },
-    };
-    const stat = try file.stat(io);
-    return stat.size;
+    if (builtin.os.tag == .linux) {
+        const linux = std.os.linux;
+        var statx = std.mem.zeroes(linux.Statx);
+        switch (linux.errno(linux.statx(fd, "", linux.AT.EMPTY_PATH, .{ .SIZE = true }, &statx))) {
+            .SUCCESS => return statx.size,
+            else => |err| return std.posix.unexpectedErrno(err),
+        }
+    }
+
+    const fstat_sym = comptime if (@hasDecl(std.c, "fstat")) std.c.fstat else null;
+    if (fstat_sym) |fstat_fn| {
+        var stat: std.c.Stat = undefined;
+        if (fstat_fn(fd, &stat) != 0) return error.Unexpected;
+        return @intCast(stat.size);
+    }
+    return error.Unexpected;
 }

@@ -763,8 +763,12 @@ when 'test'
       system("ruby #{gen_script} --single #{source} > /dev/null")
       error "Transpilation failed"
     end
+    zig_code = zig_code.gsub('@import("runtime-header.zig")', '@import("runtime/runtime-header.zig")')
 
     # Write to a minimal per-process build dir matching normal build layout.
+    # Transpiled tests import runtime/runtime-header.zig and lib/* via
+    # directory-relative paths; top-level zig/*.zig symlinks are no longer
+    # sufficient after the Zig 0.16 runtime/layout changes.
     base_name = File.basename(source, '.cht')
     build_dir = File.join(ZIG_DIR, ".build-#{$$}")
     FileUtils.mkdir_p(build_dir)
