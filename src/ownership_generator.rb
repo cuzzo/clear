@@ -1,18 +1,4 @@
 module OwnershipGenerator
-  # Returns the Zig allocator expression from provenance (or cleanup_alloc fallback).
-  def cleanup_alloc_expr(type_info)
-    case type_info&.provenance_alloc
-    when :heap then "rt.heapAlloc()"
-    when :frame then "rt.frameAlloc()"
-    else "rt.heapAlloc()" # fallback
-    end
-  end
-
-  # Returns the Zig allocator expression for NEW allocations (backing stores, buffers).
-  def storage_alloc_expr(type_info)
-    type_info&.heap_provenance? ? "rt.heapAlloc()" : "rt.frameAlloc()"
-  end
-
   def alloc_expr_from_plan(entry)
     case entry[:alloc]
     when :heap then "rt.heapAlloc()"
