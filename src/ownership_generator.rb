@@ -43,7 +43,7 @@ module OwnershipGenerator
   # derivation, no schema lookups. All fields are pre-computed by build_drop_entry.
   # Kinds that require a resolved zig_type to emit correct cleanup code.
   NEEDS_ZIG_TYPE = Set[:list, :list_with_elem_cleanup, :string_map, :numeric_map, :set,
-    :rc, :locked, :write_locked, :heap_slice, :heap_union, :heap_struct,
+    :rc, :locked, :write_locked, :always_mutable, :heap_slice, :heap_union, :heap_struct,
     :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union,
     :match_as_inline_struct].freeze
 
@@ -114,6 +114,9 @@ module OwnershipGenerator
 
     when :write_locked
       conditional_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", guarded: g)
+
+    when :always_mutable
+      conditional_defer(name, "CheatLib.refCellDestroy(#{zig_type}, #{alloc}, #{name})", guarded: g)
 
     when :heap_string, :takes_string
       conditional_defer(name, "#{alloc}.free(#{name})", guarded: g)

@@ -573,7 +573,7 @@ class MIRLowering
       end
     when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set, :fixed_soa
       ti&.zig_type
-    when :heap_union, :heap_struct, :locked, :write_locked,
+    when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
       Type.new((ti&.resolved || :Any).to_s).zig_type
     when :rc

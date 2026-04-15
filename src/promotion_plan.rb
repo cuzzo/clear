@@ -619,6 +619,7 @@ module CleanupClassifier
   private_class_method def self.classify_sync(ti)
     return entry(:locked) if ti.locked?
     return entry(:write_locked) if ti.write_locked?
+    return entry(:always_mutable) if ti.always_mutable?
     nil
   end
 
@@ -661,7 +662,7 @@ module CleanupClassifier
   private_class_method def self.classify_heap_struct_plain(ti, node, schema_lookup)
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
-    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked?
+    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked? || ti.always_mutable?
     # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?

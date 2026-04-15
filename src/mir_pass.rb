@@ -256,7 +256,12 @@ class MIRPass
 
       ident.symbol.storage = :heap
       decl = ident.symbol.reg
-      decl.storage = :heap if decl&.respond_to?(:storage=)
+      if decl&.respond_to?(:storage=)
+        decl.storage = :heap
+        # Also upgrade the initializer value's storage so lower_struct_lit
+        # generates HeapCreate instead of a plain StructInit.
+        decl.value.storage = :heap if decl.respond_to?(:value) && decl.value&.respond_to?(:storage=)
+      end
     end
   end
 

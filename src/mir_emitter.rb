@@ -422,6 +422,9 @@ class MIREmitter
     when :write_locked
       guarded_defer(name, "CheatLib.rwLockedDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
 
+    when :always_mutable
+      guarded_defer(name, "CheatLib.refCellDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
+
     when :heap_string, :takes_string
       guarded_defer(name, "#{alloc}.free(#{name})", g, errdefer:)
 
