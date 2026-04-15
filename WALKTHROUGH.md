@@ -645,7 +645,7 @@ buf = createBuffer("hello");
 ```
 
  * See [json_api](benchmarks/24_json_api/server.cht) for an example.
- * See [docs/ffi.md](docs/ffi.md) for the complete FFI guide.
+ * See [docs/agents/ffi.md](docs/agents/ffi.md) for the complete FFI guide.
 
 ## 17. Memory Model
 
