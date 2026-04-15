@@ -133,7 +133,7 @@ class ZigTranspiler
     checker = MIRChecker.new
     mod_result[:items].flatten.each do |item|
       next unless item.is_a?(MIR::FnDef)
-      mir_errors = checker.check_fn!(item)
+      mir_errors = checker.check_fn!(item, strict: true)
       unless mir_errors.empty?
         raise "MIR ownership verification failed (post-lowering):\n\n#{mir_errors.join("\n")}"
       end
