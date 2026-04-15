@@ -1041,6 +1041,7 @@ class Type
   # "if this variable is :live at scope exit, must we emit a defer?"
   def needs_explicit_cleanup?(allocator, schema_lookup = nil)
     return false if primitive? || void? || any?
+    return false if implicitly_copyable?(schema_lookup)
     # Copy types never need cleanup regardless of allocator
     return false if string? && !heap_provenance? && allocator == :frame
 

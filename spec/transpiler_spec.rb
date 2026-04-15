@@ -1228,6 +1228,34 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  describe "heap cleanup for copy-only ids" do
+    it "does not free Id<T> extracted from a union payload" do
+      src = <<~CLEAR
+        STRUCT Env { vars: String[]@list }
+        UNION Value {
+          Nil,
+          Tco { tcoAst: String @indirect, tcoEnv: Id<Env> }
+        }
+
+        FN getEnvId!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS Id<Env> ->
+          MATCH v START
+            Value.Tco AS tco ->
+              tcoEnv = COPY tco.tcoEnv;
+              RETURN tcoEnv;,
+            DEFAULT ->
+              dummy: Id<Env> = pool.insert(Env{ vars: [] });
+              RETURN dummy;
+          END
+          dummy2: Id<Env> = pool.insert(Env{ vars: [] });
+          RETURN dummy2;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).not_to include("defer CheatLib.free(rt, tcoEnv)")
+      expect(zig).not_to include("CheatLib.cleanup(u64")
+    end
+  end
+
   # ===========================================================================
   # EXTERN method trampoline
   # ===========================================================================
