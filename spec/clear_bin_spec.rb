@@ -2,6 +2,7 @@ require "rspec"
 require "tmpdir"
 require "fileutils"
 require "digest"
+require "json"
 
 # Tests for the ./clear CLI binary.
 # Each test creates a temp directory with .cht files and runs ./clear build.
@@ -40,6 +41,11 @@ RSpec.describe "./clear build" do
 
   def transpile_cache_entries
     Dir.glob(File.join(transpile_cache_dir, "*.zig")).sort
+  end
+
+  def build_metadata_path(source_path)
+    output = File.join(File.dirname(source_path), File.basename(source_path, ".cht"))
+    File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
   end
 
   context "single file" do
@@ -173,6 +179,36 @@ RSpec.describe "./clear build" do
       expect(ok2).to be true
       expect(output2).to include("[transpile-cache] hit build_root main.cht")
       expect(transpile_cache_entries).to eq(after_first)
+    ensure
+      FileUtils.rm_rf(dir)
+    end
+
+    it "rebuilds when build mode changes instead of reusing a stale binary" do
+      dir = Dir.mktmpdir
+      main_path = File.join(dir, "main.cht")
+      File.write(main_path, <<~CLEAR)
+        FN main() RETURNS Void ->
+          print("mode");
+          RETURN;
+        END
+      CLEAR
+
+      output1, ok1 = clear_build(main_path, "--safe")
+      expect(ok1).to be true
+      expect(output1).to include("Built:")
+
+      meta_path = build_metadata_path(main_path)
+      expect(File.exist?(meta_path)).to be true
+      first_signature = JSON.parse(File.read(meta_path))
+      expect(first_signature["opt_level"]).to eq("ReleaseSafe")
+
+      output2, ok2 = clear_build(main_path, "--optimized")
+      expect(ok2).to be true
+      expect(output2).to include("Built:")
+      expect(output2).not_to include("up-to-date:")
+
+      second_signature = JSON.parse(File.read(meta_path))
+      expect(second_signature["opt_level"]).to eq("ReleaseFast")
     ensure
       FileUtils.rm_rf(dir)
     end

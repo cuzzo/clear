@@ -12,6 +12,7 @@ require 'fileutils'
 require 'optparse'
 require 'digest'
 require 'set'
+require 'json'
 
 # Resolve paths relative to this script (works from any directory)
 CLEAR_ROOT = File.expand_path('..', __FILE__)
@@ -67,6 +68,38 @@ def ensure_symlink(link_path, target_path)
     FileUtils.rm_rf(link_path)
   end
   File.symlink(target_path, link_path)
+end
+
+def build_metadata_path(output)
+  File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
+end
+
+def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:)
+  {
+    "source" => File.expand_path(source),
+    "output" => File.expand_path(output),
+    "opt_level" => opt_level,
+    "extra_flags" => Array(extra_flags),
+    "module_mode" => module_mode,
+    "profile" => profile,
+    "use_c_allocator" => use_c_allocator,
+    "default_stack" => default_stack,
+    "strict_test" => strict_test,
+    "exact_tiers" => exact_tiers&.transform_keys(&:to_s),
+    "zig" => ZIG
+  }
+end
+
+def read_build_signature(output)
+  meta_path = build_metadata_path(output)
+  return nil unless File.exist?(meta_path)
+  JSON.parse(File.read(meta_path))
+rescue JSON::ParserError
+  nil
+end
+
+def write_build_signature(output, signature)
+  write_if_changed(build_metadata_path(output), JSON.pretty_generate(signature))
 end
 
 def find_package_source(pkg_name, start_dir:)
@@ -192,7 +225,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -200,13 +233,25 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Output binary path
   output ||= File.join(source_dir, base_name)
+  signature = build_signature(
+    source: source,
+    output: output,
+    opt_level: opt_level,
+    extra_flags: extra_flags,
+    module_mode: module_mode,
+    profile: profile,
+    use_c_allocator: use_c_allocator,
+    default_stack: default_stack,
+    strict_test: strict_test,
+    exact_tiers: exact_tiers
+  )
 
   # Skip rebuild if output is newer than source AND compiler files.
   unless force || module_mode || profile
     if File.exist?(output)
       out_mtime = File.mtime(output)
       newest_dep = newest_build_dependency_mtime(source)
-      if out_mtime >= newest_dep
+      if out_mtime >= newest_dep && read_build_signature(output) == signature
         $stderr.puts "\e[90mup-to-date: #{output}\e[0m"
         return :up_to_date
       end
@@ -215,10 +260,10 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
 
   # Transpile
   transpile_flag = module_mode ? '--test' : ''
+  transpile_flag += " --use-c-allocator" if use_c_allocator
   transpile_flag += " --default-stack #{default_stack}" if default_stack
   transpile_flag += " --strict" if strict_test
   if exact_tiers
-    require 'json'
     transpile_flag += " --exact-tiers '#{exact_tiers.transform_keys(&:to_s).to_json}'"
   end
 
@@ -351,6 +396,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     zig_binary = File.join(build_dir, "#{File.basename(output)}-#{$$}")
     if File.exist?(zig_binary)
       FileUtils.mv(zig_binary, output)
+      write_build_signature(output, signature)
     end
   end
 
@@ -389,6 +435,7 @@ when 'build'
   output = nil
   opt_level = 'Debug'
   extra_flags = ['-fno-llvm', '-fno-lld']
+  use_c_allocator = false
 
   # Parse build flags
   remaining = []
@@ -424,6 +471,9 @@ when 'build'
     when '--mir'
       # No-op: MIR is the only pipeline. Flag kept for backward compat.
       i += 1
+    when '--use-c-allocator'
+      use_c_allocator = true
+      i += 1
     else
       remaining << args[i]
       i += 1
@@ -437,7 +487,7 @@ when 'build'
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build)
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"
@@ -545,6 +595,7 @@ when 'run'
   # Parse run flags
   opt_level = 'Debug'
   extra_flags = ['-fno-llvm', '-fno-lld']
+  use_c_allocator = false
   run_remaining = []
   clear_args.each do |arg|
     case arg
@@ -559,6 +610,8 @@ when 'run'
       extra_flags = ['-fno-llvm', '-fno-lld']
     when '--mir'
       # No-op: MIR is the only pipeline. Flag kept for backward compat.
+    when '--use-c-allocator'
+      use_c_allocator = true
     else
       run_remaining << arg
     end
@@ -570,7 +623,7 @@ when 'run'
   source = File.expand_path(source)
   output = File.join(File.dirname(source), File.basename(source, '.cht'))
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack)
+  do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, use_c_allocator: use_c_allocator)
 
   # Hints
   unless ENV['CLEAR_THREADS']
@@ -623,8 +676,7 @@ when 'test'
       '-Mroot=all-tests.zig',
       *RUNTIME_FILES,
       '-Msafety=lib/safety.zig',
-      '--dep', 'compat',
-      '-Mebr=lib/ebr.zig',
+      '--dep', 'compat', '-Mebr=lib/ebr.zig',
       '-Mownership=lib/ownership.zig',
       '-Mcompat=lib/compat.zig',
       '-lc'
