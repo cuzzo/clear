@@ -3,6 +3,8 @@
 # Emits Int64[] ops + Value[] consts that exec! consumes directly.
 
 class BytecodeCompiler
+  class UnsupportedConstruct < StandardError; end
+
   # Opcode constants - dense numbering for jump table efficiency.
   # Must match interpreter's exec! MATCH cases exactly.
   LOAD_CONST  = 0;  LOAD_NAME   = 1;  STORE_NAME  = 2;  POP         = 3
@@ -276,12 +278,8 @@ class BytecodeCompiler
       cidx = add_const([:str, node.value])
       emit(LOAD_CONST, cidx)
       push_type(:str)
-    when :BOOL, :TRUE
-      cidx = add_const([:bool, true])
-      emit(LOAD_CONST, cidx)
-      push_type(:bool)
-    when :FALSE
-      cidx = add_const([:bool, false])
+    when :BOOLEAN, :BOOL, :TRUE, :FALSE
+      cidx = add_const([:bool, !!node.value])
       emit(LOAD_CONST, cidx)
       push_type(:bool)
     when :NIL
@@ -305,10 +303,7 @@ class BytecodeCompiler
     end
 
     if op == :SMOOTH
-      # Pipeline - compile left, then call right
-      compile(node.left)
-      # TODO: handle pipeline ops
-      return
+      raise UnsupportedConstruct, "pipeline operator #{op} is not supported by the bytecode compiler"
     end
 
     compile(node.left)
