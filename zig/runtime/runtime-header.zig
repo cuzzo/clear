@@ -4,8 +4,8 @@ const linux = std.os.linux;
 pub const Runtime = @import("runtime.zig").Runtime;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
-const streams = @import("lib/streams.zig");
-const stream_helpers = @import("lib/stream.zig");
+const streams = @import("../lib/streams.zig");
+const stream_helpers = @import("../lib/stream.zig");
 
 pub const EbrContext = @import("ebr").EbrContext;
 const Task = @import("queues.zig").Task;
@@ -72,7 +72,7 @@ pub const CheatLib = struct {
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(R) {
         return stream_helpers.concurrentBoundedSelect(
-            T, R, N, mapFn,
+            fp.WaitGroup, T, R, N, mapFn,
             struct {
                 fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
                     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
@@ -105,7 +105,7 @@ pub const CheatLib = struct {
         user_ctx: ?*anyopaque,
     ) !std.ArrayListUnmanaged(T) {
         return stream_helpers.concurrentBoundedWhere(
-            T, N, predFn,
+            fp.WaitGroup, T, N, predFn,
             struct {
                 fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
                     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
@@ -137,7 +137,7 @@ pub const CheatLib = struct {
         user_ctx: ?*anyopaque,
     ) !void {
         return stream_helpers.concurrentBoundedEach(
-            T, N, eachFn,
+            fp.WaitGroup, T, N, eachFn,
             struct {
                 fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
                     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);

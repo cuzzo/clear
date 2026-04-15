@@ -1,29 +1,26 @@
 const std = @import("std");
-const rt_mod = @import("../runtime.zig");
-const fp = @import("../scheduler.zig");
-const queues = @import("../queues.zig");
-
-const Runtime = rt_mod.Runtime;
-const TaskFn = queues.TaskFn;
 
 pub fn concurrentBoundedSelect(
+    comptime WaitGroupT: type,
     comptime T: type,
     comptime R: type,
     comptime N: usize,
-    comptime mapFn: fn (*Runtime, ?*anyopaque, T) anyerror!R,
-    comptime localSpawnFn: fn (*fp.Scheduler, TaskFn, ?*anyopaque, fp.TaskConfig) anyerror!void,
-    comptime parallelSpawnFn: fn (TaskFn, ?*anyopaque, fp.TaskConfig) anyerror!void,
-    comptime cleanupResultFn: fn (std.mem.Allocator, *R) void,
+    comptime mapFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    comptime cleanupResultFn: anytype,
     alloc: std.mem.Allocator,
-    rt: *Runtime,
+    rt: anytype,
     items: anytype,
     workers: usize,
     parallel: bool,
-    task_cfg: fp.TaskConfig,
+    task_cfg: anytype,
     user_ctx: ?*anyopaque,
 ) !std.ArrayListUnmanaged(R) {
+    _ = T;
     const ItemsPtr = @TypeOf(items);
     const PromiseT = @typeInfo(@typeInfo(ItemsPtr).pointer.child).array.child;
+    const RuntimeT = @TypeOf(rt.*);
     const Slot = ?R;
 
     const slots = try alloc.alloc(Slot, N);
@@ -37,10 +34,10 @@ pub fn concurrentBoundedSelect(
 
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
-    var wg = fp.WaitGroup.init(rt.getSched());
+    var wg = WaitGroupT.init(rt.getSched());
 
     const Worker = struct {
-        wg: *fp.WaitGroup,
+        wg: *WaitGroupT,
         items: *[N]PromiseT,
         slots: []Slot,
         next_idx: *std.atomic.Value(usize),
@@ -48,7 +45,7 @@ pub fn concurrentBoundedSelect(
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-            const worker_rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
@@ -79,9 +76,9 @@ pub fn concurrentBoundedSelect(
             .user_ctx = user_ctx,
         };
         if (parallel) {
-            try parallelSpawnFn(@as(TaskFn, @ptrCast(&Worker.run)), &worker_ctxs[i], task_cfg);
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
         } else {
-            try localSpawnFn(wg.sched, @as(TaskFn, @ptrCast(&Worker.run)), &worker_ctxs[i], task_cfg);
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
         }
     }
     wg.wait();
@@ -108,22 +105,24 @@ pub fn concurrentBoundedSelect(
 }
 
 pub fn concurrentBoundedWhere(
+    comptime WaitGroupT: type,
     comptime T: type,
     comptime N: usize,
-    comptime predFn: fn (*Runtime, ?*anyopaque, T) anyerror!bool,
-    comptime localSpawnFn: fn (*fp.Scheduler, TaskFn, ?*anyopaque, fp.TaskConfig) anyerror!void,
-    comptime parallelSpawnFn: fn (TaskFn, ?*anyopaque, fp.TaskConfig) anyerror!void,
-    comptime cleanupItemFn: fn (std.mem.Allocator, *T) void,
+    comptime predFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    comptime cleanupItemFn: anytype,
     alloc: std.mem.Allocator,
-    rt: *Runtime,
+    rt: anytype,
     items: anytype,
     workers: usize,
     parallel: bool,
-    task_cfg: fp.TaskConfig,
+    task_cfg: anytype,
     user_ctx: ?*anyopaque,
 ) !std.ArrayListUnmanaged(T) {
     const ItemsPtr = @TypeOf(items);
     const PromiseT = @typeInfo(@typeInfo(ItemsPtr).pointer.child).array.child;
+    const RuntimeT = @TypeOf(rt.*);
     const Slot = ?T;
 
     const slots = try alloc.alloc(Slot, N);
@@ -137,10 +136,10 @@ pub fn concurrentBoundedWhere(
 
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
-    var wg = fp.WaitGroup.init(rt.getSched());
+    var wg = WaitGroupT.init(rt.getSched());
 
     const Worker = struct {
-        wg: *fp.WaitGroup,
+        wg: *WaitGroupT,
         items: *[N]PromiseT,
         slots: []Slot,
         alloc: std.mem.Allocator,
@@ -149,7 +148,7 @@ pub fn concurrentBoundedWhere(
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-            const worker_rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
@@ -185,9 +184,9 @@ pub fn concurrentBoundedWhere(
             .user_ctx = user_ctx,
         };
         if (parallel) {
-            try parallelSpawnFn(@as(TaskFn, @ptrCast(&Worker.run)), &worker_ctxs[i], task_cfg);
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
         } else {
-            try localSpawnFn(wg.sched, @as(TaskFn, @ptrCast(&Worker.run)), &worker_ctxs[i], task_cfg);
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
         }
     }
     wg.wait();
@@ -214,34 +213,37 @@ pub fn concurrentBoundedWhere(
 }
 
 pub fn concurrentBoundedEach(
+    comptime WaitGroupT: type,
     comptime T: type,
     comptime N: usize,
-    comptime eachFn: fn (*Runtime, ?*anyopaque, T) anyerror!void,
-    comptime localSpawnFn: fn (*fp.Scheduler, TaskFn, ?*anyopaque, fp.TaskConfig) anyerror!void,
-    comptime parallelSpawnFn: fn (TaskFn, ?*anyopaque, fp.TaskConfig) anyerror!void,
-    rt: *Runtime,
+    comptime eachFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    rt: anytype,
     items: anytype,
     workers: usize,
     parallel: bool,
-    task_cfg: fp.TaskConfig,
+    task_cfg: anytype,
     user_ctx: ?*anyopaque,
 ) !void {
+    _ = T;
     const ItemsPtr = @TypeOf(items);
     const PromiseT = @typeInfo(@typeInfo(ItemsPtr).pointer.child).array.child;
+    const RuntimeT = @TypeOf(rt.*);
 
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
-    var wg = fp.WaitGroup.init(rt.getSched());
+    var wg = WaitGroupT.init(rt.getSched());
 
     const Worker = struct {
-        wg: *fp.WaitGroup,
+        wg: *WaitGroupT,
         items: *[N]PromiseT,
         next_idx: *std.atomic.Value(usize),
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
-            const worker_rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
@@ -270,9 +272,9 @@ pub fn concurrentBoundedEach(
             .user_ctx = user_ctx,
         };
         if (parallel) {
-            try parallelSpawnFn(@as(TaskFn, @ptrCast(&Worker.run)), &worker_ctxs[i], task_cfg);
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
         } else {
-            try localSpawnFn(wg.sched, @as(TaskFn, @ptrCast(&Worker.run)), &worker_ctxs[i], task_cfg);
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
         }
     }
     wg.wait();

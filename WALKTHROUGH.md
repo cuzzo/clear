@@ -703,20 +703,25 @@ See [docs/control-plane.md](docs/control-plane.md) for more on how CLEAR manages
 Functions cannot returned borrowed data freely, but can with a lifetime.  This is simplified from Rust.
 
 ```ruby clear
-FN grandChild(n: Node) RETURNS n.left.?Node ->
-  RETURN n?.left?.right;
+STRUCT Bar { index: Float64 }
+STRUCT Baz { name: Byte[] }
+STRUCT Foo { bar: Bar, baz: Baz }
+STRUCT Root { foo: Foo }
+
+FN identity(r: Root) RETURNS r.foo.bar:Bar ->
+  RETURN r.foo.bar;
 END
 ```
 
-Lifetimes are scoped with `<param>.<path>.`.  `n.left.` is the path and `?Node` is the return type.
+Lifetimes are scoped with `<param>.<path>:Type`. `r.foo.bar` is the path and `Bar` is the return type.
 
-This is a less restrictive lifetime than `n.?Node`.
+This is a less restrictive lifetime than `r:Bar`.
 
 Standard `IMMUTABLE` returned borrows *just work*:
 
 ```ruby clear illustrative
-gc = node.grandChild();
-print(gc?.value OR 0);
+bar = root.identity();
+print(bar.index);
 ```
 
 `MUTABLE` returned borrows require a scope - because the object you're borrowing from is restricted while you hold the borrow to prevent use-after-free:

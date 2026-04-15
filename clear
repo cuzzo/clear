@@ -122,6 +122,11 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     dst = File.join(build_dir, 'lib')
     File.symlink(lib_dir, dst) unless File.exist?(dst)
   end
+  runtime_dir = File.join(ZIG_DIR, 'runtime')
+  if Dir.exist?(runtime_dir)
+    dst = File.join(build_dir, 'runtime')
+    File.symlink(runtime_dir, dst) unless File.exist?(dst)
+  end
 
   tmp_name = "._clear_tmp_#{base_name}.zig"
   tmp_zig = File.join(build_dir, tmp_name)

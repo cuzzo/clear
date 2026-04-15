@@ -226,7 +226,10 @@ pub fn SplitStream(
 
         pub fn next(self: *Self) anyerror!?T {
             std.debug.assert(self.active);
-            self.inner.wg.wait();
+
+            if (!self.inner.closed and self.firstUnread() == null and self.inner.err == null) {
+                self.inner.wg.wait();
+            }
 
             self.inner.mutex.lock();
             defer self.inner.mutex.unlock();
