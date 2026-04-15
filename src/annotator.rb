@@ -3658,28 +3658,13 @@ private
   # by walking the AST with full type information available.
 
   def compute_ownership!(program_node)
-    # Phase 1: Recompute returns_promoted for ALL functions with complete type info.
+    # Recompute returns_promoted for ALL functions with complete type info.
     # This catches CATCH wrappers and other cases Pass A missed.
     recompute_return_provenance!
 
-    # Phase 2: Determine which functions return heap-promoted union data.
-    @fn_returns_heap_union = {}
-    @fn_nodes.each do |name, fn|
-      ret_type = fn.return_type
-      next unless ret_type
-      ret_sym = ret_type.to_s.delete_prefix("!").to_sym
-      schema = lookup_type_schema(ret_sym)
-      if schema.is_a?(Hash) && schema[:kind] == :union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        @fn_returns_heap_union[name] = true if has_heap && (fn.return_provenance == :heap)
-      end
-    end
-
-    # Phase 3: Propagate heap_promoted to caller variables.
+    # Propagate heap_promoted to caller variables. Covers transitive promotion
+    # (wrapper() -> makeList()) not yet handled by MIRPass escape analysis.
     walk_promote_callers(program_node.statements)
-
-    # Phase 4: Walk all variable declarations and annotate ownership.
-    walk_ownership(program_node.statements)
   end
 
   # Recompute returns_promoted with complete type information.
@@ -3769,13 +3754,9 @@ private
     returns
   end
 
-  # DEPRECATED: Redundant with PromotionPlan (Pass 2). This walk propagates return_provenance=:heap
-  # from callee to the declaration's type_info.provenance so the transpiler emits the correct
-  # allocator. PromotionPlan already does this more correctly by reading MIR::Promote nodes and
-  # the escaped_return/heap_provenance flags set during Pass 1. This method is kept alive because
-  # removing it requires verifying PromotionPlan covers every case it handles (FuncCall, BindExpr
-  # reassignment). When that verification is done, delete walk_promote_callers and its call site
-  # in recompute_return_provenance!. Do not add new cases here.
+  # Propagates return_provenance=:heap from callee to caller's declaration
+  # type_info. Covers transitive promotion not yet handled by MIRPass.
+  # TODO(T4): remove once MIRPass escape analysis covers transitive callers.
   def walk_promote_callers(nodes)
     AST.walk_body(nodes) do |node|
       case node
@@ -3809,7 +3790,6 @@ private
     end
   end
 
-  # Find the declaration (VarDecl/BindExpr with mode=decl) for a variable name in a function body.
   def find_decl_in_body(body, var_name)
     return nil unless body
     body = [body] unless body.is_a?(Array)
@@ -3822,70 +3802,6 @@ private
       end
     end
     nil
-  end
-
-  def walk_ownership(nodes)
-    nodes = [nodes] unless nodes.is_a?(Array)
-    nodes.each do |node|
-      case node
-      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
-      when Array
-        node.each { |n| walk_ownership([n]) }
-      when AST::FunctionDef
-        walk_ownership(node.body)
-      when AST::VarDecl, AST::BindExpr
-        annotate_var_ownership(node)
-        walk_ownership([node.value]) if node.value
-      when AST::IfStatement
-        walk_ownership(node.then_branch)
-        walk_ownership(node.else_branch)
-      when AST::WhileLoop
-        body = node.do_branch.is_a?(Array) ? node.do_branch : [node.do_branch]
-        walk_ownership(body)
-      when AST::ForRange, AST::ForEach
-        walk_ownership(node.body)
-      when AST::WithBlock
-        walk_ownership(node.body)
-      when AST::BgBlock, AST::BgStreamBlock
-        walk_ownership(node.body)
-      when AST::TestBlock
-        walk_ownership(node.setup)
-        node.whens.each { |w| walk_ownership(w.setup); w.tests.each { |t| walk_ownership(t.body) } }
-      else
-        # Walk child nodes generically
-        if node.respond_to?(:each_pair)
-          node.each_pair { |_, v| walk_ownership([v]) if v.is_a?(Array) || v.respond_to?(:each_pair) }
-        end
-      end
-    end
-  end
-
-  # DEPRECATED: Redundant with PromotionPlan (Pass 2). This annotates graph nodes with
-  # storage=:heap for declarations whose value comes from a heap-returning function, and marks
-  # aliased variables so the transpiler skips cleanup. Both of these are now handled by
-  # MIR::Promote / MIR::SuppressCleanup nodes emitted by OwnershipDataflow. When PromotionPlan
-  # is confirmed to cover @fn_returns_heap_union and @og.aliases? checks, delete this method,
-  # walk_ownership, and their call site in recompute_return_provenance!. Do not add new cases here.
-  def annotate_var_ownership(decl_node)
-    name = decl_node.name.to_s
-    graph_node = @og[name]
-    return unless graph_node
-
-    ti = decl_node.type_info
-    return unless ti
-
-    value = decl_node.value
-
-    # Check if the value comes from a function that returns heap-promoted union data
-    if value.is_a?(AST::FuncCall) && @fn_returns_heap_union[value.name]
-      graph_node.storage = :heap
-    end
-
-    # Check alias: value extracted from another union/collection via function call
-    if @og.aliases?(name)
-      # Variable shares backing data with another - transpiler should skip cleanup
-      graph_node.kind = :aliased
-    end
   end
 
   # ── Fiber Stack Auto-Sizing ──────────────────────────────────────

@@ -664,10 +664,21 @@ module CleanupClassifier
   # ── Schema helpers ───────────────────────────────────────────────
 
   private_class_method def self.elem_needs_cleanup?(ti, schema_lookup)
-    elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
-    (elem_schema.is_a?(Hash) && elem_schema[:kind] == :union &&
-      (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }) ||
+    et = ti.element_type
+    return false unless et
+    # Fast path: collection/RC/sync element types always need cleanup.
+    return true if et.needs_cleanup?(schema_lookup)
+    # Deeper check for union/struct elements: strings in union payloads are
+    # always heap-duped even without explicit heap_provenance? on the type.
+    elem_schema = schema_lookup.call(et.resolved) rescue nil
+    return false unless elem_schema.is_a?(Hash)
+    if elem_schema[:kind] == :union
+      (elem_schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+    elsif !elem_schema[:kind]  # struct
       elem_has_string_fields?(elem_schema)
+    else
+      false
+    end
   end
 
   private_class_method def self.elem_has_string_fields?(schema)
