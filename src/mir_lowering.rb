@@ -885,8 +885,19 @@ class MIRLowering
     # Build prologue statements
     prologue = []
 
-    # Frame mark save/restore
-    uses_frame_or_alloc = node.uses_frame || node.uses_alloc
+    # Frame mark save/restore.
+    # uses_frame from annotation is stale for vars upgraded frame->heap by MIRPass
+    # (upgrade_always_escaped_to_heap!, upgrade_bg_captures_to_heap!, etc.).
+    # When cleanup_bindings is set (post-MIRPass), derive from it: it reflects the
+    # post-upgrade allocators. Fall back to uses_frame when cleanup_bindings is absent
+    # (synthetic functions, specs). uses_alloc tracks stdlib frame calls (append,
+    # concat) which are not in cleanup_bindings and are always accurate.
+    has_frame_bindings = if node.cleanup_bindings
+                           node.cleanup_bindings.any? { |_, e| e[:alloc] == :frame }
+                         else
+                           node.uses_frame
+                         end
+    uses_frame_or_alloc = has_frame_bindings || node.uses_alloc
     ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
     returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? || ret_type_obj.resource? ||
                          @enum_schemas&.key?(ret_type_obj.resolved) ||
