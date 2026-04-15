@@ -27,26 +27,28 @@ class MIRPass
   # that the classifier depends on.
   def transform!(ast)
     # E1: compute which functions return heap-owned values (fixed-point over call graph).
-    # Replaces recompute_fn_return_provenance!. Writes fn.return_provenance = :heap.
-    EscapeAnalysis.compute_heap_return_fns!(@fn_nodes)
+    heap_fns = EscapeAnalysis.compute_heap_return_fns!(@fn_nodes)
 
-    # T4: Propagate heap return_provenance from callee to caller binding type_info.
-    # Covers transitive promotion (wrapper() -> makeList()) before cleanup classification.
+    # E3 (pending): propagate heap return_provenance to caller binding type_info.
+    # Must run before PromotionClassifier so HPT downgrade sees stable provenance.
     apply_transitive_heap_promotion!(ast.statements)
 
-    # Phase 1.5c: upgrade loop-carry string variables to heap.
-    # Outer string variables reassigned inside a rewinding loop need heap
-    # allocation so the carry value survives the per-iteration frame rewind.
-    # Must run before Phase 0 (HPT) and Phase 2 (CleanupClassifier) so that
-    # heap_carry_return flags are visible to both.
-    @fn_nodes.each do |_name, fn|
-      upgrade_loop_string_carries_to_heap!(fn) if fn&.body
+    # Phase 1: classify promotions for all functions.
+    # Must run before E2 so promotion_plans are available for :always_returned detection.
+    promotion_plans = {}
+    @fn_nodes.each do |name, fn|
+      promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
     end
 
-    # Phase 1.5d: mark call sites to heap-carry-return functions as heap-provenance.
-    # After Phase 1.5c, functions with heap_carry_return=true return heap strings
-    # (caller must free).  Propagate heap_provenance to their call-site expressions
-    # so Phase 0 (HPT hoisting) can register cleanup at the call site.
+    # E2: per-declaration escape scan.
+    # Applies all 6 escape conditions; replaces the upgrade_* methods below.
+    # Sets fn.heap_carry_return for mark_heap_carry_call_sites! (step E3 below).
+    @bg_heap_upgraded = EscapeAnalysis.analyze!(
+      @fn_nodes, heap_fns: heap_fns, promotion_plans: promotion_plans
+    )
+
+    # E3 (pending): mark call sites to heap-carry-return functions as heap-provenance.
+    # Runs after E2 because E2 stamps fn.heap_carry_return on loop-carry functions.
     carry_return_fns = @fn_nodes.select { |_, f|
       f.respond_to?(:heap_carry_return) && f.heap_carry_return
     }.keys.to_set
@@ -57,50 +59,8 @@ class MIRPass
       end
     end
 
-    promotion_plans = {}
-
-    # Phase 1: classify promotions for all functions (triggers HPT downgrade).
-    @fn_nodes.each do |name, fn|
-      promotion_plans[name] = PromotionClassifier.classify(fn, schema_lookup: @schema_lookup)
-    end
-
-    # Phase 1.5: upgrade always-escaped collections to heap at declaration.
-    # If a collection variable is returned on ALL return paths, allocate it on the
-    # heap from the start instead of frame-then-promote. This eliminates the
-    # MIR::Promote + runtime promoteList for these variables.
-    promotion_plans.each do |name, plan|
-      next unless plan[:var_promotes]&.any?
-      fn = @fn_nodes[name]
-      upgrade_always_escaped_to_heap!(fn, plan) if fn&.body
-    end
-
-    # Phase 1.5b: upgrade BG-captured variables to heap at declaration.
-    # BG blocks capture outer variables into a separate fiber. Frame-allocated
-    # data would be invalidated by frame rewind, so captured collections and
-    # strings are promoted at runtime. Upgrading to heap at declaration
-    # eliminates the runtime promote.
-    @fn_nodes.each do |name, fn|
-      upgrade_bg_captures_to_heap!(fn) if fn&.body
-    end
-
-    # Phase 1.5e: upgrade frame vars returned from heap-pointer functions to heap.
-    # RETURNS %Struct functions must return heap-allocated values; upgrade at
-    # declaration so the allocator is finalized before CleanupClassifier runs.
-    @fn_nodes.each do |name, fn|
-      upgrade_heap_ptr_returns_to_heap!(fn) if fn&.body
-    end
-
-    # Phase 1.5f: upgrade frame collections assigned to heap targets to heap.
-    # When a frame-allocated collection is assigned to a field/index of a
-    # heap-allocated struct/array, allocate it on heap at declaration instead
-    # of emitting a runtime MIR::Promote. Replaces handle_assign_escape from
-    # the annotator; runs post-MIR so allocators are fully resolved.
-    @fn_nodes.each do |name, fn|
-      upgrade_assign_escapes_to_heap!(fn) if fn&.body
-    end
-
     # Phase 2: set mark_per_iter on all loops so CleanupClassifier sees stable
-    # provenance before classification (fixes ordering bug: was Phase 2.5).
+    # provenance before classification.
     LoopFrameAnalysis.analyze!(@fn_nodes)
 
     # Phase 2.5: classify cleanup bindings (uses finalized provenance from Phase 2).
