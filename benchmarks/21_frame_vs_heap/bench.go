@@ -58,9 +58,11 @@ func main() {
 
 	hwmKB, rssKB := readMemory()
 
+	ms := float64(elapsed.Milliseconds())
+	// BENCH_RESULT = GC-managed strings (Go has no stack-string equivalent)
+	fmt.Printf("BENCH_RESULT: %.0f ms\n", ms)
 	fmt.Printf("Frame vs Heap Escape (%d iterations) — Go baseline\n", N)
-	fmt.Printf("  GC-managed strings: %.0f ms  RSS %d KB\n",
-		float64(elapsed.Milliseconds()), rssKB)
+	fmt.Printf("  GC-managed strings: %.0f ms  RSS %d KB\n", ms, rssKB)
 	fmt.Printf("  Total length:       %d\n", total)
 	fmt.Printf("  Peak RSS (VmHWM):   %d KB\n", hwmKB)
 }

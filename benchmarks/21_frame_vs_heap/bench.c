@@ -93,10 +93,14 @@ int main(void) {
 
     assert(stack_total == heap_total);
 
+    read_memory(&hwm_kb, &rss_kb);
+    /* BENCH_RESULT = stack (no-malloc) path — mirrors CLEAR's frame path */
+    printf("BENCH_RESULT: %.0f ms\n", stack_ms);
     printf("Frame vs Heap Escape (%d iterations) — C baseline\n", N);
     printf("  Stack (no malloc):  %.0f ms  RSS %ld KB\n", stack_ms, stack_rss);
     printf("  Heap  (malloc):     %.0f ms  RSS %ld KB\n", heap_ms, heap_rss);
-    read_memory(&hwm_kb, &rss_kb);
+    printf("  Heap overhead:      %.0f ms  (%.0f%% slower)\n",
+           heap_ms - stack_ms, (heap_ms / stack_ms - 1.0) * 100.0);
     printf("  Peak RSS (VmHWM):   %ld KB\n", hwm_kb);
     return 0;
 }

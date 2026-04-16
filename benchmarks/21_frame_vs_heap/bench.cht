@@ -61,9 +61,13 @@ FN main() RETURNS Void ->
 
     ASSERT frameTotal == heapTotal, "both variants must produce same result";
 
+    -- BENCH_RESULT reports the frame (no-malloc) path — the primary metric.
+    -- Heap variant is secondary: shows escape overhead for reference.
+    print("BENCH_RESULT: ${frameMs.toString()} ms");
     print("Frame vs Heap Escape (${n.toString()} iterations)");
     print("  Frame (no escape):  ${frameMs.toString()} ms  RSS ${frameRssKb.toString()} KB");
     print("  Heap  (promoted):   ${heapMs.toString()} ms  RSS ${heapRssKb.toString()} KB");
+    print("  Heap overhead:      ${(heapMs - frameMs).toString()} ms  (${((heapMs * 100 / frameMs) - 100).toString()}% slower)");
     print("  Peak RSS (VmHWM):   ${peakMemoryKb().toString()} KB");
     RETURN;
 END
