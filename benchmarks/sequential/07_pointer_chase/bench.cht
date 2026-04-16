@@ -29,8 +29,9 @@
 --
 -- MEMORY GAP:
 --   C RSS: ~32 MB (2M × 16-byte nodes).
---   CLEAR RSS: ~148 MB (2M × 32-byte pool slots + id_list + scheduler).
+--   CLEAR RSS: ~91 MB (2M × 32-byte pool slots + 16 MB id_list + scheduler).
 --   Pool slots carry alive+generation fields = 2× C node size.
+--   id_list pre-allocated with initCapacity(2M) -- no frame-arena doubling waste.
 --
 -- CONCLUSION: CLEAR's @pool walk throughput is on par with raw C pointer
 --   chasing in the memory-bound regime. The cost is memory: pool slots are
@@ -44,7 +45,7 @@ FN main() RETURNS Void ->
     step    = 999983_i64;
 
     MUTABLE pool: Node[2000000]@pool = [];
-    MUTABLE id_list: Id<Node>[]@list = [];
+    MUTABLE id_list: Id<Node>[2000000]@list = [];
 
     -- Phase 1: insert N nodes, record IDs in insertion order.
     FOR i IN (0_i64 ..< n_nodes) DO
