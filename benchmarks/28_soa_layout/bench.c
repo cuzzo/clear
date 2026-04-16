@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include <time.h>
 
-#define N_PARTICLES 10000
+#define N_PARTICLES 100000
 #define ITERATIONS  100
 
 /* AOS layout: 512 bytes per particle (64 fields) */
@@ -30,7 +30,7 @@ typedef struct {
     double r41, r42, r43, r44, r45, r46, r47, r48;
 } Particle;
 
-static Particle aos[N_PARTICLES];
+static Particle aos[N_PARTICLES]; /* 100K * 512 bytes = 50MB stack - use heap */
 
 /* SOA layout: only the hot fields (what the loop actually touches) */
 static double soa_x[N_PARTICLES], soa_y[N_PARTICLES];
@@ -112,11 +112,12 @@ int main(void) {
     double aos_ms = run_aos();
     double soa_ms = run_soa();
 
-    printf("Particles:   %d  (512 bytes/particle, 64 fields)\n", N_PARTICLES);
-    printf("Iterations:  %d\n", ITERATIONS);
-    printf("AOS:         %.1f ms\n", aos_ms);
-    printf("SOA:         %.1f ms\n", soa_ms);
-    printf("Speedup:     %.2fx\n", aos_ms / soa_ms);
+    /* BENCH_RESULT = SOA (the fast path we compare against CLEAR) */
+    printf("BENCH_RESULT: %.0f ms\n", soa_ms);
+    printf("SOA vs AOS (%d particles x %d iters)\n", N_PARTICLES, ITERATIONS);
+    printf("  AOS:         %.1f ms\n", aos_ms);
+    printf("  SOA:         %.1f ms\n", soa_ms);
+    printf("  Speedup:     %.2fx\n", aos_ms / soa_ms);
 
     return 0;
 }

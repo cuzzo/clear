@@ -7,7 +7,7 @@
 
 use std::time::Instant;
 
-const N_PARTICLES: usize = 10_000;
+const N_PARTICLES: usize = 100_000;
 const ITERATIONS: usize = 100;
 
 #[allow(dead_code)]
@@ -105,9 +105,10 @@ fn main() {
     let (aos_ms, _) = run_aos();
     let (soa_ms, _) = run_soa();
 
-    println!("Particles:   {}  (512 bytes/particle, 64 fields)", N_PARTICLES);
-    println!("Iterations:  {}", ITERATIONS);
-    println!("AOS:         {:.1} ms", aos_ms);
-    println!("SOA:         {:.1} ms", soa_ms);
-    println!("Speedup:     {:.2}x", aos_ms / soa_ms);
+    // BENCH_RESULT = SOA (the fast path we compare against CLEAR)
+    println!("BENCH_RESULT: {:.0} ms", soa_ms);
+    println!("SOA vs AOS ({} particles x {} iters)", N_PARTICLES, ITERATIONS);
+    println!("  AOS:         {:.1} ms", aos_ms);
+    println!("  SOA:         {:.1} ms", soa_ms);
+    println!("  Speedup:     {:.2}x", aos_ms / soa_ms);
 }
