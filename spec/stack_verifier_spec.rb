@@ -118,6 +118,153 @@ RSpec.describe StackVerifier do
     end
   end
 
+  describe "#cost_to_tier" do
+    let(:v) { StackVerifier.new("/dev/null") }
+
+    it "maps bytes <= 4096 to :micro" do
+      expect(v.cost_to_tier(0)).to eq(:micro)
+      expect(v.cost_to_tier(4096)).to eq(:micro)
+    end
+
+    it "maps bytes <= standard budget to :standard" do
+      expect(v.cost_to_tier(4097)).to eq(:standard)
+      expect(v.cost_to_tier(16384 - 4096)).to eq(:standard) # usable budget
+    end
+
+    it "maps bytes <= large budget to :large" do
+      expect(v.cost_to_tier(16384 - 4096 + 1)).to eq(:large)
+      expect(v.cost_to_tier(65536 - 4096)).to eq(:large)
+    end
+
+    it "maps bytes > large budget to :xl" do
+      expect(v.cost_to_tier(65536 - 4096 + 1)).to eq(:xl)
+      expect(v.cost_to_tier(200_000)).to eq(:xl)
+    end
+  end
+
+  describe "#compute_main_optimal_tier" do
+    it "returns a non-nil result with a valid tier" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            x = 42_i64;
+            RETURN;
+        END
+      CLEAR
+
+      bin_path, _, @tmpdir = build_and_analyze(src)
+      next unless File.exist?(bin_path)
+
+      prefix = "._clear_tmp_test"
+      verifier = StackVerifier.new(bin_path, prefix)
+      result = verifier.compute_main_optimal_tier
+
+      expect(result).not_to be_nil
+      expect(result[:path_cost]).to be >= 0
+      expect(result[:optimal_tier]).to satisfy("be a valid tier") { |t| [:micro, :standard, :large, :xl].include?(t) }
+    end
+
+    it "returns nil for a binary without clearMain" do
+      # /dev/null has no functions
+      verifier = StackVerifier.new("/dev/null", "._clear_tmp_test")
+      expect(verifier.compute_main_optimal_tier).to be_nil
+    end
+
+    it "optimal_tier fits within its budget" do
+      src = <<~CLEAR
+        FN helper(n: Int64) RETURNS Int64 ->
+            RETURN n %* 2_i64;
+        END
+        FN main() RETURNS Void ->
+            x = helper(10_i64);
+            RETURN;
+        END
+      CLEAR
+
+      bin_path, _, @tmpdir = build_and_analyze(src)
+      next unless File.exist?(bin_path)
+
+      verifier = StackVerifier.new(bin_path, "._clear_tmp_test")
+      result = verifier.compute_main_optimal_tier
+
+      expect(result).not_to be_nil
+      budget = StackVerifier::TIER_BUDGET[result[:optimal_tier]]
+      expect(result[:path_cost]).to be <= budget
+    end
+  end
+
+  describe "#compute_optimal_tiers" do
+    it "returns an empty array when there are no BG blocks" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+            x = 1_i64;
+            RETURN;
+        END
+      CLEAR
+
+      bin_path, fn_nodes, @tmpdir = build_and_analyze(src)
+      next unless File.exist?(bin_path)
+
+      verifier = StackVerifier.new(bin_path, "._clear_tmp_test")
+      expect(verifier.compute_optimal_tiers(fn_nodes: fn_nodes)).to eq([])
+    end
+
+    it "returns one entry per BG block with bg_index, path_cost, optimal_tier" do
+      src = <<~CLEAR
+        FN work(n: Int64) RETURNS Int64 ->
+            RETURN n %* 3_i64;
+        END
+        FN main() RETURNS Void ->
+            f = BG { work(5_i64); };
+            result = NEXT f;
+            RETURN;
+        END
+      CLEAR
+
+      bin_path, fn_nodes, @tmpdir = build_and_analyze(src)
+      next unless File.exist?(bin_path)
+
+      verifier = StackVerifier.new(bin_path, "._clear_tmp_test")
+      results = verifier.compute_optimal_tiers(fn_nodes: fn_nodes)
+
+      expect(results.length).to eq(1)
+      r = results.first
+      expect(r[:bg_index]).to eq(0)
+      expect(r[:path_cost]).to be > 0
+      expect(r[:optimal_tier]).to satisfy("be a valid tier") { |t| [:micro, :standard, :large, :xl].include?(t) }
+
+      # BG path cost must fit within the assigned tier's budget
+      budget = StackVerifier::TIER_BUDGET[r[:optimal_tier]]
+      expect(r[:path_cost]).to be <= budget
+    end
+
+    it "measures a pure-compute BG block: path fits its assigned tier budget" do
+      # Even a trivial BG block includes runtime wrapper overhead in debug mode.
+      # The key invariant: path_cost <= TIER_BUDGET[optimal_tier].
+      src = <<~CLEAR
+        FN crunch(x: Int64) RETURNS Int64 ->
+            RETURN x %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
+        END
+        FN main() RETURNS Void ->
+            f = BG { crunch(42_i64); };
+            result = NEXT f;
+            RETURN;
+        END
+      CLEAR
+
+      bin_path, fn_nodes, @tmpdir = build_and_analyze(src)
+      next unless File.exist?(bin_path)
+
+      verifier = StackVerifier.new(bin_path, "._clear_tmp_test")
+      results = verifier.compute_optimal_tiers(fn_nodes: fn_nodes)
+
+      expect(results.length).to eq(1)
+      r = results.first
+      expect(r[:optimal_tier]).to satisfy("be a valid tier") { |t| [:micro, :standard, :large, :xl].include?(t) }
+      budget = StackVerifier::TIER_BUDGET[r[:optimal_tier]]
+      expect(r[:path_cost]).to be <= budget
+    end
+  end
+
   describe "#zig_to_clear_name" do
     it "maps clearMain to main" do
       v = StackVerifier.new("/dev/null", "._clear_tmp_foo")
