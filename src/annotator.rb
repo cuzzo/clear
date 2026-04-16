@@ -2716,7 +2716,8 @@ private
       error!(node, "RESOLVE can only be applied to @link variables, got '#{node.value.resolved_type}'")
     end
 
-    # Result is optional of the strong type: ?T@shared or ?T@multiowned
+    # RESOLVE returns ?T@multiowned or ?T@shared.
+    # Use RESOLVE(link)?.field OR fallback to safely access the target.
     source = ti.link_source || :multiowned
     resolved_type = Type.new(:"?#{ti.resolved}")
     resolved_type.ownership = source == :shared ? :shared : :multiowned
