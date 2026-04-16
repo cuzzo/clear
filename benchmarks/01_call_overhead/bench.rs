@@ -13,6 +13,6 @@ fn main() {
     assert_eq!(result, 102334155);
     let duration = start.elapsed();
 
-    println!("Fib(35) = {}", result);
+    println!("Fib(40) = {}", result);
     println!("Time: {:.4} seconds", duration.as_secs_f64());
 }

@@ -3,8 +3,8 @@
 #include <assert.h>
 #include <time.h>
 
-// Perfect C Baseline
-// Goal: 0 Heap allocs, standard OS stack management.
+// C baseline: recursive Fibonacci, measures call overhead and stack frame cost.
+// Goal: ~204M recursive calls with zero heap allocation.
 
 int64_t fib(int64_t n) {
     if (n <= 1) return n;

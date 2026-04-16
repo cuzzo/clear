@@ -52,7 +52,7 @@ CLEAR_THREADS=2 ./benchmarks/21_frame_vs_heap/bench_clear
 
 | # | Name | What it measures | Cross-language |
 |---|------|-----------------|----------------|
-| 01 | stack_vs_heap | Recursive fib — stack allocation speed | C, Rust |
+| 01 | call_overhead | Recursive fib — call overhead and stack frame cost | C, Rust |
 | 02 | sroa | Scalar replacement of aggregates | C, Rust |
 | 03 | list_vs_stack | Dynamic list append vs stack arrays | C, Rust |
 | 04 | socket_throughput | TCP echo throughput | C, Rust |

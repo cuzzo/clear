@@ -1,6 +1,6 @@
 -- @leak_skip
--- Recursive Fibonacci to test stack frames and call overhead
--- Goal: 1M calls with zero heap allocation
+-- Recursive Fibonacci: measures pure call overhead and stack frame cost.
+-- Goal: ~204M recursive calls with zero heap allocation.
 
 FN fib(n: Int64) RETURNS Int64 @reentrant ->
     IF n <= 1 -> RETURN n;
