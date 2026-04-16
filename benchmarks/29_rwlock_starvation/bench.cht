@@ -82,12 +82,11 @@ FN main() RETURNS Void ->
         finalVal = inner.value;
     }
 
-    print("Readers:        ${nReaders.toString()}");
-    print("Read iters:     ${readIters.toString()} per reader");
-    print("Write iters:    ${writeIters.toString()}");
-    print("Total time:     ${elapsed.toString()} ms");
-    print("Writer done:    ${result.doneMs.toString()} ms");
-    print("Avg write wait: ${result.avgWaitMs.toString()} ms");
-    print("Max write wait: ${result.maxWaitMs.toString()} ms");
-    print("Final value:    ${finalVal.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    print("RwLock starvation (${nReaders.toString()} readers x ${readIters.toString()} iters)");
+    print("  Total time:     ${elapsed.toString()} ms");
+    print("  Writer done:    ${result.doneMs.toString()} ms");
+    print("  Avg write wait: ${result.avgWaitMs.toString()} ms");
+    print("  Max write wait: ${result.maxWaitMs.toString()} ms");
+    print("  Final value:    ${finalVal.toString()}");
 END

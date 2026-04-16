@@ -86,13 +86,13 @@ fn main() {
 
     let final_val = *data.read().unwrap();
 
-    println!("Readers:        {}", n_readers);
-    println!("Read iters:     {} per reader", READ_ITERS);
-    println!("Write iters:    {}", WRITE_ITERS);
-    println!("Total time:     {} ms", elapsed);
-    println!("Writer done:    {} ms", writer_done_ms);
-    println!("Avg write wait: {} us", avg_wait_ns / 1000);
-    println!("Max write wait: {} us", max_wait_ns / 1000);
-    println!("Final value:    {}", final_val);
-    println!("Sink:           {}", sink.load(Ordering::Relaxed));
+    // BENCH_RESULT = total elapsed
+    println!("BENCH_RESULT: {} ms", elapsed);
+    println!("RwLock starvation ({} readers x {} iters)", n_readers, READ_ITERS);
+    println!("  Total time:     {} ms", elapsed);
+    println!("  Writer done:    {} ms", writer_done_ms);
+    println!("  Avg write wait: {} us", avg_wait_ns / 1000);
+    println!("  Max write wait: {} us", max_wait_ns / 1000);
+    println!("  Final value:    {}", final_val);
+    println!("  Sink:           {}", sink.load(Ordering::Relaxed));
 }

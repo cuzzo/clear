@@ -10,11 +10,11 @@ Tests whether a language's RwLock starves writers under heavy read contention.
 
 ## Results (32 threads, Linux x86_64)
 
-| Lang  | Total  | Writer Done | Max Write Wait | Starved? |
-|-------|--------|-------------|----------------|----------|
-| CLEAR | 5.6s   | 15-83ms     | 1-2ms          | No       |
-| Go    | 2.9s   | 14ms        | 25us           | No       |
-| Rust  | 6.2s   | 77ms        | 1.8ms          | No       |
+| Lang  | Total  | Starved? |
+|-------|--------|----------|
+| Go    | ~2.9s  | No       |
+| CLEAR | ~5.5s  | No       |
+| Rust  | ~6.1s  | No       |
 
 All three languages use writer-preferring RwLock implementations, so none exhibit
 writer starvation.

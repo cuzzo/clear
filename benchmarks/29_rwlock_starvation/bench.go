@@ -93,13 +93,13 @@ func main() {
 
 	avgWriteWait := totalWriteWait / time.Duration(writeIters)
 
-	fmt.Printf("Readers:        %d\n", nReaders)
-	fmt.Printf("Read iters:     %d per reader\n", readIters)
-	fmt.Printf("Write iters:    %d\n", writeIters)
-	fmt.Printf("Total time:     %d ms\n", elapsed.Milliseconds())
-	fmt.Printf("Writer done:    %d ms\n", writerDone.Milliseconds())
-	fmt.Printf("Avg write wait: %d us\n", avgWriteWait.Microseconds())
-	fmt.Printf("Max write wait: %d us\n", maxWriteWait.Microseconds())
-	fmt.Printf("Final value:    %d\n", sharedData)
-	fmt.Printf("Sink:           %d\n", sink.Load())
+	// BENCH_RESULT = total elapsed (correctness test: writer should not starve)
+	fmt.Printf("BENCH_RESULT: %d ms\n", elapsed.Milliseconds())
+	fmt.Printf("RwLock starvation (%d readers x %d iters)\n", nReaders, readIters)
+	fmt.Printf("  Total time:     %d ms\n", elapsed.Milliseconds())
+	fmt.Printf("  Writer done:    %d ms\n", writerDone.Milliseconds())
+	fmt.Printf("  Avg write wait: %d us\n", avgWriteWait.Microseconds())
+	fmt.Printf("  Max write wait: %d us\n", maxWriteWait.Microseconds())
+	fmt.Printf("  Final value:    %d\n", sharedData)
+	fmt.Printf("  Sink:           %d\n", sink.Load())
 }
