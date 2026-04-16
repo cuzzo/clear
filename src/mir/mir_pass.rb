@@ -591,7 +591,18 @@ class MIRPass
     rhs = case stmt
           when AST::VarDecl    then stmt.value
           when AST::BindExpr   then stmt.value
-          when AST::Assignment then stmt.value
+          when AST::Assignment
+            # Map indexed assignments (map[k] = val) apply dupeUnionValue before
+            # calling put, so the map stores a deep copy. The original value is NOT
+            # consumed -- its cleanup defer must fire normally.
+            lhs = stmt.name
+            if lhs.is_a?(AST::GetIndex)
+              target_ti = (lhs.target.type_info rescue nil)
+              target_ti = target_ti.is_a?(Type) ? target_ti : (target_ti ? Type.new(target_ti) : nil)
+              target_ti&.map? ? nil : stmt.value
+            else
+              stmt.value
+            end
           else nil
           end
 

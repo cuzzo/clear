@@ -566,7 +566,18 @@ class OwnershipDataflow
       state[stmt.name.to_s] = make_owner_entry(stmt) if stmt.mode == :decl
 
     when AST::Assignment
-      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }
+      # Map indexed assignments (map[k] = val) apply dupeUnionValue before put,
+      # so the map stores a deep copy. The original value is NOT ownership-transferred.
+      lhs = stmt.name
+      skip_rhs_move = lhs.is_a?(AST::GetIndex) &&
+                      begin
+                        ti = lhs.target.type_info
+                        ti = ti.is_a?(Type) ? ti : (ti ? Type.new(ti) : nil)
+                        ti&.map?
+                      rescue
+                        false
+                      end
+      collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) } unless skip_rhs_move
 
     when AST::ReturnNode
       collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) }

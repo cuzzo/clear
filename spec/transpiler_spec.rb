@@ -795,8 +795,27 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # val is MOVED on all paths (assigned to map) → no defer, no _moved guard
+      # val is deep-copied by the runtime before map storage; original needs cleanup
       expect(zig).not_to include("val_moved")
+      expect(zig).to include("defer CheatLib.cleanup(Value")
+      expect(zig).to include("&val")
+    end
+
+    it "does not suppress val cleanup when map assignment deep-copies the value" do
+      src = <<~CLEAR
+        UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
+        FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+            val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
+            map["key"] = val;
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      # The runtime deep-copies val via dupeUnionValue before storing in map.
+      # val itself must be cleaned up -- its cleanup defer must NOT be suppressed.
+      expect(zig).not_to include("val_moved")
+      expect(zig).to include("defer CheatLib.cleanup(Value")
+      expect(zig).to include("&val")
     end
 
     it "emits source_moved for MATCH AS on non-Copy variant (auto-TAKES)" do
