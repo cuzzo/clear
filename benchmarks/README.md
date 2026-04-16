@@ -56,7 +56,7 @@ CLEAR_THREADS=2 ./benchmarks/21_frame_vs_heap/bench_clear
 | 02 | sroa | Scalar replacement of aggregates | C, Rust |
 | 03 | alloc_throughput | Heap alloc+fill+sum+free (10K x 10K elements) | C, Rust |
 | 04 | socket_throughput | TCP echo throughput | C, Rust |
-| 05 | hashmap | HashMap insert + lookup (1M keys) | C, Rust |
+| 05 | hashmap | HashMap insert + lookup (1M i64 keys) | C, Rust |
 | 06 | string_builder | String concatenation via list+join | C |
 | 07 | simd | Vec4 dot product (100M iterations) | C |
 | 08 | pointer_chase | Pool-based linked traversal (1M nodes) | C |

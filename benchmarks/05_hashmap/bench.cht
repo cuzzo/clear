@@ -1,35 +1,14 @@
 -- @leak: 1000000 -> 1000
--- HashMap Benchmark — CLEAR @map vs C baseline
+-- HashMap Benchmark — Int64 -> Float64, 1M inserts + 1M lookups
 --
--- MEASURED RESULTS (1M insert + 1M lookup, ReleaseFast / -O3)
--- Machine: x86-64 Linux  (run with frame marks between variants for isolation)
---
---   VARIANT                  | INSERT     | LOOKUP    | TOTAL      | vs C-String
---   C (string, FNV-1a)       | ~180 ms    | ~170 ms   | ~350 ms    |  1.0× (baseline)
---   C (f64-key, bit-cast)    | ~130 ms    |  ~70 ms   | ~200 ms    |  0.57×
---   ────────────────────────────────────────────────────────────────────────────
---   CLEAR String/GPA  (old)  | ~700 ms    | ~170 ms   | ~870 ms    |  2.5×
---   CLEAR String/Frame (new) | ~580 ms    | ~155 ms   | ~735 ms    |  2.1×   ← ~15–25% faster
---   CLEAR Numeric/f64        | ~110 ms    |  ~65 ms   | ~175 ms    |  0.50×  ← faster than C!
---   CLEAR Numeric/i64        | ~110 ms    |  ~58 ms   | ~168 ms    |  0.48×  ← faster than C!
---
--- This benchmark exercises the numeric-key fast path: HashMap<Int64, Float64>.
---   - No key duplication (integers passed by value)
---   - Single frameAlloc for the bucket array (no GPA lock contention)
---   - AutoHashMapUnmanaged with integer comparison (~1 ns vs string hash+strcmp ~5 ns)
---
--- WHAT THE TRANSPILER EMITS:
---   m[i] = v  →  try CheatLib.numericMapPut(i64, f64, rt.frameAlloc(), &m, i, v)
---   m[i]      →  CheatLib.numericMapGet(i64, f64, m, i)
---   (defer)   →  defer CheatLib.numericMapDeinit(i64, f64, rt.frameAlloc(), &m)
---
--- The frame arena holds the entire 1M-entry bucket array (~30 MB).
--- On function return the arena is rewound — zero GPA free calls in the hot path.
+-- All three languages use integer keys (i64) and float values (f64).
+-- CLEAR's bucket array lives in the frame arena — zero GPA alloc/free calls.
+-- C uses calloc/free for the bucket array. Rust uses heap via with_capacity.
 
 FN main() RETURNS Void ->
     MUTABLE m: HashMap<Int64, Float64> = {};
 
-    -- Insert phase: 1M numeric key-value pairs
+    -- Insert phase: 1M integer key-value pairs
     t0 = timestampMs();
     FOR i IN (0_i64 ..< 1000000) -> m[i] = i + 0.0;
     insertMs = timestampMs() - t0;
@@ -42,9 +21,7 @@ FN main() RETURNS Void ->
 
     ASSERT total > 0.0, "total must be positive";
     totalMs = insertMs + lookupMs;
-    print("HashMap 1M numeric keys");
-    print("  Insert: ${insertMs.toString()} ms");
-    print("  Lookup: ${lookupMs.toString()} ms");
-    print("  Total:  ${totalMs.toString()} ms");
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
+    print("Insert: ${insertMs.toString()} ms | Lookup: ${lookupMs.toString()} ms | Total: ${totalMs.toString()} ms");
     RETURN;
 END
