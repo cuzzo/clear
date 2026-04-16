@@ -99,14 +99,28 @@ class ZigTranspiler
     emitter = MIREmitter.new
     body = emitter.emit(program)
 
+    main_variant = main_stack_variant(result.fn_nodes["main"])
+    footer = File.read(File.join(File.dirname(__FILE__), '..', 'zig', 'runtime', 'runtime-footer.zig'))
+    footer = footer.gsub('.{ .stack_size = .Large, .pinned = true }',
+                         ".{ .stack_size = .#{main_variant}, .pinned = true }")
+
     <<~ZIG
       #{body}
 
       // -------------------------------------------------------------------------
       // 3. Main Entry (Test Harness)
       // -------------------------------------------------------------------------
-      #{File.read(File.join(File.dirname(__FILE__), '..', 'zig', 'runtime', 'runtime-footer.zig'))}
+      #{footer}
     ZIG
+  end
+
+  MAIN_STACK_VARIANTS = {
+    micro: "Micro", standard: "Standard", large: "Large", xl: "Xl", unbounded: "Xl"
+  }.freeze
+
+  def main_stack_variant(main_fn)
+    tier = main_fn&.stack_tier || :standard
+    MAIN_STACK_VARIANTS.fetch(tier, "Standard")
   end
 
   # Module entry point: transpile code as a Zig module (--module flag).
