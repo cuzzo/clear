@@ -746,4 +746,85 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # =========================================================================
+  # List element cleanup — capability-wrapped element types
+  #
+  # When a list holds T@multiowned / T@shared / T@shared:locked / etc.,
+  # the element cleanup loop must use the *wrapped* Zig type, not the bare T.
+  # Bug: build_drop_entry! called Type.new(t.resolved.to_s).zig_type which
+  # stripped ownership/sync, producing cleanup(T, ...) instead of
+  # cleanup(CheatLib.Rc(T), ...) — a Zig type mismatch compile error.
+  # =========================================================================
+  describe "list element cleanup preserves capability wrapper in Zig type" do
+    def transpile(src)
+      ZigTranspiler.new.transpile(src)
+    end
+
+    it "T@multiowned[]@list uses Rc(T) in element cleanup" do
+      src = <<~CLEAR
+        STRUCT Node { id: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE nodes: Node@multiowned[]@list = List[];
+          RETURN;
+        END
+      CLEAR
+      out = transpile(src)
+      expect(out).to include("CheatLib.cleanup(CheatLib.Rc(Node)")
+      expect(out).not_to match(/cleanup\(Node,/)
+    end
+
+    it "T@shared[]@list uses Arc(T) in element cleanup" do
+      src = <<~CLEAR
+        STRUCT Node { id: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE nodes: Node@shared[]@list = List[];
+          RETURN;
+        END
+      CLEAR
+      out = transpile(src)
+      expect(out).to include("CheatLib.cleanup(CheatLib.Arc(Node)")
+      expect(out).not_to match(/cleanup\(Node,/)
+    end
+
+    it "T@link[]@list uses WeakRc(T) in element cleanup" do
+      src = <<~CLEAR
+        STRUCT Node { id: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE nodes: Node@multiowned[]@list = List[];
+          MUTABLE links: Node@link[]@list = List[];
+          RETURN;
+        END
+      CLEAR
+      out = transpile(src)
+      expect(out).to include("CheatLib.cleanup(CheatLib.WeakRc(Node)")
+      expect(out).not_to match(/for \(links\.items\).*cleanup\(Node,/)
+    end
+
+    it "T@shared:locked[]@list uses Arc(Locked(T)) in element cleanup" do
+      src = <<~CLEAR
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE counters: Counter@shared:locked[]@list = List[];
+          RETURN;
+        END
+      CLEAR
+      out = transpile(src)
+      expect(out).to include("CheatLib.cleanup(CheatLib.Arc(CheatLib.Locked(Counter)")
+      expect(out).not_to match(/cleanup\(Counter,/)
+    end
+
+    it "T@shared:writeLocked[]@list uses Arc(RwLocked(T)) in element cleanup" do
+      src = <<~CLEAR
+        STRUCT Account { balance: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE accounts: Account@shared:writeLocked[]@list = List[];
+          RETURN;
+        END
+      CLEAR
+      out = transpile(src)
+      expect(out).to include("CheatLib.cleanup(CheatLib.Arc(CheatLib.RwLocked(Account)")
+      expect(out).not_to match(/cleanup\(Account,/)
+    end
+  end
+
 end

@@ -585,7 +585,7 @@ class MIRLowering
       et = ti&.element_type
       if et
         t = et.is_a?(Type) ? et : Type.new(et)
-        Type.new(t.resolved.to_s).zig_type
+        t.zig_type
       end
     when :array_with_struct_strings
       ti&.element_type ? Type.new(ti.element_type).zig_type : nil
