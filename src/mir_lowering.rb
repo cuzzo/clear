@@ -2777,6 +2777,9 @@ class MIRLowering
 
     # OR RAISE: bubble up error (Zig's try)
     if node.right.is_a?(AST::OrRaise)
+      # Extern trampolines already propagate errors internally (if frame.err |e| return e).
+      # Wrapping in TryExpr produces invalid `try { block }` — Zig's try takes an expression.
+      return left if left.is_a?(MIR::InlineZig) && left.reason == "extern_trampoline"
       return MIR::TryExpr.new(strip_try(left)) if is_error
       return left
     end

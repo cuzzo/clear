@@ -3015,6 +3015,22 @@ RSpec.describe SemanticAnnotator do
         output = ZigTranspiler.new.transpile_as_module(code)
         expect(output).not_to match(/try\s*\{/)
       end
+
+      it "direct EXTERN FN returning !Void with OR RAISE does not emit try { block }" do
+        # Same root cause as above but via a direct (non-method) EXTERN call.
+        # Both build_extern_trampoline_call and build_extern_trampoline_method produce
+        # MIR::InlineZig(reason: "extern_trampoline") which already handles error
+        # propagation internally — wrapping in TryExpr generates invalid `try { block }`.
+        code = <<~CLEAR
+          EXTERN FN mkdir(path: String) RETURNS !Void FROM "std.fs";
+          FN main() RETURNS Void ->
+            mkdir("data") OR RAISE;
+            RETURN;
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).not_to match(/try\s*\{/)
+      end
     end
   end
 
