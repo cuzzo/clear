@@ -3,29 +3,18 @@
 TCP server that stores/retrieves JSON documents. SET generates JSON files on disk,
 GET reads them and parses the JSON array (sum of elements via std.json FFI).
 
-## Results (32 threads, jemalloc)
+## Results (100K ops, 32 threads)
 
 ```
-Server              SET(ms)  GET(ms)  Peak RSS     Verified
-Rust (tokio)             59       64   10548 KB  10000/10000
-Go (goroutines)          64      216   14540 KB  10000/10000
-CLEAR (fibers)          492      462   81580 KB  10000/10000
+Server              SET(ms)  GET(ms)  Peak RSS  RSS After     Verified
+Rust (tokio)             63      568   15460 KB  15460 KB 100000/100000
+Go (goroutines)          97     2438   16164 KB  11180 KB 100000/100000
+CLEAR (fibers)           71      400   36540 KB  36540 KB 100000/100000
 ```
 
-CLEAR peak RSS is ~5.6x Go at 32 threads. This is expected and non-alarming.
-See "Memory Analysis" below.
-
-## Results (1 thread, jemalloc)
-
-```
-Server              SET(ms)  GET(ms)  Peak RSS     Verified
-Rust (tokio)             59       56    8856 KB  10000/10000
-Go (goroutines)          55      217   13772 KB  10000/10000
-CLEAR (fibers)          492     5097   14336 KB  10000/10000
-```
-
-CLEAR peak RSS is 104% of Go at 1 thread. The 13x GET slowdown is expected:
-Go uses all 32 cores (GOMAXPROCS=default), CLEAR uses 1 fiber scheduler.
+CLEAR SET (71ms) is close to Rust (63ms) and faster than Go (97ms).
+CLEAR GET (400ms) is faster than Go (2438ms) and somewhat slower than Rust (568ms).
+CLEAR peak RSS is ~2.3x Rust/Go. See "Memory Analysis" below.
 
 ## Memory Analysis
 
