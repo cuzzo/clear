@@ -103,8 +103,6 @@ int main(void) {
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double qs_time = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
     assert(arr[0] <= arr[1] && arr[N-2] <= arr[N-1]);
-    printf("Quicksort:  %.4f s\n", qs_time);
-
     /* --- Mergesort --- */
     fill(arr, N);
     clock_gettime(CLOCK_MONOTONIC, &t0);
@@ -112,9 +110,11 @@ int main(void) {
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double ms_time = (t1.tv_sec - t0.tv_sec) + (t1.tv_nsec - t0.tv_nsec) / 1e9;
     assert(arr[0] <= arr[1] && arr[N-2] <= arr[N-1]);
-    printf("Mergesort:  %.4f s\n", ms_time);
 
-    printf("Time: %.4f seconds\n", qs_time + ms_time);
+    double total_ms = (qs_time + ms_time) * 1000.0;
+    printf("BENCH_RESULT: %.0f ms\n", total_ms);
+    printf("Sort 1M floats | Quicksort: %.1f ms | Mergesort: %.1f ms\n",
+           qs_time * 1000.0, ms_time * 1000.0);
 
     free(arr);
     free(tmp);

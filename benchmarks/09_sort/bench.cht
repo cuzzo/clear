@@ -145,8 +145,8 @@ FN main() RETURNS Void ->
   ASSERT arr[0] <= arr[1], "msort: not sorted at start";
   ASSERT arr[n - 2] <= arr[n - 1], "msort: not sorted at end";
 
-  print("Sort 1M floats");
-  print("  Quicksort:  ${qsortMs.toString()} ms");
-  print("  Mergesort:  ${msortMs.toString()} ms");
+  totalMs = qsortMs + msortMs;
+  print("BENCH_RESULT: ${totalMs.toString()} ms");
+  print("Sort 1M floats | Quicksort: ${qsortMs.toString()} ms | Mergesort: ${msortMs.toString()} ms");
   RETURN;
 END
