@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <time.h>
 #include <string.h>
+#include <assert.h>
 
 #define N 5000000
 
@@ -39,21 +40,23 @@ static double elapsed_ms(struct timespec *start, struct timespec *end) {
          + (end->tv_nsec - start->tv_nsec) / 1e6;
 }
 
-// Variant A: contiguous array (pool-like)
-static long bench_pool(void) {
-    Entity *pool = malloc(N * sizeof(Entity));
-    if (!pool) { perror("malloc"); exit(1); }
+// Variant A: contiguous array (mirrors CLEAR @list)
+static long bench_array(void) {
+    Entity *arr = malloc(N * sizeof(Entity));
+    if (!arr) { perror("malloc"); exit(1); }
 
-    for (long i = 0; i < N; i++) {
-        pool[i] = (Entity){ .x = i, .y = i * 2, .health = 100 };
-    }
+    for (long i = 0; i < N; i++)
+        arr[i] = (Entity){ .x = i, .y = i * 2, .health = 100 };
 
-    long count = N;
-    free(pool);
-    return count;
+    long sum = 0;
+    for (long i = 0; i < N; i++)
+        sum += arr[i].health;
+
+    free(arr);
+    return sum;
 }
 
-// Variant B: individual mallocs (pointer-based, like ref-counted)
+// Variant B: individual mallocs per entity (mirrors CLEAR @pool generational overhead)
 static long bench_pointer(void) {
     Entity **ptrs = malloc(N * sizeof(Entity *));
     if (!ptrs) { perror("malloc"); exit(1); }
@@ -64,41 +67,44 @@ static long bench_pointer(void) {
         *ptrs[i] = (Entity){ .x = i, .y = i * 2, .health = 100 };
     }
 
-    long count = N;
+    long sum = 0;
+    for (long i = 0; i < N; i++)
+        sum += ptrs[i]->health;
 
-    for (long i = 0; i < N; i++) {
+    for (long i = 0; i < N; i++)
         free(ptrs[i]);
-    }
     free(ptrs);
-    return count;
+    return sum;
 }
 
 int main(void) {
     struct timespec t0, t1, t2;
     long hwm, rss;
 
-    // Variant A: pool-like
+    // Variant A: contiguous array (BENCH_RESULT = this path)
     clock_gettime(CLOCK_MONOTONIC, &t0);
-    long pool_count = bench_pool();
+    long arr_sum = bench_array();
     clock_gettime(CLOCK_MONOTONIC, &t1);
-    double pool_ms = elapsed_ms(&t0, &t1);
-    long pool_hwm, pool_rss;
-    read_memory(&pool_hwm, &pool_rss);
+    double arr_ms = elapsed_ms(&t0, &t1);
+    long arr_hwm, arr_rss;
+    read_memory(&arr_hwm, &arr_rss);
 
-    // Variant B: pointer-based
+    // Variant B: individual mallocs
     clock_gettime(CLOCK_MONOTONIC, &t1);
-    long ptr_count = bench_pointer();
+    long ptr_sum = bench_pointer();
     clock_gettime(CLOCK_MONOTONIC, &t2);
     double ptr_ms = elapsed_ms(&t1, &t2);
     long ptr_hwm, ptr_rss;
     read_memory(&ptr_hwm, &ptr_rss);
 
-    printf("Entities: %d\n", N);
-    printf("Pool: %.1f ms\n", pool_ms);
-    printf("Pool RSS: %ld KB\n", pool_rss);
-    printf("Pointer: %.1f ms\n", ptr_ms);
-    printf("Pointer RSS: %ld KB\n", ptr_rss);
-    printf("Peak RSS: %ld KB\n", ptr_hwm);
+    assert(arr_sum == ptr_sum);
+
+    printf("BENCH_RESULT: %.0f ms\n", arr_ms);
+    printf("Pool vs List (%d entities, insert + sum health) -- C baseline\n", N);
+    printf("  Array (dense):   %.1f ms  RSS %ld KB\n", arr_ms, arr_rss);
+    printf("  Pointer (N mallocs): %.1f ms  RSS %ld KB\n", ptr_ms, ptr_rss);
+    printf("  Pointer overhead: %.0f ms\n", ptr_ms - arr_ms);
+    printf("  Peak RSS (VmHWM): %ld KB\n", ptr_hwm);
 
     return 0;
 }

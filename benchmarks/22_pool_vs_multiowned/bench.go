@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-const N = 1000000
+const N = 5000000
 
 type Entity struct {
 	x      int64
@@ -53,21 +53,22 @@ func parseKB(line string) int64 {
 	return 0
 }
 
-// Variant A: append structs to a slice (dense array, like @list)
+// Variant A: append structs to a slice (dense array, like CLEAR @list)
 func benchSlice() int64 {
 	items := make([]Entity, 0, N)
-
 	for i := int64(0); i < N; i++ {
 		items = append(items, Entity{x: i, y: i * 2, health: 100})
 	}
-
-	return int64(len(items))
+	var sum int64
+	for _, e := range items {
+		sum += e.health
+	}
+	return sum
 }
 
-// Variant B: allocate each struct with new(), store pointers (like @multiowned / Rc)
+// Variant B: allocate each struct with new(), store pointers (like CLEAR @pool / Rc)
 func benchPointer() int64 {
 	ptrs := make([]*Entity, 0, N)
-
 	for i := int64(0); i < N; i++ {
 		e := new(Entity)
 		e.x = i
@@ -75,27 +76,35 @@ func benchPointer() int64 {
 		e.health = 100
 		ptrs = append(ptrs, e)
 	}
-
-	return int64(len(ptrs))
+	var sum int64
+	for _, e := range ptrs {
+		sum += e.health
+	}
+	return sum
 }
 
 func main() {
-	// Variant A: slice (dense)
+	// Variant A: slice (dense) — BENCH_RESULT
 	t0 := time.Now()
-	sliceCount := benchSlice()
+	sliceSum := benchSlice()
 	sliceMs := time.Since(t0).Milliseconds()
 	_, sliceRSS := readMemory()
 
 	// Variant B: pointer-based
 	t1 := time.Now()
-	ptrCount := benchPointer()
+	ptrSum := benchPointer()
 	ptrMs := time.Since(t1).Milliseconds()
 	ptrHWM, ptrRSS := readMemory()
 
-	fmt.Printf("Entities: %d\n", N)
-	fmt.Printf("Slice: %d ms\n", sliceMs)
-	fmt.Printf("Slice RSS: %d KB\n", sliceRSS)
-	fmt.Printf("Pointer: %d ms\n", ptrMs)
-	fmt.Printf("Pointer RSS: %d KB\n", ptrRSS)
-	fmt.Printf("Peak RSS: %d KB\n", ptrHWM)
+	if sliceSum != ptrSum {
+		fmt.Fprintf(os.Stderr, "sum mismatch: %d != %d\n", sliceSum, ptrSum)
+		os.Exit(1)
+	}
+
+	fmt.Printf("BENCH_RESULT: %d ms\n", sliceMs)
+	fmt.Printf("Pool vs List (%d entities, insert + sum health) -- Go baseline\n", N)
+	fmt.Printf("  Slice (dense):    %d ms  RSS %d KB\n", sliceMs, sliceRSS)
+	fmt.Printf("  Pointer (N news): %d ms  RSS %d KB\n", ptrMs, ptrRSS)
+	fmt.Printf("  Pointer overhead: %d ms\n", ptrMs-sliceMs)
+	fmt.Printf("  Peak RSS (VmHWM): %d KB\n", ptrHWM)
 }

@@ -1,0 +1,15 @@
+{
+  "source": "/home/yahn/litedb/benchmarks/22_pool_vs_multiowned/bench.cht",
+  "output": "/home/yahn/litedb/benchmarks/22_pool_vs_multiowned/bench_clear",
+  "opt_level": "ReleaseFast",
+  "extra_flags": [
+
+  ],
+  "module_mode": false,
+  "profile": false,
+  "use_c_allocator": false,
+  "default_stack": null,
+  "strict_test": false,
+  "exact_tiers": null,
+  "zig": "/home/yahn/zig-x86_64-linux-0.16.0/zig"
+}
