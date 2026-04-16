@@ -3286,6 +3286,9 @@ class MIRLowering
     else
       rhs = node.value.is_a?(AST::MoveNode) ? node.value.value : node.value
       is_move = node.value.is_a?(AST::MoveNode)
+      # Propagate VarDecl heap storage to StructLit so lower_struct_lit emits HeapCreate.
+      # upgrade_heap_ptr_returns_to_heap! sets decl.storage = :heap but not decl.value.storage.
+      rhs.storage = :heap if node.storage == :heap && rhs.is_a?(AST::StructLit)
       if !is_move && rc_retain_needed?(rhs)
         make_rc_retain(rhs)
       elsif ft.string? && ft.heap_provenance? && !is_move &&
