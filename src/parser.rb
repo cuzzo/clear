@@ -109,6 +109,7 @@ class Parser
   primary(:INT64) { parse_literal(:INT64, :stack) }
   primary(:STRING) { parse_literal(:STRING, :stack) }
   primary(:BYTE) { parse_literal(:BYTE, :stack) }
+  primary(:PREFIXED_INT) { parse_literal(:PREFIXED_INT, :stack) }
   primary(:INT8)    { parse_literal(:INT8,    :stack) }
   primary(:INT16)   { parse_literal(:INT16,   :stack) }
   primary(:INT32)   { parse_literal(:INT32,   :stack) }

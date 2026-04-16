@@ -3960,6 +3960,180 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "Integer literal overflow detection" do
+    def transpile(src)
+      ZigTranspiler.new.transpile_as_module(src)
+    end
+
+    # --- decimal literals (INT64 token) ---
+
+    context "decimal literals in declarations" do
+      it "accepts value within Byte range" do
+        expect { transpile("FN f() RETURNS Void -> x: Byte = 255; RETURN; END") }.not_to raise_error
+      end
+
+      it "rejects value exceeding Byte range" do
+        expect { transpile("FN f() RETURNS Void -> x: Byte = 256; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+
+      it "accepts value within Int8 range" do
+        expect { transpile("FN f() RETURNS Void -> x: Int8 = 127; RETURN; END") }.not_to raise_error
+      end
+
+      it "rejects value exceeding Int8 range" do
+        expect { transpile("FN f() RETURNS Void -> x: Int8 = 128; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+
+      it "accepts value within UInt32 range" do
+        expect { transpile("FN f() RETURNS Void -> x: UInt32 = 4294967295; RETURN; END") }.not_to raise_error
+      end
+
+      it "rejects value exceeding UInt32 range" do
+        expect { transpile("FN f() RETURNS Void -> x: UInt32 = 4294967296; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+
+      it "accepts Int64 max" do
+        expect { transpile("FN f() RETURNS Void -> x: Int64 = 9223372036854775807; RETURN; END") }.not_to raise_error
+      end
+    end
+
+    context "decimal literals in function calls" do
+      it "accepts Byte argument within range" do
+        src = "FN f(x: Byte) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(255); RETURN; END"
+        expect { transpile(src) }.not_to raise_error
+      end
+
+      it "rejects Byte argument out of range" do
+        src = "FN f(x: Byte) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(256); RETURN; END"
+        expect { transpile(src) }.to raise_error(/overflow/i)
+      end
+
+      it "rejects Int16 argument out of range" do
+        src = "FN f(x: Int16) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(32768); RETURN; END"
+        expect { transpile(src) }.to raise_error(/overflow/i)
+      end
+    end
+
+    context "decimal literals in return statements" do
+      it "accepts return within range" do
+        expect { transpile("FN f() RETURNS Byte -> RETURN 255; END") }.not_to raise_error
+      end
+
+      it "rejects return out of range" do
+        expect { transpile("FN f() RETURNS Byte -> RETURN 256; END") }
+          .to raise_error(/overflow/i)
+      end
+    end
+
+    # --- prefixed literals (PREFIXED_INT token: 0x, 0o, 0b) ---
+
+    context "prefixed literals default to Byte" do
+      it "accepts 0xFF (=255) where Byte expected" do
+        expect { transpile("FN f() RETURNS Void -> x: Byte = 0xFF; RETURN; END") }.not_to raise_error
+      end
+
+      it "rejects 0x100 (=256) where Byte is the default" do
+        expect { transpile("FN f() RETURNS Void -> x = 0x100; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+
+      it "rejects 0o755 (=493) in Byte-typed declaration" do
+        expect { transpile("FN f() RETURNS Void -> x: Byte = 0o755; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+    end
+
+    context "prefixed literals coerce to wider types" do
+      it "accepts 0o755 where UInt32 expected" do
+        src = "FN f(x: UInt32) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(0o755); RETURN; END"
+        expect { transpile(src) }.not_to raise_error
+      end
+
+      it "accepts 0xFF where UInt32 expected" do
+        src = "FN f(x: UInt32) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(0xFF); RETURN; END"
+        expect { transpile(src) }.not_to raise_error
+      end
+
+      it "rejects 0x1FFFFFFFF (>u32 max) where UInt32 expected" do
+        src = "FN f(x: UInt32) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(0x1FFFFFFFF); RETURN; END"
+        expect { transpile(src) }.to raise_error(/overflow/i)
+      end
+    end
+
+    # --- negated literals (constant-folded unary minus) ---
+
+    context "negated literals in declarations" do
+      it "accepts -128 where Int8 expected (minimum)" do
+        expect { transpile("FN f() RETURNS Void -> x: Int8 = -128; RETURN; END") }.not_to raise_error
+      end
+
+      it "rejects -129 where Int8 expected" do
+        expect { transpile("FN f() RETURNS Void -> x: Int8 = -129; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+
+      it "accepts -32768 where Int16 expected (minimum)" do
+        expect { transpile("FN f() RETURNS Void -> x: Int16 = -32768; RETURN; END") }.not_to raise_error
+      end
+
+      it "rejects -32769 where Int16 expected" do
+        expect { transpile("FN f() RETURNS Void -> x: Int16 = -32769; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+
+      it "rejects negative value where unsigned type expected" do
+        expect { transpile("FN f() RETURNS Void -> x: UInt32 = -1; RETURN; END") }
+          .to raise_error(/overflow/i)
+      end
+    end
+
+    context "negated literals in function calls" do
+      it "accepts -128 as Int8 argument" do
+        src = "FN f(x: Int8) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(-128); RETURN; END"
+        expect { transpile(src) }.not_to raise_error
+      end
+
+      it "rejects -129 as Int8 argument" do
+        src = "FN f(x: Int8) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(-129); RETURN; END"
+        expect { transpile(src) }.to raise_error(/overflow/i)
+      end
+    end
+
+    context "negated literals in return statements" do
+      it "accepts -128 returned as Int8" do
+        expect { transpile("FN f() RETURNS Int8 -> RETURN -128; END") }.not_to raise_error
+      end
+
+      it "rejects -129 returned as Int8" do
+        expect { transpile("FN f() RETURNS Int8 -> RETURN -129; END") }
+          .to raise_error(/overflow/i)
+      end
+    end
+
+    # --- suffixed literals checked at lexer level ---
+
+    context "suffixed literals are range-checked at lex time" do
+      it "rejects 0xFF_i8 (255 > i8 max 127)" do
+        expect { Lexer.new("0xFF_i8").tokenize }.to raise_error(/overflow/i)
+      end
+
+      it "rejects 256_u8" do
+        expect { Lexer.new("256_u8").tokenize }.to raise_error(/overflow/i)
+      end
+
+      it "rejects 0o755_u8 (493 > 255)" do
+        expect { Lexer.new("0o755_u8").tokenize }.to raise_error(/overflow/i)
+      end
+
+      it "accepts 0o755_u32" do
+        expect { Lexer.new("0o755_u32").tokenize }.not_to raise_error
+      end
+    end
+  end
+
   describe "String interpolation" do
     it "annotates interpolated string without error and produces String type" do
       src = 'FN f() RETURNS Void -> name = "World"; greeting: String = "Hello, ${name}!"; RETURN; END'

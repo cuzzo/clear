@@ -380,6 +380,7 @@ module FunctionAnalysis
 
       elsif !match && is_safe_autocast?(actual, expected)
         arg_node.coerced_type = expected
+        check_prefixed_int_range!(arg_node, expected)
         match = true
       end
 

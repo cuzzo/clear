@@ -90,7 +90,7 @@ FN handleClient!(client: TCPClient) RETURNS Void ->
 END
 
 FN main() RETURNS Void ->
-    mkdir("data", 493_u32);
+    mkdir("data", 0o755_u32);
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 

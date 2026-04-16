@@ -10,7 +10,7 @@ EXTERN FN mkdir(path: String, mode: UInt32) RETURNS Int64 FROM "std.c";
 
 FN main() RETURNS Void ->
     -- std.c.mkdir: no native shim, String coerces to [*:0]const u8 automatically
-    mkdir("/tmp/clear_std_ffi_test", 493_u32);
+    mkdir("/tmp/clear_std_ffi_test", 0o755_u32);
 
     -- std.json.parseFromSlice: comptime type arg baked into call, not a struct field
     opts: ParseOptions = ParseOptions{};

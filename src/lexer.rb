@@ -94,44 +94,32 @@ class Lexer
           add(:VAR_ID, word, start_col)
         end
 
+      when @s.scan(/0x[0-9a-fA-F]+_([a-zA-Z0-9]+)/)
+        val = @s.matched.split('_')[0].to_i(16)
+        suffix = @s[1]
+        add_prefixed_int(val, suffix, start_col)
+
       when @s.scan(/0x[0-9a-fA-F]+/)
-        val = @s.matched.to_i(16)
-        raise_if_byte_overflow(val)
-        add(:BYTE, val, start_col)
+        add(:PREFIXED_INT, @s.matched.to_i(16), start_col)
+
+      when @s.scan(/0o[0-7]+_([a-zA-Z0-9]+)/)
+        val = @s.matched.split('_')[0].to_i(8)
+        suffix = @s[1]
+        add_prefixed_int(val, suffix, start_col)
 
       when @s.scan(/0o[0-7]+/)
-        val = @s.matched.to_i(8)
-        raise_if_byte_overflow(val)
-        add(:BYTE, val, start_col)
+        add(:PREFIXED_INT, @s.matched.to_i(8), start_col)
+
+      when @s.scan(/0b[0-1]+_([a-zA-Z0-9]+)/)
+        val = @s.matched.split('_')[0].to_i(2)
+        suffix = @s[1]
+        add_prefixed_int(val, suffix, start_col)
 
       when @s.scan(/0b[0-1]+/)
-        val = @s.matched.to_i(2)
-        raise_if_byte_overflow(val)
-        add(:BYTE, val, start_col)
+        add(:PREFIXED_INT, @s.matched.to_i(2), start_col)
 
       when @s.scan(/(\d+)_([a-zA-Z0-9]+)/)
-        val_str = @s[1]
-        suffix = @s[2]
-        val = val_str.to_i
-
-        case suffix
-        when 'i64'
-          add(:INT64, val, start_col)
-        when 'f64'
-          add(:NUMBER, val.to_f, start_col)
-        when 'u8'
-          raise_if_byte_overflow(val)
-          add(:BYTE, val, start_col)
-        when 'i8'  then add(:INT8,   val, start_col)
-        when 'i16' then add(:INT16,  val, start_col)
-        when 'i32' then add(:INT32,  val, start_col)
-        when 'u16' then add(:UINT16, val, start_col)
-        when 'u32' then add(:UINT32, val, start_col)
-        when 'u64' then add(:UINT64, val, start_col)
-        when 'f32' then add(:FLOAT32, val.to_f, start_col)
-        else
-          raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
-        end
+        add_prefixed_int(@s[1].to_i, @s[2], start_col)
 
       when @s.scan(/\d+\.\d+_([a-zA-Z0-9]+)/)
         # Float literal with type suffix: 3.14_f32, 1.0_f64
@@ -313,9 +301,37 @@ class Lexer
     end
   end
 
-  def raise_if_byte_overflow(val)
-    if val > 255
-      raise "Lexer Error: Byte literal #{@s.matched} exceeds 255."
+  INT_SUFFIX_RANGES = {
+    'u8'  => 0..255,
+    'i8'  => -128..127,
+    'i16' => -32_768..32_767,
+    'u16' => 0..65_535,
+    'i32' => -2_147_483_648..2_147_483_647,
+    'u32' => 0..4_294_967_295,
+    'i64' => -9_223_372_036_854_775_808..9_223_372_036_854_775_807,
+    'u64' => 0..18_446_744_073_709_551_615,
+  }.freeze
+
+  def add_prefixed_int(val, suffix, start_col)
+    range = INT_SUFFIX_RANGES[suffix]
+    raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}" unless range || suffix == 'f32' || suffix == 'f64'
+    if range && !range.include?(val)
+      raise "Lexer Error: Literal #{@s.matched} overflows #{suffix} (range #{range})"
+    end
+    case suffix
+    when 'i64' then add(:INT64,   val,        start_col)
+    when 'u8'  then add(:BYTE,    val,        start_col)
+    when 'i8'  then add(:INT8,    val,        start_col)
+    when 'i16' then add(:INT16,   val,        start_col)
+    when 'i32' then add(:INT32,   val,        start_col)
+    when 'u16' then add(:UINT16,  val,        start_col)
+    when 'u32' then add(:UINT32,  val,        start_col)
+    when 'u64' then add(:UINT64,  val,        start_col)
+    when 'f32' then add(:FLOAT32, val.to_f,   start_col)
+    when 'f64' then add(:NUMBER,  val.to_f,   start_col)
+    else
+      raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}"
     end
   end
+
 end

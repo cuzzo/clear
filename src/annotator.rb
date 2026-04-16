@@ -1338,6 +1338,7 @@ private
         error!(node, :RETURN_MISMATCH, expected, actual)
       end
       node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
+      check_prefixed_int_range!(node.value, expected)
     end
 
     node.full_type = actual
@@ -1555,6 +1556,7 @@ private
     final_type, error = node.value.coerce!(node.type)
     error!(node, error) if error
 
+    check_prefixed_int_range!(node.value, node.value.coerced_type || final_type)
     propagate_declared_type_to_value!(node, final_type)
 
     storage = finalize_decl_storage!(node, final_type)
@@ -2330,7 +2332,8 @@ private
         else
           Type.new(Type::STRING_TYPE, location: :rodata)
         end
-      when :BYTE    then :Byte
+      when :BYTE         then :Byte
+      when :PREFIXED_INT then :Byte  # Default; overflows checked after coercion context is known
       when :INT8    then :Int8
       when :INT16   then :Int16
       when :INT32   then :Int32

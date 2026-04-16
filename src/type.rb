@@ -319,6 +319,16 @@ class Type
   FLOAT_TYPES        = [:Float32, :Float64].freeze
   NUMERIC_TYPES      = (INT_TYPES + FLOAT_TYPES).freeze
 
+  INT_TYPE_MAX = {
+    Byte: 255, UInt8: 255, UInt16: 65_535, UInt32: 4_294_967_295,
+    UInt64: 18_446_744_073_709_551_615,
+    Int8: 127, Int16: 32_767, Int32: 2_147_483_647, Int64: 9_223_372_036_854_775_807,
+  }.freeze
+  INT_TYPE_MIN = {
+    Byte: 0, UInt8: 0, UInt16: 0, UInt32: 0, UInt64: 0,
+    Int8: -128, Int16: -32_768, Int32: -2_147_483_648, Int64: -9_223_372_036_854_775_808,
+  }.freeze
+
   def numeric?
     NUMERIC_TYPES.include?(resolved)
   end
@@ -1665,6 +1675,27 @@ module TypeHelper
 
   def is_safe_autocast?(source_type, target_type)
     to_type(target_type).accepts?(to_type(source_type))
+  end
+
+  # Called after coercion context is known for integer literals and constant-foldable
+  # unary negations (e.g. -200). Errors if the value does not fit in the effective
+  # target type. No-op for non-integer or non-literal nodes.
+  def check_prefixed_int_range!(node, effective_type)
+    val = if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)
+      node.value
+    elsif node.is_a?(AST::UnaryOp) && node.op == :SUB &&
+          node.right.is_a?(AST::Literal) && (node.right.type == :INT64 || node.right.type == :PREFIXED_INT)
+      -node.right.value
+    else
+      return
+    end
+    t = effective_type.respond_to?(:resolved) ? effective_type.resolved : effective_type&.to_sym
+    max = Type::INT_TYPE_MAX[t]
+    return unless max  # Not a known integer type; let type checker handle the mismatch
+    min = Type::INT_TYPE_MIN[t] || 0
+    if val < min || val > max
+      error!(node, "Integer literal (#{val}) overflows #{t} (range #{min}..#{max})")
+    end
   end
 
   def throw_assign_mismatch_error!(node, source_type, target_type)

@@ -94,37 +94,26 @@ RSpec.describe Lexer do
       end
     end
 
-    describe "Byte Literals" do
-      it "parses Hex bytes" do
-        lexer = Lexer.new("0xFF")
-        tokens = lexer.tokenize
-        expect_token(tokens[0], :BYTE, 255, 1, 1)
+    describe "Prefixed Integer Literals (0x, 0o, 0b)" do
+      it "parses hex as PREFIXED_INT" do
+        expect_token(Lexer.new("0xFF").tokenize[0],   :PREFIXED_INT, 255, 1, 1)
+        expect_token(Lexer.new("0x100").tokenize[0],  :PREFIXED_INT, 256, 1, 1)
       end
 
-      it "parses Binary bytes" do
-        lexer = Lexer.new("0b101")
-        tokens = lexer.tokenize
-        expect_token(tokens[0], :BYTE, 5, 1, 1)
+      it "parses binary as PREFIXED_INT" do
+        expect_token(Lexer.new("0b101").tokenize[0],       :PREFIXED_INT, 5,   1, 1)
+        expect_token(Lexer.new("0b100000000").tokenize[0], :PREFIXED_INT, 256, 1, 1)
       end
 
-      it "parses Octal bytes" do
-        lexer = Lexer.new("0o7") # Note: Your regex for octal was 0b[0-7] in the code provided
-        # Wait, standard octal is usually 0o or 0, but your code had:
-        # when @s.scan(/0b[0-7]+/) -> .to_i(8)
-        # I will test against your specific implementation:
-        lexer = Lexer.new("0o7")
-        tokens = lexer.tokenize
-        expect_token(tokens[0], :BYTE, 7, 1, 1)
+      it "parses octal as PREFIXED_INT" do
+        expect_token(Lexer.new("0o7").tokenize[0],   :PREFIXED_INT, 7,   1, 1)
+        expect_token(Lexer.new("0o755").tokenize[0], :PREFIXED_INT, 493, 1, 1)
       end
 
-      it "raises error on Hex overflow (> 255)" do
-        lexer = Lexer.new("0x100") # 256
-        expect { lexer.tokenize }.to raise_error(/Lexer Error: Byte literal 0x100 exceeds 255/)
-      end
-
-      it "raises error on Binary overflow (> 255)" do
-        lexer = Lexer.new("0b100000000") # 256 in binary (9 bits)
-        expect { lexer.tokenize }.to raise_error(/Lexer Error/)
+      it "raises error on suffixed literal overflow" do
+        expect { Lexer.new("0xFF_i8").tokenize }.to raise_error(/overflows i8/)
+        expect { Lexer.new("0o755_u8").tokenize }.to raise_error(/overflows u8/)
+        expect { Lexer.new("0x1FFFFFFFF_u32").tokenize }.to raise_error(/overflows u32/)
       end
     end
 
