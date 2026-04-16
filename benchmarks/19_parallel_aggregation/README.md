@@ -41,6 +41,29 @@ merge is a single sequential pass over 1,000 entries.
 SHARD amortizes well when per-item work is expensive (parsing,
 transformation, I/O). For simple counting it is over-engineered.
 
+## TODO: PARALLEL FOLD primitive
+
+The remaining gap is structural. SHARD routes each item to its owning fiber
+via SPSC channel (~60ns/item); for trivially cheap per-item work (~10ns) the
+routing cost dominates 6:1. Go/Rust win by giving each worker a private local
+map and merging after the barrier — no routing, no channels.
+
+A future `PARALLEL FOLD ... MERGE` pipeline stage would close this gap:
+
+```clear
+counts = (0..<n) s> PARALLEL FOLD HashMap<Int64, Int64> {
+    k = absInt(seeds[_]) MOD buckets;
+    _acc[k] = (_acc[k] OR 0_i64) + 1_i64;
+} MERGE {
+    _acc[k] = (_acc[k] OR 0_i64) + _partial[k];
+};
+```
+
+Each worker owns a private `_acc`; a sequential merge combines partials after
+`WaitGroup.wait()`. SHARD remains correct and preferable when per-item work
+exceeds ~60ns. Not urgent for v0.1-pre; typical workloads are not bottlenecked
+by scheduling overhead relative to real work.
+
 ## Ergonomics comparison
 
 The parallel histogram pattern requires explicit plumbing in Go/Rust:
