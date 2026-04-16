@@ -2997,6 +2997,24 @@ RSpec.describe SemanticAnnotator do
         expect(output).to include(".a1 = __ext")
         expect(output).to include("native_math.native_add(f.a0, f.a1)")
       end
+
+      it "EXTERN method on EXTERN-returned expression does not emit try { block }" do
+        # Regression: calling an EXTERN method (UFCS style) on the inline result of
+        # another EXTERN call, where the method returns !Void, caused the entire
+        # trampoline block to be wrapped in `try { ... }` — invalid Zig syntax.
+        # `try` in Zig takes a single expression, not a block.
+        code = <<~CLEAR
+          EXTERN STRUCT Dir {} FROM "std.fs";
+          EXTERN FN cwd() RETURNS Dir FROM "std.fs";
+          EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS !Void FROM "std.fs";
+          FN main() RETURNS Void ->
+            cwd().makePath("data") OR RAISE;
+            RETURN;
+          END
+        CLEAR
+        output = ZigTranspiler.new.transpile_as_module(code)
+        expect(output).not_to match(/try\s*\{/)
+      end
     end
   end
 
