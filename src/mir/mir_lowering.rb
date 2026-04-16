@@ -98,7 +98,7 @@ class MIRLowering
   #   field init, or any position where the receiver takes ownership on success.
   #   false (default) => emit Cleanup (defer; freed on all paths).
   def hoist_alloc(expr, ast_node = nil, err_cleanup: false)
-    return expr unless mir_allocates?(expr)
+    return expr unless mir_allocates?(expr) || call_union_return_needs_hoist?(expr, ast_node)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
     @pending_stmts << MIR::AllocMark.new(name, :heap, nil)
@@ -144,8 +144,7 @@ class MIRLowering
         kind = mir.sync_fn == "rwLockedCreate" ? :write_locked : :locked
         { kind: kind, alloc: :heap, has_moved_guard: false, zig_type: mir.sync_type }
       elsif mir.own_fn
-        ti = ast_node.respond_to?(:type_info) ? (ast_node.type_info rescue nil) : nil
-        ti = ti.is_a?(Type) ? ti : nil
+        ti = Type.from_node(ast_node)
         zig_t = ti&.zig_type
         raise "hoist_cleanup_entry: MIR::CapWrap (own_fn=#{mir.own_fn}) has no zig_type -- " \
               "ast_node type_info unavailable" unless zig_t
@@ -159,16 +158,13 @@ class MIRLowering
       # Cast is a transparent wrapper; the cleanup is the same as the inner expr.
       hoist_cleanup_entry(mir.expr, ast_node)
     when MIR::Call
-      ti = ast_node.respond_to?(:type_info) ? (ast_node.type_info rescue nil) : nil
-      ti = ti.is_a?(Type) ? ti : nil
+      ti = Type.from_node(ast_node)
       return nil unless ti
-      ti = ti.payload_type || ti if ti.respond_to?(:error_union?) && ti.error_union?
-      if ti.respond_to?(:string?) && ti.string?
+      ti = ti.payload_type || ti if ti.error_union?
+      if ti.string?
         { kind: :heap_string, alloc: :heap, has_moved_guard: false }
       else
-        resolved = ti.respond_to?(:resolved) ? ti.resolved : nil
-        return nil unless resolved
-        zig_t = (Type.new(resolved).zig_type rescue nil)
+        zig_t = (Type.new(ti.resolved).zig_type rescue nil)
         return nil unless zig_t
         { kind: :non_copy_union, alloc: :heap, has_moved_guard: false, zig_type: zig_t }
       end
@@ -4055,6 +4051,20 @@ class MIRLowering
     ti = node.type_info rescue nil
     ti = ti.is_a?(Type) ? ti : nil
     ti&.heap_provenance? || false
+  end
+
+  # Returns true if a MIR::Call node returns a non-Copy union type that needs
+  # a cleanup defer when used as a temporary in a non-TAKES argument position.
+  # heap_provenance? misses these: unions like Value are stack-sized but own heap
+  # memory (via @indirect fields). When returned inline as a non-TAKES argument,
+  # they must be hoisted to a named let with a defer.
+  def call_union_return_needs_hoist?(expr, ast_node)
+    return false unless expr.is_a?(MIR::Call)
+    ti = Type.from_node(ast_node)
+    return false unless ti
+    ti = ti.payload_type || ti if ti.error_union?
+    return false if ti.heap_provenance?  # already handled by mir_allocates?
+    @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
   end
 
   def callee_needs_rt?(name)

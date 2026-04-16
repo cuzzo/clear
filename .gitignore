@@ -1,6 +1,9 @@
 vendor
 .byebug_history
 examples/*.fluxc
+examples/**/_*
+examples/**/interpreter_test
+examples/**/debug_test*
 log.txt
 zig/all-tests.zig
 zig/transpile-test.zig

@@ -1499,6 +1499,42 @@ RSpec.describe ZigTranspiler do
     end
   end
 
+  # ===========================================================================
+  # BUG-MIR-002: heap-returning call in non-TAKES argument position
+  # ===========================================================================
+  describe "BUG-MIR-002: heap-returning call in non-TAKES arg position is hoisted" do
+    it "hoists non-Copy union return from function call used as non-TAKES arg" do
+      src = <<~CLEAR
+        UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
+        FN makeVal!() RETURNS Value ->
+            RETURN Value.Lambda{ body: Value{ Num: 1.0 }, id: 1 };
+        END
+        FN useVal(v: Value) RETURNS String ->
+            RETURN "ok";
+        END
+        FN test!() RETURNS String ->
+            RETURN useVal(makeVal!());
+        END
+      CLEAR
+      zig = transpile(src)
+      # makeVal!() returns a heap-owning Value. useVal borrows it (non-TAKES).
+      # The temporary must be hoisted to a named let with a cleanup defer,
+      # otherwise the Lambda's @indirect body pointer leaks.
+      expect(zig).to include("defer CheatLib.cleanup(Value")
+    end
+
+    it "does not hoist Copy types (Int64) used as non-TAKES args" do
+      src = <<~CLEAR
+        FN makeNum!() RETURNS Int64 -> RETURN 42_i64; END
+        FN useNum(n: Int64) RETURNS Void -> RETURN; END
+        FN test!() RETURNS Void -> useNum(makeNum!()); RETURN; END
+      CLEAR
+      zig = transpile(src)
+      # Int64 is a Copy type -- no cleanup needed, no __tmp hoisting
+      expect(zig).not_to include("defer CheatLib.cleanup(Int64")
+    end
+  end
+
   describe "INV-1: HPT string dupe matches return_provenance" do
     it "uses heapAlloc for dupe when function has heap return_provenance" do
       # Use a named binding so makeStr!'s result is properly cleaned up

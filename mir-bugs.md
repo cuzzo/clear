@@ -67,8 +67,8 @@ the original retains ownership and must be cleaned up by its defer.
 ## BUG-MIR-002: Heap-returning call in non-TAKES argument position (OPEN)
 
 **Severity:** CRITICAL  
-**Status:** OPEN -- not yet fixed  
-**Reproducible:** `./clear test examples/minivm/interpreter_test.cht` -- 22 leaked allocations
+**Status:** PARTIALLY FIXED -- `hoist_alloc` extended + `evalIn` refactored with COPY. 7 leaks remain (BUG-MIR-003).
+**Reproducible:** `./clear test examples/minivm/interpreter_test.cht` -- was 22 leaks, now 7 (all from BUG-MIR-003)
 
 ### What leaked
 
@@ -141,12 +141,72 @@ this decision, consistent with the role boundaries in CLAUDE.md.
 
 ---
 
+---
+
+## BUG-MIR-003: List indexed assignment does not cleanup old element (OPEN)
+
+**Severity:** CRITICAL
+**Status:** OPEN -- not yet fixed
+**Reproducible:** `./clear test examples/minivm/interpreter_test.cht` -- 7 leaked allocations from testBytecode STRUCT_FIELD ops
+
+### What leaked
+
+```clear
+-- stack: Value[]
+pv = COPY consts[idx];        -- heap-allocated Value (via dupeUnionValue)
+stack[sp] = pv;               -- MOVES pv into stack (pv_moved = true)
+-- later...
+pv = COPY fields[fieldIdx];   -- new heap Value (field extracted from old stack[sp])
+stack[sp] = pv;               -- OVERWRITES old stack[sp] WITHOUT cleaning it up
+```
+
+Generated Zig:
+```zig
+const __new_pv = try CheatLib.dupeUnionValue(Value, consts[idx], rt.heapAlloc());  // alloc
+CheatLib.setAt(stack, sp, __new_pv);    // STRUCT_FIELD: overwrites stack[sp]
+// OLD stack[sp] (heap Value.Vector with allocated array) is NEVER freed -- LEAK
+```
+
+### How it got through the checker
+
+For `list[i] = value` (list indexed assignment), the MIR lowering:
+- Marks `value` (rhs) as consumed: `pv_moved = true`
+- Emits `CheatLib.setAt(list, idx, value)` -- shallow struct copy
+- Does NOT generate cleanup for the OLD element at `list[i]`
+
+The MIR checker has no invariant that covers old-element cleanup for list indexed writes. The checker only verifies AllocMark/Cleanup pairs for NAMED BINDINGS. `list[i]` is not a named binding -- it's an indexed slot. The checker cannot see that the old slot is overwritten without cleanup.
+
+### Checker gap
+
+No invariant covers "list indexed write must cleanup old element before overwriting."
+The checker does not model individual list slot lifetimes.
+
+### Required fix
+
+In the MIR lowering, for `AST::Assignment` where LHS is `GetIndex` on a list type (NOT a map),
+AND the element type needs cleanup (is non-Copy with heap-owning variants):
+generate a cleanup of the old element BEFORE the setAt:
+
+```zig
+CheatLib.cleanup(ElemT, alloc, CheatLib.refAt(list, idx));  // cleanup old
+CheatLib.setAt(list, idx, new_value);                       // set new
+new_value_moved = true;
+```
+
+This mirrors how variable reassignment emits `MIR::ReassignCleanup` before overwriting.
+A new `MIR::IndexedReassignCleanup` node (or extension to `MIR::ReassignCleanup`) is needed.
+
+The `CheatLib.refAt(list, idx)` function would return `&list.items[idx]` (a pointer to the element).
+
+---
+
 ## Summary of Checker Gaps
 
 | Gap | Description | Invariant that should cover it | Currently covered? |
 |-----|-------------|-------------------------------|-------------------|
 | Incorrect MoveMark | SuppressCleanup inserted for non-moves (map copy) | INV-4 (structural) | No -- checker can't detect incorrect placement |
 | HPT in arg position | heap-returning call in non-TAKES arg, not hoisted | INV-4 (HPT_LEAK) | No -- only checks statement position |
+| List element overwrite | list[i]=value doesn't cleanup old element for non-Copy types | None | No -- checker doesn't model slot lifetimes |
 
 ### Architectural implication
 

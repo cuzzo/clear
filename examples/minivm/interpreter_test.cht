@@ -9,7 +9,8 @@ REQUIRE "interpreter.cht";
 -- Test helpers: create fresh interpreter, run input, return result string.
 
 FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String @reentrant ->
-    RETURN prStr(runTest!(input, rootId, pool, penv), readable);
+    val = runTest!(input, rootId, pool, penv);
+    RETURN COPY prStr(val, readable);
 END
 
 FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String @reentrant ->

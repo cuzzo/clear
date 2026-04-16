@@ -1128,6 +1128,18 @@ class Type
     (t.collection? || t.map? || t.string? || (t.array? && !t.fixed?)) rescue false
   end
 
+  # Safely extract a normalized Type from any AST/MIR node or raw type value.
+  # Returns nil if no type_info is available or conversion fails.
+  # Replaces the repeated inline pattern:
+  #   ti = node.type_info rescue nil
+  #   ti = Type.new(ti) if ti && !ti.is_a?(Type)
+  def self.from_node(node)
+    return nil unless node
+    t = node.respond_to?(:type_info) ? (node.type_info rescue nil) : node
+    return nil unless t
+    t.is_a?(Type) ? t : (Type.new(t) rescue nil)
+  end
+
   # location= setter: writes provenance. Kept for backward compat with callers.
   def location=(value)
     @zig_type_cache = nil

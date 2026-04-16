@@ -52,8 +52,7 @@ module PromotionClassifier
 
       if val.is_a?(AST::StructLit) || val.is_a?(AST::UnionVariantLit)
         val.fields.each do |fname, fval|
-          fti = fval.type_info
-          fti = Type.new(fti) if fti && !fti.is_a?(Type)
+          fti = Type.from_node(fval)
 
           if fti&.heap_provenance? || fti&.rodata_provenance?
             handled_fields << fname.to_s
@@ -69,8 +68,7 @@ module PromotionClassifier
 
         if var_promotes.empty?
           needs_promote = val.fields.any? do |_, fval|
-            fti = fval.type_info
-            fti = Type.new(fti) if fti && !fti.is_a?(Type)
+            fti = Type.from_node(fval)
             next false if fti&.heap_provenance? || fti&.rodata_provenance?
             fti&.string? || fti&.array? || fti&.collection?
           end
@@ -87,8 +85,7 @@ module PromotionClassifier
         end
 
       elsif val.is_a?(AST::Identifier)
-        ti = val.type_info
-        ti = Type.new(ti) if ti && !ti.is_a?(Type)
+        ti = Type.from_node(val)
         # TAKES params are already heap-owned by caller; no promotion needed.
         next if val.symbol&.takes
         needs_escape = (ti&.needs_escape_promotion? || struct_has_promotable_fields?(ti, schema_lookup)) &&

@@ -534,22 +534,9 @@ class OwnershipDataflow
 
   # Create an OwnerEntry for a new declaration from its type info.
   def make_owner_entry(node)
-    ti = node.type_info rescue nil
-    ti = Type.new(ti) if ti && !ti.is_a?(Type)
-
-    allocator = if ti
-      prov = ti.provenance_alloc rescue nil
-      prov || (ti.heap_provenance? ? :heap : :frame)
-    else
-      :frame
-    end
-
-    needs = if ti
-      ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false
-    else
-      false
-    end
-
+    ti = Type.from_node(node)
+    allocator = ti ? ((ti.provenance_alloc rescue nil) || (ti.heap_provenance? ? :heap : :frame)) : :frame
+    needs = ti ? (ti.needs_explicit_cleanup?(allocator, @schema_lookup) rescue false) : false
     OwnerEntry.new(state: OWNED, allocator: allocator, needs_cleanup: needs)
   end
 
@@ -570,13 +557,7 @@ class OwnershipDataflow
       # so the map stores a deep copy. The original value is NOT ownership-transferred.
       lhs = stmt.name
       skip_rhs_move = lhs.is_a?(AST::GetIndex) &&
-                      begin
-                        ti = lhs.target.type_info
-                        ti = ti.is_a?(Type) ? ti : (ti ? Type.new(ti) : nil)
-                        ti&.map?
-                      rescue
-                        false
-                      end
+                      (Type.from_node(lhs.target)&.map? rescue false)
       collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) } unless skip_rhs_move
 
     when AST::ReturnNode
@@ -760,10 +741,9 @@ class OwnershipDataflow
   # RC assignment is clone (rcRetain), not move. Only GIVE/MOVE transfers
   # ownership (handled by was_moved from the annotator).
   def copy_type?(ident)
-    ti = ident.type_info rescue nil
+    ti = Type.from_node(ident)
     return true unless ti  # unknown type, assume Copy (safe)
-    ti = Type.new(ti) if !ti.is_a?(Type)
-    ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? rescue false)
+    ti.primitive? || ti.string? || ti.any? || ti.void? || ti.any_rc?
   end
 
   # Returns true if this identifier's type is non-Copy (move semantics).
@@ -1199,16 +1179,14 @@ module LoopFrameAnalysis
     scan_direct(body) do |s|
       case s
       when AST::VarDecl
-        ti = s.type_info
-        next unless ti.is_a?(Type)
-        is_frame = ti.frame_provenance? &&
-                   (ti.list_collection? || ti.map? || ti.string?)
+        ti = Type.from_node(s)
+        next unless ti
+        is_frame = ti.frame_provenance? && (ti.list_collection? || ti.map? || ti.string?)
         decls << s if is_frame && s.name.is_a?(String)
       when AST::BindExpr
-        ti = s.type_info rescue nil
-        next unless ti.is_a?(Type)
-        is_frame = ti.frame_provenance? &&
-                   (ti.list_collection? || ti.map? || ti.string?)
+        ti = Type.from_node(s)
+        next unless ti
+        is_frame = ti.frame_provenance? && (ti.list_collection? || ti.map? || ti.string?)
         decls << s if s.mode == :decl && is_frame && s.name.is_a?(String)
       end
     end
