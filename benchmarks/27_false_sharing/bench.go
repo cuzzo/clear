@@ -124,10 +124,11 @@ func main() {
 	paddedMs := float64(runPadded(nThreads, increments).Milliseconds())
 	heapMs := float64(runHeapAlloc(nThreads, increments).Milliseconds())
 
-	fmt.Printf("Threads:     %d\n", nThreads)
-	fmt.Printf("Increments:  %d per thread\n", increments)
-	fmt.Printf("Packed:      %.1f ms  (false sharing)\n", packedMs)
-	fmt.Printf("Padded:      %.1f ms  (no false sharing)\n", paddedMs)
-	fmt.Printf("Heap-alloc:  %.1f ms  (separate allocs, like Arc)\n", heapMs)
-	fmt.Printf("Slowdown:    %.1fx  (packed / padded)\n", packedMs/paddedMs)
+	// BENCH_RESULT = heap-alloc (separate allocs, closest to CLEAR @shared)
+	fmt.Printf("BENCH_RESULT: %.0f ms\n", heapMs)
+	fmt.Printf("False-sharing (%d threads x %d iters)\n", nThreads, increments)
+	fmt.Printf("  Packed (false sharing):  %.1f ms\n", packedMs)
+	fmt.Printf("  Padded (no false share): %.1f ms\n", paddedMs)
+	fmt.Printf("  Heap-alloc (like @shared): %.1f ms\n", heapMs)
+	fmt.Printf("  Slowdown:                %.1fx  (packed / padded)\n", packedMs/paddedMs)
 }

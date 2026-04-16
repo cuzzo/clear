@@ -111,11 +111,12 @@ int main(void) {
 
     double ratio = packed_ms / padded_ms;
 
-    printf("Threads:     %d\n", n_threads);
-    printf("Increments:  %ld per thread\n", increments);
-    printf("Packed:      %.1f ms  (false sharing)\n", packed_ms);
-    printf("Padded:      %.1f ms  (no false sharing)\n", padded_ms);
-    printf("Slowdown:    %.1fx\n", ratio);
+    /* BENCH_RESULT = padded (no false sharing, no mutex baseline) */
+    printf("BENCH_RESULT: %.0f ms\n", padded_ms);
+    printf("False-sharing (%d threads x %ld iters)\n", n_threads, increments);
+    printf("  Packed (false sharing):  %.1f ms\n", packed_ms);
+    printf("  Padded (no false share): %.1f ms\n", padded_ms);
+    printf("  Slowdown:                %.1fx\n", ratio);
 
     return 0;
 }

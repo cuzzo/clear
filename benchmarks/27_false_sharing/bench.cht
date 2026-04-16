@@ -55,8 +55,8 @@ FN main() RETURNS Void ->
     expected = workers * increments;
     ASSERT total == expected, "total mismatch";
 
-    print("Threads:     ${workers.toString()}");
-    print("Increments:  ${increments.toString()} per thread");
-    print("Time:        ${elapsed.toString()} ms  (no false sharing -- @shared:locked)");
-    print("Total:       ${total.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    print("False-sharing (${workers.toString()} threads x ${increments.toString()} iters)");
+    print("  @shared:locked (no false sharing): ${elapsed.toString()} ms");
+    print("  Total: ${total.toString()}");
 END

@@ -122,10 +122,11 @@ fn main() {
     let padded_ms = run_padded(n_threads, increments);
     let arc_ms = run_arc(n_threads, increments);
 
-    println!("Threads:     {}", n_threads);
-    println!("Increments:  {} per thread", increments);
-    println!("Packed:      {:.1} ms  (false sharing)", packed_ms);
-    println!("Padded:      {:.1} ms  (no false sharing)", padded_ms);
-    println!("Arc<Mutex>:  {:.1} ms  (separate heap allocs)", arc_ms);
-    println!("Slowdown:    {:.1}x  (packed / padded)", packed_ms / padded_ms);
+    // BENCH_RESULT = Arc<Mutex> (matches CLEAR @shared:locked exactly)
+    println!("BENCH_RESULT: {:.0} ms", arc_ms);
+    println!("False-sharing ({} threads x {} iters)", n_threads, increments);
+    println!("  Packed (false sharing):    {:.1} ms", packed_ms);
+    println!("  Padded (no false sharing): {:.1} ms", padded_ms);
+    println!("  Arc<Mutex> (like @shared): {:.1} ms", arc_ms);
+    println!("  Slowdown:                  {:.1}x  (packed / padded)", packed_ms / padded_ms);
 }
