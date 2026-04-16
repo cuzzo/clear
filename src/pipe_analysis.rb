@@ -703,14 +703,21 @@ module PipeAnalysis
   # SHARD: route pipeline items to owning schedulers by key hash
   # =========================================================
 
-  # SHARD + CONCURRENT EACH: the EACH body sees `_` as a String key.
+  # SHARD + CONCURRENT EACH: the EACH body sees `_` typed as the map's key type.
   def analyze_shard_each_op(node, shard_node)
     conc = node.right
     each_op = conc.op
 
+    # `_` is the routing key — String for string-keyed maps, numeric for numeric maps.
+    key_type = if shard_node
+      ti = shard_node.target_map.type_info
+      (ti&.numeric_map? && ti&.key_type&.resolved) || :String
+    else
+      :String
+    end
+
     with_new_scope do
-      # `_` is a String key (the output of SHARD's key expression)
-      current_scope.declare("_", nil, :String, true, false, nil, :stack)
+      current_scope.declare("_", nil, key_type, true, false, nil, :stack)
       each_op.body.each { |stmt| visit(stmt) }
     end
 
@@ -950,16 +957,26 @@ module PipeAnalysis
     end
 
     key_type = shard_op.key_expr.resolved_type
-    unless key_type == :String
-      error!(shard_op.key_expr, "SHARD key expression must evaluate to String, got #{key_type}")
-    end
 
-    # Target must be a @sharded (PartitionedStringMap) — NOT :locked
+    # Target must be a @sharded map — NOT :locked. Visit before key type check
+    # so we can validate numeric key type against the map's declared key type.
     visit(shard_op.target_map)
     target_info = shard_op.target_map.type_info
     unless target_info&.sharded? && !target_info&.any_sync?
       error!(shard_op.target_map, "SHARD target must be a HashMap@sharded(N) without :locked. " \
              "SHARD routes items to owning schedulers — :locked maps don't have ownership.")
+    end
+
+    map_key_type = target_info&.key_type&.resolved
+    if map_key_type == :String || map_key_type.nil?
+      unless key_type == :String
+        error!(shard_op.key_expr, "SHARD key expression must evaluate to String for a String-keyed map, got #{key_type}")
+      end
+    else
+      # Numeric-keyed map: key expression must match the map's key type
+      unless Type.new(key_type).numeric?
+        error!(shard_op.key_expr, "SHARD key expression must evaluate to a numeric type for #{map_key_type}-keyed map, got #{key_type}")
+      end
     end
 
     # SHARD is consumed by the subsequent CONCURRENT EACH — not standalone.

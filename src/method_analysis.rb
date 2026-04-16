@@ -73,11 +73,13 @@ module MethodAnalysis
     node.send(:"#{tag_field}=", node.name.to_sym)
     node.full_type = defn[:return_type].call(obj_type)
 
-    # Resolve zig pattern -- pick variant based on receiver type
-    zig = if obj_type&.numeric_map? && defn[:numeric_zig]
-      defn[:numeric_zig]
-    elsif (obj_type&.sharded? || obj_type&.striped?) && defn[:sharded_zig]
+    # Resolve zig pattern -- pick variant based on receiver type.
+    # Sharded takes priority over numeric: PartitionedNumericMap shares the
+    # sharded API (count/keys/values/put/get) with PartitionedStringMap.
+    zig = if (obj_type&.sharded? || obj_type&.striped?) && defn[:sharded_zig]
       defn[:sharded_zig]
+    elsif obj_type&.numeric_map? && !obj_type&.sharded? && !obj_type&.striped? && defn[:numeric_zig]
+      defn[:numeric_zig]
     else
       defn[:zig]
     end

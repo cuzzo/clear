@@ -136,9 +136,20 @@ module PipelineGenerator
     else
       # Standard AOS path: materialize pipe_items then iterate.
       items_block = build_pipe_items_block(lhs_type, alloc)
+
+      # Detect heap-allocated sources that need cleanup after iteration.
+      # values()/keys() on a sharded map allocates a new heap list — if used inline
+      # as a pipeline source (not as a named variable), it must be freed here.
+      src_needs_cleanup = list_node.is_a?(AST::MethodCall) &&
+                          %w[values keys].include?(list_node.name.to_s) &&
+                          list_node.object.type_info&.sharded?
+      cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(rt.heapAlloc());" : ""
+      src_decl     = src_needs_cleanup ? "var pipe_src_list"   : "const pipe_src_list"
+
       <<~ZIG
         #{@current_pipe_label}: {
-            const pipe_src_list = #{list_code};
+            #{src_decl} = #{list_code};
+            #{cleanup_line}
             #{items_block}
             #{res_init}
 
@@ -1255,6 +1266,12 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
+    src_needs_cleanup = list_node.is_a?(AST::MethodCall) &&
+                        %w[values keys].include?(list_node.name.to_s) &&
+                        list_node.object.type_info&.sharded?
+    cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(#{rt_name}.heapAlloc());" : ""
+    src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
+
     # For the worker body, items accessed via ctx.items (the context struct).
     inner_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
       with_fiber_capture_map({}) { visit(inner_expr) }
@@ -1281,7 +1298,8 @@ module PipelineGenerator
 
     <<~ZIG.chomp
       #{@current_pipe_label}: {
-          const pipe_src_list = #{list_code};
+          #{src_decl} = #{list_code};
+          #{cleanup_line}
           _ = &pipe_src_list;
           #{items_block}
           const __ccs#{id}_items = pipe_items;
@@ -1343,6 +1361,12 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
+    src_needs_cleanup = list_node.is_a?(AST::MethodCall) &&
+                        %w[values keys].include?(list_node.name.to_s) &&
+                        list_node.object.type_info&.sharded?
+    cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(#{rt_name}.heapAlloc());" : ""
+    src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
+
     inner_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
       with_fiber_capture_map({}) { visit(inner_expr) }
     end
@@ -1366,7 +1390,8 @@ module PipelineGenerator
 
     <<~ZIG.chomp
       #{@current_pipe_label}: {
-          const pipe_src_list = #{list_code};
+          #{src_decl} = #{list_code};
+          #{cleanup_line}
           _ = &pipe_src_list;
           #{items_block}
           const __ccw#{id}_items = pipe_items;
@@ -1424,6 +1449,11 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
+    src_needs_cleanup = list_node.is_a?(AST::MethodCall) &&
+                        %w[values keys].include?(list_node.name.to_s) &&
+                        list_node.object.type_info&.sharded?
+    cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(#{rt_name}.heapAlloc());" : ""
+
     # For EACH workers, the placeholder references the shared items array by index.
     body_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
       with_fiber_capture_map({}) do
@@ -1439,6 +1469,7 @@ module PipelineGenerator
     <<~ZIG.chomp
       {
           var pipe_src_list = #{list_code};
+          #{cleanup_line}
           _ = &pipe_src_list;
           #{items_block}
           const __cce#{id}_items = pipe_items;
@@ -1499,6 +1530,11 @@ module PipelineGenerator
     lhs_type   = list_node.type_info
     items_block = build_pipe_items_block(lhs_type, "#{rt_name}.heapAlloc()")
 
+    src_needs_cleanup = list_node.is_a?(AST::MethodCall) &&
+                        %w[values keys].include?(list_node.name.to_s) &&
+                        list_node.object.type_info&.sharded?
+    cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(#{rt_name}.heapAlloc());" : ""
+
     expr_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
       with_fiber_capture_map({}) { visit(op_node.expression) }
     end
@@ -1550,6 +1586,7 @@ module PipelineGenerator
     <<~ZIG.chomp
       #{@current_pipe_label}: {
           var pipe_src_list = #{list_code};
+          #{cleanup_line}
           _ = &pipe_src_list;
           #{items_block}
           const __ccr#{id}_items = pipe_items;

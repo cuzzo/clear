@@ -1646,7 +1646,7 @@ class MIRLowering
       zig_t = bare_ft.zig_type
 
       needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
-                    (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("NumericMapType"))
+                    (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType"))
       inner = if needs_alloc
         MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
       else
@@ -1670,8 +1670,8 @@ class MIRLowering
     zig_t = transpile_type(ti)
 
     if node.pairs.empty?
-      # PartitionedStringMap and NumericMapType don't have an .alloc field
-      needs_alloc = !zig_t.include?("PartitionedStringMap") && !zig_t.include?("NumericMapType")
+      # PartitionedStringMap, PartitionedNumericMap, and NumericMapType don't have an .alloc field
+      needs_alloc = !zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType")
       strategy = needs_alloc ? :map_bare : :map_empty
       # Numeric maps are frame-allocated; string maps are heap-allocated.
       map_alloc = (ti.respond_to?(:numeric_map?) && ti.numeric_map?) ? :frame : :heap

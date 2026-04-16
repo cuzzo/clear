@@ -396,6 +396,7 @@ pub const CheatLib = struct {
     pub const ShardedList = DataStructures.ShardedList;
     pub const Set = DataStructures.Set;
     pub const PartitionedStringMap = DataStructures.PartitionedStringMap;
+    pub const PartitionedNumericMap = DataStructures.PartitionedNumericMap;
     pub const ShardedStringMap = DataStructures.ShardedStringMap;
     pub const MutexShardedStringMap = DataStructures.MutexShardedStringMap;
     pub const StripedStringMap = DataStructures.StripedStringMap;

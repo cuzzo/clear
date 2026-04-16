@@ -1811,6 +1811,285 @@ pub fn bind(comptime deps: type) type {
         };
     }
 
+    // PartitionedNumericMap(K, V, N) — shared-nothing scheduler-partitioned map for integer/float keys.
+    // Mirror of PartitionedStringMap but for numeric key types (i64, u64, f64, etc.).
+    // Keys are value types: no heap allocation, no duplication, no key cleanup on deinit.
+    // Used by the SHARD pipeline when the target map has a numeric key type.
+    pub fn PartitionedNumericMap(comptime K: type, comptime V: type, comptime N: usize) type {
+        comptime std.debug.assert(N >= 2);
+        return struct {
+            const Self = @This();
+            const Map = NumericMapType(K, V);
+            const remote_alloc = std.heap.c_allocator;
+            const root = @import("root");
+
+            const Shard = struct {
+                map: Map = .{},
+                _pad: [56]u8 = undefined,
+            };
+
+            shards: [N]Shard = [_]Shard{.{}} ** N,
+            owners: [N]?*fp.Scheduler = [_]?*fp.Scheduler{null} ** N,
+            ownership_init: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+            inline fn noteCtxCreated(kind: u8, shard: usize) void {
+                if (@hasDecl(root, "partitionedMapTestCtxCreated")) root.partitionedMapTestCtxCreated(kind, shard);
+            }
+
+            inline fn noteCtxDestroyed(kind: u8, shard: usize) void {
+                if (@hasDecl(root, "partitionedMapTestCtxDestroyed")) root.partitionedMapTestCtxDestroyed(kind, shard);
+            }
+
+            inline fn nextOpId(kind: u8, shard: usize) u64 {
+                if (@hasDecl(root, "partitionedMapTestNextOpId")) return root.partitionedMapTestNextOpId(kind, shard);
+                return 0;
+            }
+
+            inline fn delayCtxDestroy() bool {
+                return deps.partitionedMapDelayCtxDestroy();
+            }
+
+            inline fn delayGetCtxDestroy() bool {
+                return @hasDecl(root, "partitioned_map_delay_get_ctx_destroy") and root.partitioned_map_delay_get_ctx_destroy;
+            }
+
+            inline fn delayRemoveCtxDestroy() bool {
+                return @hasDecl(root, "partitioned_map_delay_remove_ctx_destroy") and root.partitioned_map_delay_remove_ctx_destroy;
+            }
+
+            // Hash key bytes via Wyhash for consistent shard routing.
+            // Not required to match the map's internal hash (AutoHashMap uses std.hash.auto).
+            pub fn shardIndex(key: K) usize {
+                const h = std.hash.Wyhash.hash(0, std.mem.asBytes(&key));
+                return @as(usize, h) % N;
+            }
+
+            pub fn shardIndexWithHash(key: K) struct { shard: usize, hash: u64 } {
+                const h = std.hash.Wyhash.hash(0, std.mem.asBytes(&key));
+                return .{ .shard = @as(usize, h) % N, .hash = h };
+            }
+
+            /// Same co-location guarantee as PartitionedStringMap: owners[i] = scheds[i % sc].
+            pub fn ensureOwnership(self: *Self) void {
+                if (self.ownership_init.load(.acquire) == 2) return;
+                if (self.ownership_init.cmpxchgStrong(0, 1, .acquire, .monotonic)) |_| {
+                    while (self.ownership_init.load(.acquire) != 2)
+                        std.Thread.yield() catch {};
+                    return;
+                }
+                var scheds: [64]?*fp.Scheduler = [_]?*fp.Scheduler{null} ** 64;
+                var sc: u32 = 0;
+                const n = fp.global_registry.len.load(.acquire);
+                for (fp.global_registry.slots[0..n]) |*slot| {
+                    if (slot.load(.acquire)) |s| { scheds[sc] = s; sc += 1; }
+                }
+                if (sc == 0) { scheds[0] = fp.active_scheduler; sc = 1; }
+                for (0..N) |i| self.owners[i] = scheds[i % sc];
+                self.ownership_init.store(2, .release);
+            }
+
+            const is_slice_value = @typeInfo(V) == .pointer and @typeInfo(V).pointer.size == .slice;
+
+            // Remote op contexts. Key is K (value type) — no heap duplication needed.
+            const PutCtx = struct {
+                map: *Self, shard: usize, key: K, value: V,
+                err: bool = false,
+                done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+                fn run(raw: *anyopaque) void {
+                    const c: *@This() = @ptrCast(@alignCast(raw));
+                    const safe_val = if (comptime is_slice_value)
+                        remote_alloc.dupe(@typeInfo(V).pointer.child, c.value) catch {
+                            c.err = true; c.done.store(true, .release); return;
+                        }
+                    else
+                        c.value;
+                    const gop = c.map.shards[c.shard].map.getOrPut(remote_alloc, c.key) catch {
+                        if (comptime is_slice_value) remote_alloc.free(safe_val);
+                        c.err = true; c.done.store(true, .release); return;
+                    };
+                    if (gop.found_existing) {
+                        if (comptime needsCleanup(V)) cleanup(V, remote_alloc, gop.value_ptr);
+                        if (comptime is_slice_value) remote_alloc.free(gop.value_ptr.*);
+                    }
+                    gop.value_ptr.* = safe_val;
+                    c.done.store(true, .release);
+                }
+            };
+            const GetCtx = struct {
+                map: *Self, shard: usize, key: K, op_id: u64, result: ?V = null,
+                done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+                fn run(raw: *anyopaque) void {
+                    const c: *@This() = @ptrCast(@alignCast(raw));
+                    c.result = c.map.shards[c.shard].map.get(c.key);
+                    c.done.store(true, .release);
+                }
+            };
+            const RemoveCtx = struct {
+                map: *Self, shard: usize, key: K, op_id: u64,
+                done: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+                fn run(raw: *anyopaque) void {
+                    const c: *@This() = @ptrCast(@alignCast(raw));
+                    if (c.map.shards[c.shard].map.fetchRemove(c.key)) |kv| {
+                        var val = kv.value;
+                        cleanup(V, remote_alloc, &val);
+                    }
+                    c.done.store(true, .release);
+                }
+            };
+
+            fn sendAndWait(
+                target: *fp.Scheduler,
+                func_ptr: *const fn (*anyopaque) void,
+                ctx_ptr: *anyopaque,
+                done_flag: *std.atomic.Value(bool),
+            ) void {
+                if (target == fp.active_scheduler) {
+                    func_ptr(ctx_ptr);
+                    return;
+                }
+                const sender_idx = fp.active_scheduler.index;
+                std.debug.assert(sender_idx < target.channels.len);
+                const ring = target.ensureChannel(sender_idx) catch @panic("SPSC channel alloc failed");
+                const completion = remote_alloc.create(fp.RemoteCompletion) catch @panic("RemoteCall completion alloc failed");
+                completion.* = .{
+                    .wg = fp.WaitGroup.init(fp.active_scheduler),
+                    .finished = std.atomic.Value(bool).init(false),
+                };
+                completion.wg.add(1);
+                const msg = fp.SpscMessage{
+                    .tag = .RemoteCall,
+                    .rc_func = @ptrCast(func_ptr),
+                    .rc_ctx = ctx_ptr,
+                    .rc_wg = @ptrCast(completion),
+                };
+                while (!ring.push(msg)) std.atomic.spinLoopHint();
+                _ = target.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
+                target.event_fd.notify();
+                completion.wg.wait();
+                while (!completion.finished.load(.acquire)) std.atomic.spinLoopHint();
+                std.debug.assert(done_flag.load(.acquire));
+                remote_alloc.destroy(completion);
+            }
+
+            pub fn put(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator, key: K, value: V) !void {
+                self.ensureOwnership();
+                const s = shardIndex(key);
+                const ctx = try remote_alloc.create(PutCtx);
+                noteCtxCreated(0, s);
+                ctx.* = .{ .map = self, .shard = s, .key = key, .value = value };
+                sendAndWait(self.owners[s].?, @ptrCast(&PutCtx.run), @ptrCast(ctx), &ctx.done);
+                const had_err = ctx.err;
+                remote_alloc.destroy(ctx);
+                noteCtxDestroyed(0, s);
+                if (had_err) return error.OutOfMemory;
+            }
+
+            pub fn get(self: *Self, key: K) ?V {
+                self.ensureOwnership();
+                const s = shardIndex(key);
+                const ctx = remote_alloc.create(GetCtx) catch return null;
+                const op_id = nextOpId(1, s);
+                noteCtxCreated(1, s);
+                ctx.* = .{ .map = self, .shard = s, .key = key, .op_id = op_id };
+                sendAndWait(self.owners[s].?, @ptrCast(&GetCtx.run), @ptrCast(ctx), &ctx.done);
+                const result = ctx.result;
+                if (!delayCtxDestroy()) {
+                    if (delayGetCtxDestroy()) fp.active_scheduler.coopYield();
+                    remote_alloc.destroy(ctx);
+                    noteCtxDestroyed(1, s);
+                }
+                return result;
+            }
+
+            pub fn contains(self: *Self, key: K) bool {
+                return self.get(key) != null;
+            }
+
+            pub fn remove(self: *Self, _: std.mem.Allocator, key: K) void {
+                self.ensureOwnership();
+                const s = shardIndex(key);
+                const ctx = remote_alloc.create(RemoveCtx) catch return;
+                const op_id = nextOpId(2, s);
+                noteCtxCreated(2, s);
+                ctx.* = .{ .map = self, .shard = s, .key = key, .op_id = op_id };
+                sendAndWait(self.owners[s].?, @ptrCast(&RemoveCtx.run), @ptrCast(ctx), &ctx.done);
+                if (!delayCtxDestroy()) {
+                    if (delayRemoveCtxDestroy()) fp.active_scheduler.coopYield();
+                    remote_alloc.destroy(ctx);
+                    noteCtxDestroyed(2, s);
+                }
+            }
+
+            // ── Direct shard access (no hash, no routing) ──
+            // Used by the SHARD pipeline: the fiber is already pinned to the
+            // owning scheduler and the shard index is known from routing.
+            // Zero overhead: no shardIndex(), no sendAndWait().
+
+            pub fn putDirect(self: *Self, shard: usize, _: std.mem.Allocator, key: K, value: V) !void {
+                const gop = try self.shards[shard].map.getOrPut(remote_alloc, key);
+                if (gop.found_existing) cleanup(V, remote_alloc, gop.value_ptr);
+                gop.value_ptr.* = if (comptime is_slice_value)
+                    try remote_alloc.dupe(@typeInfo(V).pointer.child, value)
+                else
+                    value;
+                // No key duplication: integer keys are value types stored inline by the map.
+            }
+
+            pub fn getDirect(self: *Self, shard: usize, key: K) ?V {
+                return self.shards[shard].map.get(key);
+            }
+
+            pub fn containsDirect(self: *Self, shard: usize, key: K) bool {
+                return self.shards[shard].map.contains(key);
+            }
+
+            pub fn removeDirect(self: *Self, shard: usize, _: std.mem.Allocator, key: K) void {
+                if (self.shards[shard].map.fetchRemove(key)) |kv| {
+                    var val = kv.value;
+                    cleanup(V, remote_alloc, &val);
+                }
+            }
+
+            pub fn count(self: *Self) i64 {
+                var nc: i64 = 0;
+                for (&self.shards) |*shard| nc += @intCast(shard.map.count());
+                return nc;
+            }
+
+            pub fn keys(self: *Self, a: std.mem.Allocator) !std.ArrayListUnmanaged(K) {
+                var list: std.ArrayListUnmanaged(K) = .empty;
+                for (&self.shards) |*shard| {
+                    var it = shard.map.keyIterator();
+                    while (it.next()) |k| try list.append(a, k.*);
+                }
+                return list;
+            }
+
+            pub fn values(self: *Self, a: std.mem.Allocator) !std.ArrayListUnmanaged(V) {
+                var list: std.ArrayListUnmanaged(V) = .empty;
+                for (&self.shards) |*shard| {
+                    var it = shard.map.valueIterator();
+                    while (it.next()) |v| try list.append(a, v.*);
+                }
+                return list;
+            }
+
+            pub fn deinit(self: *Self, _: std.mem.Allocator, _: std.mem.Allocator) void {
+                for (&self.shards) |*shard| {
+                    // No key cleanup: integer keys are value types, not heap-allocated.
+                    var it = shard.map.valueIterator();
+                    while (it.next()) |v| cleanup(V, remote_alloc, v);
+                    shard.map.deinit(remote_alloc);
+                }
+            }
+
+            pub fn getOpCounts(self: *const Self) [N]u64 {
+                _ = self;
+                return [_]u64{0} ** N;
+            }
+        };
+    }
+
     // ShardedStringMap(V, N) — RwLock-sharded string hash map.
     // N independent shards, each protected by a RwLock. Readers are concurrent
     // within a shard; writers are exclusive per-shard. Thread-safe for @parallel.

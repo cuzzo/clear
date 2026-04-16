@@ -2667,3 +2667,248 @@ test "PartitionedStringMap: tiny get-remove event log preserves per-op teardown 
 test "PartitionedStringMap: repeated tiny get-remove batches preserve event-log invariants" {
     try runTinyGetRemoveLoopWithEventLog(128);
 }
+
+// ─── PartitionedNumericMap tests ─────────────────────────────────────────────
+// Covers the SHARD pipeline path (putDirect/getDirect/containsDirect/removeDirect),
+// remote put/get across schedulers, count/values, and deinit.
+// Does not duplicate the full string-map diagnostic suite; focuses on the
+// structural differences: value-type keys, no key allocation, integer hashing.
+
+const NumMap = CheatLib.PartitionedNumericMap(i64, i64, 4);
+
+const NumMapFiberCtx = struct {
+    inner: *CheatLib.Promise(i64).Inner,
+    bg_alloc: std.mem.Allocator,
+    map: *NumMap,
+    start: i64,
+    count: i64,
+
+    fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+        const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+        defer ctx.bg_alloc.destroy(ctx);
+        defer ctx.inner.wg.done();
+
+        var total: i64 = 0;
+        var i: i64 = ctx.start;
+        while (i < ctx.start + ctx.count) : (i += 1) {
+            try ctx.map.put(std.heap.c_allocator, std.heap.c_allocator, i, i);
+        }
+        i = ctx.start;
+        while (i < ctx.start + ctx.count) : (i += 1) {
+            if (ctx.map.get(i)) |_| total += 1;
+        }
+        ctx.inner.result = total;
+    }
+};
+
+fn spawnNumMapWorker(rt: *Runtime, map: *NumMap, start: i64, count: i64) !CheatLib.Promise(i64) {
+    const sa = rt.getSched().allocator;
+    const promise = try CheatLib.Promise(i64).spawn(sa, rt.getSched());
+    const ctx = try sa.create(NumMapFiberCtx);
+    ctx.* = .{ .inner = promise.inner, .bg_alloc = sa, .map = map, .start = start, .count = count };
+    try header.spawnPinned(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&NumMapFiberCtx.run)),
+        ctx,
+        .{ .stack_size = .Standard, .pinned = true },
+    );
+    return promise;
+}
+
+test "PartitionedNumericMap: putDirect/getDirect/containsDirect/removeDirect (SHARD path)" {
+    // Tests the direct-access path used by SHARD pipelines.
+    // No scheduler needed — direct shard access is single-threaded.
+    var map: NumMap = .{};
+    defer map.deinit(std.heap.c_allocator, std.heap.c_allocator);
+
+    // Seed ensureOwnership with a fake scheduler so owners[] is set.
+    var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+    map.ensureOwnership();
+
+    // Insert 100 keys via putDirect (routing shard index ourselves)
+    var i: i64 = 0;
+    while (i < 100) : (i += 1) {
+        const sh = NumMap.shardIndexWithHash(i);
+        try map.putDirect(sh.shard, std.heap.c_allocator, i, i * 2);
+    }
+
+    try std.testing.expectEqual(@as(i64, 100), map.count());
+
+    // getDirect: all keys present with correct values
+    i = 0;
+    while (i < 100) : (i += 1) {
+        const sh = NumMap.shardIndexWithHash(i);
+        const v = map.getDirect(sh.shard, i);
+        try std.testing.expectEqual(@as(i64, i * 2), v.?);
+    }
+
+    // containsDirect: present and absent
+    const sh42 = NumMap.shardIndexWithHash(@as(i64, 42));
+    try std.testing.expect(map.containsDirect(sh42.shard, 42));
+    const sh999 = NumMap.shardIndexWithHash(@as(i64, 999));
+    try std.testing.expect(!map.containsDirect(sh999.shard, 999));
+
+    // removeDirect: remove half
+    i = 0;
+    while (i < 50) : (i += 1) {
+        const sh = NumMap.shardIndexWithHash(i);
+        map.removeDirect(sh.shard, std.heap.c_allocator, i);
+    }
+    try std.testing.expectEqual(@as(i64, 50), map.count());
+
+    // Overwrite: putDirect on existing key replaces value
+    const sh0 = NumMap.shardIndexWithHash(@as(i64, 50));
+    try map.putDirect(sh0.shard, std.heap.c_allocator, 50, 9999);
+    try std.testing.expectEqual(@as(i64, 9999), map.getDirect(sh0.shard, 50).?);
+}
+
+test "PartitionedNumericMap: shardIndexWithHash is deterministic" {
+    // Same key must always hash to the same shard.
+    const a = NumMap.shardIndexWithHash(@as(i64, 12345));
+    const b = NumMap.shardIndexWithHash(@as(i64, 12345));
+    try std.testing.expectEqual(a.shard, b.shard);
+    try std.testing.expectEqual(a.hash, b.hash);
+
+    // Different keys may (and generally do) land in different shards.
+    // With N=4 and these keys the distribution should not be all-one-shard.
+    var counts = [_]usize{0} ** 4;
+    var k: i64 = 0;
+    while (k < 100) : (k += 1) {
+        counts[NumMap.shardIndexWithHash(k).shard] += 1;
+    }
+    var filled: usize = 0;
+    for (counts) |c| if (c > 0) { filled += 1; };
+    try std.testing.expect(filled > 1);
+}
+
+test "PartitionedNumericMap: count and values" {
+    var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var map: NumMap = .{};
+    defer map.deinit(std.heap.c_allocator, std.heap.c_allocator);
+    map.ensureOwnership();
+
+    var i: i64 = 0;
+    while (i < 20) : (i += 1) {
+        const sh = NumMap.shardIndexWithHash(i);
+        try map.putDirect(sh.shard, std.heap.c_allocator, i, i + 100);
+    }
+
+    try std.testing.expectEqual(@as(i64, 20), map.count());
+
+    var vals = try map.values(alloc);
+    defer vals.deinit(alloc);
+    try std.testing.expectEqual(@as(usize, 20), vals.items.len);
+
+    var ks = try map.keys(alloc);
+    defer ks.deinit(alloc);
+    try std.testing.expectEqual(@as(usize, 20), ks.items.len);
+
+    // Sum of values should be sum of (i+100) for i in 0..20 = 190 + 20*100 = 2190
+    var total: i64 = 0;
+    for (vals.items) |v| total += v;
+    try std.testing.expectEqual(@as(i64, 2190), total);
+}
+
+test "PartitionedNumericMap: remote put/get across schedulers" {
+    initWorkerGlobals();
+    defer deinitWorkerGlobals();
+
+    var threads: [2]std.Thread = undefined;
+    startWorkers(&threads, 2);
+    defer stopWorkers(&threads, 2);
+
+    var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var rt = try Runtime.init(alloc, 4 * 1024 * 1024, &global_ebr_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const FIBERS = 4;
+    const KEYS_PER = 100;
+
+    const MainFn = struct {
+        outer_rt: *Runtime,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            const rt_ptr = self.outer_rt;
+            const sa = rt_ptr.getSched().allocator;
+
+            const map = try sa.create(NumMap);
+            defer { map.deinit(std.heap.c_allocator, std.heap.c_allocator); sa.destroy(map); }
+            map.* = .{};
+
+            var promises: [FIBERS]CheatLib.Promise(i64) = undefined;
+            for (0..FIBERS) |fi| {
+                promises[fi] = try spawnNumMapWorker(rt_ptr, map, @as(i64, @intCast(fi * KEYS_PER)), KEYS_PER);
+            }
+            const total = try waitForPromises(&promises);
+            try std.testing.expectEqual(@as(i64, FIBERS * KEYS_PER), total);
+            try std.testing.expectEqual(@as(i64, FIBERS * KEYS_PER), map.count());
+        }
+    };
+
+    var runner = MainFn{ .outer_rt = &rt };
+    try runCheckedMain(&sched, @as(qs.TaskFn, @ptrCast(&MainFn.run)), &runner);
+}
+
+test "PartitionedNumericMap: remote remove cleans up correctly" {
+    initWorkerGlobals();
+    defer deinitWorkerGlobals();
+
+    var threads: [2]std.Thread = undefined;
+    startWorkers(&threads, 2);
+    defer stopWorkers(&threads, 2);
+
+    var sched = try fp.Scheduler.init(alloc, &global_ebr_ctx, &global_stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var rt = try Runtime.init(alloc, 4 * 1024 * 1024, &global_ebr_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    const MainFn = struct {
+        outer_rt: *Runtime,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            const rt_ptr = self.outer_rt;
+            const sa = rt_ptr.getSched().allocator;
+
+            const map = try sa.create(NumMap);
+            defer { map.deinit(std.heap.c_allocator, std.heap.c_allocator); sa.destroy(map); }
+            map.* = .{};
+
+            // Put 50 keys via remote path
+            var i: i64 = 0;
+            while (i < 50) : (i += 1) {
+                try map.put(std.heap.c_allocator, std.heap.c_allocator, i, i);
+            }
+            try std.testing.expectEqual(@as(i64, 50), map.count());
+
+            // Remove all via remote path
+            i = 0;
+            while (i < 50) : (i += 1) {
+                map.remove(std.heap.c_allocator, i);
+            }
+            try std.testing.expectEqual(@as(i64, 0), map.count());
+        }
+    };
+
+    var runner = MainFn{ .outer_rt = &rt };
+    try runCheckedMain(&sched, @as(qs.TaskFn, @ptrCast(&MainFn.run)), &runner);
+}

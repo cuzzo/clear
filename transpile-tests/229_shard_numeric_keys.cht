@@ -1,0 +1,27 @@
+-- SHARD pipeline with integer keys (HashMap<Int64, Int64>@sharded).
+-- Verifies that numeric-keyed sharded maps work end-to-end through the
+-- SHARD routing pipeline with zero string allocation.
+
+FN main() RETURNS Void ->
+    n = 100_i64;
+    buckets = 10_i64;
+
+    -- Build histogram: bucket each value in [0,100) into 10 buckets.
+    MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
+    (0..<n) s> SHARD(_ MOD buckets, counts) s> CONCURRENT EACH {
+        counts[_] = (counts[_] OR 0_i64) + 1_i64;
+    };
+
+    -- Each bucket should have exactly n/buckets = 10 entries.
+    ASSERT counts.count() == buckets, "expected 10 buckets";
+
+    -- Sum over values should equal n.
+    vals = counts.values();
+    total = vals s> CONCURRENT SUM toFloat(_);
+    ASSERT total == toFloat(n), "total mismatch";
+
+    -- Spot check: bucket 0 contains values 0, 10, 20, ... 90 → 10 items.
+    ASSERT (counts[0_i64] OR 0_i64) == 10_i64, "bucket 0 should have 10 items";
+
+    print("ok");
+END

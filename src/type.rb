@@ -1635,7 +1635,7 @@ class Type
       if sharded?  # sharded without sync = shared-nothing (no locks)
         if numeric_map?
           key_zig = key_type.zig_type
-          return "CheatLib.ShardedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
+          return "CheatLib.PartitionedNumericMap(#{key_zig}, #{val_zig}, #{shard_count})"
         end
         return "CheatLib.PartitionedStringMap(#{val_zig}, #{shard_count})"
       end

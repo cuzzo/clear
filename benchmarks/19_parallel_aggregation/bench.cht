@@ -19,20 +19,15 @@ FN lcg(state: Int64) RETURNS Int64 ->
 END
 
 FN absInt(x: Int64) RETURNS Int64 ->
-    IF x < 0 THEN RETURN 0 - x; END
+    IF x < 0_i64 THEN RETURN 0_i64 - x; END
     RETURN x;
-END
-
-FN makeKey(seed: Int64, buckets: Int64) RETURNS String ->
-    RETURN "b:${toString(absInt(seed) MOD buckets)}";
 END
 
 FN main() RETURNS Void ->
     n = 1000000;
     buckets = 1000;
 
-    -- Pre-compute seeds (Int64 array: 80MB vs 1.1GB for string keys).
-    -- LCG is sequential so we must pre-compute, but seeds are 8 bytes each.
+    -- Pre-compute seeds (LCG is sequential so we must pre-compute).
     MUTABLE seeds: Int64[]@list = List[];
     MUTABLE seed: Int64 = 42;
     FOR i IN (0_i64 ..< n) DO
@@ -40,13 +35,11 @@ FN main() RETURNS Void ->
         seeds.append(seed);
     END
 
-    -- Phase 1: Build histogram via SHARD (shared-nothing counting).
-    -- Key strings are generated on-the-fly inside the streaming pipeline.
+    -- Phase 1: Build histogram via SHARD with integer keys — zero string allocation.
     t0 = timestampMs();
-    MUTABLE counts: HashMap<Int64>@sharded(32) = {};
-    (0..<n) s> SHARD(makeKey(seeds[_], buckets), counts) s> CONCURRENT EACH {
-        cur = counts[_] OR 0;
-        counts[_] = cur + 1;
+    MUTABLE counts: HashMap<Int64, Int64>@sharded(32) = {};
+    (0..<n) s> SHARD(absInt(seeds[_]) MOD buckets, counts) s> CONCURRENT EACH {
+        counts[_] = (counts[_] OR 0_i64) + 1_i64;
     };
     shardMs = timestampMs() - t0;
 

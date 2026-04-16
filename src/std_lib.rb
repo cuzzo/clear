@@ -698,6 +698,7 @@ INDEX_OPS = {
   numeric_map: {
     get: {
       zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})",
+      shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})",
       return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
       container_borrow: true,
     },
@@ -707,7 +708,10 @@ INDEX_OPS = {
       allocates: true,
       alloc: :receiver_storage,
       value_transforms: [],
-      sharded_zig: "try {target}.put({alloc}, {index}, {value})",
+      sharded_zig: "try {target}.put({alloc}, {alloc}, {index}, {value})",
+      shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
+      shard_direct_value_transforms: [],
+      shard_alloc: :heap,
     },
   },
   array: {
