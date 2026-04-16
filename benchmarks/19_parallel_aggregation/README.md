@@ -17,17 +17,20 @@ All three use the same LCG with the same seed => identical results.
 
 ```
 Rust (rayon)    0.018 s   RSS: 16 MB
-Go (goroutines) 0.013 s   RSS: 12 MB
-CLEAR (fibers)  0.111 s   RSS: 46 MB
+Go (goroutines) 0.014 s   RSS: 12 MB
+CLEAR (fibers)  0.081 s   RSS: 46 MB
 
-CLEAR vs Go:   +745%
-CLEAR vs Rust: +521%
+CLEAR vs Go:   +493%
+CLEAR vs Rust: +342%
 ```
+
+Previous result before switching to integer keys: CLEAR 0.111 s (+745% vs Go).
+Integer keys eliminate ~1M string allocations per run, saving ~30ms.
 
 ## Why CLEAR is slower
 
 Same fiber runtime overhead documented in benchmark 18 (SHARD vs locked).
-The SHARD routing pipeline (hash key, send to owning fiber via channel,
+The SHARD routing pipeline (hash key, send to owning fiber via SPSC channel,
 receive + process) costs ~60ns per item. With 1M items and trivially cheap
 per-item work (one map increment, ~10ns), routing dominates.
 
