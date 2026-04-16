@@ -117,11 +117,11 @@ RSpec.describe MIRLowering do
   end
 
   describe "#emit_builtin" do
-    it "uses the bare pointee type for dupeUnionValue" do
+    it "passes a bare type name through to dupeUnionValue unchanged" do
       mir = lowering.send(
         :emit_builtin,
         :dupeUnionValue,
-        [MIR::Ident.new("*Value"), MIR::Ident.new("val"), MIR::Ident.new("rt.heapAlloc()")]
+        [MIR::Ident.new("Value"), MIR::Ident.new("val"), MIR::Ident.new("rt.heapAlloc()")]
       )
       zig = emit(mir)
       expect(zig).to eq("try CheatLib.dupeUnionValue(Value, val, rt.heapAlloc())")

@@ -101,7 +101,7 @@ class MIRLowering
     return expr unless mir_allocates?(expr)
     @tmp_counter += 1
     name = "__tmp_#{@tmp_counter}"
-    @pending_stmts << MIR::AllocMark.new(name, :heap)
+    @pending_stmts << MIR::AllocMark.new(name, :heap, nil)
     @pending_stmts << MIR::Let.new(name, expr, false, nil, nil)
     entry = hoist_cleanup_entry(expr, ast_node)
     if entry
@@ -189,7 +189,7 @@ class MIRLowering
     when MIR::Drop              then lower_drop(node)
     when MIR::Promote           then lower_promote(node)
     when MIR::SuppressCleanup   then MIR::MoveMark.new(zig_safe_name(node.name))
-    when MIR::Alloc             then MIR::AllocMark.new(node.name, node.alloc)
+    when MIR::Alloc             then MIR::AllocMark.new(node.name, node.alloc, nil)
     when MIR::Return            then MIR::ReturnMark.new(node.escaped_vars)
     when MIR::ReassignCleanup   then MIR::ReassignMark.new(node.name, node.alloc)
     when MIR::FieldCleanup      then MIR::FieldCleanupMark.new(node.target_name, node.field, node.alloc)
@@ -976,7 +976,7 @@ class MIRLowering
       ti = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
       drop_entry = entry.dup
       build_drop_entry!(drop_entry, ti, nil)
-      takes_mir << MIR::AllocMark.new(p[:name].to_s, entry[:alloc])
+      takes_mir << MIR::AllocMark.new(p[:name].to_s, entry[:alloc], ti)
       takes_mir << MIR::Cleanup.new(zig_safe_name(p[:name].to_s), drop_entry)
     end
 
@@ -3070,7 +3070,7 @@ class MIRLowering
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
-        hoisted << MIR::AllocMark.new(temp, :heap)
+        hoisted << MIR::AllocMark.new(temp, :heap, nil)
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
         # errdefer cleans this field if a later allocation (another field or
         # the outer struct pointer) fails.
@@ -3128,7 +3128,7 @@ class MIRLowering
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
-        hoisted << MIR::AllocMark.new(temp, :heap)
+        hoisted << MIR::AllocMark.new(temp, :heap, nil)
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
         hoisted << MIR::ErrDeferStmt.new(
           MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap)
@@ -3423,7 +3423,7 @@ class MIRLowering
       drop_entry = binding_entry.dup
       build_drop_entry!(drop_entry, node.type_info, node)
       mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry[:alloc]
-      [MIR::AllocMark.new(decl_name, mir_alloc), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
+      [MIR::AllocMark.new(decl_name, mir_alloc, node.type_info), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
     else
       let_node
     end
@@ -3565,7 +3565,7 @@ class MIRLowering
       when :dupe_borrowed_union
         unless val_ti&.string?
           if should_dupe_borrowed_union?(val_node, val_ti)
-            zig_t = transpile_type(val_ti)
+            zig_t = bare_zig_type(val_ti)
             val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
           end
         end
@@ -3989,7 +3989,7 @@ class MIRLowering
       # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
       # fields of __ret.  Phase 4 will replace this frame+promote pattern with a
       # direct HeapCreate so the AllocMark reflects an actual upfront allocation.
-      stmts << MIR::AllocMark.new("__ret", :heap)
+      stmts << MIR::AllocMark.new("__ret", :heap, nil)
       # ErrCleanup: if any promote call fails, free partially-promoted fields.
       # Uses struct_with_cleanup_fields (same Zig template as non_copy_union).
       stmts << MIR::ErrCleanup.new("__ret",
@@ -4022,7 +4022,7 @@ class MIRLowering
       ret_type = node.value.respond_to?(:full_type) ? Type.new(node.value.full_type) : nil
       if ret_type&.string?
         MIR::ScopeBlock.new([
-          MIR::AllocMark.new("__ret_dupe", :heap),
+          MIR::AllocMark.new("__ret_dupe", :heap, nil),
           MIR::Let.new("__ret_dupe", MIR::DupeSlice.new(value, :heap), false, nil, nil),
           MIR::ErrCleanup.new("__ret_dupe", { kind: :heap_string, alloc: :heap, has_moved_guard: false }),
           MIR::ReturnStmt.new(MIR::Ident.new("__ret_dupe"))
@@ -4135,14 +4135,16 @@ class MIRLowering
     entry = BUILTIN_OPS[name]
     raise "emit_builtin: unknown builtin :#{name}" unless entry
     pattern = entry[:zig].dup
-    if name == :dupeUnionValue && args.first.is_a?(MIR::Ident)
-      args = args.dup
-      args[0] = MIR::Ident.new(args[0].name.sub(/\A\*/, ''))
-    end
     args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}", emit_expr(a)) }
     iz = MIR::InlineZig.new(pattern, "builtin_#{name}")
     iz.stdlib_def = entry
     iz
+  end
+
+  # Returns the bare Zig type name for a type_info value, stripping any
+  # leading pointer qualifier that transpile_type may add (e.g. *Value -> Value).
+  def bare_zig_type(ti)
+    transpile_type(ti.is_a?(Type) ? ti.resolved.to_s : ti.to_s)
   end
 
   def direct_indexable_collection_type?(type_info)

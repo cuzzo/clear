@@ -29,6 +29,10 @@
 #   INV-FRAME-REWIND: Every loop body that frame-allocates must contain
 #     a restoreLoopMark defer to prevent unbounded frame arena growth.
 #
+#   INV-COPY-CLEANUP: A Cleanup paired with an AllocMark whose type_info is
+#     a primitive or Id<T> (with no sync/rc capability) is a compiler bug:
+#     value types that never own heap memory must not receive cleanup nodes.
+#
 # THE MOMENT this checker adds logic outside these invariants, it is no
 # longer a gatekeeper -- it is ad-hoc patch code that gives false confidence.
 # Every new check must be justified by one of these invariants.
@@ -243,6 +247,18 @@ class MIRChecker
       if alloc_sym != cleanup_sym
         @errors << error(:ALLOC_CLEANUP_MISMATCH, name,
           "allocated with :#{alloc_sym} but cleanup uses :#{cleanup_sym}")
+      end
+
+      # INV-COPY-CLEANUP: primitives and Id<T> (value types that can never own
+      # heap memory) must not get a Cleanup node. If they do, needs_explicit_cleanup?
+      # or visit_CopyNode missed the gate.
+      if (ti = alloc_marks.first.type_info).is_a?(Type)
+        no_caps = !ti.any_sync? && !ti.multiowned? && !ti.shared?
+        if no_caps && (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
+          @errors << error(:COPY_CLEANUP, name,
+            "cleanup emitted for value type #{ti} (primitive or Id<T>) that can never " \
+            "own heap memory -- needs_explicit_cleanup? or visit_CopyNode missed the gate")
+        end
       end
     end
 

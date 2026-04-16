@@ -483,7 +483,7 @@ module MIR
   # ================================================================
 
   # Marks an allocation point. Subsumes old MIR::Alloc.
-  AllocMark = Struct.new(:name, :alloc) do
+  AllocMark = Struct.new(:name, :alloc, :type_info) do
     include Stmt
     def stmt?; true; end
   end
