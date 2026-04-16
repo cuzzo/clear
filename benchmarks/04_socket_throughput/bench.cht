@@ -43,13 +43,18 @@ FN main() RETURNS Void ->
         END
     };
 
-    -- Reader loop: reads until all 25 600 000 bytes received (100 000 × 256).
+    -- Reader loop: reads until all 25 600 000 bytes received.
     -- TCP coalesces writes so each tcpRead may return more than 256 bytes.
+    -- Timer covers only the read loop (same scope as C/Rust BENCH_RESULT).
+    t0 = timestampMs();
     MUTABLE total_bytes = 0;
     WHILE total_bytes < 25600000 DO
         data = tcpRead(client);
         total_bytes = total_bytes + data.length();
     END
+    elapsed = timestampMs() - t0;
+
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
 
     -- Wait for writer to finish, then let defers close both fds.
     NEXT w;
