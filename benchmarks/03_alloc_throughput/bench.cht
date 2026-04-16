@@ -1,14 +1,15 @@
 -- @leak: n = 10000 -> n = 100
--- Heap Array Benchmark
+-- Alloc Throughput Benchmark
 --
 -- All three languages allocate a 10000-element heap array per outer
 -- iteration, fill it, sum it, and discard it. 10000 outer iterations.
--- Total: 100M element writes + 100M element reads.
+-- Total: 10K alloc+free cycles, 100M element writes, 100M element reads.
 --
--- CLEAR runs three variants:
---   1. Regular FOR loops (checkYield + frame marks per iteration)
---   2. Outer FOR + inner TIGHT (frame rewind per outer, no yield on inner)
---   3. C/Rust: malloc/Vec + raw indexed writes
+-- Measures allocator throughput (dominant cost) + sequential fill+sum.
+-- C: malloc/free. Rust: Vec::with_capacity. CLEAR: Float64[10000]@list.
+--
+-- Runner records TIGHT WHILE time (apples-to-apples vs C/Rust).
+-- Regular FOR is printed as CLEAR overhead reference only.
 
 FN benchRegular(n: Int64) RETURNS Float64 ->
     MUTABLE total: Float64 = 0.0;

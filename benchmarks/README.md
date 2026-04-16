@@ -54,7 +54,7 @@ CLEAR_THREADS=2 ./benchmarks/21_frame_vs_heap/bench_clear
 |---|------|-----------------|----------------|
 | 01 | call_overhead | Recursive fib — call overhead and stack frame cost | C, Rust |
 | 02 | sroa | Scalar replacement of aggregates | C, Rust |
-| 03 | list_vs_stack | Dynamic list append vs stack arrays | C, Rust |
+| 03 | alloc_throughput | Heap alloc+fill+sum+free (10K x 10K elements) | C, Rust |
 | 04 | socket_throughput | TCP echo throughput | C, Rust |
 | 05 | hashmap | HashMap insert + lookup (1M keys) | C, Rust |
 | 06 | string_builder | String concatenation via list+join | C |
