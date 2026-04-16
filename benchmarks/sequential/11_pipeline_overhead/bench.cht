@@ -30,6 +30,7 @@
 
 FN buildData(n: Int64) RETURNS Float64[]@list ->
     MUTABLE data: Float64[]@list = [];
+    data.reserve(n);
     MUTABLE state: Int64 = 42;
     FOR i IN (0_i64 ..< n) DO
         state = (state %* 6364136223846793005_i64 %+ (i %+ 1442695040888963407_i64));

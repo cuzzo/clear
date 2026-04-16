@@ -21,6 +21,17 @@ STD_LIB = {
     mutates_receiver: true,
   },
 
+  # Pre-allocate capacity without inserting elements. No-op if capacity already sufficient.
+  # Avoids doubling waste when the final size is known before filling a loop.
+  "reserve" => {
+    args: [:"Any[]", :Int64],
+    return: :Void,
+    zig: "try {0}.ensureTotalCapacity({alloc}, @intCast({1}))",
+    allocates: true,
+    alloc: :receiver_storage,
+    mutates_receiver: true,
+  },
+
   "remove" => {
     args: [:"Any[]", :Int64],
     return: :infer_element_type,
