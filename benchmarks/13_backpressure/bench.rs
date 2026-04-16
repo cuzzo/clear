@@ -1,11 +1,11 @@
-// Backpressure Benchmark — Rust / Tokio
+// Backpressure Benchmark — Rust / crossbeam
 //
-// Producer sends 100,000 items through a bounded mpsc channel (capacity 64).
-// 8 Tokio tasks consume items (CPU work: 500 LCG iterations each).
-// Producer blocks (awaits) when the channel is full — real backpressure.
+// Producer sends 100,000 items through a bounded channel (capacity 64).
+// N_CPU consumer threads process each item (CPU work: 5,000 LCG iterations).
+// Producer blocks when the channel is full — real backpressure.
 //
-// Tests: bounded channel throughput, async producer blocking,
-// Tokio task scheduling under sustained load.
+// crossbeam::channel::bounded is the idiomatic Rust bounded work queue.
+// Native threads are correct here: work is CPU-bound, not I/O-bound.
 //
 // Build: cargo build --release
 // Run:   ./target/release/bench_rust
@@ -13,7 +13,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc;
+use crossbeam_channel::bounded;
 
 const TOTAL_ITEMS: u64 = 100_000;
 const CHAN_CAP: usize = 64;
@@ -27,50 +27,34 @@ fn process_item(val: u64) -> u64 {
     x
 }
 
-#[tokio::main]
-async fn main() {
-    let (tx, rx) = mpsc::channel::<u64>(CHAN_CAP);
+fn main() {
+    let n_consumers = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(8);
+
+    let (tx, rx) = bounded::<u64>(CHAN_CAP);
     let total = Arc::new(AtomicU64::new(0));
 
     let t0 = Instant::now();
 
-    // Start consumers (share the receiver via Arc<Mutex>)
-    let n_consumers = std::env::var("TOKIO_WORKER_THREADS")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or_else(|| std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8));
-    let mut consumer_handles = Vec::new();
-    let rx = Arc::new(tokio::sync::Mutex::new(rx));
-    for _ in 0..n_consumers {
-        let rx = Arc::clone(&rx);
+    // Start consumers
+    let handles: Vec<_> = (0..n_consumers).map(|_| {
+        let rx = rx.clone();
         let total = Arc::clone(&total);
-        consumer_handles.push(tokio::spawn(async move {
-            loop {
-                let val = {
-                    let mut guard = rx.lock().await;
-                    guard.recv().await
-                };
-                match val {
-                    Some(v) => {
-                        let result = process_item(v);
-                        total.fetch_add(result, Ordering::Relaxed);
-                    }
-                    None => break,
-                }
+        std::thread::spawn(move || {
+            for val in rx {
+                total.fetch_add(process_item(val), Ordering::Relaxed);
             }
-        }));
-    }
+        })
+    }).collect();
 
     // Producer: send items (blocks when channel full)
     for i in 0..TOTAL_ITEMS {
-        tx.send(i).await.unwrap();
+        tx.send(i).unwrap();
     }
-    drop(tx); // Close channel
+    drop(tx); // Close channel — consumers drain and exit
 
-    // Wait for consumers
-    for h in consumer_handles {
-        h.await.unwrap();
-    }
+    for h in handles { h.join().unwrap(); }
 
     let elapsed = t0.elapsed().as_secs_f64();
     println!("Checksum: {}", total.load(Ordering::Relaxed) % 1_000_000_000);
