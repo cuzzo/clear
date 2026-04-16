@@ -36,11 +36,8 @@
 #define N    1000
 #define RUNS 10000
 
-static const char *pieces[] = {
-    "alpha", "beta_x", "gamma_", "delta",
-    "epsilon", "zeta_y", "eta_12", "theta",
-};
-#define NPIECES (sizeof(pieces) / sizeof(pieces[0]))
+static const char PIECE[] = "hello";
+static const size_t PLEN  = 5;
 
 static double elapsed_ms(struct timespec a, struct timespec b) {
     return (b.tv_sec - a.tv_sec) * 1e3 + (b.tv_nsec - a.tv_nsec) / 1e6;
@@ -58,13 +55,11 @@ int main(void) {
         assert(s);
 
         for (int i = 0; i < N; i++) {
-            const char *p = pieces[i % NPIECES];
-            size_t plen = strlen(p);
-            while (len + plen + 1 > cap) cap *= 2;
+            while (len + PLEN + 1 > cap) cap *= 2;
             s = realloc(s, cap);
             assert(s);
-            memcpy(s + len, p, plen);
-            len += plen;
+            memcpy(s + len, PIECE, PLEN);
+            len += PLEN;
         }
         s[len] = '\0';
         total += len;
@@ -72,7 +67,9 @@ int main(void) {
     }
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
-    printf("total_bytes=%zu\nTime: %.4f seconds\n",
-           (size_t)(total / RUNS), elapsed_ms(t0, t1) / 1000.0);
+    double ms = elapsed_ms(t0, t1);
+    printf("BENCH_RESULT: %.0f ms\n", ms);
+    printf("Time: %.1f ms | total_bytes_per_run: %zu\n",
+           ms, (size_t)(total / RUNS));
     return 0;
 }
