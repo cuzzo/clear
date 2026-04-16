@@ -4,18 +4,26 @@
 // by default) and async file I/O, giving true parallelism comparable to Go's
 // goroutine scheduler.
 //
+// Backpressure: tokio::sync::Semaphore(128) caps in-flight reads, mirroring
+// CLEAR's BG-batch approach and preventing io_uring SQ overflow on large
+// file counts.  Go spawns all goroutines at once — its scheduler handles the
+// resulting concurrency transparently.
+//
 // Tokio task overhead: ~a few hundred bytes per task (vs ~8MB OS thread stack
 // in the old std::thread version, vs ~2KB CLEAR fiber).
 //
-// Search: memchr::memmem::find_iter — SIMD-accelerated (AVX2/SSE2),
-// matching Go's bytes.Count throughput.
+// Search: memchr::memmem::find_iter — SIMD-accelerated (AVX2/SSE2).
+// NOTE: CLEAR uses std.mem.count via LLVM autovectorization; results may
+// differ from hand-tuned SIMD.  See README for details.
 //
 // Build: cargo build --release   (from this directory; runner.rb does this)
 // Run:   ./bench_rust
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 use memchr::memmem;
+use tokio::sync::Semaphore;
 
 const N_FILES: usize = 2000;
 const FILE_SIZE: usize = 10 * 1024;
@@ -106,11 +114,14 @@ async fn main() {
 
     let t0 = Instant::now();
 
-    // Spawn one Tokio task per file.  tokio::fs::read uses the blocking thread
-    // pool internally so file reads run in parallel across CPU cores.
+    // Semaphore caps in-flight reads to 128, matching CLEAR's batch size.
+    // This prevents io_uring SQ overflow and bounds memory pressure.
+    let sem = Arc::new(Semaphore::new(128));
     let mut set = tokio::task::JoinSet::new();
     for (i, path) in paths.into_iter().enumerate() {
+        let permit = Arc::clone(&sem).acquire_owned().await.unwrap();
         set.spawn(async move {
+            let _permit = permit; // released when task completes
             let data = tokio::fs::read(&path).await.unwrap_or_default();
             SearchResult { file_idx: i, count: count_occurrences(&data, NEEDLE.as_bytes()) }
         });

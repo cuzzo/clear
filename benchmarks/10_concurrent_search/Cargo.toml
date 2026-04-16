@@ -11,6 +11,6 @@ path = "bench.rs"
 
 [dependencies]
 # Async runtime — multi-threaded, uses a thread pool sized to num_cpu.
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "sync"] }
 # SIMD substring search (memmem) — matches Go's bytes.Count throughput.
 memchr = "2"

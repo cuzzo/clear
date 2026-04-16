@@ -3,6 +3,9 @@ const builtin = @import("builtin");
 const linux = std.os.linux;
 const compat = @import("../lib/compat.zig");
 pub const Runtime = @import("runtime.zig").Runtime;
+
+// SIMD-accelerated byte search from libc. Not exposed in std.c in Zig 0.16.
+extern "c" fn memchr(s: [*]const u8, c: c_int, n: usize) ?[*]const u8;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const streams = @import("../lib/streams.zig");
@@ -556,14 +559,29 @@ pub const CheatLib = struct {
     // Returns 0 if needle is empty or not found.
     // Usage: n = countOccurrences("hello world", "o")  → 2
     //
-    // Uses std.mem.count, which delegates to std.mem.indexOf in a tight loop.
-    // The Zig backend autovectorizes the inner byte scan on amd64 (SSE2/AVX2),
-    // matching the throughput of Go's bytes.Count.  The old scalar startsWith
-    // loop processed one byte per iteration; this version scans a full vector
-    // register (16–32 bytes) per iteration when the CPU supports it.
+    // Strategy: use libc memchr (SIMD-accelerated on all modern platforms) to
+    // find first-byte hits at full vector width (16-32 bytes/cycle on SSE2/AVX2),
+    // then scalar-verify the remaining bytes.  This matches the approach used by
+    // Go's bytes.Count and Rust's memchr::memmem, and is strictly faster than
+    // std.mem.count whose irregular stride (needle.len on hit, 1 on miss) prevents
+    // LLVM from autovectorizing the inner loop.
     pub fn countOccurrences(haystack: []const u8, needle: []const u8) i64 {
         if (needle.len == 0) return 0;
-        return @intCast(std.mem.count(u8, haystack, needle));
+        var count: i64 = 0;
+        var remaining = haystack;
+        while (remaining.len >= needle.len) {
+            // SIMD scan for first byte of needle.
+            const ptr = memchr(remaining.ptr, needle[0], remaining.len) orelse break;
+            const offset = @intFromPtr(ptr) - @intFromPtr(remaining.ptr);
+            const rest = remaining[offset..];
+            if (rest.len >= needle.len and std.mem.eql(u8, rest[0..needle.len], needle)) {
+                count += 1;
+                remaining = rest[needle.len..];
+            } else {
+                remaining = rest[1..];
+            }
+        }
+        return count;
     }
 
     // Sleep for milliseconds using a blocking OS sleep. Intended for tests / utility code.
@@ -1059,13 +1077,20 @@ pub const CheatLib = struct {
     }
 
     // indexOf: returns ?i64 position of needle in haystack, or null if not found.
+    // Uses memchr (libc SIMD) to find the first byte, then scalar-verifies the rest.
     pub fn indexOf(haystack: []const u8, needle: []const u8) ?i64 {
-        if (std.mem.indexOf(u8, haystack, needle)) |pos| {
-            return @intCast(pos);
+        if (needle.len == 0) return 0;
+        var remaining = haystack;
+        while (remaining.len >= needle.len) {
+            const ptr = memchr(remaining.ptr, needle[0], remaining.len) orelse return null;
+            const offset = @intFromPtr(ptr) - @intFromPtr(remaining.ptr);
+            const rest = remaining[offset..];
+            if (rest.len >= needle.len and std.mem.eql(u8, rest[0..needle.len], needle))
+                return @intCast(@intFromPtr(ptr) - @intFromPtr(haystack.ptr));
+            remaining = rest[1..];
         }
         return null;
     }
-
     // toString: Int64 -> String (heap-allocated decimal representation)
     /// Parse a string to i64. Returns error on invalid input.
     pub fn toInt(s: []const u8) !i64 {
