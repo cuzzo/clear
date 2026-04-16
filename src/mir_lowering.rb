@@ -2928,7 +2928,7 @@ class MIRLowering
       items = MIR::FieldGet.new(target, "items")
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
-    elsif ti && direct_indexable_collection_type?(ti)
+    elsif ti && direct_indexable_collection_type?(ti, node.target)
       direct_index_get(target, index, ti)
     else
       # Registry-driven: dispatch_key → INDEX_OPS get :builtin (string_raw → charAt,
@@ -3997,16 +3997,25 @@ class MIRLowering
     iz
   end
 
-  def direct_indexable_collection_type?(type_info)
+  def direct_indexable_collection_type?(type_info, target_node = nil)
     ti = Type.new(type_info)
-    # Only optimize explicitly-tagged @list collections. Dynamic arrays (WHERE results,
-    # slice params) are ambiguous at lowering time — leave them to CheatLib.getAt.
-    ti.list_collection?
+    return true if ti.list_collection?
+    # Slice params (function parameters typed as T[]) support direct indexing.
+    # Local dynamic arrays are ambiguous at lowering time — leave them to CheatLib.getAt.
+    return true if ti.array? && !ti.string? &&
+                   target_node.is_a?(AST::Identifier) &&
+                   @current_fn_param_names&.include?(target_node.name)
+    false
   end
 
-  def direct_index_get(target, index, _type_info)
+  def direct_index_get(target, index, type_info)
+    ti = Type.new(type_info)
     cast_idx = MIR::Cast.new(index, "usize", :intCast)
-    MIR::IndexGet.new(MIR::FieldGet.new(target, "items"), cast_idx)
+    if ti.list_collection?
+      MIR::IndexGet.new(MIR::FieldGet.new(target, "items"), cast_idx)
+    else
+      MIR::IndexGet.new(target, cast_idx)
+    end
   end
 
   def lower_direct_length(node)
@@ -4018,14 +4027,17 @@ class MIRLowering
 
     recv = lower(recv_ast)
     ti = Type.new(recv_ti)
+    is_param_slice = ti.array? && !ti.string? &&
+                     recv_ast.is_a?(AST::Identifier) &&
+                     @current_fn_param_names&.include?(recv_ast.name)
     len_expr =
       if ti.list_collection?
         # Explicit @list: always std.ArrayListUnmanaged — safe to go direct.
         MIR::FieldGet.new(MIR::FieldGet.new(recv, "items"), "len")
-      elsif ti.string?
+      elsif ti.string? || is_param_slice
         MIR::FieldGet.new(recv, "len")
       else
-        # Dynamic arrays and other types: CheatLib.len handles both ArrayListUnmanaged
+        # Local dynamic arrays: CheatLib.len handles both ArrayListUnmanaged
         # (via .items.len) and slices (via .len) at runtime — fall back to it.
         nil
       end

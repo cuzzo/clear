@@ -138,7 +138,7 @@ module EscapeAnalysis
     if val.is_a?(AST::Identifier)
       ti = val.type_info
       ti = ti.is_a?(Type) ? ti : (ti ? (Type.new(ti) rescue nil) : nil)
-      return !!(ti&.needs_escape_promotion? && !ti&.heap_provenance?)
+      return !!(ti&.needs_escape_promotion? && !ti&.string? && !ti&.heap_provenance?)
     end
 
     false

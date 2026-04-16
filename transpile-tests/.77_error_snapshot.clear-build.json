@@ -1,0 +1,16 @@
+{
+  "source": "/home/yahn/cheat/transpile-tests/77_error_snapshot.cht",
+  "output": "/home/yahn/cheat/transpile-tests/77_error_snapshot",
+  "opt_level": "Debug",
+  "extra_flags": [
+    "-fno-llvm",
+    "-fno-lld"
+  ],
+  "module_mode": false,
+  "profile": false,
+  "use_c_allocator": false,
+  "default_stack": "Large",
+  "strict_test": false,
+  "exact_tiers": null,
+  "zig": "/home/yahn/zig-x86_64-linux-0.16.0/zig"
+}
