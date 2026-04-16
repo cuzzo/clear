@@ -27,3 +27,12 @@ the semaphore gates fiber dispatch without copying items through a queue.
 Go and Rust pay channel overhead on every item; under 32-thread contention
 on a 64-slot channel, Rust's native thread wake/sleep cycles add up more
 than Go's lightweight goroutine scheduler.
+
+## Note on prior Rust implementation
+
+The original Rust implementation used Tokio + `Arc<Mutex<Receiver>>` (see
+c54313ca8f331ac849440941428a084eca78f319). That approach serialized all
+consumers through a single mutex, meaning only one consumer ran at a time.
+It appeared faster (~50ms) but was not measuring backpressure throughput —
+it was measuring a serialized lock. crossbeam's multi-consumer channel is
+the correct implementation; the higher number is the honest one.
