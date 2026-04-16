@@ -1595,7 +1595,7 @@ RSpec.describe ZigTranspiler do
   # Fixed SOA cleanup
   # ===========================================================================
   describe "fixed SOA array cleanup" do
-    it "emits SoaList type for T[N]@soa, not a plain fixed array" do
+    it "emits SoaList.initCapacity for T[N]@soa, not empty init" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
         FN main() RETURNS Void ->
@@ -1605,9 +1605,25 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Must declare as SoaList, not [10]Point or [0]Point
-      expect(zig).to include("CheatLib.SoaList(Point){}")
+      # Must use initCapacity(N) to avoid frame-arena doubling waste
+      expect(zig).to include("CheatLib.SoaList(Point).initCapacity(rt.frameAlloc(), 10)")
+      # Must not start empty (old broken behavior)
+      expect(zig).not_to include("CheatLib.SoaList(Point){}")
+      # Must not be a plain fixed array
       expect(zig).not_to match(/\[\d+\]Point/)
+    end
+
+    it "emits matching deinit for the pre-allocated SOA" do
+      src = <<~CLEAR
+        STRUCT Point { x: Float64, y: Float64 }
+        FN main() RETURNS Void ->
+            MUTABLE soa: Point[10]@soa = [];
+            soa.append(Point{ x: 1.0, y: 2.0 });
+            RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("soa.deinit(rt.frameAlloc())")
     end
   end
 

@@ -3332,8 +3332,8 @@ class MIRLowering
         MIR::ContainerInit.new(transpile_type(ft), :list_empty, nil, nil)
       end
     elsif ft.fixed_soa?
-      # T[N]@soa: init as SoaList, not a plain fixed array
-      MIR::ContainerInit.new(transpile_type(ft), :list_empty, nil, nil)
+      # T[N]@soa: pre-allocate with initCapacity to avoid frame-arena doubling waste
+      MIR::ContainerInit.new(transpile_type(ft), :list_capacity, decl_alloc, ft.capacity)
     else
       rhs = node.value.is_a?(AST::MoveNode) ? node.value.value : node.value
       is_move = node.value.is_a?(AST::MoveNode)
