@@ -64,7 +64,7 @@ func main() {
 		return
 	}
 	defer ln.Close()
-	fmt.Println("Go pathological server listening on port 6391")
+	fmt.Println("Go pathological server listening on port 6390")
 
 	for {
 		conn, err := ln.Accept()

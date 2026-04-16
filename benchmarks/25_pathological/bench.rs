@@ -45,7 +45,7 @@ async fn handle_client(stream: tokio::net::TcpStream) {
 #[tokio::main]
 async fn main() {
     let listener = TcpListener::bind("0.0.0.0:6390").await.unwrap();
-    println!("Rust pathological server listening on port 6391");
+    println!("Rust pathological server listening on port 6390");
 
     loop {
         let (stream, _) = listener.accept().await.unwrap();
