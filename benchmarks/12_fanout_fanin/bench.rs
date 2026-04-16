@@ -1,15 +1,21 @@
-// Fan-Out / Fan-In Benchmark — Rust / Tokio
+// Fan-Out / Fan-In Benchmark — Rust / Rayon
 //
-// Spawns N Tokio tasks, each computes a CPU-bound result (iterated LCG),
-// then collects all results into a single sum.
+// 10,000 items processed in parallel via Rayon's work-stealing thread pool.
+// Each item runs 100K LCG iterations (CPU-bound), results summed.
 //
-// Tests: task spawn overhead, JoinSet throughput, fan-in latency.
+// Rayon is the idiomatic Rust choice for CPU-bound parallel work.
+// Tokio (async I/O executor) is the wrong tool here — running synchronous
+// CPU loops inside async tasks blocks the executor's threads.
+//
+// Rayon uses a work-stealing thread pool sized to num_cpu, matching
+// CLEAR's CONCURRENT(parallel: TRUE) worker pool model.  Neither pays
+// per-item spawn cost; both amortize thread overhead across the work queue.
 //
 // Build: cargo build --release
 // Run:   ./target/release/bench_rust
 
 use std::time::Instant;
-use tokio::task::JoinSet;
+use rayon::prelude::*;
 
 const N_WORKERS: usize = 10_000;
 const ITERATIONS: usize = 100_000;
@@ -22,23 +28,13 @@ fn do_work(seed: u64) -> u64 {
     x
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let t0 = Instant::now();
 
-    // Fan-out: spawn N tasks
-    let mut set = JoinSet::new();
-    for i in 0..N_WORKERS {
-        set.spawn(async move {
-            do_work(i as u64)
-        });
-    }
-
-    // Fan-in: collect results
-    let mut total: u64 = 0;
-    while let Some(result) = set.join_next().await {
-        total = total.wrapping_add(result.unwrap());
-    }
+    let total: u64 = (0..N_WORKERS as u64)
+        .into_par_iter()
+        .map(do_work)
+        .reduce(|| 0u64, |a, b| a.wrapping_add(b));
 
     let elapsed = t0.elapsed().as_secs_f64();
     println!("Checksum: {}", total % 1_000_000_000);
