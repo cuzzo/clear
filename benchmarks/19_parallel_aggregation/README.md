@@ -1,47 +1,48 @@
 # Benchmark 19: Parallel Aggregation (Histogram)
 
-10M events bucketed into 10K categories via deterministic LCG. Two phases:
-1. SHARD pipeline builds histogram on @sharded(32) map
-2. CONCURRENT SUM/MIN/MAX/AVERAGE over histogram values
+1M events bucketed into 1,000 categories via deterministic LCG. Two phases:
+
+1. Build histogram (parallel, shared-nothing)
+2. Compute sum/max/min/avg over histogram values (parallel reduce)
+
+All three use the same LCG with the same seed => identical results.
+
+## Implementations
+
+- **CLEAR**: `@sharded(32)` map + `SHARD()` routing (zero locks). Stats via `CONCURRENT SUM/MAX/MIN/AVERAGE`.
+- **Go**: Per-goroutine local maps + merge (~40 lines). Stats via goroutine partial reduce (~30 lines).
+- **Rust**: Rayon `par_iter().fold().reduce()` for histogram. Rayon `par_iter().sum()/reduce()` for stats (~20 lines).
 
 ## Results
 
 ```
-cores     Go (sequential)     CLEAR (SHARD)
-  1         680ms               1242ms
-  2         680ms                884ms
-  4         680ms                799ms
-  8         680ms                747ms
- 32         680ms                637ms
+Rust (rayon)    0.018 s   RSS: 16 MB
+Go (goroutines) 0.013 s   RSS: 12 MB
+CLEAR (fibers)  0.111 s   RSS: 46 MB
+
+CLEAR vs Go:   +745%
+CLEAR vs Rust: +521%
 ```
 
-## Why CLEAR barely scales
+## Why CLEAR is slower
 
-The SHARD pipeline has three sequential steps per item:
-1. Hash the key string
-2. Route to the owning scheduler via SPSC channel
-3. The owning scheduler processes the item (1 map increment)
+Same fiber runtime overhead documented in benchmark 18 (SHARD vs locked).
+The SHARD routing pipeline (hash key, send to owning fiber via channel,
+receive + process) costs ~60ns per item. With 1M items and trivially cheap
+per-item work (one map increment, ~10ns), routing dominates.
 
-Step 3 is trivially cheap (~10ns per increment). Steps 1-2 are the
-routing overhead (~60ns per item). With 10M items, routing alone is
-~600ms. The parallel computation saves almost nothing because the
-per-item work (map increment) is cheaper than the routing cost.
+Go and Rust avoid routing entirely: goroutines/rayon threads each own a
+local slice of work and write their local map without coordination. The
+merge is a single sequential pass over 1,000 entries.
 
-SHARD is designed for workloads where per-item processing is expensive
-enough to amortize the routing overhead — e.g., parsing, transformation,
-I/O. For simple counting, a single-threaded hashmap (Go's approach) is
-faster because it avoids routing entirely.
+SHARD amortizes well when per-item work is expensive (parsing,
+transformation, I/O). For simple counting it is over-engineered.
 
-## Why Go is sequential
+## Ergonomics comparison
 
-The Go implementation intentionally uses a single-threaded map to show
-the baseline. Go's `sync.Map` or sharded approach would be comparable
-to CLEAR's SHARD pipeline.
+The parallel histogram pattern requires explicit plumbing in Go/Rust:
 
-## Improving this benchmark
-
-Options to make CLEAR competitive:
-- Use `@shared:sharded(128):locked` instead of SHARD — direct concurrent
-  access without routing, like the kvstore benchmark
-- Use CONCURRENT EACH with thread-local histograms, then merge
-- Increase per-item work so routing overhead is amortized
+| Task | CLEAR | Go | Rust |
+|------|-------|----|------|
+| Parallel histogram | 3 lines (SHARD pipeline) | ~40 lines | ~15 lines |
+| Stats reduce | 4 lines (CONCURRENT SUM/MAX/MIN/AVG) | ~35 lines | ~10 lines |

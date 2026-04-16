@@ -1,4 +1,4 @@
--- @leak: n = 100000 -> n = 1000
+-- @leak: n = 1000000 -> n = 1000
 -- Parallel Aggregation Benchmark — Distributed Histogram + Stats
 --
 -- Deterministic LCG generates 100K events. Each event is bucketed into
@@ -28,7 +28,7 @@ FN makeKey(seed: Int64, buckets: Int64) RETURNS String ->
 END
 
 FN main() RETURNS Void ->
-    n = 100000;
+    n = 1000000;
     buckets = 1000;
 
     -- Pre-compute seeds (Int64 array: 80MB vs 1.1GB for string keys).
