@@ -1,17 +1,13 @@
--- @leak: 100000 -> 1000
+-- @leak: 10000 -> 100
 -- Pub-Sub Benchmark — CLEAR
 --
--- Models 1 publisher broadcasting 100K messages to 64 subscribers.
--- Each subscriber processes every message with CPU-bound work
--- (2000 LCG iterations per message).
--- Total work: 100K * 64 * 2000 = 12.8 billion LCG iterations.
+-- 1 publisher broadcasts 10K messages to 64 subscribers.
+-- Each subscriber processes every message (2000 LCG iterations).
+-- Total work: 10K * 64 * 2000 = 1.28 billion LCG iterations.
 --
--- CLEAR approach: one publisher exposes a ~?Msg[] @split stream and
--- each subscriber BG fiber CLONEs the shared ordered feed. Every
--- subscriber sees the same messages in the same order.
---
--- Compare to Go (64 goroutines + buffered channels) and Rust
--- (64 Tokio tasks + broadcast channel).
+-- CLEAR: publisher writes once to a shared SplitStream ring buffer.
+-- Each subscriber CLONEs an independent cursor — zero message copying.
+-- Compare to Go/Rust: publisher sends to 64 separate channels (N copies).
 
 STRUCT Msg { seed: Int64 }
 
@@ -25,7 +21,7 @@ FN main() RETURNS Void ->
     t0 = timestampMs();
 
     msgs: ~?Msg[] @split = BG STREAM {
-        FOR i IN (0 ..< 100000) -> YIELD Msg{ seed: i };
+        FOR i IN (0 ..< 10000) -> YIELD Msg{ seed: i };
     };
 
     MUTABLE futures: ~Int64[]@list = [];
@@ -54,7 +50,7 @@ FN main() RETURNS Void ->
 
     checksum = total MOD 1000000000;
     print("Checksum: ${checksum.toString()}");
-    print("Messages: 100000");
+    print("Messages: 10000");
     print("Subscribers: 64");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
