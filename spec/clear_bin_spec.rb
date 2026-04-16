@@ -178,7 +178,11 @@ RSpec.describe "./clear build" do
       output2, ok2 = clear_build(main_path, "--safe", "--force", env: { "CLEAR_DEBUG_CACHE" => "1" })
       expect(ok2).to be true
       expect(output2).to include("[transpile-cache] hit build_root main.cht")
-      expect(transpile_cache_entries).to eq(after_first)
+      # Don't compare the full global set - parallel tests may add unrelated entries.
+      # Assert that our entries are still present and no new ones were added for this source.
+      after_second = transpile_cache_entries
+      expect(after_second).to include(*new_entries)
+      expect(after_second - after_first).not_to include(*new_entries)
     ensure
       FileUtils.rm_rf(dir)
     end
