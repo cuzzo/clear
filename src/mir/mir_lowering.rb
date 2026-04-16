@@ -3618,7 +3618,26 @@ class MIRLowering
     iz.allocs = resolved_allocs unless resolved_allocs.empty?
     # Store target variable name for checker cross-reference with AllocMark.
     iz.target_var = extract_root_var_name(target_node)
-    MIR::ExprStmt.new(iz, false)
+    setAt_stmt = MIR::ExprStmt.new(iz, false)
+
+    # Emit pre-cleanup for non-Copy element types in list collections so the
+    # overwritten element is freed before the new value is written in place.
+    if kind == :array && receiver_type.list_collection?
+      elem_ti = receiver_type.element_type
+      if elem_ti
+        sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
+        if elem_ti.needs_cleanup?(sl)
+          elem_zig = elem_ti.zig_type
+          alloc_str = alloc_zig_str(:heap)
+          cleanup_zig = "CheatLib.cleanupAt(#{elem_zig}, #{target_zig}, #{alloc_str}, #{idx_zig})"
+          cleanup_iz = MIR::InlineZig.new(cleanup_zig, "index_cleanup")
+          cleanup_iz.stdlib_def = { allocates: false }
+          return MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_iz, false), setAt_stmt])
+        end
+      end
+    end
+
+    setAt_stmt
   end
 
   def lower_field_assignment_with_cleanup(node)

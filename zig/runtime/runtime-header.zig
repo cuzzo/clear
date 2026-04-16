@@ -300,6 +300,15 @@ pub const CheatLib = struct {
         }
     }
 
+    pub fn cleanupAt(comptime T: type, container: anytype, alloc: std.mem.Allocator, index: anytype) void {
+        const i: usize = @intCast(index);
+        if (@hasField(@TypeOf(container), "items")) {
+            cleanup(T, alloc, &container.items[i]);
+        } else {
+            cleanup(T, alloc, &container[i]);
+        }
+    }
+
     pub fn concat(allocator: std.mem.Allocator, s1: []const u8, s2: []const u8) ![]const u8 {
         Runtime.profileAlloc(s1.len + s2.len);
         return try std.mem.concat(allocator, u8, &.{ s1, s2 });

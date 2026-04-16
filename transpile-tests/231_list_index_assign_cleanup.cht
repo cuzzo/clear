@@ -1,0 +1,27 @@
+-- Test: list[i] = value correctly cleans up old element for non-Copy types
+
+UNION Value { Num: Float64, Items: Int64[] }
+
+FN makeItems() RETURNS Value ->
+    MUTABLE xs: Int64[]@list = List[];
+    xs.append(1_i64);
+    xs.append(2_i64);
+    RETURN Value{ Items: xs };
+END
+
+FN main() RETURNS Void ->
+    MUTABLE items: Value[]@list = List[];
+    items.append(makeItems());
+    items.append(makeItems());
+    items.append(makeItems());
+
+    -- Overwrite slot 1: old Value.Items must be cleaned up before new value written
+    items[1] = makeItems();
+
+    -- Overwrite again: old value freed, new stored
+    items[1] = makeItems();
+
+    ASSERT items.length() == 3, "should have 3 values";
+
+    RETURN;
+END
