@@ -1,7 +1,9 @@
-// KV Store Benchmark — Go (sync.Map)
+// KV Store Benchmark — Go (sharded RWMutex map, 128 shards)
 //
-// Embedded concurrent key-value store using Go's standard library.
-// N worker goroutines perform SET/GET operations on a shared sync.Map.
+// Matches CLEAR's @shared:sharded(128):locked and Rust's DashMap structurally:
+// 128 shards, RWMutex per shard, FNV key distribution.
+// sync.Map is NOT used here — it is read-optimized and degrades severely
+// on write-heavy workloads like uniform SET.
 //
 // Workloads:
 //   1. Uniform SET   — 1M sequential keys
@@ -16,6 +18,7 @@ package main
 
 import (
 	"fmt"
+	"hash/fnv"
 	"math"
 	"math/rand"
 	"runtime"
@@ -24,31 +27,76 @@ import (
 )
 
 const (
-	numKeys  = 1_000_000
-	zipfSkew = 1.0
+	numKeys   = 1_000_000
+	numShards = 128
+	zipfSkew  = 1.0
 )
+
+// =========================================================================
+// Sharded RWMutex map (128 shards, matches CLEAR + DashMap structure)
+// =========================================================================
+
+type shard struct {
+	mu sync.RWMutex
+	m  map[string]string
+}
+
+type ShardedMap [numShards]shard
+
+func newShardedMap() *ShardedMap {
+	var sm ShardedMap
+	for i := range sm {
+		sm[i].m = make(map[string]string)
+	}
+	return &sm
+}
+
+func (sm *ShardedMap) shardFor(key string) *shard {
+	h := fnv.New32a()
+	h.Write([]byte(key))
+	return &sm[h.Sum32()%numShards]
+}
+
+func (sm *ShardedMap) Store(key, val string) {
+	s := sm.shardFor(key)
+	s.mu.Lock()
+	s.m[key] = val
+	s.mu.Unlock()
+}
+
+func (sm *ShardedMap) Load(key string) (string, bool) {
+	s := sm.shardFor(key)
+	s.mu.RLock()
+	v, ok := s.m[key]
+	s.mu.RUnlock()
+	return v, ok
+}
 
 // =========================================================================
 // Zipfian generator (rejection-inversion method)
 // =========================================================================
 
 type ZipfGen struct {
-	n          int
-	s          float64
-	hIntegral  float64
-	hFraction  float64
-	rng        *rand.Rand
+	n         int
+	s         float64
+	hIntegral float64
+	hFraction float64
+	rng       *rand.Rand
 }
 
-func hFunc(x, s float64) float64    { return math.Exp(-s * math.Log(x)) }
+func hFunc(x, s float64) float64 { return math.Exp(-s * math.Log(x)) }
 func hInt(x, s float64) float64 {
 	t := 1.0 - s
-	if math.Abs(t) > 1e-8 { return (math.Pow(x, t) - 1.0) / t }
+	if math.Abs(t) > 1e-8 {
+		return (math.Pow(x, t) - 1.0) / t
+	}
 	return math.Log(x)
 }
 func hIntInv(x, s float64) float64 {
 	t := 1.0 - s
-	if math.Abs(t) > 1e-8 { return math.Pow(t*x+1.0, 1.0/t) }
+	if math.Abs(t) > 1e-8 {
+		return math.Pow(t*x+1.0, 1.0/t)
+	}
 	return math.Exp(x)
 }
 
@@ -67,8 +115,12 @@ func (z *ZipfGen) next() int {
 		u = z.hIntegral + u*(hInt(0.5, z.s)-z.hIntegral)
 		x := hIntInv(u, z.s)
 		k := int(x + 0.5)
-		if k < 1 { k = 1 }
-		if k > z.n { k = z.n }
+		if k < 1 {
+			k = 1
+		}
+		if k > z.n {
+			k = z.n
+		}
 		if float64(k)-x <= z.hFraction || u >= hInt(float64(k)+0.5, z.s)-hFunc(float64(k), z.s) {
 			return k - 1
 		}
@@ -83,7 +135,7 @@ func main() {
 	numWorkers := runtime.GOMAXPROCS(0)
 	opsPerWorker := numKeys / numWorkers
 
-	var m sync.Map
+	m := newShardedMap()
 
 	// --- Workload 1: Uniform SET ---
 	t0 := time.Now()
@@ -93,8 +145,7 @@ func main() {
 		go func(start int) {
 			defer wg.Done()
 			for i := start; i < start+opsPerWorker; i++ {
-				key := fmt.Sprintf("key:%08d", i)
-				m.Store(key, fmt.Sprintf("value-%d", i))
+				m.Store(fmt.Sprintf("key:%08d", i), fmt.Sprintf("value-%d", i))
 			}
 		}(w * opsPerWorker)
 	}
@@ -108,8 +159,7 @@ func main() {
 		go func(start int) {
 			defer wg.Done()
 			for i := start; i < start+opsPerWorker; i++ {
-				key := fmt.Sprintf("key:%08d", i)
-				m.Load(key)
+				m.Load(fmt.Sprintf("key:%08d", i))
 			}
 		}(w * opsPerWorker)
 	}
@@ -124,8 +174,7 @@ func main() {
 			defer wg.Done()
 			z := newZipf(numKeys, zipfSkew, int64(wid+42))
 			for i := 0; i < opsPerWorker; i++ {
-				key := fmt.Sprintf("key:%08d", z.next())
-				m.Load(key)
+				m.Load(fmt.Sprintf("key:%08d", z.next()))
 			}
 		}(w)
 	}

@@ -9,7 +9,9 @@ CLEAR uses `@shared:sharded(128):locked` - an Arc-wrapped HashMap with 128 shard
 Mutex per shard. Any fiber can access any shard; the Mutex handles synchronization
 internally. No WITH blocks needed.
 
-- Go: `sync.Map`
+- Go: 128-shard `sync.RWMutex` map (custom, matches CLEAR/DashMap structure).
+  `sync.Map` is NOT used — it is read-optimized and degrades severely on
+  write-heavy workloads (2s+ for uniform SET vs 426ms with sharded mutex).
 - Rust: `DashMap` (parking_lot RwLock, `num_cpus * 4` shards)
 
 ## Running
