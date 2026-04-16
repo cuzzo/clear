@@ -153,8 +153,8 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/17_kvstore/  # Control core count
 
 ### Performance
 **Single-Core (HashMap):**
- * Numeric i64 keys outperform hand-optimized C by ~2x due to Zig's AutoHashMap and frame-arena allocation.
- * Sring workloads and other workloads typically remain within 0-30% of hand-optimzied C.
+ * Integer-key HashMap is comparable to hand-optimized do-it-yourself C hashmaps (within ~26%).
+ * String workloads and other workloads typically remain within 0-30% of hand-optimized C.
 
 **Multi-Core, Non-Adversarial:**
   * Achieves throughput parity (within 5%) with Rust/Tokio and Go.
