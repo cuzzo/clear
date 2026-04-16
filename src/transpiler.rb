@@ -49,14 +49,14 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil)
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
                   use_c_allocator: use_c_allocator, test_mode: test_mode, strict_test: strict_test,
-                  exact_tiers: exact_tiers)
+                  exact_tiers: exact_tiers, main_tier: main_tier)
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil)
+  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)
@@ -99,7 +99,7 @@ class ZigTranspiler
     emitter = MIREmitter.new
     body = emitter.emit(program)
 
-    main_variant = main_stack_variant(result.fn_nodes["main"])
+    main_variant = main_stack_variant(result.fn_nodes["main"], override: main_tier)
     footer = File.read(File.join(File.dirname(__FILE__), '..', 'zig', 'runtime', 'runtime-footer.zig'))
     footer = footer.gsub('.{ .stack_size = .Large, .pinned = true }',
                          ".{ .stack_size = .#{main_variant}, .pinned = true }")
@@ -118,8 +118,8 @@ class ZigTranspiler
     micro: "Micro", standard: "Standard", large: "Large", xl: "Xl", unbounded: "Xl"
   }.freeze
 
-  def main_stack_variant(main_fn)
-    tier = main_fn&.stack_tier || :standard
+  def main_stack_variant(main_fn, override: nil)
+    tier = override&.to_sym || main_fn&.stack_tier || :standard
     MAIN_STACK_VARIANTS.fetch(tier, "Standard")
   end
 
@@ -236,6 +236,9 @@ if __FILE__ == $0
       require 'json'
       options[:exact_tiers] = JSON.parse(json).transform_keys(&:to_i).transform_values(&:to_sym)
     end
+    opts.on('--main-tier TIER', 'Override computed stack tier for the main fiber') do |tier|
+      options[:main_tier] = tier.downcase.to_sym
+    end
   end.parse!
 
   script_file = ARGV.first
@@ -253,7 +256,8 @@ if __FILE__ == $0
     else
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
                                 use_c_allocator: !!options[:use_c_allocator],
-                                exact_tiers: options[:exact_tiers])
+                                exact_tiers: options[:exact_tiers],
+                                main_tier: options[:main_tier])
     end
   else
     $stderr.puts "Usage: ruby transpiler.rb [--module] [--pkg name=/path/to/lib.cht] <script.cht>"

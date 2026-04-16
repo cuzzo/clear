@@ -74,7 +74,7 @@ def build_metadata_path(output)
   File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
 end
 
-def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:)
+def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil)
   {
     "source" => File.expand_path(source),
     "output" => File.expand_path(output),
@@ -86,6 +86,7 @@ def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, pr
     "default_stack" => default_stack,
     "strict_test" => strict_test,
     "exact_tiers" => exact_tiers&.transform_keys(&:to_s),
+    "main_tier" => main_tier,
     "zig" => ZIG
   }
 end
@@ -225,7 +226,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, main_tier: nil)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -243,7 +244,8 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     use_c_allocator: use_c_allocator,
     default_stack: default_stack,
     strict_test: strict_test,
-    exact_tiers: exact_tiers
+    exact_tiers: exact_tiers,
+    main_tier: main_tier
   )
 
   # Skip rebuild if output is newer than source AND compiler files.
@@ -266,6 +268,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   if exact_tiers
     transpile_flag += " --exact-tiers '#{exact_tiers.transform_keys(&:to_s).to_json}'"
   end
+  transpile_flag += " --main-tier #{main_tier}" if main_tier
 
   # Auto-detect package requires: REQUIRE "pkg:name" → look for packages/name/src/lib.cht
   source_text = File.read(source)
@@ -511,9 +514,16 @@ when 'build'
       end
 
       # Phase 2: Exact stack sizing via call graph analysis
+      tier_order = { micro: 0, standard: 1, large: 2, xl: 3 }
       optimal = verifier.compute_optimal_tiers(fn_nodes: fn_nodes)
-      if optimal.any?
+      main_optimal = verifier.compute_main_optimal_tier
+
+      if optimal.any? || main_optimal
         verifier.print_tier_report(optimal)
+
+        if main_optimal
+          $stderr.puts "    main fiber: #{main_optimal[:path_cost]} bytes -> #{main_optimal[:optimal_tier].to_s.upcase}"
+        end
 
         # Find BG blocks in the AST to check user annotations
         bg_nodes = []
@@ -524,6 +534,7 @@ when 'build'
 
         needs_rebuild = false
         exact = {}
+        exact_main_tier = nil
 
         optimal.each do |r|
           idx = r[:bg_index]
@@ -531,7 +542,6 @@ when 'build'
           user_tier = bg_node&.stack_size  # explicit user annotation (e.g. @micro)
           computed = bg_node&.computed_stack_tier
           optimal_tier = r[:optimal_tier]
-          tier_order = { micro: 0, standard: 1, large: 2, xl: 3 }
 
           if user_tier
             # User explicitly picked a tier. Error if it will overflow.
@@ -552,13 +562,25 @@ when 'build'
           end
         end
 
+        # Main fiber exact sizing
+        if main_optimal
+          current_main = fn_nodes["main"]&.stack_tier || :standard
+          optimal_main = main_optimal[:optimal_tier]
+          if tier_order.fetch(optimal_main, 0) != tier_order.fetch(current_main, 0)
+            exact_main_tier = optimal_main
+            needs_rebuild = true
+          end
+        end
+
         # Phase 3: Rebuild with exact tiers
         if needs_rebuild
           $stderr.puts ""
           exact.each { |idx, tier| $stderr.puts "  [exact] BG##{idx}: #{tier} (auto-sized)" }
+          $stderr.puts "  [exact] main fiber: #{exact_main_tier} (auto-sized)" if exact_main_tier
           $stderr.puts "  Rebuilding with exact stack sizes..."
           do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags,
-                   default_stack: default_stack, force: true, exact_tiers: exact)
+                   default_stack: default_stack, force: true, exact_tiers: exact,
+                   main_tier: exact_main_tier)
           puts "Rebuilt: #{output_path}"
         end
       end

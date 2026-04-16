@@ -303,6 +303,19 @@ class StackVerifier
     dfs.call(entry_addr)
   end
 
+  # Compute optimal tier for the main fiber (clearMain entry point).
+  # Returns { entry_name:, path_cost:, optimal_tier: } or nil if clearMain not found.
+  def compute_main_optimal_tier
+    graph_data = extract_full_call_graph
+    return nil unless graph_data
+
+    addr, name = graph_data[:fn_names].find { |_, n| n =~ /\.clearMain$/ }
+    return nil unless addr
+
+    cost = deepest_path_cost(addr, graph_data)
+    { entry_name: name, path_cost: cost, optimal_tier: cost_to_tier(cost) }
+  end
+
   # Compute optimal tiers for all BG entry functions in the binary.
   # Returns array of { bg_index:, entry_name:, path_cost:, optimal_tier:, current_tier: }
   def compute_optimal_tiers(fn_nodes: nil)
