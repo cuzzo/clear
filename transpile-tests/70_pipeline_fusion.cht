@@ -163,6 +163,58 @@ FN test_select_average() RETURNS Void ->
     RETURN;
 END
 
+FN test_capacity_list_sum() RETURNS Void ->
+    -- Regression: T[N]@list (pre-initialized capacity) must iterate as ArrayList.
+    MUTABLE data: Float64[20]@list = [];
+    FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
+
+    result = data s> SUM _;
+    -- 1+2+3+4+5 = 15
+    ASSERT result == 15.0, "capacity list SUM";
+    RETURN;
+END
+
+FN test_capacity_list_where_sum() RETURNS Void ->
+    MUTABLE data: Float64[20]@list = [];
+    FOR i IN (0_i64 ..< 6_i64) -> data.append(toFloat(i + 1_i64));
+
+    result = data s> WHERE _ > 3.0 s> SUM _;
+    -- 4+5+6 = 15
+    ASSERT result == 15.0, "capacity list WHERE + SUM";
+    RETURN;
+END
+
+FN test_pool_pipeline_sum() RETURNS Void ->
+    -- Regression: T[N]@pool must support pipeline operators.
+    STRUCT PItem { v: Float64 }
+    MUTABLE pool: PItem[20]@pool = [];
+    pool.insert(PItem{ v: 1.0 });
+    pool.insert(PItem{ v: 2.0 });
+    pool.insert(PItem{ v: 3.0 });
+
+    result = pool s> SUM _.v;
+    ASSERT result == 6.0, "pool pipeline SUM";
+    RETURN;
+END
+
+FN test_pool_for_iteration() RETURNS Void ->
+    -- Regression: FOR item IN pool must iterate live slots.
+    STRUCT PItem { v: Float64 }
+    MUTABLE pool: PItem[20]@pool = [];
+    pool.insert(PItem{ v: 10.0 });
+    id2: Id<PItem> = pool.insert(PItem{ v: 20.0 });
+    pool.insert(PItem{ v: 30.0 });
+    pool.remove(id2);
+
+    MUTABLE total = 0.0;
+    FOR item IN pool DO
+        total = total + item.v;
+    END
+    -- 10 + 30 = 40 (20 was removed)
+    ASSERT total == 40.0, "FOR over pool skips dead slots";
+    RETURN;
+END
+
 FN main() RETURNS Void ->
     test_where_sum();
     test_select_sum();
@@ -180,5 +232,9 @@ FN main() RETURNS Void ->
     test_take_while_sum();
     test_long_chain();
     test_select_average();
+    test_capacity_list_sum();
+    test_capacity_list_where_sum();
+    test_pool_pipeline_sum();
+    test_pool_for_iteration();
     RETURN;
 END

@@ -3702,14 +3702,32 @@ class MIRLowering
         body, var, nil, mark_per_iter, tight
       )
       MIR::ScopeBlock.new([iter_init, while_stmt])
+    elsif ct.pool?
+      # Pool: iterate over slots, skip dead entries.
+      # Emits: for (pool.slots) |*__pslot_N| { if (!__pslot_N.alive) continue; const var = __pslot_N.value; body }
+      @for_counter = (@for_counter || 0) + 1
+      slot_var = "__pslot_#{@for_counter}"
+      slot_ident = MIR::Ident.new(slot_var)
+      slots_iter = MIR::FieldGet.new(coll, "slots")
+      skip_dead = MIR::IfStmt.new(
+        MIR::UnaryOp.new("!", MIR::FieldGet.new(slot_ident, "alive")),
+        [MIR::ContinueStmt.new(nil)],
+        nil
+      )
+      value_bind = MIR::Let.new(var, MIR::FieldGet.new(slot_ident, "value"), false, nil, nil)
+      full_body = [skip_dead, value_bind] + body
+      MIR::ForStmt.new(slots_iter, "*#{slot_var}", full_body, nil, mark_per_iter, tight)
     else
       is_field_access = node.collection.is_a?(AST::GetField)
       is_param = node.collection.is_a?(AST::Identifier) &&
                  @current_fn_param_names&.include?(node.collection.name)
-      is_arraylist = ct.array? && ct.dynamic? && !ct.string? && !is_param && !is_field_access
+      # list_collection? covers T[N]@list (fixed capacity ArrayList) in addition to
+      # T[]@list (dynamic). Both map to std.ArrayListUnmanaged and require .items.
+      is_arraylist = (ct.list_collection? || (ct.array? && ct.dynamic?)) &&
+                     !ct.string? && !is_param && !is_field_access
       iter = if is_arraylist
         MIR::FieldGet.new(coll, "items")
-      elsif is_param || (is_field_access && ct.array? && ct.dynamic?)
+      elsif is_param || (is_field_access && ct.array? && (ct.dynamic? || ct.list_collection?))
         coll
       else
         MIR::AddressOf.new(coll)
