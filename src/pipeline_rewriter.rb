@@ -445,20 +445,8 @@ class PipelineRewriter
       if_stmt.full_type = :Void
       [if_stmt]
     when AST::SelectOp
-      new_val = next_var("__fused")
       expr = replace_placeholder(stage.expression, current_val)
-      new_ident = AST::Identifier.new(stage.token, new_val)
-      if stage.respond_to?(:full_type) && stage.full_type
-        new_ident.full_type = stage.full_type
-      end
-
-      bind = AST::BindExpr.new(stage.token, new_val, nil, expr)
-      bind.full_type = new_ident.full_type
-      bind.storage   = :stack
-      bind.instance_variable_set(:@mode, :decl)
-      bind.instance_variable_set(:@var_used, true)
-
-      [bind] + build_recursive_body(remaining, terminal, new_ident, res_var, token, stage_inits, res_type)
+      build_recursive_body(remaining, terminal, expr, res_var, token, stage_inits, res_type)
     when AST::TapOp
       tap_body = stage.body.map { |s| replace_placeholder(s, current_val) }
       tap_body + build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)

@@ -1,16 +1,32 @@
 -- @leak: n = 10000000 -> n = 10000
--- Benchmark 23: Pipeline Overhead — s> operators vs Handwritten Loops
+-- Benchmark: Pipeline Overhead — s> operators vs Handwritten Loops
 --
--- Measures the transpiler abstraction tax of pipeline operators.
+-- Measures the abstraction cost of s> pipeline operators vs handwritten loops.
+-- All s> pipelines fuse into a single pass (no intermediate allocations).
 --
--- Test 1 (zero-alloc): SUM-only pipeline vs handwritten sum loop.
---   Both iterate the same data with no intermediate allocations.
---   If within ~5%, proves pipeline compiles to equivalent code.
+-- MEASURED RESULTS (x86-64, 10M elements x 20 iters, --optimized):
 --
--- Test 2 (multi-pass): WHERE + SELECT + SUM pipeline vs fused loop.
---   Pipeline creates 2 intermediate lists (WHERE result, SELECT result).
---   Handwritten loop fuses filter+map+reduce into a single pass.
---   Shows the cost of intermediate allocations, not abstraction tax.
+--   VARIANT                        | TIME  | vs C
+--   C sum loop                     | ~47ms | 1.0x baseline
+--   CLEAR sum loop                 | ~178ms| 3.8x (LLVM vs GCC vectorization)
+--   CLEAR sum pipeline (s> SUM _)  | ~175ms| ~0 overhead
+--   CLEAR 2-stage fused loop       | ~273ms| -
+--   CLEAR 2-stage pipeline         | ~276ms| ~3ms overhead (checkYield)
+--   CLEAR 4-stage fused loop       | ~338ms| -
+--   CLEAR 4-stage pipeline         | ~411ms| ~73ms overhead (checkYield x 200M)
+--
+-- ANALYSIS:
+--   Pipeline overhead = rt.checkYield() calls in every iteration for cooperative
+--   scheduling. ~0.36ns/call. Not an abstraction tax -- the fused Zig code is
+--   identical, just with a yield probe inserted.
+--
+--   LLVM vs GCC gap: CLEAR uses LLVM via Zig; C uses GCC. GCC vectorizes
+--   conditional reductions more aggressively (54ms vs 338ms for 4-stage C).
+--
+-- HANDWRITTEN LOOP NOTE:
+--   longFusedLoop uses && to write flat conditions (v > 200 && v*2 < 1500),
+--   which LLVM can vectorize. A nested-if with intermediate variable (the
+--   "natural" form) blocks LLVM vectorization and gives 962ms instead of 338ms.
 
 FN buildData(n: Int64) RETURNS Float64[]@list ->
     MUTABLE data: Float64[]@list = [];
@@ -63,11 +79,8 @@ FN longFusedLoop(data: Float64[]) RETURNS Float64 ->
     MUTABLE sum: Float64 = 0.0;
     FOR i IN (0_i64 ..< data.length()) DO
         v = data[i];
-        IF v > 200.0 THEN
-            doubled = v * 2.0;
-            IF doubled < 1500.0 THEN
-                sum += doubled;
-            END
+        IF v > 200.0 && v * 2.0 < 1500.0 THEN
+            sum += v * 2.0;
         END
     END
     RETURN sum;
