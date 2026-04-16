@@ -210,7 +210,7 @@ The benchmark runner detects `.zig` files in the benchmark directory automatical
 
 ## See Also
 
-- `benchmarks/24_json_api/` — TCP JSON server using FFI
+- `benchmarks/server/02_json_api/` — TCP JSON server using FFI
 - `transpile-tests/ffi-integration/` — EXTERN FN arithmetic
 - `transpile-tests/ffi-struct-test/` — EXTERN STRUCT with slices
 - `transpile-tests/ffi-effects-test/` — EFFECTS :alloc and !T returns

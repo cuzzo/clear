@@ -66,13 +66,16 @@ Run **integration specs** after changes to the CLI or stack verifier:
 
 ```bash
 # Benchmark runner modes
-ruby benchmarks/runner.rb --smoke benchmarks/24_json_api/   # CLEAR only, fast (~5s)
-ruby benchmarks/runner.rb --fast benchmarks/05_hashmap/     # All langs, reduced (~30s)
-ruby benchmarks/runner.rb benchmarks/05_hashmap/            # Normal (default)
-ruby benchmarks/runner.rb --release benchmarks/05_hashmap/  # Exhaustive (5x load)
-ruby benchmarks/runner.rb --all                             # All benchmarks (01-29)
-ruby benchmarks/runner.rb --smoke --all                     # Smoke test all benchmarks
-ruby benchmarks/runner.rb --cores=2 benchmarks/17_kvstore/  # Control core count
+ruby benchmarks/runner.rb --smoke benchmarks/server/02_json_api/      # CLEAR only, fast (~5s)
+ruby benchmarks/runner.rb --fast benchmarks/sequential/04_hashmap/    # All langs, reduced (~30s)
+ruby benchmarks/runner.rb benchmarks/sequential/04_hashmap/           # Normal (default)
+ruby benchmarks/runner.rb --release benchmarks/sequential/04_hashmap/ # Exhaustive (5x load)
+ruby benchmarks/runner.rb --sequential                                 # Sequential benchmarks
+ruby benchmarks/runner.rb --concurrent                                 # Concurrent benchmarks
+ruby benchmarks/runner.rb --server                                     # Server benchmarks
+ruby benchmarks/runner.rb --all                                        # All benchmarks
+ruby benchmarks/runner.rb --smoke --all                                # Smoke test all benchmarks
+ruby benchmarks/runner.rb --cores=2 benchmarks/concurrent/09_kvstore/ # Control core count
 ```
 
 See `benchmarks/README.md` for the full benchmark index and details.

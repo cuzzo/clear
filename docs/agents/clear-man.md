@@ -85,7 +85,7 @@ detected and reported.
 clear run examples/hello.cht
 
 # Build an optimized server binary
-clear build benchmarks/24_json_api/server.cht -o server
+clear build benchmarks/server/02_json_api/server.cht -o server
 
 # Run with multi-threaded scheduler and jemalloc
 CLEAR_THREADS=0 LD_PRELOAD=/lib/x86_64-linux-gnu/libjemalloc.so.2 ./server

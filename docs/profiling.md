@@ -20,8 +20,8 @@
 ### Step 1: Profile
 
 ```bash
-./clear profile benchmarks/17_kvstore/bench.cht
-./clear doctor benchmarks/17_kvstore/bench.profile/
+./clear profile benchmarks/concurrent/09_kvstore/bench.cht
+./clear doctor benchmarks/concurrent/09_kvstore/bench.profile/
 ```
 
 ### Step 2: Read the CPU profile
