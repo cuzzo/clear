@@ -1,123 +1,98 @@
 -- @leak_skip
 -- SROA (Scalar Replacement of Aggregates) Benchmark
 --
--- WHAT THIS MEASURES:
+-- BigVec has 130 Int64 fields (1040 bytes). sum3() reads only x1, x2, x3.
+-- 127 of the 130 field initialisations are dead writes.
 --
---   BigVec has 130 Float64 fields (1040 bytes). sum3() reads only x1, x2, x3.
---   127 of the 130 field initialisations are dead writes.
+-- LLVM's SROA pass decomposes BigVec into scalars and DCE eliminates
+-- the 127 dead initialisations. The loop body reduces to ~3 integer
+-- adds per iteration when SROA succeeds.
 --
---   C at -O3:   LLVM applies SROA → decomposes BigVec into scalars → DCE
---               eliminates 127 dead initialisations → loop is 3 scalar fadds.
+-- Integers are used (not floats) to avoid fast-math skew in cross-
+-- language comparisons. See planned fastmath benchmark in README.
 --
---   CLEAR:      The transpiler emits all 130 field initialisations as a Zig
---               struct literal. Because the struct is a stack `const` that
---               never escapes, LLVM's own SROA pass in ReleaseFast also DCEs
---               the 127 dead fields — so the struct overhead is the SAME as C.
+-- acc is fed back each iteration to create a serial dependency that
+-- prevents constant folding. Modulo 1_000_000_007 keeps acc bounded.
 --
---               The remaining gap (~50%) is dominated by the 20 M runtime
---               calls that LLVM cannot eliminate:
---                 - rt.saveLoopMark()    ×10 M  (CLEAR emits this for every loop)
---                 - rt.restoreLoopMark() ×10 M
+-- TIGHT WHILE: pure compute loop, no frame allocation, no
+-- saveLoopMark/restoreLoopMark overhead.
 --
--- KEY FINDING:
---   LLVM handles the struct-level SROA even without CLEAR implementing it.
---   The real cost is saveLoopMark/restoreLoopMark on loops that don't
---   actually allocate anything — Loop Mark Elision is the right fix.
---
--- LOOP MARK ELISION (future optimisation):
---   If the transpiler detects that a loop body contains no frame-allocating
---   operations (no @list, @map, or String operations), it should suppress the
---   saveLoopMark/restoreLoopMark pair entirely. This would close the ~50% gap
---   on compute-only loops like this one.
---
--- N = 10 000 000 iterations.
--- acc is fed back from the previous result (recurrence prevents constant
--- folding); it overflows to inf after ~50 iterations but IEEE 754 inf
--- arithmetic is defined, so the loop body continues to execute at full speed.
+-- N = 100 000 000 iterations.
 
 STRUCT BigVec {
-  x1: Float64, x2: Float64, x3: Float64, x4: Float64, x5: Float64,
-  x6: Float64, x7: Float64, x8: Float64, x9: Float64, x10: Float64,
-  x11: Float64, x12: Float64, x13: Float64, x14: Float64, x15: Float64,
-  x16: Float64, x17: Float64, x18: Float64, x19: Float64, x20: Float64,
-  x21: Float64, x22: Float64, x23: Float64, x24: Float64, x25: Float64,
-  x26: Float64, x27: Float64, x28: Float64, x29: Float64, x30: Float64,
-  x31: Float64, x32: Float64, x33: Float64, x34: Float64, x35: Float64,
-  x36: Float64, x37: Float64, x38: Float64, x39: Float64, x40: Float64,
-  x41: Float64, x42: Float64, x43: Float64, x44: Float64, x45: Float64,
-  x46: Float64, x47: Float64, x48: Float64, x49: Float64, x50: Float64,
-  x51: Float64, x52: Float64, x53: Float64, x54: Float64, x55: Float64,
-  x56: Float64, x57: Float64, x58: Float64, x59: Float64, x60: Float64,
-  x61: Float64, x62: Float64, x63: Float64, x64: Float64, x65: Float64,
-  x66: Float64, x67: Float64, x68: Float64, x69: Float64, x70: Float64,
-  x71: Float64, x72: Float64, x73: Float64, x74: Float64, x75: Float64,
-  x76: Float64, x77: Float64, x78: Float64, x79: Float64, x80: Float64,
-  x81: Float64, x82: Float64, x83: Float64, x84: Float64, x85: Float64,
-  x86: Float64, x87: Float64, x88: Float64, x89: Float64, x90: Float64,
-  x91: Float64, x92: Float64, x93: Float64, x94: Float64, x95: Float64,
-  x96: Float64, x97: Float64, x98: Float64, x99: Float64, x100: Float64,
-  x101: Float64, x102: Float64, x103: Float64, x104: Float64, x105: Float64,
-  x106: Float64, x107: Float64, x108: Float64, x109: Float64, x110: Float64,
-  x111: Float64, x112: Float64, x113: Float64, x114: Float64, x115: Float64,
-  x116: Float64, x117: Float64, x118: Float64, x119: Float64, x120: Float64,
-  x121: Float64, x122: Float64, x123: Float64, x124: Float64, x125: Float64,
-  x126: Float64, x127: Float64, x128: Float64, x129: Float64, x130: Float64
+  x1: Int64, x2: Int64, x3: Int64, x4: Int64, x5: Int64,
+  x6: Int64, x7: Int64, x8: Int64, x9: Int64, x10: Int64,
+  x11: Int64, x12: Int64, x13: Int64, x14: Int64, x15: Int64,
+  x16: Int64, x17: Int64, x18: Int64, x19: Int64, x20: Int64,
+  x21: Int64, x22: Int64, x23: Int64, x24: Int64, x25: Int64,
+  x26: Int64, x27: Int64, x28: Int64, x29: Int64, x30: Int64,
+  x31: Int64, x32: Int64, x33: Int64, x34: Int64, x35: Int64,
+  x36: Int64, x37: Int64, x38: Int64, x39: Int64, x40: Int64,
+  x41: Int64, x42: Int64, x43: Int64, x44: Int64, x45: Int64,
+  x46: Int64, x47: Int64, x48: Int64, x49: Int64, x50: Int64,
+  x51: Int64, x52: Int64, x53: Int64, x54: Int64, x55: Int64,
+  x56: Int64, x57: Int64, x58: Int64, x59: Int64, x60: Int64,
+  x61: Int64, x62: Int64, x63: Int64, x64: Int64, x65: Int64,
+  x66: Int64, x67: Int64, x68: Int64, x69: Int64, x70: Int64,
+  x71: Int64, x72: Int64, x73: Int64, x74: Int64, x75: Int64,
+  x76: Int64, x77: Int64, x78: Int64, x79: Int64, x80: Int64,
+  x81: Int64, x82: Int64, x83: Int64, x84: Int64, x85: Int64,
+  x86: Int64, x87: Int64, x88: Int64, x89: Int64, x90: Int64,
+  x91: Int64, x92: Int64, x93: Int64, x94: Int64, x95: Int64,
+  x96: Int64, x97: Int64, x98: Int64, x99: Int64, x100: Int64,
+  x101: Int64, x102: Int64, x103: Int64, x104: Int64, x105: Int64,
+  x106: Int64, x107: Int64, x108: Int64, x109: Int64, x110: Int64,
+  x111: Int64, x112: Int64, x113: Int64, x114: Int64, x115: Int64,
+  x116: Int64, x117: Int64, x118: Int64, x119: Int64, x120: Int64,
+  x121: Int64, x122: Int64, x123: Int64, x124: Int64, x125: Int64,
+  x126: Int64, x127: Int64, x128: Int64, x129: Int64, x130: Int64
 }
 
 -- Only reads x1, x2, x3. The other 127 fields are dead.
--- With SROA the compiler would eliminate those 127 field initialisations.
--- Note: not @reentrant — TIGHT loops cannot call @reentrant functions.
-FN sum3(v: BigVec) RETURNS Float64 ->
+FN sum3(v: BigVec) RETURNS Int64 ->
     RETURN v.x1 + v.x2 + v.x3;
 END
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
     MUTABLE i = 0;
-    MUTABLE acc: Float64 = 1.0;
+    MUTABLE acc: Int64 = 1;
 
-    -- TIGHT: pure compute loop — no arena cleanup needed, no yield overhead.
-    -- Eliminates saveLoopMark/restoreLoopMark (the dominant cost in the previous
-    -- version) and checkYield. See benchmark comments above.
     TIGHT WHILE i < 100000000 DO
-        -- Inputs fed from acc: same recurrence as the C baseline, prevents
-        -- constant folding and matches the serial dependency chain.
-        -- CLEAR emits all 130 field initialisations here. C's SROA pass
-        -- eliminates 127 of them. This is the gap this benchmark measures.
         bv = BigVec{
-            x1: acc, x2: acc+1.0, x3: acc+2.0,
-            x4: 0.0, x5: 0.0, x6: 0.0, x7: 0.0, x8: 0.0,
-            x9: 0.0, x10: 0.0, x11: 0.0, x12: 0.0, x13: 0.0,
-            x14: 0.0, x15: 0.0, x16: 0.0, x17: 0.0, x18: 0.0,
-            x19: 0.0, x20: 0.0, x21: 0.0, x22: 0.0, x23: 0.0,
-            x24: 0.0, x25: 0.0, x26: 0.0, x27: 0.0, x28: 0.0,
-            x29: 0.0, x30: 0.0, x31: 0.0, x32: 0.0, x33: 0.0,
-            x34: 0.0, x35: 0.0, x36: 0.0, x37: 0.0, x38: 0.0,
-            x39: 0.0, x40: 0.0, x41: 0.0, x42: 0.0, x43: 0.0,
-            x44: 0.0, x45: 0.0, x46: 0.0, x47: 0.0, x48: 0.0,
-            x49: 0.0, x50: 0.0, x51: 0.0, x52: 0.0, x53: 0.0,
-            x54: 0.0, x55: 0.0, x56: 0.0, x57: 0.0, x58: 0.0,
-            x59: 0.0, x60: 0.0, x61: 0.0, x62: 0.0, x63: 0.0,
-            x64: 0.0, x65: 0.0, x66: 0.0, x67: 0.0, x68: 0.0,
-            x69: 0.0, x70: 0.0, x71: 0.0, x72: 0.0, x73: 0.0,
-            x74: 0.0, x75: 0.0, x76: 0.0, x77: 0.0, x78: 0.0,
-            x79: 0.0, x80: 0.0, x81: 0.0, x82: 0.0, x83: 0.0,
-            x84: 0.0, x85: 0.0, x86: 0.0, x87: 0.0, x88: 0.0,
-            x89: 0.0, x90: 0.0, x91: 0.0, x92: 0.0, x93: 0.0,
-            x94: 0.0, x95: 0.0, x96: 0.0, x97: 0.0, x98: 0.0,
-            x99: 0.0, x100: 0.0, x101: 0.0, x102: 0.0, x103: 0.0,
-            x104: 0.0, x105: 0.0, x106: 0.0, x107: 0.0, x108: 0.0,
-            x109: 0.0, x110: 0.0, x111: 0.0, x112: 0.0, x113: 0.0,
-            x114: 0.0, x115: 0.0, x116: 0.0, x117: 0.0, x118: 0.0,
-            x119: 0.0, x120: 0.0, x121: 0.0, x122: 0.0, x123: 0.0,
-            x124: 0.0, x125: 0.0, x126: 0.0, x127: 0.0, x128: 0.0,
-            x129: 0.0, x130: 0.0
+            x1: acc, x2: acc+1, x3: acc+2,
+            x4: 0, x5: 0, x6: 0, x7: 0, x8: 0,
+            x9: 0, x10: 0, x11: 0, x12: 0, x13: 0,
+            x14: 0, x15: 0, x16: 0, x17: 0, x18: 0,
+            x19: 0, x20: 0, x21: 0, x22: 0, x23: 0,
+            x24: 0, x25: 0, x26: 0, x27: 0, x28: 0,
+            x29: 0, x30: 0, x31: 0, x32: 0, x33: 0,
+            x34: 0, x35: 0, x36: 0, x37: 0, x38: 0,
+            x39: 0, x40: 0, x41: 0, x42: 0, x43: 0,
+            x44: 0, x45: 0, x46: 0, x47: 0, x48: 0,
+            x49: 0, x50: 0, x51: 0, x52: 0, x53: 0,
+            x54: 0, x55: 0, x56: 0, x57: 0, x58: 0,
+            x59: 0, x60: 0, x61: 0, x62: 0, x63: 0,
+            x64: 0, x65: 0, x66: 0, x67: 0, x68: 0,
+            x69: 0, x70: 0, x71: 0, x72: 0, x73: 0,
+            x74: 0, x75: 0, x76: 0, x77: 0, x78: 0,
+            x79: 0, x80: 0, x81: 0, x82: 0, x83: 0,
+            x84: 0, x85: 0, x86: 0, x87: 0, x88: 0,
+            x89: 0, x90: 0, x91: 0, x92: 0, x93: 0,
+            x94: 0, x95: 0, x96: 0, x97: 0, x98: 0,
+            x99: 0, x100: 0, x101: 0, x102: 0, x103: 0,
+            x104: 0, x105: 0, x106: 0, x107: 0, x108: 0,
+            x109: 0, x110: 0, x111: 0, x112: 0, x113: 0,
+            x114: 0, x115: 0, x116: 0, x117: 0, x118: 0,
+            x119: 0, x120: 0, x121: 0, x122: 0, x123: 0,
+            x124: 0, x125: 0, x126: 0, x127: 0, x128: 0,
+            x129: 0, x130: 0
         };
-        acc = sum3(bv);   -- acc = 3*acc + 3; triples, becomes inf ~50 iters
+        acc = sum3(bv) MOD 1000000007;
         i += 1;
     END
 
-    ASSERT acc > 0.0, "acc must be positive";
+    ASSERT acc > 0, "acc must be positive";
     elapsed = timestampMs() - t0;
     print("Time: ${elapsed.toString()} ms");
     RETURN;

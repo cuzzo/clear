@@ -1,41 +1,33 @@
 # Benchmark 02: SROA (Scalar Replacement of Aggregates)
 
-BigVec has 130 Float64 fields (1040 bytes). `sum3()` reads only x1, x2, x3.
-127 of 130 field initializations are dead writes. Tests whether the backend
-eliminates them via SROA + DCE.
+BigVec has 130 Int64 fields (1040 bytes). `sum3()` reads only x1, x2, x3.
+127 of 130 field initializations are dead writes. Tests whether LLVM eliminates
+them via SROA + DCE.
 
-## Results
+## Results (100M iterations)
 
-| Build | Time | Notes |
-|-------|------|-------|
-| C (`gcc -O3`) | 181ms | SROA + SSE |
-| CLEAR (Zig native backend) | 173ms | SROA works, no SSE (x87 softfloat) |
-| CLEAR (Zig + LLVM via `-target`) | 181ms | SROA + SSE, matches C |
-| Zig + LLVM + `@setFloatMode(.optimized)` | 3.7ms | Loop folded (fast-math) |
-| Rust (`--release`) | 1.4ms | Loop folded (fast-math default for this pattern) |
+| Language | Time | vs C |
+|----------|------|------|
+| C (`gcc -O3`) | ~0.38s | baseline |
+| Rust (`--release`) | ~0.45s | +19% |
+| CLEAR (`--optimized`) | ~0.52s | +37% |
 
 ## Analysis
 
-All compilers successfully apply SROA - the 127 dead fields are eliminated.
-The disassembly confirms pure `addsd`/`vaddsd` instructions in the hot loop
-with no struct allocation or memset.
+SROA is working in all three - without it, 130 x 8 = 1040 bytes of dead writes
+per iteration would produce a 5-10x slowdown, not 19-37%.
 
-The 130x gap between Rust (1.4ms) and C/CLEAR (181ms) is NOT about SROA.
-It is about **fast-math loop folding**: the `acc` recurrence reaches infinity
-after ~50 iterations, and with fast-math enabled, LLVM proves the remaining
-~99.99M iterations are constant and folds the entire loop away.
+The gap is **integer overflow semantics**:
 
-- Rust's `rustc` annotates FP ops with `fast` flags by default for this pattern
-- C with `-ffast-math` would match (~3ms)
-- Zig with `@setFloatMode(.optimized)` matches (3.7ms)
-- Without fast-math, strict IEEE 754 semantics require evaluating every iteration
+- C defaults to signed integer UB on overflow. LLVM exploits this to treat loop
+  counters and accumulators as no-wrap induction variables, enabling loop
+  unrolling, vectorization, and induction variable simplification.
+- CLEAR defaults to panic on overflow (wrapping arithmetic `+%` in ReleaseFast).
+  LLVM sees two's complement semantics and cannot assume no-wrap, losing those
+  optimizations.
 
-## CLEAR path to matching Rust
+In short: **C defaults to UB, CLEAR defaults to Panic.** The ~37% gap is the
+optimization headroom C gets for free from undefined behavior.
 
-A `@fastmath` function annotation in CLEAR that emits `@setFloatMode(.optimized)`
-in the generated Zig would close the gap. This is an opt-in semantic change
-(NaN/infinity handling becomes undefined) - not a default.
-
-The Zig native x86_64 backend (used for fast ~2s builds) does not emit SSE
-instructions for floating point. The LLVM backend (used for `--optimized` builds)
-does emit SSE and matches C performance. Both backends apply SROA correctly.
+Rust's `black_box(acc)` prevents LLVM from seeing through the loop recurrence,
+which partially explains its gap vs C independent of overflow semantics.

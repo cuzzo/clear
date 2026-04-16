@@ -1,66 +1,68 @@
 // SROA Benchmark — Rust Baseline
 //
-// BigVec has 130 f64 fields; sum3() reads only x1,x2,x3.
-// Rust's LLVM aggressively SROA's+DCE's the unused fields even through
-// black_box/volatile — this measures SROA quality, not runtime speed.
-// The Rust number is not directly comparable to C/CLEAR.
+// BigVec has 130 i64 fields (1040 bytes). sum3() reads only x1, x2, x3.
+// 127 of the 130 field initialisations are dead.
+//
+// Rust's LLVM applies SROA + DCE identically to C when using integers.
+// (Float benchmarks are skipped here — fast-math makes float SROA results
+// incomparable across languages. See planned fastmath benchmark in README.)
+//
+// black_box(acc) prevents LLVM from constant-folding the loop while still
+// allowing SROA to decompose the struct within each iteration.
+// acc is reduced mod 1_000_000_007 to stay bounded.
+//
+// N = 100_000_000 iterations.
 
+use std::hint::black_box;
 use std::time::Instant;
 
 #[derive(Clone, Copy, Default)]
 struct BigVec {
-    x1: f64, x2: f64, x3: f64, x4: f64, x5: f64,
-    x6: f64, x7: f64, x8: f64, x9: f64, x10: f64,
-    x11: f64, x12: f64, x13: f64, x14: f64, x15: f64,
-    x16: f64, x17: f64, x18: f64, x19: f64, x20: f64,
-    x21: f64, x22: f64, x23: f64, x24: f64, x25: f64,
-    x26: f64, x27: f64, x28: f64, x29: f64, x30: f64,
-    x31: f64, x32: f64, x33: f64, x34: f64, x35: f64,
-    x36: f64, x37: f64, x38: f64, x39: f64, x40: f64,
-    x41: f64, x42: f64, x43: f64, x44: f64, x45: f64,
-    x46: f64, x47: f64, x48: f64, x49: f64, x50: f64,
-    x51: f64, x52: f64, x53: f64, x54: f64, x55: f64,
-    x56: f64, x57: f64, x58: f64, x59: f64, x60: f64,
-    x61: f64, x62: f64, x63: f64, x64: f64, x65: f64,
-    x66: f64, x67: f64, x68: f64, x69: f64, x70: f64,
-    x71: f64, x72: f64, x73: f64, x74: f64, x75: f64,
-    x76: f64, x77: f64, x78: f64, x79: f64, x80: f64,
-    x81: f64, x82: f64, x83: f64, x84: f64, x85: f64,
-    x86: f64, x87: f64, x88: f64, x89: f64, x90: f64,
-    x91: f64, x92: f64, x93: f64, x94: f64, x95: f64,
-    x96: f64, x97: f64, x98: f64, x99: f64, x100: f64,
-    x101: f64, x102: f64, x103: f64, x104: f64, x105: f64,
-    x106: f64, x107: f64, x108: f64, x109: f64, x110: f64,
-    x111: f64, x112: f64, x113: f64, x114: f64, x115: f64,
-    x116: f64, x117: f64, x118: f64, x119: f64, x120: f64,
-    x121: f64, x122: f64, x123: f64, x124: f64, x125: f64,
-    x126: f64, x127: f64, x128: f64, x129: f64, x130: f64,
+    x1: i64, x2: i64, x3: i64, x4: i64, x5: i64,
+    x6: i64, x7: i64, x8: i64, x9: i64, x10: i64,
+    x11: i64, x12: i64, x13: i64, x14: i64, x15: i64,
+    x16: i64, x17: i64, x18: i64, x19: i64, x20: i64,
+    x21: i64, x22: i64, x23: i64, x24: i64, x25: i64,
+    x26: i64, x27: i64, x28: i64, x29: i64, x30: i64,
+    x31: i64, x32: i64, x33: i64, x34: i64, x35: i64,
+    x36: i64, x37: i64, x38: i64, x39: i64, x40: i64,
+    x41: i64, x42: i64, x43: i64, x44: i64, x45: i64,
+    x46: i64, x47: i64, x48: i64, x49: i64, x50: i64,
+    x51: i64, x52: i64, x53: i64, x54: i64, x55: i64,
+    x56: i64, x57: i64, x58: i64, x59: i64, x60: i64,
+    x61: i64, x62: i64, x63: i64, x64: i64, x65: i64,
+    x66: i64, x67: i64, x68: i64, x69: i64, x70: i64,
+    x71: i64, x72: i64, x73: i64, x74: i64, x75: i64,
+    x76: i64, x77: i64, x78: i64, x79: i64, x80: i64,
+    x81: i64, x82: i64, x83: i64, x84: i64, x85: i64,
+    x86: i64, x87: i64, x88: i64, x89: i64, x90: i64,
+    x91: i64, x92: i64, x93: i64, x94: i64, x95: i64,
+    x96: i64, x97: i64, x98: i64, x99: i64, x100: i64,
+    x101: i64, x102: i64, x103: i64, x104: i64, x105: i64,
+    x106: i64, x107: i64, x108: i64, x109: i64, x110: i64,
+    x111: i64, x112: i64, x113: i64, x114: i64, x115: i64,
+    x116: i64, x117: i64, x118: i64, x119: i64, x120: i64,
+    x121: i64, x122: i64, x123: i64, x124: i64, x125: i64,
+    x126: i64, x127: i64, x128: i64, x129: i64, x130: i64,
 }
 
-#[inline(never)]
-fn sum3(v: BigVec) -> f64 {
+fn sum3(v: BigVec) -> i64 {
     v.x1 + v.x2 + v.x3
 }
 
 fn main() {
     let start = Instant::now();
 
-    let mut acc: f64 = 0.0;
-    for _ in 0..100_000 {
-        let mut bv = BigVec::default();
-        bv.x1 = acc;
-        bv.x2 = acc + 1.0;
-        bv.x3 = acc + 2.0;
-        // Pass through a volatile read to force the full struct to be materialized
-        // on the stack, matching what C and CLEAR actually do.
-        let ptr = &bv as *const BigVec;
-        let bv = unsafe { std::ptr::read_volatile(ptr) };
-        acc += sum3(bv);
+    let mut acc: i64 = 1;
+    for _ in 0..100_000_000_i64 {
+        let a = black_box(acc);
+        let bv = BigVec { x1: a, x2: a + 1, x3: a + 2, ..Default::default() };
+        acc = sum3(bv) % 1_000_000_007;
     }
 
-    assert!(acc > 0.0);
+    assert!(acc > 0);
 
     let duration = start.elapsed();
-    println!("acc = {:.6}", acc);
+    println!("acc = {}", acc);
     println!("Time: {:.4} seconds", duration.as_secs_f64());
 }

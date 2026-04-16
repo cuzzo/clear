@@ -76,6 +76,12 @@ CLEAR_THREADS=2 ./benchmarks/21_frame_vs_heap/bench_clear
 | 22 | pool_vs_multiowned | Fixed-capacity Pool vs List insert + memory | C, Go |
 | 23 | pipeline_overhead | Pipeline abstraction tax + memory | C, Go |
 
+## Planned benchmarks
+
+| # | Name | What it measures |
+|---|------|-----------------|
+| - | fastmath | Float SROA/DCE quality: measures how aggressively each compiler eliminates dead float writes (fast-math skews Rust, making cross-language comparison invalid without a separate benchmark) |
+
 ## Adding a new benchmark
 
 1. Create `benchmarks/NN_name/bench.cht` with a `FN main()` entry point
