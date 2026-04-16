@@ -102,12 +102,13 @@ int main(void) {
     double free_ms  = elapsed_ms(&t2, &t3);
     double total_ms = elapsed_ms(&t0, &t3);
 
-    printf("nodes:    %d\n", N);
-    printf("checksum: %ld\n", checksum);
-    printf("build:    %.1f ms\n", build_ms);
-    printf("walk:     %.1f ms\n", walk_ms);
-    printf("free:     %.1f ms\n", free_ms);
-    printf("total:    %.1f ms\n", total_ms);
+    /* BENCH_RESULT = total (build + walk + free) */
+    printf("BENCH_RESULT: %.0f ms\n", total_ms);
+    printf("Weak-reference graph (%d nodes)\n", N);
+    printf("  build:    %.1f ms\n", build_ms);
+    printf("  walk:     %.1f ms\n", walk_ms);
+    printf("  free:     %.1f ms\n", free_ms);
+    printf("  total:    %.1f ms\n", total_ms);
 
     return 0;
 }

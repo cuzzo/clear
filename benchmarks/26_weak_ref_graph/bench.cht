@@ -67,11 +67,11 @@ FN main() RETURNS Void ->
 
     ASSERT checksum > 0_i64, "checksum must be positive";
 
-    print("nodes:    ${n_nodes.toString()}");
-    print("checksum: ${checksum.toString()}");
-    print("build:    ${build_ms.toString()} ms");
-    print("walk:     ${walk_ms.toString()} ms");
-    print("total:    ${total_ms.toString()} ms");
+    print("BENCH_RESULT: ${total_ms.toString()} ms");
+    print("Weak-reference graph (${n_nodes.toString()} nodes)");
+    print("  build:    ${build_ms.toString()} ms");
+    print("  walk:     ${walk_ms.toString()} ms");
+    print("  total:    ${total_ms.toString()} ms");
 
     RETURN;
 END
