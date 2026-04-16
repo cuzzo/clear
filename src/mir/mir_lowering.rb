@@ -1155,7 +1155,7 @@ class MIRLowering
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       # Array/List args: convert to slice via .items (skip strings - already []const u8)
       ti = a.type_info
-      if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         # Skip & for params already received as pointers (prevents double-& in recursive calls)
@@ -1220,7 +1220,7 @@ class MIRLowering
       takes = a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.type_info
-      if ti&.array? && !ti&.string? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         if a.is_a?(AST::Identifier) && (@current_fn_collection_params&.include?(a.name) ||

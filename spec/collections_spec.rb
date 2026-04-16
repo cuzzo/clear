@@ -365,6 +365,23 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("pool.get(id)")
         expect(out).to include("pool.remove(id)")
       end
+
+      it "passes @pool parameter as pointer (&pool) not by value (.items)" do
+        out = transpile_fn(<<~CLEAR)
+          STRUCT Item { val: Int64 }
+          FN setup!(MUTABLE pool: Item[100]@pool) RETURNS Void ->
+            pool.insert(Item{ val: 1 });
+            RETURN;
+          END
+          FN f() RETURNS Void ->
+            MUTABLE pool: Item[100]@pool = [];
+            setup!(pool);
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("setup(rt, &pool)")
+        expect(out).not_to include("pool.items")
+      end
     end
   end
 
