@@ -39,14 +39,7 @@ func main() {
 		go producer(ch, int64(i+1))
 	}
 
-	// Close channel after all producers finish
-	go func() {
-		// Wait for all producers by counting messages
-		// (simpler: just use WaitGroup)
-		// Actually, use a done channel
-	}()
-
-	// Simpler: consumer counts expected messages
+	// Consumer counts expected messages
 	var total int64
 	expected := nProducers * itemsPerProd
 	for i := 0; i < expected; i++ {
