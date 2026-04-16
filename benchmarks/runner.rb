@@ -320,8 +320,23 @@ end
 # Server benchmark: start server, run shared client, capture output
 # -------------------------------------------------------------------------
 PORT = 6390
-BASE_NUM_GETS = 10_000
+DRAGONFLY_PORT = 6391
+BASE_NUM_GETS = 100_000
 CONCURRENCY = 50
+
+# Wait until a TCP port accepts connections (max ~10s).
+def wait_for_port(port, max_tries: 20, delay: 0.5)
+  require 'socket'
+  max_tries.times do
+    begin
+      TCPSocket.new("127.0.0.1", port).close
+      return true
+    rescue Errno::ECONNREFUSED, Errno::ECONNRESET, Errno::ETIMEDOUT
+      sleep delay
+    end
+  end
+  false
+end
 
 def run_server_bench(dir, timeout: RUN_TIMEOUT)
   scale = (ENV['BENCH_SCALE'] || "1.0").to_f
@@ -389,10 +404,29 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
   clear_env = { "CLEAR_THREADS" => threads }
   clear_env["LD_PRELOAD"] = jemalloc if jemalloc
 
+  # Detect DragonflyDB for benchmarks that opt in via USE_DRAGONFLY marker file.
+  dragonfly_bin = nil
+  if File.exist?("#{dir}/USE_DRAGONFLY")
+    dragonfly_bin = [
+      File.expand_path("~/.local/bin/dragonfly"),
+      "/usr/local/bin/dragonfly",
+      "/usr/bin/dragonfly",
+      `which dragonfly 2>/dev/null`.strip,
+    ].find { |p| !p.empty? && File.exist?(p) }
+    puts "WARNING: USE_DRAGONFLY present but dragonfly binary not found" unless dragonfly_bin
+  end
+
   servers = []
-  servers << { key: :rust,  label: "Rust (tokio)",    bin: "#{dir}/bench_rust",    env: {} } if has_rust && File.exist?("#{dir}/bench_rust")
-  servers << { key: :go,    label: "Go (goroutines)",  bin: "#{dir}/server_go",     env: {} } if has_go && File.exist?("#{dir}/server_go")
-  servers << { key: :clear, label: "CLEAR (fibers)",   bin: "#{dir}/server_clear",  env: clear_env } if has_clear
+  servers << { key: :dragonfly, label: "DragonflyDB",      port: DRAGONFLY_PORT,
+               bin: dragonfly_bin,  args: ["--port", DRAGONFLY_PORT.to_s,
+               "--logtostderr=false", "--dbfilename="],
+               env: {} } if dragonfly_bin
+  servers << { key: :rust,      label: "Rust (tokio)",     port: PORT,
+               bin: "#{dir}/bench_rust", args: [], env: {} } if has_rust && File.exist?("#{dir}/bench_rust")
+  servers << { key: :go,        label: "Go (goroutines)",  port: PORT,
+               bin: "#{dir}/server_go",  args: [], env: {} } if has_go && File.exist?("#{dir}/server_go")
+  servers << { key: :clear,     label: "CLEAR (fibers)",   port: PORT,
+               bin: "#{dir}/server_clear", args: [], env: clear_env } if has_clear
 
   servers.each do |srv|
     # Clean data directory
@@ -402,11 +436,11 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
     # Start server — use env hash (not string) so spawn doesn't wrap in sh -c,
     # giving us the real server PID for /proc/<pid>/status RSS tracking.
     puts "\nRunning #{srv[:label]}..."
-    pid = spawn(srv[:env], "./#{srv[:bin]}", [:out, :err] => "/dev/null")
-    sleep 1
+    pid = spawn(srv[:env], srv[:bin], *srv[:args], [:out, :err] => "/dev/null")
+    wait_for_port(srv[:port])
 
     # Run client (timeout only if TIMEOUT file present; otherwise no cap like original)
-    client_cmd = "./#{dir}/client_go #{pid} #{PORT} #{num_gets} #{CONCURRENCY} 2>&1"
+    client_cmd = "./#{dir}/client_go #{pid} #{srv[:port]} #{num_gets} #{CONCURRENCY} 2>&1"
     client_cmd = "timeout #{timeout}s #{client_cmd}" if timeout
     output = `#{client_cmd}`
     puts output
@@ -423,6 +457,15 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
     end
     if output =~ /GET phase:\s+(\d+) ms/
       r[:get_ms] = $1.to_i
+    end
+    if output =~ /SET throughput:\s+([\d.]+) rps/
+      r[:set_rps] = $1.to_f.round
+    end
+    if output =~ /GET throughput:\s+([\d.]+) rps/
+      r[:get_rps] = $1.to_f.round
+    end
+    if output =~ /INCR throughput:\s+([\d.]+) rps/
+      r[:incr_rps] = $1.to_f.round
     end
     # Phase-based output (bench 25 pathological): collect throughput per phase
     output.scan(/Phase \d+: (\S+).*?\n\s+Time: (\d+) ms\n\s+Throughput: ([\d.]+) req\/s/m).each do |name, time_ms, throughput|
@@ -477,19 +520,40 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
       puts line
     end
   else
-    # Standard SET/GET display
-    puts "#{'%-22s' % 'Server'} #{'%8s' % 'SET(ms)'} #{'%8s' % 'GET(ms)'} #{'%10s' % 'Peak RSS'} #{'%10s' % 'RSS After'} #{'%10s' % 'Verified'}"
-    puts "-" * 70
-
-    results.each do |key, r|
-      label = servers.find { |s| s[:key] == key }&.dig(:label) || key.to_s
-      verified = r[:verified] && r[:total] ? "#{r[:verified]}/#{r[:total]}" : "?"
-      peak = r[:peak_rss_kb] ? "#{r[:peak_rss_kb]} KB" : "?"
-      rss  = r[:rss_after_kb] ? "#{r[:rss_after_kb]} KB" : "?"
-      puts "#{'%-22s' % label} #{'%8s' % (r[:set_ms] || '?')} #{'%8s' % (r[:get_ms] || '?')} #{'%10s' % peak} #{'%10s' % rss} #{'%10s' % verified}"
+    # Throughput display (rps) if any server reported rps, otherwise fall back to ms
+    has_rps = results.any? { |_, r| r[:set_rps] }
+    if has_rps
+      puts "#{'%-22s' % 'Server'} #{'%12s' % 'SET(rps)'} #{'%12s' % 'GET(rps)'} #{'%12s' % 'INCR(rps)'} #{'%10s' % 'Peak RSS'}"
+      puts "-" * 72
+      results.each do |key, r|
+        label = servers.find { |s| s[:key] == key }&.dig(:label) || key.to_s
+        peak = r[:peak_rss_kb] ? "#{r[:peak_rss_kb]} KB" : "?"
+        puts "#{'%-22s' % label} #{'%12s' % (r[:set_rps] || '?')} #{'%12s' % (r[:get_rps] || '?')} #{'%12s' % (r[:incr_rps] || '?')} #{'%10s' % peak}"
+      end
+    else
+      puts "#{'%-22s' % 'Server'} #{'%8s' % 'SET(ms)'} #{'%8s' % 'GET(ms)'} #{'%10s' % 'Peak RSS'} #{'%10s' % 'RSS After'} #{'%10s' % 'Verified'}"
+      puts "-" * 70
+      results.each do |key, r|
+        label = servers.find { |s| s[:key] == key }&.dig(:label) || key.to_s
+        verified = r[:verified] && r[:total] ? "#{r[:verified]}/#{r[:total]}" : "?"
+        peak = r[:peak_rss_kb] ? "#{r[:peak_rss_kb]} KB" : "?"
+        rss  = r[:rss_after_kb] ? "#{r[:rss_after_kb]} KB" : "?"
+        puts "#{'%-22s' % label} #{'%8s' % (r[:set_ms] || '?')} #{'%8s' % (r[:get_ms] || '?')} #{'%10s' % peak} #{'%10s' % rss} #{'%10s' % verified}"
+      end
     end
   end
 
+  # Throughput comparisons
+  if results[:clear] && results[:dragonfly]
+    puts ""
+    { set: :set_rps, get: :get_rps, incr: :incr_rps }.each do |label, metric|
+      c = results[:clear][metric]; d = results[:dragonfly][metric]
+      next unless c && d && d > 0
+      pct = (((c.to_f / d) - 1) * 100).round(1)
+      sign = pct >= 0 ? "+" : ""
+      puts "CLEAR #{label.upcase} vs DragonflyDB:  #{sign}#{pct}%"
+    end
+  end
   # Memory comparison
   if results[:clear] && results[:go] && results[:clear][:peak_rss_kb] && results[:go][:peak_rss_kb]
     ratio = ((results[:clear][:peak_rss_kb].to_f / results[:go][:peak_rss_kb]) * 100).round(1)
@@ -498,6 +562,10 @@ def run_server_bench(dir, timeout: RUN_TIMEOUT)
   if results[:clear] && results[:rust] && results[:clear][:peak_rss_kb] && results[:rust][:peak_rss_kb]
     ratio = ((results[:clear][:peak_rss_kb].to_f / results[:rust][:peak_rss_kb]) * 100).round(1)
     puts "CLEAR peak RSS: #{ratio}% of Rust"
+  end
+  if results[:clear] && results[:dragonfly] && results[:clear][:peak_rss_kb] && results[:dragonfly][:peak_rss_kb]
+    ratio = ((results[:clear][:peak_rss_kb].to_f / results[:dragonfly][:peak_rss_kb]) * 100).round(1)
+    puts "\nCLEAR peak RSS: #{ratio}% of DragonflyDB"
   end
 end
 
