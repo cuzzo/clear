@@ -28,3 +28,4 @@ PLAN.md
 
 **/*.profile/
 **/.zig-cache/
+**/*.clear-build.json
