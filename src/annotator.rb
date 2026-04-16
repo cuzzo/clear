@@ -1305,17 +1305,7 @@ private
       end
     end
 
-    # 4. Escape marking: set escaped_return on variables being returned
-    # so the ownership generator suppresses their defer cleanup.
-    # PromotionClassifier (Pass C) reads these flags to decide what to promote.
-    if mark_escaping_collections!(node.value)
-      fn_node = @fn_nodes[current_fn_ctx&.name]
-      if fn_node
-        fn_node.return_provenance = :heap
-      end
-    end
-
-    # RETURN COPY expr or RETURN Struct{ field: COPY ... } normally heap-dupes,
+    # RETURN COPY expr or RETURN Struct{ field: COPY ... }: the COPY heap-dupes,
     # so the caller receives heap-allocated data.
     # But COPY of an implicitly-copyable value (e.g. Id<T>) is value-like and
     # must not force heap return provenance.
@@ -1329,15 +1319,14 @@ private
         end
       end
     elsif node.value.is_a?(AST::StructLit)
-      resolver = ->(name) { lookup_type_schema(name) rescue nil }
-      has_copy_field = node.value.fields.any? do |_, v|
-        next false unless v.is_a?(AST::CopyNode)
-        vti = v.type_info
-        !vti&.implicitly_copyable?(resolver)
-      end
+      # ensure_owned_value! only wraps @list/rodata in CopyNode, never value types.
+      # No implicitly_copyable? gate needed here.
+      has_copy_field = node.value.fields.any? { |_, v| v.is_a?(AST::CopyNode) }
       if has_copy_field
         fn_node = @fn_nodes[current_fn_ctx&.name]
-        fn_node.return_provenance = :heap
+        if fn_node
+          fn_node.return_provenance = :heap
+        end
       end
     end
 
@@ -2695,10 +2684,13 @@ private
     ti = node.type_info
     resolver = ->(name) { lookup_type_schema(name) rescue nil }
 
-    # COPY of an implicitly-copyable value is a semantic no-op: keep it
-    # value-like instead of forcing heap ownership/cleanup.
-    unless ti&.implicitly_copyable?(resolver)
-      # COPY always produces heap-owned data for non-Copy values.
+    # COPY of a primitive or Id<T> is a semantic no-op (value copy, no allocation).
+    # All other explicit COPYs produce heap-owned data.
+    is_value_copy = ti.is_a?(Type) &&
+      !ti.any_sync? && !ti.multiowned? && !ti.shared? &&
+      (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
+    unless is_value_copy
+      # COPY always produces heap-owned data for non-value types.
       ti.provenance = :heap if ti.is_a?(Type)
       # Mark as heap usage - COPY allocates via heapAlloc
       current_fn_ctx.heap_count += 1 if current_fn_ctx
