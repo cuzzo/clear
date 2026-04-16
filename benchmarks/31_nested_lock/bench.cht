@@ -75,11 +75,9 @@ FN main() RETURNS Void ->
     totalOps = nWorkers * opsPerWorker;
     opsPerSec = totalOps * 1000 / elapsed;
 
-    print("Workers:        ${nWorkers.toString()}");
-    print("Accounts:       ${numAccounts.toString()}");
-    print("Ops per worker: ${opsPerWorker.toString()}");
-    print("Total ops:      ${totalOps.toString()}");
-    print("Total time:     ${elapsed.toString()} ms");
-    print("Ops/sec:        ${opsPerSec.toString()}");
-    print("Balance:        ${total.toString()} (expected ${expected.toString()})");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    print("Nested lock (${nWorkers.toString()} workers x ${opsPerWorker.toString()} ops)");
+    print("  Total time:     ${elapsed.toString()} ms");
+    print("  Ops/sec:        ${opsPerSec.toString()}");
+    print("  Balance:        ${total.toString()} (expected ${expected.toString()})");
 END

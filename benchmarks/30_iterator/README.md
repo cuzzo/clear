@@ -19,24 +19,27 @@ LLVM from inlining the iterator into the loop body and eliminating the
 abstraction. This measures function call overhead per element, not the
 optimizer's ability to see through the pattern.
 
-## Results (ReleaseFast, single-core, noinline)
-
-| Language | Iterator (ms) | vs C |
-|----------|--------------|------|
-| C | 16.4 | baseline |
-| CLEAR | 18.9 | +15% |
-| Rust | 27.9 | +70% |
-
-CLEAR's borrowed iterator matches C within 15%. Faster than Rust because
-Zig's calling convention has less overhead than Rust's for small structs.
-
-## With inlining (what the optimizer can do)
+## Results (current runner, LLVM ReleaseFast)
 
 | Language | Iterator (ms) | Notes |
 |----------|--------------|-------|
-| C | 0 | LLVM inlines all three calls, vectorizes the sum |
-| Rust | 0 | Same — LLVM eliminates the iterator entirely |
-| CLEAR | 16.7 | Zig's native x86 backend does not inline across functions |
+| CLEAR | ~3ms | LLVM inlines all three functions, vectorizes |
+| C | ~15ms | `noinline` prevents inlining |
+| Rust | ~23ms | `#[inline(never)]` prevents inlining |
+
+The comparison is NOT apples-to-apples: C and Rust force noinline while CLEAR
+allows LLVM to inline and vectorize. CLEAR's 3ms reflects the inlined case.
+
+## Apples-to-apples: noinline (historical)
+
+| Language | Iterator (ms) | vs C |
+|----------|--------------|------|
+| C | ~16ms | baseline |
+| CLEAR | ~19ms | +15% |
+| Rust | ~28ms | +70% |
+
+With all three forced noinline, CLEAR matches C within 15%.
+Faster than Rust due to Zig's lower per-call overhead for small structs.
 
 With inlining enabled, C and Rust reduce to a single vectorized loop.
 The iterator struct, has_next check, and advance call all disappear.

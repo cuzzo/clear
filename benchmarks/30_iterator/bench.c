@@ -60,9 +60,11 @@ int main(void) {
     }
     clock_gettime(CLOCK_MONOTONIC, &t3);
 
-    printf("Iterator: %.1f ms\n", elapsed_ms(t0, t1));
-    printf("Raw loop: %.1f ms\n", elapsed_ms(t2, t3));
-    printf("Total:    %.1f ms\n", elapsed_ms(t0, t1));
+    /* BENCH_RESULT = iterator time (primary metric) */
+    printf("BENCH_RESULT: %.0f ms\n", elapsed_ms(t0, t1));
+    printf("Iterator benchmark (%d elements x %d iters)\n", N, ITERS);
+    printf("  Iterator: %.1f ms\n", elapsed_ms(t0, t1));
+    printf("  Raw loop: %.1f ms\n", elapsed_ms(t2, t3));
 
     free(data);
     return 0;

@@ -1,4 +1,4 @@
-# Benchmark 30: Nested Lock (Bank Transfer)
+# Benchmark 31: Nested Lock (Bank Transfer)
 
 Bank transfer workload: 64 accounts, N workers doing random transfers.
 Each transfer acquires 3 locks: a read lock on the bank container, then
@@ -15,19 +15,21 @@ two mutex locks on accounts (ordered by index to prevent deadlock).
 
 | Lang  | Total  | vs Go  | vs Rust |
 |-------|--------|--------|---------|
-| Rust  | 2.07s  |        |         |
-| Go    | 2.11s  |        |         |
-| CLEAR | 2.31s  | +9.6%  | +11.5%  |
+| Rust  | ~1.74s |        |         |
+| Go    | ~2.12s |        |         |
+| CLEAR | ~2.69s | +27%   | +54%    |
 
 All three implementations are structurally identical: Arc<RwLock<Bank>> containing
 Vec<Mutex<Account>>. The benchmark is apples-to-apples.
 
 ## Analysis
 
-CLEAR is within ~10% of Go and Rust. The small overhead comes from:
+CLEAR is ~27% behind Go and ~54% behind Rust. Overhead sources:
 - Arc refcount increments when extracting account references from the list
 - Fiber scheduling overhead vs OS threads (BG @parallel pins to OS threads, but
   there is still a fiber trampoline)
+- CLEAR's RwLock is pthread-based; Rust uses a custom futex-based implementation
+  that may be more efficient under high contention
 
 The nested locking pattern works correctly in all three languages. Lock ordering
 by account index prevents deadlocks. Total balance is conserved across all runs.
@@ -44,7 +46,7 @@ by account index prevents deadlocks. Total balance is conserved across all runs.
 ## Running
 
 ```bash
-ruby benchmarks/runner.rb --smoke benchmarks/30_nested_lock/   # CLEAR only
-ruby benchmarks/runner.rb --fast benchmarks/30_nested_lock/    # All langs
-ruby benchmarks/runner.rb benchmarks/30_nested_lock/           # Full run
+ruby benchmarks/runner.rb --smoke benchmarks/31_nested_lock/   # CLEAR only
+ruby benchmarks/runner.rb --fast benchmarks/31_nested_lock/    # All langs
+ruby benchmarks/runner.rb benchmarks/31_nested_lock/           # Full run
 ```

@@ -101,11 +101,10 @@ fn main() {
     let expected = (NUM_ACCOUNTS as i64) * 1000;
     let total_ops = (n_workers as i64) * OPS_PER_WORKER as i64;
 
-    println!("Workers:        {}", n_workers);
-    println!("Accounts:       {}", NUM_ACCOUNTS);
-    println!("Ops per worker: {}", OPS_PER_WORKER);
-    println!("Total ops:      {}", total_ops);
-    println!("Total time:     {} ms", elapsed);
-    println!("Ops/sec:        {}", total_ops * 1000 / elapsed);
-    println!("Balance:        {} (expected {})", total, expected);
+    // BENCH_RESULT = total elapsed
+    println!("BENCH_RESULT: {} ms", elapsed);
+    println!("Nested lock ({} workers x {} ops)", n_workers, OPS_PER_WORKER);
+    println!("  Total time:     {} ms", elapsed);
+    println!("  Ops/sec:        {}", total_ops * 1000 / elapsed);
+    println!("  Balance:        {} (expected {})", total, expected);
 }

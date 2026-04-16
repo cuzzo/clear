@@ -77,8 +77,9 @@ FN main() RETURNS Void ->
 
     ASSERT result1 == result2;
 
-    print("Iterator: ${iterMs.toString()} ms");
-    print("Raw loop: ${rawMs.toString()} ms");
-    print("Total:    ${iterMs.toString()} ms");
+    print("BENCH_RESULT: ${iterMs.toString()} ms");
+    print("Iterator benchmark (${n.toString()} elements x ${iters.toString()} iters)");
+    print("  Iterator: ${iterMs.toString()} ms");
+    print("  Raw loop: ${rawMs.toString()} ms");
     RETURN;
 END

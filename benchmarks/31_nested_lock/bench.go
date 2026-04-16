@@ -96,11 +96,10 @@ func main() {
 	expected := int64(numAccounts) * 1000
 	totalOps := int64(nWorkers) * opsPerWorker
 
-	fmt.Printf("Workers:        %d\n", nWorkers)
-	fmt.Printf("Accounts:       %d\n", numAccounts)
-	fmt.Printf("Ops per worker: %d\n", opsPerWorker)
-	fmt.Printf("Total ops:      %d\n", totalOps)
-	fmt.Printf("Total time:     %d ms\n", elapsed.Milliseconds())
-	fmt.Printf("Ops/sec:        %d\n", totalOps*1000/elapsed.Milliseconds())
-	fmt.Printf("Balance:        %d (expected %d)\n", total, expected)
+	// BENCH_RESULT = total elapsed
+	fmt.Printf("BENCH_RESULT: %d ms\n", elapsed.Milliseconds())
+	fmt.Printf("Nested lock (%d workers x %d ops)\n", nWorkers, opsPerWorker)
+	fmt.Printf("  Total time:     %d ms\n", elapsed.Milliseconds())
+	fmt.Printf("  Ops/sec:        %d\n", totalOps*1000/elapsed.Milliseconds())
+	fmt.Printf("  Balance:        %d (expected %d)\n", total, expected)
 }

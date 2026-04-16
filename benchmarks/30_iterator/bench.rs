@@ -50,7 +50,9 @@ fn main() {
     let raw_ms = t2.elapsed().as_secs_f64() * 1000.0;
 
     assert_eq!(result1, result2);
-    println!("Iterator: {:.0} ms", iter_ms);
-    println!("Raw loop: {:.0} ms", raw_ms);
-    println!("Total:    {:.0} ms", iter_ms);
+    // BENCH_RESULT = iterator time (primary metric)
+    println!("BENCH_RESULT: {:.0} ms", iter_ms);
+    println!("Iterator benchmark ({} elements x {} iters)", N, ITERS);
+    println!("  Iterator: {:.0} ms", iter_ms);
+    println!("  Raw loop: {:.0} ms", raw_ms);
 }
