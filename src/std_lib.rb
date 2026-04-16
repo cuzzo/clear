@@ -23,6 +23,11 @@ STD_LIB = {
 
   # Pre-allocate capacity without inserting elements. No-op if capacity already sufficient.
   # Avoids doubling waste when the final size is known before filling a loop.
+  #
+  # TODO: eliminate reserve() entirely. T[N]@list already calls initCapacity(alloc, N) for
+  # literal N (mir_lowering.rb). Extend that to accept runtime expressions — T[n]@list where
+  # n is a variable — so the declaration itself pre-allocates without a separate method call.
+  # The capacity annotation today only accepts integer literals (type.rb: match[2].to_i).
   "reserve" => {
     args: [:"Any[]", :Int64],
     return: :Void,
