@@ -46,6 +46,8 @@ FN main() RETURNS Void ->
     mixMs = timestampMs() - t2;
 
     ASSERT map.count() > 0;
+    totalMs = setMs + getMs + mixMs;
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
     print("Keys: ${n.toString()}");
     print("Shards: 32");
     print("Set: ${setMs.toString()} ms");

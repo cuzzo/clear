@@ -162,6 +162,8 @@ FN main() RETURNS Void ->
     ASSERT zipf_hits > 0, "Zipf hits must be > 0";
     ASSERT mix_hits > 0, "Mixed hits must be > 0";
 
+    totalMs = setMs + getMs + zipfMs + mixMs;
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
     print("Keys: ${n.toString()}");
     print("Workers: ${workers.toString()}");
     print("Set: ${setMs.toString()} ms");

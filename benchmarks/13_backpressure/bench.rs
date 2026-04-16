@@ -60,5 +60,6 @@ fn main() {
     println!("Checksum: {}", total.load(Ordering::Relaxed) % 1_000_000_000);
     println!("Items: {}", TOTAL_ITEMS);
     println!("Workers: {}", n_consumers);
+    println!("BENCH_RESULT: {} ms", (elapsed * 1000.0) as u64);
     println!("Time: {:.4} s", elapsed);
 }

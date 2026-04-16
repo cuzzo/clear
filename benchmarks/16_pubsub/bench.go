@@ -74,5 +74,6 @@ func main() {
 	fmt.Printf("Checksum: %d\n", total.Load()%1_000_000_000)
 	fmt.Printf("Messages: %d\n", int64(nMessages))
 	fmt.Printf("Subscribers: %d\n", nSubscribers)
+	fmt.Printf("BENCH_RESULT: %d ms\n", int64(elapsed*1000))
 	fmt.Printf("Time: %.0f ms\n", elapsed*1000)
 }

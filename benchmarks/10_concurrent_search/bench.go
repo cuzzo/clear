@@ -154,5 +154,6 @@ func main() {
 	for _, r := range results[:top] {
 		fmt.Printf("  file%04d.txt  %d\n", r.fileIdx, r.count)
 	}
+	fmt.Printf("BENCH_RESULT: %d ms\n", int64(elapsed*1000))
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }

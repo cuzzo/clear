@@ -52,6 +52,7 @@ FN main() RETURNS Void ->
     print("Checksum: ${checksum.toString()}");
     print("Messages: 10000");
     print("Subscribers: 64");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

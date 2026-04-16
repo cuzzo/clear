@@ -61,6 +61,8 @@ FN main() RETURNS Void ->
 
     ASSERT total == toFloat(n), "total mismatch";
 
+    totalMs = shardMs + statsMs;
+    print("BENCH_RESULT: ${totalMs.toString()} ms");
     print("Events: ${n.toString()}");
     print("Buckets: ${buckets.toString()}");
     print("Shard histogram: ${shardMs.toString()} ms");

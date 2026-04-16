@@ -202,6 +202,7 @@ func main() {
 	wg.Wait()
 	mixedTime := time.Since(t0).Seconds()
 
+	fmt.Printf("BENCH_RESULT: %d ms\n", int64((setTime+getUniformTime+getZipfTime+mixedTime)*1000))
 	fmt.Printf("Keys: %d\n", numKeys)
 	fmt.Printf("Workers: %d\n", numWorkers)
 	fmt.Printf("Set: %.4f s\n", setTime)

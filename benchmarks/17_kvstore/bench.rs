@@ -156,6 +156,7 @@ fn main() {
     for h in handles { h.join().unwrap(); }
     let mixed_time = t0.elapsed().as_secs_f64();
 
+    println!("BENCH_RESULT: {} ms", ((set_time+get_uniform_time+get_zipf_time+mixed_time) * 1000.0) as u64);
     println!("Keys: {}", NUM_KEYS);
     println!("Workers: {}", num_workers);
     println!("Set: {:.4} s", set_time);

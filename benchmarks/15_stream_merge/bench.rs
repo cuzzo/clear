@@ -46,5 +46,6 @@ fn main() {
     println!("Checksum: {}", total.wrapping_rem(1_000_000_000));
     println!("Producers: {}", N_PRODUCERS);
     println!("Items per producer: {}", ITEMS_PER_PROD);
+    println!("BENCH_RESULT: {} ms", (elapsed * 1000.0) as u64);
     println!("Time: {:.4} s", elapsed);
 }

@@ -67,5 +67,6 @@ func main() {
 	fmt.Printf("Min: %.0f\n", lowest)
 	fmt.Printf("Avg: %.0f\n", average)
 	fmt.Println("Verified: yes")
+	fmt.Printf("BENCH_RESULT: %d ms\n", elapsed.Milliseconds())
 	fmt.Printf("Time: %.4f s\n", elapsed.Seconds())
 }

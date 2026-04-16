@@ -67,5 +67,6 @@ fn main() {
     println!("Checksum: {}", total.load(Ordering::Relaxed) % 1_000_000_000);
     println!("Messages: {}", N_MESSAGES);
     println!("Subscribers: {}", N_SUBSCRIBERS);
+    println!("BENCH_RESULT: {} ms", (elapsed * 1000.0) as u64);
     println!("Time: {:.0} ms", elapsed * 1000.0);
 }

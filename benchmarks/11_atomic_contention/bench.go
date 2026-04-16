@@ -45,5 +45,6 @@ func main() {
 	total := atomic.LoadInt64(&counter)
 
 	fmt.Printf("Counter: %d (expected %d)\n", total, int64(nFibers)*int64(increments))
+	fmt.Printf("BENCH_RESULT: %d ms\n", int64(elapsed*1000))
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }

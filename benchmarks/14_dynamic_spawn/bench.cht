@@ -30,6 +30,7 @@ FN main() RETURNS Void ->
     print("Checksum: ${checksum.toString()}");
     print("Tasks: 100000");
     print("Iterations: 10000");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

@@ -49,5 +49,6 @@ fn main() {
     println!("Min: {}", lowest);
     println!("Avg: {}", average);
     println!("Verified: yes");
+    println!("BENCH_RESULT: {} ms", elapsed.as_millis());
     println!("Time: {:.4} s", elapsed.as_secs_f64());
 }

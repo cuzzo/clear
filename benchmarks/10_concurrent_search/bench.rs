@@ -141,5 +141,6 @@ async fn main() {
     for r in results.iter().take(10) {
         println!("  file{:04}.txt  {}", r.file_idx, r.count);
     }
+    println!("BENCH_RESULT: {} ms", (elapsed * 1000.0) as u64);
     println!("Time: {:.4} s", elapsed);
 }

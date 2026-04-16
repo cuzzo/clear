@@ -40,5 +40,6 @@ fn main() {
     println!("Checksum: {}", total % 1_000_000_000);
     println!("Workers: {}", N_WORKERS);
     println!("Iterations: {}", ITERATIONS);
+    println!("BENCH_RESULT: {} ms", (elapsed * 1000.0) as u64);
     println!("Time: {:.4} s", elapsed);
 }

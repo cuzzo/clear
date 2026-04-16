@@ -39,6 +39,7 @@ FN main() RETURNS Void ->
     print("Items per producer: 100000");
 
     elapsed = timestampMs() - t0;
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

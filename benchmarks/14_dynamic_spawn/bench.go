@@ -53,5 +53,6 @@ func main() {
 	fmt.Printf("Checksum: %d\n", checksum)
 	fmt.Printf("Tasks: %d\n", nTasks)
 	fmt.Printf("Iterations: %d\n", iterations)
+	fmt.Printf("BENCH_RESULT: %d ms\n", int64(elapsed*1000))
 	fmt.Printf("Time: %.4f s\n", elapsed)
 }

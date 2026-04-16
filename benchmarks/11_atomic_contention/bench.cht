@@ -29,6 +29,7 @@ FN main() RETURNS Void ->
     elapsed = timestampMs() - t0;
 
     print("Counter: ${c.value.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

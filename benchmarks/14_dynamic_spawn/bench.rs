@@ -39,5 +39,6 @@ async fn main() {
     println!("Checksum: {}", checksum);
     println!("Tasks: {}", N_TASKS);
     println!("Iterations: {}", ITERATIONS);
+    println!("BENCH_RESULT: {} ms", (elapsed * 1000.0) as u64);
     println!("Time: {:.4} s", elapsed);
 }
