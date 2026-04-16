@@ -1,7 +1,7 @@
 /*
  * SIMD Benchmark — C Baseline (Explicit AVX2)
  *
- * Vec4 dot product: 10 million iterations.
+ * Vec4 dot product: 100 million iterations.
  *
  * SIMD strategy: a Vec4 is exactly 4 doubles = 256 bits = one AVX register.
  * We load both vectors with _mm256_set_pd, multiply all 4 pairs in a single
@@ -68,7 +68,7 @@ int main(void) {
     double elapsed = (end.tv_sec  - start.tv_sec) +
                      (end.tv_nsec - start.tv_nsec) / 1e9;
 
-    printf("sum = %.6f\n", sum);
-    printf("Time: %.4f seconds\n", elapsed);
+    printf("BENCH_RESULT: %.0f ms\n", elapsed * 1000.0);
+    printf("sum = %.6f | Time: %.1f ms\n", sum, elapsed * 1000.0);
     return 0;
 }
