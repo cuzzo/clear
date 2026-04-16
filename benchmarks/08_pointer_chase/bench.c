@@ -63,12 +63,11 @@ int main(void) {
 
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
-    /* sum = 0 + STEP + 2*STEP + ... (mod N) = N*(N-1)/2 */
     assert(sum > 0);
-    double elapsed = (t1.tv_sec  - t0.tv_sec) +
-                     (t1.tv_nsec - t0.tv_nsec) / 1e9;
-    printf("sum = %ld\n", sum);
-    printf("Time: %.4f seconds\n", elapsed);
+    double ms = ((t1.tv_sec  - t0.tv_sec) +
+                 (t1.tv_nsec - t0.tv_nsec) / 1e9) * 1000.0;
+    printf("BENCH_RESULT: %.0f ms\n", ms);
+    printf("Walk: %.1f ms\n", ms);
 
     free(nodes);
     return 0;
