@@ -69,7 +69,7 @@ The annotation phase itself is split into 4 major passes:
  * This takes the fully hydrated AST Nodes and simply pretty prints them as valid Zig.
    * The most complicated part here is managing affine lifetimes properly.
 
-### 4. Runtime (`zig/runtime-header.zig`)
+### 4. Runtime (`zig/runtime` and `zig/lib`)
 
   * This is the Zig code that includes all the concurrency constructs that allow you to write easy code that seamlessly runs efficiently on multiple cores.
   * The majority of performance improvements that will be accepted live here.
