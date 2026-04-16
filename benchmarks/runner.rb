@@ -21,10 +21,22 @@ def bench_timeout(dir)
   File.exist?(f) ? File.read(f).strip.to_i : nil
 end
 
+# Benchmark output protocol:
+#   If a binary prints "BENCH_RESULT: <ms> ms" to stdout or stderr, that value
+#   is used as the measurement instead of wall time. This allows benchmarks that
+#   run multiple variants (warmup, reference runs, etc.) to declare exactly which
+#   number the runner should record. Benchmarks without BENCH_RESULT fall back to
+#   wall time (backward compatible).
 def measure_min(command, runs = 5, timeout: RUN_TIMEOUT)
   times = runs.times.filter_map do
-    t = Benchmark.measure { `timeout #{timeout}s sh -c "#{command.gsub('"', '\\"')}"` }.real
-    $?.success? ? t : nil
+    output = ""
+    t = Benchmark.measure { output = `timeout #{timeout}s sh -c "#{command.gsub('"', '\\"')} 2>&1"` }.real
+    next unless $?.success?
+    if output =~ /BENCH_RESULT:\s*(\d+(?:\.\d+)?)\s*ms/
+      $1.to_f / 1000.0
+    else
+      t
+    end
   end
   times.empty? ? nil : times.min
 end

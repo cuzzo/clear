@@ -43,12 +43,15 @@ FN main() RETURNS Void ->
     warmR = benchRegular(100);
     warmT = benchTight(100);
 
-    -- Tight inner loops (apples-to-apples vs C malloc + Rust Vec::with_capacity)
+    -- Primary measurement: TIGHT WHILE (apples-to-apples vs C malloc + Rust Vec)
     t0 = timestampMs();
     totalT = benchTight(n);
     tightMs = timestampMs() - t0;
 
-    -- Regular FOR loops (reference: includes checkYield + frame marks)
+    -- Declare the primary result for runner.rb
+    print("BENCH_RESULT: ${tightMs.toString()} ms");
+
+    -- Regular FOR loops (CLEAR overhead reference, not cross-language comparison)
     t1 = timestampMs();
     totalR = benchRegular(n);
     regularMs = timestampMs() - t1;
@@ -56,10 +59,8 @@ FN main() RETURNS Void ->
     ASSERT totalT == totalR, "results must match";
     ASSERT totalT > 0.0, "total must be positive";
 
-    -- TIGHT WHILE is the apples-to-apples comparison with C/Rust.
-    -- Regular FOR shows overhead from checkYield + per-iteration frame marks.
     print("total = ${totalT.toString()}");
     print("TIGHT WHILE: ${tightMs.toString()} ms  (vs C/Rust)");
-    print("Regular FOR: ${regularMs.toString()} ms");
+    print("Regular FOR: ${regularMs.toString()} ms  (CLEAR overhead reference, not measured by runner)");
     RETURN;
 END
