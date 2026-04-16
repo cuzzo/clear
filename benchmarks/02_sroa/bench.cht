@@ -94,6 +94,7 @@ FN main() RETURNS Void ->
 
     ASSERT acc > 0, "acc must be positive";
     elapsed = timestampMs() - t0;
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
 END

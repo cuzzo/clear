@@ -12,6 +12,7 @@ FN main() RETURNS Void ->
     r = fib(40);
     elapsed = timestampMs() - t0;
     ASSERT r == 102334155, "Fib(40) calculation error";
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
     print("Fib(40) = ${r.toString()}");
     print("Time: ${elapsed.toString()} ms");
     RETURN;

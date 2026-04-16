@@ -22,6 +22,9 @@ int main() {
     double elapsed = (end.tv_sec - start.tv_sec) + 
                     (end.tv_nsec - start.tv_nsec) / 1e9;
 
+    long elapsed_ms = (long)((end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000);
+    /* BENCH_RESULT = elapsed ms */
+    printf("BENCH_RESULT: %ld ms\n", elapsed_ms);
     printf("Fib(40) = %ld\n", result);
     printf("Time: %.4f seconds\n", elapsed);
     return 0;

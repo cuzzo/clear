@@ -60,6 +60,9 @@ int main(void) {
     double elapsed = (end.tv_sec - start.tv_sec) +
                      (end.tv_nsec - start.tv_nsec) / 1e9;
 
+    long elapsed_ms = (long)(elapsed * 1000);
+    /* BENCH_RESULT = elapsed ms */
+    printf("BENCH_RESULT: %ld ms\n", elapsed_ms);
     printf("acc = %ld\nTime: %.4f seconds\n", acc, elapsed);
     return 0;
 }

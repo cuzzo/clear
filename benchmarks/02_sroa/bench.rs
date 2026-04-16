@@ -63,6 +63,8 @@ fn main() {
     assert!(acc > 0);
 
     let duration = start.elapsed();
+    // BENCH_RESULT = elapsed ms
+    println!("BENCH_RESULT: {} ms", duration.as_millis());
     println!("acc = {}", acc);
     println!("Time: {:.4} seconds", duration.as_secs_f64());
 }
