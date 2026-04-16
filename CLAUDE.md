@@ -24,7 +24,8 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 # --- Full test suites ---
 bundle install                       # Install Ruby dependencies
-bundle exec prspec spec/              # Run all Ruby specs in parallel
+bundle exec prspec spec/              # Run all Ruby specs in parallel (~1s, excludes integration)
+bundle exec prspec spec/ --tag integration  # Run integration tests (builds binaries, ~3-4 min)
 
 # Package integration test
 cd transpile-tests/module-integration && zig build test
@@ -52,11 +53,14 @@ fiber stacks compensate for the larger stack frames that safety instrumentation 
 
 ### Test Suites
 
-Run **all three** after making changes to the compiler:
-- **Ruby specs**: `bundle exec prspec spec/` (parallel)
+Run **all four** after making changes to the compiler:
+- **Ruby unit specs**: `bundle exec prspec spec/` (parallel, ~1s, excludes integration)
 - **transpile-tests**: `./clear test transpile-tests/` (130 tests)
 - **module-integration**: `cd transpile-tests/module-integration && zig build test`
 - **ffi-integration**: `cd transpile-tests/ffi-integration && zig build test`
+
+Run **integration specs** after changes to the CLI or stack verifier:
+- **Ruby integration specs**: `bundle exec prspec spec/ --tag integration` (~3-4 min, builds binaries)
 
 ## Benchmarks
 

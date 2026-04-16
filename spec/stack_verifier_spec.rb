@@ -29,7 +29,7 @@ RSpec.describe StackVerifier do
     FileUtils.rm_rf(@tmpdir) if @tmpdir
   end
 
-  describe "#extract_frame_sizes" do
+  describe "#extract_frame_sizes", :integration do
     it "extracts stack frame sizes from a built binary" do
       src = <<~CLEAR
         FN compute(n: Float64) RETURNS Float64 ->
@@ -61,7 +61,7 @@ RSpec.describe StackVerifier do
     end
   end
 
-  describe "#analyze" do
+  describe "#analyze", :integration do
     it "cross-references with tier recommendations" do
       src = <<~CLEAR
         FN add(a: Float64, b: Float64) RETURNS Float64 ->
@@ -142,7 +142,7 @@ RSpec.describe StackVerifier do
     end
   end
 
-  describe "#compute_main_optimal_tier" do
+  describe "#compute_main_optimal_tier", :integration do
     it "returns a non-nil result with a valid tier" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
@@ -192,7 +192,7 @@ RSpec.describe StackVerifier do
     end
   end
 
-  describe "#compute_optimal_tiers" do
+  describe "#compute_optimal_tiers", :integration do
     it "returns an empty array when there are no BG blocks" do
       src = <<~CLEAR
         FN main() RETURNS Void ->

@@ -9,7 +9,7 @@ require "json"
 
 CLEAR_BIN = File.expand_path("../clear", __dir__)
 
-RSpec.describe "./clear build" do
+RSpec.describe "./clear build", :integration do
   def clear_build(source_path, *args, env: {})
     env_prefix = env.map { |k, v| "#{k}=#{v}" }.join(" ")
     env_prefix = "#{env_prefix} " unless env_prefix.empty?
