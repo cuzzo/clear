@@ -84,47 +84,23 @@ func main() {
 	data := buildData(N)
 	accum := 0.0
 
-	// Test 1: sum handwritten
 	t0 := time.Now()
 	for r := 0; r < ITER; r++ {
 		accum += sumLoop(data)
 	}
 	sumLoopMs := time.Since(t0).Milliseconds()
 
-	// Test 1b: sum pipeline-equivalent
 	t1 := time.Now()
 	for r := 0; r < ITER; r++ {
-		accum += sumLoop(data)
+		accum += fusedLoop(data)
 	}
-	sumPipeMs := time.Since(t1).Milliseconds()
+	fusedMs := time.Since(t1).Milliseconds()
 
-	// Test 2: fused handwritten
 	t2 := time.Now()
 	for r := 0; r < ITER; r++ {
-		accum += fusedLoop(data)
-	}
-	fusedMs := time.Since(t2).Milliseconds()
-
-	// Test 2b: fused pipeline-equivalent
-	t3 := time.Now()
-	for r := 0; r < ITER; r++ {
-		accum += fusedLoop(data)
-	}
-	chainMs := time.Since(t3).Milliseconds()
-
-	// Test 3: long chain handwritten
-	t4 := time.Now()
-	for r := 0; r < ITER; r++ {
 		accum += longFusedLoop(data)
 	}
-	longFusedMs := time.Since(t4).Milliseconds()
-
-	// Test 3b: long chain pipeline-equivalent
-	t5 := time.Now()
-	for r := 0; r < ITER; r++ {
-		accum += longFusedLoop(data)
-	}
-	longChainMs := time.Since(t5).Milliseconds()
+	longFusedMs := time.Since(t2).Milliseconds()
 
 	if accum == 0.0 {
 		fmt.Println("unexpected zero")
@@ -133,11 +109,11 @@ func main() {
 
 	hwm, _ := readMemory()
 
-	fmt.Printf("Handwritten loop: %d ms\n", sumLoopMs)
-	fmt.Printf("SUM pipeline: %d ms\n", sumPipeMs)
-	fmt.Printf("Fused loop (2-stage): %d ms\n", fusedMs)
-	fmt.Printf("Chained pipeline (2-stage): %d ms\n", chainMs)
-	fmt.Printf("Fused loop (4-stage): %d ms\n", longFusedMs)
-	fmt.Printf("Chained pipeline (4-stage): %d ms\n", longChainMs)
-	fmt.Printf("Peak RSS: %d KB\n", hwm)
+	// BENCH_RESULT = sum loop (cross-language baseline for CLEAR pipeline comparison)
+	fmt.Printf("BENCH_RESULT: %d ms\n", sumLoopMs)
+	fmt.Printf("Pipeline overhead (%d elements x %d iters) -- Go baseline\n", N, ITER)
+	fmt.Printf("  Sum loop (handwritten):    %d ms\n", sumLoopMs)
+	fmt.Printf("  Fused loop (2-stage):      %d ms\n", fusedMs)
+	fmt.Printf("  Fused loop (4-stage):      %d ms\n", longFusedMs)
+	fmt.Printf("  Peak RSS: %d KB\n", hwm)
 }

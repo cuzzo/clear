@@ -131,15 +131,16 @@ FN main() RETURNS Void ->
     ASSERT accum != 0.0, "prevent dead code elimination";
 
     -- ---- Report ----
-    print("Elements: ${n.toString()}");
-    print("Iterations: ${iters.toString()}");
-    print("Handwritten loop: ${sumLoopMs.toString()} ms");
-    print("SUM pipeline: ${sumPipeMs.toString()} ms");
-    print("Fused loop (2-stage): ${fusedMs.toString()} ms");
-    print("Chained pipeline (2-stage): ${chainMs.toString()} ms");
-    print("Fused loop (4-stage): ${longFusedMs.toString()} ms");
-    print("Chained pipeline (4-stage): ${longChainMs.toString()} ms");
-    print("Peak RSS: ${peakMemoryKb().toString()} KB");
+    -- BENCH_RESULT = handwritten sum loop (cross-language baseline)
+    print("BENCH_RESULT: ${sumLoopMs.toString()} ms");
+    print("Pipeline overhead (${n.toString()} elements x ${iters.toString()} iters)");
+    print("  Sum loop (handwritten):       ${sumLoopMs.toString()} ms");
+    print("  Sum pipeline (s> SUM _):      ${sumPipeMs.toString()} ms  overhead: ${(sumPipeMs - sumLoopMs).toString()} ms");
+    print("  Fused loop (2-stage):         ${fusedMs.toString()} ms");
+    print("  Chained pipeline (2-stage):   ${chainMs.toString()} ms  overhead: ${(chainMs - fusedMs).toString()} ms");
+    print("  Fused loop (4-stage):         ${longFusedMs.toString()} ms");
+    print("  Chained pipeline (4-stage):   ${longChainMs.toString()} ms  overhead: ${(longChainMs - longFusedMs).toString()} ms");
+    print("  Peak RSS: ${peakMemoryKb().toString()} KB");
 
     RETURN;
 END

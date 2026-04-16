@@ -76,51 +76,37 @@ int main(void) {
         data[i] = (double)raw;
     }
 
-    struct timespec t0, t1, t2, t3, t4, t5, t6, t7, t8, t9, t10, t11;
+    struct timespec t0, t1, t2, t3, t4, t5;
     double accum = 0.0;
 
-    /* Test 1: sum handwritten */
     clock_gettime(CLOCK_MONOTONIC, &t0);
     for (int r = 0; r < ITER; r++) accum += sum_loop(data, N);
     clock_gettime(CLOCK_MONOTONIC, &t1);
 
-    /* Test 1b: sum pipeline-equivalent (same function, proves zero overhead) */
     clock_gettime(CLOCK_MONOTONIC, &t2);
-    for (int r = 0; r < ITER; r++) accum += sum_loop(data, N);
+    for (int r = 0; r < ITER; r++) accum += fused_loop(data, N);
     clock_gettime(CLOCK_MONOTONIC, &t3);
 
-    /* Test 2: fused handwritten */
     clock_gettime(CLOCK_MONOTONIC, &t4);
-    for (int r = 0; r < ITER; r++) accum += fused_loop(data, N);
+    for (int r = 0; r < ITER; r++) accum += long_fused_loop(data, N);
     clock_gettime(CLOCK_MONOTONIC, &t5);
-
-    /* Test 2b: fused pipeline-equivalent */
-    clock_gettime(CLOCK_MONOTONIC, &t6);
-    for (int r = 0; r < ITER; r++) accum += fused_loop(data, N);
-    clock_gettime(CLOCK_MONOTONIC, &t7);
-
-    /* Test 3: long chain handwritten */
-    clock_gettime(CLOCK_MONOTONIC, &t8);
-    for (int r = 0; r < ITER; r++) accum += long_fused_loop(data, N);
-    clock_gettime(CLOCK_MONOTONIC, &t9);
-
-    /* Test 3b: long chain pipeline-equivalent */
-    clock_gettime(CLOCK_MONOTONIC, &t10);
-    for (int r = 0; r < ITER; r++) accum += long_fused_loop(data, N);
-    clock_gettime(CLOCK_MONOTONIC, &t11);
 
     if (accum == 0.0) { printf("unexpected zero\n"); return 1; }
 
     long hwm, rss;
     read_memory(&hwm, &rss);
 
-    printf("Handwritten loop: %.0f ms\n", elapsed_ms(&t0, &t1));
-    printf("SUM pipeline: %.0f ms\n", elapsed_ms(&t2, &t3));
-    printf("Fused loop (2-stage): %.0f ms\n", elapsed_ms(&t4, &t5));
-    printf("Chained pipeline (2-stage): %.0f ms\n", elapsed_ms(&t6, &t7));
-    printf("Fused loop (4-stage): %.0f ms\n", elapsed_ms(&t8, &t9));
-    printf("Chained pipeline (4-stage): %.0f ms\n", elapsed_ms(&t10, &t11));
-    printf("Peak RSS: %ld KB\n", hwm);
+    double sum_ms   = elapsed_ms(&t0, &t1);
+    double fused_ms = elapsed_ms(&t2, &t3);
+    double long_ms  = elapsed_ms(&t4, &t5);
+
+    /* BENCH_RESULT = sum loop (cross-language baseline for CLEAR pipeline comparison) */
+    printf("BENCH_RESULT: %.0f ms\n", sum_ms);
+    printf("Pipeline overhead (%d elements x %d iters) -- C baseline\n", N, ITER);
+    printf("  Sum loop (handwritten):    %.0f ms\n", sum_ms);
+    printf("  Fused loop (2-stage):      %.0f ms\n", fused_ms);
+    printf("  Fused loop (4-stage):      %.0f ms\n", long_ms);
+    printf("  Peak RSS: %ld KB\n", hwm);
 
     free(data);
     return 0;
