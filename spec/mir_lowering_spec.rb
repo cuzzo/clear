@@ -1022,13 +1022,16 @@ RSpec.describe MIRLowering do
       expect(zig).to include("y: f64")
     end
 
-    xit "borrows immutable user struct params by pointer (SROA: pending)" do
+    it "stack struct param uses anytype — SROA candidate, no const-ptr" do
+      # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
+      # into registers. Do NOT pass by *const T — that would prevent SROA.
       params = [{ name: "p", type: :Point, mutable: false }]
       l = lowering(struct_schemas: { Point: { x: { type: :Number }, y: { type: :Number } } })
-      fn = make_fn("move", params: params)
+      fn = make_fn("sum3", params: params)
       result = l.lower(fn)
       zig = emit(result)
-      expect(zig).to include("p: *const Point")
+      expect(zig).to include("p: anytype")
+      expect(zig).not_to include("*const Point")
     end
 
     it "includes frame save/restore for value-returning frame functions" do
@@ -1113,7 +1116,9 @@ RSpec.describe MIRLowering do
       expect(zig).to eq("pure()")
     end
 
-    xit "passes immutable user structs by pointer when callee borrows them (SROA: pending)" do
+    it "passes stack struct by value — SROA candidate, no const-ptr" do
+      # Structs with no heap provenance live on the stack. Zig/LLVM SROAs them
+      # into registers. Do NOT pass by *const T — that would prevent SROA.
       sig = Struct.new(:needs_rt, :can_fail, :params, :return_type)
                   .new(false, false, [{ name: "p", type: :Point, mutable: false, takes: false }], :Int64)
       l = lowering(
@@ -1124,37 +1129,7 @@ RSpec.describe MIRLowering do
       node = AST::FuncCall.new(tok, "sum3", [arg])
       node.full_type = :Int64
       result = l.lower(node)
-      expect(emit(result)).to eq("sum3(&point)")
-    end
-
-    xit "passes immutable user structs by pointer with real frontend signatures (SROA: pending)" do
-      code = <<~CHT
-        STRUCT Point { x: Int64, y: Int64 }
-
-        FN sum3(p: Point) RETURNS Int64 -> RETURN p.x + p.y; END
-
-        FN main() RETURNS Int64 ->
-            point = Point { x: 1, y: 2 };
-            RETURN sum3(point);
-        END
-      CHT
-
-      importer = ModuleImporter.new(base_dir: Dir.pwd, use_mir: true)
-      result = CompilerFrontend.compile(code, importer: importer, source_dir: Dir.pwd)
-      sig = result.fn_sigs["sum3"]
-      expect(sig).not_to be_nil
-      expect(sig.params).not_to be_empty
-      l = lowering(
-        fn_sigs: result.fn_sigs,
-        struct_schemas: result.struct_schemas,
-        enum_schemas: result.enum_schemas,
-        union_schemas: result.union_schemas
-      )
-
-      main_fn = result.ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
-      mir = l.lower(main_fn)
-      zig = emit(mir)
-      expect(zig).to include("sum3(&point)")
+      expect(emit(result)).to eq("sum3(point)")
     end
 
     it "lowers method call as UFCS" do
