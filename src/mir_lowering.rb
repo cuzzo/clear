@@ -1399,14 +1399,40 @@ class MIRLowering
     MIR::MethodCall.new(obj, node.name.to_s, args, false)
   end
 
+  # Lower an extern trampoline argument, stripping the Byte[N]→String coercion
+  # (@as([]const u8, "lit")) so string literals keep their native Zig type
+  # *const [N:0]u8, which coerces to both []const u8 AND [*:0]const u8.
+  # Without this, string literals passed to C-string params would fail with
+  # "expected [*:0]const u8, found []const u8".
+  def lower_extern_arg(ast_arg)
+    mir = lower(ast_arg)
+    if mir.is_a?(MIR::Cast) && mir.method == :as && mir.target_type == "[]const u8" && mir.expr.is_a?(MIR::Lit)
+      mir.expr
+    else
+      mir
+    end
+  end
+
   def build_extern_trampoline_call(node)
     @extern_counter = (@extern_counter || 0) + 1
     id = @extern_counter
-    args = node.args.map { |a| lower(a) }
-    arg_codes = args.map { |a| emit_expr(a) }
-    arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
+    alloc_kind = node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil
     mod_prefix = (node.respond_to?(:module_alias) && node.module_alias) ? "#{node.module_alias.gsub('.', '_')}." : ""
     fn_zig = "#{mod_prefix}#{node.name}"
+
+    # Separate comptime type args (full_type == :Type) from runtime args.
+    # Comptime args can't be struct fields (Zig type is `type`, comptime-only).
+    # They are baked directly into the call_zig string.
+    comptime_args, runtime_ast_args = node.args.partition { |a| a.respond_to?(:full_type) && a.full_type == :Type }
+    comptime_codes = comptime_args.map { |a| emit_expr(lower_extern_arg(a)) }
+
+    args = runtime_ast_args.map { |a| lower_extern_arg(a) }
+    arg_codes = args.map { |a| emit_expr(a) }
+    arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
+
+    call_parts = comptime_codes + (alloc_kind ? ["_alloc_"] : []) + arg_codes.each_index.map { |i| "f.a#{i}" }
+    call_zig = "#{fn_zig}(#{call_parts.map { |p| p == "_alloc_" ? "f.alloc" : p }.join(', ')})"
+
     build_extern_trampoline_common(
       id: id,
       prefix: "__Ext",
@@ -1415,9 +1441,9 @@ class MIRLowering
       arg_codes: arg_codes,
       arg_field_types: nil,
       arg_tuple: arg_tuple,
-      alloc_kind: node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil,
+      alloc_kind: alloc_kind,
       return_type: node.full_type,
-      call_zig: "#{fn_zig}(#{extern_call_args_zig(arg_codes.length, node.respond_to?(:extern_effects) ? node.extern_effects&.dig(:alloc) : nil)})",
+      call_zig: call_zig,
       receiver_field: nil
     )
   end
@@ -1426,7 +1452,7 @@ class MIRLowering
     @extern_counter = (@extern_counter || 0) + 1
     id = @extern_counter
     obj = lower(node.object)
-    args = node.args.map { |a| lower(a) }
+    args = node.args.map { |a| lower_extern_arg(a) }
     arg_codes = args.map { |a| emit_expr(a) }
     arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
     receiver_code = emit_expr(obj)
