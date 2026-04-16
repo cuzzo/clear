@@ -30,7 +30,7 @@ module PromotionClassifier
   # @return [Hash] { var_promotes:, struct_promote:, promote_return_ids:, unhandled_promote_fields: }
   #                or empty hash
   def self.classify(fn_node, schema_lookup:)
-    return {} unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap
+    return {} unless fn_allocates?(fn_node) || fn_node.return_provenance == :heap || fn_has_escapable_return?(fn_node, schema_lookup)
 
     ret_type_sym = fn_node.return_type
     return {} unless ret_type_sym
@@ -61,7 +61,7 @@ module PromotionClassifier
           end
 
           next unless fval.is_a?(AST::Identifier)
-          next unless fti&.escaped_return
+          next unless fti&.needs_escape_promotion? && !fti&.string? && !fti&.heap_provenance?
 
           var_promotes << { var: fval.name, zig_type: fti.zig_type }
           handled_fields << fname.to_s
@@ -89,7 +89,10 @@ module PromotionClassifier
       elsif val.is_a?(AST::Identifier)
         ti = val.type_info
         ti = Type.new(ti) if ti && !ti.is_a?(Type)
-        needs_escape = ti&.escaped_return && !ti&.heap_provenance? && !ti.string?
+        # TAKES params are already heap-owned by caller; no promotion needed.
+        next if val.symbol&.takes
+        needs_escape = (ti&.needs_escape_promotion? || struct_has_promotable_fields?(ti, schema_lookup)) &&
+                       !ti&.string? && !ti&.heap_provenance?
         if needs_escape
           if ti.list_collection? || ti.map?
             var_promotes << { var: val.name, zig_type: ti.zig_type }
@@ -143,6 +146,39 @@ module PromotionClassifier
 
   private_class_method def self.fn_allocates?(fn_node)
     fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc
+  end
+
+  private_class_method def self.fn_has_escapable_return?(fn_node, schema_lookup = nil)
+    collect_returns(fn_node.body).any? do |ret|
+      next false unless ret.value.is_a?(AST::Identifier)
+      # TAKES params are already heap-owned; returning them doesn't require promotion.
+      next false if ret.value.symbol&.takes
+      ti = ret.value.type_info
+      ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      next true if ti&.needs_escape_promotion? && !ti&.string? && !ti&.heap_provenance?
+      next true if schema_lookup && ti && !ti.string? && !ti.heap_provenance? &&
+                   struct_has_promotable_fields?(ti, schema_lookup)
+      false
+    end
+  end
+
+  # Returns true iff `ti` is a STRUCT (not union, not primitive) with at least one
+  # field that needs escape promotion (string, list, or map).
+  # Used to detect when returning a borrowed struct identifier requires promoteDeep.
+  # Deliberately excludes union types -- unions are handled separately via
+  # struct/union literal returns and dupeUnionValue at call sites.
+  private_class_method def self.struct_has_promotable_fields?(ti, schema_lookup)
+    return false unless schema_lookup && ti
+    resolved = ti.resolved
+    schema = schema_lookup.call(resolved) rescue nil
+    return false unless schema.is_a?(Hash) && !schema[:kind]  # structs only (no :kind key)
+    schema.any? do |k, v|
+      next false if k.is_a?(Symbol)
+      ft = v.is_a?(Hash) ? v[:type] : v
+      t = ft.is_a?(Type) ? ft : (Type.new(ft || :Any) rescue nil)
+      next false unless t
+      t.string? || t.list_collection? || t.map?
+    end
   end
 
   private_class_method def self.collect_returns(body)

@@ -1228,6 +1228,13 @@ class MIRPass
             end
           end
 
+          # Identifier return: RETURN var where var is a frame collection needing escape
+          if ret.value.is_a?(AST::Identifier)
+            ti = ret.value.type_info
+            ti = Type.new(ti) if ti && !ti.is_a?(Type)
+            next(ti&.needs_escape_promotion? && !ti&.string? && !ti&.heap_provenance?)
+          end
+
           false
         end
 

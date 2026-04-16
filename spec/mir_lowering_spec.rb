@@ -1,6 +1,7 @@
 require "rspec"
 require "ostruct"
 require_relative "../src/mir"
+require_relative "../src/std_lib"
 require_relative "../src/mir_lowering"
 require_relative "../src/mir_emitter"
 require_relative "../src/ast"
@@ -358,8 +359,8 @@ RSpec.describe MIRLowering do
       node = AST::GetIndex.new(tok, target, index)
       node.full_type = :Int64
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::IndexGet)
-      expect(emit(result)).to eq("items[@as(usize, @intCast(0))]")
+      expect(result).to be_a(MIR::InlineZig)
+      expect(emit(result)).to eq("CheatLib.getAt(items, 0)")
     end
 
     it "lowers string length to direct len" do
@@ -372,14 +373,14 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("@as(i64, @intCast(items.len))")
     end
 
-    it "lowers slice length to direct len" do
+    it "lowers slice length via CheatLib.len" do
       target = make_id("items", full_type: :"Int64[]")
       node = AST::MethodCall.new(tok, target, "length", [])
       node.full_type = :Int64
       node.zig_pattern = "CheatLib.len({0})"
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Cast)
-      expect(emit(result)).to eq("@as(i64, @intCast(items.len))")
+      expect(result).to be_a(MIR::InlineZig)
+      expect(emit(result)).to eq("CheatLib.len(items)")
     end
   end
 
