@@ -1,5 +1,34 @@
 # Benchmarks
 
+## Status: v0.1-pre hodgepodge
+
+This suite is an intentional mix of pragmatic and micro benchmarks, and within
+each category there is a further mix of compute-heavy and wait-heavy workloads:
+
+- **Compute-heavy**: 01 (call overhead), 02 (SROA), 03 (alloc throughput),
+  05 (hashmap), 07 (SIMD), 09 (sort) — measures raw throughput, no I/O.
+- **Wait-heavy / concurrency**: 04 (TCP echo), 10-17, 19 (parallel agg),
+  20 (TCP KV store) — measures scheduling, fiber overhead, contention.
+- **Memory**: 21-23 — measures allocator behavior, not throughput.
+
+Mixing these makes aggregate comparisons across CLEAR vs Go/Rust somewhat
+misleading: a wait-heavy benchmark and a compute-heavy one tell very different
+stories about where CLEAR is strong or weak.
+
+**Planned for v0.1:** Separate benchmarks cleanly into categories and add
+runner flags so you can target the workload type you care about:
+
+```bash
+ruby benchmarks/runner.rb --compute   # pure CPU / throughput benchmarks
+ruby benchmarks/runner.rb --io        # wait-heavy / concurrency / network
+ruby benchmarks/runner.rb --mixed     # both (current default behavior)
+```
+
+Until then, treat this suite as a useful-but-imprecise internal signal that
+CLEAR is on the right track for v0.1-pre. The numbers are directionally
+correct; apples-to-apples comparisons require picking benchmarks within the
+same category.
+
 ## Running
 
 ```bash
