@@ -12,7 +12,8 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Partial Deadlock protection (in progress - may cancel)
  - [ ] String@symbol
  - [ ] HashMap string interning as default
- - [ ] Migrate to Zig 0.16
+ - [ ] Better list capacity initialization
+ - [x] Migrate to Zig 0.16
 
 ## v0.2
 
