@@ -21,6 +21,14 @@ def bench_timeout(dir)
   File.exist?(f) ? File.read(f).strip.to_i : nil
 end
 
+# Per-benchmark thread override: read THREADS file if present.
+# Returns nil to use the global default (nproc / CLEAR_THREADS env).
+# Returns "1" (or other integer string) for single-core benchmarks.
+def bench_threads(dir)
+  f = "#{dir}/THREADS"
+  File.exist?(f) ? File.read(f).strip : nil
+end
+
 # Benchmark output protocol:
 #   If a binary prints "BENCH_RESULT: <ms> ms" to stdout or stderr, that value
 #   is used as the measurement instead of wall time. This allows benchmarks that
@@ -197,7 +205,7 @@ def run_bench(dir)
   # Leak mode: run CLEAR once with timeout, capture stderr for GPA leak reports
   if leak_mode
     if has_clear
-      threads = ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+      threads = bench_threads(dir) || ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
       threads = "0" if threads.empty?
       cmd = "BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} timeout 60 ./#{dir}/bench_clear"
       output = `#{cmd} 2>&1`
@@ -252,7 +260,8 @@ def run_bench(dir)
     # Match Go/Rust behavior: use all available cores by default.
     # Go defaults to GOMAXPROCS=num_cpu; Tokio defaults to num_cpu threads.
     # CLEAR defaults to 1 thread unless CLEAR_THREADS is set.
-    threads = ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+    # A THREADS file in the benchmark directory overrides to a fixed count (e.g. "1" for single-core benchmarks).
+    threads = bench_threads(dir) || ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
     threads = "0" if threads.empty?  # 0 = auto-detect in CLEAR
 
     # Use jemalloc for CLEAR benchmarks if available. CLEAR's runtime uses
