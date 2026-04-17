@@ -2395,12 +2395,25 @@ pub const CheatLib = struct {
                         new_ptr.* = try dupeUnionValue(ChildT, src_ptr.*, alloc);
                     @field(result, field.name) = new_ptr;
                     return result;
-                } else if (ft_info == .@"struct" and
-                    !isArrayList(FT) and !isStringMap(FT) and !isNumericMap(FT) and !isPool(FT) and
-                    !(@hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put")))
-                {
-                    @field(result, field.name) = try dupeStructSlices(FT, @field(value, field.name), alloc);
-                    return result;
+                } else if (ft_info == .@"struct") {
+                    if (comptime isArrayList(FT)) {
+                        // Deep copy ArrayList: allocate independent backing slice and dupe each element.
+                        const ElemT = arrayListElemType(FT).?;
+                        const src = @field(value, field.name);
+                        if (src.items.len > 0) {
+                            const new_buf = try alloc.alloc(ElemT, src.items.len);
+                            for (src.items, 0..) |elem, ii| {
+                                new_buf[ii] = try dupeUnionValue(ElemT, elem, alloc);
+                            }
+                            @field(result, field.name) = FT{ .items = new_buf, .capacity = new_buf.len };
+                        }
+                        return result;
+                    } else if (comptime (!isStringMap(FT) and !isNumericMap(FT) and !isPool(FT) and
+                        !(@hasField(FT, "inner") and @hasField(FT, "alloc") and @hasDecl(FT, "put"))))
+                    {
+                        @field(result, field.name) = try dupeStructSlices(FT, @field(value, field.name), alloc);
+                        return result;
+                    }
                 }
                 return value;
             }

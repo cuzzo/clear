@@ -444,8 +444,7 @@ END
 FN vecRef(v: Value, idx: Int64) RETURNS Value ->
     MATCH v START
         Value.Vector AS elems ->
-            elem = elems[idx];
-            RETURN elem;,
+            RETURN COPY elems[idx];,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
@@ -460,8 +459,7 @@ END
 FN pairCar(v: Value) RETURNS Value ->
     MATCH v START
         Value.Pair AS p ->
-            result = p.pairCar;
-            RETURN result;,
+            RETURN COPY p.pairCar;,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
@@ -470,8 +468,7 @@ END
 FN pairCdr(v: Value) RETURNS Value ->
     MATCH v START
         Value.Pair AS p ->
-            result = p.pairCdr;
-            RETURN result;,
+            RETURN COPY p.pairCdr;,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
@@ -558,6 +555,10 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.NativeFn AS id -> RETURN Value{ NativeFn: id };,
         Value.Error AS e -> RETURN Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind };,
+        Value.Lambda AS lam -> RETURN Value.Lambda{ params: lam.params, body: lam.body, envId: lam.envId };,
+        Value.Vector AS vec -> RETURN Value{ Vector: vec };,
+        Value.TypedI64Arr AS iarr -> RETURN Value{ TypedI64Arr: iarr };,
+        Value.TypedF64Arr AS farr -> RETURN Value{ TypedF64Arr: farr };,
         DEFAULT -> RETURN Value.Nil;
     END
     RETURN Value.Nil;
@@ -1352,6 +1353,30 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(setVal) THEN RETURN setVal; END
         envSet!(envId, setName, setVal, pool);
         RETURN setVal;
+
+    ELSE_IF formName == "vector-set!" THEN
+        -- (vector-set! var idx val) - copy-modify-store: get vector, rebuild with new slot, store back
+        vecName = getSymName(items[1]);
+        idxVal = eval!(COPY items[2], envId, pool);
+        IF isError?(idxVal) THEN RETURN idxVal; END
+        newElem = eval!(COPY items[3], envId, pool);
+        IF isError?(newElem) THEN RETURN newElem; END
+        idx = getInt(idxVal);
+        MUTABLE existingVec = envGet!(envId, vecName, pool);
+        MUTABLE newVec: Value[]@list = List[];
+        MATCH existingVec START
+            Value.Vector AS oldVec ->
+                FOR vi IN (0_i64 ..< oldVec.length()) DO
+                    IF vi == idx THEN
+                        newVec.append(COPY newElem);
+                    ELSE
+                        newVec.append(COPY oldVec[vi]);
+                    END
+                END
+                envSet!(envId, vecName, Value{ Vector: newVec }, pool);,
+            DEFAULT -> PASS;
+        END
+        RETURN Value.Nil;
 
     ELSE_IF formName == "let*" || formName == "let" THEN
         MATCH items[1] START
