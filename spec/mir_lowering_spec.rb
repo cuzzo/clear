@@ -934,8 +934,9 @@ RSpec.describe MIRLowering do
         make_lit(:NUMBER, 2.0),
       ]
       result = lowering.lower_body(stmts)
-      expect(result.length).to eq(2)
-      expect(result.all? { |n| n.is_a?(MIR::Lit) }).to eq(true)
+      lits = result.reject { |n| n.is_a?(MIR::Comment) }
+      expect(lits.length).to eq(2)
+      expect(lits.all? { |n| n.is_a?(MIR::Lit) }).to eq(true)
     end
 
     it "returns empty array for nil" do

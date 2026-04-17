@@ -146,7 +146,18 @@ class MIREmitter
   # --- Top-level emitters ---
 
   def emit_program(node)
-    node.items.filter_map { |item| emit(item) }.join("\n\n")
+    parts = node.items.filter_map { |item| emit(item) }
+    out = []
+    parts.each_with_index do |part, i|
+      if i == 0
+        out << part
+      elsif parts[i - 1].start_with?("// CLR:")
+        out << "\n#{part}"
+      else
+        out << "\n\n#{part}"
+      end
+    end
+    out.join
   end
 
   def emit_fn_def(node)

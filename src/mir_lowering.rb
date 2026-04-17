@@ -316,6 +316,10 @@ class MIRLowering
         mir = MIR::ExprStmt.new(mir, true)
       end
       result.concat(pending)
+      # Inject source map comment for this user-visible statement.
+      # Placed after pending (hoisted synthetic temps have no user source line).
+      line = s.respond_to?(:token) && s.token ? s.token.line : nil
+      result << MIR::Comment.new("CLR:#{line}") if line
       # lower_var_decl may return [AllocMark, Let, Cleanup] when the binding needs cleanup.
       if mir.is_a?(Array)
         result.concat(mir.compact)
@@ -400,12 +404,22 @@ class MIRLowering
         next if stmt.visibility == :private
         lowered = lower(stmt)
         next unless lowered
-        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| fn_items << n }
+        line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+        nodes = lowered.is_a?(::Array) ? lowered : [lowered]
+        nodes.each_with_index do |n, i|
+          fn_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+          fn_items << n
+        end
       when AST::StructDef, AST::EnumDef, AST::UnionDef
         next if stmt.visibility == :private
         lowered = lower(stmt)
         next unless lowered
-        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| type_items << n }
+        line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+        nodes = lowered.is_a?(::Array) ? lowered : [lowered]
+        nodes.each_with_index do |n, i|
+          type_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+          type_items << n
+        end
       when AST::RequireNode
         lowered = lower(stmt)
         next unless lowered
@@ -413,7 +427,12 @@ class MIRLowering
       when AST::ExternFnDecl, AST::ExternStructDecl
         lowered = lower(stmt)
         next unless lowered
-        (lowered.is_a?(::Array) ? lowered : [lowered]).each { |n| fn_items << n }
+        line = stmt.respond_to?(:token) && stmt.token ? stmt.token.line : nil
+        nodes = lowered.is_a?(::Array) ? lowered : [lowered]
+        nodes.each_with_index do |n, i|
+          fn_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+          fn_items << n
+        end
       end
     end
 
