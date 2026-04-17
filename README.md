@@ -15,8 +15,9 @@ It's designed to be:
 ### The *SMOOTH* operator
 
 ```ruby
-bill = users AS @u
-  s> UNNEST _.orders
+bill = users
+  s> EACH _ AS @u
+  s> UNNEST @u.orders
   s> CONCURRENT SELECT _.price * @u.discount
   s> SUM _;
 
