@@ -63,15 +63,12 @@ RSpec.describe SemanticAnnotator do
     context "simple missing field lifetime" do
       let(:code) {
         <<~FLUX
-          STRUCT Bar { index: Float64 }
-          STRUCT Foo { b: Bar }
+          UNION Val { Nil, Name: String }
+          STRUCT Foo { v: Val }
 
-          -- Define function that returns a Float64
-          FN identity(f: Foo) RETURNS Bar ->
-            RETURN f.b;
+          FN identity(f: Foo) RETURNS Val ->
+            RETURN f.v;
           END
-
-          identity(1);
         FLUX
       }
 
@@ -104,14 +101,11 @@ RSpec.describe SemanticAnnotator do
     context "simple missing index lifetime" do
       let(:code) {
         <<~FLUX
-          STRUCT User { index: Float64 }
+          UNION Val { Nil, Name: String }
 
-          -- Define function that returns a Float64
-          FN identity(l: User[]) RETURNS User ->
+          FN identity(l: Val[]) RETURNS Val ->
             RETURN l[1];
           END
-
-          identity([User{index: 1}, User{index: 2}]);
         FLUX
       }
 
@@ -351,6 +345,63 @@ RSpec.describe SemanticAnnotator do
 
       it "errors" do
         expect { result }.to raise_error(/Lifetime Error/i)
+      end
+    end
+
+    # =========================================================================
+    # BUG: indirect borrow escape -- elem = list[idx]; RETURN elem
+    # The OG marks elem as :borrowed but verify_return only checked GetIndex/
+    # GetField nodes directly; it bailed out early for Identifier nodes.
+    # =========================================================================
+    context "indirect indexed borrow escape (via variable, non-copyable element)" do
+      let(:code) {
+        <<~FLUX
+          UNION Val { Nil, Name: String }
+
+          FN first(items: Val[]) RETURNS Val ->
+            elem = items[0];
+            RETURN elem;
+          END
+        FLUX
+      }
+
+      it "errors: cannot return a borrowed element via variable without COPY or lifetime" do
+        expect { result }.to raise_error(/Cannot return borrowed/i)
+      end
+    end
+
+    context "indirect field borrow escape (via variable, non-copyable field)" do
+      let(:code) {
+        <<~FLUX
+          UNION Val { Nil, Name: String }
+          STRUCT Foo { v: Val }
+
+          FN getVal(f: Foo) RETURNS Val ->
+            v = f.v;
+            RETURN v;
+          END
+        FLUX
+      }
+
+      it "errors: cannot return a borrowed field via variable without COPY or lifetime" do
+        expect { result }.to raise_error(/Cannot return borrowed/i)
+      end
+    end
+
+    context "COPY of indexed element is allowed" do
+      let(:code) {
+        <<~FLUX
+          UNION Val { Nil, Name: String }
+
+          FN first(items: Val[]) RETURNS Val ->
+            elem = COPY items[0];
+            RETURN elem;
+          END
+        FLUX
+      }
+
+      it "does not error" do
+        expect { result }.not_to raise_error
       end
     end
   end

@@ -593,72 +593,67 @@ module FunctionAnalysis
   end
 
   def verify_return(node)
+    # A returned value is a borrow when it is a direct indexed/field access OR
+    # a variable that the ownership graph marked as :borrowed.
+    return true unless return_is_borrow?(node)
 
-    # Only verify for fields & indexes
-    return true if !node.is_a?(AST::GetField) && !node.is_a?(AST::GetIndex)
-
-    # Union variant constructors (Value.Nil, Shape.Point) are new values, not field borrows.
+    # Union variant constructors (Value.Nil, Shape.Point) create new values, not borrows.
     if node.is_a?(AST::GetField) && node.target.is_a?(AST::Identifier)
       schema = lookup_type_schema(node.target.name.to_sym) rescue nil
       return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
     end
 
-    # Get the current function's return lifetime annotation
     lifetime_path = current_fn_ctx&.lifetime
-
     type_info = node.type_object
-
-    # TODO: Need to propagate GIVE, implement copyable
     has_lifetime = !lifetime_path.nil?
-    is_copyable = type_info.copyable?
-    has_give = false
-    # Type params (e.g. T in a generic function) are always returnable —
-    # the Zig comptime system handles copies/moves at specialization time.
+    schema_resolver = ->(t) { lookup_type_schema(t) rescue nil }
+    is_copyable = (type_info&.copyable?(schema_resolver) || type_info&.implicitly_copyable?(schema_resolver))
     fn_type_params = current_fn_ctx&.type_params || []
     is_type_param = fn_type_params.include?(type_info&.resolved)
 
-    if !has_lifetime && !is_copyable && !has_give && !is_type_param
-      if node.is_a?(AST::GetField)
-        access_type = "field"
-        access_name = "field '#{node.field}'"
-      else
-        access_type = "element"
-        access_name = "element at index"
-      end
-
+    unless has_lifetime || is_copyable || is_type_param
       error!(
         node,
-        "Cannot return #{access_name} without:\n" \
-        "  1) A lifetime annotation on the function (e.g., fn foo(...) RETURNS lifetime:Type -> )\n" \
-        "  2) GIVE to transfer ownership\n" \
-        "  3) COPY for copyable types\n" \
-        "#{access_type.capitalize} type '#{node.full_type}' requires one of these."
+        "Cannot return borrowed value without COPY or a lifetime annotation.\n" \
+        "Type '#{node.full_type}' is not implicitly copyable."
       )
     end
 
-    # We're done, below we validate lifetime
-    return true if !has_lifetime
+    return true unless has_lifetime
 
-    # TODO: This needs to change when lifetimes allow splats, ORs
+    # Lifetime path validation applies to direct field/index access only.
+    # Borrowed variables need source-tracing (future work).
+    return true if node.is_a?(AST::Identifier)
+
     lifetime_path = lifetime_path.split(".").map(&:to_sym)
-
     actual_path = get_path_to_root(node)
     if actual_path.nil?
       error!("Lifetime Error: Lifetime '#{lifetime_path}' specified on return, but returned value is not associated.")
     end
 
-    # Logic: The actual return must be "under" the declared lifetime.
-    # declared: r.foo -> return: r.foo.bar (OK)
-    # declared: r.foo.bar1 -> return: r.foo.bar2 (FAIL)
-    # We check if the Actual Path starts with the Expected Path
     if actual_path[0...lifetime_path.size] != lifetime_path
-       error!(
-         node,
-         "Lifetime Error:\n" \
-         "  Expected return derived from: #{lifetime_path.join('.')}\n" \
-         "  Actual return derived from:   #{actual_path.join('.')}"
-       )
+      error!(
+        node,
+        "Lifetime Error:\n" \
+        "  Expected return derived from: #{lifetime_path.join('.')}\n" \
+        "  Actual return derived from:   #{actual_path.join('.')}"
+      )
     end
+  end
+
+  def return_is_borrow?(node)
+    if node.is_a?(AST::Identifier)
+      return false unless @og[node.name]&.kind == :borrowed
+      # Parameters (reg=nil) and MATCH bindings (reg=nil) are safe to return —
+      # the caller controls their lifetime. Only flag variables explicitly assigned
+      # from a collection index borrow (BindExpr with container_borrow=true).
+      scope = lookup_scope_for(node.name)
+      reg = scope&.locals&.[](node.name)&.reg
+      return reg.respond_to?(:container_borrow) && reg.container_borrow == true
+    end
+    return true if node.is_a?(AST::GetIndex)
+    return true if node.is_a?(AST::GetField)
+    false
   end
 
   def paths_overlap?(path_a, path_b)
