@@ -117,7 +117,7 @@ An Abstract Syntax Tree is very difficult to work with to ensure sound Affine Ow
 
 In this pass, we build a Control Flow Graph (CFG), run ownership analysis, and use this to create the MIR.
 
-This is's easy to ensure some invariants:
+This makes it more feasible to ensure the critical invariants:
 
   1. An affine value has at most one active owner at a time.
   2. A value is dropped exactly when the current scope still owns it at scope exit.
