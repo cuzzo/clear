@@ -3121,14 +3121,38 @@ class MIRLowering
       val = hoist_alloc(lower(v), v, err_cleanup: true)
       if indirect.include?(k)
         zig_t = transpile_type(var_data[:fields][k])
+        # @indirect union fields: HeapCreate emits __p.* = val (shallow copy).
+        # If the field holds a union value, deep-copy so the new allocation's
+        # internal heap pointers are independent of the source binding's cleanup.
+        field_type = var_data[:fields][k]
+        field_sym = field_type.is_a?(Type) ? field_type.resolved : field_type.to_sym
+        # Deep-copy only when source is an existing binding (GetField / Identifier):
+        # those have independent cleanup that would free the same heap data, causing
+        # UAF in the new allocation. Fresh literals (StructLit, FuncCall, COPY, etc.)
+        # transfer ownership naturally via HeapCreate and need no extra copy.
+        source_is_binding = v.is_a?(AST::GetField) || v.is_a?(AST::Identifier)
+        needs_deep_cleanup = @union_schemas&.key?(field_sym) && source_is_binding
+        if needs_deep_cleanup
+          val = MIR::DeepCopy.new(val, zig_t, nil, :union, :heap)
+        end
         @block_expr_counter += 1
         temp = "__ind_#{@block_expr_counter}_#{k}"
         hc = MIR::HeapCreate.new(zig_t, val, :heap, "blk_#{k}")
         hoisted << MIR::AllocMark.new(temp, :heap, nil)
         hoisted << MIR::Let.new(temp, hc, false, nil, nil)
-        hoisted << MIR::ErrDeferStmt.new(
-          MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap)
-        )
+        if needs_deep_cleanup
+          # Deep copy owns heap data inside __p.*; errdefer must clean it up
+          # before destroying the pointer, otherwise those allocations leak.
+          alloc_s = alloc_zig_str(:heap)
+          hoisted << MIR::ErrDeferStmt.new(MIR::ScopeBlock.new([
+            MIR::ExprStmt.new(MIR::RawZig.new("CheatLib.cleanup(#{zig_t}, #{alloc_s}, #{temp})"), false),
+            MIR::ExprStmt.new(MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap), false)
+          ]))
+        else
+          hoisted << MIR::ErrDeferStmt.new(
+            MIR::DestroyPtr.new(MIR::Ident.new(temp), :heap)
+          )
+        end
         val = MIR::Ident.new(temp)
       end
       { name: k.to_s, value: val }

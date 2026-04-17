@@ -78,4 +78,28 @@ RSpec.describe "COPY keyword" do
     zig = transpile(src)
     expect(zig).to include("dupeUnionValue")
   end
+
+  # =========================================================================
+  # BUG: @indirect union fields shallow-copied when reconstructing variant
+  # When a union variant with @indirect fields is reconstructed in a new union
+  # literal (e.g. in a MATCH TAKES block), the @indirect field is shallow-copied
+  # via HeapCreate (__p.* = val), leaving the new copy pointing at heap memory
+  # that is freed by the original binding's cleanup. The fix is to emit
+  # dupeUnionValue for @indirect fields whose type is a union.
+  # =========================================================================
+  it "deep-copies @indirect union fields when reconstructing variant in new union literal" do
+    src = <<~CLEAR
+      UNION Val { Nil, Box { data: Val @indirect, id: Int64 } }
+      FN rebuild(TAKES v: Val) RETURNS Val ->
+          MATCH TAKES v START
+              Val.Box AS b ->
+                  RETURN Val.Box{ data: b.data, id: b.id };,
+              DEFAULT -> RETURN Val.Nil;
+          END
+          RETURN Val.Nil;
+      END
+    CLEAR
+    zig = transpile(src)
+    expect(zig).to include("dupeUnionValue")
+  end
 end
