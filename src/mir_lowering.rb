@@ -2903,6 +2903,23 @@ class MIRLowering
       end
     end
 
+    # Safe field access on optional Rc/Arc: expr?.field
+    # AST::OptionalUnwrap + multiowned/shared inner type -> force-unwrap would panic on nil.
+    # Generate (if (expr) |_r| _r.ctrl.data.field else null) so the result stays ?FieldType
+    # and a subsequent OR fallback can orelse it correctly.
+    if node.target.is_a?(AST::OptionalUnwrap)
+      inner_ti = node.target.type_info  # unwrapped type set by visit_OptionalUnwrap
+      if inner_ti&.multiowned? || inner_ti&.shared?
+        inner_mir = lower(node.target.target)
+        inner_zig = emit_expr(inner_mir)
+        return MIR::RawZig.new(
+          "(if (#{inner_zig}) |_r| _r.ctrl.data.#{node.field} else null)",
+          "optional_rc_field_get",
+          { consumes: [], produces: [], borrows: [] }
+        )
+      end
+    end
+
     target = lower(node.target)
     ti = node.target.type_info
 

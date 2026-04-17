@@ -527,8 +527,9 @@ FN main() RETURNS Void ->
     -- LINK downgrades the strong Rc to a WeakRc
     weak_p = LINK p;
 
-    -- RESOLVE returns ?Parent@multiowned -- use s> or OR for safe access
-    name = RESOLVE(weak_p)?.name OR "dropped";
+    -- RESOLVE returns ?Parent@multiowned; bind first, then use ?. to safely access fields
+    resolved = RESOLVE weak_p;
+    name = resolved?.name OR "dropped";
     ASSERT name == "Alice", "resolved";
 
     RETURN;
@@ -538,7 +539,7 @@ END
 Key rules:
 - `LINK` only works on `@multiowned` or `@shared` values (compile-time error otherwise)
 - `RESOLVE` only works on `@link` values (compile-time error otherwise)
-- `RESOLVE` returns `?T` -- use `?.field` or `OR fallback` to handle the dropped case
+- `RESOLVE` returns `?T` -- bind the result first, then use `resolved?.field OR fallback` to handle the dropped case
 - Cleanup is automatic: weak references are released when they go out of scope
 - No runtime cost when the strong reference is still alive; RESOLVE is a simple count check
 

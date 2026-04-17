@@ -53,10 +53,34 @@ FN test_multiple_links() RETURNS Void ->
     RETURN;
 END
 
+-- Test 5: field access on resolved ?T@multiowned (safe nav)
+FN makeDeadWeakNode() RETURNS Node@link ->
+    n = Node{ value: 999 } @multiowned;
+    RETURN LINK n;
+END
+
+FN test_safe_field_access() RETURNS Void ->
+    -- Strong ref alive: resolved?.field returns the field value
+    n = Node{ value: 42 } @multiowned;
+    w = LINK n;
+    resolved = RESOLVE w;
+    val = resolved?.value OR -1_i64;
+    ASSERT val == 42_i64, "field access on live ref";
+
+    -- Dropped: fallback triggers
+    dead_w = makeDeadWeakNode();
+    dead_r = RESOLVE dead_w;
+    dead_val = dead_r?.value OR -1_i64;
+    ASSERT dead_val == -1_i64, "field access on dropped ref";
+
+    RETURN;
+END
+
 FN main() RETURNS Void ->
     test_multiowned();
     test_shared();
     test_link_in_struct();
     test_multiple_links();
+    test_safe_field_access();
     RETURN;
 END
