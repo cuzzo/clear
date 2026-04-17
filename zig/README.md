@@ -113,7 +113,7 @@ LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2 zig run sbr-benchmark-test
 ## Fuzzing
 
 ```bash
-zig test arena-fuzz-test.zig -femit-bin=fuzz_runner
+zig test runtime/arena-fuzz-test.zig -femit-bin=fuzz_runner
 
 valgrind --leak-check=full \
          --show-leak-kinds=all \
