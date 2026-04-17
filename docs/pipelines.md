@@ -203,6 +203,21 @@ ASSERT summaries[1].normalized == 2.0, "score normalized";
 
 The result type is inferred from the expression - `Summary[]` above, not `Raw[]`.
 
+**Pipeline fusion with SELECT T{}:** SELECT composes with WHERE and aggregates in a single fused loop - no intermediate list allocation:
+
+```ruby clear
+-- WHERE before SELECT: filter on the raw element (efficient)
+high = raws s> WHERE _.score > 75.0 s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
+
+-- SELECT before aggregate: project then sum/min/max a field
+total = raws s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } s> SUM _.normalized;
+
+-- SELECT before WHERE: build struct first, then filter on a struct field (less efficient)
+norm_high = raws s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } s> WHERE _.normalized > 0.75;
+```
+
+When SELECT precedes a fold or WHERE, the compiler binds the projected value to a temp variable per iteration. This avoids the Zig restriction on struct literals in arithmetic/boolean expression positions, so the generated code is always valid without changing semantics.
+
 ### Aggregate
 
 | Operator | Syntax | Returns | Empty list |

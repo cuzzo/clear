@@ -463,7 +463,18 @@ class PipelineRewriter
       [if_stmt]
     when AST::SelectOp
       expr = replace_placeholder(stage.expression, current_val)
-      build_recursive_body(remaining, terminal, expr, res_var, token, stage_inits, res_type)
+      # Bind SELECT result to a temp so it is never inlined into an expression
+      # position. Zig forbids StructType{...}.field in arithmetic/boolean contexts.
+      sel_var = next_var("__sel")
+      sel_decl = AST::VarDecl.new(stage.token, sel_var, nil, expr, false)
+      sel_decl.full_type = stage.expression.full_type
+      sel_decl.storage   = :stack
+      sel_decl.slot_size = 0
+      sel_decl.instance_variable_set(:@var_used, true)
+      sel_ident = AST::Identifier.new(stage.token, sel_var)
+      sel_ident.full_type = stage.expression.full_type
+      rest = build_recursive_body(remaining, terminal, sel_ident, res_var, token, stage_inits, res_type)
+      [sel_decl] + rest
     when AST::TapOp
       tap_body = stage.body.map { |s| replace_placeholder(s, current_val) }
       tap_body + build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)

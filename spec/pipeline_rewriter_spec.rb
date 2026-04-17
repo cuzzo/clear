@@ -54,9 +54,11 @@ RSpec.describe PipelineRewriter do
     expect(if_stmt.condition).to be_a(AST::BinaryOp)
     expect(if_stmt.condition.op).to eq(:GT)
     
-    # Then branch should have MethodCall (for append) with SELECT expression inlined as arg
-    expect(if_stmt.then_branch[0]).to be_a(AST::MethodCall)
-    expect(if_stmt.then_branch[0].name).to eq("append")
+    # Then branch: VarDecl for SELECT temp, then append MethodCall
+    expect(if_stmt.then_branch[0]).to be_a(AST::VarDecl)
+    expect(if_stmt.then_branch[0].name.to_s).to start_with("__sel")
+    expect(if_stmt.then_branch[1]).to be_a(AST::MethodCall)
+    expect(if_stmt.then_branch[1].name).to eq("append")
   end
 
   it "rewrites SUM pipelines into accumulation loops" do
