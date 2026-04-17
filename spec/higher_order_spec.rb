@@ -1348,6 +1348,108 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # TAP
+  # ===========================================================================
+  describe "TAP" do
+    it "result type is the input collection type (passthrough)" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            data: Float64[] = [1.0, 2.0, 3.0];
+            result = data s> TAP { _ + 0.0; };
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Float64[]")
+    end
+
+    it "can be chained before an aggregate" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Float64 ->
+            data: Float64[] = [1.0, 2.0];
+            total = data s> TAP { _ + 0.0; } s> SUM _;
+            RETURN total;
+        END
+      CLEAR
+      fn = tree.statements.first
+      expect(fn.body.last.full_type).to eq(:Float64)
+    end
+
+    it "rejects non-list input" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              x: Float64 = 1.0;
+              result = x s> TAP { _ + 0.0; };
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot TAP non-collection/)
+    end
+
+    it "generates a for loop over the collection elements" do
+      zig = ZigTranspiler.new.transpile(<<~CLEAR)
+        FN f() RETURNS Float64 ->
+            data: Float64[] = [1.0, 2.0];
+            total = data s> TAP { _ + 0.0; } s> SUM _;
+            RETURN total;
+        END
+      CLEAR
+      expect(zig).to include("for (")
+    end
+  end
+
+  # ===========================================================================
+  # SKIP
+  # ===========================================================================
+  describe "SKIP" do
+    it "result type matches the input element type" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            data: Float64[] = [1.0, 2.0, 3.0];
+            rest = data s> SKIP 1_i64;
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Float64[]")
+    end
+
+    it "preserves element type for struct collections" do
+      tree = run(<<~CLEAR)
+        STRUCT Item { value: Float64 }
+        FN f() RETURNS Void ->
+            items: Item[] = [Item{ value: 1.0 }];
+            rest = items s> SKIP 1_i64;
+        END
+      CLEAR
+      fn = tree.statements.last
+      bind = fn.body.last
+      expect(bind.full_type.to_s).to eq("Item[]")
+    end
+
+    it "rejects non-list input" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              x: Float64 = 1.0;
+              result = x s> SKIP 1_i64;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Cannot SKIP non-list/)
+    end
+
+    it "can be chained with other operators" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Float64 ->
+            data: Float64[] = [1.0, 2.0, 3.0];
+            total = data s> SKIP 1_i64 s> SUM _;
+            RETURN total;
+        END
+      CLEAR
+      fn = tree.statements.first
+      expect(fn.body.last.full_type).to eq(:Float64)
+    end
+  end
+
+  # ===========================================================================
   # Collection Types — Phase 3 (FIND, ANY, ALL, COUNT predicate query operators)
   # ===========================================================================
   describe "Collection Types — Phase 3 (FIND, ANY, ALL, COUNT)" do

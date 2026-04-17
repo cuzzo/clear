@@ -143,6 +143,40 @@ result = scores
     s> SUM _.points;
 ```
 
+### WINDOW (Sliding Window)
+
+WINDOW produces a sliding window of size N over the collection. `_` inside the body is the sub-slice (a `Float64[]` or `ElemType[]` of length N). The result is an array of the body expression evaluated per window.
+
+```ruby clear
+data: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
+
+-- Each window is a 3-element slice; body projects to window length
+lengths = data s> WINDOW(3) _.length();
+ASSERT lengths.length() == 3, "5 elements, window 3 -> 3 windows";
+
+-- Access individual elements in the window
+firsts = data s> WINDOW(2) _[0];
+ASSERT firsts[0] == 1.0, "first element of first window";
+```
+
+Number of result windows = `max(0, len - size + 1)`. A window larger than the list produces an empty result.
+
+### JOIN (Left Outer Join)
+
+JOIN performs a left outer join between two collections using a two-parameter lambda predicate. Every element of the left collection appears in the result exactly once; the right field is `NIL` when no right element matches.
+
+```ruby clear illustrative
+STRUCT User { id: Int64, name: String }
+STRUCT Order { userId: Int64, amount: Float64 }
+
+results = users s> JOIN(orders) %(u, o) -> u.id == o.userId;
+-- results: JoinResult_User_Order[]
+-- results[i].left  -- the User
+-- results[i].right -- ?Order (NIL if no match)
+```
+
+The result element type is an anonymous struct `{ left: L, right: ?R }`. The lambda must take exactly two parameters (left element, right element) and return Bool.
+
 ## Stream and Future Compatibility
 
 Pipelines over futures/streams are currently supported in a narrower subset than pipelines over collections.
