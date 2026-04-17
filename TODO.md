@@ -8,6 +8,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
 ## v0.1
 
  - [ ] FREEZE + profiling support
+ - [ ] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
  - [ ] STRUCT/FN DEFAULTS
  - [ ] Partial Deadlock protection (in progress - may cancel)
  - [ ] String@symbol
