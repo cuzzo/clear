@@ -234,6 +234,17 @@ FN main() RETURNS Void ->
     -- Interop: typed values in untyped operations
     ASSERT evalIn!("(+ (list-ref (typed-list:i64 10 20) 0) 5)", TRUE, rootId, pool, penv) == "15", "typed arr elem + untyped";
 
+    -- list-ref on Value.List of strings must return an owned copy (UAF regression)
+    -- Bug: listRef returned items[idx] without COPY; evaled freed on evalList! exit
+    -- leaving a dangling pointer that crashed dupeUnionValue when the value was reused.
+    ASSERT evalSeqIn!([
+        "(define ws (split \"apple banana cherry\" \" \"))",
+        "(define w (list-ref ws 0))",
+        "(define w2 (list-ref ws 1))",
+        "(define w3 (list-ref ws 2))",
+        "(eq? w \"apple\")"
+    ], TRUE, rootId, pool, penv) == "true", "list-ref string element is owned copy (UAF regression)";
+
     -- FFI bridge: native CLEAR functions on typed arrays
     ASSERT evalIn!("(native-sum (typed-list:i64 10 20 30))", TRUE, rootId, pool, penv) == "60", "FFI native-sum i64";
     ASSERT evalIn!("(type-of (native-sum (typed-list:i64 1 2 3)))", FALSE, rootId, pool, penv) == "Int64", "FFI returns Int64";

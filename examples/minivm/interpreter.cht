@@ -420,8 +420,7 @@ END
 FN listRef(v: Value, idx: Int64) RETURNS Value ->
     MATCH v START
         Value.List AS items ->
-            elem = items[idx];
-            RETURN elem;,
+            RETURN COPY items[idx];,
         Value.TypedI64Arr AS iarr ->
             RETURN Value{ Int64Val: iarr[idx] };,
         Value.TypedF64Arr AS farr ->
@@ -499,12 +498,12 @@ FN isError?(v: Value) RETURNS Bool ->
 END
 
 FN getErrMsg(v: Value) RETURNS String ->
-    MATCH v START Value.Error AS e -> RETURN e.errMsg;, DEFAULT -> RETURN ""; END
+    MATCH v START Value.Error AS e -> RETURN COPY e.errMsg;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN getErrKind(v: Value) RETURNS String ->
-    MATCH v START Value.Error AS e -> RETURN e.errKind;, DEFAULT -> RETURN ""; END
+    MATCH v START Value.Error AS e -> RETURN COPY e.errKind;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
@@ -555,7 +554,7 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.NativeFn AS id -> RETURN Value{ NativeFn: id };,
         Value.Error AS e -> RETURN Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind };,
-        Value.Lambda AS lam -> RETURN Value.Lambda{ params: lam.params, body: lam.body, envId: lam.envId };,
+        Value.Lambda AS lam -> RETURN Value.Lambda{ params: COPY lam.params, body: COPY lam.body, envId: lam.envId };,
         Value.Vector AS vec -> RETURN Value{ Vector: vec };,
         Value.TypedI64Arr AS iarr -> RETURN Value{ TypedI64Arr: iarr };,
         Value.TypedF64Arr AS farr -> RETURN Value{ TypedF64Arr: farr };,
@@ -1312,8 +1311,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ Str: getErrKind(val) };
 
     ELSE_IF formName == "quote" THEN
-        quoted = items[1];
-        RETURN quoted;
+        RETURN COPY items[1];
 
     ELSE_IF formName == "raise" THEN
         msg = eval!(COPY items[1], envId, pool);
@@ -1509,7 +1507,8 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         pname = getSymName(lam.params[pi]);
                         pool[callId]?.vars[pname] = evaled[pi + 1];
                     END
-                    RETURN Value.Tco{ tcoAst: COPY lam.body, tcoEnv: callId };,
+                    bodyAst: Value = COPY lam.body;
+                    RETURN eval!(GIVE bodyAst, callId, pool);,
                 DEFAULT -> RETURN Value.Nil;
             END
         ELSE
@@ -2333,8 +2332,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     END
 
     IF sp > 0 THEN
-        result = stack[sp - 1];
-        RETURN result;
+        RETURN COPY stack[sp - 1];
     END
     RETURN Value.Nil;
 END
