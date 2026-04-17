@@ -3,9 +3,16 @@
 CLEAR's pipeline system lets you transform, filter, aggregate, and iterate collections using the smooth operator (`s>`). Every pipeline operator works on arrays, `@list`, `@pool`, sharded collections, and `@pool:soa` — the same syntax regardless of the underlying storage.
 
 ```ruby clear illustrative
-scores s> WHERE _ > 50 s> SUM _;
-entities s> EACH { _.health = _.health - 1.0; };
-users s> SELECT _.name s> DISTINCT _;
+scores
+  s> WHERE _ <= 50 
+  s> SUM _;
+
+users 
+  s> SELECT _.name 
+  s> DISTINCT _;
+  
+entities 
+  s> EACH { _.health = _.health - 1.0; };
 ```
 
 This document describes both the collection pipeline model and the current stream/future pipeline surface. Stream support is intentionally narrower today than collection support.
@@ -16,10 +23,14 @@ This document describes both the collection pipeline model and the current strea
 
 ```ruby clear illustrative
 -- Pipe to a function: x s> f  →  f(x)
-result = data s> process s> validate s> format;
+result = data 
+  s> process 
+  s> validate
+  s> format;
 
 -- Pipe to an operator: list s> WHERE predicate
-alive = entities s> WHERE _.health > 0;
+alive = entities 
+  s> WHERE _.health > 0;
 ```
 
 Pipelines chain left to right. Each stage passes its result to the next.
@@ -31,22 +42,31 @@ Inside pipeline expressions, `_` refers to the current element. For struct eleme
 ```ruby clear
 -- _ is the element itself (for scalar collections)
 nums: Float64[] = [1.0, 3.0, 7.0, 9.0];
-big = nums s> WHERE _ > 5.0;
+
+big = nums 
+  s> WHERE _ > 5.0;
+
 ASSERT length(big) == 2, "WHERE filters by element value";
 
 -- _.field for struct collections
 users = [User{name: "alice"}, User{name: "bob"}];
-names = users s> SELECT _.name;
+
+names = users
+  s> SELECT _.name;
 
 scores = [Score{value: 10.0}, Score{value: 20.0}];
-total = scores s> SUM _.value;
+
+total = scores 
+  s> SUM _.value;
+
 ASSERT total == 30.0, "SUM aggregates field values";
 ```
 
 In EACH blocks, `_` is mutable — you can assign to fields:
 
 ```ruby clear illustrative
-pool s> EACH { _.health = _.health - damage; };
+pool 
+  s> EACH { _.health = _.health - damage; };
 ```
 
 ## Operators
@@ -78,7 +98,10 @@ Aggregate expressions must be numeric (Float64 or Int64). REDUCE is the general 
 
 ```ruby clear
 nums: Float64[] = [2.0, 3.0, 4.0];
-product = nums s> REDUCE(1.0) acc * _;
+
+product = nums 
+  s> REDUCE(1.0) acc * _;
+
 ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 ```
 
@@ -101,7 +124,8 @@ ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 EACH is the only operator where `_` is mutable. Use it for in-place updates:
 
 ```ruby clear illustrative
-entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
+entities 
+  s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
 ```
 
 ### TAP (Debugging / Observation)
@@ -144,10 +168,16 @@ Examples:
 
 ```ruby clear illustrative
 s: ~Int64[] = 0 ..< 8;
-s s> SELECT _ * 2 s> WHERE _ > 5 s> EACH { print(_); };
+s 
+  s> SELECT _ * 2
+  s> WHERE _ > 5 
+  s> EACH { print(_); };
 
 t: ~Int64[] = 0 ..< 10;
-t s> SKIP 2 s> TAKE_WHILE _ < 6 s> EACH { print(_); };
+t 
+  s> SKIP 2 
+  s> TAKE_WHILE _ < 6 
+  s> EACH { print(_); };
 ```
 
 Bounded finite streams (`~T[N]`) also support native concurrent pipelines for:
@@ -170,14 +200,17 @@ STRUCT Total {
 }
 
 nums: ~Float64[4] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }, BG { 4.0; }];
-doubled = nums s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+
+doubled = nums 
+  s> CONCURRENT(workers: 2) SELECT _ * 2.0;
 
 total = Total{ value: 0.0 } @shared:locked;
-nums s> CONCURRENT(workers: 2) EACH {
-    WITH EXCLUSIVE total AS t {
+nums 
+  s> CONCURRENT(workers: 2) EACH {
+      WITH EXCLUSIVE total AS t {
         t.value = t.value + _;
-    }
-};
+      }
+   };
 ```
 
 Current `CONCURRENT` limits for streams:
@@ -212,7 +245,9 @@ If you need the full collection operator surface, materialize explicitly first:
 ```ruby clear illustrative
 s: ~Int64[] = 0 ..< 10;
 vals = s.toList();
-total = vals s> WHERE _ > 3 s> SUM _;
+total = vals 
+  s> WHERE _ > 3 
+  s> SUM _;
 ```
 
 Open streams (`~?T[]`) and infinite streams (`~T[INF]`) are still `NEXT`-driven for now:
@@ -234,10 +269,14 @@ SKIP and LIMIT are complementary: SKIP drops the first N elements, LIMIT takes t
 
 ```ruby clear illustrative
 -- Pagination: page 3, 10 items per page
-page = items s> SKIP 20_i64 s> LIMIT 10_i64;
+page = items 
+  s> SKIP 20
+  s> LIMIT 10;
 
 -- Skip header row, process the rest
-data = rows s> SKIP 1_i64 s> SELECT parseRow(_);
+data = rows 
+  s> SKIP 1 
+  s> SELECT parseRow;
 ```
 
 ## Chaining
@@ -264,27 +303,33 @@ Every operator works on every collection type:
 ```ruby clear illustrative
 -- Array
 nums: Float64[] = [1, 2, 3];
-total = nums s> SUM _;
+total = nums 
+  s> SUM _;
 
 -- List
 MUTABLE data = List[];
-avg = data s> AVERAGE _.value;
+avg = data 
+  s> AVERAGE _.value;
 
 -- Pool
 MUTABLE pool: Entity[1000]@pool = [];
-alive = pool s> WHERE _.health > 0;
+alive = pool 
+  s> WHERE _.health > 0;
 
 -- Pool with SOA (field-slice iteration — cache-optimal)
 MUTABLE soa_pool: Entity[1000]@pool:soa = [];
-total_hp = soa_pool s> SUM _.health;  -- iterates only the health array
+total_hp = soa_pool 
+  s> SUM _.health;  -- iterates only the health array
 
 -- List with SOA
 MUTABLE soa_list: Entity[]@list:soa = [];
-avg = soa_list s> AVERAGE _.health;   -- contiguous f64 slice
+avg = soa_list 
+  s> AVERAGE _.health;   -- contiguous f64 slice
 
 -- Sharded (parallel EACH via DO blocks)
 MUTABLE sharded: Entity[10000]@pool:sharded(4) = [];
-sharded s> EACH { _.processed = TRUE; };
+sharded 
+  s> EACH { _.processed = TRUE; };
 ```
 
 ## Loop Fusion
@@ -293,7 +338,10 @@ The compiler automatically fuses chains of WHERE and SELECT stages ending in a f
 
 ```ruby clear illustrative
 -- Written as 3 stages:
-result = data s> WHERE _ > 500.0 s> SELECT _ * _ s> SUM _;
+result = data 
+  s> WHERE _ > 500.0 
+  s> SELECT _ * _ 
+  s> SUM _;
 
 -- Compiled as a single loop (no intermediate arrays):
 -- for (data) |it| { if (it > 500) { sum += it * it; } }
@@ -311,7 +359,8 @@ MUTABLE pool: Entity[10000]@pool:soa = [];
 
 -- SUM _.health iterates only the health array (contiguous f64[]).
 -- Without :soa, it would load all 5 fields per element.
-total = pool s> SUM _.health;
+total = pool 
+  s> SUM _.health;
 ```
 
 For WHERE and FIND, the predicate uses field-slice access (fast), and the struct is reassembled only for matching elements.
@@ -331,13 +380,20 @@ The `CONCURRENT` modifier currently parallelizes collection pipelines for `SELEC
 MUTABLE data: Score[10000]@pool:sharded(4) = [];
 
 -- Parallel WHERE: one fiber per shard
-results = data s> CONCURRENT WHERE _.value > threshold;
+results = data 
+  s> CONCURRENT WHERE dbFetch(_.id).val > threshold;
 
--- With options
-results = data s> CONCURRENT(size: LARGE) SELECT _.name;
+-- Process in parallel
+results = data 
+  s> CONCURRENT(parallel: TRUE) SELECT dbFetch(_.id).name;
 ```
 
-Options: `pool_size: N` (fiber pool size), `pin: TRUE` (pin to cores), `size: MICRO|STANDARD|LARGE|XL` (stack size).
+Options: 
+
+  * `workers: N` (fiber worker size)
+  * `pin: TRUE` (pin to cores)
+  * `size: MICRO|STANDARD|LARGE|XL` (stack size).
+  * `parallel`: TRUE` (run on multiple cores)
 
 ### `CONCURRENT` compatibility
 
