@@ -12,6 +12,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Partial Deadlock protection (in progress - may cancel)
  - [ ] String@symbol
  - [ ] HashMap string interning as default
+ - [ ] Pipeline support for infinite streams and unbound finite streams (in progress)
  - [x] Migrate to Zig 0.16
 
 ## v0.2
@@ -20,8 +21,10 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
  - [ ] Enable MVCC in the language as a syncronization capability (in progress)
- - [ ] io_uring for networking (in progress)
+ - [x] io_uring for networking
  - [ ] STRICT mode compilation
+ - [ ] Native CONCURRENT support for streaming pipelines
+ - [ ] Observable aggregations for streaming pipelines (@shared aggregate results)
  - [ ] VM supporting the vast majority of the language, near Python/Ruby non-JIT speed
  - [ ] VM can automatically generate and run LOOM tests for concurrent code
  - [ ] An RSpec like testing framework as the first standard library module
