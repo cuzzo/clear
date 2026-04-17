@@ -60,6 +60,7 @@ HISTORICAL_KNOWN_PASSING = %w[
   55_string_ops
   56_else_if_chain
   56_match_enum_exhaustive
+  48_multidim_array
   57_line_parser
   57_match_union_capture
   58_bg
@@ -74,7 +75,6 @@ HISTORICAL_CANDIDATES = %w[
   19_copy_struct
   20_subfield_move
   21_subfield_return
-  48_multidim_array
   55_string_ops
   56_else_if_chain
   57_line_parser

@@ -68,6 +68,7 @@ END
 --      21=cons 22=car 23=cdr 24=pair? 25=eq?
 --      26=string-append 27=string-length 28=substring 29=string-ref
 --      30=number->string 31=string->number 32=string? 33=display
+--      34=list-ref 35=list-length 36=list-push 62=list-set!
 
 FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     -- Arithmetic
@@ -391,6 +392,25 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 61 THEN
         s = getStr(evaled[1]);
         RETURN Value{ Str: lowercase(s) };
+    END
+    IF id == 62 THEN
+        -- list-set!: return new list with element at idx replaced (functional update)
+        setIdx = getInt(evaled[2]);
+        newElem = COPY evaled[3];
+        MATCH evaled[1] START
+            Value.List AS items ->
+                MUTABLE newList: Value[]@list = List[];
+                FOR li IN (0_i64 ..< items.length()) DO
+                    IF li == setIdx THEN
+                        newList.append(COPY newElem);
+                    ELSE
+                        newList.append(COPY items[li]);
+                    END
+                END
+                RETURN Value{ List: newList };,
+            DEFAULT -> RETURN COPY evaled[1];
+        END
+        RETURN COPY evaled[1];
     END
 
     RETURN Value.Nil;
@@ -1577,10 +1597,11 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     pool[rootId]?.vars["display"] = Value{ NativeFn: 33 };
     -- Modulo: 37
     pool[rootId]?.vars["modulo"] = Value{ NativeFn: 37 };
-    -- List access: 34=list-ref, 35=list-length, 36=list-push
+    -- List access: 34=list-ref, 35=list-length, 36=list-push, 62=list-set!
     pool[rootId]?.vars["list-ref"] = Value{ NativeFn: 34 };
     pool[rootId]?.vars["list-length"] = Value{ NativeFn: 35 };
     pool[rootId]?.vars["list-push"] = Value{ NativeFn: 36 };
+    pool[rootId]?.vars["list-set!"] = Value{ NativeFn: 62 };
     -- String stdlib: 38-42 + aliases
     pool[rootId]?.vars["startsWith?"] = Value{ NativeFn: 38 };
     pool[rootId]?.vars["split"] = Value{ NativeFn: 39 };

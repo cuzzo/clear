@@ -219,11 +219,11 @@ class SchemeTranspiler
       if node.value.is_a?(AST::StructLit)
         @var_types[node.name.to_s] = node.value.name.to_s
       end
-      # Typed array: Int64[] = [...] -> (typed-list:i64 ...)
-      val_expr = if node.type && node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit)
+      # Typed array: Int64[] = [...] -> (typed-list:i64 ...) only for exactly Int64[] (not nested)
+      val_expr = if node.type && node.type.to_s == "Int64[]" && node.value.is_a?(AST::ListLit)
         items = node.value.items.map { |i| emit(i) }.join(" ")
         items.empty? ? "(typed-list:i64)" : "(typed-list:i64 #{items})"
-      elsif node.type && node.type.to_s.include?("Float64[]") && node.value.is_a?(AST::ListLit)
+      elsif node.type && node.type.to_s == "Float64[]" && node.value.is_a?(AST::ListLit)
         items = node.value.items.map { |i| emit(i) }.join(" ")
         items.empty? ? "(typed-list:f64)" : "(typed-list:f64 #{items})"
       else
@@ -241,11 +241,11 @@ class SchemeTranspiler
       elsif node.value.is_a?(AST::HashLit)
         @hash_vars.add(node.name.to_s)
       end
-      # Typed array declaration: Int64[] = [...] -> (typed-list:i64 ...)
-      if node.type.to_s.include?("Int64[]") && node.value.is_a?(AST::ListLit)
+      # Typed array declaration: Int64[] = [...] -> (typed-list:i64 ...) only for exactly Int64[] (not nested)
+      if node.type.to_s == "Int64[]" && node.value.is_a?(AST::ListLit)
         items = node.value.items.map { |i| emit(i) }.join(" ")
         "(define #{node.name} (typed-list:i64 #{items}))"
-      elsif node.type.to_s.include?("Float64[]") && node.value.is_a?(AST::ListLit)
+      elsif node.type.to_s == "Float64[]" && node.value.is_a?(AST::ListLit)
         items = node.value.items.map { |i| emit(i) }.join(" ")
         "(define #{node.name} (typed-list:f64 #{items}))"
       else
@@ -415,6 +415,28 @@ class SchemeTranspiler
     ";; unknown field: #{field}"
   end
 
+  def root_of_index(node)
+    node.is_a?(AST::Identifier) ? node.name.to_s : root_of_index(node.target)
+  rescue
+    nil
+  end
+
+  # Build (list-set! ...) expression for nested index assignment.
+  # Returns [root_var_name, scheme_expr] where scheme_expr is the new value for root.
+  def build_list_set(lhs, val_expr)
+    idx = emit(lhs.index)
+    if lhs.target.is_a?(AST::Identifier)
+      root = lhs.target.name.to_s
+      [root, "(list-set! #{root} #{idx} #{val_expr})"]
+    elsif lhs.target.is_a?(AST::GetIndex)
+      inner_read = emit(lhs.target)
+      root, outer_set = build_list_set(lhs.target, "(list-set! #{inner_read} #{idx} #{val_expr})")
+      [root, outer_set]
+    else
+      [nil, nil]
+    end
+  end
+
   def emit_assignment(node)
     if node.name.is_a?(AST::GetField)
       target = emit(node.name.target)
@@ -426,14 +448,20 @@ class SchemeTranspiler
       end
       ";; unknown field assignment: #{field}"
     elsif node.name.is_a?(AST::GetIndex)
-      # m["key"] = val -> (set! m (assoc-set m "key" val))
-      target_name = node.name.target.is_a?(AST::Identifier) ? node.name.target.name.to_s : nil
-      key = emit(node.name.index)
       val = emit(node.value)
-      if target_name
-        "(set! #{target_name} (assoc-set #{target_name} #{key} #{val}))"
+      if @hash_vars.include?(root_of_index(node.name))
+        # m["key"] = val -> (set! m (assoc-set m "key" val))
+        target_name = node.name.target.is_a?(AST::Identifier) ? node.name.target.name.to_s : nil
+        key = emit(node.name.index)
+        if target_name
+          "(set! #{target_name} (assoc-set #{target_name} #{key} #{val}))"
+        else
+          ";; unsupported hash assignment"
+        end
       else
-        ";; index assignment on non-identifier"
+        # list[idx] = val, including nested: matrix[1][1] = val
+        root, set_expr = build_list_set(node.name, val)
+        root ? "(set! #{root} #{set_expr})" : ";; unsupported nested list assignment"
       end
     else
       "(set! #{node.name} #{emit(node.value)})"
