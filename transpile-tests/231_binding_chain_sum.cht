@@ -1,0 +1,16 @@
+-- Test: README demo -- binding chain with UNNEST and SUM.
+-- users AS @u s> UNNEST @u.orders s> SUM _.price * @u.discount
+
+STRUCT Order { price: Float64, qty: Int64 }
+STRUCT User { name: String, discount: Float64, orders: Order[]@list }
+
+FN main() RETURNS Void ->
+    ao: Order[] = [Order{ price: 10.0, qty: 2 }];
+    us: User[] = [User{ name: "alice", discount: 0.9, orders: ao }];
+    bill = us AS @u
+        s> UNNEST @u.orders
+        s> SUM _.price * @u.discount;
+    ASSERT bill == 9.0, "10.0 * 0.9 = 9.0";
+    print("OK");
+    RETURN;
+END

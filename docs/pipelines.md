@@ -39,6 +39,105 @@ alive = entities
 
 Pipelines chain left to right. Each stage passes its result to the next.
 
+## Named Pipeline Bindings (`AS @v`)
+
+The `AS @v` syntax binds the current pipeline element to a named reference that persists across subsequent stages.
+
+```ruby clear illustrative
+bill = users AS @u
+  s> UNNEST @u.orders
+  s> SUM _.price * @u.discount;
+```
+
+### Why bindings exist
+
+Without a binding, `_` always refers to the *current* element - the item being iterated at the innermost level. After `UNNEST`, `_` becomes each inner element (an Order), and the outer element (the User) is no longer reachable.
+
+```ruby clear illustrative
+-- Without AS @u: @u is not available inside the fold.
+-- `_` after UNNEST is the Order, not the User.
+bill = users
+  s> UNNEST _.orders
+  s> SUM _.price;         -- can access order.price, but NOT user.discount
+```
+
+`AS @u` captures the outer element before the `UNNEST` replaces `_`, keeping it accessible:
+
+```ruby clear illustrative
+bill = users AS @u
+  s> UNNEST @u.orders     -- @u = the User; _ = each Order
+  s> SUM _.price * @u.discount;  -- cross-reference: order.price * user.discount
+```
+
+The compiler fuses this into a single nested loop with no intermediate allocations.
+
+### Scope of a binding
+
+A binding created with `AS @v` is visible from the point of declaration to the end of the pipeline expression. It cannot be used after the pipeline terminates:
+
+```ruby clear illustrative
+bill = users AS @u
+  s> UNNEST @u.orders   -- @u is in scope
+  s> WHERE _.qty > 1    -- @u still in scope
+  s> SUM _.price * @u.discount;  -- @u still in scope
+
+-- @u is not accessible here (out of scope after the pipeline ends)
+```
+
+Multiple pipelines in the same function can each use their own `@u` - bindings are scoped to the pipeline expression, not the function.
+
+### Naming the inner element (AS @o)
+
+When you UNNEST and need a name for the inner element (instead of `_`), use a second binding after the UNNEST expression:
+
+```ruby clear illustrative
+bill = users AS @u
+  s> UNNEST @u.orders AS @o    -- @u = User, @o = Order
+  s> SUM @o.price * @u.discount;
+```
+
+`AS @o` after the UNNEST expression binds the inner element. Both `@u` and `@o` are available in the fold.
+
+### Supported combinations
+
+**UNNEST binding chains** - fold operators that work after `AS @u s> UNNEST`:
+
+| Fold | Example |
+|---|---|
+| SUM | `s> SUM _.price * @u.discount` |
+| COUNT | `s> COUNT TRUE` |
+| AVERAGE | `s> AVERAGE _.price` |
+| MIN | `s> MIN _.price` |
+| MAX | `s> MAX _.price` |
+| ANY | `s> ANY _.price > 50.0` |
+| ALL | `s> ALL @u.discount > 0.0` |
+| FIND | `s> FIND _.price > 10.0` (returns `?ElemType`) |
+
+Intermediate `WHERE` stages filter the inner elements before the fold:
+
+```ruby clear illustrative
+total = users AS @u
+  s> UNNEST @u.orders
+  s> WHERE _.qty > 1        -- filter inner elements
+  s> SUM _.price * @u.discount;
+```
+
+`SELECT` is not supported in UNNEST binding chains (the inner projection would lose the `@u` context). Use field access in the fold expression instead.
+
+**CONCURRENT binding** - `@u` is also accessible inside `CONCURRENT` stages that operate directly on the bound list (without an intermediate UNNEST):
+
+| Operator | Example |
+|---|---|
+| CONCURRENT SELECT | `AS @u s> CONCURRENT SELECT @u.val * 2.0` |
+| CONCURRENT SUM | `AS @u s> CONCURRENT SUM @u.score` |
+| CONCURRENT COUNT | `AS @u s> CONCURRENT COUNT @u.active` |
+| CONCURRENT MIN | `AS @u s> CONCURRENT MIN @u.score` |
+| CONCURRENT MAX | `AS @u s> CONCURRENT MAX @u.score` |
+| CONCURRENT AVERAGE | `AS @u s> CONCURRENT AVERAGE @u.score` |
+| CONCURRENT WHERE | `AS @u s> CONCURRENT WHERE @u.score > 50.0` |
+
+In all concurrent cases, `@u` resolves to the item being processed by the current worker.
+
 ## The `_` Variable
 
 Inside pipeline expressions, `_` refers to the current element. For struct elements, access fields with `_.fieldname`:
@@ -88,17 +187,33 @@ pool
 | **UNNEST** | `list s> UNNEST expr` | `InnerType[]` | Flatten nested arrays (flatmap) |
 | **INDEX** | `list s> INDEX key` | `HashMap<ElemType[]>` | Group into a hashmap by key |
 
+SELECT accepts any expression, including struct literals. This lets you project into a different struct type in one step:
+
+```ruby clear
+STRUCT Raw     { id: Int64, score: Float64 }
+STRUCT Summary { key: Int64, normalized: Float64 }
+
+raws: Raw[] = [Raw{ id: 1, score: 100.0 }, Raw{ id: 2, score: 200.0 }];
+
+summaries = raws s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
+
+ASSERT summaries[0].key == 1, "id preserved";
+ASSERT summaries[1].normalized == 2.0, "score normalized";
+```
+
+The result type is inferred from the expression - `Summary[]` above, not `Raw[]`.
+
 ### Aggregate
 
 | Operator | Syntax | Returns | Empty list |
 |---|---|---|---|
-| **SUM** | `list s> SUM expr` | `Float64` | 0 |
+| **SUM** | `list s> SUM expr` | Int64 / UInt64 / Float32 / Float64 | 0 |
 | **AVERAGE** | `list s> AVERAGE expr` | `Float64` | 0 |
-| **MIN** | `list s> MIN expr` | `Float64` | panics |
-| **MAX** | `list s> MAX expr` | `Float64` | panics |
+| **MIN** | `list s> MIN expr` | matches expr type | panics |
+| **MAX** | `list s> MAX expr` | matches expr type | panics |
 | **REDUCE** | `list s> REDUCE(init) expr` | type of init | init |
 
-Aggregate expressions must be numeric (Float64 or Int64). REDUCE is the general fold — `acc` is the mutable accumulator, `_` is the current element:
+The return type is driven by the expression type. SUM widens small integers to `Int64`/`UInt64`; floats stay at their original width (`Float32` stays `Float32`). AVERAGE always returns `Float64`. MIN and MAX preserve the exact expression type. REDUCE is the general fold - `acc` is the mutable accumulator, `_` is the current element:
 
 ```ruby clear
 nums: Float64[] = [2.0, 3.0, 4.0];

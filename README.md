@@ -16,11 +16,10 @@ It's designed to be:
 
 ```ruby
 bill = users AS @u
-  s> UNNEST _.orders
-  s> CONCURRENT SELECT _.price * @u.discount
-  s> SUM _;
+  s> UNNEST @u.orders
+  s> SUM _.price * @u.discount;
 
--- Automatically generates efficient, parallel partial reduction.
+-- Fuses nested iteration with aggregation. No intermediate allocations.
 ```
 
 ### Combine with in-line error handling
