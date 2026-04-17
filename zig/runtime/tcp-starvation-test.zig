@@ -166,8 +166,8 @@ pub fn main() !void {
 
     // Use N worker schedulers to simulate multi-core (CLEAR_THREADS > 1)
     const num_workers: usize = blk: {
-        if (std.posix.getenv("CLEAR_THREADS")) |env| {
-            const n = std.fmt.parseInt(usize, env, 10) catch 1;
+        if (std.c.getenv("CLEAR_THREADS")) |env_ptr| {
+            const n = std.fmt.parseInt(usize, std.mem.span(env_ptr), 10) catch 1;
             break :blk if (n > 1) n - 1 else 0;
         }
         break :blk @as(usize, 1); // Default: 2 schedulers total

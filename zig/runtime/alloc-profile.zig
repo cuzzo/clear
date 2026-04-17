@@ -5,6 +5,7 @@
 // Fixed-size open-addressed hash table -- no allocations inside the profiler.
 
 const std = @import("std");
+const compat = @import("../lib/compat.zig");
 
 const MAX_SITES = 1024;
 
@@ -62,17 +63,17 @@ pub fn recordFree(ret_addr: usize, size: usize) void {
 
 pub fn dump() void {
     // Read output path from env var
-    const path = std.posix.getenv("CLEAR_ALLOC_PROFILE") orelse return;
+    const path_ptr = std.c.getenv("CLEAR_ALLOC_PROFILE") orelse return;
 
-    const file = std.fs.cwd().createFile(path, .{ .truncate = true }) catch return;
-    defer file.close();
+    const fd = compat.createFileTruncate(path_ptr) catch return;
+    defer compat.closeFd(fd);
 
     var buf: [256]u8 = undefined;
 
-    file.writeAll("# alloc-profile v1\n") catch return;
+    compat.writeAllFd(fd, "# alloc-profile v1\n") catch return;
     const hdr = std.fmt.bufPrint(&buf, "# total_allocs: {d}\n", .{total_allocs}) catch return;
-    file.writeAll(hdr) catch return;
-    file.writeAll("# addr alloc_count alloc_bytes free_count free_bytes live_bytes\n") catch return;
+    compat.writeAllFd(fd, hdr) catch return;
+    compat.writeAllFd(fd, "# addr alloc_count alloc_bytes free_count free_bytes live_bytes\n") catch return;
 
     for (&sites) |*site| {
         if (site.addr != 0 and site.alloc_count > 0) {
@@ -88,7 +89,7 @@ pub fn dump() void {
                 site.free_bytes,
                 live,
             }) catch continue;
-            file.writeAll(line) catch return;
+            compat.writeAllFd(fd, line) catch return;
         }
     }
 }

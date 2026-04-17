@@ -889,8 +889,8 @@ pub fn main() !void {
     //    On machines with many cores + large workloads, set CLEAR_THREADS=0 (auto)
     //    or CLEAR_THREADS=N to spawn N-1 worker schedulers.
     const num_workers = blk: {
-        if (std.posix.getenv("CLEAR_THREADS")) |env| {
-            const n = std.fmt.parseInt(usize, env, 10) catch 1;
+        if (std.c.getenv("CLEAR_THREADS")) |env_ptr| {
+            const n = std.fmt.parseInt(usize, std.mem.span(env_ptr), 10) catch 1;
             if (n == 0) {
                 // Auto: use all CPUs
                 const cpus = std.Thread.getCpuCount() catch 1;

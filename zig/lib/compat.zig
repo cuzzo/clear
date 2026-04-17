@@ -116,6 +116,11 @@ pub fn RwLocked(comptime T: type) type {
     };
 }
 
+pub fn getenv(name: [*:0]const u8) ?[]const u8 {
+    const val = std.c.getenv(name) orelse return null;
+    return std.mem.span(val);
+}
+
 pub fn sleepNs(ns: u64) void {
     var req = std.c.timespec{
         .sec = @intCast(ns / std.time.ns_per_s),
@@ -195,6 +200,22 @@ pub fn writeFd(fd: std.posix.fd_t, buf: []const u8) !usize {
     const rc = std.c.write(fd, buf.ptr, buf.len);
     if (rc < 0) return error.Unexpected;
     return @intCast(rc);
+}
+
+pub fn writeAllFd(fd: std.posix.fd_t, buf: []const u8) !void {
+    var written: usize = 0;
+    while (written < buf.len) {
+        const rc = std.c.write(fd, buf.ptr + written, buf.len - written);
+        if (rc < 0) return error.Unexpected;
+        written += @intCast(rc);
+    }
+}
+
+pub fn createFileTruncate(path: [*:0]const u8) !std.posix.fd_t {
+    const flags = std.posix.O{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true };
+    const fd = std.c.open(path, @bitCast(flags), @as(std.c.mode_t, 0o644));
+    if (fd < 0) return error.Unexpected;
+    return fd;
 }
 
 pub fn fileSizeFd(fd: std.posix.fd_t) !u64 {
