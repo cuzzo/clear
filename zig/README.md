@@ -1,9 +1,42 @@
+# Runtime
+
+## Overview
+
+The runtime is built around cooperative Green Fibers rather than scheduling application code directly on OS threads.
+
+At a very high level, the runtime has a few critical parts:
+
+### 0. Bootstrap (`zig/runtime/runtime-footer.zig`)
+
+ * This is the generated entrypoint glue for compiled CLEAR programs.
+ * It sets up the allocator, global EBR context (for MVCC, not currently in use), stack pool, worker schedulers, and submits `clearMain` as the first task.
+
+### 1. Runtime Context (`zig/runtime/runtime.zig`)
+
+ * This is the per-fiber runtime object.
+ * It owns the frame allocator, heap allocator, error context, and other execution-local runtime state.
+ * Generated CLEAR code receives a `*Runtime` and performs most runtime-sensitive work through it.
+
+### 2. Fibers & Stacks (`zig/runtime/fiber-core.zig`, `zig/runtime/fiber-memory.zig`)
+
+ * This is the machinery for user-space Green Fibers.
+ * It implements stack allocation, stack pooling, segmented stack growth, and low-level context switching.
+ * This is what allows CLEAR to run many tasks without requiring one OS thread per task.
+
+Like Go, CLEAR has stack-smash protection built-in. But the prevention mechanism is different.
+
+
+### 3. Scheduler (`zig/runtime/scheduler.zig`, `zig/runtime/queues.zig`, `zig/runtime/spsc.zig`)
+
+ * This is the **cooperative** scheduler.
+ * It maintains runnable tasks, sleeping tasks, pinned tasks, and cross-scheduler messages.
+ * It context-switches between Green Fiber stacks to run tasks cooperatively.
+ * It uses SPSC channels for cross-scheduler communication and work stealing for load balancing.
+
+
 ## Stack Overflow Detection
 
-The fiber runtime uses **segmented stacks**: a Machine Function Pass injects
-a stack-limit check at the very start of every function, *before* the
-prologue.  If the check fails, `__morestack` (in `switch.S`) allocates a
-new segment and the function retries on fresh stack space.
+The fiber runtime uses **segmented stacks**: a Machine Function Pass injects a stack-limit check at the very start of every function, *before* the prologue.  If the check fails, `__morestack` (in `switch.S`) allocates a new segment and the function retries on fresh stack space.
 
 ### Step 1: Build the LLVM Machine Pass plugin
 
@@ -52,12 +85,20 @@ zig build-exe fiber-overflow-test.o switch.S onRoot.S \
 ./fiber-test-runner
 ```
 
+## Getting Started:
 
-## Benchmarking
+Running Tests:
 
-```bash
-zig run sbr-benchmark-test.zig -O ReleaseFast -lc
 ```
+zig build test
+```
+
+Running Benchmarks:
+
+```
+zig build benchmark -Doptimize=ReleaseFast
+```
+
 
 * `-lc` links the c library (for malloc)
 * `-O ReleaseFast` is required, otherwise you're comparing non-realistic results.
@@ -89,14 +130,6 @@ zig test queues-test.zig -fsanitize-thread -lc
 ```bash
 ./scheduler-fuzz-test.sh
 ```
-
-
-## Unwinding
-
-```bash
-zig test unwind-test.zig unwind.S -lc -lunwind   -O Debug   -fno-strip   -rdynamic   --eh-frame-hdr
-```
-
 
 ## Generate ASM
 
