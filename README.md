@@ -15,10 +15,9 @@ It's designed to be:
 ### The *SMOOTH* operator
 
 ```ruby
-bill = users
-  s> EACH _ AS @u
-  s> UNNEST @u.orders
-  s> CONCURRENT SELECT _.price * @u.discount
+bill = users AS @u
+  s> UNNEST @u.orders AS @o
+  s> CONCURRENT SELECT @o.price * @u.discount
   s> SUM _;
 
 -- Automatically generates efficient, parallel partial reduction.
