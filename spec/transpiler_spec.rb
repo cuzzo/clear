@@ -1677,6 +1677,112 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
+  # AS @v pipeline binding - happy path
+  # ===========================================================================
+  describe "AS @v pipeline binding" do
+    let(:struct_preamble) { <<~CLEAR }
+      STRUCT Order { price: Float64, qty: Int64 }
+      STRUCT User { name: String, orders: Order[]@list }
+      FN main() RETURNS Void ->
+        alice_orders: Order[] = [Order{ price: 10.0, qty: 2 }, Order{ price: 20.0, qty: 1 }];
+        bob_orders:   Order[] = [Order{ price: 15.0, qty: 3 }];
+        users: User[] = [
+          User{ name: "alice", orders: alice_orders },
+          User{ name: "bob",   orders: bob_orders }
+        ];
+    CLEAR
+
+    it "generates an outer for-loop with named capture for AS @u" do
+      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders s> SUM _.price; RETURN; END"
+      zig = transpile(src)
+      expect(zig).to match(/for.*\|__pipe_u\|/)
+    end
+
+    it "generates an inner for-loop over the unnested field" do
+      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders s> SUM _.price; RETURN; END"
+      zig = transpile(src)
+      expect(zig).to match(/__pipe_u\.orders/)
+    end
+
+    it "substitutes @u in the fold expression" do
+      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders s> SUM _.price; RETURN; END"
+      zig = transpile(src)
+      # _.price should reference the inner loop variable, @u should be the outer
+      expect(zig).to include("__pipe_u")
+      expect(zig).not_to match(/@u/)   # no literal @u in output
+    end
+
+    it "generates explicit inner binding for UNNEST @u.orders AS @o" do
+      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders AS @o s> SUM @o.price; RETURN; END"
+      zig = transpile(src)
+      expect(zig).to match(/for.*\|__pipe_u\|/)
+      expect(zig).to match(/for.*\|__pipe_o\|/)
+      expect(zig).to include("__pipe_o.price")
+    end
+
+    it "WHERE stage filters using inner element, fold uses @u" do
+      src = <<~CLEAR
+        STRUCT Order { price: Float64, qty: Int64 }
+        STRUCT User { name: String, discount: Float64, orders: Order[]@list }
+        FN main() RETURNS Void ->
+          ao: Order[] = [Order{ price: 10.0, qty: 2 }];
+          us: User[] = [User{ name: "a", discount: 0.9, orders: ao }];
+          _ = us AS @u s> UNNEST @u.orders s> WHERE _.qty > 1 s> SUM _.price * @u.discount;
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to match(/if \(.*__bc_inner\.qty > 1/)
+      expect(zig).to include("__pipe_u.discount")
+    end
+
+    it "supports ALL fold types in a binding chain" do
+      src = <<~CLEAR
+        STRUCT Order { price: Float64, qty: Int64 }
+        STRUCT User { name: String, orders: Order[]@list }
+        FN main() RETURNS Void ->
+          ao: Order[] = [Order{ price: 5.0, qty: 1 }];
+          us: User[] = [User{ name: "x", orders: ao }];
+          cnt  = us AS @u s> UNNEST @u.orders s> COUNT TRUE;
+          any_ = us AS @u s> UNNEST @u.orders s> ANY _.price > 0.0;
+          all_ = us AS @u s> UNNEST @u.orders s> ALL _.qty > 0;
+          mn   = us AS @u s> UNNEST @u.orders s> MIN _.price;
+          mx   = us AS @u s> UNNEST @u.orders s> MAX _.price;
+          avg  = us AS @u s> UNNEST @u.orders s> AVERAGE _.price;
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "CONCURRENT SELECT uses @u as the current element" do
+      src = <<~CLEAR
+        STRUCT SimpleUser { val: Float64 }
+        FN main() RETURNS Void ->
+          sus: SimpleUser[] = [SimpleUser{ val: 1.0 }, SimpleUser{ val: 2.0 }];
+          _ = sus AS @u s> CONCURRENT(workers: 2) SELECT @u.val * 2.0;
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("ctx.items[__idx].val")
+    end
+
+    it "CONCURRENT SUM uses @u as the current element" do
+      src = <<~CLEAR
+        STRUCT SimpleUser { val: Float64 }
+        FN main() RETURNS Void ->
+          sus: SimpleUser[] = [SimpleUser{ val: 1.0 }];
+          _ = sus AS @u s> CONCURRENT(workers: 1) SUM @u.val;
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("ctx.items[__idx].val")
+    end
+  end
+
+  # ===========================================================================
   # AS @v binding error cases
   # ===========================================================================
   describe "AS @v binding error cases" do

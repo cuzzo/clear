@@ -636,7 +636,7 @@ module PipeAnalysis
   # Covers :Float64, :Int64, :Byte, :Float64.
 
   def analyze_sum_op(node)
-    # SUM: list s> SUM expr  → Float64 (0 for empty; also accepts range)
+    # SUM: list s> SUM expr  → upsized numeric type (int→Int64/UInt64, float→same float)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "SUM", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -651,7 +651,7 @@ module PipeAnalysis
       error!(node.right, "SUM requires a numeric expression, got #{expr_type}")
     end
 
-    node.full_type = :Float64
+    node.full_type = sum_result_clear_type(expr_type)
     node.storage   = :stack
   end
 
@@ -676,7 +676,7 @@ module PipeAnalysis
   end
 
   def analyze_min_op(node)
-    # MIN: list s> MIN expr  → Float64 (panics on empty; also accepts range)
+    # MIN: list s> MIN expr  → exact expression type (panics on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "MIN", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -691,12 +691,12 @@ module PipeAnalysis
       error!(node.right, "MIN requires a numeric expression, got #{expr_type}")
     end
 
-    node.full_type = :Float64
+    node.full_type = expr_type
     node.storage   = :stack
   end
 
   def analyze_max_op(node)
-    # MAX: list s> MAX expr  → Float64 (panics on empty; also accepts range)
+    # MAX: list s> MAX expr  → exact expression type (panics on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "MAX", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -711,7 +711,7 @@ module PipeAnalysis
       error!(node.right, "MAX requires a numeric expression, got #{expr_type}")
     end
 
-    node.full_type = :Float64
+    node.full_type = expr_type
     node.storage   = :stack
   end
 
@@ -1189,6 +1189,17 @@ module PipeAnalysis
   #   - Array types (metatype :array)
   #   - @pool and @pool:sharded(N) collection types
   #   - @list and @list:sharded(N) collection types
+  # Returns the CLEAR result type for SUM based on the expression's input type.
+  # Signed integers upsize to Int64; unsigned to UInt64; floats stay their own type.
+  def sum_result_clear_type(expr_sym)
+    case expr_sym
+    when :Int8, :Int16, :Int32, :Int64 then :Int64
+    when :UInt8, :Byte, :UInt16, :UInt32, :UInt64 then :UInt64
+    when :Float32 then :Float32
+    else :Float64
+    end
+  end
+
   def require_array_input!(node, op_name, allow_range: false, allow_stream: false)
     lhs_type = node.left.type_info
     return if node.left.metatype == :array

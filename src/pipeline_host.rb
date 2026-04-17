@@ -1511,6 +1511,21 @@ class PipelineHost
     end
   end
 
+  # Like numeric_fold_expr_f64 but targets any accumulator type.
+  # For float accumulators, converts integer expressions via @floatFromInt.
+  # For integer accumulators, returns the expression as-is.
+  def numeric_fold_expr_typed(expr_ast, item_var, acc_zig)
+    expr_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(expr_ast) }
+    expr_type = expr_ast.respond_to?(:full_type) ? expr_ast.full_type : nil
+    expr_is_int = expr_type && Type.new(expr_type).integer?
+    acc_is_float = acc_zig == "f64" || acc_zig == "f32"
+    if expr_is_int && acc_is_float
+      MIR::Cast.new(MIR::Cast.new(expr_mir, nil, :floatFromInt), acc_zig, :as)
+    else
+      expr_mir
+    end
+  end
+
   # Build the LazyRange init + stage prefix shared by lower_each_range and lower_range_fold.
   # Returns a hash: { range_let, source_name, outer_stmts, stage_stmts, item_var, initial_capture,
   #                   item_used, elem_zig }
@@ -1653,10 +1668,11 @@ class PipelineHost
       result_expr = MIR::Ident.new("__fold_acc")
 
     when AST::SumOp
-      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
-      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("0"), true, "f64", nil)
+      acc_zig  = transpile_type(smooth_node.full_type.to_s)  # already upsized by pipe_analysis
+      expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
+      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("0"), true, acc_zig, nil)
       loop_acc_stmts << MIR::Set.new(MIR::Ident.new("__fold_acc"),
-        MIR::BinOp.new("+", MIR::Ident.new("__fold_acc"), expr_f64))
+        MIR::BinOp.new("+", MIR::Ident.new("__fold_acc"), expr_mir))
       result_expr = MIR::Ident.new("__fold_acc")
 
     when AST::AverageOp
@@ -1674,11 +1690,14 @@ class PipelineHost
           MIR::Cast.new(MIR::Cast.new(MIR::Ident.new("__fold_cnt"), nil, :floatFromInt), "f64", :as)))
 
     when AST::MinOp
-      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
+      expr_sym = smooth_node.full_type.resolved  # exact type set by pipe_analysis
+      acc_zig  = transpile_type(smooth_node.full_type.to_s)
+      min_init, _max_init = agg_minmax_sentinels(acc_zig, expr_sym)
+      expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
       acc_init_stmts << MIR::Let.new("__fold_acc",
-        MIR::InlineZig.new("std.math.floatMax(f64)", "float_max"), true, "f64", nil)
+        MIR::InlineZig.new(min_init, "numeric_min"), true, acc_zig, nil)
       acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
-      loop_acc_stmts << MIR::Let.new("__fold_val", expr_f64, false, nil, nil)
+      loop_acc_stmts << MIR::Let.new("__fold_val", expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
         MIR::BinOp.new("<", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
         [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
@@ -1688,11 +1707,14 @@ class PipelineHost
       result_expr = MIR::Ident.new("__fold_acc")
 
     when AST::MaxOp
-      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
+      expr_sym = smooth_node.full_type.resolved  # exact type set by pipe_analysis
+      acc_zig  = transpile_type(smooth_node.full_type.to_s)
+      _min_init, max_init = agg_minmax_sentinels(acc_zig, expr_sym)
+      expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
       acc_init_stmts << MIR::Let.new("__fold_acc",
-        MIR::InlineZig.new("-std.math.floatMax(f64)", "float_min"), true, "f64", nil)
+        MIR::InlineZig.new(max_init, "numeric_max"), true, acc_zig, nil)
       acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
-      loop_acc_stmts << MIR::Let.new("__fold_val", expr_f64, false, nil, nil)
+      loop_acc_stmts << MIR::Let.new("__fold_val", expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
         MIR::BinOp.new(">", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
         [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
@@ -1784,8 +1806,17 @@ class PipelineHost
       raise "CONCURRENT over finite streams is temporarily disabled until it has a MIR-safe lowering path"
     end
 
+    # Detect `list AS @u s> CONCURRENT SELECT @u.field` -- thread the binding
+    # into the CONCURRENT worker body so @u resolves to ctx.items[__idx].
+    lhs = smooth_node.left
+    prev_outer = @concurrent_outer_binding
+    @concurrent_outer_binding = if lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
+      lhs.right.name   # "@u"
+    end
+
     inner = conc_op.op
     zig_code = transpile_concurrent(smooth_node)
+    @concurrent_outer_binding = prev_outer
 
     allocates = case inner
                 when AST::SelectOp, AST::WhereOp then true

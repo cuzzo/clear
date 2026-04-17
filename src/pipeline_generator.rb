@@ -22,6 +22,13 @@ module PipelineGenerator
   # sources, individual operator methods handle each stage via materialization.
   # -------------------------------------------------------------------------
 
+  # When lower_concurrent detected `list AS @u s> CONCURRENT op`, this wraps
+  # the expression visit with @u -> placeholder substitution active.
+  def with_concurrent_outer_binding(placeholder, &blk)
+    return blk.call unless @concurrent_outer_binding
+    with_named_binding(@concurrent_outer_binding, placeholder) { blk.call }
+  end
+
   # Save and restore all pipeline state around a block. Ensures that nested
   # pipeline visits (chained pipelines, SHARD bodies, etc.) don't leak state.
   # Any keyword argument overrides the corresponding state for the block's duration.
@@ -873,12 +880,41 @@ module PipelineGenerator
   # Phase 4: Numeric Aggregation Operators
   # =========================================================
 
+  # Returns the Zig accumulator type for a SUM/MIN/MAX expression.
+  # for_sum=true upsizes small ints to i64/u64 to avoid overflow.
+  def agg_zig_type(resolved_sym, for_sum: false)
+    case resolved_sym
+    when :Float32                              then "f32"
+    when :Int8, :Int16, :Int32                 then for_sum ? "i64" : transpile_type(resolved_sym)
+    when :Int64                                then "i64"
+    when :UInt8, :Byte, :UInt16, :UInt32       then for_sum ? "u64" : transpile_type(resolved_sym)
+    when :UInt64                               then "u64"
+    else                                            "f64"
+    end
+  end
+
+  # Returns [min_sentinel, max_sentinel] for a given Zig numeric type.
+  # min_sentinel is the initial value for a MIN accumulator (highest possible).
+  # max_sentinel is the initial value for a MAX accumulator (lowest possible).
+  def agg_minmax_sentinels(zig_t, resolved_sym)
+    if [:Float32, :Float64].include?(resolved_sym)
+      ["std.math.floatMax(#{zig_t})", "-std.math.floatMax(#{zig_t})"]
+    elsif [:Int8, :Int16, :Int32, :Int64].include?(resolved_sym)
+      ["std.math.maxInt(#{zig_t})", "std.math.minInt(#{zig_t})"]
+    elsif [:UInt8, :Byte, :UInt16, :UInt32, :UInt64].include?(resolved_sym)
+      ["std.math.maxInt(#{zig_t})", "0"]
+    else
+      ["std.math.floatMax(f64)", "-std.math.floatMax(f64)"]
+    end
+  end
+
   def transpile_sum(list_node, sum_node, smooth_node)
     expr_code = visit_pipeline_expr(list_node, sum_node.expression)
+    acc_type  = transpile_type(smooth_node.full_type.to_s)  # already upsized by pipe_analysis
 
     transpile_pipeline_macro(list_node, smooth_node) do
       <<~ZIG
-        var sum_result: f64 = 0;
+        var sum_result: #{acc_type} = 0;
         for (pipe_items) |it| {
             sum_result += #{expr_code};
         }
@@ -904,11 +940,14 @@ module PipelineGenerator
 
   def transpile_min(list_node, min_node, smooth_node)
     expr_code = visit_pipeline_expr(list_node, min_node.expression)
+    expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
+    acc_type  = transpile_type(smooth_node.full_type.to_s)
+    min_init, _max_init = agg_minmax_sentinels(acc_type, expr_sym)
 
     transpile_pipeline_macro(list_node, smooth_node) do
       <<~ZIG
         if (pipe_items.len == 0) @panic("MIN applied to empty list");
-        var min_result: f64 = std.math.floatMax(f64);
+        var min_result: #{acc_type} = #{min_init};
         for (pipe_items) |it| {
             const min_val = #{expr_code};
             if (min_val < min_result) min_result = min_val;
@@ -920,11 +959,14 @@ module PipelineGenerator
 
   def transpile_max(list_node, max_node, smooth_node)
     expr_code = visit_pipeline_expr(list_node, max_node.expression)
+    expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
+    acc_type  = transpile_type(smooth_node.full_type.to_s)
+    _min_init, max_init = agg_minmax_sentinels(acc_type, expr_sym)
 
     transpile_pipeline_macro(list_node, smooth_node) do
       <<~ZIG
         if (pipe_items.len == 0) @panic("MAX applied to empty list");
-        var max_result: f64 = -std.math.floatMax(f64);
+        var max_result: #{acc_type} = #{max_init};
         for (pipe_items) |it| {
             const max_val = #{expr_code};
             if (max_val > max_result) max_result = max_val;
@@ -975,15 +1017,15 @@ module PipelineGenerator
         transpile_concurrent_each(lhs, inner, id, workers_code, rt_name, options)
       end
     when AST::SumOp
-      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :sum)
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :sum, smooth_node)
     when AST::CountOp
-      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :count)
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :count, smooth_node)
     when AST::MinOp
-      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :min)
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :min, smooth_node)
     when AST::MaxOp
-      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :max)
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :max, smooth_node)
     when AST::AverageOp
-      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :average)
+      transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :average, smooth_node)
     end
   end
 
@@ -1273,8 +1315,11 @@ module PipelineGenerator
     src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
 
     # For the worker body, items accessed via ctx.items (the context struct).
+    # If source was `list AS @u`, @u also resolves to ctx.items[__idx].
     inner_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
-      with_fiber_capture_map({}) { visit(inner_expr) }
+      with_fiber_capture_map({}) do
+        with_concurrent_outer_binding("ctx.items[__idx]") { visit(inner_expr) }
+      end
     end
     bare_code = inner_code.sub(/^try /, '')
 
@@ -1368,7 +1413,9 @@ module PipelineGenerator
     src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
 
     inner_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
-      with_fiber_capture_map({}) { visit(inner_expr) }
+      with_fiber_capture_map({}) do
+        with_concurrent_outer_binding("ctx.items[__idx]") { visit(inner_expr) }
+      end
     end
     bare_code = inner_code.sub(/^try /, '')
 
@@ -1457,10 +1504,12 @@ module PipelineGenerator
     # For EACH workers, the placeholder references the shared items array by index.
     body_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
       with_fiber_capture_map({}) do
-        each_op.body.map { |stmt|
-          code = visit(stmt)
-          code.strip.end_with?(";") ? code : "#{code};"
-        }.join("\n                      ")
+        with_concurrent_outer_binding("ctx.items[__idx]") do
+          each_op.body.map { |stmt|
+            code = visit(stmt)
+            code.strip.end_with?(";") ? code : "#{code};"
+          }.join("\n                      ")
+        end
       end
     end
 
@@ -1522,7 +1571,7 @@ module PipelineGenerator
   # Zero contention during the parallel phase. Sequential O(N)
   # combine after WaitGroup.wait().
   #
-  def transpile_concurrent_reduce(list_node, op_node, id, workers_code, rt_name, options, kind)
+  def transpile_concurrent_reduce(list_node, op_node, id, workers_code, rt_name, options, kind, smooth_node = nil)
     @current_pipe_label = next_pipe_label
     item_zig = transpile_type(list_node.type_info.element_type.resolved)
 
@@ -1536,18 +1585,20 @@ module PipelineGenerator
     cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(#{rt_name}.heapAlloc());" : ""
 
     expr_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
-      with_fiber_capture_map({}) { visit(op_node.expression) }
+      with_fiber_capture_map({}) do
+        with_concurrent_outer_binding("ctx.items[__idx]") { visit(op_node.expression) }
+      end
     end
 
     spawn_call = concurrent_spawn_call(options, "__ccr#{id}_wg", "__CcrWorker#{id}", "__ccr#{id}_workers[__w]")
 
-    # Per-kind configuration
+    # Per-kind configuration (use smooth_node.full_type for result type — reliable even for Placeholder exprs)
     case kind
     when :sum
-      partial_type = "f64"
+      partial_type = smooth_node ? transpile_type(smooth_node.full_type.to_s) : "f64"
       partial_init = "0"
       worker_body  = "ctx.partial.* += #{expr_code};"
-      result_type  = "f64"
+      result_type  = partial_type
       result_init  = "0"
     when :count
       partial_type = "i64"
@@ -1556,17 +1607,19 @@ module PipelineGenerator
       result_type  = "i64"
       result_init  = "0"
     when :min
-      partial_type = "f64"
-      partial_init = "std.math.floatMax(f64)"
+      expr_sym     = smooth_node ? smooth_node.full_type.resolved : :Float64
+      partial_type = smooth_node ? transpile_type(smooth_node.full_type.to_s) : "f64"
+      partial_init, _ = agg_minmax_sentinels(partial_type, expr_sym)
       worker_body  = "const __v = #{expr_code}; if (__v < ctx.partial.*) ctx.partial.* = __v;"
-      result_type  = "f64"
-      result_init  = "std.math.floatMax(f64)"
+      result_type  = partial_type
+      result_init  = partial_init
     when :max
-      partial_type = "f64"
-      partial_init = "-std.math.floatMax(f64)"
+      expr_sym     = smooth_node ? smooth_node.full_type.resolved : :Float64
+      partial_type = smooth_node ? transpile_type(smooth_node.full_type.to_s) : "f64"
+      _, partial_init = agg_minmax_sentinels(partial_type, expr_sym)
       worker_body  = "const __v = #{expr_code}; if (__v > ctx.partial.*) ctx.partial.* = __v;"
-      result_type  = "f64"
-      result_init  = "-std.math.floatMax(f64)"
+      result_type  = partial_type
+      result_init  = partial_init
     when :average
       partial_type = "f64"
       partial_init = "0"
