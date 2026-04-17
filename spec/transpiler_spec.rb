@@ -1813,4 +1813,30 @@ RSpec.describe ZigTranspiler do
       expect { transpile(src) }.to raise_error(/SELECT is not supported in AS @v binding chains/)
     end
   end
+
+  # ===========================================================================
+  # Pipeline placeholder field error
+  # ===========================================================================
+  describe "pipeline placeholder field errors" do
+    let(:point_preamble) { <<~CLEAR }
+      STRUCT Point { x: Float64, y: Float64 }
+      FN main() RETURNS Void ->
+        pts: Point[] = [Point{ x: 1.0, y: 2.0 }];
+    CLEAR
+
+    it "raises a type error when SUM accesses a non-existent field on _" do
+      src = point_preamble + "_ = pts s> SUM _.z; RETURN; END"
+      expect { transpile(src) }.to raise_error(/field access 'z'.*Point|Point.*field.*'z'/i)
+    end
+
+    it "raises a type error when WHERE accesses a non-existent field on _" do
+      src = point_preamble + "_ = pts s> WHERE _.z > 0.0; RETURN; END"
+      expect { transpile(src) }.to raise_error(/field access 'z'.*Point|Point.*field.*'z'/i)
+    end
+
+    it "raises a type error when SELECT accesses a non-existent field on _" do
+      src = point_preamble + "_ = pts s> SELECT _.z; RETURN; END"
+      expect { transpile(src) }.to raise_error(/field access 'z'.*Point|Point.*field.*'z'/i)
+    end
+  end
 end

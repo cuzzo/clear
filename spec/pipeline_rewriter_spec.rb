@@ -61,6 +61,56 @@ RSpec.describe PipelineRewriter do
     expect(if_stmt.then_branch[1].name).to eq("append")
   end
 
+  it "SELECT result is bound to a temp VarDecl before append" do
+    # Ensures struct literals are never inlined in expression position (Zig limitation).
+    ast = parse_and_rewrite(<<~CLEAR)
+      STRUCT S { v: Float64 }
+      FN main() RETURNS Void ->
+          items = [1.0, 2.0];
+          result = items s> SELECT S{ v: _ };
+          RETURN;
+      END
+    CLEAR
+    main = ast.statements.find { |s| s.respond_to?(:name) && s.name == "main" }
+    bind = main.body.find { |s| s.respond_to?(:name) && s.name == "result" }
+
+    foreach = bind.value.body[1]
+    # Body: [VarDecl(__sel1 = S{v: it}), MethodCall(append, __sel1)]
+    expect(foreach.body[0]).to be_a(AST::VarDecl)
+    expect(foreach.body[0].name.to_s).to start_with("__sel")
+    expect(foreach.body[1]).to be_a(AST::MethodCall)
+    expect(foreach.body[1].name).to eq("append")
+  end
+
+  it "SELECT then SUM: VarDecl temp used in accumulator assignment" do
+    ast = parse_and_rewrite(<<~CLEAR)
+      STRUCT S { v: Float64 }
+      FN main() RETURNS Void ->
+          items = [1.0, 2.0];
+          total = items s> SELECT S{ v: _ } s> SUM _.v;
+          RETURN;
+      END
+    CLEAR
+    main = ast.statements.find { |s| s.respond_to?(:name) && s.name == "main" }
+    bind = main.body.find { |s| s.respond_to?(:name) && s.name == "total" }
+
+    foreach = bind.value.body[1]
+    # Body: [VarDecl(__sel1 = S{v: it}), Assignment(sum += __sel1.v)]
+    expect(foreach.body[0]).to be_a(AST::VarDecl)
+    sel_name = foreach.body[0].name.to_s
+    expect(sel_name).to start_with("__sel")
+    expect(foreach.body[1]).to be_a(AST::Assignment)
+    # The RHS of the add should reference the sel var, not the struct literal directly
+    rhs = foreach.body[1].value
+    expect(rhs).to be_a(AST::BinaryOp)
+    expect(rhs.op).to eq(:ADD)
+    # Right side of add should be a field access on the temp, not a struct literal
+    field_access = rhs.right
+    expect(field_access).to be_a(AST::GetField)
+    expect(field_access.target).to be_a(AST::Identifier)
+    expect(field_access.target.name.to_s).to eq(sel_name)
+  end
+
   it "rewrites SUM pipelines into accumulation loops" do
     ast = parse_and_rewrite(<<~CLEAR)
       FN main() RETURNS Void ->
