@@ -17,8 +17,8 @@ It's designed to be:
 ```ruby
 bill = users AS @u
   s> UNNEST _.orders
-  s> SELECT _.price * @u.discount
-  s> COCURRENT REDUCE(0, (acc, x) -> acc + x );
+  s> CONCURRENT SELECT _.price * @u.discount
+  s> SUM _;
 
 -- Automatically generates efficient, parallel partial reduction.
 ```
