@@ -2617,6 +2617,10 @@ class MIRLowering
     # Error chain: expr OR handler
     return lower_or_rescue(node) if node.op == :OR_RESCUE
 
+    # Named pipeline binding (AS @v): passthrough to LHS value.
+    # The @v registration is handled by the pipeline host at the binding point.
+    return lower(node.left) if node.op == :BIND_VAR
+
     # String concat (2-part) uses std.mem.concat
     if node.string_concat
       left = hoist_alloc(lower(node.left), node.left)

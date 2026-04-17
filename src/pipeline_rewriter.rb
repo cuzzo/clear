@@ -102,6 +102,12 @@ class PipelineRewriter
     terminal = chain[:terminal]
     real_source = chain[:source]
 
+    # Named binding chains (source AS @u s> UNNEST ...) must reach the MIR
+    # lowering intact so lower_binding_chain can fuse them into nested loops
+    # with correct @u -> loop_var substitution. PipelineRewriter has no concept
+    # of named bindings and would emit @u as a raw identifier.
+    return node if binding_source?(real_source)
+
     # Rewrite the source (it may contain nested pipelines in non-chain positions).
     # real_source is the non-SMOOTH root of the chain; safe to rewrite recursively.
     real_source = rewrite!(real_source)
@@ -209,6 +215,17 @@ class PipelineRewriter
 
   def is_fusible?(node)
     FUSIBLE_STAGES.any? { |t| node.is_a?(t) }
+  end
+
+  # Returns true if the node is, or contains, a BIND_VAR-sourced pipeline.
+  # These are handled by MIR lowering (lower_binding_chain) which performs
+  # correct @u -> loop_var substitution. PipelineRewriter must leave them alone.
+  def binding_source?(node)
+    return true if node.is_a?(AST::BinaryOp) && node.op == :BIND_VAR
+    return false unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+    # Walk the source chain to find if its root is a BIND_VAR.
+    inner_src = collect_chain(node)[:source]
+    inner_src.is_a?(AST::BinaryOp) && inner_src.op == :BIND_VAR
   end
 
   def collect_chain(node)

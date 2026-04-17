@@ -28,9 +28,31 @@ class PipelineHost
     @soa_needed_fields = Set.new
     @transpiler_context_stack = []
     @mir_mode = false
+    # Named pipeline bindings: "@u" -> "__pipe_u" (persist across stages, cleared per-chain)
+    @named_bindings = {}
   end
 
   def current_tp_ctx; @transpiler_context_stack.last; end
+
+  # Compute the Zig variable name for a CLEAR named pipeline binding.
+  # "@u" -> "__pipe_u", "@order" -> "__pipe_order"
+  def pipe_binding_zig_name(clear_name)
+    "__pipe_#{clear_name.delete_prefix('@')}"
+  end
+
+  # Register a named pipeline binding for the duration of a block.
+  # Saves and restores previous value so nested bindings stack correctly.
+  def with_named_binding(clear_name, zig_var, &blk)
+    prev = @named_bindings[clear_name]
+    @named_bindings[clear_name] = zig_var
+    blk.call
+  ensure
+    if prev.nil?
+      @named_bindings.delete(clear_name)
+    else
+      @named_bindings[clear_name] = prev
+    end
+  end
 
   # Delegate fiber capture map management to MIRLowering
   def with_fiber_capture_map(new_entries, rt_override: "__rt", &blk)
@@ -56,6 +78,11 @@ class PipelineHost
     # Join param map: lambda param names -> Zig loop variables
     if node.is_a?(AST::Identifier) && @join_param_map && @join_param_map[node.name]
       return @join_param_map[node.name]
+    end
+
+    # Named pipeline binding: @u -> registered Zig var (e.g. "__pipe_u")
+    if node.is_a?(AST::Identifier) && !@named_bindings.empty? && @named_bindings.key?(node.name)
+      return @named_bindings[node.name]
     end
 
     # SOA field-slice rewrite: _.field -> __soa_field[__soa_i]
@@ -143,7 +170,7 @@ class PipelineHost
   # and join param names with their Zig loop variable names.
   # Returns the node (possibly modified) or a new synthetic Identifier.
   def substitute_placeholders(node)
-    return node unless @placeholder_name || @acc_placeholder || @join_param_map || @soa_each_mode
+    return node unless @placeholder_name || @acc_placeholder || @join_param_map || @soa_each_mode || !@named_bindings.empty?
 
     # SOA EACH: _.field -> synthetic identifier __soa_field[__soa_i]
     if @soa_each_mode && node.is_a?(AST::GetField) &&
@@ -166,6 +193,10 @@ class PipelineHost
         return new_id
       elsif @join_param_map && @join_param_map[node.name]
         new_id = AST::Identifier.new(node.token, @join_param_map[node.name])
+        copy_type_info(node, new_id)
+        return new_id
+      elsif !@named_bindings.empty? && (zig_var = @named_bindings[node.name])
+        new_id = AST::Identifier.new(node.token, zig_var)
         copy_type_info(node, new_id)
         return new_id
       end
@@ -297,6 +328,12 @@ class PipelineHost
     if rhs.is_a?(AST::ReduceOp)
       range_chain = unwrap_range_chain(lhs)
       return lower_range_reduce(range_chain[:source], range_chain[:stages], rhs) if range_chain
+    end
+
+    # Binding-unnest chain: source AS @u s> UNNEST expr [AS @o] s> [stages] s> fold
+    # Must be fused into nested loops - materializing UNNEST would lose the @u context.
+    if (bchain = unwrap_binding_unnest_chain(node))
+      return lower_binding_chain(bchain)
     end
 
     case rhs
@@ -1231,6 +1268,214 @@ class PipelineHost
     end
     return nil unless finite_stream_source_node?(cursor)
     { source: cursor, stages: stages }
+  end
+
+  # Detect a binding-unnest chain suitable for fused nested-loop generation:
+  #   BIND_VAR(source, @u) s> [BIND_VAR(]UNNEST(expr)[, @o)] s> [WHERE/SELECT] s> fold
+  #
+  # Note: `UNNEST expr AS @o` parses as BIND_VAR(UnnestOp(expr), @o) because AS has
+  # higher precedence than s>. Both `s> UNNEST expr` and `s> UNNEST expr AS @o` are handled.
+  #
+  # Returns a hash with the chain components, or nil if the pattern doesn't match.
+  def unwrap_binding_unnest_chain(node)
+    return nil unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
+
+    # Terminal must be a fold op
+    fold = node.right
+    return nil unless RANGE_FOLD_OPS.any? { |t| fold.is_a?(t) }
+    cursor = node.left
+
+    # Collect optional intermediate WHERE/SELECT stages (in chain order)
+    stages = []
+    while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
+      rhs = cursor.right
+      if rhs.is_a?(AST::WhereOp) || rhs.is_a?(AST::SelectOp)
+        stages.unshift(rhs)
+        cursor = cursor.left
+      else
+        break
+      end
+    end
+
+    # cursor must now be: SMOOTH(BIND_VAR(source, @u), unnest_part)
+    return nil unless cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
+    lhs = cursor.left
+    rhs = cursor.right
+
+    # Must be a UnnestOp
+    return nil unless rhs.is_a?(AST::UnnestOp)
+
+    # Detect optional inner binding: `UNNEST expr AS @o` parses as
+    # UnnestOp(expression=BIND_VAR(expr, @o)) because :pipe_expression uses
+    # parse_expression(1) which consumes AS at prec 2 as part of the inner expr.
+    unnest_expr = rhs.expression
+    inner_binding = nil
+    if unnest_expr.is_a?(AST::BinaryOp) && unnest_expr.op == :BIND_VAR
+      inner_binding = unnest_expr.right.name  # "@o"
+      unnest_expr   = unnest_expr.left        # the actual array expression
+    end
+
+    # LHS must be a BIND_VAR (source AS @u)
+    return nil unless lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
+
+    {
+      source:        lhs.left,
+      outer_binding: lhs.right.name,  # "@u"
+      unnest_expr:   unnest_expr,     # @u.orders (unwrapped from any BIND_VAR)
+      inner_binding: inner_binding,   # "@o" or nil
+      stages:        stages,
+      fold:          fold
+    }
+  end
+
+  # Generate fused nested loops for a binding-unnest chain.
+  # Outer loop: source elements bound to @u (outer_zig).
+  # Inner loop: unnest expression elements (inner_zig).
+  # Both bindings are visible in stage expressions and the fold.
+  def lower_binding_chain(chain)
+    outer_name = chain[:outer_binding]          # "@u"
+    outer_zig  = pipe_binding_zig_name(outer_name)  # "__pipe_u"
+    inner_name = chain[:inner_binding]          # "@o" or nil
+    inner_zig  = inner_name ? pipe_binding_zig_name(inner_name) : "__bc_inner"
+    label      = next_pipe_label
+
+    with_named_binding(outer_name, outer_zig) do
+      source_mir = visit_mir(chain[:source])
+      unnest_mir = visit_mir(chain[:unnest_expr])  # @u already in @named_bindings
+
+      inner_block = lambda do
+        acc_init, loop_body, result_expr = lower_binding_fold(
+          chain[:fold], chain[:stages], inner_zig)
+
+        # When inner_name is nil the capture is the generated __bc_inner which
+        # the fold expression may not reference (e.g. ALL @u.discount > 0.0).
+        # Detect actual usage by emitting the body to text and scanning for the
+        # capture name, then suppress only if unused to avoid Zig errors.
+        unless inner_name
+          body_text = loop_body.map { |s| @emitter.emit(s).to_s }.join
+          unless body_text.include?(inner_zig)
+            suppress = MIR::RawZig.new("_ = #{inner_zig};", "suppress_unused_inner_capture", nil, nil)
+            loop_body = [suppress, *loop_body]
+          end
+        end
+
+        inner_loop = MIR::ForStmt.new(
+          MIR::InlineZig.new(
+            'if (@hasField(@TypeOf(__bc_unn), "items")) __bc_unn.items else __bc_unn[0..]',
+            "bc_unnest_items"),
+          inner_zig, loop_body, nil)
+
+        outer_loop = MIR::ForStmt.new(
+          MIR::InlineZig.new(
+            'if (@hasField(@TypeOf(__bc_src), "items")) __bc_src.items else __bc_src[0..]',
+            "bc_src_items"),
+          outer_zig,
+          [
+            MIR::Let.new("__bc_unn", unnest_mir, false, nil, nil),
+            inner_loop
+          ],
+          nil)
+
+        MIR::BlockExpr.new(label, [
+          MIR::Let.new("__bc_src", source_mir, false, nil, nil),
+          *acc_init,
+          outer_loop,
+          MIR::BreakStmt.new(label, result_expr)
+        ])
+      end
+
+      if inner_name
+        with_named_binding(inner_name, inner_zig) { inner_block.call }
+      else
+        inner_block.call
+      end
+    end
+  end
+
+  # Build accumulator init stmts, per-element body stmts, and result expr for
+  # a fold op inside a binding chain. placeholder is the Zig inner loop var name.
+  def lower_binding_fold(fold, stages, placeholder)
+    case fold
+    when AST::SumOp
+      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      init   = [MIR::Let.new("__bc_acc", MIR::Lit.new("0"), true, "f64", nil)]
+      accum  = [MIR::Set.new(MIR::Ident.new("__bc_acc"),
+                  MIR::BinOp.new("+", MIR::Ident.new("__bc_acc"), expr))]
+      [init, bc_wrap_stages(stages, placeholder, accum), MIR::Ident.new("__bc_acc")]
+
+    when AST::CountOp
+      pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      init  = [MIR::Let.new("__bc_acc", MIR::Lit.new("0"), true, "i64", nil)]
+      accum = [MIR::IfStmt.new(pred, [MIR::Set.new(MIR::Ident.new("__bc_acc"),
+                 MIR::BinOp.new("+", MIR::Ident.new("__bc_acc"), MIR::Lit.new("1")))], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), MIR::Ident.new("__bc_acc")]
+
+    when AST::AverageOp
+      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      init = [MIR::Let.new("__bc_sum", MIR::Lit.new("0"), true, "f64", nil),
+              MIR::Let.new("__bc_cnt", MIR::Lit.new("0"), true, "i64", nil)]
+      accum = [MIR::Set.new(MIR::Ident.new("__bc_sum"),
+                 MIR::BinOp.new("+", MIR::Ident.new("__bc_sum"), expr)),
+               MIR::Set.new(MIR::Ident.new("__bc_cnt"),
+                 MIR::BinOp.new("+", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("1")))]
+      result = MIR::Conditional.new(
+        MIR::BinOp.new("==", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("0")),
+        MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
+        MIR::BinOp.new("/", MIR::Ident.new("__bc_sum"),
+          MIR::Cast.new(MIR::Ident.new("__bc_cnt"), "f64", :floatFromInt)))
+      [init, bc_wrap_stages(stages, placeholder, accum), result]
+
+    when AST::MinOp
+      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      init  = [MIR::Let.new("__bc_acc",
+                 MIR::InlineZig.new("std.math.floatMax(f64)", "float_max"), true, "f64", nil)]
+      accum = [MIR::Let.new("__bc_val", expr, false, nil, nil),
+               MIR::IfStmt.new(
+                 MIR::BinOp.new("<", MIR::Ident.new("__bc_val"), MIR::Ident.new("__bc_acc")),
+                 [MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Ident.new("__bc_val"))], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), MIR::Ident.new("__bc_acc")]
+
+    when AST::MaxOp
+      expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      init  = [MIR::Let.new("__bc_acc",
+                 MIR::InlineZig.new("-std.math.floatMax(f64)", "float_min"), true, "f64", nil)]
+      accum = [MIR::Let.new("__bc_val", expr, false, nil, nil),
+               MIR::IfStmt.new(
+                 MIR::BinOp.new(">", MIR::Ident.new("__bc_val"), MIR::Ident.new("__bc_acc")),
+                 [MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Ident.new("__bc_val"))], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), MIR::Ident.new("__bc_acc")]
+
+    when AST::AnyOp
+      pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      init  = [MIR::Let.new("__bc_acc", MIR::Lit.new("false"), true, nil, nil)]
+      accum = [MIR::IfStmt.new(pred, [
+                 MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Lit.new("true")),
+                 MIR::BreakStmt.new(nil, nil)], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), MIR::Ident.new("__bc_acc")]
+
+    when AST::AllOp
+      pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      init  = [MIR::Let.new("__bc_acc", MIR::Lit.new("true"), true, nil, nil)]
+      accum = [MIR::IfStmt.new(MIR::UnaryOp.new("!", pred), [
+                 MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Lit.new("false")),
+                 MIR::BreakStmt.new(nil, nil)], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), MIR::Ident.new("__bc_acc")]
+
+    else
+      raise "lower_binding_fold: unsupported fold op #{fold.class}"
+    end
+  end
+
+  # Wrap accum_stmts with WHERE predicate guards from intermediate stages.
+  # Stages are applied innermost-first (each WHERE wraps the inner body).
+  def bc_wrap_stages(stages, placeholder, accum_stmts)
+    body = accum_stmts
+    stages.reverse_each do |stage|
+      next unless stage.is_a?(AST::WhereOp)
+      pred = with_pipeline_context(placeholder: placeholder) { visit_mir(stage.expression) }
+      body = [MIR::IfStmt.new(pred, body, nil)]
+    end
+    body
   end
 
   # Lower a fold expression and wrap in @as(f64, @floatFromInt(...)) if integer.

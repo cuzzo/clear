@@ -1,0 +1,53 @@
+-- Test: AS @v pipeline binding with UNNEST
+-- users AS @u s> UNNEST @u.orders [AS @o] s> [stages] s> fold
+-- The binding keeps the outer element (@u) accessible inside the inner loop.
+
+STRUCT Order { price: Float64, qty: Int64 }
+STRUCT User { name: String, discount: Float64, orders: Order[]@list }
+
+FN main() RETURNS Void ->
+    alice_orders: Order[] = [Order{ price: 10.0, qty: 2 }, Order{ price: 20.0, qty: 1 }];
+    bob_orders:   Order[] = [Order{ price: 15.0, qty: 3 }];
+
+    users: User[] = [
+        User{ name: "alice", discount: 0.9, orders: alice_orders },
+        User{ name: "bob",   discount: 0.8, orders: bob_orders }
+    ];
+
+    -- Basic: source-level binding + UNNEST, SUM using both @u and _
+    -- alice: (10*0.9 + 20*0.9) = 27.0, bob: (15*0.8) = 12.0, total = 39.0
+    total = users AS @u
+        s> UNNEST @u.orders
+        s> SUM _.price * @u.discount;
+    ASSERT total == 39.0, "discounted total should be 39.0";
+
+    -- Explicit inner binding: UNNEST @u.orders AS @o
+    total2 = users AS @u
+        s> UNNEST @u.orders AS @o
+        s> SUM @o.price * @u.discount;
+    ASSERT total2 == 39.0, "explicit @o binding gives same result";
+
+    -- WHERE before fold: filter orders with qty > 1, then sum discounted price
+    -- alice: qty=2 passes (10*0.9=9.0), qty=1 fails; bob: qty=3 passes (15*0.8=12.0)
+    -- total_large = 9.0 + 12.0 = 21.0
+    total_large = users AS @u
+        s> UNNEST @u.orders
+        s> WHERE _.qty > 1
+        s> SUM _.price * @u.discount;
+    ASSERT total_large == 21.0, "filtered discounted total should be 21.0";
+
+    -- ANY: does any order have price > 18?
+    -- bob has price=15, alice has 10 and 20 -> yes (20 > 18)
+    any_expensive = users AS @u
+        s> UNNEST @u.orders
+        s> ANY _.price > 18.0;
+    ASSERT any_expensive == TRUE, "some order price > 18";
+
+    -- ALL: are all discounts applied (non-zero)?
+    all_discounted = users AS @u
+        s> UNNEST @u.orders
+        s> ALL @u.discount > 0.0;
+    ASSERT all_discounted == TRUE, "all users have non-zero discount";
+
+    RETURN;
+END

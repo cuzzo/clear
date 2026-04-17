@@ -580,7 +580,10 @@ module CleanupClassifier
     return nil unless ti.array? && !ti.string? && !ti.collection? && val.is_a?(AST::ListLit)
     elem_schema = schema_lookup.call(ti.element_type&.resolved) rescue nil
     return nil unless elem_has_string_fields?(elem_schema)
-    entry(:array_with_struct_strings)
+    # Use cleanupAlloc so element cleanup handles both heap-allocated strings
+    # (freed normally) and frame-allocated nested data (skipped safely, rewind
+    # reclaims it). heapAlloc would crash if any field points into frame memory.
+    entry(:array_with_struct_strings, alloc: :cleanup)
   end
 
   private_class_method def self.classify_rc_or_link(ti, schema_lookup)

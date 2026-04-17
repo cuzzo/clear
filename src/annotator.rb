@@ -2401,18 +2401,28 @@ private
     # node.right is the Identifier for the new variable
     var_name = node.right.name
 
+    # When binding a collection source (users AS @u), @u refers to each *element*,
+    # not the collection. Subsequent @u.field accesses need the element type.
+    # Note: collection? covers pool/list/map; array? is needed for plain T[] arrays.
+    lhs_ti = Type.new(lhs_type)
+    binding_type = if (lhs_ti.array? || lhs_ti.collection?) && !lhs_ti.string? && lhs_ti.element_type
+      lhs_ti.element_type.to_s
+    else
+      lhs_type
+    end
+
     # Register in scope (Immutable, Stack storage)
     current_scope.declare(
       var_name,
       nil,
-      lhs_type,
+      binding_type,
       false, # Immutable
       false, # Not rebindable
       nil,
       :stack
     )
 
-    # The result of the operation is the value itself (passthrough)
+    # The result of the operation is the collection itself (passthrough for pipeline)
     node.full_type = lhs_type
   end
 
