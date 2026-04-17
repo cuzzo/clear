@@ -1,6 +1,10 @@
 # Pipelines and Higher-Order Functions
 
-CLEAR's pipeline system lets you transform, filter, aggregate, and iterate collections using the smooth operator (`s>`). Every pipeline operator works on arrays, `@list`, `@pool`, sharded collections, and `@pool:soa` — the same syntax regardless of the underlying storage.
+CLEAR's pipeline system lets you transform, filter, aggregate, and iterate collections using the smooth operator (`s>`).
+
+Every pipeline operator works on arrays, `@list`, `@pool`, sharded collections, `@pool:soa`, streams `~T[]`, etc - the same syntax regardless of the underlying storage.
+
+`_` is the placeholder value for the value being iterated over.
 
 ```ruby clear illustrative
 scores
