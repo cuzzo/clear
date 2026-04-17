@@ -26,7 +26,7 @@ bill = users AS @u
 ### Combine with in-line error handling
 
 ```ruby
-FN myFunc(id: Int64, name: String) ->
+FN myFunc(id: Int64, name: String) RETURNS MyPage ->
   val = fetchData(id, name) OR RAISE
    s> parseHeader OR EXIT "Invalid Header"
    s> parseBody OR EXIT "Invalid Body"
