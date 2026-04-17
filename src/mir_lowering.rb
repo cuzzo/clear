@@ -2578,6 +2578,17 @@ class MIRLowering
   end
 
   def lower_identifier(node)
+    # Pipeline bindings (@u, @v, @item, ...) are substituted by PipelineHost
+    # before reaching the MIR lowering. If one arrives here it means it was
+    # used outside its pipeline context (after the pipeline expression ended,
+    # or in a pipeline that doesn't have a matching AS declaration).
+    if node.name.match?(/\A@[a-z]/)
+      line = node.token&.respond_to?(:line) ? node.token.line : "?"
+      raise "line #{line}: Undefined pipeline binding '#{node.name}'. " \
+            "Pipeline bindings must be declared with 'AS #{node.name}' " \
+            "in the same pipeline expression where they are used."
+    end
+
     return MIR::FnRef.new(zig_safe_name(node.name)) if node.respond_to?(:fn_ref) && node.fn_ref
 
     # Inside a WITH block, use the unwrapped inner alias instead of the Rc handle

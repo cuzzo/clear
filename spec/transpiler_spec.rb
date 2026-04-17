@@ -1675,4 +1675,36 @@ RSpec.describe ZigTranspiler do
       expect(zig).not_to match(/;\s*_ = cur;/)
     end
   end
+
+  # ===========================================================================
+  # AS @v binding error cases
+  # ===========================================================================
+  describe "AS @v binding error cases" do
+    it "raises an error when a pipeline binding is used after the pipeline ends" do
+      src = <<~CLEAR
+        STRUCT Order { price: Float64 }
+        STRUCT User { name: String, orders: Order[]@list }
+        FN main() RETURNS Void ->
+          users: User[] = [User{ name: "alice", orders: [Order{price: 10.0}] }];
+          total = users AS @u s> UNNEST @u.orders s> SUM _.price;
+          bad = @u.name;
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(/Undefined pipeline binding '@u'/)
+    end
+
+    it "raises an error when SELECT is used in an AS @v binding chain" do
+      src = <<~CLEAR
+        STRUCT Order { price: Float64 }
+        STRUCT User { name: String, orders: Order[]@list }
+        FN main() RETURNS Void ->
+          users: User[] = [User{ name: "alice", orders: [Order{price: 10.0}] }];
+          total = users AS @u s> UNNEST @u.orders s> SELECT _.price s> SUM _;
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(/SELECT is not supported in AS @v binding chains/)
+    end
+  end
 end

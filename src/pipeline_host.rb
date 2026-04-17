@@ -1412,17 +1412,18 @@ class PipelineHost
 
     when AST::AverageOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
+      # Use f64 for count to avoid @floatFromInt in the division (same as the
+      # non-binding-chain AVERAGE code path in PipelineGenerator).
       init = [MIR::Let.new("__bc_sum", MIR::Lit.new("0"), true, "f64", nil),
-              MIR::Let.new("__bc_cnt", MIR::Lit.new("0"), true, "i64", nil)]
+              MIR::Let.new("__bc_cnt", MIR::Lit.new("0.0"), true, "f64", nil)]
       accum = [MIR::Set.new(MIR::Ident.new("__bc_sum"),
                  MIR::BinOp.new("+", MIR::Ident.new("__bc_sum"), expr)),
                MIR::Set.new(MIR::Ident.new("__bc_cnt"),
-                 MIR::BinOp.new("+", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("1")))]
+                 MIR::BinOp.new("+", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("1.0")))]
       result = MIR::Conditional.new(
-        MIR::BinOp.new("==", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("0")),
+        MIR::BinOp.new("==", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("0.0")),
         MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
-        MIR::BinOp.new("/", MIR::Ident.new("__bc_sum"),
-          MIR::Cast.new(MIR::Ident.new("__bc_cnt"), "f64", :floatFromInt)))
+        MIR::BinOp.new("/", MIR::Ident.new("__bc_sum"), MIR::Ident.new("__bc_cnt")))
       [init, bc_wrap_stages(stages, placeholder, accum), result]
 
     when AST::MinOp
@@ -1471,6 +1472,10 @@ class PipelineHost
   def bc_wrap_stages(stages, placeholder, accum_stmts)
     body = accum_stmts
     stages.reverse_each do |stage|
+      if stage.is_a?(AST::SelectOp)
+        raise "SELECT is not supported in AS @v binding chains. " \
+              "Use WHERE to filter or name the projection with AS @o before the fold."
+      end
       next unless stage.is_a?(AST::WhereOp)
       pred = with_pipeline_context(placeholder: placeholder) { visit_mir(stage.expression) }
       body = [MIR::IfStmt.new(pred, body, nil)]
