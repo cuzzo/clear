@@ -21,62 +21,33 @@ CLEAR is focused on describing intent, and the compiler transforming that into t
 
 ## Architectural Overview
 
-### 0. Lexer (`src/lexer.rb`)
+### Compiler (src/)
 
- * This takes text and parses it into valid CLEAR tokens.
- * If you're adding a new syntax feature, you likely need to start here.
+At an extremely high level, the compiler has 7 passes:
 
-### 1. Parser (`src/parser.rb`)
+ 1. Lexer (Tokenize the program)
+ 2. Parser (Transform tokens into an Abstract Syntax Tree)
+ 3. Annotator (Hydrate tokens with type info, ensure proper program structure)
+ 4. Desugaring (Transform Pipelines, String Concatenation, etc)
+ 5. Control Flow Graphing (Transform the AST into a CFG, ensure Affine Ownership / memory safety)
+ 6. MIR Lowering (Transform the CFG into a Mid-level Representation that can be translated into *SAFE* Zig)
+ 7. Transpilation (Turn the MIR into working Zig code)
 
- * This parses tokens and transforms them into Abstract Syntax Tree (AST) nodes.
-   * An AST node basically extracts all relevant data from the source text about a particular CLEAR construct (like a function, or while loop).
+### Runtime (zig/)
 
-### 2. Annotator (`src/annotator.rb`)
+ At an extremely high level, the runtime is broken up into:
+ 
+  1. The library (zig/lib) which has all the data structures we need for concurrency.
+  2. The Runtime / Green Fiber Scheduler (zig/runtime).
 
-The annotation phase itself is split into 4 major passes:
+The Scheduler currently only works on Linux:
 
- 1.  Type Inference
- 2.  Ownership Graphing
- 3.  Escape Analysis & Promoption Planning
- 4.  Cleanup Planning
+  * It uses `io_uring` for Network and File IO.
+  * It maintains queues of runnable tasks.
+  * It context-switches between green-fiber stacks to run tasks *COOPERATIVELY*.
+  * It uses SPSC channels for cross-scheduler communication and work stealing for load balancing.
 
-#### 2.a) Type Inference
-
- * This pass is focused on figuring at the type from `x = 1;` or `x = BG { foo() }`
-   * The majority of non-syntax compiler errors happen at this phase.
-
-#### 2.b) Ownership Graphing
-
- * Affine movement violations are also picked up at this stage.
- * "Borrow Checking" and "Lifetime Analysis" occur here as well.
-    * This pass ensures no "Double Free".
-
-
-#### 2.c) Escape Analysis & Promotion Planning
-
- * This manages part 1 of memory lifetime: promoting escaping memory to the heap.
-   * Something allocated on the temporary arena must be promoted to the heap to survive death.
-   * This pass ensures no "Use After Free".
-
-
-#### 2.d) Cleanup Planning
-
- * All good things must come to an end.  What escapes death in 2.c, must eventually die at the right time.
-   * This pass ensures no "Memory Leaks".
-
-### 3. Transpiler (`src/transpiler.rb`)
-
- * This takes the fully hydrated AST Nodes and simply pretty prints them as valid Zig.
-   * The most complicated part here is managing affine lifetimes properly.
-
-### 4. Runtime (`zig/runtime` and `zig/lib`)
-
-  * This is the Zig code that includes all the concurrency constructs that allow you to write easy code that seamlessly runs efficiently on multiple cores.
-  * The majority of performance improvements that will be accepted live here.
-    * The biggest impacts come from scheduler efficiency.
-      * Go's scheduler is a God-like work of art.  Despite the language itself having many efficiency flaws, it is *very* difficult to outperform Go, strictly due to how good it's scheduler is.
-      * CLEAR's scheduler is far less sophisticated, and improvements here will make the most impact.
-      * See [docs/benchmarks.md](docs/benchmarks.md) for a list of known areas for improvement.
+CLEAR automatically inserts cooperative yields into generated code (like Go), to reduce a number p99 latency issues like Head-of-Line blocking.
 
 ## Local Development Setup
 
