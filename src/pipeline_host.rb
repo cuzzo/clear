@@ -286,6 +286,20 @@ class PipelineHost
         copy_type_info(node, new_with)
         return new_with
       end
+    when AST::StructLit
+      new_fields = node.fields.transform_values { |v| substitute_placeholders(v) }
+      if new_fields != node.fields
+        new_sl = AST::StructLit.new(node.token, node.name, new_fields, node.storage, node.type_args)
+        copy_type_info(node, new_sl)
+        return new_sl
+      end
+    when AST::HashLit
+      new_pairs = node.pairs.transform_values { |v| substitute_placeholders(v) }
+      if new_pairs != node.pairs
+        new_hl = AST::HashLit.new(node.token, new_pairs, node.storage)
+        copy_type_info(node, new_hl)
+        return new_hl
+      end
     end
 
     node

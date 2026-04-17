@@ -759,6 +759,8 @@ class PipelineRewriter
       val = node[member]
       if val.is_a?(Array)
         new_node[member] = val.map { |i| replace_placeholder(i, replacement) }
+      elsif val.is_a?(Hash)
+        new_node[member] = val.transform_values { |v| replace_placeholder(v, replacement) }
       elsif val.is_a?(AST::Locatable)
         new_node[member] = replace_placeholder(val, replacement)
       end
