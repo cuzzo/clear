@@ -406,7 +406,7 @@ Options:
 | Arrays / `@list` / `@pool` / `@pool:soa` | Yes | Yes | Yes |
 | `@sharded(...)` collections | Yes | Yes | Yes |
 | Finite streams `~T[]` | Not yet | Not yet | Not yet |
-| Bounded streams `~T[N]` | Runtime helpers landed; compiler integration in progress | Runtime helpers landed; compiler integration in progress | Runtime helpers landed; compiler integration in progress |
+| Bounded streams `~T[N]` | Yes | Yes | Yes |
 | Open streams `~?T[]` | Not yet | Not yet | Not yet |
 | Infinite streams `~T[INF]` | Not yet | Not yet | Not yet |
 
