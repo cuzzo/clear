@@ -187,12 +187,12 @@ pub fn build(b: *std.Build) void {
     const bench_step = b.step("benchmark", "Run performance benchmarks");
 
     const benchmark_files = [_][]const u8{
-        "runtime/arena-benchmark-test.zig",
-        "runtime/benchmark-test.zig",
-        "runtime/safety-benchmark-test.zig",
-        "runtime/slab-alloc-benchmark-test.zig",
-        "runtime/queues-benchmark-test.zig",
-        "runtime/scheduler-benchmark-test.zig",
+        "arena-benchmark-test.zig",
+        "benchmark-test.zig",
+        "safety-benchmark-test.zig",
+        "slab-alloc-benchmark-test.zig",
+        "queues-benchmark-test.zig",
+        "scheduler-benchmark-test.zig",
     };
 
     for (benchmark_files) |filename| {
@@ -213,8 +213,9 @@ pub fn build(b: *std.Build) void {
         bench_tests.root_module.addAssemblyFile(onroot_s);
         bench_tests.root_module.link_libc = true;
 
-        const run_bench = b.addRunArtifact(bench_tests);
-        run_bench.has_side_effects = true;
+        const run_bench = std.Build.Step.Run.create(b, b.fmt("run benchmark {s}", .{filename}));
+        run_bench.addArtifactArg(bench_tests);
+        run_bench.stdio = .inherit;
         bench_step.dependOn(&run_bench.step);
     }
 

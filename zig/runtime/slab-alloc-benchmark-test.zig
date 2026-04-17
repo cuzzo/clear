@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../lib/compat.zig");
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
 const BenchObj = struct {
@@ -17,7 +18,7 @@ test "BENCHMARK: Slab vs GPA (Run with -O ReleaseFast)" {
 
     for (thread_counts) |t_count| {
         // --- 1. Measure GPA ---
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        var gpa = std.heap.DebugAllocator(.{}){};
         defer _ = gpa.deinit();
 
         const gpa_ops = try runBenchGPA(gpa.allocator(), t_count, ITERATIONS);
@@ -42,7 +43,7 @@ fn runBenchGPA(allocator: std.mem.Allocator, thread_count: usize, total_iters: u
     defer threads.deinit(std.testing.allocator);
 
     const ops_per_thread = total_iters / thread_count;
-    var timer = try std.time.Timer.start();
+    var timer = try compat.Timer.start();
 
     for (0..thread_count) |_| {
         const t = try std.Thread.spawn(.{}, workerGPA, .{ allocator, ops_per_thread });
@@ -71,7 +72,7 @@ fn runBenchGeneric(allocator: std.mem.Allocator, thread_count: usize, total_iter
     defer threads.deinit(std.testing.allocator);
 
     const ops_per_thread = total_iters / thread_count;
-    var timer = try std.time.Timer.start();
+    var timer = try compat.Timer.start();
 
     for (0..thread_count) |_| {
         const t = try std.Thread.spawn(.{}, workerGeneric, .{ allocator, ops_per_thread });
@@ -100,7 +101,7 @@ fn runBenchSlab(slab: *SlabAllocator(BenchObj), thread_count: usize, total_iters
     defer threads.deinit(std.testing.allocator);
 
     const ops_per_thread = total_iters / thread_count;
-    var timer = try std.time.Timer.start();
+    var timer = try compat.Timer.start();
 
     for (0..thread_count) |_| {
         const t = try std.Thread.spawn(.{}, workerSlab, .{ slab, ops_per_thread });

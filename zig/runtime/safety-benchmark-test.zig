@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../lib/compat.zig");
 const safety = @import("../lib/safety.zig");
 
 // -------------------------------------------------------------------------
@@ -90,7 +91,7 @@ test "Benchmark: Safety Guards Overhead" {
 
     // 2. Baseline Run
     {
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
         var sum: usize = 0;
 
         for (inputs.items) |n| {
@@ -105,7 +106,7 @@ test "Benchmark: Safety Guards Overhead" {
     // 3. Guard Run
     {
         safety.__min_depth = std.math.maxInt(usize);
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
         var sum: usize = 0;
 
         for (inputs.items) |n| {
@@ -132,14 +133,14 @@ test "Benchmark: Safety Guards Overhead" {
     defer freeTree(allocator, root);
 
     // Use volatile pointer to prevent optimization in ReleaseFast
-    var root_ptr = @as(*volatile *JsonNode, &root);
+    const root_ptr = @as(*volatile *JsonNode, &root);
 
     var TREE_RUNS: u64 = 1000;
     time_baseline = 0;
 
     // 1. Baseline
     {
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
         var i: usize = 0;
         var sum: usize = 0;
         while (i < TREE_RUNS) : (i += 1) {
@@ -154,7 +155,7 @@ test "Benchmark: Safety Guards Overhead" {
     // 2. Depth Guard
     {
         safety.__min_depth = std.math.maxInt(usize);
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
         var i: usize = 0;
         var sum: usize = 0;
         while (i < TREE_RUNS) : (i += 1) {
@@ -184,12 +185,9 @@ test "Benchmark: Safety Guards Overhead" {
 
     tree_depth = 20;
 
-    // Note: Allocating 32MB might take a moment
-    root = try buildTree(arena_allocator, tree_depth);
-    defer freeTree(arena_allocator, root);
-
-    // Prevent optimization
-    root_ptr = @as(*volatile *JsonNode, &root);
+    // Note: Allocating 32MB might take a moment; arena.deinit() handles cleanup
+    var root2 = try buildTree(arena_allocator, tree_depth);
+    const root2_ptr = @as(*volatile *JsonNode, &root2);
 
     // Reduced runs because the tree is 32x larger now
     TREE_RUNS = 50;
@@ -197,11 +195,11 @@ test "Benchmark: Safety Guards Overhead" {
 
     // 1. Baseline
     {
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
         var i: usize = 0;
         var sum: usize = 0;
         while (i < TREE_RUNS) : (i += 1) {
-            sum += walkTreeNoGuard(root_ptr.*);
+            sum += walkTreeNoGuard(root2_ptr.*);
         }
         time_baseline = timer.read();
 
@@ -214,11 +212,11 @@ test "Benchmark: Safety Guards Overhead" {
     // 2. Depth Guard
     {
         safety.__min_depth = std.math.maxInt(usize);
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
         var i: usize = 0;
         var sum: usize = 0;
         while (i < TREE_RUNS) : (i += 1) {
-            sum += walkTreeDepthGuard(root_ptr.*);
+            sum += walkTreeDepthGuard(root2_ptr.*);
         }
         const time_guard = timer.read();
         stdout("[DepthGuard] {d} runs: {d}ms\n", .{TREE_RUNS, time_guard / 1_000_000});

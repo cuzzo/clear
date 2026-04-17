@@ -2708,7 +2708,7 @@ pub const CheatLib = struct {
         iterations: u64,
     ) BenchmarkResult {
         const alloc_profile = @import("alloc-profile.zig");
-        const timer = std.time.Timer;
+        const timer = compat.Timer;
 
         const max_samples = @min(iterations, 10_000);
         var samples: [10_000]u64 = undefined;

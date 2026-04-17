@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../lib/compat.zig");
 const CheatArena = @import("frame.zig").CheatArena;
 
 // Link LibC for the malloc comparison
@@ -43,11 +44,11 @@ test "Benchmark: CheatArena vs Malloc (ArrayList)" {
             .vtable = &.{ .alloc = Wrapper.alloc, .resize = Wrapper.resize, .free = Wrapper.free, .remap = Wrapper.remap },
         };
 
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
 
         var i: usize = 0;
         while (i < ITERATIONS) : (i += 1) {
-            var list = std.ArrayListUnmanaged(u64){};
+            var list = std.ArrayListUnmanaged(u64).empty;
 
             // Mark the start of the "Scope"
             const mark = arena.getMark();
@@ -72,11 +73,11 @@ test "Benchmark: CheatArena vs Malloc (ArrayList)" {
     {
         const malloc_allocator = std.heap.c_allocator;
 
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
 
         var i: usize = 0;
         while (i < ITERATIONS) : (i += 1) {
-            var list = std.ArrayListUnmanaged(u64){};
+            var list = std.ArrayListUnmanaged(u64).empty;
 
             // Simulate work: Grow a list
             var j: usize = 0;
@@ -97,14 +98,14 @@ test "Benchmark: CheatArena vs Malloc (ArrayList)" {
     // -------------------------------------------------------------------------
     {
         // This is often slower than C malloc but safer (detects leaks)
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+        var gpa = std.heap.DebugAllocator(.{}){};
         const gpa_allocator = gpa.allocator();
 
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
 
         var i: usize = 0;
         while (i < ITERATIONS) : (i += 1) {
-            var list = std.ArrayListUnmanaged(u64){};
+            var list = std.ArrayListUnmanaged(u64).empty;
 
             var j: usize = 0;
             while (j < LIST_SIZE) : (j += 1) {

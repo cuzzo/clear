@@ -9,6 +9,7 @@
 //       (ReleaseFast required for meaningful throughput numbers)
 
 const std = @import("std");
+const compat = @import("../lib/compat.zig");
 const builtin = @import("builtin");
 const fp = @import("scheduler.zig");
 const Scheduler = fp.Scheduler;
@@ -98,7 +99,7 @@ test "Thundering Herd: pickTwo contention" {
     };
 
     var threads: [N_THREADS]std.Thread = undefined;
-    var timer = try std.time.Timer.start();
+    var timer = try compat.Timer.start();
 
     for (0..N_THREADS) |i| {
         threads[i] = try std.Thread.spawn(.{}, Worker.run, .{ &reg, &valid_set, &total_ops });
@@ -257,7 +258,7 @@ test "pickTwo latency scaling" {
         };
 
         var threads: [16]std.Thread = undefined;
-        var timer = try std.time.Timer.start();
+        var timer = try compat.Timer.start();
 
         for (0..n_threads) |i| {
             threads[i] = try std.Thread.spawn(.{}, ScaleWorker.run, .{ &reg, &total_ops });

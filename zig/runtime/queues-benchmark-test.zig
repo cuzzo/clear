@@ -1,4 +1,5 @@
 const std = @import("std");
+const compat = @import("../lib/compat.zig");
 const builtin = @import("builtin");
 const testing = std.testing;
 
@@ -8,7 +9,7 @@ const RunQueue = queues.RunQueue;
 test "Benchmark: Throughput" {
     if (builtin.mode == .Debug) return error.SkipZigTest; // Don't bench in debug
 
-    var timer = try std.time.Timer.start();
+    var timer = try compat.Timer.start();
     const ITERATIONS = 10_000_000;
 
     var q = RunQueue.init();

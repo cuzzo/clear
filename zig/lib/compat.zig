@@ -133,6 +133,30 @@ pub fn milliTimestamp() i64 {
     return @intCast(ts.sec * 1000 + @divFloor(ts.nsec, 1_000_000));
 }
 
+pub fn nanoTimestamp() u64 {
+    var ts: std.c.timespec = undefined;
+    if (std.c.clock_gettime(std.c.CLOCK.MONOTONIC, &ts) != 0) return 0;
+    return @as(u64, @intCast(ts.sec)) * 1_000_000_000 + @as(u64, @intCast(ts.nsec));
+}
+
+/// Drop-in replacement for the removed std.time.Timer.
+/// Usage: var t = try Timer.start(); ... const ns = t.read();
+pub const Timer = struct {
+    start_ns: u64,
+
+    pub fn start() error{}!Timer {
+        return .{ .start_ns = nanoTimestamp() };
+    }
+
+    pub fn read(self: *Timer) u64 {
+        return nanoTimestamp() - self.start_ns;
+    }
+
+    pub fn reset(self: *Timer) void {
+        self.start_ns = nanoTimestamp();
+    }
+};
+
 pub fn randomBytes(buf: []u8) !void {
     var filled: usize = 0;
     while (filled < buf.len) {
