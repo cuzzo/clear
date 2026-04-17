@@ -80,8 +80,8 @@ If you need to explicitly force an object onto the heap (e.g., for recursive str
 -- Recursive structures use 'indirect' to avoid infinite size on stack
 STRUCT Node {
   value: Int64,
-  left: indirect Node,
-  left: indirect Node
+  left: ?Node @indirect,
+  left: ?Node @indirect
 }
 ```
 
@@ -104,15 +104,19 @@ In CLEAR, we separate **Types** from **Capabilities**.
 
 ### The CLEAR Model
 
-**Ownership:** Rc = `multiowned`, Arc = `shared`
-**Synchronization:** Mvcc = `shared:read`, RwLock = `shared:writeLocked`, Mutex = `shared:locked`
-**Future** -> `:actor` uses Object Actor Pattern combined with compiler aware SHARDING
-**Interior Mutability:** Cell, RefCell -> combined = `alwaysMutable`
-* Automatically acts like Cell for data under 16 bytes
-* `alwaysMutable` must be unwrapped before individually passing into a function as an argument, like any other capability
-**Existence:** Option, Result => not a capability -> a tense:
-* `T?` = Optional T
-* Unwrapped like in Rust and Zig with `.?`
+ * **Ownership:** Rc = `multiowned`, Arc = `shared`
+ * **Synchronization:** RwLock = `shared:writeLocked`, Mutex = `shared:locked`
+   * **coming soon** -> Mvcc = `shared:versioned`, `:actor` uses Object Actor Pattern combined with compiler aware SHARDING
+ * **Interior Mutability:** Cell, RefCell -> combined = `alwaysMutable`
+   * Automatically acts like Cell for data under 16 bytes
+   * `alwaysMutable` must be unwrapped before individually passing into a function as an argument, like any other capability
+ * **Existence:** Option, Result => not a capability -> a tense:
+   * `T?` = Optional `T`
+   * Unwrapped like in Rust and Zig with `.?`
+ * **Future:**: Something that will arrive later
+    * `~T` = Future `T`
+    * `~T[]` = Future `T`s (like a Stream).
+
 
 ```CLEAR
 affUser = User.new();         -- creates `affine User` (default)
@@ -186,18 +190,7 @@ Variable lifetimes follow a simple birth/death cycle: they live as long as the F
 
 When a function starts, it opens a clean ARENA (A bank of memory). Any variable you create lives in this ARENA. When the function ends, the entire ARENA is wiped. *POOF*.
 
-### 8. Cheating Death: The `GIVE` Keyword
-
-When you return an object, you are `GIVING` it to the caller. CLEAR handles the transfer of ownership automatically for simple types. For complex capabilities, you use `GIVE` to satisfy `TAKES`.
-
-```ruby
-FN makeUser() -> User
-  u = User{name: "Neo"};
-  RETURN GIVE u;              -- Ownership moves to the caller.
-END
-```
-
-### 9. Cheating Death pt 2: The `TAKES` Keyword
+### 9. Cheating Death: The `TAKES` Keyword
 
 In 99% of cases, when you pass a variable to a function, you are just letting that function **Borrow** it. If a function needs to store that object in a long-lived structure (like a Tree or Global List), it must explicitly **TAKE** responsibility for it.
 
@@ -207,7 +200,7 @@ FN addChild!(MUTABLE parent: Node, TAKES child: Node) ->
   parent.list.push!(GIVE child);
 END
 
-node = Node.new();
+node = Node{val: 1};
 addChild!(root, GIVE node);   -- I surrender ownership.
 node.print();                 -- COMPILER ERROR: Variable 'node' is dead.
 ```
@@ -230,5 +223,3 @@ WITH RESTRICT node.child {
 **Path-Based Scoping:** CLEAR allows you to restrict only the specific part of a data structure you are using (e.g., `node.child`), leaving the rest of the object mutable. This minimizes "poison" and makes complex architectures easier to reason about.
 
 This ensures that "poisoning" is always visible and local.
-
-
