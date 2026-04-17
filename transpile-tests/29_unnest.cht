@@ -10,13 +10,13 @@ END
 
 FN main() RETURNS Void ->
   -- Build items with nested arrays
-  tags1: Int64[] = [10_i64, 20_i64];
-  tags2: Int64[] = [30_i64, 40_i64, 50_i64];
-  tags3: Int64[] = [60_i64];
+  tags1: Int64[] = [10, 20];
+  tags2: Int64[] = [30, 40, 50];
+  tags3: Int64[] = [60];
 
-  item1 = makeItem(1_i64, tags1);
-  item2 = makeItem(2_i64, tags2);
-  item3 = makeItem(3_i64, tags3);
+  item1 = makeItem(1, tags1);
+  item2 = makeItem(2, tags2);
+  item3 = makeItem(3, tags3);
 
   MUTABLE items: Item[] = [];
   items.append(item1);
