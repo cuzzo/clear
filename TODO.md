@@ -10,7 +10,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
  - [ ] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
  - [ ] STRUCT/FN DEFAULTS
- - [ ] Partial Deadlock protection (in progress - may cancel)
+ - [ ] Partial Deadlock protection (in progress - may cancel - primary safety goal is enough syncronization options to not ever *need* locks in EXTREME STRICT mode, tbd)
  - [ ] String@symbol
  - [ ] HashMap string interning as default
  - [ ] Pipeline support for infinite streams and unbound finite streams (in progress)
