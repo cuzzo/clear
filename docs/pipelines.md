@@ -19,7 +19,7 @@ entities
   s> EACH { _.health = _.health - 1.0; };
 ```
 
-This document describes both the collection pipeline model and the current stream/future pipeline surface. Stream support is intentionally narrower today than collection support.
+This document describes both the collection pipeline model and the stream/future pipeline surface. The full operator set is supported for finite streams (`~T[]`, `~T[N]`); infinite streams (`~T[INF]`) require `LIMIT` to bound them and then support all non-materialization operators.
 
 ## The Smooth Operator (`s>`)
 
@@ -316,99 +316,59 @@ Pipelines over futures/streams are currently supported in a narrower subset than
 | Type | Meaning | `NEXT` result | Pipeline support |
 |---|---|---|---|
 | `~T` | Single future value | `T` | Not a pipeline source |
-| `~?T[]` | Open stream | `?T` | Not a general pipeline source yet |
-| `~T[INF]` | Infinite stream | `T` | Not a general pipeline source yet |
-| `~T[]` | Finite stream (unbounded length) | `?T` | Supported for a subset of non-concurrent operators |
-| `~T[N]` | Finite bounded stream | `?T` | Supported for the same non-concurrent subset, plus bounded `CONCURRENT EACH/SELECT/WHERE` |
+| `~?T[]` | Open stream | `?T` | Not a pipeline source yet |
+| `~T[]` | Finite dynamic stream | `?T` | Full non-concurrent operator set (see table) |
+| `~T[N]` | Finite bounded stream | `?T` | Full non-concurrent operator set plus `CONCURRENT EACH/SELECT/WHERE` |
+| `~T[INF]` | Infinite stream | `T` | Fusible stages + all terminals via `LIMIT` |
 
-### Finite stream operators
+### Operator support matrix
 
-Finite streams currently support:
+The columns are the three pipeline-capable stream types. "Stage" operators filter or transform in a fused while loop without materializing; "terminal" operators consume the stream and produce a scalar or collection result.
 
-- `EACH`
-- `SELECT`
-- `WHERE`
-- `SKIP`
-- `TAKE_WHILE`
-- `TAP`
+#### Stages (fusible, zero intermediate allocations)
 
-Examples:
+| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+|---|---|---|---|
+| `WHERE` | yes | yes | yes (LIMIT must appear in chain) |
+| `SELECT` | yes | yes | yes (LIMIT must appear in chain) |
+| `SKIP` | yes | yes | yes (LIMIT must appear in chain) |
+| `TAKE_WHILE` | yes | yes | yes (LIMIT must appear in chain) |
+| `LIMIT` | yes | yes | yes - converts stream to `T[]` |
+| `TAP` | yes | yes | not yet |
 
-```ruby clear illustrative
-s: ~Int64[] = 0 ..< 8;
-s 
-  s> SELECT _ * 2
-  s> WHERE _ > 5 
-  s> EACH { print(_); };
+`LIMIT` can appear anywhere in the chain relative to other fusible stages. The compiler fuses the entire chain into a single while loop - `counter s> WHERE _ > 0 s> LIMIT 5 s> EACH` and `counter s> LIMIT 5 s> WHERE _ > 0 s> EACH` both work; they differ only in whether LIMIT counts pre- or post-filter items.
 
-t: ~Int64[] = 0 ..< 10;
-t 
-  s> SKIP 2 
-  s> TAKE_WHILE _ < 6 
-  s> EACH { print(_); };
-```
+#### Fold terminals (produce a scalar or optional value)
 
-Bounded finite streams (`~T[N]`) also support native concurrent pipelines for:
+| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+|---|---|---|---|
+| `EACH` | yes | yes | via LIMIT |
+| `SUM` | yes | yes | via LIMIT |
+| `COUNT` | yes | yes | via LIMIT |
+| `AVERAGE` | yes | yes | via LIMIT |
+| `MIN` | yes | yes | via LIMIT |
+| `MAX` | yes | yes | via LIMIT |
+| `ANY` | yes | yes | via LIMIT |
+| `ALL` | yes | yes | via LIMIT |
+| `FIND` | yes | yes | via LIMIT |
+| `REDUCE` | not yet | not yet | not yet |
 
-- `CONCURRENT EACH`
-- `CONCURRENT SELECT`
-- `CONCURRENT WHERE`
+"via LIMIT" means LIMIT must appear earlier in the same pipeline chain. LIMIT converts `~T[INF]` to `T[]` (a regular list); the fold terminal then operates on that list. Example: `counter s> WHERE _ > 0 s> LIMIT 5 s> SUM _`.
 
-These paths are native stream pipelines:
+#### Materialization terminals (produce a new collection)
 
-- they consume bounded promise slots directly
-- they do not materialize through `.toList()`
-- they lower through MIR-visible builtin helper calls instead of raw pipeline Zig generation
+These require a fully-materialized list. Not supported for any stream type - materialize first with `.toList()` if needed.
 
-Example:
+| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+|---|---|---|---|
+| `ORDER_BY` | not yet | not yet | not yet |
+| `DISTINCT` | not yet | not yet | not yet |
+| `UNNEST` | not yet | not yet | not yet |
+| `INDEX` | not yet | not yet | not yet |
+| `WINDOW` | not yet | not yet | not yet |
+| `JOIN` | not yet | not yet | not yet |
 
-```ruby clear illustrative
-STRUCT Total {
-    value: Float64
-}
-
-nums: ~Float64[4] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }, BG { 4.0; }];
-
-doubled = nums 
-  s> CONCURRENT(workers: 2) SELECT _ * 2.0;
-
-total = Total{ value: 0.0 } @shared:locked;
-nums 
-  s> CONCURRENT(workers: 2) EACH {
-      WITH EXCLUSIVE total AS t {
-        t.value = t.value + _;
-      }
-   };
-```
-
-Current `CONCURRENT` limits for streams:
-
-- only `~T[N]` is supported today
-- direct range expressions still use the non-concurrent finite-stream path unless first bound as `~T[N]`
-- `~T[]`, `~?T[]`, and `~T[INF]` do not yet support native `CONCURRENT`
-
-Currently unsupported for finite streams:
-
-- `SUM`
-- `COUNT`
-- `REDUCE`
-- `LIMIT`
-- `ORDER_BY`
-- `DISTINCT`
-- `UNNEST`
-- `INDEX`
-- `ANY`
-- `ALL`
-- `FIND`
-- `AVERAGE`
-- `MIN`
-- `MAX`
-
-Additionally unsupported for `~T[]` specifically:
-
-- `CONCURRENT`
-
-If you need the full collection operator surface, materialize explicitly first:
+If you need any of these, materialize first:
 
 ```ruby clear illustrative
 s: ~Int64[] = 0 ..< 10;
@@ -418,7 +378,28 @@ total = vals
   s> SUM _;
 ```
 
-Open streams (`~?T[]`) and infinite streams (`~T[INF]`) are still `NEXT`-driven for now:
+#### Concurrent operators
+
+| Operator | `~T[]` | `~T[N]` | `~T[INF]` |
+|---|---|---|---|
+| `CONCURRENT EACH` | not yet | yes | not yet |
+| `CONCURRENT SELECT` | not yet | yes | not yet |
+| `CONCURRENT WHERE` | not yet | yes | not yet |
+
+`~T[N]` concurrent pipelines are native: they consume promise slots directly without materializing through `.toList()`, and lower through MIR-visible builtin helpers. Example:
+
+```ruby clear illustrative
+nums: ~Float64[4] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }, BG { 4.0; }];
+
+doubled = nums 
+  s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+```
+
+Direct range expressions still use the non-concurrent path unless first bound as `~T[N]`.
+
+### Open streams
+
+Open streams (`~?T[]`) are still `NEXT`-driven only:
 
 ```ruby clear illustrative
 gen: ~?Int64[] = BG STREAM {
