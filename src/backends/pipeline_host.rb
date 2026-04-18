@@ -1826,7 +1826,7 @@ class PipelineHost
   def lower_range_reduce(range_lit, stages, reduce_op)
     p = build_lazy_range_prefix(range_lit, stages)
     item_var   = p[:item_var]
-    range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "next", [], true)
+    range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
 
     label    = next_pipe_label
     acc_zig  = transpile_type(reduce_op.full_type.to_s)
@@ -1835,9 +1835,15 @@ class PipelineHost
       visit_mir(reduce_op.expression)
     }
 
+    source_ti = range_lit.type_info
+    defer_deinit = source_ti&.bounded_stream? ?
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      nil
+
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts],
       MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+      *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next,
         [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)],
         p[:initial_capture], nil, nil, nil),

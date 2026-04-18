@@ -310,10 +310,10 @@ module PipeAnalysis
 
   def analyze_reduce_op(node)
     # REDUCE: list s> REDUCE(initial) acc + _.value
-    # Also accepts range source for the fused lazy path.
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "REDUCE", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    # Also accepts range/stream sources for the fused lazy path.
+    is_stream = finite_stream_source?(node.left)
+    require_array_input!(node, "REDUCE", allow_range: is_stream, allow_stream: is_stream)
+    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
 
     # Analyze the initial value to get the accumulator type
     visit(node.right.initial_value)

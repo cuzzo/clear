@@ -351,7 +351,7 @@ The columns are the three pipeline-capable stream types. "Stage" operators filte
 | `ANY` | yes | yes | via LIMIT |
 | `ALL` | yes | yes | via LIMIT |
 | `FIND` | yes | yes | via LIMIT |
-| `REDUCE` | not yet | not yet | not yet |
+| `REDUCE` | yes | yes | via LIMIT |
 
 "via LIMIT" means LIMIT must appear earlier in the same pipeline chain. LIMIT converts `~T[INF]` to `T[]` (a regular list); the fold terminal then operates on that list. Example: `counter s> WHERE _ > 0 s> LIMIT 5 s> SUM _`.
 

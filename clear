@@ -18,7 +18,7 @@ require 'json'
 CLEAR_ROOT = File.expand_path('..', __FILE__)
 ZIG_DIR    = File.join(CLEAR_ROOT, 'zig')
 SRC_DIR    = File.join(CLEAR_ROOT, 'src')
-TRANSPILER = File.join(SRC_DIR, 'transpiler.rb')
+TRANSPILER = File.join(SRC_DIR, 'backends', 'transpiler.rb')
 TRANSPILER_CACHE_DIR = File.join(ZIG_DIR, '.clear-transpile-cache')
 
 # Find Zig compiler

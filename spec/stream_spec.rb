@@ -1434,15 +1434,15 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "rejects REDUCE on variable-backed ~T[] until fold support exists" do
+      it "accepts REDUCE on variable-backed ~T[]" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Int64[] = 0 ..< 8;
-            total = s s> REDUCE(0) acc + _;
+            total = s s> REDUCE(0_i64) acc + _;
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Cannot REDUCE non-list type ~Int64\[\]/)
+        expect { run(src) }.not_to raise_error
       end
 
       it "accepts LIMIT on variable-backed ~T[]" do
