@@ -1445,15 +1445,16 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.to raise_error(SourceError, /Cannot REDUCE non-list type ~Int64\[\]/)
       end
 
-      it "rejects LIMIT on variable-backed ~T[] until that operator is supported" do
+      it "accepts LIMIT on variable-backed ~T[]" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
-            s: ~Int64[] = 0 ..< 8;
-            s s> LIMIT 3 s> EACH { print(_); };
+            s: ~Int64[] = 1 ..< 100;
+            MUTABLE sum: Int64 = 0;
+            s s> LIMIT 3 s> EACH { sum = sum + _; };
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Cannot LIMIT non-list type ~Int64\[\]/)
+        expect { run(src) }.not_to raise_error
       end
 
       it "rejects EACH on BG/open streams as non-collection pipeline sources" do

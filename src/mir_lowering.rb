@@ -3784,6 +3784,14 @@ class MIRLowering
           MIR::MethodCall.new(coll, "nextOrNull", [], true),
           body, var, nil, mark_per_iter, tight)
       ])
+    elsif ct.inf_stream?
+      # Infinite stream (~T[INF]): nextOrNull() returns ?T, null only when stream is
+      # closed.  A LIMIT stage in the body breaks the loop after N items.
+      # No extra defer needed: the variable-scope `defer name.deinit()` (emitted by
+      # the variable's cleanup entry) signals the generator to stop at function exit.
+      MIR::WhileStmt.new(
+        MIR::MethodCall.new(coll, "nextOrNull", [], true),
+        body, var, nil, mark_per_iter, tight)
     else
       is_field_access = node.collection.is_a?(AST::GetField)
       is_param = node.collection.is_a?(AST::Identifier) &&

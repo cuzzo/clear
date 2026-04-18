@@ -315,10 +315,22 @@ module PipeAnalysis
   end
 
   def analyze_limit_op(node)
-    # LIMIT: list s> LIMIT n (also accepts range source for fused lazy path)
-    is_range = node.left.is_a?(AST::RangeLit)
-    require_array_input!(node, "LIMIT", allow_range: is_range)
-    item_type = is_range ? range_element_type(node.left) : node.left.type_info.element_type.resolved
+    # LIMIT: list s> LIMIT n
+    # Also accepts range and stream sources (fused lazy path).
+    is_range  = node.left.is_a?(AST::RangeLit)
+    lhs_ti    = node.left.type_info
+    is_stream = lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream? || lhs_ti&.inf_stream?
+    require_array_input!(node, "LIMIT", allow_range: is_range || is_stream, allow_stream: is_stream)
+
+    item_type = if is_range
+      range_element_type(node.left)
+    elsif lhs_ti&.inf_stream?
+      lhs_ti.inf_stream_element_type.resolved
+    elsif is_stream
+      lhs_ti.tense_type.element_type.resolved
+    else
+      lhs_ti.element_type.resolved
+    end
 
     # Analyze the count expression
     visit(node.right.count)
@@ -327,7 +339,7 @@ module PipeAnalysis
       error!(node.right.count, "LIMIT count must be a number, got #{count_type}")
     end
 
-    # Result type is the same list type
+    # Result type is a materialized list of the element type
     node.full_type = :"#{item_type}[]"
     node.storage = :frame
   end
@@ -1205,7 +1217,7 @@ module PipeAnalysis
     return if node.left.metatype == :array
     return if lhs_type&.collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
-    return if allow_stream && (lhs_type&.dynamic_stream? || lhs_type&.bounded_stream?)
+    return if allow_stream && (lhs_type&.dynamic_stream? || lhs_type&.bounded_stream? || lhs_type&.inf_stream?)
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")

@@ -1258,7 +1258,8 @@ class PipelineHost
   end
 
   def finite_stream_source_node?(node)
-    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? || node.type_info&.bounded_stream?
+    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? ||
+      node.type_info&.bounded_stream? || node.type_info&.inf_stream?
   end
 
   # Walk a BinaryOp(SMOOTH) left-spine looking for a finite stream source
@@ -1559,6 +1560,8 @@ class PipelineHost
     source_ti = source_node.type_info
     elem_t = if source_ti&.dynamic_stream? || source_ti&.bounded_stream?
       source_ti.tense_type.element_type
+    elsif source_ti&.inf_stream?
+      source_ti.inf_stream_element_type
     else
       start_ft = source_node.respond_to?(:start) && source_node.start.respond_to?(:full_type) ? source_node.start.full_type : nil
       Type.new(start_ft || :Int64)
@@ -1628,14 +1631,18 @@ class PipelineHost
       end
     end
 
-    is_var_stream = source_node.is_a?(AST::Identifier) && (source_ti&.dynamic_stream? || source_ti&.bounded_stream?)
+    is_var_stream = source_node.is_a?(AST::Identifier) &&
+                   (source_ti&.dynamic_stream? || source_ti&.bounded_stream? || source_ti&.inf_stream?)
     source_name = is_var_stream ? source_node.name.to_s : "__range_src"
     range_let = is_var_stream ? nil :
       MIR::Let.new("__range_src", visit_mir(source_node), true, nil, "_ = &__range_src;")
 
-    # Bounded streams use nextOrNull() so the while-loop optional-capture pattern works.
-    # Dynamic streams (~T[]) use next() which already returns ?T.
-    next_method = source_ti&.bounded_stream? ? "nextOrNull" : "next"
+    # BoundedStream and InfStream use nextOrNull() (returns ?T) for while-loop capture.
+    # Dynamic streams (~T[] = IntRange/Range) use next() which already returns ?T.
+    # InfStream.nextOrNull() blocks until data arrives or the stream is closed; the
+    # LIMIT stage breaks the loop after N items, then the variable-scope defer deinit
+    # signals the generator to stop.
+    next_method = (source_ti&.bounded_stream? || source_ti&.inf_stream?) ? "nextOrNull" : "next"
 
     { range_let: range_let, source_name: source_name,
       outer_stmts: outer_stmts, stage_stmts: stage_stmts,

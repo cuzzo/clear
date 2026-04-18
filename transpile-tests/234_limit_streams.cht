@@ -1,0 +1,55 @@
+-- Test: LIMIT on all stream types.
+-- ~T[N]:   LIMIT drains unconsumed promises via defer deinit.
+-- ~T[]:    LIMIT on a range iterator (IntRange) — no heap cleanup needed.
+-- ~T[INF]: LIMIT terminates the infinite generator after N items.
+
+FN main() RETURNS Void ->
+    -- LIMIT + EACH on bounded stream (~T[N])
+    s1: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
+    MUTABLE sum1: Int64 = 0;
+    s1 s> LIMIT 3 s> EACH { sum1 = sum1 + _; };
+    ASSERT sum1 == 6, "LIMIT 3 on ~T[5]: 1+2+3";
+
+    -- LIMIT + EACH on dynamic range stream (~T[])
+    s2: ~Int64[] = 1 ..< 100;
+    MUTABLE sum2: Int64 = 0;
+    s2 s> LIMIT 4 s> EACH { sum2 = sum2 + _; };
+    ASSERT sum2 == 10, "LIMIT 4 on ~T[]: 1+2+3+4";
+
+    -- LIMIT + EACH on infinite stream (~T[INF])
+    counter: ~Int64[INF] = BG STREAM {
+        MUTABLE i: Int64 = 1;
+        WHILE TRUE DO
+            YIELD i;
+            i = i + 1;
+        END
+    };
+    MUTABLE sum3: Int64 = 0;
+    counter s> LIMIT 5 s> EACH { sum3 = sum3 + _; };
+    ASSERT sum3 == 15, "LIMIT 5 on ~T[INF]: 1+2+3+4+5";
+
+    -- LIMIT + SUM on infinite stream (~T[INF])
+    counter2: ~Int64[INF] = BG STREAM {
+        MUTABLE j: Int64 = 1;
+        WHILE TRUE DO
+            YIELD j;
+            j = j + 1;
+        END
+    };
+    total = counter2 s> LIMIT 5 s> SUM _;
+    ASSERT total == 15, "LIMIT 5 + SUM on ~T[INF]: 1+2+3+4+5";
+
+    -- LIMIT + COUNT on infinite stream
+    counter3: ~Int64[INF] = BG STREAM {
+        MUTABLE k: Int64 = 0;
+        WHILE TRUE DO
+            YIELD k;
+            k = k + 1;
+        END
+    };
+    cnt = counter3 s> LIMIT 7 s> COUNT _ >= 0;
+    ASSERT cnt == 7, "LIMIT 7 + COUNT on ~T[INF]";
+
+    print("OK");
+    RETURN;
+END
