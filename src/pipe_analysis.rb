@@ -1,5 +1,5 @@
-require_relative "../src/ast"
-require_relative "../src/type"
+require_relative "ast/ast"
+require_relative "ast/type"
 require 'set'
 
 module PipeAnalysis

@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/lexer"
-require_relative "../src/parser"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
 require_relative "../src/annotator"
 
 # Tests that the annotator raises a compile error when a non-Copy variable

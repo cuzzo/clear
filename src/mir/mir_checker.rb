@@ -45,7 +45,7 @@
 #   UseAfterMoveChecker  -- use-after-move (Rule 1)
 #   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 
-require_relative "type"
+require_relative "../ast/type"
 
 class MIRChecker
   attr_reader :errors

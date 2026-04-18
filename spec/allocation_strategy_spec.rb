@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/transpiler"
+require_relative "../src/backends/transpiler"
 
 # Allocation Strategy Verification — spec/allocation_strategy_spec.rb
 #

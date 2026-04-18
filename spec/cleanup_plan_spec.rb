@@ -1,10 +1,10 @@
 require "rspec"
-require_relative "../src/lexer"
-require_relative "../src/parser"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/promotion_plan"
-require_relative "../src/control_flow"
-require_relative "../src/mir"
+require_relative "../src/mir/promotion_plan"
+require_relative "../src/mir/control_flow"
+require_relative "../src/mir/mir"
 
 # Tests CleanupClassifier - classifies which bindings need cleanup.
 # MIRPass consumes this to insert MIR::Drop nodes and stamp AST.

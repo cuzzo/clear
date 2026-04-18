@@ -1,7 +1,7 @@
 require "rspec"
 require "tmpdir"
-require_relative "../src/stack_verifier"
-require_relative "../src/transpiler"
+require_relative "../src/mir/stack_verifier"
+require_relative "../src/backends/transpiler"
 
 RSpec.describe StackVerifier do
   # Build a CLEAR program and return the binary path + annotator fn_nodes.

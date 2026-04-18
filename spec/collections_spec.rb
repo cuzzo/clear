@@ -3,8 +3,8 @@ require "byebug"
 require "tmpdir"
 require "fileutils"
 
-require_relative "../src/transpiler"
-require_relative "../src/ast"
+require_relative "../src/backends/transpiler"
+require_relative "../src/ast/ast"
 
 RSpec.describe SemanticAnnotator do
   def run(source)

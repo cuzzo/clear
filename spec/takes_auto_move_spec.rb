@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/lexer"
-require_relative "../src/parser"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/transpiler"
+require_relative "../src/backends/transpiler"
 
 # TAKES should automatically move the argument — no explicit GIVE needed.
 # After calling fn(TAKES val), val is consumed. Using val again is an error.

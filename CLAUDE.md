@@ -106,49 +106,49 @@ See `docs/profiling.md` for a full case study.
 ## Architecture
 
 The compiler is a 5-pass system written in Ruby:
-- **Pass 0: Parsing:** `src/lexer.rb`, `src/parser.rb`. Builds the raw AST.
-- **Pass 1: Annotation:** `src/annotator.rb`, `src/type.rb`. Performs type inference, symbol resolution, and capability checks.
-- **Pass 2: Dataflow & MIR Lowering:** `src/control_flow.rb`, `src/ownership_graph.rb`, `src/promotion_plan.rb`.
+- **Pass 0: Parsing:** `src/ast/lexer.rb`, `src/ast/parser.rb`. Builds the raw AST.
+- **Pass 1: Annotation:** `src/annotator.rb`, `src/ast/type.rb`. Performs type inference, symbol resolution, and capability checks.
+- **Pass 2: Dataflow & MIR Lowering:** `src/mir/control_flow.rb`, `src/mir/ownership_graph.rb`, `src/mir/promotion_plan.rb`.
   - Computes `PromotionPlan` (escape promotion) and `CleanupPlan` (cleanup requirements).
   - Performs `Escape Analysis` and forward `OwnershipDataflow` on the CFG.
   - Lowers all `Alloc`/`Dealloc`/`Free`/`Move`/`Promote` events into explicit **MIRNodes** (`MIR::Alloc`, `MIR::Drop`, `MIR::Promote`, `MIR::SuppressCleanup`).
-- **Pass 3: MIR Validation:** `src/static_leak_checker.rb`. Verifies the post-MIR function body for:
+- **Pass 3: MIR Validation:** `src/mir/mir_checker.rb`. Verifies the post-MIR function body for:
   - Memory leaks (including frame arena overflows).
   - Double-frees (missing or incorrect moved guards).
   - Use-after-frees.
   - Allocator consistency (heap vs frame).
-- **Pass 4: Transpiling:** `src/transpiler.rb`.
+- **Pass 4: Transpiling:** `src/backends/transpiler.rb`.
   - **Dumb Transpiler:** Zero on-the-fly decisions. No on-the-fly allocator choices, no on-the-fly deinit/cleanup choices.
   - Purely mechanical emission driven by MIR nodes and AST stamps.
-  - At no point outside of `src/std_lib.rb` or `src/type.rb` should there be special logic for intrinsic or standard library functions.
+  - At no point outside of `src/ast/std_lib.rb` or `src/ast/type.rb` should there be special logic for intrinsic or standard library functions.
 
 ### Pass 1: Annotation / Type Inference
-- `src/annotator.rb`, `src/type.rb`, `src/scope.rb`, `src/ownership_graph.rb`
+- `src/annotator.rb`, `src/ast/type.rb`, `src/ast/scope.rb`, `src/mir/ownership_graph.rb`
 - Type inference, ownership tracking, borrow checking
 - Marks AST nodes with `type_info`, `full_type`, `storage`, `provenance`
-- Resolves stdlib intrinsics via `src/stdlib.rb`
+- Resolves stdlib intrinsics via `src/ast/std_lib.rb`
 
 ### Pass 2: Dataflow (Escape Analysis + Ownership Lowering to MIR)
 Two sub-passes that lower all allocation/deallocation/move decisions into MIR nodes:
 
-**2a. Promotion Planning** (`src/promotion_plan.rb: PromotionClassifier`)
+**2a. Promotion Planning** (`src/mir/promotion_plan.rb: PromotionClassifier`)
 - Identifies frame-allocated variables that escape via return
 - Plans frame-to-heap promotions (list, string_map, generic, fields)
 
-**2b. Cleanup Planning** (`src/promotion_plan.rb: CleanupClassifier`, `src/control_flow.rb: OwnershipDataflow, MIRPass`)
+**2b. Cleanup Planning** (`src/mir/promotion_plan.rb: CleanupClassifier`, `src/mir/control_flow.rb: OwnershipDataflow, MIRPass`)
 - Classifies every binding needing cleanup (kind, allocator, moved-guard)
 - Forward dataflow on CFG refines moved-guards (removes unnecessary guards, eliminates cleanup for always-moved vars)
 - HPT hoisting: heap-returning sub-expressions lifted into VarDecls
 - Inserts MIR nodes into AST: `MIR::Alloc`, `MIR::Drop`, `MIR::Promote`, `MIR::Return`, `MIR::SuppressCleanup`, `MIR::ReassignCleanup`, `MIR::FieldCleanup`
 
 ### Pass 3: Validate MIR Nodes (Static Leak Checker)
-- `src/static_leak_checker.rb`
+- `src/mir/mir_checker.rb`
 - Verifies: no memory leaks (every Alloc has a Drop), no double-free (moved guards correct), no use-after-free (frame escapes promoted), no frame overflow (loops have per-iteration rewind)
 - Cross-references MIR events with OwnershipDataflow results
 - Safety net: catches unhoisted heap calls, orphan MIR nodes, allocator mismatches
 
 ### Pass 4: Transpiling
-- `src/transpiler.rb`, `src/ownership_generator.rb` (generates Zig code)
+- `src/backends/transpiler.rb`, `src/mir/ownership_generator.rb` (generates Zig code)
 - Dumb: no on-the-fly allocator choices, no on-the-fly deinit/cleanup choices
 - MIR::Drop -> `emit_cleanup_from_entry` (mechanical Zig template from pre-computed entry)
 - MIR::Promote -> promotion code or pending flag for next statement
@@ -156,7 +156,7 @@ Two sub-passes that lower all allocation/deallocation/move decisions into MIR no
 - MIR::Alloc/Return/ReassignCleanup/FieldCleanup -> no code emitted (verification only)
 
 ### Architectural Rules
-- At no point outside of `src/std_lib.rb` or `src/type.rb` should there be special logic for intrinsic / standard library functions. All stdlib behavior is registry-driven.
+- At no point outside of `src/ast/std_lib.rb` or `src/ast/type.rb` should there be special logic for intrinsic / standard library functions. All stdlib behavior is registry-driven.
 - All alloc/dealloc/move decisions must flow through MIR nodes. The transpiler must never make allocator choices.
 - Never allocate on the frame and then unconditionally promote to the heap. If a value is ALWAYS promoted, allocate directly on the heap at declaration time. Escape analysis in Pass 1 must propagate provenance back to declarations so finalize_decl_storage! makes the correct choice upfront.
 - See `mir-bugs.md` for known MIR violations. See `alloc-bugs.md` for frame-then-always-promote gaps. See `memory-safety.md` for the full plan.
@@ -175,7 +175,7 @@ Two sub-passes that lower all allocation/deallocation/move decisions into MIR no
 **What to do:**
 
 1. Write a failing transpile-test or spec that demonstrates the UAF/leak before your fix.
-2. Add the escape condition to `EscapeAnalysis` (`src/escape_analysis.rb`), Phase E2:
+2. Add the escape condition to `EscapeAnalysis` (`src/mir/escape_analysis.rb`), Phase E2:
    - Add a detection query in the per-declaration scan (one `when` branch or guard).
    - Write the correct mutations: `node.storage = :heap`, and `ti.provenance = :heap` unless the type_info is a shared struct Type (see cases `:heap_ptr_return` and `:assign_escape` for the exception pattern).
    - Return any bookkeeping sets (e.g., `bg_upgraded`) needed by downstream passes.
@@ -188,7 +188,7 @@ Two sub-passes that lower all allocation/deallocation/move decisions into MIR no
 
 The MIR pipeline has three strict roles. Violating the role boundaries is what causes UAF, double-free, and leaks.
 
-**Role 1 -- MIRLowering (`src/mir_lowering.rb`): Makes ALL decisions.**
+**Role 1 -- MIRLowering (`src/mir/mir_lowering.rb`): Makes ALL decisions.**
 
 Everything that determines memory correctness is decided here and encoded in MIR node types and pre-computed fields. The checker and emitter never re-derive these decisions.
 
@@ -204,7 +204,7 @@ What MUST be done in MIRLowering before the checker can guarantee safety:
 - **Frame values that escape** must be promoted to heap AT DECLARATION TIME (before any use). Never allocate on the frame and promote later; that is a concurrent-use window.
 - **Loop bodies that frame-allocate** must emit `FrameSave`/`FrameRestore` (restoreLoopMark) per iteration. No naked frame allocs in loops without rewind.
 
-**Role 2 -- MIRChecker (`src/mir_checker.rb`): Verifies the decisions, nothing else.**
+**Role 2 -- MIRChecker (`src/mir/mir_checker.rb`): Verifies the decisions, nothing else.**
 
 The checker enforces exactly 7 invariants and MUST NOT grow beyond them. Each new check added to the checker is a signal that the lowering made a decision incorrectly and is asking the checker to compensate. That is wrong. Fix the lowering.
 
@@ -223,7 +223,7 @@ NEVER add:
 - Heuristic pattern matching on names or types -- the lowering must tag via MIR nodes.
 - Cross-referencing return values with cleanup nodes -- the lowering handles this.
 
-**Role 3 -- MIREmitter (`src/mir_emitter.rb`): Pure template engine, zero decisions.**
+**Role 3 -- MIREmitter (`src/mir/mir_emitter.rb`): Pure template engine, zero decisions.**
 
 The emitter maps each MIR node to a fixed Zig text fragment. It makes NO ownership decisions, inspects NO types, and chooses NO allocators. Every choice was made by the lowering and is encoded in the node type or its pre-computed fields.
 

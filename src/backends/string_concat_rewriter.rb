@@ -1,5 +1,5 @@
-require_relative "ast"
-require_relative "type"
+require_relative "../ast/ast"
+require_relative "../ast/type"
 
 # String Concat Rewriter — flattens chained string + into StringConcat nodes.
 #

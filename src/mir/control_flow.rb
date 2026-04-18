@@ -17,7 +17,7 @@
 #
 # Runs AFTER annotation + plan computation, BEFORE transpilation.
 
-require_relative "ast"
+require_relative "../ast/ast"
 
 # ==========================================
 # CFG - Control Flow Graph (analysis only)

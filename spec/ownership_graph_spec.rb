@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/ownership_graph"
+require_relative "../src/mir/ownership_graph"
 
 RSpec.describe OwnershipGraph do
   subject(:graph) { OwnershipGraph.new }
@@ -257,7 +257,7 @@ end
 
 # Integration tests: verify the graph is populated when the annotator runs.
 RSpec.describe "OwnershipGraph integration" do
-  require_relative "../src/transpiler"
+  require_relative "../src/backends/transpiler"
 
   def annotate(source)
     tokens = Lexer.new(source).tokenize

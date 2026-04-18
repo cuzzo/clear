@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/transpiler"
+require_relative "../src/backends/transpiler"
 
 # Tests the UseAfterMoveChecker -- the dataflow-based use-after-move checker
 # that operates on CFG per-statement snapshots.

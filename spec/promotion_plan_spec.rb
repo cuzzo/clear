@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/lexer"
-require_relative "../src/parser"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/promotion_plan"
+require_relative "../src/mir/promotion_plan"
 
 # Tests PromotionClassifier (Pass C) — classifies what promotion to
 # emit for each function. Maps 1:1 to bugs found today.

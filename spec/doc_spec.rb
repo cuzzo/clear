@@ -1,4 +1,4 @@
-require_relative "../src/transpiler"
+require_relative "../src/backends/transpiler"
 
 # doc_spec.rb — Verify all ```clear code blocks in docs/ transpile successfully.
 #

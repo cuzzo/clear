@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/lexer" # Adjust path to matches your file structure
+require_relative "../src/ast/lexer" # Adjust path to matches your file structure
 
 RSpec.describe Lexer do
   # Helper to make expectations readable
@@ -302,7 +302,7 @@ RSpec.describe Lexer do
     end
 
     it "preserves ? in pipeline RHS (parser restores from OptionalUnwrap)" do
-      require_relative "../src/parser"
+      require_relative "../src/ast/parser"
       require_relative "../src/annotator"
       src = <<~CLEAR
         FN check?(n: Float64) RETURNS Bool -> RETURN n > 0.0; END

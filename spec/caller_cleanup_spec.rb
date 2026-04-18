@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/transpiler"
+require_relative "../src/backends/transpiler"
 
 # Tests CALLER-side cleanup for heap-promoted return values.
 # When a function with returns_promoted returns data, the caller must

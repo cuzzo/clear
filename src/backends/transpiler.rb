@@ -5,21 +5,21 @@ require "optparse"
 require "logger"
 require "set"
 
-require_relative "./lexer"
-require_relative "./parser"
-require_relative "./ast"
-require_relative "./annotator"
+require_relative "../ast/lexer"
+require_relative "../ast/parser"
+require_relative "../ast/ast"
+require_relative "../annotator"
 require_relative "./zig_type_mapper"
-require_relative "./promotion_plan"
+require_relative "../mir/promotion_plan"
 require_relative "./pipeline_rewriter"
 require_relative "./string_concat_rewriter"
-require_relative "./control_flow"
+require_relative "../mir/control_flow"
 require_relative "./importer"
 require_relative "./compiler_frontend"
-require_relative "./mir"
-require_relative "./mir_lowering"
-require_relative "./mir_emitter"
-require_relative "./mir_checker"
+require_relative "../mir/mir"
+require_relative "../mir/mir_lowering"
+require_relative "../mir/mir_emitter"
+require_relative "../mir/mir_checker"
 
 class ZigTranspiler
   include ZigTypeMapper
@@ -100,7 +100,7 @@ class ZigTranspiler
     body = emitter.emit(program)
 
     main_variant = main_stack_variant(result.fn_nodes["main"], override: main_tier)
-    footer = File.read(File.join(File.dirname(__FILE__), '..', 'zig', 'runtime', 'runtime-footer.zig'))
+    footer = File.read(File.join(File.dirname(__FILE__), '..', '..', 'zig', 'runtime', 'runtime-footer.zig'))
     footer = footer.gsub('.{ .stack_size = .Large, .pinned = true }',
                          ".{ .stack_size = .#{main_variant}, .pinned = true }")
 

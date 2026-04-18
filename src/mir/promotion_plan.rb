@@ -1,4 +1,4 @@
-require_relative "type"
+require_relative "../ast/type"
 
 # Pass C: Escape Promotion Planning
 #

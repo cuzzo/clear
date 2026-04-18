@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/transpiler"
-require_relative "../src/ast"
+require_relative "../src/backends/transpiler"
+require_relative "../src/ast/ast"
 require_relative "../src/effects"
 
 RSpec.describe "Effect Tracking" do

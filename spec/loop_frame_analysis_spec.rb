@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/transpiler"
+require_relative "../src/backends/transpiler"
 
 # Tests for LoopFrameAnalysis (Pass 2.5) -- the module that sets mark_per_iter
 # and promotes outer containers/fields to heap.

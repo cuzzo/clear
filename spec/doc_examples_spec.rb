@@ -1,5 +1,5 @@
-require_relative '../src/lexer'
-require_relative '../src/parser'
+require_relative '../src/ast/lexer'
+require_relative '../src/ast/parser'
 require_relative '../src/annotator'
 
 # Extract ```clear code blocks from markdown files and verify they compile.

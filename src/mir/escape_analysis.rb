@@ -12,8 +12,8 @@
 #   E3 - tag_transitive_provenance! propagate heap provenance to binding type_infos
 #         tag_carry_call_sites!     stamp heap provenance on carry-call expressions
 
-require_relative "type"
-require_relative "ast"
+require_relative "../ast/type"
+require_relative "../ast/ast"
 
 module EscapeAnalysis
   # ── Phase E1 ─────────────────────────────────────────────────────────────

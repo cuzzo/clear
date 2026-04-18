@@ -1,7 +1,7 @@
 require "rspec"
-require_relative "../src/lexer"
-require_relative "../src/parser"
-require_relative "../src/pipeline_rewriter"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
+require_relative "../src/backends/pipeline_rewriter"
 
 RSpec.describe PipelineRewriter do
   def parse_and_rewrite(src)

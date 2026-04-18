@@ -72,9 +72,9 @@ class ModuleImporter
   private
 
   def compile_module_mir(ast, annotator, source_dir)
-    require_relative "mir"
-    require_relative "mir_lowering"
-    require_relative "mir_emitter"
+    require_relative "../mir/mir"
+    require_relative "../mir/mir_lowering"
+    require_relative "../mir/mir_emitter"
     require_relative "compiler_frontend"
 
     # Run MIRPass on the module AST (needed for cleanup stamps in function bodies)

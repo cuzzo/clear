@@ -1,5 +1,5 @@
-require_relative "ast"
-require_relative "std_lib"
+require_relative "../ast/ast"
+require_relative "../ast/std_lib"
 
 # Pipeline Rewriter — transforms high-level pipeline operators (s>) into 
 # regular AST nodes (ForEach, IfStatement, BlockExpr) AFTER annotation.

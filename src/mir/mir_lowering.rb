@@ -10,9 +10,9 @@
 # introspection and allocator resolution happens HERE, not in the emitter.
 
 require_relative "mir"
-require_relative "ast"
-require_relative "type"
-require_relative "zig_type_mapper"
+require_relative "../ast/ast"
+require_relative "../ast/type"
+require_relative "../backends/zig_type_mapper"
 
 class MIRLowering
   include ZigTypeMapper
@@ -4297,7 +4297,7 @@ class MIRLowering
   # Lazy-create PipelineHost for complex pipeline operator dispatch.
   def pipeline_host
     @pipeline_host ||= begin
-      require_relative "pipeline_host"
+      require_relative "../backends/pipeline_host"
       require_relative "mir_emitter"
       emitter = @_emitter || MIREmitter.new
       PipelineHost.new(lowering: self, emitter: emitter)

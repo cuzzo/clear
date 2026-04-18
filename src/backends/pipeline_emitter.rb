@@ -12,7 +12,7 @@
 #   Phase 5: Sharded pipelines -- N channels, work-stealing
 #   Phase 6: InfStream/OpenStream as pipeline sources
 
-require_relative "mir"
+require_relative "../mir/mir"
 
 class PipelineEmitter
   def initialize(main_emitter)

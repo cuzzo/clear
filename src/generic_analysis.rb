@@ -1,4 +1,4 @@
-require_relative "./ast"
+require_relative "ast/ast"
 
 # ==========================================
 # GENERIC ANALYSIS

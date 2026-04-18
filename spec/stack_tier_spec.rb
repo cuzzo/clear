@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/transpiler"
-require_relative "../src/ast"
+require_relative "../src/backends/transpiler"
+require_relative "../src/ast/ast"
 
 RSpec.describe "Stack Tier Recommendations" do
   def analyze(source)

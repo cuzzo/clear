@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/mir"
-require_relative "../src/mir_emitter"
+require_relative "../src/mir/mir"
+require_relative "../src/mir/mir_emitter"
 
 RSpec.describe MIREmitter do
   let(:e) { MIREmitter.new }

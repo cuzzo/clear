@@ -484,8 +484,8 @@ when 'build'
 
   # Post-build stack verification and exact sizing
   if stack_check && File.exist?(output_path) && File.read(source).scan(/REQUIRE\s+"pkg:([^"]+)"/).empty?
-    require_relative 'src/stack_verifier'
-    require_relative 'src/transpiler'
+    require_relative 'src/mir/stack_verifier'
+    require_relative 'src/backends/transpiler'
 
     begin
       src_text = File.read(source)

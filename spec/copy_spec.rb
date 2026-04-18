@@ -1,8 +1,8 @@
 require "rspec"
-require_relative "../src/lexer"
-require_relative "../src/parser"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
 require_relative "../src/annotator"
-require_relative "../src/transpiler"
+require_relative "../src/backends/transpiler"
 
 RSpec.describe "COPY keyword" do
   def annotate(src)

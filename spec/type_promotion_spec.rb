@@ -1,5 +1,5 @@
 require "rspec"
-require_relative "../src/type"
+require_relative "../src/ast/type"
 
 # Tests that Type#needs_promotion? and Type#needs_cleanup? mirror
 # the Zig comptime needsPromotion and needsCleanup functions exactly.

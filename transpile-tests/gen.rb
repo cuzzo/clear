@@ -1,6 +1,6 @@
 #! /usr/bin/env ruby
 require 'bundler/setup'
-require_relative '../src/transpiler'
+require_relative '../src/backends/transpiler'
 
 # Generates Zig test blocks from .cht files using MIRLowering + MIREmitter.
 class TestGenerator

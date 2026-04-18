@@ -1,14 +1,14 @@
 require "rspec"
 require "ostruct"
-require_relative "../src/mir"
-require_relative "../src/std_lib"
-require_relative "../src/mir_lowering"
-require_relative "../src/mir_emitter"
-require_relative "../src/ast"
-require_relative "../src/lexer"
-require_relative "../src/type"
-require_relative "../src/importer"
-require_relative "../src/compiler_frontend"
+require_relative "../src/mir/mir"
+require_relative "../src/ast/std_lib"
+require_relative "../src/mir/mir_lowering"
+require_relative "../src/mir/mir_emitter"
+require_relative "../src/ast/ast"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/type"
+require_relative "../src/backends/importer"
+require_relative "../src/backends/compiler_frontend"
 
 RSpec.describe MIRLowering do
   let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }

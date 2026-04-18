@@ -6,13 +6,13 @@
 # Both the old visit-dispatch path and the new MIR lowering path consume
 # the same CompilerFrontend::Result.
 
-require_relative "lexer"
-require_relative "parser"
-require_relative "ast"
-require_relative "annotator"
+require_relative "../ast/lexer"
+require_relative "../ast/parser"
+require_relative "../ast/ast"
+require_relative "../annotator"
 require_relative "pipeline_rewriter"
 require_relative "string_concat_rewriter"
-require_relative "control_flow"
+require_relative "../mir/control_flow"
 
 class CompilerFrontend
   Result = Struct.new(

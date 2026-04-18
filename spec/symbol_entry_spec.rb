@@ -1,4 +1,4 @@
-require_relative "../src/symbol_entry"
+require_relative "../src/ast/symbol_entry"
 require "set"
 
 RSpec.describe SymbolEntry do

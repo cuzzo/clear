@@ -1,6 +1,6 @@
 require 'bundler/setup'
-require_relative '../src/mir'
-require_relative '../src/mir_checker'
+require_relative '../src/mir/mir'
+require_relative '../src/mir/mir_checker'
 
 # Tests the post-lowering MIRChecker -- only two checks remain:
 #   HPT_LEAK              -- heap-returning call result discarded (leak)

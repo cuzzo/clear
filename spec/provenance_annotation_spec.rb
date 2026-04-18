@@ -1,6 +1,6 @@
 require "rspec"
-require_relative "../src/lexer"
-require_relative "../src/parser"
+require_relative "../src/ast/lexer"
+require_relative "../src/ast/parser"
 require_relative "../src/annotator"
 
 # Phase 2 validation: provenance is set correctly during annotation
