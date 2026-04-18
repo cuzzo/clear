@@ -1258,7 +1258,7 @@ class PipelineHost
   end
 
   def finite_stream_source_node?(node)
-    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream?
+    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? || node.type_info&.bounded_stream?
   end
 
   # Walk a BinaryOp(SMOOTH) left-spine looking for a finite stream source
@@ -1557,7 +1557,7 @@ class PipelineHost
   # by any stage -- used by callers to decide between |__each_item| and |_| in Zig.
   def build_lazy_range_prefix(source_node, stages)
     source_ti = source_node.type_info
-    elem_t = if source_ti&.dynamic_stream?
+    elem_t = if source_ti&.dynamic_stream? || source_ti&.bounded_stream?
       source_ti.tense_type.element_type
     else
       start_ft = source_node.respond_to?(:start) && source_node.start.respond_to?(:full_type) ? source_node.start.full_type : nil
@@ -1628,15 +1628,19 @@ class PipelineHost
       end
     end
 
-    is_var_stream = source_node.is_a?(AST::Identifier) && source_ti&.dynamic_stream?
+    is_var_stream = source_node.is_a?(AST::Identifier) && (source_ti&.dynamic_stream? || source_ti&.bounded_stream?)
     source_name = is_var_stream ? source_node.name.to_s : "__range_src"
     range_let = is_var_stream ? nil :
       MIR::Let.new("__range_src", visit_mir(source_node), true, nil, "_ = &__range_src;")
 
+    # Bounded streams use nextOrNull() so the while-loop optional-capture pattern works.
+    # Dynamic streams (~T[]) use next() which already returns ?T.
+    next_method = source_ti&.bounded_stream? ? "nextOrNull" : "next"
+
     { range_let: range_let, source_name: source_name,
       outer_stmts: outer_stmts, stage_stmts: stage_stmts,
       item_var: item_var, initial_capture: initial_capture, item_used: item_used,
-      elem_zig: elem_zig }
+      elem_zig: elem_zig, next_method: next_method }
   end
 
   # Emit a fused while loop for a finite stream source with zero or more fusible stages.
@@ -1645,7 +1649,7 @@ class PipelineHost
     item_var        = p[:item_var]
     initial_capture = p[:initial_capture]
     item_used       = p[:item_used]
-    range_next      = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "next", [], true)
+    range_next      = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
 
     body_mir = visit_pipeline_body_mir(each_op.body, placeholder: item_var)
 
@@ -1655,8 +1659,16 @@ class PipelineHost
     item_used ||= body_uses_initial
     capture_name = item_used ? initial_capture : "_"
 
+    # Bounded streams (~T[N]): emit defer deinit so early-exit ops (TAKE_WHILE, LIMIT)
+    # drain unconsumed Promise.Inner allocations.  No-op when all items are consumed.
+    source_ti = range_lit.type_info
+    defer_deinit = source_ti&.bounded_stream? ?
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      nil
+
     MIR::ScopeBlock.new([
       *([p[:range_let]].compact), *p[:outer_stmts],
+      *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next,
         [*p[:stage_stmts], *body_mir],
         capture_name, nil, nil, nil)
@@ -1670,7 +1682,7 @@ class PipelineHost
     p = build_lazy_range_prefix(range_lit, stages)
     item_var   = p[:item_var]
     elem_zig   = p[:elem_zig]
-    range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "next", [], true)
+    range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
 
     # Fold always references the element; always use the initial capture name.
     capture_name = p[:initial_capture]
@@ -1784,8 +1796,16 @@ class PipelineHost
         MIR::Lit.new("null"))
     end
 
+    # Bounded streams (~T[N]): emit defer deinit so early-exit folds (AnyOp, AllOp, FindOp)
+    # drain unconsumed Promise.Inner allocations.  No-op when all items are consumed.
+    source_ti = range_lit.type_info
+    defer_deinit = source_ti&.bounded_stream? ?
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      nil
+
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts], *acc_init_stmts,
+      *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next,
         [*p[:stage_stmts], *loop_acc_stmts],
         capture_name, nil, nil, nil),

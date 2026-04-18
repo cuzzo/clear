@@ -84,3 +84,51 @@ test "BoundedStream exhaustion condition is head >= N" {
     s.head = 2;
     try std.testing.expect(s.head >= 2); // exhausted: next() would panic
 }
+
+// ---------------------------------------------------------------------------
+// nextOrNull: structural invariants (no scheduler required)
+// ---------------------------------------------------------------------------
+// nextOrNull() returns null immediately when head >= N without touching items.
+// The scheduler-dependent path (consuming actual Promise values) is covered by
+// transpile-tests/233_bounded_stream_sequential_pipelines.cht.
+
+test "nextOrNull returns null for exhausted stream (head == N)" {
+    // Stream of 3 with head already at 3 — nextOrNull must return null without
+    // touching items[] (which are uninitialised).
+    var s: CheatLib.BoundedStream(i64, 3) = undefined;
+    s.head = 3;
+    const result = try s.nextOrNull();
+    try std.testing.expect(result == null);
+    // head must not advance past N
+    try std.testing.expectEqual(@as(usize, 3), s.head);
+}
+
+test "nextOrNull returns null for zero-capacity stream" {
+    var s: CheatLib.BoundedStream(i64, 0) = undefined;
+    s.head = 0;
+    const result = try s.nextOrNull();
+    try std.testing.expect(result == null);
+}
+
+// ---------------------------------------------------------------------------
+// deinit: no-op when already exhausted (no scheduler required)
+// ---------------------------------------------------------------------------
+// deinit() must be a no-op when head == N — it must not touch items[].
+// The early-exit drain path (calling next() on unconsumed promises) is covered
+// by transpile-tests/233_bounded_stream_sequential_pipelines.cht.
+
+test "deinit is a no-op when stream is already exhausted" {
+    // head == N means all promises were consumed; deinit's while condition
+    // (head < N) is false and the body never runs.  No scheduler needed.
+    var s: CheatLib.BoundedStream(i64, 4) = undefined;
+    s.head = 4;
+    s.deinit(); // must not access items[4] (out of bounds) or call next()
+    try std.testing.expectEqual(@as(usize, 4), s.head);
+}
+
+test "deinit is a no-op for zero-capacity stream" {
+    var s: CheatLib.BoundedStream(i64, 0) = undefined;
+    s.head = 0;
+    s.deinit();
+    try std.testing.expectEqual(@as(usize, 0), s.head);
+}

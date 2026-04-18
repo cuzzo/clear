@@ -611,6 +611,26 @@ pub fn bind(comptime deps: type) type {
                 self.head += 1;
                 return val;
             }
+
+            /// Optional form of next() for use in while-loop pipeline iteration.
+            /// Returns null when all N items have been consumed.
+            pub fn nextOrNull(self: *Self) anyerror!?T {
+                if (self.head >= N) return null;
+                const val = try self.items[self.head].next();
+                self.head += 1;
+                return val;
+            }
+
+            /// Drain any unconsumed promises, freeing their Inner allocations.
+            /// No-op when all N items have already been consumed.
+            /// Must be called after a pipeline loop that may terminate early
+            /// (TAKE_WHILE, LIMIT) to avoid leaking Promise.Inner allocations.
+            pub fn deinit(self: *Self) void {
+                while (self.head < N) {
+                    _ = self.items[self.head].next() catch {};
+                    self.head += 1;
+                }
+            }
         };
     }
 

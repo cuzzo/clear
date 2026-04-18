@@ -110,6 +110,143 @@ test "Promise(f64): next() fast-path when producer finishes first" {
     try std.testing.expectEqual(@as(f64, 99.0), state.result);
 }
 
+// ---------------------------------------------------------------------------
+// BoundedStream(i64, N): scheduler-based tests for nextOrNull() and deinit()
+// ---------------------------------------------------------------------------
+
+const BsTestState3 = struct {
+    stream: CheatLib.BoundedStream(i64, 3),
+    sum: i64 = 0,
+};
+
+const BsProducerArgs = struct {
+    inner: *CheatLib.Promise(i64).Inner,
+    value: i64,
+};
+
+fn bsProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    _ = rt;
+    const args = @as(*BsProducerArgs, @ptrCast(@alignCast(raw_args.?)));
+    args.inner.result = args.value;
+    args.inner.wg.done();
+}
+
+fn bsConsumerAll3(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    _ = rt;
+    const state = @as(*BsTestState3, @ptrCast(@alignCast(raw_args.?)));
+    while (try state.stream.nextOrNull()) |item| {
+        state.sum += item;
+    }
+}
+
+fn bsConsumerOne3(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    _ = rt;
+    // Consume only the first item — simulates TAKE_WHILE that exits after item 0.
+    const state = @as(*BsTestState3, @ptrCast(@alignCast(raw_args.?)));
+    if (try state.stream.nextOrNull()) |item| {
+        state.sum += item;
+    }
+}
+
+test "BoundedStream(i64,3): nextOrNull() consumes all items in order" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var state = BsTestState3{
+        .stream = CheatLib.BoundedStream(i64, 3){
+            .items = .{
+                try CheatLib.Promise(i64).spawn(allocator, &sched),
+                try CheatLib.Promise(i64).spawn(allocator, &sched),
+                try CheatLib.Promise(i64).spawn(allocator, &sched),
+            },
+            .head = 0,
+        },
+    };
+
+    var p0_args = BsProducerArgs{ .inner = state.stream.items[0].inner, .value = 10 };
+    var p1_args = BsProducerArgs{ .inner = state.stream.items[1].inner, .value = 20 };
+    var p2_args = BsProducerArgs{ .inner = state.stream.items[2].inner, .value = 30 };
+
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsProducer)), &p0_args, .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsProducer)), &p1_args, .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsProducer)), &p2_args, .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsConsumerAll3)), &state, .{});
+
+    sched.run();
+
+    // All 3 items consumed: sum == 10+20+30 == 60.  stream.head == 3.
+    try std.testing.expectEqual(@as(i64, 60), state.sum);
+    try std.testing.expectEqual(@as(usize, 3), state.stream.head);
+    // nextOrNull() now returns null (exhausted) without touching items.
+    const trailing_null = try state.stream.nextOrNull();
+    try std.testing.expect(trailing_null == null);
+    // DebugAllocator will fail the test if any Promise.Inner was leaked.
+}
+
+test "BoundedStream(i64,3): deinit() drains unconsumed promises (early-exit simulation)" {
+    // Simulates the TAKE_WHILE / LIMIT early-exit pattern: consumer stops after the
+    // first item, leaving 2 unconsumed promises.  deinit() must free their Inners.
+    const allocator = std.testing.allocator;
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var state = BsTestState3{
+        .stream = CheatLib.BoundedStream(i64, 3){
+            .items = .{
+                try CheatLib.Promise(i64).spawn(allocator, &sched),
+                try CheatLib.Promise(i64).spawn(allocator, &sched),
+                try CheatLib.Promise(i64).spawn(allocator, &sched),
+            },
+            .head = 0,
+        },
+    };
+
+    var p0_args = BsProducerArgs{ .inner = state.stream.items[0].inner, .value = 10 };
+    var p1_args = BsProducerArgs{ .inner = state.stream.items[1].inner, .value = 20 };
+    var p2_args = BsProducerArgs{ .inner = state.stream.items[2].inner, .value = 30 };
+
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsProducer)), &p0_args, .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsProducer)), &p1_args, .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsProducer)), &p2_args, .{});
+    // Consumer exits after first item; producers for items[1] and [2] still run.
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(qs.TaskFn, @ptrCast(&bsConsumerOne3)), &state, .{});
+
+    sched.run();
+
+    // Only item[0] was consumed; head advanced to 1.
+    try std.testing.expectEqual(@as(i64, 10), state.sum);
+    try std.testing.expectEqual(@as(usize, 1), state.stream.head);
+
+    // All producers have completed (sched.run returned), so wg.counter == 0 for
+    // items[1] and [2].  deinit() calls next() from non-fiber context: wg.wait()
+    // sees counter == 0 and returns immediately, freeing each Inner.
+    state.stream.deinit();
+
+    try std.testing.expectEqual(@as(usize, 3), state.stream.head);
+    // DebugAllocator will fail the test if any Promise.Inner was leaked.
+}
+
 test {
     _ = @import("../runtime/bounded-stream-test.zig");
     _ = @import("../runtime/inf-stream-test.zig");

@@ -31,7 +31,7 @@ module PipeAnalysis
   private
 
   def finite_stream_source?(node)
-    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream?
+    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? || node.type_info&.bounded_stream?
   end
 
   def bounded_stream_source?(node)
@@ -1205,7 +1205,7 @@ module PipeAnalysis
     return if node.left.metatype == :array
     return if lhs_type&.collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
-    return if allow_stream && lhs_type&.dynamic_stream?
+    return if allow_stream && (lhs_type&.dynamic_stream? || lhs_type&.bounded_stream?)
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")

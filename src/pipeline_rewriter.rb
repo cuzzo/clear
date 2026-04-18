@@ -129,7 +129,7 @@ class PipelineRewriter
     # single fused while loop.
     is_range_fold_terminal = terminal.is_a?(AST::EachOp) ||
                              TERMINAL_FOLDS.any? { |t| terminal.is_a?(t) }
-    if (real_source.is_a?(AST::RangeLit) || real_source.type_info&.dynamic_stream?) && is_range_fold_terminal &&
+    if (real_source.is_a?(AST::RangeLit) || real_source.type_info&.dynamic_stream? || real_source.type_info&.bounded_stream?) && is_range_fold_terminal &&
        stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
       return node

@@ -3768,6 +3768,22 @@ class MIRLowering
       value_bind = MIR::Let.new(var, MIR::FieldGet.new(slot_ident, "value"), false, nil, nil)
       full_body = [skip_dead, value_bind] + body
       MIR::ForStmt.new(slots_iter, "*#{slot_var}", full_body, nil, mark_per_iter, tight)
+    elsif ct.dynamic_stream?
+      # Finite stream (~T[]): next() returns ?T; while-loop with optional capture.
+      MIR::WhileStmt.new(
+        MIR::MethodCall.new(coll, "next", [], true),
+        body, var, nil, mark_per_iter, tight)
+    elsif ct.bounded_stream?
+      # Bounded stream (~T[N]): next() returns T (panics when exhausted).
+      # Use nextOrNull() so the while-loop optional-capture pattern works.
+      # defer deinit drains any unconsumed promises on early exit.
+      defer_deinit = MIR::DeferStmt.new(MIR::MethodCall.new(coll, "deinit", [], false))
+      MIR::ScopeBlock.new([
+        defer_deinit,
+        MIR::WhileStmt.new(
+          MIR::MethodCall.new(coll, "nextOrNull", [], true),
+          body, var, nil, mark_per_iter, tight)
+      ])
     else
       is_field_access = node.collection.is_a?(AST::GetField)
       is_param = node.collection.is_a?(AST::Identifier) &&
