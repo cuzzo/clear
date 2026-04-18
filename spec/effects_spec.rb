@@ -1,7 +1,7 @@
 require "rspec"
 require_relative "../src/backends/transpiler"
 require_relative "../src/ast/ast"
-require_relative "../src/effects"
+require_relative "../src/annotator-helpers/effects"
 
 RSpec.describe "Effect Tracking" do
   def run(source)

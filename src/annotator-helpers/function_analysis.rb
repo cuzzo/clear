@@ -1,4 +1,4 @@
-require_relative "ast/ast"
+require_relative "../ast/ast"
 
 module FunctionAnalysis
   # Converts an intrinsic definition from STD_LIB format to the standard
@@ -711,4 +711,3 @@ module FunctionAnalysis
     "(#{types.join(', ')})"
   end
 end
-
