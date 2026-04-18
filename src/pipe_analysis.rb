@@ -43,6 +43,11 @@ module PipeAnalysis
     node.type_info.tense_type.element_type.resolved
   end
 
+  # Element type for an InfStream source (~T[INF]).
+  def inf_stream_element_type(node)
+    node.type_info.inf_stream_element_type.resolved
+  end
+
   def has_catch_blocks?
     fn = @fn_nodes&.dig(current_fn_ctx&.name)
     fn && fn.catch_clauses.is_a?(Array) && fn.catch_clauses.any?
@@ -126,12 +131,20 @@ module PipeAnalysis
   end
 
   # SELECT, WHERE, INDEX, ORDER_BY share similar structure.
-  # SELECT and WHERE also accept a RangeLit source (fused lazy path).
+  # SELECT and WHERE also accept a RangeLit or InfStream source (fused lazy path).
   def analyze_select_family_op(node)
-    is_stream = finite_stream_source?(node.left) &&
+    is_inf    = node.left.type_info&.inf_stream? &&
+                (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
+    is_stream = (finite_stream_source?(node.left) || is_inf) &&
                 (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
     require_array_input!(node, "SELECT", allow_range: is_stream, allow_stream: is_stream)
-    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = if is_inf
+      inf_stream_element_type(node.left)
+    elsif is_stream
+      finite_stream_element_type(node.left)
+    else
+      node.left.type_info.element_type.resolved
+    end
 
     # Create a temporary Scope for the body
     with_new_scope do
@@ -148,13 +161,15 @@ module PipeAnalysis
       end
     end
 
-    # Set Result Type based on operator
+    # Set Result Type based on operator.
+    # InfStream sources propagate ~T[INF] so downstream fusible ops and LIMIT
+    # can see the source is still infinite; LIMIT will convert to T[].
     case node.right
     when AST::SelectOp
       result_base = node.right.expression.full_type
-      node.full_type = :"#{result_base}[]"
+      node.full_type = is_inf ? :"~#{result_base}[INF]" : :"#{result_base}[]"
     when AST::WhereOp
-      node.full_type = :"#{item_type}[]"
+      node.full_type = is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]"
     when AST::IndexOp
       # INDEX returns HashMap<KeyType, ElementType[]>
       key_type = node.right.expression.resolved_type
@@ -169,15 +184,22 @@ module PipeAnalysis
     node.storage = :frame
 
     # WHERE/SELECT/ORDER_BY allocate intermediate ArrayListUnmanaged at the
-    # transpiler level via rt.frameAlloc(). Signal this so compute_needs_rt!
-    # propagates the Runtime dependency correctly.
-    current_fn_ctx.frame_count += 1 if current_fn_ctx
+    # transpiler level via rt.frameAlloc(). InfStream results are not materialized;
+    # only count frame allocation for finite (list-producing) results.
+    current_fn_ctx.frame_count += 1 if current_fn_ctx && !is_inf
   end
 
   def analyze_take_while_op(node)
-    is_stream = finite_stream_source?(node.left)
+    is_inf    = node.left.type_info&.inf_stream?
+    is_stream = finite_stream_source?(node.left) || is_inf
     require_array_input!(node, "TAKE_WHILE", allow_range: is_stream, allow_stream: is_stream)
-    item_type = is_stream ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = if is_inf
+      inf_stream_element_type(node.left)
+    elsif is_stream
+      finite_stream_element_type(node.left)
+    else
+      node.left.type_info.element_type.resolved
+    end
 
     with_new_scope do
       current_scope.declare("_", nil, item_type, false, false, nil, :stack)
@@ -188,9 +210,9 @@ module PipeAnalysis
       error!(node.right, "TAKE_WHILE predicate must evaluate to Bool, got #{node.right.expression.resolved_type}")
     end
 
-    node.full_type = :"#{item_type}[]"
+    node.full_type = is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]"
     node.storage = :frame
-    current_fn_ctx.frame_count += 1 if current_fn_ctx
+    current_fn_ctx.frame_count += 1 if current_fn_ctx && !is_inf
   end
 
   def analyze_window_op(node)
@@ -518,10 +540,17 @@ module PipeAnalysis
   end
 
   def analyze_skip_op(node)
-    # SKIP: list s> SKIP n -> same list type with first n elements removed (also accepts range)
-    is_range = finite_stream_source?(node.left)
+    # SKIP: list s> SKIP n -> same list type with first n elements removed (also accepts range/InfStream)
+    is_inf   = node.left.type_info&.inf_stream?
+    is_range = finite_stream_source?(node.left) || is_inf
     require_array_input!(node, "SKIP", allow_range: is_range, allow_stream: is_range)
-    item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
+    item_type = if is_inf
+      inf_stream_element_type(node.left)
+    elsif is_range
+      finite_stream_element_type(node.left)
+    else
+      node.left.type_info.element_type.resolved
+    end
 
     visit(node.right.count)
     count_type = node.right.count.resolved_type
@@ -529,7 +558,7 @@ module PipeAnalysis
       error!(node.right.count, "SKIP count must be a number, got #{count_type}")
     end
 
-    node.full_type = :"#{item_type}[]"
+    node.full_type = is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]"
     node.storage = :frame
   end
 

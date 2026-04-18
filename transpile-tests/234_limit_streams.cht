@@ -50,6 +50,53 @@ FN main() RETURNS Void ->
     cnt = counter3 s> LIMIT 7 s> COUNT _ >= 0;
     ASSERT cnt == 7, "LIMIT 7 + COUNT on ~T[INF]";
 
+    -- WHERE before LIMIT on ~T[INF]: LIMIT counts filtered items
+    counter4: ~Int64[INF] = BG STREAM {
+        MUTABLE n: Int64 = 1;
+        WHILE TRUE DO
+            YIELD n;
+            n = n + 1;
+        END
+    };
+    MUTABLE sum4: Int64 = 0;
+    counter4 s> WHERE _ MOD 2 == 0 s> LIMIT 3 s> EACH { sum4 = sum4 + _; };
+    ASSERT sum4 == 12, "WHERE evens then LIMIT 3: 2+4+6";
+
+    -- SELECT before LIMIT on ~T[INF]
+    counter5: ~Int64[INF] = BG STREAM {
+        MUTABLE m: Int64 = 1;
+        WHILE TRUE DO
+            YIELD m;
+            m = m + 1;
+        END
+    };
+    total2 = counter5 s> SELECT _ * 10 s> LIMIT 4 s> SUM _;
+    ASSERT total2 == 100, "SELECT *10 then LIMIT 4 SUM: 10+20+30+40";
+
+    -- SKIP before LIMIT on ~T[INF]
+    counter6: ~Int64[INF] = BG STREAM {
+        MUTABLE p: Int64 = 1;
+        WHILE TRUE DO
+            YIELD p;
+            p = p + 1;
+        END
+    };
+    MUTABLE sum5: Int64 = 0;
+    counter6 s> SKIP 5 s> LIMIT 3 s> EACH { sum5 = sum5 + _; };
+    ASSERT sum5 == 21, "SKIP 5 then LIMIT 3: 6+7+8";
+
+    -- LIMIT before WHERE on ~T[INF]: LIMIT counts source items, WHERE filters among those
+    counter7: ~Int64[INF] = BG STREAM {
+        MUTABLE q: Int64 = 1;
+        WHILE TRUE DO
+            YIELD q;
+            q = q + 1;
+        END
+    };
+    MUTABLE sum6: Int64 = 0;
+    counter7 s> LIMIT 6 s> WHERE _ MOD 2 == 0 s> EACH { sum6 = sum6 + _; };
+    ASSERT sum6 == 12, "LIMIT 6 then WHERE evens: 2+4+6";
+
     print("OK");
     RETURN;
 END
