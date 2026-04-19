@@ -33,6 +33,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] A statistical benchmarking & profiling framework like Go/Rust
  - [ ] `./clear doctor` to automatically fix most syntax, conversion, affine errors and profiling recomendations if you choose
  - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
+ - [ ] @sorted for lists, sets, hashmaps.
 
 Milestone: *Basic* SQL/CLEAR database
 
