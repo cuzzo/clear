@@ -140,6 +140,17 @@ class PipelineRewriter
       return node
     end
 
+    # DISTINCT always bypasses to pipeline_host lower_distinct: it handles
+    # list and all stream sources via a Set-accumulating for/while loop.
+    # The rewriter's fuse_pipeline path can't be used here because lower_var_decl
+    # short-circuits on set_collection? and emits an empty set, discarding the
+    # BlockExpr produced by fuse_pipeline.
+    if terminal.is_a?(AST::DistinctOp) &&
+       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
+      patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
+      return node
+    end
+
     # INDEX on a finite stream source also bypasses: the MIR lowering handles
     # it as a lazy while loop (lower_stream_index via unwrap_range_chain).
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
@@ -651,50 +662,12 @@ class PipelineRewriter
 
       [inner_foreach]
     when AST::DistinctOp
-      # Linear scan: check if key already exists in result, append if not
+      # Set insert: result is a T[]@set; insert deduplicates in O(1).
       key_expr = replace_placeholder(terminal.expression, current_val)
-      found_var = next_var("__found")
-      ex_var = next_var("__ex")
-
-      # var __found = false
-      found_init = AST::Literal.new(token, :BOOLEAN, false)
-      found_init.full_type = :Bool
-      found_decl = AST::VarDecl.new(token, found_var, nil, found_init, true)
-      found_decl.full_type = :Bool
-      found_decl.storage = :stack
-      found_decl.slot_size = 1
-      found_decl.instance_variable_set(:@var_used, true)
-      found_decl.var_mutated = true
-
-      # Inner loop over result: for existing in res { if key == existing_key { found = true; break } }
-      ex_ident = AST::Identifier.new(token, ex_var)
-      ex_key = replace_placeholder(terminal.expression, ex_ident)
-
-      found_ident = AST::Identifier.new(token, found_var)
-      set_found = AST::Assignment.new(token, found_ident.dup, AST::Literal.new(token, :BOOLEAN, true))
-      set_found.full_type = :Void
-
-      eq_check = AST::BinaryOp.new(token, key_expr.dup, :EQ, ex_key)
-      eq_check.full_type = :Bool
-
-      inner_if = AST::IfStatement.new(token, eq_check, [set_found, AST::BreakNode.new(token)], nil)
-      inner_if.full_type = :Void
-
-      inner_foreach = AST::ForEach.new(token, ex_var, res_ident.dup, [inner_if], nil, false)
-      inner_foreach.full_type = :Void
-      inner_foreach.instance_variable_set(:@var_used, true)
-
-      # if !found { res.append(item) }
-      append = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
-      append.full_type = :Void
-      append.zig_pattern = STD_LIB["append"][:zig]
-
-      not_found = AST::UnaryOp.new(token, :NOT, found_ident.dup)
-      not_found.full_type = :Bool
-      outer_if = AST::IfStatement.new(token, not_found, [append], nil)
-      outer_if.full_type = :Void
-
-      [found_decl, inner_foreach, outer_if]
+      insert_call = AST::MethodCall.new(token, res_ident.dup, "insert", [key_expr])
+      insert_call.full_type = :Void
+      insert_call.zig_pattern = "try {0}.insert({alloc}, {1})"
+      [insert_call]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
       call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])

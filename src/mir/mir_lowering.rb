@@ -3387,7 +3387,14 @@ class MIRLowering
       cap = ft.capacity
       MIR::ContainerInit.new(transpile_type(ft), :pool, decl_alloc, cap)
     elsif ft.set_collection?
-      MIR::ContainerInit.new(transpile_type(ft), :set_empty, nil, nil)
+      rhs = node.value
+      # DISTINCT pipeline: the init is a SMOOTH node (pipeline result) — lower it directly.
+      # For plain empty-set declarations, use ContainerInit.
+      if rhs.is_a?(AST::BinaryOp) && rhs.op == :SMOOTH
+        lower(node.value)
+      else
+        MIR::ContainerInit.new(transpile_type(ft), :set_empty, nil, nil)
+      end
     elsif ft.list_collection?
       rhs = node.value
       rhs_unwrapped = (rhs.is_a?(AST::BinaryOp) && rhs.op == :OR_RESCUE) ? rhs.left : rhs
@@ -3443,7 +3450,7 @@ class MIRLowering
       drop_entry = binding_entry.dup
       build_drop_entry!(drop_entry, node.type_info, node)
       mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry[:alloc]
-      [MIR::AllocMark.new(decl_name, mir_alloc, node.type_info), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
+      [MIR::AllocMark.new(safe_name, mir_alloc, node.type_info), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
     else
       let_node
     end

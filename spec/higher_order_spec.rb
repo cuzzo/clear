@@ -422,8 +422,8 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "returns the same list type" do
-        expect(result).to eq(:"Item[]")
+      it "returns Set type of the key field" do
+        expect(result).to eq(:"Int64[]")
       end
     end
 

@@ -855,40 +855,56 @@ class PipelineHost
   end
 
   def lower_distinct(list_node, distinct_node, smooth_node)
-    elem_type = list_node.full_type.element_type.resolved.to_s
-    elem_zig = transpile_type(elem_type)
-    alloc = pipeline_alloc(smooth_node)
-
+    # smooth_node.full_type is T[]@set; element_type gives the key type T.
+    elem_zig = transpile_type(smooth_node.full_type.element_type.resolved.to_s)
+    set_zig  = "CheatLib.Set(#{elem_zig})"
+    alloc    = :heap  # Set.insert/deinit always use heap (HashMap needs real allocator)
     expr_mir = visit_pipeline_expr_mir(list_node, distinct_node.expression)
-    expr_mir_inner = with_pipeline_context(placeholder: "it2") {
-      visit_mir(distinct_node.expression)
-    }
+
+    # Use unwrap_range_chain to detect stream sources: list_node may be a SMOOTH
+    # chain (e.g. counter s> LIMIT 9) whose annotated full_type is already a
+    # materialized list, so checking lhs_ti.dynamic_stream? is insufficient.
+    range_chain = unwrap_range_chain(list_node)
+    if range_chain
+
+      p = build_lazy_range_prefix(range_chain[:source], range_chain[:stages])
+      item_var     = p[:item_var]
+      range_next   = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
+      key_expr_mir = with_pipeline_context(placeholder: item_var) { visit_mir(distinct_node.expression) }
+      label        = next_pipe_label
+
+      source_ti    = range_chain[:source].type_info
+      defer_deinit = source_ti&.bounded_stream? ?
+        MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+        nil
+
+      return MIR::BlockExpr.new(label, [
+        *([p[:range_let]].compact), *p[:outer_stmts],
+        MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
+        *([defer_deinit].compact),
+        MIR::WhileStmt.new(range_next,
+          [*p[:stage_stmts],
+           MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
+           MIR::ExprStmt.new(MIR::MethodCall.new(
+             MIR::Ident.new("dist_set"), "insert",
+             [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF },
+              MIR::Ident.new("dist_key")], true), nil)],
+          p[:initial_capture], nil, nil, nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
+      ])
+    end
 
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::Let.new("res_list",
-          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("dist_key", expr_mir, false, nil, nil),
-          MIR::Let.new("dist_found", MIR::Lit.new("false"), true, nil, nil),
-          MIR::ForStmt.new(
-            MIR::FieldGet.new(MIR::Ident.new("res_list"), "items"), "it2", [
-              MIR::Let.new("dist_existing_key", expr_mir_inner, false, nil, nil),
-              MIR::IfStmt.new(
-                MIR::Call.new("CheatLib.eql",
-                  [MIR::Ident.new("dist_key"), MIR::Ident.new("dist_existing_key")], false),
-                [
-                  MIR::Set.new(MIR::Ident.new("dist_found"), MIR::Lit.new("true")),
-                  MIR::BreakStmt.new(nil, nil)
-                ], nil)
-            ], nil),
-          MIR::IfStmt.new(MIR::UnaryOp.new("!", MIR::Ident.new("dist_found")), [
-            MIR::ExprStmt.new(MIR::MethodCall.new(
-              MIR::Ident.new("res_list"), "append",
-              [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("it")], true), nil)
-          ], nil)
+          MIR::ExprStmt.new(MIR::MethodCall.new(
+            MIR::Ident.new("dist_set"), "insert",
+            [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF },
+             MIR::Ident.new("dist_key")], true), nil)
         ], nil),
-        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+        MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
       ]
     end
   end

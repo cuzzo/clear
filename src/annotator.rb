@@ -1578,8 +1578,20 @@ private
     Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
 
     node_sync = node.type_info&.sync
+    # Preserve collection metadata (e.g. :set from DISTINCT) in scope so
+    # resolve_full_type returns the correct dispatch_key for method lookup.
+    # Do NOT store the full node.type_info — it embeds ownership/sync from
+    # finalize_storage!, which breaks resolve_type in declare_capability_scope!
+    # (WITH EXCLUSIVE unwrapping reads the raw entry.type expecting just the base type).
+    scope_type = if node.type_info&.collection && !(final_type.is_a?(Type) && final_type.collection)
+      ft = Type.new(final_type)
+      ft.collection = node.type_info.collection
+      ft
+    else
+      final_type
+    end
     current_scope.declare(
-      node.name, node, final_type, mutable_flag, false, node.slot_size, storage,
+      node.name, node, scope_type, mutable_flag, false, node.slot_size, storage,
       Set.new, [],
       sync: node_sync,
       resource: is_resource,

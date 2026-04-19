@@ -410,9 +410,20 @@ module PipeAnalysis
 
   def analyze_distinct_op(node)
     # DISTINCT: list s> DISTINCT _.field (or just DISTINCT _)
-    # Returns unique elements, preserving order
-    require_array_input!(node, "DISTINCT")
-    item_type = node.left.type_info.element_type.resolved
+    # Returns a Set of unique key values (T[]@set).
+    lhs_type  = node.left.type_info
+    is_inf    = lhs_type&.inf_stream?
+    is_stream = finite_stream_source?(node.left) || is_inf
+
+    require_array_input!(node, "DISTINCT", allow_range: is_stream, allow_stream: is_stream)
+
+    item_type = if is_inf
+      inf_stream_element_type(node.left)
+    elsif is_stream
+      finite_stream_element_type(node.left)
+    else
+      lhs_type.element_type.resolved
+    end
 
     # Analyze the expression with '_' in scope
     with_new_scope do
@@ -420,12 +431,12 @@ module PipeAnalysis
       visit(node.right.expression)
     end
 
-    # Store the key type for transpilation (what we're comparing for uniqueness)
-    node.right.full_type = node.right.expression.resolved_type
-
-    # Result type is the same list type
-    node.full_type = :"#{item_type}[]"
-    node.storage = :frame
+    # Key type is what the expression evaluates to; result is a Set of those keys.
+    key_type = node.right.expression.resolved_type
+    node.right.full_type = key_type
+    node.full_type = Type.new(:"#{key_type}[]", collection: :set)
+    node.storage = :heap
+    current_fn_ctx.heap_count += 1 if current_fn_ctx
   end
 
   def analyze_pipe_to_func_call(node)
