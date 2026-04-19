@@ -565,9 +565,10 @@ module PipeAnalysis
   end
 
   def analyze_tap_op(node)
-    # TAP: list s> TAP { body } -> same list type (pass-through); also accepts range source.
+    # TAP: list s> TAP { body } -> same list type (pass-through); also accepts range/stream source.
     lhs_type = node.left.type_info
-    is_range = finite_stream_source?(node.left)
+    is_inf   = lhs_type&.inf_stream?
+    is_range = finite_stream_source?(node.left) || is_inf
     is_pool  = lhs_type&.pool?
     is_list  = lhs_type&.list_collection?
     is_array = node.left.metatype == :array
@@ -578,7 +579,13 @@ module PipeAnalysis
       return
     end
 
-    item_type = is_range ? finite_stream_element_type(node.left) : lhs_type.element_type.resolved
+    item_type = if is_inf
+      inf_stream_element_type(node.left)
+    elsif is_range
+      finite_stream_element_type(node.left)
+    else
+      lhs_type.element_type.resolved
+    end
 
     with_new_scope do
       # Read-only: TAP is for observation, not mutation

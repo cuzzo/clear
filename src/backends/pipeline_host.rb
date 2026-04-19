@@ -300,6 +300,13 @@ class PipelineHost
         copy_type_info(node, new_hl)
         return new_hl
       end
+    when AST::Assert
+      new_cond = substitute_placeholders(node.condition)
+      if new_cond != node.condition
+        new_assert = AST::Assert.new(node.token, new_cond, node.message)
+        copy_type_info(node, new_assert)
+        return new_assert
+      end
     end
 
     node
