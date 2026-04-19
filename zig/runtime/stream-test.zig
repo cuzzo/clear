@@ -112,7 +112,7 @@ fn makeBoundedPromiseItems(rt: *Runtime, values: [4]i64) ![4]CheatLib.Promise(i6
 // Struct shape
 // ---------------------------------------------------------------------------
 
-test "Stream has inner, alloc, and head fields" {
+test "Stream has inner and alloc fields (no head — ring buffer tracks position in Inner)" {
     const S = CheatLib.Stream(f64);
     const fields = @typeInfo(S).@"struct".fields;
     var found_inner = false;
@@ -125,119 +125,118 @@ test "Stream has inner, alloc, and head fields" {
     }
     try std.testing.expect(found_inner);
     try std.testing.expect(found_alloc);
-    try std.testing.expect(found_head);
+    try std.testing.expect(!found_head); // ring buffer — no consumer head field on the handle
 }
 
-test "Stream.Inner has items and wg fields" {
+test "Stream.Inner has ring buffer fields, wg, closed, err (no items ArrayList)" {
     const Inner = CheatLib.Stream(f64).Inner;
     const fields = @typeInfo(Inner).@"struct".fields;
-    var found_items = false;
-    var found_wg    = false;
+    var found_buf    = false;
+    var found_head   = false;
+    var found_tail   = false;
+    var found_closed = false;
+    var found_wg     = false;
+    var found_items  = false;
     inline for (fields) |f| {
-        if (std.mem.eql(u8, f.name, "items")) found_items = true;
-        if (std.mem.eql(u8, f.name, "wg"))    found_wg    = true;
+        if (std.mem.eql(u8, f.name, "buf"))    found_buf    = true;
+        if (std.mem.eql(u8, f.name, "head"))   found_head   = true;
+        if (std.mem.eql(u8, f.name, "tail"))   found_tail   = true;
+        if (std.mem.eql(u8, f.name, "closed")) found_closed = true;
+        if (std.mem.eql(u8, f.name, "wg"))     found_wg     = true;
+        if (std.mem.eql(u8, f.name, "items"))  found_items  = true;
     }
-    try std.testing.expect(found_items);
+    try std.testing.expect(found_buf);
+    try std.testing.expect(found_head);
+    try std.testing.expect(found_tail);
+    try std.testing.expect(found_closed);
     try std.testing.expect(found_wg);
-}
-
-test "Stream head defaults to 0" {
-    // Verify the default value in the head field definition
-    const S = CheatLib.Stream(f64);
-    const field_defaults = comptime blk: {
-        const fields = @typeInfo(S).@"struct".fields;
-        var head_default: usize = 999;
-        for (fields) |f| {
-            if (std.mem.eql(u8, f.name, "head")) {
-                if (f.default_value_ptr) |ptr| {
-                    head_default = @as(*const usize, @ptrCast(@alignCast(ptr))).*;
-                }
-            }
-        }
-        break :blk head_default;
-    };
-    try std.testing.expectEqual(@as(usize, 0), field_defaults);
+    try std.testing.expect(!found_items); // ArrayList replaced by ring buffer
 }
 
 // ---------------------------------------------------------------------------
-// push() adds items to Inner.items (simulate generator phase)
+// push/next via ring buffer (fast path: no blocking, fake sched is safe)
 // ---------------------------------------------------------------------------
 
-test "Stream.push appends to inner items (direct Inner manipulation)" {
+test "Stream.push and next deliver items via ring buffer" {
     const S = CheatLib.Stream(f64);
     const alloc = std.testing.allocator;
 
-    const inner = try alloc.create(S.Inner);
-    inner.* = .{};  // items starts empty; wg field left undefined (not called)
-    defer {
-        inner.items.deinit(alloc);
-        alloc.destroy(inner);
-    }
+    // spawnNew with a fake sched — fast path never dereferences it.
+    var stream = try S.spawnNew(alloc, fakeSched());
+    // Skip deinit (would call wg.wait on fake sched); manually free Inner below.
 
-    // Simulate the generator fiber calling push() on a local stream handle
-    var gen_handle = S{ .inner = inner, .alloc = alloc };
-    try gen_handle.push(10.0);
-    try gen_handle.push(20.0);
-    try gen_handle.push(30.0);
+    var gen = S{ .inner = stream.inner, .alloc = alloc };
+    try gen.push(10.0);
+    try gen.push(20.0);
+    try gen.push(30.0);
 
-    try std.testing.expectEqual(@as(usize, 3), inner.items.items.len);
-    try std.testing.expectApproxEqAbs(10.0, inner.items.items[0], 1e-9);
-    try std.testing.expectApproxEqAbs(20.0, inner.items.items[1], 1e-9);
-    try std.testing.expectApproxEqAbs(30.0, inner.items.items[2], 1e-9);
+    // Mark closed directly — avoids wg.done() on fake sched.
+    stream.inner.closed = true;
+
+    const v1 = try stream.next();
+    const v2 = try stream.next();
+    const v3 = try stream.next();
+    const v4 = try stream.next(); // null — ring empty and closed
+
+    try std.testing.expectApproxEqAbs(10.0, v1.?, 1e-9);
+    try std.testing.expectApproxEqAbs(20.0, v2.?, 1e-9);
+    try std.testing.expectApproxEqAbs(30.0, v3.?, 1e-9);
+    try std.testing.expectEqual(@as(?f64, null), v4);
+
+    alloc.destroy(stream.inner);
 }
 
-test "Stream.push works for bool type" {
+test "Stream.push works for bool type (ring buffer)" {
     const S = CheatLib.Stream(bool);
     const alloc = std.testing.allocator;
 
-    const inner = try alloc.create(S.Inner);
-    inner.* = .{};
-    defer {
-        inner.items.deinit(alloc);
-        alloc.destroy(inner);
-    }
+    var stream = try S.spawnNew(alloc, fakeSched());
+    var gen = S{ .inner = stream.inner, .alloc = alloc };
+    try gen.push(true);
+    try gen.push(false);
 
-    var gen_handle = S{ .inner = inner, .alloc = alloc };
-    try gen_handle.push(true);
-    try gen_handle.push(false);
+    stream.inner.closed = true;
 
-    try std.testing.expectEqual(@as(usize, 2), inner.items.items.len);
-    try std.testing.expect(inner.items.items[0] == true);
-    try std.testing.expect(inner.items.items[1] == false);
+    try std.testing.expectEqual(@as(?bool, true),  try stream.next());
+    try std.testing.expectEqual(@as(?bool, false), try stream.next());
+    try std.testing.expectEqual(@as(?bool, null),  try stream.next());
+
+    alloc.destroy(stream.inner);
 }
 
-// ---------------------------------------------------------------------------
-// head advancement via direct field access (validate the algorithm,
-// not the scheduler-dependent wait() path)
-// ---------------------------------------------------------------------------
-
-test "Stream head advances as items are consumed (simulated)" {
-    const S = CheatLib.Stream(f64);
+test "Stream.next returns null immediately when closed and ring is empty" {
+    const S = CheatLib.Stream(i64);
     const alloc = std.testing.allocator;
 
-    const inner = try alloc.create(S.Inner);
-    inner.* = .{};
-    defer {
-        inner.items.deinit(alloc);
-        alloc.destroy(inner);
+    var stream = try S.spawnNew(alloc, fakeSched());
+    stream.inner.closed = true; // closed before any push
+
+    try std.testing.expectEqual(@as(?i64, null), try stream.next());
+
+    alloc.destroy(stream.inner);
+}
+
+test "Stream ring buffer preserves FIFO order across 64-item boundary" {
+    const S = CheatLib.Stream(i64);
+    const alloc = std.testing.allocator;
+
+    var stream = try S.spawnNew(alloc, fakeSched());
+    var gen = S{ .inner = stream.inner, .alloc = alloc };
+
+    // Push exactly BUF_SIZE items (64) without triggering blocking.
+    var i: i64 = 0;
+    while (i < 64) : (i += 1) try gen.push(i);
+
+    stream.inner.closed = true;
+
+    var j: i64 = 0;
+    while (j < 64) : (j += 1) {
+        const v = try stream.next();
+        try std.testing.expectEqual(@as(?i64, j), v);
     }
+    try std.testing.expectEqual(@as(?i64, null), try stream.next());
 
-    var consumer = S{ .inner = inner, .alloc = alloc };
-
-    // Push 2 items (simulating generator)
-    try consumer.push(100.0);
-    try consumer.push(200.0);
-
-    // Simulate the post-wait() part of next() — advance head manually
-    try std.testing.expectEqual(@as(usize, 0), consumer.head);
-    // First pop
-    consumer.head += 1;
-    try std.testing.expectEqual(@as(usize, 1), consumer.head);
-    // Second pop
-    consumer.head += 1;
-    try std.testing.expectEqual(@as(usize, 2), consumer.head);
-    // Exhausted: head >= items.len
-    try std.testing.expect(consumer.head >= inner.items.items.len);
+    alloc.destroy(stream.inner);
 }
 
 // ---------------------------------------------------------------------------

@@ -635,79 +635,200 @@ pub fn bind(comptime deps: type) type {
     }
 
     // -----------------------------------------------------------------------
-    // Stream(T): An open/closeable generator stream. Corresponds to ~T[?] in CLEAR.
+    // Stream(T): An open/closeable generator stream. Corresponds to ~T[] in CLEAR.
     //
     // A BG STREAM { YIELD x; } block spawns a generator fiber that calls push() for
     // each YIELD and close() when the body completes. The consumer calls next() to
     // retrieve values one by one; next() returns null when the stream is exhausted.
     //
-    // First next() call blocks via WaitGroup until the generator fiber has finished
-    // (buffered all values). Subsequent next() calls return immediately from the buffer.
+    // Data flow uses an SPSC ring buffer (same design as InfStream) so the consumer
+    // receives items as the generator produces them — no buffering of the full stream.
+    // The generator blocks (yields its fiber) when the ring is full, providing back
+    // pressure. The consumer blocks when the ring is empty but the generator is still
+    // running.
+    //
+    // A WaitGroup in Inner tracks generator lifecycle separately from the ring:
+    // the generator calls wg.done() inside close(), and deinit() calls wg.wait()
+    // before destroying Inner. This ensures Inner is never freed while the generator
+    // fiber is still accessing it (correct for both normal and early-exit paths).
     //
     // Lifecycle:
     //   Spawn:   var s = try CheatLib.Stream(f64).spawnNew(alloc, sched);
     //   In gen:  var local = CheatLib.Stream(f64){ .inner = ctx.stream_inner, .alloc = ctx.alloc };
     //            defer local.close();
     //            try local.push(1.0); try local.push(2.0);
-    //   Consume: const v1 = s.next(); // ?f64 — blocks until generator done, then pops
-    //            const v2 = s.next(); // ?f64 — pops next item
-    //            const v3 = s.next(); // null — exhausted
-    //   Cleanup: defer s.deinit();    // frees Inner + buffer
+    //   Consume: const v1 = try s.next(); // ?f64 — null when exhausted
+    //   Cleanup: defer s.deinit();        // waits for generator, frees Inner
     pub fn Stream(comptime T: type) type {
         return struct {
             const Self = @This();
+            const BUF_SIZE: u32 = 64;
+            const MASK: u32 = BUF_SIZE - 1;
 
             pub const Inner = struct {
-                items: std.ArrayListUnmanaged(T) = .empty,
-                wg: WaitGroup = undefined,
-                err: ?anyerror = null, // terminal error from generator fiber
+                buf:           [BUF_SIZE]T = undefined,
+                head:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                tail:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                lock:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+                consumer_task: ?*Task = null,
+                producer_task: ?*Task = null,
+                sched:         *fp.Scheduler,
+                closed:        bool = false,
+                err:           ?anyerror = null,
+                wg:            WaitGroup = undefined, // lifecycle: generator calls done() in close()
             };
 
             inner: *Inner,
             alloc: std.mem.Allocator,
-            head: usize = 0,
 
-            /// Allocate an Inner on the heap, initialize the WaitGroup, and return the Stream handle.
             pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
                 const inner = try alloc.create(Inner);
-                inner.* = .{ .items = .empty, .wg = WaitGroup.init(sched) };
+                inner.* = .{ .sched = sched, .wg = WaitGroup.init(sched) };
                 inner.wg.add(1);
-                return Self{ .inner = inner, .alloc = alloc, .head = 0 };
+                return .{ .inner = inner, .alloc = alloc };
             }
 
-            /// Called by the generator fiber to buffer a yielded value.
-            pub fn push(self: *Self, val: T) !void {
-                try self.inner.items.append(self.alloc, val);
+            /// Generator pushes a value into the ring. Blocks (yields) when full.
+            /// Returns error.StreamClosed if the consumer called deinit() early.
+            pub fn push(self: *Self, val: T) error{StreamClosed}!void {
+                const inner = self.inner;
+                while (true) {
+                    if (inner.closed) {
+                        cleanup(T, self.alloc, &val);
+                        return error.StreamClosed;
+                    }
+                    const h = inner.head.load(.monotonic);
+                    const t = inner.tail.load(.acquire);
+                    if (h -% t < BUF_SIZE) {
+                        inner.buf[h & MASK] = val;
+                        inner.head.store(h +% 1, .release);
+                        if (h == t) {
+                            while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                            if (inner.consumer_task) |consumer| {
+                                inner.consumer_task = null;
+                                inner.lock.store(0, .release);
+                                inner.sched.schedule(consumer);
+                            } else {
+                                inner.lock.store(0, .release);
+                            }
+                        }
+                        return;
+                    }
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    if (inner.closed) {
+                        inner.lock.store(0, .release);
+                        cleanup(T, self.alloc, &val);
+                        return error.StreamClosed;
+                    }
+                    const t2 = inner.tail.load(.acquire);
+                    if (h -% t2 < BUF_SIZE) {
+                        inner.lock.store(0, .release);
+                        continue;
+                    }
+                    const task = inner.sched.getCurrent();
+                    task.status.store(.Blocked, .release);
+                    inner.producer_task = task;
+                    inner.lock.store(0, .release);
+                    task.base.yield();
+                }
             }
 
-            /// Called by the generator fiber (via defer) when its body finishes.
-            /// Signals the consumer that all values have been buffered.
+            /// Generator calls this (via defer) when its body finishes.
+            /// Marks the ring closed so the consumer gets null after draining,
+            /// and signals the lifecycle WaitGroup so deinit() can safely free Inner.
             pub fn close(self: *Self) void {
-                self.inner.wg.done();
+                const inner = self.inner;
+                while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                inner.closed = true;
+                if (inner.consumer_task) |consumer| {
+                    inner.consumer_task = null;
+                    inner.lock.store(0, .release);
+                    inner.sched.schedule(consumer);
+                } else {
+                    inner.lock.store(0, .release);
+                }
+                inner.wg.done();
             }
 
             /// Record a terminal error from the generator fiber.
-            /// Called when the generator's run() catches an error before close().
             pub fn setError(self: *Self, err: anyerror) void {
                 self.inner.err = err;
             }
 
-            /// Consume the next buffered value.
-            /// Blocks on the first call until the generator fiber has finished.
-            /// Returns error if the generator fiber failed, null if exhausted.
+            /// Returns the next item from the ring, blocking when empty.
+            /// Returns null when the generator has closed and the ring is drained.
+            /// Returns an error if the generator called setError().
             pub fn next(self: *Self) anyerror!?T {
-                self.inner.wg.wait();
-                if (self.inner.err) |err| return err;
-                if (self.head >= self.inner.items.items.len) return null;
-                const val = self.inner.items.items[self.head];
-                self.head += 1;
-                return val;
+                const inner = self.inner;
+                while (true) {
+                    const t = inner.tail.load(.monotonic);
+                    const h = inner.head.load(.acquire);
+                    if (h != t) {
+                        const val = inner.buf[t & MASK];
+                        inner.tail.store(t +% 1, .release);
+                        if (h -% t == BUF_SIZE) {
+                            while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                            if (inner.producer_task) |producer| {
+                                inner.producer_task = null;
+                                inner.lock.store(0, .release);
+                                inner.sched.schedule(producer);
+                            } else {
+                                inner.lock.store(0, .release);
+                            }
+                        }
+                        return val;
+                    }
+                    if (inner.closed) {
+                        if (inner.err) |err| return err;
+                        return null;
+                    }
+                    while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                    const h2 = inner.head.load(.acquire);
+                    if (h2 != t) {
+                        inner.lock.store(0, .release);
+                        continue;
+                    }
+                    if (inner.closed) {
+                        inner.lock.store(0, .release);
+                        if (inner.err) |err| return err;
+                        return null;
+                    }
+                    const task = inner.sched.getCurrent();
+                    task.status.store(.Blocked, .release);
+                    inner.consumer_task = task;
+                    inner.lock.store(0, .release);
+                    task.base.yield();
+                }
             }
 
-            /// Free the buffer and Inner allocation. Call once when done consuming.
+            /// Signal early exit to the generator, wait for it to stop, then free Inner.
+            /// Safe to call after reading all items (next() returned null) or mid-stream.
             pub fn deinit(self: *Self) void {
-                self.inner.items.deinit(self.alloc);
-                self.alloc.destroy(self.inner);
+                const inner = self.inner;
+                // Signal producer to stop (mirrors InfStream.deinit drain for strings).
+                while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                inner.closed = true;
+                if (comptime (T == []const u8 or T == []u8)) {
+                    const h = inner.head.load(.acquire);
+                    const t = inner.tail.load(.acquire);
+                    var i: u32 = t;
+                    while (i != h) : (i +%= 1) {
+                        const item = inner.buf[i & MASK];
+                        if (item.len > 0) self.alloc.free(item);
+                    }
+                    inner.tail.store(h, .release);
+                }
+                if (inner.producer_task) |producer| {
+                    inner.producer_task = null;
+                    inner.lock.store(0, .release);
+                    inner.sched.schedule(producer);
+                } else {
+                    inner.lock.store(0, .release);
+                }
+                // Wait for the generator fiber to call close() (wg.done()).
+                // Guarantees Inner is not accessed by the generator after destroy.
+                inner.wg.wait();
+                self.alloc.destroy(inner);
             }
         };
     }
