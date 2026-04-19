@@ -357,18 +357,23 @@ The columns are the three pipeline-capable stream types. "Stage" operators filte
 
 #### Materialization terminals (produce a new collection)
 
-These require a fully-materialized list. Not supported for any stream type - materialize first with `.toList()` if needed.
+These operators consume the stream and produce a new heap-allocated collection.
+`DISTINCT` and `INDEX` are fully supported for all stream types; others require
+materializing first with `.toList()`.
 
 | Operator | `~T[]` | `~T[N]` | `~T[INF]` |
 |---|---|---|---|
+| `DISTINCT` | yes - returns `T[]@set` | yes - returns `T[]@set` | via LIMIT - returns `T[]@set` |
+| `INDEX` | yes | yes | via LIMIT |
 | `ORDER_BY` | not yet | not yet | not yet |
-| `DISTINCT` | not yet | not yet | not yet |
 | `UNNEST` | not yet | not yet | not yet |
-| `INDEX` | yes | yes | N/A |
 | `WINDOW` | not yet | not yet | not yet |
 | `JOIN` | not yet | not yet | not yet |
 
-If you need any of these, materialize first:
+"via LIMIT" means `LIMIT` must appear earlier in the chain (same rule as fold terminals).
+`DISTINCT` returns `T[]@set` (a Set), supporting `.count()` and `.contains?()`.
+
+If you need `ORDER_BY`, `UNNEST`, `WINDOW`, or `JOIN` on a stream, materialize first:
 
 ```ruby clear illustrative
 s: ~Int64[] = 0 ..< 10;
