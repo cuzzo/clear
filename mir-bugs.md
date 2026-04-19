@@ -1,219 +1,50 @@
-# MIR Checker Bug Tracker
+# MIR System Potential Bugs
 
-These are confirmed cases where the MIR checker FAILED to detect a real memory leak.
-Each entry documents the root cause and the checker gap that allowed it through.
+The following is a list of potential memory leaks, use-after-free, or double-free issues identified in the current compiler architecture (up to MIRPass and StaticLeakChecker).
 
----
+## 1. Unhoisted Heap Literals (Memory Leak)
+`MIRPass.hoist_heap_temps!` currently only scans for `FuncCall` and `MethodCall` with heap provenance. It misses `StructLit`, `ListLit`, and `HashLit` that are explicitly marked with `@heap` storage or have a type requiring heap allocation.
+- **Impact**: Any heap-allocated literal used as a sub-expression (e.g., an argument to a function) will allocate memory but will not be hoisted to a `VarDecl`. Consequently, no `MIR::Alloc` or `MIR::Drop` nodes are inserted, leading to a silent memory leak.
+- **Example**: `print(User@{heap}{id: 1})`
+- **Checker Gap**: `StaticLeakChecker.scan_expr_for_unhoisted_heap!` also only looks for `FuncCall`/`MethodCall`, so it doesn't catch these leaks.
 
-## BUG-MIR-001: Incorrect MoveMark for map-indexed assignment (FIXED)
+## 2. MATCH TAKES Variant Payload Leak (Memory Leak)
+When performing a `MATCH TAKES` on a union, the subject union's ownership is consumed. If a branch matches a variant with a non-Copy payload (e.g., a `List` or `StringMap`) but does not use an `AS` binding to extract it, the payload is leaked.
+- **Impact**: The union's moved guard is set to `true`, preventing the union-level `Drop` from firing. However, since the payload wasn't bound to a variable, nothing cleans it up.
+- **Example**: `MATCH TAKES u CASE .Some -> {}` (where `u` is `Option<List>`).
+- **Resolution**: `MATCH TAKES` branches without `AS` bindings must still emit cleanup for non-Copy variant payloads.
 
-**Severity:** CRITICAL  
-**Status:** Fixed in `src/control_flow.rb` and `src/mir_pass.rb` (map assignment ownership fix)  
-**Reproducible:** `spec/transpiler_spec.rb` - "does not suppress val cleanup when map assignment deep-copies the value"
+## 3. Use-After-Free via `with RESTRICT` Reassignment (UAF)
+The annotator and MIR system do not currently prevent the reassignment of a variable that is aliased by a `with RESTRICT` block.
+- **Impact**: If a heap-allocated variable is aliased as `r` and then reassigned, the pre-cleanup for the reassignment frees the old value. The restricted alias `r` now points to freed memory.
+- **Example**:
+  ```clear
+  WITH RESTRICT x AS r
+    x = new_value # x is freed here
+    print(r)      # UAF
+  ```
 
-### What leaked
+## 4. On-the-fly Allocator Choices in Transpiler (Architecture Violation)
+The transpiler still contains logic in `resolve_alloc_for_intrinsic` and `resolve_alloc_for_container` to decide between `:heap` and `:frame` allocators at code-generation time.
+- **Impact**: This violates the "dumb transpiler" principle. These decisions should be made in `MIRPass` (or `CleanupClassifier`) and encoded into `MIR::Alloc` and `MIR::Drop` nodes.
+- **Risks**: Divergence between `MIRPass`'s assumptions and the transpiler's actual emission leads to `ALLOC_MISMATCH` or leaks that the checker cannot reliably verify if the transpiler "goes rogue."
 
-```clear
-val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
-map["key"] = val;
-RETURN someOtherValue;
-```
+## 5. Manual Arena Management (Architecture Violation / Potential Leak)
+The transpiler still manually handles `rt.saveFrameMark()` / `rt.restoreFrameMark()` and `rt.preserveAndRewind()` based on function return types and `uses_frame` flags.
+- **Impact**: This "on-the-fly" cleanup logic is not represented in the MIR. `StaticLeakChecker` has `check_frame_overflow!`, but it doesn't see the actual save/restore points as MIR nodes.
+- **Resolution**: Introduce `MIR::FrameMark` and `MIR::FrameRewind` nodes to make arena management explicit and verifiable.
 
-Generated Zig (before fix):
-```zig
-const val = ...;
-var val_moved = false;
-defer if (!val_moved) CheatLib.cleanup(Value, rt.heapAlloc(), &val); // LEAK: never fires
-...
-try map.put(..., blk_prm: {
-    var __prm = try CheatLib.dupeUnionValue(Value, val, rt.heapAlloc()); // map gets a COPY
-    ...
-});
-val_moved = true; // BUG: suppresses val's cleanup even though map has a copy, not val
-```
+## 6. Implicit Allocations in VarDecl/Assignment (Potential Leak)
+Certain constructs like `List[10]` (pre-allocation) or `Pool` initialization trigger allocations directly in the transpiler's `visit_VarDecl` or `transpile_container_set`.
+- **Impact**: These are not always explicitly represented as `MIR::Alloc` nodes if they are considered "part of the type initialization."
+- **Risk**: If the initialization allocates but the `MIRPass` doesn't flag the variable as `needs_cleanup`, it leaks.
 
-### How it got through the checker
+## 7. `OrRescue` Fallback Dupe Fragility (Potential Leak/UAF)
+The transpiler uses a `@pending_or_fallback_dupe` state flag set by `MIR::Promote(:or_fallback_dupe)`.
+- **Impact**: State flags in the transpiler are fragile. If the MIR sequence is interrupted or if nodes are visited out of order, the flag might remain set or be missed.
+- **Resolution**: `OrRescue` nodes should be stamped with the dupe requirement directly.
 
-The checker sees:
-- `AllocMark(val)` -- present
-- `Cleanup(val, has_moved_guard=true)` -- present
-
-Both invariants 1 and 2 are structurally satisfied. The checker cannot verify that
-`val_moved = true` is placed CORRECTLY -- it only verifies that a cleanup exists.
-
-The ownership dataflow in `transfer_stmt` (control_flow.rb) treated `map[k] = val`
-as a consumption of `val`, which eventually caused `MIR::SuppressCleanup` to be
-inserted after the statement. That SuppressCleanup generates `val_moved = true`.
-
-But the runtime's `blk_prm: { dupeUnionValue(val) }` transform deep-copies `val`
-before `put`, so `val` is NOT moved -- the map holds a copy. The original `val`
-needs its cleanup defer to fire.
-
-### Checker gap
-
-The checker trusts that `SuppressCleanup` nodes are placed correctly. It cannot
-detect the case where a `SuppressCleanup` suppresses a value that was NOT actually
-transferred to another owner.
-
-### Fix
-
-In `transfer_stmt` (control_flow.rb) and `collect_consumed_names` (mir_pass.rb):
-for `AST::Assignment` where LHS is `GetIndex` on a map type, do NOT mark the RHS
-identifier as consumed. The map's value transform (dupeUnionValue) makes a copy;
-the original retains ownership and must be cleaned up by its defer.
-
----
-
-## BUG-MIR-002: Heap-returning call in non-TAKES argument position (OPEN)
-
-**Severity:** CRITICAL  
-**Status:** PARTIALLY FIXED -- `hoist_alloc` extended + `evalIn` refactored with COPY. 7 leaks remain (BUG-MIR-003).
-**Reproducible:** `./clear test examples/minivm/interpreter_test.cht` -- was 22 leaks, now 7 (all from BUG-MIR-003)
-
-### What leaked
-
-```clear
-FN evalIn!(...) RETURNS String ->
-    RETURN prStr(runTest!(input, rootId, pool, penv), readable);
-END
-```
-
-`runTest!` returns a heap-allocated `Value`. `prStr` takes `v: Value` (NOT `TAKES`) --
-it borrows the value by-value copy. The temporary `Value` returned by `runTest!` is
-passed directly to `prStr` as an argument, with no variable binding and no cleanup defer.
-
-Generated Zig:
-```zig
-fn evalIn(...) ![]const u8 {
-    return try types.prStr(rt, try interpreter.runTest(rt, input, rootId, pool, penv), readable);
-    //                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    //                         Heap Value -- no variable, no defer, leaks
-}
-```
-
-### How it got through the checker
-
-MIR checker invariant 4: "Heap-returning call in STATEMENT position is bound to a variable (HPT_LEAK)."
-
-The check is restricted to TOP-LEVEL STATEMENT EXPRESSIONS. In this case,
-`runTest!(...)` is in ARGUMENT position of `prStr(...)`, which is the value in a
-RETURN statement. The call is NOT at statement position -- it is nested inside another
-call's argument list.
-
-The HPT hoisting logic in `mir_lowering.rb` / `hoist_alloc` is called when processing
-function call arguments. But the condition for hoisting requires the call to be in a
-"borrow" argument position for a non-TAKES parameter AND the call is heap-returning.
-Investigation needed: is this case being evaluated at all by `hoist_alloc`, or is it
-being skipped because the outer call is a RETURN?
-
-### Checker gap
-
-Invariant 4's scope is too narrow. It only fires for:
-  `statement = heap_returning_call(...)`
-
-It does NOT fire for:
-  `statement = f(heap_returning_call(...), other_args)`  -- nested in arg position
-  `RETURN f(heap_returning_call(...), other_args)`       -- nested in return value
-
-Any heap-returning call nested inside another call's non-TAKES argument list bypasses
-HPT detection. The MIR checker cannot see inside call arguments at this level.
-
-### Required fix
-
-Two possible approaches:
-
-**A. Fix in MIR lowering (preferred):** Extend `hoist_alloc` to hoist heap-returning
-calls that appear in non-TAKES argument positions. When `runTest!(...)` is passed as
-an argument to `prStr` (non-TAKES parameter), the lowering should emit:
-
-```zig
-const __tmp_runtest = try interpreter.runTest(rt, input, rootId, pool, penv);
-defer CheatLib.cleanup(Value, rt.heapAlloc(), &__tmp_runtest);
-return try types.prStr(rt, __tmp_runtest, readable);
-```
-
-**B. Fix in MIR checker (extend invariant 4):** Scan ALL call arguments (not just
-top-level statements) for heap-returning calls passed to non-TAKES parameters.
-This is harder because it requires type information at the checker level.
-
-**Recommended:** Fix A (extend hoist_alloc). The lowering is the right place to make
-this decision, consistent with the role boundaries in CLAUDE.md.
-
----
-
----
-
-## BUG-MIR-003: List indexed assignment does not cleanup old element (OPEN)
-
-**Severity:** CRITICAL
-**Status:** OPEN -- not yet fixed
-**Reproducible:** `./clear test examples/minivm/interpreter_test.cht` -- 7 leaked allocations from testBytecode STRUCT_FIELD ops
-
-### What leaked
-
-```clear
--- stack: Value[]
-pv = COPY consts[idx];        -- heap-allocated Value (via dupeUnionValue)
-stack[sp] = pv;               -- MOVES pv into stack (pv_moved = true)
--- later...
-pv = COPY fields[fieldIdx];   -- new heap Value (field extracted from old stack[sp])
-stack[sp] = pv;               -- OVERWRITES old stack[sp] WITHOUT cleaning it up
-```
-
-Generated Zig:
-```zig
-const __new_pv = try CheatLib.dupeUnionValue(Value, consts[idx], rt.heapAlloc());  // alloc
-CheatLib.setAt(stack, sp, __new_pv);    // STRUCT_FIELD: overwrites stack[sp]
-// OLD stack[sp] (heap Value.Vector with allocated array) is NEVER freed -- LEAK
-```
-
-### How it got through the checker
-
-For `list[i] = value` (list indexed assignment), the MIR lowering:
-- Marks `value` (rhs) as consumed: `pv_moved = true`
-- Emits `CheatLib.setAt(list, idx, value)` -- shallow struct copy
-- Does NOT generate cleanup for the OLD element at `list[i]`
-
-The MIR checker has no invariant that covers old-element cleanup for list indexed writes. The checker only verifies AllocMark/Cleanup pairs for NAMED BINDINGS. `list[i]` is not a named binding -- it's an indexed slot. The checker cannot see that the old slot is overwritten without cleanup.
-
-### Checker gap
-
-No invariant covers "list indexed write must cleanup old element before overwriting."
-The checker does not model individual list slot lifetimes.
-
-### Required fix
-
-In the MIR lowering, for `AST::Assignment` where LHS is `GetIndex` on a list type (NOT a map),
-AND the element type needs cleanup (is non-Copy with heap-owning variants):
-generate a cleanup of the old element BEFORE the setAt:
-
-```zig
-CheatLib.cleanup(ElemT, alloc, CheatLib.refAt(list, idx));  // cleanup old
-CheatLib.setAt(list, idx, new_value);                       // set new
-new_value_moved = true;
-```
-
-This mirrors how variable reassignment emits `MIR::ReassignCleanup` before overwriting.
-A new `MIR::IndexedReassignCleanup` node (or extension to `MIR::ReassignCleanup`) is needed.
-
-The `CheatLib.refAt(list, idx)` function would return `&list.items[idx]` (a pointer to the element).
-
----
-
-## Summary of Checker Gaps
-
-| Gap | Description | Invariant that should cover it | Currently covered? |
-|-----|-------------|-------------------------------|-------------------|
-| Incorrect MoveMark | SuppressCleanup inserted for non-moves (map copy) | INV-4 (structural) | No -- checker can't detect incorrect placement |
-| HPT in arg position | heap-returning call in non-TAKES arg, not hoisted | INV-4 (HPT_LEAK) | No -- only checks statement position |
-| List element overwrite | list[i]=value doesn't cleanup old element for non-Copy types | None | No -- checker doesn't model slot lifetimes |
-
-### Architectural implication
-
-The MIR checker's invariants are STRUCTURAL: they verify presence of AllocMark/Cleanup
-pairs and their type/allocator consistency. They do NOT verify:
-- That SuppressCleanup nodes are inserted for ACTUAL ownership transfers (not copies)
-- That heap-returning calls in nested argument positions are hoisted
-
-Fixing these requires the LOWERING to be correct (not just the checker to detect errors).
-The checker cannot substitute for correct lowering decisions.
+## 8. `TRANSPILE_CAST` Ownership Gaps (Potential Leak)
+`ZigTranspiler.visit_node` automatically applies `transpile_cast` if a `coerced_type` is present.
+- **Impact**: If a cast requires an allocation (e.g., coercing a non-Copy type that requires a deep copy/dupe), it is not tracked by the MIR system.
+- **Risk**: Most casts are currently just slice reinterpretation or pointer casts, but if any allocate, they leak.
