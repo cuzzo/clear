@@ -1097,6 +1097,223 @@ pub fn bind(comptime deps: type) type {
         };
     }
 
+    // -----------------------------------------------------------------------
+    // BoundedChannel(T): single-producer, multi-consumer bounded queue with
+    // back pressure.
+    //
+    // The producer calls push() to write items; it blocks (parks its fiber)
+    // when the ring is full, resuming only after a consumer pops an item.
+    // Up to MAX_CONSUMERS consumers each call pop() concurrently; they block
+    // when the ring is empty and the channel is still open. Each item is
+    // delivered to exactly one consumer (work-stealing, not pub-sub).
+    //
+    // close() signals end-of-stream: consumers drain remaining buffered items
+    // then receive null. setError() signals a fatal error: consumers receive
+    // the error immediately (items still in the ring are abandoned).
+    //
+    // Lifecycle:
+    //   var ch = try CheatLib.BoundedChannel(i64).init(alloc, 16);
+    //   defer ch.deinit();
+    //   // producer fiber:
+    //   try ch.push(42);
+    //   ch.close();
+    //   // consumer fiber:
+    //   while (try ch.pop()) |val| { ... }
+    //
+    // Used by `stream s> CONCURRENT SELECT/WHERE/EACH` to prevent unbounded
+    // memory growth when the source stream outpaces workers.
+    pub fn BoundedChannel(comptime T: type) type {
+        return struct {
+            const Self = @This();
+            pub const MAX_CONSUMERS: usize = 64;
+
+            pub const Inner = struct {
+                buf: []T,
+                mask: usize,
+                head: usize = 0,   // producer write index (monotonically increasing)
+                tail: usize = 0,   // consumer read index  (monotonically increasing)
+
+                mutex: compat.Mutex = .{},
+
+                // Producer parking: only one producer at a time.
+                producer_parked: bool = false,
+                producer_task: ?*Task = null,
+                producer_sched: ?*fp.Scheduler = null,
+
+                // Consumer parking: up to MAX_CONSUMERS may be simultaneously blocked.
+                consumer_tasks:  [MAX_CONSUMERS]?*Task         = [_]?*Task{null} ** MAX_CONSUMERS,
+                consumer_scheds: [MAX_CONSUMERS]?*fp.Scheduler = [_]?*fp.Scheduler{null} ** MAX_CONSUMERS,
+
+                closed: bool = false,
+                err: ?anyerror = null,
+                alloc: std.mem.Allocator,
+
+                pub fn capacity(self: *Inner) usize { return self.mask + 1; }
+                pub fn used(self: *Inner) usize     { return self.head - self.tail; }
+
+                fn wakeOneConsumer(self: *Inner) void {
+                    for (0..MAX_CONSUMERS) |i| {
+                        if (self.consumer_tasks[i]) |task| {
+                            const sched = self.consumer_scheds[i].?;
+                            self.consumer_tasks[i] = null;
+                            self.consumer_scheds[i] = null;
+                            sched.schedule(task);
+                            return;
+                        }
+                    }
+                }
+
+                fn wakeAllConsumers(self: *Inner) void {
+                    for (0..MAX_CONSUMERS) |i| {
+                        if (self.consumer_tasks[i]) |task| {
+                            const sched = self.consumer_scheds[i].?;
+                            self.consumer_tasks[i] = null;
+                            self.consumer_scheds[i] = null;
+                            sched.schedule(task);
+                        }
+                    }
+                }
+
+                fn wakeProducer(self: *Inner) void {
+                    if (!self.producer_parked) return;
+                    self.producer_parked = false;
+                    const task = self.producer_task.?;
+                    const sched = self.producer_sched.?;
+                    self.producer_task = null;
+                    self.producer_sched = null;
+                    sched.schedule(task);
+                }
+
+                fn findConsumerSlot(self: *Inner) ?usize {
+                    for (0..MAX_CONSUMERS) |i| {
+                        if (self.consumer_tasks[i] == null) return i;
+                    }
+                    return null;
+                }
+            };
+
+            inner: *Inner,
+
+            pub fn init(alloc: std.mem.Allocator, cap: usize) !Self {
+                std.debug.assert(cap > 0 and cap & (cap - 1) == 0); // must be power of 2
+                const buf = try alloc.alloc(T, cap);
+                errdefer alloc.free(buf);
+                const inner = try alloc.create(Inner);
+                inner.* = .{
+                    .buf = buf,
+                    .mask = cap - 1,
+                    .alloc = alloc,
+                };
+                return .{ .inner = inner };
+            }
+
+            /// Producer: write val into the ring. Blocks when the ring is full.
+            /// Returns error.StreamClosed if close() or setError() was called.
+            pub fn push(self: *Self, val: T) anyerror!void {
+                const inner = self.inner;
+                while (true) {
+                    inner.mutex.lock();
+                    if (inner.closed) {
+                        inner.mutex.unlock();
+                        return error.StreamClosed;
+                    }
+                    if (inner.used() < inner.capacity()) {
+                        inner.buf[inner.head & inner.mask] = val;
+                        inner.head += 1;
+                        inner.wakeOneConsumer();
+                        inner.mutex.unlock();
+                        return;
+                    }
+                    // Ring full — park until a consumer pops.
+                    if (fp.scheduler_running and fp.active_scheduler.current_task != null) {
+                        const task = fp.active_scheduler.getCurrent();
+                        inner.producer_parked = true;
+                        inner.producer_task = task;
+                        inner.producer_sched = fp.active_scheduler;
+                        task.status.store(.Blocked, .release);
+                        inner.mutex.unlock();
+                        task.base.yield();
+                    } else {
+                        inner.mutex.unlock();
+                        std.Thread.yield() catch {};
+                    }
+                }
+            }
+
+            /// Consumer: read the next item. Returns null when the channel is
+            /// closed and the ring is empty. Blocks when the ring is empty and
+            /// the channel is still open. Returns an error if setError was called.
+            pub fn pop(self: *Self) anyerror!?T {
+                const inner = self.inner;
+                while (true) {
+                    inner.mutex.lock();
+                    // Error takes priority: skip buffered items so callers see the
+                    // failure quickly rather than receiving partial results.
+                    if (inner.err) |err| {
+                        inner.mutex.unlock();
+                        return err;
+                    }
+                    if (inner.head != inner.tail) {
+                        const val = inner.buf[inner.tail & inner.mask];
+                        inner.tail += 1;
+                        inner.wakeProducer();
+                        inner.mutex.unlock();
+                        return val;
+                    }
+                    if (inner.closed) {
+                        inner.mutex.unlock();
+                        return null; // drained and closed (no error)
+                    }
+                    // Ring empty and open — park until producer pushes or closes.
+                    if (fp.scheduler_running and fp.active_scheduler.current_task != null) {
+                        const slot = inner.findConsumerSlot() orelse {
+                            inner.mutex.unlock();
+                            std.Thread.yield() catch {};
+                            continue;
+                        };
+                        const task = fp.active_scheduler.getCurrent();
+                        inner.consumer_tasks[slot] = task;
+                        inner.consumer_scheds[slot] = fp.active_scheduler;
+                        task.status.store(.Blocked, .release);
+                        inner.mutex.unlock();
+                        task.base.yield();
+                    } else {
+                        inner.mutex.unlock();
+                        std.Thread.yield() catch {};
+                    }
+                }
+            }
+
+            /// Signal end-of-stream. Consumers drain remaining items then get null.
+            pub fn close(self: *Self) void {
+                const inner = self.inner;
+                inner.mutex.lock();
+                inner.closed = true;
+                inner.wakeAllConsumers();
+                inner.wakeProducer();
+                inner.mutex.unlock();
+            }
+
+            /// Signal a fatal error. Consumers receive the error immediately.
+            pub fn setError(self: *Self, err: anyerror) void {
+                const inner = self.inner;
+                inner.mutex.lock();
+                inner.err = err;
+                inner.closed = true;
+                inner.wakeAllConsumers();
+                inner.wakeProducer();
+                inner.mutex.unlock();
+            }
+
+            pub fn deinit(self: *Self) void {
+                const inner = self.inner;
+                const alloc = inner.alloc;
+                alloc.free(inner.buf);
+                alloc.destroy(inner);
+            }
+        };
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});
