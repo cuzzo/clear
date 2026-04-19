@@ -132,11 +132,13 @@ module PipeAnalysis
 
   # SELECT, WHERE, INDEX, ORDER_BY share similar structure.
   # SELECT and WHERE also accept a RangeLit or InfStream source (fused lazy path).
+  # INDEX accepts finite stream sources (~T[], ~T[N]).
   def analyze_select_family_op(node)
     is_inf    = node.left.type_info&.inf_stream? &&
                 (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
     is_stream = (finite_stream_source?(node.left) || is_inf) &&
-                (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp))
+                (node.right.is_a?(AST::SelectOp) || node.right.is_a?(AST::WhereOp) ||
+                 node.right.is_a?(AST::IndexOp))
     require_array_input!(node, "SELECT", allow_range: is_stream, allow_stream: is_stream)
     item_type = if is_inf
       inf_stream_element_type(node.left)

@@ -1002,8 +1002,22 @@ class PipelineHost
   end
 
   def lower_index(list_node, expr_node, smooth_node)
-    elem_zig = transpile_type(list_node.full_type.element_type.resolved.to_s)
+    lhs_ti = list_node.type_info
     alloc = pipeline_alloc(smooth_node)
+
+    # Stream source: use lazy while loop instead of materializing first.
+    if (range_chain = unwrap_range_chain(list_node))
+      elem_sym = if lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream?
+        lhs_ti.tense_type.element_type.resolved
+      else
+        list_node.full_type.element_type.resolved
+      end
+      elem_zig = transpile_type(elem_sym.to_s)
+      map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig}))"
+      return lower_stream_index(range_chain, expr_node, elem_zig, alloc, map_type)
+    end
+
+    elem_zig = transpile_type(list_node.full_type.element_type.resolved.to_s)
     expr_mir = visit_pipeline_expr_mir(list_node, expr_node)
     map_type = "CheatLib.StringMap(std.ArrayListUnmanaged(#{elem_zig}))"
     lower_pipeline_block(list_node) do |items, label|
@@ -1045,6 +1059,63 @@ class PipelineHost
         MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
       ]
     end
+  end
+
+  def lower_stream_index(range_chain, expr_node, elem_zig, alloc, map_type)
+    alloc_str = HEAP_ALLOC
+    # Filtered-out items must have their heap sub-fields freed; comptime no-op for primitives.
+    on_skip = ->(var) {
+      [MIR::ExprStmt.new(
+        MIR::InlineZig.new("CheatLib.cleanup(#{elem_zig}, #{alloc_str}, &#{var})", "item_cleanup"), nil)]
+    }
+    p = build_lazy_range_prefix(range_chain[:source], range_chain[:stages], on_skip: on_skip)
+    item_var   = p[:item_var]
+    range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
+
+    expr_mir = with_pipeline_context(placeholder: item_var) { visit_mir(expr_node) }
+    label    = next_pipe_label
+
+    source_ti    = range_chain[:source].type_info
+    defer_deinit = source_ti&.bounded_stream? ?
+      MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
+      nil
+
+    MIR::BlockExpr.new(label, [
+      *([p[:range_let]].compact), *p[:outer_stmts],
+      MIR::Let.new("idx_result",
+        MIR::InlineZig.new(".{ .alloc = #{alloc_str} }", "idx_init_val"),
+        true, map_type, nil),
+      *([defer_deinit].compact),
+      MIR::WhileStmt.new(range_next, [
+        *p[:stage_stmts],
+        MIR::Let.new("idx_key", expr_mir, false, nil, nil),
+        MIR::Let.new("idx_key_owned",
+          MIR::InlineZig.new(
+            "try #{alloc_str}.dupe(u8, idx_key)",
+            "idx_key_dupe").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
+        MIR::Let.new("gop",
+          MIR::InlineZig.new(
+            "idx_result.inner.getOrPut(#{alloc_str}, idx_key_owned) catch @panic(\"INDEX allocation failed\")",
+            "idx_get_or_put").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
+        MIR::IfStmt.new(
+          MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing"),
+          [MIR::ExprStmt.new(
+            MIR::InlineZig.new(
+              "#{alloc_str}.free(idx_key_owned)",
+              "idx_key_free"), nil)
+          ], nil),
+        MIR::IfStmt.new(
+          MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing")),
+          [MIR::ExprStmt.new(
+            MIR::InlineZig.new("gop.value_ptr.* = .empty", "idx_init_slot"), nil)
+          ], nil),
+        MIR::ExprStmt.new(
+          MIR::InlineZig.new(
+            "gop.value_ptr.append(#{alloc_str}, #{item_var}) catch @panic(\"INDEX append failed\")",
+            "idx_append").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, nil)
+      ], p[:initial_capture], nil, nil, nil),
+      MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
+    ])
   end
 
   def lower_join(list_node, join_node, smooth_node)
@@ -1556,7 +1627,7 @@ class PipelineHost
   #                   item_used, elem_zig }
   # `item_used` tracks whether the initial capture (`__each_item`) is referenced
   # by any stage -- used by callers to decide between |__each_item| and |_| in Zig.
-  def build_lazy_range_prefix(source_node, stages)
+  def build_lazy_range_prefix(source_node, stages, on_skip: nil)
     source_ti = source_node.type_info
     elem_t = if source_ti&.dynamic_stream? || source_ti&.bounded_stream?
       source_ti.tense_type.element_type
@@ -1587,14 +1658,14 @@ class PipelineHost
       when AST::WhereOp
         item_used = true if item_var == initial_capture
         pred_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
-        stage_stmts << MIR::IfStmt.new(
-          MIR::UnaryOp.new("!", pred_mir), [MIR::ContinueStmt.new(nil)], nil)
+        skip_stmts = on_skip ? [*on_skip.call(item_var), MIR::ContinueStmt.new(nil)] : [MIR::ContinueStmt.new(nil)]
+        stage_stmts << MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), skip_stmts, nil)
 
       when AST::TakeWhileOp
         item_used = true if item_var == initial_capture
         pred_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(stage.expression) }
-        stage_stmts << MIR::IfStmt.new(
-          MIR::UnaryOp.new("!", pred_mir), [MIR::BreakStmt.new(nil, nil)], nil)
+        skip_stmts = on_skip ? [*on_skip.call(item_var), MIR::BreakStmt.new(nil, nil)] : [MIR::BreakStmt.new(nil, nil)]
+        stage_stmts << MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), skip_stmts, nil)
 
       when AST::LimitOp
         item_counter += 1

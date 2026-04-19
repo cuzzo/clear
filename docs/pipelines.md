@@ -364,7 +364,7 @@ These require a fully-materialized list. Not supported for any stream type - mat
 | `ORDER_BY` | not yet | not yet | not yet |
 | `DISTINCT` | not yet | not yet | not yet |
 | `UNNEST` | not yet | not yet | not yet |
-| `INDEX` | not yet | not yet | not yet |
+| `INDEX` | yes | yes | N/A |
 | `WINDOW` | not yet | not yet | not yet |
 | `JOIN` | not yet | not yet | not yet |
 
