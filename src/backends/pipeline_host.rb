@@ -1032,6 +1032,11 @@ class PipelineHost
     if (range_chain = unwrap_range_chain(list_node))
       elem_sym = if lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream?
         lhs_ti.tense_type.element_type.resolved
+      elsif range_chain[:source].type_info&.inf_stream?
+        # list_node is a SMOOTH chain (e.g. counter s> LIMIT 9); lhs_ti is the
+        # materialized list type so tense_type is unavailable. Pull element type
+        # from the inf stream source directly.
+        range_chain[:source].type_info.inf_stream_element_type.resolved
       else
         list_node.full_type.element_type.resolved
       end

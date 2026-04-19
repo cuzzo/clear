@@ -151,10 +151,11 @@ class PipelineRewriter
       return node
     end
 
-    # INDEX on a finite stream source also bypasses: the MIR lowering handles
-    # it as a lazy while loop (lower_stream_index via unwrap_range_chain).
+    # INDEX on a finite or LIMIT-bounded stream source bypasses: the MIR lowering
+    # handles it as a lazy while loop (lower_stream_index via unwrap_range_chain).
+    # inf_with_limit reuses the variable already computed above.
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
-                      (real_source.type_info&.dynamic_stream? || real_source.type_info&.bounded_stream?) &&
+                      (real_source.type_info&.dynamic_stream? || real_source.type_info&.bounded_stream? || inf_with_limit) &&
                       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
