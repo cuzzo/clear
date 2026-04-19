@@ -1623,7 +1623,8 @@ private
       finalize_decl_node!(node, false)
       # Struct with BORROWED fields: propagate non_escaping to the binding.
       if node.value.instance_variable_get(:@has_borrowed_fields)
-        node.symbol.non_escaping = true
+        node.symbol.non_escaping   = true
+        node.symbol.borrowed_alias = true
       end
 
     elsif scope.is_immutable?(node.name)
@@ -2863,6 +2864,13 @@ private
         error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.") if full_analysis.has_local
         error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.") if full_analysis.has_rc
       end
+
+      if full_analysis.has_non_escaping_capture
+        error!(node, "DO block captures a WITH-scoped (BORROWED/RESTRICT) binding. " \
+                     "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
+                     "Move the DO block outside the WITH block, or use COPY to get an owned value.")
+      end
+
       analysis = (!branch[:pinned] && !branch[:parallel] && full_analysis.has_shared) ? full_analysis : nil
 
       if analysis && !branch[:pinned]
@@ -2906,7 +2914,14 @@ private
     node.yields_frame_strings = true if stream_body_yields_frame_string?(node.body)
 
     # Compute captures for transpiler (same as BG blocks).
-    node.capture_analysis = analyze_fiber_captures(node.body)
+    stream_analysis = analyze_fiber_captures(node.body)
+    node.capture_analysis = stream_analysis
+
+    if stream_analysis.has_non_escaping_capture
+      error!(node, "BG STREAM block captures a WITH-scoped (BORROWED/RESTRICT) binding. " \
+                   "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
+                   "Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.")
+    end
   end
 
   # Returns true if any YieldExpr in the stream body yields a frame-allocated string.
@@ -2990,6 +3005,14 @@ private
     if node.parallel
       error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.") if full_analysis.has_local
       error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.") if full_analysis.has_rc
+    end
+
+    # WITH-scoped (BORROWED/RESTRICT) bindings cannot escape into fibers.
+    # The fiber may outlive the WITH block, turning the alias into a dangling pointer.
+    if full_analysis.has_non_escaping_capture
+      error!(node, "BG block captures a WITH-scoped (BORROWED/RESTRICT) binding. " \
+                   "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
+                   "Move the BG block outside the WITH block, or use COPY to get an owned value.")
     end
 
     # Auto-pin detection
@@ -3169,9 +3192,19 @@ private
   def handle_assign_move(node)
     return if node.value.is_a?(AST::CopyNode)
 
-    # Non-escaping values (WITH block aliases) cannot be moved/consumed
+    # Non-escaping values (WITH block aliases) cannot be moved/consumed.
+    # Copy types (Int64, Bool, Float64, etc.) are exempt: assignment copies the
+    # value with no pointer transfer, so no lifetime hazard exists.
     if node.value.is_a?(AST::Identifier) && node.value.symbol&.non_escaping
-      error!(node, "Cannot move WITH-scoped '#{node.value.name}'. WITH bindings cannot escape their block.")
+      vti = node.value.type_info
+      needs_move = begin
+        vti && Type.new(vti).requires_move?
+      rescue
+        true
+      end
+      if needs_move
+        error!(node, "Cannot move WITH-scoped '#{node.value.name}'. WITH bindings cannot escape their block.")
+      end
     end
     if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)
       # Container indexing of borrowed source into an owned target (HashMap

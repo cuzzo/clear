@@ -219,14 +219,36 @@ module CapabilityHelper
         is_mutable = !!cap[:alias_mutable]
         resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
-        current_scope.locals[alias_name].non_escaping = true
+        sym = current_scope.locals[alias_name]
+        sym.non_escaping  = true
+        sym.borrowed_alias = true  # RESTRICT alias: fiber capture is stack-UAF
         og_declare(alias_name, nil, resolved_type)
       end
     elsif cap[:capability] == :BORROWED
+      # BORROWED guarantees the aliased data is stable for the borrow duration.
+      # @shared/@locked/@multiowned types can be concurrently written — the
+      # stability guarantee cannot be upheld. Reject them at the borrow site.
+      source_sym = cap[:old_scope]&.locals&.[](var_name)
+      if source_sym
+        bad_storage = source_sym.storage == :shared || source_sym.storage == :multiowned
+        bad_sync    = source_sym.sync == :locked || source_sym.sync == :write_locked
+        if bad_storage || bad_sync
+          qualifier = if source_sym.storage == :shared then "@shared"
+                      elsif source_sym.storage == :multiowned then "@multiowned"
+                      elsif source_sym.sync == :locked then "@locked"
+                      else "@writeLocked"
+                      end
+          error!(cap[:var_node], "Cannot use WITH BORROWED on #{qualifier} variable '#{var_name}'. " \
+                                  "BORROWED guarantees the data is stable, but #{qualifier} data can be " \
+                                  "modified concurrently. Use WITH #{var_name} { } to access it safely instead.")
+        end
+      end
       alias_name = cap[:alias] || var_name
       resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
-      current_scope.locals[alias_name].non_escaping = true
+      sym = current_scope.locals[alias_name]
+      sym.non_escaping  = true
+      sym.borrowed_alias = true  # BORROWED alias: fiber capture is stack-UAF
       og_declare(alias_name, nil, resolved_type)
       @og.borrow("__borrowed_#{var_name}", var_name, mutable: false)
     end
@@ -243,6 +265,7 @@ module CapabilityHelper
     :has_sharded,      # specifically captures @sharded (for auto-pin reason)
     :has_affine_locked, # captures affine @locked (not @shared) -- needs spawnPinned
     :has_outer_ref,    # references any outer-scope variable
+    :has_non_escaping_capture, # captures a non_escaping (BORROWED/RESTRICT) binding -- UAF risk
     :captures,         # Hash<name => type_obj> for code generation
     :close_patterns,   # Hash<name => close_zig_string> for resource cleanup
     :pointer_captures, # Set<name> - captures needing *T pointer passing
@@ -260,6 +283,7 @@ module CapabilityHelper
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
+      has_non_escaping_capture: false,
       captures: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
@@ -297,6 +321,7 @@ module CapabilityHelper
     result = CaptureAnalysis.new(
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
+      has_non_escaping_capture: false,
       captures: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
@@ -325,6 +350,10 @@ module CapabilityHelper
         next if %w[TRUE FALSE VOID _].include?(name)
 
         info = current_scope.locals[name]
+        # Fallback: the symbol was resolved during visit_Identifier and stored on the node.
+        # Use it when current_scope lookup misses (e.g. inside DO branches with deep nesting).
+        resolved_sym = info || node.symbol
+        result.has_non_escaping_capture = true if resolved_sym&.borrowed_alias
         if info
           result.has_outer_ref = true
 
