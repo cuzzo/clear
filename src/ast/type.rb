@@ -684,7 +684,7 @@ class Type
     if schema.is_a?(Hash) && schema[:kind].nil?
       closes = []
       schema.each do |fname, ftype|
-        next if fname == :type_params || fname == :methods
+        next if fname.is_a?(Symbol)  # skip metadata keys; field names are strings
         f_resolved = Type.new(ftype).resolved
         f_schema = schema_lookup.call(f_resolved) rescue nil
         if f_schema&.dig(:kind) == :resource

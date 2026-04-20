@@ -347,6 +347,7 @@ private
         name: p[:name],
         type: p[:type],
         required: p[:default].nil?,
+        default: p[:default],
         mutable: p[:mutable],
         takes: p[:takes] || false
       }},
@@ -418,7 +419,8 @@ private
     # 3. Pre-declaration (so the function can be recursive)
     signature = FunctionSignature.new(
       params: node.params.map { |p| {
-        name: p[:name], type: p[:type], required: p[:default].nil?, mutable: p[:mutable], takes: p[:takes]
+        name: p[:name], type: p[:type], required: p[:default].nil?,
+        default: p[:default], mutable: p[:mutable], takes: p[:takes]
       }},
       return_type: declared_return, return_lifetime: lifetime_path,
       visibility: node.visibility,
@@ -564,6 +566,10 @@ private
 
     # Register the Type Name with its field schema.
     schema = node.fields.transform_values { |f| f[:type] }
+
+    # Store field defaults so empty struct literals (Foo{}) can be validated.
+    field_defaults = node.fields.each_with_object({}) { |(k, f), h| h[k] = f[:default] if f[:default] }
+    schema[:field_defaults] = field_defaults unless field_defaults.empty?
 
     # Track which fields are BORROWED (references, not owned).
     borrowed_fields = node.fields.select { |_, f| f[:borrowed] }.keys
@@ -2157,6 +2163,20 @@ private
       return
     end
 
+    # Empty struct literal: MyStruct{} — use all struct field defaults.
+    if node.fields.empty?
+      field_names = schema.keys.reject { |k| k.is_a?(Symbol) }
+      unless field_names.empty?
+        field_defaults = schema[:field_defaults] || {}
+        missing = field_names.reject { |f| field_defaults.key?(f) }
+        if missing.any?
+          error!(node, "Cannot use '#{node.name}{}' — field(s) #{missing.join(', ')} have no default values")
+        end
+      end
+      node.full_type = node.name.to_sym
+      return
+    end
+
     # Build type param substitution map for generic struct instantiation.
     # e.g. Pair<Number>{ first: 1.0 } → { :T => :Float64 }
     type_params = schema[:type_params]
@@ -2367,6 +2387,12 @@ private
       else
         error!(node, "UNKNOWN LITERAL!")
       end
+  end
+
+  def visit_DefaultLit(node)
+    # Resolved type is set by declare_and_verify_params / visit_StructLit context.
+    # Standalone DEFAULT is not valid; callers validate the context.
+    node.full_type = :Any
   end
 
   def visit_BinaryOp(node)

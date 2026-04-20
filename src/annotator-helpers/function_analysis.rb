@@ -91,6 +91,7 @@ module FunctionAnalysis
         name: param[:name],
         type: param[:type],
         required: param[:default].nil?,
+        default: param[:default],
         mutable: param[:mutable] || false,
         takes: param[:takes] || false
       }
@@ -282,6 +283,23 @@ module FunctionAnalysis
         error!(node, :ARITY_MISMATCH, node.name, min_args, given_args)
       else
         error!(node, :ARITY_MISMATCH_RANGE, node.name, min_args, max_args, given_args)
+      end
+    end
+
+    # A2. Inject default args for omitted optional params.
+    if given_args < max_args
+      params[given_args...max_args].each do |param|
+        next if param[:required]
+        default = param[:default]
+        injected = case default
+        when AST::DefaultLit
+          type_name = param[:type].is_a?(Symbol) ? param[:type].to_s : param[:type].to_s
+          AST::StructLit.new(default.token, type_name, {}, nil)
+        else
+          default.dup
+        end
+        visit(injected)
+        node.args << injected
       end
     end
 
@@ -489,17 +507,33 @@ module FunctionAnalysis
 
   def declare_and_verify_params(node)
     node.params.each do |param|
-      # Validate Defaults (unchanged)
+      # Validate Defaults
       if param[:default]
-        visit(param[:default])
-
-        def_type = param[:default].resolved_type
-        param_type = param[:type]
-
-        unless is_safe_autocast?(def_type, param_type)
-          error!(node, "Type Error: Default value for '#{param[:name]}' expects #{param_type}, got #{def_type}")
+        if param[:default].is_a?(AST::DefaultLit)
+          # DEFAULT is only valid for struct-type params
+          param_type_sym = param[:type].is_a?(Symbol) ? param[:type] : param[:type].to_sym rescue nil
+          schema = lookup_type_schema(param_type_sym) if param_type_sym
+          unless schema.is_a?(Hash) && !schema[:kind]
+            error!(node, "Type Error: DEFAULT can only be used for struct-type parameters, not '#{param[:type]}'")
+          end
+          # Validate all fields of the struct have defaults
+          field_names = schema.keys.reject { |k| k.is_a?(Symbol) }
+          unless field_names.empty?
+            field_defaults = schema[:field_defaults] || {}
+            missing = field_names.reject { |f| field_defaults.key?(f) }
+            if missing.any?
+              error!(node, "Type Error: DEFAULT for '#{param[:name]}' requires '#{param[:type]}' to have defaults for all fields; missing: #{missing.join(', ')}")
+            end
+          end
+          param[:default].full_type = param[:type].to_sym rescue param[:type]
+        else
+          visit(param[:default])
+          def_type = param[:default].resolved_type
+          param_type = param[:type]
+          unless is_safe_autocast?(def_type, param_type)
+            error!(node, "Type Error: Default value for '#{param[:name]}' expects #{param_type}, got #{def_type}")
+          end
         end
-        # TODO: If types different, set coerced_type
       end
 
       current_scope.declare(

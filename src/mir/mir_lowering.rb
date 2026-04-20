@@ -225,6 +225,7 @@ class MIRLowering
 
     # --- Expressions ---
     when AST::Literal           then lower_literal(node)
+    when AST::DefaultLit        then MIR::Lit.new(".{}")
     when AST::Identifier        then lower_identifier(node)
     when AST::BinaryOp          then lower_binary_op(node)
     when AST::UnaryOp           then lower_unary_op(node)
@@ -652,6 +653,13 @@ class MIRLowering
     MIR::EnumDef.new(node.name, node.variants.map(&:to_s), nil)
   end
 
+  def lower_field_default(node)
+    case node
+    when AST::DefaultLit then MIR::Lit.new(".{}")
+    else lower(node)
+    end
+  end
+
   def lower_struct_def(node)
     @struct_schemas[node.name.to_sym] = node.fields
 
@@ -660,7 +668,8 @@ class MIRLowering
       comptime_params = node.type_params.map { |p| "comptime #{p}: type" }
       fields_mir = node.fields.map { |name, fd|
         zig_t = transpile_type(fd[:type], is_field: true)
-        MIR::FieldDef.new(name.to_s, zig_t, nil)
+        default_mir = fd[:default] ? lower_field_default(fd[:default]) : nil
+        MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
       inner_struct = MIR::StructDef.new(nil, fields_mir, nil, nil)
       body = [MIR::ReturnStmt.new(inner_struct)]
@@ -668,7 +677,8 @@ class MIRLowering
     else
       fields = node.fields.map { |name, fd|
         zig_t = transpile_type(fd[:type], is_field: true)
-        MIR::FieldDef.new(name.to_s, zig_t, nil)
+        default_mir = fd[:default] ? lower_field_default(fd[:default]) : nil
+        MIR::FieldDef.new(name.to_s, zig_t, default_mir)
       }
       MIR::StructDef.new(node.name, fields, nil, nil)
     end

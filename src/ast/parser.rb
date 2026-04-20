@@ -122,6 +122,7 @@ class Parser
   primary(:KEYWORD, 'TRUE') { t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, true) }
   primary(:KEYWORD, 'FALSE') { t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, false) }
   primary(:KEYWORD, 'NIL') { t = consume(:KEYWORD); AST::Literal.new(t, :NIL, nil) }
+  primary(:KEYWORD, 'DEFAULT') { t = consume(:KEYWORD, 'DEFAULT'); AST::DefaultLit.new(t) }
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
@@ -600,18 +601,20 @@ class Parser
 
       p_name = consume(:VAR_ID).value unless is_comptime
       p_type = :Any
+      default_val = nil
 
       if is_comptime
         consume(:CHAR, ':')
         p_type = consume(:TYPE_ID).value.to_sym  # The type param name (T)
         p_name = "comptime"
-      elsif match!(:CHAR, ":")
-        p_type = parse_type_annotation
-      end
-
-      default_val = nil
-      if match!(:CHAR, '=')
-        default_val = parse_expression()
+      else
+        # Syntax: name=default: Type  (default before type annotation)
+        if match!(:CHAR, '=')
+          default_val = parse_expression()
+        end
+        if match!(:CHAR, ':')
+          p_type = parse_type_annotation
+        end
       end
 
       { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime }
@@ -1455,17 +1458,19 @@ class Parser
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name = consume(:VAR_ID).value
+
+      # Syntax: name=default: Type  (default before type annotation)
+      default_val = nil
+      if match!(:CHAR, '=')
+        default_val = parse_expression()
+      end
+
       consume(:CHAR, ':')
 
       # Optional BORROWED modifier: field is a reference, not owned
       borrowed = match!(:KEYWORD, 'BORROWED') ? true : false
 
       type = parse_type_annotation()
-
-      default_val = nil
-      if match!(:CHAR, '=')
-        default_val = parse_expression()
-      end
 
       [name, { type: type, default: default_val, borrowed: borrowed }]
     end

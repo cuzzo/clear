@@ -280,7 +280,7 @@ RSpec.describe SemanticAnnotator do
       context "Matching Types" do
         let(:code) {
           <<~FLUX
-            FN increment(n: Float64 = 1) -> RETURN n + 1; END
+            FN increment(n=1: Float64) -> RETURN n + 1; END
           FLUX
         }
         it "allows correct default values" do
@@ -292,7 +292,7 @@ RSpec.describe SemanticAnnotator do
         let(:code) {
           <<~FLUX
             -- n expects Float64, default is String
-            FN increment(n: Float64 = "1") -> RETURN n; END
+            FN increment(n="1": Float64) -> RETURN n; END
           FLUX
         }
         it "raises error when default value type mismatch" do
@@ -417,7 +417,7 @@ RSpec.describe SemanticAnnotator do
     context "Default Arguments" do
       let(:base_code) {
         <<~FLUX
-          FN increment(n: Float64, by: Float64 = 1) RETURNS Float64 ->
+          FN increment(n: Float64, by=1: Float64) RETURNS Float64 ->
             RETURN n + by;
           END
         FLUX
