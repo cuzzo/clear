@@ -157,24 +157,11 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/concurrent/09_kvstore/  # Control
 ```
 
 ### Performance
-**Single-Core (HashMap):**
- * Integer-key HashMap is comparable to hand-optimized do-it-yourself C hashmaps (within ~26%).
- * String workloads and other workloads typically remain within 0-30% of hand-optimized C.
 
-**Multi-Core, Non-Adversarial:**
-  * Achieves throughput parity (within 5%) with Rust/Tokio and Go.
-  * CLEAR uses similar peak memory to Rust, about ~50% of Go due to the absence of a garbage collector.
+  * On a single core, typically with 0-30% of Perfect C code.
+  * In concurrent throughput and p99 latency, typically competitive with Rust/Tokio and Go. 
 
-**Multi-Core, Adversarial (Pathological Workloads):**
-  * Demonstrates high throughput and competitive p99.9 latency under skewed/adversarial loads using cooperative scheduling.
-     * Though Go's preemptive scheduler maintains a slight edge in p99 consistency.
-
-**Reality: Multi-Core KV Store (vs Dragonfly):**
- * Matches Dragonfly's raw I/O and sharded HashMap throughput (within 5-10%) and offers better p99 latency.
-    * Explicit caveat that this compares a minimal parser to a feature-complete production database.
-    * Though this is achieved in ~50 lines of code.
-
-See [benchmarks/README.md](benchmarks/README.md) for more details and [docs/agents/benchmarks.md](docs/agents/benchmarks.md) for a table comparison.
+See [benchmarks/README.md](benchmarks/README.md).
 
 ## ⚠️ DISCLAIMER ⚠️
 
