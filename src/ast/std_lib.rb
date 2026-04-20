@@ -21,6 +21,26 @@ STD_LIB = {
     mutates_receiver: true,
   },
 
+  "insert" => {
+    args: [:"Any[]", { type: :Any, takes: true }],
+    return: :Void,
+    zig: "try {0}.append({alloc}, {1})",
+    narrows_collection: true,
+    allocates: true,
+    alloc: :receiver_storage,
+    mutates_receiver: true,
+  },
+
+  "push" => {
+    args: [:"Any[]", { type: :Any, takes: true }],
+    return: :Void,
+    zig: "try {0}.append({alloc}, {1})",
+    narrows_collection: true,
+    allocates: true,
+    alloc: :receiver_storage,
+    mutates_receiver: true,
+  },
+
   # Pre-allocate capacity without inserting elements. No-op if capacity already sufficient.
   # Avoids doubling waste when the final size is known before filling a loop.
   #
@@ -44,6 +64,15 @@ STD_LIB = {
     zig: "{0}.orderedRemove(@intCast({1}))",
     mutates_receiver: true,
     borrows: :all,  # borrows list + index; returns owned element
+  },
+
+  # pop() — remove and return the last element, or null if empty.
+  "pop" => {
+    args: [:"Any[]"],
+    return: :infer_optional_element_type,
+    zig: "{0}.pop()",
+    mutates_receiver: true,
+    borrows: :all,
   },
 
 
@@ -653,6 +682,13 @@ MAP_METHODS = {
     borrows: :all,
   },
   "count" => {
+    arity: 0, tag: :map_method,
+    zig: "{0}.count()",
+    numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
+    return_type: ->(_) { Type.new(:Int64) },
+    borrows: :all,
+  },
+  "length" => {
     arity: 0, tag: :map_method,
     zig: "{0}.count()",
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",

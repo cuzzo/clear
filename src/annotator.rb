@@ -2816,6 +2816,14 @@ private
     ti&.element_type&.resolved || :Any
   end
 
+  # Infer return type for list.pop() — returns ?T (optional element type).
+  def infer_optional_element_type(args, node)
+    receiver = args.first
+    ti = receiver&.type_info
+    elem = ti&.element_type&.resolved || :Any
+    :"?#{elem}"
+  end
+
   def visit_LinkNode(node)
     visit(node.value)
     ti = node.value.type_info

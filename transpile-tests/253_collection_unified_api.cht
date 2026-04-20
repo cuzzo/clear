@@ -1,0 +1,60 @@
+-- Test: unified collection API - insert/push/pop work on @list,
+-- insert/length work uniformly across @set, @pool, and HashMap.
+
+STRUCT Item { val: Int64 }
+
+FN main() RETURNS Void ->
+    -- @list: insert and push are aliases for append
+    MUTABLE nums: Int64[]@list = [];
+    nums.insert(5);
+    nums.push(10);
+    nums.insert(15);
+    ASSERT nums.length() == 3, "list length after insert/push";
+    ASSERT nums[0] == 5,  "list[0]";
+    ASSERT nums[1] == 10, "list[1]";
+    ASSERT nums[2] == 15, "list[2]";
+
+    -- @list: pop returns ?T
+    MUTABLE popped: Int64 = -1;
+    IF nums.pop() AS last THEN
+        popped = last;
+    END
+    ASSERT popped == 15, "popped last element";
+    ASSERT nums.length() == 2, "list length after pop";
+
+    -- pop on empty list returns nil
+    MUTABLE empty: Int64[]@list = [];
+    MUTABLE popped_nil: Bool = FALSE;
+    IF empty.pop() AS _ THEN
+        popped_nil = TRUE;
+    ELSE
+        popped_nil = FALSE;
+    END
+    ASSERT popped_nil == FALSE, "empty pop returns nil";
+
+    -- @set: insert and length
+    MUTABLE s: Int64[]@set = [];
+    s.insert(1);
+    s.insert(2);
+    s.insert(3);
+    ASSERT s.length() == 3, "set length";
+    ASSERT s.contains?(2) == TRUE, "set contains 2";
+
+    -- @pool: insert returns Id, length counts live slots
+    MUTABLE pool: Item[100]@pool = [];
+    id1 = pool.insert(Item{ val: 42 });
+    id2 = pool.insert(Item{ val: 99 });
+    ASSERT pool.length() == 2, "pool length";
+    IF pool[id1] AS item THEN
+        ASSERT item.val == 42, "pool get id1";
+    END
+
+    -- HashMap: length as alias for count
+    MUTABLE m: HashMap<Int64> = {};
+    m["x"] = 10;
+    m["y"] = 20;
+    ASSERT m.length() == 2, "map length";
+    ASSERT m.count() == 2,  "map count still works";
+
+    RETURN;
+END
