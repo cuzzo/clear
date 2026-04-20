@@ -316,6 +316,7 @@ module AST
     attr_accessor :string_concat  # true when this is string + (stamped by annotator)
     attr_accessor :storage        # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
+    attr_accessor :paren_bind     # true when this :BIND_VAR was wrapped in parens: (expr AS name)
   end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
@@ -352,6 +353,13 @@ module AST
     attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
     attr_accessor :then_result_type    # Type of last value expression in then_branch
     attr_accessor :else_result_type    # Type of last value expression in else_branch
+  end
+  # IF x AS y [&& z AS a] THEN ... [ELSE ...] END
+  # bindings: Array of { expr:, name:, name_token: }
+  # single binding emits: if (expr) |y| { ... }
+  # multi binding emits labeled block: blk: { const y = expr1 orelse break :blk; const a = expr2 orelse break :blk; ... }
+  IfBind       = Struct.new(:token, :bindings, :then_branch, :else_branch) do
+    include Locatable
   end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     include Locatable

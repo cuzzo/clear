@@ -147,6 +147,9 @@ class MIRChecker
     when MIR::IfStmt
       walk_mir(node.then_body, &block)
       walk_mir(node.else_body, &block)
+    when MIR::IfBindStmt
+      walk_mir(node.then_body, &block)
+      walk_mir(node.else_body, &block)
     when MIR::WhileStmt, MIR::ForStmt
       walk_mir(node.body, &block)
     when MIR::ScopeBlock, MIR::BlockExpr

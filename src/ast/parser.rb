@@ -181,6 +181,17 @@ class Parser
   primary(:CHAR, '(') do
     consume(:CHAR, '(')
     expr = parse_expression
+    # (expr AS name): optional binding group used in IF (expr AS name) && ...
+    # parse_expression stops at AS (guard blocks non-@-prefixed tokens), so check explicitly.
+    if match?(:KEYWORD, 'AS')
+      consume(:KEYWORD, 'AS')
+      name_tok = consume(:VAR_ID)
+      consume(:CHAR, ')')
+      bind = AST::BinaryOp.new(name_tok, expr, :BIND_VAR,
+               AST::Identifier.new(name_tok, name_tok.value))
+      bind.paren_bind = true
+      next parse_suffixes(bind)
+    end
     consume(:CHAR, ')')
     parse_suffixes(expr)
   end
@@ -1248,6 +1259,29 @@ class Parser
       return AST::IfStatement.new(if_token, condition, [stmt].compact, [])
     end
 
+    # Single bare bind: IF expr AS name [THEN ...]
+    # AS is not consumed by parse_expression (guard blocks non-@-prefixed identifiers),
+    # so we check for it explicitly here.
+    if match?(:KEYWORD, 'AS')
+      consume(:KEYWORD, 'AS')
+      name_tok = consume(:VAR_ID)
+      # Bare multi-bind error: IF expr AS name && expr2 AS name2 THEN
+      if match?(:CHAR, '&&')
+        error!(if_token,
+          "Syntax Error: Multiple optional bindings require parentheses around each binding.\n" \
+          "  Found: IF expr AS name && expr AS name THEN\n" \
+          "  Use:   IF (expr AS name) && (expr AS name) THEN")
+      end
+      bindings = [{ expr: condition, name: name_tok.value, name_token: name_tok }]
+      return parse_if_bind_body(if_token, bindings)
+    end
+
+    # Paren-bind form: IF (expr AS name) [&& (expr2 AS name2)] THEN ...
+    # Paren primary marks BinaryOp(:BIND_VAR) with paren_bind:true when (expr AS name) is parsed.
+    if (bindings = extract_paren_bindings(condition, if_token))
+      return parse_if_bind_body(if_token, bindings)
+    end
+
     consume(:KEYWORD, 'THEN')
     then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
 
@@ -1269,6 +1303,56 @@ class Parser
     end
 
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+  end
+
+  def parse_if_bind_body(if_token, bindings)
+    consume(:KEYWORD, 'THEN')
+    then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
+    else_branch = []
+    if match!(:KEYWORD, 'ELSE')
+      else_branch = parse_block_body(['END'])
+      consume(:KEYWORD, 'END')
+    else
+      consume(:KEYWORD, 'END')
+    end
+    AST::IfBind.new(if_token, bindings, then_branch, else_branch)
+  end
+
+  # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
+  # Returns nil if condition is not a paren-bind pattern.
+  # Raises error if any bind in a && chain is bare (not paren-wrapped).
+  def extract_paren_bindings(node, if_token)
+    case node
+    when AST::BinaryOp
+      if node.op == :BIND_VAR
+        return node.paren_bind ? [{ expr: node.left, name: node.right.name, name_token: node.right.token }] : nil
+      elsif node.op == :AND  # && maps to :AND in OP_TO_OP_CODE
+        left_binds  = extract_paren_bindings(node.left, if_token)
+        right_binds = extract_paren_bindings(node.right, if_token)
+        # Only treat as bind-chain if at least one side is a paren-bind
+        if left_binds || right_binds
+          # Validate: bare binds in && position are illegal
+          validate_no_bare_bind!(node.left,  if_token) unless left_binds
+          validate_no_bare_bind!(node.right, if_token) unless right_binds
+          return (left_binds || []).concat(right_binds || [])
+        end
+      end
+    end
+    nil
+  end
+
+  # Raises an error if node is a non-paren BIND_VAR anywhere in the && tree.
+  def validate_no_bare_bind!(node, if_token)
+    return unless node.is_a?(AST::BinaryOp)
+    if node.op == :BIND_VAR && !node.paren_bind
+      error!(if_token,
+        "Syntax Error: Multiple optional bindings require parentheses around each binding.\n" \
+        "  Found: IF expr AS name && expr AS name THEN\n" \
+        "  Use:   IF (expr AS name) && (expr AS name) THEN")
+    elsif node.op == :AND
+      validate_no_bare_bind!(node.left,  if_token)
+      validate_no_bare_bind!(node.right, if_token)
+    end
   end
 
   # Expression-position IF: each branch is a single expression (no semicolons).

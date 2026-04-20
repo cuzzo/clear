@@ -719,6 +719,43 @@ private
     node.full_type = :Void
   end
 
+  def visit_IfBind(node)
+    # Visit and validate each binding expression.
+    node.bindings.each do |b|
+      visit(b[:expr])
+      ti = b[:expr].type_info
+      unless ti&.optional?
+        error!(b[:expr], "IF ... AS binding requires an optional type, got '#{b[:expr].resolved_type}'")
+      end
+      # Annotate each binding with the unwrapped type for use in lowering.
+      unwrapped = ti.wrapped_type
+      b[:unwrapped_type] = unwrapped
+    end
+
+    branch_logic = [
+      proc {
+        # Declare each binding in the then-scope with the unwrapped type.
+        node.bindings.each do |b|
+          unwrapped = b[:unwrapped_type]
+          sym = unwrapped.is_a?(Type) ? unwrapped.resolved : unwrapped
+          current_scope.declare(b[:name], nil, unwrapped, false, false, nil, :stack)
+          entry = current_scope.locals[b[:name]]
+          b[:symbol] = entry
+          classify_ownership!(entry)
+        end
+        visit_stmts(node.then_branch)
+        nil
+      },
+      proc {
+        visit_stmts(node.else_branch)
+        nil
+      }
+    ]
+
+    analyze_control_flow_branches(branch_logic)
+    node.full_type = :Void
+  end
+
   # Type-checks a struct destructuring pattern against the match subject type.
   # Verifies field names exist and value types match the struct schema.
   def annotate_struct_pattern!(match_node, pat)

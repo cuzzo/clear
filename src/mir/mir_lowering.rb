@@ -204,6 +204,7 @@ class MIRLowering
 
     # --- Control flow ---
     when AST::IfStatement       then lower_if(node)
+    when AST::IfBind            then lower_if_bind(node)
     when AST::WhileLoop         then lower_while(node)
     when AST::ForEach           then lower_for_each(node)
     when AST::ForRange          then lower_for_range(node)
@@ -1234,7 +1235,10 @@ class MIRLowering
 
   def lower_method_call(node)
     # Intrinsic pattern: already resolved by annotator
-    return lower_intrinsic(node) if node.zig_pattern
+    if node.zig_pattern
+      return lower_safe_nav_method_call(node) if node.object.is_a?(AST::OptionalUnwrap)
+      return lower_intrinsic(node)
+    end
 
     # Extern method dispatch
     if node.instance_variable_get(:@extern_method)
@@ -1283,6 +1287,31 @@ class MIRLowering
     call = MIR::Call.new(fn_zig, all_args, can_fail)
     call.heap_provenance = call_heap_provenance?(node)
     call
+  end
+
+  # Safe navigation for method calls: expr?.method(args)
+  # Wraps the call in (if (expr) |_snav_N| call_with_N_as_receiver else null).
+  def lower_safe_nav_method_call(node)
+    @safe_nav_counter = (@safe_nav_counter || 0) + 1
+    snav_var = "_snav_#{@safe_nav_counter}"
+
+    inner_mir = lower(node.object.target)
+    inner_zig = emit_expr(inner_mir)
+
+    snav_ident = AST::Identifier.new(node.object.token, snav_var)
+    snav_ident.full_type = node.object.type_info  # T (unwrapped)
+
+    synthetic = node.dup
+    synthetic.object = snav_ident
+
+    call_mir  = lower_intrinsic(synthetic)
+    call_zig  = emit_expr(call_mir)
+
+    MIR::InlineZig.new(
+      "(if (#{inner_zig}) |#{snav_var}| #{call_zig} else null)",
+      "optional_safe_nav",
+      { borrows: :all }
+    )
   end
 
   def lower_intrinsic(node)
@@ -2977,21 +3006,25 @@ class MIRLowering
       end
     end
 
-    # Safe field access on optional Rc/Arc: expr?.field
-    # AST::OptionalUnwrap + multiowned/shared inner type -> force-unwrap would panic on nil.
-    # Generate (if (expr) |_r| _r.ctrl.data.field else null) so the result stays ?FieldType
-    # and a subsequent OR fallback can orelse it correctly.
+    # Safe field access on any ?T: expr?.field
+    # Always generate safe navigation so nil propagates instead of panicking.
     if node.target.is_a?(AST::OptionalUnwrap)
-      inner_ti = node.target.type_info  # unwrapped type set by visit_OptionalUnwrap
-      if inner_ti&.multiowned? || inner_ti&.shared?
-        inner_mir = lower(node.target.target)
-        inner_zig = emit_expr(inner_mir)
-        return MIR::RawZig.new(
-          "(if (#{inner_zig}) |_r| _r.ctrl.data.#{node.field} else null)",
-          "optional_rc_field_get",
-          { consumes: [], produces: [], borrows: [] }
-        )
+      inner_ti = node.target.type_info  # T (unwrapped)
+      inner_mir = lower(node.target.target)
+      inner_zig = emit_expr(inner_mir)
+      field_expr = if inner_ti&.multiowned? || inner_ti&.shared? ||
+                       inner_ti&.locked? || inner_ti&.write_locked?
+        "_r.ctrl.data.#{node.field}"
+      elsif inner_ti&.always_mutable?
+        "_r.data.#{node.field}"
+      else
+        "_r.#{node.field}"
       end
+      return MIR::RawZig.new(
+        "(if (#{inner_zig}) |_r| #{field_expr} else null)",
+        "optional_field_get",
+        { consumes: [], produces: [], borrows: [] }
+      )
     end
 
     target = lower(node.target)
@@ -3062,6 +3095,15 @@ class MIRLowering
       end
     elsif ti&.pool?
       MIR::MethodCall.new(target, "get", [index], false)
+    elsif ti&.set_collection?
+      # @set[item]: membership check — returns ?T (item if present, null otherwise)
+      target_zig = emit_expr(target)
+      index_zig  = emit_expr(index)
+      elem_zig   = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type.zig_type
+      pattern = "if (#{target_zig}.contains(#{index_zig})) @as(#{elem_zig}, #{index_zig}) else null"
+      iz = MIR::InlineZig.new(pattern, "set_member_get")
+      iz.stdlib_def = { borrows: :all }
+      iz
     elsif node.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
       items = MIR::FieldGet.new(target, "items")
@@ -3697,7 +3739,7 @@ class MIRLowering
 
     # Emit pre-cleanup for non-Copy element types in list collections so the
     # overwritten element is freed before the new value is written in place.
-    if kind == :array && receiver_type.list_collection?
+    if (kind == :array || kind == :list) && receiver_type.list_collection?
       elem_ti = receiver_type.element_type
       if elem_ti
         sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
@@ -3787,6 +3829,15 @@ class MIRLowering
     then_body = lower_body(node.then_branch)
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfStmt.new(cond, then_body, else_body)
+  end
+
+  def lower_if_bind(node)
+    mir_bindings = node.bindings.map do |b|
+      { expr: lower(b[:expr]), capture: b[:name] }
+    end
+    then_body = lower_body(node.then_branch)
+    else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
+    MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
   end
 
   def lower_while(node)
@@ -3891,6 +3942,19 @@ class MIRLowering
       MIR::WhileStmt.new(
         MIR::MethodCall.new(coll, "nextOrNull", [], true),
         body, var, nil, mark_per_iter, tight)
+    elsif ct.set_collection?
+      # Set: iterate via keyIterator(). next() returns ?*T so we deref in the body.
+      @for_counter = (@for_counter || 0) + 1
+      iter_var  = "__kit_#{@for_counter}"
+      ptr_var   = "__kptr_#{@for_counter}"
+      iter_init = MIR::Let.new(iter_var, MIR::MethodCall.new(coll, "keyIterator", [], false), true, nil, nil)
+      deref     = MIR::Let.new(var, MIR::FieldGet.new(MIR::Ident.new(ptr_var), "*"), false, nil, nil)
+      full_body = [deref, MIR::Suppress.new(var)] + body
+      while_stmt = MIR::WhileStmt.new(
+        MIR::MethodCall.new(MIR::Ident.new(iter_var), "next", [], false),
+        full_body, ptr_var, nil, mark_per_iter, tight
+      )
+      MIR::ScopeBlock.new([iter_init, while_stmt])
     else
       is_field_access = node.collection.is_a?(AST::GetField)
       is_param = node.collection.is_a?(AST::Identifier) &&

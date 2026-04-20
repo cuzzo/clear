@@ -145,6 +145,14 @@ module MIR
     include Stmt
   end
 
+  # IF x AS y [&& z AS a] THEN ... [ELSE ...] END
+  # Single binding: if (expr) |y| { then_body } else { else_body }
+  # Multi binding:  blk: { const y = expr1 orelse break :blk; ... then_body } if (!ok) { else_body }
+  # bindings: Array of { expr: MIR node, capture: String }
+  IfBindStmt = Struct.new(:bindings, :then_body, :else_body) do
+    include Stmt
+  end
+
   # While loop.
   # Zig: while (cond) [: (update)] [|capture|] { body }
   WhileStmt = Struct.new(:cond, :body, :capture, :update, :mark_per_iter, :tight) do

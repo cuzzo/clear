@@ -51,6 +51,7 @@ class MIREmitter
     when MIR::Set              then emit_set(node)
     when MIR::ReassignWithCleanup then emit_reassign_cleanup(node)
     when MIR::IfStmt           then emit_if_stmt(node)
+    when MIR::IfBindStmt       then emit_if_bind_stmt(node)
     when MIR::WhileStmt        then emit_while(node)
     when MIR::ForStmt          then emit_for(node)
     when MIR::SwitchStmt       then emit_switch(node)
@@ -252,6 +253,33 @@ class MIREmitter
       result += " else {\n#{else_body}\n}"
     end
     result
+  end
+
+  def emit_if_bind_stmt(node)
+    then_body = emit_body(node.then_body)
+    else_body = node.else_body && !node.else_body.empty? ? emit_body(node.else_body) : nil
+
+    if node.bindings.length == 1
+      b = node.bindings[0]
+      expr = emit(b[:expr])
+      result = "if (#{expr}) |#{b[:capture]}| {\n#{then_body}\n}"
+      result += " else {\n#{else_body}\n}" if else_body
+      result
+    else
+      # Multi-binding: labeled break block
+      @if_bind_counter = (@if_bind_counter || 0) + 1
+      label = "__ib_#{@if_bind_counter}"
+      ok_var = "__ib_ok_#{@if_bind_counter}"
+      inner = node.bindings.map { |b|
+        "const #{b[:capture]} = #{emit(b[:expr])} orelse break :#{label};"
+      }.join("\n")
+      result = "var #{ok_var}: bool = false;\n"
+      result += "#{label}: {\n#{inner}\n#{then_body}\n#{ok_var} = true;\n}"
+      if else_body
+        result += "\nif (!#{ok_var}) {\n#{else_body}\n}"
+      end
+      result
+    end
   end
 
   def emit_while(node)
