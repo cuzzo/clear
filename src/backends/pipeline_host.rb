@@ -1030,7 +1030,9 @@ class PipelineHost
 
     # Stream source: use lazy while loop instead of materializing first.
     if (range_chain = unwrap_range_chain(list_node))
-      elem_sym = if lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream?
+      elem_sym = if lhs_ti&.open_stream?
+        lhs_ti.open_stream_element_type.resolved
+      elsif lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream?
         lhs_ti.tense_type.element_type.resolved
       elsif range_chain[:source].type_info&.inf_stream?
         # list_node is a SMOOTH chain (e.g. counter s> LIMIT 9); lhs_ti is the
@@ -1358,6 +1360,7 @@ class PipelineHost
 
   def finite_stream_source_node?(node)
     node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? ||
+      node.type_info&.open_stream? ||
       node.type_info&.bounded_stream? || node.type_info&.inf_stream?
   end
 
@@ -1657,7 +1660,9 @@ class PipelineHost
   # by any stage -- used by callers to decide between |__each_item| and |_| in Zig.
   def build_lazy_range_prefix(source_node, stages, on_skip: nil)
     source_ti = source_node.type_info
-    elem_t = if source_ti&.dynamic_stream? || source_ti&.bounded_stream?
+    elem_t = if source_ti&.open_stream?
+      source_ti.open_stream_element_type
+    elsif source_ti&.dynamic_stream? || source_ti&.bounded_stream?
       source_ti.tense_type.element_type
     elsif source_ti&.inf_stream?
       source_ti.inf_stream_element_type
@@ -1731,7 +1736,8 @@ class PipelineHost
     end
 
     is_var_stream = source_node.is_a?(AST::Identifier) &&
-                   (source_ti&.dynamic_stream? || source_ti&.bounded_stream? || source_ti&.inf_stream?)
+                   (source_ti&.dynamic_stream? || source_ti&.open_stream? ||
+                    source_ti&.bounded_stream? || source_ti&.inf_stream?)
     source_name = is_var_stream ? source_node.name.to_s : "__range_src"
     range_let = is_var_stream ? nil :
       MIR::Let.new("__range_src", visit_mir(source_node), true, nil, "_ = &__range_src;")

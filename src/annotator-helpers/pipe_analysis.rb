@@ -31,7 +31,8 @@ module PipeAnalysis
   private
 
   def finite_stream_source?(node)
-    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? || node.type_info&.bounded_stream?
+    node.is_a?(AST::RangeLit) || node.type_info&.dynamic_stream? ||
+      node.type_info&.bounded_stream? || node.type_info&.open_stream?
   end
 
   def bounded_stream_source?(node)
@@ -40,6 +41,7 @@ module PipeAnalysis
 
   def finite_stream_element_type(node)
     return range_element_type(node) if node.is_a?(AST::RangeLit)
+    return node.type_info.open_stream_element_type.resolved if node.type_info&.open_stream?
     node.type_info.tense_type.element_type.resolved
   end
 
@@ -1133,7 +1135,8 @@ module PipeAnalysis
     when AST::SelectOp, AST::WhereOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_select_family_op(node)
-      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? || node.left.is_a?(AST::RangeLit)
+      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? ||
+            node.left.type_info&.open_stream? || node.left.is_a?(AST::RangeLit)
         analyze_concurrent_stream_select_family_op(node)
       else
         analyze_select_family_op(proxy)
@@ -1141,7 +1144,8 @@ module PipeAnalysis
     when AST::EachOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_each_op(node)
-      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? || node.left.is_a?(AST::RangeLit)
+      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? ||
+            node.left.type_info&.open_stream? || node.left.is_a?(AST::RangeLit)
         analyze_concurrent_stream_each_op(node)
       elsif shard_node
         # Explicit SHARD + CONCURRENT EACH: items are String keys.
@@ -1197,6 +1201,7 @@ module PipeAnalysis
                          (bounded_stream_source?(node.left) ||
                           node.left.type_info&.inf_stream? ||
                           node.left.type_info&.dynamic_stream? ||
+                          node.left.type_info&.open_stream? ||
                           node.left.is_a?(AST::RangeLit))
     unless stream_op_analyzed
       node.full_type = proxy.full_type
@@ -1339,7 +1344,8 @@ module PipeAnalysis
     return if node.left.metatype == :array
     return if lhs_type&.collection?
     return if allow_range && node.left.is_a?(AST::RangeLit)
-    return if allow_stream && (lhs_type&.dynamic_stream? || lhs_type&.bounded_stream? || lhs_type&.inf_stream?)
+    return if allow_stream && (lhs_type&.dynamic_stream? || lhs_type&.bounded_stream? ||
+                               lhs_type&.inf_stream? || lhs_type&.open_stream?)
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
       error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")

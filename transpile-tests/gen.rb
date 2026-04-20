@@ -17,7 +17,8 @@ class TestGenerator
       fn_sigs: result.fn_sigs,
       moved_guard_info: result.moved_guard_info,
       importer: importer,
-      source_dir: source_dir
+      source_dir: source_dir,
+      debug_mode: true
     )
     program = lowering.lower_program(result.ast)
 

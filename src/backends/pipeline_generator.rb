@@ -597,7 +597,7 @@ module PipelineGenerator
       }.join("\n        ")
     end
 
-    if lhs_type&.dynamic_stream?
+    if lhs_type&.dynamic_stream? || lhs_type&.open_stream?
       stream_code = visit(lhs)
       source_name, setup =
         if lhs.is_a?(AST::Identifier)
@@ -1005,7 +1005,7 @@ module PipelineGenerator
       end
     end
 
-    if lhs_type&.inf_stream? || lhs_type&.dynamic_stream? || lhs.is_a?(AST::RangeLit)
+    if lhs_type&.inf_stream? || lhs_type&.dynamic_stream? || lhs_type&.open_stream? || lhs.is_a?(AST::RangeLit)
       case inner
       when AST::SelectOp
         return transpile_concurrent_stream_select(lhs, inner, id, workers_code, rt_name, options)
@@ -1298,9 +1298,13 @@ module PipelineGenerator
     policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
 
     stream_ti = stream_node.type_info
-    is_inf = stream_ti&.inf_stream?
-    item_zig   = transpile_type(is_inf ? stream_ti.inf_stream_element_type.resolved
-                                       : stream_ti.tense_type.element_type.resolved)
+    is_inf  = stream_ti&.inf_stream?
+    is_open = stream_ti&.open_stream?
+    item_zig = transpile_type(
+      if is_inf then stream_ti.inf_stream_element_type.resolved
+      elsif is_open then stream_ti.open_stream_element_type.resolved
+      else stream_ti.tense_type.element_type.resolved
+      end)
     result_zig = transpile_type(select_op.expression.full_type)
     pop_method = is_inf ? "nextOrNull" : "next"
     source     = stream_concurrent_source_setup(stream_node, id)
@@ -1389,9 +1393,13 @@ module PipelineGenerator
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
     stream_ti = stream_node.type_info
-    is_inf = stream_ti&.inf_stream?
-    item_zig   = transpile_type(is_inf ? stream_ti.inf_stream_element_type.resolved
-                                       : stream_ti.tense_type.element_type.resolved)
+    is_inf  = stream_ti&.inf_stream?
+    is_open = stream_ti&.open_stream?
+    item_zig = transpile_type(
+      if is_inf then stream_ti.inf_stream_element_type.resolved
+      elsif is_open then stream_ti.open_stream_element_type.resolved
+      else stream_ti.tense_type.element_type.resolved
+      end)
     pop_method = is_inf ? "nextOrNull" : "next"
     source     = stream_concurrent_source_setup(stream_node, id)
 
@@ -1476,9 +1484,13 @@ module PipelineGenerator
   # CONCURRENT EACH on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
   def transpile_concurrent_stream_each(stream_node, each_op, conc_op, id, workers_code, rt_name, options = {})
     stream_ti  = stream_node.type_info
-    is_inf     = stream_ti&.inf_stream?
-    item_zig   = transpile_type(is_inf ? stream_ti.inf_stream_element_type.resolved
-                                       : stream_ti.tense_type.element_type.resolved)
+    is_inf  = stream_ti&.inf_stream?
+    is_open = stream_ti&.open_stream?
+    item_zig = transpile_type(
+      if is_inf then stream_ti.inf_stream_element_type.resolved
+      elsif is_open then stream_ti.open_stream_element_type.resolved
+      else stream_ti.tense_type.element_type.resolved
+      end)
     pop_method = is_inf ? "nextOrNull" : "next"
     source     = stream_concurrent_source_setup(stream_node, id)
 

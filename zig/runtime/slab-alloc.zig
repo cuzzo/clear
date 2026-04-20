@@ -215,6 +215,12 @@ pub fn SlabAllocator(comptime T: type) type {
             const mask = ~(self.slab_size - 1);
             const header_addr = ptr_addr & mask;
             const slab = @as(*SlabHeader, @ptrFromInt(header_addr));
+            // Validate the slab header looks sane
+            if (slab.used_count > 64 or (@intFromPtr(slab) & (self.slab_size - 1)) != 0) {
+                std.debug.print("[destroyToDepot] CORRUPT slab=0x{x} used_count={d} obj=0x{x}\n", .{
+                    header_addr, slab.used_count, ptr_addr,
+                });
+            }
 
             const node: *Node = @ptrCast(@alignCast(obj));
             node.next = slab.free_head;

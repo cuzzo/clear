@@ -2486,7 +2486,7 @@ class MIRLowering
   TIER_RANK = { "Micro" => 0, "Standard" => 1, "Large" => 2, "Xl" => 3, "Huge" => 4 }.freeze
 
   def task_config_zig(stack_size, computed_tier)
-    default = "Standard"
+    default = @debug_mode ? "Large" : "Standard"
     variant = if stack_size
       STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
     elsif computed_tier
@@ -3813,8 +3813,8 @@ class MIRLowering
       value_bind = MIR::Let.new(var, MIR::FieldGet.new(slot_ident, "value"), false, nil, nil)
       full_body = [skip_dead, value_bind] + body
       MIR::ForStmt.new(slots_iter, "*#{slot_var}", full_body, nil, mark_per_iter, tight)
-    elsif ct.dynamic_stream?
-      # Finite stream (~T[]): next() returns ?T; while-loop with optional capture.
+    elsif ct.dynamic_stream? || ct.open_stream?
+      # Finite/open stream (~T[] / ~?T[]): next() returns ?T; while-loop with optional capture.
       MIR::WhileStmt.new(
         MIR::MethodCall.new(coll, "next", [], true),
         body, var, nil, mark_per_iter, tight)

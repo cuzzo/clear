@@ -134,6 +134,7 @@ class PipelineRewriter
     inf_with_limit = real_source.type_info&.inf_stream? &&
                      stages.any? { |s| s.is_a?(AST::LimitOp) }
     if (real_source.is_a?(AST::RangeLit) || real_source.type_info&.dynamic_stream? ||
+        real_source.type_info&.open_stream? ||
         real_source.type_info&.bounded_stream? || inf_with_limit) && is_range_fold_terminal &&
        stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
@@ -155,7 +156,8 @@ class PipelineRewriter
     # handles it as a lazy while loop (lower_stream_index via unwrap_range_chain).
     # inf_with_limit reuses the variable already computed above.
     is_stream_index = terminal.is_a?(AST::IndexOp) &&
-                      (real_source.type_info&.dynamic_stream? || real_source.type_info&.bounded_stream? || inf_with_limit) &&
+                      (real_source.type_info&.dynamic_stream? || real_source.type_info&.open_stream? ||
+                       real_source.type_info&.bounded_stream? || inf_with_limit) &&
                       stages.all? { |s| FUSIBLE_STAGES.any? { |t| s.is_a?(t) } }
     if is_stream_index
       patch_chain_source!(node, real_source) unless real_source.equal?(chain[:source])
@@ -304,7 +306,16 @@ class PipelineRewriter
     current_it = AST::Identifier.new(token, it_var)
     if source.respond_to?(:full_type) && source.full_type
       src_t = Type.new(source.full_type)
-      current_it.full_type = src_t.element_type if src_t.element_type
+      elem_t = if src_t.open_stream?
+        src_t.open_stream_element_type
+      elsif src_t.dynamic_stream? || src_t.bounded_stream?
+        src_t.tense_type.element_type
+      elsif src_t.inf_stream?
+        src_t.inf_stream_element_type
+      else
+        src_t.element_type
+      end
+      current_it.full_type = elem_t if elem_t
     end
 
     stage_inits = []

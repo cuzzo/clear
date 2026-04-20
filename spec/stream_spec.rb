@@ -1457,7 +1457,7 @@ RSpec.describe SemanticAnnotator do
         expect { run(src) }.not_to raise_error
       end
 
-      it "rejects EACH on BG/open streams as non-collection pipeline sources" do
+      it "accepts EACH on BG/open streams as sequential pipeline op" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
@@ -1465,10 +1465,10 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Cannot EACH non-collection type ~\?Int64\[\]/)
+        expect { run(src) }.not_to raise_error
       end
 
-      it "rejects REDUCE on BG/open streams as non-list pipeline sources" do
+      it "accepts REDUCE on BG/open streams as sequential pipeline op" do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
@@ -1476,7 +1476,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Cannot REDUCE non-list type ~\?Int64\[\]/)
+        expect { run(src) }.not_to raise_error
       end
     end
 
