@@ -147,13 +147,13 @@ cd transpile-tests/ffi-integration && zig build test
 ### Benchmarks
 
 ```bash
-ruby benchmarks/runner.rb --smoke benchmarks/24_json_api/   # CLEAR only, fast (~5s)
-ruby benchmarks/runner.rb --fast benchmarks/05_hashmap/     # All langs, quick (~30s)
-ruby benchmarks/runner.rb benchmarks/05_hashmap/            # Normal (5 runs)
-ruby benchmarks/runner.rb --release benchmarks/05_hashmap/  # Exhaustive (5x load)
+ruby benchmarks/runner.rb --smoke benchmarks/server/02_json_api/   # CLEAR only, fast (~5s)
+ruby benchmarks/runner.rb --fast benchmarks/sequential/04_hashmap/     # All langs, quick (~30s)
+ruby benchmarks/runner.rb benchmarks/sequential/04_hashmap/            # Normal (5 runs)
+ruby benchmarks/runner.rb --release benchmarks/sequential/04_hashmap/  # Exhaustive (5x load)
 ruby benchmarks/runner.rb --all                             # All benchmarks
 ruby benchmarks/runner.rb --smoke --all                     # Smoke test everything
-ruby benchmarks/runner.rb --cores=4 benchmarks/17_kvstore/  # Control core count
+ruby benchmarks/runner.rb --cores=4 benchmarks/concurrent/09_kvstore/  # Control core count
 ```
 
 ### Performance
