@@ -4,7 +4,7 @@ FN main() RETURNS Void ->
     -- DISTINCT on dynamic range stream (~T[])
     s1: ~Int64[] = 1 ..< 6;
     u1 = s1 s> DISTINCT _;
-    ASSERT u1.count() == 5_i64, "distinct range 1..5: 5 unique";
+    ASSERT u1.length() == 5_i64, "distinct range 1..5: 5 unique";
     ASSERT u1.contains?(3_i64), "contains 3";
 
     -- DISTINCT on ~T[INF] with LIMIT: unique items from counter
@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
         END
     };
     u2 = counter s> LIMIT 9 s> DISTINCT _;
-    ASSERT u2.count() == 3_i64, "1 MOD 3 cycles through 0,1,2";
+    ASSERT u2.length() == 3_i64, "1 MOD 3 cycles through 0,1,2";
     ASSERT u2.contains?(0_i64), "contains 0";
     ASSERT u2.contains?(1_i64), "contains 1";
     ASSERT u2.contains?(2_i64), "contains 2";
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
         END
     };
     u3 = counter2 s> WHERE _ MOD 2 == 0 s> LIMIT 10 s> DISTINCT _;
-    ASSERT u3.count() == 3_i64, "even residues mod 5: 0, 2, 4";
+    ASSERT u3.length() == 3_i64, "even residues mod 5: 0, 2, 4";
     ASSERT u3.contains?(0_i64), "contains 0";
     ASSERT u3.contains?(2_i64), "contains 2";
     ASSERT u3.contains?(4_i64), "contains 4";
@@ -38,7 +38,7 @@ FN main() RETURNS Void ->
     -- DISTINCT on bounded stream (~T[N])
     s4: ~Int64[5] = [BG { 3; }, BG { 1; }, BG { 3; }, BG { 2; }, BG { 1; }];
     u4 = s4 s> DISTINCT _;
-    ASSERT u4.count() == 3_i64, "3 unique values from bounded stream";
+    ASSERT u4.length() == 3_i64, "3 unique values from bounded stream";
     ASSERT u4.contains?(1_i64), "contains 1";
     ASSERT u4.contains?(2_i64), "contains 2";
     ASSERT u4.contains?(3_i64), "contains 3";

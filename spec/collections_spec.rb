@@ -385,4 +385,238 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ===========================================================================
+  # Collection interchangeability — .length(), .contains?, FOR...IN @set,
+  # @set pipelines, @list/@set[i] indexing
+  # ===========================================================================
+  describe "Collection interchangeability" do
+    def compile(src)
+      ZigTranspiler.new.transpile(src, test_mode: true)
+    end
+
+    # -------------------------------------------------------------------------
+    # .length() on @pool
+    # -------------------------------------------------------------------------
+    describe "@pool .length()" do
+      it "resolves pool.length() to Int64" do
+        ast = run(<<~CLEAR)
+          STRUCT Item { v: Int64 }
+          FN f() RETURNS Void ->
+            MUTABLE pool: Item[10]@pool = [];
+            n: Int64 = pool.length();
+            RETURN;
+          END
+        CLEAR
+        expect { ast }.not_to raise_error
+      end
+
+      it "emits pool.length() Zig call" do
+        out = compile(<<~CLEAR)
+          STRUCT Item { v: Int64 }
+          FN main() RETURNS Void ->
+            MUTABLE pool: Item[10]@pool = [];
+            n: Int64 = pool.length();
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("pool.length()")
+      end
+
+      it "raises error for unknown method .count() on pool" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Item { v: Int64 }
+            FN f() RETURNS Void ->
+              MUTABLE pool: Item[10]@pool = [];
+              n: Int64 = pool.count();
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Unknown method 'count' on Pool/)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # .length() on @set
+    # -------------------------------------------------------------------------
+    describe "@set .length()" do
+      it "resolves set.length() to Int64" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE s: String[]@set = [];
+              s.insert("a");
+              n: Int64 = s.length();
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "emits set.length() Zig call" do
+        out = compile(<<~CLEAR)
+          FN main() RETURNS Void ->
+            MUTABLE s: String[]@set = [];
+            s.insert("hi");
+            n: Int64 = s.length();
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("s.length()")
+      end
+
+      it "raises error for .count() on set" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE s: String[]@set = [];
+              n: Int64 = s.count();
+              RETURN;
+            END
+          CLEAR
+        }.to raise_error(CompilerError, /Unknown method 'count' on Set/)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # .contains? on T[] arrays and @list
+    # -------------------------------------------------------------------------
+    describe ".contains? on arrays and @list" do
+      it "resolves contains?(arr, item) for Int64 array" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              nums: Int64[] = [1, 2, 3];
+              found: Bool = contains?(nums, 2);
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "resolves contains?(list, item) for @list" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE list: Int64[]@list = List[];
+              list.append(1);
+              found: Bool = contains?(list, 1);
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "emits CheatLib.sliceContains for array contains?" do
+        out = compile(<<~CLEAR)
+          FN main() RETURNS Void ->
+            nums: Int64[] = [1, 2, 3];
+            found: Bool = contains?(nums, 2_i64);
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("CheatLib.sliceContains")
+      end
+
+      it "returns Bool for contains? on array" do
+        ast = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            nums: Int64[] = [1, 2, 3];
+            found = contains?(nums, 2);
+            RETURN;
+          END
+        CLEAR
+        fn = ast.statements.first
+        found_bind = fn.body.find { |s| s.respond_to?(:name) && s.name == "found" }
+        expect(found_bind.full_type.resolved).to eq(:Bool)
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # .contains? on @pool
+    # -------------------------------------------------------------------------
+    describe "@pool .contains?" do
+      it "resolves pool.contains?(id) to Bool" do
+        expect {
+          run(<<~CLEAR)
+            STRUCT Item { v: Int64 }
+            FN f() RETURNS Void ->
+              MUTABLE pool: Item[10]@pool = [];
+              id = pool.insert(Item{ v: 1 });
+              found: Bool = pool.contains?(id);
+              RETURN;
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "emits pool.get(id) != null for pool.contains?" do
+        out = compile(<<~CLEAR)
+          STRUCT Item { v: Int64 }
+          FN main() RETURNS Void ->
+            MUTABLE pool: Item[10]@pool = [];
+            id = pool.insert(Item{ v: 1 });
+            found: Bool = pool.contains?(id);
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("pool.get(id) != null")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # FOR...IN on @set
+    # -------------------------------------------------------------------------
+    describe "FOR...IN @set" do
+      it "compiles FOR...IN on a String[]@set" do
+        expect {
+          run(<<~CLEAR)
+            FN f() RETURNS Void ->
+              MUTABLE s: String[]@set = [];
+              s.insert("a");
+              s.insert("b");
+              FOR item IN s DO
+                RETURN;
+              END
+            END
+          CLEAR
+        }.not_to raise_error
+      end
+
+      it "emits keyIterator loop for @set FOR...IN" do
+        out = compile(<<~CLEAR)
+          FN main() RETURNS Void ->
+            MUTABLE s: String[]@set = [];
+            s.insert("hi");
+            FOR item IN s DO
+              RETURN;
+            END
+            RETURN;
+          END
+        CLEAR
+        expect(out).to include("keyIterator()")
+        expect(out).to include(".next()")
+      end
+    end
+
+    # -------------------------------------------------------------------------
+    # @set[item] membership check returning ?T
+    # -------------------------------------------------------------------------
+    describe "@set[item] membership check" do
+      it "returns ?T for @set[item] lookup" do
+        ast = run(<<~CLEAR)
+          FN f() RETURNS Void ->
+            MUTABLE s: Int64[]@set = [];
+            s.insert(1);
+            val = s[1];
+            RETURN;
+          END
+        CLEAR
+        fn = ast.statements.first
+        val_bind = fn.body.find { |s| s.respond_to?(:name) && s.name == "val" }
+        expect(val_bind.full_type.optional?).to be true
+      end
+    end
+  end
+
 end

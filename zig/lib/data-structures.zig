@@ -1526,6 +1526,14 @@ pub fn bind(comptime deps: type) type {
             pub fn count(self: *const Self) i64 {
                 return @intCast(self.live_count);
             }
+
+            pub fn length(self: *const Self) i64 {
+                return self.count();
+            }
+
+            pub fn contains(self: *Self, id: u64) bool {
+                return self.get(id) != null;
+            }
         };
     }
 
@@ -1682,6 +1690,10 @@ pub fn bind(comptime deps: type) type {
             pub fn count(self: *const Self) i64 {
                 return @intCast(self.live_count);
             }
+
+            pub fn length(self: *const Self) i64 {
+                return self.count();
+            }
         };
     }
 
@@ -1742,6 +1754,10 @@ pub fn bind(comptime deps: type) type {
                 for (&self.shards) |*s| n += s.count();
                 return n;
             }
+
+            pub fn length(self: *const Self) i64 {
+                return self.count();
+            }
         };
     }
 
@@ -1799,7 +1815,7 @@ pub fn bind(comptime deps: type) type {
                 }
             }
 
-            pub fn contains(self: *Self, value: T) bool {
+            pub fn contains(self: *const Self, value: T) bool {
                 return self.inner.contains(value);
             }
 
@@ -1813,6 +1829,14 @@ pub fn bind(comptime deps: type) type {
 
             pub fn count(self: *Self) i64 {
                 return @intCast(self.inner.count());
+            }
+
+            pub fn length(self: *Self) i64 {
+                return self.count();
+            }
+
+            pub fn keyIterator(self: *const Self) Map.KeyIterator {
+                return self.inner.keyIterator();
             }
 
             pub fn deinit(self: *Self, alloc: std.mem.Allocator) void {

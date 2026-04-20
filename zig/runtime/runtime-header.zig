@@ -253,6 +253,29 @@ pub const CheatLib = struct {
         }
     }
 
+    // Bounds-safe index: returns null on out-of-bounds instead of panicking.
+    pub fn getAtOpt(container: anytype, index: anytype) ?ElementType(@TypeOf(container)) {
+        const i: usize = @intCast(index);
+        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        if (@hasField(@TypeOf(c), "items")) {
+            if (i >= c.items.len) return null;
+            return c.items[i];
+        } else {
+            if (i >= c.len) return null;
+            return c[i];
+        }
+    }
+
+    // Linear search over a slice or ArrayList for item equality.
+    pub fn sliceContains(container: anytype, item: anytype) bool {
+        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        const slice = if (@hasField(@TypeOf(c), "items")) c.items else c;
+        for (slice) |elem| {
+            if (eql(elem, item)) return true;
+        }
+        return false;
+    }
+
     // Byte-level character access: returns a single-byte slice ([]const u8).
     // Used by CLEAR's String@raw buf[i] indexing.
     pub noinline fn charAt(str: []const u8, index: anytype) []const u8 {

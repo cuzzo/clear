@@ -563,7 +563,8 @@ class Type
     elsif map?              then :string_map
     elsif pool?             then :pool
     elsif set_collection?   then :set_collection
-    elsif list_collection? || (array? && !string?) then :array
+    elsif list_collection?              then :list
+    elsif array? && !string?            then :array
     elsif string? && symbol? then :string_symbol
     elsif string? && raw?    then :string_raw
     end

@@ -282,12 +282,17 @@ STD_LIB = {
   },
 
   # contains?("hello", "ll") -> true
-  "contains?" => {
-    args: [STRING_TYPE, STRING_TYPE],
-    return: :Bool,
-    zig: "(std.mem.indexOf(u8, {0}, {1}) != null)",
-    borrows: :all,
-  },
+  # contains?(arr, item)     -> true/false (linear search, @list or T[])
+  "contains?" => [
+    { args: [STRING_TYPE, STRING_TYPE],
+      return: :Bool,
+      zig: "(std.mem.indexOf(u8, {0}, {1}) != null)",
+      borrows: :all },
+    { args: [:"Any[]", :Any],
+      return: :Bool,
+      zig: "CheatLib.sliceContains({0}, {1})",
+      borrows: :all },
+  ],
 
   # max(a, b) -> larger value
   "max" => [
@@ -543,10 +548,16 @@ POOL_METHODS = {
     return_type: ->(_) { :Void },
     borrows: :all,  # pool frees the slot internally
   },
-  "count" => {
+  "length" => {
     arity: 0, tag: :pool_method,
-    zig: "{0}.count()",
+    zig: "{0}.length()",
     return_type: ->(_) { Type.new(:Int64) },
+    borrows: :all,
+  },
+  "contains?" => {
+    arity: 1, tag: :pool_method,
+    zig: "({0}.get({1}) != null)",
+    return_type: ->(_) { :Bool },
     borrows: :all,
   },
 }.freeze
@@ -582,9 +593,9 @@ SET_METHODS = {
     return_type: ->(_) { :Void },
     borrows: :all,  # set frees the element internally
   },
-  "count" => {
+  "length" => {
     arity: 0, tag: :set_method,
-    zig: "{0}.count()",
+    zig: "{0}.length()",
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
   },
@@ -742,6 +753,18 @@ INDEX_OPS = {
       value_transforms: [],
     },
   },
+  list: {
+    get: {
+      zig: "CheatLib.getAt({target}, {index})",
+      return_type: ->(ct) { ct.element_type },
+      container_borrow: true,
+    },
+    set: {
+      zig: "CheatLib.setAt({target}, {index}, {value})",
+      takes_value: false,
+      value_transforms: [],
+    },
+  },
   pool: {
     get: {
       zig: "{target}.get({index})",
@@ -757,6 +780,11 @@ INDEX_OPS = {
     },
   },
   set_collection: {
+    get: {
+      zig: "if ({target}.contains({index})) {index} else null",
+      return_type: ->(ct) { Type.new(:"?#{ct.element_type.resolved}") },
+      container_borrow: true,
+    },
     set: {
       zig: "try {target}.insert({alloc}, {value})",
       takes_value: true,

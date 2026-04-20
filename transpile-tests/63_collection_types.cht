@@ -38,8 +38,8 @@ FN main() RETURNS Void ->
     id_a: Id<Point> = pool.insert(Point{ x: 10.0, y: 20.0 });
     id_b: Id<Point> = pool.insert(Point{ x: 30.0, y: 40.0 });
 
-    -- pool.count() tracks live slots
-    ASSERT pool.count() == 2, "pool should have 2 live items";
+    -- pool.length() tracks live slots
+    ASSERT pool.length() == 2, "pool should have 2 live items";
 
     -- get returns ?*Point (optional pointer to the live slot)
     p_a = pool.get(id_a);
@@ -48,7 +48,7 @@ FN main() RETURNS Void ->
     -- remove invalidates the handle
     pool.remove(id_a);
     ASSERT pool.get(id_a) == NIL, "get after remove should return NIL";
-    ASSERT pool.count() == 1, "pool should have 1 live item after remove";
+    ASSERT pool.length() == 1, "pool should have 1 live item after remove";
 
     -- id_b still valid
     ASSERT pool.get(id_b) != NIL, "id_b should still be valid";

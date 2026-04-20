@@ -5,7 +5,7 @@ FN main() RETURNS Void ->
   nums: Int64[] = [1, 2, 1, 3, 1, 4, 1];
   unique = nums s> DISTINCT _;
 
-  ASSERT unique.count() == 4_i64, "Should have 4 unique items";
+  ASSERT unique.length() == 4_i64, "Should have 4 unique items";
   ASSERT unique.contains?(1_i64), "Should contain 1";
   ASSERT unique.contains?(2_i64), "Should contain 2";
   ASSERT unique.contains?(3_i64), "Should contain 3";
@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
   ordered: Int64[] = [3, 1, 2, 1, 3, 2];
   unique_ordered = ordered s> DISTINCT _;
 
-  ASSERT unique_ordered.count() == 3_i64, "Should have 3 unique items";
+  ASSERT unique_ordered.length() == 3_i64, "Should have 3 unique items";
   ASSERT unique_ordered.contains?(1_i64), "Should contain 1";
   ASSERT unique_ordered.contains?(2_i64), "Should contain 2";
   ASSERT unique_ordered.contains?(3_i64), "Should contain 3";
@@ -25,18 +25,18 @@ FN main() RETURNS Void ->
   already_unique: Int64[] = [5, 6, 7, 8];
   still_unique = already_unique s> DISTINCT _;
 
-  ASSERT still_unique.count() == 4_i64, "Should have 4 items";
+  ASSERT still_unique.length() == 4_i64, "Should have 4 items";
 
   -- Test 4: DISTINCT on empty list
   empty: Int64[] = [];
   empty_distinct = empty s> DISTINCT _;
 
-  ASSERT empty_distinct.count() == 0_i64, "Should have 0 items";
+  ASSERT empty_distinct.length() == 0_i64, "Should have 0 items";
 
   -- Test 5: DISTINCT with all duplicates
   all_same: Int64[] = [42, 42, 42, 42];
   one_item = all_same s> DISTINCT _;
 
-  ASSERT one_item.count() == 1_i64, "Should have 1 item";
+  ASSERT one_item.length() == 1_i64, "Should have 1 item";
   ASSERT one_item.contains?(42_i64), "Item should be 42";
 END

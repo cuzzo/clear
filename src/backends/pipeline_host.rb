@@ -418,6 +418,8 @@ class PipelineHost
       [build_mat_soa_list(lhs_type), "pipe_items"]
     elsif lhs_type&.list_collection? && lhs_type&.sharded?
       [build_mat_sharded_list(lhs_type), "pipe_items"]
+    elsif lhs_type&.set_collection?
+      [build_mat_set(lhs_type), "pipe_items"]
     else
       # Plain array/list: hasField check for .items vs raw slice
       init = MIR::InlineZig.new(
@@ -542,6 +544,23 @@ class PipelineHost
       nil)
 
     [var_decl, defer, loop_node, mat_items_let]
+  end
+
+  # Set: materialize keys into a temp slice via keyIterator (deref ?*T pointers).
+  def build_mat_set(lhs_type)
+    elem_zig = lhs_type.element_type.zig_type
+    var_decl, defer = mat_var_and_defer(elem_zig)
+
+    iter_let = MIR::Let.new("__skit",
+      MIR::MethodCall.new(MIR::Ident.new("pipe_src_list"), "keyIterator", [], false),
+      true, nil, nil)
+    deref = MIR::FieldGet.new(MIR::Ident.new("__skptr"), "*")
+    loop_node = MIR::WhileStmt.new(
+      MIR::MethodCall.new(MIR::Ident.new("__skit"), "next", [], false),
+      [mat_append(deref)],
+      "__skptr", nil)
+
+    [var_decl, defer, iter_let, loop_node, mat_items_let]
   end
 
   # SOA list: iterate data.len, append data.get(i).
@@ -1321,6 +1340,23 @@ class PipelineHost
             'if (@hasField(@TypeOf(__each_src), "items")) __each_src.items else __each_src[0..]',
             "each_items"), false, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new("__each_items"), "__each_item", body_mir, nil)
+      ])
+    end
+
+    # Set collection: iterate via keyIterator(); next() returns ?*T so deref in body.
+    if lhs_type&.set_collection?
+      source_mir = visit_mir(list_node)
+      body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
+      return MIR::ScopeBlock.new([
+        MIR::Let.new("__each_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
+        MIR::Let.new("__each_iter",
+          MIR::MethodCall.new(MIR::Ident.new("__each_src"), "keyIterator", [], false),
+          true, nil, nil),
+        MIR::WhileStmt.new(
+          MIR::MethodCall.new(MIR::Ident.new("__each_iter"), "next", [], false),
+          [MIR::Let.new("__each_item", MIR::FieldGet.new(MIR::Ident.new("__each_kptr"), "*"), false, nil, nil),
+           *body_mir],
+          "__each_kptr", nil)
       ])
     end
 

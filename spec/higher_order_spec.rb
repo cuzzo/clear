@@ -519,7 +519,7 @@ RSpec.describe SemanticAnnotator do
         }.to raise_error(SourceError, /@pool requires an array type/)
       end
 
-      it "allows insert/get/remove/count on a sharded pool" do
+      it "allows insert/get/remove/length on a sharded pool" do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
@@ -528,14 +528,14 @@ RSpec.describe SemanticAnnotator do
               id = sp.insert(Score{ value: 1.0 });
               result = sp.get(id);
               sp.remove(id);
-              n = sp.count();
+              n = sp.length();
               RETURN;
             END
           CLEAR
         }.not_to raise_error
       end
 
-      it "emits ShardedPool insert/get/remove/count Zig calls" do
+      it "emits ShardedPool insert/get/remove/length Zig calls" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
           FN f() RETURNS Void ->
@@ -543,14 +543,14 @@ RSpec.describe SemanticAnnotator do
             id = sp.insert(Score{ value: 1.0 });
             result = sp.get(id);
             sp.remove(id);
-            n = sp.count();
+            n = sp.length();
             RETURN;
           END
         CLEAR
         expect(out).to include("try sp.insert(rt.heapAlloc(),")
         expect(out).to include("sp.get(id)")
         expect(out).to include("sp.remove(id)")
-        expect(out).to include("sp.count()")
+        expect(out).to include("sp.length()")
       end
     end
 

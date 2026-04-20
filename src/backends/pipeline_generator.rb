@@ -762,6 +762,8 @@ module PipelineGenerator
       transpile_each_sharded_list(lhs, body_code, lhs_type)
     elsif lhs_type&.fixed_soa?
       transpile_each_soa_list(lhs, body_code)
+    elsif lhs_type&.set_collection?
+      transpile_each_set(lhs, body_code)
     else
       raise "BUG: plain-array EACH should have been rewritten by PipelineRewriter"
     end
@@ -782,6 +784,20 @@ module PipelineGenerator
           for (__each_src.slots) |*__each_slot| {
               if (!__each_slot.alive) continue;
               const __each_item = &__each_slot.value;
+              #{body_code}
+          }
+      }
+    ZIG
+  end
+
+  def transpile_each_set(set_node, body_code)
+    set_code = visit(set_node)
+    <<~ZIG.chomp
+      {
+          const __each_src = &#{set_code};
+          var __each_iter = __each_src.keyIterator();
+          while (__each_iter.next()) |__each_kptr| {
+              const __each_item = __each_kptr.*;
               #{body_code}
           }
       }

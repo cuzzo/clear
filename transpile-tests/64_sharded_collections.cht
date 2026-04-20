@@ -13,13 +13,13 @@ FN main() RETURNS Void ->
     id_b: Id<Score> = sp.insert(Score{ value: 20.0 });
     id_c: Id<Score> = sp.insert(Score{ value: 30.0 });
 
-    ASSERT sp.count() == 3, "sharded pool should have 3 items";
+    ASSERT sp.length() == 3, "sharded pool should have 3 items";
 
     pa = sp.get(id_a);
     ASSERT pa != NIL, "get should find id_a";
 
     sp.remove(id_b);
-    ASSERT sp.count() == 2, "should have 2 after removing id_b";
+    ASSERT sp.length() == 2, "should have 2 after removing id_b";
     ASSERT sp.get(id_b) == NIL, "id_b should be stale after remove";
     ASSERT sp.get(id_c) != NIL, "id_c should still be valid";
 
