@@ -55,7 +55,7 @@ CLEAR attempts to merge the best of Rust, Go, and SQL to build the language of t
 
 Concurrency is not hard.  SQL is the most commonly used programming language in the world, and it executes parallel queries as effiently as possible.
 
-Concurrency is only hard when you have to tell the computer exactly how to achieve it efficiently.  CLEAR does the hard part for you like a SQL engine.
+Concurrency is only hard when you have to tell the computer exactly how to achieve it safely and efficiently.  CLEAR does the hard part for you like a SQL engine.
 
 In CLEAR, you describe the strategy you want to employ, and the compiler generates the *how*.  When it's mature, you'll be able to trust that it leverages its runtime as efficiently as possible (as Go does currently).
 
@@ -72,7 +72,7 @@ BG { @micro:arena -> foo() }
 
 In CLEAR, the compiler can tell when you're *probably* employing a bad strategy, and changing it is typically just a one-line fix, rather than a full-app rearchitecture.
 
-For the v0.1-pre release, CLEAR comes with a Control Plane and it can detect when you've employed a bad strategy.  It works with the profiler to help you pick better strategies.  For some, it can self-correct (like if you picked a bad stack-size for a reentrant fiber).  In the near future, it will correct from contention issues.  In the far future, the Control Plane aims to be able to protect you from even heavily skewed workloads (when you picked the wrong strategy, like shared-nothing).
+For the v0.1-pre release, CLEAR comes with a Control Plane.  It can detect when you've employed a bad strategy.  It works with the profiler to help you pick better strategies.  For some, it can self-correct (like if you picked a bad stack-size for a reentrant fiber).  In the near future, it will correct from contention issues.  In the far future, the Control Plane aims to be able to protect you from even heavily skewed workloads (when you picked the wrong strategy, like shared-nothing).
 
 CLEAR is designed such that you can override default compiler behviors if you know what you're doing, but you don't have the tools to shoot yourself in the foot.
 
