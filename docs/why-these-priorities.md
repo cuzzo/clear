@@ -10,7 +10,7 @@ CLEAR is designed to be:
 
  ## But Why?
 
-Rust was designed to replace C for Browser Engines & Kernel development. There are a number of tradeoffs Rust was not willing to make for it to be either 1) easy / understandable, or 2) a better Go.
+Rust to have memory safety with no overhead - primarily to use for Servo to replace C for Browser Engines and for Kernel development. There are a number of tradeoffs Rust was not willing to make for it to be either 1) easy / understandable, or 2) a better Go.
 
 Yet people are desperate to use Rust as a better Go because it has so much potential to be that.
 
@@ -38,12 +38,12 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 | **Memory Usage** | A+ | A+ | B- | B+ | C- | **A-** |
 | **Predictability** | A+ | A+ | B+ | A- | A- | **A** |
 | **Memory Safety** | F | A+ | B * | A+ | A+ | **A+** |
-| **Memory Ordering** | F | F | F | A+ | A+ | **A+** |
-| **TOCTOU** | F | F | F | A+ | A- | **B+** |
-| **Deadlock** | F | F | F | A+ | A+ | **A- \*** |
+| **Memory Ordering** | F | C | B | A+ | A+ | **A-** |
+| **Logical TOCTOU** | F | F | F | A+ | A- | **B+** |
+| **Deadlock** | F | C | C+ | A+ | A+ | **A- \*** |
 | **Starvation** | F | B | A | B | A+ | **A-** |
 | **Causality** | F | F | F | B | B | **B \*** |
-| **Backpressure** | F | A | A+ | D | C | **A** |
+| **Backpressure** | F | A | A+ | C | B | **A** |
 | **Time / Ordering** | F | F | F | F | F | **A** |
 | **Fault Tolerence** | F | F | F | F | A+ | **?** |
 
@@ -53,20 +53,21 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 
   * **The C Cognitive Load Controversy:** C scoring an **F** may be controversial, but "Cognitive Load" here captures the true difficulty of writing *correct* concurrent systems. C’s F is the price it pays for A+ ratings elsewhere; you could write C with a B in cognitive load (e.g., using a single global lock), but throughput would plummet to an F. Similarly, you could bolt on a Garbage Collector to improve safety, but speed and predictability would drop to a C.
   * **The “Best Practices Fallacy”:** Given perfect discipline and SOTA libraries, one can achieve better ratings in C, Rust, or Go. However, "doing it right" is not a scalable systems architecture. These ratings reflect the language’s inherent, default guarantees.
-  * **The Rust & Tokio Note:** Rust is graded slightly unfairly as its evaluation includes Tokio. While not part of the core language, it is the *de facto* production standard and its semantics must be evaluated.
+  * **The Rust/Tokio Note:** Rust is graded slightly unfairly as its evaluation includes Tokio. While not part of the core language, it is the *de facto* production standard and its semantics must be evaluated.
   * **The Go Scheduler:** Go experts may feel there isn't enough separation in Throughput/Backpressure. CLEAR praises Go’s runtime and scheduler as one of the most sophisticated pieces of software ever written; these ratings may not do its operational excellence enough justice.
+  * **Go Memory Safety:** Go is memory-safe in the conventional sense, but it does not provide strong concurrency-safety or invariant-safety by default. Its practical model often relies on discipline around shared mutable state.
   * **The Pony Asterisk:** Pony’s flawless safety comes at a hit to expressiveness. By forbidding shared mutable state, certain highly efficient data structures (like lock-free graphs) are nearly impossible to write idiomatically.
 
 ## CLEAR Ratings: The Architecture
 
   * **Cognitive Load:** CLEAR is designed so that **Profile Guided Optimization (PGO)** and automated tooling solve the heavy lifting. You write intuitive, sequential code, and the profiler suggests (and injects) the necessary optimization directives based on actual workloads.
   * **Memory Safety:** Like Rust, CLEAR utilizes **Affine Ownership** to guarantee memory safety.
-  * **TOCTOU:** Values behind Arcs/Locks cannot escape lexical scope. The compiler can generate **Loom tests** in our deterministic VM to catch dependencies and break them.
-  * **Deadlock:** CLEAR uses locks for read-heavy workloads where MVCC unpredictability is a non-starter. If locks detect deadlock, they will park; if parked over a configured time, they *can* die (if the task is marked killable).
-  * **Starvation & Backpressure:** Like BEAM, CLEAR prevents CPU starvation via a preemptive scheduler. It separately tracks per-task memory consumption to kill runaway tasks and enforce backpressure.
+  * **Logical TOCTOU:** Values behind Arcs/Locks cannot escape lexical scope. The compiler can generate **Loom tests** in a deterministic VM to catch dependencies and break them. Use-after-free and race conditions are included in Memory Saftey. Time-related bugs are captured in Causality and Timing / Ordering categories.
+  * **Deadlock:** Technical deadlock is not part of CLEAR’s intended concurrency model, and by v0.3 the runtime aims to detect and prevent unbounded lock-wait cycles from silently persisting. Locks are intentionally more cumbersome to use because they are rarely the best-performing or safest solution. When developers opt into lock-based coordination anyway, they are also opting into explicit responsibility for handling lock-related failures correctly. A language like Pony or BEAM which does not have locks deserves a better ranking.
+  * **Starvation & Backpressure:** Like BEAM, CLEAR *will* prevent CPU starvation via its cooperative scheduler with automatically injected yielding. It separately tracks per-task memory consumption to kill runaway tasks and enforce backpressure.
   * **Memory Consumption:** CLEAR uses **MVCC** as a default synchronization technique. This adds memory overhead to eliminate common classes of bugs (deadlocks, contention).
   * **Causality:** CLEAR offers **A+** causality with MVCC and `@split` streams, but allows you to "load the foot-gun" (locks) for specific read-heavy workloads where predictability is paramount.
-  * **Time / Ordering:** CLEAR separates time as a **tense** in the type system. Time can only be shared via streams through the `@split` capability, guaranteeing ordering across shared
+  * **Time / Ordering:** CLEAR separates time as a **tense** in the type system. Time can only be shared via streams through the `@split` capability, guaranteeing ordering across shared streams.
   * **Fault Tolerence:** It is still to early in the design stage to determine a realistic score for CLEAR's fault tolerence story - particularly with regards to issues that could arise from shared mutable memory and idempotence likely not being a first-class function color. CLEAR hopes to have a reasonable ceiling of a  B (similar to Causality). It will likely give you some tools to shoot yourself in the foot (to both achieve understandability and not limit workloads) - you could mark tasks as killable which aren't or tasks as retrying which aren't etc. But CLEAR will have the systems in place to easily achieve an A+ rating when it's critical.
 
 ## How Does CLEAR think about Cognitive Burden
