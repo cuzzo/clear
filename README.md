@@ -84,6 +84,8 @@ In addition, Zig supports compiling *to* any target *from* any machine. I.e. you
 
 It also has exceptionally fast *debug* build times, but does not produce production binaries as fast as Go.
 
+In general, CLEAR thinks that the people buiding Zig are some of the smartest people in the world, and it has the picked the most practical build system trade-offs. Some Go engineers will likely disagree.
+
 ## BUILDING & TESTING
 
 If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
