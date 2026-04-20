@@ -14,7 +14,7 @@ Rust was designed to replace C for Browser Engines & Kernel development. There a
 
 Yet people are desperate to use Rust as a better Go because it has so much potential to be that.
 
-Pony eliminates nearly all concurrency hazards by design. Rust merely ensures memory safety - which is perhaps the most common and critical concurrency hazard. But despite the safety, it's not widely used because the learning curve is too steep.
+Pony eliminates nearly all concurrency hazards by design. Rust merely ensures memory safety - which is perhaps the most common and critical concurrency hazard. But despite its safety, Pony not widely used because the learning curve is too steep.
 
 Rust & Pony were both not willing to make tradeoffs to prioritize ease-of-use or understandability.
 
