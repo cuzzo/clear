@@ -172,7 +172,7 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/17_kvstore/  # Control core count
 
 See [docs/benchmarks.md](docs/benchmarks.md) for table comparisons.
 
-## DISCLAIMER
+## ⚠️ DISCLAIMER ⚠️
 
 CLEAR is currently in **v0.1-pre** release. It is an architectural preview and is NOT production-ready.
 
