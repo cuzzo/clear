@@ -1,0 +1,47 @@
+-- String@symbol: compile-time interned identifiers with O(1) equality
+
+FN classify(tag: String@symbol) RETURNS String ->
+    IF tag == :ok      THEN RETURN "success"; END
+    IF tag == :error   THEN RETURN "failure"; END
+    IF tag == :pending THEN RETURN "waiting"; END
+    RETURN "unknown";
+END
+
+FN current_mode() RETURNS String@symbol ->
+    RETURN :debug;
+END
+
+FN main() RETURNS Void ->
+    -- Basic literal and equality
+    status = :ok;
+    ASSERT status == :ok,       "symbol eq ok";
+    ASSERT !(status == :error), "symbol neq error";
+
+    -- Inequality between distinct symbols
+    a = :foo;
+    b = :bar;
+    ASSERT !(a == b), "distinct symbols are not equal";
+    ASSERT a == :foo, "same symbol literal matches";
+
+    -- Identical symbol literals must be equal (compile-time deduplication)
+    x = :hello;
+    y = :hello;
+    ASSERT x == y, "identical symbol literals are equal";
+
+    -- As typed function parameter
+    ASSERT classify(:ok)      == "success", "classify ok";
+    ASSERT classify(:error)   == "failure", "classify error";
+    ASSERT classify(:pending) == "waiting", "classify pending";
+    ASSERT classify(:nope)    == "unknown", "classify fallthrough";
+
+    -- Function returning String@symbol
+    mode = current_mode();
+    ASSERT mode == :debug, "symbol return value";
+
+    -- Symbols with underscores
+    s1 = :content_type;
+    s2 = :content_type;
+    ASSERT s1 == s2, "underscore symbol equality";
+
+    RETURN;
+END

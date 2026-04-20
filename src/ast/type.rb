@@ -198,9 +198,11 @@ class Type
     @provenance = location if location && location != :stack
     @ownership = ownership if ownership
     @sync      = sync      if sync
-    # Sync types need a stable heap address (mirrors sync= setter behavior).
-    # :raw is a data-access mode, not a lock — raw strings are borrow/stack, not heap.
-    @provenance = :heap if @sync && @sync != :raw && @ownership == :affine
+    # Sync types need a stable heap address.
+    # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
+    @provenance = :heap if @sync && @sync != :raw && @sync != :symbol && @ownership == :affine
+    # Symbol strings live in static read-only memory — always rodata, never heap/frame.
+    @provenance = :rodata if @sync == :symbol
     # Pool collection always lives on the heap (owns internal slot array).
     if collection
       @collection = collection
@@ -492,9 +494,13 @@ class Type
     @sync == :raw
   end
 
-  # True for any sync capability (excludes @raw which is a data-access mode, not a lock)
+  def symbol?
+    @sync == :symbol
+  end
+
+  # True for any sync capability (excludes :raw and :symbol which are data-access modes, not locks)
   def any_sync?
-    !@sync.nil? && @sync != :raw
+    !@sync.nil? && @sync != :raw && @sync != :symbol
   end
 
   # Backwards compat alias used in a few places
@@ -558,7 +564,8 @@ class Type
     elsif pool?             then :pool
     elsif set_collection?   then :set_collection
     elsif list_collection? || (array? && !string?) then :array
-    elsif string? && raw?   then :string_raw
+    elsif string? && symbol? then :string_symbol
+    elsif string? && raw?    then :string_raw
     end
     # Returns nil for non-dispatchable types (plain String, primitives, etc.)
   end
@@ -1157,8 +1164,9 @@ class Type
   def sync=(value)
     @zig_type_cache = nil
     @sync = value
-    # Sync types need a stable heap address (:raw is a data-access mode, not a real lock)
-    @provenance = :heap if value && value != :raw && @ownership == :affine
+    # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
+    @provenance = :heap if value && value != :raw && value != :symbol && @ownership == :affine
+    @provenance = :rodata if value == :symbol
   end
 
   # Returns the Zig type string representation of this type.

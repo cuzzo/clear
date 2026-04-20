@@ -774,6 +774,15 @@ INDEX_OPS = {
     },
     # No :set — strings are immutable.
   },
+  string_symbol: {
+    get: {
+      # Byte indexing on String@symbol — same as @raw, returns @symbol slice.
+      builtin: :charAt,
+      return_type: ->(_t) { Type.new(:String, sync: :symbol) },
+      container_borrow: true,
+    },
+    # No :set — symbols are immutable.
+  },
 }.freeze
 
 # ============================================================================
@@ -805,9 +814,12 @@ COLLECTION_METHOD_CONFIGS = {
 
 BUILTIN_OPS = {
   # --- String comparison ---
-  eql:    { zig: "CheatLib.eql({0}, {1})", borrows: :all },
-  strcmp: { zig: "CheatLib.strcmp({0}, {1})", borrows: :all },
-  strEql: { zig: "CheatLib.strEql({0}, {1})", borrows: :all },
+  eql:       { zig: "CheatLib.eql({0}, {1})", borrows: :all },
+  strcmp:    { zig: "CheatLib.strcmp({0}, {1})", borrows: :all },
+  strEql:    { zig: "CheatLib.strEql({0}, {1})", borrows: :all },
+  # O(1) pointer+length comparison for String@symbol. Valid because the compiler
+  # deduplicates identical string literals within a single compilation unit.
+  symbolEql: { zig: "({0}.ptr == {1}.ptr and {0}.len == {1}.len)", borrows: :all },
 
   # --- String indexing ---
   charAt: { zig: "CheatLib.charAt({0}, {1})", borrows: :all },

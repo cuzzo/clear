@@ -74,7 +74,7 @@ module GenericAnalysis
     # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
     if is_param
       has_ownership_cap = %i[multiowned shared split].include?(type_obj.ownership)
-      has_sync_cap = type_obj.sync && !%i[raw].include?(type_obj.sync)
+      has_sync_cap = type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
       if has_ownership_cap || has_sync_cap
         error!(node, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end

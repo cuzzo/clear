@@ -476,7 +476,9 @@ full = "foo" + "bar";          -- "foobar" (single allocation, no intermediate)
 
 Like arrays, Strings have capabilities:
 
-`String@raw` (byte buffer) and `String@ring` (v0.2 - circular buffer for streaming).
+- `String@raw` - raw byte buffer; no UTF-8 encoding assumption, O(1) byte indexing, zero-copy slicing. Use for binary data, network buffers, parsers operating on bytes.
+- `String@symbol` - compile-time interned identifier. Literals use Ruby-style `:ok` syntax. The compiler embeds the string in read-only static memory and deduplicates identical literals, so equality is O(1) pointer comparison and the value needs no cleanup (program-lifetime). Use for status tags, option names, event names, and map keys where the set of values is known at compile time. Note: interned HashMaps carry their own per-map symbol table for runtime string keys - this avoids a globally locked intern table, which would create a contention hotspot incompatible with CLEAR's scalability goals.
+- `String@ring` (v0.2) - circular buffer for streaming.
 
 ## 13. Graphs, Cycles, and @indirect
 

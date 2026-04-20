@@ -2373,6 +2373,9 @@ private
         else
           Type.new(Type::STRING_TYPE, location: :rodata)
         end
+      when :SYMBOL
+        # Symbol literals: compile-time interned, static lifetime, O(1) equality by pointer.
+        Type.new(Type::STRING_TYPE, sync: :symbol)
       when :BYTE         then :Byte
       when :PREFIXED_INT then :Byte  # Default; overflows checked after coercion context is known
       when :INT8    then :Int8

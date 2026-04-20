@@ -108,6 +108,14 @@ class Parser
   primary(:NUMBER) { parse_literal(:NUMBER, :stack) }
   primary(:INT64) { parse_literal(:INT64, :stack) }
   primary(:STRING) { parse_literal(:STRING, :stack) }
+  # Symbol literal: :identifier — only valid in expression position.
+  # The ':' char is already consumed by the time the primary body runs.
+  primary(:CHAR, ':') do
+    colon_tok = consume(:CHAR, ':')
+    error!(colon_tok, "Expected a symbol name (lowercase identifier) after ':'") unless match?(:VAR_ID)
+    ident_tok = consume(:VAR_ID)
+    AST::Literal.new(colon_tok, :SYMBOL, ident_tok.value, :stack)
+  end
   primary(:BYTE) { parse_literal(:BYTE, :stack) }
   primary(:PREFIXED_INT) { parse_literal(:PREFIXED_INT, :stack) }
   primary(:INT8)    { parse_literal(:INT8,    :stack) }
@@ -1984,7 +1992,7 @@ class Parser
   end
 
   # All recognized capability tokens.
-  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @indirect @link @raw @list @pool @set @soa @sharded].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @indirect @link @raw @symbol @list @pool @set @soa @sharded].freeze
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
   # Returns nil if no capability token is present, or a Hash:
@@ -2040,6 +2048,9 @@ class Parser
     when "@raw"
       error!(token, "Duplicate sync") if result[:sync]
       result[:sync] = :raw
+    when "@symbol"
+      error!(token, "Duplicate sync") if result[:sync]
+      result[:sync] = :symbol
     when "@indirect"
       error!(token, "Duplicate indirect") if result[:is_indirect]
       @last_indirect_consumed = true

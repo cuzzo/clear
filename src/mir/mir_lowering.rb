@@ -2542,7 +2542,7 @@ class MIRLowering
 
   def lower_literal(node)
     case node.type
-    when :STRING
+    when :STRING, :SYMBOL
       escaped = node.value.bytes.map { |b|
         case b
         when 0x5C then '\\\\'
@@ -2667,7 +2667,21 @@ class MIRLowering
 
     # String comparison
     if Type.new(node.left.full_type).string? || Type.new(node.right.full_type).string?
-      # Hoist allocating sub-expressions so their heap strings get cleanup.
+      left_ti  = Type.new(node.left.full_type)
+      right_ti = Type.new(node.right.full_type)
+
+      # Symbol == symbol: O(1) pointer+length comparison. No allocation possible,
+      # so no hoist_alloc needed. Falls through to content comparison if either
+      # side is a plain string (cross-type comparison stays correct).
+      if left_ti.symbol? && right_ti.symbol?
+        cmp_node = case node.op
+              when :EQ  then emit_builtin(:symbolEql, [left, right])
+              when :NEQ then MIR::UnaryOp.new("!", emit_builtin(:symbolEql, [left, right]))
+              end
+        return cmp_node if cmp_node
+      end
+
+      # General string comparison: hoist allocating sub-expressions so heap strings get cleanup.
       # (e.g. ASSERT f() == "x" -- f() returns a heap string that needs freeing)
       left = hoist_alloc(left, node.left)
       right = hoist_alloc(right, node.right)
