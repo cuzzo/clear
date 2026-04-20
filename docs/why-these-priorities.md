@@ -18,7 +18,7 @@ Pony eliminates nearly all concurrency hazards by design. Rust merely ensures me
 
 Rust & Pony were both not willing to make tradeoffs to prioritize ease-of-use or understandability.
 
-Go made those trade-offs. But Go is a thin veneer over C with the most sophisticated runtime in the world bolted on. To achieve best in class speeds relies on - like C - loading a footgun and exposing yourself to a number of hazards and developer discipline to get it right. It provides valuable best-in-class tooling to help mitigate *some* of these problems.
+Go made those trade-offs. But Go is a thin veneer over C with the most sophisticated runtime in the world bolted on. To achieve best in class speeds Go - like C - relies on loading a footgun and exposing yourself to a number of hazards and developer discipline to get it right. It provides valuable best-in-class tooling to help mitigate *some* of these problems.
 
 CLEAR exists because it thinks Rust is not truly safe enough inherently, Pony is not easy enough, and Go is currently the most practical trade-off but is too dangerous and cannot fix its inherent problems.
 
