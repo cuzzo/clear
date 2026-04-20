@@ -6,6 +6,18 @@ Benchmarks are organized into three categories:
 - **concurrent/** - fiber scheduling, BG blocks, channels, contention benchmarks
 - **server/** - TCP/HTTP server benchmarks with client load generators
 
+## Disclaimer
+
+These benchmarks are purely to guide the development of CLEAR.
+
+They consistently show CLEAR outperforming Go and/or Rust in a number of metrics where - with better more scientific benchmarks - CLEAR would be unlikely to outperform them.
+
+They should be interpretted with a **HUGE GRAIN OF SALT**. They are not designed to favor CLEAR, but the benchmarks are a strange mix of 1) compute heavy, 2) I/O / wait heavy, 3) micro benchmarks.
+
+At this stage, they are meant to show that CLEAR is moving in the right direction, and has some reasonable level of performance.
+
+CLEAR is not meant to be seriously considered for use at this stage. More effort will be put into making truly fair and valuable benchmarks when CLEAR is ready for actual adoption.
+
 ## Running
 
 ```bash
