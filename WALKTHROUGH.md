@@ -421,6 +421,7 @@ All collections are **automatically monomorphized** -- the compiler generates ze
 | `T[]@list` | `List` | Dynamic-size, heap-backed |
 | `T[N]@pool` | `Pool` | Fixed-capacity, generational handles |
 | `T[]@set` | `Set` | Dynamic-size, heap-backed, distinct items |
+| `T[]@ring` | `Ring` | Circular Ring Buffer (mainly for Streams - v0.2) |
 
 
 ```ruby clear
