@@ -1064,7 +1064,7 @@ module PipeAnalysis
     node.storage = :stack
   end
 
-  VALID_CONCURRENT_OPTIONS = %w[workers parallel size].freeze
+  VALID_CONCURRENT_OPTIONS = %w[workers capacity parallel size].freeze
   VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
 
   def analyze_concurrent_op(node)
@@ -1086,6 +1086,22 @@ module PipeAnalysis
       end
       if literal_val && literal_val <= 0
         error!(ps, "CONCURRENT workers must be greater than 0, got #{literal_val.to_i}")
+      end
+    end
+
+    # Validate capacity option if present
+    if (cap = options["capacity"])
+      visit(cap)
+      unless [:Float64, :Int64].include?(cap.resolved_type)
+        error!(cap, "CONCURRENT capacity must be a number, got #{cap.resolved_type}")
+      end
+      literal_val = if cap.is_a?(AST::Literal)
+        cap.value.to_f
+      elsif cap.is_a?(AST::UnaryOp) && cap.op == :SUB && cap.right.is_a?(AST::Literal)
+        -cap.right.value.to_f
+      end
+      if literal_val && literal_val <= 0
+        error!(cap, "CONCURRENT capacity must be greater than 0, got #{literal_val.to_i}")
       end
     end
 

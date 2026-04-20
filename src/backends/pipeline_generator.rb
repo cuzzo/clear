@@ -991,6 +991,7 @@ module PipelineGenerator
     @conc_counter += 1
 
     workers_code = options["workers"] ? visit(options["workers"]) : "CheatLib.threadCount()"
+    capacity_code = options["capacity"] ? visit(options["capacity"]) : nil
     rt_name = @do_rt_name || "rt"
     lhs_type = lhs.type_info
 
@@ -1008,11 +1009,11 @@ module PipelineGenerator
     if lhs_type&.inf_stream? || lhs_type&.dynamic_stream? || lhs_type&.open_stream? || lhs.is_a?(AST::RangeLit)
       case inner
       when AST::SelectOp
-        return transpile_concurrent_stream_select(lhs, inner, id, workers_code, rt_name, options)
+        return transpile_concurrent_stream_select(lhs, inner, id, workers_code, capacity_code, rt_name, options)
       when AST::WhereOp
-        return transpile_concurrent_stream_where(lhs, inner, id, workers_code, rt_name, options)
+        return transpile_concurrent_stream_where(lhs, inner, id, workers_code, capacity_code, rt_name, options)
       when AST::EachOp
-        return transpile_concurrent_stream_each(lhs, inner, conc, id, workers_code, rt_name, options)
+        return transpile_concurrent_stream_each(lhs, inner, conc, id, workers_code, capacity_code, rt_name, options)
       end
     end
 
@@ -1293,7 +1294,7 @@ module PipelineGenerator
   # CONCURRENT SELECT on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
   # Workers each maintain a local result list; merged after wg.wait().
   # Result order is non-deterministic (work-stealing).
-  def transpile_concurrent_stream_select(stream_node, select_op, id, workers_code, rt_name, options = {})
+  def transpile_concurrent_stream_select(stream_node, select_op, id, workers_code, capacity_code, rt_name, options = {})
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
 
@@ -1330,11 +1331,12 @@ module PipelineGenerator
 
     feeder_spawn = "try __cis#{id}_wg.sched.submitSpawn(\n              @intFromPtr(&Runtime.entryWrapper),\n              @as(CheatHeader.TaskFn, @ptrCast(&__CisFeeder#{id}.run)),\n              &__cis#{id}_feeder, .{},\n          );"
     worker_spawn = concurrent_spawn_call(options, "__cis#{id}_wg", "__CisWorker#{id}", "__cis#{id}_workers[__w]")
+    cap_zig = capacity_code ? "@intCast(#{capacity_code})" : "blk: { var c: usize = 4; while (c < __cis#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
 
     <<~ZIG.chomp
       #{@current_pipe_label}: {
           #{source[:setup].empty? ? "" : source[:setup] + "\n          "}const __cis#{id}_n_workers: usize = @intCast(#{workers_code});
-          const __cis#{id}_cap: usize = blk: { var c: usize = 4; while (c < __cis#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); };
+          const __cis#{id}_cap: usize = #{cap_zig};
           var __cis#{id}_chan = try CheatLib.BoundedChannel(#{item_zig}).init(#{rt_name}.heapAlloc(), __cis#{id}_cap);
           defer __cis#{id}_chan.deinit();
           var __cis#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());#{err_decl}
@@ -1388,7 +1390,7 @@ module PipelineGenerator
   end
 
   # CONCURRENT WHERE on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
-  def transpile_concurrent_stream_where(stream_node, where_op, id, workers_code, rt_name, options = {})
+  def transpile_concurrent_stream_where(stream_node, where_op, id, workers_code, capacity_code, rt_name, options = {})
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
@@ -1424,11 +1426,12 @@ module PipelineGenerator
 
     feeder_spawn = "try __cisw#{id}_wg.sched.submitSpawn(\n              @intFromPtr(&Runtime.entryWrapper),\n              @as(CheatHeader.TaskFn, @ptrCast(&__CiswFeeder#{id}.run)),\n              &__cisw#{id}_feeder, .{},\n          );"
     worker_spawn = concurrent_spawn_call(options, "__cisw#{id}_wg", "__CiswWorker#{id}", "__cisw#{id}_workers[__w]")
+    cap_zig = capacity_code ? "@intCast(#{capacity_code})" : "blk: { var c: usize = 4; while (c < __cisw#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
 
     <<~ZIG.chomp
       #{@current_pipe_label}: {
           #{source[:setup].empty? ? "" : source[:setup] + "\n          "}const __cisw#{id}_n_workers: usize = @intCast(#{workers_code});
-          const __cisw#{id}_cap: usize = blk: { var c: usize = 4; while (c < __cisw#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); };
+          const __cisw#{id}_cap: usize = #{cap_zig};
           var __cisw#{id}_chan = try CheatLib.BoundedChannel(#{item_zig}).init(#{rt_name}.heapAlloc(), __cisw#{id}_cap);
           defer __cisw#{id}_chan.deinit();
           var __cisw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());#{err_decl}
@@ -1482,7 +1485,7 @@ module PipelineGenerator
   end
 
   # CONCURRENT EACH on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
-  def transpile_concurrent_stream_each(stream_node, each_op, conc_op, id, workers_code, rt_name, options = {})
+  def transpile_concurrent_stream_each(stream_node, each_op, conc_op, id, workers_code, capacity_code, rt_name, options = {})
     stream_ti  = stream_node.type_info
     is_inf  = stream_ti&.inf_stream?
     is_open = stream_ti&.open_stream?
@@ -1512,11 +1515,12 @@ module PipelineGenerator
 
     feeder_spawn = "try __cise#{id}_wg.sched.submitSpawn(\n              @intFromPtr(&Runtime.entryWrapper),\n              @as(CheatHeader.TaskFn, @ptrCast(&__CiseFeeder#{id}.run)),\n              &__cise#{id}_feeder, .{},\n          );"
     worker_spawn = concurrent_spawn_call(options, "__cise#{id}_wg", "__CiseWorker#{id}", "__cise#{id}_workers[__w]")
+    cap_zig = capacity_code ? "@intCast(#{capacity_code})" : "blk: { var c: usize = 4; while (c < __cise#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
 
     <<~ZIG.chomp
       {
           #{source[:setup].empty? ? "" : source[:setup] + "\n          "}const __cise#{id}_n_workers: usize = @intCast(#{workers_code});
-          const __cise#{id}_cap: usize = blk: { var c: usize = 4; while (c < __cise#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); };
+          const __cise#{id}_cap: usize = #{cap_zig};
           var __cise#{id}_chan = try CheatLib.BoundedChannel(#{item_zig}).init(#{rt_name}.heapAlloc(), __cise#{id}_cap);
           defer __cise#{id}_chan.deinit();
           var __cise#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());

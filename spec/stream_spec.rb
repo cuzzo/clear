@@ -572,6 +572,50 @@ RSpec.describe SemanticAnnotator do
         CLEAR
         expect { run(src) }.not_to raise_error
       end
+
+      it "allows CONCURRENT with explicit capacity on a stream" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; YIELD 3; };
+            vals = s s> CONCURRENT(workers: 2, capacity: 4) SELECT _ * 2;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.not_to raise_error
+      end
+
+      it "rejects CONCURRENT capacity of zero" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            vals = s s> CONCURRENT(workers: 2, capacity: 0) SELECT _ * 2;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /capacity must be greater than 0/)
+      end
+
+      it "rejects CONCURRENT capacity of negative value" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            vals = s s> CONCURRENT(workers: 2, capacity: -1) SELECT _ * 2;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /capacity must be greater than 0/)
+      end
+
+      it "rejects unknown CONCURRENT options" do
+        src = <<~CLEAR
+          FN f() RETURNS Void ->
+            s: ~?Int64[] = BG STREAM { YIELD 1; };
+            vals = s s> CONCURRENT(workers: 2, buffer: 4) SELECT _ * 2;
+            RETURN;
+          END
+        CLEAR
+        expect { run(src) }.to raise_error(SourceError, /Unknown CONCURRENT option 'buffer'/)
+      end
     end
   end
 

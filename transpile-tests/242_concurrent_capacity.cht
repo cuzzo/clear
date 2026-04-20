@@ -1,0 +1,78 @@
+-- Test: CONCURRENT(workers: N, capacity: X) explicit channel capacity.
+-- Verifies that capacity controls the BoundedChannel size and that
+-- pipelines still produce correct results with explicit capacity.
+
+STRUCT Acc {
+    value: Int64
+}
+
+FN main() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: capacity smaller than auto-default (tight backlog)
+    -- -------------------------------------------------------
+    gen1: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 1;
+        WHILE i <= 10 DO
+            YIELD i;
+            i = i + 1;
+        END
+    };
+    results1 = gen1 s> CONCURRENT(workers: 2, capacity: 4) SELECT _ * 2;
+    ASSERT results1.length() == 10, "capacity=4: all 10 items processed";
+    MUTABLE sum1: Int64 = 0;
+    results1 s> EACH { sum1 = sum1 + _; };
+    ASSERT sum1 == 110, "capacity=4: 2+4+6+8+10+12+14+16+18+20=110";
+
+    -- -------------------------------------------------------
+    -- Test 2: capacity larger than auto-default (generous backlog)
+    -- -------------------------------------------------------
+    gen2: ~?Int64[] = BG STREAM {
+        MUTABLE i2: Int64 = 1;
+        WHILE i2 <= 6 DO
+            YIELD i2;
+            i2 = i2 + 1;
+        END
+    };
+    evens2 = gen2 s> CONCURRENT(workers: 2, capacity: 32) WHERE _ MOD 2 == 0;
+    ASSERT evens2.length() == 3, "capacity=32: 3 even numbers in 1..6";
+    MUTABLE sum2: Int64 = 0;
+    evens2 s> EACH { sum2 = sum2 + _; };
+    ASSERT sum2 == 12, "capacity=32: 2+4+6=12";
+
+    -- -------------------------------------------------------
+    -- Test 3: capacity=1 (extreme back pressure) with EACH
+    -- -------------------------------------------------------
+    acc3 = Acc{ value: 0 } @shared:locked;
+    gen3: ~?Int64[] = BG STREAM {
+        YIELD 10;
+        YIELD 20;
+        YIELD 30;
+        YIELD 40;
+    };
+    gen3 s> CONCURRENT(workers: 2, capacity: 1) EACH {
+        WITH EXCLUSIVE acc3 AS a {
+            a.value = a.value + _;
+        }
+    };
+    WITH acc3 AS a {
+        ASSERT a.value == 100, "capacity=1: 10+20+30+40=100";
+    }
+
+    -- -------------------------------------------------------
+    -- Test 4: capacity on ~T[INF] infinite stream SELECT
+    -- -------------------------------------------------------
+    gen4: ~Int64[INF] = BG STREAM {
+        MUTABLE i4: Int64 = 1;
+        WHILE i4 <= 8 DO
+            YIELD i4;
+            i4 = i4 + 1;
+        END
+    };
+    results4 = gen4 s> CONCURRENT(workers: 3, capacity: 8) SELECT _ + 100;
+    ASSERT results4.length() == 8, "capacity on ~T[INF]: 8 items";
+    MUTABLE sum4: Int64 = 0;
+    results4 s> EACH { sum4 = sum4 + _; };
+    ASSERT sum4 == 836, "capacity on ~T[INF]: (1..8)+100 each = 836";
+
+    RETURN;
+END
