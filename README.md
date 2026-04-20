@@ -10,6 +10,8 @@ It's designed to be:
  4. Scalable
  5. *BLAZING* fast
 
+ See [Why These Priorities](docs/why-these-priorities.md) for more details.
+
 ## WHAT DOES CLEAR LOOK LIKE
 
 ### The *SMOOTH* operator
