@@ -845,12 +845,16 @@ pub fn bind(comptime deps: type) type {
     // Both sides run as green fibers on the same scheduler. Blocking = fiber yield.
     // The generator is expected to loop forever (BG STREAM { WHILE TRUE DO YIELD; END }).
     //
+    // A WaitGroup in Inner tracks generator lifecycle: the generator calls wg.done()
+    // inside close(), and deinit() calls wg.wait() before destroying Inner. This
+    // prevents the feeder/consumer from accessing Inner after the generator frees it.
+    //
     // Lifecycle:
     //   Spawn:   var s = try CheatLib.InfStream(f64).spawnNew(alloc, sched);
     //   In gen:  var local = CheatLib.InfStream(f64){ .inner = ctx.stream_inner, .alloc = ctx.alloc };
     //            while (true) { try local.push(val); }
     //   Consume: const v = s.next();  // T — blocks until generator pushes
-    //   Cleanup: defer s.deinit();    // frees Inner
+    //   Cleanup: defer s.deinit();    // waits for generator, frees Inner
     pub fn InfStream(comptime T: type) type {
         return struct {
             const Self = @This();
@@ -870,6 +874,7 @@ pub fn bind(comptime deps: type) type {
                 sched: *fp.Scheduler,
                 closed: bool = false,
                 err: ?anyerror = null,
+                wg: WaitGroup = undefined, // lifecycle: generator calls done() in close()
             };
 
             inner: *Inner,
@@ -877,7 +882,8 @@ pub fn bind(comptime deps: type) type {
 
             pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
                 const inner = try alloc.create(Inner);
-                inner.* = .{ .sched = sched };
+                inner.* = .{ .sched = sched, .wg = WaitGroup.init(sched) };
+                inner.wg.add(1);
                 return Self{ .inner = inner, .alloc = alloc };
             }
 
@@ -993,6 +999,7 @@ pub fn bind(comptime deps: type) type {
 
             /// Signal EOF to the consumer: no more values will be pushed.
             /// Wakes the consumer if it was blocked waiting for data.
+            /// Signals the lifecycle WaitGroup so deinit() can safely free Inner.
             pub fn close(self: *Self) void {
                 const inner = self.inner;
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
@@ -1004,6 +1011,7 @@ pub fn bind(comptime deps: type) type {
                 } else {
                     inner.lock.store(0, .release);
                 }
+                inner.wg.done();
             }
 
             /// Consumer reads next value, returning null on EOF (closed + empty).
@@ -1061,9 +1069,8 @@ pub fn bind(comptime deps: type) type {
                 }
             }
 
-            /// Signal the generator fiber to stop.
+            /// Signal the generator fiber to stop, wait for it to finish, then free Inner.
             /// Sets closed flag and wakes the producer if blocked.
-            /// The producer will see closed=true, return error.StreamClosed, and free Inner.
             /// For string streams (T = []const u8), drains and frees unconsumed buffered items
             /// before signaling the producer, preventing leaks on early consumer exit.
             pub fn deinit(self: *Self) void {
@@ -1081,8 +1088,6 @@ pub fn bind(comptime deps: type) type {
                         const item = inner.buf[i & MASK];
                         if (item.len > 0) self.alloc.free(item);
                     }
-                    // Mark buffer as empty so destroy(stream_inner) in the generator fiber
-                    // cannot double-free (the generator exits cleanly without touching buf).
                     inner.tail.store(h, .release);
                 }
 
@@ -1093,6 +1098,10 @@ pub fn bind(comptime deps: type) type {
                 } else {
                     inner.lock.store(0, .release);
                 }
+                // Wait for the generator fiber to call close() (wg.done()).
+                // Guarantees Inner is not accessed by the generator after destroy.
+                inner.wg.wait();
+                self.alloc.destroy(inner);
             }
         };
     }

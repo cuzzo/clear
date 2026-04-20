@@ -2099,7 +2099,6 @@ class MIRLowering
                   #{body_code.include?("__rt") ? "" : "_ = &__rt;"}
                   const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_sg#{id}.?)));
                   defer ctx.alloc.destroy(ctx);
-                  #{is_inf ? "defer ctx.alloc.destroy(ctx.stream_inner);" : ""}
                   #{string_frees}
                   var #{local_stream} = #{stream_zig}{ .inner = ctx.stream_inner, .alloc = ctx.alloc };
                   defer #{local_stream}.close();
@@ -3853,7 +3852,16 @@ class MIRLowering
       else
         MIR::AddressOf.new(coll)
       end
-      capture = is_mutable ? "*#{var}" : var
+      # Pointer capture (|*var|) is only needed when iterating structs with mutable field
+      # access. For primitive/enum/union element types, value capture (|var|) is correct
+      # because primitives are Copy types and can't be meaningfully mutated in-place.
+      capture = if is_mutable
+        elem = ct.element_type
+        elem_sym = elem.is_a?(Type) ? elem.resolved : elem
+        (elem_sym && @struct_schemas.key?(elem_sym)) ? "*#{var}" : var
+      else
+        var
+      end
       MIR::ForStmt.new(iter, capture, body, nil, mark_per_iter, tight)
     end
   end

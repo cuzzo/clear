@@ -1005,6 +1005,17 @@ module PipelineGenerator
       end
     end
 
+    if lhs_type&.inf_stream? || lhs_type&.dynamic_stream? || lhs.is_a?(AST::RangeLit)
+      case inner
+      when AST::SelectOp
+        return transpile_concurrent_stream_select(lhs, inner, id, workers_code, rt_name, options)
+      when AST::WhereOp
+        return transpile_concurrent_stream_where(lhs, inner, id, workers_code, rt_name, options)
+      when AST::EachOp
+        return transpile_concurrent_stream_each(lhs, inner, conc, id, workers_code, rt_name, options)
+      end
+    end
+
     case inner
     when AST::SelectOp
       transpile_concurrent_select(lhs, inner, id, workers_code, rt_name, options)
@@ -1106,7 +1117,7 @@ module PipelineGenerator
           };
           var __ccbs#{id}_next = std.atomic.Value(usize).init(0);
           var __ccbs#{id}_workers: [64]__CcbsWorker#{id} = undefined;
-          const __ccbs#{id}_actual_workers = @min(__ccbs#{id}_n_workers, 64);
+          const __ccbs#{id}_actual_workers: usize = @min(__ccbs#{id}_n_workers, 64);
           __ccbs#{id}_wg.add(__ccbs#{id}_actual_workers);
           for (0..__ccbs#{id}_actual_workers) |__w| {
               __ccbs#{id}_workers[__w] = .{
@@ -1187,7 +1198,7 @@ module PipelineGenerator
           };
           var __ccbw#{id}_next = std.atomic.Value(usize).init(0);
           var __ccbw#{id}_workers: [64]__CcbwWorker#{id} = undefined;
-          const __ccbw#{id}_actual_workers = @min(__ccbw#{id}_n_workers, 64);
+          const __ccbw#{id}_actual_workers: usize = @min(__ccbw#{id}_n_workers, 64);
           __ccbw#{id}_wg.add(__ccbw#{id}_actual_workers);
           for (0..__ccbw#{id}_actual_workers) |__w| {
               __ccbw#{id}_workers[__w] = .{
@@ -1251,7 +1262,7 @@ module PipelineGenerator
           };
           var __ccbe#{id}_next = std.atomic.Value(usize).init(0);
           var __ccbe#{id}_workers: [64]__CcbeWorker#{id} = undefined;
-          const __ccbe#{id}_actual_workers = @min(__ccbe#{id}_n_workers, 64);
+          const __ccbe#{id}_actual_workers: usize = @min(__ccbe#{id}_n_workers, 64);
           __ccbe#{id}_wg.add(__ccbe#{id}_actual_workers);
           for (0..__ccbe#{id}_actual_workers) |__w| {
               __ccbe#{id}_workers[__w] = .{
@@ -1262,6 +1273,278 @@ module PipelineGenerator
               #{spawn_call}
           }
           __ccbe#{id}_wg.wait();
+      }
+    ZIG
+  end
+
+  # Build source setup for stream concurrent ops (dynamic or InfStream).
+  # Returns { setup, src_name } where src_name is the Zig expression to take &src_name.
+  # For identifier sources no temp var is needed; for expressions one is created.
+  def stream_concurrent_source_setup(stream_node, id)
+    source_code = visit(stream_node)
+    if stream_node.is_a?(AST::Identifier)
+      { setup: "", src_name: source_code }
+    else
+      tmp = "__cis#{id}_src"
+      { setup: "var #{tmp} = #{source_code};\n          _ = &#{tmp};", src_name: tmp }
+    end
+  end
+
+  # CONCURRENT SELECT on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
+  # Workers each maintain a local result list; merged after wg.wait().
+  # Result order is non-deterministic (work-stealing).
+  def transpile_concurrent_stream_select(stream_node, select_op, id, workers_code, rt_name, options = {})
+    @current_pipe_label = next_pipe_label
+    policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
+
+    stream_ti = stream_node.type_info
+    is_inf = stream_ti&.inf_stream?
+    item_zig   = transpile_type(is_inf ? stream_ti.inf_stream_element_type.resolved
+                                       : stream_ti.tense_type.element_type.resolved)
+    result_zig = transpile_type(select_op.expression.full_type)
+    pop_method = is_inf ? "nextOrNull" : "next"
+    source     = stream_concurrent_source_setup(stream_node, id)
+
+    inner_code = with_pipeline_context(placeholder: "__stream_item") do
+      with_fiber_capture_map({}) { visit(inner_expr) }
+    end
+    bare_code = inner_code.sub(/^try /, '')
+
+    err_field    = policy == :raise ? "\n              err:   *std.atomic.Value(u16)," : ""
+    err_ctx_init = policy == :raise ? "\n                  .err   = &__cis#{id}_err," : ""
+    err_decl     = policy == :raise ? "\n          var __cis#{id}_err = std.atomic.Value(u16).init(0);" : ""
+    err_check    = policy == :raise ? "\n          const __cis#{id}_ec = __cis#{id}_err.load(.seq_cst);\n          if (__cis#{id}_ec != 0) return @errorFromInt(__cis#{id}_ec);" : ""
+
+    result_body = case policy
+    when :prune
+      "const __cv = #{bare_code} catch continue;\n                  try ctx.local.append(ctx.alloc, __cv);"
+    when :raise
+      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      continue;\n                  };\n                  try ctx.local.append(ctx.alloc, __cv);"
+    else
+      "try ctx.local.append(ctx.alloc, #{inner_code});"
+    end
+
+    feeder_spawn = "try __cis#{id}_wg.sched.submitSpawn(\n              @intFromPtr(&Runtime.entryWrapper),\n              @as(CheatHeader.TaskFn, @ptrCast(&__CisFeeder#{id}.run)),\n              &__cis#{id}_feeder, .{},\n          );"
+    worker_spawn = concurrent_spawn_call(options, "__cis#{id}_wg", "__CisWorker#{id}", "__cis#{id}_workers[__w]")
+
+    <<~ZIG.chomp
+      #{@current_pipe_label}: {
+          #{source[:setup].empty? ? "" : source[:setup] + "\n          "}const __cis#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __cis#{id}_cap: usize = blk: { var c: usize = 4; while (c < __cis#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); };
+          var __cis#{id}_chan = try CheatLib.BoundedChannel(#{item_zig}).init(#{rt_name}.heapAlloc(), __cis#{id}_cap);
+          defer __cis#{id}_chan.deinit();
+          var __cis#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());#{err_decl}
+          const __CisFeeder#{id} = struct {
+              wg:   *CheatHeader.WaitGroup,
+              src:  *@TypeOf(#{source[:src_name]}),
+              chan: *CheatLib.BoundedChannel(#{item_zig}),
+              fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  defer ctx.chan.close();
+                  while (try ctx.src.#{pop_method}()) |__stream_item| {
+                      try ctx.chan.push(__stream_item);
+                  }
+              }
+          };
+          const __CisWorker#{id} = struct {
+              wg:    *CheatHeader.WaitGroup,
+              chan:  *CheatLib.BoundedChannel(#{item_zig}),
+              local: std.ArrayListUnmanaged(#{result_zig}),
+              alloc: std.mem.Allocator,#{err_field}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  while (try ctx.chan.pop()) |__stream_item| {
+                      #{result_body}
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __cis#{id}_feeder = __CisFeeder#{id}{ .wg = &__cis#{id}_wg, .src = &#{source[:src_name]}, .chan = &__cis#{id}_chan };
+          var __cis#{id}_workers: [64]__CisWorker#{id} = undefined;
+          const __cis#{id}_actual_workers: usize = @min(__cis#{id}_n_workers, 64);
+          __cis#{id}_wg.add(1 + __cis#{id}_actual_workers);
+          #{feeder_spawn}
+          for (0..__cis#{id}_actual_workers) |__w| {
+              __cis#{id}_workers[__w] = .{ .wg = &__cis#{id}_wg, .chan = &__cis#{id}_chan, .local = .empty, .alloc = #{rt_name}.heapAlloc()#{err_ctx_init} };
+              #{worker_spawn}
+          }
+          __cis#{id}_wg.wait();#{err_check}
+          var __cis#{id}_final = std.ArrayListUnmanaged(#{result_zig}).empty;
+          for (0..__cis#{id}_actual_workers) |__w| {
+              try __cis#{id}_final.appendSlice(#{rt_name}.heapAlloc(), __cis#{id}_workers[__w].local.items);
+              __cis#{id}_workers[__w].local.deinit(#{rt_name}.heapAlloc());
+          }
+          break :#{@current_pipe_label} __cis#{id}_final;
+      }
+    ZIG
+  end
+
+  # CONCURRENT WHERE on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
+  def transpile_concurrent_stream_where(stream_node, where_op, id, workers_code, rt_name, options = {})
+    @current_pipe_label = next_pipe_label
+    policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
+
+    stream_ti = stream_node.type_info
+    is_inf = stream_ti&.inf_stream?
+    item_zig   = transpile_type(is_inf ? stream_ti.inf_stream_element_type.resolved
+                                       : stream_ti.tense_type.element_type.resolved)
+    pop_method = is_inf ? "nextOrNull" : "next"
+    source     = stream_concurrent_source_setup(stream_node, id)
+
+    inner_code = with_pipeline_context(placeholder: "__stream_item") do
+      with_fiber_capture_map({}) { visit(inner_expr) }
+    end
+    bare_code = inner_code.sub(/^try /, '')
+
+    err_field    = policy == :raise ? "\n              err:   *std.atomic.Value(u16)," : ""
+    err_ctx_init = policy == :raise ? "\n                  .err   = &__cisw#{id}_err," : ""
+    err_decl     = policy == :raise ? "\n          var __cisw#{id}_err = std.atomic.Value(u16).init(0);" : ""
+    err_check    = policy == :raise ? "\n          const __cisw#{id}_ec = __cisw#{id}_err.load(.seq_cst);\n          if (__cisw#{id}_ec != 0) return @errorFromInt(__cisw#{id}_ec);" : ""
+
+    pred_body = case policy
+    when :prune
+      "const __cv = #{bare_code} catch continue;\n                  if (__cv) try ctx.local.append(ctx.alloc, __stream_item);"
+    when :raise
+      "const __cv = #{bare_code} catch |e| {\n                      _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);\n                      continue;\n                  };\n                  if (__cv) try ctx.local.append(ctx.alloc, __stream_item);"
+    else
+      "if (#{inner_code}) try ctx.local.append(ctx.alloc, __stream_item);"
+    end
+
+    feeder_spawn = "try __cisw#{id}_wg.sched.submitSpawn(\n              @intFromPtr(&Runtime.entryWrapper),\n              @as(CheatHeader.TaskFn, @ptrCast(&__CiswFeeder#{id}.run)),\n              &__cisw#{id}_feeder, .{},\n          );"
+    worker_spawn = concurrent_spawn_call(options, "__cisw#{id}_wg", "__CiswWorker#{id}", "__cisw#{id}_workers[__w]")
+
+    <<~ZIG.chomp
+      #{@current_pipe_label}: {
+          #{source[:setup].empty? ? "" : source[:setup] + "\n          "}const __cisw#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __cisw#{id}_cap: usize = blk: { var c: usize = 4; while (c < __cisw#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); };
+          var __cisw#{id}_chan = try CheatLib.BoundedChannel(#{item_zig}).init(#{rt_name}.heapAlloc(), __cisw#{id}_cap);
+          defer __cisw#{id}_chan.deinit();
+          var __cisw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());#{err_decl}
+          const __CiswFeeder#{id} = struct {
+              wg:   *CheatHeader.WaitGroup,
+              src:  *@TypeOf(#{source[:src_name]}),
+              chan: *CheatLib.BoundedChannel(#{item_zig}),
+              fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  defer ctx.chan.close();
+                  while (try ctx.src.#{pop_method}()) |__stream_item| {
+                      try ctx.chan.push(__stream_item);
+                  }
+              }
+          };
+          const __CiswWorker#{id} = struct {
+              wg:    *CheatHeader.WaitGroup,
+              chan:  *CheatLib.BoundedChannel(#{item_zig}),
+              local: std.ArrayListUnmanaged(#{item_zig}),
+              alloc: std.mem.Allocator,#{err_field}
+              fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  while (try ctx.chan.pop()) |__stream_item| {
+                      #{pred_body}
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __cisw#{id}_feeder = __CiswFeeder#{id}{ .wg = &__cisw#{id}_wg, .src = &#{source[:src_name]}, .chan = &__cisw#{id}_chan };
+          var __cisw#{id}_workers: [64]__CiswWorker#{id} = undefined;
+          const __cisw#{id}_actual_workers: usize = @min(__cisw#{id}_n_workers, 64);
+          __cisw#{id}_wg.add(1 + __cisw#{id}_actual_workers);
+          #{feeder_spawn}
+          for (0..__cisw#{id}_actual_workers) |__w| {
+              __cisw#{id}_workers[__w] = .{ .wg = &__cisw#{id}_wg, .chan = &__cisw#{id}_chan, .local = .empty, .alloc = #{rt_name}.heapAlloc()#{err_ctx_init} };
+              #{worker_spawn}
+          }
+          __cisw#{id}_wg.wait();#{err_check}
+          var __cisw#{id}_final = std.ArrayListUnmanaged(#{item_zig}).empty;
+          for (0..__cisw#{id}_actual_workers) |__w| {
+              try __cisw#{id}_final.appendSlice(#{rt_name}.heapAlloc(), __cisw#{id}_workers[__w].local.items);
+              __cisw#{id}_workers[__w].local.deinit(#{rt_name}.heapAlloc());
+          }
+          break :#{@current_pipe_label} __cisw#{id}_final;
+      }
+    ZIG
+  end
+
+  # CONCURRENT EACH on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
+  def transpile_concurrent_stream_each(stream_node, each_op, conc_op, id, workers_code, rt_name, options = {})
+    stream_ti  = stream_node.type_info
+    is_inf     = stream_ti&.inf_stream?
+    item_zig   = transpile_type(is_inf ? stream_ti.inf_stream_element_type.resolved
+                                       : stream_ti.tense_type.element_type.resolved)
+    pop_method = is_inf ? "nextOrNull" : "next"
+    source     = stream_concurrent_source_setup(stream_node, id)
+
+    captures = conc_op.capture_analysis&.captures || {}
+    capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}.*"] }
+    capture_fields = captures.keys.map { |name| "    #{name}: *const @TypeOf(#{name})," }.join("\n")
+    capture_inits  = captures.keys.map { |name| ".#{name} = &#{name}" }.join(", ")
+    capture_inits_str = capture_inits.empty? ? "" : ", #{capture_inits}"
+
+    body_code = with_pipeline_context(placeholder: "__each_item") do
+      with_fiber_capture_map(capture_map) do
+        each_op.body.map { |stmt|
+          code = visit(stmt)
+          s = code.strip
+          (s.end_with?(";") || s.end_with?("}")) ? code : "#{code};"
+        }.join("\n                  ")
+      end
+    end
+
+    feeder_spawn = "try __cise#{id}_wg.sched.submitSpawn(\n              @intFromPtr(&Runtime.entryWrapper),\n              @as(CheatHeader.TaskFn, @ptrCast(&__CiseFeeder#{id}.run)),\n              &__cise#{id}_feeder, .{},\n          );"
+    worker_spawn = concurrent_spawn_call(options, "__cise#{id}_wg", "__CiseWorker#{id}", "__cise#{id}_workers[__w]")
+
+    <<~ZIG.chomp
+      {
+          #{source[:setup].empty? ? "" : source[:setup] + "\n          "}const __cise#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __cise#{id}_cap: usize = blk: { var c: usize = 4; while (c < __cise#{id}_n_workers * 4) : (c <<= 1) {} break :blk @min(c, 64); };
+          var __cise#{id}_chan = try CheatLib.BoundedChannel(#{item_zig}).init(#{rt_name}.heapAlloc(), __cise#{id}_cap);
+          defer __cise#{id}_chan.deinit();
+          var __cise#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          const __CiseFeeder#{id} = struct {
+              wg:   *CheatHeader.WaitGroup,
+              src:  *@TypeOf(#{source[:src_name]}),
+              chan: *CheatLib.BoundedChannel(#{item_zig}),
+              fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  defer ctx.chan.close();
+                  while (try ctx.src.#{pop_method}()) |__stream_item| {
+                      try ctx.chan.push(__stream_item);
+                  }
+              }
+          };
+          const __CiseWorker#{id} = struct {
+              wg:   *CheatHeader.WaitGroup,
+              chan: *CheatLib.BoundedChannel(#{item_zig}),
+          #{capture_fields.empty? ? "" : capture_fields + "\n    "}    fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  _ = &__rt;
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  while (try ctx.chan.pop()) |__each_item| {
+                      #{body_code}
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __cise#{id}_feeder = __CiseFeeder#{id}{ .wg = &__cise#{id}_wg, .src = &#{source[:src_name]}, .chan = &__cise#{id}_chan };
+          var __cise#{id}_workers: [64]__CiseWorker#{id} = undefined;
+          const __cise#{id}_actual_workers: usize = @min(__cise#{id}_n_workers, 64);
+          __cise#{id}_wg.add(1 + __cise#{id}_actual_workers);
+          #{feeder_spawn}
+          for (0..__cise#{id}_actual_workers) |__w| {
+              __cise#{id}_workers[__w] = .{ .wg = &__cise#{id}_wg, .chan = &__cise#{id}_chan#{capture_inits_str} };
+              #{worker_spawn}
+          }
+          __cise#{id}_wg.wait();
       }
     ZIG
   end
@@ -1374,7 +1657,7 @@ module PipelineGenerator
           };
           var __ccs#{id}_next = std.atomic.Value(usize).init(0);
           var __ccs#{id}_workers: [64]__CcsWorker#{id} = undefined;
-          const __ccs#{id}_actual_workers = @min(__ccs#{id}_n_workers, 64);
+          const __ccs#{id}_actual_workers: usize = @min(__ccs#{id}_n_workers, 64);
           __ccs#{id}_wg.add(__ccs#{id}_actual_workers);
           for (0..__ccs#{id}_actual_workers) |__w| {
               __ccs#{id}_workers[__w] = .{
@@ -1468,7 +1751,7 @@ module PipelineGenerator
           };
           var __ccw#{id}_next = std.atomic.Value(usize).init(0);
           var __ccw#{id}_workers: [64]__CcwWorker#{id} = undefined;
-          const __ccw#{id}_actual_workers = @min(__ccw#{id}_n_workers, 64);
+          const __ccw#{id}_actual_workers: usize = @min(__ccw#{id}_n_workers, 64);
           __ccw#{id}_wg.add(__ccw#{id}_actual_workers);
           for (0..__ccw#{id}_actual_workers) |__w| {
               __ccw#{id}_workers[__w] = .{
@@ -1547,7 +1830,7 @@ module PipelineGenerator
           };
           var __cce#{id}_next = std.atomic.Value(usize).init(0);
           var __cce#{id}_workers: [64]__CceWorker#{id} = undefined;
-          const __cce#{id}_actual_workers = @min(__cce#{id}_n_workers, 64);
+          const __cce#{id}_actual_workers: usize = @min(__cce#{id}_n_workers, 64);
           __cce#{id}_wg.add(__cce#{id}_actual_workers);
           for (0..__cce#{id}_actual_workers) |__w| {
               __cce#{id}_workers[__w] = .{

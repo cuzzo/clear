@@ -1958,10 +1958,6 @@ class PipelineHost
       return lower_concurrent_bounded_stream(smooth_node.left, conc_op)
     end
 
-    if unwrap_range_chain(smooth_node.left)
-      raise "CONCURRENT over finite streams is temporarily disabled until it has a MIR-safe lowering path"
-    end
-
     # Detect `list AS @u s> CONCURRENT SELECT @u.field` -- thread the binding
     # into the CONCURRENT worker body so @u resolves to ctx.items[__idx].
     lhs = smooth_node.left

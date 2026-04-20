@@ -1133,12 +1133,16 @@ module PipeAnalysis
     when AST::SelectOp, AST::WhereOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_select_family_op(node)
+      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? || node.left.is_a?(AST::RangeLit)
+        analyze_concurrent_stream_select_family_op(node)
       else
         analyze_select_family_op(proxy)
       end
     when AST::EachOp
       if bounded_stream_source?(node.left)
         analyze_concurrent_bounded_each_op(node)
+      elsif node.left.type_info&.inf_stream? || node.left.type_info&.dynamic_stream? || node.left.is_a?(AST::RangeLit)
+        analyze_concurrent_stream_each_op(node)
       elsif shard_node
         # Explicit SHARD + CONCURRENT EACH: items are String keys.
         analyze_shard_each_op(node, shard_node)
@@ -1187,7 +1191,14 @@ module PipeAnalysis
       end
     end
 
-    unless bounded_stream_source?(node.left)
+    # SELECT/WHERE/EACH on stream sources set node.full_type directly in their analyze
+    # methods. REDUCE ops (SUM/COUNT/etc.) and array sources still use the proxy.
+    stream_op_analyzed = (conc.op.is_a?(AST::SelectOp) || conc.op.is_a?(AST::WhereOp) || conc.op.is_a?(AST::EachOp)) &&
+                         (bounded_stream_source?(node.left) ||
+                          node.left.type_info&.inf_stream? ||
+                          node.left.type_info&.dynamic_stream? ||
+                          node.left.is_a?(AST::RangeLit))
+    unless stream_op_analyzed
       node.full_type = proxy.full_type
       node.storage   = (node.full_type == :Void) ? :stack : :heap
     end
@@ -1227,6 +1238,68 @@ module PipeAnalysis
   def analyze_concurrent_bounded_each_op(node)
     lhs_type = node.left.type_info
     item_type = lhs_type.stream_element_type.resolved
+    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
+                  %w[true TRUE].include?(node.right.options["parallel"].name)
+
+    with_new_scope(current_scope) do
+      current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+      with_soa_tracking(node, item_type) do
+        node.right.op.body.each { |stmt| visit(stmt) }
+      end
+    end
+
+    node.right.capture_analysis =
+      validate_fiber_captures!(node.right, node.right.op.body, is_parallel, false) ||
+      analyze_fiber_captures(node.right.op.body, is_parallel: is_parallel)
+
+    node.full_type = :Void
+    node.storage   = :stack
+  end
+
+  # CONCURRENT SELECT/WHERE on ~T[] (dynamic stream) or ~T[INF] (InfStream).
+  # Uses BoundedChannel for SPMC back pressure: feeder reads source, workers compete.
+  # Produces a materialized list (not another stream) regardless of source kind.
+  def analyze_concurrent_stream_select_family_op(node)
+    lhs_type = node.left.type_info
+    item_type = if lhs_type&.inf_stream?
+      inf_stream_element_type(node.left)
+    else
+      finite_stream_element_type(node.left)
+    end
+    is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
+                  %w[true TRUE].include?(node.right.options["parallel"].name)
+
+    with_new_scope do
+      current_scope.declare("_", nil, item_type, false, false, nil, :stack)
+      with_soa_tracking(node, item_type) do
+        visit(node.right.op.expression)
+      end
+    end
+
+    node.right.capture_analysis =
+      validate_fiber_captures!(node.right, [node.right.op.expression], is_parallel, false) ||
+      analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
+
+    if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
+      error!(node.right.op, "WHERE clause must evaluate to Bool")
+    end
+
+    node.full_type = case node.right.op
+    when AST::SelectOp then :"#{node.right.op.expression.full_type}[]"
+    when AST::WhereOp  then :"#{item_type}[]"
+    end
+    node.storage = :heap
+    current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  # CONCURRENT EACH on ~T[] (dynamic stream) or ~T[INF] (InfStream).
+  def analyze_concurrent_stream_each_op(node)
+    lhs_type = node.left.type_info
+    item_type = if lhs_type&.inf_stream?
+      inf_stream_element_type(node.left)
+    else
+      finite_stream_element_type(node.left)
+    end
     is_parallel = node.right.options["parallel"].is_a?(AST::Identifier) &&
                   %w[true TRUE].include?(node.right.options["parallel"].name)
 

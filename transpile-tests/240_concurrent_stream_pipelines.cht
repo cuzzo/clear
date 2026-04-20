@@ -1,0 +1,93 @@
+-- Test: CONCURRENT ops on ~T[] (dynamic finite stream) and ~T[INF] (InfStream).
+-- These use BoundedChannel for back-pressured SPMC work distribution.
+-- Result order within concurrent ops is non-deterministic; tests use sums/counts.
+
+STRUCT Acc {
+    value: Int64
+}
+
+FN main() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: ~T[] | CONCURRENT SELECT (transform all items)
+    -- -------------------------------------------------------
+    s1: ~Int64[] = 1 ..< 6;
+    doubled = s1 s> CONCURRENT(workers: 2) SELECT _ * 2;
+    ASSERT doubled.length() == 5, "concurrent stream SELECT keeps all 5 items";
+    MUTABLE sum1: Int64 = 0;
+    doubled s> EACH { sum1 = sum1 + _; };
+    ASSERT sum1 == 30, "concurrent stream SELECT: 2+4+6+8+10=30";
+
+    -- -------------------------------------------------------
+    -- Test 2: ~T[] | CONCURRENT WHERE (filter items)
+    -- -------------------------------------------------------
+    s2: ~Int64[] = 1 ..< 10;
+    evens = s2 s> CONCURRENT(workers: 3) WHERE _ MOD 2 == 0;
+    ASSERT evens.length() == 4, "concurrent stream WHERE: 4 even numbers in 1..9";
+    MUTABLE sum2: Int64 = 0;
+    evens s> EACH { sum2 = sum2 + _; };
+    ASSERT sum2 == 20, "concurrent stream WHERE: 2+4+6+8=20";
+
+    -- -------------------------------------------------------
+    -- Test 3: ~T[] | CONCURRENT EACH (side effects via shared locked struct)
+    -- -------------------------------------------------------
+    acc3 = Acc{ value: 0 } @shared:locked;
+    s3: ~Int64[] = 1 ..< 6;
+    s3 s> CONCURRENT(workers: 2) EACH {
+        WITH EXCLUSIVE acc3 AS a {
+            a.value = a.value + _;
+        }
+    };
+    WITH acc3 AS a {
+        ASSERT a.value == 15, "concurrent stream EACH: 1+2+3+4+5=15";
+    }
+
+    -- -------------------------------------------------------
+    -- Test 4: ~T[INF] | CONCURRENT SELECT (finite self-closing generator)
+    -- -------------------------------------------------------
+    gen4: ~Int64[INF] = BG STREAM {
+        YIELD 10;
+        YIELD 20;
+        YIELD 30;
+    };
+    results4 = gen4 s> CONCURRENT(workers: 2) SELECT _ + 1;
+    ASSERT results4.length() == 3, "concurrent inf stream SELECT: 3 items";
+    MUTABLE sum4: Int64 = 0;
+    results4 s> EACH { sum4 = sum4 + _; };
+    ASSERT sum4 == 63, "concurrent inf stream SELECT: 11+21+31=63";
+
+    -- -------------------------------------------------------
+    -- Test 5: ~T[INF] | CONCURRENT WHERE (finite self-closing generator)
+    -- -------------------------------------------------------
+    gen5: ~Int64[INF] = BG STREAM {
+        MUTABLE i5: Int64 = 1;
+        WHILE i5 <= 8 DO
+            YIELD i5;
+            i5 = i5 + 1;
+        END
+    };
+    odds = gen5 s> CONCURRENT(workers: 2) WHERE _ MOD 2 != 0;
+    ASSERT odds.length() == 4, "concurrent inf stream WHERE: 4 odd numbers in 1..8";
+    MUTABLE sum5: Int64 = 0;
+    odds s> EACH { sum5 = sum5 + _; };
+    ASSERT sum5 == 16, "concurrent inf stream WHERE: 1+3+5+7=16";
+
+    -- -------------------------------------------------------
+    -- Test 6: ~T[INF] | CONCURRENT EACH (finite self-closing generator)
+    -- -------------------------------------------------------
+    acc6 = Acc{ value: 0 } @shared:locked;
+    gen6: ~Int64[INF] = BG STREAM {
+        YIELD 100;
+        YIELD 200;
+        YIELD 300;
+    };
+    gen6 s> CONCURRENT(workers: 2) EACH {
+        WITH EXCLUSIVE acc6 AS a {
+            a.value = a.value + _;
+        }
+    };
+    WITH acc6 AS a {
+        ASSERT a.value == 600, "concurrent inf stream EACH: 100+200+300=600";
+    }
+
+    RETURN;
+END
