@@ -22,6 +22,6 @@ Go made those trade-offs. But Go is a thin veneer over C with the most sophistic
 
 CLEAR exists because it thinks Rust is not truly safe enough inherently, Pony is not easy enough, and Go is currently the most practical trade-off but is too dangerous and cannot fix its inherent problems.
 
-Further, although Pony literally forces you into the actor pattern - at least at this stage, it is not inherently distributive.
+Further, although Pony literally forces you into the actor pattern - at least at this stage, it is not inherently distributive. The actor model does not require serialization, distributed fault tolerence, supervision, etc. Pony uses the ideas to achieve safety on a single machine, but just because you wrote the code that *allows* for distribution easily, does not mean it actually can be distributed effectively by default.
 
 CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them. The goal is to make trade-offs to achieve understandability, and to sacrfice *some* safety if it means giving you tools necessary to realistically accomplish common workloads.
