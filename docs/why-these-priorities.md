@@ -24,4 +24,6 @@ CLEAR exists because it thinks Rust is not truly safe enough inherently, Pony is
 
 Further, although Pony literally forces you into the actor pattern - at least at this stage, it is not inherently distributive. The actor model does not require serialization, distributed fault tolerence, supervision, etc. Pony uses the ideas to achieve safety on a single machine, but just because you wrote the code that *allows* for distribution easily, does not mean it actually can be distributed effectively by default.
 
+Pony did not want to make any sacrifices on safety. This led to a language that is impractical and/or not competitive for many of workloads (with a high cognitive burden).
+
 CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them. The goal is to make trade-offs to achieve understandability, and to sacrfice *some* safety if it means giving you tools necessary to realistically accomplish common workloads.
