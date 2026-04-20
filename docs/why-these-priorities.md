@@ -85,7 +85,7 @@ Go claims to be *easy* - which implies simplicity. But Go allows and often force
 
 Go may claim to be easy, but if you need to write 20 lines of imperative arcana in the precise ceremonial order or rely on a set of libraries to do common things efficiently - it is not truly easy.
 
-In essence, CLEAR thinks it is relatively easy to describe *what* you want to do (your intent), and it is certainly easy to recognize it after the Profiler points you in the right direction for efficiency and safety (one-line optimizaitons clearly separate from code).
+In essence, CLEAR thinks SQL proved that it is relatively easy to describe *what* you want to do (your intent), and it is certainly easy to recognize it after the Profiler points you in the right direction for efficiency and safety (one-line optimizaitons clearly separate from code).
 
 It is much harder to think like the computer and tell it *HOW* to do that, or list what *CAN* be done and hope that matches what you want to do.
 
