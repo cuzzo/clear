@@ -105,9 +105,9 @@ not wall time. Use `--server` to run them.
 
 | # | Name | What it measures | Cross-language |
 |---|------|-----------------|----------------|
-| 01 | tcp_kvstore | TCP RESP protocol key-value server | - |
-| 02 | json_api | TCP JSON server (FFI-heavy, wrk load) | - |
-| 03 | pathological | Worst-case allocation/contention patterns | - |
+| 01 | tcp_kvstore | TCP RESP protocol key-value server | DragonflyDB |
+| 02 | json_api | TCP JSON server (FFI-heavy, wrk load) | Rust, Go |
+| 03 | pathological | Worst-case allocation/contention patterns | Rust, Go |
 
 ## Memory benchmarks
 
