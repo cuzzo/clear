@@ -83,7 +83,7 @@ Pony is not considered difficult because it merely has capabilities or because i
 
 Go claims to be *easy* - which implies simplicity. But Go allows and often forces you to load footguns to achieve decent performance, lending itself to global complexity and hard-to-understand programs.
 
-Go may claim to be easy, but if you need to write 20 lines of imperative arcana in the precise ceremonal order or rely on a set of libraries to do common things efficiently - it is not truly easy.
+Go may claim to be easy, but if you need to write 20 lines of imperative arcana in the precise ceremonial order or rely on a set of libraries to do common things efficiently - it is not truly easy.
 
 In essence, CLEAR thinks it is relatively easy to describe *what* you want to do (your intent), and it is certainly easy to recognize it after the Profiler points you in the right direction for efficiency and safety (one-line optimizaitons clearly separate from code).
 
