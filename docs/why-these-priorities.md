@@ -10,7 +10,7 @@ CLEAR is designed to be:
 
  ## But Why?
 
-Rust was designed to replace C for the Linux Kernel. There are a number of tradeoffs Rust was not willing to make for it to be either 1) easy / understandable, or 2) a better Go.
+Rust was designed to replace C for Browser Engines & Kernel development. There are a number of tradeoffs Rust was not willing to make for it to be either 1) easy / understandable, or 2) a better Go.
 
 Yet people are desperate to use Rust as a better Go because it has so much potential to be that.
 
