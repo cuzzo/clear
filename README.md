@@ -82,6 +82,8 @@ CLEAR lowers to Zig, which has native access to the entire C library.
 
 In addition, Zig supports compiling *to* any target *from* any machine. I.e. you can compile for a Mac architecture from your Linux workstation.
 
+It also has exceptionally fast *debug* build times, but does not produce production binaries as fast as Go.
+
 ## BUILDING & TESTING
 
 If you want to contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
