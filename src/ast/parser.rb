@@ -1617,15 +1617,34 @@ class Parser
     AST::RecoverOp.new(tok, default_expr)
   end
 
-  # WINDOW(size) expression
+  # WINDOW(size) expression        -- sliding window (positional arg)
+  # WINDOW(size: N, time: 'Xms')  -- batch/tumbling window (named args)
   # e.g., prices s> WINDOW(3) SUM(_) / 3.0
+  # e.g., stream s> WINDOW(size: 100) SELECT process(_)
+  # e.g., stream s> WINDOW(size: 100, time: '500ms') EACH { ... }
   def parse_window_op
     window_token = consume(:KEYWORD, 'WINDOW')
     consume(:CHAR, '(')
-    size = parse_expression
-    consume(:CHAR, ')')
-    body = parse_expression(1)  # pipe_expression precedence
-    AST::WindowOp.new(window_token, size, body)
+    # Named-param form (BatchWindowOp) if first token is VAR_ID followed by ':'
+    if match?(:VAR_ID) && peek.type == :CHAR && peek.value == ':'
+      options = {}
+      loop do
+        key_tok = consume(:VAR_ID)
+        consume(:CHAR, ':')
+        val = parse_expression
+        options[key_tok.value] = val
+        break unless match?(:CHAR, ',')
+        consume(:CHAR, ',')
+      end
+      consume(:CHAR, ')')
+      body = parse_expression(1)
+      AST::BatchWindowOp.new(window_token, options, body)
+    else
+      size = parse_expression
+      consume(:CHAR, ')')
+      body = parse_expression(1)  # pipe_expression precedence
+      AST::WindowOp.new(window_token, size, body)
+    end
   end
 
   # JOIN(right_source) key_expr_or_lambda

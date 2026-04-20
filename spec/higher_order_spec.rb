@@ -1301,6 +1301,122 @@ RSpec.describe SemanticAnnotator do
   end
 
   # ===========================================================================
+  # WINDOW (batch/tumbling)
+  # ===========================================================================
+  describe "WINDOW(size:, time:)" do
+    it "size-only: result type is expression-type[]" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            data: Int64[] = [1, 2, 3, 4, 5];
+            result = data s> WINDOW(size: 3) _.length();
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Int64[]")
+    end
+
+    it "time-only: result type is expression-type[]" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            data: Int64[] = [1, 2, 3];
+            result = data s> WINDOW(time: "500ms") _.length();
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Int64[]")
+    end
+
+    it "size + time: both named params accepted" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            data: Int64[] = [1, 2, 3];
+            result = data s> WINDOW(size: 2, time: "1s") _.length();
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Int64[]")
+    end
+
+    it "rejects when neither size nor time is provided" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              data: Int64[] = [1, 2, 3];
+              result = data s> WINDOW(size: 3) _.length();
+              result2 = data s> WINDOW(size: 0) _.length();
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WINDOW size must be > 0/)
+    end
+
+    it "rejects unknown option key" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              data: Int64[] = [1, 2, 3];
+              result = data s> WINDOW(bad_key: 3) _.length();
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Unknown WINDOW option/)
+    end
+
+    it "rejects non-numeric size" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              data: Int64[] = [1, 2, 3];
+              result = data s> WINDOW(size: "bad") _.length();
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WINDOW size must be a number/)
+    end
+
+    it "rejects invalid time format" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              data: Int64[] = [1, 2, 3];
+              result = data s> WINDOW(time: "5x") _.length();
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WINDOW time format must be like/)
+    end
+
+    it "rejects non-string time" do
+      expect {
+        run(<<~CLEAR)
+          FN f() RETURNS Void ->
+              data: Int64[] = [1, 2, 3];
+              result = data s> WINDOW(time: 500) _.length();
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WINDOW time must be a string literal/)
+    end
+
+    it "accepts open stream source (~?T[])" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            gen: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
+            result = gen s> WINDOW(size: 2) _.length();
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Int64[]")
+    end
+
+    it "accepts inf stream source (~T[INF])" do
+      tree = run(<<~CLEAR)
+        FN f() RETURNS Void ->
+            gen: ~Int64[INF] = BG STREAM { YIELD 1; YIELD 2; };
+            result = gen s> WINDOW(size: 2) _.length();
+        END
+      CLEAR
+      bind = tree.statements.first.body.last
+      expect(bind.full_type.to_s).to eq("Int64[]")
+    end
+  end
+
+  # ===========================================================================
   # JOIN
   # ===========================================================================
   describe "JOIN" do

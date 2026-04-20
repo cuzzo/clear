@@ -79,6 +79,7 @@ module PipeAnalysis
     node.is_a?(AST::TapOp) ||
     node.is_a?(AST::TakeWhileOp) ||
     node.is_a?(AST::WindowOp) ||
+    node.is_a?(AST::BatchWindowOp) ||
     node.is_a?(AST::JoinOp) ||
     node.is_a?(AST::RecoverOp)
   end
@@ -125,6 +126,8 @@ module PipeAnalysis
       analyze_take_while_op(node)
     when AST::WindowOp
       analyze_window_op(node)
+    when AST::BatchWindowOp
+      analyze_batch_window_op(node)
     when AST::JoinOp
       analyze_join_op(node)
     when AST::RecoverOp
@@ -240,6 +243,79 @@ module PipeAnalysis
     expr_type = node.right.expression.full_type || node.right.expression.resolved_type
     node.full_type = :"#{expr_type}[]"
     node.storage = :frame
+    current_fn_ctx.frame_count += 1 if current_fn_ctx
+  end
+
+  # Time string format: '500ms', '1s', '2min', '1h'
+  BATCH_WINDOW_TIME_RE = /\A(\d+(?:\.\d+)?)(ms|s|min|h)\z/.freeze
+  BATCH_WINDOW_TIME_NS = { 'ms' => 1_000_000, 's' => 1_000_000_000, 'min' => 60_000_000_000, 'h' => 3_600_000_000_000 }.freeze
+
+  def parse_batch_window_time_ns(str)
+    m = BATCH_WINDOW_TIME_RE.match(str)
+    return nil unless m
+    (m[1].to_f * BATCH_WINDOW_TIME_NS[m[2]]).to_i
+  end
+
+  def analyze_batch_window_op(node)
+    opts = node.right.options
+    bw = node.right
+
+    valid_keys = %w[size time]
+    opts.each_key do |k|
+      error!(bw.token, "Unknown WINDOW option '#{k}', valid: #{valid_keys.join(', ')}") unless valid_keys.include?(k)
+    end
+
+    unless opts.key?("size") || opts.key?("time")
+      error!(bw.token, "WINDOW requires at least one of size: or time:")
+    end
+
+    # Validate size
+    if opts["size"]
+      visit(opts["size"])
+      size_type = opts["size"].resolved_type
+      unless [:Int64, :Float64].include?(size_type)
+        error!(opts["size"], "WINDOW size must be a number, got #{size_type}")
+      end
+      if opts["size"].is_a?(AST::Literal)
+        v = opts["size"].value.to_f
+        error!(opts["size"], "WINDOW size must be > 0") if v <= 0
+      end
+    end
+
+    # Validate time string and compute nanoseconds
+    if opts["time"]
+      visit(opts["time"])
+      unless opts["time"].is_a?(AST::Literal) && opts["time"].type == :STRING
+        error!(opts["time"], "WINDOW time must be a string literal like '500ms' or '1s'")
+      end
+      ns = parse_batch_window_time_ns(opts["time"].value)
+      error!(opts["time"], "WINDOW time format must be like '500ms', '1s', '2min', '1h', got '#{opts["time"].value}'") unless ns
+      error!(opts["time"], "WINDOW time must be > 0") if ns <= 0
+    end
+
+    # Determine input element type (works for arrays and all stream types)
+    left_ti = node.left.type_info
+    item_type = if left_ti&.inf_stream?
+      left_ti.inf_stream_element_type.resolved
+    elsif left_ti&.open_stream? || left_ti&.dynamic_stream?
+      left_ti.open_stream_element_type.resolved
+    elsif left_ti&.bounded_stream?
+      left_ti.stream_element_type.resolved
+    elsif left_ti&.element_type
+      left_ti.element_type.resolved
+    else
+      error!(node.left, "WINDOW(size:, time:) requires a collection or stream input")
+    end
+
+    # _ is a batch: T[]
+    with_new_scope do
+      current_scope.declare("_", nil, :"#{item_type}[]", false, false, nil, :stack)
+      visit(bw.expression)
+    end
+
+    expr_type = bw.expression.full_type || bw.expression.resolved_type
+    node.full_type = :"#{expr_type}[]"
+    node.storage = :heap
     current_fn_ctx.frame_count += 1 if current_fn_ctx
   end
 

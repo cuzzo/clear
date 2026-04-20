@@ -2730,7 +2730,7 @@ class MIRLowering
       AST::OrderByOp, AST::LimitOp, AST::UnnestOp, AST::DistinctOp,
       AST::EachOp, AST::FindOp, AST::AnyOp, AST::AllOp,
       AST::CountOp, AST::SumOp, AST::AverageOp, AST::MinOp, AST::MaxOp,
-      AST::TakeWhileOp, AST::WindowOp, AST::JoinOp, AST::RecoverOp,
+      AST::TakeWhileOp, AST::WindowOp, AST::BatchWindowOp, AST::JoinOp, AST::RecoverOp,
       AST::TapOp, AST::SkipOp, AST::ShardOp, AST::ConcurrentOp
     ]
     if complex_ops.any? { |t| rhs.is_a?(t) }

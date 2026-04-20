@@ -426,6 +426,9 @@ module AST
   TakeWhileOp = Struct.new(:token, :expression) { include Locatable }
   # WINDOW(size): sliding window of `size` elements. _ is the sub-slice.
   WindowOp = Struct.new(:token, :size, :expression) { include Locatable }
+  # WINDOW(size: N, time: 'Xms'): batch/tumbling window. _ is a T[] batch.
+  # options = { "size" => size_node, "time" => time_node } (at least one required)
+  BatchWindowOp = Struct.new(:token, :options, :expression) { include Locatable }
   # JOIN(right_source) key_expr_or_lambda
   # Equi-join: shared key applied to both sides, or lambda(a, b) -> Bool.
   # Result: anonymous struct { left: L, right: ?R } for each left element.

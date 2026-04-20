@@ -1323,6 +1323,87 @@ pub fn bind(comptime deps: type) type {
         };
     }
 
+    // -----------------------------------------------------------------------
+    // BatchWindow(T): tumbling/session window that accumulates items into
+    // batches and flushes on size, elapsed time, or both (first-of-either).
+    //
+    // Unlike the sliding WINDOW(N) operator (collection-only, overlapping),
+    // BatchWindow is non-overlapping: each item belongs to exactly one batch.
+    //
+    // Flush conditions (checked after every push):
+    //   max_size > 0  -> flush when buf.items.len >= max_size
+    //   timeout_ns > 0 -> flush when elapsed >= timeout_ns since first item
+    //   both specified -> flush on whichever condition fires first
+    //
+    // Lifecycle:
+    //   var w = CheatLib.BatchWindow(i64).init(alloc, 100, 500_000_000); // 100 items or 500ms
+    //   defer w.deinit();
+    //   if (try w.push(item)) |batch| { defer w.freeBatch(batch); ... }
+    //   if (try w.flush()) |batch| { defer w.freeBatch(batch); ... }  // final partial batch
+    //
+    // Used by `stream s> WINDOW(size: N, time: 'Xms') body` pipeline operator.
+    pub fn BatchWindow(comptime T: type) type {
+        return struct {
+            const Self = @This();
+
+            buf: std.ArrayListUnmanaged(T) = .empty,
+            max_size: usize,
+            timeout_ns: u64,
+            batch_start_ns: u64 = 0,
+            has_items: bool = false,
+            alloc: std.mem.Allocator,
+
+            pub fn init(alloc: std.mem.Allocator, max_size: usize, timeout_ns: u64) Self {
+                return .{ .max_size = max_size, .timeout_ns = timeout_ns, .alloc = alloc };
+            }
+
+            /// Push an item. Returns a heap-allocated batch slice when the window
+            /// should flush (size or time limit reached), null otherwise.
+            /// Caller must call freeBatch() on the returned slice.
+            pub fn push(self: *Self, item: T) !?[]T {
+                if (!self.has_items) {
+                    self.batch_start_ns = compat.nanoTimestamp();
+                    self.has_items = true;
+                }
+                try self.buf.append(self.alloc, item);
+                if (self.shouldFlush()) {
+                    return try self.takeBatch();
+                }
+                return null;
+            }
+
+            /// Flush any remaining buffered items as a final batch.
+            /// Returns null if the buffer is empty.
+            /// Caller must call freeBatch() on the returned slice.
+            pub fn flush(self: *Self) !?[]T {
+                if (self.buf.items.len == 0) return null;
+                return try self.takeBatch();
+            }
+
+            pub fn freeBatch(self: *Self, batch: []T) void {
+                self.alloc.free(batch);
+            }
+
+            pub fn deinit(self: *Self) void {
+                self.buf.deinit(self.alloc);
+            }
+
+            fn shouldFlush(self: *const Self) bool {
+                const size_flush = self.max_size > 0 and self.buf.items.len >= self.max_size;
+                const time_flush = self.timeout_ns > 0 and self.has_items and
+                    (compat.nanoTimestamp() -% self.batch_start_ns) >= self.timeout_ns;
+                return size_flush or time_flush;
+            }
+
+            fn takeBatch(self: *Self) ![]T {
+                const slice = try self.alloc.dupe(T, self.buf.items);
+                self.buf.clearRetainingCapacity();
+                self.has_items = false;
+                return slice;
+            }
+        };
+    }
+
     pub fn assert(condition: bool, msg: []const u8) void {
         if (!condition) {
             std.debug.print("ASSERTION FAILED: {s}\n", .{msg});

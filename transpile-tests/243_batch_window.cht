@@ -1,0 +1,113 @@
+-- Test: WINDOW(size: N) and WINDOW(size: N, time: 'Xms') batch/tumbling window.
+-- Verifies that:
+--   1. size-only: flushes exactly every N items (array source)
+--   2. time-only: explicit flush after loop gathers partial batch (array source)
+--   3. both: size fires first (array source)
+--   4. open stream source: all items batched correctly
+--   5. inf stream source: all items batched correctly
+--   6. partial final batch is included in result
+
+FN sumBatch(batch: Int64[]) RETURNS Int64 ->
+    MUTABLE s: Int64 = 0;
+    batch s> EACH { s = s + _; };
+    RETURN s;
+END
+
+FN main() RETURNS Void ->
+    -- -------------------------------------------------------
+    -- Test 1: size-only, array source, exact batches
+    -- input: [1..6], batch size 3 -> batches [1,2,3], [4,5,6]
+    -- -------------------------------------------------------
+    arr1: Int64[] = [1, 2, 3, 4, 5, 6];
+    sums1 = arr1 s> WINDOW(size: 3) sumBatch(_);
+    ASSERT sums1.length() == 2, "test1: 2 batches";
+    MUTABLE total1: Int64 = 0;
+    sums1 s> EACH { total1 = total1 + _; };
+    ASSERT total1 == 21, "test1: sum=21";
+
+    -- -------------------------------------------------------
+    -- Test 2: size-only, partial final batch
+    -- input: [1..7], batch size 3 -> [1,2,3], [4,5,6], [7]
+    -- -------------------------------------------------------
+    arr2: Int64[] = [1, 2, 3, 4, 5, 6, 7];
+    sums2 = arr2 s> WINDOW(size: 3) sumBatch(_);
+    ASSERT sums2.length() == 3, "test2: 3 batches";
+    MUTABLE total2: Int64 = 0;
+    sums2 s> EACH { total2 = total2 + _; };
+    ASSERT total2 == 28, "test2: sum=28";
+
+    -- -------------------------------------------------------
+    -- Test 3: size-only, single large batch
+    -- input: [10, 20, 30], batch size 10 -> partial [10,20,30]
+    -- -------------------------------------------------------
+    arr3: Int64[] = [10, 20, 30];
+    sums3 = arr3 s> WINDOW(size: 10) sumBatch(_);
+    ASSERT sums3.length() == 1, "test3: 1 partial batch";
+    ASSERT sums3[0] == 60, "test3: sum=60";
+
+    -- -------------------------------------------------------
+    -- Test 4: size: 1, every item is its own batch
+    -- -------------------------------------------------------
+    arr4: Int64[] = [5, 10, 15];
+    counts4 = arr4 s> WINDOW(size: 1) _.length();
+    ASSERT counts4.length() == 3, "test4: 3 batches of size 1";
+    MUTABLE total4: Int64 = 0;
+    counts4 s> EACH { total4 = total4 + _; };
+    ASSERT total4 == 3, "test4: each batch length=1";
+
+    -- -------------------------------------------------------
+    -- Test 5: open stream source, size-only
+    -- gen: ~?Int64[] = 1..10, batch 4 -> [1-4],[5-8],[9-10]
+    -- -------------------------------------------------------
+    gen5: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 1;
+        WHILE i <= 10 DO
+            YIELD i;
+            i = i + 1;
+        END
+    };
+    sums5 = gen5 s> WINDOW(size: 4) sumBatch(_);
+    ASSERT sums5.length() == 3, "test5: 3 batches from open stream";
+    MUTABLE total5: Int64 = 0;
+    sums5 s> EACH { total5 = total5 + _; };
+    ASSERT total5 == 55, "test5: sum 1..10=55";
+
+    -- -------------------------------------------------------
+    -- Test 6: inf stream source, size-only
+    -- -------------------------------------------------------
+    gen6: ~Int64[INF] = BG STREAM {
+        MUTABLE i6: Int64 = 1;
+        WHILE i6 <= 6 DO
+            YIELD i6;
+            i6 = i6 + 1;
+        END
+    };
+    sums6 = gen6 s> WINDOW(size: 2) sumBatch(_);
+    ASSERT sums6.length() == 3, "test6: 3 batches from inf stream";
+    MUTABLE total6: Int64 = 0;
+    sums6 s> EACH { total6 = total6 + _; };
+    ASSERT total6 == 21, "test6: sum 1..6=21";
+
+    -- -------------------------------------------------------
+    -- Test 7: time: "1s", partial batch via flush after loop
+    -- Large timeout (1s) so no time flush during fast iteration.
+    -- All items go into one partial batch via final flush.
+    -- -------------------------------------------------------
+    arr7: Int64[] = [100, 200, 300];
+    lens7 = arr7 s> WINDOW(time: "1s") _.length();
+    ASSERT lens7.length() == 1, "test7: 1 partial batch from time window";
+    ASSERT lens7[0] == 3, "test7: batch has 3 items";
+
+    -- -------------------------------------------------------
+    -- Test 8: size: N, time: 'Xms' both specified, size fires first
+    -- batch=3 items, timeout=500ms (won't fire in test)
+    -- -------------------------------------------------------
+    arr8: Int64[] = [1, 2, 3, 4, 5, 6];
+    sums8 = arr8 s> WINDOW(size: 3, time: "500ms") sumBatch(_);
+    ASSERT sums8.length() == 2, "test8: size fires first -> 2 batches";
+    MUTABLE total8: Int64 = 0;
+    sums8 s> EACH { total8 = total8 + _; };
+    ASSERT total8 == 21, "test8: sum=21";
+
+    RETURN;
+END

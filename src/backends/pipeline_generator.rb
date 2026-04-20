@@ -326,6 +326,134 @@ module PipelineGenerator
     end
   end
 
+  BATCH_WINDOW_TIME_NS = { 'ms' => 1_000_000, 's' => 1_000_000_000, 'min' => 60_000_000_000, 'h' => 3_600_000_000_000 }.freeze
+
+  def batch_window_timeout_ns(bw_node)
+    return "0" unless bw_node.options["time"]
+    str = bw_node.options["time"].value
+    m = /\A(\d+(?:\.\d+)?)(ms|s|min|h)\z/.match(str)
+    return "0" unless m
+    (m[1].to_f * BATCH_WINDOW_TIME_NS[m[2]]).to_i.to_s
+  end
+
+  def transpile_batch_window(lhs, bw_node, smooth_node)
+    @bw_counter = (@bw_counter || 0) + 1
+    id = @bw_counter
+
+    lhs_type = lhs.type_info
+    expr_type_str = (bw_node.expression.full_type || bw_node.expression.resolved_type).to_s
+
+    is_open    = lhs_type&.open_stream? || lhs_type&.dynamic_stream?
+    is_inf     = lhs_type&.inf_stream?
+    is_bounded = lhs_type&.bounded_stream?
+    is_stream  = is_open || is_inf
+
+    elem_type = if is_open
+      lhs_type.open_stream_element_type.resolved
+    elsif is_inf
+      lhs_type.inf_stream_element_type.resolved
+    elsif is_bounded
+      lhs_type.stream_element_type.resolved
+    else
+      lhs_type.element_type.resolved
+    end
+
+    elem_zig = transpile_type(elem_type.to_s)
+
+    size_code  = bw_node.options["size"] ? "@intCast(#{visit(bw_node.options['size'])})" : "0"
+    timeout_ns = batch_window_timeout_ns(bw_node)
+
+    placeholder = "__bw#{id}_batch"
+    expr_code = with_pipeline_context(placeholder: placeholder) { visit(bw_node.expression) }
+
+    batch_emit = ->(alloc_str) {
+      <<~ZIG.strip
+        if (try __bw#{id}.push(__bw#{id}_item)) |__bw#{id}_slice| {
+            defer __bw#{id}.freeBatch(__bw#{id}_slice);
+            var #{placeholder} = std.ArrayListUnmanaged(#{elem_zig}){ .items = __bw#{id}_slice, .capacity = __bw#{id}_slice.len };
+            _ = &#{placeholder};
+            const __bwval#{id} = #{expr_code};
+            try res_list.append(#{alloc_str}, __bwval#{id});
+        }
+      ZIG
+    }
+    flush_emit = ->(alloc_str) {
+      <<~ZIG.strip
+        if (try __bw#{id}.flush()) |__bw#{id}_slice| {
+            defer __bw#{id}.freeBatch(__bw#{id}_slice);
+            var #{placeholder} = std.ArrayListUnmanaged(#{elem_zig}){ .items = __bw#{id}_slice, .capacity = __bw#{id}_slice.len };
+            _ = &#{placeholder};
+            const __bwval#{id} = #{expr_code};
+            try res_list.append(#{alloc_str}, __bwval#{id});
+        }
+      ZIG
+    }
+
+    if is_stream
+      alloc_str = "rt.heapAlloc()"
+      label = next_pipe_label
+      @current_pipe_label = label
+      pop_method = is_inf ? "nextOrNull" : "next"
+      stream_code = visit(lhs)
+      source_name, setup =
+        if lhs.is_a?(AST::Identifier)
+          [stream_code, ""]
+        else
+          ["__bw#{id}_src", "var __bw#{id}_src = #{stream_code};\n    _ = &__bw#{id}_src;\n    "]
+        end
+
+      <<~ZIG
+        #{label}: {
+            #{setup}var res_list = try CheatLib.makeList(#{transpile_type(expr_type_str)}, #{alloc_str}, &.{});
+            {
+                var __bw#{id} = CheatLib.BatchWindow(#{elem_zig}).init(#{alloc_str}, #{size_code}, #{timeout_ns});
+                defer __bw#{id}.deinit();
+                while (try #{source_name}.#{pop_method}()) |__bw#{id}_item| {
+                    #{batch_emit.(alloc_str)}
+                }
+                #{flush_emit.(alloc_str)}
+            }
+            break :#{label} res_list;
+        }
+      ZIG
+    elsif is_bounded
+      alloc_str = "rt.heapAlloc()"
+      label = next_pipe_label
+      @current_pipe_label = label
+      src_code = visit(lhs)
+
+      <<~ZIG
+        #{label}: {
+            const __bw#{id}_bsrc = #{src_code};
+            var res_list = try CheatLib.makeList(#{transpile_type(expr_type_str)}, #{alloc_str}, &.{});
+            {
+                var __bw#{id} = CheatLib.BatchWindow(#{elem_zig}).init(#{alloc_str}, #{size_code}, #{timeout_ns});
+                defer __bw#{id}.deinit();
+                for (__bw#{id}_bsrc.items) |__bw#{id}_item| {
+                    #{batch_emit.(alloc_str)}
+                }
+                #{flush_emit.(alloc_str)}
+            }
+            break :#{label} res_list;
+        }
+      ZIG
+    else
+      transpile_pipeline_macro(lhs, smooth_node, res_type: expr_type_str) do |alloc_str|
+        <<~ZIG
+          {
+              var __bw#{id} = CheatLib.BatchWindow(#{elem_zig}).init(#{alloc_str}, #{size_code}, #{timeout_ns});
+              defer __bw#{id}.deinit();
+              for (pipe_items) |__bw#{id}_item| {
+                  #{batch_emit.(alloc_str)}
+              }
+              #{flush_emit.(alloc_str)}
+          }
+          break :#{@current_pipe_label} res_list;
+        ZIG
+      end
+    end
+  end
+
   def transpile_join(list_node, join_node, smooth_node)
     left_zig  = transpile_type(list_node.full_type.element_type.resolved.to_s)
     right_src = visit(join_node.right_source)

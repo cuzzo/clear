@@ -399,6 +399,7 @@ pub const CheatLib = struct {
     pub const Stream = DataStructures.Stream;
     pub const InfStream = DataStructures.InfStream;
     pub const BoundedChannel = DataStructures.BoundedChannel;
+    pub const BatchWindow = DataStructures.BatchWindow;
     pub const Pool = DataStructures.Pool;
     pub const SoaList = DataStructures.SoaList;
     pub const SoaPool = DataStructures.SoaPool;

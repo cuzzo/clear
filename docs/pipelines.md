@@ -291,6 +291,43 @@ ASSERT firsts[0] == 1.0, "first element of first window";
 
 Number of result windows = `max(0, len - size + 1)`. A window larger than the list produces an empty result.
 
+### WINDOW (Batch / Tumbling Window)
+
+`WINDOW(size: N)`, `WINDOW(time: 'Xms')`, or `WINDOW(size: N, time: 'Xms')` produces non-overlapping batches. `_` inside the body is a `T[]` batch. The result is a heap-allocated list of the body expression evaluated per batch.
+
+Flush conditions (checked after every item):
+- `size: N` - flush when the batch accumulates N items
+- `time: 'Xms'` - flush when elapsed time since the first item in the batch >= timeout; time units: `ms`, `s`, `min`, `h`
+- Both specified - flush on whichever fires first (first-of-either)
+
+A partial batch at the end is always included. Works on all source types: arrays, `~T[]`, `~T[N]`, and `~T[INF]`.
+
+```ruby clear
+FN sumBatch(batch: Int64[]) RETURNS Int64 ->
+    MUTABLE s: Int64 = 0;
+    batch s> EACH { s = s + _; };
+    RETURN s;
+END
+
+-- Array source, size-only: [1..7] -> [1,2,3], [4,5,6], [7]
+arr: Int64[] = [1, 2, 3, 4, 5, 6, 7];
+sums = arr s> WINDOW(size: 3) sumBatch(_);
+ASSERT sums.length() == 3;   -- 3 batches
+ASSERT sums[2] == 7;         -- partial final batch
+
+-- Open stream, size + time (first-of-either)
+gen: ~?Int64[] = BG STREAM { MUTABLE i: Int64 = 1; WHILE i <= 10 DO YIELD i; i = i + 1; END };
+sums2 = gen s> WINDOW(size: 4, time: "500ms") sumBatch(_);
+ASSERT sums2.length() == 3;  -- [1-4], [5-8], [9-10]
+
+-- Time-only: entire array arrives fast, all items in one final batch
+arr2: Int64[] = [100, 200, 300];
+lens = arr2 s> WINDOW(time: "1s") _.length();
+ASSERT lens[0] == 3;  -- one batch of 3
+```
+
+> **Note:** The sliding-window form `WINDOW(N)` (positional integer, no named params) is the existing collection-only operator above. The named-param form `WINDOW(size:, time:)` is the new batching operator and works on both collections and streams.
+
 ### JOIN (Left Outer Join)
 
 JOIN performs a left outer join between two collections using a two-parameter lambda predicate. Every element of the left collection appears in the result exactly once; the right field is `NIL` when no right element matches.
@@ -367,13 +404,15 @@ materializing first with `.toList()`.
 | `INDEX` | yes | yes | via LIMIT |
 | `ORDER_BY` | not yet | not yet | not yet |
 | `UNNEST` | not yet | not yet | not yet |
-| `WINDOW` | not yet | not yet | not yet |
+| `WINDOW(N)` (sliding) | not yet | not yet | not yet |
+| `WINDOW(size:, time:)` (batch) | yes | yes | yes |
 | `JOIN` | not yet | not yet | not yet |
 
 "via LIMIT" means `LIMIT` must appear earlier in the chain (same rule as fold terminals).
 `DISTINCT` returns `T[]@set` (a Set), supporting `.count()` and `.contains?()`.
 
-If you need `ORDER_BY`, `UNNEST`, `WINDOW`, or `JOIN` on a stream, materialize first:
+If you need `ORDER_BY`, `UNNEST`, sliding `WINDOW(N)`, or `JOIN` on a stream, materialize first.
+The batching `WINDOW(size:, time:)` operator works directly on streams without materialization.
 
 ```ruby clear illustrative
 s: ~Int64[] = 0 ..< 10;

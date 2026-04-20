@@ -132,6 +132,7 @@ pub fn build(b: *std.Build) void {
     const test_files = [_][]const u8{
         "arena-mode-test.zig",
         "asm-test.zig",
+        "batch-window-test.zig",
         "control-plane-test.zig",
         "data-structures-test.zig",
         "fiber-control-tests.zig",
