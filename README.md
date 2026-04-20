@@ -189,7 +189,20 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 
 ## VISION
 
-The goal of CLEAR is:
+In short, they tell you that you can:
+
+ 1. Have the efficiency of Rust,
+ 2. Or the safety of Pony,
+ 3. Or the latency predictability of Go,
+ 4. Or the distribution of BEAM.
+
+Pick one.
+
+CLEAR **aims** to give you **near** best-in-class at all categories, while having a significantly lower cognitive burden / barrier to entry than even Go.
+
+This is **wildly ambitious** and **certainly unproven** in a v0.1-pre release. But CLEAR thinks it has the design to make this **eventually possible**.
+
+How?
 
   1. To be able to run a REPL / VM, to live-debug like you can in Ruby, to write working code *faster* than you can even in scripting languages.
      - CLEAR aims to achieve a level of fearless concurrency above Rust, Pony, or Elixir.
