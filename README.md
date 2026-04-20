@@ -174,7 +174,7 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/concurrent/09_kvstore/  # Control
     * Explicit caveat that this compares a minimal parser to a feature-complete production database.
     * Though this is achieved in ~50 lines of code.
 
-See [docs/benchmarks.md](docs/benchmarks.md) for table comparisons.
+See [benchmarks/README.md](benchmarks/README.md) for more details and [docs/agents/benchmarks.md](docs/agents/benchmarks.md) for a table comparison.
 
 ## ⚠️ DISCLAIMER ⚠️
 
