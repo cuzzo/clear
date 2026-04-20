@@ -176,7 +176,7 @@ CLEAR is currently in **v0.1-pre** release. It is an architectural preview and i
 
 ## KNOWN SCALING ISSUES
 
-* Zig's `std.Thread.Mutex` scales poorly vs Rust's parking_lot at high core counts (2x gap at 32 cores) - see [benchmarks/17_kvstore/README.md](benchmarks/17_kvstore/README.md).
+* Zig's `std.Thread.Mutex` scales poorly vs Rust's parking_lot at high core counts (2x gap at 32 cores) - see [benchmarks/concurrent/09_kvstore/README.md](benchmarks/concurrent/09_kvstore/README.md).
   * Zig will likely fix these issues before a CLEAR v0.3 release.
   * CLEAR's RwLock (`@shared:writeLocked`) bypasses Zig's stdlib, using `pthread_rwlock_t` with writer-preferring attributes directly.
 
