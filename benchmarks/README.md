@@ -12,7 +12,9 @@ These benchmarks are purely to guide the development of CLEAR.
 
 They consistently show CLEAR outperforming Go and/or Rust in a number of metrics where - with better more scientific benchmarks - CLEAR would be unlikely to outperform them.
 
-They should be interpretted with a **HUGE GRAIN OF SALT**. They are not designed to favor CLEAR, but the benchmarks are a strange mix of 1) compute heavy, 2) I/O / wait heavy, 3) micro benchmarks.
+Most sequential benchmarks are meant to compare to "Perfect C". Nothing is expected to beat "Perfect C". These benchmarks should separate things that are easy to write "Perfect C". Some of them have known issues where C is not performing as well as it's eventually *intended* to. Sequential Rust benchmarks are meant to compare idiomatic Rust to C (so this would include RefCell/Cell overhead rather than comparing unsafe Rust). *Most* Rust benchmarks should also not be beatable - at best CLEAR should tie.
+
+Concurrent benchmarks are far less easy to compare fairly. They should be interpretted with a **HUGE GRAIN OF SALT**. They are not designed to favor CLEAR, but the benchmarks are a strange mix of 1) compute heavy, 2) I/O / wait heavy, 3) micro benchmarks.
 
 At this stage, they are meant to show that CLEAR is moving in the right direction, and has some reasonable level of performance.
 
