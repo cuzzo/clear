@@ -101,6 +101,9 @@ module AST
     # @return [Array(Symbol, String|nil)] [final_type, error_message]
     #
     def coerce!(declared_type)
+      # fn_type must not be flattened to its return type — preserve the full Type object.
+      return [@type_object, nil] if @type_object&.fn_type? && (declared_type.nil? || declared_type == :Any)
+
       inferred = @type_object&.resolved
 
       # No explicit type or :Any -> use inferred, no coercion needed

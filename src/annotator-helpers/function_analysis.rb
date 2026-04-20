@@ -103,7 +103,8 @@ module FunctionAnalysis
     {
       params: normalized_params,
       return: { type: return_type },
-      lambda: true
+      lambda: true,
+      fn_type: true
     }
   end
 
@@ -580,6 +581,9 @@ module FunctionAnalysis
       if cap[:mutable] && !entry.mutable
         error!(node, "Cannot capture immutable variable '#{cap_name}' as MUTABLE")
       end
+
+      # Mark the captured variable as used in its declaring scope.
+      owner_scope.mark_read(cap_name)
 
       # Enrich the capture node with the resolved type
       cap[:type] = entry.type
