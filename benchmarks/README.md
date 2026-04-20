@@ -6,7 +6,7 @@ Benchmarks are organized into three categories:
 - **concurrent/** - fiber scheduling, BG blocks, channels, contention benchmarks
 - **server/** - TCP/HTTP server benchmarks with client load generators
 
-## Disclaimer
+## ⚠️ Disclaimer ⚠️
 
 These benchmarks are purely to guide the development of CLEAR.
 
