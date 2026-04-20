@@ -68,3 +68,41 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
   * **Causality:** CLEAR offers **A+** causality with MVCC and `@split` streams, but allows you to "load the foot-gun" (locks) for specific read-heavy workloads where predictability is paramount.
   * **Time / Ordering:** CLEAR separates time as a **tense** in the type system. Time can only be shared via streams through the `@split` capability, guaranteeing ordering across shared
   * **Fault Tolerence:** It is still to early in the design stage to determine a realistic score for CLEAR's fault tolerence story - particularly with regards to issues that could arise from shared mutable memory and idempotence likely not being a first-class function color. CLEAR hopes to have a reasonable ceiling of a  B (similar to Causality). It will likely give you some tools to shoot yourself in the foot (to both achieve understandability and not limit workloads) - you could mark tasks as killable which aren't or tasks as retrying which aren't etc. But CLEAR will have the systems in place to easily achieve an A+ rating when it's critical.
+
+## How Does CLEAR think about Cognitive Burden
+
+In CLEAR's perspective, a program becomes difficult to understand because of global complexity.
+
+A function is impossible to understand if the entire codebase must be understood to understand the function and line of code you are looking at.
+
+This is why CLEAR aims to completely eradicate all forms of global complexity. If you can understand any function fully by just looking at the function, it is simple.
+
+Rust is not considered difficult because of Affine Ownership.  It is considered difficult because of "Fighting the Borrow Checker" which mainly boils down to Rust's obsession that it must achieve zero-cost abstractions in *ALL* cases - which includes shared-mutable borrows. This is almost entirely the source of confusing lifetime annotations in Rust. If you eliminate this demand, you eliminate most of the "Fighting the Borrow Checker" in Rust complaints. CLEAR has done this. This is because this is Rust's main source of global complexity.
+
+Pony is not considered difficult because it merely has capabilities or because it forces you into the actor pattern. It is difficult because capabilities do are not intuitive. You aren't describing what you *want* to do, you are describing what *can be done*. This is less intuitive.
+
+Go claims to be *easy* - which implies simplicity. But Go allows and often forces you to load footguns to achieve decent performance, lending itself to global complexity and hard-to-understand programs.
+
+Go may claim to be easy, but if you need to write 20 lines of imperative arcana in the precise ceremonal order or rely on a set of libraries to do common things efficiently - it is not truly easy.
+
+In essence, CLEAR thinks it is relatively easy to describe *what* you want to do (your intent), and it is certainly easy to recognize it after the Profiler points you in the right direction for efficiency and safety (one-line optimizaitons clearly separate from code).
+
+It is much harder to think like the computer and tell it *HOW* to do that, or list what *CAN* be done and hope that matches what you want to do.
+
+## How Does CLEAR think about Performance and Speed
+
+**Raw Speed** being a metric should raise some eyebrows.  Performance is not a monolith. It is a balance of competing trade-offs.
+
+From CLEAR's perspective - Correct, Safe, and Understandable are by far the most important pillars of the design that are being balanced.
+
+When CLEAR thinks about speed, it mainly thinks about **single machine** concurrent throughput in compute heavy workloads. CLEAR is looking toward the future of compute rather than the present.
+
+In the future, core count is expected to continue growing faster than memory.  Cache per core has not meaningfully grown much in decades, and CLEAR *assumes* this will not grow as meaningfully as core count in the future.
+
+CLEAR thinks the main **Raw Speed** metrics are: 1) compiling via Zig to get LLVM best in class optimizations to single-core performance, 2) maximizing for **cache locality** as memory read stalls can dominate compute performance benchmarks.
+
+In general, CLEAR aims to overcome added memory, co-operative yielding, and any safety checks by given a level of cache locality that is nearly impossible to reach in any other language.
+
+How?
+
+The core pillar of CLEAR's design is to maximize local reasoning and minimize global complexity. This is what makes CLEAR **simple**, even if it may not be as **easy** as Go. It also **should** allow CLEAR to make compiler optimizations WRT escape analysis that no other language (that we are aware of) can make to maximize cache locality.
