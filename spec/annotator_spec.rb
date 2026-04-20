@@ -434,6 +434,100 @@ RSpec.describe SemanticAnnotator do
         expect { run(code) }.not_to raise_error
         expect(get_last_type(code)).to eq(:Float64)
       end
+
+      it "rejects old syntax name: Type = default" do
+        expect {
+          run("FN foo(n: Float64 = 1) -> RETURN n; END")
+        }.to raise_error(ParserError)
+      end
+
+      context "Multiple defaults" do
+        it "injects all defaults when all optional params omitted" do
+          code = <<~FLUX
+            FN add(a=1: Float64, b=2: Float64) RETURNS Float64 ->
+              RETURN a + b;
+            END
+            add();
+          FLUX
+          expect { run(code) }.not_to raise_error
+          expect(get_last_type(code)).to eq(:Float64)
+        end
+
+        it "injects trailing defaults when first optional params provided" do
+          code = <<~FLUX
+            FN add(a: Float64, b=2: Float64, c=3: Float64) RETURNS Float64 ->
+              RETURN a + b + c;
+            END
+            add(10);
+          FLUX
+          expect { run(code) }.not_to raise_error
+          expect(get_last_type(code)).to eq(:Float64)
+        end
+      end
+
+      context "DEFAULT keyword for struct params" do
+        let(:struct_base) {
+          <<~FLUX
+            STRUCT Cfg { retries=3: Int64, timeout=1000: Int64 }
+          FLUX
+        }
+
+        it "allows DEFAULT when all struct fields have defaults" do
+          code = struct_base + <<~FLUX
+            FN run(cfg=DEFAULT: Cfg) RETURNS Int64 ->
+              RETURN cfg.retries;
+            END
+          FLUX
+          expect { run(code) }.not_to raise_error
+        end
+
+        it "injects struct default at call site (return type resolves)" do
+          code = struct_base + <<~FLUX
+            FN run(cfg=DEFAULT: Cfg) RETURNS Int64 ->
+              RETURN cfg.retries;
+            END
+            run();
+          FLUX
+          expect { run(code) }.not_to raise_error
+          expect(get_last_type(code)).to eq(:Int64)
+        end
+
+        it "errors DEFAULT for a primitive-type param" do
+          expect {
+            run(<<~FLUX)
+              FN foo(n=DEFAULT: Int64) -> RETURN n; END
+            FLUX
+          }.to raise_error(/Type Error.*DEFAULT.*struct/i)
+        end
+
+        it "errors DEFAULT when struct has fields without defaults" do
+          expect {
+            run(<<~FLUX)
+              STRUCT Partial { x=10: Int64, y: Int64 }
+              FN foo(p=DEFAULT: Partial) -> RETURN p.x; END
+            FLUX
+          }.to raise_error(/Type Error.*DEFAULT.*missing/i)
+        end
+      end
+
+      context "Lambda defaults" do
+        it "allows a lambda param with a primitive default" do
+          code = <<~FLUX
+            double = %(n=5: Int64) -> n * 2;
+            double(3);
+          FLUX
+          expect { run(code) }.not_to raise_error
+        end
+
+        it "injects default when lambda called with fewer args" do
+          code = <<~FLUX
+            double = %(n=5: Int64) -> n * 2;
+            double();
+          FLUX
+          expect { run(code) }.not_to raise_error
+          expect(get_last_type(code)).to eq(:Int64)
+        end
+      end
     end
 
     context "Auto-casting Arguments" do
@@ -1214,6 +1308,43 @@ RSpec.describe SemanticAnnotator do
         end
       end
     end
+
+    context "Empty struct literal (all field defaults)" do
+      it "allows Foo{} when all fields have defaults" do
+        expect {
+          run(<<~FLUX)
+            STRUCT Cfg { retries=3: Int64, timeout=1000: Int64 }
+            c = Cfg{};
+          FLUX
+        }.not_to raise_error
+      end
+
+      it "resolves Foo{} to the struct type" do
+        code = <<~FLUX
+          STRUCT Cfg { retries=3: Int64, timeout=1000: Int64 }
+          Cfg{};
+        FLUX
+        expect(get_last_type(code)).to eq(:Cfg)
+      end
+
+      it "errors Foo{} when any field has no default" do
+        expect {
+          run(<<~FLUX)
+            STRUCT Bad { x: Int64, y=10: Int64 }
+            Bad{};
+          FLUX
+        }.to raise_error(/Cannot use 'Bad\{\}'.*no default/i)
+      end
+
+      it "allows Foo{} for a struct with no fields" do
+        expect {
+          run(<<~FLUX)
+            STRUCT Empty {}
+            Empty{};
+          FLUX
+        }.not_to raise_error
+      end
+    end
   end
 
   describe "List Literals (visit_ListLit)" do
@@ -1861,6 +1992,28 @@ RSpec.describe SemanticAnnotator do
       it "raises a semantic error for accessing uncaptured variable" do
          # Note: Adjust error message to match your specific compiler error
         expect { run(code) }.to raise_error(/Undefined variable/i)
+      end
+    end
+
+    context "Captures cannot have defaults" do
+      it "errors when a FN USE capture has a default value" do
+        expect {
+          run(<<~FLUX)
+            x = 10;
+            FN getter() USE(x=5) RETURNS Int64 ->
+              RETURN x;
+            END
+          FLUX
+        }.to raise_error(/Captures cannot have default values/i)
+      end
+
+      it "errors when a lambda USE capture has a default value" do
+        expect {
+          run(<<~FLUX)
+            y = 20;
+            f = %(n: Int64) USE(y=5) -> n + y;
+          FLUX
+        }.to raise_error(/Captures cannot have default values/i)
       end
     end
   end

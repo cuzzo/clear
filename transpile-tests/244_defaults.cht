@@ -1,13 +1,22 @@
 -- Test: function and struct defaults
 -- Verifies:
---   1. Function param with primitive default
---   2. Function param with DEFAULT (struct default)
+--   1. Primitive param default injected at call site
+--   2. Override the default
 --   3. Empty struct literal Foo{} uses all field defaults
 --   4. Struct field defaults emitted in Zig struct definition
+--   5. DEFAULT param default injects struct{} at call site
+--   6. Multiple default params - all omitted
+--   7. Multiple default params - trailing defaults injected
+--   8. DEFAULT as a struct field default (nested struct defaults in Zig)
 
 STRUCT Config {
     retries=3: Int64,
     timeout=1000: Int64,
+}
+
+STRUCT Outer {
+    count=5: Int64,
+    cfg=DEFAULT: Config,
 }
 
 FN makeConfig() RETURNS Config ->
@@ -20,6 +29,10 @@ END
 
 FN runWithConfig(cfg=DEFAULT: Config) RETURNS Int64 ->
     RETURN cfg.retries + cfg.timeout;
+END
+
+FN addWithDefaults(a=1: Int64, b=2: Int64) RETURNS Int64 ->
+    RETURN a + b;
 END
 
 FN main() RETURNS Void ->
@@ -47,6 +60,20 @@ FN main() RETURNS Void ->
     -- Test 6: override DEFAULT param
     r6 = runWithConfig(Config{ retries: 5, timeout: 500 });
     ASSERT r6 == 505, "test6: explicit cfg, 5+500=505";
+
+    -- Test 7: multiple defaults - all omitted
+    r7 = addWithDefaults();
+    ASSERT r7 == 3, "test7: both defaults, 1+2=3";
+
+    -- Test 8: multiple defaults - first provided, trailing injected
+    r8 = addWithDefaults(10);
+    ASSERT r8 == 12, "test8: first=10, second=2, 10+2=12";
+
+    -- Test 9: DEFAULT as struct field default (nested Zig .{} initializer)
+    outer = Outer{};
+    ASSERT outer.count == 5, "test9: outer.count=5";
+    ASSERT outer.cfg.retries == 3, "test9: outer.cfg.retries=3";
+    ASSERT outer.cfg.timeout == 1000, "test9: outer.cfg.timeout=1000";
 
     RETURN;
 END

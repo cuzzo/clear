@@ -560,6 +560,10 @@ module FunctionAnalysis
       # cap is likely a hash: { name: "x" }
       cap_name = cap[:name]
 
+      if cap[:default]
+        error!(node, "Captures cannot have default values: '#{cap_name}'")
+      end
+
       if !current_scope.locals.key?(cap_name)
         # Check if it's in a higher scope
         owner_scope = lookup_scope_for(cap_name)
