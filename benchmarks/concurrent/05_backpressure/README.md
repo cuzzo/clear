@@ -1,38 +1,71 @@
-# Benchmark 13: Backpressure
+# Benchmark 05: Backpressure
 
 100,000 items processed with CPU work (5,000 LCG iterations each).
-Producer is rate-limited when consumers fall behind.
+Producer is rate-limited when consumers fall behind — all three languages
+use a bounded channel (capacity 64) as the back pressure mechanism.
 
-## Backpressure mechanisms
-
-- **CLEAR**: `CONCURRENT(workers: 32, parallel: TRUE) SELECT` — semaphore-gated
-  pipeline. No channel; items are dispatched directly to worker fibers.
-  Producer fiber blocks when all 32 slots are in-flight.
-- **Go**: bounded channel (cap 64) + GOMAXPROCS consumer goroutines.
-  Producer goroutine blocks on `ch <-` when channel is full.
-- **Rust**: `crossbeam::channel::bounded(64)` + N_CPU native threads.
-  Producer thread blocks on `tx.send()` when channel is full. Native threads
-  are correct here — work is CPU-bound, not I/O-bound.
-
-## Results (best of 5, all cores)
+## Workload
 
 ```
-CLEAR      37ms
-Go         72ms
-Rust      243ms
+N        = 100,000 items
+Work     = 5,000 LCG iterations per item (wrapping multiply + add)
+Capacity = 64  (channel / buffer slots)
+Workers  = threadCount() (auto-scaled to available cores)
+Result   = sum of all LCG outputs mod 1e9 (checksum: 516709808)
 ```
 
-CLEAR's pipeline avoids per-item channel send/receive overhead entirely —
-the semaphore gates fiber dispatch without copying items through a queue.
-Go and Rust pay channel overhead on every item; under 32-thread contention
-on a 64-slot channel, Rust's native thread wake/sleep cycles add up more
-than Go's lightweight goroutine scheduler.
+## Back pressure mechanisms
+
+- **CLEAR**: `BG STREAM { YIELD i } s> CONCURRENT(capacity: 64) EACH { ... }`
+  The producer fiber blocks in `BoundedChannel.push()` when all 64 slots are
+  occupied. Workers accumulate into a `@shared:locked` struct — no result list
+  is ever materialized. Peak memory is O(capacity), not O(N).
+
+- **Go**: `make(chan uint64, 64)` + `runtime.GOMAXPROCS(0)` goroutines.
+  Producer goroutine blocks on `ch <-` when channel is full. Workers
+  accumulate via `sync/atomic.Uint64` (lock-free).
+
+- **Rust**: `crossbeam::channel::bounded(64)` + `available_parallelism()`
+  native threads. Producer thread blocks on `tx.send()` when channel is full.
+  Workers accumulate via `AtomicU64` (lock-free). Native threads are correct
+  here: work is CPU-bound, not I/O-bound.
+
+## Results (direct binary run, all cores, optimized builds)
+
+```
+CLEAR (fibers + BoundedChannel)     57 ms
+Go    (goroutines + chan)            74 ms   +30% vs CLEAR
+Rust  (threads + crossbeam)        233 ms  +308% vs CLEAR
+```
+
+All three produce checksum 516709808.
+
+CLEAR's M:N fiber scheduler has lower context-switch overhead than Go
+goroutines for this pattern (high-rate items, moderate work per item).
+Rust's native thread wakeups (OS-level futex) dominate at 32 workers
+competing on a 64-slot channel, making crossbeam the slowest despite
+zero scheduler overhead per-item.
+
+## Memory
+
+CLEAR holds only 64 items in the BoundedChannel at any point — the
+`@shared:locked` accumulator contains a single Int64. Go and Rust are
+similarly bounded by their channel capacity. RSS overhead from CLEAR's
+fiber stack pool (~16 MB) is the main runtime cost vs Go's ~2 MB.
+
+## Note on prior CLEAR implementation (semaphore approach)
+
+The original CLEAR benchmark (prior to BoundedChannel) used
+`items s> CONCURRENT(workers: 32) SELECT processItem(_.seed)` which:
+- Materialized all 100K results into a heap list (O(N) memory)
+- Used a semaphore to gate fiber dispatch (not a channel)
+- Reported 37ms, but was not measuring the same workload
+
+The new implementation uses a real `BoundedChannel` and accumulates
+in-place. The 57ms result is the honest channel-back-pressure number.
 
 ## Note on prior Rust implementation
 
-The original Rust implementation used Tokio + `Arc<Mutex<Receiver>>` (see
-c54313ca8f331ac849440941428a084eca78f319). That approach serialized all
-consumers through a single mutex, meaning only one consumer ran at a time.
-It appeared faster (~50ms) but was not measuring backpressure throughput —
-it was measuring a serialized lock. crossbeam's multi-consumer channel is
-the correct implementation; the higher number is the honest one.
+The original Rust implementation used Tokio + `Arc<Mutex<Receiver>>` which
+serialized all consumers through a single mutex. crossbeam's multi-consumer
+channel is the correct implementation.

@@ -1,19 +1,14 @@
 -- @leak: 100000 -> 1000
 -- Backpressure Benchmark — CLEAR
 --
--- Producer generates 100,000 items.  Consumer pool processes each item
--- with CPU work (5000 LCG iterations).  Backpressure is applied via
--- CONCURRENT(workers: 32) which uses a semaphore to limit in-flight
--- work — the producer fiber blocks when all 32 slots are busy.
---
--- CLEAR does not have bounded channels (v0.1).  The CONCURRENT pipeline
--- is the closest mechanism: it gates fan-out with a semaphore, providing
--- backpressure at the pipeline level rather than the channel level.
---
--- This benchmark reveals the overhead of CLEAR's pipeline machinery
--- compared to Go's native channels and Rust/Tokio's mpsc.
+-- Producer (BG STREAM) generates 100,000 items lazily. Items flow
+-- through a real BoundedChannel(capacity: 64): the producer fiber
+-- blocks when all 64 slots are occupied, providing true back pressure.
+-- Workers scale with threadCount(). Results are accumulated in a
+-- @shared:locked struct — no result list is ever materialized.
+-- Peak memory: O(capacity), not O(N).
 
-STRUCT Item { seed: Int64, result: Int64 }
+STRUCT Acc { value: Int64 }
 
 FN processItem(val: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = val;
@@ -22,24 +17,32 @@ FN processItem(val: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
+    acc = Acc{ value: 0 } @shared:locked;
     t0 = timestampMs();
-    -- Build work items
-    MUTABLE items: Item[] = [];
-    FOR i IN (0_i64 ..< 100000) -> items.append(Item{ seed: i, result: 0 });
 
-    -- Process with backpressure (workers: 8 = max 8 concurrent fibers)
-    processed = items s> CONCURRENT(workers: 32, parallel: TRUE) SELECT processItem(_.seed);
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0;
+        WHILE i < 100000 DO
+            YIELD i;
+            i = i + 1;
+        END
+    };
 
-    -- Sum results (SUM returns Float64, so we accumulate as Float64)
-    MUTABLE total: Int64 = 0;
-    FOR j IN (0_i64 ..< 100000) -> total = total %+ processed[j];
+    gen s> CONCURRENT(capacity: 64) EACH {
+        h = processItem(_);
+        WITH EXCLUSIVE acc AS a {
+            a.value = a.value %+ h;
+        }
+    };
 
-    checksum = total MOD 1000000000;
-    print("Checksum:", checksum);
-    print("Items: 100000");
-    print("Workers: 32");
+    WITH acc AS a {
+        checksum = a.value MOD 1000000000;
+        print("Checksum:", checksum);
+    }
 
     elapsed = timestampMs() - t0;
+    print("Items: 100000");
+    print("Channel capacity: 64");
     print("BENCH_RESULT: ${elapsed.toString()} ms");
     print("Time: ${elapsed.toString()} ms");
     RETURN;
