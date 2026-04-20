@@ -347,7 +347,12 @@ module AST
   DefaultLit   = Struct.new(:token) { include Locatable }
   StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) { include Locatable }
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
-  IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) { include Locatable }
+  IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
+    include Locatable
+    attr_accessor :expr_mode           # true when used as an expression (x = IF ...)
+    attr_accessor :then_result_type    # Type of last value expression in then_branch
+    attr_accessor :else_result_type    # Type of last value expression in else_branch
+  end
   WhileLoop    = Struct.new(:token, :condition, :do_branch, :deferred_drops) do
     include Locatable
     attr_accessor :mark_per_iter
@@ -617,7 +622,10 @@ module AST
   # default_drops: drop-array for default branch (or nil), filled by annotator
   MatchStatement    = Struct.new(:token, :expr, :cases, :default_case, :case_drops, :default_drops, :exhaustive, :takes) do
     include Locatable
-    attr_accessor :string_match  # set by annotator: true when expr is string type (use strEql)
+    attr_accessor :string_match       # set by annotator: true when expr is string type (use strEql)
+    attr_accessor :expr_mode          # true when used as an expression (x = MATCH ...)
+    attr_accessor :case_result_types  # Array of Types (parallel to cases), for expression-MATCH
+    attr_accessor :default_result_type # Type of last value expression in default_case
   end
 
   # ForRange: FOR var IN (start ..= end) DO body END

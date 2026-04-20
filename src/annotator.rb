@@ -711,6 +711,11 @@ private
     ]
 
     analyze_control_flow_branches(branch_logic)
+
+    # Store branch result types so use sites can promote to expression mode.
+    node.then_result_type = expr_result_type(node.then_branch)
+    node.else_result_type = expr_result_type(node.else_branch)
+
     node.full_type = :Void
   end
 
@@ -1023,6 +1028,10 @@ private
       end
     end
 
+    # Store case result types so use sites can promote to expression mode.
+    node.case_result_types = node.cases.map { |c| expr_result_type(c[:body]) }
+    node.default_result_type = expr_result_type(node.default_case)
+
     node.full_type = :Void
   end
 
@@ -1295,6 +1304,8 @@ private
     end
 
     visit(node.value)
+    promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+    promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
 
     # 1. Lifetime Tracking
     verify_return(node.value)
@@ -1412,8 +1423,11 @@ private
     # argument - rodata strings are valid for the call's lifetime. The callee
     # dupes strings it needs to escape via promoteFields.
     node.args.each { |arg| arg.instance_variable_set(:@is_call_arg, true) if arg.is_a?(AST::StructLit) }
-    node.args.each { |arg| visit(arg) }
-
+    node.args.each { |arg|
+      visit(arg)
+      promote_to_expr_if!(node, arg) if arg.is_a?(AST::IfStatement)
+      promote_to_expr_match!(node, arg) if arg.is_a?(AST::MatchStatement)
+    }
 
     # Handle "native_call" special case
     if node.name == "native_call"
@@ -1553,6 +1567,8 @@ private
       node.value.storage = :stack
     end
     visit(node.value)
+    promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+    promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
     finalize_decl_node!(node, node.mutable)
   end
 
@@ -1637,6 +1653,8 @@ private
     scope = current_scope
     if !scope.locals.key?(node.name)
       # Declaration path
+      promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
+      promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
       node.mode = :decl
       finalize_decl_node!(node, false)
       # Struct with BORROWED fields: propagate non_escaping to the binding.
@@ -3360,6 +3378,110 @@ private
     unless @og.can_write?(root_name)
       error!(node, "Lifetime Error: Cannot assign to '#{root_name}' because it is currently borrowed.")
     end
+  end
+
+  # Returns the Type of the last value-producing expression in a branch body,
+  # or nil if the branch doesn't end with a usable expression.
+  # Used to determine whether an IF/MATCH node can be promoted to expression mode.
+  def expr_result_type(branch)
+    return nil if branch.nil? || branch.empty?
+    last = branch.last
+    return nil unless last.respond_to?(:type_info)
+    # ELSE_IF chain: the last element is a nested IfStatement — use its result type
+    if last.is_a?(AST::IfStatement)
+      return last.then_result_type
+    end
+    ti = last.type_info
+    return nil unless ti
+    return nil if ti.resolved == :Void || ti.resolved == :NoReturn
+    # These are statement-level constructs, not value-producing expressions
+    return nil if last.is_a?(AST::ReturnNode)   || last.is_a?(AST::VarDecl)   ||
+                  last.is_a?(AST::BindExpr)      || last.is_a?(AST::Assignment) ||
+                  last.is_a?(AST::WhileLoop)     || last.is_a?(AST::ForRange)   ||
+                  last.is_a?(AST::ForEach)       || last.is_a?(AST::MatchStatement) ||
+                  last.is_a?(AST::Assert)        || last.is_a?(AST::Raise)      ||
+                  last.is_a?(AST::WithBlock)     || last.is_a?(AST::BgBlock)    ||
+                  last.is_a?(AST::DoBlock)       || last.is_a?(AST::PassStmt)   ||
+                  last.is_a?(AST::DieNode)       || last.is_a?(AST::ThrowNode)
+    ti
+  end
+
+  # Promotes an AST::IfStatement that is used in expression position
+  # (value of a VarDecl, BindExpr, ReturnNode, or FuncCall arg).
+  # Sets expr_mode = true and full_type = result_type if valid; errors otherwise.
+  def promote_to_expr_if!(parent_node, if_node)
+    # Recursively promote ELSE_IF chains first
+    if if_node.else_branch&.length == 1 && (nested = if_node.else_branch.first).is_a?(AST::IfStatement)
+      promote_to_expr_if!(if_node, nested)
+      else_result = nested.type_info
+    else
+      else_result = if_node.else_result_type
+    end
+
+    then_result = if_node.then_result_type
+
+    unless then_result
+      error!(if_node, "IF expression: THEN branch must end with a value expression")
+    end
+    unless else_result
+      if if_node.else_branch.nil? || if_node.else_branch.empty?
+        error!(if_node, "IF used as expression requires an ELSE branch")
+      else
+        error!(if_node, "IF expression: ELSE branch must end with a value expression")
+      end
+    end
+
+    t1 = then_result.string? ? :String : then_result.resolved
+    t2 = else_result.string? ? :String : else_result.resolved
+    unless t1 == t2 || t1 == :Any || t2 == :Any
+      error!(if_node, "IF expression branches have incompatible types: THEN returns #{t1}, ELSE returns #{t2}")
+    end
+
+    result_type = (t1 == :Any) ? else_result : then_result
+    unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+      error!(if_node, "IF expression result type '#{result_type.resolved}' must be implicitly copyable (primitive, symbol, or rodata string). Use statement-IF with RETURN for heap-allocated values.")
+    end
+
+    if_node.expr_mode = true
+    if_node.full_type = (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type
+  end
+
+  # Promotes an AST::MatchStatement that is used in expression position.
+  def promote_to_expr_match!(parent_node, match_node)
+    case_types = match_node.case_result_types || []
+    default_type = match_node.default_result_type
+
+    # All case bodies must produce values
+    case_types.each_with_index do |t, i|
+      unless t
+        error!(match_node, "MATCH expression: every branch must end with a value expression")
+      end
+    end
+
+    # Must have DEFAULT or be exhaustive (MATCH IFF)
+    unless default_type || match_node.exhaustive
+      error!(match_node, "MATCH expression requires a DEFAULT branch (or MATCH IFF for exhaustive enum/union matching)")
+    end
+
+    all_types = case_types.compact
+    all_types << default_type if default_type
+
+    if all_types.empty?
+      error!(match_node, "MATCH expression must have at least one case")
+    end
+
+    resolved_types = all_types.map { |t| t.string? ? :String : t.resolved }.uniq.reject { |t| t == :Any }
+    if resolved_types.size > 1
+      error!(match_node, "MATCH expression branches have incompatible types: #{resolved_types.join(', ')}")
+    end
+
+    result_type = all_types.first
+    unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
+      error!(match_node, "MATCH expression result type '#{result_type.resolved}' must be implicitly copyable (primitive, symbol, or rodata string). Use statement-MATCH for heap-allocated values.")
+    end
+
+    match_node.expr_mode = true
+    match_node.full_type = (result_type.string? && !result_type.symbol?) ? Type.new(:String, location: :rodata) : result_type
   end
 
   def finalize_scope(node, branch: nil)

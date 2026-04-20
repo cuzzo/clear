@@ -104,6 +104,10 @@ class Parser
   end
 
 
+  # IF and MATCH as expressions: x = IF cond THEN a ELSE b END
+  primary(:KEYWORD, 'IF')    { parse_if_expr }
+  primary(:KEYWORD, 'MATCH') { parse_match_expr }
+
   # Primaries
   primary(:NUMBER) { parse_literal(:NUMBER, :stack) }
   primary(:INT64) { parse_literal(:INT64, :stack) }
@@ -1265,6 +1269,82 @@ class Parser
     end
 
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+  end
+
+  # Expression-position IF: each branch is a single expression (no semicolons).
+  def parse_if_expr
+    if_token = consume(:KEYWORD, 'IF')
+    parse_if_chain_expr(if_token)
+  end
+
+  def parse_if_chain_expr(if_token)
+    condition = parse_expression
+    consume(:KEYWORD, 'THEN')
+    then_branch = [parse_expression]
+
+    else_branch = []
+    if match!(:KEYWORD, 'ELSE_IF')
+      # Recursion consumes END; do not consume again here.
+      else_branch = [parse_if_chain_expr(previous)]
+    elsif match!(:KEYWORD, 'ELSE')
+      else_branch = [parse_expression]
+      consume(:KEYWORD, 'END')
+    else
+      consume(:KEYWORD, 'END')
+    end
+
+    AST::IfStatement.new(if_token, condition, then_branch, else_branch)
+  end
+
+  # Expression-position MATCH: each arm body is a single expression (no semicolons).
+  def parse_match_expr
+    tok = consume(:KEYWORD, 'MATCH')
+    takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
+    exhaustive = match?(:KEYWORD, 'IFF') && consume(:KEYWORD, 'IFF')
+    expr = parse_expression
+    consume(:KEYWORD, 'START')
+
+    cases = []
+    default_case = nil
+
+    until match?(:KEYWORD, 'END') || match?(:EOF)
+      if match?(:KEYWORD, 'DEFAULT')
+        consume(:KEYWORD, 'DEFAULT')
+        consume(:ARROW)
+        default_case = [parse_expression]
+        match!(:CHAR, ',')
+        break
+      end
+
+      if match?(:KEYWORD, 'WHEN')
+        consume(:KEYWORD, 'WHEN')
+        condition = parse_expression
+        consume(:ARROW)
+        cases << { kind: :when, value: condition, body: [parse_expression] }
+      elsif match?(:CHAR, '{')
+        pattern = parse_struct_pattern
+        consume(:ARROW)
+        cases << { kind: :struct_pattern, value: pattern, body: [parse_expression] }
+      else
+        @suppress_struct_lit = true
+        pattern = parse_expression
+        @suppress_struct_lit = false
+        binding = nil
+        destructure = nil
+        if match?(:KEYWORD, 'AS')
+          consume(:KEYWORD, 'AS')
+          binding = consume(:VAR_ID).value
+        elsif match?(:CHAR, '{')
+          destructure = parse_struct_pattern
+        end
+        consume(:ARROW)
+        cases << { kind: :eq, value: pattern, binding: binding, destructure: destructure, body: [parse_expression] }
+      end
+      match!(:CHAR, ',')
+    end
+
+    consume(:KEYWORD, 'END')
+    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !!exhaustive, !!takes)
   end
 
   # FOR var IN (start ..= end) DO body END   — range iteration

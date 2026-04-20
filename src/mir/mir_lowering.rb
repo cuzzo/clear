@@ -327,6 +327,27 @@ class MIRLowering
     result
   end
 
+  # Like lower_body, but the last user-visible statement becomes break :label expr
+  # instead of a regular statement. Used for IF/MATCH expression branches.
+  def lower_body_with_break(stmts, label)
+    return [] unless stmts && !stmts.empty?
+
+    # Find the last non-old-MIR-verification node (the result expression)
+    last_user_idx = stmts.rindex { |s|
+      !s.is_a?(MIR::Drop) && !s.is_a?(MIR::Alloc) &&
+      !s.is_a?(MIR::Return) && !s.is_a?(MIR::SuppressCleanup) &&
+      !s.is_a?(MIR::ReassignCleanup) && !s.is_a?(MIR::FieldCleanup)
+    }
+    return lower_body(stmts) unless last_user_idx
+
+    prefix_lowered = lower_body(stmts[0...last_user_idx])
+    result_mir = lower(stmts[last_user_idx])
+    pending = flush_pending
+    suffix_lowered = stmts[(last_user_idx + 1)..].empty? ? [] : lower_body(stmts[(last_user_idx + 1)..])
+
+    prefix_lowered + pending + suffix_lowered + [MIR::BreakStmt.new(label, result_mir)]
+  end
+
   def statement_node?(node)
     node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) ||
     node.is_a?(AST::Assignment) ||
@@ -3753,6 +3774,15 @@ class MIRLowering
   # ================================================================
 
   def lower_if(node)
+    if node.expr_mode
+      @block_expr_counter += 1
+      label = "__if_#{@block_expr_counter}"
+      cond = lower(node.condition)
+      then_body = lower_body_with_break(node.then_branch, label)
+      else_body = lower_body_with_break(node.else_branch || [], label)
+      return MIR::BlockExpr.new(label, [MIR::IfStmt.new(cond, then_body, else_body)])
+    end
+
     cond = lower(node.condition)
     then_body = lower_body(node.then_branch)
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
@@ -3935,6 +3965,13 @@ class MIRLowering
   end
 
   def lower_match(node)
+    if node.expr_mode
+      @block_expr_counter += 1
+      expr_label = "__match_#{@block_expr_counter}"
+    else
+      expr_label = nil
+    end
+
     subject = lower(node.expr)
 
     # Determine if union MATCH
@@ -3958,9 +3995,13 @@ class MIRLowering
       node.cases.all? { |c| c[:kind] != :when && c[:kind] != :struct_pattern &&
                             c[:value].is_a?(AST::GetField) }
 
+    lower_branch = ->(stmts) {
+      expr_label ? lower_body_with_break(stmts, expr_label) : lower_body(stmts)
+    }
+
     if is_int_match || is_enum_match
       arms = node.cases.map { |c|
-        body = lower_body(c[:body])
+        body = lower_branch.call(c[:body])
         pattern = if is_enum_match
           ".#{c[:value].field}"
         else
@@ -3969,18 +4010,18 @@ class MIRLowering
         end
         { pattern: pattern, body: body }
       }
-      default = (node.default_case && !node.default_case.empty?) ? lower_body(node.default_case) : nil
+      default = (node.default_case && !node.default_case.empty?) ? lower_branch.call(node.default_case) : nil
       # Non-exhaustive enum match without DEFAULT needs else => {} to satisfy Zig
       if is_enum_match && !default
         all_variants = @enum_schemas[expr_type_sym]&.map(&:to_s)&.sort || []
         covered = node.cases.map { |c| c[:value].field.to_s }.sort
         default = [] unless covered == all_variants
       end
-      MIR::SwitchStmt.new(subject, arms, default)
+      result = MIR::SwitchStmt.new(subject, arms, default)
     else
       # If-chain for unions, strings, and complex patterns
       branches = node.cases.map { |c|
-        body = lower_body(c[:body])
+        body = lower_branch.call(c[:body])
         cond = if is_union
           variant = case c[:value]
                     when AST::GetField then c[:value].field
@@ -4029,9 +4070,11 @@ class MIRLowering
         end
         { cond: cond, body: body }
       }
-      default = (node.default_case && !node.default_case.empty?) ? lower_body(node.default_case) : nil
-      MIR::IfChain.new(branches, default)
+      default = (node.default_case && !node.default_case.empty?) ? lower_branch.call(node.default_case) : nil
+      result = MIR::IfChain.new(branches, default)
     end
+
+    expr_label ? MIR::BlockExpr.new(expr_label, [result]) : result
   end
 
   def lower_return(node)

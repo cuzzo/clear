@@ -1,0 +1,19 @@
+FN pick(flag: Bool) RETURNS Int64 ->
+  RETURN IF flag THEN 10 ELSE 20 END;
+END
+
+FN grade(n: Int64) RETURNS String ->
+  RETURN IF n >= 90 THEN "A" ELSE_IF n >= 80 THEN "B" ELSE "C" END;
+END
+
+FN label(ok: Bool) RETURNS String ->
+  RETURN IF ok THEN "ok" ELSE "error" END;
+END
+
+FN main() RETURNS Void ->
+  a = IF TRUE THEN 1 ELSE 2 END;
+  b = IF FALSE THEN 100 ELSE 200 END;
+  flag = TRUE;
+  c = IF flag THEN 42 ELSE 0 END;
+  RETURN;
+END

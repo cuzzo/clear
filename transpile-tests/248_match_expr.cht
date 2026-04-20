@@ -1,0 +1,25 @@
+FN label(n: Int64) RETURNS String ->
+  RETURN MATCH n START
+    1 -> "one",
+    2 -> "two",
+    DEFAULT -> "other"
+  END;
+END
+
+FN score(n: Int64) RETURNS Int64 ->
+  RETURN MATCH n START
+    1 -> 100,
+    2 -> 200,
+    DEFAULT -> 0
+  END;
+END
+
+FN main() RETURNS Void ->
+  n = 2;
+  x = MATCH n START
+    1 -> "one",
+    2 -> "two",
+    DEFAULT -> "other"
+  END;
+  RETURN;
+END
