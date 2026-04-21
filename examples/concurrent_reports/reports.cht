@@ -26,7 +26,7 @@ FN buildReport(name: String, data: String) RETURNS Report ->
         val = toInt(parts[i]);
         sum += val;
     END
-    RETURN Report{ name: name, itemCount: parts.length(), total: sum };
+    RETURN Report{ name: COPY name, itemCount: parts.length(), total: sum };
 END
 
 -- Build a report that can fail.
@@ -39,7 +39,7 @@ FN buildReportOrFail(name: String, data: String) RETURNS !Report ->
         val = toInt(parts[i]);
         sum += val;
     END
-    RETURN Report{ name: name, itemCount: parts.length(), total: sum };
+    RETURN Report{ name: COPY name, itemCount: parts.length(), total: sum };
 END
 
 FN main() RETURNS Void ->
