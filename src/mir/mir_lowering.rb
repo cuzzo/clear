@@ -1993,16 +1993,26 @@ class MIRLowering
     @current_bg_pointer_captures = pointer_captures
     # Lower the fiber body to MIR nodes (for checker visibility) and build Zig strings.
     # run_body carries the MIR stmts so the checker can walk allocations inside the fiber.
+    # Save outer @pending_stmts: hoists from fiber body (e.g. auto-COPY string fields in
+    # OR fallback struct literals) must be emitted INSIDE the fiber's run function, not in
+    # the outer function where Zig's inner-function capture rules would reject them.
     run_body = nil
+    prev_fiber_pending = @pending_stmts
+    @pending_stmts = []
     stmt_code, result_line = with_fiber_capture_map(bg_capture_map, rt_override: bg_rt) do
       body_mir = []
       sc = pre_steps.filter_map { |step|
         mir = lower(step[:expr])
+        step_pending = flush_pending
         code = emit_expr(mir)
+        body_mir.concat(step_pending)
         body_mir << (step[:binding] ? MIR::Let.new(step[:binding], mir, false, nil, nil) : mir)
         # AllocMark and other verification-only nodes emit nil -- skip them.
         next nil if code.nil?
-        if step[:binding]
+        pending_code = step_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
+        parts = []
+        parts << pending_code unless pending_code.empty?
+        parts << if step[:binding]
           "const #{step[:binding]} = #{code};"
         elsif code.strip.end_with?(";") || code.strip.end_with?("}")
           code
@@ -2011,25 +2021,33 @@ class MIRLowering
           is_void_step = expr_type.nil? || expr_type == :Void || (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
           is_void_step ? "#{code};" : "_ = #{code};"
         end
+        parts.join("\n            ")
       }.join("\n            ")
 
       last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)
       rl = if last_step.nil? || is_void || last_is_assign
         if last_step
           last_mir = lower(last_step[:expr])
+          last_pending = flush_pending
+          body_mir.concat(last_pending)
           body_mir << last_mir
           last_code = emit_expr(last_mir)
-          (last_code.strip.end_with?("}") || last_code.strip.end_with?(";")) ? last_code : "#{last_code};"
+          pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
+          stmt = (last_code.strip.end_with?("}") || last_code.strip.end_with?(";")) ? last_code : "#{last_code};"
+          pending_code.empty? ? stmt : "#{pending_code}\n            #{stmt}"
         else
           ""
         end
       else
         last_mir = lower(last_step[:expr])
+        last_pending = flush_pending
+        body_mir.concat(last_pending)
         body_mir << last_mir
         result_code = emit_expr(last_mir)
+        pending_code = last_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
         # Apply scope-exit promotion: frame strings must be heap-duped so they
         # outlive the fiber's frame, which is rewound when the fiber exits.
-        if node.exit_promote&.dig(:strategy) == :string_dupe
+        assignment = if node.exit_promote&.dig(:strategy) == :string_dupe
           # Use __ctx_N.alloc — __bg_alloc is the same allocator but declared
           # in the outer block, not accessible inside the run fn.
           "__ctx_#{id}.inner.result = try __ctx_#{id}.alloc.dupe(u8, #{result_code});"
@@ -2037,10 +2055,12 @@ class MIRLowering
           result_code = result_code.sub(/\Atry /, '') if result_code.start_with?("try ")
           "__ctx_#{id}.inner.result = #{result_code};"
         end
+        pending_code.empty? ? assignment : "#{pending_code}\n            #{assignment}"
       end
       run_body = body_mir
       [sc, rl]
     end
+    @pending_stmts = prev_fiber_pending
     @current_bg_pointer_captures = prev_bg_ptr_caps
 
     arena_init = node.arena_mode ? "#{bg_rt}.arena_mode = true;" : ""
@@ -2952,45 +2972,63 @@ class MIRLowering
     end
 
     # Default: expr OR fallback -> error union catch or optional orelse
+
+    # Early path: OR fallback struct with string fields.
+    # Detect BEFORE calling lower(node.right) so hoist_alloc never fires for
+    # CopyNode-wrapped string literals. Outer-scope errdefer temps from hoist_alloc
+    # are never cleaned up on the success path (the catch block never runs), causing
+    # a leak — especially inside BG fibers where errdefer fires only on fiber error.
+    if is_error && node.right.is_a?(AST::StructLit)
+      ret_type = node.right.full_type
+      ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
+      resolved = ret_type&.resolved
+      schema = @struct_schemas&.dig(resolved)
+      string_fields = schema&.filter_map do |fname, fdef|
+        next if fname.is_a?(Symbol)
+        ft = (fdef.is_a?(Hash) ? fdef[:type] : fdef)
+        ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
+        fname if ft.string?
+      end || []
+      if string_fields.any?
+        rt_name = @rt_name
+        left_raw = emit_expr(strip_try(left))
+        # Build struct init without CopyNode-triggered hoist_alloc: unwrap
+        # CopyNode-wrapped rodata string literals to raw literals so lower()
+        # returns MIR::Lit instead of MIR::DeepCopy (which would trigger hoist_alloc).
+        # The inline dupe() inside the catch block handles heap promotion.
+        fields_zig = node.right.fields.map { |k, v|
+          v_lit = if v.is_a?(AST::CopyNode) && v.value.is_a?(AST::Literal) &&
+                     v.value.type_info&.string? && v.value.type_info&.rodata?
+            v.value
+          else
+            v
+          end
+          ".#{k} = #{emit_expr(lower(v_lit))}"
+        }.join(", ")
+        type_name = node.right.name.to_s
+        right_zig = ".{ #{fields_zig} }"
+        # Dupe each string field with proper cleanup on partial failure:
+        # - First field: `try dupe(...)` — propagates OOM, no prior state to clean up.
+        # - Each subsequent field: catch, free all previously-duped fields, re-return error.
+        promos = string_fields.each_with_index.map { |f, i|
+          if i == 0
+            "__fb.#{f} = try #{rt_name}.heapAlloc().dupe(u8, __fb.#{f});"
+          else
+            frees = string_fields[0...i].map { |prev| "#{rt_name}.heapAlloc().free(__fb.#{prev});" }.join(" ")
+            "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch |__dupe_err| { #{frees} return __dupe_err; };"
+          end
+        }.join(" ")
+        return MIR::RawZig.new(
+          "(#{left_raw} catch __fb: { var __fb: #{type_name} = #{right_zig}; #{promos} break :__fb __fb; })",
+          "or_fallback_dupe",
+          { consumes: [], produces: [], borrows: [] }
+        )
+      end
+    end
+
     right = lower(node.right)
 
     if is_error
-      # or_fallback_dupe annotated directly on BinaryOp node
-      if node.or_fallback_dupe && node.right.is_a?(AST::StructLit)
-        ret_type = node.right.full_type
-        ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
-        resolved = ret_type&.resolved
-        schema = @struct_schemas&.dig(resolved)
-        string_fields = schema&.filter_map do |fname, fdef|
-          next if fname.is_a?(Symbol)
-          ft = (fdef.is_a?(Hash) ? fdef[:type] : fdef)
-          ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-          fname if ft.string?
-        end || []
-        if string_fields.any?
-          rt_name = @rt_name
-          left_raw = emit_expr(strip_try(left))
-          right_zig = emit_expr(right)
-          # Dupe each string field with proper cleanup on partial failure:
-          # - First field: `try dupe(...)` — propagates OOM, no prior state to clean up.
-          # - Each subsequent field: catch, free all previously-duped fields, re-return error.
-          #   This prevents leaking heap-duped fields if a later dupe fails under OOM.
-          promos = string_fields.each_with_index.map { |f, i|
-            if i == 0
-              "__fb.#{f} = try #{rt_name}.heapAlloc().dupe(u8, __fb.#{f});"
-            else
-              frees = string_fields[0...i].map { |prev| "#{rt_name}.heapAlloc().free(__fb.#{prev});" }.join(" ")
-              "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch |__dupe_err| { #{frees} return __dupe_err; };"
-            end
-          }.join(" ")
-          return MIR::RawZig.new(
-            "(#{left_raw} catch __fb: { var __fb = #{right_zig}; #{promos} break :__fb __fb; })",
-            "or_fallback_dupe",
-            { consumes: [], produces: [], borrows: [] }
-          )
-        end
-      end
-
       return MIR::TryCatch.new(strip_try(left), right, nil)
     end
 
