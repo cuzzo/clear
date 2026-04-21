@@ -89,6 +89,7 @@ class MIREmitter
     when MIR::RcRetain         then emit_rc_retain(node)
     when MIR::RcDowngrade      then emit_rc_downgrade(node)
     when MIR::WeakUpgrade      then emit_weak_upgrade(node)
+    when MIR::FreezeExpr       then emit_freeze(node)
     when MIR::MakeList         then emit_make_list(node)
     when MIR::FrameSave        then emit_frame_save(node)
     when MIR::FrameRestore     then emit_frame_restore(node)
@@ -430,6 +431,10 @@ class MIREmitter
     when :list, :string_map, :numeric_map
       guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
+    when :frozen
+      kw = errdefer ? "errdefer" : "defer"
+      "#{kw} #{name}.deinit(rt.heapAlloc());\n"
+
     when :pool, :fixed_soa
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} #{name}.deinit(#{alloc});\n"
@@ -609,6 +614,10 @@ class MIREmitter
 
   def emit_weak_upgrade(node)
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
+  end
+
+  def emit_freeze(node)
+    "try CheatLib.freeze(#{node.zig_base}, rt.heapAlloc(), #{emit(node.inner)})"
   end
 
   def emit_make_list(node)

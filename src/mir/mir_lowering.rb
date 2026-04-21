@@ -251,6 +251,7 @@ class MIRLowering
     when AST::CapabilityWrap    then lower_cap_wrap(node)
     when AST::LinkNode          then lower_link(node)
     when AST::ResolveNode       then lower_resolve(node)
+    when AST::FreezeNode        then lower_freeze(node)
     when AST::Copy              then lower(node.value) # Zig copies structs by value
 
     # --- Slice ---
@@ -1334,6 +1335,8 @@ class MIRLowering
       obj_ti = node.object.type_info
       if obj_ti&.shared? || obj_ti&.multiowned?
         obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
+      elsif obj_ti&.frozen?
+        obj_mir = MIR::Deref.new(MIR::FieldGet.new(obj_mir, "_root"))
       end
       [obj_mir] + node.args.map { |a| lower(a) }
     else
@@ -3015,6 +3018,8 @@ class MIRLowering
       field_expr = if inner_ti&.multiowned? || inner_ti&.shared? ||
                        inner_ti&.locked? || inner_ti&.write_locked?
         "_r.ctrl.data.#{node.field}"
+      elsif inner_ti&.frozen?
+        "_r._root.#{node.field}"
       elsif inner_ti&.always_mutable?
         "_r.data.#{node.field}"
       else
@@ -3041,6 +3046,9 @@ class MIRLowering
       ctrl = MIR::FieldGet.new(target, "ctrl")
       data = MIR::FieldGet.new(ctrl, "data")
       return MIR::FieldGet.new(data, node.field.to_s)
+    elsif ti&.frozen?
+      # target._root.field
+      return MIR::FieldGet.new(MIR::FieldGet.new(target, "_root"), node.field.to_s)
     elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
       # target.ctrl.data.field
       ctrl = MIR::FieldGet.new(target, "ctrl")
@@ -3428,6 +3436,16 @@ class MIRLowering
     source = ti.link_source || :multiowned
     func = source == :shared ? "weakArcUpgrade" : "weakRcUpgrade"
     MIR::WeakUpgrade.new(inner, base, func)
+  end
+
+  def lower_freeze(node)
+    ti = node.value.type_info
+    base = ti.resolved.to_s.sub(/^\?/, '')
+    zig_base = transpile_type(base)
+    inner = lower(node.value)
+    # Dereference Rc data pointer to get *const T for freeze()
+    rc_data = MIR::FieldGet.new(MIR::FieldGet.new(inner, "ctrl"), "data")
+    MIR::FreezeExpr.new(rc_data, zig_base)
   end
 
   # ================================================================

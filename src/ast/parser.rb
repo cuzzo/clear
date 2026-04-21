@@ -143,6 +143,7 @@ class Parser
   primary(:KEYWORD, 'CLONE', AST::CloneNode, ['CLONE', :expression])
   primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
   primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
+  primary(:KEYWORD, 'FREEZE', AST::FreezeNode, ['FREEZE', :expression])
   primary(:KEYWORD, 'BG')   { parse_bg_block }
   primary(:KEYWORD, 'NEXT') { parse_next_expr }
   primary(:PERCENT, '%') { parse_sigil_construct }

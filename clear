@@ -286,6 +286,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   FileUtils.mkdir_p(build_dir)
   ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
   ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+  ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
   cache_dir = File.join(build_dir, '.zig-cache')
   global_cache_dir = File.join(build_dir, '.global-zig-cache')
 
@@ -775,6 +776,7 @@ when 'test'
     FileUtils.mkdir_p(build_dir)
     ensure_symlink(File.join(build_dir, 'runtime'), File.join(ZIG_DIR, 'runtime'))
     ensure_symlink(File.join(build_dir, 'lib'), File.join(ZIG_DIR, 'lib'))
+    ensure_symlink(File.join(build_dir, 'experimental'), File.join(ZIG_DIR, 'experimental'))
     source_dir = File.dirname(File.expand_path(source))
     extern_modules = File.read(source).scan(/FROM\s+"([^"]+)"/).flatten.uniq
     ffi_modules = extern_modules.select { |m|

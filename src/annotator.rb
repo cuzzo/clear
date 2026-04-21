@@ -2857,6 +2857,20 @@ private
     node.full_type = resolved_type
   end
 
+  def visit_FreezeNode(node)
+    visit(node.value)
+    ti = node.value.type_info
+    unless ti&.multiowned? || ti&.shared?
+      error!(node, "FREEZE can only be applied to @multiowned or @shared values, got '#{node.value.resolved_type}'")
+    end
+    base = ti.resolved.to_s.sub(/^\?/, '')
+    result_type = Type.new(base.to_sym)
+    result_type.ownership  = :frozen
+    result_type.provenance = :heap
+    node.full_type = result_type
+    node.storage   = :frozen
+  end
+
   def visit_Give(node)
     visit(node.value)
 

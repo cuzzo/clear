@@ -94,6 +94,8 @@ class Scope
 
     # Overlay storage-derived capabilities onto the type
     case entry.storage
+    when :frozen
+      base_type.ownership = :frozen
     when :multiowned
       base_type.ownership = :multiowned
     when :shared

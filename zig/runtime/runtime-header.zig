@@ -9,6 +9,7 @@ extern "c" fn memchr(s: [*]const u8, c: c_int, n: usize) ?[*]const u8;
 const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const streams = @import("../lib/streams.zig");
+const freeze_mod = @import("../experimental/freeze.zig");
 
 pub const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const Task = @import("queues.zig").Task;
@@ -1778,6 +1779,14 @@ pub const CheatLib = struct {
         ctrl.* = .{ .strong = 1, .weak = 0, .data = data_ptr, .alloc = alloc };
         alloc_profile.recordAlloc(@returnAddress(), @sizeOf(RcControlBlock(T)) + @sizeOf(T));
         return Rc(T){ .ctrl = ctrl };
+    }
+
+    pub fn Frozen(comptime T: type) type {
+        return freeze_mod.Frozen(T);
+    }
+
+    pub fn freeze(comptime T: type, alloc: std.mem.Allocator, val: *const T) freeze_mod.FreezeError!freeze_mod.Frozen(T) {
+        return freeze_mod.freeze(T, alloc, val);
     }
 
     pub fn rcRetain(comptime T: type, rc: Rc(T)) Rc(T) {

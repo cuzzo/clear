@@ -466,6 +466,10 @@ class Type
     @ownership == :shared
   end
 
+  def frozen?
+    @ownership == :frozen
+  end
+
   def split?
     @ownership == :split
   end
@@ -1185,6 +1189,9 @@ class Type
   # @return [Symbol] One of :stack, :frame, or :heap
   #
   def finalize_storage(size, current_storage = nil)
+    # Frozen (compact buffer) always stays frozen
+    return :frozen if frozen? || current_storage == :frozen
+
     # Multiowned (Rc) always stays multiowned
     return :multiowned if multiowned? || current_storage == :multiowned
 

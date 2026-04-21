@@ -467,6 +467,14 @@ module MIR
     include Expr
   end
 
+  # Compact an @multiowned tree into a single contiguous buffer.
+  # Zig: try CheatLib.freeze(T, alloc, inner_ptr)
+  # inner: MIR expr for the Rc data pointer (*const T)
+  # zig_base: Zig type name for T
+  FreezeExpr = Struct.new(:inner, :zig_base) do
+    include Expr
+  end
+
   # Make a list from items.
   # Zig: try CheatLib.makeList(elem_type, alloc, &.{ items })
   # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.

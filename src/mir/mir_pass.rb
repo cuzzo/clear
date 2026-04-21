@@ -842,7 +842,7 @@ class MIRPass
     when AST::FuncCall, AST::MethodCall
       node.args.select { |a| a.respond_to?(:was_moved) && a.was_moved }
                .flat_map { |a| collect_escaping_ids(a) }
-    when AST::CopyNode, AST::CloneNode then []
+    when AST::CopyNode, AST::CloneNode, AST::FreezeNode then []
     else []
     end
   end

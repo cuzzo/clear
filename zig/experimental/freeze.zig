@@ -36,11 +36,8 @@ pub fn Frozen(comptime T: type) type {
     return struct {
         const Self = @This();
         _buf: []align(@alignOf(T)) u8,
-
-        /// Pointer to the root value.  Valid for the lifetime of Self.
-        pub fn root(self: *const Self) *const T {
-            return @ptrCast(self._buf.ptr);
-        }
+        /// Direct pointer to root for efficient field access from CLEAR.
+        _root: *const T,
 
         pub fn deinit(self: Self, alloc: Allocator) void {
             alloc.free(self._buf);
@@ -110,7 +107,7 @@ pub fn freeze(comptime T: type, alloc: Allocator, val: *const T)
         var cursor: usize = 0;
         copyNode(T, val, buf, &cursor);
         std.debug.assert(cursor == size);
-        return Frozen(T){ ._buf = buf };
+        return Frozen(T){ ._buf = buf, ._root = @ptrCast(buf.ptr) };
     } else {
         var size: usize = 0;
         measureNode(T, val, &size);
@@ -121,7 +118,7 @@ pub fn freeze(comptime T: type, alloc: Allocator, val: *const T)
         var cursor: usize = 0;
         copyNode(T, val, buf, &cursor);
         std.debug.assert(cursor == size);
-        return Frozen(T){ ._buf = buf };
+        return Frozen(T){ ._buf = buf, ._root = @ptrCast(buf.ptr) };
     }
 }
 
@@ -422,7 +419,7 @@ test "freeze: flat struct with string field" {
     const frozen = try freeze(Item, alloc, &item);
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     try std.testing.expectEqualStrings("hello", r.name);
     try std.testing.expectEqual(@as(i64, 42), r.value);
 
@@ -459,7 +456,7 @@ test "freeze: binary tree with string keys" {
     alloc.free(right.key); alloc.destroy(right);
     alloc.free(root_node.key); alloc.destroy(root_node);
 
-    const r = frozen.root();
+    const r = frozen._root;
     try std.testing.expectEqualStrings("b", r.key);
     try std.testing.expectEqual(@as(i64, 2), r.value);
     try std.testing.expect(r.left != null);
@@ -501,7 +498,7 @@ test "freeze: [][]const u8 — inner strings relocated into buffer" {
 
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     const base = @intFromPtr(frozen._buf.ptr);
     const end  = base + frozen._buf.len;
 
@@ -531,7 +528,7 @@ test "freeze: nested inline struct with string field" {
     alloc.free(label);  // free before reading frozen to prove no stale ptr
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     const base = @intFromPtr(frozen._buf.ptr);
     const end  = base + frozen._buf.len;
 
@@ -562,7 +559,7 @@ test "freeze: []*T — slice of pointers to structs" {
 
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     const base = @intFromPtr(frozen._buf.ptr);
     const end  = base + frozen._buf.len;
 
@@ -598,7 +595,7 @@ test "freeze: tagged union — string and integer variants" {
         const v = Val{ .num = 42 };
         const frozen = try freeze(Val, alloc, &v);
         defer frozen.deinit(alloc);
-        try std.testing.expectEqual(Val{ .num = 42 }, frozen.root().*);
+        try std.testing.expectEqual(Val{ .num = 42 }, frozen._root.*);
     }
 
     // String variant: string bytes must be inlined into the buffer.
@@ -609,7 +606,7 @@ test "freeze: tagged union — string and integer variants" {
         alloc.free(s); // free before reading to prove no stale ptr
         defer frozen.deinit(alloc);
 
-        const r = frozen.root();
+        const r = frozen._root;
         const base = @intFromPtr(frozen._buf.ptr);
         const end  = base + frozen._buf.len;
         try std.testing.expectEqualStrings("hello union", r.str);
@@ -648,7 +645,7 @@ test "freeze: tagged union — recursive tree (Value-like)" {
 
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     const base = @intFromPtr(frozen._buf.ptr);
     const end  = base + frozen._buf.len;
 
@@ -702,7 +699,7 @@ test "freeze: tagged union — nested list of lists" {
 
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     const base = @intFromPtr(frozen._buf.ptr);
     const end  = base + frozen._buf.len;
 
@@ -735,7 +732,7 @@ test "freeze: union embedded in struct" {
     alloc.free(s);
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     const base = @intFromPtr(frozen._buf.ptr);
     const end  = base + frozen._buf.len;
 
@@ -792,7 +789,7 @@ test "freeze: acyclic linked list (recursive type) succeeds" {
     alloc.destroy(c); alloc.destroy(b); alloc.destroy(a);
     defer frozen.deinit(alloc);
 
-    const r = frozen.root();
+    const r = frozen._root;
     const base = @intFromPtr(frozen._buf.ptr);
     const end  = base + frozen._buf.len;
 
@@ -865,7 +862,7 @@ test "freeze: acyclic chain of 100 (recursive type) succeeds" {
     const frozen = try freeze(Node, alloc, &nodes[0]);
     defer frozen.deinit(alloc);
 
-    var cur: ?*const Node = frozen.root();
+    var cur: ?*const Node = frozen._root;
     var count: usize = 0;
     while (cur) |n| : (cur = n.next) count += 1;
     try std.testing.expectEqual(@as(usize, N), count);

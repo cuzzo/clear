@@ -523,7 +523,8 @@ module CleanupClassifier
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
     return nil if ti.borrow_provenance?  # borrow return -- caller owns data
 
-    classify_inf_stream(ti) ||
+    classify_frozen(ti) ||
+      classify_inf_stream(ti) ||
       classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||
       classify_array_struct_strings(ti, node, schema_lookup) ||
@@ -550,6 +551,11 @@ module CleanupClassifier
   # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.
   # deinit() sets closed=true and wakes the generator so it exits cleanly.
   # No moved guard: streams are not linearly-affine (requires_move? = false).
+  private_class_method def self.classify_frozen(ti)
+    return nil unless ti.frozen?
+    entry(:frozen, alloc: :heap, has_moved_guard: false)
+  end
+
   private_class_method def self.classify_inf_stream(ti)
     return nil unless ti.inf_stream?
     entry(:inf_stream, has_moved_guard: false)

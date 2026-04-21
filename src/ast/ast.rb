@@ -188,6 +188,8 @@ module AST
       end
 
       case storage
+      when :frozen
+        t.ownership = :frozen
       when :multiowned
         t.ownership = :multiowned
       when :shared
@@ -519,6 +521,7 @@ module AST
   CloneNode         = Struct.new(:token, :value) { include Locatable }  # CLONE expr              -> explicit handle retain for non-affine replay/shared futures
   LinkNode          = Struct.new(:token, :value) { include Locatable }  # LINK expr               -> downgrade Rc/Arc to WeakRc/WeakArc
   ResolveNode       = Struct.new(:token, :value) { include Locatable }  # RESOLVE expr            -> upgrade WeakRc/WeakArc to ?Rc/?Arc
+  FreezeNode        = Struct.new(:token, :value) { include Locatable }  # FREEZE expr             -> compact @multiowned tree into contiguous buffer
   # PassStmt: no-op statement (like Python's `pass`).
   PassStmt          = Struct.new(:token) { include Locatable }
   # StructPattern: destructuring pattern for MATCH.
