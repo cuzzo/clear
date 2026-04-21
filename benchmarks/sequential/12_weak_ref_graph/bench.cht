@@ -54,7 +54,8 @@ FN main() RETURNS Void ->
         IF i > 0_i64 THEN
             resolved = RESOLVE parents[i];
             IF resolved != NIL THEN
-                checksum = checksum + resolved?.id;
+                r = resolved?;
+                checksum = checksum + r.id;
             END
         END
     END

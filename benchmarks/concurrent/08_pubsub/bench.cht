@@ -35,7 +35,8 @@ FN main() RETURNS Void ->
                 IF msg == NIL THEN
                     BREAK;
                 END
-                total = total %+ processMessage(msg?.seed);
+                m = msg?;
+                total = total %+ processMessage(m.seed);
             END
             total;
         });

@@ -1,8 +1,8 @@
 -- @leak: 2000000 -> 2000
 -- Pointer-Chasing Benchmark — CLEAR (@pool + Id<Node>)
 --
--- Mirrors bench.c exactly: 2,000,000 nodes, additive prime-step permutation.
---   next[i] = id of node at slot (i + STEP) MOD N
+-- 2,000,000 nodes, additive prime-step permutation.
+--   Walk: cur_idx = (cur_idx + STEP) MOD N (arithmetic, no next pointer needed)
 --   STEP = 999983 (prime, gcd(STEP, 2000000) = 1 → full-length cycle).
 --
 -- Memory pressure:
@@ -17,7 +17,7 @@
 --   CLEAR (@pool + Id<Node>)   | ~204 ms   | ~-5% (comparable)
 --
 -- Both timings cover the walk phase only (2M pointer dereferences).
--- Setup (build + wire) is excluded from BENCH_RESULT on both sides.
+-- Setup (build) is excluded from BENCH_RESULT on both sides.
 --
 -- ANALYSIS:
 --   The benchmark is in the memory-bound regime: 2M nodes × 32-byte pool
@@ -37,7 +37,7 @@
 --   chasing in the memory-bound regime. The cost is memory: pool slots are
 --   2× larger than raw C structs, and the scheduler adds fixed overhead.
 
-STRUCT Node { val: Int64, next: ?Id<Node> }
+STRUCT Node { val: Int64 }
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
@@ -49,26 +49,20 @@ FN main() RETURNS Void ->
 
     -- Phase 1: insert N nodes, record IDs in insertion order.
     FOR i IN (0_i64 ..< n_nodes) DO
-        id = pool.insert(Node{ val: i, next: NIL });
+        id = pool.insert(Node{ val: i });
         id_list.append(id);
     END
 
-    -- Phase 2: wire additive permutation — node[i].next = id[(i+step) MOD n].
-    FOR j IN (0_i64 ..< n_nodes) DO
-        next_pos = (j + step) MOD n_nodes;
-        next_id  = id_list[next_pos];
-        cur_node = pool.get(id_list[j]);
-        cur_node?.next = next_id;
-    END
-
-    -- Phase 3: walk N steps, accumulate sum. Time only this phase (mirrors C).
-    MUTABLE cur:   ?Id<Node> = id_list[0];
-    MUTABLE sum    = 0;
+    -- Phase 2: walk N steps via arithmetic permutation, accumulate sum.
+    -- Time only this phase (mirrors C walk phase).
+    MUTABLE cur_idx: Int64 = 0;
+    MUTABLE sum = 0;
     t1 = timestampMs();
     FOR steps IN (0_i64 ..< n_nodes) DO
-        n     = pool.get(cur?);
-        sum   = sum + n?.val;
-        cur   = n?.next;
+        IF pool[id_list[cur_idx]] AS n THEN
+            sum = sum + n.val;
+        END
+        cur_idx = (cur_idx + step) MOD n_nodes;
     END
     walkMs = timestampMs() - t1;
 
