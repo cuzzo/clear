@@ -22,7 +22,7 @@ Go made those trade-offs. But Go is a thin veneer over C with the most sophistic
 
 CLEAR exists because it thinks Rust is not truly safe enough inherently, Pony is not easy enough, and Go is currently the most practical trade-off but is too dangerous and cannot fix its inherent problems.
 
-Further, although Pony literally forces you into the actor pattern - at least at this stage, it is not inherently distributive. The actor model does not require serialization, distributed fault tolerence, supervision, etc. Pony uses the ideas to achieve safety on a single machine, but just because you wrote the code that *allows* for distribution easily, does not mean it actually can be distributed effectively by default.
+Further, although Pony literally forces you into the actor pattern - at least at this stage, it is not inherently distributive. The actor model does not require serialization, distributed fault tolerance, supervision, etc. Pony uses the ideas to achieve safety on a single machine, but just because you wrote the code that *allows* for distribution easily, does not mean it actually can be distributed effectively by default.
 
 Pony did not want to make any sacrifices on safety. This led to a language that is impractical and/or not competitive for many of workloads (with a high cognitive burden).
 
@@ -45,7 +45,7 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 | **Causality** | F | F | F | B | B | **B \*** |
 | **Backpressure** | F | A | A+ | C | B | **A** |
 | **Time / Ordering** | F | F | F | F | F | **A** |
-| **Fault Tolerence** | F | F | F | F | A+ | **?** |
+| **Fault Tolerance** | F | F | F | F | A+ | **?** |
 
 ### Non-CLEAR Ratings: Context & Justification
 
@@ -68,7 +68,24 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
   * **Memory Consumption:** CLEAR uses **MVCC** as a default synchronization technique. This adds memory overhead to eliminate common classes of bugs (deadlocks, contention).
   * **Causality:** CLEAR offers **A+** causality with MVCC and `@split` streams, but allows you to "load the foot-gun" (locks) for specific read-heavy workloads where predictability is paramount.
   * **Time / Ordering:** CLEAR separates time as a **tense** in the type system. Time can only be shared via streams through the `@split` capability, guaranteeing ordering across shared streams.
-  * **Fault Tolerence:** It is still to early in the design stage to determine a realistic score for CLEAR's fault tolerence story - particularly with regards to issues that could arise from shared mutable memory and idempotence likely not being a first-class function color. CLEAR hopes to have a reasonable ceiling of a  B (similar to Causality). It will likely give you some tools to shoot yourself in the foot (to both achieve understandability and not limit workloads). You could mark tasks as killable which aren't or tasks as retryable which aren't, etc. But CLEAR aims to have the systems in place to easily achieve an A+ rating when and only when its critical to go the extra mile. Everything else scoring an F besides BEAM is evidence that solving all these problems at the language/runtime level is likely not *critical* for the types of workloads most languages target (CLEAR included). The approach CLEAR is currently most interested in is taking the five most common faults: 1) CPU Starvation (Time), 2) Local Heap Exhaustion (Space), 3) Orphination (Task that spawned died, work no longer relevant), 4) Data-Flow Severance (prodicing a stream that no one is listening to), 5) Deadlock... And to either prevent them entirely (Deadlock) or detect when it's possibly a problem (OOM) and force the developer to handle the possible outcome.  Whatever CLEAR's solution ends up being, BEAM folks are likely to look at it as "Basically an F", but CLEAR does aim to provide value here. 
+  * **Fault Tolerance:** It is still too early in the design stage to determine a realistic score for CLEAR's fault tolerance story—particularly regarding issues that arise from shared mutable memory and the fact that idempotence is not a first-class function color. 
+
+### Fault Tolerance
+
+CLEAR hopes to have a reasonable ceiling of a **B** (similar to Causality). It will likely give you tools to shoot yourself in the foot to prioritize understandability and broad workload support—for example, you could mark tasks as killable which aren't, or tasks as retrying which aren't idempotent. But CLEAR will have the systems in place to easily support an **A+** architecture when paired with modern infrastructure. 
+
+The fact that everything else scores an **F** besides BEAM is evidence that solving these problems purely at the language level may no longer be the best choice. 
+
+  The approach CLEAR is currently most interested in is targeting the five most common catastrophic faults: 
+  1) **CPU Starvation** (Time) 
+  2) **Local Heap Exhaustion** (Space) 
+  3) **Lexical Orphanhood** (The spawning task died; the work is no longer relevant) 
+  4) **Data-Flow Severance** (Producing a stream that no one is listening to) 
+  5) **Deadlocks** (Unbounded lock-wait cycles)
+
+CLEAR aims to either safely assassinate the offending fibers automatically (Deadlocks/Orphans) or detect the threshold and force the developer to handle the outcome (OOM limits). 
+
+Whatever CLEAR's final solution ends up being, BEAM folks are likely to look at it and say, "That's basically an F." But CLEAR aims to provide pragmatic value.  Like BEAM folks, CLEAR is of the view that killing entire processes with important state just because you have no built-in fault tolerance is insane.  Unlike BEAM, CLEAR is unlikely to eliminate the possibility of *needing* to do that *occasionally*, but it aims to reduce that need to practically zero.
 
 ## How Does CLEAR think about Cognitive Burden
 
