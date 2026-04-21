@@ -42,9 +42,9 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 | **Logical TOCTOU** | F | F | F | A+ | A- | **B+** |
 | **Deadlock** | F | C | C+ | A+ | A+ | **A- \*** |
 | **Starvation** | F | B | A | B | A+ | **A-** |
-| **Causality** | F | F | F | B | B | **B \*** |
 | **Backpressure** | F | A | A+ | C | B | **A** |
-| **Time / Ordering** | F | F | F | F | F | **A** |
+| **Causal Ordering** | F | F | F | B+ | C | **B \*** |
+| **Stream Ordering** | F | F | F | F | F | **?** |
 | **Fault Tolerance** | F | F | F | F | A+ | **?** |
 
 ### Non-CLEAR Ratings: Context & Justification
@@ -66,8 +66,8 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
   * **Deadlock:** Technical deadlock is not part of CLEAR’s intended concurrency model, and by v0.3 the runtime aims to detect and prevent unbounded lock-wait cycles from silently persisting. Locks are intentionally more cumbersome to use because they are rarely the best-performing or safest solution. When developers opt into lock-based coordination anyway, they are also opting into explicit responsibility for handling lock-related failures correctly. A language like Pony or BEAM which does not have locks deserves a better ranking.
   * **Starvation & Backpressure:** Like BEAM, CLEAR *will* prevent CPU starvation via its cooperative scheduler with automatically injected yielding. It separately tracks per-task memory consumption to kill runaway tasks and enforce backpressure.
   * **Memory Consumption:** CLEAR uses **MVCC** as a default synchronization technique. This adds memory overhead to eliminate common classes of bugs (deadlocks, contention).
-  * **Causality:** CLEAR offers **A+** causality with MVCC and `@split` streams, but allows you to "load the foot-gun" (locks) for specific read-heavy workloads where predictability is paramount.
-  * **Time / Ordering:** CLEAR separates time as a **tense** in the type system. Time can only be shared via streams through the `@split` capability, guaranteeing ordering across shared streams.
+  * **Causal Ordering:** CLEAR separates time as a **tense** in the type system, and offers **A+** causal ordering with `@split` streams and solves the concurrent write problem with MVCC and transaction failure handling. But it allows you to "load the foot-gun" (locks) for specific read-heavy workloads where predictability is paramount.
+  * **Stream Ordering:** CLEAR has not yet determined if it will offer any guarantees to protect against stream ordering related bugs. Frameworks like Flink and Kafka exist to solve this problem. It may not make sense to try to solve it in the runtime/language.
   * **Fault Tolerance:** It is still too early in the design stage to determine a realistic score for CLEAR's fault tolerance story—particularly regarding issues that arise from shared mutable memory and the fact that idempotence is not a first-class function color. 
 
 ### Fault Tolerance
