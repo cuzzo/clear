@@ -4438,10 +4438,12 @@ class MIRLowering
   def direct_index_get(target, index, ast_node, type_info)
     cast_idx = MIR::Cast.new(index, "usize", :intCast)
     ti = Type.new(type_info)
+    list_param = ti.list_collection? && ast_node.is_a?(AST::Identifier) &&
+                 @current_fn_param_names&.include?(ast_node.name)
     base =
-      if ti.list_collection?
+      if ti.list_collection? && !list_param
         MIR::FieldGet.new(target, "items")
-      elsif direct_slice_backed_expr?(ast_node, ti)
+      elsif direct_slice_backed_expr?(ast_node, ti) || list_param
         target
       else
         return nil
@@ -4458,10 +4460,16 @@ class MIRLowering
 
     recv = lower(recv_ast)
     ti = Type.new(recv_ti)
+    is_param = recv_ast.is_a?(AST::Identifier) &&
+               @current_fn_param_names&.include?(recv_ast.name)
     len_expr =
       if ti.list_collection?
-        # Explicit @list: always std.ArrayListUnmanaged — safe to go direct.
-        MIR::FieldGet.new(MIR::FieldGet.new(recv, "items"), "len")
+        if is_param
+          # Parameters receive slices ([]T via .items at call site) — no .items wrapper.
+          MIR::FieldGet.new(recv, "len")
+        else
+          MIR::FieldGet.new(MIR::FieldGet.new(recv, "items"), "len")
+        end
       elsif ti.string? || (ti.array? && !ti.string? && direct_slice_backed_expr?(recv_ast, ti))
         MIR::FieldGet.new(recv, "len")
       else

@@ -658,6 +658,8 @@ class MIRPass
           add_if_consumed(a.value, names, bindings, true)
         elsif a.respond_to?(:was_moved) && a.was_moved && a.is_a?(AST::Identifier)
           add_if_consumed(a, names, bindings, true)
+        elsif a.is_a?(AST::StructLit) || a.is_a?(AST::CapabilityWrap)
+          walk_consumed(a, names, bindings)
         end
       end
     end

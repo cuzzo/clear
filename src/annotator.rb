@@ -3940,6 +3940,7 @@ private
     return if current_fn_ctx&.type_params&.include?(vt.resolved)
     return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
     og_set_moved(node.name)
+    node.was_moved = true
   end
 
   # Reject storing a borrowed value into an owned container (struct, union, TAKES param).
