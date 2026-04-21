@@ -7,12 +7,11 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
 
 ## v0.1
 
- - [ ] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
+ - [x] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
  - [ ] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
  - [x] STRUCT/FN DEFAULTS
  - [ ] Partial Deadlock protection (in progress - may cancel - primary safety goal is enough syncronization options to not ever *need* locks in EXTREME STRICT mode, tbd)
- - [ ] String@symbol
- - [ ] HashMap string interning as default
+ - [x] String@symbol
  - [x] Pipeline support for infinite streams (LIMITed) and unbound finite streams 
  - [x] Migrate to Zig 0.16
 
@@ -34,6 +33,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] A statistical benchmarking & profiling framework like Go/Rust
  - [ ] `./clear doctor` to automatically fix most syntax, conversion, affine errors and profiling recomendations if you choose
  - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
+ - [ ] HashMap string interning
  - [ ] @sorted for lists, sets, hashmaps.
 
 Milestone: *Basic* SQL/CLEAR database
