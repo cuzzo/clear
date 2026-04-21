@@ -41,6 +41,7 @@ Milestone: *Basic* SQL/CLEAR database
 ## v0.3
 
  - [ ] CPS to support conditional & nested-looping Finite State Machine fibers
+ - [ ] Full Infinite Stream support
  - [ ] Stream Join (declarative, basic)
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
