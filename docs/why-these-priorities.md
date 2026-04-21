@@ -62,7 +62,7 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 
   * **Cognitive Load:** CLEAR is designed so that **Profile Guided Optimization (PGO)** and automated tooling solve the heavy lifting. You write intuitive, sequential code, and the profiler suggests (and injects) the necessary optimization directives based on actual workloads.
   * **Memory Safety:** Like Rust, CLEAR utilizes **Affine Ownership** to guarantee memory safety.
-  * **Logical TOCTOU:** Values behind Arcs/Locks cannot escape lexical scope. The compiler can generate **Loom tests** in a deterministic VM to catch dependencies and break them. Use-after-free and race conditions are included in Memory Saftey. Time-related bugs are captured in Causality and Timing / Ordering categories.
+  * **Logical TOCTOU:** Values behind Arcs/Locks cannot escape lexical scope. The compiler can generate **Loom tests** in a deterministic VM to catch dependencies and break them. Use-after-free and race conditions are included in Memory Saftey. Time-related bugs are captured in Causal & Stream Ordering categories.
   * **Deadlock:** Technical deadlock is not part of CLEAR’s intended concurrency model, and by v0.3 the runtime aims to detect and prevent unbounded lock-wait cycles from silently persisting. Locks are intentionally more cumbersome to use because they are rarely the best-performing or safest solution. When developers opt into lock-based coordination anyway, they are also opting into explicit responsibility for handling lock-related failures correctly. A language like Pony or BEAM which does not have locks deserves a better ranking.
   * **Starvation & Backpressure:** Like BEAM, CLEAR *will* prevent CPU starvation via its cooperative scheduler with automatically injected yielding. It separately tracks per-task memory consumption to kill runaway tasks and enforce backpressure.
   * **Memory Consumption:** CLEAR uses **MVCC** as a default synchronization technique. This adds memory overhead to eliminate common classes of bugs (deadlocks, contention).
@@ -72,7 +72,7 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 
 ### Fault Tolerance
 
-CLEAR hopes to have a reasonable ceiling of a **B** (similar to Causality). It will likely give you tools to shoot yourself in the foot to prioritize understandability and broad workload support—for example, you could mark tasks as killable which aren't, or tasks as retrying which aren't idempotent. But CLEAR will have the systems in place to easily support an **A+** architecture when paired with modern infrastructure. 
+CLEAR hopes to have a reasonable ceiling of a **B** (similar to Causal Ordering). It will likely give you tools to shoot yourself in the foot to prioritize understandability and broad workload support—for example, you could mark tasks as killable which aren't, or tasks as retrying which aren't idempotent. But CLEAR will have the systems in place to easily support an **A+** architecture when paired with modern infrastructure. 
 
 The fact that everything else scores an **F** besides BEAM is evidence that solving these problems purely at the language level may no longer be the best choice. 
 
@@ -119,8 +119,8 @@ In the future, core count is expected to continue growing faster than memory.  C
 
 CLEAR thinks the main **Raw Speed** metrics are: 1) compiling via Zig to get LLVM best in class optimizations to single-core performance, 2) maximizing for **cache locality** as memory read stalls can dominate compute performance benchmarks.
 
-In general, CLEAR aims to overcome added memory, co-operative yielding, and any safety checks by given a level of cache locality that is nearly impossible to reach in any other language.
+In general, CLEAR aims to *overcome* added memory, co-operative yielding, and any safety checks by gaining a level of cache locality that is nearly impossible to reach in any other language.
 
 How?
 
-The core pillar of CLEAR's design is to maximize local reasoning and minimize global complexity. This is what makes CLEAR **simple**, even if it may not be as **easy** as Go. It also **should** allow CLEAR to make compiler optimizations WRT escape analysis that no other language (that we are aware of) can make to maximize cache locality.
+The core pillar of CLEAR's design is to maximize local reasoning and minimize global complexity. This is what makes CLEAR **simple**, even if it may not be as **easy** as Go. It also **should** allow CLEAR to make compiler optimizations WRT escape analysis that no other language (that we are aware of) can make to maximize cache locality. 
