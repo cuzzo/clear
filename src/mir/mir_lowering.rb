@@ -1601,14 +1601,20 @@ class MIRLowering
       init_fields << ".alloc = #{alloc_expr}"
     end
 
+    # f is referenced in call_stmt only when the struct has data fields.
+    f_needed = receiver_field || alloc_kind || arg_codes.any? || !returns_void || can_fail
+    f_binding = f_needed ? "const f: *@This() = @ptrCast(@alignCast(ptr));" : "_ = ptr;"
+
     code = +""
     if returns_void
       code << "{ "
     else
       code << "blk_ext#{id}: { "
     end
-    code << "const #{args_tuple_name} = #{arg_tuple}; "
-    code << "const #{prefix}#{id} = struct { #{fields.join(', ')}, fn run(ptr: ?*anyopaque) callconv(.c) void { const f: *@This() = @ptrCast(@alignCast(ptr)); #{call_stmt} } }; "
+    # Only emit the args tuple when there are arguments that reference it.
+    code << "const #{args_tuple_name} = #{arg_tuple}; " if arg_codes.any?
+    field_decls = fields.empty? ? "" : "#{fields.join(', ')}, "
+    code << "const #{prefix}#{id} = struct { #{field_decls}fn run(ptr: ?*anyopaque) callconv(.c) void { #{f_binding} #{call_stmt} } }; "
     code << "var #{frame_name} = #{prefix}#{id}{ #{init_fields.join(', ')} }; "
     code << "#{@rt_name}.onRootStack(@as(*const fn (?*anyopaque) callconv(.c) void, &#{prefix}#{id}.run), @ptrCast(&#{frame_name})); "
     code << "if (#{frame_name}.err) |e| return e; " if can_fail

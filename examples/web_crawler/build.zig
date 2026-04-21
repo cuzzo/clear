@@ -5,12 +5,12 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const build_root = b.build_root.path orelse ".";
-    const transpiler = b.fmt("{s}/../../src/transpiler.rb", .{build_root});
+    const transpiler = b.fmt("{s}/../../src/backends/transpiler.rb", .{build_root});
     const main_src = b.fmt("{s}/src/main.cht", .{build_root});
 
     // cheat_runtime module (needed by --module output)
     const cheat_runtime_mod = b.createModule(.{
-        .root_source_file = b.path("../../zig/runtime-header.zig"),
+        .root_source_file = b.path("../../zig/runtime/runtime-header.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -24,7 +24,7 @@ pub fn build(b: *std.Build) void {
 
     // Transpile main.cht → Zig module
     const transpile_main = b.addSystemCommand(&.{ "ruby", transpiler, "--module", main_src });
-    const main_zig = transpile_main.captureStdOut();
+    const main_zig = transpile_main.captureStdOut(.{});
 
     const main_mod = b.createModule(.{
         .root_source_file = main_zig,
@@ -37,10 +37,11 @@ pub fn build(b: *std.Build) void {
     // Integration test
     const test_step = b.step("test", "Run web crawler integration test");
 
+    main_mod.addAssemblyFile(b.path("../../zig/runtime/switch.S"));
+    main_mod.addAssemblyFile(b.path("../../zig/runtime/onRoot.S"));
+
     const integration_test = b.addTest(.{ .root_module = main_mod });
-    integration_test.addAssemblyFile(b.path("../../zig/switch.S"));
-    integration_test.addAssemblyFile(b.path("../../zig/onRoot.S"));
-    integration_test.linkLibC();
+    main_mod.link_libc = true;
 
     const run_test = b.addRunArtifact(integration_test);
     test_step.dependOn(&run_test.step);

@@ -46,7 +46,7 @@ FN fetchPage(baseUrl: String, path: String) RETURNS Page @reentrant ->
     html = httpGet(url);
     title = extractTitle(html);
     links = countLinks(html);
-    RETURN Page{ url: path, title: title, linkCount: links };
+    RETURN Page{ url: COPY path, title: COPY title, linkCount: links };
 END
 
 FN main() RETURNS Void ->
@@ -57,16 +57,18 @@ FN main() RETURNS Void ->
     -- (cooperative scheduler: this is a no-op yield)
 
     baseUrl = "localhost:19876";
+    baseUrlAbout = COPY baseUrl;
+    baseUrlBlog = COPY baseUrl;
 
     -- Fetch 3 pages concurrently using BG fibers
     home: ~Page = BG { @large:canSmash ->
         fetchPage(baseUrl, "/");
     };
     about: ~Page = BG { @large:canSmash ->
-        fetchPage(baseUrl, "/about");
+        fetchPage(baseUrlAbout, "/about");
     };
     blog: ~Page = BG { @large:canSmash ->
-        fetchPage(baseUrl, "/blog");
+        fetchPage(baseUrlBlog, "/blog");
     };
 
     -- Await all results
