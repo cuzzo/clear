@@ -34,7 +34,7 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Cognitive Load** | F * | D+ | B | D- | C+ | **A-** |
 | **Memory Safety** | F | A+ | B * | A+ | A+ | **A+** |
-| **Raw Speed** | A+ | A+ | A- | A | C | **A** |
+| **Raw Speed** | A+ | A | B+ | A- | C | **A-** |
 | **Throughput** | A | A | A+ | A | A | **A** |
 | **Memory Usage** | A+ | A+ | B- | B+ | C- | **A-** |
 | **Predictability** | A+ | A+ | B- | B+ | A- | **A-** |
