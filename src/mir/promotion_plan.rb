@@ -350,6 +350,9 @@ module CleanupClassifier
       ti = node.type_info
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
       cleanup = classify_binding(var_name, ti, node, promoted_fns, schema_lookup)
+      # Stamp on node for identity-based lookup in lower_var_decl (avoids
+      # same-name collisions when two vars share a name in different scopes).
+      node.mir_binding_entry = cleanup if cleanup
       bindings[var_name] = cleanup if cleanup
     end
     # AST.walk_body doesn't recurse into MethodCall/FuncCall args, so BgBlock

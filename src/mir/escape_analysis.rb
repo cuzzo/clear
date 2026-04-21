@@ -322,9 +322,44 @@ module EscapeAnalysis
         next unless bind.is_a?(AST::BindExpr) && bind.mode == :assign
         next unless bind.name.is_a?(String) && !local_names.include?(bind.name)
         ti = bind.type_info rescue nil
-        next unless ti.is_a?(Type) && ti.string?
-        carry_names << bind.name
-        LoopFrameAnalysis.promote_value_to_heap!(bind.value)
+        next unless ti.is_a?(Type)
+        if ti.string?
+          carry_names << bind.name
+          LoopFrameAnalysis.promote_value_to_heap!(bind.value)
+        elsif ti.list_collection? || ti.set_collection? || (ti.map? && !ti.numeric_map?) || ti.pool?
+          # Local allocator-backed container (list/set/map/pool) assigned to an outer variable.
+          # When the loop rewinds the frame between iterations, the local's backing
+          # buffer is freed but the outer variable still holds it → use-after-free.
+          # Fix: promote BOTH the local decl AND the outer variable to heap.
+          # The outer variable must also be heap so its reassignment cleanup uses heapAlloc().
+          rhs = bind.value
+          next unless rhs.is_a?(AST::Identifier) && local_names.include?(rhs.name)
+          # Promote the loop-local declaration.
+          AST.walk_body(body) do |local_decl|
+            next unless (local_decl.is_a?(AST::VarDecl) || (local_decl.is_a?(AST::BindExpr) && local_decl.mode == :decl)) && local_decl.name.to_s == rhs.name
+            local_decl.storage = :heap if local_decl.respond_to?(:storage=)
+            decl_ti = local_decl.type_info rescue nil
+            decl_ti = Type.new(decl_ti) if decl_ti && !decl_ti.is_a?(Type)
+            decl_ti.provenance = :heap if decl_ti.is_a?(Type)
+            if rhs.symbol
+              rhs.symbol.storage = :heap
+              sym_reg = rhs.symbol.reg
+              sym_reg.storage = :heap if sym_reg&.respond_to?(:storage=)
+            end
+          end
+          # Promote the outer variable's declaration so its cleanup uses heapAlloc().
+          outer_name = bind.name
+          AST.walk_body(fn.body) do |outer_decl|
+            next unless (outer_decl.is_a?(AST::VarDecl) || (outer_decl.is_a?(AST::BindExpr) && outer_decl.mode == :decl)) && outer_decl.name.to_s == outer_name
+            outer_decl.storage = :heap if outer_decl.respond_to?(:storage=)
+            outer_ti = outer_decl.type_info rescue nil
+            outer_ti = Type.new(outer_ti) if outer_ti && !outer_ti.is_a?(Type)
+            outer_ti.provenance = :heap if outer_ti.is_a?(Type)
+            if outer_decl.respond_to?(:symbol) && outer_decl.symbol
+              outer_decl.symbol.storage = :heap
+            end
+          end
+        end
       end
     end
     carry_names

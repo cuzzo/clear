@@ -522,7 +522,9 @@ class MIRLowering
   # Extract root variable name from a potentially nested AST node (e.g., pool[id]?.vars).
   def extract_root_var_name(node)
     case node
-    when AST::Identifier then node.name.to_s
+    when AST::Identifier
+      decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+      (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) || node.name.to_s
     when AST::GetField   then extract_root_var_name(node.target)
     when AST::GetIndex   then extract_root_var_name(node.target)
     else
@@ -875,6 +877,12 @@ class MIRLowering
 
     # Set current bindings so lower_var_decl can look up cleanup info.
     @current_bindings = node.cleanup_bindings || {}
+    # Per-function name disambiguation: when two variables share the same Zig
+    # name but have different allocators (different scopes), the MIR checker's
+    # flat name-keyed allocs dict would conflate them.  Track which names have
+    # had AllocMarks emitted and remap collisions to <name>_L<line>.
+    @fn_alloc_marked_names = {}   # safe_name => true (seen at least once)
+    @decl_zig_name_map    = {}    # node.object_id => disambiguated Zig name
 
     # Mutable scalar params: Zig params are const, need shadow vars
     mutable_scalar_params = (node.params || []).select { |p|
@@ -1383,7 +1391,7 @@ class MIRLowering
           storage = arg_node.respond_to?(:storage) ? arg_node.storage : nil
           next if storage == :heap
           next if arg_node.is_a?(AST::CopyNode)
-          dupe_alloc = alloc_sym == :heap ? :heap : alloc_for_node(arg_node)
+          dupe_alloc = resolved == :heap ? :heap : alloc_for_node(arg_node)
           mir_args[mir_idx] = MIR::DupeSlice.new(mir_args[mir_idx], dupe_alloc)
         end
       end
@@ -1410,10 +1418,12 @@ class MIRLowering
     iz.stdlib_def = node.matched_stdlib_def if node.respond_to?(:matched_stdlib_def)
     iz.allocs = resolved_allocs unless resolved_allocs.empty?
     # Store target variable name for checker cross-reference with AllocMark.
+    # Use extract_root_var_name so renamed variables (same-name collision fix)
+    # get the correct disambiguated Zig name.
     if node.is_a?(AST::MethodCall) && node.object.respond_to?(:name)
-      iz.target_var = node.object.name.to_s
+      iz.target_var = extract_root_var_name(node.object)
     elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver && node.args&.first&.respond_to?(:name)
-      iz.target_var = node.args.first.name.to_s  # UFCS: first arg is receiver
+      iz.target_var = extract_root_var_name(node.args.first)  # UFCS: first arg is receiver
     end
     iz
   end
@@ -2683,7 +2693,12 @@ class MIRLowering
     capture_map = @do_capture_map || {}
     return MIR::Ident.new(capture_map[node.name]) if capture_map.key?(node.name)
 
-    ident = MIR::Ident.new(zig_safe_name(node.name))
+    # Use disambiguated Zig name if the declaration was renamed to avoid
+    # same-name collision in the MIR checker (see lower_var_decl).
+    decl_node = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+    zig_name = (@decl_zig_name_map && decl_node && @decl_zig_name_map[decl_node.object_id]) ||
+               zig_safe_name(node.name)
+    ident = MIR::Ident.new(zig_name)
     # Loop-carry string: identifier was marked for heap dupe at the use site
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
@@ -3499,7 +3514,9 @@ class MIRLowering
     is_mutable ||= ft.resource? || node.resource_close_zig
     is_mutable = false if ft.local?
 
-    # Look up the cleanup entry from the bindings stamped by MIRPass.
+    # Post-dataflow cleanup entry (cleanup_decisions! refinements are correct here).
+    # For same-name vars in different scopes, alloc is overridden per-declaration
+    # via alloc_for_node(node) which reads the storage set by escape analysis.
     decl_name = node.name.to_s
     binding_entry = @current_bindings[decl_name]
     has_mir_drop = binding_entry && binding_entry[:needs_cleanup] && !binding_entry[:match_as]
@@ -3524,8 +3541,15 @@ class MIRLowering
     annotation = needs_annotation ? zig_type : nil
 
     # Resolve init value - special handling for collection types.
-    # Allocator comes from the cleanup plan (single source of truth).
-    decl_alloc = binding_entry&.dig(:alloc) || :heap
+    # Per-declaration storage (set by escape analysis) takes precedence over the
+    # name-keyed cleanup plan (which may be stale for same-name vars in different scopes).
+    # Escape analysis stamping (:heap) takes precedence. For :frame, trust the
+    # cleanup_bindings alloc (which correctly handles sharded/pool/always-heap types).
+    decl_alloc = if node.respond_to?(:storage) && node.storage == :heap
+      :heap
+    else
+      binding_entry&.dig(:alloc) || :heap
+    end
     init = if ft.pool?
       cap = ft.capacity
       MIR::ContainerInit.new(transpile_type(ft), :pool, decl_alloc, cap)
@@ -3575,6 +3599,18 @@ class MIRLowering
 
     safe_name = zig_safe_name(node.name)
 
+    # Disambiguate when two variables in the same function would share a Zig
+    # name AND both emit AllocMarks (has_mir_drop).  The MIR checker's flat
+    # name-keyed allocs dict conflates them; appending the source line makes
+    # the names unique so the checker sees independent containers.
+    if has_mir_drop && @fn_alloc_marked_names&.key?(safe_name)
+      safe_name = "#{safe_name}_L#{node.line}"
+    end
+    if has_mir_drop && @fn_alloc_marked_names
+      @fn_alloc_marked_names[safe_name] = true
+      @decl_zig_name_map[node.object_id] = safe_name
+    end
+
     suppression = if keyword_mutable
       if actually_mutated && node.var_used && !forced_var
         nil
@@ -3592,7 +3628,29 @@ class MIRLowering
     if has_mir_drop
       drop_entry = binding_entry.dup
       build_drop_entry!(drop_entry, node.type_info, node)
-      mir_alloc = resolve_decl_stdlib_alloc(node) || binding_entry[:alloc]
+      # Escape-analysis heap stamp takes precedence.
+      # Same-name collision fix: if cleanup_bindings says :heap but this declaration's
+      # storage is :frame and the type doesn't structurally require heap (sharded/pool/map),
+      # use per-declaration storage. This avoids using a stale alloc from a same-named
+      # heap variable in a different scope. All other cleanup allocs (:frame, :cleanup,
+      # :heap on heap-backing types) are preserved verbatim from cleanup_bindings.
+      ft = node.type_info ? (Type.new(node.type_info) rescue nil) : nil
+      node_alloc = if node.respond_to?(:storage) && node.storage == :heap
+        :heap
+      elsif binding_entry[:alloc] == :heap && alloc_for_node(node) != :heap && !ft&.needs_heap_backing?
+        alloc_for_node(node)
+      else
+        binding_entry[:alloc]
+      end
+      # Guard: :cleanup is a semantic alloc (mixed-provenance for struct-string-field lists).
+      # Downgrading it to :frame silently produces leaks that pass ALLOC_CLEANUP_MISMATCH
+      # because both AllocMark and Cleanup end up self-consistent at :frame.
+      if binding_entry[:alloc] == :cleanup && node_alloc != :cleanup
+        raise "BUG in lower_var_decl: lowering downgraded :cleanup to " \
+              ":#{node_alloc} for '#{safe_name}' -- fix the alloc selection logic above"
+      end
+      drop_entry[:alloc] = node_alloc
+      mir_alloc = resolve_decl_stdlib_alloc(node) || node_alloc
       [MIR::AllocMark.new(safe_name, mir_alloc, node.type_info), let_node, MIR::Cleanup.new(safe_name, drop_entry)]
     else
       let_node
@@ -3601,8 +3659,8 @@ class MIRLowering
 
   def lower_bind_expr(node)
     if node.mode == :decl
-      # Proxy to VarDecl logic. cleanup_alloc/has_cleanup are no longer needed
-      # since lower_var_decl reads from @current_bindings[name].
+      # Proxy to VarDecl logic. Copy mir_binding_entry so lower_var_decl
+      # uses node-identity lookup rather than the name-keyed dict.
       proxy = AST::VarDecl.new(node.token, node.name, node.type, node.value, false)
       proxy.full_type = node.full_type
       proxy.storage = node.storage

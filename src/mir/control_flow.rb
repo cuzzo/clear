@@ -555,11 +555,20 @@ class OwnershipDataflow
       state[stmt.name.to_s] = make_owner_entry(stmt) if stmt.mode == :decl
 
     when AST::Assignment
-      # Map indexed assignments (map[k] = val) apply dupeUnionValue before put,
-      # so the map stores a deep copy. The original value is NOT ownership-transferred.
+      # Map indexed assignments: only skip rhs moves for UNION values (dupeUnionValue
+      # creates a true deep copy, so the original retains ownership). For struct values,
+      # CheatLib.promote() shallow-copies heap string pointers, so nested list-field
+      # variables ARE consumed (moved) into the promoted copy -- suppress their cleanup.
       lhs = stmt.name
-      skip_rhs_move = lhs.is_a?(AST::GetIndex) &&
-                      (Type.from_node(lhs.target)&.map? rescue false)
+      lhs_is_map = lhs.is_a?(AST::GetIndex) && (Type.from_node(lhs.target)&.map? rescue false)
+      skip_rhs_move = if lhs_is_map
+        val_ti_raw = stmt.value.respond_to?(:type_info) ? (stmt.value.type_info rescue nil) : nil
+        val_resolved = val_ti_raw && (val_ti_raw.is_a?(Type) ? val_ti_raw.resolved : val_ti_raw)
+        schema = val_resolved && @schema_lookup&.call(val_resolved)
+        schema.is_a?(Hash) && schema[:kind] == :union
+      else
+        false
+      end
       collect_binding_moves(stmt.value, state).each { |n| mark_moved!(state, n) } unless skip_rhs_move
 
     when AST::ReturnNode
