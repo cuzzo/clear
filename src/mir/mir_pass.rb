@@ -213,6 +213,8 @@ class MIRPass
       # Stamp cleanup info on reassignment / match-as nodes.
       stamp_reassign_cleanup!(stmt, bindings)
       stamp_match_as_cleanup!(stmt, bindings)
+      stamp_while_bind_cleanup!(stmt, bindings)
+      stamp_if_bind_cleanup!(stmt, bindings)
 
       # Insert MIR::Promote before container stores that need frame-to-heap promotion.
       insert_container_promote!(result, stmt)
@@ -264,6 +266,11 @@ class MIRPass
       stmt.else_branch = transform_body(stmt.else_branch, bindings, promo) if stmt.else_branch
     when AST::WhileLoop
       stmt.do_branch = transform_body(stmt.do_branch, bindings, promo) if stmt.do_branch
+    when AST::WhileBindLoop
+      stmt.do_branch = transform_body(stmt.do_branch, bindings, promo) if stmt.do_branch
+    when AST::IfBind
+      stmt.then_branch = transform_body(stmt.then_branch, bindings, promo) if stmt.then_branch
+      stmt.else_branch = transform_body(stmt.else_branch, bindings, promo) if stmt.else_branch && !stmt.else_branch.empty?
     when AST::ForRange, AST::ForEach
       stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
     when AST::MatchStatement
@@ -726,6 +733,32 @@ class MIRPass
     # Ensure source has moved guard so _moved variable exists for suppression.
     # Only set if the source still needs cleanup (dataflow may have eliminated it).
     src_entry[:has_moved_guard] = true if has_as_cleanup && src_entry && src_entry[:needs_cleanup]
+  end
+
+  def stamp_while_bind_cleanup!(stmt, bindings)
+    return unless stmt.is_a?(AST::WhileBindLoop)
+    entry = bindings[stmt.binding_name.to_s]
+    return unless entry && entry[:needs_cleanup]
+    alloc_node = MIR::Alloc.new(stmt.token, stmt.binding_name.to_s, entry[:kind], entry[:alloc])
+    drop = MIR::Drop.new(stmt.token, stmt.binding_name.to_s, entry[:kind], entry[:alloc],
+                         true, nil, nil, nil)
+    drop.cleanup_entry = entry
+    stmt.do_branch = [alloc_node, drop] + (stmt.do_branch || [])
+  end
+
+  def stamp_if_bind_cleanup!(stmt, bindings)
+    return unless stmt.is_a?(AST::IfBind)
+    mir_prefix = []
+    stmt.bindings.each do |b|
+      entry = bindings[b[:name].to_s]
+      next unless entry && entry[:needs_cleanup]
+      mir_prefix << MIR::Alloc.new(stmt.token, b[:name].to_s, entry[:kind], entry[:alloc])
+      drop = MIR::Drop.new(stmt.token, b[:name].to_s, entry[:kind], entry[:alloc],
+                           true, nil, nil, nil)
+      drop.cleanup_entry = entry
+      mir_prefix << drop
+    end
+    stmt.then_branch = mir_prefix + (stmt.then_branch || []) unless mir_prefix.empty?
   end
 
   # Insert MIR::Promote before indexed Assignment nodes where the container's

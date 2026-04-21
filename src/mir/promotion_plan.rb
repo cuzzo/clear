@@ -261,6 +261,10 @@ module CleanupClassifier
     # 3. MATCH AS bindings (non-Copy payloads need cleanup with _moved guard).
     walk_match_as_bindings(fn_node.body, schema_lookup, bindings)
 
+    # 4. WHILE bind and IF bind captures from call results (ownership-transferring).
+    walk_while_bind_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
+    walk_if_bind_bindings(fn_node.body, promoted_fns, schema_lookup, bindings)
+
     bindings
   end
 
@@ -508,6 +512,55 @@ module CleanupClassifier
             }
           end
         end
+      end
+    end
+  end
+
+  # Classify WHILE bind captures that come from ownership-transferring calls.
+  # Only MethodCall/FuncCall results are considered: variable/field access is a
+  # borrow and the original binding retains cleanup responsibility.
+  # RESOLVE is handled separately (rcRelease in lower_while_bind).
+  private_class_method def self.walk_while_bind_bindings(body, promoted_fns, schema_lookup, bindings)
+    AST.walk_body(body) do |node|
+      next unless node.is_a?(AST::WhileBindLoop)
+      cond = node.condition
+      next unless cond.is_a?(AST::MethodCall) || cond.is_a?(AST::FuncCall)
+      next if cond.is_a?(AST::ResolveNode)
+      ti = cond.type_info
+      ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      inner_ti = ti&.wrapped_type
+      next unless inner_ti
+      inner_ti = Type.new(inner_ti) if inner_ti && !inner_ti.is_a?(Type)
+      e = classify_binding(node.binding_name.to_s, inner_ti, node, promoted_fns, schema_lookup)
+      next unless e
+      e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
+      if inner_ti.element_type
+        e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
+      end
+      bindings[node.binding_name.to_s] = e
+    end
+  end
+
+  # Classify IF bind captures that come from ownership-transferring calls.
+  private_class_method def self.walk_if_bind_bindings(body, promoted_fns, schema_lookup, bindings)
+    AST.walk_body(body) do |node|
+      next unless node.is_a?(AST::IfBind)
+      node.bindings.each do |b|
+        expr = b[:expr]
+        next unless expr.is_a?(AST::MethodCall) || expr.is_a?(AST::FuncCall)
+        next if expr.is_a?(AST::ResolveNode)
+        ti = expr.type_info
+        ti = Type.new(ti) if ti && !ti.is_a?(Type)
+        inner_ti = ti&.wrapped_type
+        next unless inner_ti
+        inner_ti = Type.new(inner_ti) if inner_ti && !inner_ti.is_a?(Type)
+        e = classify_binding(b[:name].to_s, inner_ti, node, promoted_fns, schema_lookup)
+        next unless e
+        e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
+        if inner_ti.element_type
+          e[:elem_zig_type] ||= (Type.new(inner_ti.element_type).zig_type rescue "UNKNOWN")
+        end
+        bindings[b[:name].to_s] = e
       end
     end
   end

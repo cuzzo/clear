@@ -749,6 +749,7 @@ private
           entry = current_scope.locals[b[:name]]
           b[:symbol] = entry
           classify_ownership!(entry)
+          og_declare(b[:name].to_s, nil, unwrapped)
         end
         visit_stmts(node.then_branch)
         nil
@@ -1236,11 +1237,23 @@ private
 
     pre_loop_states = @og&.fork_lightweight
 
+    # Footgun guard: a MethodCall on an immutable receiver cannot advance the
+    # loop condition and will loop forever.  RESOLVE is a ResolveNode (not a
+    # MethodCall) and is safe; mutable receivers may mutate state each iteration.
+    cond = node.condition
+    if cond.is_a?(AST::MethodCall)
+      recv = cond.object
+      if recv.is_a?(AST::Identifier) && current_scope.is_immutable?(recv.name)
+        error!(node, "WHILE ... AS binding: '#{cond.name}' is called on immutable '#{recv.name}' -- the condition cannot advance and may loop forever. Declare '#{recv.name}' as MUTABLE or use a regular WHILE loop.")
+      end
+    end
+
     analyze_control_flow_branches([
       proc {
         current_scope.declare(node.binding_name, nil, unwrapped, false, false, nil, :stack)
         entry = current_scope.locals[node.binding_name]
         classify_ownership!(entry)
+        og_declare(node.binding_name.to_s, nil, unwrapped)
 
         visit_stmts(node.do_branch)
         finalize_scope(node)

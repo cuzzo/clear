@@ -4315,4 +4315,48 @@ RSpec.describe SemanticAnnotator do
       expect(zig).to include("Hello, ")
     end
   end
+
+  describe "WHILE bind footgun: stateless condition on immutable receiver" do
+    it "rejects WHILE AS when the method receiver is immutable" do
+      src = <<~CHT
+        FN test() RETURNS Void ->
+          str = "a,b,c";
+          WHILE str.indexOf(",") AS pos DO
+            BREAK;
+          END
+          RETURN;
+        END
+      CHT
+      expect { run(src) }.to raise_error(/immutable|cannot advance|loop forever/i)
+    end
+
+    it "allows WHILE AS when the method receiver is MUTABLE" do
+      src = <<~CHT
+        FN test() RETURNS Void ->
+          MUTABLE items: Int64[5]@list = [];
+          items.append(1_i64);
+          WHILE items.pop() AS v DO
+            _ = v;
+          END
+          RETURN;
+        END
+      CHT
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "allows WHILE RESOLVE AS (ResolveNode, not a MethodCall)" do
+      src = <<~CHT
+        STRUCT Node { val: Int64 }
+        FN test() RETURNS Void ->
+          live = Node{ val: 42 } @multiowned;
+          w = LINK live;
+          WHILE RESOLVE w AS node DO
+            BREAK;
+          END
+          RETURN;
+        END
+      CHT
+      expect { run(src) }.not_to raise_error
+    end
+  end
 end
