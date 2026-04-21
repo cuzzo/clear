@@ -43,9 +43,9 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 | **Deadlock** | F | C | C+ | A+ | A+ | **A- \*** |
 | **Starvation** | F | B | A | B | A+ | **A-** |
 | **Backpressure** | F | A | A+ | C | B | **A** |
+| **Fault Tolerance** | F | F | F | F | A+ | **?** |
 | **Causal Ordering** | F | F | F | B+ | C | **B \*** |
 | **Stream Ordering** | F | F | F | F | F | **?** |
-| **Fault Tolerance** | F | F | F | F | A+ | **?** |
 
 ### Non-CLEAR Ratings: Context & Justification
 
