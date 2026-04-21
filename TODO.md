@@ -72,3 +72,7 @@ Vision is clear: Gradual Typing (Ruby/Python) -> Typed (Rust) -> STRICT Typed (H
  - [ ] EXTREME STRICT compilation pt 2: *most* of ADA's safety
  - [ ] Supervisor to kill killable / cancelable bad fibers
  - [ ] Control Plane Capability Migration -> live shift skewed workloads
+
+## v0.6
+
+ - [ ] Persistence / durability (for shared and distributed data)
