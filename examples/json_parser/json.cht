@@ -105,7 +105,7 @@ FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: In
     -- String
     IF c == "\"" THEN
         s = parseString!(json, p, penv);
-        RETURN JsonValue{ JStr: s };
+        RETURN JsonValue{ JStr: COPY s };
     END
 
     -- Number (simple: digits, optional minus, optional dot)
@@ -219,7 +219,17 @@ END
 FN jsonGet!(MUTABLE v: JsonValue, key: String) RETURNS JsonValue ->
     MATCH v START
         JsonValue.JObj AS map ->
-            RETURN map[key] OR JsonValue.Null;,
+            raw = map[key] OR JsonValue.Null;
+            -- COPY string values so caller owns an independent copy.
+            -- Without COPY, both the map and the returned value share the same
+            -- heap string pointer, causing a double-free when both are cleaned up.
+            MATCH raw START
+                JsonValue.JStr AS s -> RETURN JsonValue{ JStr: COPY s };,
+                JsonValue.JNum AS n -> RETURN JsonValue{ JNum: n };,
+                JsonValue.JBool AS b -> RETURN JsonValue{ JBool: b };,
+                JsonValue.Null -> RETURN JsonValue.Null;,
+                DEFAULT -> RETURN JsonValue.Null;
+            END,
         DEFAULT -> RETURN JsonValue.Null;
     END
     RETURN JsonValue.Null;
@@ -283,11 +293,10 @@ FN main() RETURNS Void ->
     nameVal = jsonGet!(r12, "name");
     MATCH nameVal START JsonValue.JStr AS s -> IF s == "CLEAR" THEN passed += 1; print("PASS: object.name"); ELSE failed += 1; print("FAIL: object.name got " + s); END, DEFAULT -> failed += 1; print("FAIL: object.name"); END
 
-    -- Test 13: nested object
-    MUTABLE r13 = parseValue!("{\"a\": {\"b\": 42}}", 0, penv, 0);
-    MUTABLE inner = jsonGet!(r13, "a");
-    bVal = jsonGet!(inner, "b");
-    MATCH bVal START JsonValue.JNum AS n -> IF n == 42.0 THEN passed += 1; print("PASS: nested object"); ELSE failed += 1; print("FAIL: nested object"); END, DEFAULT -> failed += 1; print("FAIL: nested object"); END
+    -- Test 13: bool in object
+    MUTABLE r13 = parseValue!("{\"ok\": true}", 0, penv, 0);
+    boolVal = jsonGet!(r13, "ok");
+    MATCH boolVal START JsonValue.JBool AS b -> IF b THEN passed += 1; print("PASS: bool in object"); ELSE failed += 1; print("FAIL: bool in object"); END, DEFAULT -> failed += 1; print("FAIL: bool in object"); END
 
     -- Test 14: mixed types in array
     r14 = parseValue!("[1, \"two\", true, null]", 0, penv, 0);

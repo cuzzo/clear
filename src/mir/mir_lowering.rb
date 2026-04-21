@@ -4448,7 +4448,9 @@ class MIRLowering
     entry = BUILTIN_OPS[name]
     raise "emit_builtin: unknown builtin :#{name}" unless entry
     pattern = entry[:zig].dup
-    args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}", emit_expr(a)) }
+    # Use block form of gsub so backslashes in Zig code (e.g. "\\" for a literal
+    # backslash) are not interpreted as replacement specials by String#gsub.
+    args.each_with_index { |a, i| code = emit_expr(a); pattern = pattern.gsub("{#{i}}") { code } }
     iz = MIR::InlineZig.new(pattern, "builtin_#{name}")
     iz.stdlib_def = entry
     iz

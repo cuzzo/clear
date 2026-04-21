@@ -651,23 +651,31 @@ private
   def analyze_control_flow_branches(branches, merge_to_parent: true)
     og_snapshot = @og&.fork_lightweight
     og_branch_snapshots = []
+    branch_terminates = []
     all_drops = []
 
     branches.each do |branch_logic|
       # Restore graph to pre-branch state before analyzing each branch
       @og&.restore_lightweight(og_snapshot) if og_snapshot
+      prev_terminated = @branch_terminated
+      @branch_terminated = false
       with_new_scope(current_scope) do
         og_push_scope
         all_drops << branch_logic.call
         og_branch_snapshots << (@og&.fork_lightweight)
+        branch_terminates << @branch_terminated
         og_pop_scope
       end
+      @branch_terminated = prev_terminated
     end
 
     if merge_to_parent
-      # Restore to base, then merge all branch results
+      # Restore to base, then merge only non-terminating branch results.
+      # A terminating branch (RETURN/RAISE) cannot reach the merge point, so
+      # its moved states must not poison the post-branch scope.
       @og&.restore_lightweight(og_snapshot) if og_snapshot
-      og_branch_snapshots.each do |snap|
+      og_branch_snapshots.each_with_index do |snap, i|
+        next if branch_terminates[i]
         next unless snap
         # Lightweight merge: just apply moved states
         snap[:node_states].each do |path, state|
@@ -1387,6 +1395,7 @@ private
     # RAISE "message" - signals an error
     visit(node.message_expr) if node.message_expr
     node.full_type = :NoReturn # Raises propagate up or are caught
+    @branch_terminated = true
   end
 
   # ==========================================
@@ -1408,6 +1417,7 @@ private
       end
 
       node.full_type = :Void
+      @branch_terminated = true
       return # Stop here, nothing else to analyze
     end
 
@@ -1479,6 +1489,8 @@ private
     if current_fn_ctx
       current_fn_ctx.returns << {storage: node.value.storage, type: actual, metatype: node.value.metatype}
     end
+
+    @branch_terminated = true
   end
 
   def visit_StaticCall(node)
