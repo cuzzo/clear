@@ -1134,7 +1134,7 @@ when 'doctor'
       puts "  larger than L3 cache."
       puts ""
       puts "  Zig:         const frozen = try freeze(T, alloc, root_ptr);"
-      puts "  CLEAR:       FREEZE expr  (coming in next release)"
+      puts "  CLEAR:       frozen = FREEZE expr"
       puts ""
     end
   end

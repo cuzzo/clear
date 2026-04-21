@@ -1,61 +1,78 @@
 -- freeze_candidate.cht
 --
--- Builds a large list of RC (@multiowned) heap nodes, then traverses them
--- many times following a XOR-shuffled permutation.  Designed to demonstrate
--- the FREEZE doctor recommendation: high LLC miss rate + many small scattered
--- RC node allocs.
+-- Before/after comparison for FREEZE.
 --
--- Expected doctor output:
---   LLC miss rate: >20% (scattered nodes exceed cache)
---   FREEZE Opportunity: rcCreate site, N allocs x ~56 bytes avg
+-- BEFORE: 10 000 Doc @multiowned objects, each with three heap-allocated strings.
+-- Each access chases ctrl → data → string bytes across scattered allocations.
+-- Doctor reports: high LLC miss rate + FREEZE Opportunity.
+--
+-- AFTER: FREEZE a single Doc into one contiguous buffer. All struct fields and
+-- string bytes become adjacent, cutting pointer chasing from 3 hops to 1.
+--
+-- Run with:
+--   ./clear profile examples/testing/freeze_candidate.cht
+--   ./clear doctor  examples/testing/freeze_candidate.profile/
 
-STRUCT Node {
-    key:  Int64,
-    val:  Int64,
-    next: Int64
+STRUCT Doc {
+    title:  String,
+    body:   String,
+    tag:    String
 }
 
+FN buildDoc(seed: Int64) RETURNS Doc @multiowned ->
+    RETURN Doc{
+        title: "doc_title_" + seed.toString(),
+        body:  "body_content_" + (seed * 13).toString() + "_suffix",
+        tag:   "tag_" + (seed MOD 50).toString()
+    } @multiowned;
+END
+
 FN main() RETURNS Void ->
-    n     = 30000_i64;
-    iters = 500_i64;
+    n_docs = 10000_i64;
 
-    -- Allocate n nodes individually on the heap via @multiowned (scattered allocs).
-    nodes: Node @multiowned []@list = List[];
-    MUTABLE x = 12345_i64;
-    MUTABLE i = 0_i64;
-    WHILE i < n DO
-        x = (x * 1664525 + 1013904223) MOD 999983;
-        nodes.append(Node{ key: x, val: i, next: 0 } @multiowned);
-        i += 1;
-    END
-
-    -- Build a random-permutation traversal order via XOR-shift.
-    MUTABLE y = 99991_i64;
+    -- ── RC version: n_docs scattered Doc allocations ─────────────────────────
+    -- 5 heap allocs per Doc (ctrl, data, title, body, tag) → 50 000 allocs total.
+    -- Working set ≈ n_docs × 80 B ≈ 800 KB, exceeds L1/L2 → LLC misses.
+    docs: Doc @multiowned []@list = List[];
     MUTABLE k = 0_i64;
-    WHILE k < n DO
-        y = (y * 22695477 + 1) MOD 999983;
-        idx = y MOD n;
-        nodes[k].next = idx;
+    WHILE k < n_docs DO
+        docs.append(buildDoc(k));
         k += 1;
     END
 
-    -- Traverse iters times following the next-index chain.
     t0 = timestampMs();
-    MUTABLE total = 0_i64;
-    MUTABLE iter = 0_i64;
-    WHILE iter < iters DO
-        MUTABLE cur = 0_i64;
-        MUTABLE step = 0_i64;
-        WHILE step < n DO
-            total += nodes[cur].val;
-            cur = nodes[cur].next;
-            step += 1;
+    MUTABLE s_rc = 0_i64;
+    iters = 200_i64;
+    MUTABLE it = 0_i64;
+    WHILE it < iters DO
+        MUTABLE idx = 0_i64;
+        WHILE idx < n_docs DO
+            s_rc += docs[idx].title.length() + docs[idx].body.length() + docs[idx].tag.length();
+            idx += 1;
         END
-        iter += 1;
+        it += 1;
     END
-    elapsed = timestampMs() - t0;
+    rc_ms = timestampMs() - t0;
 
-    print("n=" + n.toString() + " iters=" + iters.toString() +
-          " sum=" + total.toString() + " traversal_ms=" + elapsed.toString());
-    RETURN;
+    -- ── FREEZE version: one Doc, all fields in one contiguous buffer ──────────
+    -- After FREEZE the frozen buffer holds the Doc struct + all 3 string bodies
+    -- at adjacent offsets. Access is one pointer hop into the buffer.
+    -- Working set ≈ 80 B → always in L1.
+    doc_fr = buildDoc(42);
+    frozen = FREEZE doc_fr;
+
+    t1 = timestampMs();
+    MUTABLE s_fr = 0_i64;
+    frozen_iters = n_docs * iters;
+    MUTABLE fi = 0_i64;
+    WHILE fi < frozen_iters DO
+        s_fr += frozen.title.length() + frozen.body.length() + frozen.tag.length();
+        fi += 1;
+    END
+    fr_ms = timestampMs() - t1;
+
+    print("RC     (" + n_docs.toString() + " docs x " + iters.toString() + " passes): " +
+          rc_ms.toString() + "ms  sum=" + s_rc.toString());
+    print("Frozen (1 doc  x " + frozen_iters.toString() + " reads):  " +
+          fr_ms.toString() + "ms  sum=" + s_fr.toString());
 END
