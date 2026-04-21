@@ -33,17 +33,17 @@ CLEAR **aims** to take the lessons of Pony, Rust, Go, and BEAM and combine them.
 | Feature | C | Rust/Tokio | Go | Pony | BEAM | CLEAR |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
 | **Cognitive Load** | F * | D+ | B | D- | C+ | **A-** |
+| **Memory Safety** | F | A+ | B * | A+ | A+ | **A+** |
 | **Raw Speed** | A+ | A+ | A- | A | C | **A** |
 | **Throughput** | A | A | A+ | A | A | **A** |
 | **Memory Usage** | A+ | A+ | B- | B+ | C- | **A-** |
 | **Predictability** | A+ | A+ | B- | B+ | A- | **A-** |
-| **Memory Safety** | F | A+ | B * | A+ | A+ | **A+** |
+| **Backpressure** | F | A | A+ | C | B | **A** |
+| **Starvation** | F | B | A | B | A+ | **A-** |
+| **Fault Tolerance** | F | F | F | F | A+ | **?** |
+| **Deadlock** | F | C | C+ | A+ | A+ | **A- \*** |
 | **Memory Ordering** | F | C | B | A+ | A+ | **A-** |
 | **Logical TOCTOU** | F | F | F | A+ | A- | **B+** |
-| **Deadlock** | F | C | C+ | A+ | A+ | **A- \*** |
-| **Starvation** | F | B | A | B | A+ | **A-** |
-| **Backpressure** | F | A | A+ | C | B | **A** |
-| **Fault Tolerance** | F | F | F | F | A+ | **?** |
 | **Causal Ordering** | F | F | F | B+ | C | **B \*** |
 | **Stream Ordering** | F | F | F | F | F | **?** |
 
