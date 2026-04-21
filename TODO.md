@@ -14,6 +14,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] String@symbol
  - [x] Pipeline support for infinite streams (LIMITed) and unbound finite streams 
  - [x] Migrate to Zig 0.16
+ - [x] io_uring for networking
 
 ## v0.2
 
@@ -23,7 +24,6 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
  - [ ] Enable MVCC in the language as a syncronization capability (in progress)
- - [x] io_uring for networking
  - [ ] STRICT mode compilation
  - [ ] Native CONCURRENT support for streaming pipelines
  - [ ] Observable aggregations for streaming pipelines (@shared aggregate results)
