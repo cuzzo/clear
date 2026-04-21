@@ -1336,7 +1336,7 @@ class MIRLowering
       if obj_ti&.shared? || obj_ti&.multiowned?
         obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
       elsif obj_ti&.frozen?
-        obj_mir = MIR::Deref.new(MIR::FieldGet.new(obj_mir, "_root"))
+        # *const T auto-derefs for method calls in Zig — no _root deref needed
       end
       [obj_mir] + node.args.map { |a| lower(a) }
     else
@@ -3019,7 +3019,7 @@ class MIRLowering
                        inner_ti&.locked? || inner_ti&.write_locked?
         "_r.ctrl.data.#{node.field}"
       elsif inner_ti&.frozen?
-        "_r._root.#{node.field}"
+        "_r.#{node.field}"
       elsif inner_ti&.always_mutable?
         "_r.data.#{node.field}"
       else
@@ -3047,8 +3047,8 @@ class MIRLowering
       data = MIR::FieldGet.new(ctrl, "data")
       return MIR::FieldGet.new(data, node.field.to_s)
     elsif ti&.frozen?
-      # target._root.field
-      return MIR::FieldGet.new(MIR::FieldGet.new(target, "_root"), node.field.to_s)
+      # *const T auto-derefs in Zig — no _root needed
+      return MIR::FieldGet.new(target, node.field.to_s)
     elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
       # target.ctrl.data.field
       ctrl = MIR::FieldGet.new(target, "ctrl")

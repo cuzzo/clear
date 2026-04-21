@@ -227,6 +227,12 @@ class MIREmitter
   # --- Statement emitters ---
 
   def emit_let(node)
+    if node.init.is_a?(MIR::FreezeExpr)
+      buf  = "#{node.name}__buf"
+      kw   = node.mutable ? "var" : "const"
+      sup  = node.suppression ? " #{node.suppression}" : ""
+      return "const #{buf} = #{emit(node.init)};\n#{kw} #{node.name} = #{buf}._root;#{sup}"
+    end
     kw = node.mutable ? "var" : "const"
     ann = node.annotation ? ": #{node.annotation}" : ""
     init = emit(node.init)
@@ -433,7 +439,7 @@ class MIREmitter
 
     when :frozen
       kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{name}.deinit(rt.heapAlloc());\n"
+      "#{kw} #{name}__buf.deinit(rt.heapAlloc());\n"
 
     when :pool, :fixed_soa
       kw = errdefer ? "errdefer" : "defer"
