@@ -52,9 +52,7 @@ FN main() RETURNS Void ->
         checksum = checksum + nodes[i].id;
 
         IF i > 0_i64 THEN
-            resolved = RESOLVE parents[i];
-            IF resolved != NIL THEN
-                r = resolved?;
+            IF RESOLVE parents[i] AS r THEN
                 checksum = checksum + r.id;
             END
         END

@@ -729,6 +729,13 @@ private
       end
       # Annotate each binding with the unwrapped type for use in lowering.
       unwrapped = ti.wrapped_type
+      # RESOLVE returns ?T@multiowned/shared where the caller owns the strong ref.
+      # Propagate ownership so field access auto-derefs through .ctrl.data and
+      # the lowering knows to inject rcRelease cleanup.
+      if b[:expr].is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
+        unwrapped.ownership = ti.ownership
+        unwrapped.link_source = ti.link_source
+      end
       b[:unwrapped_type] = unwrapped
     end
 

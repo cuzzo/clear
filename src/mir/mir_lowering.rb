@@ -3854,6 +3854,22 @@ class MIRLowering
       { expr: lower(b[:expr]), capture: b[:name] }
     end
     then_body = lower_body(node.then_branch)
+
+    # RESOLVE bindings acquire a new strong ref that must be released.
+    # Prepend `defer CheatLib.rc/arcRelease(T, alloc, capture)` to the then-body.
+    node.bindings.each_with_index do |b, i|
+      mir_expr = mir_bindings[i][:expr]
+      next unless mir_expr.is_a?(MIR::WeakUpgrade)
+      release_func = mir_expr.func == "weakArcUpgrade" ? "arcRelease" : "rcRelease"
+      alloc_expr = MIR::MethodCall.new(MIR::Ident.new(@rt_name), "heapAlloc", [], false)
+      release_call = MIR::Call.new(
+        "CheatLib.#{release_func}",
+        [MIR::Ident.new(mir_expr.zig_base), alloc_expr, MIR::Ident.new(b[:name])],
+        false
+      )
+      then_body = [MIR::DeferStmt.new(release_call)] + then_body
+    end
+
     else_body = (node.else_branch && !node.else_branch.empty?) ? lower_body(node.else_branch) : nil
     MIR::IfBindStmt.new(mir_bindings, then_body, else_body)
   end

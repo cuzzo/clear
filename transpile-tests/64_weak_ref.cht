@@ -76,11 +76,26 @@ FN test_safe_field_access() RETURNS Void ->
     RETURN;
 END
 
+-- Test 6: IF RESOLVE x AS y optional binding
+FN test_if_resolve_bind() RETURNS Void ->
+    x = Node{ value: 100 } @multiowned;
+    w = LINK x;
+
+    MUTABLE found = 0_i64;
+    IF RESOLVE w AS r THEN
+        found = r.value;
+    END
+    ASSERT found == 100_i64, "IF RESOLVE AS should bind the resolved value";
+
+    RETURN;
+END
+
 FN main() RETURNS Void ->
     test_multiowned();
     test_shared();
     test_link_in_struct();
     test_multiple_links();
     test_safe_field_access();
+    test_if_resolve_bind();
     RETURN;
 END
