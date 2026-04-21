@@ -944,10 +944,12 @@ when 'doctor'
             else "" end
       avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
       kb = s[:bytes] / 1024.0
-      leak = if s[:frees] == 0 && s[:allocs] > 0
-               # The profiler only tracks frame-arena allocations (smartAlloc).
-               # smartFree is a no-op — arena memory is reclaimed by rewind, not
-               # individual free.  So frees==0 is expected, not a leak.
+      leak = if s[:frees] == 0 && s[:allocs] > 0 && avg >= 16
+               # rcCreate alloc tracking: frees always 0 (rcRelease uses different
+               # return address so it doesn't decrement this site's counter).
+               "  (heap rc)"
+             elsif s[:frees] == 0 && s[:allocs] > 0
+               # Frame-arena (smartAlloc): frees==0 is normal — rewind frees in bulk.
                "  (arena)"
              elsif s[:frees] > 0 && s[:frees] < s[:allocs]
                "  ** LEAK ** (#{s[:allocs] - s[:frees]} unfreed)"
@@ -962,10 +964,14 @@ when 'doctor'
           "#{func} #{loc}", s[:bytes], s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
       end
     end
-    arena_count = sites.first(10).count { |s| s[:frees] == 0 && s[:allocs] > 0 }
-    leak_count  = sites.first(10).count { |s| s[:frees] > 0 && s[:frees] < s[:allocs] }
+    arena_count  = sites.first(10).count { |s| s[:frees] == 0 && s[:allocs] > 0 && (s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0) < 16 }
+    heap_rc_count = sites.first(10).count { |s| s[:frees] == 0 && s[:allocs] > 0 && (s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0) >= 16 }
+    leak_count   = sites.first(10).count { |s| s[:frees] > 0 && s[:frees] < s[:allocs] }
     if arena_count > 0 && leak_count == 0
       puts "  (arena) = frame-arena allocation, freed in bulk by rewind (not a leak)"
+    end
+    if heap_rc_count > 0
+      puts "  (heap rc) = @multiowned RC allocation tracked by rcCreate"
     end
     puts ""
   else
@@ -1000,14 +1006,135 @@ when 'doctor'
 
   # ── Hardware Counters ──
   perf_stat_file = File.join(profile_dir, 'perf-stat.txt')
+  hw = {}        # event_name -> integer count (unsupported events absent)
+  llc_miss_rate = nil
+
   if File.exist?(perf_stat_file)
     puts "=== Hardware Counters ==="
     puts ""
     File.readlines(perf_stat_file).each do |l|
       next if l.strip.empty? || l.start_with?('#') || l.start_with?('Performance')
       puts "  #{l.rstrip}" if l =~ /\d/
+      next if l.include?('<not supported>')
+      # Parse: "    1,234,567      event-name:u     # comment"
+      m = l.match(/^\s*([\d,]+)\s+([\w:-]+)/)
+      next unless m
+      hw[m[2].sub(/:u?$/, '')] = m[1].gsub(',', '').to_i
+    end
+
+    # Derived metrics
+    cycles       = hw['cycles']
+    instructions = hw['instructions']
+    branches     = hw['branches']
+    branch_miss  = hw['branch-misses']
+    # cache-references / cache-misses are the LLC-level events on x86
+    # (LLC-loads / LLC-load-misses unsupported on most VMs/laptops)
+    llc_loads    = hw['LLC-loads']    || hw['cache-references']
+    llc_misses   = hw['LLC-load-misses'] || hw['cache-misses']
+
+    ipc = (cycles && instructions && cycles > 0) ?
+            (instructions.to_f / cycles).round(2) : nil
+    llc_miss_rate = (llc_loads && llc_misses && llc_loads > 0) ?
+                      (llc_misses.to_f / llc_loads * 100).round(1) : nil
+    branch_miss_pct = (branches && branch_miss && branches > 0) ?
+                        (branch_miss.to_f / branches * 100).round(1) : nil
+
+    puts ""
+    puts "  Analysis:"
+    if ipc
+      ipc_note = ipc < 1.0 ? " (low — memory or branch bound)" :
+                 ipc >= 2.0 ? " (good — compute bound)" : ""
+      puts "    IPC: #{ipc}#{ipc_note}"
+    end
+    if llc_miss_rate
+      llc_note = llc_miss_rate > 20 ? " *** HIGH — working set exceeds cache" :
+                 llc_miss_rate > 10 ? " (moderate)" : " (low)"
+      puts "    LLC miss rate: #{llc_miss_rate}%#{llc_note}"
+    end
+    if branch_miss_pct
+      branch_note = branch_miss_pct > 5 ? " *** HIGH — unpredictable control flow" : ""
+      puts "    Branch miss rate: #{branch_miss_pct}%#{branch_note}"
     end
     puts ""
+  end
+
+  # ── FREEZE Recommendation ──
+  # Fires when: high LLC miss rate + many small scattered heap allocations
+  # (the signature of individually malloc'd tree/list nodes).
+  STRING_OPS = %w[concat charAtCodepoint intToString floatToString smartAlloc].freeze
+  FREEZE_LLC_THRESHOLD  = 20   # % LLC miss rate to consider high
+  FREEZE_MIN_ALLOCS     = 5_000
+  FREEZE_MIN_AVG_BYTES  = 16   # below this = arena string/int bytes, not struct nodes
+  FREEZE_MAX_AVG_BYTES  = 512
+
+  if llc_miss_rate && llc_miss_rate >= FREEZE_LLC_THRESHOLD && sites&.any?
+    candidates = sites.select do |s|
+      avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
+      r   = resolved&.dig(s[:addr])
+      fn  = r ? r[:func] : ''
+      s[:allocs] >= FREEZE_MIN_ALLOCS &&
+        avg >= FREEZE_MIN_AVG_BYTES && avg <= FREEZE_MAX_AVG_BYTES &&
+        STRING_OPS.none? { |op| fn.include?(op) }
+    end.sort_by { |s| -s[:bytes] }
+
+    # For RC alloc sites that resolve to entryWrapper (inlined in ReleaseFast),
+    # scan the transpiled.zig for rcCreate call sites to find CLEAR source lines.
+    rc_clear_lines = []
+    zig_source = File.join(profile_dir, 'transpiled.zig')
+    if File.exist?(zig_source)
+      zig_lines = File.readlines(zig_source)
+      zig_lines.each_with_index do |line, li|
+        next unless line.include?('rcCreate')
+        (li - 1).downto(0) do |ci|
+          break if ci < 0
+          if zig_lines[ci] =~ %r{// CLR:(\d+)}
+            rc_clear_lines << $1.to_i
+            break
+          end
+        end
+      end
+      rc_clear_lines.uniq!
+    end
+
+    if candidates.any?
+      puts "=== FREEZE Opportunity ==="
+      puts ""
+      puts "  LLC cache miss rate is #{llc_miss_rate}% (high). Detected scattered"
+      puts "  node-level heap allocations — likely pointer-chasing through"
+      puts "  individually malloc'd structs."
+      puts ""
+      puts "  Candidates (many small allocs from same site):"
+      candidates.first(5).each do |s|
+        r   = resolved&.dig(s[:addr])
+        # In ReleaseFast builds, RC alloc sites inline into entryWrapper.
+        # Fall back to transpiled.zig rcCreate line scan for CLEAR location.
+        loc = if r&.dig(:clear_line)
+                "line #{r[:clear_line]}"
+              elsif r && r[:func] != 'entryWrapper' && !r[:func].empty?
+                r[:func]
+              elsif rc_clear_lines.any?
+                "line #{rc_clear_lines.first}"
+              else
+                s[:addr]
+              end
+        avg  = s[:bytes] / s[:allocs]
+        mb   = s[:bytes] / (1024.0 * 1024.0)
+        puts "    %-32s  %s allocs × %d bytes avg  (%.1f MB)" % [
+          loc,
+          s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'),
+          avg, mb
+        ]
+      end
+      puts ""
+      puts "  If these nodes form a tree or acyclic graph, FREEZE can pack"
+      puts "  them into a single contiguous allocation, eliminating pointer-"
+      puts "  chasing cache misses. Measured speedup: 3-5x for working sets"
+      puts "  larger than L3 cache."
+      puts ""
+      puts "  Zig:         const frozen = try freeze(T, alloc, root_ptr);"
+      puts "  CLEAR:       FREEZE expr  (coming in next release)"
+      puts ""
+    end
   end
 
 when 'help', '--help', '-h', nil

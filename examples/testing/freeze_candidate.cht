@@ -1,0 +1,61 @@
+-- freeze_candidate.cht
+--
+-- Builds a large list of RC (@multiowned) heap nodes, then traverses them
+-- many times following a XOR-shuffled permutation.  Designed to demonstrate
+-- the FREEZE doctor recommendation: high LLC miss rate + many small scattered
+-- RC node allocs.
+--
+-- Expected doctor output:
+--   LLC miss rate: >20% (scattered nodes exceed cache)
+--   FREEZE Opportunity: rcCreate site, N allocs x ~56 bytes avg
+
+STRUCT Node {
+    key:  Int64,
+    val:  Int64,
+    next: Int64
+}
+
+FN main() RETURNS Void ->
+    n     = 30000_i64;
+    iters = 500_i64;
+
+    -- Allocate n nodes individually on the heap via @multiowned (scattered allocs).
+    nodes: Node @multiowned []@list = List[];
+    MUTABLE x = 12345_i64;
+    MUTABLE i = 0_i64;
+    WHILE i < n DO
+        x = (x * 1664525 + 1013904223) MOD 999983;
+        nodes.append(Node{ key: x, val: i, next: 0 } @multiowned);
+        i += 1;
+    END
+
+    -- Build a random-permutation traversal order via XOR-shift.
+    MUTABLE y = 99991_i64;
+    MUTABLE k = 0_i64;
+    WHILE k < n DO
+        y = (y * 22695477 + 1) MOD 999983;
+        idx = y MOD n;
+        nodes[k].next = idx;
+        k += 1;
+    END
+
+    -- Traverse iters times following the next-index chain.
+    t0 = timestampMs();
+    MUTABLE total = 0_i64;
+    MUTABLE iter = 0_i64;
+    WHILE iter < iters DO
+        MUTABLE cur = 0_i64;
+        MUTABLE step = 0_i64;
+        WHILE step < n DO
+            total += nodes[cur].val;
+            cur = nodes[cur].next;
+            step += 1;
+        END
+        iter += 1;
+    END
+    elapsed = timestampMs() - t0;
+
+    print("n=" + n.toString() + " iters=" + iters.toString() +
+          " sum=" + total.toString() + " traversal_ms=" + elapsed.toString());
+    RETURN;
+END

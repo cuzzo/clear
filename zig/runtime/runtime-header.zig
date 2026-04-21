@@ -1771,10 +1771,12 @@ pub const CheatLib = struct {
     }
 
     pub fn rcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Rc(T) {
+        const alloc_profile = @import("alloc-profile.zig");
         const ctrl = try alloc.create(RcControlBlock(T));
         const data_ptr = try alloc.create(T);
         data_ptr.* = data;
         ctrl.* = .{ .strong = 1, .weak = 0, .data = data_ptr, .alloc = alloc };
+        alloc_profile.recordAlloc(@returnAddress(), @sizeOf(RcControlBlock(T)) + @sizeOf(T));
         return Rc(T){ .ctrl = ctrl };
     }
 
