@@ -1611,6 +1611,21 @@ class Parser
     tok = consume(:KEYWORD, 'WHILE')
     condition = parse_expression
 
+    # WHILE expr AS name [-> stmt | DO ... END]
+    if match?(:KEYWORD, 'AS')
+      consume(:KEYWORD, 'AS')
+      name_tok = consume(:VAR_ID)
+      if match?(:ARROW, '->')
+        consume(:ARROW, '->')
+        stmt = parse_statement
+        return AST::WhileBindLoop.new(tok, condition, name_tok.value, name_tok, [stmt].compact, nil)
+      end
+      consume(:KEYWORD, 'DO')
+      body = parse_stmts_until_end
+      consume(:KEYWORD, 'END')
+      return AST::WhileBindLoop.new(tok, condition, name_tok.value, name_tok, body, nil)
+    end
+
     # Shorthand: WHILE condition -> single_statement;
     if match?(:ARROW, '->')
       consume(:ARROW, '->')

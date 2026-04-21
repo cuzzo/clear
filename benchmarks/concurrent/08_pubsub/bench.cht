@@ -30,12 +30,7 @@ FN main() RETURNS Void ->
         futures.append(BG {
             @parallel ->
             MUTABLE total: Int64 = 0;
-            WHILE TRUE DO
-                msg = NEXT subscriber_msgs;
-                IF msg == NIL THEN
-                    BREAK;
-                END
-                m = msg?;
+            WHILE NEXT subscriber_msgs AS m DO
                 total = total %+ processMessage(m.seed);
             END
             total;

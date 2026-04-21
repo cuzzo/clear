@@ -1103,7 +1103,7 @@ module LoopFrameAnalysis
 
   def self.walk_stmt!(stmt)
     case stmt
-    when AST::WhileLoop
+    when AST::WhileLoop, AST::WhileBindLoop
       walk_stmts!(stmt.do_branch)          # inner loops first
       process_loop!(stmt, stmt.do_branch)
     when AST::ForRange
@@ -1361,7 +1361,7 @@ module LoopFrameAnalysis
     body.each do |s|
       yield s
       case s
-      when AST::WhileLoop, AST::ForRange, AST::ForEach, AST::FunctionDef
+      when AST::WhileLoop, AST::WhileBindLoop, AST::ForRange, AST::ForEach, AST::FunctionDef
         next  # boundary -- do not enter nested loop / fn body
       when AST::IfStatement
         scan_direct(s.then_branch, &block)

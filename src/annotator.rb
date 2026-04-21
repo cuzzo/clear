@@ -1219,6 +1219,57 @@ private
     node.full_type = :Void
   end
 
+  def visit_WhileBindLoop(node)
+    visit(node.condition)
+    ti = node.condition.type_info
+    unless ti&.optional?
+      error!(node.condition, "WHILE ... AS binding requires an optional type, got '#{node.condition.resolved_type}'")
+    end
+
+    unwrapped = ti.wrapped_type
+    if node.condition.is_a?(AST::ResolveNode) && (ti.multiowned? || ti.shared?)
+      unwrapped.ownership = ti.ownership
+      unwrapped.link_source = ti.link_source
+    end
+
+    if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
+
+    pre_loop_states = @og&.fork_lightweight
+
+    analyze_control_flow_branches([
+      proc {
+        current_scope.declare(node.binding_name, nil, unwrapped, false, false, nil, :stack)
+        entry = current_scope.locals[node.binding_name]
+        classify_ownership!(entry)
+
+        visit_stmts(node.do_branch)
+        finalize_scope(node)
+
+        loop_body_names = collect_body_identifier_names(node.do_branch)
+        current_scope.locals.each do |name, _entry|
+          next if name == node.binding_name
+          was_live = pre_loop_states&.dig(:node_states, name) == :live
+          is_moved = @og&.moved?(name)
+          if was_live && is_moved
+            next unless loop_body_names.include?(name)
+            var_type = current_scope.locals[name]&.type
+            type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
+            is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
+            unless is_copy
+              error!(node, "Use of moved value '#{name}' in loop.")
+            end
+          end
+        end
+        node.deferred_drops
+      }
+    ], merge_to_parent: false)
+
+    if current_fn_ctx then current_fn_ctx.loop_depth -= 1 else @loop_depth -= 1 end
+
+    node.mark_per_iter = false
+    node.full_type = :Void
+  end
+
   # Deep validation for TIGHT loops.
   # Walks the full AST subtree (nested ifs, whiles, match blocks) looking for
   # any call to a @reentrant or EXTERN FN function. Stops at FunctionDef

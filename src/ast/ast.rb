@@ -20,7 +20,7 @@ module AST
       when MatchStatement
         (node.cases || []).each { |c| walk_body(c[:body], &visitor) }
         walk_body(node.default_case, &visitor) if node.default_case
-      when WhileLoop
+      when WhileLoop, WhileBindLoop
         walk_body(node.do_branch, &visitor)
       when ForRange, ForEach
         walk_body(node.body, &visitor)
@@ -367,6 +367,11 @@ module AST
     include Locatable
     attr_accessor :mark_per_iter
     attr_accessor :tight        # true when declared with TIGHT WHILE — no yield injection, no loop marks
+  end
+  WhileBindLoop = Struct.new(:token, :condition, :binding_name, :binding_token, :do_branch, :deferred_drops) do
+    include Locatable
+    attr_accessor :mark_per_iter
+    attr_accessor :tight
   end
   BreakNode    = Struct.new(:token) { include Locatable }
   ContinueNode = Struct.new(:token) { include Locatable }

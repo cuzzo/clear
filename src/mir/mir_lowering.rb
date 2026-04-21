@@ -206,6 +206,7 @@ class MIRLowering
     when AST::IfStatement       then lower_if(node)
     when AST::IfBind            then lower_if_bind(node)
     when AST::WhileLoop         then lower_while(node)
+    when AST::WhileBindLoop     then lower_while_bind(node)
     when AST::ForEach           then lower_for_each(node)
     when AST::ForRange          then lower_for_range(node)
     when AST::MatchStatement    then lower_match(node)
@@ -3891,12 +3892,53 @@ class MIRLowering
       body = [save, restore] + body
     end
 
-    # Yield check at end of loop body
-    if !node.tight && @current_fn_has_rt
+    # Yield check at end of loop body (skip when last stmt is unconditional exit)
+    if !node.tight && @current_fn_has_rt && !loop_body_exits?(body)
       body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
     end
 
     MIR::WhileStmt.new(cond, body, nil, nil, node.mark_per_iter, !!node.tight)
+  end
+
+  def lower_while_bind(node)
+    rt = MIR::Ident.new(@rt_name)
+    cond = lower(node.condition)
+    body = lower_body(node.do_branch)
+
+    # RESOLVE captures acquire a strong ref each iteration — release at end of body.
+    if cond.is_a?(MIR::WeakUpgrade)
+      release_func = cond.func == "weakArcUpgrade" ? "arcRelease" : "rcRelease"
+      alloc_expr = MIR::MethodCall.new(rt, "heapAlloc", [], false)
+      release_call = MIR::Call.new(
+        "CheatLib.#{release_func}",
+        [MIR::Ident.new(cond.zig_base), alloc_expr, MIR::Ident.new(node.binding_name)],
+        false
+      )
+      body = [MIR::DeferStmt.new(release_call)] + body
+    end
+
+    if !node.tight && node.mark_per_iter && @current_fn_has_rt
+      @loop_mark_counter = (@loop_mark_counter || 0) + 1
+      mark_var = "__loop_mark_#{@loop_mark_counter}"
+      save = MIR::Let.new(mark_var, MIR::MethodCall.new(rt, "saveLoopMark", [], false), false, nil, nil)
+      restore = MIR::DeferStmt.new(
+        MIR::MethodCall.new(rt, "restoreLoopMark", [MIR::Ident.new(mark_var)], false)
+      )
+      body = [save, restore] + body
+    end
+
+    if !node.tight && @current_fn_has_rt && !loop_body_exits?(body)
+      body << MIR::ExprStmt.new(MIR::MethodCall.new(rt, "checkYield", [], false), false)
+    end
+
+    MIR::WhileStmt.new(cond, body, node.binding_name, nil, node.mark_per_iter, false)
+  end
+
+  # Returns true when the last reachable statement in a loop body is an
+  # unconditional exit (break/continue/return), making any trailing code unreachable.
+  def loop_body_exits?(body)
+    return false unless body.is_a?(Array) && !body.empty?
+    body.last.is_a?(MIR::BreakStmt) || body.last.is_a?(MIR::ContinueStmt) || body.last.is_a?(MIR::ReturnStmt)
   end
 
   def lower_for_each(node)
