@@ -202,22 +202,46 @@ pub const ParkingMutex = struct {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
-            // Non-fiber: test-then-CAS with futex backoff.
+            // Non-fiber: spin-then-yield-then-futex.
+            //
+            // For brief CS the spin phase acquires without leaving user
+            // space. The yield phase covers moderate hold times. Only for
+            // genuinely long waits do we futex-park.
+            //
+            // We CLEAR HAS_THREAD_SLEEPER when waking from futex. Letting
+            // it stay sticky meant every unlock thereafter paid a Futex.wake
+            // syscall (~1500ns) even when no one was parked, which is what
+            // made Mutex slower than RwLock-as-mutex on contended brief-CS
+            // workloads (RwLock has no thread-sleeper bit at all).
+            const NF_SPIN_BUDGET:  u32 = 256;
+            const NF_YIELD_BUDGET: u32 = 32;
             while (true) {
                 var spins: u32 = 0;
-                while (spins < SPIN_BUDGET) : (spins += 1) {
+                while (spins < NF_SPIN_BUDGET) : (spins += 1) {
                     if ((self.state.load(.monotonic) & STATE_LOCKED) == 0) break;
                     std.atomic.spinLoopHint();
                 }
-                if (spins == SPIN_BUDGET) {
-                    // Park on futex. Mark sleeper bit so unlocker wakes us.
-                    const before = self.state.fetchOr(STATE_HAS_THREAD_SLEEPER, .acquire);
-                    if ((before & STATE_LOCKED) == 0) continue; // race
-                    // Wait on lower 32 bits. Owner changes in upper bits
-                    // cause spurious wakes -- harmless, we just retry.
-                    const expected_low: u32 = @truncate(before | STATE_HAS_THREAD_SLEEPER);
-                    Futex.waitU64Low(&self.state, expected_low);
-                    continue;
+                if (spins == NF_SPIN_BUDGET) {
+                    var yields: u32 = 0;
+                    while (yields < NF_YIELD_BUDGET) : (yields += 1) {
+                        std.Thread.yield() catch {};
+                        if ((self.state.load(.monotonic) & STATE_LOCKED) == 0) break;
+                    }
+                    if (yields == NF_YIELD_BUDGET) {
+                        // Long wait -- park on futex.
+                        // The HAS_THREAD_SLEEPER bit is left sticky after
+                        // wake. Clearing it on wake creates a lost-wake
+                        // deadlock when multiple threads are parked: A
+                        // wakes, clears the bit, A unlocks → bit clear →
+                        // no wake fires for still-parked B. Sticky-bit
+                        // means every unlock thereafter pays a Futex.wake
+                        // syscall (~1500ns) but it's correct.
+                        const before = self.state.fetchOr(STATE_HAS_THREAD_SLEEPER, .acquire);
+                        if ((before & STATE_LOCKED) == 0) continue; // race
+                        const expected_low: u32 = @truncate(before | STATE_HAS_THREAD_SLEEPER);
+                        Futex.waitU64Low(&self.state, expected_low);
+                        continue;
+                    }
                 }
                 // Looks free -- attempt CAS preserving other bits.
                 const cur = self.state.load(.acquire);
