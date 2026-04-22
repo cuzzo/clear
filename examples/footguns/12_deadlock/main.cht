@@ -1,0 +1,150 @@
+-- Footgun: Deadlock — CLEAR
+--
+-- CLEAR uses cooperative fibers and @locked / @shared:locked for mutex-
+-- protected state. Like C, Go, and Rust, the classic AB/BA lock-order
+-- deadlock CAN be expressed in standard mode — and it will hang.
+--
+-- CLEAR's mitigations (rated A-*):
+--
+-- 1. Runtime: @killable tasks park instead of hanging forever. If a fiber
+--    has been blocked on a mutex longer than the configured timeout, the
+--    runtime kills the task and NEXT returns an error. Deadlock becomes a
+--    recoverable error rather than an infinite hang. (v0.2)
+--
+-- 2. STRICT EXTREME: the compiler enforces a global lock acquisition
+--    hierarchy via the OwnershipGraph. Code that acquires lock B while
+--    holding lock A, when elsewhere A is acquired after B, fails to compile.
+--    This is a zero-cost compile-time guarantee. (v0.3 roadmap)
+--
+-- The * in A-*: if you use @locked without @killable and without STRICT
+-- EXTREME, you can still deadlock in standard mode.
+
+STRUCT Account { balance: Int64 }
+
+-- BROKEN: AB / BA lock-order deadlock.
+-- This compiles but hangs at runtime in standard mode.
+-- (Commented out — would deadlock the example program.)
+--
+-- FN broken_example() RETURNS Void ->
+--     a = Account{ balance: 100 } @locked;
+--     b = Account{ balance: 200 } @locked;
+--
+--     t1 = BG {
+--         WITH EXCLUSIVE a AS ra {
+--             -- t1 holds a, tries to get b
+--             WITH EXCLUSIVE b AS rb {    -- DEADLOCK if t2 holds b
+--                 rb.balance = rb.balance + ra.balance;
+--             }
+--         }
+--     };
+--
+--     t2 = BG {
+--         WITH EXCLUSIVE b AS rb {
+--             -- t2 holds b, tries to get a
+--             WITH EXCLUSIVE a AS ra {    -- DEADLOCK if t1 holds a
+--                 ra.balance = ra.balance + rb.balance;
+--             }
+--         }
+--     };
+--
+--     NEXT t1;
+--     NEXT t2;  -- hangs here
+-- END
+
+-- CORRECT: consistent lock order — always 'a' before 'b'.
+-- Both fibers acquire in the same order; no cycle can form.
+FN correct_ordering() RETURNS Void ->
+    a = Account{ balance: 100 } @locked;
+    b = Account{ balance: 200 } @locked;
+
+    -- t1: a → b
+    t1 = BG {
+        WITH EXCLUSIVE a AS ra {
+            WITH EXCLUSIVE b AS rb {
+                rb.balance = rb.balance + 50;
+                ra.balance = ra.balance - 50;
+            }
+        }
+    };
+
+    -- t2: a → b  (same order — safe)
+    t2 = BG {
+        WITH EXCLUSIVE a AS ra {
+            WITH EXCLUSIVE b AS rb {
+                rb.balance = rb.balance + 30;
+                ra.balance = ra.balance - 30;
+            }
+        }
+    };
+
+    NEXT t1;
+    NEXT t2;
+
+    WITH EXCLUSIVE a AS ra {
+        print("a.balance = " + ra.balance.toString());
+    }
+    WITH EXCLUSIVE b AS rb {
+        print("b.balance = " + rb.balance.toString());
+    }
+END
+
+-- CORRECT: release first lock before acquiring second.
+-- No two locks held simultaneously — deadlock structurally impossible here.
+-- Tradeoff: the two-step operation is not atomic (TOCTOU window between
+-- releasing a and acquiring b).
+FN sequential_locks() RETURNS Void ->
+    a = Account{ balance: 100 } @locked;
+    b = Account{ balance: 200 } @locked;
+
+    t1 = BG {
+        amount = 0;
+        -- Step 1: debit a, release lock.
+        WITH EXCLUSIVE a AS ra {
+            amount = ra.balance / 2;
+            ra.balance = ra.balance - amount;
+        }
+        -- a is unlocked here. No deadlock possible.
+        -- Step 2: credit b.
+        WITH EXCLUSIVE b AS rb {
+            rb.balance = rb.balance + amount;
+        }
+    };
+
+    NEXT t1;
+
+    WITH EXCLUSIVE a AS ra {
+        print("a.balance = " + ra.balance.toString());
+    }
+    WITH EXCLUSIVE b AS rb {
+        print("b.balance = " + rb.balance.toString());
+    }
+END
+
+FN main() RETURNS Void ->
+    print("--- correct: consistent lock order ---");
+    correct_ordering();
+
+    print("--- correct: sequential locks (no simultaneous holds) ---");
+    sequential_locks();
+END
+
+-- Summary:
+--
+-- CLEAR vs C/Go/Rust vs Pony/BEAM on deadlock:
+--
+--   C:     Hangs forever. No detection. External tooling (Helgrind, TSan)
+--          required.
+--
+--   Go:    Hangs forever for partial deadlocks (goroutine subset).
+--          Detects global deadlock (all goroutines blocked) with a panic.
+--          Idiomatic fix: use channels + single-owner goroutines.
+--
+--   Rust:  Hangs forever. Borrow checker says nothing about lock ordering.
+--          parking_lot crate adds optional runtime detection.
+--
+--   CLEAR: Standard mode — hangs (same as above). @killable tasks convert
+--          the hang to a recoverable error. STRICT EXTREME enforces lock
+--          ordering at compile time, making the AB/BA pattern a build error.
+--
+--   Pony/BEAM: Actor model — no shared mutable state, no mutex locks,
+--          no deadlock. The pattern cannot be expressed.
