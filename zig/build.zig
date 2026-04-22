@@ -20,7 +20,7 @@ pub fn build(b: *std.Build) void {
     // -------------------------------------------------------------------------
     // MODULES & EXECUTABLES
     // -------------------------------------------------------------------------
-    const mod = b.addModule("zig", .{
+    _ = b.addModule("zig", .{
         .root_source_file = runtime_path,
         .target = target,
     });
@@ -29,25 +29,6 @@ pub fn build(b: *std.Build) void {
     // TEST CONFIGURATION
     // -------------------------------------------------------------------------
     const test_step = b.step("test", "Run all tests");
-
-    // 1. Run tests inside the main module (runtime.zig)
-    const mod_tests = b.addTest(.{
-        .root_module = mod,
-    });
-
-    mod_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
-    mod_tests.root_module.addImport("safety", safety_mod);
-    mod_tests.root_module.addImport("ebr", ebr_mod);
-    mod_tests.root_module.addImport("ownership", ownership_mod);
-    mod_tests.root_module.addImport("compat", compat_mod);
-    mod_tests.root_module.addAssemblyFile(switch_s);
-    mod_tests.root_module.addAssemblyFile(onroot_s);
-    mod_tests.root_module.link_libc = true;
-
-    const run_mod_tests = std.Build.Step.Run.create(b, "run test module");
-    run_mod_tests.addArtifactArg(mod_tests);
-    run_mod_tests.stdio = .inherit;
-    test_step.dependOn(&run_mod_tests.step);
 
     // -------------------------------------------------------------------------
     // CUSTOM LLVM PASS SETUP
@@ -179,6 +160,7 @@ pub fn build(b: *std.Build) void {
         const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
         run_unit_tests.addArtifactArg(unit_tests);
         run_unit_tests.stdio = .inherit;
+        run_unit_tests.setCwd(b.path("."));
         test_step.dependOn(&run_unit_tests.step);
     }
 

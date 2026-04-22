@@ -874,7 +874,8 @@ pub fn bind(comptime deps: type) type {
                 sched: *fp.Scheduler,
                 closed: bool = false,
                 err: ?anyerror = null,
-                wg: WaitGroup = undefined, // lifecycle: generator calls done() in close()
+                has_generator: bool = false, // true only when created via spawnNew
+                wg: WaitGroup = undefined, // valid only when has_generator == true
             };
 
             inner: *Inner,
@@ -882,7 +883,7 @@ pub fn bind(comptime deps: type) type {
 
             pub fn spawnNew(alloc: std.mem.Allocator, sched: *fp.Scheduler) !Self {
                 const inner = try alloc.create(Inner);
-                inner.* = .{ .sched = sched, .wg = WaitGroup.init(sched) };
+                inner.* = .{ .sched = sched, .has_generator = true, .wg = WaitGroup.init(sched) };
                 inner.wg.add(1);
                 return Self{ .inner = inner, .alloc = alloc };
             }
@@ -1100,7 +1101,7 @@ pub fn bind(comptime deps: type) type {
                 }
                 // Wait for the generator fiber to call close() (wg.done()).
                 // Guarantees Inner is not accessed by the generator after destroy.
-                inner.wg.wait();
+                if (inner.has_generator) inner.wg.wait();
                 self.alloc.destroy(inner);
             }
         };

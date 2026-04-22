@@ -1213,6 +1213,7 @@ pub const WaitGroup = struct {
 
     // Blocking Wait (Yields Fiber)
     pub fn wait(self: *WaitGroup) void {
+        if (self.counter.load(.seq_cst) == 0) return;
         if (self.sched.current_task == null) {
             while (self.counter.load(.seq_cst) != 0) {
                 std.Thread.yield() catch {};

@@ -220,9 +220,8 @@ test "InfStream(string).deinit() frees unconsumed buffered strings" {
     try std.testing.expectEqualStrings("world", v2);
 
     // deinit() must free "foo" and "bar" before destroying inner.
-    // GPA will catch any leak.
+    // GPA will catch any leak. deinit() owns and destroys inner.
     s.deinit();
-    alloc.destroy(inner);
 }
 
 test "InfStream(string).push() frees value when stream is closed" {
