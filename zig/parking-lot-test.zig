@@ -7,6 +7,7 @@ const ebr_mod = @import("lib/ebr.zig");
 const CheatHeader = @import("runtime/runtime-header.zig");
 const pl = @import("lib/parking-lot.zig");
 
+const compat = @import("lib/compat.zig");
 const Runtime = CheatHeader.Runtime;
 const EbrContext = CheatHeader.EbrContext;
 const ParkingMutex = pl.ParkingMutex;
@@ -85,7 +86,7 @@ test "ParkingMutex: N fibers increment shared counter" {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const wc = @as(*WorkCtx, @ptrCast(@alignCast(raw.?)));
             defer wc.s.wg.done();
-            wc.s.mu.lock();
+            try wc.s.mu.lock();
             wc.s.counter += 1;
             wc.s.mu.unlock();
         }
@@ -143,7 +144,7 @@ test "ParkingMutex: lock contention transfers ownership correctly" {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const wc = @as(*WCtx, @ptrCast(@alignCast(raw.?)));
             defer wc.s.wg.done();
-            wc.s.mu.lock();
+            try wc.s.mu.lock();
             wc.s.counter += 1;
             wc.s.mu.unlock();
         }
@@ -198,7 +199,7 @@ test "ParkingRwLock: multiple concurrent readers" {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const rc = @as(*RCtx, @ptrCast(@alignCast(raw.?)));
             defer rc.s.wg.done();
-            rc.s.rw.lockShared();
+            try rc.s.rw.lockShared();
             rc.s.reads_completed += 1;
             rc.s.rw.unlockShared();
         }
@@ -251,7 +252,7 @@ test "ParkingRwLock: writer excludes readers and other writers" {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const wc = @as(*WCtx, @ptrCast(@alignCast(raw.?)));
             defer wc.s.wg.done();
-            wc.s.rw.lock();
+            try wc.s.rw.lock();
             wc.s.counter += 1;
             wc.s.rw.unlock();
         }
@@ -309,11 +310,11 @@ test "ParkingRwLock: mixed readers and writers" {
             const wc = @as(*WCtx, @ptrCast(@alignCast(raw.?)));
             defer wc.s.wg.done();
             if (wc.is_writer) {
-                wc.s.rw.lock();
+                try wc.s.rw.lock();
                 wc.s.write_count += 1;
                 wc.s.rw.unlock();
             } else {
-                wc.s.rw.lockShared();
+                try wc.s.rw.lockShared();
                 wc.s.read_count += 1;
                 wc.s.rw.unlockShared();
             }
@@ -364,11 +365,11 @@ test "ParkingRwLocked: read/write guard API" {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
             // Write
-            var wg = c.l.write();
+            var wg = try c.l.write();
             wg.get().* = 42;
             wg.release();
             // Read back
-            var rg = c.l.read();
+            var rg = try c.l.read();
             c.ok = rg.get().* == 42;
             rg.release();
         }
@@ -413,7 +414,7 @@ test "ParkingMutex: stress 32 fibers, 10 increments each" {
             const wc = @as(*WCtx, @ptrCast(@alignCast(raw.?)));
             defer wc.s.wg.done();
             for (0..INCREMENTS_PER) |_| {
-                wc.s.mu.lock();
+                try wc.s.mu.lock();
                 wc.s.counter += 1;
                 wc.s.mu.unlock();
             }
@@ -470,11 +471,11 @@ test "ParkingRwLock: stress 8 writers 8 readers" {
             const wc = @as(*WCtx, @ptrCast(@alignCast(raw.?)));
             defer wc.s.wg.done();
             if (wc.is_writer) {
-                wc.s.rw.lock();
+                try wc.s.rw.lock();
                 wc.s.write_count += 1;
                 wc.s.rw.unlock();
             } else {
-                wc.s.rw.lockShared();
+                try wc.s.rw.lockShared();
                 wc.s.read_count += 1;
                 wc.s.rw.unlockShared();
             }
@@ -499,8 +500,603 @@ test "ParkingRwLock: stress 8 writers 8 readers" {
     try std.testing.expectEqual(@as(usize, NR), shared.read_count);
 }
 
-// Note: AB/BA cycle detection is tested manually — Zig 0.16 has no
-// std.testing.expectPanic. To reproduce: run the binary with two fibers
-// where A holds mu_a and waits for mu_b while B holds mu_b and waits for
-// mu_a. The second lock attempt will print "DEADLOCK: lock cycle detected"
-// and @panic before either fiber parks.
+// ─────────────────────────────────────────────────────────────────────────────
+// Error recovery tests
+//
+// Verify that after lock() returns an error, the lock state is consistent and
+// other waiters proceed normally. Each test checks:
+//   - The correct error is returned
+//   - Defers fire and release the lock
+//   - A waiting fiber gets the lock and completes
+//   - Lock struct fields are zeroed afterward
+// ─────────────────────────────────────────────────────────────────────────────
+
+test "ParkingMutex: re-entrant lock returns error.Deadlock, lock remains usable" {
+    // A locks mu, then tries to lock mu again (same owner -> immediate Deadlock).
+    // A's defer fires mu.unlock(); B then acquires mu normally.
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        mu: ParkingMutex = .{},
+        wg: CheatHeader.WaitGroup,
+        a_got_deadlock: bool = false,
+        b_counter: usize = 0,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu.lock();
+            defer c.s.mu.unlock();
+            // Second lock on same mutex by same owner -> error.Deadlock immediately.
+            c.s.mu.lock() catch |e| {
+                c.s.a_got_deadlock = (e == error.Deadlock);
+                return e; // defer above fires -> mu released
+            };
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu.lock();
+            c.s.b_counter += 1;
+            c.s.mu.unlock();
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{});
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{});
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{});
+    sched.run();
+
+    try std.testing.expect(shared.a_got_deadlock);
+    try std.testing.expectEqual(@as(usize, 1), shared.b_counter);
+    try std.testing.expectEqual(@as(u32, 0), shared.mu.locked.load(.monotonic));
+}
+
+test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked" {
+    // Scheduling design (LIFO ready queue):
+    //   Spawn B first, then A. LIFO pops A first.
+    //   A: locks mu_a, parks on rendezvous (pre-locked, no owner).
+    //   B: locks mu_b, calls rendezvous.unlock() (wakes A into ready queue,
+    //      B keeps running), tries mu_a (parks, B.waiting_for_lock_owner = A).
+    //   A: resumes, tries mu_b -> detectCycle sees B->A chain -> error.Deadlock.
+    //   A's defer releases mu_a -> B wakes, acquires mu_a, b_counter++.
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        mu_a: ParkingMutex = .{},
+        mu_b: ParkingMutex = .{},
+        // rendezvous: pre-locked before run(). A parks here; B unlocks it to
+        // signal A. B then parks on mu_a before A resumes, establishing
+        // B.waiting_for_lock_owner = A for cycle detection.
+        rendezvous: ParkingMutex = .{},
+        wg: CheatHeader.WaitGroup,
+        a_got_deadlock: bool = false,
+        b_counter: usize = 0,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    // Pre-lock rendezvous with no owner so A will park on it.
+    shared.rendezvous.locked.store(1, .monotonic);
+
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu_a.lock();
+            defer c.s.mu_a.unlock();
+            // Park here. B will unlock rendezvous after locking mu_b,
+            // then immediately try mu_a (parking with waiting_for_lock_owner=A).
+            // A resumes only after B has already parked on mu_a.
+            try c.s.rendezvous.lock();
+            defer c.s.rendezvous.unlock();
+            // B holds mu_b and B.waiting_for_lock_owner == A -> cycle.
+            c.s.mu_b.lock() catch |e| {
+                c.s.a_got_deadlock = (e == error.Deadlock);
+                return e; // defer mu_a.unlock() fires, waking B
+            };
+            c.s.mu_b.unlock();
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu_b.lock();
+            defer c.s.mu_b.unlock();
+            // Wake A (pushes A to ready queue). B keeps running.
+            c.s.rendezvous.unlock();
+            // Try mu_a (held by A). Parks: B.waiting_for_lock_owner = A.
+            // A runs next, finds the cycle.
+            try c.s.mu_a.lock();
+            defer c.s.mu_a.unlock();
+            c.s.b_counter += 1;
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            // Spawn B first so LIFO runs A first.
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{});
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{});
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{});
+    sched.run();
+
+    try std.testing.expect(shared.a_got_deadlock);
+    try std.testing.expectEqual(@as(usize, 1), shared.b_counter);
+    try std.testing.expectEqual(@as(u32, 0), shared.mu_a.locked.load(.monotonic));
+    try std.testing.expectEqual(@as(u32, 0), shared.mu_b.locked.load(.monotonic));
+}
+
+test "ParkingRwLock: re-entrant write lock returns error.Deadlock, lock remains usable" {
+    // A holds write lock, tries to write-lock again -> cycle (A == write_owner) -> error.Deadlock.
+    // A's defer releases it; B acquires normally.
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        rw: ParkingRwLock = .{},
+        wg: CheatHeader.WaitGroup,
+        a_got_deadlock: bool = false,
+        b_counter: usize = 0,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.rw.lock();
+            defer c.s.rw.unlock();
+            c.s.rw.lock() catch |e| {
+                c.s.a_got_deadlock = (e == error.Deadlock);
+                return e;
+            };
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.rw.lock();
+            c.s.b_counter += 1;
+            c.s.rw.unlock();
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{});
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{});
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{});
+    sched.run();
+
+    try std.testing.expect(shared.a_got_deadlock);
+    try std.testing.expectEqual(@as(usize, 1), shared.b_counter);
+    try std.testing.expect(!shared.rw.write_locked);
+    try std.testing.expectEqual(@as(i32, 0), shared.rw.readers);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Timeout tests
+//
+// Set sched.lock_timeout_ms to a short value so the timeout path is exercised
+// without real-time waits of 30s. The holder fiber sleeps 4x longer than the
+// timeout so the waiter times out before the holder releases.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Fiber sleep helper: yield this fiber for `ms` milliseconds.
+fn fiberSleepMs(ms: u64) void {
+    const sched = fp.active_scheduler;
+    const task = sched.current_task.?;
+    sched.sleepTask(task, compat.milliTimestamp() + @as(i64, @intCast(ms)));
+    task.base.yield();
+}
+
+test "ParkingMutex: lock timeout returns error.LockTimeout, lock remains usable" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    sched.lock_timeout_ms = 100;
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        mu: ParkingMutex = .{},
+        wg: CheatHeader.WaitGroup,
+        b_got_timeout: bool = false,
+        a_counter: usize = 0,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu.lock();
+            defer c.s.mu.unlock();
+            fiberSleepMs(400);  // hold the lock 4x longer than timeout
+            c.s.a_counter += 1;
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            c.s.mu.lock() catch |e| {
+                c.s.b_got_timeout = (e == error.LockTimeout);
+                return;
+            };
+            c.s.mu.unlock();
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.b_got_timeout);
+    try std.testing.expectEqual(@as(usize, 1), shared.a_counter);
+    try std.testing.expectEqual(@as(u32, 0), shared.mu.locked.load(.monotonic));
+}
+
+test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can proceed" {
+    // Regression test for: writers_waiting not decremented on write-lock timeout,
+    // permanently blocking future readers via the wakeNext writers_waiting == 0 guard.
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    sched.lock_timeout_ms = 100;
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        rw: ParkingRwLock = .{},
+        wg: CheatHeader.WaitGroup,
+        b_got_timeout: bool = false,
+        c_read_counter: usize = 0,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    const CCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+    var c_ctx = CCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.rw.lock();
+            defer c.s.rw.unlock();
+            // Hold longer than B's timeout (100ms) and longer than C's
+            // pre-queue sleep (120ms) so C queues while A still holds.
+            fiberSleepMs(150);
+        }
+    };
+    // B tries to write-lock while A holds it. B times out after 100ms.
+    // On timeout, writers_waiting must be decremented so C can proceed.
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            c.s.rw.lock() catch |e| {
+                c.s.b_got_timeout = (e == error.LockTimeout);
+                return;
+            };
+            c.s.rw.unlock();
+        }
+    };
+    // C tries to read-lock AFTER B has timed out but while A still holds.
+    // Without the fix, wakeNext never wakes C (writers_waiting stays 1).
+    // With the fix, writers_waiting drops to 0 when B times out, and C is
+    // woken when A finally releases. Staggering C's queue time avoids C
+    // hitting its own lock_timeout_ms before A releases.
+    const FiberC = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*CCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            // Sleep past B's 100ms timeout so writers_waiting is already
+            // decremented (with fix) before C queues.
+            fiberSleepMs(120);
+            try c.s.rw.lockShared();
+            defer c.s.rw.unlockShared();
+            c.s.c_read_counter += 1;
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx, cc: *CCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(3);
+            // Spawn order: C, B, A. LIFO runs A first.
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberC.run)), self.cc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx, .cc = &c_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.b_got_timeout);
+    try std.testing.expectEqual(@as(usize, 1), shared.c_read_counter);
+    try std.testing.expectEqual(@as(u32, 0), shared.rw.writers_waiting);
+    try std.testing.expect(!shared.rw.write_locked);
+    try std.testing.expectEqual(@as(i32, 0), shared.rw.readers);
+}
+
+test "ParkingRwLock: read-lock timeout returns error.LockTimeout" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    sched.lock_timeout_ms = 100;
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        rw: ParkingRwLock = .{},
+        wg: CheatHeader.WaitGroup,
+        b_got_timeout: bool = false,
+        a_counter: usize = 0,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.rw.lock();
+            defer c.s.rw.unlock();
+            fiberSleepMs(400);
+            c.s.a_counter += 1;
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            c.s.rw.lockShared() catch |e| {
+                c.s.b_got_timeout = (e == error.LockTimeout);
+                return;
+            };
+            c.s.rw.unlockShared();
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.b_got_timeout);
+    try std.testing.expectEqual(@as(usize, 1), shared.a_counter);
+    try std.testing.expect(!shared.rw.write_locked);
+    try std.testing.expectEqual(@as(i32, 0), shared.rw.readers);
+}
+
+test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
+    // Cycle: A holds mu1 and waits for mu2 (owned by B).
+    //        B holds mu2 and waits for mu3 (owned by C).
+    //        C holds mu3 and waits for mu1 (owned by A, A waiting for B).
+    //        B tries mu3: detectCycle(B,C) -> C.waiting=A -> A.waiting=B -> B found -> Deadlock.
+    //
+    // Rendezvous protocol (pre-locked rv1, rv2):
+    //   A: lock mu1, park on rv1 (wait for B to lock mu2).
+    //   B: lock mu2, unlock rv1 (wakes A), park on rv2 (wait for C to lock mu3).
+    //   A: (LIFO) resumes from rv1, tries mu2 -> parks (A.waiting=B).
+    //   C: lock mu3, unlock rv2 (wakes B), tries mu1 -> parks (C.waiting=A, no cycle yet).
+    //   B: resumes from rv2, tries mu3 -> cycle detected (B.waiting=C, C.waiting=A, A.waiting=B).
+    //   B gets Deadlock, releases mu2. A wakes, increments a_counter, releases mu1.
+    //   C wakes, increments c_counter, releases mu3 and mu1.
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        mu1: ParkingMutex = .{},
+        mu2: ParkingMutex = .{},
+        mu3: ParkingMutex = .{},
+        rv1: ParkingMutex = .{},
+        rv2: ParkingMutex = .{},
+        wg: CheatHeader.WaitGroup,
+        b_got_deadlock: bool = false,
+        a_counter: usize = 0,
+        c_counter: usize = 0,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    // Pre-lock rendezvous mutexes (owner=null so A and B park on them).
+    shared.rv1.locked.store(1, .monotonic);
+    shared.rv2.locked.store(1, .monotonic);
+
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    const CCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+    var c_ctx = CCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu1.lock();
+            defer c.s.mu1.unlock();
+            try c.s.rv1.lock();       // parks here; B unlocks rv1 after locking mu2
+            defer c.s.rv1.unlock();
+            try c.s.mu2.lock();       // parks here; A.waiting=B; B detects cycle later
+            defer c.s.mu2.unlock();
+            c.s.a_counter += 1;
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu2.lock();
+            defer c.s.mu2.unlock();
+            c.s.rv1.unlock();         // wake A (A pushed to ready queue; B keeps running)
+            try c.s.rv2.lock();       // parks here; C unlocks rv2 after locking mu3
+            defer c.s.rv2.unlock();
+            // At this point: C holds mu3, C is parked on mu1; A holds mu1 and waits for mu2.
+            // Walking the chain: B.waiting=C -> C.waiting=A -> A.waiting=B -> cycle!
+            c.s.mu3.lock() catch |e| {
+                c.s.b_got_deadlock = (e == error.Deadlock);
+                return e; // defer mu2.unlock() fires, A wakes and gets mu2
+            };
+            defer c.s.mu3.unlock();
+        }
+    };
+    const FiberC = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*CCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu3.lock();
+            defer c.s.mu3.unlock();
+            c.s.rv2.unlock();         // wake B (B pushed to ready queue; C keeps running)
+            try c.s.mu1.lock();       // parks; C.waiting=A (no cycle yet: B.waiting=null)
+            defer c.s.mu1.unlock();
+            c.s.c_counter += 1;
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx, cc: *CCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(3);
+            // Spawn C, B, A. LIFO pops A first.
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberC.run)), self.cc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx, .cc = &c_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.b_got_deadlock);
+    try std.testing.expectEqual(@as(usize, 1), shared.a_counter);
+    try std.testing.expectEqual(@as(usize, 1), shared.c_counter);
+    try std.testing.expectEqual(@as(u32, 0), shared.mu1.locked.load(.monotonic));
+    try std.testing.expectEqual(@as(u32, 0), shared.mu2.locked.load(.monotonic));
+    try std.testing.expectEqual(@as(u32, 0), shared.mu3.locked.load(.monotonic));
+}

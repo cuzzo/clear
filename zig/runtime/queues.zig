@@ -341,4 +341,8 @@ pub const Task = struct {
     // Used by cycle detection: follow the chain task -> owner -> owner -> ...
     // Null when not blocked or blocked on a read lock (no single owner).
     waiting_for_lock_owner: ?*Task = null,
+    // Set by ParkingRwLock when parking as a write-lock waiter. On timeout,
+    // the scheduler decrements this counter (writers_waiting) so future readers
+    // are not permanently blocked by a phantom writer count.
+    lock_counter_ptr: ?*u32 = null,
 };

@@ -9,10 +9,12 @@
 // than pthread_mutex_lock (no futex syscall, no OS scheduler involvement).
 //
 // Safety properties vs pthread_mutex:
-//   - Deadlock detection: walk the owner chain before parking. Panic if a cycle
-//     is found (re-entrant locking or AB/BA across @parallel) instead of hanging.
-//   - Timeout: if a fiber waits more than LOCK_TIMEOUT_MS (30s), the scheduler
-//     wakes it and it panics with a clear message instead of hanging forever.
+//   - Deadlock detection: walk the owner chain before parking. Return
+//     error.Deadlock on re-entrant acquisition or AB/BA cycle. The fiber's
+//     defers run on error unwind, releasing any locks it already holds and
+//     unblocking other waiters. No process kill required.
+//   - Timeout: if a fiber waits more than sched.lock_timeout_ms (default 30s),
+//     the scheduler wakes it and lock() returns error.LockTimeout.
 //   - Non-fiber context: falls back to a tight spin (safe for scheduler startup
 //     code, tests, and any path where active_scheduler is not set).
 //
@@ -35,6 +37,11 @@ const Task = qs.Task;
 const WaiterNode = qs.WaiterNode;
 const WaiterList = qs.WaiterList;
 
+pub const LockError = error{
+    Deadlock,
+    LockTimeout,
+};
+
 // Returns the active scheduler if we are currently running inside a fiber,
 // null otherwise (scheduler startup, test code, non-fiber paths).
 inline fn getScheduler() ?*fp.Scheduler {
@@ -43,10 +50,11 @@ inline fn getScheduler() ?*fp.Scheduler {
 }
 
 // Walk the owner chain from `owner` looking for `waiter`. If found, the
-// waiter is in a deadlock cycle. Depth-limited to 64 to guard against
-// corrupted state. Read locks have no single owner, so they store null in
-// waiting_for_lock_owner and act as chain terminators.
-fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) void {
+// waiter is in a deadlock cycle. Returns error.Deadlock so the caller can
+// unwind cleanly via defer blocks rather than killing the process.
+// Depth-limited to 64 to guard against corrupted state.
+// Read locks store null in waiting_for_lock_owner and act as chain terminators.
+fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!void {
     var current = owner;
     var depth: usize = 0;
     while (current) |holder| : (depth += 1) {
@@ -56,7 +64,7 @@ fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) void {
                 "transitively held by itself\n",
                 .{ waiter, lock_ptr },
             );
-            @panic("deadlock: lock cycle detected");
+            return error.Deadlock;
         }
         if (depth >= 64) break;
         current = holder.waiting_for_lock_owner;
@@ -87,12 +95,12 @@ pub const ParkingMutex = struct {
         return false;
     }
 
-    pub fn lock(self: *ParkingMutex) void {
+    pub fn lock(self: *ParkingMutex) LockError!void {
         if (self.tryLock()) return;
-        self.lockSlow();
+        return self.lockSlow();
     }
 
-    fn lockSlow(self: *ParkingMutex) void {
+    fn lockSlow(self: *ParkingMutex) LockError!void {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
@@ -120,12 +128,12 @@ pub const ParkingMutex = struct {
                 "DEADLOCK: re-entrant lock acquisition — fiber {*} already holds mutex {*}\n",
                 .{ task, self },
             );
-            @panic("deadlock: re-entrant lock acquisition");
+            return error.Deadlock;
         }
 
         // Walk the owner chain: if the owner is transitively waiting for a
         // lock that task holds, we have an AB/BA cycle.
-        detectCycle(task, current_owner, self);
+        try detectCycle(task, current_owner, self);
 
         // Set up intrusive waiter on our stack frame (no heap alloc).
         var node = WaiterNode{
@@ -169,14 +177,10 @@ pub const ParkingMutex = struct {
             // unlock() that fired after the timeout scan removed our node,
             // we hold it and can proceed.
             if (self.locked.load(.acquire) == 1 and self.owner.load(.acquire) == task) {
-                // Ownership was transferred; proceed normally.
                 return;
             }
-            std.debug.print(
-                "LOCK TIMEOUT: fiber {*} waited >30s for mutex {*}\n",
-                .{ task, self },
-            );
-            @panic("lock timeout: possible deadlock");
+            std.debug.print("LOCK TIMEOUT: fiber {*} waited for mutex {*}\n", .{ task, self });
+            return error.LockTimeout;
         }
 
         // Ownership was transferred by unlock(). Record us as owner.
@@ -237,7 +241,7 @@ pub const ParkingRwLock = struct {
     }
 
     // Exclusive (write) lock
-    pub fn lock(self: *ParkingRwLock) void {
+    pub fn lock(self: *ParkingRwLock) LockError!void {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
@@ -270,7 +274,11 @@ pub const ParkingRwLock = struct {
 
         // Must wait. Detect cycle before parking (write lock has a single owner).
         const current_write_owner = self.write_owner.load(.acquire);
-        detectCycle(task, current_write_owner, self);
+        // Release spinlock before potentially returning an error so we leave
+        // the lock state consistent.
+        self.spinRelease();
+        try detectCycle(task, current_write_owner, self);
+        self.spinAcquire();
 
         self.writers_waiting += 1;
         var node = WaiterNode{ .task = task, .sched_ptr = sched };
@@ -279,6 +287,7 @@ pub const ParkingRwLock = struct {
         task.waiting_for_lock_list = &self.write_waiters;
         task.lock_waiter_node = &node;
         task.waiting_for_lock_owner = current_write_owner;
+        task.lock_counter_ptr = &self.writers_waiting;
         task.status.store(.Blocked, .release);
         self.spinRelease();
 
@@ -289,12 +298,13 @@ pub const ParkingRwLock = struct {
         task.waiting_for_lock_list = null;
         task.lock_waiter_node = null;
         task.waiting_for_lock_owner = null;
+        task.lock_counter_ptr = null;
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;
             if (self.write_locked and self.write_owner.load(.acquire) == task) return;
-            std.debug.print("LOCK TIMEOUT: fiber {*} waited >30s for write lock {*}\n", .{ task, self });
-            @panic("lock timeout: possible deadlock");
+            std.debug.print("LOCK TIMEOUT: fiber {*} waited for write lock {*}\n", .{ task, self });
+            return error.LockTimeout;
         }
 
         self.write_owner.store(task, .release);
@@ -309,7 +319,7 @@ pub const ParkingRwLock = struct {
     }
 
     // Shared (read) lock
-    pub fn lockShared(self: *ParkingRwLock) void {
+    pub fn lockShared(self: *ParkingRwLock) LockError!void {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
@@ -344,6 +354,7 @@ pub const ParkingRwLock = struct {
         task.waiting_for_lock.store(self, .release);
         task.waiting_for_lock_list = &self.read_waiters;
         task.lock_waiter_node = &node;
+        // waiting_for_lock_owner stays null: read locks have no single owner.
         task.status.store(.Blocked, .release);
         self.spinRelease();
 
@@ -356,13 +367,12 @@ pub const ParkingRwLock = struct {
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;
-            // Check if we were granted a read slot by unlock
             self.spinAcquire();
             const held = !self.write_locked;
             self.spinRelease();
-            if (held) return; // ownership was transferred
-            std.debug.print("LOCK TIMEOUT: fiber {*} waited >30s for read lock {*}\n", .{ task, self });
-            @panic("lock timeout: possible deadlock");
+            if (held) return;
+            std.debug.print("LOCK TIMEOUT: fiber {*} waited for read lock {*}\n", .{ task, self });
+            return error.LockTimeout;
         }
         // Ownership (reader slot) was already incremented for us by wakeNext().
     }
@@ -413,13 +423,13 @@ pub fn ParkingRwLocked(comptime T: type) type {
             return .{ .data = val };
         }
 
-        pub fn read(self: *Self) ReadGuard {
-            self.rw.lockShared();
+        pub fn read(self: *Self) LockError!ReadGuard {
+            try self.rw.lockShared();
             return .{ .parent = self };
         }
 
-        pub fn write(self: *Self) WriteGuard {
-            self.rw.lock();
+        pub fn write(self: *Self) LockError!WriteGuard {
+            try self.rw.lock();
             return .{ .parent = self };
         }
 

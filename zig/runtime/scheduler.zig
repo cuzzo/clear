@@ -225,6 +225,9 @@ pub const Scheduler = struct {
     active_tasks: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     shutdown_on_idle: bool = true,
     fast_path_counter: u32 = 0,
+    // Configurable lock timeout. Default 30s for production; set lower for tests
+    // or when CLEAR exposes per-scheduler timeout configuration.
+    lock_timeout_ms: i64 = 30_000,
 
     /// Stable index assigned at registration (0..N-1).  Used by
     /// PartitionedStringMap to determine shard ownership.
@@ -653,18 +656,28 @@ pub const Scheduler = struct {
                             _ = self.lock_waiters.swapRemove(i);
                             continue;
                         }
-                        if (now_ms - task.lock_wait_start_ms > qs.LOCK_TIMEOUT_MS) {
+                        if (now_ms - task.lock_wait_start_ms > self.lock_timeout_ms) {
                             // Timed out: remove from lock's waiter list, then wake.
+                            var removed = false;
                             if (task.waiting_for_lock_list) |wl| {
                                 wl.spinAcquire();
-                                _ = wl.remove(task.lock_waiter_node.?);
+                                removed = wl.remove(task.lock_waiter_node.?);
                                 wl.spinRelease();
+                            }
+                            // If this was a ParkingRwLock write-lock waiter and we
+                            // won the removal race, decrement writers_waiting so
+                            // future lockShared calls are not permanently blocked.
+                            if (removed) {
+                                if (task.lock_counter_ptr) |ctr| {
+                                    _ = @atomicRmw(u32, ctr, .Sub, 1, .monotonic);
+                                }
                             }
                             _ = self.lock_waiters.swapRemove(i);
                             task.lock_timed_out = true;
                             task.waiting_for_lock.store(null, .release);
                             task.waiting_for_lock_list = null;
                             task.lock_waiter_node = null;
+                            task.lock_counter_ptr = null;
                             task.status.store(.Ready, .release);
                             self.enqueueTask(task);
                             continue;
@@ -712,6 +725,16 @@ pub const Scheduler = struct {
                 switch (task.status.load(.acquire)) {
                     .Finished => {
                         _ = self.active_tasks.fetchSub(1, .monotonic);
+                        // Remove from lock_waiters before destroying to prevent stale pointer access.
+                        // A task can register itself there via registerLockWaiter and then complete
+                        // (e.g. after deadlock detection returns error.Deadlock) without being lazily
+                        // removed, because waiting_for_lock was already cleared by detectCycle.
+                        for (self.lock_waiters.items, 0..) |wt, idx| {
+                            if (wt == task) {
+                                _ = self.lock_waiters.swapRemove(idx);
+                                break;
+                            }
+                        }
                         self.freeStack(task.base.stack.memory);
                         self.allocator.destroy(task.base);
                         self.allocator.destroy(task);
