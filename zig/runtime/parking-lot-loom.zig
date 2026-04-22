@@ -386,8 +386,8 @@ fn rwReset() void {
 // is fully released, and each reader's observation is in [0, expected_writers].
 fn rwCheckInvariants(expected_writers: usize, reader_slots: []const usize) bool {
     if (g_writer_counter != expected_writers) return false;
-    if (g_rw.write_locked) return false;
-    if (g_rw.readers != 0) return false;
+    if (g_rw.isWriteLocked()) return false;
+    if (g_rw.readerCount() != 0) return false;
     if (!g_rw.waiters.isEmpty()) return false;
     for (reader_slots) |s| {
         const obs = g_reader_observed[s];
@@ -434,7 +434,7 @@ test "parking rwlock loom: two writers exhaustive 256 schedules" {
         if (!rwCheckInvariants(2, &.{})) {
             std.debug.print(
                 "\nINVARIANT FAIL sched {d}: writer_counter={d} write_locked={} readers={d} waiters_empty={}\n",
-                .{ sched_idx, g_writer_counter, g_rw.write_locked, g_rw.readers, g_rw.waiters.isEmpty() },
+                .{ sched_idx, g_writer_counter, g_rw.isWriteLocked(), g_rw.readerCount(), g_rw.waiters.isEmpty() },
             );
             failures += 1;
         }
@@ -490,7 +490,7 @@ test "parking rwlock loom: writer vs reader exhaustive 256 schedules" {
         if (!rwCheckInvariants(1, &.{1})) {
             std.debug.print(
                 "\nINVARIANT FAIL sched {d}: writer_counter={d} reader_obs={d} write_locked={} readers={d}\n",
-                .{ sched_idx, g_writer_counter, g_reader_observed[1], g_rw.write_locked, g_rw.readers },
+                .{ sched_idx, g_writer_counter, g_reader_observed[1], g_rw.isWriteLocked(), g_rw.readerCount() },
             );
             failures += 1;
         }
@@ -542,7 +542,7 @@ test "parking rwlock loom: two readers + one writer prng seeds" {
         if (!rwCheckInvariants(1, &.{ 1, 2 })) {
             std.debug.print(
                 "\nPRNG FAIL seed {d}: writer_counter={d} r1={d} r2={d} write_locked={} readers={d} waiters_empty={}\n",
-                .{ seed, g_writer_counter, g_reader_observed[1], g_reader_observed[2], g_rw.write_locked, g_rw.readers, g_rw.waiters.isEmpty() },
+                .{ seed, g_writer_counter, g_reader_observed[1], g_reader_observed[2], g_rw.isWriteLocked(), g_rw.readerCount(), g_rw.waiters.isEmpty() },
             );
             failures += 1;
         }

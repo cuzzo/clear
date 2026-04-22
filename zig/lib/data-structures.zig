@@ -2,6 +2,7 @@ const std = @import("std");
 const compat = @import("compat.zig");
 const fp = @import("../runtime/scheduler.zig");
 const Task = @import("../runtime/queues.zig").Task;
+const pl = @import("parking-lot.zig");
 
 pub fn bind(comptime deps: type) type {
     return struct {
@@ -325,7 +326,9 @@ pub fn bind(comptime deps: type) type {
     /// false sharing when multiple Locked values are heap-allocated adjacently.
     pub fn Locked(comptime T: type) type {
         return struct {
-            mutex: compat.Mutex align(64) = .{},
+            // ParkingMutex parks the fiber (not the OS thread) on contention.
+            // Deadlock detection and 30s timeout replace silent hangs.
+            mutex: pl.ParkingMutex align(64) = .{},
             data: T,
 
             const Self = @This();
@@ -422,13 +425,13 @@ pub fn bind(comptime deps: type) type {
     /// Multiple concurrent readers allowed; writers are exclusive.
     /// Acquire read access via read(); write access via write().
     ///
-    /// Uses writer-preferring pthread_rwlock to prevent writer starvation.
-    /// glibc's default pthread_rwlock is reader-preferring: new readers can
-    /// acquire while a writer waits, causing indefinite starvation under load.
-    /// PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP blocks new readers once
-    /// a writer is waiting, matching Go's sync.RWMutex and Rust's futex_rwlock.
+    /// Uses ParkingRwLock: a FIFO-fair fiber-aware rwlock. Waiters (readers
+    /// and writers) share a single queue served in arrival order. This
+    /// prevents both writer starvation under heavy reader load and reader
+    /// starvation under heavy writer load. In-fiber contention stays in
+    /// user space (park+yield on the scheduler, no syscall).
     pub fn RwLocked(comptime T: type) type {
-        return compat.RwLocked(T);
+        return pl.ParkingRwLocked(T);
     }
 
     /// Heap-allocate a new RwLocked(T) wrapping a value of type T.

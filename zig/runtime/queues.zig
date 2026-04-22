@@ -248,6 +248,91 @@ pub const TaskStatus = enum(u8) {
     Blocked = 2,  // Don't run me, I'm waiting on something
 };
 
+// Lock timeout: 30 seconds. Panics instead of hanging forever.
+pub const LOCK_TIMEOUT_MS: i64 = 30_000;
+
+// Intrusive waiter node placed on the parking fiber's stack (no heap alloc).
+// Used by ParkingMutex and ParkingRwLock to track blocked fibers.
+// Waiter kind is used by ParkingRwLock's FIFO waiter list so the wake path
+// knows whether to grant a read or a write slot. ParkingMutex ignores it.
+pub const WaiterKind = enum(u8) { Write, Read };
+
+pub const WaiterNode = struct {
+    task: *Task = undefined,
+    sched_ptr: *anyopaque = undefined, // *Scheduler, erased to avoid circular import
+    next: ?*WaiterNode = null,
+    kind: WaiterKind = .Write,
+};
+
+// Spinlock-protected intrusive FIFO queue of WaiterNodes.
+// Placed inside ParkingMutex / ParkingRwLock. Not heap-allocated.
+// push() appends to the tail; pop() removes from the head. FIFO prevents
+// waiter starvation under high contention regardless of whether the lock
+// is a mutex (LIFO would let new arrivals keep grabbing the lock ahead of
+// already-parked fibers) or an rwlock (FIFO is the basis of fair ordering).
+pub const WaiterList = struct {
+    head: ?*WaiterNode = null,
+    tail: ?*WaiterNode = null,
+    spin: Atomic(u32) = Atomic(u32).init(0),
+
+    pub fn spinAcquire(self: *WaiterList) void {
+        while (self.spin.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
+            std.atomic.spinLoopHint();
+        }
+    }
+
+    pub fn spinRelease(self: *WaiterList) void {
+        self.spin.store(0, .release);
+    }
+
+    // Append to tail (FIFO).
+    pub fn push(self: *WaiterList, node: *WaiterNode) void {
+        node.next = null;
+        if (self.tail) |t| {
+            t.next = node;
+            self.tail = node;
+        } else {
+            self.head = node;
+            self.tail = node;
+        }
+    }
+
+    // Remove from head.
+    pub fn pop(self: *WaiterList) ?*WaiterNode {
+        const h = self.head orelse return null;
+        self.head = h.next;
+        if (self.head == null) self.tail = null;
+        h.next = null;
+        return h;
+    }
+
+    // Peek at head without removing (used by rwlock wakeNext to decide
+    // whether the next drain step is a reader or a writer).
+    pub fn peek(self: *const WaiterList) ?*WaiterNode {
+        return self.head;
+    }
+
+    pub fn remove(self: *WaiterList, target: *WaiterNode) bool {
+        var prev: ?*WaiterNode = null;
+        var curr = self.head;
+        while (curr) |c| {
+            if (c == target) {
+                if (prev) |p| p.next = c.next else self.head = c.next;
+                if (self.tail == c) self.tail = prev;
+                c.next = null;
+                return true;
+            }
+            prev = c;
+            curr = c.next;
+        }
+        return false;
+    }
+
+    pub fn isEmpty(self: *const WaiterList) bool {
+        return self.head == null;
+    }
+};
+
 pub const TaskConfig = struct {
     timeout_ms: u64 = 0,
     stack_size: StackSize = .Standard,  // Default to Standard
@@ -268,4 +353,22 @@ pub const Task = struct {
     /// cleared when drainInbox processes it. Detects double-push.
     in_inbox: Atomic(bool) = Atomic(bool).init(false),
     wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
+
+    // Parking-lot lock fields. Set by ParkingMutex/ParkingRwLock on park.
+    // Read by the scheduler's timeout scanner. Always null when not parked.
+    // Using std.atomic.Value (not SimAtomic) so scheduler can safely read
+    // from its loop without these becoming Loom yield points.
+    waiting_for_lock: std.atomic.Value(?*anyopaque) = std.atomic.Value(?*anyopaque).init(null),
+    waiting_for_lock_list: ?*WaiterList = null, // back-ptr to lock's waiter list
+    lock_waiter_node: ?*WaiterNode = null,      // back-ptr to our WaiterNode in that list
+    lock_wait_start_ms: i64 = 0,
+    lock_timed_out: bool = false,
+    // Set to the exclusive owner of the lock this task is blocked on.
+    // Used by cycle detection: follow the chain task -> owner -> owner -> ...
+    // Null when not blocked or blocked on a read lock (no single owner).
+    waiting_for_lock_owner: ?*Task = null,
+    // Set by ParkingRwLock when parking as a write-lock waiter. On timeout,
+    // the scheduler decrements this counter (writers_waiting) so future readers
+    // are not permanently blocked by a phantom writer count.
+    lock_counter_ptr: ?*u32 = null,
 };

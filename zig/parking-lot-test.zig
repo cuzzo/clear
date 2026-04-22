@@ -738,8 +738,8 @@ test "ParkingRwLock: re-entrant write lock returns error.Deadlock, lock remains 
 
     try std.testing.expect(shared.a_got_deadlock);
     try std.testing.expectEqual(@as(usize, 1), shared.b_counter);
-    try std.testing.expect(!shared.rw.write_locked);
-    try std.testing.expectEqual(@as(i32, 0), shared.rw.readers);
+    try std.testing.expect(!shared.rw.isWriteLocked());
+    try std.testing.expectEqual(@as(i32, 0), shared.rw.readerCount());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -947,8 +947,8 @@ test "ParkingRwLock: write-lock timeout does not permanently block readers" {
     // After B's timeout, the FIFO queue is empty of the phantom writer,
     // so C's lockShared succeeds.
     try std.testing.expectEqual(@as(usize, 1), shared.c_read_counter);
-    try std.testing.expect(!shared.rw.write_locked);
-    try std.testing.expectEqual(@as(i32, 0), shared.rw.readers);
+    try std.testing.expect(!shared.rw.isWriteLocked());
+    try std.testing.expectEqual(@as(i32, 0), shared.rw.readerCount());
 }
 
 test "ParkingRwLock: read-lock timeout returns error.LockTimeout" {
@@ -1014,8 +1014,8 @@ test "ParkingRwLock: read-lock timeout returns error.LockTimeout" {
 
     try std.testing.expect(shared.b_got_timeout);
     try std.testing.expectEqual(@as(usize, 1), shared.a_counter);
-    try std.testing.expect(!shared.rw.write_locked);
-    try std.testing.expectEqual(@as(i32, 0), shared.rw.readers);
+    try std.testing.expect(!shared.rw.isWriteLocked());
+    try std.testing.expectEqual(@as(i32, 0), shared.rw.readerCount());
 }
 
 test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
@@ -1336,8 +1336,8 @@ test "ParkingRwLock: cross-thread writers and readers hammer" {
 
     try std.testing.expectEqual(@as(usize, 0), bad_reads.load(.monotonic));
     try std.testing.expectEqual(N_WRITERS * OPS_PER_WRITER, counter);
-    try std.testing.expect(!rw.write_locked);
-    try std.testing.expectEqual(@as(i32, 0), rw.readers);
+    try std.testing.expect(!rw.isWriteLocked());
+    try std.testing.expectEqual(@as(i32, 0), rw.readerCount());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
