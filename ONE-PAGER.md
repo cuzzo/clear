@@ -45,5 +45,5 @@ This is a v0.1 release. In unpredictable real-world workloads, CLEAR will not ye
 CLEAR's foundational principle is to **minimize global complexity and maximize local reasoning.**
 
 1.  **Deep Optimization**: By enforcing local reasoning, the compiler can perform aggressive optimizations (like `Auto-Squishing` structs into SoA) that are often impossible in languages with pointer-aliasing or global side-effects.
-2.  **Runtime Control Plane**: The runtime adapts to live data patterns that are unpredictable at compile-time. Stack overflow auto-upsizes future tasks. Memory waste auto-downsizes. Key skew auto-enables work-stealing. All three operate live, with zero restarts. See [docs/control-plane.md](docs/control-plane.md).
+2.  **Runtime Control Plane**: The runtime adapts to live data patterns that are unpredictable at compile-time. Stack overflow auto-upsizes future tasks. Memory waste auto-downsizes. Key skew auto-enables resharding or live-migrating to a different structure that enables work-stealing (by v0.4). All three operate live, with zero restarts. See [docs/control-plane.md](docs/control-plane.md).
 3.  **AI-Native**: CLEAR's local reasoning makes it unusually amenable to AI-assisted development and automated optimization.
