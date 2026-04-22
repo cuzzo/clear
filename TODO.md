@@ -5,7 +5,7 @@
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
 
-## v0.1
+## v0.1 (Target = May 1)
 
  - [x] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
  - [ ] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
@@ -16,7 +16,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Migrate to Zig 0.16
  - [x] io_uring for networking
 
-## v0.2
+## v0.2 (Target = July 15)
 
  - [ ] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
  - [ ] Finite State Machines for non-conditional, non-reeentrant, and non-nested looping fibers
@@ -38,7 +38,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
 
 Milestone: *Basic* SQL/CLEAR database
 
-## v0.3
+## v0.3 (Target = Oct 1)
 
  - [ ] CPS to support conditional & nested-looping Finite State Machine fibers
  - [ ] Full Infinite Stream support
@@ -57,7 +57,7 @@ Vision is clear: Gradual Typing (Ruby/Python) -> Typed (Rust) -> STRICT Typed (H
 
 `./clear doctor ` + profiling on replay can take you ~95% of the way from an untyped correct app to ADA-level safety and HFT-C speed automatically.
 
-## v0.4
+## v0.4 (December 25)
 
  - [ ] EXTREME STRICT compilation pt 1: en route to ADA-levels of safety (just blocking compilation where required, ensuring the syntax is forward compatible)
  - [ ] MacOS support
