@@ -18,14 +18,14 @@ CLEAR makes the common case zero-cost and the uncommon case explicit. You pay fo
 ## WHAT DOES CLEAR LOOK LIKE?
 CLEAR excels at high-throughput data processing. Here is a pipeline that handles back-pressure, manages complex errors, and leverages shared-nothing architecture:
 
-```clear
+```ruby clear illustrative
 -- Shared-nothing pool with Sharded Structure-of-Arrays for lock-free, cache-optimal access
 MUTABLE sensors: Sensor[]@pool:sharded(64):soa = load_sensors();
 
 -- Pipeline with parallel execution and dynamic control plane monitoring
 results = sensors
-  s> CONCURRENT(workers: 16, parallel: TRUE) SELECT
-       process_reading(_) OR PRUNE    -- Drop failed readings
+  s> CONCURRENT(workers: 16, parallel: TRUE) 
+     SELECT process_reading(_) OR PRUNE    -- Drop failed readings
   s> WHERE _.intensity > 0.8
   s> LIMIT 1000;
 
