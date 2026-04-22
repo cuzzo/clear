@@ -1100,3 +1100,209 @@ test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
     try std.testing.expectEqual(@as(u32, 0), shared.mu2.locked.load(.monotonic));
     try std.testing.expectEqual(@as(u32, 0), shared.mu3.locked.load(.monotonic));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Defer-unwind safety test
+//
+// Proves the core safety claim of the error-return refactor: when a fiber
+// returns error.Deadlock while holding multiple locks, unwind via defer
+// releases every held lock in reverse order and wakes every parked waiter.
+// Without this guarantee the ecosystem would silently leak held locks when
+// a deadlock is detected.
+// ─────────────────────────────────────────────────────────────────────────────
+test "ParkingMutex: deadlock unwind releases multiple held locks and wakes waiters" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        mu1: ParkingMutex = .{},
+        mu2: ParkingMutex = .{},
+        wg: CheatHeader.WaitGroup,
+        a_got_deadlock: bool = false,
+        b_acquired_mu1: bool = false,
+        c_acquired_mu2: bool = false,
+        // Sequencing: A sets held_both when it owns mu1+mu2.
+        // B and C block until held_both so they park on A's locks,
+        // not before A has acquired them.
+        held_both: ParkingMutex = .{},
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    // Pre-lock held_both. A unlocks it after grabbing mu1+mu2, releasing B and C.
+    shared.held_both.locked.store(1, .monotonic);
+
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    const CCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+    var c_ctx = CCtx{ .s = &shared };
+
+    // A: lock mu1, lock mu2, release held_both to wake B and C, yield until
+    // they park, re-lock mu1 -> Deadlock. Unwind must release mu2 then mu1.
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu1.lock();
+            defer c.s.mu1.unlock();
+            try c.s.mu2.lock();
+            defer c.s.mu2.unlock();
+            // Release B and C so they park on mu1/mu2 before A errors.
+            c.s.held_both.unlock();
+            // Give B and C a chance to park. fiberSleepMs suspends this fiber
+            // into sleeping_queue so the scheduler runs B and C to park state.
+            fiberSleepMs(20);
+            // Re-entrant: same owner -> immediate error.Deadlock (no parking).
+            c.s.mu1.lock() catch |e| {
+                c.s.a_got_deadlock = (e == error.Deadlock);
+                return e; // defers fire: mu2.unlock(), mu1.unlock()
+            };
+        }
+    };
+    // B parks on mu1 once held_both is released. After A's unwind, B acquires.
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.held_both.lock();
+            c.s.held_both.unlock();
+            try c.s.mu1.lock();
+            c.s.b_acquired_mu1 = true;
+            c.s.mu1.unlock();
+        }
+    };
+    // C parks on mu2 once held_both is released. After A's unwind, C acquires.
+    const FiberC = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*CCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.held_both.lock();
+            c.s.held_both.unlock();
+            try c.s.mu2.lock();
+            c.s.c_acquired_mu2 = true;
+            c.s.mu2.unlock();
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx, cc: *CCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(3);
+            // LIFO: spawn C, B, A -> A pops first.
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberC.run)), self.cc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx, .cc = &c_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.a_got_deadlock);
+    try std.testing.expect(shared.b_acquired_mu1);
+    try std.testing.expect(shared.c_acquired_mu2);
+    try std.testing.expectEqual(@as(u32, 0), shared.mu1.locked.load(.monotonic));
+    try std.testing.expectEqual(@as(u32, 0), shared.mu2.locked.load(.monotonic));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-scheduler stress tests
+//
+// All preceding tests run on a single scheduler, so the cross-thread paths
+// through atomic ops, spin-acquire, and memory ordering are never exercised.
+// These tests drive the locks from real OS threads (non-fiber context)
+// to shake out races in the tryLock / spin-based fallback paths that are
+// used whenever a lock is touched outside the scheduler loop (startup,
+// teardown, embedded callers).
+// ─────────────────────────────────────────────────────────────────────────────
+test "ParkingMutex: cross-thread contention hammer (8 threads, 10K ops)" {
+    const N_THREADS: usize = 8;
+    const OPS_PER_THREAD: usize = 10_000;
+    var mu = ParkingMutex{};
+    var counter: usize = 0;
+
+    const Worker = struct {
+        fn run(m: *ParkingMutex, c: *usize, iters: usize) void {
+            var i: usize = 0;
+            while (i < iters) : (i += 1) {
+                // tryLock is non-blocking; fall through to spin if contended.
+                while (!m.tryLock()) std.atomic.spinLoopHint();
+                c.* += 1;
+                m.unlock();
+            }
+        }
+    };
+
+    var threads: [N_THREADS]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, Worker.run, .{ &mu, &counter, OPS_PER_THREAD });
+    }
+    for (&threads) |*t| t.join();
+
+    try std.testing.expectEqual(N_THREADS * OPS_PER_THREAD, counter);
+    try std.testing.expectEqual(@as(u32, 0), mu.locked.load(.monotonic));
+}
+
+test "ParkingRwLock: cross-thread writers and readers hammer" {
+    const N_WRITERS: usize = 4;
+    const N_READERS: usize = 4;
+    const OPS_PER_WRITER: usize = 5_000;
+    const OPS_PER_READER: usize = 5_000;
+    var rw = ParkingRwLock{};
+    // Single counter protected by rw. Writers increment; readers verify the
+    // value is stable across a read-side spin (if it changes under us, the
+    // lock is broken).
+    var counter: usize = 0;
+    var bad_reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0);
+
+    const Writer = struct {
+        fn run(l: *ParkingRwLock, c: *usize, iters: usize) void {
+            var i: usize = 0;
+            while (i < iters) : (i += 1) {
+                l.lock() catch continue;
+                c.* += 1;
+                l.unlock();
+            }
+        }
+    };
+    const Reader = struct {
+        fn run(l: *ParkingRwLock, c: *usize, br: *std.atomic.Value(usize), iters: usize) void {
+            var i: usize = 0;
+            while (i < iters) : (i += 1) {
+                l.lockShared() catch continue;
+                const first = c.*;
+                // Spin briefly inside the read lock. If mutual exclusion is
+                // broken, a concurrent writer will mutate `counter` here.
+                var s: usize = 0;
+                while (s < 8) : (s += 1) std.atomic.spinLoopHint();
+                const second = c.*;
+                if (first != second) _ = br.fetchAdd(1, .monotonic);
+                l.unlockShared();
+            }
+        }
+    };
+
+    var threads: [N_WRITERS + N_READERS]std.Thread = undefined;
+    for (threads[0..N_WRITERS]) |*t| {
+        t.* = try std.Thread.spawn(.{}, Writer.run, .{ &rw, &counter, OPS_PER_WRITER });
+    }
+    for (threads[N_WRITERS..]) |*t| {
+        t.* = try std.Thread.spawn(.{}, Reader.run, .{ &rw, &counter, &bad_reads, OPS_PER_READER });
+    }
+    for (&threads) |*t| t.join();
+
+    try std.testing.expectEqual(@as(usize, 0), bad_reads.load(.monotonic));
+    try std.testing.expectEqual(N_WRITERS * OPS_PER_WRITER, counter);
+    try std.testing.expect(!rw.write_locked);
+    try std.testing.expectEqual(@as(i32, 0), rw.readers);
+}
