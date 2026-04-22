@@ -2,101 +2,154 @@
 
 **Matrix row:** Deadlock — C: F, Rust: F, Go: F, Pony: A+, BEAM: A+, CLEAR: A-*
 
-The asterisk: CLEAR uses locks for read-heavy workloads where MVCC unpredictability is a non-starter. Locks can deadlock in standard mode. CLEAR provides runtime detection + recovery, and `STRICT EXTREME` provides compile-time lock-ordering enforcement.
+The asterisk: CLEAR uses locks for read-heavy workloads where MVCC unpredictability is a non-starter. Locks can deadlock in standard mode. CLEAR provides runtime detection + recovery, and `STRICT EXTREME` (roadmap) will add compile-time lock-ordering enforcement.
 
 ---
 
-## The Classic Deadlock
+## Why the AB/BA Pattern Is Not the Main CLEAR Footgun
 
-Two fibers, two locks, opposite acquisition order:
+The classic two-thread deadlock (thread A holds lock 1, waits for lock 2; thread B holds lock 2, waits for lock 1) requires two actors holding their respective lock simultaneously. In CLEAR's cooperative fiber scheduler, fibers only yield at explicit yield points (`NEXT`, I/O). There is no yield between acquiring the first lock and acquiring the second inside a `WITH EXCLUSIVE` block, so the AB/BA cycle cannot form on a single scheduler: the first fiber grabs both locks before the second fiber ever runs.
+
+The AB/BA pattern does become dangerous with `@parallel` (multi-scheduler, multiple OS threads), because the fibers then run on different OS threads simultaneously. But in the common single-scheduler case, it is not the footgun to worry about.
+
+---
+
+## The Real Footgun: Re-Entrant Locking
+
+CLEAR's `@locked` uses a non-recursive `pthread_mutex_t`. If a fiber tries to acquire a lock it already holds, `pthread_mutex_lock` blocks the OS thread — and since the fiber holding the lock IS that OS thread, it can never release it. Deadlock.
 
 ```ruby clear illustrative
-STRUCT Account { balance: Int64 }
+STRUCT State { value: Int64 }
 
 FN main() RETURNS Void ->
-    a = Account{ balance: 100 } @locked;
-    b = Account{ balance: 200 } @locked;
+    s = State{ value: 0 } @locked;
 
-    -- Fiber 1: acquires a, then tries to acquire b.
-    t1 = BG {
-        WITH EXCLUSIVE a AS ra {
-            -- t1 holds a. If t2 is here simultaneously, t2 holds b.
-            WITH EXCLUSIVE b AS rb {    -- blocks waiting for b
-                rb.balance = rb.balance + ra.balance;
+    t = BG {
+        WITH EXCLUSIVE s AS outer {
+            outer.value = 1;
+            -- DEADLOCK: trying to re-acquire the same mutex this fiber holds.
+            -- pthread_mutex_lock blocks the OS thread. The lock is never
+            -- released because the releaser IS the blocked fiber.
+            WITH EXCLUSIVE s AS inner {
+                inner.value = 2;
             }
         }
     };
 
-    -- Fiber 2: acquires b, then tries to acquire a.
-    t2 = BG {
-        WITH EXCLUSIVE b AS rb {
-            -- t2 holds b. If t1 is here simultaneously, t1 holds a.
-            WITH EXCLUSIVE a AS ra {    -- blocks waiting for a — DEADLOCK
-                ra.balance = ra.balance + rb.balance;
-            }
-        }
-    };
-
-    NEXT t1;
-    NEXT t2;
+    NEXT t;  -- hangs here
 END
 ```
 
-CLEAR's cooperative scheduler means this deadlock is deterministic on a single scheduler — once t1 holds `a` and suspends waiting for `b` (which t2 holds), and t2 suspends waiting for `a` (which t1 holds), neither fiber can yield. On `CLEAR_THREADS > 1` with `@parallel`, the same cycle can occur across OS threads.
+This compiles without error and hangs at runtime.
+
+**Fix:** restructure so the same lock is never acquired twice on the same call path. Pass the already-locked inner value to helper functions instead of locking again:
+
+```ruby clear illustrative
+FN update_inner(inner: State) RETURNS Void ->
+    -- Takes the already-unlocked value; no lock needed here.
+    inner.value = 2;
+END
+
+FN main() RETURNS Void ->
+    s = State{ value: 0 } @locked;
+
+    t = BG {
+        WITH EXCLUSIVE s AS inner {
+            inner.value = 1;
+            update_inner(inner);  -- pass the unlocked value, not the lock
+        }
+    };
+
+    NEXT t;
+END
+```
 
 ---
 
-## Fix 1: Consistent Lock Ordering
+## The NEXT-Inside-WITH Footgun
 
-Always acquire locks in the same global order. If every caller takes `a` before `b`, the cycle is impossible:
+A subtler variant: fiber A holds a lock and calls `NEXT` on a promise produced by fiber B — but fiber B also needs that lock to complete.
 
 ```ruby clear illustrative
-FN transfer(src: Account @locked, dst: Account @locked, amount: Int64) RETURNS Void ->
-    -- Both fibers acquire src first, then dst.
-    -- As long as ALL callers follow this convention, no cycle can form.
-    WITH EXCLUSIVE src AS s {
-        WITH EXCLUSIVE dst AS d {
-            d.balance = d.balance + amount;
-            s.balance = s.balance - amount;
+STRUCT State { value: Int64 }
+
+FN main() RETURNS Void ->
+    s = State{ value: 0 } @locked;
+
+    producer = BG {
+        -- producer needs 's' to do its work
+        WITH EXCLUSIVE s AS inner {
+            inner.value = 42;
         }
+    };
+
+    consumer = BG {
+        WITH EXCLUSIVE s AS outer {
+            -- consumer holds 's', then waits for producer
+            NEXT producer;  -- DEADLOCK: producer can't acquire 's' — consumer holds it
+            print(outer.value.toString());
+        }
+    };
+
+    NEXT consumer;  -- hangs here
+END
+```
+
+The fiber holding the lock yields via `NEXT`, but the lock is NOT released when a fiber yields — `WITH EXCLUSIVE` holds the lock for the duration of the block, not just until the next yield point. The producer is stuck waiting for the lock that the consumer holds while waiting for the producer.
+
+**Fix:** resolve the promise before entering the lock, or restructure so the two operations don't depend on each other:
+
+```ruby clear illustrative
+FN main() RETURNS Void ->
+    s = State{ value: 0 } @locked;
+
+    producer = BG {
+        WITH EXCLUSIVE s AS inner {
+            inner.value = 42;
+        }
+    };
+
+    NEXT producer;  -- wait for producer BEFORE acquiring the lock
+
+    WITH s AS inner {
+        print(inner.value.toString());  -- 42
     }
 END
-
-FN main() RETURNS Void ->
-    a = Account{ balance: 100 } @locked;
-    b = Account{ balance: 200 } @locked;
-
-    -- Both fibers use the same src→dst order.
-    t1 = BG { transfer(a, b, 50); };
-    t2 = BG { transfer(a, b, 30); };
-
-    NEXT t1;
-    NEXT t2;
-END
 ```
-
-This is a convention, not a compiler guarantee in standard mode. See STRICT EXTREME below for the compile-time version.
 
 ---
 
-## Fix 2: Single Lock Scope
+## STRICT EXTREME: Compile-Time Lock Ordering (Roadmap)
 
-Restructure so each operation needs only one lock at a time:
+In `STRICT EXTREME` mode (planned, not yet implemented), the compiler will enforce a global acquisition hierarchy via the `OwnershipGraph`. Re-entrant acquisition and AB/BA cycles will be detected at build time:
+
+```
+error: re-entrant lock acquisition
+  fiber acquires 's' at line 8 (WITH EXCLUSIVE)
+  then acquires 's' again at line 11 (WITH EXCLUSIVE)
+  fix: pass the already-locked pointer to helper functions instead
+```
+
+See [docs/strict-extreme.md](strict-extreme.md) for the full STRICT EXTREME roadmap.
+
+---
+
+## Fix: Single Lock Scope (Always Safe)
+
+Restructure so each operation needs only one lock at a time. No re-entrancy, no NEXT-inside-WITH:
 
 ```ruby clear illustrative
 FN main() RETURNS Void ->
     a = Account{ balance: 100 } @locked;
     b = Account{ balance: 200 } @locked;
 
-    -- Read a, release lock; compute; acquire b, write.
-    -- No two locks held simultaneously — deadlock structurally impossible.
     t1 = BG {
         amount = 0;
         WITH EXCLUSIVE a AS ra {
             amount = ra.balance / 2;
             ra.balance = ra.balance - amount;
         }
-        -- a is unlocked here
+        -- a is unlocked here. No re-entrancy possible.
         WITH EXCLUSIVE b AS rb {
             rb.balance = rb.balance + amount;
         }
@@ -106,67 +159,25 @@ FN main() RETURNS Void ->
 END
 ```
 
-The tradeoff: releasing between the two operations creates a TOCTOU window. Use this pattern when the two operations are not required to be atomic together.
-
----
-
-## CLEAR's Runtime Mitigation
-
-Standard-mode CLEAR locks detect when a fiber has been parked waiting for a mutex longer than the configured timeout. If the blocked task is marked `@killable`, the runtime terminates it with an error rather than hanging indefinitely:
-
-```ruby clear illustrative
--- Illustrative — @killable and deadlock timeout are planned for v0.2
-t1 = BG { @killable ->
-    WITH EXCLUSIVE a AS ra {
-        WITH EXCLUSIVE b AS rb {
-            rb.balance = ra.balance;
-        }
-    }
-};
-
--- If t1 deadlocks, the runtime kills it after the configured timeout
--- and NEXT returns an error instead of hanging.
-result = NEXT t1 OR { print("task killed: deadlock timeout"); };
-```
-
-This turns a hang into a recoverable error. It does not prevent the deadlock — it limits the blast radius.
-
----
-
-## STRICT EXTREME: Compile-Time Lock Ordering
-
-In `STRICT EXTREME` mode the compiler enforces a global acquisition hierarchy via the `OwnershipGraph`. If any code path acquires `b` while holding `a`, but another path acquires `a` while holding `b`, the build fails:
-
-```
-error: lock cycle detected
-  t1: acquires 'a' at line 12, then 'b' at line 14
-  t2: acquires 'b' at line 20, then 'a' at line 22
-  fix: establish a consistent acquisition order across all callers
-```
-
-This is a compile-time guarantee — the broken pattern from the first example above would not compile under `STRICT EXTREME`. No runtime overhead; the check is static.
-
-See [docs/strict-extreme.md](strict-extreme.md) for the full STRICT EXTREME feature set.
+The tradeoff: releasing between the two operations creates a TOCTOU window (see [docs/05_toctou](../examples/footguns/05_toctou/main.cht)).
 
 ---
 
 ## Why C, Go, and Rust Get F
 
-All three languages give the programmer locks with no ordering enforcement and no built-in deadlock detection:
+All three languages expose the same non-recursive mutex with no re-entrancy detection and no built-in deadlock timeout:
 
-- **C** (`pthread_mutex_lock`): blocks forever on deadlock. No timeout by default. Requires manual `pthread_mutex_timedlock` or external tooling (Helgrind).
-- **Go** (`sync.Mutex`): blocks forever. The race detector does not detect deadlocks; only Go's goroutine dump (Ctrl+C / SIGABRT) reveals the cycle after the fact.
-- **Rust** (`std::sync::Mutex`): blocks forever. The borrow checker ensures memory safety but says nothing about lock ordering. `parking_lot` crate adds optional deadlock detection as a feature flag.
-
-In all three, the programmer must either impose ordering by convention, use a single lock, or use a higher-level abstraction (channels, actors) to avoid locks entirely.
+- **C** (`pthread_mutex_lock`): hangs forever on re-entrant lock or AB/BA cycle. No detection without Helgrind or TSan.
+- **Go** (`sync.Mutex`): hangs forever for partial deadlocks. Detects global deadlock (all goroutines blocked) with a panic. Race detector does not catch deadlocks.
+- **Rust** (`std::sync::Mutex`): hangs forever. Attempting to lock from the same thread panics on some platforms (documented as "may panic or deadlock"). `parking_lot` adds optional cycle detection.
 
 ---
 
 ## Summary
 
-| Approach | Prevents deadlock? | Cost |
+| Pattern | Current CLEAR behavior | Planned fix |
 |---|---|---|
-| Consistent lock order (manual) | Yes, by convention | None (discipline only) |
-| Single-lock-at-a-time restructure | Yes, structurally | May introduce TOCTOU window |
-| `@killable` timeout recovery | No — limits blast radius | Slight runtime overhead |
-| `STRICT EXTREME` lock ordering | Yes, at compile time | Build-time check only |
+| Re-entrant lock (same fiber re-acquires) | Hangs — non-recursive mutex | STRICT EXTREME: compile error |
+| NEXT inside WITH (holding lock while awaiting) | Hangs — lock not released on yield | STRICT EXTREME: compile error |
+| AB/BA across @parallel fibers | Hangs — same as C/Go/Rust | STRICT EXTREME: compile error |
+| AB/BA on single scheduler | Does not occur — no yield between lock acquisitions | N/A |

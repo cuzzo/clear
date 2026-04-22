@@ -1,150 +1,169 @@
 -- Footgun: Deadlock — CLEAR
 --
--- CLEAR uses cooperative fibers and @locked / @shared:locked for mutex-
--- protected state. Like C, Go, and Rust, the classic AB/BA lock-order
--- deadlock CAN be expressed in standard mode — and it will hang.
+-- CLEAR's cooperative fiber scheduler means the classic AB/BA two-lock
+-- deadlock does NOT occur on a single scheduler: fibers don't yield
+-- between acquiring the first and second lock inside a WITH EXCLUSIVE
+-- block, so the second fiber never gets to hold its lock while the first
+-- is waiting.
 --
--- CLEAR's mitigations (rated A-*):
+-- The CLEAR deadlock footguns are different:
 --
--- 1. Runtime: @killable tasks park instead of hanging forever. If a fiber
---    has been blocked on a mutex longer than the configured timeout, the
---    runtime kills the task and NEXT returns an error. Deadlock becomes a
---    recoverable error rather than an infinite hang. (v0.2)
+-- 1. Re-entrant locking: a fiber tries to acquire a lock it already holds.
+--    CLEAR uses non-recursive pthread_mutex_t. A second acquire from the
+--    same fiber blocks the OS thread permanently — the fiber holding the
+--    lock IS the blocked fiber, so it can never release it.
 --
--- 2. STRICT EXTREME: the compiler enforces a global lock acquisition
---    hierarchy via the OwnershipGraph. Code that acquires lock B while
---    holding lock A, when elsewhere A is acquired after B, fails to compile.
---    This is a zero-cost compile-time guarantee. (v0.3 roadmap)
+-- 2. NEXT inside WITH: a fiber holds a lock and awaits a promise from
+--    another fiber that also needs that lock. WITH EXCLUSIVE holds the
+--    lock for the entire block duration — it is NOT released on yield.
+--    The awaited fiber blocks on the lock; the awaiting fiber blocks on
+--    NEXT; neither can proceed.
 --
--- The * in A-*: if you use @locked without @killable and without STRICT
--- EXTREME, you can still deadlock in standard mode.
+-- CLEAR does NOT yet enforce lock-ordering or re-entrancy at compile time.
+-- That is planned for STRICT EXTREME (v0.3 roadmap).
 
+STRUCT State { value: Int64 }
 STRUCT Account { balance: Int64 }
 
--- BROKEN: AB / BA lock-order deadlock.
--- This compiles but hangs at runtime in standard mode.
--- (Commented out — would deadlock the example program.)
+-- -------------------------------------------------------------------------
+-- BROKEN 1: Re-entrant locking
+-- -------------------------------------------------------------------------
+-- A fiber acquires @locked variable 's', then tries to acquire 's' again
+-- inside the same WITH EXCLUSIVE block. The non-recursive mutex blocks
+-- the OS thread. Nothing can ever release the lock — hang.
 --
--- FN broken_example() RETURNS Void ->
---     a = Account{ balance: 100 } @locked;
---     b = Account{ balance: 200 } @locked;
---
---     t1 = BG {
---         WITH EXCLUSIVE a AS ra {
---             -- t1 holds a, tries to get b
---             WITH EXCLUSIVE b AS rb {    -- DEADLOCK if t2 holds b
---                 rb.balance = rb.balance + ra.balance;
+-- FN broken_reentrant() RETURNS Void ->
+--     s = State{ value: 0 } @locked;
+--     t = BG {
+--         WITH EXCLUSIVE s AS outer {
+--             outer.value = 1;
+--             WITH EXCLUSIVE s AS inner {  -- re-acquires the same lock — DEADLOCK
+--                 inner.value = 2;
 --             }
 --         }
 --     };
---
---     t2 = BG {
---         WITH EXCLUSIVE b AS rb {
---             -- t2 holds b, tries to get a
---             WITH EXCLUSIVE a AS ra {    -- DEADLOCK if t1 holds a
---                 ra.balance = ra.balance + rb.balance;
---             }
---         }
---     };
---
---     NEXT t1;
---     NEXT t2;  -- hangs here
+--     NEXT t;  -- hangs here
 -- END
 
--- CORRECT: consistent lock order — always 'a' before 'b'.
--- Both fibers acquire in the same order; no cycle can form.
-FN correct_ordering() RETURNS Void ->
-    a = Account{ balance: 100 } @locked;
-    b = Account{ balance: 200 } @locked;
+-- -------------------------------------------------------------------------
+-- BROKEN 2: NEXT inside WITH
+-- -------------------------------------------------------------------------
+-- Consumer holds a lock and awaits a producer that also needs that lock.
+-- WITH EXCLUSIVE does not release the lock on yield — it holds it for the
+-- entire block. Producer is stuck waiting for the lock; consumer is stuck
+-- waiting for producer.
+--
+-- FN broken_next_inside_with() RETURNS Void ->
+--     s = State{ value: 0 } @locked;
+--     producer = BG {
+--         WITH EXCLUSIVE s AS inner { inner.value = 42; }
+--     };
+--     consumer = BG {
+--         WITH EXCLUSIVE s AS outer {
+--             NEXT producer;          -- producer needs 's'; consumer holds it — DEADLOCK
+--             print(outer.value.toString());
+--         }
+--     };
+--     NEXT consumer;  -- hangs here
+-- END
 
-    -- t1: a → b
-    t1 = BG {
-        WITH EXCLUSIVE a AS ra {
-            WITH EXCLUSIVE b AS rb {
-                rb.balance = rb.balance + 50;
-                ra.balance = ra.balance - 50;
-            }
+-- -------------------------------------------------------------------------
+-- CORRECT: Resolve promises before acquiring locks
+-- -------------------------------------------------------------------------
+FN correct_next_before_lock() RETURNS Void ->
+    s = State{ value: 0 } @locked;
+
+    producer = BG {
+        WITH EXCLUSIVE s AS inner {
+            inner.value = 42;
         }
     };
 
-    -- t2: a → b  (same order — safe)
-    t2 = BG {
-        WITH EXCLUSIVE a AS ra {
-            WITH EXCLUSIVE b AS rb {
-                rb.balance = rb.balance + 30;
-                ra.balance = ra.balance - 30;
-            }
-        }
-    };
+    NEXT producer;  -- wait for producer BEFORE acquiring the lock
 
-    NEXT t1;
-    NEXT t2;
-
-    WITH EXCLUSIVE a AS ra {
-        print("a.balance = " + ra.balance.toString());
-    }
-    WITH EXCLUSIVE b AS rb {
-        print("b.balance = " + rb.balance.toString());
+    WITH s AS inner {
+        print("value = " + inner.value.toString());  -- 42
     }
 END
 
--- CORRECT: release first lock before acquiring second.
--- No two locks held simultaneously — deadlock structurally impossible here.
--- Tradeoff: the two-step operation is not atomic (TOCTOU window between
--- releasing a and acquiring b).
-FN sequential_locks() RETURNS Void ->
+-- -------------------------------------------------------------------------
+-- CORRECT: Pass already-locked value to helpers (avoid re-entrancy)
+-- -------------------------------------------------------------------------
+FN update_value(inner: State) RETURNS Void ->
+    -- Receives the already-unlocked struct value — no lock needed.
+    inner.value = 2;
+END
+
+FN correct_no_reentrant() RETURNS Void ->
+    s = State{ value: 0 } @locked;
+
+    t = BG {
+        WITH EXCLUSIVE s AS inner {
+            inner.value = 1;
+            update_value(inner);  -- pass the value, not the lock
+        }
+    };
+
+    NEXT t;
+
+    WITH s AS inner {
+        print("final value = " + inner.value.toString());
+    }
+END
+
+-- -------------------------------------------------------------------------
+-- CORRECT: Sequential locks — never hold two at once
+-- -------------------------------------------------------------------------
+FN sequential_transfer() RETURNS Void ->
     a = Account{ balance: 100 } @locked;
     b = Account{ balance: 200 } @locked;
 
-    t1 = BG {
+    t = BG {
         amount = 0;
-        -- Step 1: debit a, release lock.
         WITH EXCLUSIVE a AS ra {
             amount = ra.balance / 2;
             ra.balance = ra.balance - amount;
         }
-        -- a is unlocked here. No deadlock possible.
-        -- Step 2: credit b.
+        -- 'a' is unlocked here — no two locks held simultaneously
         WITH EXCLUSIVE b AS rb {
             rb.balance = rb.balance + amount;
         }
     };
 
-    NEXT t1;
+    NEXT t;
 
-    WITH EXCLUSIVE a AS ra {
-        print("a.balance = " + ra.balance.toString());
-    }
-    WITH EXCLUSIVE b AS rb {
-        print("b.balance = " + rb.balance.toString());
-    }
+    WITH a AS ra { print("a = " + ra.balance.toString()); }
+    WITH b AS rb { print("b = " + rb.balance.toString()); }
 END
 
 FN main() RETURNS Void ->
-    print("--- correct: consistent lock order ---");
-    correct_ordering();
+    print("--- correct: NEXT before lock ---");
+    correct_next_before_lock();
 
-    print("--- correct: sequential locks (no simultaneous holds) ---");
-    sequential_locks();
+    print("--- correct: no re-entrancy ---");
+    correct_no_reentrant();
+
+    print("--- correct: sequential locks ---");
+    sequential_transfer();
 END
 
 -- Summary:
 --
--- CLEAR vs C/Go/Rust vs Pony/BEAM on deadlock:
+-- CLEAR deadlock footguns vs C/Go/Rust:
 --
---   C:     Hangs forever. No detection. External tooling (Helgrind, TSan)
---          required.
+--   C/Go/Rust: Classic AB/BA lock-order deadlock is the primary concern
+--              because threads run truly concurrently. No language-level
+--              detection. Hang forever.
 --
---   Go:    Hangs forever for partial deadlocks (goroutine subset).
---          Detects global deadlock (all goroutines blocked) with a panic.
---          Idiomatic fix: use channels + single-owner goroutines.
+--   CLEAR (single scheduler): AB/BA does not occur — cooperative fibers
+--              don't yield mid-WITH-EXCLUSIVE. The footguns are:
+--              (1) re-entrant locking — fiber locks what it already holds
+--              (2) NEXT inside WITH — holding a lock while awaiting a
+--                  fiber that also needs that lock
+--              Both hang forever in standard mode.
 --
---   Rust:  Hangs forever. Borrow checker says nothing about lock ordering.
---          parking_lot crate adds optional runtime detection.
+--   CLEAR (STRICT EXTREME, roadmap): compile-time error for re-entrancy
+--              and AB/BA cycles via OwnershipGraph lock-ordering analysis.
 --
---   CLEAR: Standard mode — hangs (same as above). @killable tasks convert
---          the hang to a recoverable error. STRICT EXTREME enforces lock
---          ordering at compile time, making the AB/BA pattern a build error.
---
---   Pony/BEAM: Actor model — no shared mutable state, no mutex locks,
---          no deadlock. The pattern cannot be expressed.
+--   Pony/BEAM: Actor model — no shared mutable locks, deadlock by this
+--              mechanism is structurally impossible.
