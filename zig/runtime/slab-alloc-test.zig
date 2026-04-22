@@ -405,8 +405,10 @@ fn validateLargePtr(slab_size: usize, obj: *LargeStack) !void {
     // SlabHeader: 3 optional pointers (8 each) + usize + bool = ~33 bytes.
     // We conservatively use 48 as the aligned header size (matches object_align=16).
     const obj_align = 16; // @max(16, @max(@alignOf(LargeStack), @alignOf(?*anyopaque)))
-    const header_estimate = 48; // alignForward(~33, 16) — matches grow()
-    const first_obj = std.mem.alignForward(usize, header_estimate, obj_align);
+    const header_end = std.mem.alignForward(usize, 48, obj_align); // alignForward(~33, 16)
+    // Stack objects (>= 4KB) get a one-page guard between header and first object.
+    const guard: usize = if (obj_size >= 4096) 4096 else 0;
+    const first_obj = @max(header_end, guard);
     const stride = std.mem.alignForward(usize, obj_size, obj_align);
 
     const ptr_addr = @intFromPtr(obj);

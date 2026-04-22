@@ -45,11 +45,18 @@ pub fn SlabAllocator(comptime T: type) type {
 
         const object_size = @sizeOf(T);
         const object_align = @max(16, @max(@alignOf(T), @alignOf(Node)));
+        // For stack-sized objects (>= 4KB), leave at least one OS page between
+        // the slab header and the first object. Stacks grow downward; a stack
+        // overflow on the lowest object would otherwise corrupt the slab header.
+        // Small-object slabs don't need this gap.
+        const first_obj_offset: usize = blk: {
+            const header_end = std.mem.alignForward(usize, @sizeOf(SlabHeader), object_align);
+            const guard: usize = if (object_size >= 4096) 4096 else 0;
+            break :blk @max(header_end, guard);
+        };
 
         pub fn init(allocator: std.mem.Allocator, slab_size: usize) Self {
             std.debug.assert(std.math.isPowerOfTwo(slab_size));
-            const header_size = @sizeOf(SlabHeader);
-            const first_obj_offset = std.mem.alignForward(usize, header_size, object_align);
             std.debug.assert(slab_size > first_obj_offset + object_size);
 
             local_alloc_mag.count = 0;
@@ -215,22 +222,14 @@ pub fn SlabAllocator(comptime T: type) type {
             const mask = ~(self.slab_size - 1);
             const header_addr = ptr_addr & mask;
             const slab = @as(*SlabHeader, @ptrFromInt(header_addr));
-            // Validate the slab header looks sane
-            if (slab.used_count > 64 or (@intFromPtr(slab) & (self.slab_size - 1)) != 0) {
-                std.debug.print("[destroyToDepot] CORRUPT slab=0x{x} used_count={d} obj=0x{x}\n", .{
-                    header_addr, slab.used_count, ptr_addr,
-                });
-            }
 
             const node: *Node = @ptrCast(@alignCast(obj));
             node.next = slab.free_head;
             slab.free_head = node;
+            std.debug.assert(slab.used_count > 0);
             slab.used_count -= 1;
 
             if (slab.used_count == 0) {
-                // Instead of freeing immediately, move to a "to be cleaned" list
-                // or simply leave it in partial_slabs until deinit.
-                // Freeing here is dangerous while thread-local magazines might still have pointers.
                 if (slab.is_full) {
                     self.removeSlab(slab, &self.full_slabs);
                     self.prependSlab(slab, &self.partial_slabs);
@@ -251,18 +250,12 @@ pub fn SlabAllocator(comptime T: type) type {
             // in destroyToDepot will segfault. Catch it here.
             const addr = @intFromPtr(bytes.ptr);
             if (addr & (self.slab_size - 1) != 0) {
-                // If we can't get aligned memory, we can't function.
-                // We could try to free and retry, but for now, panic or error.
-                std.debug.print("SlabAllocator: Underlying allocator returned unaligned memory! Expected {d}, got ptr {x}\n", .{self.slab_size, addr});
+                std.debug.print("SlabAllocator: unaligned memory: expected {d}-byte alignment, got ptr 0x{x}\n", .{ self.slab_size, addr });
                 return error.OutOfMemory;
             }
 
-            // Cast Chain:
-            // 1. [*]u8 (slice ptr) -> *u8 (single ptr)
             const raw_single_ptr: *u8 = @ptrCast(bytes.ptr);
-            // 2. Assert Alignment (*u8 -> *align(8) u8)
             const aligned_ptr: *align(@alignOf(SlabHeader)) u8 = @alignCast(raw_single_ptr);
-            // 3. Cast to Struct (*align(8) u8 -> *SlabHeader)
             const slab: *SlabHeader = @ptrCast(aligned_ptr);
 
             slab.* = .{
@@ -273,8 +266,7 @@ pub fn SlabAllocator(comptime T: type) type {
                 .is_full = false,
             };
 
-            const header_size = @sizeOf(SlabHeader);
-            var offset = std.mem.alignForward(usize, header_size, object_align);
+            var offset = first_obj_offset;
 
             while (offset + object_size <= self.slab_size) {
                 const node_addr = @intFromPtr(slab) + offset;
@@ -339,13 +331,11 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         pub fn scanUnsafe(self: *Self, context: anytype, comptime func: fn(ctx: @TypeOf(context), ptr: *T) void) void {
-            // Iterate Partial List
             var it = self.partial_slabs;
             while (it) |slab| {
                 self.scanSlab(slab, context, func);
                 it = slab.next;
             }
-            // Iterate Full List
             it = self.full_slabs;
             while (it) |slab| {
                 self.scanSlab(slab, context, func);
@@ -354,28 +344,21 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         fn scanSlab(self: *Self, slab: *SlabHeader, context: anytype, comptime func: fn(ctx: @TypeOf(context), ptr: *T) void) void {
-             const header_size = @sizeOf(SlabHeader);
-             // Re-calculate offset logic matching grow()
-             var offset = std.mem.alignForward(usize, header_size, object_align);
-
-             while (offset + object_size <= self.slab_size) {
-                 const node_addr = @intFromPtr(slab) + offset;
-                 const ptr: *T = @ptrFromInt(node_addr);
-
-                 func(context, ptr);
-
-                 offset += std.mem.alignForward(usize, object_size, object_align);
-             }
+            var offset = first_obj_offset;
+            while (offset + object_size <= self.slab_size) {
+                const node_addr = @intFromPtr(slab) + offset;
+                const ptr: *T = @ptrFromInt(node_addr);
+                func(context, ptr);
+                offset += std.mem.alignForward(usize, object_size, object_align);
+            }
         }
 
         /// Check if an object's slab header belongs to this instance.
         fn ownsSlab(self: *Self, obj: *T) bool {
             const mask = ~(self.slab_size - 1);
             const slab: *SlabHeader = @ptrFromInt(@intFromPtr(obj) & mask);
-            // Check partial_slabs list
             var it = self.partial_slabs;
             while (it) |s| : (it = s.next) { if (s == slab) return true; }
-            // Check full_slabs list
             it = self.full_slabs;
             while (it) |s| : (it = s.next) { if (s == slab) return true; }
             return false;
