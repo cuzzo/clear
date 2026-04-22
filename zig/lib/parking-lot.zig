@@ -42,6 +42,27 @@ inline fn getScheduler() ?*fp.Scheduler {
     return fp.active_scheduler;
 }
 
+// Walk the owner chain from `owner` looking for `waiter`. If found, the
+// waiter is in a deadlock cycle. Depth-limited to 64 to guard against
+// corrupted state. Read locks have no single owner, so they store null in
+// waiting_for_lock_owner and act as chain terminators.
+fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) void {
+    var current = owner;
+    var depth: usize = 0;
+    while (current) |holder| : (depth += 1) {
+        if (holder == waiter) {
+            std.debug.print(
+                "DEADLOCK: lock cycle — fiber {*} waiting on lock {*} which is " ++
+                "transitively held by itself\n",
+                .{ waiter, lock_ptr },
+            );
+            @panic("deadlock: lock cycle detected");
+        }
+        if (depth >= 64) break;
+        current = holder.waiting_for_lock_owner;
+    }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ParkingMutex — exclusive (write) lock
@@ -93,7 +114,8 @@ pub const ParkingMutex = struct {
         const task = sched.current_task.?;
 
         // Re-entrancy check: same task already owns the lock → deadlock.
-        if (self.owner.load(.acquire) == task) {
+        const current_owner = self.owner.load(.acquire);
+        if (current_owner == task) {
             std.debug.print(
                 "DEADLOCK: re-entrant lock acquisition — fiber {*} already holds mutex {*}\n",
                 .{ task, self },
@@ -101,16 +123,22 @@ pub const ParkingMutex = struct {
             @panic("deadlock: re-entrant lock acquisition");
         }
 
+        // Walk the owner chain: if the owner is transitively waiting for a
+        // lock that task holds, we have an AB/BA cycle.
+        detectCycle(task, current_owner, self);
+
         // Set up intrusive waiter on our stack frame (no heap alloc).
         var node = WaiterNode{
             .task = task,
             .sched_ptr = sched,
         };
 
-        // Record lock metadata on the task for the scheduler's timeout scanner.
+        // Record lock metadata on the task for the scheduler's timeout scanner
+        // and for cycle detection by other waiters.
         task.waiting_for_lock.store(self, .release);
         task.waiting_for_lock_list = &self.waiters;
         task.lock_waiter_node = &node;
+        task.waiting_for_lock_owner = current_owner;
 
         // Add to waiter list and set Blocked under the spinlock so unlock()
         // cannot pop our node and submitResume before we have set Blocked.
@@ -132,6 +160,7 @@ pub const ParkingMutex = struct {
         task.waiting_for_lock.store(null, .release);
         task.waiting_for_lock_list = null;
         task.lock_waiter_node = null;
+        task.waiting_for_lock_owner = null;
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;
@@ -239,13 +268,17 @@ pub const ParkingRwLock = struct {
             return;
         }
 
-        // Must wait.
+        // Must wait. Detect cycle before parking (write lock has a single owner).
+        const current_write_owner = self.write_owner.load(.acquire);
+        detectCycle(task, current_write_owner, self);
+
         self.writers_waiting += 1;
         var node = WaiterNode{ .task = task, .sched_ptr = sched };
         self.write_waiters.push(&node);
         task.waiting_for_lock.store(self, .release);
         task.waiting_for_lock_list = &self.write_waiters;
         task.lock_waiter_node = &node;
+        task.waiting_for_lock_owner = current_write_owner;
         task.status.store(.Blocked, .release);
         self.spinRelease();
 
@@ -255,6 +288,7 @@ pub const ParkingRwLock = struct {
         task.waiting_for_lock.store(null, .release);
         task.waiting_for_lock_list = null;
         task.lock_waiter_node = null;
+        task.waiting_for_lock_owner = null;
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;

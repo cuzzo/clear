@@ -337,4 +337,8 @@ pub const Task = struct {
     lock_waiter_node: ?*WaiterNode = null,      // back-ptr to our WaiterNode in that list
     lock_wait_start_ms: i64 = 0,
     lock_timed_out: bool = false,
+    // Set to the exclusive owner of the lock this task is blocked on.
+    // Used by cycle detection: follow the chain task -> owner -> owner -> ...
+    // Null when not blocked or blocked on a read lock (no single owner).
+    waiting_for_lock_owner: ?*Task = null,
 };

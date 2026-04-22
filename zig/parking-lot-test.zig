@@ -498,3 +498,9 @@ test "ParkingRwLock: stress 8 writers 8 readers" {
     try std.testing.expectEqual(@as(usize, NW), shared.write_count);
     try std.testing.expectEqual(@as(usize, NR), shared.read_count);
 }
+
+// Note: AB/BA cycle detection is tested manually — Zig 0.16 has no
+// std.testing.expectPanic. To reproduce: run the binary with two fibers
+// where A holds mu_a and waits for mu_b while B holds mu_b and waits for
+// mu_a. The second lock attempt will print "DEADLOCK: lock cycle detected"
+// and @panic before either fiber parks.
