@@ -138,8 +138,6 @@ pub fn build(b: *std.Build) void {
         "vopr-test.zig",
         "vopr-loom-test.zig",
         "yield-test.zig",
-        "parking-lot-loom-test.zig",
-        "parking-lot-test.zig",
     };
 
     for (test_files) |filename| {
@@ -178,7 +176,6 @@ pub fn build(b: *std.Build) void {
         "slab-alloc-benchmark-test.zig",
         "queues-benchmark-test.zig",
         "scheduler-benchmark-test.zig",
-        "parking-lot-benchmark-test.zig",
         "experimental/freeze_bench.zig",
     };
 
