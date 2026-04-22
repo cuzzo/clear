@@ -1,0 +1,62 @@
+-- Footgun: Buffer Overflow — CLEAR
+--
+-- CLEAR does not expose raw pointers or pointer arithmetic. All collection
+-- access uses bounds-checked indexing: an out-of-bounds access panics at
+-- runtime with a descriptive message. There is no memcpy, no sizeof, no
+-- way to write past the end of a buffer in pure CLEAR.
+--
+-- The underlying Zig runtime emits bounds checks for every array/slice
+-- index. In the default build mode (Zig backend) these are always active.
+-- In --optimized (LLVM ReleaseFast) the compiler can elide checks it can
+-- prove are in-range; explicitly out-of-bounds accesses still panic.
+--
+-- CLEAR's string type is a length-prefixed slice, not a null-terminated
+-- char*. String indexing operates on codepoints, not raw bytes, and is
+-- bounds-checked. There is no strncpy, strncat, or sprintf.
+
+STRUCT ByteBuffer { data: [Int] }
+
+FN safe_access() RETURNS Void ->
+    buf = [0, 0, 0, 0];   -- 4-element list
+
+    -- Out-of-bounds access:
+    -- val = buf[10];      -- runtime panic: index 10 out of bounds (len 4)
+
+    -- Correct: iterate within bounds
+    i = 0;
+    WHILE i < buf.len() {
+        buf[i]! = i;
+        i = i + 1;
+    }
+
+    print("buf[0]=" + buf[0].toString());
+    print("buf[3]=" + buf[3].toString());
+END
+
+FN off_by_one() RETURNS Void ->
+    arr = [0, 1, 2, 3, 4, 5, 6, 7];   -- 8 elements (indices 0-7)
+
+    -- arr[8] would panic: index 8 out of bounds (len 8)
+    -- The C footgun (i <= 8 instead of i < 8) cannot silently succeed.
+
+    last = arr[arr.len() - 1];  -- safe: always the last element
+    print("arr[7]=" + last.toString());
+END
+
+FN main() RETURNS Void ->
+    safe_access();
+    off_by_one();
+END
+
+-- Summary:
+--
+-- CLEAR eliminates buffer overflow at the language level:
+-- - No raw pointer arithmetic or pointer casts to array pointers
+-- - All indexing is bounds-checked (runtime panic, never silent corruption)
+-- - Strings are length-prefixed slices, not null-terminated char*
+-- - No memcpy/memset/strncpy equivalents that take a raw byte count
+--
+-- The tradeoff vs C: you cannot write a custom memory allocator or DMA
+-- driver in pure CLEAR — those require inline Zig with explicit unsafe.
+-- The benefit: the entire buffer overflow / memory corruption category
+-- is structurally impossible in pure CLEAR code.

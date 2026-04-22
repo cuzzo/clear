@@ -1,0 +1,39 @@
+-- Footgun: Use-After-Free — CLEAR
+--
+-- CLEAR's ownership system prevents UAF at compile time via two mechanisms:
+--
+-- 1. GIVE transfers ownership to the callee. Any subsequent use of the
+--    original binding is a compile error: "variable was moved".
+--
+-- 2. Frame-escape analysis: local variables live on the arena frame.
+--    If a value would be read after its frame is rewound (e.g. a pointer
+--    stored in a longer-lived container), the compiler promotes it to the
+--    heap at declaration time — no dangling frame reference is possible.
+
+STRUCT Player { name: String, score: Int64 }
+
+-- Takes ownership of the player; it is freed when this function returns.
+FN consume(TAKES p: Player) RETURNS Void ->
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    p = Player{ name: "Alice", score: 100 };
+    print(p.name);          -- OK: p is still owned here
+
+    consume(GIVE p);        -- ownership transferred; p is gone
+
+    -- print(p.name);       -- ERROR: 'p' was moved on the line above
+    --                       -- "variable 'p' used after GIVE"
+
+    -- ----------------------------------------------------------------
+    -- Frame escape: CLEAR detects when a frame value outlives its scope
+    -- and automatically promotes it to the heap. No dangling pointers.
+
+    items: []Int64 = [10, 20, 30];
+    -- Returning 'items' from this scope is safe: escape analysis sees
+    -- it must outlive the frame and allocates it on the heap directly.
+    -- The "frame then promote" pattern that causes UAF in C never occurs.
+
+    print("use_after_free: CLEAR prevents this at compile time");
+END

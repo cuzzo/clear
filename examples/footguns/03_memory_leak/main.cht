@@ -1,0 +1,51 @@
+-- Footgun: Memory Leak — CLEAR
+--
+-- CLEAR's static leak checker (MIRChecker) verifies at compile time that
+-- every heap allocation has a matching cleanup on EVERY control-flow path,
+-- including error paths and early returns.
+--
+-- The C pattern — allocate, then return early without freeing — is caught
+-- before the binary is produced. No valgrind needed.
+
+FN process(input: String) RETURNS String OR RAISE ->
+    buf: String = "processed: " + input;   -- heap allocation
+
+    IF input.startsWith("!") THEN
+        RAISE "bad input";
+        -- ERROR (if buf had no cleanup): MIRChecker: LEAK
+        -- 'buf' allocated on line above has no cleanup on this path.
+        -- CLEAR inserts the cleanup automatically (like defer in Go),
+        -- so in practice this compiles and buf is freed on the error path.
+    END
+
+    RETURN buf;   -- ownership transferred to caller; buf not freed here
+END
+
+FN main() RETURNS Void ->
+    -- Happy path: buf ownership moves to result, freed when result goes
+    -- out of scope.
+    result = process("hello") OR RAISE;
+    print(result);
+
+    -- Error path: buf inside process() is freed automatically before
+    -- the error propagates. No leak.
+    process("!bad") OR {
+        print("error (no leak: CLEAR freed buf on the error path)");
+    };
+
+    -- ----------------------------------------------------------------
+    -- The broken version — what MIRChecker catches:
+    --
+    -- FN broken(input: String) RETURNS String OR RAISE ->
+    --     buf: String = concat("processed: ", input);  -- heap alloc
+    --     IF input.startsWith("!") THEN
+    --         RAISE "bad";   -- ERROR: LEAK — buf has no cleanup here
+    --     END                --   MIRChecker: alloc at line N has no
+    --     RETURN buf;        --   matching Drop on the RAISE path
+    -- END
+    --
+    -- This is the same shape as the C bug. CLEAR rejects it at compile
+    -- time; C silently leaks 256 bytes.
+
+    print("memory_leak: CLEAR catches missing cleanup at compile time");
+END

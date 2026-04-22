@@ -1,0 +1,78 @@
+-- Footgun: Alias Mutation — CLEAR
+--
+-- CLEAR's ownership system prevents aliased mutation through two mechanisms:
+--
+-- 1. Single ownership: every value has exactly one owner at a time.
+--    You cannot have two live bindings that both own the same data.
+--    Transferring ownership via GIVE invalidates the original binding.
+--
+-- 2. Shared state via @shared:locked: if you DO want shared mutable access,
+--    you must declare it explicitly as @shared:locked (Arc<Mutex<T>>) or
+--    @shared:writeLocked (Arc<RwLock<T>>). All access goes through WITH or
+--    WITH EXCLUSIVE blocks that hold the lock — there is no way to hold a
+--    reference and mutate the same object simultaneously.
+--
+-- The C "restrict lie" pattern cannot be expressed: the compiler never
+-- assumes non-aliasing, and the language does not expose raw pointers.
+
+STRUCT Point { x: Int, y: Int }
+
+FN demonstrate_ownership() RETURNS Void ->
+    p1 = Point{ x: 1, y: 2 };
+
+    -- GIVE transfers ownership; p1 is no longer valid after this.
+    -- Using p1 after GIVE is a compile-time error.
+    -- p2 = GIVE p1;
+    -- print(p1.x.toString()); -- compile error: p1 was moved
+
+    -- Without GIVE, structs in CLEAR are implicitly copied for Copy types.
+    -- Point has only Int fields (Copy), so assignment copies the value.
+    p2 = p1;       -- copy: p2 is a fresh copy, p1 is still valid
+    -- p2.x = 99; -- mutation requires MUTABLE declaration
+
+    MUTABLE p3 = p1;    -- mutable copy
+    p3.x = 99;
+    print("p1.x after p3.x=99: " + p1.x.toString()); -- still 1, copy semantics
+    print("p3.x = " + p3.x.toString());               -- 99
+END
+
+FN shared_mutation() RETURNS Void ->
+    -- To share mutable state, declare it @shared:locked.
+    -- Access requires WITH EXCLUSIVE (write) or WITH (read).
+    -- You cannot hold a reference AND mutate simultaneously:
+    -- the mutex enforces that at most one accessor holds the lock.
+    counter = 0 @shared:locked;
+
+    writer = BG {
+        WITH EXCLUSIVE counter AS c {
+            c! = 42;
+            -- Lock released here. No other accessor can read/write c
+            -- while this block executes.
+        }
+    };
+
+    NEXT writer;
+
+    WITH counter AS c {
+        print("counter = " + c.toString()); -- 42
+    }
+END
+
+FN main() RETURNS Void ->
+    demonstrate_ownership();
+    shared_mutation();
+END
+
+-- Summary:
+--
+-- CLEAR prevents alias mutation through ownership (not aliasing analysis):
+-- - Single-owner semantics: GIVE invalidates the source binding
+-- - Copy types (Int, Bool, String) copy on assignment — no aliasing
+-- - Non-copy heap types (List, Map, complex structs) require GIVE to
+--   transfer, preventing implicit aliasing
+-- - Shared mutation requires @shared:locked + WITH, which serializes
+--   access via a mutex — no concurrent aliased mutation possible
+--
+-- There is no "restrict" keyword because there is no pointer arithmetic.
+-- There is no strict-aliasing optimization rule because there are no
+-- raw pointers to alias.

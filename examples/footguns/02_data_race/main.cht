@@ -1,0 +1,48 @@
+-- Footgun: Data Race — CLEAR
+--
+-- CLEAR makes data races impossible at the type level.
+-- Shared mutable state must be declared @shared:locked (Arc<Mutex<T>>).
+-- The WITH EXCLUSIVE block is the only way to mutate it, and it serializes
+-- access. There is no way to hold a mutable reference outside a WITH block.
+--
+-- A raw mutable local cannot be captured by concurrent BG fibers at all:
+-- the escape analysis sees the concurrent capture and requires @shared.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    -- @shared:locked = Arc<Mutex<Counter>>. Mutation requires WITH EXCLUSIVE.
+    c = Counter{ value: 0 } @shared:locked;
+
+    p1 = BG {
+        REPEAT 1000000 TIMES
+            WITH EXCLUSIVE c AS inner {
+                inner.value = inner.value + 1;
+            }
+        END
+    };
+
+    p2 = BG {
+        REPEAT 1000000 TIMES
+            WITH EXCLUSIVE c AS inner {
+                inner.value = inner.value + 1;
+            }
+        END
+    };
+
+    NEXT p1;
+    NEXT p2;
+
+    WITH c AS inner {
+        -- Always 2000000: WITH EXCLUSIVE serializes all mutations.
+        ASSERT inner.value == 2000000, "no data race";
+        print(inner.value.str());
+    }
+END
+
+-- The broken version does not compile:
+--
+--   MUTABLE counter: Int64 = 0;
+--   p1 = BG { counter! = counter + 1; };   -- ERROR: 'counter' is a frame
+--   p2 = BG { counter! = counter + 1; };   -- local captured by concurrent
+--                                           -- fibers; requires @shared:locked
