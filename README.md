@@ -53,7 +53,7 @@ CLEAR attempts to merge the best of Rust, Go, and SQL to build the language of t
 
 ### Declarative Concurrency
 
-Concurrency is not hard.  SQL is the most commonly used programming language in the world, and it executes parallel queries as effiently as possible.
+Concurrency is not hard.  SQL is the most commonly used programming language in the world, and it executes parallel queries quite efficiently.
 
 Concurrency is only hard when you have to tell the computer exactly how to achieve it safely and efficiently.  CLEAR does the hard part for you like a SQL engine.
 
