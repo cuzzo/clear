@@ -253,16 +253,26 @@ pub const LOCK_TIMEOUT_MS: i64 = 30_000;
 
 // Intrusive waiter node placed on the parking fiber's stack (no heap alloc).
 // Used by ParkingMutex and ParkingRwLock to track blocked fibers.
+// Waiter kind is used by ParkingRwLock's FIFO waiter list so the wake path
+// knows whether to grant a read or a write slot. ParkingMutex ignores it.
+pub const WaiterKind = enum(u8) { Write, Read };
+
 pub const WaiterNode = struct {
     task: *Task = undefined,
     sched_ptr: *anyopaque = undefined, // *Scheduler, erased to avoid circular import
     next: ?*WaiterNode = null,
+    kind: WaiterKind = .Write,
 };
 
-// Spinlock-protected intrusive linked list of WaiterNodes.
+// Spinlock-protected intrusive FIFO queue of WaiterNodes.
 // Placed inside ParkingMutex / ParkingRwLock. Not heap-allocated.
+// push() appends to the tail; pop() removes from the head. FIFO prevents
+// waiter starvation under high contention regardless of whether the lock
+// is a mutex (LIFO would let new arrivals keep grabbing the lock ahead of
+// already-parked fibers) or an rwlock (FIFO is the basis of fair ordering).
 pub const WaiterList = struct {
     head: ?*WaiterNode = null,
+    tail: ?*WaiterNode = null,
     spin: Atomic(u32) = Atomic(u32).init(0),
 
     pub fn spinAcquire(self: *WaiterList) void {
@@ -275,16 +285,31 @@ pub const WaiterList = struct {
         self.spin.store(0, .release);
     }
 
+    // Append to tail (FIFO).
     pub fn push(self: *WaiterList, node: *WaiterNode) void {
-        node.next = self.head;
-        self.head = node;
+        node.next = null;
+        if (self.tail) |t| {
+            t.next = node;
+            self.tail = node;
+        } else {
+            self.head = node;
+            self.tail = node;
+        }
     }
 
+    // Remove from head.
     pub fn pop(self: *WaiterList) ?*WaiterNode {
         const h = self.head orelse return null;
         self.head = h.next;
+        if (self.head == null) self.tail = null;
         h.next = null;
         return h;
+    }
+
+    // Peek at head without removing (used by rwlock wakeNext to decide
+    // whether the next drain step is a reader or a writer).
+    pub fn peek(self: *const WaiterList) ?*WaiterNode {
+        return self.head;
     }
 
     pub fn remove(self: *WaiterList, target: *WaiterNode) bool {
@@ -293,6 +318,7 @@ pub const WaiterList = struct {
         while (curr) |c| {
             if (c == target) {
                 if (prev) |p| p.next = c.next else self.head = c.next;
+                if (self.tail == c) self.tail = prev;
                 c.next = null;
                 return true;
             }

@@ -365,11 +365,11 @@ test "ParkingRwLocked: read/write guard API" {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
             // Write
-            var wg = try c.l.write();
+            var wg = c.l.write();
             wg.get().* = 42;
             wg.release();
             // Read back
-            var rg = try c.l.read();
+            var rg = c.l.read();
             c.ok = rg.get().* == 42;
             rg.release();
         }
@@ -824,9 +824,15 @@ test "ParkingMutex: lock timeout returns error.LockTimeout, lock remains usable"
     try std.testing.expectEqual(@as(u32, 0), shared.mu.locked.load(.monotonic));
 }
 
-test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can proceed" {
-    // Regression test for: writers_waiting not decremented on write-lock timeout,
-    // permanently blocking future readers via the wakeNext writers_waiting == 0 guard.
+test "ParkingRwLock: write-lock timeout does not permanently block readers" {
+    // Regression test: a writer that parks and then times out must not
+    // leave the rwlock in a state that permanently blocks readers. The
+    // pre-FIFO implementation had a `writers_waiting` counter that was
+    // not decremented on timeout, and wakeNext would skip readers until
+    // it hit zero. The current FIFO design removes the counter entirely
+    // (peek at queue head determines grant), but the invariant -- "after
+    // a writer timeout, subsequent readers succeed" -- is still worth
+    // pinning down.
     //
     // Fully event-driven: no wall-clock sleeps. The scheduler's idle path
     // arms an io_uring timeout for the earliest lock-waiter deadline, so
@@ -834,11 +840,9 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
     //
     //   1. Main spawns A (takes write lock) and B (queues for write lock).
     //   2. Main waits on b_wg for B to finish via LockTimeout.
-    //   3. Main snapshots rw.writers_waiting. With the fix writers_waiting
-    //      is 0; without it, it would be stuck at 1.
-    //   4. Main spawns C (queues for read lock) and signals A via release_wg.
-    //   5. A unlocks. wakeNext wakes C iff writers_waiting == 0.
-    //   6. Main waits on ac_wg for A and C.
+    //   3. Main spawns C (queues for read lock) and signals A via release_wg.
+    //   4. A unlocks. wakeNext drains the FIFO queue. C (head) gets read grant.
+    //   5. Main waits on ac_wg for A and C.
     const t_alloc = std.testing.allocator;
     var ebr = EbrContext{};
     defer ebr.deinit(t_alloc);
@@ -855,18 +859,16 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
     const Shared = struct {
         rw: ParkingRwLock = .{},
         // b_wg drops to 0 when B finishes (times out). Main waits on this
-        // before snapshotting writers_waiting.
+        // before spawning C.
         b_wg: CheatHeader.WaitGroup,
         // release_wg is pre-added(1). A waits on it after taking rw. Main
-        // calls done() to release A only after snapshotting writers_waiting
-        // and spawning C -- so A's unlock wakes C's read-lock wait.
+        // calls done() to release A only after spawning C -- so A's unlock
+        // wakes C's read-lock wait.
         release_wg: CheatHeader.WaitGroup,
         // ac_wg drops to 0 when A and C both finish. Main waits on this last.
         ac_wg: CheatHeader.WaitGroup,
         b_got_timeout: bool = false,
         c_read_counter: usize = 0,
-        // Snapshot captured by Main immediately after B times out.
-        writers_waiting_after_b: u32 = std.math.maxInt(u32),
     };
     var shared = Shared{
         .b_wg = CheatHeader.WaitGroup.init(&sched),
@@ -928,11 +930,9 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
             // once B hits lock_timeout_ms.
             self.s.b_wg.wait();
 
-            // Snapshot -- no further lock activity has happened.
-            self.s.writers_waiting_after_b = self.s.rw.writers_waiting;
-
-            // Now queue C and release A. C parks in read_waiters; A's unlock
-            // calls wakeNext which wakes C iff writers_waiting == 0.
+            // Now queue C (parks in the unified FIFO waiter queue) and
+            // release A. A's unlock drains the queue; C (at the head)
+            // gets the read grant.
             try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberC.run)), self.cc, .{ .stack_size = .Large });
             self.s.release_wg.done();
 
@@ -944,11 +944,9 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
     sched.run();
 
     try std.testing.expect(shared.b_got_timeout);
-    // The core invariant this test was written for: writers_waiting must be
-    // back to 0 at the moment B finishes its timeout.
-    try std.testing.expectEqual(@as(u32, 0), shared.writers_waiting_after_b);
+    // After B's timeout, the FIFO queue is empty of the phantom writer,
+    // so C's lockShared succeeds.
     try std.testing.expectEqual(@as(usize, 1), shared.c_read_counter);
-    try std.testing.expectEqual(@as(u32, 0), shared.rw.writers_waiting);
     try std.testing.expect(!shared.rw.write_locked);
     try std.testing.expectEqual(@as(i32, 0), shared.rw.readers);
 }

@@ -178,6 +178,7 @@ pub fn build(b: *std.Build) void {
         "slab-alloc-benchmark-test.zig",
         "queues-benchmark-test.zig",
         "scheduler-benchmark-test.zig",
+        "parking-lot-benchmark-test.zig",
         "experimental/freeze_bench.zig",
     };
 

@@ -42,6 +42,28 @@ pub const LockError = error{
     LockTimeout,
 };
 
+// Non-fiber (raw-thread) waiters spin this many iterations before falling
+// back to a futex park. Short enough that very brief contention stays in
+// user space; long enough that sustained contention parks in the kernel
+// instead of burning 100% CPU.
+const SPIN_BUDGET: u32 = 64;
+
+// Thin Linux-futex wrapper for the non-fiber fallback. The CLEAR runtime is
+// Linux-only (io_uring), so a portable abstraction is unnecessary. Used
+// only on the raw-thread path — fiber callers park on the scheduler via
+// task.base.yield() which is cheaper than any syscall.
+const linux = std.os.linux;
+const Futex = struct {
+    inline fn wait(ptr: *std.atomic.Value(u32), expected: u32) void {
+        const op = linux.FUTEX_OP{ .cmd = .WAIT, .private = true };
+        _ = linux.futex_4arg(@ptrCast(&ptr.raw), op, expected, null);
+    }
+    inline fn wake(ptr: *std.atomic.Value(u32), n: u32) void {
+        const op = linux.FUTEX_OP{ .cmd = .WAKE, .private = true };
+        _ = linux.futex_3arg(@ptrCast(&ptr.raw), op, n);
+    }
+};
+
 // Returns the active scheduler if we are currently running inside a fiber,
 // null otherwise (scheduler startup, test code, non-fiber paths).
 inline fn getScheduler() ?*fp.Scheduler {
@@ -104,18 +126,24 @@ pub const ParkingMutex = struct {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
-            // Non-fiber context: spin with OS yield backoff.
+            // Non-fiber context: adaptive spin then futex park.
+            // Previous version spun forever with std.Thread.yield(), which
+            // burned 100% of a core under contention. Futex parks the
+            // thread in the kernel (zero CPU) until the locked field is
+            // seen at 0 -- i.e. until unlock() wakes it.
             var spins: u32 = 0;
-            while (!self.tryLock()) {
-                spins += 1;
-                if (spins > 256) {
-                    std.Thread.yield() catch {};
-                    spins = 0;
-                } else {
+            while (true) {
+                if (self.tryLock()) return;
+                if (spins < SPIN_BUDGET) {
                     std.atomic.spinLoopHint();
+                    spins += 1;
+                    continue;
                 }
+                // Park: wait while locked == 1. Returns when unlock stores 0
+                // and calls Futex.wake (or on spurious wakeup, which retries).
+                Futex.wait(&self.locked, 1);
+                spins = 0;
             }
-            return;
         }
 
         const sched = sched_opt.?;
@@ -214,32 +242,50 @@ pub const ParkingMutex = struct {
             w.task.waiting_for_lock.store(null, .release);
             const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
             sched.submitResume(w.task);
+            // Fiber waiter path: the locked field stays 1 (ownership transferred).
+            // A raw-thread waiter parked on Futex.wait(&locked, 1) stays asleep;
+            // it'll be woken when a future unlock takes the no-waiter branch.
         } else {
-            // No waiters — fully release the lock.
+            // No fiber waiters — fully release the lock and wake one raw-thread
+            // waiter (if any) via the futex.
             self.locked.store(0, .release);
+            Futex.wake(&self.locked, 1);
         }
     }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ParkingRwLock — readers-writer lock (write-preferring)
+// ParkingRwLock — fair readers-writer lock
 //
-// State machine (protected by spin):
-//   readers  > 0:  N readers hold the lock
-//   readers == 0:  unlocked
-//   write_locked:  exclusive writer holds the lock
+// State (protected by `spin`):
+//   readers > 0        N readers hold the lock
+//   write_locked       exclusive writer holds the lock
+//   (neither)          unlocked
 //
-// Write-preference: new readers are blocked when writers_waiting > 0.
+// Fairness: a single FIFO queue of waiters. wakeNext drains from the head:
+//   - head is a Writer and readers == 0  -> grant write, stop.
+//   - head is a Reader                    -> grant read, continue draining
+//     contiguous readers until the first Writer (which stays queued).
+// New arrivals queue unconditionally if the queue is non-empty -- this
+// prevents both writer starvation (no reader bypasses a queued writer)
+// and reader starvation (no writer stream bypasses queued readers).
+//
+// Non-fiber callers (tests, startup, off-fiber embedding) spin briefly
+// then park on `gen` via the futex; every state-changing op wakes one.
 // ─────────────────────────────────────────────────────────────────────────────
 pub const ParkingRwLock = struct {
     readers: i32 = 0,
     write_locked: bool = false,
-    writers_waiting: u32 = 0,
-    // Spinlock protecting the state fields above and both waiter lists.
+    // Spinlock protecting the state fields above and the waiter list.
     spin: Atomic(u32) = Atomic(u32).init(0),
-    write_waiters: WaiterList = .{},
-    read_waiters: WaiterList = .{},
+    // Unified FIFO waiter queue. Each node carries its kind (Read|Write).
+    waiters: WaiterList = .{},
     write_owner: std.atomic.Value(?*Task) = std.atomic.Value(?*Task).init(null),
+    // Futex counter for non-fiber waiters. Bumped on every state change
+    // that could unblock a waiter (unlock, unlockShared when readers==0,
+    // and inside wakeNext's reader drain). Non-fiber waiters call
+    // `gen.wait(last_seen, null)` to sleep until a change occurs.
+    gen: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
     fn spinAcquire(self: *ParkingRwLock) void {
         while (self.spin.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
@@ -251,24 +297,39 @@ pub const ParkingRwLock = struct {
         self.spin.store(0, .release);
     }
 
+    // Bump the futex generation and wake any non-fiber waiter. Called from
+    // unlock paths; safe to call with the spinlock held.
+    fn signalGen(self: *ParkingRwLock) void {
+        _ = self.gen.fetchAdd(1, .release);
+        Futex.wake(&self.gen, 1);
+    }
+
     // Exclusive (write) lock
     pub fn lock(self: *ParkingRwLock) LockError!void {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
-            // Non-fiber: spin until we can write-lock.
+            // Non-fiber: short spin, then park on futex.
             var spins: u32 = 0;
             while (true) {
                 self.spinAcquire();
+                // Fair: a non-fiber writer bypasses the waiter queue (we have
+                // no WaiterNode to park on from off-fiber). This is rare path
+                // usage (bootstrap, tests); correctness-over-fairness is fine.
                 if (!self.write_locked and self.readers == 0) {
                     self.write_locked = true;
                     self.spinRelease();
                     return;
                 }
+                const snapshot = self.gen.load(.acquire);
                 self.spinRelease();
-                spins += 1;
-                if (spins > 256) { std.Thread.yield() catch {}; spins = 0; }
-                else std.atomic.spinLoopHint();
+                if (spins < SPIN_BUDGET) {
+                    std.atomic.spinLoopHint();
+                    spins += 1;
+                } else {
+                    Futex.wait(&self.gen, snapshot);
+                    spins = 0;
+                }
             }
         }
 
@@ -276,7 +337,8 @@ pub const ParkingRwLock = struct {
         const task = sched.current_task.?;
 
         self.spinAcquire();
-        if (!self.write_locked and self.readers == 0) {
+        // Fast path: only if lock is fully unheld and no one is queued.
+        if (!self.write_locked and self.readers == 0 and self.waiters.isEmpty()) {
             self.write_locked = true;
             self.write_owner.store(task, .release);
             self.spinRelease();
@@ -285,20 +347,16 @@ pub const ParkingRwLock = struct {
 
         // Must wait. Detect cycle before parking (write lock has a single owner).
         const current_write_owner = self.write_owner.load(.acquire);
-        // Release spinlock before potentially returning an error so we leave
-        // the lock state consistent.
         self.spinRelease();
         try detectCycle(task, current_write_owner, self);
         self.spinAcquire();
 
-        self.writers_waiting += 1;
-        var node = WaiterNode{ .task = task, .sched_ptr = sched };
-        self.write_waiters.push(&node);
+        var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
+        self.waiters.push(&node);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.write_waiters;
+        task.waiting_for_lock_list = &self.waiters;
         task.lock_waiter_node = &node;
         task.waiting_for_lock_owner = current_write_owner;
-        task.lock_counter_ptr = &self.writers_waiting;
         task.status.store(.Blocked, .release);
         self.spinRelease();
 
@@ -309,7 +367,6 @@ pub const ParkingRwLock = struct {
         task.waiting_for_lock_list = null;
         task.lock_waiter_node = null;
         task.waiting_for_lock_owner = null;
-        task.lock_counter_ptr = null;
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;
@@ -327,6 +384,7 @@ pub const ParkingRwLock = struct {
         self.write_owner.store(null, .release);
         self.wakeNext();
         self.spinRelease();
+        self.signalGen();
     }
 
     // Shared (read) lock
@@ -337,15 +395,22 @@ pub const ParkingRwLock = struct {
             var spins: u32 = 0;
             while (true) {
                 self.spinAcquire();
-                if (!self.write_locked and self.writers_waiting == 0) {
+                // Fair: a new reader joins only if nobody is queued, so we
+                // cannot bypass a waiting writer.
+                if (!self.write_locked and self.waiters.isEmpty()) {
                     self.readers += 1;
                     self.spinRelease();
                     return;
                 }
+                const snapshot = self.gen.load(.acquire);
                 self.spinRelease();
-                spins += 1;
-                if (spins > 256) { std.Thread.yield() catch {}; spins = 0; }
-                else std.atomic.spinLoopHint();
+                if (spins < SPIN_BUDGET) {
+                    std.atomic.spinLoopHint();
+                    spins += 1;
+                } else {
+                    Futex.wait(&self.gen, snapshot);
+                    spins = 0;
+                }
             }
         }
 
@@ -353,17 +418,17 @@ pub const ParkingRwLock = struct {
         const task = sched.current_task.?;
 
         self.spinAcquire();
-        // Write-preferring: block new readers if a writer is waiting or holds.
-        if (!self.write_locked and self.writers_waiting == 0) {
+        // Fair: if anyone is queued ahead of us, park -- don't leapfrog.
+        if (!self.write_locked and self.waiters.isEmpty()) {
             self.readers += 1;
             self.spinRelease();
             return;
         }
 
-        var node = WaiterNode{ .task = task, .sched_ptr = sched };
-        self.read_waiters.push(&node);
+        var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Read };
+        self.waiters.push(&node);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.read_waiters;
+        task.waiting_for_lock_list = &self.waiters;
         task.lock_waiter_node = &node;
         // waiting_for_lock_owner stays null: read locks have no single owner.
         task.status.store(.Blocked, .release);
@@ -393,39 +458,49 @@ pub const ParkingRwLock = struct {
         self.readers -= 1;
         if (self.readers == 0) self.wakeNext();
         self.spinRelease();
+        self.signalGen();
     }
 
-    // Wake the highest-priority waiter (call while holding spinlock).
-    // Writer-preference: wake a writer if one is waiting. Otherwise wake all
-    // pending readers.
+    // Wake the next waiter(s) in FIFO order (call with spinlock held).
+    // Must be called only when the lock is in a grantable state:
+    //   - From unlock(): write_locked == false (just cleared), readers == 0.
+    //   - From unlockShared(): readers just dropped to 0, write_locked == false.
     //
-    // Before every submitResume we clear the waiter's wait-state fields. See
-    // ParkingMutex.unlock for the rationale (cycle-detection false-positive
-    // race if we leave stale pointers visible to concurrent detectCycle walks).
+    // Drain rule: peek at head.
+    //   - Head is Writer and readers == 0  -> grant write, stop.
+    //   - Head is Reader                    -> grant read, loop for next.
+    //   - Stop on first Writer after grants if any reader(s) remain held
+    //     (read batch has concurrency; writer must wait for the batch to
+    //     drain before it can acquire exclusive).
     fn wakeNext(self: *ParkingRwLock) void {
-        if (self.write_waiters.head != null and !self.write_locked and self.readers == 0) {
-            const w = self.write_waiters.pop().?;
-            self.writers_waiting -= 1;
-            self.write_locked = true;
-            self.write_owner.store(w.task, .release);
-            w.task.waiting_for_lock_owner = null;
-            w.task.waiting_for_lock_list = null;
-            w.task.lock_waiter_node = null;
-            w.task.lock_counter_ptr = null;
-            w.task.waiting_for_lock.store(null, .release);
-            const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
-            sched.submitResume(w.task);
-            return;
-        }
-        // Wake all waiting readers (they can hold concurrently).
-        if (!self.write_locked and self.writers_waiting == 0) {
-            while (self.read_waiters.pop()) |r| {
-                self.readers += 1;
-                r.task.waiting_for_lock_list = null;
-                r.task.lock_waiter_node = null;
-                r.task.waiting_for_lock.store(null, .release);
-                const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
-                sched.submitResume(r.task);
+        while (self.waiters.peek()) |head| {
+            switch (head.kind) {
+                .Write => {
+                    // Writer can only acquire when no readers hold the lock.
+                    // If we've already granted reads in this loop iteration,
+                    // readers > 0, and we stop.
+                    if (self.readers > 0) return;
+                    const w = self.waiters.pop().?;
+                    self.write_locked = true;
+                    self.write_owner.store(w.task, .release);
+                    w.task.waiting_for_lock_owner = null;
+                    w.task.waiting_for_lock_list = null;
+                    w.task.lock_waiter_node = null;
+                    w.task.waiting_for_lock.store(null, .release);
+                    const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
+                    sched.submitResume(w.task);
+                    return;
+                },
+                .Read => {
+                    const r = self.waiters.pop().?;
+                    self.readers += 1;
+                    r.task.waiting_for_lock_list = null;
+                    r.task.lock_waiter_node = null;
+                    r.task.waiting_for_lock.store(null, .release);
+                    const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
+                    sched.submitResume(r.task);
+                    // Keep draining: next head might be another reader.
+                },
             }
         }
     }
@@ -446,12 +521,35 @@ pub fn ParkingRwLocked(comptime T: type) type {
             return .{ .data = val };
         }
 
-        pub fn read(self: *Self) LockError!ReadGuard {
+        // NOTE: read()/write() panic on lock errors (Deadlock/LockTimeout)
+        // because CLEAR's @shared:writeLocked WITH-block codegen emits these
+        // without `try`. For explicit error handling, call self.rw.lock() /
+        // self.rw.lockShared() directly, which return LockError!void.
+        //
+        // This preserves a stable guard-based API (compat.RwLocked mirror)
+        // while keeping the lower-level parking-lot API fallible for code
+        // that wants to recover from deadlocks.
+        pub fn read(self: *Self) ReadGuard {
+            self.rw.lockShared() catch |e| {
+                std.debug.panic("ParkingRwLocked.read: {}", .{e});
+            };
+            return .{ .parent = self };
+        }
+
+        pub fn write(self: *Self) WriteGuard {
+            self.rw.lock() catch |e| {
+                std.debug.panic("ParkingRwLocked.write: {}", .{e});
+            };
+            return .{ .parent = self };
+        }
+
+        // Fallible variants for callers that want to recover from errors.
+        pub fn readOrErr(self: *Self) LockError!ReadGuard {
             try self.rw.lockShared();
             return .{ .parent = self };
         }
 
-        pub fn write(self: *Self) LockError!WriteGuard {
+        pub fn writeOrErr(self: *Self) LockError!WriteGuard {
             try self.rw.lock();
             return .{ .parent = self };
         }
