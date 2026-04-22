@@ -2,6 +2,7 @@ const std = @import("std");
 const compat = @import("compat.zig");
 const fp = @import("../runtime/scheduler.zig");
 const Task = @import("../runtime/queues.zig").Task;
+const pl = @import("parking-lot.zig");
 
 pub fn bind(comptime deps: type) type {
     return struct {
@@ -325,7 +326,9 @@ pub fn bind(comptime deps: type) type {
     /// false sharing when multiple Locked values are heap-allocated adjacently.
     pub fn Locked(comptime T: type) type {
         return struct {
-            mutex: compat.Mutex align(64) = .{},
+            // ParkingMutex parks the fiber (not the OS thread) on contention.
+            // Deadlock detection and 30s timeout replace silent hangs.
+            mutex: pl.ParkingMutex align(64) = .{},
             data: T,
 
             const Self = @This();
@@ -428,7 +431,7 @@ pub fn bind(comptime deps: type) type {
     /// PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP blocks new readers once
     /// a writer is waiting, matching Go's sync.RWMutex and Rust's futex_rwlock.
     pub fn RwLocked(comptime T: type) type {
-        return compat.RwLocked(T);
+        return pl.ParkingRwLocked(T);
     }
 
     /// Heap-allocate a new RwLocked(T) wrapping a value of type T.

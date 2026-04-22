@@ -161,6 +161,9 @@ pub const Scheduler = struct {
     pinned_queue: std.ArrayListUnmanaged(*Task) = .empty,
     stack_cache: std.ArrayListUnmanaged([]u8) = .empty,   // LIFO Cache for Stacks
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .empty,
+    // Fibers parked waiting for a ParkingMutex or ParkingRwLock.
+    // Scanned in the run loop's slow path for LOCK_TIMEOUT_MS deadlock detection.
+    lock_waiters: std.ArrayListUnmanaged(*Task) = .empty,
 
     // 2. Communication — Pure SPSC (no MPSC linked list)
     /// SPSC channels: lazily allocated, one per potential sender (max 64).
@@ -276,6 +279,7 @@ pub const Scheduler = struct {
     }
 
     pub fn deinit(self: *Scheduler) void {
+        self.lock_waiters.deinit(self.allocator);
         const queues = .{ &self.fiber_pool, &self.sleeping_queue };
         inline for (queues) |q| {
             for (q.items) |task| {
@@ -588,6 +592,13 @@ pub const Scheduler = struct {
 
         const my_id = std.Thread.getCurrentId();
 
+        // Ensure thread-locals always point to this scheduler when run() is
+        // called. Tests that set these before calling run() get the same value;
+        // tests that omit the setup (relying on implicit state from a previous
+        // test) get the correct scheduler without fragile stack-address aliasing.
+        active_scheduler = self;
+        scheduler_running = true;
+
         global_registry.register(self.allocator, std.Thread.getCurrentId(), self) catch |err| {
             std.debug.print("SCHEDULER REGISTRATION FAILED: {}\n", .{err});
             return;
@@ -626,6 +637,39 @@ pub const Scheduler = struct {
                         } else {
                             i += 1;
                         }
+                    }
+                }
+
+                // Check for lock-parked fibers that exceeded LOCK_TIMEOUT_MS.
+                // A non-null waiting_for_lock means the fiber is still parked.
+                // Null means it woke up normally — lazily remove from the list.
+                if (self.lock_waiters.items.len > 0) {
+                    const now_ms = milliTimestamp();
+                    var i: usize = 0;
+                    while (i < self.lock_waiters.items.len) {
+                        const task = self.lock_waiters.items[i];
+                        if (task.waiting_for_lock.load(.acquire) == null) {
+                            // Already woken normally; clean up the tracking entry.
+                            _ = self.lock_waiters.swapRemove(i);
+                            continue;
+                        }
+                        if (now_ms - task.lock_wait_start_ms > qs.LOCK_TIMEOUT_MS) {
+                            // Timed out: remove from lock's waiter list, then wake.
+                            if (task.waiting_for_lock_list) |wl| {
+                                wl.spinAcquire();
+                                _ = wl.remove(task.lock_waiter_node.?);
+                                wl.spinRelease();
+                            }
+                            _ = self.lock_waiters.swapRemove(i);
+                            task.lock_timed_out = true;
+                            task.waiting_for_lock.store(null, .release);
+                            task.waiting_for_lock_list = null;
+                            task.lock_waiter_node = null;
+                            task.status.store(.Ready, .release);
+                            self.enqueueTask(task);
+                            continue;
+                        }
+                        i += 1;
                     }
                 }
             } // end slow path
@@ -807,6 +851,15 @@ pub const Scheduler = struct {
         task.wake_time = wake_time;
         task.status.store(.Blocked, .release);
         self.sleeping_queue.append(self.allocator, task) catch unreachable;
+    }
+
+    // Register a lock-parked task for timeout scanning.
+    // Called by parking-lot.zig before the fiber yields.
+    // The task's waiting_for_lock / waiting_for_lock_list / lock_waiter_node
+    // must already be set by the caller.
+    pub fn registerLockWaiter(self: *Scheduler, task: *Task) void {
+        task.lock_wait_start_ms = milliTimestamp();
+        self.lock_waiters.append(self.allocator, task) catch {};
     }
 
     // -----------------------------------------------------------------
