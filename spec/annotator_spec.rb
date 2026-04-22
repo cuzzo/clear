@@ -3076,7 +3076,7 @@ RSpec.describe SemanticAnnotator do
         annotator.annotate!(ast)
         transpiler = ZigTranspiler.new
         output = transpiler.transpile_as_module(code)
-        imports = output.scan(/@import\("native_math\.zig"\)/)
+        imports = output.scan(/@import\("native_math"\)/)
         expect(imports.length).to eq(1)
       end
 

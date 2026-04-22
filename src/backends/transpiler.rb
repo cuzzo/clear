@@ -153,6 +153,16 @@ class ZigTranspiler
       end
     end
 
+    # In module mode, EXTERN FN imports use named modules (e.g. -Mhttp=lib.zig).
+    # Strip the .zig suffix from simple (non-path) module imports so @import("http")
+    # matches the declared module name rather than looking for a file "http.zig".
+    all_items = (mod_result[:items] + mod_result[:type_items]).flatten
+    all_items.each do |item|
+      next unless item.is_a?(MIR::Import)
+      next if item.module_path.include?("/")      # filesystem path, leave as-is
+      item.module_path = item.module_path.delete_suffix(".zig")
+    end
+
     emitter = MIREmitter.new
     items_zig = mod_result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
     type_defs_zig = mod_result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
@@ -162,11 +172,14 @@ class ZigTranspiler
 
     # If the module defines main, emit a Zig test block so the module
     # can be used directly as the root of `zig test` without a wrapper file.
+    # Uses a single-threaded scheduler so BG blocks (spawnBest) work correctly.
     has_cheat_main = result.ast.statements.any? { |s| s.is_a?(AST::FunctionDef) && s.name == "main" }
     test_block = if has_cheat_main
       <<~ZIG_TEST
 
         test "cheat main" {
+            const fp = CheatHeader.scheduler;
+            const fm = CheatHeader.fiber_memory;
             var da = std.heap.DebugAllocator(.{}){};
             defer _ = da.deinit();
             const allocator = da.allocator();
@@ -175,7 +188,30 @@ class ZigTranspiler
             var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
             defer rt.deinit();
             rt.wireAllocator();
-            try clearMain(&rt);
+            var stack_pool = fm.StackPool.init(allocator);
+            defer stack_pool.deinit();
+            var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+            defer {
+                sched.deinit();
+                fp.global_registry.deinit(allocator);
+            }
+            fp.active_scheduler = &sched;
+            fp.scheduler_running = true;
+            const MainRunner = struct {
+                outer_rt: *Runtime,
+                fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                    const self: *@This() = @ptrCast(@alignCast(raw_args.?));
+                    try clearMain(self.outer_rt);
+                }
+            };
+            var main_runner = MainRunner{ .outer_rt = &rt };
+            try sched.submitSpawn(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&MainRunner.run)),
+                &main_runner,
+                .{ .stack_size = .Large, .pinned = true },
+            );
+            sched.run();
         }
       ZIG_TEST
     else

@@ -457,7 +457,7 @@ class MIRLowering
       end
     end
 
-    { items: type_items + fn_items, type_items: type_items }
+    { items: fn_items, type_items: type_items }
   end
 
   private
@@ -1519,6 +1519,22 @@ class MIRLowering
     arg_codes = args.map { |a| emit_expr(a) }
     arg_tuple = arg_codes.empty? ? ".{}" : ".{ #{arg_codes.join(', ')} }"
 
+    # Use declared param types for struct fields to avoid comptime_int (e.g. @TypeOf(19876)).
+    # Skip extern/module functions: their CLEAR types (e.g. String -> []const u8) may differ
+    # from the actual Zig/C types (e.g. [*:0]const u8), breaking implicit coercions.
+    sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_sym) || @fn_sigs&.dig(node.name.to_s)
+    sig_params = (sig&.params || sig&.dig(:params) || []).reject { |p| p[:comptime] }
+    arg_field_types = if sig&.module_alias
+      nil
+    else
+      types = sig_params.each_with_index.map do |p, i|
+        next nil unless i < runtime_ast_args.length
+        pt = p[:type]
+        pt.is_a?(Type) ? pt.zig_type(is_param: true) : (Type::ZIG_TYPE_MAP[pt] || nil)
+      end
+      types.empty? || types.all?(&:nil?) ? nil : types
+    end
+
     call_parts = comptime_codes + (alloc_kind ? ["_alloc_"] : []) + arg_codes.each_index.map { |i| "f.a#{i}" }
     call_zig = "#{fn_zig}(#{call_parts.map { |p| p == "_alloc_" ? "f.alloc" : p }.join(', ')})"
 
@@ -1528,7 +1544,7 @@ class MIRLowering
       args_tuple_name: "__ext#{id}_args",
       frame_name: "__ext#{id}_frame",
       arg_codes: arg_codes,
-      arg_field_types: nil,
+      arg_field_types: arg_field_types,
       arg_tuple: arg_tuple,
       alloc_kind: alloc_kind,
       return_type: node.full_type,

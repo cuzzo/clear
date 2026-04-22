@@ -1,25 +1,31 @@
-// http — thin Zig wrapper over std.net for CLEAR FFI.
+// http — thin wrapper over libc sockets for CLEAR FFI.
 //
 // Provides:
-//   httpGet(url)         → []const u8   (fetch page body over TCP)
-//   startTestServer(port) → void        (spawn canned-page server on OS thread)
-//   stopTestServer()      → void        (signal shutdown)
-//   freeString(ptr, len)  → void        (free a string returned by httpGet)
+//   httpGet(url)          -> []const u8  (fetch page body over TCP)
+//   startTestServer(port) -> void        (spawn canned-page server on OS thread)
+//   stopTestServer()      -> void        (signal shutdown)
+//   freeString(ptr, len)  -> void        (free a string returned by httpGet)
 //
 // All returned strings are allocated with c_allocator so they survive
 // CLEAR's frame rewind. Caller is responsible for freeing via freeString.
 
 const std = @import("std");
+const c = std.c;
 const alloc = std.heap.c_allocator;
 
+fn makeSockAddr(ip: u32, port: u16) c.sockaddr.in {
+    return c.sockaddr.in{
+        .family = c.AF.INET,
+        .port = std.mem.nativeToBig(u16, port),
+        .addr = ip,
+        .zero = std.mem.zeroes([8]u8),
+    };
+}
+
 // -------------------------------------------------------------------------
-// HTTP Client — minimal GET request over raw TCP
+// HTTP Client
 // -------------------------------------------------------------------------
 
-/// Fetch a page body from "host:port/path".
-/// URL format: "localhost:PORT/path" (no scheme).
-/// Returns the HTTP response body (heap-allocated via c_allocator).
-/// Returns empty slice on any error.
 pub fn httpGet(url: []const u8) []const u8 {
     return doGet(url) catch "";
 }
@@ -33,34 +39,38 @@ fn doGet(url: []const u8) ![]const u8 {
     const port = std.fmt.parseInt(u16, rest[0..slash], 10) catch return error.BadUrl;
     const path = if (slash < rest.len) rest[slash..] else "/";
 
-    // Connect
-    const addr = try std.net.Address.resolveIp(host, port);
-    const stream = try std.net.tcpConnectToAddress(addr);
-    defer stream.close();
+    // Resolve "localhost" / "127.0.0.1"
+    const ip: u32 = if (std.mem.eql(u8, host, "localhost") or std.mem.eql(u8, host, "127.0.0.1"))
+        std.mem.nativeToBig(u32, 0x7f000001)
+    else
+        return error.UnsupportedHost;
 
-    // Send GET request
+    const fd = c.socket(c.AF.INET, c.SOCK.STREAM | c.SOCK.CLOEXEC, 0);
+    if (fd < 0) return error.SocketFailed;
+    defer _ = c.close(fd);
+
+    var addr = makeSockAddr(ip, port);
+    if (c.connect(fd, @ptrCast(&addr), @sizeOf(c.sockaddr.in)) != 0)
+        return error.ConnectFailed;
+
     const req = try std.fmt.allocPrint(alloc, "GET {s} HTTP/1.0\r\nHost: {s}\r\nConnection: close\r\n\r\n", .{ path, host });
     defer alloc.free(req);
-    try stream.writeAll(req);
+    _ = c.send(fd, req.ptr, req.len, 0);
 
-    // Read full response
-    var buf = std.ArrayList(u8).init(alloc);
-    defer buf.deinit();
-    var tmp: [4096]u8 = undefined;
-    while (true) {
-        const n = stream.read(&tmp) catch break;
-        if (n == 0) break;
-        try buf.appendSlice(tmp[0..n]);
+    var buf: [65536]u8 = undefined;
+    var total: usize = 0;
+    while (total < buf.len) {
+        const n = c.recv(fd, buf[total..].ptr, buf.len - total, 0);
+        if (n <= 0) break;
+        total += @intCast(n);
     }
 
-    // Find body after \r\n\r\n
-    const response = buf.items;
+    const response = buf[0..total];
     const sep = std.mem.indexOf(u8, response, "\r\n\r\n") orelse return try alloc.dupe(u8, "");
     const body = response[sep + 4 ..];
     return try alloc.dupe(u8, body);
 }
 
-/// Free a string previously returned by httpGet.
 pub fn freeString(ptr: [*]const u8, len: i64) void {
     if (len <= 0) return;
     const n: usize = @intCast(len);
@@ -68,25 +78,18 @@ pub fn freeString(ptr: [*]const u8, len: i64) void {
 }
 
 // -------------------------------------------------------------------------
-// Test Server — canned HTML pages on an OS thread
+// Test Server
 // -------------------------------------------------------------------------
 
 var server_shutdown = std.atomic.Value(bool).init(false);
 var server_thread: ?std.Thread = null;
 
-/// Start a test HTTP server on `port` in a background OS thread.
-/// Serves 3 canned pages:
-///   /           → index with links to /about and /blog
-///   /about      → about page with link to /
-///   /blog       → blog page with links to /about and /
-///   everything else → 404
 pub fn startTestServer(port: i64) void {
     server_shutdown.store(false, .release);
     const p: u16 = @intCast(port);
     server_thread = std.Thread.spawn(.{}, serverLoop, .{p}) catch return;
 }
 
-/// Signal the test server to shut down and wait for its thread.
 pub fn stopTestServer() void {
     server_shutdown.store(true, .release);
     if (server_thread) |t| {
@@ -96,43 +99,46 @@ pub fn stopTestServer() void {
 }
 
 fn serverLoop(port: u16) void {
-    const addr = std.net.Address.parseIp4("127.0.0.1", port) catch return;
-    var server = addr.listen(.{ .reuse_address = true }) catch return;
-    defer server.deinit();
+    const server_fd = c.socket(c.AF.INET, c.SOCK.STREAM | c.SOCK.CLOEXEC, 0);
+    if (server_fd < 0) return;
+    defer _ = c.close(server_fd);
 
-    // Set a short timeout so we can check shutdown flag
-    if (std.posix.setsockopt(server.stream.handle, std.posix.SOL.SOCKET, std.posix.SO.RCVTIMEO, &std.mem.toBytes(std.posix.timeval{
-        .sec = 0,
-        .usec = 200_000, // 200ms
-    }))) {} else |_| {}
+    const yes: i32 = 1;
+    _ = c.setsockopt(server_fd, c.SOL.SOCKET, c.SO.REUSEADDR, @ptrCast(&yes), @sizeOf(i32));
+
+    // 200ms receive timeout so we can poll shutdown flag
+    const tv = c.timeval{ .sec = 0, .usec = 200_000 };
+    _ = c.setsockopt(server_fd, c.SOL.SOCKET, c.SO.RCVTIMEO, @ptrCast(&tv), @sizeOf(c.timeval));
+
+    const ip = std.mem.nativeToBig(u32, 0x7f000001);
+    var addr = makeSockAddr(ip, port);
+    if (c.bind(server_fd, @ptrCast(&addr), @sizeOf(c.sockaddr.in)) != 0) return;
+    if (c.listen(server_fd, 16) != 0) return;
 
     while (!server_shutdown.load(.acquire)) {
-        const conn = server.accept() catch continue;
-        handleConnection(conn.stream) catch {};
+        const client_fd = c.accept(server_fd, null, null);
+        if (client_fd < 0) continue;
+        handleConnection(client_fd) catch {};
+        _ = c.close(client_fd);
     }
 }
 
-fn handleConnection(stream: std.net.Stream) !void {
-    defer stream.close();
-
-    // Read request line
+fn handleConnection(fd: i32) !void {
     var buf: [1024]u8 = undefined;
-    const n = stream.read(&buf) catch return;
-    if (n == 0) return;
+    const n = c.recv(fd, &buf, buf.len, 0);
+    if (n <= 0) return;
 
-    // Extract path from "GET /path HTTP/1.x"
-    const request = buf[0..n];
+    const request = buf[0..@intCast(n)];
     const get_end = std.mem.indexOf(u8, request, " HTTP/") orelse return;
     const path = if (get_end > 4) request[4..get_end] else "/";
 
-    // Route to canned pages
     const body = route(path);
     const status = if (body.len > 0) "200 OK" else "404 Not Found";
     const response_body = if (body.len > 0) body else "<html><body>Not Found</body></html>";
 
-    const response = std.fmt.allocPrint(alloc, "HTTP/1.0 {s}\r\nContent-Length: {d}\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{s}", .{ status, response_body.len, response_body }) catch return;
+    const response = try std.fmt.allocPrint(alloc, "HTTP/1.0 {s}\r\nContent-Length: {d}\r\nContent-Type: text/html\r\nConnection: close\r\n\r\n{s}", .{ status, response_body.len, response_body });
     defer alloc.free(response);
-    stream.writeAll(response) catch {};
+    _ = c.send(fd, response.ptr, response.len, 0);
 }
 
 fn route(path: []const u8) []const u8 {
