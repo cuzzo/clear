@@ -39,7 +39,7 @@ results = sensors
 ## PERFORMANCE
 In predictable workloads, as demonstrated in the included benchmarks, CLEAR outperforms Go and Rust/Tokio with considerably less, clearer code.
 
-This is a v0.1 release. In unpredictable real-world workloads, CLEAR will not yet match this level of advantage — but there is substantial room for improvement by v1. We believe CLEAR will eventually outperform Go in nearly all cases: no garbage collector, nearly half the memory footprint, more predictable response times, and zero chance of data races.
+This is a v0.1 release. In unpredictable real-world workloads, CLEAR will not yet match this level of advantage — but there is substantial room for improvement by v1. CLEAR believes it will eventually outperform Go in almost all cases: no garbage collector, nearly half the memory footprint, more predictable response times, and zero chance of data races or a number of other concurrency hazards.
 
 ## THE IMPLICATIONS
 CLEAR's foundational principle is to **minimize global complexity and maximize local reasoning.**
