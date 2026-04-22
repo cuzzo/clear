@@ -827,6 +827,28 @@ test "ParkingMutex: lock timeout returns error.LockTimeout, lock remains usable"
 test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can proceed" {
     // Regression test for: writers_waiting not decremented on write-lock timeout,
     // permanently blocking future readers via the wakeNext writers_waiting == 0 guard.
+    //
+    // Coordination is event-driven except for a single wall-clock wait in Main
+    // that is tied DIRECTLY to lock_timeout_ms. The cascaded 150/120/100ms
+    // timings of the previous version are gone.
+    //
+    // Side note on the single remaining sleep: the scheduler's lock_waiters
+    // timeout scan only runs when the scheduler wakes for some other reason
+    // (a sleeping fiber's 1ms io_uring poll, a CQE, etc). If nothing is in
+    // sleeping_queue and no I/O is pending, io_uring_enter blocks indefinitely
+    // and the lock timeout never fires. Main's fiberSleepMs serves both as
+    // "wait for B to time out" and as "keep scheduler awake so timeouts fire".
+    // A purely event-driven design would require a scheduler-level change to
+    // register a timer when registerLockWaiter is called.
+    //
+    //   1. Main spawns A (takes write lock) and B (queues for write lock).
+    //   2. Main sleeps lock_timeout_ms + small margin -- by the time it wakes,
+    //      B's timeout has fired (counter checks prove this below).
+    //   3. Main snapshots rw.writers_waiting and confirms b_wg is drained.
+    //      With the fix writers_waiting == 0; without it, stuck at 1.
+    //   4. Main spawns C (queues for read lock) and releases A via release_wg.
+    //   5. A unlocks. wakeNext wakes C iff writers_waiting == 0.
+    //   6. Main waits on ac_wg for A and C.
     const t_alloc = std.testing.allocator;
     var ebr = EbrContext{};
     defer ebr.deinit(t_alloc);
@@ -842,11 +864,25 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
 
     const Shared = struct {
         rw: ParkingRwLock = .{},
-        wg: CheatHeader.WaitGroup,
+        // b_wg drops to 0 when B finishes (times out). Main waits on this
+        // before snapshotting writers_waiting.
+        b_wg: CheatHeader.WaitGroup,
+        // release_wg is pre-added(1). A waits on it after taking rw. Main
+        // calls done() to release A only after snapshotting writers_waiting
+        // and spawning C -- so A's unlock wakes C's read-lock wait.
+        release_wg: CheatHeader.WaitGroup,
+        // ac_wg drops to 0 when A and C both finish. Main waits on this last.
+        ac_wg: CheatHeader.WaitGroup,
         b_got_timeout: bool = false,
         c_read_counter: usize = 0,
+        // Snapshot captured by Main immediately after B times out.
+        writers_waiting_after_b: u32 = std.math.maxInt(u32),
     };
-    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    var shared = Shared{
+        .b_wg = CheatHeader.WaitGroup.init(&sched),
+        .release_wg = CheatHeader.WaitGroup.init(&sched),
+        .ac_wg = CheatHeader.WaitGroup.init(&sched),
+    };
     const ACtx = struct { s: *Shared };
     const BCtx = struct { s: *Shared };
     const CCtx = struct { s: *Shared };
@@ -854,23 +890,22 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
     var b_ctx = BCtx{ .s = &shared };
     var c_ctx = CCtx{ .s = &shared };
 
+    // A: take the write lock, park on release_wg until Main signals release,
+    // then unlock. Uses WaitGroup (not another mutex) so A's park is not
+    // itself subject to lock_timeout_ms.
     const FiberA = struct {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
-            defer c.s.wg.done();
+            defer c.s.ac_wg.done();
             try c.s.rw.lock();
             defer c.s.rw.unlock();
-            // Hold longer than B's timeout (100ms) and longer than C's
-            // pre-queue sleep (120ms) so C queues while A still holds.
-            fiberSleepMs(150);
+            c.s.release_wg.wait();
         }
     };
-    // B tries to write-lock while A holds it. B times out after 100ms.
-    // On timeout, writers_waiting must be decremented so C can proceed.
     const FiberB = struct {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
-            defer c.s.wg.done();
+            defer c.s.b_wg.done();
             c.s.rw.lock() catch |e| {
                 c.s.b_got_timeout = (e == error.LockTimeout);
                 return;
@@ -878,18 +913,10 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
             c.s.rw.unlock();
         }
     };
-    // C tries to read-lock AFTER B has timed out but while A still holds.
-    // Without the fix, wakeNext never wakes C (writers_waiting stays 1).
-    // With the fix, writers_waiting drops to 0 when B times out, and C is
-    // woken when A finally releases. Staggering C's queue time avoids C
-    // hitting its own lock_timeout_ms before A releases.
     const FiberC = struct {
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const c = @as(*CCtx, @ptrCast(@alignCast(raw.?)));
-            defer c.s.wg.done();
-            // Sleep past B's 100ms timeout so writers_waiting is already
-            // decremented (with fix) before C queues.
-            fiberSleepMs(120);
+            defer c.s.ac_wg.done();
             try c.s.rw.lockShared();
             defer c.s.rw.unlockShared();
             c.s.c_read_counter += 1;
@@ -899,12 +926,28 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
         s: *Shared, ac: *ACtx, bc: *BCtx, cc: *CCtx,
         fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
             const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
-            self.s.wg.add(3);
-            // Spawn order: C, B, A. LIFO runs A first.
-            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberC.run)), self.cc, .{ .stack_size = .Large });
+            self.s.b_wg.add(1);
+            self.s.ac_wg.add(2);
+            self.s.release_wg.add(1);
+            // Spawn B first so LIFO runs A first (A gets the write lock).
             try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
             try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
-            self.s.wg.wait();
+
+            // Wait long enough for B's 100ms timeout to fire. Margin covers
+            // scheduler wake latency (~1ms per poll). Since B is the only
+            // fiber that can block on the rw lock, when this sleep returns
+            // B is guaranteed to have timed out.
+            fiberSleepMs(@as(u64, @intCast(fp.active_scheduler.lock_timeout_ms)) + 20);
+
+            // Snapshot -- no further lock activity has happened.
+            self.s.writers_waiting_after_b = self.s.rw.writers_waiting;
+
+            // Now queue C and release A. C parks in read_waiters; A's unlock
+            // calls wakeNext which wakes C iff writers_waiting == 0.
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberC.run)), self.cc, .{ .stack_size = .Large });
+            self.s.release_wg.done();
+
+            self.s.ac_wg.wait();
         }
     };
     var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx, .cc = &c_ctx };
@@ -912,6 +955,9 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
     sched.run();
 
     try std.testing.expect(shared.b_got_timeout);
+    // The core invariant this test was written for: writers_waiting must be
+    // back to 0 at the moment B finishes its timeout.
+    try std.testing.expectEqual(@as(u32, 0), shared.writers_waiting_after_b);
     try std.testing.expectEqual(@as(usize, 1), shared.c_read_counter);
     try std.testing.expectEqual(@as(u32, 0), shared.rw.writers_waiting);
     try std.testing.expect(!shared.rw.write_locked);
