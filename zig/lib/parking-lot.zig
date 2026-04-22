@@ -281,11 +281,15 @@ pub const ParkingRwLock = struct {
     // Unified FIFO waiter queue. Each node carries its kind (Read|Write).
     waiters: WaiterList = .{},
     write_owner: std.atomic.Value(?*Task) = std.atomic.Value(?*Task).init(null),
-    // Futex counter for non-fiber waiters. Bumped on every state change
-    // that could unblock a waiter (unlock, unlockShared when readers==0,
-    // and inside wakeNext's reader drain). Non-fiber waiters call
-    // `gen.wait(last_seen, null)` to sleep until a change occurs.
-    gen: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    // NOTE on non-fiber fallback: ParkingRwLock does NOT use a futex for
+    // raw-thread callers. An earlier version added a `gen` atomic bumped on
+    // every unlock to wake potentially-parked threads; the fetchAdd on a
+    // shared cache line slowed the in-fiber path because the same line is
+    // touched by every cross-scheduler unlock. Since the non-fiber path is
+    // only used for bootstrap / tests / rare off-fiber callers, the simpler
+    // spin+yield fallback is preferred. ParkingMutex *does* use its `locked`
+    // atomic as a futex word since that field is already on the hot path.
 
     fn spinAcquire(self: *ParkingRwLock) void {
         while (self.spin.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
@@ -295,13 +299,6 @@ pub const ParkingRwLock = struct {
 
     fn spinRelease(self: *ParkingRwLock) void {
         self.spin.store(0, .release);
-    }
-
-    // Bump the futex generation and wake any non-fiber waiter. Called from
-    // unlock paths; safe to call with the spinlock held.
-    fn signalGen(self: *ParkingRwLock) void {
-        _ = self.gen.fetchAdd(1, .release);
-        Futex.wake(&self.gen, 1);
     }
 
     // Exclusive (write) lock
@@ -321,15 +318,10 @@ pub const ParkingRwLock = struct {
                     self.spinRelease();
                     return;
                 }
-                const snapshot = self.gen.load(.acquire);
                 self.spinRelease();
-                if (spins < SPIN_BUDGET) {
-                    std.atomic.spinLoopHint();
-                    spins += 1;
-                } else {
-                    Futex.wait(&self.gen, snapshot);
-                    spins = 0;
-                }
+                spins += 1;
+                if (spins > 256) { std.Thread.yield() catch {}; spins = 0; }
+                else std.atomic.spinLoopHint();
             }
         }
 
@@ -384,7 +376,6 @@ pub const ParkingRwLock = struct {
         self.write_owner.store(null, .release);
         self.wakeNext();
         self.spinRelease();
-        self.signalGen();
     }
 
     // Shared (read) lock
@@ -402,15 +393,10 @@ pub const ParkingRwLock = struct {
                     self.spinRelease();
                     return;
                 }
-                const snapshot = self.gen.load(.acquire);
                 self.spinRelease();
-                if (spins < SPIN_BUDGET) {
-                    std.atomic.spinLoopHint();
-                    spins += 1;
-                } else {
-                    Futex.wait(&self.gen, snapshot);
-                    spins = 0;
-                }
+                spins += 1;
+                if (spins > 256) { std.Thread.yield() catch {}; spins = 0; }
+                else std.atomic.spinLoopHint();
             }
         }
 
@@ -458,7 +444,6 @@ pub const ParkingRwLock = struct {
         self.readers -= 1;
         if (self.readers == 0) self.wakeNext();
         self.spinRelease();
-        self.signalGen();
     }
 
     // Wake the next waiter(s) in FIFO order (call with spinlock held).

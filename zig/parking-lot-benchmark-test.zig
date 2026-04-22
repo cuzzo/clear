@@ -202,3 +202,120 @@ test "rwlock throughput: ParkingRwLock vs pthread_rwlock_t (2W+6R, 100K ops each
     );
     std.debug.print("  Ratio: ParkingRwLock is {d:.2}x pthread speed\n", .{ratio});
 }
+
+// ─── Scaling test: how does throughput change with thread count? ─────────────
+//
+// This mirrors the CLEAR benchmark/concurrent/13_rwlock_starvation workload
+// (N-1 readers spinning, busyWork(100) inside crit section) but as raw threads
+// so we can see how our implementation scales vs pthread without involving
+// the CLEAR scheduler / fiber layer.
+
+const SCALE_OPS_PER_READER: usize = 200_000;
+const SCALE_WRITE_OPS: usize = 100;
+
+fn scaleBusyWork(n: usize) usize {
+    var acc: usize = 0;
+    var i: usize = 0;
+    while (i < n) : (i += 1) acc +%= i;
+    return acc;
+}
+
+fn scaleParkingReader(rw: *pl.ParkingRwLock, counter: *const usize, sink: *usize) void {
+    var i: usize = 0;
+    while (i < SCALE_OPS_PER_READER) : (i += 1) {
+        rw.lockShared() catch unreachable;
+        sink.* +%= counter.*;
+        sink.* +%= scaleBusyWork(100);
+        rw.unlockShared();
+    }
+}
+
+fn scaleParkingWriter(rw: *pl.ParkingRwLock, counter: *usize, sink: *usize) void {
+    var i: usize = 0;
+    while (i < SCALE_WRITE_OPS) : (i += 1) {
+        rw.lock() catch unreachable;
+        counter.* += 1;
+        sink.* +%= scaleBusyWork(100);
+        rw.unlock();
+    }
+}
+
+fn scalePthreadReader(rw: *c.pthread_rwlock_t, counter: *const usize, sink: *usize) void {
+    var i: usize = 0;
+    while (i < SCALE_OPS_PER_READER) : (i += 1) {
+        _ = c.pthread_rwlock_rdlock(rw);
+        sink.* +%= counter.*;
+        sink.* +%= scaleBusyWork(100);
+        _ = c.pthread_rwlock_unlock(rw);
+    }
+}
+
+fn scalePthreadWriter(rw: *c.pthread_rwlock_t, counter: *usize, sink: *usize) void {
+    var i: usize = 0;
+    while (i < SCALE_WRITE_OPS) : (i += 1) {
+        _ = c.pthread_rwlock_wrlock(rw);
+        counter.* += 1;
+        sink.* +%= scaleBusyWork(100);
+        _ = c.pthread_rwlock_unlock(rw);
+    }
+}
+
+fn runScaleParking(n_threads: usize, alloc: std.mem.Allocator) !u64 {
+    var rw = pl.ParkingRwLock{};
+    var counter: usize = 0;
+    var w_sink: usize = 0;
+    const sinks = try alloc.alloc(usize, n_threads - 1);
+    defer alloc.free(sinks);
+    for (sinks) |*s| s.* = 0;
+    const threads = try alloc.alloc(std.Thread, n_threads);
+    defer alloc.free(threads);
+
+    const start = compat.nanoTimestamp();
+    threads[0] = try std.Thread.spawn(.{}, scaleParkingWriter, .{ &rw, &counter, &w_sink });
+    for (threads[1..], 0..) |*t, idx| {
+        t.* = try std.Thread.spawn(.{}, scaleParkingReader, .{ &rw, &counter, &sinks[idx] });
+    }
+    for (threads) |*t| t.join();
+    return @intCast(compat.nanoTimestamp() - start);
+}
+
+fn runScalePthread(n_threads: usize, alloc: std.mem.Allocator) !u64 {
+    var rw: c.pthread_rwlock_t = std.mem.zeroes(c.pthread_rwlock_t);
+    _ = c.pthread_rwlock_init(&rw, null);
+    defer _ = c.pthread_rwlock_destroy(&rw);
+
+    var counter: usize = 0;
+    var w_sink: usize = 0;
+    const sinks = try alloc.alloc(usize, n_threads - 1);
+    defer alloc.free(sinks);
+    for (sinks) |*s| s.* = 0;
+    const threads = try alloc.alloc(std.Thread, n_threads);
+    defer alloc.free(threads);
+
+    const start = compat.nanoTimestamp();
+    threads[0] = try std.Thread.spawn(.{}, scalePthreadWriter, .{ &rw, &counter, &w_sink });
+    for (threads[1..], 0..) |*t, idx| {
+        t.* = try std.Thread.spawn(.{}, scalePthreadReader, .{ &rw, &counter, &sinks[idx] });
+    }
+    for (threads) |*t| t.join();
+    return @intCast(compat.nanoTimestamp() - start);
+}
+
+test "rwlock scaling: ParkingRwLock vs pthread_rwlock_t at 2,4,8,16 threads" {
+    const alloc = std.testing.allocator;
+    const counts = [_]usize{ 2, 4, 8, 16 };
+
+    std.debug.print("\n  threads | ParkingRwLock |  pthread_rwlock_t | ratio\n", .{});
+    std.debug.print("  --------|---------------|-------------------|------\n", .{});
+    for (counts) |n| {
+        const pk_ns = try runScaleParking(n, alloc);
+        const pt_ns = try runScalePthread(n, alloc);
+        const pk_ms: f64 = @as(f64, @floatFromInt(pk_ns)) / 1_000_000.0;
+        const pt_ms: f64 = @as(f64, @floatFromInt(pt_ns)) / 1_000_000.0;
+        const ratio: f64 = pt_ms / pk_ms;
+        std.debug.print(
+            "  {d:>7} | {d:>10.1} ms | {d:>14.1} ms | {d:>4.2}x\n",
+            .{ n, pk_ms, pt_ms, ratio },
+        );
+    }
+}
