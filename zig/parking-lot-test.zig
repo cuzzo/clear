@@ -1472,3 +1472,108 @@ test "ParkingMutex: wakeNext clears wait-state so detectCycle has no TOCTOU fals
     try std.testing.expect(!shared.mu_b.isLocked());
     try std.testing.expect(!shared.mu_c.isLocked());
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Non-fiber holder + fiber waiter (owner-packing sentinel coverage)
+//
+// ParkingMutex packs the owner *Task into the upper bits of the state word.
+// A non-fiber holder has no Task, so `owner` is encoded as 0 (sentinel-as-
+// absence). When a fiber subsequently tries to lock, its slow path reads
+// the owner from state, sees null, and:
+//   1. Re-entrancy check (current_owner == self) is false (null != fiber).
+//   2. detectCycle walks from null -> chain ends immediately, no Deadlock.
+//   3. Fiber parks normally.
+// When the raw thread releases, wakeNext transfers ownership to the parked
+// fiber (now with a real Task pointer in state).
+//
+// This test exercises that path explicitly: a raw OS thread holds the mutex
+// while a fiber tries to acquire and parks. Without correct handling of the
+// null-owner case, detectCycle could panic on the @ptrFromInt of 0, or
+// re-entrancy could false-positive.
+// ─────────────────────────────────────────────────────────────────────────────
+test "ParkingMutex: fiber acquires after non-fiber holder releases (sentinel owner)" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        mu: ParkingMutex = .{},
+        wg: CheatHeader.WaitGroup,
+        // Raw thread sets this true once it has the lock; fiber polls it
+        // (via fiberSleepMs) to confirm before trying to acquire.
+        thread_holding: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        // Raw thread waits on this to be true before releasing the lock.
+        // Set by fiber AFTER it has parked, so we exercise the non-fiber
+        // unlock -> wake-fiber-waiter path.
+        thread_should_release: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        fiber_acquired: bool = false,
+        fiber_owner_was_null: bool = false,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+
+    // Raw OS thread that holds the mutex.
+    const ThreadFn = struct {
+        fn run(s: *Shared) void {
+            s.mu.lock() catch unreachable;
+            s.thread_holding.store(true, .release);
+            // Spin until fiber signals to release.
+            while (!s.thread_should_release.load(.acquire)) {
+                std.atomic.spinLoopHint();
+            }
+            s.mu.unlock();
+        }
+    };
+    const Ctx = struct { s: *Shared };
+    var ctx = Ctx{ .s = &shared };
+
+    // Fiber tries to acquire after raw thread holds.
+    const Fiber = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            // Wait until raw thread is holding.
+            while (!c.s.thread_holding.load(.acquire)) fiberSleepMs(1);
+            // The raw thread holds with owner=null sentinel. Verify.
+            c.s.fiber_owner_was_null = (c.s.mu.ownerTask() == null);
+            // Try to lock. We'll park because raw thread holds. detectCycle
+            // must handle null current_owner without panicking.
+            try c.s.mu.lock();
+            // Once we get it, the raw thread released. Confirm.
+            c.s.fiber_acquired = true;
+            c.s.mu.unlock();
+        }
+    };
+    const Main = struct {
+        s: *Shared, c: *Ctx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(1);
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Fiber.run)), self.c, .{ .stack_size = .Large });
+            // Sleep so the fiber gets a chance to spawn, observe the held
+            // lock, and park before we tell the raw thread to release.
+            fiberSleepMs(50);
+            self.s.thread_should_release.store(true, .release);
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .c = &ctx };
+
+    // Spawn the raw thread first so it grabs the mutex.
+    var thread = try std.Thread.spawn(.{}, ThreadFn.run, .{&shared});
+
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+    thread.join();
+
+    try std.testing.expect(shared.fiber_owner_was_null);
+    try std.testing.expect(shared.fiber_acquired);
+    try std.testing.expect(!shared.mu.isLocked());
+}

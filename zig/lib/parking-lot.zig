@@ -51,6 +51,12 @@ const SPIN_BUDGET: u32 = 100;
 // Linux-only (io_uring), so a portable abstraction is unnecessary. Used
 // only on the raw-thread path — fiber callers park on the scheduler via
 // task.base.yield() which is cheaper than any syscall.
+//
+// Linux futex is u32-only. For a u64 atomic (e.g. ParkingMutex.state which
+// packs owner pointer + flag bits), we wait on the lower 32 bits via
+// pointer cast. x86_64 is little-endian, so the lower 32 bits live at the
+// base address of the u64. A change to upper bits (owner pointer changing)
+// will spuriously wake the futex; we just retry, which is correct.
 const linux = std.os.linux;
 const Futex = struct {
     inline fn wait(ptr: *std.atomic.Value(u32), expected: u32) void {
@@ -58,6 +64,14 @@ const Futex = struct {
         _ = linux.futex_4arg(@ptrCast(&ptr.raw), op, expected, null);
     }
     inline fn wake(ptr: *std.atomic.Value(u32), n: u32) void {
+        const op = linux.FUTEX_OP{ .cmd = .WAKE, .private = true };
+        _ = linux.futex_3arg(@ptrCast(&ptr.raw), op, n);
+    }
+    inline fn waitU64Low(ptr: *std.atomic.Value(u64), expected_low: u32) void {
+        const op = linux.FUTEX_OP{ .cmd = .WAIT, .private = true };
+        _ = linux.futex_4arg(@ptrCast(&ptr.raw), op, expected_low, null);
+    }
+    inline fn wakeU64(ptr: *std.atomic.Value(u64), n: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAKE, .private = true };
         _ = linux.futex_3arg(@ptrCast(&ptr.raw), op, n);
     }
@@ -97,33 +111,43 @@ fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!voi
 // ParkingMutex — exclusive (write) lock
 // ─────────────────────────────────────────────────────────────────────────────
 pub const ParkingMutex = struct {
-    // Packed state in a single atomic u32. ALL hot-path ops touch only
-    // this one cache line. Previously thread_sleepers was a separate
-    // atomic field which doubled cache traffic per unlock under
-    // contention; folding it into state as a third bit eliminates that.
+    // Packed state in a single atomic u64. ALL hot-path data lives here:
+    //   bits 0:        LOCKED            -- lock currently held
+    //   bits 1:        HAS_WAITERS       -- one or more fibers parked
+    //   bits 2:        HAS_THREAD_SLEEPER -- one or more raw threads parked
+    //   bits 3-63:     OWNER             -- *Task pointer (Task is 8-aligned,
+    //                                       so its low 3 bits are always 0;
+    //                                       fits cleanly above flag bits)
     //
-    //   bit 0: LOCKED            -- lock is currently held
-    //   bit 1: HAS_WAITERS       -- one or more fibers parked in the queue
-    //   bit 2: HAS_THREAD_SLEEPER -- one or more raw threads parked on futex
+    // For non-fiber holders the OWNER bits are 0; cycle detection sees a
+    // null owner and treats the chain as terminated (correct -- we have no
+    // way to walk a non-fiber holder's wait chain).
     //
-    // unlock fast path is now a single atomic fetchAnd: clearing LOCKED
-    // returns the prior value, which tells us whether to wake (waiters or
-    // thread sleepers) without touching a second cache line.
-    pub const STATE_LOCKED:             u32 = 1;
-    pub const STATE_HAS_WAITERS:        u32 = 2;
-    pub const STATE_HAS_THREAD_SLEEPER: u32 = 4;
-    pub const STATE_WAKE_BITS:          u32 = STATE_HAS_WAITERS | STATE_HAS_THREAD_SLEEPER;
+    // Putting the owner pointer in the same atomic as the lock state means:
+    //   * One CAS on acquire sets BOTH lock and owner -- no separate store.
+    //   * One fetchAnd on release clears BOTH -- no separate store.
+    //   * One cache line touched per op (was two with separate `owner`).
+    //
+    // Linux futex is u32-only; we wait on the lower 32 bits of state via
+    // Futex.waitU64Low. Owner-bits changing in the upper part causes
+    // spurious wakes, which we correctly handle (loop and retry).
+    pub const STATE_LOCKED:             u64 = 1;
+    pub const STATE_HAS_WAITERS:        u64 = 2;
+    pub const STATE_HAS_THREAD_SLEEPER: u64 = 4;
+    pub const STATE_FLAG_MASK:          u64 = 7;
+    pub const STATE_OWNER_MASK:         u64 = ~@as(u64, 7);
+    pub const STATE_WAKE_BITS:          u64 = STATE_HAS_WAITERS | STATE_HAS_THREAD_SLEEPER;
 
-    state: Atomic(u32) = Atomic(u32).init(0),
-    // Task currently holding the lock (for deadlock cycle detection). Read
-    // outside any lock by other fibers' lockSlow → race-tolerant: a stale
-    // pointer can only cause a benign false-negative on cycle detection,
-    // never a false positive (we re-check on the slow path under queue_spin).
-    owner: std.atomic.Value(?*Task) = std.atomic.Value(?*Task).init(null),
-    // Spinlock protecting the waiter queue + the moves of HAS_WAITERS_BIT.
-    // Only entered on slow path -- not in the contended fast path.
+    state: Atomic(u64) = Atomic(u64).init(0),
+    // Spinlock protecting the waiter queue.
     queue_spin: Atomic(u32) = Atomic(u32).init(0),
     waiters: WaiterList = .{},
+
+    inline fn ownerOf(state_val: u64) ?*Task {
+        const owner_bits = state_val & STATE_OWNER_MASK;
+        if (owner_bits == 0) return null;
+        return @ptrFromInt(owner_bits);
+    }
 
     fn spinAcquireQueue(self: *ParkingMutex) void {
         while (self.queue_spin.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
@@ -134,41 +158,40 @@ pub const ParkingMutex = struct {
         self.queue_spin.store(0, .release);
     }
 
-    /// Test/inspection helpers. Read-only accessors over the packed state.
+    /// Test/inspection helpers.
     pub fn isLocked(self: *const ParkingMutex) bool {
         return (self.state.load(.acquire) & STATE_LOCKED) != 0;
     }
-    /// Pre-lock the mutex without an owner. Used by tests as a rendezvous
-    /// primitive: a fiber can later .lock() and will park; another caller
-    /// .unlock()s to release. NOT for general use.
+    pub fn ownerTask(self: *const ParkingMutex) ?*Task {
+        return ownerOf(self.state.load(.acquire));
+    }
+    /// Pre-lock without an owner. Test rendezvous primitive only.
     pub fn presetLocked(self: *ParkingMutex) void {
         _ = self.state.fetchOr(STATE_LOCKED, .monotonic);
     }
 
     pub fn tryLock(self: *ParkingMutex) bool {
-        // Load-first to avoid write contention on every attempt. fetchOr
-        // only when the lock looks acquirable. Under N-thread contention,
-        // the load is a read-shared cache hit; only the eventual winner
-        // pays the RMW cost.
         const cur = self.state.load(.acquire);
         if ((cur & STATE_LOCKED) != 0) return false;
-        const prev = self.state.fetchOr(STATE_LOCKED, .acquire);
-        if ((prev & STATE_LOCKED) != 0) return false;
-        if (getScheduler()) |sched| {
-            self.owner.store(sched.current_task, .release);
-        }
-        return true;
+        const owner_val: u64 = if (getScheduler()) |sched|
+            @intFromPtr(sched.current_task)
+        else
+            0;
+        const new_state = cur | STATE_LOCKED | owner_val;
+        return self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null;
     }
 
     pub fn lock(self: *ParkingMutex) LockError!void {
-        // Fast path: load-first to avoid write contention. See tryLock.
+        // Fast path: load + CAS preserving any flag bits already set,
+        // packing owner into state in the same atomic op as LOCKED.
         const cur = self.state.load(.acquire);
         if ((cur & STATE_LOCKED) == 0) {
-            const prev = self.state.fetchOr(STATE_LOCKED, .acquire);
-            if ((prev & STATE_LOCKED) == 0) {
-                if (getScheduler()) |sched| {
-                    self.owner.store(sched.current_task, .release);
-                }
+            const owner_val: u64 = if (getScheduler()) |sched|
+                @intFromPtr(sched.current_task)
+            else
+                0;
+            const new_state = cur | STATE_LOCKED | owner_val;
+            if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) {
                 return;
             }
         }
@@ -179,10 +202,7 @@ pub const ParkingMutex = struct {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
-            // Non-fiber: spin-then-CAS, then futex if still held. Mark
-            // HAS_THREAD_SLEEPER in the state word (single atomic) before
-            // sleeping so unlocker knows to wake without a separate counter
-            // load.
+            // Non-fiber: test-then-CAS with futex backoff.
             while (true) {
                 var spins: u32 = 0;
                 while (spins < SPIN_BUDGET) : (spins += 1) {
@@ -190,21 +210,20 @@ pub const ParkingMutex = struct {
                     std.atomic.spinLoopHint();
                 }
                 if (spins == SPIN_BUDGET) {
-                    // Still locked -- park on futex. Set sleeper bit first
-                    // so the unlocker doesn't skip the wake.
+                    // Park on futex. Mark sleeper bit so unlocker wakes us.
                     const before = self.state.fetchOr(STATE_HAS_THREAD_SLEEPER, .acquire);
-                    if ((before & STATE_LOCKED) == 0) {
-                        // Race: lock cleared between our last load and
-                        // fetchOr. Don't sleep.
-                        continue;
-                    }
-                    Futex.wait(&self.state, before | STATE_HAS_THREAD_SLEEPER);
+                    if ((before & STATE_LOCKED) == 0) continue; // race
+                    // Wait on lower 32 bits. Owner changes in upper bits
+                    // cause spurious wakes -- harmless, we just retry.
+                    const expected_low: u32 = @truncate(before | STATE_HAS_THREAD_SLEEPER);
+                    Futex.waitU64Low(&self.state, expected_low);
                     continue;
                 }
-                // fetchOr: sets LOCKED, preserves other bits. If prev was
-                // unlocked, we acquired.
-                const prev_or = self.state.fetchOr(STATE_LOCKED, .acquire);
-                if ((prev_or & STATE_LOCKED) == 0) return;
+                // Looks free -- attempt CAS preserving other bits.
+                const cur = self.state.load(.acquire);
+                if ((cur & STATE_LOCKED) != 0) continue;
+                const new_state = cur | STATE_LOCKED;
+                if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) return;
             }
         }
 
@@ -212,7 +231,8 @@ pub const ParkingMutex = struct {
         const task = sched.current_task.?;
 
         // Re-entrancy check: same task already owns the lock → deadlock.
-        const current_owner = self.owner.load(.acquire);
+        const cur_state = self.state.load(.acquire);
+        const current_owner = ownerOf(cur_state);
         if (current_owner == task) {
             std.debug.print(
                 "DEADLOCK: re-entrant lock acquisition — fiber {*} already holds mutex {*}\n",
@@ -221,22 +241,23 @@ pub const ParkingMutex = struct {
             return error.Deadlock;
         }
 
-        // Walk the owner chain BEFORE taking queue_spin so error returns are
-        // free of the spin-held-on-error case.
+        // Walk the owner chain BEFORE taking queue_spin.
         try detectCycle(task, current_owner, self);
 
         self.spinAcquireQueue();
 
-        // Re-check: state might have become unlocked between our fast-path
-        // attempt and now. fetchOr preserves other bits.
-        const prev_or = self.state.fetchOr(STATE_LOCKED, .acquire);
-        if ((prev_or & STATE_LOCKED) == 0) {
-            self.owner.store(task, .release);
-            self.spinReleaseQueue();
-            return;
+        // Re-check: state might have become unlocked. CAS preserving flag
+        // bits; pack owner in the same op.
+        const recheck = self.state.load(.acquire);
+        if ((recheck & STATE_LOCKED) == 0) {
+            const new_state = recheck | STATE_LOCKED | @intFromPtr(task);
+            if (self.state.cmpxchgWeak(recheck, new_state, .acquire, .monotonic) == null) {
+                self.spinReleaseQueue();
+                return;
+            }
         }
 
-        // Park. Set HAS_WAITERS_BIT under queue_spin so unlocker calls us.
+        // Park. Set HAS_WAITERS_BIT under queue_spin.
         _ = self.state.fetchOr(STATE_HAS_WAITERS, .release);
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
@@ -258,47 +279,35 @@ pub const ParkingMutex = struct {
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;
-            // Did unlock grant us the lock right before timeout fired?
-            if ((self.state.load(.acquire) & STATE_LOCKED) != 0
-                and self.owner.load(.acquire) == task)
-            {
-                return;
-            }
+            if (ownerOf(self.state.load(.acquire)) == task) return;
             std.debug.print("LOCK TIMEOUT: fiber {*} waited for mutex {*}\n", .{ task, self });
             return error.LockTimeout;
         }
 
-        // Ownership transferred by unlock.
-        self.owner.store(task, .release);
+        // Ownership transferred by unlock; nothing more to do (state already
+        // has owner = task).
     }
 
     pub fn unlock(self: *ParkingMutex) void {
-        // Note: we deliberately do NOT clear `owner` here. It costs an extra
-        // atomic store on a hot cache line. The next acquire overwrites it,
-        // and re-entrancy detection still works because the stale owner is
-        // overwritten on the next acquire that succeeds.
-
-        // Single atomic op: clear LOCKED. fetchAnd returns the prior value,
-        // which tells us whether to wake (waiters or thread sleepers) -- no
-        // separate cache-line-bouncing load required.
-        const prev = self.state.fetchAnd(~STATE_LOCKED, .release);
+        // Single atomic op: clear LOCKED + OWNER, preserving flag bits.
+        // fetchAnd returns the prior value, which tells us whether to wake.
+        const prev = self.state.fetchAnd(STATE_FLAG_MASK & ~STATE_LOCKED, .release);
+        // = fetchAnd(STATE_HAS_WAITERS | STATE_HAS_THREAD_SLEEPER)
         // Hot path: no waiters of either kind. Single atomic op total.
         if ((prev & STATE_WAKE_BITS) == 0) return;
 
-        // Slow path: someone needs waking.
         if ((prev & STATE_HAS_WAITERS) != 0) {
             self.spinAcquireQueue();
             const waiter = self.waiters.pop();
             const more_after = !self.waiters.isEmpty();
             if (waiter) |w| {
-                // Transfer ownership: re-set LOCKED + HAS_WAITERS-iff-more,
-                // preserving HAS_THREAD_SLEEPER from prev if any.
-                const sleeper_bit: u32 = prev & STATE_HAS_THREAD_SLEEPER;
-                const new_state: u32 = STATE_LOCKED
-                    | (if (more_after) STATE_HAS_WAITERS else @as(u32, 0))
-                    | sleeper_bit;
+                // Transfer ownership: rebuild state with LOCKED, owner, and
+                // any preserved flag bits.
+                const sleeper_bit: u64 = prev & STATE_HAS_THREAD_SLEEPER;
+                const more_bit: u64 = if (more_after) STATE_HAS_WAITERS else 0;
+                const new_state: u64 = STATE_LOCKED | sleeper_bit | more_bit
+                    | @intFromPtr(w.task);
                 self.state.store(new_state, .release);
-                self.owner.store(w.task, .release);
                 w.task.waiting_for_lock_owner = null;
                 w.task.waiting_for_lock_list = null;
                 w.task.lock_waiter_node = null;
@@ -308,19 +317,14 @@ pub const ParkingMutex = struct {
                 self.spinReleaseQueue();
                 return;
             }
-            // Queue empty (HAS_WAITERS bit was stale -- timed-out waiter).
+            // Stale HAS_WAITERS (timed-out waiter). Clear it.
             _ = self.state.fetchAnd(~STATE_HAS_WAITERS, .release);
             self.spinReleaseQueue();
             // Fall through to thread sleeper wake check.
         }
 
-        // Wake one raw-thread waiter parked on the futex. The bit stays set
-        // (sticky) until a future fiber-waiter slow path clears it; this
-        // means we pay a Futex.wake syscall on every unlock once any thread
-        // has parked, but the alternative (clearing the bit) creates a
-        // lost-wake race when multiple threads are parked.
         if ((prev & STATE_HAS_THREAD_SLEEPER) != 0) {
-            Futex.wake(&self.state, 1);
+            Futex.wakeU64(&self.state, 1);
         }
     }
 };

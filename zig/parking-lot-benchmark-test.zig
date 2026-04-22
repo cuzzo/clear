@@ -27,19 +27,20 @@ const c = @cImport({
 });
 
 const Pattern = enum { read_heavy, write_heavy, mixed };
-const Contention = enum { uncontended, heavy, realistic };
+const Contention = enum { uncontended, heavy, realistic, long_held };
 const LockKind = enum { mutex, rwlock };
 
 const ContentionParams = struct {
     n_threads: usize,
     ops_per_thread: usize,
     work_iters: usize,
+    sleep_ns_in_cs: u64 = 0, // hold the lock for this long via std.Thread.sleep
 };
 
-// Use the actual CPU count for "heavy" / "realistic" so we measure true
-// scaling. uncontended stays at 1 thread. Iteration counts are sized so
-// each cell runs >= 500ms for meaningful measurement (per-op times around
-// 15-30ns uncontended, 30-400ns under contention).
+// Use the actual CPU count for contended levels so we measure true
+// scaling. uncontended stays at 1 thread. Iteration counts target
+// ~500-1500ms per cell -- enough for measurement noise to wash out,
+// short enough to keep total benchmark wallclock manageable.
 fn coreCount() usize {
     return std.Thread.getCpuCount() catch 8;
 }
@@ -47,9 +48,19 @@ fn coreCount() usize {
 fn paramsFor(level: Contention) ContentionParams {
     const cores = coreCount();
     return switch (level) {
-        .uncontended => .{ .n_threads = 1,     .ops_per_thread = 30_000_000, .work_iters = 0 },
-        .heavy       => .{ .n_threads = cores, .ops_per_thread = 500_000,    .work_iters = 0 },
-        .realistic   => .{ .n_threads = cores, .ops_per_thread = 100_000,    .work_iters = 100 },
+        // 1 thread, no work: pure overhead measurement.
+        .uncontended => .{ .n_threads = 1,     .ops_per_thread = 20_000_000, .work_iters = 0 },
+        // All cores, no in-CS work: maximum lock-overhead contention.
+        .heavy       => .{ .n_threads = cores, .ops_per_thread = 200_000,    .work_iters = 0 },
+        // All cores, modest in-CS work (~100 cycles).
+        .realistic   => .{ .n_threads = cores, .ops_per_thread = 50_000,     .work_iters = 100 },
+        // All cores, lock held for 10ms in each CS via std.Thread.sleep.
+        // This is where parking-lot's design SHINES for fibers (the OS
+        // thread isn't blocked, the fiber yields to the scheduler) but
+        // for raw threads we still futex-park, same as pthread.
+        // Iter count low because each op takes ~10ms of wall time.
+        .long_held   => .{ .n_threads = cores, .ops_per_thread = 5,          .work_iters = 0,
+                            .sleep_ns_in_cs = 10 * std.time.ns_per_ms },
     };
 }
 
@@ -75,7 +86,12 @@ const Shared = struct {
 
 // ─── Workers ────────────────────────────────────────────────────────────────
 
-fn parkingMutexWorker(mu: *pl.ParkingMutex, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+inline fn doCsWork(sh: *Shared, work: usize, sleep_ns: u64) void {
+    if (work > 0) sh.sink +%= busyWork(work);
+    if (sleep_ns > 0) compat.sleepNs(sleep_ns);
+}
+
+fn parkingMutexWorker(mu: *pl.ParkingMutex, sh: *Shared, ops: usize, write_pct: u32, work: usize, sleep_ns: u64, seed: u64) void {
     var prng = std.Random.DefaultPrng.init(seed);
     var rnd = prng.random();
     var i: usize = 0;
@@ -83,12 +99,12 @@ fn parkingMutexWorker(mu: *pl.ParkingMutex, sh: *Shared, ops: usize, write_pct: 
         const is_write = rnd.uintLessThan(u32, 100) < write_pct;
         mu.lock() catch unreachable;
         if (is_write) sh.counter += 1 else sh.sink +%= sh.counter;
-        if (work > 0) sh.sink +%= busyWork(work);
+        doCsWork(sh, work, sleep_ns);
         mu.unlock();
     }
 }
 
-fn pthreadMutexWorker(mu: *c.pthread_mutex_t, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+fn pthreadMutexWorker(mu: *c.pthread_mutex_t, sh: *Shared, ops: usize, write_pct: u32, work: usize, sleep_ns: u64, seed: u64) void {
     var prng = std.Random.DefaultPrng.init(seed);
     var rnd = prng.random();
     var i: usize = 0;
@@ -96,12 +112,12 @@ fn pthreadMutexWorker(mu: *c.pthread_mutex_t, sh: *Shared, ops: usize, write_pct
         const is_write = rnd.uintLessThan(u32, 100) < write_pct;
         _ = c.pthread_mutex_lock(mu);
         if (is_write) sh.counter += 1 else sh.sink +%= sh.counter;
-        if (work > 0) sh.sink +%= busyWork(work);
+        doCsWork(sh, work, sleep_ns);
         _ = c.pthread_mutex_unlock(mu);
     }
 }
 
-fn parkingRwLockWorker(rw: *pl.ParkingRwLock, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+fn parkingRwLockWorker(rw: *pl.ParkingRwLock, sh: *Shared, ops: usize, write_pct: u32, work: usize, sleep_ns: u64, seed: u64) void {
     var prng = std.Random.DefaultPrng.init(seed);
     var rnd = prng.random();
     var i: usize = 0;
@@ -110,18 +126,18 @@ fn parkingRwLockWorker(rw: *pl.ParkingRwLock, sh: *Shared, ops: usize, write_pct
         if (is_write) {
             rw.lock() catch unreachable;
             sh.counter += 1;
-            if (work > 0) sh.sink +%= busyWork(work);
+            doCsWork(sh, work, sleep_ns);
             rw.unlock();
         } else {
             rw.lockShared() catch unreachable;
             sh.sink +%= sh.counter;
-            if (work > 0) sh.sink +%= busyWork(work);
+            doCsWork(sh, work, sleep_ns);
             rw.unlockShared();
         }
     }
 }
 
-fn pthreadRwLockWorker(rw: *c.pthread_rwlock_t, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+fn pthreadRwLockWorker(rw: *c.pthread_rwlock_t, sh: *Shared, ops: usize, write_pct: u32, work: usize, sleep_ns: u64, seed: u64) void {
     var prng = std.Random.DefaultPrng.init(seed);
     var rnd = prng.random();
     var i: usize = 0;
@@ -130,12 +146,12 @@ fn pthreadRwLockWorker(rw: *c.pthread_rwlock_t, sh: *Shared, ops: usize, write_p
         if (is_write) {
             _ = c.pthread_rwlock_wrlock(rw);
             sh.counter += 1;
-            if (work > 0) sh.sink +%= busyWork(work);
+            doCsWork(sh, work, sleep_ns);
             _ = c.pthread_rwlock_unlock(rw);
         } else {
             _ = c.pthread_rwlock_rdlock(rw);
             sh.sink +%= sh.counter;
-            if (work > 0) sh.sink +%= busyWork(work);
+            doCsWork(sh, work, sleep_ns);
             _ = c.pthread_rwlock_unlock(rw);
         }
     }
@@ -153,7 +169,7 @@ fn runParkingMutex(alloc: std.mem.Allocator, params: ContentionParams, write_pct
     for (threads, 0..) |*t, idx| {
         t.* = try std.Thread.spawn(.{}, parkingMutexWorker, .{
             &mu, &sh, params.ops_per_thread, write_pct, params.work_iters,
-            @as(u64, idx) + 1,
+            params.sleep_ns_in_cs, @as(u64, idx) + 1,
         });
     }
     for (threads) |*t| t.join();
@@ -172,7 +188,7 @@ fn runPthreadMutex(alloc: std.mem.Allocator, params: ContentionParams, write_pct
     for (threads, 0..) |*t, idx| {
         t.* = try std.Thread.spawn(.{}, pthreadMutexWorker, .{
             &mu, &sh, params.ops_per_thread, write_pct, params.work_iters,
-            @as(u64, idx) + 1,
+            params.sleep_ns_in_cs, @as(u64, idx) + 1,
         });
     }
     for (threads) |*t| t.join();
@@ -189,7 +205,7 @@ fn runParkingRwLock(alloc: std.mem.Allocator, params: ContentionParams, write_pc
     for (threads, 0..) |*t, idx| {
         t.* = try std.Thread.spawn(.{}, parkingRwLockWorker, .{
             &rw, &sh, params.ops_per_thread, write_pct, params.work_iters,
-            @as(u64, idx) + 1,
+            params.sleep_ns_in_cs, @as(u64, idx) + 1,
         });
     }
     for (threads) |*t| t.join();
@@ -214,7 +230,7 @@ fn runPthreadRwLock(alloc: std.mem.Allocator, params: ContentionParams, write_pc
     for (threads, 0..) |*t, idx| {
         t.* = try std.Thread.spawn(.{}, pthreadRwLockWorker, .{
             &rw, &sh, params.ops_per_thread, write_pct, params.work_iters,
-            @as(u64, idx) + 1,
+            params.sleep_ns_in_cs, @as(u64, idx) + 1,
         });
     }
     for (threads) |*t| t.join();
@@ -230,7 +246,12 @@ fn nameP(p: Pattern) []const u8 {
     return switch (p) { .read_heavy => "read-heavy ", .write_heavy => "write-heavy", .mixed => "mixed      " };
 }
 fn nameC(level: Contention) []const u8 {
-    return switch (level) { .uncontended => "uncontended", .heavy => "heavy      ", .realistic => "realistic  " };
+    return switch (level) {
+        .uncontended => "uncontended",
+        .heavy       => "heavy      ",
+        .realistic   => "realistic  ",
+        .long_held   => "long-held  ",
+    };
 }
 
 test "lock matrix: ParkingMutex/RwLock vs pthread (3 patterns x 2 locks x 3 contention)" {
@@ -250,7 +271,7 @@ test "lock matrix: ParkingMutex/RwLock vs pthread (3 patterns x 2 locks x 3 cont
 
     inline for ([_]LockKind{ .mutex, .rwlock }) |kind| {
         inline for ([_]Pattern{ .read_heavy, .write_heavy, .mixed }) |p| {
-            inline for ([_]Contention{ .uncontended, .heavy, .realistic }) |level| {
+            inline for ([_]Contention{ .uncontended, .heavy, .realistic, .long_held }) |level| {
                 const params = paramsFor(level);
                 const wp = writeProbPct(p);
                 std.debug.print(
