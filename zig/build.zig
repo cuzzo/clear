@@ -170,6 +170,7 @@ pub fn build(b: *std.Build) void {
     // BENCHMARKS (zig build benchmark)
     // -------------------------------------------------------------------------
     const bench_step = b.step("benchmark", "Run performance benchmarks");
+    const bench_locks_step = b.step("bench-locks", "Run only the parking-lot benchmark");
 
     const benchmark_files = [_][]const u8{
         "arena-benchmark-test.zig",
@@ -204,6 +205,9 @@ pub fn build(b: *std.Build) void {
         run_bench.addArtifactArg(bench_tests);
         run_bench.stdio = .inherit;
         bench_step.dependOn(&run_bench.step);
+        if (std.mem.eql(u8, filename, "parking-lot-benchmark-test.zig")) {
+            bench_locks_step.dependOn(&run_bench.step);
+        }
     }
 
     // -------------------------------------------------------------------------

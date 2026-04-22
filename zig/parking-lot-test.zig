@@ -576,7 +576,7 @@ test "ParkingMutex: re-entrant lock returns error.Deadlock, lock remains usable"
 
     try std.testing.expect(shared.a_got_deadlock);
     try std.testing.expectEqual(@as(usize, 1), shared.b_counter);
-    try std.testing.expectEqual(@as(u32, 0), shared.mu.locked.load(.monotonic));
+    try std.testing.expect(!shared.mu.isLocked());
 }
 
 test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked" {
@@ -612,7 +612,7 @@ test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked"
     };
     var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
     // Pre-lock rendezvous with no owner so A will park on it.
-    shared.rendezvous.locked.store(1, .monotonic);
+    shared.rendezvous.presetLocked();
 
     const ACtx = struct { s: *Shared };
     const BCtx = struct { s: *Shared };
@@ -670,8 +670,8 @@ test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked"
 
     try std.testing.expect(shared.a_got_deadlock);
     try std.testing.expectEqual(@as(usize, 1), shared.b_counter);
-    try std.testing.expectEqual(@as(u32, 0), shared.mu_a.locked.load(.monotonic));
-    try std.testing.expectEqual(@as(u32, 0), shared.mu_b.locked.load(.monotonic));
+    try std.testing.expect(!shared.mu_a.isLocked());
+    try std.testing.expect(!shared.mu_b.isLocked());
 }
 
 test "ParkingRwLock: re-entrant write lock returns error.Deadlock, lock remains usable" {
@@ -821,7 +821,7 @@ test "ParkingMutex: lock timeout returns error.LockTimeout, lock remains usable"
 
     try std.testing.expect(shared.b_got_timeout);
     try std.testing.expectEqual(@as(usize, 1), shared.a_counter);
-    try std.testing.expectEqual(@as(u32, 0), shared.mu.locked.load(.monotonic));
+    try std.testing.expect(!shared.mu.isLocked());
 }
 
 test "ParkingRwLock: write-lock timeout does not permanently block readers" {
@@ -1057,8 +1057,8 @@ test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
     };
     var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
     // Pre-lock rendezvous mutexes (owner=null so A and B park on them).
-    shared.rv1.locked.store(1, .monotonic);
-    shared.rv2.locked.store(1, .monotonic);
+    shared.rv1.presetLocked();
+    shared.rv2.presetLocked();
 
     const ACtx = struct { s: *Shared };
     const BCtx = struct { s: *Shared };
@@ -1129,9 +1129,9 @@ test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
     try std.testing.expect(shared.b_got_deadlock);
     try std.testing.expectEqual(@as(usize, 1), shared.a_counter);
     try std.testing.expectEqual(@as(usize, 1), shared.c_counter);
-    try std.testing.expectEqual(@as(u32, 0), shared.mu1.locked.load(.monotonic));
-    try std.testing.expectEqual(@as(u32, 0), shared.mu2.locked.load(.monotonic));
-    try std.testing.expectEqual(@as(u32, 0), shared.mu3.locked.load(.monotonic));
+    try std.testing.expect(!shared.mu1.isLocked());
+    try std.testing.expect(!shared.mu2.isLocked());
+    try std.testing.expect(!shared.mu3.isLocked());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1170,7 +1170,7 @@ test "ParkingMutex: deadlock unwind releases multiple held locks and wakes waite
     };
     var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
     // Pre-lock held_both. A unlocks it after grabbing mu1+mu2, releasing B and C.
-    shared.held_both.locked.store(1, .monotonic);
+    shared.held_both.presetLocked();
 
     const ACtx = struct { s: *Shared };
     const BCtx = struct { s: *Shared };
@@ -1244,8 +1244,8 @@ test "ParkingMutex: deadlock unwind releases multiple held locks and wakes waite
     try std.testing.expect(shared.a_got_deadlock);
     try std.testing.expect(shared.b_acquired_mu1);
     try std.testing.expect(shared.c_acquired_mu2);
-    try std.testing.expectEqual(@as(u32, 0), shared.mu1.locked.load(.monotonic));
-    try std.testing.expectEqual(@as(u32, 0), shared.mu2.locked.load(.monotonic));
+    try std.testing.expect(!shared.mu1.isLocked());
+    try std.testing.expect(!shared.mu2.isLocked());
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1283,7 +1283,7 @@ test "ParkingMutex: cross-thread contention hammer (8 threads, 10K ops)" {
     for (&threads) |*t| t.join();
 
     try std.testing.expectEqual(N_THREADS * OPS_PER_THREAD, counter);
-    try std.testing.expectEqual(@as(u32, 0), mu.locked.load(.monotonic));
+    try std.testing.expect(!mu.isLocked());
 }
 
 test "ParkingRwLock: cross-thread writers and readers hammer" {
@@ -1389,7 +1389,7 @@ test "ParkingMutex: wakeNext clears wait-state so detectCycle has no TOCTOU fals
         c_reached_end: bool = false,
     };
     var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
-    shared.rv.locked.store(1, .monotonic);
+    shared.rv.presetLocked();
 
     const ACtx = struct { s: *Shared };
     const BCtx = struct { s: *Shared };
@@ -1468,7 +1468,7 @@ test "ParkingMutex: wakeNext clears wait-state so detectCycle has no TOCTOU fals
     try std.testing.expect(shared.a_acquired_mu_c);
     try std.testing.expect(shared.b_reached_end);
     try std.testing.expect(shared.c_reached_end);
-    try std.testing.expectEqual(@as(u32, 0), shared.mu_a.locked.load(.monotonic));
-    try std.testing.expectEqual(@as(u32, 0), shared.mu_b.locked.load(.monotonic));
-    try std.testing.expectEqual(@as(u32, 0), shared.mu_c.locked.load(.monotonic));
+    try std.testing.expect(!shared.mu_a.isLocked());
+    try std.testing.expect(!shared.mu_b.isLocked());
+    try std.testing.expect(!shared.mu_c.isLocked());
 }

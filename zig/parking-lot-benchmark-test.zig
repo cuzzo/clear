@@ -1,321 +1,278 @@
 pub const CLEAR_FRAME_DEBUG = false;
 
-// parking-lot-benchmark-test.zig — raw-thread throughput comparison vs pthread.
+// parking-lot-benchmark-test.zig
 //
-// Benchmarks the NON-FIBER path of ParkingMutex / ParkingRwLock against
-// libc pthread_mutex_t / pthread_rwlock_t under equivalent contention.
-// The in-fiber path is not what we're comparing here -- the fiber version
-// never enters the kernel under contention (yield to scheduler) whereas
-// pthread always does. The interesting apples-to-apples comparison is the
-// raw-thread path where both use futex-style parking.
+// Comprehensive 3 x 2 x 3 = 18 benchmark matrix vs pthread:
+//   - 3 access patterns: read-heavy (1% writes), write-heavy (99% writes),
+//                         mixed (50/50). For Mutex these collapse; we run
+//                         all three for matrix symmetry.
+//   - 2 lock types:      ParkingMutex/pthread_mutex_t,
+//                         ParkingRwLock/pthread_rwlock_t.
+//   - 3 contention levels:
+//       uncontended (1 thread, no work in CS)  — pure overhead.
+//       heavy       (16 threads, no work in CS) — max contention.
+//       realistic   (8 threads, busyWork(100) in CS) — typical workload.
 //
-// Run:  zig build benchmark 2>&1 | grep -E "PARKING|PTHREAD"
-// Or:   zig test parking-lot-benchmark-test.zig -lc -O ReleaseFast
-//       (ReleaseFast required for meaningful numbers)
+// Run:  zig build benchmark -Doptimize=ReleaseFast
+//
+// All numbers are ms wall-clock for the workload (lower is better).
+// Ratio column = pthread_ms / parking_ms; > 1.0 means parking is faster.
 
 const std = @import("std");
 const pl = @import("lib/parking-lot.zig");
 const compat = @import("lib/compat.zig");
 
-// Link libc pthread. We use pthread_mutex directly because Zig 0.16 has no
-// std.Thread.Mutex wrapper, and pthread_mutex is what the OS provides anyway.
 const c = @cImport({
     @cInclude("pthread.h");
 });
 
-const N_THREADS: usize = 8;
-const OPS_PER_THREAD: usize = 200_000;
+const Pattern = enum { read_heavy, write_heavy, mixed };
+const Contention = enum { uncontended, heavy, realistic };
+const LockKind = enum { mutex, rwlock };
 
-// Shared counter protected by a lock. Each thread increments it N times.
-fn parkingMutexWorker(mu: *pl.ParkingMutex, counter: *usize) void {
-    var i: usize = 0;
-    while (i < OPS_PER_THREAD) : (i += 1) {
-        mu.lock() catch unreachable;
-        counter.* += 1;
-        mu.unlock();
-    }
+const ContentionParams = struct {
+    n_threads: usize,
+    ops_per_thread: usize,
+    work_iters: usize,
+};
+
+// Use the actual CPU count for "heavy" / "realistic" so we measure true
+// scaling. uncontended stays at 1 thread. Iteration counts are sized so
+// each cell runs >= 500ms for meaningful measurement (per-op times around
+// 15-30ns uncontended, 30-400ns under contention).
+fn coreCount() usize {
+    return std.Thread.getCpuCount() catch 8;
 }
 
-fn pthreadMutexWorker(mu: *c.pthread_mutex_t, counter: *usize) void {
-    var i: usize = 0;
-    while (i < OPS_PER_THREAD) : (i += 1) {
-        _ = c.pthread_mutex_lock(mu);
-        counter.* += 1;
-        _ = c.pthread_mutex_unlock(mu);
-    }
+fn paramsFor(level: Contention) ContentionParams {
+    const cores = coreCount();
+    return switch (level) {
+        .uncontended => .{ .n_threads = 1,     .ops_per_thread = 30_000_000, .work_iters = 0 },
+        .heavy       => .{ .n_threads = cores, .ops_per_thread = 500_000,    .work_iters = 0 },
+        .realistic   => .{ .n_threads = cores, .ops_per_thread = 100_000,    .work_iters = 100 },
+    };
 }
 
-test "mutex throughput: ParkingMutex vs pthread_mutex_t (8 threads, 200K ops each)" {
-    // Warm up the allocator / thread creation path so first-run noise is
-    // charged to neither side.
-    {
-        var junk: std.Thread = undefined;
-        junk = try std.Thread.spawn(.{}, struct {
-            fn f() void {}
-        }.f, .{});
-        junk.join();
-    }
-
-    // ── ParkingMutex (our impl) ─────────────────────────────────────────────
-    var pk_mutex = pl.ParkingMutex{};
-    var pk_counter: usize = 0;
-    var pk_threads: [N_THREADS]std.Thread = undefined;
-
-    const pk_start = compat.nanoTimestamp();
-    for (&pk_threads) |*t| {
-        t.* = try std.Thread.spawn(.{}, parkingMutexWorker, .{ &pk_mutex, &pk_counter });
-    }
-    for (&pk_threads) |*t| t.join();
-    const pk_elapsed_ns = compat.nanoTimestamp() - pk_start;
-
-    try std.testing.expectEqual(N_THREADS * OPS_PER_THREAD, pk_counter);
-
-    // ── pthread_mutex_t (baseline) ──────────────────────────────────────────
-    var pt_mutex: c.pthread_mutex_t = std.mem.zeroes(c.pthread_mutex_t);
-    _ = c.pthread_mutex_init(&pt_mutex, null);
-    defer _ = c.pthread_mutex_destroy(&pt_mutex);
-
-    var pt_counter: usize = 0;
-    var pt_threads: [N_THREADS]std.Thread = undefined;
-
-    const pt_start = compat.nanoTimestamp();
-    for (&pt_threads) |*t| {
-        t.* = try std.Thread.spawn(.{}, pthreadMutexWorker, .{ &pt_mutex, &pt_counter });
-    }
-    for (&pt_threads) |*t| t.join();
-    const pt_elapsed_ns = compat.nanoTimestamp() - pt_start;
-
-    try std.testing.expectEqual(N_THREADS * OPS_PER_THREAD, pt_counter);
-
-    // ── Report ──────────────────────────────────────────────────────────────
-    const total_ops = N_THREADS * OPS_PER_THREAD;
-    const pk_ms: f64 = @as(f64, @floatFromInt(pk_elapsed_ns)) / 1_000_000.0;
-    const pt_ms: f64 = @as(f64, @floatFromInt(pt_elapsed_ns)) / 1_000_000.0;
-    const pk_ops_per_sec: f64 = @as(f64, @floatFromInt(total_ops)) * 1_000_000_000.0 / @as(f64, @floatFromInt(pk_elapsed_ns));
-    const pt_ops_per_sec: f64 = @as(f64, @floatFromInt(total_ops)) * 1_000_000_000.0 / @as(f64, @floatFromInt(pt_elapsed_ns));
-    const ratio: f64 = pt_ms / pk_ms;
-
-    std.debug.print(
-        "\n  PARKING ParkingMutex:    {d:>8.1} ms  ({d:>10.0} ops/sec)\n",
-        .{ pk_ms, pk_ops_per_sec },
-    );
-    std.debug.print(
-        "  PTHREAD pthread_mutex_t: {d:>8.1} ms  ({d:>10.0} ops/sec)\n",
-        .{ pt_ms, pt_ops_per_sec },
-    );
-    std.debug.print("  Ratio: ParkingMutex is {d:.2}x pthread speed\n", .{ratio});
+fn writeProbPct(p: Pattern) u32 {
+    return switch (p) {
+        .read_heavy  => 1,
+        .write_heavy => 99,
+        .mixed       => 50,
+    };
 }
 
-// ─── RwLock throughput ──────────────────────────────────────────────────────
-
-const N_WRITERS: usize = 2;
-const N_READERS: usize = 6;
-const RW_OPS_PER_THREAD: usize = 100_000;
-
-fn parkingRwWriter(rw: *pl.ParkingRwLock, counter: *usize) void {
-    var i: usize = 0;
-    while (i < RW_OPS_PER_THREAD) : (i += 1) {
-        rw.lock() catch unreachable;
-        counter.* += 1;
-        rw.unlock();
-    }
-}
-
-fn parkingRwReader(rw: *pl.ParkingRwLock, counter: *const usize, sink: *usize) void {
-    var i: usize = 0;
-    while (i < RW_OPS_PER_THREAD) : (i += 1) {
-        rw.lockShared() catch unreachable;
-        sink.* +%= counter.*;
-        rw.unlockShared();
-    }
-}
-
-fn pthreadRwWriter(rw: *c.pthread_rwlock_t, counter: *usize) void {
-    var i: usize = 0;
-    while (i < RW_OPS_PER_THREAD) : (i += 1) {
-        _ = c.pthread_rwlock_wrlock(rw);
-        counter.* += 1;
-        _ = c.pthread_rwlock_unlock(rw);
-    }
-}
-
-fn pthreadRwReader(rw: *c.pthread_rwlock_t, counter: *const usize, sink: *usize) void {
-    var i: usize = 0;
-    while (i < RW_OPS_PER_THREAD) : (i += 1) {
-        _ = c.pthread_rwlock_rdlock(rw);
-        sink.* +%= counter.*;
-        _ = c.pthread_rwlock_unlock(rw);
-    }
-}
-
-test "rwlock throughput: ParkingRwLock vs pthread_rwlock_t (2W+6R, 100K ops each)" {
-    var pk_sink: [N_READERS]usize = [_]usize{0} ** N_READERS;
-    var pk_counter: usize = 0;
-    var pk_rw = pl.ParkingRwLock{};
-    var pk_threads: [N_WRITERS + N_READERS]std.Thread = undefined;
-
-    const pk_start = compat.nanoTimestamp();
-    for (pk_threads[0..N_WRITERS]) |*t| {
-        t.* = try std.Thread.spawn(.{}, parkingRwWriter, .{ &pk_rw, &pk_counter });
-    }
-    for (pk_threads[N_WRITERS..], 0..) |*t, idx| {
-        t.* = try std.Thread.spawn(.{}, parkingRwReader, .{ &pk_rw, &pk_counter, &pk_sink[idx] });
-    }
-    for (&pk_threads) |*t| t.join();
-    const pk_elapsed_ns = compat.nanoTimestamp() - pk_start;
-    try std.testing.expectEqual(N_WRITERS * RW_OPS_PER_THREAD, pk_counter);
-
-    // pthread rwlock baseline
-    var pt_rw: c.pthread_rwlock_t = std.mem.zeroes(c.pthread_rwlock_t);
-    _ = c.pthread_rwlock_init(&pt_rw, null);
-    defer _ = c.pthread_rwlock_destroy(&pt_rw);
-
-    var pt_sink: [N_READERS]usize = [_]usize{0} ** N_READERS;
-    var pt_counter: usize = 0;
-    var pt_threads: [N_WRITERS + N_READERS]std.Thread = undefined;
-
-    const pt_start = compat.nanoTimestamp();
-    for (pt_threads[0..N_WRITERS]) |*t| {
-        t.* = try std.Thread.spawn(.{}, pthreadRwWriter, .{ &pt_rw, &pt_counter });
-    }
-    for (pt_threads[N_WRITERS..], 0..) |*t, idx| {
-        t.* = try std.Thread.spawn(.{}, pthreadRwReader, .{ &pt_rw, &pt_counter, &pt_sink[idx] });
-    }
-    for (&pt_threads) |*t| t.join();
-    const pt_elapsed_ns = compat.nanoTimestamp() - pt_start;
-    try std.testing.expectEqual(N_WRITERS * RW_OPS_PER_THREAD, pt_counter);
-
-    const total_ops = (N_WRITERS + N_READERS) * RW_OPS_PER_THREAD;
-    const pk_ms: f64 = @as(f64, @floatFromInt(pk_elapsed_ns)) / 1_000_000.0;
-    const pt_ms: f64 = @as(f64, @floatFromInt(pt_elapsed_ns)) / 1_000_000.0;
-    const pk_ops_per_sec: f64 = @as(f64, @floatFromInt(total_ops)) * 1_000_000_000.0 / @as(f64, @floatFromInt(pk_elapsed_ns));
-    const pt_ops_per_sec: f64 = @as(f64, @floatFromInt(total_ops)) * 1_000_000_000.0 / @as(f64, @floatFromInt(pt_elapsed_ns));
-    const ratio: f64 = pt_ms / pk_ms;
-
-    std.debug.print(
-        "\n  PARKING ParkingRwLock:    {d:>8.1} ms  ({d:>10.0} ops/sec)\n",
-        .{ pk_ms, pk_ops_per_sec },
-    );
-    std.debug.print(
-        "  PTHREAD pthread_rwlock_t: {d:>8.1} ms  ({d:>10.0} ops/sec)\n",
-        .{ pt_ms, pt_ops_per_sec },
-    );
-    std.debug.print("  Ratio: ParkingRwLock is {d:.2}x pthread speed\n", .{ratio});
-}
-
-// ─── Scaling test: how does throughput change with thread count? ─────────────
-//
-// This mirrors the CLEAR benchmark/concurrent/13_rwlock_starvation workload
-// (N-1 readers spinning, busyWork(100) inside crit section) but as raw threads
-// so we can see how our implementation scales vs pthread without involving
-// the CLEAR scheduler / fiber layer.
-
-const SCALE_OPS_PER_READER: usize = 200_000;
-const SCALE_WRITE_OPS: usize = 100;
-
-fn scaleBusyWork(n: usize) usize {
+inline fn busyWork(n: usize) usize {
     var acc: usize = 0;
     var i: usize = 0;
     while (i < n) : (i += 1) acc +%= i;
     return acc;
 }
 
-fn scaleParkingReader(rw: *pl.ParkingRwLock, counter: *const usize, sink: *usize) void {
+const Shared = struct {
+    counter: usize = 0,
+    sink: usize align(64) = 0,
+};
+
+// ─── Workers ────────────────────────────────────────────────────────────────
+
+fn parkingMutexWorker(mu: *pl.ParkingMutex, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+    var prng = std.Random.DefaultPrng.init(seed);
+    var rnd = prng.random();
     var i: usize = 0;
-    while (i < SCALE_OPS_PER_READER) : (i += 1) {
-        rw.lockShared() catch unreachable;
-        sink.* +%= counter.*;
-        sink.* +%= scaleBusyWork(100);
-        rw.unlockShared();
+    while (i < ops) : (i += 1) {
+        const is_write = rnd.uintLessThan(u32, 100) < write_pct;
+        mu.lock() catch unreachable;
+        if (is_write) sh.counter += 1 else sh.sink +%= sh.counter;
+        if (work > 0) sh.sink +%= busyWork(work);
+        mu.unlock();
     }
 }
 
-fn scaleParkingWriter(rw: *pl.ParkingRwLock, counter: *usize, sink: *usize) void {
+fn pthreadMutexWorker(mu: *c.pthread_mutex_t, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+    var prng = std.Random.DefaultPrng.init(seed);
+    var rnd = prng.random();
     var i: usize = 0;
-    while (i < SCALE_WRITE_OPS) : (i += 1) {
-        rw.lock() catch unreachable;
-        counter.* += 1;
-        sink.* +%= scaleBusyWork(100);
-        rw.unlock();
+    while (i < ops) : (i += 1) {
+        const is_write = rnd.uintLessThan(u32, 100) < write_pct;
+        _ = c.pthread_mutex_lock(mu);
+        if (is_write) sh.counter += 1 else sh.sink +%= sh.counter;
+        if (work > 0) sh.sink +%= busyWork(work);
+        _ = c.pthread_mutex_unlock(mu);
     }
 }
 
-fn scalePthreadReader(rw: *c.pthread_rwlock_t, counter: *const usize, sink: *usize) void {
+fn parkingRwLockWorker(rw: *pl.ParkingRwLock, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+    var prng = std.Random.DefaultPrng.init(seed);
+    var rnd = prng.random();
     var i: usize = 0;
-    while (i < SCALE_OPS_PER_READER) : (i += 1) {
-        _ = c.pthread_rwlock_rdlock(rw);
-        sink.* +%= counter.*;
-        sink.* +%= scaleBusyWork(100);
-        _ = c.pthread_rwlock_unlock(rw);
+    while (i < ops) : (i += 1) {
+        const is_write = rnd.uintLessThan(u32, 100) < write_pct;
+        if (is_write) {
+            rw.lock() catch unreachable;
+            sh.counter += 1;
+            if (work > 0) sh.sink +%= busyWork(work);
+            rw.unlock();
+        } else {
+            rw.lockShared() catch unreachable;
+            sh.sink +%= sh.counter;
+            if (work > 0) sh.sink +%= busyWork(work);
+            rw.unlockShared();
+        }
     }
 }
 
-fn scalePthreadWriter(rw: *c.pthread_rwlock_t, counter: *usize, sink: *usize) void {
+fn pthreadRwLockWorker(rw: *c.pthread_rwlock_t, sh: *Shared, ops: usize, write_pct: u32, work: usize, seed: u64) void {
+    var prng = std.Random.DefaultPrng.init(seed);
+    var rnd = prng.random();
     var i: usize = 0;
-    while (i < SCALE_WRITE_OPS) : (i += 1) {
-        _ = c.pthread_rwlock_wrlock(rw);
-        counter.* += 1;
-        sink.* +%= scaleBusyWork(100);
-        _ = c.pthread_rwlock_unlock(rw);
+    while (i < ops) : (i += 1) {
+        const is_write = rnd.uintLessThan(u32, 100) < write_pct;
+        if (is_write) {
+            _ = c.pthread_rwlock_wrlock(rw);
+            sh.counter += 1;
+            if (work > 0) sh.sink +%= busyWork(work);
+            _ = c.pthread_rwlock_unlock(rw);
+        } else {
+            _ = c.pthread_rwlock_rdlock(rw);
+            sh.sink +%= sh.counter;
+            if (work > 0) sh.sink +%= busyWork(work);
+            _ = c.pthread_rwlock_unlock(rw);
+        }
     }
 }
 
-fn runScaleParking(n_threads: usize, alloc: std.mem.Allocator) !u64 {
+// ─── Runners ────────────────────────────────────────────────────────────────
+
+fn runParkingMutex(alloc: std.mem.Allocator, params: ContentionParams, write_pct: u32) !u64 {
+    var mu = pl.ParkingMutex{};
+    var sh = Shared{};
+    const threads = try alloc.alloc(std.Thread, params.n_threads);
+    defer alloc.free(threads);
+
+    const start = compat.nanoTimestamp();
+    for (threads, 0..) |*t, idx| {
+        t.* = try std.Thread.spawn(.{}, parkingMutexWorker, .{
+            &mu, &sh, params.ops_per_thread, write_pct, params.work_iters,
+            @as(u64, idx) + 1,
+        });
+    }
+    for (threads) |*t| t.join();
+    return @intCast(compat.nanoTimestamp() - start);
+}
+
+fn runPthreadMutex(alloc: std.mem.Allocator, params: ContentionParams, write_pct: u32) !u64 {
+    var mu: c.pthread_mutex_t = std.mem.zeroes(c.pthread_mutex_t);
+    _ = c.pthread_mutex_init(&mu, null);
+    defer _ = c.pthread_mutex_destroy(&mu);
+    var sh = Shared{};
+    const threads = try alloc.alloc(std.Thread, params.n_threads);
+    defer alloc.free(threads);
+
+    const start = compat.nanoTimestamp();
+    for (threads, 0..) |*t, idx| {
+        t.* = try std.Thread.spawn(.{}, pthreadMutexWorker, .{
+            &mu, &sh, params.ops_per_thread, write_pct, params.work_iters,
+            @as(u64, idx) + 1,
+        });
+    }
+    for (threads) |*t| t.join();
+    return @intCast(compat.nanoTimestamp() - start);
+}
+
+fn runParkingRwLock(alloc: std.mem.Allocator, params: ContentionParams, write_pct: u32) !u64 {
     var rw = pl.ParkingRwLock{};
-    var counter: usize = 0;
-    var w_sink: usize = 0;
-    const sinks = try alloc.alloc(usize, n_threads - 1);
-    defer alloc.free(sinks);
-    for (sinks) |*s| s.* = 0;
-    const threads = try alloc.alloc(std.Thread, n_threads);
+    var sh = Shared{};
+    const threads = try alloc.alloc(std.Thread, params.n_threads);
     defer alloc.free(threads);
 
     const start = compat.nanoTimestamp();
-    threads[0] = try std.Thread.spawn(.{}, scaleParkingWriter, .{ &rw, &counter, &w_sink });
-    for (threads[1..], 0..) |*t, idx| {
-        t.* = try std.Thread.spawn(.{}, scaleParkingReader, .{ &rw, &counter, &sinks[idx] });
+    for (threads, 0..) |*t, idx| {
+        t.* = try std.Thread.spawn(.{}, parkingRwLockWorker, .{
+            &rw, &sh, params.ops_per_thread, write_pct, params.work_iters,
+            @as(u64, idx) + 1,
+        });
     }
     for (threads) |*t| t.join();
     return @intCast(compat.nanoTimestamp() - start);
 }
 
-fn runScalePthread(n_threads: usize, alloc: std.mem.Allocator) !u64 {
+fn runPthreadRwLock(alloc: std.mem.Allocator, params: ContentionParams, write_pct: u32) !u64 {
+    // Default reader-preferring on glibc would starve writers; ours is fair.
+    // Use writer-preferring for an apples-to-apples comparison.
+    var attr: c.pthread_rwlockattr_t = undefined;
+    _ = c.pthread_rwlockattr_init(&attr);
+    defer _ = c.pthread_rwlockattr_destroy(&attr);
+    _ = c.pthread_rwlockattr_setkind_np(&attr, c.PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
     var rw: c.pthread_rwlock_t = std.mem.zeroes(c.pthread_rwlock_t);
-    _ = c.pthread_rwlock_init(&rw, null);
+    _ = c.pthread_rwlock_init(&rw, &attr);
     defer _ = c.pthread_rwlock_destroy(&rw);
-
-    var counter: usize = 0;
-    var w_sink: usize = 0;
-    const sinks = try alloc.alloc(usize, n_threads - 1);
-    defer alloc.free(sinks);
-    for (sinks) |*s| s.* = 0;
-    const threads = try alloc.alloc(std.Thread, n_threads);
+    var sh = Shared{};
+    const threads = try alloc.alloc(std.Thread, params.n_threads);
     defer alloc.free(threads);
 
     const start = compat.nanoTimestamp();
-    threads[0] = try std.Thread.spawn(.{}, scalePthreadWriter, .{ &rw, &counter, &w_sink });
-    for (threads[1..], 0..) |*t, idx| {
-        t.* = try std.Thread.spawn(.{}, scalePthreadReader, .{ &rw, &counter, &sinks[idx] });
+    for (threads, 0..) |*t, idx| {
+        t.* = try std.Thread.spawn(.{}, pthreadRwLockWorker, .{
+            &rw, &sh, params.ops_per_thread, write_pct, params.work_iters,
+            @as(u64, idx) + 1,
+        });
     }
     for (threads) |*t| t.join();
     return @intCast(compat.nanoTimestamp() - start);
 }
 
-test "rwlock scaling: ParkingRwLock vs pthread_rwlock_t at 2,4,8,16 threads" {
-    const alloc = std.testing.allocator;
-    const counts = [_]usize{ 2, 4, 8, 16 };
+// ─── Matrix ─────────────────────────────────────────────────────────────────
 
-    std.debug.print("\n  threads | ParkingRwLock |  pthread_rwlock_t | ratio\n", .{});
-    std.debug.print("  --------|---------------|-------------------|------\n", .{});
-    for (counts) |n| {
-        const pk_ns = try runScaleParking(n, alloc);
-        const pt_ns = try runScalePthread(n, alloc);
-        const pk_ms: f64 = @as(f64, @floatFromInt(pk_ns)) / 1_000_000.0;
-        const pt_ms: f64 = @as(f64, @floatFromInt(pt_ns)) / 1_000_000.0;
-        const ratio: f64 = pt_ms / pk_ms;
-        std.debug.print(
-            "  {d:>7} | {d:>10.1} ms | {d:>14.1} ms | {d:>4.2}x\n",
-            .{ n, pk_ms, pt_ms, ratio },
-        );
+fn nameKind(k: LockKind) []const u8 {
+    return switch (k) { .mutex => "Mutex ", .rwlock => "RwLock" };
+}
+fn nameP(p: Pattern) []const u8 {
+    return switch (p) { .read_heavy => "read-heavy ", .write_heavy => "write-heavy", .mixed => "mixed      " };
+}
+fn nameC(level: Contention) []const u8 {
+    return switch (level) { .uncontended => "uncontended", .heavy => "heavy      ", .realistic => "realistic  " };
+}
+
+test "lock matrix: ParkingMutex/RwLock vs pthread (3 patterns x 2 locks x 3 contention)" {
+    const alloc = std.testing.allocator;
+
+    // Warm thread spawn so the first row isn't penalized.
+    {
+        var t = try std.Thread.spawn(.{}, struct { fn f() void {} }.f, .{});
+        t.join();
+    }
+
+    std.debug.print(
+        "\n  Lock   | Pattern     | Contention  |  Parking ms |  pthread ms |  Ratio\n" ++
+          "  -------|-------------|-------------|-------------|-------------|-------\n",
+        .{},
+    );
+
+    inline for ([_]LockKind{ .mutex, .rwlock }) |kind| {
+        inline for ([_]Pattern{ .read_heavy, .write_heavy, .mixed }) |p| {
+            inline for ([_]Contention{ .uncontended, .heavy, .realistic }) |level| {
+                const params = paramsFor(level);
+                const wp = writeProbPct(p);
+                std.debug.print(
+                    "  > {s} | {s} | {s} ... ",
+                    .{ nameKind(kind), nameP(p), nameC(level) },
+                );
+                const pk_ns = switch (kind) {
+                    .mutex  => try runParkingMutex(alloc, params, wp),
+                    .rwlock => try runParkingRwLock(alloc, params, wp),
+                };
+                const pt_ns = switch (kind) {
+                    .mutex  => try runPthreadMutex(alloc, params, wp),
+                    .rwlock => try runPthreadRwLock(alloc, params, wp),
+                };
+                const pk_ms: f64 = @as(f64, @floatFromInt(pk_ns)) / 1_000_000.0;
+                const pt_ms: f64 = @as(f64, @floatFromInt(pt_ns)) / 1_000_000.0;
+                const ratio: f64 = pt_ms / pk_ms;
+                std.debug.print(
+                    "park={d:.1}ms pthr={d:.1}ms ratio={d:.2}x\n",
+                    .{ pk_ms, pt_ms, ratio },
+                );
+            }
+        }
     }
 }
