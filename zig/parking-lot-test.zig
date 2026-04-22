@@ -828,25 +828,15 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
     // Regression test for: writers_waiting not decremented on write-lock timeout,
     // permanently blocking future readers via the wakeNext writers_waiting == 0 guard.
     //
-    // Coordination is event-driven except for a single wall-clock wait in Main
-    // that is tied DIRECTLY to lock_timeout_ms. The cascaded 150/120/100ms
-    // timings of the previous version are gone.
-    //
-    // Side note on the single remaining sleep: the scheduler's lock_waiters
-    // timeout scan only runs when the scheduler wakes for some other reason
-    // (a sleeping fiber's 1ms io_uring poll, a CQE, etc). If nothing is in
-    // sleeping_queue and no I/O is pending, io_uring_enter blocks indefinitely
-    // and the lock timeout never fires. Main's fiberSleepMs serves both as
-    // "wait for B to time out" and as "keep scheduler awake so timeouts fire".
-    // A purely event-driven design would require a scheduler-level change to
-    // register a timer when registerLockWaiter is called.
+    // Fully event-driven: no wall-clock sleeps. The scheduler's idle path
+    // arms an io_uring timeout for the earliest lock-waiter deadline, so
+    // B's 100ms timeout fires reliably even when nothing else is pending.
     //
     //   1. Main spawns A (takes write lock) and B (queues for write lock).
-    //   2. Main sleeps lock_timeout_ms + small margin -- by the time it wakes,
-    //      B's timeout has fired (counter checks prove this below).
-    //   3. Main snapshots rw.writers_waiting and confirms b_wg is drained.
-    //      With the fix writers_waiting == 0; without it, stuck at 1.
-    //   4. Main spawns C (queues for read lock) and releases A via release_wg.
+    //   2. Main waits on b_wg for B to finish via LockTimeout.
+    //   3. Main snapshots rw.writers_waiting. With the fix writers_waiting
+    //      is 0; without it, it would be stuck at 1.
+    //   4. Main spawns C (queues for read lock) and signals A via release_wg.
     //   5. A unlocks. wakeNext wakes C iff writers_waiting == 0.
     //   6. Main waits on ac_wg for A and C.
     const t_alloc = std.testing.allocator;
@@ -933,11 +923,10 @@ test "ParkingRwLock: write-lock timeout decrements writers_waiting, readers can 
             try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
             try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
 
-            // Wait long enough for B's 100ms timeout to fire. Margin covers
-            // scheduler wake latency (~1ms per poll). Since B is the only
-            // fiber that can block on the rw lock, when this sleep returns
-            // B is guaranteed to have timed out.
-            fiberSleepMs(@as(u64, @intCast(fp.active_scheduler.lock_timeout_ms)) + 20);
+            // Wait for B to finish. The scheduler's idle path arms a timeout
+            // SQE for B's lock deadline, so this wakes deterministically
+            // once B hits lock_timeout_ms.
+            self.s.b_wg.wait();
 
             // Snapshot -- no further lock activity has happened.
             self.s.writers_waiting_after_b = self.s.rw.writers_waiting;
@@ -1351,4 +1340,137 @@ test "ParkingRwLock: cross-thread writers and readers hammer" {
     try std.testing.expectEqual(N_WRITERS * OPS_PER_WRITER, counter);
     try std.testing.expect(!rw.write_locked);
     try std.testing.expectEqual(@as(i32, 0), rw.readers);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// detectCycle false-positive regression
+//
+// Reproduces deterministically in single-scheduler cooperative mode. The bug:
+// when unlock() wakes a waiter via submitResume, the waiter goes onto the
+// ready queue but does not actually run until a later scheduler tick. Its
+// waiting_for_lock_owner field is still the pre-wake pointer, so a subsequent
+// detectCycle walk from ANOTHER fiber observes a stale chain and can report
+// error.Deadlock for a cycle that no longer exists.
+//
+// Fix (wakeNext): clear the waiter's wait-state fields BEFORE submitResume.
+//
+// Scenario here:
+//   A: holds mu_a, parked on rv (pre-locked rendezvous).
+//   B: holds mu_b, parked on mu_a. B.waiting_for_lock_owner = A.
+//   C: holds mu_c, parked on mu_b. C.waiting_for_lock_owner = B.
+//   Main: sleeps briefly so A/B/C all park, then unlocks rv (wakes A).
+//   A wakes, unlocks mu_a (wakes B into ready queue; B has NOT run yet).
+//   A tries mu_c. detectCycle walks: C -> B -> B.waiting_for_lock_owner.
+//     Without fix: B.waiting_for_lock_owner == A (stale) -> cycle found -> FALSE Deadlock.
+//     With fix:    B.waiting_for_lock_owner == null     -> chain ends    -> no cycle.
+//   With fix: A parks on mu_c, eventually acquires it after B and C unwind.
+// ─────────────────────────────────────────────────────────────────────────────
+test "ParkingMutex: wakeNext clears wait-state so detectCycle has no TOCTOU false positive" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    fp.active_scheduler = &sched;
+
+    const Shared = struct {
+        mu_a: ParkingMutex = .{},
+        mu_b: ParkingMutex = .{},
+        mu_c: ParkingMutex = .{},
+        // Pre-locked; Main unlocks it to release A after A/B/C are all parked.
+        rv: ParkingMutex = .{},
+        wg: CheatHeader.WaitGroup,
+        a_got_false_deadlock: bool = false,
+        a_acquired_mu_c: bool = false,
+        b_reached_end: bool = false,
+        c_reached_end: bool = false,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    shared.rv.locked.store(1, .monotonic);
+
+    const ACtx = struct { s: *Shared };
+    const BCtx = struct { s: *Shared };
+    const CCtx = struct { s: *Shared };
+    var a_ctx = ACtx{ .s = &shared };
+    var b_ctx = BCtx{ .s = &shared };
+    var c_ctx = CCtx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*ACtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu_a.lock();
+            // Park on rv waiting for Main's release signal.
+            try c.s.rv.lock();
+            c.s.rv.unlock();
+            // Explicit unlock (not defer) so it runs BEFORE we try mu_c.
+            // This is the wakeNext call that puts B into ready queue.
+            c.s.mu_a.unlock();
+            // detectCycle runs inside this lock() call. Without the wakeNext
+            // clear, we see the stale chain C -> B -> A and false-positive.
+            c.s.mu_c.lock() catch |e| {
+                c.s.a_got_false_deadlock = (e == error.Deadlock);
+                return;
+            };
+            c.s.a_acquired_mu_c = true;
+            c.s.mu_c.unlock();
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*BCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu_b.lock();
+            defer c.s.mu_b.unlock();
+            try c.s.mu_a.lock();
+            defer c.s.mu_a.unlock();
+            c.s.b_reached_end = true;
+        }
+    };
+    const FiberC = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*CCtx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            try c.s.mu_c.lock();
+            defer c.s.mu_c.unlock();
+            try c.s.mu_b.lock();
+            defer c.s.mu_b.unlock();
+            c.s.c_reached_end = true;
+        }
+    };
+    const Main = struct {
+        s: *Shared, ac: *ACtx, bc: *BCtx, cc: *CCtx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(3);
+            // LIFO: spawn C, B, A so A pops first (locks mu_a before B tries it;
+            // B locks mu_b before C tries it).
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberC.run)), self.cc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = .Large });
+            // Sleep briefly so the scheduler runs A/B/C through to their park
+            // points. This is a setup step, not timing-dependent coordination.
+            fiberSleepMs(10);
+            // All three are now parked. Release A.
+            self.s.rv.unlock();
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx, .cc = &c_ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    // The core assertion: with the fix, detectCycle must not fire spuriously.
+    try std.testing.expect(!shared.a_got_false_deadlock);
+    try std.testing.expect(shared.a_acquired_mu_c);
+    try std.testing.expect(shared.b_reached_end);
+    try std.testing.expect(shared.c_reached_end);
+    try std.testing.expectEqual(@as(u32, 0), shared.mu_a.locked.load(.monotonic));
+    try std.testing.expectEqual(@as(u32, 0), shared.mu_b.locked.load(.monotonic));
+    try std.testing.expectEqual(@as(u32, 0), shared.mu_c.locked.load(.monotonic));
 }

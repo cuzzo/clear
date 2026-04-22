@@ -201,6 +201,17 @@ pub const ParkingMutex = struct {
             // Transfer ownership to the waiter. The lock stays locked.
             // unlock() sets owner so the waiter can check re-entrancy later.
             self.owner.store(w.task, .release);
+            // Clear wait-state BEFORE submitResume. Once this task is Ready,
+            // another fiber's detectCycle may walk w.task.waiting_for_lock_owner
+            // before w.task actually runs. If we leave the stale pre-wake
+            // pointer set, detectCycle can report a cycle that no longer exists
+            // (false-positive error.Deadlock). The wake site is the only race-
+            // free place to clear these; the post-yield cleanup in lockSlow()
+            // is redundant after this but kept for defense-in-depth.
+            w.task.waiting_for_lock_owner = null;
+            w.task.waiting_for_lock_list = null;
+            w.task.lock_waiter_node = null;
+            w.task.waiting_for_lock.store(null, .release);
             const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
             sched.submitResume(w.task);
         } else {
@@ -387,12 +398,21 @@ pub const ParkingRwLock = struct {
     // Wake the highest-priority waiter (call while holding spinlock).
     // Writer-preference: wake a writer if one is waiting. Otherwise wake all
     // pending readers.
+    //
+    // Before every submitResume we clear the waiter's wait-state fields. See
+    // ParkingMutex.unlock for the rationale (cycle-detection false-positive
+    // race if we leave stale pointers visible to concurrent detectCycle walks).
     fn wakeNext(self: *ParkingRwLock) void {
         if (self.write_waiters.head != null and !self.write_locked and self.readers == 0) {
             const w = self.write_waiters.pop().?;
             self.writers_waiting -= 1;
             self.write_locked = true;
             self.write_owner.store(w.task, .release);
+            w.task.waiting_for_lock_owner = null;
+            w.task.waiting_for_lock_list = null;
+            w.task.lock_waiter_node = null;
+            w.task.lock_counter_ptr = null;
+            w.task.waiting_for_lock.store(null, .release);
             const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
             sched.submitResume(w.task);
             return;
@@ -401,6 +421,9 @@ pub const ParkingRwLock = struct {
         if (!self.write_locked and self.writers_waiting == 0) {
             while (self.read_waiters.pop()) |r| {
                 self.readers += 1;
+                r.task.waiting_for_lock_list = null;
+                r.task.lock_waiter_node = null;
+                r.task.waiting_for_lock.store(null, .release);
                 const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
                 sched.submitResume(r.task);
             }

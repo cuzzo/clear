@@ -616,9 +616,20 @@ pub const Scheduler = struct {
                 if (flag.load(.monotonic)) break;
             }
 
+            // Scan lock_waiters every iteration (fast or slow path). Without
+            // this, three failure modes silently break lock timeouts:
+            //   1. Idle scheduler blocks on io_uring_enter forever — handled
+            //      by the idle path below arming a timeout for the earliest
+            //      lock deadline.
+            //   2. Fast-path starvation: a scheduler that always has ready
+            //      work never enters the slow-path branch, so lock timeouts
+            //      never fire. Running the scan here fixes that.
+            //   3. Stale-entry leak: entries for fibers that woke via unlock
+            //      (not timeout) are only lazily cleaned in this scan, so
+            //      #2 also means the list grows without bound.
+            _ = self.scanLockWaiters();
+
             // ── Fast path: if any queue has work, run it immediately.
-            // Every 64 fast-path iterations, drain inbox + poll ring to
-            // pick up newly spawned tasks and wake I/O-blocked fibers.
             if (self.hasWork()) {
                 self.fast_path_counter +%= 1;
                 self.drainChannels();
@@ -640,49 +651,6 @@ pub const Scheduler = struct {
                         } else {
                             i += 1;
                         }
-                    }
-                }
-
-                // Check for lock-parked fibers that exceeded LOCK_TIMEOUT_MS.
-                // A non-null waiting_for_lock means the fiber is still parked.
-                // Null means it woke up normally — lazily remove from the list.
-                if (self.lock_waiters.items.len > 0) {
-                    const now_ms = milliTimestamp();
-                    var i: usize = 0;
-                    while (i < self.lock_waiters.items.len) {
-                        const task = self.lock_waiters.items[i];
-                        if (task.waiting_for_lock.load(.acquire) == null) {
-                            // Already woken normally; clean up the tracking entry.
-                            _ = self.lock_waiters.swapRemove(i);
-                            continue;
-                        }
-                        if (now_ms - task.lock_wait_start_ms > self.lock_timeout_ms) {
-                            // Timed out: remove from lock's waiter list, then wake.
-                            var removed = false;
-                            if (task.waiting_for_lock_list) |wl| {
-                                wl.spinAcquire();
-                                removed = wl.remove(task.lock_waiter_node.?);
-                                wl.spinRelease();
-                            }
-                            // If this was a ParkingRwLock write-lock waiter and we
-                            // won the removal race, decrement writers_waiting so
-                            // future lockShared calls are not permanently blocked.
-                            if (removed) {
-                                if (task.lock_counter_ptr) |ctr| {
-                                    _ = @atomicRmw(u32, ctr, .Sub, 1, .monotonic);
-                                }
-                            }
-                            _ = self.lock_waiters.swapRemove(i);
-                            task.lock_timed_out = true;
-                            task.waiting_for_lock.store(null, .release);
-                            task.waiting_for_lock_list = null;
-                            task.lock_waiter_node = null;
-                            task.lock_counter_ptr = null;
-                            task.status.store(.Ready, .release);
-                            self.enqueueTask(task);
-                            continue;
-                        }
-                        i += 1;
                     }
                 }
             } // end slow path
@@ -783,9 +751,39 @@ pub const Scheduler = struct {
             // Determine wait_nr: 0 = non-blocking, 1 = block until at least one CQE.
             var wait_nr: u32 = 1;
 
+            // Compute the wait timeout in nanoseconds. 0 means "no timeout"
+            // (block indefinitely on CQEs). Otherwise we submit an io_uring
+            // timeout SQE for that duration so the scheduler wakes up in
+            // time to fire sleeper wakes or lock-waiter timeouts.
+            var timeout_ns: u64 = 0;
+
             if (self.sleeping_queue.items.len > 0) {
-                // Submit a 1ms timeout so we wake up to check sleepers.
-                const ts = linux.kernel_timespec{ .sec = 0, .nsec = 1_000_000 };
+                // 1ms poll for sleepers. (Existing behavior; the sleep
+                // queue's exact next wake_time is not consulted.)
+                timeout_ns = 1_000_000;
+            }
+            if (self.lock_waiters.items.len > 0) {
+                // Arm the wait for the earliest lock-waiter deadline so an
+                // otherwise-idle scheduler still wakes up to fire the
+                // timeout. Without this, io_uring_enter blocks forever and
+                // lock_timeout_ms is a no-op.
+                const now_ms = milliTimestamp();
+                var earliest_ms: i64 = now_ms + self.lock_timeout_ms;
+                for (self.lock_waiters.items) |t| {
+                    if (t.waiting_for_lock.load(.monotonic) == null) continue;
+                    const deadline = t.lock_wait_start_ms + self.lock_timeout_ms;
+                    if (deadline < earliest_ms) earliest_ms = deadline;
+                }
+                const ms_until = @max(@as(i64, 1), earliest_ms - now_ms);
+                const ns: u64 = @as(u64, @intCast(ms_until)) * 1_000_000;
+                if (timeout_ns == 0 or ns < timeout_ns) timeout_ns = ns;
+            }
+
+            if (timeout_ns > 0) {
+                const ts = linux.kernel_timespec{
+                    .sec = @intCast(timeout_ns / 1_000_000_000),
+                    .nsec = @intCast(timeout_ns % 1_000_000_000),
+                };
                 self.queueTimeoutOnIoStack(&ts);
                 self.ring_dirty = true;
             } else if (self.shutdown_on_idle and self.active_tasks.load(.monotonic) == 0) {
@@ -988,6 +986,56 @@ pub const Scheduler = struct {
 
     fn ioHelperStackTop(self: *Scheduler) usize {
         return @intFromPtr(self.io_helper_stack.ptr) + self.io_helper_stack.len;
+    }
+
+    /// Time out any lock_waiters past their deadline and lazy-clean stale
+    /// entries. Returns the earliest remaining deadline in milliseconds
+    /// (absolute wall-clock), or null if the list is empty after scanning.
+    /// The caller uses this to arm an io_uring timeout in the idle path so
+    /// a totally-idle scheduler still wakes up in time to fire timeouts.
+    fn scanLockWaiters(self: *Scheduler) ?i64 {
+        if (self.lock_waiters.items.len == 0) return null;
+        const now_ms = milliTimestamp();
+        var earliest: ?i64 = null;
+        var i: usize = 0;
+        while (i < self.lock_waiters.items.len) {
+            const task = self.lock_waiters.items[i];
+            if (task.waiting_for_lock.load(.acquire) == null) {
+                // Already woken normally; clean up the tracking entry.
+                _ = self.lock_waiters.swapRemove(i);
+                continue;
+            }
+            const deadline = task.lock_wait_start_ms + self.lock_timeout_ms;
+            if (now_ms - task.lock_wait_start_ms > self.lock_timeout_ms) {
+                // Timed out: remove from lock's waiter list, then wake.
+                var removed = false;
+                if (task.waiting_for_lock_list) |wl| {
+                    wl.spinAcquire();
+                    removed = wl.remove(task.lock_waiter_node.?);
+                    wl.spinRelease();
+                }
+                // If this was a ParkingRwLock write-lock waiter and we
+                // won the removal race, decrement writers_waiting so
+                // future lockShared calls are not permanently blocked.
+                if (removed) {
+                    if (task.lock_counter_ptr) |ctr| {
+                        _ = @atomicRmw(u32, ctr, .Sub, 1, .monotonic);
+                    }
+                }
+                _ = self.lock_waiters.swapRemove(i);
+                task.lock_timed_out = true;
+                task.waiting_for_lock.store(null, .release);
+                task.waiting_for_lock_list = null;
+                task.lock_waiter_node = null;
+                task.lock_counter_ptr = null;
+                task.status.store(.Ready, .release);
+                self.enqueueTask(task);
+                continue;
+            }
+            if (earliest == null or deadline < earliest.?) earliest = deadline;
+            i += 1;
+        }
+        return earliest;
     }
 
     fn queueTimeoutOnIoStack(self: *Scheduler, ts: *const linux.kernel_timespec) void {
