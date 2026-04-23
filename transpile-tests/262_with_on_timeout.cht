@@ -14,10 +14,11 @@ FN main() RETURNS Void ->
         inner.value = inner.value + 1;
     } ON Transient PASS
 
-    -- ON :LockTimeout, :LockCycle EXIT "msg" (type selector list)
+    -- ON :LockTimeout EXIT "msg" (type selector; :LockCycle and :Deadlock
+    -- are statically impossible here so they cannot appear as selectors).
     WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
-    } ON :LockTimeout, :LockCycle EXIT "deadlocked"
+    } ON :LockTimeout EXIT "deadlocked"
 
     -- ON Transient -> { stmts }
     MUTABLE fallback: Int64 = 0;

@@ -38,6 +38,18 @@ module LockHelper
     @lock_direct_edges    ||= Hash.new { |h, k| h[k] = [] }
     @lock_direct_acquires ||= Hash.new { |h, k| h[k] = Set.new }
     @lock_held_calls      ||= Hash.new { |h, k| h[k] = [] }
+    # WITH-with-clause sites are post-pass verified for reachable-handler
+    # correctness: ON :X where :X cannot actually fire is a dead handler.
+    @lock_clause_sites    ||= []
+  end
+
+  def record_lock_clause_site!(node, expanded_capabilities)
+    return unless node.lock_error_clause
+    fallible = expanded_capabilities.select { |c|
+      c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
+    }
+    cap_types = fallible.filter_map { |c| lock_identity_of(c) }
+    @lock_clause_sites << { node: node, cap_types: cap_types }
   end
 
   # ---- Phase 1 — lexical same-name nested-WITH check ------------------
@@ -152,16 +164,18 @@ module LockHelper
     end
   end
 
-  # Build the global graph over non-opted-out edges. Returns the node
-  # set, adjacency map, and the live edge array (for later diagnostic
-  # lookup by SCC membership).
-  def build_lock_graph
+  # Build the global graph. When include_opted_out is false, excludes
+  # opt-out edges — used for cycle-error reporting (non-opted cycles
+  # are bugs). When true, includes every edge — used for handler
+  # reachability analysis (opt-out edges are paths that CAN fire at
+  # runtime, so ON :LockCycle handlers reaching them are live).
+  def build_lock_graph(include_opted_out: false)
     adj = Hash.new { |h, k| h[k] = Set.new }
     nodes = Set.new
     live = []
     @lock_direct_edges.each do |_fn, edges|
       edges.each do |e|
-        next if e.opted_out
+        next if e.opted_out && !include_opted_out
         adj[e.held] << e.acquired
         nodes << e.held
         nodes << e.acquired
@@ -225,11 +239,76 @@ module LockHelper
   def check_lock_cycles!
     propagate_lock_acquires!
     resolve_held_calls!
-    graph = build_lock_graph
-    sccs = tarjan_scc(graph[:nodes], graph[:adj])
-    sccs.each do |scc|
-      next unless scc_is_cyclic?(scc, graph[:adj])
-      report_lock_cycle!(scc, graph[:edges])
+
+    non_opted = build_lock_graph(include_opted_out: false)
+    tarjan_scc(non_opted[:nodes], non_opted[:adj]).each do |scc|
+      next unless scc_is_cyclic?(scc, non_opted[:adj])
+      report_lock_cycle!(scc, non_opted[:edges])
+    end
+
+    # Handler reachability: a dead ON :X handler is a compile error so
+    # the programmer's intent stays honest with the code. Uses the FULL
+    # graph (including opt-outs) because opt-out edges are exactly the
+    # runtime paths where :LockCycle / :Deadlock can actually fire.
+    check_lock_handler_reachability!
+  end
+
+  def check_lock_handler_reachability!
+    return if @lock_clause_sites.nil? || @lock_clause_sites.empty?
+
+    full = build_lock_graph(include_opted_out: true)
+    types_in_cycle     = Set.new
+    types_with_self    = Set.new
+    tarjan_scc(full[:nodes], full[:adj]).each do |scc|
+      if scc.length >= 2
+        scc.each { |t| types_in_cycle << t }
+      else
+        node = scc.first
+        if full[:adj][node].include?(node)
+          types_in_cycle << node
+          types_with_self << node
+        end
+      end
+    end
+
+    @lock_clause_sites.each do |site|
+      verify_handler_reachability!(site, types_in_cycle, types_with_self)
+    end
+  end
+
+  # The per-WITH narrowed possibility set:
+  #   - :LockTimeout    always (any fallible acquire can time out)
+  #   - :LockCycle      iff any of the WITH's cap types is in a graph cycle
+  #   - :Deadlock       iff any of the WITH's cap types has a graph self-loop
+  # Each selector in the clause must expand to at least one type in this
+  # set. A selector that expands to the empty set here is dead code.
+  def verify_handler_reachability!(site, types_in_cycle, types_with_self)
+    node    = site[:node]
+    clause  = node.lock_error_clause
+    return unless clause
+
+    possible = Set.new
+    possible << :LockTimeout
+    site[:cap_types].each do |t|
+      possible << :LockCycle if types_in_cycle.include?(t)
+      possible << :Deadlock  if types_with_self.include?(t)
+    end
+
+    clause[:selectors].each do |sel|
+      expansion = case sel[:form]
+                  when :kind then AST.types_for_kind(sel[:name]).to_set
+                  when :type then Set.new([sel[:name]])
+                  else Set.new
+                  end
+      reachable = expansion & possible
+      next unless reachable.empty?
+
+      label = sel[:form] == :type ? ":#{sel[:name]}" : sel[:name].to_s
+      error!(sel[:token] || node,
+             "You are trying to handle `#{label}` which is not a possible error at " \
+             "this WITH. The static lock analysis proved it cannot fire. Remove the " \
+             "handler, or mark an upstream lock acquire with POSSIBLE_DEADLOCK / " \
+             "POSSIBLE_LOCK_CYCLE if you know a runtime path can reach it.")
     end
   end
 

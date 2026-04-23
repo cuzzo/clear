@@ -3115,6 +3115,10 @@ private
     @held_lock_types = prev_held_types
 
     validate_lock_error_clause!(node, expanded_capabilities)
+    # Queue this WITH for the post-pass handler-reachability check. Running
+    # it here (during annotation) is too early — cycle information isn't
+    # known until compute_lock_cycles! has propagated through @call_graph.
+    record_lock_clause_site!(node, expanded_capabilities)
 
     @with_block_depth -= 1
     node.full_type = :Void

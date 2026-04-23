@@ -1392,11 +1392,11 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
 
-    it "accepts ON :LockTimeout, :LockCycle PASS" do
+    it "accepts ON :LockTimeout alone (LockCycle is statically impossible here)" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout, :LockCycle PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout PASS
       FLUX
       expect { run(src) }.not_to raise_error
     end
@@ -1696,6 +1696,89 @@ RSpec.describe SemanticAnnotator do
         FN main() RETURNS Void -> cycleInOne(); RETURN; END
       FLUX
       expect { run(src) }.to raise_error(/lock cycle/)
+    end
+  end
+
+  describe "ON :Sym handler reachability" do
+    it "rejects ON :LockCycle when no cycle is possible" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockCycle PASS
+      FLUX
+      expect { run(src) }.to raise_error(/trying to handle `:LockCycle` which is not a possible error/)
+    end
+
+    it "rejects ON :Deadlock when no self-loop is possible" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :Deadlock PASS
+      FLUX
+      expect { run(src) }.to raise_error(/trying to handle `:Deadlock` which is not a possible error/)
+    end
+
+    it "accepts ON :LockTimeout (always a possible error)" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout PASS
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts ON Transient even when LockCycle is impossible (LockTimeout keeps Transient alive)" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient RAISE
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts ON :LockCycle when an opt-out reintroduces the cycle" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+
+        FN useB() RETURNS Void ->
+          local_b = B{ y: 0 } @locked;
+          WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
+          RETURN;
+        END
+
+        FN useA() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH EXCLUSIVE local_a AS aa { aa.x = aa.x + 1; }
+          RETURN;
+        END
+
+        FN ab() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_a AS aa {
+            useB();
+          } ON :LockCycle PASS
+          RETURN;
+        END
+
+        FN ba() RETURNS Void ->
+          local_b = B{ y: 0 } @locked;
+          WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_b AS bb { useA(); }
+          RETURN;
+        END
+
+        FN main() RETURNS Void -> ab(); ba(); RETURN; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects multi-selector clause when every type in the list is impossible" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockCycle, :Deadlock PASS
+      FLUX
+      expect { run(src) }.to raise_error(/not a possible error/)
     end
   end
 
