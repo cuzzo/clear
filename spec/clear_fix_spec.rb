@@ -155,6 +155,67 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "enum / union variant typos" do
+    it "suggests the closest enum variant" do
+      src = <<~CLEAR
+        ENUM Shape { Circle, Square, Triangle }
+        FN main() RETURNS Shape ->
+          RETURN Shape.Circl;
+        END
+      CLEAR
+      path = write("e.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Enum 'Shape' has no variant 'Circl'/)
+      expect(out).to match(/Replace 'Circl' with 'Circle'/)
+    end
+
+    it "applies the enum fix and the result compiles" do
+      src = "ENUM Shape { Circle, Square }\nFN main() RETURNS Shape ->\n  RETURN Shape.Squar;\nEND\n"
+      path = write("e.cht", src)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("Shape.Square")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+
+    it "suggests the closest inline-struct union variant" do
+      src = <<~CLEAR
+        UNION Shape {
+          Circle { radius: Float64 },
+          Square { side: Float64 }
+        }
+
+        FN main() RETURNS Shape ->
+          RETURN Shape.Circl{radius: 2.0};
+        END
+      CLEAR
+      path = write("u.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Union 'Shape' has no variant 'Circl'/)
+      expect(out).to match(/Replace 'Circl' with 'Circle'/)
+    end
+
+    it "applies the union-variant fix and the result compiles" do
+      src = <<~CLEAR
+        UNION Shape {
+          Circle { radius: Float64 },
+          Square { side: Float64 }
+        }
+
+        FN main() RETURNS Shape ->
+          RETURN Shape.Circl{radius: 2.0};
+        END
+      CLEAR
+      path = write("u.cht", src)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("Shape.Circle{radius: 2.0}")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
   describe "operator-typo rule table" do
     it "suggests `s>` for `|>`" do
       src = "FN main() RETURNS Int64 ->\n  v = [1] s> SUM _;\n  RETURN v;\nEND\n"

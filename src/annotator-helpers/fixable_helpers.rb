@@ -158,6 +158,63 @@ module FixableHelper
              fixes: fixes, raise_in_collector: cascade)
   end
 
+  # Synthesize a token-like anchor at an explicit (line, col). Used by
+  # migrations whose error node doesn't carry a separate token for the
+  # offending identifier (e.g., `Shape.Circl` — the field name 'Circl'
+  # is a String in GetField, not a Token).
+  #
+  # Carries `type`/`value` stubs so `SourceError#build_message` — which
+  # reads `@token.type == :EOF` — doesn't NPE when the anchor flows
+  # through to the legacy error path in non-collector mode.
+  AnchorToken = Struct.new(:line, :column) do
+    def type; :ANCHOR; end
+    def value; nil; end
+  end
+
+  def anchor_at(line, col)
+    AnchorToken.new(line, col)
+  end
+
+  # Given a Type.Variant style GetField, compute the token line/col of
+  # the variant name (right after `target.` — length of target + 1).
+  def variant_anchor_from_getfield(getfield_node)
+    tgt = getfield_node.target
+    return nil unless tgt.respond_to?(:token) && tgt.token
+    anchor_at(tgt.token.line, tgt.token.column + tgt.name.to_s.length + 1)
+  end
+
+  # For a UnionVariantLit `Union.Variant{...}`, the node's token is the
+  # opening `{` — the variant name ends right before it, so the name's
+  # start column is `token.column - variant_name.length`.
+  def variant_anchor_from_unionlit(node, variant_name)
+    return nil unless node.respond_to?(:token) && node.token
+    anchor_at(node.token.line, node.token.column - variant_name.to_s.length)
+  end
+
+  # Typo-suggestion wrapper that takes an (line, col, name, length)
+  # instead of a Token. Used by migrations whose error token comes
+  # from a synthesized anchor.
+  def emit_variant_typo!(anchor, name, candidates, message, fix_label,
+                         cascade: false)
+    best = closest_name(name, candidates)
+    fixes = []
+    if best
+      fixes << Fix.new(
+        description: "Replace '#{name}' with '#{best}' (#{fix_label}).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: anchor.line, col: anchor.column, length: name.to_s.length),
+          replacement: best.to_s
+        )]
+      )
+    end
+
+    return error!(anchor, message) if fixes.empty?
+
+    fixable!(anchor, message: message, category: :type, level: :error,
+             fixes: fixes, raise_in_collector: cascade)
+  end
+
   # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
   # locates the original declaration (via the enclosing scope's info)
   # and inserts `MUTABLE ` at its column. If the declaration can't be

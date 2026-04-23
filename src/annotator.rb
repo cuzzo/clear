@@ -2451,7 +2451,17 @@ private
 
       variant_name, val_node = node.fields.first
       unless schema[:variants].key?(variant_name)
-        error!(node, :UNION_UNKNOWN_VARIANT, node.name, variant_name)
+        anchor = variant_anchor_from_unionlit(node, variant_name)
+        if anchor
+          emit_variant_typo!(
+            anchor, variant_name, schema[:variants].keys,
+            "Type Error: Union '#{node.name}' has no variant '#{variant_name}'.",
+            "variant of union #{node.name}",
+            cascade: true
+          )
+        else
+          error!(node, :UNION_UNKNOWN_VARIANT, node.name, variant_name)
+        end
       end
       raw_expected = schema[:variants][variant_name]
       if raw_expected.nil?

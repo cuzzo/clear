@@ -97,7 +97,17 @@ module UnionAnalysis
 
     if schema[:kind] == :enum
       unless schema[:variants].include?(node.field)
-        error!(node, :ENUM_UNKNOWN_VARIANT, type_name, node.field)
+        anchor = variant_anchor_from_getfield(node)
+        if anchor
+          emit_variant_typo!(
+            anchor, node.field, schema[:variants],
+            "Type Error: Enum '#{type_name}' has no variant '#{node.field}'.",
+            "variant of enum #{type_name}",
+            cascade: true
+          )
+        else
+          error!(node, :ENUM_UNKNOWN_VARIANT, type_name, node.field)
+        end
       end
       node.target.full_type = type_name
       node.full_type = type_name
@@ -106,7 +116,17 @@ module UnionAnalysis
 
     if schema[:kind] == :union
       unless schema[:variants].key?(node.field)
-        error!(node, :UNION_UNKNOWN_VARIANT, type_name, node.field)
+        anchor = variant_anchor_from_getfield(node)
+        if anchor
+          emit_variant_typo!(
+            anchor, node.field, schema[:variants].keys,
+            "Type Error: Union '#{type_name}' has no variant '#{node.field}'.",
+            "variant of union #{type_name}",
+            cascade: true
+          )
+        else
+          error!(node, :UNION_UNKNOWN_VARIANT, type_name, node.field)
+        end
       end
       var_data = schema[:variants][node.field]
       if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct && !@match_pattern_context
@@ -131,7 +151,17 @@ module UnionAnalysis
       error!(node, "Type Error: '#{node.union_name}' is not a union type.")
     end
     unless schema[:variants].key?(node.variant_name)
-      error!(node, :UNION_UNKNOWN_VARIANT, node.union_name, node.variant_name)
+      anchor = variant_anchor_from_unionlit(node, node.variant_name)
+      if anchor
+        emit_variant_typo!(
+          anchor, node.variant_name, schema[:variants].keys,
+          "Type Error: Union '#{node.union_name}' has no variant '#{node.variant_name}'.",
+          "variant of union #{node.union_name}",
+          cascade: true
+        )
+      else
+        error!(node, :UNION_UNKNOWN_VARIANT, node.union_name, node.variant_name)
+      end
     end
 
     var_data = schema[:variants][node.variant_name]
