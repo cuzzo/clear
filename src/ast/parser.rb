@@ -2369,9 +2369,11 @@ class Parser
     n
   end
 
-  # Parse comma-separated error selectors. Each is either a bare TYPE_ID
-  # (error kind: Transient, System, ...) or `:' TYPE_ID (error type symbol:
-  # :LockTimeout, :Deadlock, ...).
+  # Parse comma-separated error selectors. Each is a bare TYPE_ID. A
+  # TYPE_ID matching one of the 6 reserved kind names is a kind
+  # selector; anything else is a type selector. Types are enum values
+  # (no `:` prefix) per the unified error-system design; the 6 kind
+  # names are effectively reserved.
   def parse_error_selectors
     selectors = [parse_error_selector]
     while match!(:CHAR, ',')
@@ -2381,15 +2383,12 @@ class Parser
   end
 
   def parse_error_selector
-    if match!(:CHAR, ':')
-      tok = consume(:TYPE_ID)
-      { form: :type, name: tok.value.to_sym, token: tok }
-    elsif match?(:TYPE_ID)
-      tok = consume(:TYPE_ID)
-      { form: :kind, name: tok.value.to_sym, token: tok }
-    else
-      error!(current, "Expected error selector: a kind like 'Transient' or a type like ':LockTimeout'")
+    unless match?(:TYPE_ID)
+      error!(current, "Expected error selector: a kind like 'Transient' or a type like 'LockTimeout'")
     end
+    tok = consume(:TYPE_ID)
+    form = ERROR_KINDS.include?(tok.value) ? :kind : :type
+    { form: form, name: tok.value.to_sym, token: tok }
   end
 
   # Parse a single error-handler action: RAISE | PASS | EXIT "msg" | -> { stmts }.

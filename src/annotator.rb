@@ -3195,7 +3195,7 @@ private
         matched.concat(AST.types_for_kind(sel[:name]))
       when :type
         unless AST.error_type?(sel[:name])
-          error!(sel[:token], "Unknown error type ':#{sel[:name]}'. " \
+          error!(sel[:token], "Unknown error type '#{sel[:name]}'. " \
                               "Register it in src/ast/error_registry.rb.")
         end
         matched << sel[:name]
@@ -3209,14 +3209,14 @@ private
       unless non_transient.empty?
         error!(clause[:token] || node,
                "RETRY only targets Transient errors. Non-retryable types in selector: " \
-               "#{non_transient.map { |s| ':' + s.to_s }.join(', ')}")
+               "#{non_transient.join(', ')}")
       end
     end
 
     overlap = matched & possible
     if overlap.empty?
-      error!(node, "Selectors [#{matched.map { |s| ':' + s.to_s }.join(', ')}] do not match " \
-                   "any error the WITH acquire can produce (#{possible.map { |s| ':' + s.to_s }.join(', ')}).")
+      error!(node, "Selectors [#{matched.join(', ')}] do not match " \
+                   "any error the WITH acquire can produce (#{possible.join(', ')}).")
     end
 
     clause[:matched_types] = overlap

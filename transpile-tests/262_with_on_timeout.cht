@@ -1,7 +1,7 @@
 -- Test: WITH EXCLUSIVE ... ON <selectors> <action>.
 -- Under no-contention the lock acquires immediately and the clause
 -- never fires. Exercises the codegen of each action + selector shape:
--- kind selector (Transient), type selectors (:LockTimeout, :LockCycle),
+-- kind selector (Transient), type selectors (LockTimeout, LockCycle),
 -- RETRY sugar, and the -> { stmts } block form.
 
 STRUCT Counter { value: Int64 }
@@ -14,11 +14,11 @@ FN main() RETURNS Void ->
         inner.value = inner.value + 1;
     } ON Transient PASS
 
-    -- ON :LockTimeout EXIT "msg" (type selector; :LockCycle and :Deadlock
+    -- ON LockTimeout EXIT "msg" (type selector; LockCycle and Deadlock
     -- are statically impossible here so they cannot appear as selectors).
     WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
-    } ON :LockTimeout EXIT "deadlocked"
+    } ON LockTimeout EXIT "deadlocked"
 
     -- ON Transient -> { stmts }
     MUTABLE fallback: Int64 = 0;
@@ -31,10 +31,10 @@ FN main() RETURNS Void ->
         inner.value = inner.value + 1;
     } RETRY(3) THEN PASS
 
-    -- ON :LockTimeout RETRY(2) THEN PASS (explicit type + retry)
+    -- ON LockTimeout RETRY(2) THEN PASS (explicit type + retry)
     WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
-    } ON :LockTimeout RETRY(2) THEN PASS
+    } ON LockTimeout RETRY(2) THEN PASS
 
     WITH EXCLUSIVE c AS inner {
         ASSERT inner.value == 5, "expected 5 increments";

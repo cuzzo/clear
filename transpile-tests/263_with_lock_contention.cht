@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
         napFor(20);
         WITH EXCLUSIVE c AS inner {
             inner.value = 999;
-        } ON :LockTimeout -> {
+        } ON LockTimeout -> {
             WITH EXCLUSIVE timed_out AS t { t.value = t.value + 1; }
         }
     };

@@ -1269,11 +1269,11 @@ RSpec.describe SemanticAnnotator do
       expect(clause[:retries]).to be_nil
     end
 
-    it "parses ON :LockTimeout, :LockCycle PASS" do
+    it "parses ON LockTimeout, LockCycle PASS" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout, :LockCycle PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockTimeout, LockCycle PASS
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
       expect(clause[:action]).to eq(:pass)
@@ -1314,11 +1314,11 @@ RSpec.describe SemanticAnnotator do
       expect(clause[:selectors].first[:name]).to eq(:Transient)
     end
 
-    it "parses ON :LockTimeout RETRY(2) THEN RAISE" do
+    it "parses ON LockTimeout RETRY(2) THEN RAISE" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout RETRY(2) THEN RAISE
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockTimeout RETRY(2) THEN RAISE
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
       expect(clause[:retries]).to eq(2)
@@ -1392,38 +1392,42 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
 
-    it "accepts ON :LockTimeout alone (LockCycle is statically impossible here)" do
+    it "accepts ON LockTimeout alone (LockCycle is statically impossible here)" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockTimeout PASS
       FLUX
       expect { run(src) }.not_to raise_error
     end
 
-    it "rejects unknown error kind" do
+    it "rejects unknown identifier as an unknown type" do
+      # Under the unified grammar, any TYPE_ID that isn't one of the 6
+      # reserved kinds parses as a type. A bogus name surfaces as
+      # "Unknown error type" rather than "Unknown error kind" — there
+      # is no source-level path to write an unknown kind.
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Nonsense RAISE
       FLUX
-      expect { run(src) }.to raise_error(/Unknown error kind 'Nonsense'/)
+      expect { run(src) }.to raise_error(/Unknown error type 'Nonsense'/)
     end
 
     it "rejects unknown error type" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :Imaginary RAISE
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Imaginary RAISE
       FLUX
-      expect { run(src) }.to raise_error(/Unknown error type ':Imaginary'/)
+      expect { run(src) }.to raise_error(/Unknown error type 'Imaginary'/)
     end
 
     it "rejects RETRY on a non-Transient selector" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :Deadlock RETRY(3) THEN RAISE
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Deadlock RETRY(3) THEN RAISE
       FLUX
       expect { run(src) }.to raise_error(/RETRY only targets Transient errors/)
     end
@@ -1699,30 +1703,30 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
-  describe "ON :Sym handler reachability" do
-    it "rejects ON :LockCycle when no cycle is possible" do
+  describe "ON Sym handler reachability" do
+    it "rejects ON LockCycle when no cycle is possible" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockCycle PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockCycle PASS
       FLUX
-      expect { run(src) }.to raise_error(/trying to handle `:LockCycle` which is not a possible error/)
+      expect { run(src) }.to raise_error(/trying to handle `LockCycle` which is not a possible error/)
     end
 
-    it "rejects ON :Deadlock when no self-loop is possible" do
+    it "rejects ON Deadlock when no self-loop is possible" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :Deadlock PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Deadlock PASS
       FLUX
-      expect { run(src) }.to raise_error(/trying to handle `:Deadlock` which is not a possible error/)
+      expect { run(src) }.to raise_error(/trying to handle `Deadlock` which is not a possible error/)
     end
 
-    it "accepts ON :LockTimeout (always a possible error)" do
+    it "accepts ON LockTimeout (always a possible error)" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockTimeout PASS
       FLUX
       expect { run(src) }.not_to raise_error
     end
@@ -1736,7 +1740,7 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
 
-    it "accepts ON :LockCycle when an opt-out reintroduces the cycle" do
+    it "accepts ON LockCycle when an opt-out reintroduces the cycle" do
       src = <<~FLUX
         STRUCT A { x: Int64 }
         STRUCT B { y: Int64 }
@@ -1757,7 +1761,7 @@ RSpec.describe SemanticAnnotator do
           local_a = A{ x: 0 } @locked;
           WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_a AS aa {
             useB();
-          } ON :LockCycle PASS
+          } ON LockCycle PASS
           RETURN;
         END
 
@@ -1776,7 +1780,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockCycle, :Deadlock PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON LockCycle, Deadlock PASS
       FLUX
       expect { run(src) }.to raise_error(/not a possible error/)
     end

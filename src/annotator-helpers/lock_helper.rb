@@ -361,7 +361,7 @@ module LockHelper
       reachable = expansion & possible
       next unless reachable.empty?
 
-      label = sel[:form] == :type ? ":#{sel[:name]}" : sel[:name].to_s
+      label = sel[:name].to_s
       error!(sel[:token] || node,
              "You are trying to handle `#{label}` which is not a possible error at " \
              "this WITH. The static lock analysis proved it cannot fire. Remove the " \
