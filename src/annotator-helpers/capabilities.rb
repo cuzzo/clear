@@ -437,6 +437,15 @@ module CapabilityHelper
             end
           end
         end
+
+        # lock_error_clause is an attr_accessor (not a Struct member), so
+        # the generic walk below misses it. Descend explicitly so any
+        # outer-scope vars used in the action's message/body are
+        # captured by the enclosing BG/DO/fiber.
+        if (clause = node.lock_error_clause)
+          _unified_capture_walk([clause[:message]], locally_bound, result, is_parallel) if clause[:message]
+          _unified_capture_walk(clause[:body], locally_bound, result, is_parallel) if clause[:body].is_a?(Array)
+        end
       end
 
       # Don't recurse into nested BG/DO blocks — they have their own capture scope.

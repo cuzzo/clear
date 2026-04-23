@@ -1,0 +1,49 @@
+-- Test: real lock contention triggers the ON <selector> action.
+-- Debug builds set Scheduler.lock_timeout_ms = 100 (30s in release),
+-- so a holder that sleeps 300ms reliably times out any concurrent
+-- waiter. The waiter's timeout action bumps a separate counter so
+-- main can verify the path actually fired.
+
+STRUCT Counter { value: Int64 }
+
+-- Helper so sleep() gets the caller's runtime. sleep()'s stdlib
+-- template hardcodes `rt.`, which is the wrong symbol inside a BG
+-- body where the runtime is bound as `__rt_bgN`. Calling a plain FN
+-- trampolines through needs_rt so the right handle is passed in.
+FN napFor(ms: Int64) RETURNS Void ->
+    sleep(ms);
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    c = Counter{ value: 0 } @shared:locked;
+    timed_out = Counter{ value: 0 } @shared:locked;
+
+    holder = BG {
+        WITH EXCLUSIVE c AS inner {
+            napFor(300);
+            inner.value = 1;
+        }
+    };
+
+    waiter = BG {
+        napFor(20);
+        WITH EXCLUSIVE c AS inner {
+            inner.value = 999;
+        } ON :LockTimeout -> {
+            WITH EXCLUSIVE timed_out AS t { t.value = t.value + 1; }
+        }
+    };
+
+    NEXT holder;
+    NEXT waiter;
+
+    WITH timed_out AS t {
+        ASSERT t.value == 1, "waiter should have timed out exactly once";
+    }
+    WITH c AS inner {
+        ASSERT inner.value == 1, "holder's write must be the final value";
+    }
+
+    RETURN;
+END

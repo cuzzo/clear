@@ -225,9 +225,11 @@ pub const Scheduler = struct {
     active_tasks: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     shutdown_on_idle: bool = true,
     fast_path_counter: u32 = 0,
-    // Configurable lock timeout. Default 30s for production; set lower for tests
-    // or when CLEAR exposes per-scheduler timeout configuration.
-    lock_timeout_ms: i64 = 30_000,
+    // Configurable lock timeout. 30s in production (ReleaseFast/Safe) so
+    // long-running legitimate waits don't spuriously time out; 100ms in
+    // Debug builds so WITH ... ON <selector> clauses are actually
+    // exercised by tests under contention.
+    lock_timeout_ms: i64 = if (builtin.mode == .Debug) 100 else 30_000,
 
     /// Stable index assigned at registration (0..N-1).  Used by
     /// PartitionedStringMap to determine shard ownership.

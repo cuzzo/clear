@@ -1658,7 +1658,7 @@ private
     node.can_fail = true if matched_def[:can_fail] || matched_def[:allocates]
     node.error_kind = matched_def[:error_kind] if matched_def[:error_kind]
     node.error_type = matched_def[:error_type] if matched_def[:error_type]
-    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail])
+    current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail] || matched_def[:needs_rt])
 
     # 5. Flag mutable access through list indexing.
     #    When a mutating intrinsic (e.g., append, remove) is called on a receiver

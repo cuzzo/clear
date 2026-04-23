@@ -515,7 +515,8 @@ STD_LIB = {
   "sleep" => {
     args: [:Int64],
     return: :Void,
-    zig: "rt.sleep(@intCast(@as(u64, @bitCast({0}))))"
+    zig: "rt.sleep(@intCast(@as(u64, @bitCast({0}))))",
+    needs_rt: true
   },
 
   # -------------------------------------------------------------------------
