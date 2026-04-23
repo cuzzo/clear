@@ -246,6 +246,7 @@ class Formatter::Emitter
     toks = expand_fn_blocks(toks)
     toks = expand_then_do_blocks(toks)
     toks = expand_with_blocks(toks)
+    toks = expand_pipelines(toks)
     toks = expand_record_types(toks)
     toks = collapse_newlines(toks)
     render(toks)
@@ -739,6 +740,122 @@ class Formatter::Emitter
 
   def phantom(type)
     Formatter::FormatLexer::Token.new(type, '', 0, 0)
+  end
+
+  # ---- Pipeline forced wraps (§3.4, §3.7) --------------------------------
+  #
+  # When a pipeline chain has 2+ `s>` stages (at the same expression depth,
+  # before any `;` / `,` / closing bracket), each stage renders on its own
+  # line at +1 from the receiver.
+  #
+  # `s> RECOVER(...)` gets one extra indent level relative to its sibling
+  # stages:  users s> a s> RECOVER(default) s> b  ->
+  #   users
+  #     s> a
+  #     s> RECOVER(default)    <-- +1 more
+  #     s> b
+  def expand_pipelines(toks)
+    chains = find_s_chains(toks)
+    return toks if chains.empty?
+
+    s_to_chain = {}
+    chains.each { |c| c[:s_idxs].each { |idx| s_to_chain[idx] = c } }
+    recover_s = detect_recover_stages(toks, chains)
+
+    out = []
+    i = 0
+    while i < toks.length
+      chain = s_to_chain[i]
+      if chain && chain[:s_idxs].first == i
+        i = emit_chain(out, toks, chain, recover_s)
+      else
+        out << toks[i]
+        i += 1
+      end
+    end
+    out
+  end
+
+  def find_s_chains(toks)
+    chains = []
+    i = 0
+    while i < toks.length
+      if toks[i].type == :OP && toks[i].raw == 's>'
+        s_idxs = [i]
+        depth = 0
+        j = i + 1
+        while j < toks.length
+          t = toks[j]
+          if t.type == :SYM
+            case t.raw
+            when '(', '[', '{' then depth += 1
+            when ')', ']', '}'
+              if depth == 0
+                break
+              else
+                depth -= 1
+              end
+            when ',', ';'
+              break if depth == 0
+            end
+          elsif t.type == :OP && t.raw == 's>' && depth == 0
+            s_idxs << j
+          end
+          j += 1
+        end
+        chains << { s_idxs: s_idxs, end_idx: j } if s_idxs.length >= 2
+        i = j
+      else
+        i += 1
+      end
+    end
+    chains
+  end
+
+  def detect_recover_stages(toks, chains)
+    result = {}
+    chains.each do |c|
+      c[:s_idxs].each do |idx|
+        j = idx + 1
+        j += 1 while j < toks.length && toks[j].type == :NL
+        if j < toks.length && toks[j].type == :KEYWORD && toks[j].raw == 'RECOVER'
+          result[idx] = true
+        end
+      end
+    end
+    result
+  end
+
+  # Emit a wrapped pipeline chain. Each stage on its own line at +1
+  # (relative to receiver). Stages that are `s> RECOVER(...)` get an
+  # additional +1. Strips source NLs inside stages so the canonical
+  # layout wins regardless of the input layout.
+  def emit_chain(out, toks, chain, recover_s)
+    s_idxs  = chain[:s_idxs]
+    end_idx = chain[:end_idx]
+
+    insert_nl(out)
+    out << phantom(:INDENT_OPEN)
+
+    s_idxs.each_with_index do |s_idx, k|
+      next_bound = s_idxs[k + 1] || end_idx
+      recover    = recover_s[s_idx]
+
+      insert_nl(out) if k > 0
+      out << phantom(:INDENT_OPEN) if recover
+
+      out << toks[s_idx]  # s>
+
+      (s_idx + 1 ... next_bound).each do |j|
+        next if toks[j].type == :NL  # discard source NLs inside a stage
+        out << toks[j]
+      end
+
+      out << phantom(:INDENT_CLOSE) if recover
+    end
+
+    out << phantom(:INDENT_CLOSE)
+    end_idx
   end
 
   # Split STRUCT / UNION / ENUM blocks so each field/variant is its own line.
