@@ -1342,4 +1342,42 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "WITH lock-error clause annotator validation" do
+    it "accepts ON TIMEOUT on EXCLUSIVE @locked capture" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT RAISE
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts ON TIMEOUT on EXCLUSIVE @writeLocked capture" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @writeLocked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT RAISE
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts ON TIMEOUT on write_locked_read (read-only WITH on @writeLocked)" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @writeLocked;
+        WITH c AS inner { n = inner.v; } ON TIMEOUT PASS
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects ON TIMEOUT on a non-fallible capability (@multiowned)" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        MUTABLE c = C{ v: 0 } @multiowned;
+        WITH c { } ON TIMEOUT RAISE
+      FLUX
+      expect { run(src) }.to raise_error(/never produce a lock-acquire timeout/)
+    end
+  end
+
 end

@@ -3050,8 +3050,36 @@ private
       end
     end
 
+    validate_lock_error_clause!(node, expanded_capabilities)
+
     @with_block_depth -= 1
     node.full_type = :Void
+  end
+
+  # Validate WithBlock#lock_error_clause. Requires at least one fallible
+  # capability (EXCLUSIVE or write_locked_read) and visits the action's
+  # message/body so downstream passes see annotated types. The action
+  # body runs outside the WITH scope (the lock was never acquired on
+  # timeout), so visit it in the enclosing scope.
+  def validate_lock_error_clause!(node, expanded_capabilities)
+    clause = node.lock_error_clause
+    return unless clause
+
+    has_fallible = expanded_capabilities.any? { |c|
+      c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
+    }
+    unless has_fallible
+      error!(node, "ON TIMEOUT / RETRY clause requires a WITH capability that can fail " \
+                   "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). " \
+                   "The declared capabilities never produce a lock-acquire timeout.")
+    end
+
+    case clause[:action]
+    when :exit
+      visit(clause[:message]) if clause[:message]
+    when :block
+      visit_stmts(clause[:body]) if clause[:body]
+    end
   end
 
   # Walk statements looking for assignments where a borrowed alias escapes
