@@ -169,6 +169,14 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/concurrent/09_kvstore/  # Control
 
 See [benchmarks/README.md](benchmarks/README.md).
 
+## ⚠️ KNOWN SCALING ISSUES ⚠️
+
+ * **Custom Deadlock Prevention:** CLEAR uses a custom parking_lot implementation that prevents deadlocks by raising an error instead of hanging.
+ * **RwLock Performance:** In benchmarks, our implementation appears to consistently outperform standard OS RwLocks (typically .5x-3x).
+ * **Mutex Overhead:** Under heavy contention with short critical sections, CLEAR's Mutex can be up to 4x slower than standard implementations.
+ * **Future Fixes (v0.3):** This performance gap should be narrowed by v0.3, though Mutexes with deadlock prevention will likely always carry performance overhead.
+ * **Design Philosophy:** CLEAR’s main goal is to provide you with a robust set of alternative tools so that standard Mutex locks are *almost* never the best choice.
+
 ## ⚠️ DISCLAIMER ⚠️
 
 CLEAR is currently in **v0.1-pre** release. It is an architectural preview and is NOT production-ready.
