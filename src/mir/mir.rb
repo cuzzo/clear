@@ -752,4 +752,20 @@ module MIR
   InlineZig = Struct.new(:code, :reason, :ownership_contract, :stdlib_def, :allocs, :target_var) do
     include Expr
   end
+
+  # Inline bytecode. Sibling to InlineZig, consumed only by bc_emitter (the
+  # VM backend). Emitted by MIR lowering when target == :bc AND the stdlib
+  # registry entry opts into bc (entry[:bc] == true). Carries the op symbol
+  # (same key used in BUILTIN_OPS) + arg expressions.
+  #
+  # op:    Symbol — the registry key (e.g. :intAdd, :assert, :eql).
+  # args:  Array<MIR::Expr> — the argument expressions (unlowered).
+  # stdlib_def: the registry hash (ownership semantics).
+  #
+  # bc_emitter has a case-per-op dispatch. It evaluates args (via compile_expr)
+  # in declared order, then emits the corresponding opcode sequence. The Zig
+  # backend must never see this node.
+  InlineBc = Struct.new(:op, :args, :stdlib_def) do
+    include Expr
+  end
 end

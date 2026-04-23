@@ -19,6 +19,7 @@ UNION Value {
     Int64Val: Int64,
     TypedI64Arr: Int64[],
     TypedF64Arr: Float64[],
+    MapRef: Id<Env>,
 }
 
 -- Pure helpers
@@ -136,20 +137,22 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
         Value.Tco -> RETURN "#<tco>";,
-        Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";
+        Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";,
+        Value.MapRef -> RETURN "#<map>";
     END
     RETURN "";
 END
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    IF pool[envId]?.vars.contains?(name) THEN
-        RETURN COPY (pool[envId]?.vars[name] OR Value.Nil);
-    END
-
-    parentVal = pool[envId]?.vars["__p"] OR Value.Nil;
-    MATCH parentVal START
-        Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
-        DEFAULT -> RETURN Value.Nil;
+    IF pool[envId] AS env THEN
+        IF env.vars.contains?(name) THEN
+            RETURN COPY (env.vars[name] OR Value.Nil);
+        END
+        parentVal = env.vars["__p"] OR Value.Nil;
+        MATCH parentVal START
+            Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
+            DEFAULT -> RETURN Value.Nil;
+        END
     END
     RETURN Value.Nil;
 END

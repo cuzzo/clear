@@ -407,6 +407,10 @@ module GenericAnalysis
     if expr.is_a?(AST::BinaryOp) && (expr.op == :OR || expr.op == :OR_RESCUE)
       return find_container_source(expr.left)
     end
+    # pool[id]? parses as OptionalUnwrap(GetIndex) - peel through the unwrap.
+    if expr.is_a?(AST::OptionalUnwrap)
+      return find_container_source(expr.target)
+    end
     nil
   end
 

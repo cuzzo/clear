@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code when working with code in this repository.
 
+## MiniVM Rules
+
+The active MiniVM path is `bc_emitter.rb` + `_bc_runner.cht` (bytecode compiler + interpreter).
+
+`scheme_transpiler.rb` and `interpreter.cht` are **deprecated**. Do not add features to them.
+
+**NEVER parse Zig code strings in the MiniVM to generate bytecode. Not one character of Zig.**
+`MIR::InlineZig` and `MIR::RawZig` are Zig backend artifacts. When the bc_emitter encounters
+them, it must use the AST fallback (`compile_ast_stmt` / `compile_ast_expr`), never inspect
+the `.code` string. If no AST node is available, raise `Unimplemented`.
+
 ## Project Overview
 
 **CLEAR** is a memory-safe programming language that combines the ease of Ruby/Python with Rust-like safety. It features arena-based memory management (no garbage collector), ownership semantics, and separates **Types** from **Capabilities**.

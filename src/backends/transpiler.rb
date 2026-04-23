@@ -134,7 +134,8 @@ class ZigTranspiler
   end
 
   MAIN_STACK_VARIANTS = {
-    micro: "Micro", standard: "Standard", large: "Large", xl: "Xl", unbounded: "Xl"
+    micro: "Micro", standard: "Standard", large: "Large", xl: "Xl",
+    service: "Huge", unbounded: "Huge"
   }.freeze
 
   def main_stack_variant(main_fn, override: nil)

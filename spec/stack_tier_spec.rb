@@ -169,14 +169,14 @@ RSpec.describe "Stack Tier Recommendations" do
   end
 
   describe "@canSmash validation" do
-    it "errors when BG calls @reentrant without @canSmash" do
+    it "auto-promotes to service when BG calls @reentrant without @canSmash" do
       src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN main() RETURNS Void ->\n" \
             "    p: ~Float64 = BG { fib(10.0); };\n" \
             "    result: Float64 = NEXT p; RETURN;\nEND\n"
-      expect { analyze(src) }.to raise_error(CompilerError, /Stack safety.*reentrant.*canSmash/)
+      expect { analyze(src) }.not_to raise_error
     end
 
     it "allows @canSmash to override reentrant check" do
@@ -242,7 +242,7 @@ RSpec.describe "Stack Tier Recommendations" do
       expect { analyze(src) }.not_to raise_error
     end
 
-    it "errors when DO block calls @reentrant without @canSmash" do
+    it "auto-promotes to service when DO block calls @reentrant without @canSmash" do
       src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
@@ -251,7 +251,7 @@ RSpec.describe "Stack Tier Recommendations" do
             "FN main() RETURNS Void ->\n" \
             "    DO { work() }\n" \
             "    RETURN;\nEND\n"
-      expect { analyze(src) }.to raise_error(CompilerError, /unbounded.*canSmash/)
+      expect { analyze(src) }.not_to raise_error
     end
 
     it "allows @canSmash on DO block branches" do

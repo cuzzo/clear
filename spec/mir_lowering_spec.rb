@@ -146,6 +146,41 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq('"line\\nnext"')
     end
 
+    it "escapes backslash in string literal to two backslashes" do
+      node = make_lit(:STRING, "\\")
+      result = lowering.lower(node)
+      expect(emit(result)).to eq('"\\\\"')
+    end
+
+    it "gsub block form: backslash in string not mangled by eql builtin substitution" do
+      # Ruby gsub(pattern, string) mangles \\ to \ in the replacement.
+      # Using gsub(pattern) { string } avoids this. Regression test.
+      # When a string literal containing a backslash is used as an arg to a builtin
+      # (like CheatLib.eql), the Zig output must contain "\\\\" (escaped backslash),
+      # not "\\"" (escaped double-quote, which is a Zig syntax error).
+      backslash_node = make_lit(:STRING, "\\")
+      backslash_node.full_type = :String
+
+      id_s = AST::Identifier.new(tok, "s")
+      id_s.full_type = :String
+      id_i = AST::Identifier.new(tok, "i")
+      id_i.full_type = :Int64
+
+      # charAt(s, i) == "\\"
+      charat = AST::FuncCall.new(tok, "charAt", [id_s, id_i])
+      charat.full_type = :String
+      charat.matched_stdlib_def = STD_LIB["charAt"].first
+      eq_node = AST::BinaryOp.new(tok, charat, :EQ, backslash_node)
+      eq_node.full_type = :Boolean
+      eq_node.left.full_type = :String
+
+      l = lowering
+      result = l.lower(eq_node)
+      zig = emit(result)
+      expect(zig).to include('"\\\\"')
+      expect(zig).not_to include('"\\"")')
+    end
+
     it "lowers integer literal" do
       node = make_lit(:NUMBER, 42, full_type: :Int64)
       node.coerced_type = :Int64
@@ -338,7 +373,8 @@ RSpec.describe MIRLowering do
       right = make_id("b", full_type: :Int64)
       node = make_binop(left, :DIV, right)
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::Call)
+      # Routed through the builtin registry (:intDiv) so the :bc target can
+      # dispatch to DIV_I64. Zig emission still renders @divTrunc(a, b).
       expect(emit(result)).to include("@divTrunc(a, b)")
     end
 

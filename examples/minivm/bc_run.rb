@@ -1,0 +1,116 @@
+#!/usr/bin/env ruby
+# bc_run.rb: compile a CLEAR source file to bytecode and run it on the bytecode VM.
+# Usage: ruby bc_run.rb program.cht [--run]
+#
+# Runs CompilerFrontend -> MIRLowering -> MIRChecker -> BcEmitter,
+# writes ops/consts to temp files, then executes the compiled _bc_runner binary.
+# The _bc_runner binary is built once from _bc_runner.cht and cached.
+
+src_root = File.expand_path("../../src", __dir__)
+$LOAD_PATH.unshift(src_root)
+$LOAD_PATH.unshift(File.join(src_root, "ast"))
+$LOAD_PATH.unshift(File.join(src_root, "mir"))
+$LOAD_PATH.unshift(File.join(src_root, "backends"))
+$LOAD_PATH.unshift(File.join(src_root, "annotator-helpers"))
+
+require "set"
+require "open3"
+
+if $PROGRAM_NAME == __FILE__ && ARGV.empty?
+  $stderr.puts "Usage: ruby bc_run.rb <file.cht>"
+  exit 1
+end
+
+if $PROGRAM_NAME == __FILE__
+  ARGV.delete("--run")  # accepted but ignored (run is always the mode)
+
+  project_root   = File.expand_path("../../", __dir__)
+  bc_runner_path = File.join(__dir__, "_bc_runner")
+  bc_runner_src  = File.join(__dir__, "_bc_runner.cht")
+  bc_ops_file    = File.join(__dir__, "_bc_ops.txt")
+  bc_consts_file = File.join(__dir__, "_bc_consts.txt")
+  completion_marker = "SCHEME: all expressions completed"
+
+  bc_runner_stale = !File.exist?(bc_runner_path) ||
+                    File.mtime(bc_runner_path) < File.mtime(bc_runner_src)
+
+  if bc_runner_stale
+    $stderr.puts "Building bc_runner (cached for subsequent tests)..."
+    bc_runner_src_text = File.read(bc_runner_src)
+    interp_base = bc_runner_src_text
+    main_idx    = bc_runner_src_text.index(/^FN main\(\)/)
+    interp_base = bc_runner_src_text[0...main_idx] if main_idx
+
+    bc_runner_main  = "FN main() RETURNS Void ->\n"
+    bc_runner_main += "    MUTABLE pool: Env[50000]@pool = [];\n"
+    bc_runner_main += "    MUTABLE penv: HashMap<Value> = {};\n"
+    bc_runner_main += "    rootId = setupEnv!(pool);\n"
+    bc_runner_main += "    bcOps = loadBytecodeOps!(\"#{bc_ops_file}\", pool);\n"
+    bc_runner_main += "    bcConsts = loadBytecodeConsts!(\"#{bc_consts_file}\", pool);\n"
+    bc_runner_main += "    bcResult = exec!(bcOps, bcConsts, rootId, pool);\n"
+    bc_runner_main += "    IF isError?(bcResult) THEN\n"
+    bc_runner_main += "        print(\"SCHEME ASSERT FAILED: \" + getErrMsg(bcResult));\n"
+    bc_runner_main += "    ELSE\n"
+    bc_runner_main += "        print(prStr(bcResult, FALSE));\n"
+    bc_runner_main += "        print(\"#{completion_marker}\");\n"
+    bc_runner_main += "    END\n"
+    bc_runner_main += "    RETURN;\nEND\n"
+
+    File.write(bc_runner_src, interp_base + bc_runner_main)
+    system("#{project_root}/clear", "build", "--use-c-allocator", bc_runner_src, "-o", bc_runner_path,
+           [:out, :err] => File::NULL)
+  end
+
+  require_relative "bc_emitter"
+  require "compiler_frontend"
+  require "mir_lowering"
+  require "mir_checker"
+  require "importer"
+
+  source_file = File.expand_path(ARGV[0])
+  source      = File.read(source_file)
+  source_dir  = File.dirname(source_file)
+
+  bc_txt = begin
+    importer  = ModuleImporter.new(base_dir: source_dir)
+    fe_result = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
+    lowering  = MIRLowering.new(
+      struct_schemas:   fe_result.struct_schemas,
+      enum_schemas:     fe_result.enum_schemas,
+      union_schemas:    fe_result.union_schemas,
+      fn_sigs:          fe_result.fn_sigs,
+      moved_guard_info: fe_result.moved_guard_info,
+      importer:         importer,
+      source_dir:       source_dir,
+      target:           :bc
+    )
+    program    = lowering.lower_program(fe_result.ast)
+    mir_errors = MIRChecker.new.check_program!(program, strict: true)
+    unless mir_errors.nil? || mir_errors.empty?
+      $stderr.puts "MIR validation errors: #{mir_errors.first}"
+      nil
+    else
+      emitter = BcEmitter.new(fe_result, source: source)
+      emitter.compile(program)
+      emitter.serialize
+    end
+  rescue => e
+    $stderr.puts "Bytecode compilation error: #{e.message}"
+    $stderr.puts e.backtrace.first(5).join("\n") if ENV["BC_DEBUG"]
+    nil
+  end
+
+  if bc_txt
+    begin
+      ops_str     = bc_txt.lines[0].chomp
+      const_lines = bc_txt.lines[1..].map(&:chomp)
+      File.write(bc_ops_file, ops_str)
+      File.write(bc_consts_file, const_lines.join("\n"))
+      output, _status = Open3.capture2e(bc_runner_path)
+      print output
+    ensure
+      File.delete(bc_ops_file)    if File.exist?(bc_ops_file)
+      File.delete(bc_consts_file) if File.exist?(bc_consts_file)
+    end
+  end
+end

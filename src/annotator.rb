@@ -4226,17 +4226,20 @@ private
         n.each_value { |v| traverse.call(v) }
       when AST::BgBlock
         calls = scan_for_calls(n.body).first
-        n.computed_stack_tier = max_tier_for_calls(calls)
+        raw = max_tier_for_calls(calls)
+        n.computed_stack_tier = (raw == :unbounded) ? :service : raw
         validate_fiber_stack!(n, calls, n.stack_size, n.can_smash)
         n.body.each { |s| traverse.call(s) }
       when AST::BgStreamBlock
         calls = scan_for_calls(n.body).first
-        n.computed_stack_tier = max_tier_for_calls(calls)
+        raw = max_tier_for_calls(calls)
+        n.computed_stack_tier = (raw == :unbounded) ? :service : raw
         n.body.each { |s| traverse.call(s) }
       when AST::DoBlock
         n.branches.each do |branch|
           calls = scan_for_calls(branch[:body]).first
-          branch[:computed_stack_tier] = max_tier_for_calls(calls)
+          raw = max_tier_for_calls(calls)
+          branch[:computed_stack_tier] = (raw == :unbounded) ? :service : raw
           validate_fiber_stack!(n, calls, branch[:stack_size], branch[:can_smash])
           branch[:body].each { |s| traverse.call(s) }
         end
@@ -4248,20 +4251,14 @@ private
   end
 
   # Validate stack sizing for a fiber spawn.
-  # Errors if:
-  #   1. Fiber's call chain includes :unbounded (reentrant) without @canSmash
-  #   2. User picked a size smaller than the computed tier without @canSmash
+  # Errors if: user picked a size smaller than the computed tier without @canSmash.
+  # Reentrant call chains auto-promote to :service (Huge) instead of erroring.
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
     return if can_smash  # user acknowledged the risk
 
-    computed = max_tier_for_calls(call_names)
-
-    # Unbounded: call chain reaches a @reentrant function
-    if computed == :unbounded
-      fn_name = find_unbounded_callee(call_names)
-      error!(node, "Stack safety: this fiber calls '#{fn_name}' whose stack depth is unbounded " \
-                   "(reentrant). Add @canSmash to acknowledge the risk: BG { @canSmash -> ... }")
-    end
+    raw = max_tier_for_calls(call_names)
+    # Reentrant chains auto-promote to :service rather than erroring.
+    computed = (raw == :unbounded) ? :service : raw
 
     # User-specified size too small
     if user_size && TIER_ORDER.fetch(user_size, 0) < TIER_ORDER.fetch(computed, 0)

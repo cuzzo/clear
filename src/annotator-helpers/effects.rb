@@ -206,12 +206,13 @@ module EffectTracker
   # The tier is a lower bound: the runtime control plane can upsize adaptively.
   #
   # Tiers:
-  #   :micro    (4 KB)  - pure compute, no allocations, no blocking
-  #   :standard (16 KB) - heap allocations, extern calls, moderate locals
-  #   :large    (64 KB) - recursive functions, deep call chains
-  #   :xl       (256 KB)- recursive + heap-heavy
+  #   :micro    (4 KB)   - pure compute, no allocations, no blocking
+  #   :standard (16 KB)  - heap allocations, extern calls, moderate locals
+  #   :large    (64 KB)  - recursive functions, deep call chains
+  #   :xl       (256 KB) - recursive + heap-heavy
+  #   :service  (2 MB)   - reentrant functions (auto-assigned when call chain is unbounded)
   #
-  STACK_TIER_BUDGET = { micro: 4096, standard: 16384, large: 65536, xl: 262144 }.freeze
+  STACK_TIER_BUDGET = { micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 2_097_152 }.freeze
 
   def compute_stack_tiers!
     # Phase 1: assign base tier per function from its own effects.
@@ -269,7 +270,7 @@ module EffectTracker
 
   # Compute the maximum stack tier needed by a set of function names,
   # following the call graph transitively. :unbounded propagates.
-  TIER_ORDER = { micro: 0, standard: 1, large: 2, xl: 3, unbounded: 4 }.freeze
+  TIER_ORDER = { micro: 0, standard: 1, large: 2, xl: 3, service: 4, unbounded: 5 }.freeze
 
   def max_tier_for_calls(fn_names)
     visited = Set.new

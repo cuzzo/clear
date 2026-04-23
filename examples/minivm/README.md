@@ -1,61 +1,43 @@
 # CLEAR MiniVM
 
-`examples/minivm` is a self-hosted CLEAR VM/compiler playground. It is useful both as:
+`examples/minivm` is a self-hosted CLEAR VM/compiler playground. Its primary purpose is:
 
-- a deep integration test for CLEAR language/runtime features
-- a prototype for the production VM work planned after `v0.1`
+- **Debugging CLEAR programs** by running them through a VM that uses the exact same Zig runtime
+  as native CLEAR binaries (same CheatLib collections, same String ops, same pool/arena semantics).
+- **Auto-generating loom tests** from CLEAR programs.
 
-## Current State
+## Core Design Principle
 
-The MiniVM currently has two execution paths:
+The VM must use the same underlying Zig runtime primitives as the native compiler, accessed
+through the VM layer. It is pointless -- and actively harmful -- for the VM to re-implement
+pieces of the Zig runtime. A second implementation diverges from the real behavior and makes
+debugging unreliable.
 
-- tree-walker interpreter
-- bytecode VM with a bytecode-first runner and fallback logic
+Any operation not yet supported in the bytecode path should error `NOT_SUPPORTED`, not fall
+back to a shadow implementation.
 
-The important point is that these paths are **not at the same maturity level**.
+## Active Path: Bytecode VM
 
-## What To Treat As The Real Test Surface
+The active execution path is the bytecode compiler + `_bc_runner.cht`.
 
-The primary correctness target is:
+`bc_emitter.rb` compiles a verified `MIR::Program` (post-MIRChecker) to bytecode.
+`_bc_runner.cht` is the CLEAR program that implements `exec!` -- the bytecode interpreter.
 
-```bash
-./examples/minivm/clear test examples/minivm/interpreter_test.cht
-```
+All collection types (HashMap, @set, @list) in `_bc_runner.cht` use the native CLEAR
+`CheatLib.*` implementations via the same API surface as user programs.
 
-That file is the actively maintained regression suite for:
+## Deprecated: S-expression Tree-walker
 
-- core evaluation
-- bytecode execution
-- typed arrays
-- FFI bridges
-- struct-field bytecode ops
-- cross-module `REQUIRE` behavior
+`scheme_transpiler.rb` and `interpreter.cht` are **deprecated proof-of-concept** artifacts.
 
-If that passes, the MiniVM is in its expected working state.
+The scheme transpiler was an early PoC that walked the CLEAR AST and emitted Scheme-style
+S-expressions, which the tree-walker interpreter in `interpreter.cht` then evaluated. It was
+never a faithful implementation of CLEAR semantics and has been superseded by the bytecode path.
 
-## Historical Compliance Runner
+**Do not add features to `scheme_transpiler.rb` or `interpreter.cht`.** Those files are
+kept for reference only.
 
-There is also a historical compliance runner:
-
-```bash
-ruby examples/minivm/run_tests.rb --historical
-```
-
-That script exercises a broad subset of `transpile-tests/` through:
-
-- `scheme_transpiler.rb --run`
-- bytecode-first execution
-- S-expression fallback
-
-This runner is useful for exploration, but it is **not** the authoritative bar for current MiniVM correctness. Some entries in its old `KNOWN_PASSING` list are aspirational or stale relative to the current implementation work.
-
-Use it as:
-
-- a smoke/discovery tool
-- a way to find promising next compatibility targets
-- not as the single source of truth for whether MiniVM is "working"
-
-## Recommended Commands
+## Running Tests
 
 Primary regression check:
 
@@ -63,26 +45,14 @@ Primary regression check:
 ./examples/minivm/clear test examples/minivm/interpreter_test.cht
 ```
 
+Run the VM test suite:
+
+```bash
+ruby examples/minivm/run_tests.rb
+```
+
 Run a single CLEAR program on the MiniVM:
 
 ```bash
 ruby examples/minivm/clear run path/to/file.cht
 ```
-
-Emit Scheme S-expressions:
-
-```bash
-ruby examples/minivm/scheme_transpiler.rb path/to/file.cht
-```
-
-Try the broader historical compliance set:
-
-```bash
-ruby examples/minivm/run_tests.rb --historical
-```
-
-## Notes
-
-- `scheme_transpiler.rb --run` is intended to use bytecode first and fall back when needed.
-- The fallback/parser path is still an active area of stabilization.
-- If you are debugging recent MiniVM work, prefer starting from `interpreter_test.cht` before expanding to the historical compliance runner.

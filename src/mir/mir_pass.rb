@@ -785,8 +785,11 @@ class MIRPass
     val_ti = Type.new(val_ti) if val_ti && !val_ti.is_a?(Type)
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
-    # Annotate directly on Assignment node (no MIR::Promote needed)
-    stmt.container_promote_zig_type = val_ti.zig_type
+    # Annotate directly on Assignment node (no MIR::Promote needed).
+    # Use bare type (strip *) — promote(T, rt, &v) expects T = base, not pointer.
+    zig_t = val_ti.zig_type
+    zig_t = zig_t[1..] if zig_t.start_with?("*")
+    stmt.container_promote_zig_type = zig_t
   end
 
   # Resolve the INDEX_OPS :set entry for a container type.

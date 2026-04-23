@@ -62,7 +62,7 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
                 tokenizeToEnv!(inspPenv, inspectExpr);
                 inspPenv["__rp"] = Value{ Number: 0.0 };
                 inspAst = readFormEnv!(inspPenv);
-                pool[envId]?.vars["__dbg_inspect"] = COPY inspAst;
+                IF pool[envId] AS dbgInspEnv THEN dbgInspEnv.vars["__dbg_inspect"] = COPY inspAst; END
                 debugAction = 4; debugActive = FALSE;
             ELSE_IF cmdRaw == ":l" || cmdRaw == ":locals" THEN
                 localsStr = envGet!(envId, "__dbg_locals", pool);
