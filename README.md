@@ -38,7 +38,7 @@ FN myFunc(id: Int64, name: String) RETURNS MyPage ->
     
   RETURN page; 
 
-CATCH Input WITH(ParseError)
+CATCH ParseError
   IF __error.context == "Invalid Header" -> logInvalidHeader(__error.snapshot.header());
   RETURN defaultPage();
 DEFAULT
