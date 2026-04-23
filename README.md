@@ -34,7 +34,7 @@ FN myFunc(id: Int64, name: String) RETURNS MyPage ->
     s> fetchUser
       s> RECOVER(defaultUser())
     s> TAP saveToDb(id, name, _)
-    s> renderPage();
+    s> renderHomePage;
     
   RETURN page; 
 
