@@ -1,10 +1,5 @@
 # CLEAR TODO
 
-## v0.1-pre: Architectural Preview
-
-Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
-
-
 ## v0.1 (Target = May 1)
 
  - [x] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
@@ -15,6 +10,9 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Pipeline support for infinite streams (LIMITed) and unbound finite streams 
  - [x] Migrate to Zig 0.16
  - [x] io_uring for networking
+ - [x] Native CONCURRENT support for streaming pipelines
+
+Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
 ## v0.2 (Target = July 15)
 
@@ -23,9 +21,8 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Re-entrant Thunks (to avoid unbounded recursive growth, auto insert max_depth, auto-insert co-operative yields)
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
- - [ ] Enable MVCC in the language as a syncronization capability (in progress)
+ - [ ] Enable MVCC in the language as a syncronization capability (in progress, already exists in the runtime)
  - [ ] STRICT mode compilation
- - [ ] Native CONCURRENT support for streaming pipelines
  - [ ] Observable aggregations for streaming pipelines (@shared aggregate results)
  - [ ] VM supporting the vast majority of the language, near Python/Ruby non-JIT speed
  - [ ] VM can automatically generate and run LOOM tests for concurrent code
