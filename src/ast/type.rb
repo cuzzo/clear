@@ -6,6 +6,7 @@ class Type
   attr_accessor :mutability, :lifetime_constraint
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
   attr_accessor :sync        # nil (default), :locked, :write_locked
+  attr_accessor :lock_rank   # nil (default) or Integer — @locked(rank: N) / @writeLocked(rank: N)
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N) / HashMap:sharded(N))
   attr_accessor :soa          # true when @pool:soa or @list:soa — Structure of Arrays layout

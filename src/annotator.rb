@@ -2783,8 +2783,18 @@ private
 
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
+    ti.lock_rank = node.lock_rank if node.lock_rank
     # @indirect forces heap location (same as @local, but different intent).
     ti.provenance = :heap           if node.layout == :indirect
+
+    # Phase 3: enforce per-type rank consistency. First declaration of a
+    # type with a rank sets it; subsequent declarations must match. A
+    # mismatch is a programming error — the rank is meant to induce a
+    # total order across acquire sites, which only works if all sites
+    # agree on the rank of T.
+    if node.lock_rank && node.sync && (node.sync == :locked || node.sync == :write_locked)
+      record_lock_type_rank!(ti.base_type, node.lock_rank, node)
+    end
 
     # CapabilityWrap always allocates on the heap.
     if node.ownership || node.sync || node.layout
@@ -3055,6 +3065,11 @@ private
     # Phase 1 static nested-lock check: reject same-variable-name nested
     # fallible acquire unless the inner WITH carries POSSIBLE_DEADLOCK.
     check_nested_lock_reacquire!(node, expanded_capabilities)
+
+    # Phase 3: local rank-ordering check. Runs before edge accumulation
+    # so a ranked violation fires with a clear "rank X violates rank Y"
+    # message rather than a later SCC-based diagnostic.
+    check_lock_rank_ordering!(node, expanded_capabilities)
 
     # Phase 2: record per-fn held->acquired edges and direct acquires
     # for the global cycle-detection pass. Edges from an opted-out WITH

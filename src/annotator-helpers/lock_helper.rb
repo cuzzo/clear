@@ -41,6 +41,31 @@ module LockHelper
     # WITH-with-clause sites are post-pass verified for reachable-handler
     # correctness: ON :X where :X cannot actually fire is a dead handler.
     @lock_clause_sites    ||= []
+    # Phase 3: per-type lock rank. First declaration of a type with
+    # @locked(rank: N) / @writeLocked(rank: N) establishes the rank;
+    # every subsequent declaration of that type must agree.
+    @lock_type_ranks      ||= {}
+  end
+
+  # First declaration of T with a rank wins; subsequent mismatches error.
+  def record_lock_type_rank!(type_sym, rank, node)
+    return unless type_sym && rank
+    existing = @lock_type_ranks[type_sym]
+    if existing.nil?
+      @lock_type_ranks[type_sym] = rank
+    elsif existing != rank
+      error!(node,
+             "Inconsistent lock rank for type '#{type_sym}': previously declared as rank #{existing}, " \
+             "now rank #{rank}. All declarations of a ranked lock type must agree on the rank.")
+    end
+  end
+
+  # For the Phase 3 ordering check: return the rank of a WITH capability's
+  # lock type, or nil if the type has no rank declared anywhere.
+  def rank_of_cap(cap)
+    t = lock_identity_of(cap)
+    return nil unless t
+    @lock_type_ranks[t]
   end
 
   def record_lock_clause_site!(node, expanded_capabilities)
@@ -77,6 +102,39 @@ module LockHelper
                "(outer line #{outer_tok&.line}). This is a structural self-deadlock. " \
                "If you know the instances are distinct and ordered, mark the inner WITH as " \
                "POSSIBLE_DEADLOCK.")
+      end
+    end
+  end
+
+  # ---- Phase 3 — rank-based DAG enforcement ---------------------------
+
+  # Reject a WITH whose fallible acquire's rank is not strictly greater
+  # than every currently-held ranked lock. Only runs between pairs of
+  # ranked types — unranked types are ignored (Phase 2's graph-based
+  # cycle detection covers those). POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE
+  # on the inner WITH downgrades the error to a [Note] so the risk is
+  # visible but not blocking.
+  def check_lock_rank_ordering!(node, expanded_capabilities)
+    return unless @held_lock_types && !@held_lock_types.empty?
+    return unless @lock_type_ranks && !@lock_type_ranks.empty?
+    escape = node.deadlock_escape
+    expanded_capabilities.each do |cap|
+      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
+      cap_rank = rank_of_cap(cap)
+      next unless cap_rank
+      @held_lock_types.each do |entry|
+        held_rank = @lock_type_ranks[entry[:type]]
+        next unless held_rank
+        next if cap_rank > held_rank
+        msg = "Lock rank violation: acquiring ':#{lock_identity_of(cap)}' at rank #{cap_rank} while " \
+              "':#{entry[:type]}' (rank #{held_rank}) is held. Ranks must be strictly ascending along " \
+              "the acquire path to prove LockCycle freedom by construction."
+        if escape
+          note!(cap[:var_node], msg + " (POSSIBLE_#{escape[:kind].to_s.upcase} accepted.)")
+        else
+          error!(cap[:var_node], msg + " If ordering is enforced by a different discipline, mark the " \
+                                       "inner WITH with POSSIBLE_LOCK_CYCLE.")
+        end
       end
     end
   end

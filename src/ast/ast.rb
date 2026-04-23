@@ -535,7 +535,15 @@ module AST
   # ownership: nil | :multiowned | :shared
   # sync:      nil | :locked | :write_locked | :local
   # layout:    nil | :indirect
-  CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) { include Locatable }
+  CapabilityWrap    = Struct.new(:token, :value, :ownership, :sync, :layout) do
+    include Locatable
+    # Optional integer rank on @locked(rank: N) / @writeLocked(rank: N).
+    # Used by Phase 3 to prove LockCycle freedom: when all participating
+    # locks are ranked, acquiring any lock requires the new rank to be
+    # strictly greater than every held rank, which makes cycles
+    # structurally unrepresentable.
+    attr_accessor :lock_rank
+  end
   MoveNode          = Struct.new(:token, :value) { include Locatable }  # MOVE expr               -> transfer Rc/Arc handle without retain
   CopyNode          = Struct.new(:token, :value) { include Locatable; attr_accessor :deep_copy }  # COPY expr -> explicit deep-copy; deep_copy: true for unions with heap variants
   CloneNode         = Struct.new(:token, :value) { include Locatable }  # CLONE expr              -> explicit handle retain for non-affine replay/shared futures

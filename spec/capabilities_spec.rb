@@ -1782,4 +1782,185 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # Phase 3: @locked(rank: N) / @writeLocked(rank: N) DAG enforcement
+  # ---------------------------------------------------------------------------
+
+  describe "lock rank annotation + ordering" do
+    it "parses and accepts @locked(rank: N)" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked(rank: 1);
+        WITH EXCLUSIVE c AS inner { inner.v = 1; }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "parses and accepts @writeLocked(rank: N)" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @writeLocked(rank: 1);
+        WITH EXCLUSIVE c AS inner { inner.v = 1; }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts nested acquire in strictly ascending rank order (@locked)" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @locked(rank: 1);
+        b = B{ y: 0 } @locked(rank: 2);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts nested acquire in ascending rank on @writeLocked" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @writeLocked(rank: 1);
+        b = B{ y: 0 } @writeLocked(rank: 2);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects nested acquire in descending rank order" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @locked(rank: 2);
+        b = B{ y: 0 } @locked(rank: 1);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/Lock rank violation.*rank 1.*rank 2/)
+    end
+
+    it "rejects equal ranks on the same acquire path" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @locked(rank: 1);
+        b = B{ y: 0 } @locked(rank: 1);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/Lock rank violation/)
+    end
+
+    it "rejects inconsistent rank declarations for the same type" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        a = C{ v: 0 } @locked(rank: 1);
+        b = C{ v: 0 } @locked(rank: 2);
+      FLUX
+      expect { run(src) }.to raise_error(/Inconsistent lock rank for type 'C'/)
+    end
+
+    it "ignores unranked types in rank ordering check" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @locked(rank: 5);
+        b = B{ y: 0 } @locked;
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      # a is rank 5, b is unranked — rank check skips this pair.
+      # (Phase 2 graph detection still runs but this single direction has no cycle.)
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts a three-rank ascending chain" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        STRUCT D { z: Int64 }
+        a = A{ x: 0 } @locked(rank: 1);
+        b = B{ y: 0 } @locked(rank: 2);
+        d = D{ z: 0 } @locked(rank: 3);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb {
+            WITH EXCLUSIVE d AS dd { dd.z = aa.x + bb.y; }
+          }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects a three-rank chain with a dip in the middle" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        STRUCT D { z: Int64 }
+        a = A{ x: 0 } @locked(rank: 1);
+        b = B{ y: 0 } @locked(rank: 3);
+        d = D{ z: 0 } @locked(rank: 2);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb {
+            WITH EXCLUSIVE d AS dd { dd.z = aa.x + bb.y; }
+          }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/Lock rank violation.*rank 2.*rank 3/)
+    end
+
+    it "downgrades rank violation to a [Note] when POSSIBLE_LOCK_CYCLE is set" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @locked(rank: 2);
+        b = B{ y: 0 } @locked(rank: 1);
+        WITH EXCLUSIVE a AS aa {
+          WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects descending rank on @writeLocked" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @writeLocked(rank: 2);
+        b = B{ y: 0 } @writeLocked(rank: 1);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/Lock rank violation/)
+    end
+
+    it "accepts negative ranks (they still define a total order)" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+        a = A{ x: 0 } @locked(rank: -5);
+        b = B{ y: 0 } @locked(rank: 0);
+        WITH EXCLUSIVE a AS aa {
+          WITH EXCLUSIVE b AS bb { bb.y = aa.x; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects malformed @locked(foo: 1) — 'rank' keyword required" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked(foo: 1);
+      FLUX
+      expect { run(src) }.to raise_error(ParserError, /Expected 'rank' keyword/)
+    end
+  end
+
 end

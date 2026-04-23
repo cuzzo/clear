@@ -291,43 +291,51 @@ class Parser
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    cw.lock_rank = lock_rank
+    cw
   end
 
   suffix(:VAR_ID, '@shared') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    cw.lock_rank = lock_rank
+    cw
   end
 
   suffix(:VAR_ID, '@locked') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    cw.lock_rank = lock_rank
+    cw
   end
 
   suffix(:VAR_ID, '@writeLocked') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
-    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+    cw.lock_rank = lock_rank
+    cw
   end
 
   suffix(:VAR_ID, '@local') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@alwaysMutable') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@indirect') do |lhs|
     token = consume(:VAR_ID)
-    ownership, sync, layout = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
@@ -2412,8 +2420,9 @@ class Parser
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
   # Returns [ownership, sync, layout].
   def parse_cap_join(tok, first_attrs)
-    dims = { ownership: nil, sync: nil, layout: nil }
+    dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
     apply_cap_dim!(tok, first_attrs, dims)
+    parse_lock_rank_arg!(tok, first_attrs, dims)
 
     while match?(:CHAR, ':')
       consume(:CHAR, ':')
@@ -2428,6 +2437,7 @@ class Parser
       end
       next_tok = consume(:VAR_ID)
       apply_cap_dim!(next_tok, attrs, dims)
+      parse_lock_rank_arg!(next_tok, attrs, dims)
     end
 
     # Reject T @cap1 @cap2 (must use : join, e.g. @shared:locked)
@@ -2435,7 +2445,7 @@ class Parser
       error!(current, "Cannot use two separate @ capabilities. Join with ':' instead (e.g., @shared:locked not @shared @locked).")
     end
 
-    [dims[:ownership], dims[:sync], dims[:layout]]
+    [dims[:ownership], dims[:sync], dims[:layout], dims[:lock_rank]]
   end
 
   def apply_cap_dim!(tok, attrs, dims)
@@ -2444,6 +2454,30 @@ class Parser
       error!(tok, "Duplicate #{dim} capability: already have @#{dims[dim]}, cannot add @#{attrs[:val]}")
     end
     dims[dim] = attrs[:val]
+  end
+
+  # Parse an optional `(rank: N)` argument after @locked / @writeLocked.
+  # The N is an integer; sign and magnitude are free. Duplicate rank on
+  # the same capability chain is an error.
+  def parse_lock_rank_arg!(sigil_tok, attrs, dims)
+    return unless attrs[:dim] == :sync
+    return unless attrs[:val] == :locked || attrs[:val] == :write_locked
+    return unless match?(:CHAR, '(')
+    consume(:CHAR, '(')
+    unless match?(:VAR_ID, 'rank')
+      error!(current, "Expected 'rank' keyword inside @#{attrs[:val]}(...) arguments.")
+    end
+    consume(:VAR_ID, 'rank')
+    consume(:CHAR, ':')
+    neg = match!(:CHAR, '-')
+    num_tok = consume_number
+    rank = num_tok.value.to_i
+    rank = -rank if neg
+    consume(:CHAR, ')')
+    if dims[:lock_rank]
+      error!(sigil_tok, "Duplicate rank on capability chain (already #{dims[:lock_rank]}, cannot also set #{rank}).")
+    end
+    dims[:lock_rank] = rank
   end
 
   # Branch-prefix sigils for DO blocks.
