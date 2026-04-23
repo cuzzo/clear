@@ -550,6 +550,8 @@ class MIREmitter
       "#{node.name}.alloc = #{rt}.heapAlloc();"
     when :generic
       "try CheatLib.promote(#{node.zig_type}, #{rt}, &#{node.name});"
+    when :generic_deep
+      "try CheatLib.promoteDeep(#{node.zig_type}, #{rt}, &#{node.name});"
     else
       raise "MIREmitter#emit_escape_promote: unhandled strategy :#{node.strategy}"
     end

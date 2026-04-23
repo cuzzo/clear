@@ -395,6 +395,10 @@ module MIR
   #   :list         -> try CheatLib.promoteList(elem, rt, &name);
   #   :string_map   -> name.alloc = rt.heapAlloc();
   #   :generic      -> try CheatLib.promote(zig_type, rt, &name);
+  #   :generic_deep -> try CheatLib.promoteDeep(zig_type, rt, &name);
+  # `name` may be a dotted path (e.g. "__ret.field") for per-field
+  # promotion in a return-with-promotion pattern; the emitter takes &name
+  # verbatim.
   EscapePromote = Struct.new(:name, :zig_type, :strategy, :data, :rt_expr) do
     include Stmt
     # data: strategy-specific payload (field set, alloc symbol, etc.)

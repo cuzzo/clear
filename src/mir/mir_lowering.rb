@@ -4717,20 +4717,34 @@ class MIRLowering
       stmts << MIR::ErrCleanup.new("__ret",
         { kind: :struct_with_cleanup_fields, alloc: :heap, has_moved_guard: false, zig_type: zig_type })
       if ret_field_promote[:fields]
+        # Per-field promotion: for each named heap field of __ret, emit
+        # `try CheatLib.promote(@TypeOf(__ret.f), rt, &__ret.f);`.
+        # Previously emitted as a MIR::Call with a hand-assembled arg
+        # list — opaque to the MIR checker. EscapePromote with :generic
+        # strategy is a structural node (MIR::Stmt) the checker can
+        # reason about: the `name` carries the dotted path for
+        # visibility + INV-1 allocator consistency.
         ret_field_promote[:fields].each do |fname|
-          stmts << MIR::ExprStmt.new(
-            MIR::Call.new("CheatLib.promote", [
-              MIR::Call.new("@TypeOf", [MIR::FieldGet.new(MIR::Ident.new("__ret"), fname)], false),
-              rt,
-              MIR::AddressOf.new(MIR::FieldGet.new(MIR::Ident.new("__ret"), fname))
-            ], true), false)
+          target = "__ret.#{fname}"
+          stmts << MIR::EscapePromote.new(
+            target,
+            "@TypeOf(#{target})",
+            :generic,
+            nil,
+            rt_name,
+          )
         end
       else
-        zig_type = ret_field_promote[:zig_type]
-        stmts << MIR::ExprStmt.new(
-          MIR::Call.new("CheatLib.promoteDeep", [
-            MIR::Ident.new(zig_type), rt, MIR::AddressOf.new(MIR::Ident.new("__ret"))
-          ], true), false)
+        # Whole-struct deep promotion: `try CheatLib.promoteDeep(T, rt, &__ret);`.
+        # Previously opaque MIR::Call; now a structural EscapePromote
+        # with :generic_deep strategy.
+        stmts << MIR::EscapePromote.new(
+          "__ret",
+          ret_field_promote[:zig_type],
+          :generic_deep,
+          nil,
+          rt_name,
+        )
       end
       stmts << MIR::ReturnStmt.new(MIR::Ident.new("__ret"))
       MIR::ScopeBlock.new(stmts)
