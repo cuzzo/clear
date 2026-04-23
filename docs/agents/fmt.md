@@ -276,6 +276,15 @@ a bug in the rule, not in the code.
 - 120-char width warnings (§2): after formatting, lines exceeding 120
   chars emit `path:line: warning: line length N exceeds 120` to stderr.
   Opt out with `clear fmt --no-warn`.
+- Digit-group separators (§8): decimal ints and floats get canonical
+  `_` separators when either side of the decimal has more than 4
+  digits. Integer side groups from the right (`1_234_567`); fractional
+  side groups from the left (`0.123_456`). Numbers at or below 4 digits
+  are canonicalized WITHOUT separators (`1_234` → `1234`). Type suffixes
+  (`_i32`, `_f64`, ...) preserved. Hex/oct/bin literals are left
+  untouched — grouping conventions vary (4, 3, 8) and user choice wins.
+  Requires matching lexer support: a closed suffix set (i8..f64) so
+  `0xDEAD_BEEF` is unambiguously hex-with-separator, not hex-with-suffix.
 
 **v1.2 (forced wraps):**
 - WITH forced wraps (§3.2, §3.3): 2+ captures always wrap; trailing

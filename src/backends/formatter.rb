@@ -115,6 +115,8 @@ end
 class Formatter::FormatLexer
   Token = Struct.new(:type, :raw, :line, :col)
 
+  NUMERIC_SUFFIX_RE = /i8|i16|i32|i64|u8|u16|u32|u64|f32|f64/.freeze
+
   def initialize(source)
     @src = source
     @s = StringScanner.new(source)
@@ -146,11 +148,19 @@ class Formatter::FormatLexer
         else
           push(:VAR_ID, m, sl, sc)
         end
-      when m = @s.scan(/0[xob][0-9a-fA-F_]+(?:_[a-zA-Z][a-zA-Z0-9]*)?/)
+      # Numeric literals: support `_` as a digit group separator. The type
+      # suffix (if any) is closed: i8/i16/i32/i64/u8/u16/u32/u64/f32/f64.
+      # Patterns mirror the main Lexer so FormatLexer preserves the exact
+      # source text (including separators).
+      when m = @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
         push(:NUM, m, sl, sc)
-      when m = @s.scan(/\d+\.\d+(?:_[a-zA-Z][a-zA-Z0-9]*)?/)
+      when m = @s.scan(/0o[0-7]+(?:_[0-7]+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
         push(:NUM, m, sl, sc)
-      when m = @s.scan(/\d+(?:_[a-zA-Z][a-zA-Z0-9]*)?/)
+      when m = @s.scan(/0b[0-1]+(?:_[0-1]+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
+        push(:NUM, m, sl, sc)
+      when m = @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
+        push(:NUM, m, sl, sc)
+      when m = @s.scan(/\d+(?:_\d+)*(?:_#{NUMERIC_SUFFIX_RE})?\b/o)
         push(:NUM, m, sl, sc)
       else
         raise Formatter::Error, "lex error at #{@line}:#{@col} near #{@s.peek(10).inspect}"
@@ -243,6 +253,7 @@ class Formatter::Emitter
   def emit
     toks = @tokens.reject { |t| t.type == :WS }
     toks = collapse_newlines(toks)
+    toks = canonicalize_numerics(toks)
     toks = expand_fn_blocks(toks)
     toks = expand_then_do_blocks(toks)
     toks = expand_with_blocks(toks)
@@ -256,6 +267,57 @@ class Formatter::Emitter
   end
 
   private
+
+  # ---- numeric literal canonicalization (§8) ----------------------------
+  #
+  # Decimal numeric literals get canonical `_` separators when either side
+  # of the decimal has more than 4 digits. Integer side groups from the
+  # right (`1_234_567`); fractional side groups from the left
+  # (`0.123_456`). Numbers at or below 4 digits are canonicalized WITHOUT
+  # separators (so `1_234` -> `1234` and `1000000` -> `1_000_000`). Type
+  # suffixes (`_i32`, `_f64`, ...) are preserved. Hex/oct/bin literals
+  # are left untouched — convention there varies (groups of 4, 3, 8) and
+  # we leave the user's choice in place.
+  def canonicalize_numerics(toks)
+    toks.map do |t|
+      next t unless t.type == :NUM
+      Formatter::FormatLexer::Token.new(:NUM, canonicalize_numeric(t.raw), t.line, t.col)
+    end
+  end
+
+  NUM_SUFFIX_TAIL_RE = /_(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64)\z/.freeze
+
+  def canonicalize_numeric(raw)
+    return raw if raw.start_with?('0x', '0o', '0b')
+
+    suffix = ''
+    body = raw
+    if (m = raw.match(NUM_SUFFIX_TAIL_RE))
+      suffix = m[0]
+      body = raw[0...m.begin(0)]
+    end
+
+    if body.include?('.')
+      int_part, frac_part = body.split('.', 2)
+      int_digits  = int_part.tr('_', '')
+      frac_digits = frac_part.tr('_', '')
+      int_out  = int_digits.length  > 4 ? group_from_right(int_digits)  : int_digits
+      frac_out = frac_digits.length > 4 ? group_from_left(frac_digits) : frac_digits
+      "#{int_out}.#{frac_out}#{suffix}"
+    else
+      digits = body.tr('_', '')
+      out    = digits.length > 4 ? group_from_right(digits) : digits
+      "#{out}#{suffix}"
+    end
+  end
+
+  def group_from_right(digits)
+    digits.reverse.scan(/.{1,3}/).join('_').reverse
+  end
+
+  def group_from_left(digits)
+    digits.scan(/.{1,3}/).join('_')
+  end
 
   # ---- pre-passes on the token stream ---------------------------------
 

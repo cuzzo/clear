@@ -94,36 +94,35 @@ class Lexer
           add(:VAR_ID, word, start_col)
         end
 
-      when @s.scan(/0x[0-9a-fA-F]+_([a-zA-Z0-9]+)/)
-        val = @s.matched.split('_')[0].to_i(16)
-        suffix = @s[1]
-        add_prefixed_int(val, suffix, start_col)
+      # Numeric literals support `_` as a digit separator (e.g. 1_000_000,
+      # 3.141_592, 0xDEAD_BEEF). Separators are stripped for the value.
+      # The type suffix set is closed (see NUMERIC_SUFFIX_RE) to disambiguate
+      # hex digit groups from a suffix — `0xDEAD_BEEF` is hex separators,
+      # `0xff_u32` is hex + suffix. The suffix-bearing regex runs before
+      # the plain form so the suffix is captured when present.
+      when @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
+        val = strip_digit_separators(@s.matched, @s[1]).to_i(16)
+        add_prefixed_int(val, @s[1], start_col)
 
-      when @s.scan(/0x[0-9a-fA-F]+/)
-        add(:PREFIXED_INT, @s.matched.to_i(16), start_col)
+      when @s.scan(/0x[0-9a-fA-F]+(?:_[0-9a-fA-F]+)*/)
+        add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(16), start_col)
 
-      when @s.scan(/0o[0-7]+_([a-zA-Z0-9]+)/)
-        val = @s.matched.split('_')[0].to_i(8)
-        suffix = @s[1]
-        add_prefixed_int(val, suffix, start_col)
+      when @s.scan(/0o[0-7]+(?:_[0-7]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
+        val = strip_digit_separators(@s.matched, @s[1]).to_i(8)
+        add_prefixed_int(val, @s[1], start_col)
 
-      when @s.scan(/0o[0-7]+/)
-        add(:PREFIXED_INT, @s.matched.to_i(8), start_col)
+      when @s.scan(/0o[0-7]+(?:_[0-7]+)*/)
+        add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(8), start_col)
 
-      when @s.scan(/0b[0-1]+_([a-zA-Z0-9]+)/)
-        val = @s.matched.split('_')[0].to_i(2)
-        suffix = @s[1]
-        add_prefixed_int(val, suffix, start_col)
+      when @s.scan(/0b[0-1]+(?:_[0-1]+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
+        val = strip_digit_separators(@s.matched, @s[1]).to_i(2)
+        add_prefixed_int(val, @s[1], start_col)
 
-      when @s.scan(/0b[0-1]+/)
-        add(:PREFIXED_INT, @s.matched.to_i(2), start_col)
+      when @s.scan(/0b[0-1]+(?:_[0-1]+)*/)
+        add(:PREFIXED_INT, @s.matched.tr('_', '').to_i(2), start_col)
 
-      when @s.scan(/(\d+)_([a-zA-Z0-9]+)/)
-        add_prefixed_int(@s[1].to_i, @s[2], start_col)
-
-      when @s.scan(/\d+\.\d+_([a-zA-Z0-9]+)/)
-        # Float literal with type suffix: 3.14_f32, 1.0_f64
-        val = @s.matched.split('_')[0].to_f
+      when @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
+        val = strip_digit_separators(@s.matched, @s[1]).to_f
         suffix = @s[1]
         case suffix
         when 'f32' then add(:FLOAT32, val, start_col)
@@ -131,13 +130,15 @@ class Lexer
         else raise "Lexer Error: Unknown float suffix '_#{suffix}' at line #{@line}:#{@column}"
         end
 
-      when @s.scan(/\d+\.\d+/)
-        # Float literal (has decimal point): 3.14, 0.5
-        add(:NUMBER, @s.matched.to_f, start_col)
+      when @s.scan(/\d+(?:_\d+)*\.\d+(?:_\d+)*/)
+        add(:NUMBER, @s.matched.tr('_', '').to_f, start_col)
 
-      when @s.scan(/\d+/)
-        # Integer literal (no decimal): 42, 1000
-        add(:INT64, @s.matched.to_i, start_col)
+      when @s.scan(/\d+(?:_\d+)*_(#{NUMERIC_SUFFIX_RE})\b/o)
+        body = strip_digit_separators(@s.matched, @s[1])
+        add_prefixed_int(body.to_i, @s[1], start_col)
+
+      when @s.scan(/\d+(?:_\d+)*/)
+        add(:INT64, @s.matched.tr('_', '').to_i, start_col)
 
       when @s.scan(/"/)
         advance_pos(@s.matched) # Advance past the opening quote
@@ -299,6 +300,19 @@ class Lexer
     else
       @column += str.length
     end
+  end
+
+  # Closed set of numeric type suffixes. Matches a word boundary so the
+  # suffix can't absorb a following identifier.
+  NUMERIC_SUFFIX_RE = /i8|i16|i32|i64|u8|u16|u32|u64|f32|f64/.freeze
+
+  # Strip digit-group separators (underscores) from a numeric literal's
+  # matched text. Removes the trailing `_<suffix>` (passed in) first so
+  # we don't strip the underscore that introduces the type suffix. Any
+  # base prefix (`0x`, `0o`, `0b`) is preserved.
+  def strip_digit_separators(matched, suffix)
+    body = matched.sub(/_#{Regexp.escape(suffix)}\z/, '')
+    body.tr('_', '')
   end
 
   INT_SUFFIX_RANGES = {

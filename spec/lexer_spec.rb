@@ -117,6 +117,42 @@ RSpec.describe Lexer do
       end
     end
 
+    describe "Digit-group separators" do
+      it "parses `_` as a separator in plain ints" do
+        expect_token(Lexer.new("1_000").tokenize[0],        :INT64, 1000, 1, 1)
+        expect_token(Lexer.new("1_000_000").tokenize[0],    :INT64, 1_000_000, 1, 1)
+        expect_token(Lexer.new("12_345_678").tokenize[0],   :INT64, 12_345_678, 1, 1)
+      end
+
+      it "parses `_` as a separator in suffixed ints" do
+        expect_token(Lexer.new("1_000_i32").tokenize[0],    :INT32, 1000, 1, 1)
+        expect_token(Lexer.new("1_234_567_u32").tokenize[0], :UINT32, 1_234_567, 1, 1)
+      end
+
+      it "parses `_` as a separator in plain floats" do
+        expect_token(Lexer.new("1_000.5").tokenize[0],            :NUMBER, 1000.5, 1, 1)
+        expect_token(Lexer.new("3.141_592").tokenize[0],          :NUMBER, 3.141592, 1, 1)
+        expect_token(Lexer.new("1_234.567_89").tokenize[0],       :NUMBER, 1234.56789, 1, 1)
+      end
+
+      it "parses `_` as a separator in suffixed floats" do
+        expect_token(Lexer.new("3.141_592_f64").tokenize[0],      :NUMBER, 3.141592, 1, 1)
+        expect_token(Lexer.new("1_234.5_f32").tokenize[0],        :FLOAT32, 1234.5, 1, 1)
+      end
+
+      it "parses `_` as a separator in hex/oct/bin (no suffix ambiguity)" do
+        # 0xDEAD_BEEF must be parsed as hex with a separator, NOT hex + suffix
+        # "BEEF" — the suffix pattern is closed to i8..f64.
+        expect_token(Lexer.new("0xDEAD_BEEF").tokenize[0],  :PREFIXED_INT, 0xDEADBEEF, 1, 1)
+        expect_token(Lexer.new("0b1010_0101").tokenize[0],  :PREFIXED_INT, 0b10100101, 1, 1)
+        expect_token(Lexer.new("0o12_34").tokenize[0],      :PREFIXED_INT, 0o1234, 1, 1)
+      end
+
+      it "allows hex + suffix with separator in the hex body" do
+        expect_token(Lexer.new("0xFF_FF_u32").tokenize[0],  :UINT32, 0xFFFF, 1, 1)
+      end
+    end
+
     it "handles complex operators" do
       lexer = Lexer.new(".. -> s> OR || &&")
       tokens = lexer.tokenize

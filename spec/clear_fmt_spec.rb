@@ -161,6 +161,63 @@ RSpec.describe "./clear fmt", :integration do
     expect(stderr).not_to include("warning: line length")
   end
 
+  it "auto-inserts digit separators for decimal ints > 4 digits" do
+    src = <<~CLEAR
+      FN main() RETURNS Int64 ->
+        a: Int64 = 1000000;
+        b: Int64 = 12345;
+        c: Int64 = 1234;
+        d: Int64 = 42;
+        RETURN a;
+      END
+    CLEAR
+    path = write("n_int.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to include("a: Int64 = 1_000_000;")
+    expect(out).to include("b: Int64 = 12_345;")
+    expect(out).to include("c: Int64 = 1234;")
+    expect(out).to include("d: Int64 = 42;")
+  end
+
+  it "auto-inserts digit separators for floats with >4 digits on either side" do
+    src = <<~CLEAR
+      FN main() RETURNS Void ->
+        a: Float64 = 3.141592653589793;
+        b: Float64 = 1000000.5;
+        c: Float64 = 1.5;
+        RETURN;
+      END
+    CLEAR
+    path = write("n_float.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to include("a: Float64 = 3.141_592_653_589_793;")
+    expect(out).to include("b: Float64 = 1_000_000.5;")
+    expect(out).to include("c: Float64 = 1.5;")
+  end
+
+  it "preserves type suffixes through separator rewriting" do
+    src = "FN main() RETURNS Int32 ->\n  a: Int32 = 1000000_i32;\n  RETURN a;\nEND\n"
+    path = write("n_suffix.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to include("1_000_000_i32")
+  end
+
+  it "canonicalizes existing separators (1_0_0_0 -> 1000, 1000000 -> 1_000_000)" do
+    src = "FN main() RETURNS Int64 ->\n  a: Int64 = 1_0_0_0;\n  b: Int64 = 1000000;\n  RETURN a;\nEND\n"
+    path = write("n_canon.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to include("a: Int64 = 1000;")
+    expect(out).to include("b: Int64 = 1_000_000;")
+  end
+
+  it "leaves hex / oct / bin literals untouched" do
+    src = "FN main() RETURNS Int64 ->\n  a = 0xDEAD_BEEF;\n  b = 0b1010_0101;\n  RETURN 0;\nEND\n"
+    path = write("n_hex.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to include("0xDEAD_BEEF")
+    expect(out).to include("0b1010_0101")
+  end
+
   it "is idempotent on the whole transpile-tests corpus" do
     root = File.expand_path("../transpile-tests", __dir__)
     files = Dir.glob(File.join(root, "**", "*.cht"))
