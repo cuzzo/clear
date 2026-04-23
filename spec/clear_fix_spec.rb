@@ -123,6 +123,46 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "error accumulation (LSP-style)" do
+    it "collects multiple :error findings from a single pass" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          x = 1;
+          x = 2;
+          y = 10;
+          y = 20;
+          RETURN x + y;
+        END
+      CLEAR
+      path = write("multi.cht", src)
+      out, _, status = run_fix("--dry-run", path)
+      expect(status).to eq(0)
+      # Both immutable-assignment findings should show, not just the first.
+      expect(out.scan(/Variable '.' is immutable/).length).to eq(2)
+      expect(out).to match(/Variable 'x' is immutable/)
+      expect(out).to match(/Variable 'y' is immutable/)
+    end
+
+    it "applies both fixes and the result compiles" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          x = 1;
+          x = 2;
+          y = 10;
+          y = 20;
+          RETURN x + y;
+        END
+      CLEAR
+      path = write("multi.cht", src)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 2 edit/)
+      expect(File.read(path)).to include("MUTABLE x = 1")
+      expect(File.read(path)).to include("MUTABLE y = 10")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
   describe "`clear build --fix` / `clear run --fix` (Phase C)" do
     let(:src) do
       "FN main() RETURNS Int64 ->\n  x = 1;\n  x = 2;\n  RETURN x;\nEND\n"
