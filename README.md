@@ -29,11 +29,13 @@ bill = users AS @u
 ```ruby
 FN myFunc(id: Int64, name: String) RETURNS MyPage ->
   val = fetchData(id, name) OR RAISE
-   s> parseHeader OR EXIT "Invalid Header"
-   s> parseBody OR EXIT "Invalid Body"
-   s> fetchUser
+    s> parseHeader OR EXIT "Invalid Header"
+    s> parseBody OR EXIT "Invalid Body"
+    s> fetchUser
       s> RECOVER(defaultUser())
-   s> saveToDb(id, name, _);
+    s> TAP saveToDb(id, name, _)
+    s> renderPage();
+  RETURN val; 
 
 CATCH Input WITH(ParseError)
   IF __error.context == "Invalid Header" -> logInvalidHeader(__error.snapshot.header());
@@ -62,7 +64,8 @@ In CLEAR, you describe the strategy you want to employ, and the compiler generat
 ```ruby clear illustrative
 -- `notify()` users in parallel, with back pressure
 users
-  s> CONCURRENT(workers: 8, parallel: TRUE) EACH notify
+  s> CONCURRENT(workers: 8, capacity: 800, parallel: TRUE)
+     EACH notify
 
 -- Spawn a short-lived green fiber, do all allocations in an Arena for speed:
 BG { @micro:arena -> foo() }
