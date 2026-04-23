@@ -3030,6 +3030,21 @@ private
       acquire_capability!(node, cap, expanded_capabilities)
     end
 
+    # Phase 1 static nested-lock check: reject same-variable-name nested
+    # fallible acquire unless the inner WITH carries POSSIBLE_DEADLOCK.
+    check_nested_lock_reacquire!(node, expanded_capabilities)
+
+    # Track which variable names become "held" on entering this WITH. Only
+    # fallible captures (EXCLUSIVE / write_locked_read) qualify — BORROWED
+    # / RESTRICT don't acquire a mutex, so they don't participate.
+    prev_held = @held_locks || {}
+    @held_locks = prev_held.dup
+    expanded_capabilities.each do |cap|
+      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
+      vn = cap_var_name(cap[:var_node])
+      @held_locks[vn] ||= { token: cap[:var_node].respond_to?(:token) ? cap[:var_node].token : node.token }
+    end
+
     # 2. Enter a child scope for the capability block
     # Inherits parent variables so the WITH body can see enclosing locals,
     # but new declarations inside are isolated to the WITH block.
@@ -3054,8 +3069,37 @@ private
 
     validate_lock_error_clause!(node, expanded_capabilities)
 
+    @held_locks = prev_held
     @with_block_depth -= 1
     node.full_type = :Void
+  end
+
+  # Reject a nested WITH that re-acquires a fallible lock on a variable
+  # already held by an enclosing WITH in the same function. Lexical,
+  # same-name; does not chase aliases or cross function boundaries
+  # (those are later-phase analyses). The inner WITH can opt out with
+  # POSSIBLE_DEADLOCK, which downgrades the error to a [Note] so the
+  # risk stays visible in compiler output.
+  def check_nested_lock_reacquire!(node, expanded_capabilities)
+    return unless @held_locks
+    expanded_capabilities.each do |cap|
+      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
+      vn = cap_var_name(cap[:var_node])
+      next unless @held_locks.key?(vn)
+      outer_tok = @held_locks[vn][:token]
+      escape    = node.deadlock_escape
+      if escape && escape[:kind] == :deadlock
+        note!(cap[:var_node], "POSSIBLE_DEADLOCK accepted: '#{vn}' already held by an enclosing WITH " \
+                              "(outer line #{outer_tok&.line}). Reviewer: verify this cannot actually self-acquire " \
+                              "at runtime (distinct instances, sorted acquire, etc.).")
+      else
+        error!(cap[:var_node],
+               "Nested lock re-acquire: '#{vn}' is already held by an enclosing WITH " \
+               "(outer line #{outer_tok&.line}). This is a structural self-deadlock. " \
+               "If you know the instances are distinct and ordered, mark the inner WITH as " \
+               "POSSIBLE_DEADLOCK.")
+      end
+    end
   end
 
   # Validate WithBlock#lock_error_clause. Requires at least one fallible

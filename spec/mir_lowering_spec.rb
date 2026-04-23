@@ -1328,9 +1328,9 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include("__counter_guard")
+      expect(zig).to match(/__counter_guard_\d+/)
       expect(zig).to include(".acquire()")
-      expect(zig).to include("defer __counter_guard.release()")
+      expect(zig).to match(/defer __counter_guard_\d+\.release\(\)/)
       expect(zig).to include("const c =")
     end
 
@@ -1346,7 +1346,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       zig = emit(result)
       expect(zig).to include(".write()")
-      expect(zig).to include("defer __counter_guard.release()")
+      expect(zig).to match(/defer __counter_guard_\d+\.release\(\)/)
     end
 
     it "lowers write_locked_read capability with read()" do
@@ -1361,7 +1361,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       zig = emit(result)
       expect(zig).to include(".read()")
-      expect(zig).to include("defer __counter_guard.release()")
+      expect(zig).to match(/defer __counter_guard_\d+\.release\(\)/)
     end
 
     it "lowers BORROWED capability" do

@@ -437,6 +437,10 @@ module AST
   WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
     include Locatable
     attr_accessor :lock_error_clause
+    # Per-WITH opt-out from a static nested-lock check. Hash shape:
+    #   { kind: :deadlock | :lock_cycle, token: Token }
+    # nil = no opt-out; annotator rejects violating nesting.
+    attr_accessor :deadlock_escape
   end
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }

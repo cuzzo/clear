@@ -1351,6 +1351,35 @@ RSpec.describe SemanticAnnotator do
       FLUX
       expect { parse_only(src) }.to raise_error(ParserError, /Expected RAISE, PASS, EXIT/)
     end
+
+    it "parses WITH POSSIBLE_DEADLOCK EXCLUSIVE modifier" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH POSSIBLE_DEADLOCK EXCLUSIVE c AS inner { inner.v = 1; }
+      FLUX
+      block = with_block(parse_only(src))
+      expect(block.deadlock_escape).to include(kind: :deadlock)
+    end
+
+    it "parses WITH POSSIBLE_LOCK_CYCLE modifier" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE c AS inner { inner.v = 1; }
+      FLUX
+      block = with_block(parse_only(src))
+      expect(block.deadlock_escape).to include(kind: :lock_cycle)
+    end
+
+    it "leaves deadlock_escape nil when no modifier is present" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; }
+      FLUX
+      expect(with_block(parse_only(src)).deadlock_escape).to be_nil
+    end
   end
 
   describe "WITH error-clause annotator validation" do
@@ -1415,6 +1444,81 @@ RSpec.describe SemanticAnnotator do
         WITH c { } ON Transient RAISE
       FLUX
       expect { run(src) }.to raise_error(/never produce a lock-acquire error/)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Phase 1: lexical same-name nested-WITH check
+  # ---------------------------------------------------------------------------
+
+  describe "nested lock re-acquire (lexical)" do
+    it "rejects same-name nested EXCLUSIVE WITH" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS outer {
+          WITH EXCLUSIVE c AS inner { inner.v = 1; }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/Nested lock re-acquire: 'c' is already held/)
+    end
+
+    it "rejects same-name nested write_locked_read on @writeLocked" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @writeLocked;
+        WITH EXCLUSIVE c AS outer {
+          WITH c AS inner { n = inner.v; }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/Nested lock re-acquire: 'c'/)
+    end
+
+    it "accepts inner WITH when marked POSSIBLE_DEADLOCK" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS outer {
+          WITH POSSIBLE_DEADLOCK EXCLUSIVE c AS inner { inner.v = 1; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts nested WITH on distinct variables" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        a = C{ v: 0 } @locked;
+        b = C{ v: 0 } @locked;
+        WITH EXCLUSIVE a AS x {
+          WITH EXCLUSIVE b AS y { y.v = x.v; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts BORROWED outer (non-locked) + EXCLUSIVE inner on a different locked variable" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        STRUCT B { n: Int64 }
+        c = C{ v: 0 } @locked;
+        b = B{ n: 5 };
+        WITH BORROWED b AS ref {
+          WITH EXCLUSIVE c AS inner { inner.v = ref.n; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects three-deep same-name nesting" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS l1 {
+          WITH EXCLUSIVE c AS l2 { l2.v = 1; }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/Nested lock re-acquire/)
     end
   end
 

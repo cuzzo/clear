@@ -1856,7 +1856,10 @@ class MIRLowering
         bindings << "const #{inner} = #{zig_var}.ctrl.data.*;\n_ = &#{inner};"
       when :EXCLUSIVE
         next if needs_sort
-        guard_var = "__#{var_name}_guard"
+        # Include the WITH node's object_id in the guard name so nested
+        # WITHs on the same variable (permitted via POSSIBLE_DEADLOCK)
+        # don't produce colliding Zig identifiers.
+        guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
         lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         panic_method = resolved&.write_locked? ? "write" : "acquire"
         err_method   = resolved&.write_locked? ? "writeOrErr" : "acquireOrErr"
@@ -1867,7 +1870,7 @@ class MIRLowering
         end
       when :write_locked_read
         next if needs_sort
-        guard_var = "__#{var_name}_guard"
+        guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
         lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         if clause
           bindings << emit_fallible_lock_binding(lock_expr, "readOrErr", guard_var, alias_name, clause, with_label, node)

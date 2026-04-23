@@ -2265,6 +2265,15 @@ class Parser
   def parse_with_capability
     with_token = consume(:KEYWORD, 'WITH')
 
+    # Optional deadlock-escape modifier: one of POSSIBLE_DEADLOCK /
+    # POSSIBLE_LOCK_CYCLE, immediately after WITH. Acts as a per-block
+    # opt-out from the static nested-lock checks; code still emits a
+    # [Note] at each opted-out site so the risk remains visible.
+    escape_tok = nil
+    if match?(:KEYWORD, 'POSSIBLE_DEADLOCK') || match?(:KEYWORD, 'POSSIBLE_LOCK_CYCLE')
+      escape_tok = consume(:KEYWORD)
+    end
+
     # Parse comma-separated list of capability specifications.
     # Syntax: WITH var_name { } — capability is inferred from the variable's type.
     # Explicit form: WITH RESTRICT/EXCLUSIVE var_name { } — traditional capabilities.
@@ -2308,6 +2317,12 @@ class Parser
 
     node = AST::WithBlock.new(with_token, capabilities, body)
     node.lock_error_clause = parse_lock_error_clause
+    if escape_tok
+      node.deadlock_escape = {
+        kind: escape_tok.value == 'POSSIBLE_DEADLOCK' ? :deadlock : :lock_cycle,
+        token: escape_tok,
+      }
+    end
     node
   end
 
