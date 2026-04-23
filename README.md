@@ -29,8 +29,8 @@ bill = users AS @u
 ```ruby
 FN myFunc(id: Int64, name: String) RETURNS MyPage ->
   page = fetchData(id, name) OR RAISE
-    s> parseHeader OR EXIT "Invalid Header"
-    s> parseBody OR EXIT "Invalid Body"
+    s> parseHeader OR EXIT "Invalid Header"   -- parseHeader RAISES Input, ParseError
+    s> parseBody OR EXIT "Invalid Body"       -- we can attach messages to be handled specifically below
     s> fetchUser
       s> RECOVER(defaultUser())
     s> TAP saveToDb(id, name, _)
