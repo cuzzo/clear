@@ -1,0 +1,180 @@
+require "rspec"
+require "tmpdir"
+require "fileutils"
+
+# Integration tests for `./clear fmt`. Each test writes one or more .cht
+# files into a tmp dir, invokes the real ./clear binary, and asserts on
+# stdout/stderr/exit/file contents.
+
+CLEAR_BIN = File.expand_path("../clear", __dir__) unless defined?(CLEAR_BIN)
+
+RSpec.describe "./clear fmt", :integration do
+  def run_fmt(*args)
+    cmd = "#{CLEAR_BIN} fmt #{args.join(' ')}"
+    stdout = `#{cmd} 2>/tmp/clear_fmt_stderr`
+    stderr = File.read("/tmp/clear_fmt_stderr")
+    File.delete("/tmp/clear_fmt_stderr") rescue nil
+    [stdout, stderr, $?.exitstatus]
+  end
+
+  around do |ex|
+    Dir.mktmpdir do |dir|
+      @tmp = dir
+      ex.run
+    end
+  end
+
+  def write(name, content)
+    path = File.join(@tmp, name)
+    File.write(path, content)
+    path
+  end
+
+  it "parses and prints a well-formed file to stdout" do
+    path = write("a.cht", "FN main() RETURNS Void ->\n  RETURN;\nEND\n")
+    out, _, status = run_fmt("--stdout", path)
+    expect(status).to eq(0)
+    expect(out).to eq("FN main() RETURNS Void ->\n  RETURN;\nEND\n")
+  end
+
+  it "exits non-zero on a parse error and refuses to write" do
+    path = write("bad.cht", "FN main( RETURNS Void ->\n")
+    before = File.read(path)
+    _, stderr, status = run_fmt(path)
+    expect(status).not_to eq(0)
+    expect(stderr).to match(/parse error/i)
+    expect(File.read(path)).to eq(before)
+  end
+
+  it "normalizes 4-space indent to 2-space and prints the path on change" do
+    path = write("i.cht", "FN main() RETURNS Void ->\n    RETURN;\nEND\n")
+    out, _, status = run_fmt(path)
+    expect(status).to eq(0)
+    expect(out.strip).to eq(path)
+    expect(File.read(path)).to eq("FN main() RETURNS Void ->\n  RETURN;\nEND\n")
+  end
+
+  it "--check exits 1 when file is not formatted, 0 when formatted" do
+    bad  = write("b.cht", "FN main() RETURNS Void ->\n    RETURN;\nEND\n")
+    good = write("g.cht", "FN main() RETURNS Void ->\n  RETURN;\nEND\n")
+
+    _, _, sb = run_fmt("--check", bad)
+    expect(sb).to eq(1)
+
+    _, _, sg = run_fmt("--check", good)
+    expect(sg).to eq(0)
+  end
+
+  it "expands FN one-liners into multi-line form" do
+    path = write("o.cht", "FN f() RETURNS Int64 -> RETURN 0; END\n")
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to eq("FN f() RETURNS Int64 ->\n  RETURN 0;\nEND\n")
+  end
+
+  it "wraps FN signature when it exceeds 120 chars" do
+    long = (1..6).map { |i| "p#{i}: SomeReallyLongTypeName" }.join(", ")
+    path = write("l.cht", "FN withLotsOfParams(#{long}) RETURNS Int64 ->\n  RETURN 0;\nEND\n")
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("FN withLotsOfParams(\n")
+    expect(out).to include("\n)\nRETURNS Int64 ->\n")
+  end
+
+  it "wraps WITH with 2+ captures onto their own lines" do
+    src = <<~CLEAR
+      STRUCT C {v: Int64}
+      FN main() RETURNS Void ->
+        a = C {v: 0} @locked;
+        b = C {v: 0} @locked;
+        WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
+          x.v = x.v + 1;
+        }
+        RETURN;
+      END
+    CLEAR
+    path = write("w.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("WITH\n    EXCLUSIVE a AS x,\n    EXCLUSIVE b AS y {")
+  end
+
+  it "wraps pipelines with 2+ `s>` stages each on its own line" do
+    src = <<~CLEAR
+      FN main() RETURNS Int64 ->
+        v = items s> SELECT _ * 2 s> SUM _;
+        RETURN v;
+      END
+    CLEAR
+    path = write("p.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("\n    s> SELECT _ * 2\n    s> SUM _")
+  end
+
+  it "gives `s> RECOVER(...)` one extra indent relative to sibling stages" do
+    src = <<~CLEAR
+      FN main() RETURNS Int64 ->
+        v = items s> a s> RECOVER(0) s> b;
+        RETURN v;
+      END
+    CLEAR
+    path = write("r.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    # a and b at +1 (4 spaces inside main); RECOVER at +2 (6 spaces).
+    expect(out).to match(/^    s> a$/)
+    expect(out).to match(/^      s> RECOVER\(0\)$/)
+    expect(out).to match(/^    s> b;$/)
+  end
+
+  it "wraps long call args onto own lines with closing paren at call column" do
+    long = (1..8).map { |i| "arg_#{i}_with_long_name" }.join(", ")
+    src = "FN main() RETURNS Int64 ->\n  v = callWithLongName(#{long});\n  RETURN v;\nEND\n"
+    path = write("c.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("v = callWithLongName(\n")
+    expect(out).to match(/\n  \);\n/)
+  end
+
+  it "flush-attaches @capability in type position and keeps space in value position" do
+    src = <<~CLEAR
+      STRUCT Counter {value: Int64@locked}
+      FN main() RETURNS Int64 ->
+        x = 42 @locked;
+        RETURN x;
+      END
+    CLEAR
+    path = write("cap.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("value: Int64@locked")
+    expect(out).to include("x = 42 @locked")
+  end
+
+  it "emits a width warning for lines exceeding 120 chars" do
+    long_str = '"' + ("x" * 140) + '"'
+    path = write("width.cht", "FN main() RETURNS Void ->\n  s = #{long_str};\n  RETURN;\nEND\n")
+    _, stderr, status = run_fmt("--check", path)
+    expect(status).to eq(0).or eq(1)
+    expect(stderr).to match(/width\.cht:\d+: warning: line length \d+ exceeds 120/)
+  end
+
+  it "suppresses width warnings with --no-warn" do
+    long_str = '"' + ("x" * 140) + '"'
+    path = write("nw.cht", "FN main() RETURNS Void ->\n  s = #{long_str};\n  RETURN;\nEND\n")
+    _, stderr, _ = run_fmt("--no-warn", "--check", path)
+    expect(stderr).not_to include("warning: line length")
+  end
+
+  it "is idempotent on the whole transpile-tests corpus" do
+    root = File.expand_path("../transpile-tests", __dir__)
+    files = Dir.glob(File.join(root, "**", "*.cht"))
+    expect(files).not_to be_empty
+
+    drifts = []
+    files.each do |f|
+      first, _, s1 = run_fmt("--no-warn", "--stdout", f)
+      next unless s1 == 0
+      second_in = File.join(@tmp, "tmp_idem.cht")
+      File.write(second_in, first)
+      second, _, _ = run_fmt("--no-warn", "--stdout", second_in)
+      drifts << f if second != first
+    end
+    expect(drifts).to eq([])
+  end
+end
