@@ -62,7 +62,8 @@ module AST
     attr_accessor :slot_size
     attr_accessor :resource_close_zig   # set by annotator on resource declarations
     attr_accessor :can_fail             # true when this call node can produce an error (stdlib can_fail, user !T return)
-    attr_accessor :error_kind           # Symbol (:Timeout, :System, ...) — CLEAR error kind stamped from stdlib registry; nil = unclassified
+    attr_accessor :error_kind           # Symbol — one of the 6 kinds (:Transient, :Input, :System, :NotFound, :Permission, :Canceled); nil = unclassified
+    attr_accessor :error_type           # Symbol — specific error name (:LockTimeout, :LockCycle, :Deadlock, ...); nil = unspecified. Narrower than error_kind.
     attr_accessor :var_used             # true when the variable is read in user code
     attr_accessor :var_mutated          # true when the variable is reassigned after declaration
     attr_accessor :symbol               # SymbolEntry — set by annotator for resolved bindings
@@ -421,7 +422,7 @@ module AST
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
-  # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled, :Timeout)
+  # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled)
   # error_name: optional string (user-defined error enum name)
   # message_expr: optional string expression
   Raise        = Struct.new(:token, :kind, :error_name, :message_expr) { include Locatable }

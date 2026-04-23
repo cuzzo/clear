@@ -1,0 +1,38 @@
+-- Test: WITH EXCLUSIVE ... ON TIMEOUT <action>.
+-- Under no-contention, the lock acquires immediately and the clause
+-- never fires. Exercises each action's codegen path: PASS, EXIT "msg",
+-- -> { stmts }, and RETRY(N) THEN PASS. RAISE is exercised via a
+-- separate fallible-return scenario below.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    MUTABLE c = Counter{ value: 0 } @locked;
+
+    -- PASS
+    WITH EXCLUSIVE c AS inner {
+        inner.value = inner.value + 1;
+    } ON TIMEOUT PASS
+
+    -- EXIT "msg"
+    WITH EXCLUSIVE c AS inner {
+        inner.value = inner.value + 1;
+    } ON TIMEOUT EXIT "deadlocked"
+
+    -- -> { stmts }
+    MUTABLE fallback: Int64 = 0;
+    WITH EXCLUSIVE c AS inner {
+        inner.value = inner.value + 1;
+    } ON TIMEOUT -> { fallback = -1; }
+
+    -- RETRY(N) THEN PASS
+    WITH EXCLUSIVE c AS inner {
+        inner.value = inner.value + 1;
+    } RETRY(3) THEN PASS
+
+    WITH EXCLUSIVE c AS inner {
+        ASSERT inner.value == 4, "expected 4 after 4 increments";
+    }
+
+    RETURN;
+END

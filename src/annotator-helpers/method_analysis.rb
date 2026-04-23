@@ -134,6 +134,7 @@ module MethodAnalysis
     end
     node.can_fail = true if defn[:can_fail] || defn[:allocates]
     node.error_kind = defn[:error_kind] if defn[:error_kind]
+    node.error_type = defn[:error_type] if defn[:error_type]
 
     true
   end

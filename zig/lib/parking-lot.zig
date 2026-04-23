@@ -38,7 +38,14 @@ const WaiterNode = qs.WaiterNode;
 const WaiterList = qs.WaiterList;
 
 pub const LockError = error{
+    // Self-cyclic: the waiter is the owner (same fiber re-acquired). Always a
+    // user bug; not retryable. Maps to ErrorKind.System.
     Deadlock,
+    // Multi-hop cycle (A holds X and waits on Y; B holds Y and waits on X).
+    // Resolvable if either party backs off and retries with jitter, so it's
+    // classified as Transient.
+    LockCycle,
+    // Lock wait exceeded the scheduler's lock_timeout_ms deadline. Transient.
     LockTimeout,
 };
 
@@ -84,22 +91,30 @@ inline fn getScheduler() ?*fp.Scheduler {
     return fp.active_scheduler;
 }
 
-// Walk the owner chain from `owner` looking for `waiter`. If found, the
-// waiter is in a deadlock cycle. Returns error.Deadlock so the caller can
-// unwind cleanly via defer blocks rather than killing the process.
-// Depth-limited to 64 to guard against corrupted state.
-// Read locks store null in waiting_for_lock_owner and act as chain terminators.
+// Walk the owner chain from `owner` looking for `waiter`. If found, return
+// error.Deadlock when the owner is the waiter (depth 0, self-cyclic,
+// always a user bug) or error.LockCycle when the cycle is multi-hop (AB/BA,
+// resolvable by one party backing off). Depth-limited to 64 to guard
+// against corrupted state. Read locks store null in waiting_for_lock_owner
+// and act as chain terminators.
 fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!void {
     var current = owner;
     var depth: usize = 0;
     while (current) |holder| : (depth += 1) {
         if (holder == waiter) {
+            if (depth == 0) {
+                std.debug.print(
+                    "DEADLOCK: fiber {*} re-acquired lock {*} it already holds\n",
+                    .{ waiter, lock_ptr },
+                );
+                return error.Deadlock;
+            }
             std.debug.print(
-                "DEADLOCK: lock cycle — fiber {*} waiting on lock {*} which is " ++
-                "transitively held by itself\n",
-                .{ waiter, lock_ptr },
+                "LOCK CYCLE: fiber {*} waiting on lock {*} transitively held by " ++
+                "itself via {} hop(s)\n",
+                .{ waiter, lock_ptr, depth },
             );
-            return error.Deadlock;
+            return error.LockCycle;
         }
         if (depth >= 64) break;
         current = holder.waiting_for_lock_owner;

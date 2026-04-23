@@ -1816,6 +1816,12 @@ class MIRLowering
   def lower_with_block(node)
     rt_name = @rt_name
     bindings = []
+    clause = node.lock_error_clause
+    # Only RAISE/EXIT exit via `return`; PASS and `-> { stmts }` exit by
+    # breaking out of this labeled block. Emit the label only when used
+    # so Zig doesn't complain about an unused label.
+    needs_label = clause && (clause[:action] == :pass || clause[:action] == :block)
+    with_label = needs_label ? "__with_#{node.object_id.abs}" : nil
 
     (node.capabilities || []).each do |cap|
       var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
@@ -1830,15 +1836,21 @@ class MIRLowering
       when :EXCLUSIVE
         guard_var = "__#{var_name}_guard"
         lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
-        if resolved&.write_locked?
-          bindings << "var #{guard_var} = #{lock_expr}.write();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+        panic_method = resolved&.write_locked? ? "write" : "acquire"
+        err_method   = resolved&.write_locked? ? "writeOrErr" : "acquireOrErr"
+        if clause
+          bindings << emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, node)
         else
-          bindings << "var #{guard_var} = #{lock_expr}.acquire();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+          bindings << "var #{guard_var} = #{lock_expr}.#{panic_method}();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
         end
       when :write_locked_read
         guard_var = "__#{var_name}_guard"
         lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
-        bindings << "var #{guard_var} = #{lock_expr}.read();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+        if clause
+          bindings << emit_fallible_lock_binding(lock_expr, "readOrErr", guard_var, alias_name, clause, with_label, node)
+        else
+          bindings << "var #{guard_var} = #{lock_expr}.read();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
+        end
       when :BORROWED
         # PURE: cap[:var_node] is always an Identifier or field ref; never allocating.
         source_zig = emit_expr(lower(cap[:var_node]))
@@ -1885,8 +1897,94 @@ class MIRLowering
       vn = c[:var_node]
       vn.respond_to?(:name) ? vn.name.to_s : nil
     }
-    MIR::RawZig.new("{\n#{all_bindings}\n#{body_zig}\n}", "with_block",
+    outer_prefix = with_label ? "#{with_label}: " : ""
+    MIR::RawZig.new("#{outer_prefix}{\n#{all_bindings}\n#{body_zig}\n}", "with_block",
       { consumes: [], produces: [], borrows: borrows })
+  end
+
+  # Emit the acquire-or-catch binding for a fallible lock under a
+  # WithBlock#lock_error_clause. Produces Zig statements that define
+  # `guard_var` and its alias, or execute the clause's action on timeout /
+  # lock-cycle failure. Self-deadlock (error.Deadlock, user bug) always
+  # bubbles up as a Transient -> System raise regardless of the clause.
+  def emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, with_node)
+    action_zig = emit_lock_action_zig(clause, with_label, with_node)
+    retries = clause[:retries]
+    acquire_blk = "__acq_#{with_node.object_id.abs}_#{guard_var}"
+    line = with_node.token&.line.to_s
+    deadlock_bubble = %Q(#{@rt_name}.setError(.System, "Deadlock", "self-cyclic lock acquire", #{line});\nreturn error.CheatError;)
+
+    handler_body = <<~ZIG.rstrip
+      switch (__err) {
+        error.Deadlock => { #{deadlock_bubble} },
+        error.LockTimeout, error.LockCycle => {
+          #{action_zig}
+        },
+      }
+    ZIG
+
+    if retries
+      retry_handler = <<~ZIG.rstrip
+        switch (__err) {
+          error.Deadlock => { #{deadlock_bubble} },
+          error.LockTimeout, error.LockCycle => {
+            if (__retry + 1 < #{retries}) continue;
+            #{action_zig}
+          },
+        }
+      ZIG
+      acquire_expr = <<~ZIG.rstrip
+        #{acquire_blk}: {
+          var __retry: usize = 0;
+          while (true) : (__retry += 1) {
+            if (#{lock_expr}.#{err_method}()) |__g| {
+              break :#{acquire_blk} __g;
+            } else |__err| {
+              #{retry_handler}
+            }
+          }
+        }
+      ZIG
+    else
+      acquire_expr = <<~ZIG.rstrip
+        #{acquire_blk}: {
+          if (#{lock_expr}.#{err_method}()) |__g| {
+            break :#{acquire_blk} __g;
+          } else |__err| {
+            #{handler_body}
+          }
+        }
+      ZIG
+    end
+
+    <<~ZIG.rstrip
+      var #{guard_var} = #{acquire_expr};
+      defer #{guard_var}.release();
+      const #{alias_name} = #{guard_var}.get();
+      _ = &#{alias_name};
+    ZIG
+  end
+
+  # Zig statements that handle a retryable lock failure (LockTimeout /
+  # LockCycle). Must terminate: return / @panic, or break :__with_<id>.
+  # The enclosing switch dispatches error.Deadlock separately, so this
+  # code never runs for self-deadlock.
+  def emit_lock_action_zig(clause, with_label, with_node)
+    line = with_node.token&.line.to_s
+    case clause[:action]
+    when :raise
+      %Q(#{@rt_name}.setError(.Transient, "LockTimeout", "lock acquire timed out", #{line});\nreturn error.CheatError;)
+    when :exit
+      msg_zig = emit_expr(lower(clause[:message]))
+      %Q(#{@rt_name}.setError(.Transient, "LockTimeout", #{msg_zig}, #{line});\nreturn error.CheatError;)
+    when :pass
+      "break :#{with_label};"
+    when :block
+      body_zig = emit_stmts_zig(lower_body(clause[:body]))
+      "#{body_zig}\nbreak :#{with_label};"
+    else
+      raise "Internal: unknown lock action #{clause[:action]}"
+    end
   end
 
   def lower_do_block(node)

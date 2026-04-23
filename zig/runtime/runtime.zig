@@ -65,8 +65,7 @@ pub const ErrorKind = enum(u8) {
     NotFound = 3,
     Permission = 4,
     Canceled = 5,
-    Timeout = 6,
-    Unknown = 7,
+    Unknown = 6,
 };
 
 pub const ErrorContext = struct {
@@ -100,19 +99,20 @@ pub const ErrorContext = struct {
 /// based on known error names. Unrecognized errors become .Unknown.
 pub fn zigErrorToKind(err: anyerror) ErrorKind {
     const name = @errorName(err);
-    // System: resource exhaustion, infrastructure failure
+    // System: resource exhaustion, infrastructure failure, user-bug self-deadlock
     if (std.mem.eql(u8, name, "OutOfMemory")) return .System;
     if (std.mem.eql(u8, name, "SystemResources")) return .System;
     if (std.mem.eql(u8, name, "Unexpected")) return .System;
     if (std.mem.eql(u8, name, "DiskQuota")) return .System;
     if (std.mem.eql(u8, name, "NoSpaceLeft")) return .System;
-    // Timeout: operation exceeded its deadline (lock wait, fiber wait, I/O).
-    // Distinct from Transient so CLEAR's RETRY(N) clause can target only
-    // those errors that a retry might actually succeed on.
-    if (std.mem.eql(u8, name, "Timeout")) return .Timeout;
-    if (std.mem.eql(u8, name, "LockTimeout")) return .Timeout;
-    if (std.mem.eql(u8, name, "ConnectionTimedOut")) return .Timeout;
-    // Transient: temporary, may or may not succeed on retry (network ops).
+    if (std.mem.eql(u8, name, "Deadlock")) return .System;
+    // Transient: temporary, retryable. Covers lock acquisition timeouts,
+    // AB/BA lock cycles (one party backing off resolves them), and network
+    // transients.
+    if (std.mem.eql(u8, name, "LockTimeout")) return .Transient;
+    if (std.mem.eql(u8, name, "LockCycle")) return .Transient;
+    if (std.mem.eql(u8, name, "Timeout")) return .Transient;
+    if (std.mem.eql(u8, name, "ConnectionTimedOut")) return .Transient;
     if (std.mem.eql(u8, name, "WouldBlock")) return .Transient;
     if (std.mem.eql(u8, name, "ConnectionRefused")) return .Transient;
     if (std.mem.eql(u8, name, "ConnectionResetByPeer")) return .Transient;
