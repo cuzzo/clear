@@ -1559,7 +1559,7 @@ class Parser
     AST::StructPattern.new(tok, fields, partial)
   end
 
-  ERROR_KINDS = %w[Transient Input System NotFound Permission Canceled].freeze
+  ERROR_KINDS = %w[Transient Input System NotFound Permission Canceled Timeout].freeze
 
   # RAISE Kind;
   # RAISE Kind, ErrorName;

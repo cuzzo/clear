@@ -420,7 +420,7 @@ module AST
   end
   Assert       = Struct.new(:token, :condition, :message) { include Locatable }
   # RAISE Kind, ErrorName, "message"
-  # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled)
+  # kind: symbol (:Transient, :Input, :System, :NotFound, :Permission, :Canceled, :Timeout)
   # error_name: optional string (user-defined error enum name)
   # message_expr: optional string expression
   Raise        = Struct.new(:token, :kind, :error_name, :message_expr) { include Locatable }
