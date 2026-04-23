@@ -245,6 +245,7 @@ class Formatter::Emitter
     toks = collapse_newlines(toks)
     toks = expand_fn_blocks(toks)
     toks = expand_then_do_blocks(toks)
+    toks = expand_with_blocks(toks)
     toks = expand_record_types(toks)
     toks = collapse_newlines(toks)
     render(toks)
@@ -523,6 +524,223 @@ class Formatter::Emitter
     end_idx + 1
   end
 
+  # ---- WITH forced wraps (§3.2, §3.3) -----------------------------------
+  #
+  # A block WITH has the shape `WITH caps... { body } [ON clause...]`. Two
+  # triggers force multi-line layout:
+  #   (a) 2+ capture clauses (comma-separated) — captures split onto their
+  #       own lines, body at +2, `}` at +1.
+  #   (b) any trailing ON ... / RETRY ... clause after `}` — `}` moves to
+  #       its own line at +1, ON moves to +1, body at +2.
+  # Both triggers can combine. `CATCH Input WITH(...)` filter uses
+  # `WITH(`; it is NOT a block WITH and we leave it alone.
+  def expand_with_blocks(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      if t.type == :KEYWORD && t.raw == 'WITH' && with_is_block?(toks, i)
+        i = emit_with_block(out, toks, i)
+      else
+        out << t
+        i += 1
+      end
+    end
+    out
+  end
+
+  def with_is_block?(toks, idx)
+    j = idx + 1
+    while j < toks.length && [:NL, :COMMENT].include?(toks[j].type)
+      j += 1
+    end
+    return true if j >= toks.length
+    !(toks[j].type == :SYM && toks[j].raw == '(')
+  end
+
+  def emit_with_block(out, toks, start)
+    brace_idx = find_with_open_brace(toks, start)
+    unless brace_idx
+      out << toks[start]
+      return start + 1
+    end
+    close_idx = find_matching_close_brace(toks, brace_idx)
+    unless close_idx
+      out << toks[start]
+      return start + 1
+    end
+
+    # Captures between WITH and `{`; count top-level commas + 1.
+    cap_count = 1
+    depth = 0
+    (start + 1 ... brace_idx).each do |j|
+      t = toks[j]
+      next unless t.type == :SYM
+      case t.raw
+      when '(', '[' then depth += 1
+      when ')', ']' then depth -= 1
+      when ','      then cap_count += 1 if depth == 0
+      end
+    end
+
+    on_end = consume_on_clause(toks, close_idx + 1)
+    has_on = on_end > close_idx + 1
+    multi_cap = cap_count >= 2
+
+    unless multi_cap || has_on
+      out << toks[start]
+      return start + 1
+    end
+
+    # ---- apply wrap ----------------------------------------------------
+    out << toks[start]  # WITH
+
+    if multi_cap
+      insert_nl(out)
+      out << phantom(:INDENT_OPEN)
+      depth = 0
+      j = start + 1
+      j = skip_nls(toks, j)
+      while j < brace_idx
+        t = toks[j]
+        if t.type == :NL
+          j += 1
+          next
+        end
+        if t.type == :SYM && t.raw == ',' && depth == 0
+          out << t
+          j += 1
+          insert_nl(out)
+          j = skip_nls(toks, j)
+          next
+        end
+        if t.type == :SYM
+          case t.raw
+          when '(', '[' then depth += 1
+          when ')', ']' then depth -= 1
+          end
+        end
+        out << t
+        j += 1
+      end
+      out << toks[brace_idx]  # `{`
+      # Body is at (captures:+1) + (`{`:+1) = +2 naturally.
+    else
+      # Single cap, has_on. Emit capture tokens as-is up to and including `{`.
+      (start + 1 .. brace_idx).each { |j| out << toks[j] }
+      # Body needs +2 but `{` only gives +1; add extra marker.
+      out << phantom(:INDENT_OPEN)
+    end
+
+    insert_nl(out)
+    j = skip_nls(toks, brace_idx + 1)
+    while j < close_idx
+      out << toks[j]
+      j += 1
+    end
+    out.pop while out.last && out.last.type == :NL
+    insert_nl(out)
+    out << toks[close_idx]  # `}`
+
+    if has_on
+      # Emit ON clause tokens on their own line at +1.
+      insert_nl(out)
+      j = close_idx + 1
+      j = skip_nls(toks, j)
+      while j < on_end
+        t = toks[j]
+        j += 1
+        next if t.type == :NL
+        out << t
+      end
+    end
+
+    # Attach INDENT_CLOSE to the end of the current line (after last code).
+    # Source NL / trailing whitespace handles line termination from here.
+    out << phantom(:INDENT_CLOSE)
+
+    has_on ? on_end : close_idx + 1
+  end
+
+  def find_with_open_brace(toks, start)
+    depth = 0
+    j = start + 1
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[' then depth += 1
+        when ')', ']' then depth -= 1
+        when '{' then return j if depth == 0
+        end
+      end
+      j += 1
+    end
+    nil
+  end
+
+  def find_matching_close_brace(toks, open_idx)
+    depth = 0
+    j = open_idx + 1
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '{' then depth += 1
+        when '}'
+          return j if depth == 0
+          depth -= 1
+        end
+      end
+      j += 1
+    end
+    nil
+  end
+
+  # Starting at `start` (one past `}`), attach any trailing
+  # ON / RETRY segments. Returns the index of the last token of the ON
+  # clause (usually a NL), or `start` if no clause. Does NOT advance past
+  # NLs that follow the final ON segment — those blank lines belong to
+  # the enclosing scope.
+  def consume_on_clause(toks, start)
+    cursor = start
+    loop do
+      peek = skip_nls(toks, cursor)
+      break if peek >= toks.length
+      t = toks[peek]
+      break unless t.type == :KEYWORD && on_keyword?(t.raw)
+      cursor = consume_on_segment(toks, peek)
+    end
+    cursor
+  end
+
+  def on_keyword?(raw)
+    %w[ON RETRY POSSIBLE_DEADLOCK POSSIBLE_LOCK_CYCLE].include?(raw)
+  end
+
+  def consume_on_segment(toks, start)
+    depth = 0
+    j = start
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1
+        when ')', ']', '}' then depth -= 1
+        end
+      end
+      if t.type == :NL && depth == 0
+        return j
+      end
+      j += 1
+    end
+    j
+  end
+
+  def phantom(type)
+    Formatter::FormatLexer::Token.new(type, '', 0, 0)
+  end
+
   # Split STRUCT / UNION / ENUM blocks so each field/variant is its own line.
   def expand_record_types(toks)
     out = []
@@ -606,7 +824,8 @@ class Formatter::Emitter
 
   # Walks the transformed token stream and produces the final string.
   # Maintains: indent depth, per-line buffers, last non-comment code token
-  # (for spacing decisions).
+  # (for spacing decisions). `:INDENT_OPEN` / `:INDENT_CLOSE` phantom tokens
+  # adjust depth for forced wraps where no `{` / `END` drives the change.
   def render(toks)
     lines = tokens_to_lines(toks)
     lines = ensure_blank_before_catch(lines)
@@ -614,9 +833,13 @@ class Formatter::Emitter
 
     depth = 0
     out = +""
-    lines.each do |line|
+    lines.each do |raw_line|
+      pre_delta, post_delta, line = split_indent_markers(raw_line)
+      depth = [depth + pre_delta, 0].max
+
       if line.empty?
         out << "\n"
+        depth = [depth + post_delta, 0].max
         next
       end
 
@@ -638,8 +861,31 @@ class Formatter::Emitter
       if last && OPEN_TERMINAL.include?(last.raw)
         depth += 1
       end
+      depth = [depth + post_delta, 0].max
     end
     out
+  end
+
+  # Extract INDENT_OPEN/INDENT_CLOSE markers from a line. Markers that
+  # appear before any code token adjust depth BEFORE the line renders
+  # (pre_delta); markers that appear after code adjust depth after
+  # (post_delta). Returns [pre_delta, post_delta, filtered_line].
+  def split_indent_markers(line)
+    pre = 0
+    post = 0
+    filtered = []
+    seen_code = false
+    line.each do |t|
+      if t.type == :INDENT_OPEN
+        seen_code ? post += 1 : pre += 1
+      elsif t.type == :INDENT_CLOSE
+        seen_code ? post -= 1 : pre -= 1
+      else
+        filtered << t
+        seen_code = true if t.type != :COMMENT
+      end
+    end
+    [pre, post, filtered]
   end
 
   def tokens_to_lines(toks)
