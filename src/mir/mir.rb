@@ -341,7 +341,8 @@ module MIR
   # Free a slice.
   # Zig: alloc.free(slice)
   # Used for: errdefer cleanup of AllocSlice.
-  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
+  # expression node (e.g. Ident("alloc")) used directly as the allocator.
   FreeSlice = Struct.new(:slice, :alloc) do
     include Expr
   end
@@ -349,7 +350,8 @@ module MIR
   # Destroy a heap pointer.
   # Zig: alloc.destroy(ptr)
   # Used for: errdefer cleanup of HeapCreate, intermediate cap wrap cleanup.
-  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
+  # expression node (e.g. Ident("alloc")) used directly as the allocator.
   DestroyPtr = Struct.new(:ptr, :alloc) do
     include Expr
   end
@@ -657,6 +659,20 @@ module MIR
   # Conditional expression (Zig if-expression).
   # Zig: if (cond) then_val else else_val
   Conditional = Struct.new(:cond, :then_val, :else_val) do
+    include Expr
+  end
+
+  # Optional-unwrap conditional expression.
+  # Zig: (if (optional) |capture| then_expr else else_expr)
+  # capture is the name bound to the unwrapped value inside then_expr.
+  IfOptional = Struct.new(:optional, :capture, :then_expr, :else_expr) do
+    include Expr
+  end
+
+  # Comptime-qualified expression.
+  # Zig: comptime expr
+  # Forces expr to be evaluated at compile time.
+  Comptime = Struct.new(:expr) do
     include Expr
   end
 

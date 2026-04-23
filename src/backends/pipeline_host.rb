@@ -1508,7 +1508,9 @@ class PipelineHost
         unless inner_name
           body_text = loop_body.map { |s| @emitter.emit(s).to_s }.join
           unless body_text.include?(inner_zig)
-            suppress = MIR::RawZig.new("_ = #{inner_zig};", "suppress_unused_inner_capture", nil, nil)
+            suppress_iz = MIR::InlineZig.new("_ = #{inner_zig};", "suppress_unused_inner_capture")
+            suppress_iz.stdlib_def = { allocates: false, borrows: :all }
+            suppress = suppress_iz
             loop_body = [suppress, *loop_body]
           end
         end

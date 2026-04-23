@@ -943,6 +943,14 @@ BUILTIN_OPS = {
   # --- Set membership probe: target[item] -> item if present else null.
   # {0}=target, {1}=item (also used as the result when present), {2}=elem_zig_type
   setMemberGet: { zig: "if ({0}.contains({1})) @as({2}, {1}) else null", borrows: :all },
+
+  # --- Typed cleanup call used by errdefer hoisted temps.
+  # {0}=zig_type, {1}=allocator, {2}=binding name
+  cleanup: { zig: "CheatLib.cleanup({0}, {1}, {2})", allocates: false, borrows: :all },
+
+  # --- Comptime cleanup predicate (true iff the type has non-trivial cleanup).
+  # {0}=elem_zig_type
+  needsCleanup: { zig: "CheatLib.needsCleanup({0})", borrows: :all },
   concurrentBoundedSelect: {
     zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
     allocates: true

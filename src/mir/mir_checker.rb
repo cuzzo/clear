@@ -115,6 +115,7 @@ class MIRChecker
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names)
     verify_zig_contracts!(all_zig_nodes)
+    verify_raw_justified!(all_zig_nodes)
     verify_frame_rewind!(fn_def.body)
     verify_unhoisted_allocs!(fn_def.body) if strict
 
@@ -326,6 +327,37 @@ class MIRChecker
       @errors << error(kind, node.reason || label.downcase,
         "#{label} calls #{unaudited.uniq.join(', ')} without stdlib_def " \
         "(ownership effects invisible to checker)")
+    end
+  end
+
+  # RAW_UNJUSTIFIED: every MIR::RawZig must carry a reason: in this whitelist.
+  #
+  # RawZig is an opaque escape hatch. The checker cannot see inside raw Zig
+  # code, so each use must be explicitly justified. New sites added to
+  # mir_lowering.rb must either (a) be decomposed into structural MIR, or
+  # (b) add the reason here with a commit message explaining why the site
+  # cannot be decomposed.
+  RAW_JUSTIFIED_REASONS = %w[
+    pipeline_fallback_test
+    pipeline_legacy_host
+    require_local_module_opaque
+  ].freeze
+
+  # Reason prefixes whose every concrete variant is justified (the
+  # per-operator name is appended by the lowering, e.g. concurrent_eachop).
+  RAW_JUSTIFIED_PREFIXES = %w[
+    concurrent_
+  ].freeze
+
+  def verify_raw_justified!(zig_nodes)
+    zig_nodes.each do |node|
+      next unless node.is_a?(MIR::RawZig)
+      reason = node.reason.to_s
+      next if RAW_JUSTIFIED_REASONS.include?(reason)
+      next if RAW_JUSTIFIED_PREFIXES.any? { |p| reason.start_with?(p) }
+      @errors << error(:RAW_UNJUSTIFIED, node.reason || "raw_zig",
+        "RawZig with reason '#{node.reason}' is not in RAW_JUSTIFIED_REASONS " \
+        "(add to whitelist with justification, or decompose into structural MIR)")
     end
   end
 

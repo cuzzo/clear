@@ -118,6 +118,8 @@ class MIREmitter
     when MIR::TryCatch         then emit_try_catch(node)
     when MIR::Orelse           then "(#{emit(node.expr)} orelse #{emit(node.fallback)})"
     when MIR::Conditional      then emit_conditional(node)
+    when MIR::IfOptional       then emit_if_optional(node)
+    when MIR::Comptime         then "comptime #{emit(node.expr)}"
     when MIR::AddressOf        then "&#{emit(node.expr)}"
     when MIR::Deref            then "#{emit(node.expr)}.*"
     when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
@@ -426,11 +428,17 @@ class MIREmitter
   end
 
   def emit_free_slice(node)
-    "#{alloc_zig(node.alloc)}.free(#{emit(node.slice)})"
+    "#{alloc_expr(node.alloc)}.free(#{emit(node.slice)})"
   end
 
   def emit_destroy_ptr(node)
-    "#{alloc_zig(node.alloc)}.destroy(#{emit(node.ptr)})"
+    "#{alloc_expr(node.alloc)}.destroy(#{emit(node.ptr)})"
+  end
+
+  # Accepts either a Symbol (:heap/:frame/:cleanup, resolved via rt) or a MIR
+  # expression node (used as the allocator directly, e.g. a parameter name).
+  def alloc_expr(alloc)
+    alloc.is_a?(Symbol) ? alloc_zig(alloc) : emit(alloc)
   end
 
   # Emit cleanup for MIR::Cleanup (defer) and MIR::ErrCleanup (errdefer).
@@ -776,6 +784,10 @@ class MIREmitter
 
   def emit_conditional(node)
     "(if (#{emit(node.cond)}) #{emit(node.then_val)} else #{emit(node.else_val)})"
+  end
+
+  def emit_if_optional(node)
+    "(if (#{emit(node.optional)}) |#{node.capture}| #{emit(node.then_expr)} else #{emit(node.else_expr)})"
   end
 
   def emit_range_lit(node)

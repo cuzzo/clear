@@ -1334,7 +1334,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::ScopeBlock)
       zig = emit(result)
       expect(zig).to include("__counter_unwrap")
       expect(zig).to include("ctrl.data.*")
@@ -1449,8 +1449,8 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(result.reason).to eq("with_block")
+      expect(result).to be_a(MIR::ScopeBlock)
+      expect(result.body).not_to be_empty
     end
   end
 
@@ -1814,9 +1814,9 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
-      expect(result.reason).to eq("test_block")
-      zig = emit(result)
+      expect(result).to be_a(Array)
+      expect(result.first).to be_a(MIR::TestDef)
+      zig = result.map { |t| emit(t) }.join("\n")
       expect(zig).to include('test "MyTest: given input: works"')
       expect(zig).to include("Runtime.init(allocator")
       expect(zig).to include("rt.wireAllocator()")
@@ -1834,7 +1834,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      zig = emit(result)
+      zig = result.map { |t| emit(t) }.join("\n")
       expect(zig).to include('test "WithSetup: setup: passes"')
     end
   end
@@ -1850,7 +1850,7 @@ RSpec.describe MIRLowering do
       node.full_type = :Void
 
       result = lowering.lower(node)
-      expect(result).to be_a(MIR::RawZig)
+      expect(result).to be_a(MIR::InlineZig)
       zig = emit(result)
       expect(zig).to include("ASSERT_RAISES")
       expect(zig).to include("matchesKind(.Runtime)")
