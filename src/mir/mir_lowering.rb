@@ -2529,14 +2529,45 @@ class MIRLowering
   end
 
   def lower_or_exit(node)
-    rt = MIR::Ident.new(@rt_name)
-    msg_node = node.message ? lower(node.message) : MIR::Lit.new('""')
-    # Legacy OR EXIT "msg" form: System kind, no specific type (None id 0).
-    set_error = MIR::MethodCall.new(rt, "setError", [
-      MIR::Ident.new(".System"), MIR::Lit.new('0'), msg_node, MIR::Lit.new(node.token.line.to_s)
-    ], false)
-    ret = MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
-    MIR::ScopeBlock.new([MIR::ExprStmt.new(set_error, false), ret])
+    # Unified OR EXIT: any combination of (kind, error_name, message).
+    # Unspecified fields inherit from the pre-existing rt.__error set
+    # by the failing call. If a Kind is specified but no Type, the
+    # type is explicitly cleared (set to 0 / None) to avoid carrying
+    # a stale type that no longer matches the new kind.
+    stmts = []
+    rt_name = @rt_name
+    line = node.token.line.to_s
+
+    if node.kind
+      stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.kind = .#{node.kind}", "or_exit_kind", { consumes: [], produces: [], borrows: [] }), false)
+      if node.error_name
+        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] }), false)
+      else
+        # Kind without type -> clear any stale type from the prior context.
+        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type", { consumes: [], produces: [], borrows: [] }), false)
+      end
+    elsif node.error_name
+      # Type-only: annotator already backfilled node.kind via
+      # resolve_error_registration!'s type-lookup branch. If for some
+      # reason it wasn't backfilled (unknown type), the annotator
+      # already emitted the error; skip emission.
+      if AST.error_type?(node.error_name.to_sym)
+        registered_kind = AST.kind_of_type(node.error_name.to_sym)
+        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type", { consumes: [], produces: [], borrows: [] }), false)
+        stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{node.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] }), false)
+      end
+    end
+
+    if node.message
+      msg_zig = emit_expr(lower(node.message))
+      stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg", { consumes: [], produces: [], borrows: [] }), false)
+    end
+
+    # Always update clear_line so diagnostics point at this OR EXIT.
+    stmts << MIR::ExprStmt.new(MIR::RawZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line", { consumes: [], produces: [], borrows: [] }), false)
+
+    stmts << MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
+    MIR::ScopeBlock.new(stmts)
   end
 
   # ================================================================
@@ -3208,17 +3239,40 @@ class MIRLowering
       return left
     end
 
-    # OR EXIT "message": set error context + propagate
+    # OR EXIT <unified form>: selectively update kind / error_name /
+    # message on rt.__error before propagating. Unspecified fields
+    # inherit from whatever the failing call set. Kind-without-Type
+    # clears the type explicitly (to avoid carrying a stale type
+    # from the prior context that no longer matches the new kind).
     if node.right.is_a?(AST::OrExit)
       if is_error
-        rt = MIR::Ident.new(@rt_name)
-        msg_node = node.right.message ? lower(node.right.message) : MIR::Lit.new('""')
+        rt_name = @rt_name
+        ex = node.right
         line = node.respond_to?(:token) && node.token ? node.token.line : 0
-        error_obj = MIR::FieldGet.new(rt, "__error")
-        set_msg = MIR::Set.new(MIR::FieldGet.new(error_obj, "message"), msg_node)
-        set_line = MIR::Set.new(MIR::FieldGet.new(error_obj, "clear_line"), MIR::Lit.new(line.to_s))
-        ret_err = MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
-        catch_block = MIR::ScopeBlock.new([set_msg, set_line, ret_err])
+        stmts = []
+
+        if ex.kind
+          stmts << MIR::RawZig.new("#{rt_name}.__error.kind = .#{ex.kind}", "or_exit_kind", { consumes: [], produces: [], borrows: [] })
+          if ex.error_name
+            stmts << MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] })
+          else
+            stmts << MIR::RawZig.new("#{rt_name}.__error.error_name = 0", "or_exit_clear_type", { consumes: [], produces: [], borrows: [] })
+          end
+        elsif ex.error_name && AST.error_type?(ex.error_name.to_sym)
+          # Type-only: the annotator seeded the registry; look up the kind.
+          registered_kind = AST.kind_of_type(ex.error_name.to_sym)
+          stmts << MIR::RawZig.new("#{rt_name}.__error.kind = .#{registered_kind}", "or_exit_kind_from_type", { consumes: [], produces: [], borrows: [] })
+          stmts << MIR::RawZig.new("#{rt_name}.__error.error_name = @intFromEnum(ErrorName.#{ex.error_name})", "or_exit_type", { consumes: [], produces: [], borrows: [] })
+        end
+
+        if ex.message
+          msg_zig = emit_expr(lower(ex.message))
+          stmts << MIR::RawZig.new("#{rt_name}.__error.message = #{msg_zig}", "or_exit_msg", { consumes: [], produces: [], borrows: [] })
+        end
+
+        stmts << MIR::RawZig.new("#{rt_name}.__error.clear_line = #{line}", "or_exit_line", { consumes: [], produces: [], borrows: [] })
+        stmts << MIR::ReturnStmt.new(MIR::Ident.new("__exit_err"))
+        catch_block = MIR::ScopeBlock.new(stmts.map { |s| s.is_a?(MIR::ReturnStmt) ? s : MIR::ExprStmt.new(s, false) })
         return MIR::TryCatch.new(strip_try(left), catch_block, "__exit_err")
       end
       return left

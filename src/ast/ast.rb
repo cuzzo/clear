@@ -504,7 +504,16 @@ module AST
     def name; target.respond_to?(:name) ? target.name : nil end
   end
   OrRaise        = Struct.new(:token) { include Locatable }  # OR RAISE - bubble up error (Zig's try)
-  OrExit         = Struct.new(:token, :message) { include Locatable }  # OR EXIT "msg" - set error context + raise
+  # OR EXIT forms under the unified error system. Unspecified fields
+  # inherit from the pre-existing rt.__error set by the failing call:
+  #   OR EXIT "msg"                — message-only override (kind/type inherited)
+  #   OR EXIT Kind                 — set kind, clear type
+  #   OR EXIT Kind, "msg"          — kind + msg, clear type
+  #   OR EXIT Kind, Type           — kind + type
+  #   OR EXIT Kind, Type, "msg"    — full override
+  #   OR EXIT Type                 — set type (kind auto-resolved)
+  #   OR EXIT Type, "msg"          — type + msg
+  OrExit         = Struct.new(:token, :kind, :error_name, :message) { include Locatable }
   OrPass         = Struct.new(:token) { include Locatable }  # OR PASS - ignore error, use undefined
   OrPrune        = Struct.new(:token) { include Locatable }  # OR PRUNE - discard error, skip item (concurrent only)
   OrBreak        = Struct.new(:token) { include Locatable }  # OR BREAK - error-to-break coercion in loops

@@ -2406,6 +2406,83 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  describe "OR EXIT grammar — unified with inherit semantics" do
+    def outer_wrap(inner)
+      <<~FLUX
+        FN fail() RETURNS !Int64 -> RAISE Input, OrigErr, "original"; RETURN 0; END
+        FN try_fail() RETURNS Int64 ->
+          v: Int64 = fail() #{inner};
+          RETURN v;
+        CATCH Input
+          RETURN -1;
+        CATCH NotFound
+          RETURN -2;
+        CATCH System
+          RETURN -3;
+        CATCH Transient
+          RETURN -4;
+        DEFAULT
+          RETURN -99;
+        END
+      FLUX
+    end
+
+    it "parses OR EXIT \"msg\" (message only)" do
+      expect { run(outer_wrap('OR EXIT "replaced"')) }.not_to raise_error
+    end
+
+    it "parses OR EXIT Kind (kind only)" do
+      expect { run(outer_wrap('OR EXIT NotFound')) }.not_to raise_error
+    end
+
+    it "parses OR EXIT Kind, \"msg\"" do
+      expect { run(outer_wrap('OR EXIT NotFound, "msg"')) }.not_to raise_error
+    end
+
+    it "parses OR EXIT Kind, Type (registers the type on first use)" do
+      src = outer_wrap('OR EXIT NotFound, SomeNew')
+      expect { run(src) }.not_to raise_error
+      expect(AST.kind_of_type(:SomeNew)).to eq(:NotFound)
+    end
+
+    it "parses OR EXIT Kind, Type, \"msg\" (full override)" do
+      src = outer_wrap('OR EXIT System, SysIssue, "whoops"')
+      expect { run(src) }.not_to raise_error
+      expect(AST.kind_of_type(:SysIssue)).to eq(:System)
+    end
+
+    it "parses OR EXIT Type (kind auto-resolved from the registry)" do
+      # OrigErr was registered as Input by the fail() helper in outer_wrap.
+      src = outer_wrap('OR EXIT OrigErr, "x"')
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects OR EXIT Type when Type is unregistered (no kind to infer)" do
+      src = outer_wrap('OR EXIT UnknownType, "x"')
+      expect { run(src) }.to raise_error(/Error type 'UnknownType' is not registered/)
+    end
+
+    it "registers a new (Kind, Type) at an OR EXIT site (first-use behavior)" do
+      src = outer_wrap('OR EXIT Input, ExitRegistered, "msg"')
+      expect { run(src) }.not_to raise_error
+      expect(AST.kind_of_type(:ExitRegistered)).to eq(:Input)
+    end
+
+    it "rejects OR EXIT Kind, Type when Type is already registered with a different kind" do
+      src = <<~FLUX
+        FN seed()  RETURNS !Int64 -> RAISE Input,    Fixed, "first"; RETURN 0; END
+        FN other() RETURNS !Int64 -> RAISE NotFound, "x"; RETURN 0; END
+        FN go() RETURNS Int64 ->
+          v: Int64 = other() OR EXIT NotFound, Fixed, "conflict";
+          RETURN v;
+        CATCH NotFound
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.to raise_error(/'Fixed' is already mapped to kind 'Input'/)
+    end
+  end
+
   describe "CATCH grammar — multiple clauses + DEFAULT" do
     it "accepts multiple CATCH clauses mixing kind-only, kind+WITH, and direct-type" do
       src = <<~FLUX

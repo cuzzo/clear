@@ -1726,22 +1726,40 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("undefined")
     end
 
-    it "lowers OrExit with message" do
+    it "lowers OrExit with message (pure message override)" do
+      # New unified OR EXIT: 4-arg (token, kind, error_name, message).
+      # Pure "msg" form passes nil kind + nil error_name; lowering
+      # inherits both from rt.__error and only updates message.
       msg = make_lit(:STRING, "fatal", full_type: :String)
-      node = AST::OrExit.new(tok, msg)
+      node = AST::OrExit.new(tok, nil, nil, msg)
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
       zig = emit(result)
-      expect(zig).to include("setError")
+      expect(zig).to include("rt.__error.message")
+      expect(zig).to include("return error.CheatError")
+      # No kind / error_name writes because both were nil.
+      expect(zig).not_to include("rt.__error.kind =")
+      expect(zig).not_to include("rt.__error.error_name =")
+    end
+
+    it "lowers OrExit Kind,Type,msg (full override) with direct field writes" do
+      msg = make_lit(:STRING, "bad", full_type: :String)
+      node = AST::OrExit.new(tok, :Input, "ParseErr", msg)
+      result = lowering.lower(node)
+      zig = emit(result)
+      expect(zig).to include("rt.__error.kind = .Input")
+      expect(zig).to include("rt.__error.error_name = @intFromEnum(ErrorName.ParseErr)")
+      expect(zig).to include("rt.__error.message")
       expect(zig).to include("return error.CheatError")
     end
 
-    it "lowers OrExit without message" do
-      node = AST::OrExit.new(tok, nil)
+    it "lowers OrExit Kind (kind-only) with type cleared to 0" do
+      node = AST::OrExit.new(tok, :Input, nil, nil)
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include('""')
-      expect(zig).to include("setError")
+      expect(zig).to include("rt.__error.kind = .Input")
+      # Kind-without-type clears the stale type explicitly.
+      expect(zig).to include("rt.__error.error_name = 0")
     end
   end
 

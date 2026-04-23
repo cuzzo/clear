@@ -550,23 +550,28 @@ private
     @function_context_stack.pop
   end
 
-  # Pre-pass: walk every RAISE site in the program and register
-  # (kind, type) pairs with the error registry. Lets CATCH Type
-  # clauses resolve even when the RAISE that introduces the type is
-  # later in source order.
+  # Pre-pass: walk every RAISE and OR EXIT site that provides both a
+  # kind and a type, and seed the registry with (kind, type). Lets
+  # CATCH Type clauses resolve regardless of source order. OR EXIT
+  # counts too because it can introduce new types that only the
+  # CATCH for a particular call needs to see.
   def seed_error_types_from_raises!(program_node)
+    seed_body = lambda do |stmts|
+      AST.walk_body(stmts) do |n|
+        case n
+        when AST::Raise
+          next unless n.kind && n.error_name
+          resolve_error_registration!(n, n.kind, n.error_name, n.token)
+        when AST::OrExit
+          next unless n.kind && n.error_name
+          resolve_error_registration!(n, n.kind, n.error_name, n.token)
+        end
+      end
+    end
     program_node.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      AST.walk_body(stmt.body) do |n|
-        next unless n.is_a?(AST::Raise)
-        next unless n.kind && n.error_name
-        resolve_error_registration!(n, n.kind, n.error_name, n.token)
-      end
-      AST.walk_body(stmt.catch_clauses&.map { |c| c[:body] }&.flatten || []) do |n|
-        next unless n.is_a?(AST::Raise)
-        next unless n.kind && n.error_name
-        resolve_error_registration!(n, n.kind, n.error_name, n.token)
-      end
+      seed_body.call(stmt.body)
+      seed_body.call(stmt.catch_clauses&.map { |c| c[:body] }&.flatten || [])
     end
   end
 
@@ -2906,6 +2911,7 @@ private
 
   def visit_OrExit(node)
     visit(node.message) if node.message
+    resolve_error_registration!(node, node.kind, node.error_name, node.token)
     node.full_type = :Void
   end
 

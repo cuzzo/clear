@@ -1202,10 +1202,54 @@ class Parser
     elsif match!(:KEYWORD, 'RAISE')
       rhs = AST::OrRaise.new(previous)
 
-    # Syntax: ... OR EXIT "message" (set error context message + raise)
+    # Syntax: ... OR EXIT  (unified error system — mirrors RAISE):
+    #   OR EXIT "msg"                   — inherit kind/type, replace msg
+    #   OR EXIT Kind                    — set kind, clear type
+    #   OR EXIT Kind, "msg"             — set kind, clear type, replace msg
+    #   OR EXIT Kind, Type              — set kind + type
+    #   OR EXIT Kind, Type, "msg"       — full
+    #   OR EXIT Type                    — set type (kind auto-resolved)
+    #   OR EXIT Type, "msg"             — set type + msg
+    # Disambiguation: first TYPE_ID is a kind iff it's in ERROR_KINDS;
+    # otherwise it's a type. Unspecified fields inherit from the
+    # pre-existing rt.__error at lowering time.
     elsif match!(:KEYWORD, 'EXIT')
-      msg = parse_expression
-      rhs = AST::OrExit.new(previous, msg)
+      exit_tok = previous
+      kind = nil
+      error_name = nil
+      message = nil
+
+      if match?(:STRING)
+        # OR EXIT "msg" — pure message override
+        message = parse_expression
+      elsif match?(:TYPE_ID)
+        first_tok = consume(:TYPE_ID)
+        first_is_kind = ERROR_KINDS.include?(first_tok.value)
+        if first_is_kind
+          kind = first_tok.value.to_sym
+        else
+          error_name = first_tok.value
+        end
+        if match?(:CHAR, ',')
+          consume(:CHAR, ',')
+          if first_is_kind && match?(:TYPE_ID)
+            # Kind, Type[, "msg"]
+            error_name = consume(:TYPE_ID).value
+            if match?(:CHAR, ',')
+              consume(:CHAR, ',')
+              message = parse_expression
+            end
+          else
+            # Kind, "msg"  or  Type, "msg"
+            message = parse_expression
+          end
+        end
+      else
+        # No args — legacy "just bubble the existing error" form.
+        # Kept for backward compat; equivalent to OR RAISE.
+      end
+
+      rhs = AST::OrExit.new(exit_tok, kind, error_name, message)
 
     # Syntax: ... OR PASS (ignore error, use undefined/default)
     elsif match!(:KEYWORD, 'PASS')
