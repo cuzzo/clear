@@ -1026,46 +1026,61 @@ class Parser
     #   END
     catch_block = nil
     # Parse CATCH clauses (unified error-system grammar):
-    #   CATCH Kind                              -- match any error of kind
-    #   CATCH Kind WITH(Type)                   -- kind + one type
-    #   CATCH Kind WITH(Type1, Type2, ...)      -- kind + multiple types
-    #   CATCH Type                              -- direct type match
-    #                                              (kind auto-resolved from the
-    #                                              registered type->kind pair)
-    #   DEFAULT                                 -- catch-all
     #
-    # Disambiguation (as elsewhere): the first TYPE_ID after CATCH is a
-    # kind iff it's in ERROR_KINDS; otherwise it's a type.
+    #   CATCH <item> (',' <item>)* [ WITH(<filter> (',' <filter>)*) ]
     #
-    # Clause shape stored on the AST: { form:, name:, error_names:, body: }
-    # where error_names is always an Array of Strings (possibly empty).
+    # <item>   is a TYPE_ID — disambiguated via ERROR_KINDS into a kind
+    #         or a type. Any mix and any count is valid:
+    #           CATCH Input, NotFound           — kinds only
+    #           CATCH ParseErr, BadJson         — types only
+    #           CATCH Input, ParseErr           — mix
+    # <filter> is a TYPE_ID (error type name) OR a STRING (message to
+    #         match). The annotator validates the types against the
+    #         registry; messages are compared as-is at runtime.
+    #
+    # Match semantics:
+    #   Items are ORed. WITH filters (if present) are ORed among
+    #   themselves and ANDed against the item-list match. Example:
+    #     CATCH Input, ParseErr WITH(BadJson, "bad header")
+    #   matches iff (kind is Input OR type is ParseErr) AND
+    #               (type is BadJson OR message == "bad header").
+    #
+    # Clause shape stored on the AST:
+    #   { items:        [{ form: :kind|:type, name:, token: }, ...],
+    #     filters:      [{ form: :type|:message, value: }, ...],
+    #     body:         [...] }
+    # Annotator fills in clause[:kinds] / [:types] / [:filter_types] /
+    # [:filter_messages] for lowering.
     catch_block = nil
     if match?(:KEYWORD, 'CATCH')
       catch_clauses = []
       default_body = nil
       while match?(:KEYWORD, 'CATCH')
         consume(:KEYWORD, 'CATCH')
-        first_tok = consume(:TYPE_ID)
-        form = ERROR_KINDS.include?(first_tok.value) ? :kind : :type
-        error_names = []
-        if form == :type
-          # CATCH Type — no WITH clause permitted.
-          error_names = [first_tok.value]
-        elsif match?(:KEYWORD, 'WITH')
+
+        # 1) One or more comma-separated items.
+        items = [parse_catch_item]
+        while match!(:CHAR, ',')
+          items << parse_catch_item
+        end
+
+        # 2) Optional WITH(<filter_list>). Filters may be types
+        #    (TYPE_ID) or messages (STRING).
+        filters = []
+        if match?(:KEYWORD, 'WITH')
           consume(:KEYWORD, 'WITH')
           consume(:CHAR, '(')
-          error_names << consume(:TYPE_ID).value
+          filters << parse_catch_filter
           while match!(:CHAR, ',')
-            error_names << consume(:TYPE_ID).value
+            filters << parse_catch_filter
           end
           consume(:CHAR, ')')
         end
+
         clause_body = parse_block_body(['CATCH', 'DEFAULT', 'END'])
         catch_clauses << {
-          form: form,
-          name: first_tok.value,       # kind name (form :kind) or type name (form :type)
-          name_token: first_tok,       # for annotator diagnostics
-          error_names: error_names,    # list of type names to filter on
+          items: items,
+          filters: filters,
           body: clause_body,
         }
       end
@@ -1607,6 +1622,29 @@ class Parser
   # ERROR_KINDS; any other TYPE_ID is a TYPE. When only one TYPE_ID is
   # present, `kind` is nil and the annotator resolves it from the
   # registered (type, kind) entry.
+  # Parse a single CATCH item: a bare TYPE_ID that's either a kind (if
+  # in ERROR_KINDS) or a type. Returns { form:, name:, token: }.
+  def parse_catch_item
+    tok = consume(:TYPE_ID)
+    form = ERROR_KINDS.include?(tok.value) ? :kind : :type
+    { form: form, name: tok.value, token: tok }
+  end
+
+  # Parse a single CATCH WITH filter: a TYPE_ID (error type) or a
+  # STRING literal (message). Returns { form:, value:, token: }.
+  def parse_catch_filter
+    if match?(:TYPE_ID)
+      tok = consume(:TYPE_ID)
+      { form: :type, value: tok.value, token: tok }
+    elsif match?(:STRING)
+      tok = current
+      str_expr = parse_expression
+      { form: :message, value: str_expr, token: tok }
+    else
+      error!(current, "Expected a type name (e.g. ParseErr) or a string message inside CATCH WITH(...)")
+    end
+  end
+
   def parse_raise_stmt
     tok = consume(:KEYWORD, 'RAISE')
 

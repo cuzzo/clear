@@ -103,6 +103,13 @@ pub const ErrorContext = struct {
         return self.error_name == name;
     }
 
+    /// True iff the error's message exactly equals `msg`. Used by
+    /// `CATCH Kind WITH("some message")` to dispatch on the message
+    /// string set at the RAISE / OR EXIT site.
+    pub fn matchesMessage(self: *const ErrorContext, msg: []const u8) bool {
+        return std.mem.eql(u8, self.message, msg);
+    }
+
     /// Cast the snapshot pointer to a typed pointer. Returns null if no snapshot.
     pub fn snapshotAs(self: *const ErrorContext, comptime T: type) ?*const T {
         if (self.snapshot_ptr == 0) return null;

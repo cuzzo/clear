@@ -571,46 +571,64 @@ private
   end
 
   # Resolve a parsed CATCH clause into its runtime-dispatch form.
-  # Input shape (from parser):
-  #   { form: :kind | :type, name: String, name_token: Token,
-  #     error_names: [String], body: [...] }
-  # After this method:
-  #   clause[:kind]        = Symbol (the ErrorKind for dispatch)
-  #   clause[:error_names] = [String] (possibly empty)
-  # Reports any unknown-type / unknown-kind / kind-mismatch error.
+  # The parser produces:
+  #   { items:   [{ form: :kind|:type, name:, token: }, ...],
+  #     filters: [{ form: :type|:message, value:, token: }, ...],
+  #     body:    [...] }
+  # After this method, the clause carries four lowering-ready fields:
+  #   clause[:kinds]            = [Symbol, ...] — kinds from items
+  #   clause[:types]            = [String, ...] — types from items
+  #   clause[:filter_types]     = [String, ...] — types from WITH
+  #   clause[:filter_messages]  = [AST node, ...] — messages from WITH
+  # Match semantics: (any kind matches OR any type matches) AND
+  #   (filters empty OR any filter_type matches OR any filter_message
+  #    matches). No cross-constraint between items and filters — a
+  #   mixed `CATCH Kind, Type` simply ORs the two checks.
   def resolve_catch_clause!(clause)
-    if clause[:form] == :kind
-      kind_str = clause[:name]
-      unless AST.error_kind?(kind_str.to_sym)
-        error!(clause[:name_token],
-               "Unknown error kind '#{kind_str}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}")
-      end
-      clause[:kind] = kind_str.to_sym
-      clause[:error_names].each do |type_str|
-        type_sym = type_str.to_sym
+    kinds = []
+    types = []
+    (clause[:items] || []).each do |item|
+      if item[:form] == :kind
+        kind_sym = item[:name].to_sym
+        unless AST.error_kind?(kind_sym)
+          error!(item[:token],
+                 "Unknown error kind '#{item[:name]}'. Expected one of: " \
+                 "#{AST::ERROR_KINDS.join(', ')}")
+        end
+        kinds << kind_sym
+      else
+        type_sym = item[:name].to_sym
         unless AST.error_type?(type_sym)
-          error!(clause[:name_token],
-                 "CATCH #{kind_str} WITH(#{type_str}): error type '#{type_str}' is not registered. " \
-                 "Register it by RAISE-ing it first, e.g. RAISE #{kind_str}, #{type_str}, \"...\"")
+          error!(item[:token],
+                 "CATCH #{item[:name]}: error type '#{item[:name]}' is not registered. A type " \
+                 "must be registered via RAISE/OR EXIT before it can be CATCHed.")
         end
-        actual_kind = AST.kind_of_type(type_sym)
-        if actual_kind && actual_kind != clause[:kind]
-          error!(clause[:name_token],
-                 "CATCH #{kind_str} WITH(#{type_str}): '#{type_str}' is registered as kind " \
-                 "'#{actual_kind}', not '#{kind_str}'. Remove the WITH filter or correct the kind.")
-        end
+        types << item[:name]
       end
-    elsif clause[:form] == :type
-      type_str = clause[:name]
-      type_sym = type_str.to_sym
-      unless AST.error_type?(type_sym)
-        error!(clause[:name_token],
-               "CATCH #{type_str}: error type '#{type_str}' is not registered. A type must be " \
-               "registered via RAISE/OR EXIT before it can be directly CATCHed.")
-      end
-      clause[:kind] = AST.kind_of_type(type_sym)
-      # error_names already = [type_str] from the parser.
     end
+    clause[:kinds] = kinds.uniq
+    clause[:types] = types.uniq
+
+    filter_types    = []
+    filter_messages = []
+    (clause[:filters] || []).each do |f|
+      case f[:form]
+      when :type
+        type_sym = f[:value].to_sym
+        unless AST.error_type?(type_sym)
+          error!(f[:token],
+                 "CATCH ... WITH(#{f[:value]}): error type '#{f[:value]}' is not registered.")
+        end
+        filter_types << f[:value]
+      when :message
+        # value is the parsed STRING expression. Visit so the string
+        # literal gets its Type stamped for downstream lowering.
+        visit(f[:value])
+        filter_messages << f[:value]
+      end
+    end
+    clause[:filter_types]    = filter_types.uniq
+    clause[:filter_messages] = filter_messages
   end
 
   # Collect input types from pipeline s> steps that can fail.

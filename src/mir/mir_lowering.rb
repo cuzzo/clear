@@ -1073,23 +1073,45 @@ class MIRLowering
     end
 
     parts = (node.catch_clauses || []).map { |clause|
-      # The annotator resolves every form to { kind, error_names }:
-      #   CATCH Kind                        -> { kind: Kind, error_names: [] }
-      #   CATCH Kind WITH(T1, T2)           -> { kind: Kind, error_names: [T1, T2] }
-      #   CATCH Type                        -> { kind: <registered kind of Type>,
-      #                                          error_names: [Type] }
-      kind = clause[:kind]
-      error_names = clause[:error_names] || (clause[:error_name] ? [clause[:error_name]] : [])
+      # The annotator produces four lowering-ready fields:
+      #   kinds, types, filter_types, filter_messages.
+      # Match semantics:
+      #   (any kind matches OR any type matches)
+      #   AND
+      #   (no filters OR any filter_type OR any filter_message matches)
+      kinds            = clause[:kinds]            || []
+      types            = clause[:types]            || []
+      filter_types     = clause[:filter_types]     || []
+      filter_messages  = clause[:filter_messages]  || []
+
       clause_mir = lower_body(clause[:body])
       clause_bodies << clause_mir
       clause_body_zig = clause_mir.map { |m| emit_expr(m) }.join("\n            ")
 
-      cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
-      unless error_names.empty?
-        name_checks = error_names.map { |n| "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{n}))" }
-        cond_parts << (name_checks.size == 1 ? name_checks.first : "(#{name_checks.join(' or ')})")
+      # Item side — kinds ORed with types.
+      item_checks = []
+      kinds.each { |k| item_checks << "#{rt_name}.__error.matchesKind(.#{k})" }
+      types.each { |t| item_checks << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{t}))" }
+      item_cond = if item_checks.empty?
+        "true"  # defensive; a malformed clause with no items would still short-circuit
+      elsif item_checks.size == 1
+        item_checks.first
+      else
+        "(#{item_checks.join(' or ')})"
       end
-      cond = cond_parts.join(" and ")
+
+      # Filter side — types ORed with messages.
+      filter_checks = []
+      filter_types.each { |t| filter_checks << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{t}))" }
+      filter_messages.each { |m_node| filter_checks << "#{rt_name}.__error.matchesMessage(#{emit_expr(lower(m_node))})" }
+
+      cond = if filter_checks.empty?
+        item_cond
+      elsif filter_checks.size == 1
+        "#{item_cond} and #{filter_checks.first}"
+      else
+        "#{item_cond} and (#{filter_checks.join(' or ')})"
+      end
 
       "if (#{cond}) {\n            #{snapshot_decl}const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{clause_body_zig}\n        }"
     }.join(" else ")

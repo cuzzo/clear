@@ -2173,7 +2173,11 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
 
-    it "rejects CATCH Kind WITH(Type) when Type's registered kind differs" do
+    it "accepts CATCH Kind WITH(Type) even when Type's registered kind differs (dead match, not error)" do
+      # Permissive semantics: CATCH accepts the mix; the AND between
+      # items and filters means the match is just unreachable at
+      # runtime. Programmer's responsibility — enables multi-item
+      # CATCH without kind-compat contortions.
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, MyErr, "bad"; END
         FN b() RETURNS Int64 ->
@@ -2183,7 +2187,7 @@ RSpec.describe SemanticAnnotator do
           RETURN -1;
         END
       FLUX
-      expect { run(src) }.to raise_error(/registered as kind 'Input', not 'NotFound'/)
+      expect { run(src) }.not_to raise_error
     end
 
     it "rejects CATCH Kind WITH(UnknownType) for an unregistered type" do
@@ -2226,7 +2230,7 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
 
-    it "rejects multi-type WITH when ANY type has a mismatched kind" do
+    it "accepts multi-type WITH even when one of the types has a different kind (Miss becomes a dead filter)" do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input,    Ok,   "p"; END
         FN b() RETURNS !Void -> RAISE NotFound, Miss, "m"; END
@@ -2237,7 +2241,7 @@ RSpec.describe SemanticAnnotator do
           RETURN -1;
         END
       FLUX
-      expect { run(src) }.to raise_error(/'Miss' is registered as kind 'NotFound', not 'Input'/)
+      expect { run(src) }.not_to raise_error
     end
 
     it "accepts multi-type WITH with three types sharing a kind" do
@@ -2291,6 +2295,114 @@ RSpec.describe SemanticAnnotator do
         END
       FLUX
       expect { run(src) }.to raise_error(/'NeverUsed' is not registered/)
+    end
+  end
+
+  describe "CATCH grammar — multi-item (comma-separated) CATCH" do
+    it "accepts CATCH Kind1, Kind2 (multi-kind)" do
+      src = <<~FLUX
+        FN failInput() RETURNS !Void -> RAISE Input, "b"; END
+        FN failNF()    RETURNS !Void -> RAISE NotFound, "b"; END
+        FN go(mode: Int64) RETURNS Int64 ->
+          IF mode == 1 THEN failInput() OR RAISE; END
+          IF mode == 2 THEN failNF()    OR RAISE; END
+          RETURN 1;
+        CATCH Input, NotFound
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts CATCH Type1, Type2 (multi-type)" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, A, "a"; END
+        FN b() RETURNS !Void -> RAISE Input, B, "b"; END
+        FN go() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH A, B
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts CATCH Kind1, Type2 (mixed kind + type, different kinds OK)" do
+      # Type2 has kind NotFound; CATCH also has kind Input.  This is
+      # explicitly permitted: the match ORs the two checks so each
+      # lives in its own scope.
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE NotFound, MissingItem, "m"; END
+        FN go() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input, MissingItem
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects an unregistered type anywhere in the item list" do
+      src = <<~FLUX
+        FN go() RETURNS Int64 -> RETURN 1;
+        CATCH Input, NeverDefined
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.to raise_error(/'NeverDefined' is not registered/)
+    end
+  end
+
+  describe "CATCH grammar — WITH(message) and mixed type/message filter" do
+    it "accepts CATCH Kind WITH(\"some message\") as a pure message match" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, "bad header"; END
+        FN go() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH("bad header")
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts CATCH Kind WITH(Type, \"message\") mixed filter" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, ParseErr, "bad"; END
+        FN go() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH(ParseErr, "bad header")
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts CATCH Type WITH(\"msg\") — direct type + message filter" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, MyErr, "nope"; END
+        FN go() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH MyErr WITH("nope")
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects WITH() with something that is neither a TYPE_ID nor a string" do
+      src = <<~FLUX
+        FN go() RETURNS Int64 -> RETURN 1;
+        CATCH Input WITH(42)
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.to raise_error(ParserError, /Expected a type name .* or a string/)
     end
   end
 
