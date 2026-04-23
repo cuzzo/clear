@@ -1996,7 +1996,12 @@ private
         node.full_type = :Type
         return
       end
-      error!(node, "Undefined variable '#{node.name}'")
+      emit_typo_suggestion!(
+        node.token, node.name, outer_scope_vars.to_a,
+        "Undefined variable '#{node.name}'",
+        "closest in-scope variable"
+      )
+      return
     end
 
     # 1. Check Validity (View Invalidation Logic)
@@ -2526,6 +2531,9 @@ private
 
       raw_expected = schema[field_name]
       if raw_expected.nil?
+        # TODO: auto-fix needs the field-name token stored by the
+        # parser in StructLit.fields. Today `fields` is name -> value
+        # node; the field-name token is discarded.
         error!(node, "Struct '#{node.name}' has no field '#{field_name}'")
       end
 

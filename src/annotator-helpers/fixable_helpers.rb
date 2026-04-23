@@ -120,6 +120,44 @@ module FixableHelper
     fixable!(token, message: message, category: :registry, level: :error, fixes: fixes)
   end
 
+  # Registry-shaped: an identifier typo against a known candidate set
+  # that isn't strictly a registry but has the same emit shape.
+  # Replaces the identifier at `token` with the closest candidate when
+  # one is within the Levenshtein threshold.
+  #
+  #   token       — the name token (line/col used for the edit span)
+  #   name        — the user-typed identifier
+  #   candidates  — list of valid identifiers (Symbols or Strings)
+  #   message     — user-facing error message
+  #   fix_label   — short description of the replacement source
+  #                 ("closest in-scope variable", "field of MyStruct", ...)
+  #   category    — :registry by default; callers can override
+  #   cascade     — when true, the error's site isn't safe to continue
+  #                 past (downstream code reads fields this visitor
+  #                 would have set); the finding is captured and THEN
+  #                 the annotator raises. Pass `false` at sites where
+  #                 the enclosing visitor can cleanly bail out.
+  def emit_typo_suggestion!(token, name, candidates, message, fix_label,
+                            category: :registry, cascade: true)
+    best = closest_name(name, candidates)
+    fixes = []
+    if best
+      fixes << Fix.new(
+        description: "Replace '#{name}' with '#{best}' (#{fix_label}).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: token.line, col: token.column, length: name.to_s.length),
+          replacement: best.to_s
+        )]
+      )
+    end
+
+    return error!(token, message) if fixes.empty?
+
+    fixable!(token, message: message, category: category, level: :error,
+             fixes: fixes, raise_in_collector: cascade)
+  end
+
   # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
   # locates the original declaration (via the enclosing scope's info)
   # and inserts `MUTABLE ` at its column. If the declaration can't be

@@ -139,7 +139,12 @@ module ErrorHelper
   # Without a collector, behaviour matches the legacy compiler:
   #   :hint / :info / :warning — printed to stderr, doesn't halt.
   #   :error                   — raised as CompilerError (like `error!`).
-  def fixable!(node_or_token, message:, category:, level: :warning, fixes:)
+  # `raise_in_collector:` — set to true for errors whose site is unsafe
+  # to continue past (e.g., undefined identifier — downstream reads
+  # `node.full_type` and cascades on nil). The finding is still
+  # captured; the annotator then raises so the collector gets a clean
+  # snapshot of what was diagnosed before the cascade would start.
+  def fixable!(node_or_token, message:, category:, level: :warning, fixes:, raise_in_collector: false)
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
     finding = FixableFinding.new(
       level: level, message: message, token: token,
@@ -148,7 +153,9 @@ module ErrorHelper
 
     if FixCollector.enabled?
       FixCollector.push(finding)
-      return
+      return unless raise_in_collector
+      err_class = self.class.name.include?("Parser") ? ParserError : CompilerError
+      raise err_class.new(token, message, @source_code)
     end
 
     case level

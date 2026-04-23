@@ -117,7 +117,11 @@ module FunctionAnalysis
 
     scope = lookup_scope_for(func_name)
     unless scope
-      error!(node, "Undefined function '#{func_name}'")
+      emit_typo_suggestion!(
+        node.token, func_name, @fn_nodes.keys,
+        "Undefined function '#{func_name}'",
+        "closest declared function"
+      )
       return
     end
 

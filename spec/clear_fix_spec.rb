@@ -155,6 +155,34 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "typo suggestions (undefined var / fn)" do
+    it "suggests the closest in-scope variable" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          message = "hi";
+          RETURN messaje.length();
+        END
+      CLEAR
+      path = write("v.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Undefined variable 'messaje'/)
+      expect(out).to match(/Replace 'messaje' with 'message'/)
+    end
+
+    it "suggests the closest declared function" do
+      src = <<~CLEAR
+        FN doThing() RETURNS Int64 -> RETURN 42; END
+        FN main() RETURNS Int64 ->
+          RETURN doTing();
+        END
+      CLEAR
+      path = write("f.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Undefined function 'doTing'/)
+      expect(out).to match(/Replace 'doTing' with 'doThing'/)
+    end
+  end
+
   describe "error accumulation (LSP-style)" do
     it "collects multiple :error findings from a single pass" do
       src = <<~CLEAR
