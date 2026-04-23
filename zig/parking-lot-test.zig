@@ -579,13 +579,15 @@ test "ParkingMutex: re-entrant lock returns error.Deadlock, lock remains usable"
     try std.testing.expect(!shared.mu.isLocked());
 }
 
-test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked" {
+test "ParkingMutex: AB/BA cycle returns error.LockCycle, blocked fiber unblocked" {
     // Scheduling design (LIFO ready queue):
     //   Spawn B first, then A. LIFO pops A first.
     //   A: locks mu_a, parks on rendezvous (pre-locked, no owner).
     //   B: locks mu_b, calls rendezvous.unlock() (wakes A into ready queue,
     //      B keeps running), tries mu_a (parks, B.waiting_for_lock_owner = A).
-    //   A: resumes, tries mu_b -> detectCycle sees B->A chain -> error.Deadlock.
+    //   A: resumes, tries mu_b -> detectCycle sees B->A chain (depth 1) ->
+    //      error.LockCycle (multi-hop, Transient). Chain-depth 0 (re-entrant
+    //      self-acquire) returns error.Deadlock instead.
     //   A's defer releases mu_a -> B wakes, acquires mu_a, b_counter++.
     const t_alloc = std.testing.allocator;
     var ebr = EbrContext{};
@@ -607,7 +609,7 @@ test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked"
         // B.waiting_for_lock_owner = A for cycle detection.
         rendezvous: ParkingMutex = .{},
         wg: CheatHeader.WaitGroup,
-        a_got_deadlock: bool = false,
+        a_got_lock_cycle: bool = false,
         b_counter: usize = 0,
     };
     var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
@@ -634,7 +636,7 @@ test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked"
             // cycle -> error.LockCycle (Transient). error.Deadlock is
             // reserved for chain-length-0 self-cyclic acquires.
             c.s.mu_b.lock() catch |e| {
-                c.s.a_got_deadlock = (e == error.LockCycle);
+                c.s.a_got_lock_cycle = (e == error.LockCycle);
                 return e; // defer mu_a.unlock() fires, waking B
             };
             c.s.mu_b.unlock();
@@ -670,7 +672,7 @@ test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked"
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{});
     sched.run();
 
-    try std.testing.expect(shared.a_got_deadlock);
+    try std.testing.expect(shared.a_got_lock_cycle);
     try std.testing.expectEqual(@as(usize, 1), shared.b_counter);
     try std.testing.expect(!shared.mu_a.isLocked());
     try std.testing.expect(!shared.mu_b.isLocked());
@@ -1020,11 +1022,12 @@ test "ParkingRwLock: read-lock timeout returns error.LockTimeout" {
     try std.testing.expectEqual(@as(i32, 0), shared.rw.readerCount());
 }
 
-test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
+test "ParkingMutex: 3-way A->B->C->A cycle returns error.LockCycle, all fibers recover" {
     // Cycle: A holds mu1 and waits for mu2 (owned by B).
     //        B holds mu2 and waits for mu3 (owned by C).
     //        C holds mu3 and waits for mu1 (owned by A, A waiting for B).
-    //        B tries mu3: detectCycle(B,C) -> C.waiting=A -> A.waiting=B -> B found -> Deadlock.
+    //        B tries mu3: detectCycle(B,C) -> C.waiting=A -> A.waiting=B -> B found
+    //        at depth 2 -> error.LockCycle (multi-hop, recoverable via backoff).
     //
     // Rendezvous protocol (pre-locked rv1, rv2):
     //   A: lock mu1, park on rv1 (wait for B to lock mu2).
@@ -1053,7 +1056,7 @@ test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
         rv1: ParkingMutex = .{},
         rv2: ParkingMutex = .{},
         wg: CheatHeader.WaitGroup,
-        b_got_deadlock: bool = false,
+        b_got_lock_cycle: bool = false,
         a_counter: usize = 0,
         c_counter: usize = 0,
     };
@@ -1095,7 +1098,7 @@ test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
             // Walking the chain: B.waiting=C -> C.waiting=A -> A.waiting=B -> multi-hop
             // cycle -> error.LockCycle (Transient).
             c.s.mu3.lock() catch |e| {
-                c.s.b_got_deadlock = (e == error.LockCycle);
+                c.s.b_got_lock_cycle = (e == error.LockCycle);
                 return e; // defer mu2.unlock() fires, A wakes and gets mu2
             };
             defer c.s.mu3.unlock();
@@ -1129,7 +1132,7 @@ test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
     try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
     sched.run();
 
-    try std.testing.expect(shared.b_got_deadlock);
+    try std.testing.expect(shared.b_got_lock_cycle);
     try std.testing.expectEqual(@as(usize, 1), shared.a_counter);
     try std.testing.expectEqual(@as(usize, 1), shared.c_counter);
     try std.testing.expect(!shared.mu1.isLocked());
@@ -1661,4 +1664,238 @@ test "ParkingRwLock: multi-thread writers with CS sleep (lost-wake regression)" 
 
     try std.testing.expectEqual(N_THREADS * ITERS_PER_THREAD, counter);
     try std.testing.expect(!rw.isWriteLocked());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// *OrErr fallible wrappers
+//
+// acquireOrErr / readOrErr / writeOrErr return LockError instead of panicking
+// on the three detection outcomes. The panic variants (acquire / read / write)
+// are covered by the tests above; these verify the fallible path surfaces the
+// same errors without crashing the program.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test "Locked(T).acquireOrErr: happy path, timeout, and re-entrant Deadlock" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    sched.lock_timeout_ms = 100;
+    fp.active_scheduler = &sched;
+
+    const Locked = CheatHeader.CheatLib.Locked(usize);
+
+    const Shared = struct {
+        locked: Locked = Locked.init(0),
+        wg: CheatHeader.WaitGroup,
+        happy_ok: bool = false,
+        got_timeout: bool = false,
+        got_deadlock: bool = false,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const Ctx = struct { s: *Shared };
+    var ctx = Ctx{ .s = &shared };
+
+    // Holder A: fast lock, verify re-entrant acquireOrErr returns error.Deadlock.
+    // Then holds the lock longer than timeout so B's acquireOrErr sees a timeout.
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            var g = c.s.locked.acquireOrErr() catch unreachable;
+            c.s.happy_ok = g.get().* == 0;
+            // Re-entrant attempt while A already holds the lock.
+            _ = c.s.locked.acquireOrErr() catch |e| {
+                c.s.got_deadlock = (e == error.Deadlock);
+            };
+            fiberSleepMs(400);
+            g.release();
+        }
+    };
+    // B: contended acquire past the 100ms timeout.
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            _ = c.s.locked.acquireOrErr() catch |e| {
+                c.s.got_timeout = (e == error.LockTimeout);
+                return;
+            };
+            unreachable; // Should have timed out.
+        }
+    };
+    const Main = struct {
+        s: *Shared, c: *Ctx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.c, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.c, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .c = &ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.happy_ok);
+    try std.testing.expect(shared.got_deadlock);
+    try std.testing.expect(shared.got_timeout);
+}
+
+test "ParkingRwLocked(T).writeOrErr: happy path, timeout, and re-entrant Deadlock" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    sched.lock_timeout_ms = 100;
+    fp.active_scheduler = &sched;
+
+    const Locked = ParkingRwLocked(usize);
+
+    const Shared = struct {
+        locked: Locked = Locked.init(0),
+        wg: CheatHeader.WaitGroup,
+        happy_ok: bool = false,
+        got_timeout: bool = false,
+        got_deadlock: bool = false,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const Ctx = struct { s: *Shared };
+    var ctx = Ctx{ .s = &shared };
+
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            var g = c.s.locked.writeOrErr() catch unreachable;
+            c.s.happy_ok = g.get().* == 0;
+            _ = c.s.locked.writeOrErr() catch |e| {
+                c.s.got_deadlock = (e == error.Deadlock);
+            };
+            fiberSleepMs(400);
+            g.release();
+        }
+    };
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            _ = c.s.locked.writeOrErr() catch |e| {
+                c.s.got_timeout = (e == error.LockTimeout);
+                return;
+            };
+            unreachable;
+        }
+    };
+    const Main = struct {
+        s: *Shared, c: *Ctx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.c, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.c, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .c = &ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.happy_ok);
+    try std.testing.expect(shared.got_deadlock);
+    try std.testing.expect(shared.got_timeout);
+}
+
+test "ParkingRwLocked(T).readOrErr: happy path and timeout" {
+    // readOrErr has no self-deadlock path (read locks are counted, not
+    // ownership-tracked), so this test covers happy path + timeout only.
+    // A writer holds exclusive access past the timeout; a reader's
+    // readOrErr() parks and eventually times out.
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var rt = try Runtime.init(t_alloc, 512 * 1024, &ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
+    var sp = fm.StackPool.init(t_alloc);
+    defer sp.deinit();
+    var sched = try initSched(t_alloc, &ebr, &sp);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    sched.lock_timeout_ms = 100;
+    fp.active_scheduler = &sched;
+
+    const Locked = ParkingRwLocked(usize);
+
+    const Shared = struct {
+        locked: Locked = Locked.init(7),
+        wg: CheatHeader.WaitGroup,
+        reader_happy_ok: bool = false,
+        reader_got_timeout: bool = false,
+    };
+    var shared = Shared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    const Ctx = struct { s: *Shared };
+    var ctx = Ctx{ .s = &shared };
+
+    // Writer holds exclusive access for 400ms.
+    const FiberA = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            var g = c.s.locked.writeOrErr() catch unreachable;
+            defer g.release();
+            fiberSleepMs(400);
+        }
+    };
+    // Reader B arrives uncontended first (happy path), then a writer takes over
+    // and Reader C waits past timeout. Split into two reader phases in one fiber.
+    const FiberB = struct {
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const c = @as(*Ctx, @ptrCast(@alignCast(raw.?)));
+            defer c.s.wg.done();
+            // Happy path: writer hasn't run yet, read acquires immediately.
+            {
+                var rg = c.s.locked.readOrErr() catch unreachable;
+                c.s.reader_happy_ok = rg.get().* == 7;
+                rg.release();
+            }
+            // Let the writer take it, then try again — should time out.
+            fiberSleepMs(20);
+            _ = c.s.locked.readOrErr() catch |e| {
+                c.s.reader_got_timeout = (e == error.LockTimeout);
+                return;
+            };
+            unreachable;
+        }
+    };
+    const Main = struct {
+        s: *Shared, c: *Ctx,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.s.wg.add(2);
+            // Spawn writer first so LIFO pops B first; B gets the happy-path
+            // read, then yields via sleep while writer acquires.
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.c, .{ .stack_size = .Large });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.c, .{ .stack_size = .Large });
+            self.s.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .s = &shared, .c = &ctx };
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = .Large });
+    sched.run();
+
+    try std.testing.expect(shared.reader_happy_ok);
+    try std.testing.expect(shared.reader_got_timeout);
 }

@@ -140,6 +140,7 @@ pub fn build(b: *std.Build) void {
         "yield-test.zig",
         "parking-lot-loom-test.zig",
         "parking-lot-test.zig",
+        "parking-lot-hammer-test.zig",
     };
 
     for (test_files) |filename| {
