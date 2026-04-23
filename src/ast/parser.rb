@@ -1025,26 +1025,49 @@ class Parser
     #     body;
     #   END
     catch_block = nil
-    # Parse CATCH clauses:
-    #   CATCH Kind                       -- match on error kind
-    #   CATCH Kind WITH(ErrorName)       -- match on kind + specific error
-    #   DEFAULT                          -- catch-all
+    # Parse CATCH clauses (unified error-system grammar):
+    #   CATCH Kind                              -- match any error of kind
+    #   CATCH Kind WITH(Type)                   -- kind + one type
+    #   CATCH Kind WITH(Type1, Type2, ...)      -- kind + multiple types
+    #   CATCH Type                              -- direct type match
+    #                                              (kind auto-resolved from the
+    #                                              registered type->kind pair)
+    #   DEFAULT                                 -- catch-all
+    #
+    # Disambiguation (as elsewhere): the first TYPE_ID after CATCH is a
+    # kind iff it's in ERROR_KINDS; otherwise it's a type.
+    #
+    # Clause shape stored on the AST: { form:, name:, error_names:, body: }
+    # where error_names is always an Array of Strings (possibly empty).
     catch_block = nil
     if match?(:KEYWORD, 'CATCH')
       catch_clauses = []
       default_body = nil
       while match?(:KEYWORD, 'CATCH')
         consume(:KEYWORD, 'CATCH')
-        kind = consume(:TYPE_ID).value  # Transient, Input, System, etc.
-        error_name = nil
-        if match?(:KEYWORD, 'WITH')
+        first_tok = consume(:TYPE_ID)
+        form = ERROR_KINDS.include?(first_tok.value) ? :kind : :type
+        error_names = []
+        if form == :type
+          # CATCH Type — no WITH clause permitted.
+          error_names = [first_tok.value]
+        elsif match?(:KEYWORD, 'WITH')
           consume(:KEYWORD, 'WITH')
           consume(:CHAR, '(')
-          error_name = consume(:TYPE_ID).value
+          error_names << consume(:TYPE_ID).value
+          while match!(:CHAR, ',')
+            error_names << consume(:TYPE_ID).value
+          end
           consume(:CHAR, ')')
         end
         clause_body = parse_block_body(['CATCH', 'DEFAULT', 'END'])
-        catch_clauses << { kind: kind, error_name: error_name, body: clause_body }
+        catch_clauses << {
+          form: form,
+          name: first_tok.value,       # kind name (form :kind) or type name (form :type)
+          name_token: first_tok,       # for annotator diagnostics
+          error_names: error_names,    # list of type names to filter on
+          body: clause_body,
+        }
       end
       if match?(:KEYWORD, 'DEFAULT')
         consume(:KEYWORD, 'DEFAULT')

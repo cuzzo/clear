@@ -1,0 +1,72 @@
+-- Test: the unified CATCH grammar compiles + runs end-to-end.
+-- Exercises every form against actual raised errors and verifies
+-- which clause handles each case.
+--   1. CATCH Kind           — plain kind match
+--   2. CATCH Kind WITH(T)   — kind + single type
+--   3. CATCH Kind WITH(T1, T2) — kind + multi-type filter
+--   4. CATCH Type            — direct type match (kind inferred)
+
+FN raiseParseErr() RETURNS !Int64 -> RAISE Input, ParseErr,   "bad p"; RETURN 0; END
+FN raiseOtherInput() RETURNS !Int64 -> RAISE Input, OtherIn,  "bad o"; RETURN 0; END
+FN raiseExtraIn() RETURNS !Int64 -> RAISE Input, ExtraIn,     "bad x"; RETURN 0; END
+FN raisePlainInput() RETURNS !Int64 -> RAISE Input, "plain";            RETURN 0; END
+FN raiseTransient() RETURNS !Int64 -> RAISE Transient, "flaky";        RETURN 0; END
+
+-- CATCH Type directly matches the registered-kind type.
+FN directType(mode: Int64) RETURNS Int64 ->
+    IF mode == 1 THEN v = raiseParseErr() OR RAISE; RETURN v; END
+    RETURN 0;
+CATCH ParseErr
+    RETURN -1;
+END
+
+-- CATCH Kind WITH(Type) narrows to a specific type.
+FN withSingle(mode: Int64) RETURNS Int64 ->
+    IF mode == 1 THEN v = raiseParseErr()    OR RAISE; RETURN v; END
+    IF mode == 2 THEN v = raisePlainInput()  OR RAISE; RETURN v; END
+    RETURN 0;
+CATCH Input WITH(ParseErr)
+    RETURN -1;
+CATCH Input
+    RETURN -2;
+END
+
+-- CATCH Kind WITH(T1, T2) filters on multiple types.
+FN withMulti(mode: Int64) RETURNS Int64 ->
+    IF mode == 1 THEN v = raiseOtherInput() OR RAISE; RETURN v; END
+    IF mode == 2 THEN v = raiseExtraIn()    OR RAISE; RETURN v; END
+    IF mode == 3 THEN v = raisePlainInput() OR RAISE; RETURN v; END
+    RETURN 0;
+CATCH Input WITH(OtherIn, ExtraIn)
+    RETURN -1;
+CATCH Input
+    RETURN -2;
+END
+
+-- CATCH Kind matches any error of that kind.
+FN kindOnly(mode: Int64) RETURNS Int64 ->
+    IF mode == 1 THEN v = raiseTransient() OR RAISE; RETURN v; END
+    RETURN 0;
+CATCH Transient
+    RETURN -1;
+END
+
+FN main() RETURNS Void ->
+    -- Direct type form
+    ASSERT directType(1) == -1, "CATCH ParseErr matches ParseErr";
+    ASSERT directType(0) ==  0, "no raise -> no catch";
+
+    -- Kind + single type
+    ASSERT withSingle(1) == -1, "CATCH Input WITH(ParseErr) matches ParseErr";
+    ASSERT withSingle(2) == -2, "CATCH Input (fallback) matches plain Input";
+
+    -- Kind + multi type
+    ASSERT withMulti(1) == -1, "CATCH Input WITH(OtherIn, ExtraIn) matches OtherIn";
+    ASSERT withMulti(2) == -1, "same clause also matches ExtraIn";
+    ASSERT withMulti(3) == -2, "CATCH Input (fallback) matches plain Input";
+
+    -- Kind-only
+    ASSERT kindOnly(1) == -1, "CATCH Transient matches";
+
+    RETURN;
+END

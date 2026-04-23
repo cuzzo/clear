@@ -1073,16 +1073,22 @@ class MIRLowering
     end
 
     parts = (node.catch_clauses || []).map { |clause|
+      # The annotator resolves every form to { kind, error_names }:
+      #   CATCH Kind                        -> { kind: Kind, error_names: [] }
+      #   CATCH Kind WITH(T1, T2)           -> { kind: Kind, error_names: [T1, T2] }
+      #   CATCH Type                        -> { kind: <registered kind of Type>,
+      #                                          error_names: [Type] }
       kind = clause[:kind]
-      error_name = clause[:error_name]
-      # Use lower_body to flush pending hoisted Lets per statement (prevents
-      # hoist_alloc-produced Lets from escaping the catch body scope).
+      error_names = clause[:error_names] || (clause[:error_name] ? [clause[:error_name]] : [])
       clause_mir = lower_body(clause[:body])
       clause_bodies << clause_mir
       clause_body_zig = clause_mir.map { |m| emit_expr(m) }.join("\n            ")
 
       cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
-      cond_parts << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{error_name}))" if error_name
+      unless error_names.empty?
+        name_checks = error_names.map { |n| "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{n}))" }
+        cond_parts << (name_checks.size == 1 ? name_checks.first : "(#{name_checks.join(' or ')})")
+      end
       cond = cond_parts.join(" and ")
 
       "if (#{cond}) {\n            #{snapshot_decl}const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{clause_body_zig}\n        }"

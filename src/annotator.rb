@@ -176,6 +176,14 @@ private
     # Pre-register synthesized default functions so Pass 3 bodies can call them.
     @synthetic_fns.each { |fn| pre_register_function(fn) }
 
+    # PASS 2.9: Seed the error-type registry from every RAISE site that
+    # provides both a kind and a type. This pre-pass means CATCH Type
+    # clauses can reference types registered by later-in-source RAISE
+    # sites (source order independence). Collision diagnostics still
+    # point at the first-seen site since register_type! records the
+    # token.
+    seed_error_types_from_raises!(node)
+
     # PASS 3: Analyze Logic
     # Visit all statements in order.
     # - VarDecls will be registered here (linear scoping).
@@ -508,6 +516,11 @@ private
 
     # Visit CATCH clause bodies with __error and snapshot in scope.
     if node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
+      # Resolve each parsed clause to a { kind, error_names } pair the
+      # lowering can emit directly. Validates every type against the
+      # registry (seeded by PASS 2.9) and rejects kind mismatches.
+      node.catch_clauses.each { |c| resolve_catch_clause!(c) }
+
       # Collect snapshot types from pipeline steps for typed snapshot access
       snap_types = Set.new
       collect_pipe_input_types(node.body, snap_types)
@@ -535,6 +548,69 @@ private
     end
 
     @function_context_stack.pop
+  end
+
+  # Pre-pass: walk every RAISE site in the program and register
+  # (kind, type) pairs with the error registry. Lets CATCH Type
+  # clauses resolve even when the RAISE that introduces the type is
+  # later in source order.
+  def seed_error_types_from_raises!(program_node)
+    program_node.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      AST.walk_body(stmt.body) do |n|
+        next unless n.is_a?(AST::Raise)
+        next unless n.kind && n.error_name
+        resolve_error_registration!(n, n.kind, n.error_name, n.token)
+      end
+      AST.walk_body(stmt.catch_clauses&.map { |c| c[:body] }&.flatten || []) do |n|
+        next unless n.is_a?(AST::Raise)
+        next unless n.kind && n.error_name
+        resolve_error_registration!(n, n.kind, n.error_name, n.token)
+      end
+    end
+  end
+
+  # Resolve a parsed CATCH clause into its runtime-dispatch form.
+  # Input shape (from parser):
+  #   { form: :kind | :type, name: String, name_token: Token,
+  #     error_names: [String], body: [...] }
+  # After this method:
+  #   clause[:kind]        = Symbol (the ErrorKind for dispatch)
+  #   clause[:error_names] = [String] (possibly empty)
+  # Reports any unknown-type / unknown-kind / kind-mismatch error.
+  def resolve_catch_clause!(clause)
+    if clause[:form] == :kind
+      kind_str = clause[:name]
+      unless AST.error_kind?(kind_str.to_sym)
+        error!(clause[:name_token],
+               "Unknown error kind '#{kind_str}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}")
+      end
+      clause[:kind] = kind_str.to_sym
+      clause[:error_names].each do |type_str|
+        type_sym = type_str.to_sym
+        unless AST.error_type?(type_sym)
+          error!(clause[:name_token],
+                 "CATCH #{kind_str} WITH(#{type_str}): error type '#{type_str}' is not registered. " \
+                 "Register it by RAISE-ing it first, e.g. RAISE #{kind_str}, #{type_str}, \"...\"")
+        end
+        actual_kind = AST.kind_of_type(type_sym)
+        if actual_kind && actual_kind != clause[:kind]
+          error!(clause[:name_token],
+                 "CATCH #{kind_str} WITH(#{type_str}): '#{type_str}' is registered as kind " \
+                 "'#{actual_kind}', not '#{kind_str}'. Remove the WITH filter or correct the kind.")
+        end
+      end
+    elsif clause[:form] == :type
+      type_str = clause[:name]
+      type_sym = type_str.to_sym
+      unless AST.error_type?(type_sym)
+        error!(clause[:name_token],
+               "CATCH #{type_str}: error type '#{type_str}' is not registered. A type must be " \
+               "registered via RAISE/OR EXIT before it can be directly CATCHed.")
+      end
+      clause[:kind] = AST.kind_of_type(type_sym)
+      # error_names already = [type_str] from the parser.
+    end
   end
 
   # Collect input types from pipeline s> steps that can fail.

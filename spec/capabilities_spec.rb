@@ -2106,4 +2106,214 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # CATCH grammar — every form
+  # ---------------------------------------------------------------------------
+  # The unified CATCH surface:
+  #   CATCH Kind                          — by kind
+  #   CATCH Kind WITH(Type)               — kind + single type
+  #   CATCH Kind WITH(T1, T2, ...)        — kind + multi-type filter
+  #   CATCH Type                          — direct type match (kind inferred)
+  # Every form feeds the annotator's resolve_catch_clause!, which must
+  # populate clause[:kind] + clause[:error_names] so mir-lowering can
+  # emit the right dispatch.
+
+  describe "CATCH grammar — kind-only form" do
+    it "accepts CATCH Kind" do
+      src = <<~FLUX
+        FN go(mode: Int64) RETURNS Int64 ->
+          IF mode == 0 THEN RAISE Input, "bad"; END
+          RETURN 1;
+        CATCH Input
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts CATCH of every registered kind" do
+      AST::ERROR_KINDS.each do |kind|
+        src = <<~FLUX
+          FN go() RETURNS Int64 ->
+            RAISE #{kind}, "bad";
+            RETURN 1;
+          CATCH #{kind}
+            RETURN -1;
+          END
+        FLUX
+        expect { run(src) }.not_to(raise_error, "failed for kind #{kind}")
+      end
+    end
+  end
+
+  describe "CATCH grammar — kind + type (legacy WITH form)" do
+    it "accepts CATCH Kind WITH(Type) for a type registered at a prior RAISE" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, ParseError, "bad"; END
+        FN b() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH(ParseError)
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts CATCH Kind WITH(Type) when the RAISE appears LATER in source (pre-pass seeding)" do
+      src = <<~FLUX
+        FN b() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH(LateType)
+          RETURN -1;
+        END
+        FN a() RETURNS !Void -> RAISE Input, LateType, "bad"; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects CATCH Kind WITH(Type) when Type's registered kind differs" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, MyErr, "bad"; END
+        FN b() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH NotFound WITH(MyErr)
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.to raise_error(/registered as kind 'Input', not 'NotFound'/)
+    end
+
+    it "rejects CATCH Kind WITH(UnknownType) for an unregistered type" do
+      src = <<~FLUX
+        FN go() RETURNS Int64 ->
+          RAISE Input, "bad";
+          RETURN 1;
+        CATCH Input WITH(NeverRaised)
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.to raise_error(/'NeverRaised' is not registered/)
+    end
+
+    it "rejects CATCH with an unknown kind" do
+      src = <<~FLUX
+        FN go() RETURNS Int64 -> RETURN 1;
+        CATCH Nope
+          RETURN -1;
+        END
+      FLUX
+      # 'Nope' isn't a kind and isn't a registered type either -> unknown type.
+      expect { run(src) }.to raise_error(/is not registered/)
+    end
+  end
+
+  describe "CATCH grammar — multi-type WITH" do
+    it "accepts CATCH Kind WITH(T1, T2) when both types are Input" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, ParseErr,   "p"; END
+        FN b() RETURNS !Void -> RAISE Input, InvalidJson, "j"; END
+        FN c() RETURNS Int64 ->
+          a() OR RAISE;
+          b() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH(ParseErr, InvalidJson)
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects multi-type WITH when ANY type has a mismatched kind" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input,    Ok,   "p"; END
+        FN b() RETURNS !Void -> RAISE NotFound, Miss, "m"; END
+        FN c() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH(Ok, Miss)
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.to raise_error(/'Miss' is registered as kind 'NotFound', not 'Input'/)
+    end
+
+    it "accepts multi-type WITH with three types sharing a kind" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, A, "a"; END
+        FN b() RETURNS !Void -> RAISE Input, B, "b"; END
+        FN c() RETURNS !Void -> RAISE Input, C, "c"; END
+        FN handler() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH(A, B, C)
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+  end
+
+  describe "CATCH grammar — direct-type form" do
+    it "accepts CATCH Type when Type is registered by a RAISE in the same program" do
+      src = <<~FLUX
+        FN fail() RETURNS !Void -> RAISE Input, DirectErr, "bad"; END
+        FN go() RETURNS Int64 ->
+          fail() OR RAISE;
+          RETURN 1;
+        CATCH DirectErr
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "accepts CATCH Type for a stdlib-registered type" do
+      src = <<~FLUX
+        FN maybeTimeout() RETURNS !Void -> RAISE Transient, LockTimeout, "slow"; END
+        FN go() RETURNS Int64 ->
+          maybeTimeout() OR RAISE;
+          RETURN 1;
+        CATCH LockTimeout
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects CATCH Type for an unregistered type" do
+      src = <<~FLUX
+        FN go() RETURNS Int64 -> RETURN 1;
+        CATCH NeverUsed
+          RETURN -1;
+        END
+      FLUX
+      expect { run(src) }.to raise_error(/'NeverUsed' is not registered/)
+    end
+  end
+
+  describe "CATCH grammar — multiple clauses + DEFAULT" do
+    it "accepts multiple CATCH clauses mixing kind-only, kind+WITH, and direct-type" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input,    Bad,     "b"; END
+        FN b() RETURNS !Void -> RAISE Transient, Flaky,  "f"; END
+        FN go() RETURNS Int64 ->
+          a() OR RAISE;
+          RETURN 1;
+        CATCH Input WITH(Bad)
+          RETURN -1;
+        CATCH Flaky
+          RETURN -2;
+        CATCH NotFound
+          RETURN -3;
+        DEFAULT
+          RETURN -99;
+        END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+  end
+
 end
