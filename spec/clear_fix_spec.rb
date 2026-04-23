@@ -90,4 +90,36 @@ RSpec.describe "./clear fix", :integration do
     expect(status).to eq(0)
     expect(out).to include("no fixable findings")
   end
+
+  describe "ownership: assign-to-immutable (Phase B)" do
+    let(:src) do
+      "FN main() RETURNS Int64 ->\n  x = 1;\n  x = 2;\n  RETURN x;\nEND\n"
+    end
+
+    it "reports with an auto fix that declares the binding MUTABLE" do
+      path = write("im.cht", src)
+      out, _, status = run_fix("--dry-run", path)
+      expect(status).to eq(0)
+      expect(out).to match(/Variable 'x' is immutable/)
+      expect(out).to match(/Declare 'x' as MUTABLE at its binding site \(line 2\)/)
+    end
+
+    it "applies the fix and the result still compiles" do
+      path = write("im.cht", src)
+      out, _, status = run_fix(path)
+      expect(status).to eq(0)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to eq(
+        "FN main() RETURNS Int64 ->\n  MUTABLE x = 1;\n  x = 2;\n  RETURN x;\nEND\n"
+      )
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+
+    it "--only=ownership matches the immutable-assignment finding" do
+      path = write("im.cht", src)
+      out, _, _ = run_fix("--dry-run", "--only=ownership", path)
+      expect(out).to match(/Variable 'x' is immutable/)
+    end
+  end
 end

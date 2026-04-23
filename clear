@@ -1235,9 +1235,17 @@ when 'fix'
     queued_edits = []
     findings.each do |f|
       auto_fix = f.fixes.find { |fx| fx.confidence == :auto }
+
+      if dry_run
+        describe_finding(f)
+        next
+      end
+
       chosen =
-        if take_first || auto_fix
-          auto_fix || f.fixes.first
+        if auto_fix
+          auto_fix
+        elsif take_first
+          f.fixes.first
         else
           describe_finding(f)
           prompt_choice(f)

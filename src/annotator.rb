@@ -1959,7 +1959,7 @@ private
       end
 
     elsif scope.is_immutable?(node.name)
-      error!(node, "Variable '#{node.name}' is immutable")
+      emit_immutable_assignment_error!(node, scope)
 
     else
       # Assignment path
@@ -2009,6 +2009,10 @@ private
 
     # 3. Liveness
     if @og&.moved?(node.name)
+      # TODO: auto-fix requires tracking the move SITE (where the value
+      # was consumed), not the use site — `(COPY x)` at the use site is
+      # semantically wrong because `x` is already moved. Revisit once
+      # OwnershipGraph records per-path move provenance.
       error!(node, "Use of moved value '#{node.name}'")
     end
 
@@ -4022,29 +4026,6 @@ private
     Span.new(file: file, line: tok.line, col: col, length: name.length)
   end
 
-  def emit_unused_variable_finding!(reg, name, is_mutable)
-    return unless reg && reg.respond_to?(:token) && reg.token
-    name_span = var_name_span(reg, name)
-    fixes = []
-    if name_span
-      fixes << Fix.new(
-        description: "Replace '#{name}' with '_' (explicit throwaway).",
-        confidence: :auto,
-        edits: [Edit.new(
-          span: Span.new(file: name_span.file, line: name_span.line, col: name_span.col, length: name_span.length),
-          replacement: '_'
-        )]
-      )
-    end
-    return $stderr.puts("\e[33m[Warning]\e[0m Unused variable '#{name}' (line #{reg.line})") if fixes.empty?
-
-    fixable!(reg,
-      message: "Unused variable '#{name}'",
-      category: :lint,
-      level: :warning,
-      fixes: fixes)
-  end
-
   def emit_mutable_unused_finding!(reg, name)
     return unless reg && reg.respond_to?(:token) && reg.token
     tok = reg.token
@@ -4065,6 +4046,40 @@ private
       message: "MUTABLE '#{name}' is never reassigned — consider removing MUTABLE",
       category: :lint,
       level: :warning,
+      fixes: fixes)
+  end
+
+  # Variable-is-immutable (category: :ownership, level: :error). Looks
+  # up the declaration via the containing scope and emits an :auto fix
+  # that inserts `MUTABLE ` at the declaration's column. When the
+  # declaration already has `MUTABLE` (shouldn't happen given the guard
+  # that emits this error), the fix is skipped and we fall through to
+  # the plain error path.
+  def emit_immutable_assignment_error!(node, scope)
+    info = scope.locals[node.name]
+    decl = info&.reg
+    fixes = []
+    if decl && decl.respond_to?(:token) && decl.token
+      tok = decl.token
+      already_mutable = tok.respond_to?(:value) && tok.value == 'MUTABLE'
+      unless already_mutable
+        fixes << Fix.new(
+          description: "Declare '#{node.name}' as MUTABLE at its binding site (line #{tok.line}).",
+          confidence: :auto,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+            replacement: 'MUTABLE '
+          )]
+        )
+      end
+    end
+
+    return error!(node, "Variable '#{node.name}' is immutable") if fixes.empty?
+
+    fixable!(node,
+      message: "Variable '#{node.name}' is immutable",
+      category: :ownership,
+      level: :error,
       fixes: fixes)
   end
 
