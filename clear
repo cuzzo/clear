@@ -33,6 +33,44 @@ ZIG = [
 RUNTIME_FILES = %w[runtime/switch.S runtime/onRoot.S].map { |f| File.join(ZIG_DIR, f) }
 
 # Detect jemalloc/tcmalloc
+def describe_finding(finding)
+  line = finding.token&.line
+  col  = finding.token&.column
+  puts "\n[#{finding.category}] #{finding.message} (line #{line}, col #{col})"
+  finding.fixes.each_with_index do |fx, i|
+    marker = fx.confidence == :auto ? '*' : ' '
+    puts "  #{marker} [#{i + 1}] #{fx.description}"
+  end
+end
+
+def prompt_choice(finding)
+  $stderr.print "Apply which fix? [1-#{finding.fixes.length}, 0 to skip]: "
+  input = $stdin.gets&.strip
+  return nil if input.nil? || input.empty?
+  idx = input.to_i
+  return nil if idx == 0
+  finding.fixes[idx - 1]
+end
+
+# Apply edits to `text`. Edits are pre-sorted last-to-first (line, col)
+# so earlier application doesn't shift later byte positions.
+def apply_edits(text, edits)
+  lines = text.split("\n", -1)
+  edits.each do |e|
+    sp = e.span
+    idx = sp.line - 1
+    next if idx < 0 || idx >= lines.length
+    ln = lines[idx]
+    start_col = sp.col - 1
+    start_col = 0 if start_col < 0
+    start_col = ln.length if start_col > ln.length
+    end_col = start_col + sp.length
+    end_col = ln.length if end_col > ln.length
+    lines[idx] = ln[0...start_col] + e.replacement.to_s + ln[end_col..]
+  end
+  lines.join("\n")
+end
+
 def find_alloc_preload
   Dir.glob('/lib/x86_64-linux-gnu/libjemalloc.so*').first ||
     Dir.glob('/usr/lib/libjemalloc.so*').first ||
@@ -1139,6 +1177,96 @@ when 'doctor'
     end
   end
 
+when 'fix'
+  require_relative 'src/ast/lexer'
+  require_relative 'src/ast/parser'
+  require_relative 'src/ast/fixable_error'
+  require_relative 'src/annotator'
+
+  args = ARGV[1..] || []
+  dry_run       = false
+  take_first    = false
+  only_set      = nil
+  paths         = []
+
+  args.each do |a|
+    case a
+    when '--dry-run' then dry_run = true
+    when '--yes'     then take_first = true
+    when /\A--only=(.+)/ then only_set = $1.split(',').map(&:to_sym).to_set
+    when /\A-/       then error "Unknown flag for fix: #{a}"
+    else paths << a
+    end
+  end
+
+  error "Usage: clear fix [--dry-run|--yes|--only=cat1,cat2] <file.cht>..." if paths.empty?
+
+  paths.each do |path|
+    error "No such file: #{path}" unless File.file?(path)
+    source = File.read(path)
+
+    # Run lexer + parser + annotator in collector mode.
+    FixCollector.enable!
+    findings = []
+    begin
+      tokens = Lexer.new(source).tokenize
+      ast    = Parser.new(tokens, source).parse
+      begin
+        SemanticAnnotator.new.annotate!(ast)
+      rescue CompilerError, ParserError
+        # Annotator may still raise for non-fixable errors; the fixable
+        # findings emitted before the raise are in the collector.
+      end
+      findings = FixCollector.drain
+    ensure
+      FixCollector.disable!
+    end
+
+    findings = findings.select { |f| only_set.nil? || only_set.include?(f.category) }
+
+    if findings.empty?
+      puts "#{path}: no fixable findings"
+      next
+    end
+
+    # Order findings by position, then dedupe by (line, col, message).
+    findings = findings.sort_by { |f| [f.token&.line || 0, f.token&.column || 0] }
+
+    queued_edits = []
+    findings.each do |f|
+      auto_fix = f.fixes.find { |fx| fx.confidence == :auto }
+      chosen =
+        if take_first || auto_fix
+          auto_fix || f.fixes.first
+        else
+          describe_finding(f)
+          prompt_choice(f)
+        end
+
+      if chosen
+        puts "  #{path}:#{f.token&.line}:#{f.token&.column}  [#{f.category}]  #{f.message}"
+        puts "    -> #{chosen.description}"
+        queued_edits.concat(chosen.edits.map { |e| [path, e] })
+      end
+    end
+
+    next if dry_run || queued_edits.empty?
+
+    # Group edits by file, apply right-to-left by (line, col) within each
+    # file so earlier edits don't shift later byte offsets.
+    by_file = queued_edits.group_by(&:first)
+    by_file.each do |file_key, rows|
+      target_path = file_key || path
+      text = File.read(target_path)
+      edits = rows.map { |(_, e)| e }
+               .sort_by { |e| [e.span.line, e.span.col] }
+               .reverse
+      text = apply_edits(text, edits)
+      File.write(target_path, text)
+    end
+    puts "#{path}: applied #{queued_edits.length} edit(s)"
+  end
+
 when 'fmt', 'format'
   require_relative 'src/backends/formatter'
 
@@ -1231,6 +1359,10 @@ when 'help', '--help', '-h', nil
       clear test ... --debug-frame   Enable debug frame arena (slow, detects use-after-rewind)
       clear profile <file.cht>      Build + run with profiling (heap + CPU)
       clear doctor <profile-dir>    Analyze profile data
+      clear fix <file.cht>          Apply auto-fixable findings; prompt for others
+      clear fix --dry-run <file>    Show findings and chosen fixes, do not write
+      clear fix --yes <file>        Take the first fix for every finding
+      clear fix --only=lint,... <f> Restrict to categories (lint, ownership, ...)
       clear fmt <file|dir>...       Format CLEAR source in place
       clear fmt --check <path>...   Exit 1 if any file is not formatted
       clear fmt --stdout <file>     Print formatted output, do not write

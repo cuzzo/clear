@@ -125,6 +125,43 @@ module ErrorHelper
     loc = token ? " (line #{token.line})" : ""
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
+
+  # Emit a fixable finding — a diagnostic with one or more suggested
+  # edits. When the FixCollector is active (`clear fix` mode), the
+  # finding is captured for later application. Otherwise:
+  #   level: :warning — printed to stderr (behaves like note!)
+  #   level: :error   — raised as a CompilerError (behaves like error!)
+  # Callers pass:
+  #   node_or_token — anchor for reporting location
+  #   message       — human-readable message
+  #   category      — see FixableFinding::CATEGORIES
+  #   level         — :warning or :error
+  #   fixes         — Array<Fix> (non-empty)
+  def fixable!(node_or_token, message:, category:, level: :warning, fixes:)
+    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    finding = FixableFinding.new(
+      level: level, message: message, token: token,
+      category: category, fixes: fixes
+    )
+
+    if FixCollector.enabled?
+      FixCollector.push(finding)
+      return if level == :warning
+      # Level :error still halts the build after being recorded, so the
+      # fix tool can distinguish blocking from non-blocking findings.
+      err_class = self.class.name.include?("Parser") ? ParserError : CompilerError
+      raise err_class.new(token, message, @source_code)
+    end
+
+    case level
+    when :warning
+      loc = token ? " (line #{token.line})" : ""
+      $stderr.puts "\e[33m[Warning]\e[0m #{message}#{loc}"
+    when :error
+      err_class = self.class.name.include?("Parser") ? ParserError : CompilerError
+      raise err_class.new(token, message, @source_code)
+    end
+  end
 end
 
 class SourceError < StandardError

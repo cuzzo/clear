@@ -1,4 +1,5 @@
 require_relative "ast/source_error"
+require_relative "ast/fixable_error"
 require_relative "ast/scope"
 require_relative "ast/parser"
 require_relative "ast/std_lib"
@@ -3986,6 +3987,10 @@ private
         classify_ownership!(info) unless info.ownership_kind
         next if [:resource, :collection, :rc].include?(info.ownership_kind)
         next unless info.reg
+
+        # TODO: not yet auto-fixable — `_` collides with the Zig discard
+        # keyword and deletion loses any RHS side effects. Kept as a plain
+        # stderr warning until we add an :interactive "delete line" fix.
         loc = info.reg.respond_to?(:line) ? " (line #{info.reg.line})" : ""
         $stderr.puts "\e[33m[Warning]\e[0m Unused variable '#{name}'#{loc}"
       end
@@ -3997,10 +4002,70 @@ private
         next unless info.mutable
         next unless info.read || (info.reg&.respond_to?(:var_used) && info.reg.var_used)
         next if info.reg&.respond_to?(:var_mutated) && info.reg.var_mutated
-        loc = info.reg.respond_to?(:line) ? " (line #{info.reg.line})" : ""
-        $stderr.puts "\e[33m[Warning]\e[0m MUTABLE '#{name}' is never reassigned#{loc} — consider removing MUTABLE"
+
+        emit_mutable_unused_finding!(info.reg, name)
       end
     end
+  end
+
+  # Location of the variable NAME inside a VarDecl/BindExpr. For a
+  # `MUTABLE x = ...` declaration the node's token points at `MUTABLE`,
+  # so the name starts 8 columns later ("MUTABLE " is 7 letters + 1
+  # space). For an `x = ...` bind the token IS the name.
+  def var_name_span(reg, name, file: nil)
+    tok = reg.respond_to?(:token) ? reg.token : nil
+    return nil unless tok
+    col = tok.column
+    if reg.respond_to?(:mutable) && reg.mutable && tok.respond_to?(:value) && tok.value == 'MUTABLE'
+      col += 'MUTABLE '.length
+    end
+    Span.new(file: file, line: tok.line, col: col, length: name.length)
+  end
+
+  def emit_unused_variable_finding!(reg, name, is_mutable)
+    return unless reg && reg.respond_to?(:token) && reg.token
+    name_span = var_name_span(reg, name)
+    fixes = []
+    if name_span
+      fixes << Fix.new(
+        description: "Replace '#{name}' with '_' (explicit throwaway).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: name_span.file, line: name_span.line, col: name_span.col, length: name_span.length),
+          replacement: '_'
+        )]
+      )
+    end
+    return $stderr.puts("\e[33m[Warning]\e[0m Unused variable '#{name}' (line #{reg.line})") if fixes.empty?
+
+    fixable!(reg,
+      message: "Unused variable '#{name}'",
+      category: :lint,
+      level: :warning,
+      fixes: fixes)
+  end
+
+  def emit_mutable_unused_finding!(reg, name)
+    return unless reg && reg.respond_to?(:token) && reg.token
+    tok = reg.token
+    fixes = []
+    if tok && tok.respond_to?(:value) && tok.value == 'MUTABLE'
+      fixes << Fix.new(
+        description: "Remove MUTABLE keyword (binding is never reassigned).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column, length: 'MUTABLE '.length),
+          replacement: ''
+        )]
+      )
+    end
+    return $stderr.puts("\e[33m[Warning]\e[0m MUTABLE '#{name}' is never reassigned (line #{reg.line}) — consider removing MUTABLE") if fixes.empty?
+
+    fixable!(reg,
+      message: "MUTABLE '#{name}' is never reassigned — consider removing MUTABLE",
+      category: :lint,
+      level: :warning,
+      fixes: fixes)
   end
 
   def collect_scope_drops(node: nil)
