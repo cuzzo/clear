@@ -148,6 +148,57 @@ STRUCT Point {
 }
 ```
 
+### 3.9 Long call arguments
+
+When **any** argument to a function call is itself multi-line (BG/DO block
+with 2+ stmts, wrapped STRUCT literal, wrapped chain, wrapped pipeline) OR
+the full call exceeds 120 chars, wrap **all** arguments onto their own
+lines:
+
+```clear
+foo(
+  x(y(z(blah))),
+  STRUCT{a: b, c: d},
+  BG { foo() }
+)
+```
+
+All-or-nothing — if one argument triggers wrap, every argument wraps, for
+consistency with the FN-signature rule. `)` returns to the call column.
+
+### 3.10 BG / DO blocks
+
+- 0 or 1 statements: inline — `BG { stmt }` — if it fits 120.
+- 2 or more statements: **always** multi-line.
+- Capability form `BG { @micro -> stmt }`: prefer one line; if the
+  statement overflows, wrap body with the statement at +2:
+
+  ```clear
+  BG {
+    @micro ->
+      reallyLongExpressionThatOverflows(args)
+  }
+  ```
+
+### 3.11 CONCURRENT chains
+
+When `CONCURRENT(...)` takes 2+ parameters, the following pipeline stage
+(`EACH` / `WHERE` / etc.) drops to the next line at the `CONCURRENT`
+column:
+
+```clear
+items
+  s> CONCURRENT(pool_size: 8, key: _.id)
+     EACH { _.doWork() }
+```
+
+### 3.12 Non-rules (explicitly not automated)
+
+- **Nested unary-call -> pipeline rewrite**: `f1(f2(f3(x)))` does NOT
+  become `x s> f3 s> f2 s> f1`. That is a semantic rewrite — it rotates
+  which function is "outermost", does not work for multi-arg calls, and
+  belongs in `clear lint`, not `clear fmt`.
+
 ## 4. Spacing
 
 - One space around binary operators, `=`, and after `,` and `;`.
@@ -211,28 +262,42 @@ a bug in the rule, not in the code.
 
 ## Implementation status
 
-**v0 (current):**
+**v1.1 (current):**
 - Parse validation (§9).
-- Indent recomputation from block structure (§1 base rule, excluding the
-  §3 forced wraps).
-- Blank-line normalization (§6).
-- Trailing-whitespace stripping.
-- Comments preserved in place (by line preservation).
+- Lossless tokenization (preserves strings incl. `${}`, comments, numerics).
+- Intra-line spacing canonicalization (§4) — operators, commas,
+  semicolons, sigil attach, call/index attach, `:` type annotations,
+  unary operators at expression-start positions, `WITH(...)` attach.
+- Canonical comment spacing (§5): 2 spaces before trailing `--`, 1 after.
+- FN one-liner expansion (§7): every FN becomes multi-line; `;`
+  statement boundaries in the body are split onto lines; `ELSE` /
+  `ELSE_IF` / `CATCH` / `DEFAULT` move to their own line.
+- IF / WHILE / FOR one-liner expansion (§7): one-line `THEN` / `DO ... END`
+  forms are expanded to multi-line. Multi-line forms preserved as-is.
+- STRUCT / UNION / ENUM (§3.8): one field/variant per line; internal
+  NLs and comments preserved (so UNION bodies with default-method FN
+  declarations plus leading comments round-trip correctly).
+- Indent recomputation (§1 base): 2-space, from block structure.
+- Blank-line normalization (§6): collapse 3+ to 2, 1 before
+  CATCH/DEFAULT, strip trailing.
+- CATCH / DEFAULT / ELSE / ELSE_IF outdent (§1).
+- Idempotent: verified `fmt(fmt(x)) == fmt(x)` on the full
+  transpile-tests corpus (306 files, 0 parse errors, 0 drift).
 
-**v1 (next):**
-- Intra-line spacing canonicalization (§4).
-- One-liner rules (§7).
-- STRUCT / UNION / ENUM one-per-line (§3.8).
-- FN signature forced wrap (§3.1).
-- WITH forced wraps (§3.2, §3.3).
-- Pipeline forced wraps, including `s> RECOVER` extra indent (§3.4, §3.7).
+**v1.2 (next — forced wraps):**
+- FN signature forced wrap when >120 chars (§3.1).
+- WITH forced wraps: 2+ captures always, 1-cap >120, ON clause shape
+  (§3.2, §3.3).
+- Pipeline forced wraps incl. `s> RECOVER` extra indent (§3.4, §3.7).
 - Method chain forced wrap (§3.5).
-- Pipeline / chain assignment drop (§3.6).
-- CATCH outdent (§1 specific rule; handled at v0 block level but reverify).
-- Canonical comment spacing (§5).
+- Pipeline/chain assignment drop when first line >80 chars (§3.6).
+- Long call argument wrap — all-or-nothing (§3.9).
+- BG / DO multi-statement wrap + capability-form rules (§3.10).
+- CONCURRENT multi-arg stage drop (§3.11).
 
 **v2 (later):**
-- Width warnings (§2).
-- Continuation indent (§1 general rule).
-- Ambiguous comment detection (§9).
-- Integer `_` separators (§8, needs parser).
+- Warn-only 120-char width reports (§2).
+- Continuation indent for arbitrary expression wrap (§1 general rule).
+- Ambiguous comment attachment detection (§9).
+- Integer `_` separator normalization (§8, needs parser support).
+- Canonical capability attach rules (§4, type vs value position).

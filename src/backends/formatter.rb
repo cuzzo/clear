@@ -1,52 +1,85 @@
 # CLEAR source formatter.
 #
-# Status: v0 (indent + blank-line + trailing-whitespace normalization).
+# Status: v1.1.
 #
-# v0 guarantees:
-#   - Refuses to write on parse error (exits non-zero).
-#   - Re-computes 2-space indent from block structure:
-#       opens:  `{`, `THEN`, `DO`, `->`  when they are the last code token on a line
-#       closes: `END`, `}`                when they are the first token on a line
-#       outdents (line-start only): `ELSE`, `ELSE_IF`, `CATCH`, `DEFAULT`
-#   - Collapses 3+ consecutive blank lines to 2.
-#   - Ensures exactly one blank line before `CATCH` / `DEFAULT` clauses.
-#   - Strips trailing whitespace on every line.
-#   - Preserves comments in place (by line preservation; intra-line content is not rewritten).
+# v1.1 implements:
+#   - Parse validation (refuse-on-error).
+#   - Lossless tokenization preserving raw text (strings, comments, etc.).
+#   - Intra-line spacing canonicalization:
+#       * space around binary operators, `=`, after `,` and `;`
+#       * no space inside `()` / `[]` / `{}`
+#       * no space around `.` or `::`
+#       * tense sigils (`!` `?` `%` `~`) attach to following type/sigil
+#       * unary `-` / `!` / `~` attach at expression-start positions
+#       * call/index attach: `foo(`, `foo[`, `)(`, `](`, `][`
+#       * type annotation `:` — no space before, one space after
+#   - Comment spacing: trailing `--` has 2 spaces before, 1 space after.
+#   - FN one-liner expansion (§7): every FN becomes multi-line with body
+#     statements split on `;` boundaries.
+#   - STRUCT / UNION / ENUM (§3.8): one field/variant per line.
+#   - 2-space indent recomputed from block structure (opens: `{` `THEN` `DO`
+#     `->` line-terminal; closes: `END` `}` line-leading; outdents:
+#     `ELSE` `ELSE_IF` `CATCH` `DEFAULT` line-leading).
+#   - Blank-line normalization: collapse 3+ to 2, exactly one blank before
+#     CATCH/DEFAULT, strip trailing blanks.
 #   - Idempotent: fmt(fmt(x)) == fmt(x).
 #
-# Deferred to v1+ (documented here so nothing is lost):
-#   - Intra-line spacing canonicalization (around operators, after commas, no-space inside
-#     parens/brackets, no space between tense sigils and type: `!T` `?T` `%T` `~T`).
-#   - Capability attach rules (type-position: `T@locked`; value-position: `1 @locked`,
-#     `foo() @locked`).
-#   - Forced multi-line for FN (no one-liners).
-#   - FN signature forced wrap when >120 chars (`)`, `RETURNS T ->` at FN column).
-#   - WITH: 2+ captures OR single cap >120 -> each capture on its own line,
-#     body at +2, closing `}` at +1.
-#   - WITH with ON clause: body at +2, closing `}` at +1, `ON ...` at +1.
-#   - Pipeline: 2+ `s>` stages on their own lines; `s> RECOVER(...)` gets one
-#     extra indent level relative to sibling `s>` stages.
-#   - Method chain: >3 calls OR >80 chars -> one `.call()` per line.
-#   - Pipeline/chain assignment: if first line >80 chars, drop RHS; receiver at +1,
-#     chain/stages at +2.
-#   - STRUCT / UNION / ENUM: one item per line (unconditional).
-#   - Integer `_` separators (needs parser support).
-#   - Warn-only width checks at 120 chars for non-forced-wrap cases.
-#   - Ambiguous-comment-attachment detection + refuse-to-write with context.
-#   - Continuation indent (context-aware, deferred last).
+# Deferred to v1.2:
+#   - FN signature forced wrap when >120 chars (§3.1).
+#   - WITH forced wraps: 2+ captures, 1-cap >120, ON-clause shape (§3.2, §3.3).
+#   - Pipeline forced wraps incl. `s> RECOVER` extra indent (§3.4, §3.7).
+#   - Method chain forced wrap (§3.5).
+#   - Pipeline/chain assignment drop when first line >80 (§3.6).
+#
+# Deferred to v2:
+#   - Warn-only 120-char width reports.
+#   - Ambiguous-comment-attachment detection + refuse-to-write.
+#   - Continuation indent for arbitrary expression wrap.
+#   - Integer `_` separator normalization.
 
 require_relative '../ast/lexer'
 require_relative '../ast/parser'
+require 'strscan'
+require 'set'
 
 class Formatter
   class Error < StandardError; end
 
   INDENT = '  '
 
+  # Tokens after which `-`/`!`/`~` is unary (attaches to the following token).
+  EXPR_START_KEYWORDS = %w[
+    RETURN IF THEN ELSE ELSE_IF WHILE DO FOR IN BG
+    RAISE ASSERT OR AS CATCH DEFAULT MATCH WHEN
+    TAP RECOVER EXIT PASS PRUNE GIVE TAKES COPY MOVE
+    CLONE FREEZE LINK RESOLVE START YIELD
+    SELECT WHERE INDEX REDUCE ORDER_BY LIMIT SKIP UNNEST
+    DISTINCT EACH FIND ANY ALL COUNT SUM AVERAGE MIN MAX
+    CONCURRENT SHARD TAKE_WHILE WINDOW JOIN MUTABLE
+    ASSERT_RAISES CAPTURES SEQUENCE TRUE FALSE NIL
+    NEXT CAST
+  ].to_set.freeze
+
+  EXPR_START_SYMS = [
+    '(', '[', '{', ',', ';', '=', '<', '>', '+', '*', '/', '%', '?', ':'
+  ].to_set.freeze
+
+  EXPR_START_OPS = %w[
+    == != <= >= && || ** += -= *= /= :: -> s>
+    .. ..< ..<= ..= %* %+ %- !* !+ !-
+  ].to_set.freeze
+
   OPEN_TERMINAL   = %w[-> { THEN DO].freeze
   CLOSE_LEADING   = %w[END }].freeze
   OUTDENT_LEADING = %w[ELSE ELSE_IF CATCH DEFAULT].freeze
   BLANK_BEFORE    = %w[CATCH DEFAULT].freeze
+
+  # Keywords that attach directly to a following `(` — no space inserted.
+  # Everything else gets a space between keyword and `(`.
+  ATTACH_PAREN_AFTER = %w[
+    WITH RETRY WINDOW RECOVER JOIN SHARD REDUCE
+    ASSERT ASSERT_RAISES CAST
+  ].to_set.freeze
 
   def self.format(source)
     new(source).format
@@ -58,189 +91,719 @@ class Formatter
 
   def format
     validate_parse!
-    lines = @source.lines
-    lines = lines.map { |l| strip_trailing_ws(l) }
-    lines = reindent(lines)
-    lines = collapse_blanks(lines)
-    lines = ensure_blank_before_catch(lines)
-    lines = trim_trailing_blanks(lines)
-    ensure_trailing_newline(lines.join)
+    tokens = FormatLexer.new(@source).tokenize
+    Emitter.new(tokens).emit
   end
 
   private
 
-  # -- validation ----------------------------------------------------------
-
   def validate_parse!
-    tokens = ::Lexer.new(@source).tokenize
-    ::Parser.new(tokens, @source).parse
+    ts = ::Lexer.new(@source).tokenize
+    ::Parser.new(ts, @source).parse
   rescue => e
     raise Error, "parse error: #{e.message}"
   end
+end
 
-  # -- whitespace normalization -------------------------------------------
+# -----------------------------------------------------------------------
+# Lossless tokenizer.
+#
+# Unlike the main Lexer, this one preserves the raw source text of every
+# token (including quotes around strings and interpolation expressions).
+# String tokens are kept opaque: we don't decode escapes or desugar `${}`.
+# -----------------------------------------------------------------------
+class Formatter::FormatLexer
+  Token = Struct.new(:type, :raw, :line, :col)
 
-  def strip_trailing_ws(line)
-    has_nl = line.end_with?("\n")
-    stripped = line.sub(/[ \t]+(?=\n|\z)/, '')
-    stripped += "\n" if has_nl && !stripped.end_with?("\n")
-    stripped
+  def initialize(source)
+    @src = source
+    @s = StringScanner.new(source)
+    @line = 1
+    @col  = 1
+    @out  = []
   end
 
-  def collapse_blanks(lines)
-    result = []
-    blanks = 0
-    lines.each do |l|
-      if blank_line?(l)
-        blanks += 1
-        next
-      end
-      emit_blanks = [blanks, 2].min
-      emit_blanks.times { result << "\n" }
-      blanks = 0
-      result << l
-    end
-    # Trailing blanks handled separately; drop them all here.
-    result
-  end
-
-  def blank_line?(line)
-    line.sub(/\n\z/, '').strip.empty?
-  end
-
-  def trim_trailing_blanks(lines)
-    while lines.last && blank_line?(lines.last)
-      lines.pop
-    end
-    lines
-  end
-
-  def ensure_trailing_newline(s)
-    s.end_with?("\n") ? s : s + "\n"
-  end
-
-  def ensure_blank_before_catch(lines)
-    result = []
-    lines.each_with_index do |l, i|
-      body = l.lstrip
-      first = first_word(body)
-      if BLANK_BEFORE.include?(first) && !result.empty?
-        # back up over trailing blanks we already emitted
-        while result.last && blank_line?(result.last)
-          result.pop
+  def tokenize
+    until @s.eos?
+      sl, sc = @line, @col
+      case
+      when m = @s.scan(/[ \t]+/)             then push(:WS, m, sl, sc)
+      when m = @s.scan(/\r?\n/)              then push(:NL, m, sl, sc)
+      when m = @s.scan(/--[^\n]*/)           then push(:COMMENT, m, sl, sc)
+      when m = @s.scan(/"""(?:.|\n)*?"""/m)  then push(:STRING, m, sl, sc)
+      when @s.peek(1) == '"'
+        raw = consume_string
+        push(:STRING, raw, sl, sc)
+      when m = @s.scan(/->|s>|==|!=|>=|<=|&&|\|\||\*\*|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
+        push(:OP, m, sl, sc)
+      when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
+        push(:SYM, m, sl, sc)
+      when m = @s.scan(/[a-zA-Z_@]\w*[!?]?/)
+        if ::Lexer::KEYWORDS.include?(m)
+          push(:KEYWORD, m, sl, sc)
+        elsif m =~ /\A[A-Z]/
+          push(:TYPE_ID, m, sl, sc)
+        else
+          push(:VAR_ID, m, sl, sc)
         end
-        result << "\n" unless result.empty?
+      when m = @s.scan(/0[xob][0-9a-fA-F_]+(?:_[a-zA-Z][a-zA-Z0-9]*)?/)
+        push(:NUM, m, sl, sc)
+      when m = @s.scan(/\d+\.\d+(?:_[a-zA-Z][a-zA-Z0-9]*)?/)
+        push(:NUM, m, sl, sc)
+      when m = @s.scan(/\d+(?:_[a-zA-Z][a-zA-Z0-9]*)?/)
+        push(:NUM, m, sl, sc)
+      else
+        raise Formatter::Error, "lex error at #{@line}:#{@col} near #{@s.peek(10).inspect}"
       end
-      result << l
     end
-    result
+    @out
   end
 
-  def first_word(body)
-    return nil if body.empty? || body.start_with?('--')
-    m = body.match(/\A([A-Z_][A-Z_0-9]*)\b/)
-    m && m[1]
-  end
+  private
 
-  # -- indent recomputation ------------------------------------------------
-
-  def reindent(lines)
+  # Consume balanced `"..."` string including `\` escapes and `${...}`
+  # interpolation (which may nest braces). Returns raw source text
+  # (including the surrounding quotes). Advances the scanner.
+  def consume_string
+    start = @s.pos
+    @s.getch # opening quote
     depth = 0
-    out = []
-    lines.each do |raw|
-      content = raw.sub(/\A[ \t]+/, '')
-      nl = content.end_with?("\n") ? "\n" : ""
-      body = content.sub(/\n\z/, '')
+    until @s.eos?
+      c = @s.peek(1)
+      if c == '\\'
+        @s.getch
+        @s.getch unless @s.eos?
+        next
+      end
+      if depth == 0 && c == '"'
+        @s.getch
+        break
+      end
+      if c == '$' && @s.peek(2) == '${'
+        @s.getch; @s.getch
+        depth += 1
+        next
+      end
+      if depth > 0 && c == '{'
+        @s.getch
+        depth += 1
+        next
+      end
+      if depth > 0 && c == '}'
+        @s.getch
+        depth -= 1
+        next
+      end
+      @s.getch
+    end
+    # NOTE: StringScanner#pos is a BYTE offset. Use byteslice so multi-byte
+    # characters earlier in the source (e.g., `—` in comments) don't shift
+    # the string-literal slice off its actual boundaries.
+    @src.byteslice(start...@s.pos)
+  end
 
-      if body.empty?
-        out << nl
+  def push(type, raw, line, col)
+    @out << Token.new(type, raw, line, col)
+    advance(raw)
+  end
+
+  def advance(s)
+    nl = s.count("\n")
+    if nl > 0
+      @line += nl
+      last = s.rindex("\n")
+      @col = s.length - last
+    else
+      @col += s.length
+    end
+  end
+end
+
+# -----------------------------------------------------------------------
+# Emitter.
+#
+# Operates on a lossless token stream:
+#   1. Drops :WS tokens; we regenerate spacing from scratch.
+#   2. Applies structural transformations that may insert :NL tokens
+#      (FN expansion, STRUCT/UNION/ENUM one-per-line).
+#   3. Renders: walks tokens, emits canonical spacing, tracks block depth
+#      for indent, normalizes blank lines, places comments.
+# -----------------------------------------------------------------------
+class Formatter::Emitter
+  INDENT          = Formatter::INDENT
+  OPEN_TERMINAL   = Formatter::OPEN_TERMINAL
+  CLOSE_LEADING   = Formatter::CLOSE_LEADING
+  OUTDENT_LEADING = Formatter::OUTDENT_LEADING
+  BLANK_BEFORE    = Formatter::BLANK_BEFORE
+
+  def initialize(tokens)
+    @tokens = tokens
+  end
+
+  def emit
+    toks = @tokens.reject { |t| t.type == :WS }
+    toks = collapse_newlines(toks)
+    toks = expand_fn_blocks(toks)
+    toks = expand_then_do_blocks(toks)
+    toks = expand_record_types(toks)
+    toks = collapse_newlines(toks)
+    render(toks)
+  end
+
+  private
+
+  # ---- pre-passes on the token stream ---------------------------------
+
+  # Collapse runs of 3+ consecutive :NL into 2.
+  def collapse_newlines(toks)
+    out = []
+    run = 0
+    toks.each do |t|
+      if t.type == :NL
+        run += 1
+        out << t if run <= 2
+      else
+        run = 0
+        out << t
+      end
+    end
+    out
+  end
+
+  # For each top-level `FN ... -> ... END` (or any nested FN), ensure that
+  # the body is multi-line: a newline follows `->` and precedes `END`, and
+  # statements in between are split on `;` boundaries.
+  def expand_fn_blocks(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      if t.type == :KEYWORD && t.raw == 'FN'
+        i = emit_fn_block(out, toks, i)
+      else
+        out << t
+        i += 1
+      end
+    end
+    out
+  end
+
+  # Emits a FN block starting at index `start` (token = 'FN') into `out`.
+  # Returns the index after the matching `END`.
+  def emit_fn_block(out, toks, start)
+    # Copy up to and including the `->` that ends the signature.
+    arrow_idx = find_fn_arrow(toks, start)
+    unless arrow_idx
+      out << toks[start]
+      return start + 1
+    end
+
+    (start..arrow_idx).each { |j| out << toks[j] }
+
+    # Ensure exactly one :NL after the arrow (strip any blank line directly
+    # after the signature — bodies start immediately at +1 indent).
+    insert_nl(out)
+
+    # Walk body, tracking depth, until matching END at depth 0.
+    depth = 0
+    j = arrow_idx + 1
+    j = skip_nls(toks, j)
+    body_start = out.length
+    while j < toks.length
+      tj = toks[j]
+      if tj.type == :KEYWORD && tj.raw == 'END' && depth == 0
+        break
+      end
+      # Nested END-terminated constructs: only the keywords whose scope
+      # actually closes with END. Brace-terminated blocks (WITH/MATCH/
+      # STRUCT/UNION/ENUM/BG) are handled by the `{`/`}` branches below.
+      # Filter WITH (`CATCH Input WITH(...)`) is not a block opener.
+      if tj.type == :KEYWORD && %w[FN IF WHILE FOR TEST WHEN].include?(tj.raw)
+        if tj.raw == 'FN'
+          j = emit_fn_block(out, toks, j)
+          next
+        else
+          depth += 1
+          out << tj
+          j += 1
+          next
+        end
+      end
+      if tj.type == :KEYWORD && tj.raw == 'END'
+        depth -= 1
+        out << tj
+        j += 1
+        next
+      end
+      if tj.type == :SYM && tj.raw == '{'
+        depth += 1
+        out << tj
+        j += 1
+        next
+      end
+      if tj.type == :SYM && tj.raw == '}'
+        depth -= 1
+        out << tj
+        j += 1
+        next
+      end
+      # Statement boundary: `;` at depth 0 — force newline after it and
+      # skip exactly one following source NL (it's redundant with the one
+      # I just inserted). Additional source NLs pass through as blank lines.
+      if tj.type == :SYM && tj.raw == ';' && depth == 0
+        out << tj
+        j += 1
+        insert_nl(out)
+        j += 1 if j < toks.length && toks[j].type == :NL
+        next
+      end
+      # ELSE / ELSE_IF / CATCH / DEFAULT at this depth: ensure they start
+      # on a new line.
+      if tj.type == :KEYWORD && Formatter::OUTDENT_LEADING.include?(tj.raw) && depth == 0
+        insert_nl(out)
+        out << tj
+        j += 1
+        next
+      end
+      out << tj
+      j += 1
+    end
+
+    # Strip any trailing NLs in the body and insert exactly one before END.
+    if body_start < out.length
+      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      insert_nl(out)
+    end
+    if j < toks.length
+      out << toks[j]  # END
+      j += 1
+    end
+    j
+  end
+
+  def skip_nls(toks, j)
+    j += 1 while j < toks.length && toks[j].type == :NL
+    j
+  end
+
+  def find_fn_arrow(toks, fn_idx)
+    depth = 0
+    j = fn_idx + 1
+    while j < toks.length
+      t = toks[j]
+      case
+      when t.type == :SYM && t.raw == '('  then depth += 1
+      when t.type == :SYM && t.raw == ')'  then depth -= 1
+      when t.type == :SYM && t.raw == '['  then depth += 1
+      when t.type == :SYM && t.raw == ']'  then depth -= 1
+      when t.type == :OP  && t.raw == '->' && depth == 0 then return j
+      when t.type == :KEYWORD && t.raw == 'END' && depth == 0 then return nil
+      end
+      j += 1
+    end
+    nil
+  end
+
+  # Expand one-liner IF / WHILE / FOR blocks that use THEN or DO...END.
+  # Detects blocks where no newline appears between the opening keyword and
+  # the matching END, and expands them so the body is on its own line(s).
+  # Multi-line forms are left untouched.
+  def expand_then_do_blocks(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      if t.type == :KEYWORD && %w[IF WHILE FOR].include?(t.raw)
+        end_idx = one_liner_end(toks, i)
+        if end_idx
+          i = expand_if_while_for(out, toks, i, end_idx)
+        else
+          out << t
+          i += 1
+        end
+      else
+        out << t
+        i += 1
+      end
+    end
+    out
+  end
+
+  # Returns the index of the matching END if and only if no :NL appears
+  # anywhere between `start` and that END (i.e., the whole construct is
+  # a single source line). Otherwise nil.
+  def one_liner_end(toks, start)
+    depth = 0
+    j = start + 1
+    while j < toks.length
+      t = toks[j]
+      return nil if t.type == :NL
+      if t.type == :KEYWORD
+        case t.raw
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN'
+          depth += 1
+        when 'END'
+          return j if depth == 0
+          depth -= 1
+        end
+      elsif t.type == :SYM
+        case t.raw
+        when '{' then depth += 1
+        when '}' then depth -= 1
+        end
+      end
+      j += 1
+    end
+    nil
+  end
+
+  # Expand a one-liner `IF/WHILE/FOR ... THEN|DO ... END` between indices
+  # `start` (keyword) and `end_idx` (matching END). Emits into `out` and
+  # returns the index after END.
+  def expand_if_while_for(out, toks, start, end_idx)
+    # Find the THEN or DO terminator at depth 0.
+    term_idx = nil
+    depth = 0
+    (start + 1...end_idx).each do |j|
+      t = toks[j]
+      if t.type == :SYM && t.raw == '('      then depth += 1
+      elsif t.type == :SYM && t.raw == ')'   then depth -= 1
+      elsif t.type == :SYM && t.raw == '['   then depth += 1
+      elsif t.type == :SYM && t.raw == ']'   then depth -= 1
+      elsif t.type == :KEYWORD && %w[THEN DO].include?(t.raw) && depth == 0
+        term_idx = j
+        break
+      end
+    end
+    unless term_idx
+      # No terminator found — don't rewrite.
+      out << toks[start]
+      return start + 1
+    end
+
+    # Copy up through the terminator.
+    (start..term_idx).each { |j| out << toks[j] }
+    insert_nl(out)
+
+    # Walk body tokens. Split `;` boundaries; outdent ELSE/ELSE_IF.
+    depth = 0
+    j = term_idx + 1
+    body_start = out.length
+    while j < end_idx
+      tj = toks[j]
+      if tj.type == :SYM && tj.raw == '('      then depth += 1; out << tj; j += 1; next end
+      if tj.type == :SYM && tj.raw == ')'      then depth -= 1; out << tj; j += 1; next end
+      if tj.type == :SYM && tj.raw == '['      then depth += 1; out << tj; j += 1; next end
+      if tj.type == :SYM && tj.raw == ']'      then depth -= 1; out << tj; j += 1; next end
+      if tj.type == :SYM && tj.raw == '{'      then depth += 1; out << tj; j += 1; next end
+      if tj.type == :SYM && tj.raw == '}'      then depth -= 1; out << tj; j += 1; next end
+
+      if tj.type == :SYM && tj.raw == ';' && depth == 0
+        out << tj
+        j += 1
+        insert_nl(out)
+        next
+      end
+      if tj.type == :KEYWORD && %w[ELSE ELSE_IF].include?(tj.raw) && depth == 0
+        insert_nl(out)
+        out << tj
+        j += 1
+        next
+      end
+      out << tj
+      j += 1
+    end
+
+    # Strip any trailing NLs in body; insert exactly one before END.
+    if body_start < out.length
+      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      insert_nl(out)
+    end
+    out << toks[end_idx]  # END
+    end_idx + 1
+  end
+
+  # Split STRUCT / UNION / ENUM blocks so each field/variant is its own line.
+  def expand_record_types(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      if t.type == :KEYWORD && %w[STRUCT UNION ENUM].include?(t.raw)
+        i = emit_record_type(out, toks, i)
+      else
+        out << t
+        i += 1
+      end
+    end
+    out
+  end
+
+  def emit_record_type(out, toks, start)
+    # Copy tokens until the opening `{`.
+    j = start
+    while j < toks.length
+      t = toks[j]
+      out << t
+      j += 1
+      break if t.type == :SYM && t.raw == '{'
+    end
+    return j if j >= toks.length
+
+    # Canonicalize: exactly one NL after `{`, one NL after each top-level
+    # `,`, one NL before `}`. Internal NLs/comments (e.g., default-method
+    # FN declarations with leading comments in UNION bodies) are preserved.
+    insert_nl(out)
+    j = skip_nls(toks, j)
+
+    depth = 0
+    body_start = out.length
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM && t.raw == '{'
+        depth += 1; out << t; j += 1; next
+      end
+      if t.type == :SYM && t.raw == '}'
+        if depth == 0
+          break
+        else
+          depth -= 1; out << t; j += 1; next
+        end
+      end
+      if t.type == :SYM && t.raw == '(' then depth += 1; out << t; j += 1; next end
+      if t.type == :SYM && t.raw == ')' then depth -= 1; out << t; j += 1; next end
+      if t.type == :SYM && t.raw == '[' then depth += 1; out << t; j += 1; next end
+      if t.type == :SYM && t.raw == ']' then depth -= 1; out << t; j += 1; next end
+      if t.type == :SYM && t.raw == ',' && depth == 0
+        out << t; j += 1
+        insert_nl(out)
+        j += 1 if j < toks.length && toks[j].type == :NL
+        next
+      end
+      out << t
+      j += 1
+    end
+
+    if body_start < out.length
+      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      insert_nl(out)
+    end
+    if j < toks.length
+      out << toks[j]  # `}`
+      j += 1
+    end
+    j
+  end
+
+  # Ensure the last token in `out` is exactly one :NL. If the last token
+  # is already :NL, leave it. Otherwise append a fresh :NL.
+  def insert_nl(out)
+    return if out.last && out.last.type == :NL
+    out << Formatter::FormatLexer::Token.new(:NL, "\n", 0, 0)
+  end
+
+  # ---- rendering ------------------------------------------------------
+
+  # Walks the transformed token stream and produces the final string.
+  # Maintains: indent depth, per-line buffers, last non-comment code token
+  # (for spacing decisions).
+  def render(toks)
+    lines = tokens_to_lines(toks)
+    lines = ensure_blank_before_catch(lines)
+    lines = drop_trailing_blanks(lines)
+
+    depth = 0
+    out = +""
+    lines.each do |line|
+      if line.empty?
+        out << "\n"
         next
       end
 
-      first_tok = leading_token(body)
-      last_tok  = trailing_token(body)
+      first = first_code(line)
+      last  = last_code(line)
 
-      if CLOSE_LEADING.include?(first_tok)
+      line_depth = depth
+      if first && CLOSE_LEADING.include?(first.raw)
         depth = [depth - 1, 0].max
         line_depth = depth
-      elsif OUTDENT_LEADING.include?(first_tok)
+      elsif first && OUTDENT_LEADING.include?(first.raw)
         line_depth = [depth - 1, 0].max
-      else
-        line_depth = depth
       end
 
-      out << (INDENT * line_depth) + body + nl
+      out << (INDENT * line_depth)
+      out << format_line_body(line)
+      out << "\n"
 
-      # Block-open: adjust depth for subsequent lines.
-      if OPEN_TERMINAL.include?(last_tok)
+      if last && OPEN_TERMINAL.include?(last.raw)
         depth += 1
       end
     end
     out
   end
 
-  # Return the first meaningful token on a line (after stripping leading indent).
-  # A leading `--` comment line returns nil (comments don't affect depth).
-  def leading_token(body)
-    s = body.lstrip
-    return nil if s.empty? || s.start_with?('--')
-    # Match keywords, identifiers, or single-char block punctuation.
-    m = s.match(/\A([A-Z_][A-Z_0-9]*|\{|\})/)
-    return nil unless m
-    tok = m[1]
-    # Must be at a boundary (keyword followed by non-word char or end).
-    return tok
-  end
-
-  # Return the trailing code token on a line, ignoring a trailing `--` comment.
-  # Only returns the token if it matters for depth tracking (one of OPEN_TERMINAL
-  # or a punctuation we care about); otherwise returns nil.
-  def trailing_token(body)
-    code = strip_trailing_comment(body).rstrip
-    return nil if code.empty?
-
-    # Check for the specific open terminals.
-    return '->'   if code.end_with?('->')
-    return '{'    if code.end_with?('{')
-    return 'THEN' if code =~ /\bTHEN\s*\z/
-    return 'DO'   if code =~ /\bDO\s*\z/
-    nil
-  end
-
-  # Strip a trailing `--` line comment, being careful not to cut inside a
-  # string literal. Handles `"..."` (respecting backslash escapes) and
-  # `"""..."""` triple-quoted strings.
-  def strip_trailing_comment(line)
-    i = 0
-    len = line.length
-    in_single = false  # inside "..."
-    in_triple = false  # inside """..."""
-    while i < len
-      c = line[i]
-
-      if !in_single && line[i, 3] == '"""'
-        in_triple = !in_triple
-        i += 3
-        next
+  def tokens_to_lines(toks)
+    lines = []
+    cur = []
+    toks.each do |t|
+      if t.type == :NL
+        lines << cur
+        cur = []
+      else
+        cur << t
       end
-
-      if in_triple
-        i += 1
-        next
-      end
-
-      if c == '"' && (i == 0 || line[i - 1] != '\\')
-        in_single = !in_single
-        i += 1
-        next
-      end
-
-      if !in_single && c == '-' && line[i + 1] == '-'
-        return line[0...i]
-      end
-
-      i += 1
     end
-    line
+    lines << cur unless cur.empty?
+    lines
+  end
+
+  def first_code(line)
+    line.find { |t| t.type != :COMMENT }
+  end
+
+  def last_code(line)
+    line.reverse.find { |t| t.type != :COMMENT }
+  end
+
+  def ensure_blank_before_catch(lines)
+    out = []
+    lines.each do |line|
+      fc = first_code(line)
+      if fc && BLANK_BEFORE.include?(fc.raw) && !out.empty?
+        # Strip any existing trailing blanks and insert exactly one.
+        out.pop while out.last && out.last.empty?
+        out << [] unless out.empty?
+      end
+      out << line
+    end
+    out
+  end
+
+  def drop_trailing_blanks(lines)
+    lines = lines.dup
+    lines.pop while lines.last && lines.last.empty?
+    lines
+  end
+
+  # Emit a line's tokens with canonical intra-line spacing.
+  # Comments get 2-space prefix if inline, 1 space after `--`.
+  def format_line_body(line)
+    buf = +""
+    prev = nil  # previous emitted *code* token
+    line.each_with_index do |t, idx|
+      if t.type == :COMMENT
+        # Trailing (inline) comment if any code precedes on this line.
+        body = canonicalize_comment(t.raw)
+        if prev
+          buf << '  '
+          buf << body
+        else
+          # Standalone leading comment on its own line.
+          buf << body
+        end
+        next
+      end
+      if prev
+        buf << ' ' if needs_space?(prev, t, line, idx)
+      end
+      buf << t.raw
+      prev = t
+    end
+    buf
+  end
+
+  # Normalize a `--...` comment: exactly one space after `--`, trailing
+  # whitespace stripped. `--` alone (empty comment) stays `--`.
+  def canonicalize_comment(raw)
+    body = raw[2..].to_s
+    body = body.rstrip
+    return '--' if body.empty?
+    body = body.sub(/\A\s+/, '')
+    "-- #{body}"
+  end
+
+  # Spacing decision between two adjacent code tokens A (prev) and B (cur).
+  def needs_space?(a, b, line, b_idx)
+    # No space inside opening/closing brackets.
+    return false if a.type == :SYM && ['(', '[', '{'].include?(a.raw)
+    return false if b.type == :SYM && [')', ']', '}'].include?(b.raw)
+
+    # No space around `.` or `::`.
+    return false if a.type == :SYM && a.raw == '.'
+    return false if b.type == :SYM && b.raw == '.'
+    return false if a.type == :OP  && a.raw == '::'
+    return false if b.type == :OP  && b.raw == '::'
+
+    # Call / index attach.
+    if b.type == :SYM && b.raw == '('
+      return false if [:VAR_ID, :TYPE_ID].include?(a.type)
+      return false if a.type == :SYM && [')', ']'].include?(a.raw)
+      return false if a.type == :KEYWORD && Formatter::ATTACH_PAREN_AFTER.include?(a.raw)
+    end
+    if b.type == :SYM && b.raw == '['
+      return false if [:VAR_ID, :TYPE_ID].include?(a.type)
+      return false if a.type == :SYM && [')', ']'].include?(a.raw)
+    end
+
+    # No space before `,` or `;`.
+    if b.type == :SYM && (b.raw == ',' || b.raw == ';')
+      return false
+    end
+
+    # Type annotation `:` — no space before, space after (default).
+    if b.type == :SYM && b.raw == ':'
+      return false
+    end
+
+    # Tense sigils (`!` `?` `%` `~`) attach to following type / sigil.
+    if a.type == :SYM && %w[! ? % ~].include?(a.raw)
+      if b.type == :TYPE_ID
+        return false
+      end
+      if b.type == :SYM && %w[! ? % ~].include?(b.raw)
+        return false
+      end
+      # Unary use at expression start: attach.
+      if unary_context?(line, b_idx - 1)
+        return false
+      end
+    end
+
+    # Unary `-` at expression start: attach (e.g., `-1`).
+    if a.type == :SYM && a.raw == '-' && unary_context?(line, b_idx - 1)
+      return false
+    end
+
+    # `%` as modulus needs space; as sigil handled above. Default: space.
+
+    # Default: one space.
+    true
+  end
+
+  # Is position `a_idx` in `line` a unary-operator context — i.e., does
+  # the token at `a_idx` appear at the start of an expression?
+  #
+  # This is true when the previous non-comment token is one of a set of
+  # keywords/symbols/operators that end an expression.
+  def unary_context?(line, a_idx)
+    j = a_idx - 1
+    while j >= 0
+      prev = line[j]
+      j -= 1
+      next if prev.type == :COMMENT
+      case prev.type
+      when :KEYWORD
+        return Formatter::EXPR_START_KEYWORDS.include?(prev.raw)
+      when :SYM
+        return true if Formatter::EXPR_START_SYMS.include?(prev.raw)
+        return false
+      when :OP
+        return true if Formatter::EXPR_START_OPS.include?(prev.raw)
+        return false
+      else
+        return false
+      end
+    end
+    true  # start of line — treat as expression start
   end
 end
