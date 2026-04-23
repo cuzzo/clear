@@ -1,0 +1,42 @@
+UNION Val { Nil, Num: Float64 }
+
+-- Reassignment of a cleanup-needing binding inside ELSE_IF branches where
+-- another sibling branch declares the same name: regression for the MIR
+-- lowering's line-suffix rename vs `ReassignWithCleanup` / `SuppressCleanup`
+-- name mismatch. Prior to the fix, the cleanup guard `<name>_moved` and the
+-- reassignment cleanup `cleanup(..., &<name>)` both referenced the
+-- unsuffixed original name while the decl lived under `<name>_L<line>`,
+-- producing `use of undeclared identifier` in the emitted Zig.
+
+FN inner(n: Float64) RETURNS Val -> RETURN Val{ Num: n }; END
+
+FN pick(kind: Int64) RETURNS Val ->
+    IF kind == 1 THEN
+        MUTABLE v: Val = inner(1.0);
+        v = inner(10.0);
+        RETURN v;
+    ELSE_IF kind == 2 THEN
+        MUTABLE v: Val = inner(2.0);
+        v = inner(20.0);
+        RETURN v;
+    ELSE
+        RETURN Val.Nil;
+    END
+    RETURN Val.Nil;
+END
+
+FN getNum(v: Val) RETURNS Float64 ->
+    MATCH v START
+        Val.Num AS n -> RETURN n;,
+        DEFAULT -> RETURN 0.0;
+    END
+    RETURN 0.0;
+END
+
+FN main() RETURNS Void ->
+    a = pick(1);
+    ASSERT getNum(a) == 10.0, "kind 1 reassign should be 10";
+    b = pick(2);
+    ASSERT getNum(b) == 20.0, "kind 2 reassign should be 20";
+    RETURN;
+END

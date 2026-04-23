@@ -186,7 +186,14 @@ class MIRLowering
     # --- Old MIR nodes (from MIRPass) -> new MIR nodes ---
     when MIR::Drop              then lower_drop(node)
     when MIR::Promote           then lower_promote(node)
-    when MIR::SuppressCleanup   then MIR::MoveMark.new(zig_safe_name(node.name))
+    when MIR::SuppressCleanup
+      # SuppressCleanup is an AST-level marker that pre-dates line-suffix
+      # rename; its .name is a raw identifier string with no link back to
+      # the renamed decl. Consult @fn_name_rename_map so the emitted
+      # "x_moved = true" line matches the Cleanup's suffixed guard var.
+      safe = zig_safe_name(node.name)
+      safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
+      MIR::MoveMark.new(safe)
     when MIR::Alloc             then MIR::AllocMark.new(node.name, node.alloc, nil)
     when MIR::Return            then MIR::ReturnMark.new(node.escaped_vars)
     when MIR::ReassignCleanup   then MIR::ReassignMark.new(node.name, node.alloc)
@@ -885,6 +892,13 @@ class MIRLowering
     # had AllocMarks emitted and remap collisions to <name>_L<line>.
     @fn_alloc_marked_names = {}   # safe_name => true (seen at least once)
     @decl_zig_name_map    = {}    # node.object_id => disambiguated Zig name
+    # Name-keyed fallback used by AST-level markers (SuppressCleanup, Drop,
+    # ReassignCleanup) whose lowering doesn't have access to the decl's
+    # AST node. Populated by lower_var_decl in lowering order: whichever
+    # branch's decl was lowered most recently wins, which matches the
+    # lexical-scope assumption that SuppressCleanup for a binding appears
+    # between its decl and the next same-name decl.
+    @fn_name_rename_map   = {}    # original_name => disambiguated Zig name
 
     # Mutable scalar params: Zig params are const, need shadow vars
     mutable_scalar_params = (node.params || []).select { |p|
@@ -3932,12 +3946,19 @@ class MIRLowering
     # name AND both emit AllocMarks (has_mir_drop).  The MIR checker's flat
     # name-keyed allocs dict conflates them; appending the source line makes
     # the names unique so the checker sees independent containers.
+    original_safe = safe_name
     if has_mir_drop && @fn_alloc_marked_names&.key?(safe_name)
       safe_name = "#{safe_name}_L#{node.line}"
     end
     if has_mir_drop && @fn_alloc_marked_names
       @fn_alloc_marked_names[safe_name] = true
       @decl_zig_name_map[node.object_id] = safe_name
+      # Name-keyed view used by AST markers lowered later (see
+      # @fn_name_rename_map init comment). Overwrites when the same name
+      # is re-declared in a sibling branch — lowering order matches the
+      # lexical order in which AST markers reference each decl, so the
+      # latest entry is the one in scope for the next marker.
+      @fn_name_rename_map[original_safe] = safe_name if @fn_name_rename_map
     end
 
     suppression = if keyword_mutable
@@ -4008,6 +4029,10 @@ class MIRLowering
       result
     else
       safe = zig_safe_name(node.name)
+      # Resolve through the line-suffix rename map so reassignments (e.g.
+      # kResult = resolveTco(...)) and their cleanup guards reference the
+      # same Zig variable that the earlier decl created.
+      safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
       value = lower(node.value)
       if node.reassign_cleanup
         zig_type = node.reassign_cleanup[:zig_type] || "UNKNOWN"
