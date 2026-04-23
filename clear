@@ -33,6 +33,54 @@ ZIG = [
 RUNTIME_FILES = %w[runtime/switch.S runtime/onRoot.S].map { |f| File.join(ZIG_DIR, f) }
 
 # Detect jemalloc/tcmalloc
+# Detect `--fix` / `--fix=auto` / `--fix=yes` in an args list. Returns
+# nil, :interactive, or :auto. `yes` is an alias for `auto`.
+def detect_fix_mode(args)
+  return :auto        if args.include?('--fix=auto') || args.include?('--fix=yes')
+  return :interactive if args.include?('--fix')
+  nil
+end
+
+# First positional argument in an args list (skipping flags and the
+# value after `-o`). Used by --fix to locate the source file without
+# needing the full build-flag parser.
+def first_positional_arg(args)
+  skip_next = false
+  args.each do |a|
+    if skip_next
+      skip_next = false
+      next
+    end
+    if a == '-o' || a == '--out'
+      skip_next = true
+      next
+    end
+    return a unless a.start_with?('-')
+  end
+  nil
+end
+
+# Run `<binary> <cmd> <sub_args>`; on failure, invoke `clear fix` on
+# `source` (passing `--yes` when mode is :auto) and retry the build
+# exactly once. Exits with the final subprocess status. The sub-build
+# does NOT receive `--fix`, so nothing recurses.
+def run_with_fix_retry(binary, cmd, sub_args, source, fix_mode)
+  first = system(binary, cmd, *sub_args)
+  exit($?.exitstatus) if first
+
+  $stderr.puts "\e[33m[fix]\e[0m #{cmd} failed — running `clear fix` on #{source}..."
+  fix_args = ['fix']
+  fix_args << '--yes' if fix_mode == :auto
+  fix_args << source
+  unless system(binary, *fix_args)
+    $stderr.puts "\e[31m[fix]\e[0m fix produced no applicable edits; giving up."
+    exit 1
+  end
+
+  $stderr.puts "\e[33m[fix]\e[0m retrying `clear #{cmd}`..."
+  exec(binary, cmd, *sub_args)
+end
+
 def describe_finding(finding)
   line = finding.token&.line
   col  = finding.token&.column
@@ -461,6 +509,19 @@ end
 case ARGV[0]
 when 'build'
   args = ARGV[1..] || []
+
+  # --fix / --fix=auto: on build failure, invoke `clear fix` on the
+  # source then retry once. Implemented via subprocess so the build's
+  # existing exit-on-error behaviour doesn't leak into the retry path.
+  fix_mode = detect_fix_mode(args)
+  if fix_mode
+    sub_args = args - %w[--fix --fix=auto --fix=yes]
+    source   = first_positional_arg(sub_args)
+    error "Usage: clear build --fix <file.cht>" unless source
+    run_with_fix_retry(__FILE__, 'build', sub_args, source, fix_mode)
+    exit 0
+  end
+
   output = nil
   opt_level = 'Debug'
   extra_flags = ['-fno-llvm', '-fno-lld']
@@ -638,6 +699,18 @@ when 'run'
   else
     clear_args = ARGV[1..] || []
     run_args = []
+  end
+
+  # --fix: same retry pattern as `clear build --fix`.
+  fix_mode = detect_fix_mode(clear_args)
+  if fix_mode
+    sub_args = clear_args - %w[--fix --fix=auto --fix=yes]
+    source   = first_positional_arg(sub_args)
+    error "Usage: clear run --fix <file.cht>" unless source
+    full_args = sub_args.dup
+    full_args += ['--'] + run_args unless run_args.empty?
+    run_with_fix_retry(__FILE__, 'run', full_args, source, fix_mode)
+    exit 0
   end
 
   # Parse run flags
@@ -1367,6 +1440,8 @@ when 'help', '--help', '-h', nil
       clear test ... --debug-frame   Enable debug frame arena (slow, detects use-after-rewind)
       clear profile <file.cht>      Build + run with profiling (heap + CPU)
       clear doctor <profile-dir>    Analyze profile data
+      clear build --fix <file>      On compile error, run `clear fix` then retry once
+      clear run --fix <file>        Same, for `clear run`
       clear fix <file.cht>          Apply auto-fixable findings; prompt for others
       clear fix --dry-run <file>    Show findings and chosen fixes, do not write
       clear fix --yes <file>        Take the first fix for every finding

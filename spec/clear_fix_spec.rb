@@ -122,4 +122,54 @@ RSpec.describe "./clear fix", :integration do
       expect(out).to match(/Variable 'x' is immutable/)
     end
   end
+
+  describe "`clear build --fix` / `clear run --fix` (Phase C)" do
+    let(:src) do
+      "FN main() RETURNS Int64 ->\n  x = 1;\n  x = 2;\n  RETURN x;\nEND\n"
+    end
+
+    def run_cmd(*argv)
+      cmd = "#{CLEAR_BIN} #{argv.join(' ')}"
+      out = `#{cmd} 2>/tmp/clear_cmd_stderr`
+      err = File.read("/tmp/clear_cmd_stderr")
+      File.delete("/tmp/clear_cmd_stderr") rescue nil
+      [out, err, $?.exitstatus]
+    end
+
+    it "`build --fix` auto-applies ownership fix and then builds" do
+      path = write("b.cht", src)
+      out, err, status = run_cmd("build", "--fix", path)
+      expect(status).to eq(0), "stderr:\n#{err}"
+      expect(err).to match(/build failed — running `clear fix`/)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("MUTABLE x = 1")
+    end
+
+    it "`run --fix` auto-applies ownership fix and then runs" do
+      path = write("r.cht", src)
+      _, err, status = run_cmd("run", "--fix", path)
+      expect(status).to eq(0), "stderr:\n#{err}"
+      expect(err).to match(/run failed — running `clear fix`/)
+      expect(File.read(path)).to include("MUTABLE x = 1")
+    end
+
+    it "`build --fix=auto` applies interactive fixes without prompting" do
+      # Any fixable finding with only :interactive candidates would need
+      # --fix=auto to proceed non-interactively. Immutable-assignment is
+      # :auto so this just confirms the flag parses + flows through.
+      path = write("b.cht", src)
+      _, _, status = run_cmd("build", "--fix=auto", path)
+      expect(status).to eq(0)
+    end
+
+    it "exits non-zero when `fix` produces no edits (build still broken)" do
+      # A file whose only compile error has no fixable mapping — the
+      # fixer will exit 0 with no edits, but the build retry still
+      # fails, so the overall command exits non-zero.
+      broken = "FN main() RETURNS Void ->\n  nonexistent_function();\n  RETURN;\nEND\n"
+      path   = write("broken.cht", broken)
+      _, _, status = run_cmd("build", "--fix", path)
+      expect(status).not_to eq(0)
+    end
+  end
 end
