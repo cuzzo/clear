@@ -247,6 +247,7 @@ class Formatter::Emitter
     toks = expand_then_do_blocks(toks)
     toks = expand_with_blocks(toks)
     toks = expand_pipelines(toks)
+    toks = expand_method_chains(toks)
     toks = expand_bg_do_blocks(toks)
     toks = expand_record_types(toks)
     toks = collapse_newlines(toks)
@@ -841,6 +842,109 @@ class Formatter::Emitter
 
   def phantom(type)
     Formatter::FormatLexer::Token.new(type, '', 0, 0)
+  end
+
+  # ---- Method chain wrap (§3.5) ------------------------------------------
+  #
+  # `.a().b().c()...` chains with 4+ segments OR total chain length > 80
+  # chars wrap, one `.seg` per line at +1 from the receiver. A segment is
+  # `.name` optionally followed by `(args)` or `[index]`.
+  def expand_method_chains(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      if method_chain_start?(toks, i, out)
+        segments, chain_end = scan_chain_segments(toks, i)
+        if segments.length >= 4 || chain_length_estimate(toks, segments) > 80
+          insert_nl(out)
+          out << phantom(:INDENT_OPEN)
+          segments.each_with_index do |seg, k|
+            insert_nl(out) if k > 0
+            (seg[:start]...seg[:end]).each do |j|
+              next if toks[j].type == :NL
+              out << toks[j]
+            end
+          end
+          out << phantom(:INDENT_CLOSE)
+          i = chain_end
+          next
+        end
+      end
+      out << toks[i]
+      i += 1
+    end
+    out
+  end
+
+  def method_chain_start?(toks, i, out)
+    return false unless toks[i].type == :SYM && toks[i].raw == '.'
+    prev = last_nontrivial_in_out(out)
+    return false unless prev
+    [:VAR_ID, :TYPE_ID].include?(prev.type) ||
+      (prev.type == :SYM && [')', ']'].include?(prev.raw))
+  end
+
+  def last_nontrivial_in_out(out)
+    j = out.length - 1
+    while j >= 0
+      t = out[j]
+      break unless [:NL, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
+      j -= 1
+    end
+    j >= 0 ? out[j] : nil
+  end
+
+  def scan_chain_segments(toks, start_idx)
+    segments = []
+    i = start_idx
+    while i < toks.length && toks[i].type == :SYM && toks[i].raw == '.'
+      seg_start = i
+      i += 1
+      # The segment name (identifier).
+      break unless i < toks.length && [:VAR_ID, :TYPE_ID].include?(toks[i].type)
+      i += 1
+      # Optional (args) or [index].
+      while i < toks.length && toks[i].type == :SYM && ['(', '['].include?(toks[i].raw)
+        i = skip_matched_brackets(toks, i)
+      end
+      segments << { start: seg_start, end: i }
+      # Skip any NLs between segments (chain may already be wrapped).
+      while i < toks.length && toks[i].type == :NL
+        i += 1
+      end
+    end
+    [segments, segments.last ? segments.last[:end] : start_idx]
+  end
+
+  def skip_matched_brackets(toks, open_idx)
+    opener = toks[open_idx].raw
+    closer = (opener == '(') ? ')' : ']'
+    depth = 0
+    j = open_idx
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        if t.raw == opener then depth += 1
+        elsif t.raw == closer
+          depth -= 1
+          return j + 1 if depth == 0
+        end
+      end
+      j += 1
+    end
+    j
+  end
+
+  def chain_length_estimate(toks, segments)
+    total = 0
+    segments.each do |seg|
+      (seg[:start]...seg[:end]).each do |j|
+        t = toks[j]
+        next if t.type == :NL
+        total += t.raw.length
+      end
+    end
+    total
   end
 
   # ---- BG / DO multi-statement wrap (§3.10) ------------------------------

@@ -262,7 +262,34 @@ a bug in the rule, not in the code.
 
 ## Implementation status
 
-**v1.1 (current):**
+**v1.2 (current — forced wraps):**
+- WITH forced wraps (§3.2, §3.3): 2+ captures always wrap; trailing
+  ON/RETRY/POSSIBLE_* clause forces the body-at-+2, `}`-at-+1,
+  ON-at-+1 shape. Both triggers compose.
+- Pipeline forced wraps (§3.4, §3.7): 2+ `s>` stages → each stage on
+  its own line at +1 from receiver; `s> RECOVER(...)` receives one
+  extra indent level (+2) relative to sibling stages.
+- FN signature wrap (§3.1): projected single-line length > 120 OR
+  source already wrapped between `(` and `)` → each param at +1,
+  `)` and `RETURNS T ->` back at FN column.
+- BG/DO multi-statement wrap (§3.10): 0–1 statements stay inline,
+  2+ statements force multi-line (each statement on its own line).
+- STRUCT/UNION/ENUM one-per-line (§3.8) — from v1.1.
+
+Introduced `:INDENT_OPEN` / `:INDENT_CLOSE` phantom tokens that the
+renderer uses to adjust depth in positions where no `{`/`END`/`->`
+drives the change. Placement before any code on a line acts
+pre-render; placement after code acts post-render.
+
+**v1.2 deferred (v2 candidates):**
+- Long call argument wrap (§3.9) — needs whole-call multi-line
+  detection plus all-or-nothing wrap.
+- Pipeline / chain assignment drop when first line >80 (§3.6).
+- CONCURRENT multi-arg stage drop (§3.11) — depends on exact column
+  alignment with the `CONCURRENT` keyword position, which the
+  depth-based renderer can't express directly.
+
+**v1.1:**
 - Parse validation (§9).
 - Lossless tokenization (preserves strings incl. `${}`, comments, numerics).
 - Intra-line spacing canonicalization (§4) — operators, commas,
