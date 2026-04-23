@@ -1577,3 +1577,85 @@ test "ParkingMutex: fiber acquires after non-fiber holder releases (sentinel own
     try std.testing.expect(shared.fiber_acquired);
     try std.testing.expect(!shared.mu.isLocked());
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lost-wake regression: multiple raw threads, sustained contention with
+// long-enough CS to force several into futex_wait simultaneously.
+//
+// THE BUG THIS WOULD HAVE CAUGHT: a previous version of the non-fiber
+// futex path cleared HAS_THREAD_SLEEPER bit on wake. Sequence:
+//   1. T_A and T_B both park, bit is set.
+//   2. Holder wakes T_A. T_A acquires, clears the bit.
+//   3. T_A unlocks → bit is clear → no wake fires for T_B.
+//   4. T_B is parked forever → join() hangs → test deadlocks.
+//
+// Existing tests didn't catch it because:
+//   - All fiber tests use HAS_WAITERS (different bit, different code path).
+//   - The cross-thread hammer test only uses tryLock (fast path; never
+//     reaches the futex code).
+//
+// This test forces at least one thread into futex per round by sleeping
+// 100us inside the critical section -- long enough that SPIN_BUDGET +
+// YIELD_BUDGET budgets (~32us total) are exhausted by waiting threads.
+// ─────────────────────────────────────────────────────────────────────────────
+test "ParkingMutex: multi-thread sustained contention with CS sleep (lost-wake regression)" {
+    const N_THREADS: usize = 4;
+    const ITERS_PER_THREAD: usize = 200;
+    const CS_SLEEP_NS: u64 = 100_000; // 100us; > SPIN+YIELD budget combined
+
+    var mu = ParkingMutex{};
+    var counter: usize = 0;
+
+    const Worker = struct {
+        fn run(m: *ParkingMutex, c: *usize, iters: usize, sleep_ns: u64) void {
+            var i: usize = 0;
+            while (i < iters) : (i += 1) {
+                m.lock() catch unreachable;
+                c.* += 1;
+                compat.sleepNs(sleep_ns);
+                m.unlock();
+            }
+        }
+    };
+
+    var threads: [N_THREADS]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, Worker.run, .{ &mu, &counter, ITERS_PER_THREAD, CS_SLEEP_NS });
+    }
+    // If the lost-wake bug returns, one of these joins will hang forever.
+    for (&threads) |*t| t.join();
+
+    try std.testing.expectEqual(N_THREADS * ITERS_PER_THREAD, counter);
+    try std.testing.expect(!mu.isLocked());
+}
+
+// Same regression coverage for ParkingRwLock writer side.
+test "ParkingRwLock: multi-thread writers with CS sleep (lost-wake regression)" {
+    const N_THREADS: usize = 4;
+    const ITERS_PER_THREAD: usize = 200;
+    const CS_SLEEP_NS: u64 = 100_000;
+
+    var rw = ParkingRwLock{};
+    var counter: usize = 0;
+
+    const Worker = struct {
+        fn run(l: *ParkingRwLock, c: *usize, iters: usize, sleep_ns: u64) void {
+            var i: usize = 0;
+            while (i < iters) : (i += 1) {
+                l.lock() catch unreachable;
+                c.* += 1;
+                compat.sleepNs(sleep_ns);
+                l.unlock();
+            }
+        }
+    };
+
+    var threads: [N_THREADS]std.Thread = undefined;
+    for (&threads) |*t| {
+        t.* = try std.Thread.spawn(.{}, Worker.run, .{ &rw, &counter, ITERS_PER_THREAD, CS_SLEEP_NS });
+    }
+    for (&threads) |*t| t.join();
+
+    try std.testing.expectEqual(N_THREADS * ITERS_PER_THREAD, counter);
+    try std.testing.expect(!rw.isWriteLocked());
+}
