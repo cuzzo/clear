@@ -317,7 +317,8 @@ module MIR
   #     break :blk __p;
   # }
   # Used for: @indirect fields, heap struct literals, capability boxing.
-  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
+  # expression node (e.g. Ident("alloc")) used directly as the allocator.
   HeapCreate = Struct.new(:zig_type, :init, :alloc, :label) do
     include Expr
   end
@@ -325,7 +326,8 @@ module MIR
   # Byte slice duplication.
   # Zig: try alloc.dupe(u8, source)
   # Used for: string copies, HPT return dupes, BG captures.
-  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
+  # expression node (e.g. Ident("alloc")) used directly as the allocator.
   DupeSlice = Struct.new(:source, :alloc) do
     include Expr
   end
@@ -333,7 +335,8 @@ module MIR
   # Typed slice allocation (uninitialized).
   # Zig: try alloc.alloc(elem_type, len)
   # Used for: COPY list deep-copy buffer.
-  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
+  # expression node (e.g. Ident("alloc")) used directly as the allocator.
   AllocSlice = Struct.new(:elem_type, :len, :alloc) do
     include Expr
   end
@@ -415,7 +418,8 @@ module MIR
   #   :list_shallow -> blk: { alloc + memcpy }
   #   :list_deep    -> blk: { alloc + per-element dupeUnionValue }
   #   :passthrough  -> source (no copy needed, value type)
-  # alloc: symbol (:heap, :frame) -- resolved to Zig by emitter.
+  # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
+  # expression node (e.g. Ident("alloc")) used directly as the allocator.
   DeepCopy = Struct.new(:source, :zig_type, :elem_type, :strategy,
                         :alloc) do
     include Expr
@@ -673,6 +677,33 @@ module MIR
   # Zig: comptime expr
   # Forces expr to be evaluated at compile time.
   Comptime = Struct.new(:expr) do
+    include Expr
+  end
+
+  # Semantic union-variant payload access.
+  # Zig: union_value.Variant
+  # zig_type: the union's Zig type name (for checker cross-reference and
+  # for bc_emitter dispatch). Distinguishes variant access from struct-field
+  # access so bc_emitter can route to native `cdr` (or equivalent) without
+  # scanning variant name tables.
+  UnionVariantGet = Struct.new(:object, :variant, :zig_type) do
+    include Expr
+  end
+
+  # Semantic list-backing-slice access.
+  # Zig: list.items
+  # Used by lowering to mark list-specific accesses (vs arbitrary struct
+  # fields). The checker and bc_emitter can dispatch on node class rather
+  # than name-matching "items".
+  ListItems = Struct.new(:list) do
+    include Expr
+  end
+
+  # Semantic list length access.
+  # Zig: expr.len
+  # Wrap in ListItems first for ArrayList-shaped containers whose length
+  # lives at list.items.len (compose as ListLength(ListItems(list))).
+  ListLength = Struct.new(:expr) do
     include Expr
   end
 

@@ -768,7 +768,7 @@ class MIRLowering
             nil
           )
           len_guard = MIR::IfStmt.new(
-            MIR::BinOp.new(">", MIR::FieldGet.new(self_field, "len"), MIR::Lit.new("0")),
+            MIR::BinOp.new(">", MIR::ListLength.new(self_field), MIR::Lit.new("0")),
             [MIR::ExprStmt.new(MIR::FreeSlice.new(self_field, alloc_ref), false)],
             nil
           )
@@ -3488,7 +3488,20 @@ class MIRLowering
       return MIR::FieldGet.new(data, node.field.to_s)
     end
 
-    result = MIR::FieldGet.new(target, node.field.to_s)
+    # Detect union-variant payload access: target has a union type and the
+    # field name matches a declared variant. Emit MIR::UnionVariantGet so
+    # bc_emitter / checker can dispatch on node class rather than name
+    # matching (vs. plain struct-field access).
+    target_type_sym = ti&.resolved&.to_s&.to_sym
+    union_schema = target_type_sym && @union_schemas&.dig(target_type_sym)
+    field_str = node.field.to_s
+    if union_schema && (union_schema.key?(node.field) ||
+                        union_schema.key?(field_str) ||
+                        union_schema.key?(field_str.to_sym))
+      return MIR::UnionVariantGet.new(target, field_str, ti.zig_type)
+    end
+
+    result = MIR::FieldGet.new(target, field_str)
 
     # Auto-dereference @indirect fields
     target_type = ti&.resolved.to_s
@@ -3539,7 +3552,7 @@ class MIRLowering
       emit_builtin(:setMemberGet, [target, index, MIR::Ident.new(elem_zig)])
     elsif node.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
-      items = MIR::FieldGet.new(target, "items")
+      items = MIR::ListItems.new(target)
       cast_idx = MIR::Cast.new(index, "usize", :intCast)
       MIR::IndexGet.new(items, cast_idx)
     elsif ti && direct_indexable_collection_type?(ti)
@@ -4301,7 +4314,7 @@ class MIRLowering
 
     len_guard = ->(old_name, alloc_sym) {
       MIR::IfStmt.new(
-        MIR::BinOp.new(">", MIR::FieldGet.new(MIR::Ident.new(old_name), "len"), MIR::Lit.new("0")),
+        MIR::BinOp.new(">", MIR::ListLength.new(MIR::Ident.new(old_name)), MIR::Lit.new("0")),
         [MIR::ExprStmt.new(MIR::FreeSlice.new(MIR::Ident.new(old_name), alloc_sym), false)],
         nil
       )
@@ -4557,7 +4570,7 @@ class MIRLowering
       is_arraylist = (ct.list_collection? || (ct.array? && ct.dynamic?)) &&
                      !ct.string? && !is_param && !is_field_access
       iter = if is_arraylist
-        MIR::FieldGet.new(coll, "items")
+        MIR::ListItems.new(coll)
       elsif is_param || (is_field_access && ct.array? && (ct.dynamic? || ct.list_collection?))
         coll
       else
@@ -4980,7 +4993,7 @@ class MIRLowering
                  @current_fn_param_names&.include?(ast_node.name)
     base =
       if ti.list_collection? && !list_param
-        MIR::FieldGet.new(target, "items")
+        MIR::ListItems.new(target)
       elsif direct_slice_backed_expr?(ast_node, ti) || list_param
         target
       else
@@ -5004,12 +5017,12 @@ class MIRLowering
       if ti.list_collection?
         if is_param
           # Parameters receive slices ([]T via .items at call site) — no .items wrapper.
-          MIR::FieldGet.new(recv, "len")
+          MIR::ListLength.new(recv)
         else
-          MIR::FieldGet.new(MIR::FieldGet.new(recv, "items"), "len")
+          MIR::ListLength.new(MIR::ListItems.new(recv))
         end
       elsif ti.string? || (ti.array? && !ti.string? && direct_slice_backed_expr?(recv_ast, ti))
-        MIR::FieldGet.new(recv, "len")
+        MIR::ListLength.new(recv)
       else
         # Local dynamic arrays: CheatLib.len handles both ArrayListUnmanaged
         # (via .items.len) and slices (via .len) at runtime — fall back to it.

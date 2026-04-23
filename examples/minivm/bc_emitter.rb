@@ -739,6 +739,8 @@ class BcEmitter
       compile_method_call_expr(node)
     when MIR::FieldGet
       compile_field_get(node)
+    when MIR::UnionVariantGet
+      compile_union_variant_get(node)
     when MIR::IndexGet
       compile_index_get(node)
     when MIR::StructInit
@@ -753,8 +755,19 @@ class BcEmitter
       compile_cast(node)
     when MIR::Conditional
       compile_conditional(node)
+    when MIR::Comptime
+      compile_expr(node.expr)  # VM evaluates comptime guards at runtime
     when MIR::ItemsAccess
       compile_expr(node.expr)  # VM lists don't need .items unwrap
+    when MIR::ListItems
+      compile_expr(node.list)  # VM lists don't need .items unwrap
+    when MIR::ListLength
+      compile_expr(node.expr); pop_type
+      emit_op(NATIVE_CALL, NATIVES["count"], 1)
+      push_type(:i64)
+      return
+    when MIR::IfOptional
+      compile_if_optional(node)
     when MIR::AddressOf
       compile_expr(node.expr)  # VM has no pointers
     when MIR::Deref
@@ -1548,6 +1561,38 @@ class BcEmitter
     compile_expr(node.else_val)
     @ops[patch_end] = @ops.length
     push_type(peek_type)
+  end
+
+  # MIR::UnionVariantGet: union payload access, routed to native cdr.
+  # The MIR distinguishes this from struct-field access so we don't need
+  # the unreliable name-matching fallback inside compile_field_get.
+  def compile_union_variant_get(node)
+    compile_expr_to_value(node.object); pop_type
+    emit_op(NATIVE_CALL, NATIVES["cdr"], 1)
+    push_type(:any)
+  end
+
+  # MIR::IfOptional: (if (optional) |capture| then_expr else else_expr).
+  # VM model: optional is nil-or-value; bind capture to the non-nil value
+  # in the then branch. Since VM values are Scheme-like (no type-level
+  # optional wrapper), the capture simply aliases the probed expression.
+  def compile_if_optional(node)
+    tmp = "__opt_#{@ops.length}"
+    compile_expr(node.optional); ensure_value_stack
+    emit_op(STORE_NAME, add_const(tmp))
+    emit_op(NOT); emit_op(NOT)  # boolify
+    emit_op(JUMP_IF_FALSE); patch_else = @ops.length; emit_op(0)
+    # Then branch: bind capture = tmp, emit then_expr.
+    emit_op(LOAD_NAME, add_const(tmp))
+    emit_op(STORE_NAME, add_const(node.capture.to_s))
+    pop_type if !@type_stack.empty?  # discard the bool from NOT/NOT
+    compile_expr(node.then_expr); ensure_value_stack
+    emit_op(JUMP); patch_end = @ops.length; emit_op(0)
+    @ops[patch_else] = @ops.length
+    pop_type if !@type_stack.empty?  # discard the then branch's type for now
+    compile_expr(node.else_expr); ensure_value_stack
+    @ops[patch_end] = @ops.length
+    push_type(:any)
   end
 
   def compile_block_expr(node)

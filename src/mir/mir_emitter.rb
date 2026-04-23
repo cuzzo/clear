@@ -120,6 +120,9 @@ class MIREmitter
     when MIR::Conditional      then emit_conditional(node)
     when MIR::IfOptional       then emit_if_optional(node)
     when MIR::Comptime         then "comptime #{emit(node.expr)}"
+    when MIR::UnionVariantGet  then "#{paren_if_try(emit(node.object))}.#{node.variant}"
+    when MIR::ListItems        then "#{paren_if_try(emit(node.list))}.items"
+    when MIR::ListLength       then "#{paren_if_try(emit(node.expr))}.len"
     when MIR::AddressOf        then "&#{emit(node.expr)}"
     when MIR::Deref            then "#{emit(node.expr)}.*"
     when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
@@ -410,7 +413,7 @@ class MIREmitter
   def emit_heap_create(node)
     label = node.label || "__hc"
     init = emit(node.init)
-    alloc = alloc_zig(node.alloc)
+    alloc = alloc_expr(node.alloc)
     "#{label}: {\n" \
     "    const __p = try #{alloc}.create(#{node.zig_type});\n" \
     "    errdefer #{alloc}.destroy(__p);\n" \
@@ -420,11 +423,11 @@ class MIREmitter
   end
 
   def emit_dupe_slice(node)
-    "try #{alloc_zig(node.alloc)}.dupe(u8, #{emit(node.source)})"
+    "try #{alloc_expr(node.alloc)}.dupe(u8, #{emit(node.source)})"
   end
 
   def emit_alloc_slice(node)
-    "try #{alloc_zig(node.alloc)}.alloc(#{node.elem_type}, #{emit(node.len)})"
+    "try #{alloc_expr(node.alloc)}.alloc(#{node.elem_type}, #{emit(node.len)})"
   end
 
   def emit_free_slice(node)
@@ -567,7 +570,7 @@ class MIREmitter
 
   def emit_deep_copy(node)
     src = emit(node.source)
-    alloc = node.alloc ? alloc_zig(node.alloc) : nil
+    alloc = node.alloc ? alloc_expr(node.alloc) : nil
     case node.strategy
     when :string
       # dupe returns []u8 (mutable); cast to []const u8 so comparisons with
@@ -698,10 +701,13 @@ class MIREmitter
   end
 
   def emit_field_get(node)
-    obj = emit(node.object)
-    # Parenthesize try-expressions to prevent Zig precedence issues
-    obj = "(#{obj})" if obj.start_with?("try ")
-    "#{obj}.#{node.field}"
+    "#{paren_if_try(emit(node.object))}.#{node.field}"
+  end
+
+  # Parenthesize try-expressions to prevent Zig precedence issues where
+  # `try X.field` parses as `try (X.field)` instead of `(try X).field`.
+  def paren_if_try(expr)
+    expr.start_with?("try ") ? "(#{expr})" : expr
   end
 
   def emit_index_get(node)
