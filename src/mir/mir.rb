@@ -768,4 +768,28 @@ module MIR
   InlineBc = Struct.new(:op, :args, :stdlib_def) do
     include Expr
   end
+
+  # Raw bytecode. Sibling to RawZig for the :bc target. Nothing in
+  # mir_lowering emits this yet — Phase 0 scaffolding only (see
+  # examples/minivm/MIR_MIGRATION.md). Phase 3 will start emitting it
+  # by target-aware rewriting of RawZig sites that have a :bc_raw
+  # registry mapping.
+  #
+  # template: Array of Symbol | String | Array. bc_emitter walks the
+  #   template: a Symbol is an opcode name (emit_op(OPCODE)), a String
+  #   is a placeholder like "{0}" that substitutes with the compiled
+  #   value of args[0], an Array is [opcode_symbol, *inline_args] for
+  #   opcodes that take immediate args (e.g. [:NATIVE_CALL, :list_push, 2]).
+  # args:     Array<MIR::Expr> — the argument expressions (unlowered).
+  # stdlib_def: the registry hash the template came from (ownership
+  #   semantics so the checker can reason about it).
+  #
+  # Same invisibility rule as RawZig applies: the checker cannot see
+  # inside the template. When Phase 3 lands, every bc_raw template should
+  # come from a registry entry whose ownership effects are declared in
+  # stdlib_def, making INV-5 enforceable uniformly.
+  RawBc = Struct.new(:template, :args, :stdlib_def) do
+    include Stmt
+    def expr?; true; end  # can appear in expression position too
+  end
 end

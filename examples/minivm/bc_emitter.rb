@@ -355,6 +355,13 @@ class BcEmitter
       end
     when MIR::InlineBc
       compile_inline_bc(mir_node)
+    when MIR::RawBc
+      # Statement-position RawBc — walk its template for side effects,
+      # discard the result.
+      compile_raw_bc(mir_node)
+      t = pop_type
+      emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
+      push_type(:void)
     when MIR::MoveMark
       # Release this slot's ownership at the point the binding is moved
       # out — either into a return value or a TAKES callee arg. MARK_MOVED
@@ -760,6 +767,8 @@ class BcEmitter
       raise Unimplemented, "InlineZig/RawZig in expression position (no bc template in stdlib)"
     when MIR::InlineBc
       compile_inline_bc(node)
+    when MIR::RawBc
+      compile_raw_bc(node)
     when MIR::ConcatStr
       # Variadic string concat — the VM's CONCAT opcode takes two operands
       # and pushes the joined string. Chain it for 3+ parts: push a, push b,
@@ -854,6 +863,57 @@ class BcEmitter
   # ================================================================
   # Binary operations
   # ================================================================
+
+  # MIR::RawBc: template-driven multi-opcode emission. Unlike InlineBc
+  # (which dispatches on op name via compile_inline_bc's case statement),
+  # RawBc carries the opcode sequence inline as a template array — same
+  # structural role as RawZig on the Zig side.
+  #
+  # Template element forms:
+  #   Symbol              -> emit_op(OPCODE) with no immediate args.
+  #   String "{N}"        -> compile_expr_to_value(args[N]).
+  #   Array [Sym, *]      -> emit_op(Sym, *immediate_args). Placeholders
+  #                           "{N}" inside the array still resolve to args.
+  #
+  # Phase 0 scaffolding: no lowering site currently emits RawBc. When
+  # Phase 3 starts emitting it, every template should come from a
+  # registry entry whose ownership effects are declared in stdlib_def
+  # so INV-5 remains enforceable.
+  def compile_raw_bc(node)
+    template = node.template || []
+    args = node.args || []
+    template.each do |elem|
+      case elem
+      when Symbol
+        opcode = self.class.const_get(elem)
+        emit_op(opcode)
+      when String
+        m = elem.match(/\A\{(\d+)\}\z/)
+        if m
+          compile_expr_to_value(args[m[1].to_i]); pop_type
+        else
+          raise Unimplemented, "RawBc template string form not understood: #{elem.inspect}"
+        end
+      when Array
+        opcode_sym = elem[0]
+        opcode = self.class.const_get(opcode_sym)
+        immediate_args = elem[1..].map do |a|
+          if a.is_a?(String) && (m = a.match(/\A\{(\d+)\}\z/))
+            compile_expr_to_value(args[m[1].to_i]); pop_type
+            nil  # placeholder consumed before the emit
+          elsif a.is_a?(Symbol)
+            NATIVES[a.to_s] || raise(Unimplemented, "RawBc: unknown native :#{a}")
+          else
+            a
+          end
+        end.compact
+        emit_op(opcode, *immediate_args)
+      else
+        raise Unimplemented, "RawBc template element not understood: #{elem.inspect}"
+      end
+    end
+    push_type(:any)
+  end
 
   # MIR::InlineBc: stdlib-op dispatch driven by the :bc entry in BUILTIN_OPS.
   # The op symbol matches the registry key. Args are already MIR expr nodes;

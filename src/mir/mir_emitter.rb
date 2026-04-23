@@ -127,6 +127,7 @@ class MIREmitter
     when MIR::LambdaExpr       then emit_lambda(node)
     when MIR::InlineZig        then emit_inline_zig(node)
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
+    when MIR::RawBc            then emit_raw_bc_as_zig(node)
 
     else
       raise "MIREmitter: unknown node type #{node.class}"
@@ -140,6 +141,19 @@ class MIREmitter
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry[:zig]
+    pattern = entry[:zig].dup
+    node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
+    pattern
+  end
+
+  # RawBc is the :bc-target sibling of RawZig. Nothing in current lowering
+  # emits it (Phase 0 scaffolding only). If a :bc lowering path ever feeds
+  # a RawBc into a Zig-producing step, fall back to the :zig field of the
+  # registry entry so emission completes. Registry entries that reach Zig
+  # without :zig set is a bug in the migration — raise loudly.
+  def emit_raw_bc_as_zig(node)
+    entry = node.stdlib_def
+    raise "emit_raw_bc_as_zig: node has no stdlib_def" unless entry && entry[:zig]
     pattern = entry[:zig].dup
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
     pattern
