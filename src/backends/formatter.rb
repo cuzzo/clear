@@ -77,7 +77,7 @@ class Formatter
   # Keywords that attach directly to a following `(` — no space inserted.
   # Everything else gets a space between keyword and `(`.
   ATTACH_PAREN_AFTER = %w[
-    WITH RETRY WINDOW RECOVER JOIN SHARD REDUCE
+    WITH RETRY WINDOW RECOVER JOIN SHARD REDUCE CONCURRENT
     ASSERT ASSERT_RAISES CAST
   ].to_set.freeze
 
@@ -258,6 +258,7 @@ class Formatter::Emitter
     toks = expand_then_do_blocks(toks)
     toks = expand_with_blocks(toks)
     toks = expand_pipelines(toks)
+    toks = expand_concurrent_drops(toks)
     toks = expand_method_chains(toks)
     toks = expand_bg_do_blocks(toks)
     toks = expand_record_types(toks)
@@ -907,6 +908,100 @@ class Formatter::Emitter
     Formatter::FormatLexer::Token.new(type, '', 0, 0)
   end
 
+  # ---- CONCURRENT multi-arg chain drop (§3.11) ---------------------------
+  #
+  # `CONCURRENT(p1, p2) EACH { body }` with 2+ params drops the trailing
+  # pipeline keyword (EACH / WHERE / SELECT / etc.) to its own line at +1
+  # from the `CONCURRENT` line. Exact column alignment with CONCURRENT is
+  # not reachable in a depth-based renderer, so +1 depth is the canonical
+  # approximation.
+  def expand_concurrent_drops(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      if t.type == :KEYWORD && t.raw == 'CONCURRENT'
+        paren_open = skip_ws_nl(toks, i + 1)
+        if paren_open && toks[paren_open].type == :SYM && toks[paren_open].raw == '('
+          paren_close = find_matching_paren_or_brace(toks, paren_open, '(', ')')
+          if paren_close && count_depth0_commas(toks, paren_open, paren_close) >= 1
+            next_kw = skip_ws_nl(toks, paren_close + 1)
+            if next_kw && toks[next_kw].type == :KEYWORD && pipeline_op_keyword?(toks[next_kw].raw)
+              # Emit `CONCURRENT(...)` as-is (stripping NLs inside args;
+              # args are already wrapped by expand_call_args if long).
+              (i..paren_close).each { |j| out << toks[j] }
+              insert_nl(out)
+              out << phantom(:INDENT_OPEN)
+              stage_end = find_concurrent_stage_end(toks, next_kw)
+              (next_kw...stage_end).each do |j|
+                next if toks[j].type == :NL
+                out << toks[j]
+              end
+              out << phantom(:INDENT_CLOSE)
+              i = stage_end
+              next
+            end
+          end
+        end
+      end
+      out << t
+      i += 1
+    end
+    out
+  end
+
+  def skip_ws_nl(toks, start)
+    j = start
+    while j < toks.length && [:NL].include?(toks[j].type)
+      j += 1
+    end
+    j < toks.length ? j : nil
+  end
+
+  def count_depth0_commas(toks, open_idx, close_idx)
+    depth = 0
+    n = 0
+    ((open_idx + 1)...close_idx).each do |j|
+      t = toks[j]
+      next unless t.type == :SYM
+      case t.raw
+      when '(', '[', '{' then depth += 1
+      when ')', ']', '}' then depth -= 1
+      when ','           then (n += 1 if depth == 0)
+      end
+    end
+    n
+  end
+
+  def pipeline_op_keyword?(raw)
+    %w[EACH WHERE SELECT FIND ANY ALL COUNT SUM AVERAGE MIN MAX REDUCE
+       ORDER_BY LIMIT SKIP UNNEST DISTINCT TAP TAKE_WHILE WINDOW JOIN SHARD].include?(raw)
+  end
+
+  # Stage ends at the next `s>` at the SAME depth, a `;`, or an unmatched
+  # closing bracket. Inside nested `{}` / `()` the content is opaque.
+  def find_concurrent_stage_end(toks, start)
+    depth = 0
+    j = start
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1
+        when ')', ']', '}'
+          return j if depth == 0
+          depth -= 1
+        when ';'
+          return j if depth == 0
+        end
+      elsif t.type == :OP && t.raw == 's>' && depth == 0
+        return j
+      end
+      j += 1
+    end
+    j
+  end
+
   # ---- Method chain wrap (§3.5) ------------------------------------------
   #
   # `.a().b().c()...` chains with 4+ segments OR total chain length > 80
@@ -919,6 +1014,7 @@ class Formatter::Emitter
       if method_chain_start?(toks, i, out)
         segments, chain_end = scan_chain_segments(toks, i)
         if segments.length >= 4 || chain_length_estimate(toks, segments) > 80
+          dropped = maybe_drop_assignment_rhs(out)
           insert_nl(out)
           out << phantom(:INDENT_OPEN)
           segments.each_with_index do |seg, k|
@@ -929,6 +1025,7 @@ class Formatter::Emitter
             end
           end
           out << phantom(:INDENT_CLOSE)
+          out << phantom(:INDENT_CLOSE) if dropped
           i = chain_end
           next
         end
@@ -1340,9 +1437,15 @@ class Formatter::Emitter
   # (relative to receiver). Stages that are `s> RECOVER(...)` get an
   # additional +1. Strips source NLs inside stages so the canonical
   # layout wins regardless of the input layout.
+  #
+  # §3.6 assignment drop: if the receiver line (`x = receiver` or
+  # `x: T = receiver`) exceeds 80 chars, drop the RHS to its own line
+  # at +1, chain at +2.
   def emit_chain(out, toks, chain, recover_s)
     s_idxs  = chain[:s_idxs]
     end_idx = chain[:end_idx]
+
+    dropped = maybe_drop_assignment_rhs(out)
 
     insert_nl(out)
     out << phantom(:INDENT_OPEN)
@@ -1365,7 +1468,43 @@ class Formatter::Emitter
     end
 
     out << phantom(:INDENT_CLOSE)
+    out << phantom(:INDENT_CLOSE) if dropped
     end_idx
+  end
+
+  # §3.6: when `x = receiver ...` or `x: T = receiver ...` overflows 80
+  # chars, insert a NL + INDENT_OPEN right after the `=` so the receiver
+  # drops onto its own line at +1. Returns true when applied (caller must
+  # emit a matching INDENT_CLOSE after the chain).
+  def maybe_drop_assignment_rhs(out)
+    return false if current_line_length_in_out(out) <= 80
+    eq_idx = find_assignment_eq_on_current_line(out)
+    return false unless eq_idx
+
+    nl_tok   = Formatter::FormatLexer::Token.new(:NL, "\n", 0, 0)
+    open_tok = phantom(:INDENT_OPEN)
+    out.insert(eq_idx + 1, nl_tok, open_tok)
+    true
+  end
+
+  def find_assignment_eq_on_current_line(out)
+    start = out.length - 1
+    while start >= 0 && out[start].type != :NL
+      start -= 1
+    end
+    depth = 0
+    eq_idx = nil
+    ((start + 1)...out.length).each do |i|
+      t = out[i]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1
+        when ')', ']', '}' then depth -= 1
+        when '='           then (eq_idx = i if depth == 0)
+        end
+      end
+    end
+    eq_idx
   end
 
   # Split STRUCT / UNION / ENUM blocks so each field/variant is its own line.

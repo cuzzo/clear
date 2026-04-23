@@ -285,6 +285,26 @@ a bug in the rule, not in the code.
   untouched — grouping conventions vary (4, 3, 8) and user choice wins.
   Requires matching lexer support: a closed suffix set (i8..f64) so
   `0xDEAD_BEEF` is unambiguously hex-with-separator, not hex-with-suffix.
+- Pipeline / chain assignment drop (§3.6): when `x = receiver ...` or
+  `x: T = receiver ...` starts a pipeline (2+ `s>`) or a qualifying
+  method chain AND the first line would exceed 80 chars, the RHS
+  drops onto its own line at +1 with the chain at +2. Applies to
+  both pipeline and method-chain wrap paths via a shared helper that
+  scans the current output line for the last `=` at depth 0 and
+  inserts NL + `:INDENT_OPEN` after it.
+- CONCURRENT multi-arg chain drop (§3.11): when `CONCURRENT(p1, p2, ...)`
+  has 2+ args (1+ top-level comma) AND the next token is a pipeline
+  operator keyword (`EACH` / `WHERE` / `SELECT` / `REDUCE` / `TAP` /
+  etc.), the keyword drops onto its own line at +1 from the
+  `CONCURRENT` line. Exact column-alignment with `CONCURRENT` is not
+  reachable in a depth-based renderer, so +1 depth is the canonical
+  approximation.
+- Comment attachment (§5): no explicit ambiguity check is needed — the
+  formatter preserves every comment on its original source line (line
+  structure is preserved; intra-line spacing is rewritten). Comments
+  inside multi-line constructs round-trip with the surrounding content.
+  A dedicated `:ambiguous` refuse-to-write heuristic would only fire in
+  edge cases that do not arise under this architecture.
 
 **v1.2 (forced wraps):**
 - WITH forced wraps (§3.2, §3.3): 2+ captures always wrap; trailing
@@ -305,13 +325,16 @@ renderer uses to adjust depth in positions where no `{`/`END`/`->`
 drives the change. Placement before any code on a line acts
 pre-render; placement after code acts post-render.
 
-**v1.2 deferred (v2 candidates):**
-- Long call argument wrap (§3.9) — needs whole-call multi-line
-  detection plus all-or-nothing wrap.
-- Pipeline / chain assignment drop when first line >80 (§3.6).
-- CONCURRENT multi-arg stage drop (§3.11) — depends on exact column
-  alignment with the `CONCURRENT` keyword position, which the
-  depth-based renderer can't express directly.
+**Still pending (deferred indefinitely):**
+- §1 General continuation indent for arbitrary expression wraps the
+  user introduces (binary operators split across lines, assignment
+  RHS that is neither a pipeline nor a chain, etc.). The user asked
+  to defer this until last; the current formatter already handles
+  the specific-shape continuations (FN-sig, WITH, pipeline, chain,
+  call args, BG/DO, CONCURRENT, STRUCT/UNION/ENUM) and preserves
+  source layout for anything else, so a general rule can be designed
+  on top of the current architecture when the concrete rules are
+  nailed down.
 
 **v1.1:**
 - Parse validation (§9).

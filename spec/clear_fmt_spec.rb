@@ -218,6 +218,54 @@ RSpec.describe "./clear fmt", :integration do
     expect(out).to include("0b1010_0101")
   end
 
+  it "drops pipeline receiver onto its own line when first line exceeds 80 (§3.6)" do
+    src = <<~CLEAR
+      FN main() RETURNS Int64 ->
+        some_really_really_long_variable_name = some_really_really_long_receiver_expression_thing s> a s> b;
+        RETURN 0;
+      END
+    CLEAR
+    path = write("drop_pipe.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to match(/some_really_really_long_variable_name =\n/)
+    expect(out).to match(/^    some_really_really_long_receiver_expression_thing$/)
+    expect(out).to match(/^      s> a$/)
+    expect(out).to match(/^      s> b;$/)
+  end
+
+  it "keeps receiver inline when first line fits within 80 chars" do
+    src = "FN main() RETURNS Int64 ->\n  x = items s> filter s> reduce;\n  RETURN 0;\nEND\n"
+    path = write("nodrop.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to match(/^  x = items$/)
+    expect(out).to match(/^    s> filter$/)
+  end
+
+  it "drops trailing pipeline keyword after CONCURRENT with 2+ args (§3.11)" do
+    src = <<~CLEAR
+      FN main() RETURNS Void ->
+        items s> CONCURRENT(workers: 4, capacity: 8) EACH { doWork(_); };
+        RETURN;
+      END
+    CLEAR
+    path = write("conc.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to match(/CONCURRENT\(workers: 4, capacity: 8\)\n/)
+    expect(out).to match(/^    EACH \{/)
+  end
+
+  it "leaves single-arg CONCURRENT inline" do
+    src = <<~CLEAR
+      FN main() RETURNS Void ->
+        items s> CONCURRENT(workers: 4) EACH { doWork(_); };
+        RETURN;
+      END
+    CLEAR
+    path = write("conc1.cht", src)
+    out, _, _ = run_fmt("--no-warn", "--stdout", path)
+    expect(out).to include("CONCURRENT(workers: 4) EACH")
+  end
+
   it "is idempotent on the whole transpile-tests corpus" do
     root = File.expand_path("../transpile-tests", __dir__)
     files = Dir.glob(File.join(root, "**", "*.cht"))
