@@ -10,6 +10,7 @@ require_relative "mir/ownership_graph"
 require_relative "annotator-helpers/generic_analysis"
 require_relative "annotator-helpers/capabilities"
 require_relative "annotator-helpers/effects"
+require_relative "annotator-helpers/lock_helper"
 require_relative "mir/alloc"
 require_relative "annotator-helpers/method_analysis"
 require_relative "annotator-helpers/union"
@@ -28,6 +29,7 @@ class SemanticAnnotator
   include AllocHelper
   include MethodAnalysis
   include UnionAnalysis
+  include LockHelper
 
   attr_reader :scope_stack
 
@@ -55,6 +57,11 @@ class SemanticAnnotator
     # SOA analysis: tracks which fields of `_` are accessed during pipeline lambda bodies.
     # nil = not inside a pipeline; Set = collecting field names.
     @pipeline_accessed_fields = nil
+
+    # Phase 2 lock analysis storage (keyed by fn name). Hooked in
+    # visit_WithBlock / user-fn-call visitors; cycle-checked as a
+    # post-pass after @call_graph is complete.
+    init_lock_analysis!
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = false
     # Tracks remaining statements in current body for forward reference analysis
@@ -201,6 +208,12 @@ private
 
     # PASS 6: Compute effect sets for every function via call-graph fixed-point.
     compute_effects!
+
+    # PASS 6b: Static lock-cycle / self-deadlock detection. Propagates
+    # lock acquires through @call_graph, synthesizes held-while-calling
+    # edges, then runs SCC over the global held->acquired graph and
+    # reports any cycles.
+    check_lock_cycles!
 
     # PASS 7: Compute stack tier recommendations per function.
     compute_stack_tiers!
@@ -1559,6 +1572,15 @@ private
 
     resolve_call(node, node.args)
 
+    # Phase 2: when this call happens inside a held WITH scope and targets
+    # a user-defined function, record a held->callee site so the post-pass
+    # can add (held, T) edges for every T the callee transitively acquires.
+    # Uses the Array-of-Hash @held_lock_types shape so opted_out flows
+    # through to synthesized edges.
+    if @held_lock_types && !@held_lock_types.empty? && @fn_nodes.key?(node.name)
+      fn_name = current_fn_ctx&.name || "<top>"
+      record_held_call!(fn_name, node.name, @held_lock_types, node.token)
+    end
   end
 
   def visit_MethodCall(node)
@@ -3034,15 +3056,33 @@ private
     # fallible acquire unless the inner WITH carries POSSIBLE_DEADLOCK.
     check_nested_lock_reacquire!(node, expanded_capabilities)
 
-    # Track which variable names become "held" on entering this WITH. Only
-    # fallible captures (EXCLUSIVE / write_locked_read) qualify — BORROWED
-    # / RESTRICT don't acquire a mutex, so they don't participate.
+    # Phase 2: record per-fn held->acquired edges and direct acquires
+    # for the global cycle-detection pass. Edges from an opted-out WITH
+    # (POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE) are marked opted_out and
+    # excluded from the cycle graph.
+    fn_name_for_lock = current_fn_ctx&.name || "<top>"
+    held_entries_now = @held_lock_types || []
+    expanded_capabilities.each do |cap|
+      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
+      record_with_acquire!(fn_name_for_lock, cap, held_entries_now, node.deadlock_escape)
+    end
+
+    # Track which variable names / lock types become "held" on entering
+    # this WITH. Only fallible captures qualify — BORROWED / RESTRICT
+    # don't acquire a mutex. @held_lock_types is an Array of
+    # { type:, opted_out: } so a WITH's deadlock_escape propagates to
+    # every edge emitted from within its held scope.
     prev_held = @held_locks || {}
     @held_locks = prev_held.dup
+    prev_held_types = @held_lock_types || []
+    @held_lock_types = prev_held_types.dup
+    cur_opt = !node.deadlock_escape.nil?
     expanded_capabilities.each do |cap|
       next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
       vn = cap_var_name(cap[:var_node])
       @held_locks[vn] ||= { token: cap[:var_node].respond_to?(:token) ? cap[:var_node].token : node.token }
+      t = lock_identity_of(cap)
+      @held_lock_types << { type: t, opted_out: cur_opt } if t
     end
 
     # 2. Enter a child scope for the capability block
@@ -3067,39 +3107,17 @@ private
       end
     end
 
+    # Restore held-lock state BEFORE visiting the ON/RETRY clause's action
+    # body or message — on the error path the lock was never acquired, so
+    # the action runs outside the held scope. Lock-cycle analysis must
+    # see the action body as lock-free.
+    @held_locks = prev_held
+    @held_lock_types = prev_held_types
+
     validate_lock_error_clause!(node, expanded_capabilities)
 
-    @held_locks = prev_held
     @with_block_depth -= 1
     node.full_type = :Void
-  end
-
-  # Reject a nested WITH that re-acquires a fallible lock on a variable
-  # already held by an enclosing WITH in the same function. Lexical,
-  # same-name; does not chase aliases or cross function boundaries
-  # (those are later-phase analyses). The inner WITH can opt out with
-  # POSSIBLE_DEADLOCK, which downgrades the error to a [Note] so the
-  # risk stays visible in compiler output.
-  def check_nested_lock_reacquire!(node, expanded_capabilities)
-    return unless @held_locks
-    expanded_capabilities.each do |cap|
-      next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
-      vn = cap_var_name(cap[:var_node])
-      next unless @held_locks.key?(vn)
-      outer_tok = @held_locks[vn][:token]
-      escape    = node.deadlock_escape
-      if escape && escape[:kind] == :deadlock
-        note!(cap[:var_node], "POSSIBLE_DEADLOCK accepted: '#{vn}' already held by an enclosing WITH " \
-                              "(outer line #{outer_tok&.line}). Reviewer: verify this cannot actually self-acquire " \
-                              "at runtime (distinct instances, sorted acquire, etc.).")
-      else
-        error!(cap[:var_node],
-               "Nested lock re-acquire: '#{vn}' is already held by an enclosing WITH " \
-               "(outer line #{outer_tok&.line}). This is a structural self-deadlock. " \
-               "If you know the instances are distinct and ordered, mark the inner WITH as " \
-               "POSSIBLE_DEADLOCK.")
-      end
-    end
   end
 
   # Validate WithBlock#lock_error_clause. Requires at least one fallible

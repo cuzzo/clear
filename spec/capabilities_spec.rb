@@ -1485,13 +1485,38 @@ RSpec.describe SemanticAnnotator do
       expect { run(src) }.not_to raise_error
     end
 
-    it "accepts nested WITH on distinct variables" do
+    it "accepts nested WITH on distinct types" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        STRUCT D { w: Int64 }
+        a = C{ v: 0 } @locked;
+        b = D{ w: 0 } @locked;
+        WITH EXCLUSIVE a AS x {
+          WITH EXCLUSIVE b AS y { y.w = x.v; }
+        }
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects nested WITH on same-type distinct variables without opt-out (Phase 2)" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         a = C{ v: 0 } @locked;
         b = C{ v: 0 } @locked;
         WITH EXCLUSIVE a AS x {
           WITH EXCLUSIVE b AS y { y.v = x.v; }
+        }
+      FLUX
+      expect { run(src) }.to raise_error(/self-loop.*:C|Potential.*self-loop/)
+    end
+
+    it "accepts nested WITH on same-type distinct variables when inner has POSSIBLE_DEADLOCK" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        a = C{ v: 0 } @locked;
+        b = C{ v: 0 } @locked;
+        WITH EXCLUSIVE a AS x {
+          WITH POSSIBLE_DEADLOCK EXCLUSIVE b AS y { y.v = x.v; }
         }
       FLUX
       expect { run(src) }.not_to raise_error
@@ -1519,6 +1544,158 @@ RSpec.describe SemanticAnnotator do
         }
       FLUX
       expect { run(src) }.to raise_error(/Nested lock re-acquire/)
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Phase 2: type-level cross-function lock-cycle detection
+  # ---------------------------------------------------------------------------
+
+  describe "type-level lock-cycle detection (cross-function)" do
+    it "rejects AB/BA cycle across two functions on distinct types" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+
+        FN useB() RETURNS Void ->
+          local_b = B{ y: 0 } @locked;
+          WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
+          RETURN;
+        END
+
+        FN useA() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH EXCLUSIVE local_a AS aa { aa.x = aa.x + 1; }
+          RETURN;
+        END
+
+        FN ab() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH EXCLUSIVE local_a AS aa { useB(); }
+          RETURN;
+        END
+
+        FN ba() RETURNS Void ->
+          local_b = B{ y: 0 } @locked;
+          WITH EXCLUSIVE local_b AS bb { useA(); }
+          RETURN;
+        END
+
+        FN main() RETURNS Void -> ab(); ba(); RETURN; END
+      FLUX
+      expect { run(src) }.to raise_error(/lock cycle/)
+    end
+
+    it "accepts consistent-order held-during-call on two types (no cycle)" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+
+        FN useB() RETURNS Void ->
+          local_b = B{ y: 0 } @locked;
+          WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
+          RETURN;
+        END
+
+        FN ab() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH EXCLUSIVE local_a AS aa { useB(); }
+          RETURN;
+        END
+
+        FN main() RETURNS Void -> ab(); RETURN; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects same-type nested acquire across a function-call boundary" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+
+        FN useC() RETURNS Void ->
+          other_c = C{ v: 0 } @locked;
+          WITH EXCLUSIVE other_c AS cc { cc.v = cc.v + 1; }
+          RETURN;
+        END
+
+        FN holder() RETURNS Void ->
+          my_c = C{ v: 0 } @locked;
+          WITH EXCLUSIVE my_c AS cc { useC(); }
+          RETURN;
+        END
+
+        FN main() RETURNS Void -> holder(); RETURN; END
+      FLUX
+      expect { run(src) }.to raise_error(/self-loop|lock cycle/)
+    end
+
+    it "accepts cross-fn cycle when both participating sites carry POSSIBLE_LOCK_CYCLE" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+
+        FN useB() RETURNS Void ->
+          local_b = B{ y: 0 } @locked;
+          WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
+          RETURN;
+        END
+
+        FN useA() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH EXCLUSIVE local_a AS aa { aa.x = aa.x + 1; }
+          RETURN;
+        END
+
+        FN ab() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_a AS aa { useB(); }
+          RETURN;
+        END
+
+        FN ba() RETURNS Void ->
+          local_b = B{ y: 0 } @locked;
+          WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_b AS bb { useA(); }
+          RETURN;
+        END
+
+        FN main() RETURNS Void -> ab(); ba(); RETURN; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "permits calls that don't take the held lock's type" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+
+        FN pure() RETURNS Int64 -> RETURN 42; END
+
+        FN holder() RETURNS Void ->
+          local_a = A{ x: 0 } @locked;
+          WITH EXCLUSIVE local_a AS aa { aa.x = pure(); }
+          RETURN;
+        END
+
+        FN main() RETURNS Void -> holder(); RETURN; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects intra-fn AB/BA cycle on different types, different variables" do
+      src = <<~FLUX
+        STRUCT A { x: Int64 }
+        STRUCT B { y: Int64 }
+
+        FN cycleInOne() RETURNS Void ->
+          a1 = A{ x: 0 } @locked;
+          b1 = B{ y: 0 } @locked;
+          WITH EXCLUSIVE a1 AS aa { WITH EXCLUSIVE b1 AS bb { bb.y = aa.x; } }
+          WITH EXCLUSIVE b1 AS bb { WITH EXCLUSIVE a1 AS aa { aa.x = bb.y; } }
+          RETURN;
+        END
+
+        FN main() RETURNS Void -> cycleInOne(); RETURN; END
+      FLUX
+      expect { run(src) }.to raise_error(/lock cycle/)
     end
   end
 
