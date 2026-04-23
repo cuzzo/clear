@@ -247,6 +247,7 @@ class Formatter::Emitter
     toks = expand_then_do_blocks(toks)
     toks = expand_with_blocks(toks)
     toks = expand_pipelines(toks)
+    toks = expand_bg_do_blocks(toks)
     toks = expand_record_types(toks)
     toks = collapse_newlines(toks)
     render(toks)
@@ -840,6 +841,107 @@ class Formatter::Emitter
 
   def phantom(type)
     Formatter::FormatLexer::Token.new(type, '', 0, 0)
+  end
+
+  # ---- BG / DO multi-statement wrap (§3.10) ------------------------------
+  #
+  # `BG { ... }` (and `DO { ... }` fork-join branches) must be multi-line
+  # when the body contains 2+ statements. Single-statement bodies stay
+  # inline if they fit. Capability form `BG { @micro -> stmt }` is single
+  # statement and stays inline.
+  def expand_bg_do_blocks(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      if t.type == :KEYWORD && %w[BG DO].include?(t.raw)
+        brace_idx = find_bg_brace(toks, i)
+        if brace_idx
+          close_idx = find_matching_close_brace(toks, brace_idx)
+          if close_idx && count_statements_in_block(toks, brace_idx, close_idx) >= 2
+            i = emit_bg_do_wrapped(out, toks, i, brace_idx, close_idx)
+            next
+          end
+        end
+      end
+      out << t
+      i += 1
+    end
+    out
+  end
+
+  def find_bg_brace(toks, start)
+    j = start + 1
+    while j < toks.length && [:NL, :COMMENT].include?(toks[j].type)
+      j += 1
+    end
+    return j if j < toks.length && toks[j].type == :SYM && toks[j].raw == '{'
+    nil
+  end
+
+  def count_statements_in_block(toks, open_brace, close_brace)
+    depth = 0
+    count = 0
+    has_tokens = false
+    (open_brace + 1 ... close_brace).each do |j|
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1
+        when ')', ']', '}' then depth -= 1
+        when ';'
+          if depth == 0
+            count += 1 if has_tokens
+            has_tokens = false
+            next
+          end
+        end
+      end
+      next if [:NL, :COMMENT].include?(t.type)
+      has_tokens = true
+    end
+    count += 1 if has_tokens
+    count
+  end
+
+  def emit_bg_do_wrapped(out, toks, kw_idx, brace_idx, close_idx)
+    # Emit BG/DO keyword through and including `{`, stripping any NLs.
+    (kw_idx..brace_idx).each do |j|
+      next if toks[j].type == :NL
+      out << toks[j]
+    end
+    insert_nl(out)
+
+    depth = 0
+    j = brace_idx + 1
+    j = skip_nls(toks, j)
+    body_start = out.length
+    while j < close_idx
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1; out << t; j += 1; next
+        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
+        when ';'
+          if depth == 0
+            out << t
+            j += 1
+            insert_nl(out)
+            j += 1 if j < toks.length && toks[j].type == :NL
+            next
+          end
+        end
+      end
+      out << t
+      j += 1
+    end
+
+    if body_start < out.length
+      out.pop while out.last && out.last.type == :NL && out.length > body_start
+      insert_nl(out)
+    end
+    out << toks[close_idx]
+    close_idx + 1
   end
 
   # ---- Pipeline forced wraps (§3.4, §3.7) --------------------------------
