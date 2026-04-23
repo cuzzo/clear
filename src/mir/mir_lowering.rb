@@ -2497,15 +2497,11 @@ class MIRLowering
     if node.yield_dupe
       # Frame string: dupe to stream allocator before push so the value outlives
       # the fiber's frame rewind (or loop mark rewind between yields).
-      # PHASE-3 (task #46, blocked by task #51): the dupe is embedded in an InlineZig
-      # arg; hoisting requires a structured MIR::FnDef for the BG stream fiber body.
-      inner_code = emit_expr(lowered)
-      dupe_iz = MIR::InlineZig.new(
-        "try #{stream_local}.alloc.dupe(u8, #{inner_code})",
-        "yield_string_dupe"
-      )
-      dupe_iz.stdlib_def = { allocates: true }
-      return MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [dupe_iz], true)
+      dupe_call = emit_builtin(:streamDupeBytes, [
+        MIR::Ident.new("#{stream_local}.alloc"),
+        lowered,
+      ])
+      return MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [dupe_call], true)
     end
     MIR::MethodCall.new(MIR::Ident.new(stream_local), "push", [lowered], true)
   end
@@ -3483,7 +3479,9 @@ class MIRLowering
         pattern = pattern.gsub("{target}", target_zig)
         pattern = pattern.gsub("{shard_idx}", @shard_context[:idx])
         pattern = pattern.gsub("{shard_key}", @shard_context[:key])
-        MIR::InlineZig.new(pattern, "shard_direct_get")
+        iz = MIR::InlineZig.new(pattern, "shard_direct_get")
+        iz.stdlib_def = op
+        iz
       elsif map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
         key_zig = map_ft.key_type.zig_type
         val_zig = map_ft.value_type.zig_type
@@ -3495,13 +3493,8 @@ class MIRLowering
       MIR::MethodCall.new(target, "get", [index], false)
     elsif ti&.set_collection?
       # @set[item]: membership check — returns ?T (item if present, null otherwise)
-      target_zig = emit_expr(target)
-      index_zig  = emit_expr(index)
-      elem_zig   = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type.zig_type
-      pattern = "if (#{target_zig}.contains(#{index_zig})) @as(#{elem_zig}, #{index_zig}) else null"
-      iz = MIR::InlineZig.new(pattern, "set_member_get")
-      iz.stdlib_def = { borrows: :all }
-      iz
+      elem_zig = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type.zig_type
+      emit_builtin(:setMemberGet, [target, index, MIR::Ident.new(elem_zig)])
     elsif node.needs_mut_ref
       # target.items[@as(usize, @intCast(index))]
       items = MIR::FieldGet.new(target, "items")
@@ -4224,10 +4217,13 @@ class MIRLowering
         if elem_ti.needs_cleanup?(sl)
           elem_zig = elem_ti.zig_type
           alloc_str = alloc_zig_str(:heap)
-          cleanup_zig = "CheatLib.cleanupAt(#{elem_zig}, #{target_zig}, #{alloc_str}, #{idx_zig})"
-          cleanup_iz = MIR::InlineZig.new(cleanup_zig, "index_cleanup")
-          cleanup_iz.stdlib_def = { allocates: false }
-          return MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_iz, false), setAt_stmt])
+          cleanup_call = emit_builtin(:cleanupAt, [
+            MIR::Ident.new(elem_zig),
+            MIR::Ident.new(target_zig),
+            MIR::Ident.new(alloc_str),
+            MIR::Ident.new(idx_zig),
+          ])
+          return MIR::ScopeBlock.new([MIR::ExprStmt.new(cleanup_call, false), setAt_stmt])
         end
       end
     end
