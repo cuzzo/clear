@@ -1824,6 +1824,26 @@ class MIRLowering
     needs_label = clause && (clause[:action] == :pass || clause[:action] == :block)
     with_label = needs_label ? "__with_#{node.object_id.abs}" : nil
 
+    # Collect fallible captures first to decide whether to apply runtime
+    # lock sorting. Any WITH block that acquires 2+ locks simultaneously is
+    # globally ordered by underlying mutex address, so two sites that name
+    # the same set of locks in different source orders cannot form a
+    # held-acquire edge that contradicts each other. This preserves the
+    # safety invariant that multi-acquire WITH blocks cannot, on their own,
+    # produce a LockCycle at runtime.
+    fallible_caps = (node.capabilities || []).select { |c|
+      c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
+    }
+    needs_sort = fallible_caps.length >= 2
+    if needs_sort && clause
+      raise "WITH with 2+ fallible lock captures cannot combine with an ON/RETRY clause yet; " \
+            "split into separate WITH blocks (node at line #{node.token&.line})"
+    end
+
+    if needs_sort
+      bindings << emit_sorted_lock_acquires(fallible_caps)
+    end
+
     (node.capabilities || []).each do |cap|
       var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
       alias_name = cap[:alias] || var_name
@@ -1835,6 +1855,7 @@ class MIRLowering
         inner = "__#{var_name}_unwrap"
         bindings << "const #{inner} = #{zig_var}.ctrl.data.*;\n_ = &#{inner};"
       when :EXCLUSIVE
+        next if needs_sort
         guard_var = "__#{var_name}_guard"
         lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         panic_method = resolved&.write_locked? ? "write" : "acquire"
@@ -1845,6 +1866,7 @@ class MIRLowering
           bindings << "var #{guard_var} = #{lock_expr}.#{panic_method}();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
         end
       when :write_locked_read
+        next if needs_sort
         guard_var = "__#{var_name}_guard"
         lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
         if clause
@@ -1986,6 +2008,87 @@ class MIRLowering
     else
       raise "Internal: unknown lock action #{clause[:action]}"
     end
+  end
+
+  # Emit Zig for acquiring N>=2 fallible lock captures in runtime
+  # pointer-address order. Produces:
+  #   - one __guardN per capture (undefined, typed via @TypeOf)
+  #   - a __ptrs array of usize addresses
+  #   - a __order index array, bubble-sorted by __ptrs
+  #   - a for-loop over __order with a switch to call the right acquire()
+  #   - defer __guardN.release() for each guard
+  #   - const alias = __guardN.get() aliases
+  # Uses panic-variant acquire methods (acquire / read / write) so the
+  # existing behavior (panic on LockError) is preserved. MVP scope; the
+  # fallible variants would need a combined-clause design.
+  def emit_sorted_lock_acquires(fallible_caps)
+    n = fallible_caps.length
+    entries = fallible_caps.each_with_index.map do |cap, i|
+      var_name   = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
+      alias_name = cap[:alias] || var_name
+      resolved   = cap[:resolved_type]
+      zig_var    = @do_capture_map&.dig(var_name) || var_name
+      # lock_expr is the "logical lock container" we call .acquire()/.read()/.write() on.
+      lock_expr  = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
+      # addr_expr is the stable runtime identity used as the sort key.
+      # Arc's ctrl.data is already a *T — take that pointer directly, no
+      # deref-then-addr. For direct Locked(T), take &zig_var (stable for
+      # the variable's lifetime, and captures across fibers share it).
+      addr_expr  = resolved&.any_rc? ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
+      method = case cap[:capability]
+               when :EXCLUSIVE
+                 resolved&.write_locked? ? "write" : "acquire"
+               when :write_locked_read
+                 "read"
+               end
+      {
+        i: i, alias_name: alias_name, guard_var: "__sort_guard_#{i}",
+        lock_expr: lock_expr, addr_expr: addr_expr, method: method,
+      }
+    end
+
+    guard_decls = entries.map { |e|
+      "var #{e[:guard_var]}: @TypeOf(#{e[:lock_expr]}.#{e[:method]}()) = undefined;"
+    }.join("\n")
+
+    ptr_init = entries.map { |e| "@intFromPtr(#{e[:addr_expr]})" }.join(", ")
+    order_init = (0...n).to_a.join(", ")
+
+    switch_arms = entries.map { |e|
+      "#{e[:i]} => #{e[:guard_var]} = #{e[:lock_expr]}.#{e[:method]}(),"
+    }.join("\n                ")
+
+    defer_releases = entries.map { |e| "defer #{e[:guard_var]}.release();" }.join("\n")
+    alias_decls    = entries.map { |e|
+      "const #{e[:alias_name]} = #{e[:guard_var]}.get();\n_ = &#{e[:alias_name]};"
+    }.join("\n")
+
+    <<~ZIG.rstrip
+      #{guard_decls}
+      {
+          const __ptrs = [_]usize{ #{ptr_init} };
+          var __order = [_]u8{ #{order_init} };
+          var __i: usize = 0;
+          while (__i < #{n}) : (__i += 1) {
+              var __j: usize = 0;
+              while (__j + 1 < #{n}) : (__j += 1) {
+                  if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {
+                      const __tmp = __order[__j];
+                      __order[__j] = __order[__j + 1];
+                      __order[__j + 1] = __tmp;
+                  }
+              }
+          }
+          for (__order) |__idx| {
+              switch (__idx) {
+                #{switch_arms}
+                else => unreachable,
+              }
+          }
+      }
+      #{defer_releases}
+      #{alias_decls}
+    ZIG
   end
 
   def lower_do_block(node)
