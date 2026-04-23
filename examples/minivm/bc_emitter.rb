@@ -74,6 +74,8 @@ class BcEmitter
     @fn_start_ips = {}   # { helper_fn_name => bytecode_index where body starts }
     @in_helper_fn = false
     @helper_fn_returned = false
+    @loop_continue_target = nil  # bytecode index to jump to for MIR::ContinueStmt
+    @loop_break_patches = nil    # Array of op indices needing loop-exit patch
   end
 
   def compile(program)
@@ -173,7 +175,8 @@ class BcEmitter
   # AST fn_nodes key the main fn under `main` (or `cheatMain`) but MIR renames
   # it to `clearMain`. Try each candidate.
   def lookup_ast_fn(name)
-    @fn_nodes[name.to_sym] || @fn_nodes[name] || (
+    @fn_nodes[name.to_sym] || @fn_nodes[name] ||
+      @fn_nodes["#{name}!".to_sym] || @fn_nodes["#{name}!"] || (
       MAIN_NAMES.include?(name) ?
         (@fn_nodes[:main] || @fn_nodes["main"] ||
          @fn_nodes[:cheatMain] || @fn_nodes["cheatMain"] ||
@@ -388,6 +391,25 @@ class BcEmitter
     when MIR::ScopeBlock
       inner = semantic_mir_nodes(mir_node.body)
       inner.each { |n| compile_stmt(n, nil) }
+    when MIR::Pipeline
+      # See compile_expr's MIR::Pipeline branch.
+      compile_stmt(mir_node.inner, nil)
+    when MIR::ContinueStmt
+      if @loop_continue_target
+        emit_op(JUMP, @loop_continue_target)
+        push_type(:void)
+      else
+        raise Unimplemented, "ContinueStmt outside of a known loop target"
+      end
+    when MIR::BreakStmt
+      if @loop_break_patches
+        emit_op(JUMP)
+        @loop_break_patches << @ops.length
+        emit_op(0)
+        push_type(:void)
+      else
+        raise Unimplemented, "MIR::BreakStmt outside of a known loop"
+      end
     when MIR::RawZig, MIR::InlineZig
       raise Unimplemented, "#{mir_node.class.name.split('::').last} not supported in VM path"
     when MIR::BgBlock, MIR::DoBlock, MIR::CatchWrapper
@@ -574,9 +596,17 @@ class BcEmitter
     jump_exit_idx = @ops.length
     emit_op(0)
 
+    saved_continue = @loop_continue_target
+    saved_breaks   = @loop_break_patches
+    @loop_continue_target = loop_start
+    @loop_break_patches   = []
     emit_body_stmts(node.body)
+    break_patches = @loop_break_patches
+    @loop_continue_target = saved_continue
+    @loop_break_patches   = saved_breaks
     emit_op(JUMP, loop_start)
     @ops[jump_exit_idx] = @ops.length
+    break_patches.each { |idx| @ops[idx] = @ops.length }
     push_type(:void)
   end
 
@@ -751,6 +781,31 @@ class BcEmitter
       compile_container_init(node)
     when MIR::DeepCopy
       compile_expr(node.source)  # simplified: no deep copy in VM
+    when MIR::HeapCreate
+      compile_expr(node.init)  # VM has no heap pointers; value is the "box"
+    when MIR::ArrayInit
+      (node.items || []).each { |it| compile_expr_to_value(it); pop_type }
+      emit_op(NATIVE_CALL, NATIVES["list"], (node.items || []).length)
+      push_type(:any); return
+    when MIR::DupeSlice
+      compile_expr(node.source)  # VM strings/lists are boxed; no dupe needed
+    when MIR::AllocSlice
+      emit_op(NATIVE_CALL, NATIVES["vector"], 0); push_type(:any); return
+    when MIR::FreezeExpr
+      compile_expr(node.inner)  # VM has no const/freeze semantics
+    when MIR::FnRef
+      emit_op(LOAD_CONST, add_const([:sym, node.name.to_s])); push_type(:any); return
+    when MIR::TryExpr
+      compile_expr(node.expr)  # VM doesn't propagate Zig errors
+    when MIR::TryCatch
+      compile_expr(node.expr)  # VM treats error-union as bare value
+    when MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade
+      compile_expr(node.source)  # RC ops are no-op in VM; forward the inner value
+    when MIR::FreeSlice
+      # VM is GC'd; no explicit free. Evaluate for side effects only.
+      compile_expr_to_value(node.slice); pop_type
+      emit_op(POP)
+      push_type(:void); return
     when MIR::Cast
       compile_cast(node)
     when MIR::Conditional
@@ -764,7 +819,7 @@ class BcEmitter
     when MIR::ListLength
       compile_expr(node.expr); pop_type
       emit_op(NATIVE_CALL, NATIVES["count"], 1)
-      push_type(:i64)
+      push_type(:any)
       return
     when MIR::IfOptional
       compile_if_optional(node)
@@ -809,6 +864,12 @@ class BcEmitter
       compile_expr(node.inner)
     when MIR::BlockExpr
       compile_block_expr(node)
+    when MIR::Pipeline
+      # Migrated pipeline operators produce a real MIR tree via
+      # pipeline_host.lower_pipeline — compile that directly. Legacy operators
+      # leave inner as MIR::RawZig which the VM can't compile; the inner
+      # RawZig dispatch raises with a better error than a silent passthrough.
+      compile_expr(node.inner)
     when NilClass
       cidx = add_const(nil)
       emit_op(LOAD_CONST, cidx)
@@ -1056,6 +1117,40 @@ class BcEmitter
       emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
       @ops[jump_ok] = @ops.length
       emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
+    when :cleanup, :cleanupAt
+      # VM is GC'd; explicit cleanup is a no-op. Evaluate args for side effects
+      # (shouldn't have any, but be safe) and produce void.
+      (node.args || []).each do |a|
+        compile_expr_to_value(a); pop_type; emit_op(POP)
+      end
+      push_type(:void); return
+    when :needsCleanup
+      # Comptime predicate; VM has GC so nothing needs manual cleanup.
+      emit_op(LOAD_CONST, add_const([:bool, false])); push_type(:any); return
+    when :dupeUnionValue
+      # VM values are already boxed / shared-by-reference; no deep copy needed.
+      # Forward arg[0] (the source value). alloc + type args are Zig-only.
+      compile_expr_to_value(node.args[0]); pop_type
+      push_type(:any); return
+    when :streamDupeBytes
+      # VM strings are immutable/boxed; forward the source bytes (arg[1]).
+      compile_expr_to_value(node.args[1]); pop_type
+      push_type(:any); return
+    when :setMemberGet
+      # if (set.contains(item)) item else nil
+      # args: [set, item, elem_zig_type]
+      compile_expr_to_value(node.args[0])
+      compile_expr_to_value(node.args[1])
+      emit_op(NATIVE_CALL, NATIVES["contains?"], 2)
+      emit_op(JUMP_IF_FALSE)
+      jump_miss = @ops.length; emit_op(0)
+      compile_expr_to_value(node.args[1])  # hit: push the item
+      emit_op(JUMP)
+      jump_end = @ops.length; emit_op(0)
+      @ops[jump_miss] = @ops.length
+      emit_op(LOAD_CONST, add_const(nil))  # miss: push nil
+      @ops[jump_end] = @ops.length
+      push_type(:any); return
     else
       raise Unimplemented, "MIR::InlineBc op not yet implemented: :#{op}"
     end
@@ -1255,6 +1350,23 @@ class BcEmitter
        callee == "CheatLib.promoteFields"
       payload = args.length >= 2 ? args[1] : args[0]
       compile_expr_to_value(payload); pop_type
+      push_type(:any)
+      return
+    end
+
+    # Cleanup / ownership markers: no-op in GC'd VM. Consume any args for
+    # side effects and push void so call-in-statement dispatch drops cleanly.
+    if callee == "CheatLib.cleanup" || callee == "CheatLib.cleanupAt" ||
+       callee == "CheatLib.free" || callee == "CheatLib.destroy"
+      args.each { |a| compile_expr_to_value(a); pop_type; emit_op(POP) }
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
+      return
+    end
+
+    # RC constructors: in the VM all values are uniformly boxed; Rc/Arc wrap
+    # is transparent. Forward the payload (the last positional arg is the value).
+    if callee == "CheatLib.rcCreate" || callee == "CheatLib.arcCreate"
+      compile_expr_to_value(args.last); pop_type
       push_type(:any)
       return
     end

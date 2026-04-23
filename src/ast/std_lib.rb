@@ -931,26 +931,26 @@ BUILTIN_OPS = {
   assert: { zig: "CheatLib.assert({0}, {1})", bc: true, borrows: :all },
 
   # --- Deep copy (allocates heap copy of union value) ---
-  dupeUnionValue: { zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", allocates: true },
+  dupeUnionValue: { zig: "try CheatLib.dupeUnionValue({0}, {1}, {2})", bc: true, allocates: true },
 
   # --- In-place element cleanup (frees the element at idx before overwrite) ---
-  cleanupAt: { zig: "CheatLib.cleanupAt({0}, {1}, {2}, {3})", allocates: false, borrows: :all },
+  cleanupAt: { zig: "CheatLib.cleanupAt({0}, {1}, {2}, {3})", bc: true, allocates: false, borrows: :all },
 
   # --- Duplicate a []u8 with the given allocator (used by BG stream yield to
   # outlive per-iteration frame rewind). Returns an owned []u8.
-  streamDupeBytes: { zig: "try {0}.dupe(u8, {1})", allocates: true },
+  streamDupeBytes: { zig: "try {0}.dupe(u8, {1})", bc: true, allocates: true },
 
   # --- Set membership probe: target[item] -> item if present else null.
   # {0}=target, {1}=item (also used as the result when present), {2}=elem_zig_type
-  setMemberGet: { zig: "if ({0}.contains({1})) @as({2}, {1}) else null", borrows: :all },
+  setMemberGet: { zig: "if ({0}.contains({1})) @as({2}, {1}) else null", bc: true, borrows: :all },
 
   # --- Typed cleanup call used by errdefer hoisted temps.
   # {0}=zig_type, {1}=allocator, {2}=binding name
-  cleanup: { zig: "CheatLib.cleanup({0}, {1}, {2})", allocates: false, borrows: :all },
+  cleanup: { zig: "CheatLib.cleanup({0}, {1}, {2})", bc: true, allocates: false, borrows: :all },
 
   # --- Comptime cleanup predicate (true iff the type has non-trivial cleanup).
   # {0}=elem_zig_type
-  needsCleanup: { zig: "CheatLib.needsCleanup({0})", borrows: :all },
+  needsCleanup: { zig: "CheatLib.needsCleanup({0})", bc: true, borrows: :all },
   concurrentBoundedSelect: {
     zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
     allocates: true
