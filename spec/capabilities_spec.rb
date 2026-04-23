@@ -1243,4 +1243,103 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # WITH EXCLUSIVE ... ON TIMEOUT / RETRY(N) THEN
+  # ---------------------------------------------------------------------------
+
+  describe "WITH EXCLUSIVE lock-error clause parsing" do
+    def parse_only(source)
+      tokens = Lexer.new(source).tokenize
+      Parser.new(tokens, source).parse
+    end
+
+    def with_block(ast)
+      ast.statements.find { |s| s.is_a?(AST::WithBlock) }
+    end
+
+    it "parses WITH EXCLUSIVE ... ON TIMEOUT RAISE" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT RAISE
+      FLUX
+      ast = parse_only(src)
+      clause = with_block(ast).lock_error_clause
+      expect(clause[:action]).to eq(:raise)
+      expect(clause[:retries]).to be_nil
+    end
+
+    it "parses WITH EXCLUSIVE ... ON TIMEOUT PASS" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT PASS
+      FLUX
+      clause = with_block(parse_only(src)).lock_error_clause
+      expect(clause[:action]).to eq(:pass)
+    end
+
+    it "parses ON TIMEOUT EXIT with a message" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT EXIT "stuck"
+      FLUX
+      clause = with_block(parse_only(src)).lock_error_clause
+      expect(clause[:action]).to eq(:exit)
+      expect(clause[:message]).not_to be_nil
+    end
+
+    it "parses ON TIMEOUT -> { stmts }" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT -> { c.v = 0; }
+      FLUX
+      clause = with_block(parse_only(src)).lock_error_clause
+      expect(clause[:action]).to eq(:block)
+      expect(clause[:body]).to be_an(Array)
+      expect(clause[:body]).not_to be_empty
+    end
+
+    it "parses RETRY(N) THEN RAISE" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } RETRY(3) THEN RAISE
+      FLUX
+      clause = with_block(parse_only(src)).lock_error_clause
+      expect(clause[:action]).to eq(:raise)
+      expect(clause[:retries]).to eq(3)
+    end
+
+    it "rejects RETRY(0)" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } RETRY(0) THEN RAISE
+      FLUX
+      expect { parse_only(src) }.to raise_error(ParserError, /RETRY\(N\) requires N > 0/)
+    end
+
+    it "leaves lock_error_clause nil when no clause present" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; }
+      FLUX
+      clause = with_block(parse_only(src)).lock_error_clause
+      expect(clause).to be_nil
+    end
+
+    it "rejects unknown action keyword" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT WAT
+      FLUX
+      expect { parse_only(src) }.to raise_error(ParserError, /Expected RAISE, PASS, EXIT/)
+    end
+  end
+
 end

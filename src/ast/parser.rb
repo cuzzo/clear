@@ -2305,7 +2305,50 @@ class Parser
     body = parse_block_body(['}'])
     consume(:CHAR, '}')
 
-    AST::WithBlock.new(with_token, capabilities, body)
+    node = AST::WithBlock.new(with_token, capabilities, body)
+    node.lock_error_clause = parse_lock_error_clause
+    node
+  end
+
+  # Parse an optional ON TIMEOUT <action> or RETRY(N) THEN <action> clause
+  # following a WITH block's closing `}`. Returns a Hash or nil.
+  def parse_lock_error_clause
+    if match!(:KEYWORD, 'RETRY')
+      consume(:CHAR, '(')
+      retries_tok = consume_number
+      retries = retries_tok.value.to_i
+      error!(retries_tok, "RETRY(N) requires N > 0, got #{retries}") if retries <= 0
+      consume(:CHAR, ')')
+      consume(:KEYWORD, 'THEN')
+      action = parse_lock_action
+      action.merge(retries: retries)
+    elsif match!(:KEYWORD, 'ON')
+      consume(:KEYWORD, 'TIMEOUT')
+      parse_lock_action
+    else
+      nil
+    end
+  end
+
+  # Parse a single lock-error action: RAISE | PASS | EXIT "msg" | -> { stmts }.
+  def parse_lock_action
+    if match!(:KEYWORD, 'RAISE')
+      { action: :raise, token: previous }
+    elsif match!(:KEYWORD, 'PASS')
+      { action: :pass, token: previous }
+    elsif match!(:KEYWORD, 'EXIT')
+      tok = previous
+      msg = parse_expression
+      { action: :exit, message: msg, token: tok }
+    elsif match?(:ARROW, '->')
+      tok = consume(:ARROW, '->')
+      consume(:CHAR, '{')
+      body = parse_block_body(['}'])
+      consume(:CHAR, '}')
+      { action: :block, body: body, token: tok }
+    else
+      error!(current, "Expected RAISE, PASS, EXIT \"msg\", or -> { ... } after lock error clause")
+    end
   end
 
   # Parses an optional `:@cap` continuation after an expression-level capability sigil.
