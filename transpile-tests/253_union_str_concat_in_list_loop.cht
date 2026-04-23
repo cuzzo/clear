@@ -1,0 +1,44 @@
+-- Compiler bug: a frame-allocated string (from concat) placed into a
+-- union variant, then into a heap-managed list inside a loop, is not
+-- auto-promoted to heap. After the loop's frame rewind, the Value.Str
+-- pointers dangle into reclaimed frame memory.
+--
+-- Expected behavior: `list.append(Value{ Str: s1 + s2 })` should either
+--   (a) auto-promote the concat result to heap before constructing the
+--       union variant (since the union value escapes into a heap list), or
+--   (b) be a compiler error requiring an explicit COPY.
+--
+-- Actual behavior: compiler accepts it silently; runtime produces UAF
+-- (segfault or garbage data) when list[i].Str is read after the loop.
+--
+-- This is the same bug found in examples/minivm/_bc_runner.cht's CONCAT
+-- and ADD opcodes, worked around there by explicit COPY (s1 + s2).
+
+UNION Value {
+    Nil,
+    Str: String,
+}
+
+FN main() RETURNS Void ->
+    MUTABLE list: Value[]@list = List[];
+
+    FOR i IN (0_i64 ..< 10) DO
+        s1 = "item_";
+        s2 = i.toString();
+        -- Concat `s1 + s2` is frame-allocated. Wrapping it in a union
+        -- variant and appending to a heap list must promote the string.
+        list.append(Value{ Str: s1 + s2 });
+    END
+
+    -- After 10 loop iterations the frame has been rewound 10 times.
+    -- The Str slices inside list[*] point to reclaimed frame memory.
+    MATCH list[0] START
+        Value.Str AS s -> ASSERT s == "item_0", "list[0] should be item_0";,
+        DEFAULT -> ASSERT FALSE, "list[0] should be Str variant";
+    END
+
+    MATCH list[9] START
+        Value.Str AS s -> ASSERT s == "item_9", "list[9] should be item_9";,
+        DEFAULT -> ASSERT FALSE, "list[9] should be Str variant";
+    END
+END

@@ -245,7 +245,81 @@ module EscapeAnalysis
       decl.storage = :heap if decl&.respond_to?(:storage=)
     end
 
+    # ── Condition 7: frame string-concat escape via heap-container mutator arg ──
+    # Pattern:   heap_list.append(Value{ Str: s1 + s2 })
+    #            heap_list.append(s1 + s2)
+    #            heap_map[k] = Value{ Str: s1 + s2 }    (handled via Assignment in C4,
+    #                                                    but the nested concat is still frame)
+    #
+    # When a string-concat expression (BinaryOp :ADD with string_concat=true) is
+    # passed TAKES into a heap container's mutator (append/insert/push), its
+    # frame-allocated result dangles after the call returns and the enclosing
+    # frame rewinds. Promote the concat to :heap so mir_lowering emits
+    # std.mem.concat(heapAlloc, ...) instead of frameAlloc.
+    #
+    # We walk INSIDE StructLit / UnionVariantLit field values so the common
+    # shape `Container.append(Variant{ Str: concat })` is covered too.
+    AST.walk_body(fn.body) do |node|
+      next unless node.is_a?(AST::MethodCall)
+      next unless %w[append insert push put].include?(node.name.to_s)
+      obj = node.object
+      # Receiver must be a collection (Type#collection? covers HashMap /
+      # @pool / @list / @set uniformly — the single source of truth).
+      next unless obj.respond_to?(:symbol) && obj.symbol
+      t = obj.symbol.type
+      sym_ti = t.is_a?(Type) ? t : (Type.new(t) rescue nil)
+      next unless sym_ti && sym_ti.collection?
+
+      # Only promote for lists whose element type is a user-defined
+      # composite (union/struct). For primitive- and String-element lists
+      # (e.g. String[]@list), the list's own cleanup is frame-allocated;
+      # pushing a heap-allocated string there would leak on deinit. The
+      # composite-element case is the one where the list's cleanup is
+      # heap-allocated AND will recursively free embedded string fields —
+      # so frame strings there are a true UAF and must be promoted.
+      elem_t = sym_ti.element_type
+      next unless elem_t && !elem_t.primitive? && !elem_t.string?
+
+      node.args.each { |arg| e2_promote_frame_concats!(arg) }
+    end
+
     { bg_upgraded: bg_upgraded, always_escaped: always_escaped, carry_return_vars: carry_ret_vars }
+  end
+
+  # Recursively promote frame string-concat expressions to heap storage.
+  # Handles concats nested inside union/struct literals (and list literals)
+  # passed as mutator arguments to heap-owned containers. Returns true if
+  # any promotion happened — caller uses that to cascade-promote the
+  # receiver container.
+  private_class_method def self.e2_promote_frame_concats!(node)
+    return false unless node
+    case node
+    when AST::BinaryOp
+      promoted = false
+      if node.op == :ADD && node.respond_to?(:string_concat) && node.string_concat
+        node.storage = :heap if node.respond_to?(:storage=)
+        ti = node.type_info
+        ti.provenance = :heap if ti.is_a?(Type)
+        promoted = true
+      end
+      promoted |= e2_promote_frame_concats!(node.left)
+      promoted |= e2_promote_frame_concats!(node.right)
+      promoted
+    when AST::StringConcat
+      node.storage = :heap if node.respond_to?(:storage=)
+      node.parts&.each { |p| e2_promote_frame_concats!(p) }
+      true
+    when AST::StructLit, AST::UnionVariantLit
+      promoted = false
+      node.fields&.each_value { |v| promoted |= e2_promote_frame_concats!(v) }
+      promoted
+    when AST::ListLit
+      promoted = false
+      node.items&.each { |it| promoted |= e2_promote_frame_concats!(it) }
+      promoted
+    else
+      false
+    end
   end
 
   # Collect all ReturnNode descendants in body.
@@ -265,7 +339,7 @@ module EscapeAnalysis
         captures.each do |name, type_obj|
           t = type_obj ? Type.new(type_obj) : nil
           next unless t && !t.needs_pointer_passing?
-          next unless t.list_collection? || (t.map? && !t.numeric_map?) || t.pool? || t.set_collection?
+          next unless t.collection? && !t.numeric_map?
           names << name
         end
       end
