@@ -344,6 +344,12 @@ pub fn bind(comptime deps: type) type {
                 return Guard{ .parent = self };
             }
 
+            // Fallible variant used by CLEAR codegen; acquire() panics on the same errors for non-CLEAR callers.
+            pub fn acquireOrErr(self: *Self) pl.LockError!Guard {
+                try self.mutex.lock();
+                return Guard{ .parent = self };
+            }
+
             pub const Guard = struct {
                 parent: *Self,
 
