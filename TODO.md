@@ -10,7 +10,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
  - [ ] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
  - [x] STRUCT/FN DEFAULTS
- - [ ] Partial Deadlock protection (in progress - may cancel - primary safety goal is enough syncronization options to not ever *need* locks in EXTREME STRICT mode, tbd)
+ - [x] Partial Deadlock protection (detect *possible* lock cycles and *possible* true system deadlock at compile time, raise handle-able errors at runtime when encountered, rather than *actually* deadlocking)
  - [x] String@symbol
  - [x] Pipeline support for infinite streams (LIMITed) and unbound finite streams 
  - [x] Migrate to Zig 0.16
