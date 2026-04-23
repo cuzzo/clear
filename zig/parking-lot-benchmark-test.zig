@@ -305,29 +305,27 @@ test "lock matrix: ParkingMutex/RwLock vs pthread (3 patterns x 2 locks x 3 cont
 
 // ─── In-fiber benchmark: many fibers per scheduler thread ──────────────────
 //
-// The matrix above measures raw OS threads -- pthread's home turf and where
-// parking-lot's M:N design has no special advantage (both futex-park OS
-// threads on contention). The unique parking-lot win is fiber-level: when
-// a fiber blocks on a lock, parking-lot yields it to the scheduler so
-// OTHER fibers on the same OS thread keep running. pthread blocks the
-// entire OS thread, starving every fiber sharing that thread.
+// N fibers on 1 scheduler thread all loop { lock + brief work + unlock }.
+// With brief CS and no mid-CS yields, the workload is effectively
+// uncontended at the OS level (cooperative fibers take turns, holder
+// always releases before yielding). This measures pure per-op overhead
+// across two lock types:
+//   - ParkingMutex
+//   - pthread_mutex_t (from inside fibers; safe here because workload
+//     is uncontended, no thread blocking)
 //
-// This benchmark measures parking-lot in the in-fiber scenario:
-//   - 1 scheduler thread, N fibers (varied)
-//   - all N fibers loop: lockShared + brief work + unlockShared
-//   - we measure total acquisitions/sec
-//
-// We do NOT compare against pthread here because doing so cleanly is
-// pathological: pthread_mutex_lock from inside a fiber blocks the
-// scheduler thread, so any contended pthread workload from fibers either
-// deadlocks (single scheduler) or requires a multi-scheduler harness
-// orders of magnitude more complex than this file. Multi-scheduler
-// pthread-vs-parking-lot would be the right way to benchmark the M:N
-// advantage, and is a separate piece of work.
+// Note: this is NOT the scenario that shows parking-lot's M:N win. That
+// needs contended fibers (one holds + yields mid-CS while others wait);
+// doing that cleanly requires a multi-scheduler setup so a blocked fiber
+// in a pthread variant doesn't deadlock the single OS thread.
 
 const FIBER_BENCH_DURATION_MS: u64 = 500;
+const LockChoice = enum { parking, pthread };
+
 const FiberBenchShared = struct {
-    mu: pl.ParkingMutex = .{},
+    mu_park: pl.ParkingMutex = .{},
+    mu_pt:   c.pthread_mutex_t = std.mem.zeroes(c.pthread_mutex_t),
+    choice: LockChoice = .parking,
     stop: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
     acquires: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     wg: CheatHeader.WaitGroup,
@@ -338,14 +336,23 @@ fn fiberBenchWorker(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
     defer sh.wg.done();
     var local: usize = 0;
     while (!sh.stop.load(.monotonic)) {
-        sh.mu.lock() catch unreachable;
-        local +%= 1; // brief CS work (compiler can't optimize across lock)
-        sh.mu.unlock();
+        switch (sh.choice) {
+            .parking => {
+                sh.mu_park.lock() catch unreachable;
+                local +%= 1;
+                sh.mu_park.unlock();
+            },
+            .pthread => {
+                _ = c.pthread_mutex_lock(&sh.mu_pt);
+                local +%= 1;
+                _ = c.pthread_mutex_unlock(&sh.mu_pt);
+            },
+        }
         _ = sh.acquires.fetchAdd(1, .monotonic);
     }
 }
 
-fn runFiberBench(alloc: std.mem.Allocator, n_fibers: usize) !usize {
+fn runFiberBench(alloc: std.mem.Allocator, n_fibers: usize, choice: LockChoice) !usize {
     var ebr = EbrContext{};
     defer ebr.deinit(alloc);
     var rt = try Runtime.init(alloc, 512 * 1024, &ebr);
@@ -357,11 +364,14 @@ fn runFiberBench(alloc: std.mem.Allocator, n_fibers: usize) !usize {
     defer { sched.deinit(); fp.global_registry.deinit(alloc); }
     fp.active_scheduler = &sched;
 
-    var shared = FiberBenchShared{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    var shared = FiberBenchShared{ .wg = CheatHeader.WaitGroup.init(&sched), .choice = choice };
+    if (choice == .pthread) {
+        _ = c.pthread_mutex_init(&shared.mu_pt, null);
+    }
+    defer if (choice == .pthread) { _ = c.pthread_mutex_destroy(&shared.mu_pt); };
 
-    // Stop signal from a separate OS thread so the scheduler isn't blocked
-    // by a fiber-side compat.sleepNs (which would suspend the entire
-    // scheduler thread, defeating the whole point).
+    // Stop from a separate OS thread so we don't accidentally suspend
+    // the scheduler via compat.sleepNs.
     const Stopper = struct {
         fn run(s: *FiberBenchShared, ms: u64) void {
             compat.sleepNs(ms * std.time.ns_per_ms);
@@ -388,31 +398,35 @@ fn runFiberBench(alloc: std.mem.Allocator, n_fibers: usize) !usize {
     return shared.acquires.load(.monotonic);
 }
 
-test "fiber benchmark: ParkingMutex throughput vs fiber count on 1 scheduler" {
+test "fiber benchmark: ParkingMutex vs pthread_mutex, N fibers on 1 scheduler" {
     const alloc = std.testing.allocator;
 
     std.debug.print(
-        "\n  ParkingMutex on 1 scheduler thread, N fibers contending ({d}ms wallclock):\n" ++
-          "  ---------------------------------------------------------\n" ++
-          "  N fibers | total acquires | acquires/sec\n" ++
-          "  ---------|----------------|--------------\n",
+        "\n  In-fiber lock throughput, 1 scheduler thread, {d}ms wallclock:\n" ++
+          "  -------------------------------------------------------------\n" ++
+          "  N fibers | ParkingMutex ops/sec | pthread_mutex ops/sec | ratio\n" ++
+          "  ---------|----------------------|-----------------------|------\n",
         .{FIBER_BENCH_DURATION_MS},
     );
     inline for ([_]usize{ 1, 4, 16, 64, 256 }) |n| {
-        const acquires = try runFiberBench(alloc, n);
-        const per_sec = @as(f64, @floatFromInt(acquires)) * 1000.0
+        const pk_acquires = try runFiberBench(alloc, n, .parking);
+        const pt_acquires = try runFiberBench(alloc, n, .pthread);
+        const pk_per_sec: f64 = @as(f64, @floatFromInt(pk_acquires)) * 1000.0
             / @as(f64, @floatFromInt(FIBER_BENCH_DURATION_MS));
+        const pt_per_sec: f64 = @as(f64, @floatFromInt(pt_acquires)) * 1000.0
+            / @as(f64, @floatFromInt(FIBER_BENCH_DURATION_MS));
+        const ratio = pk_per_sec / pt_per_sec;
         std.debug.print(
-            "  {d:>8} | {d:>14} | {d:>12.0}\n",
-            .{ n, acquires, per_sec },
+            "  {d:>8} | {d:>20.0} | {d:>21.0} | {d:.2}x\n",
+            .{ n, pk_per_sec, pt_per_sec, ratio },
         );
     }
     std.debug.print(
-        "\n  Each fiber loops: lock + brief work + unlock. With M:N\n" ++
-          "  scheduling, blocked fibers yield to the scheduler so other\n" ++
-          "  fibers on the same OS thread keep running. Throughput should\n" ++
-          "  stay roughly flat as N grows -- per-acquisition cost is\n" ++
-          "  dominated by lock + fiber-yield overhead, not OS thread blocks.\n\n",
+        "\n  Workload: fibers loop lock+unlock cooperatively. No actual\n" ++
+          "  contention (holder always releases before yielding). This\n" ++
+          "  measures pure per-op overhead. A parking-lot M:N win would\n" ++
+          "  require contended fibers (yields mid-CS) across multiple\n" ++
+          "  schedulers, which is a separate (multi-scheduler) benchmark.\n\n",
         .{},
     );
 }
