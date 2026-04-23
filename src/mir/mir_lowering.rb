@@ -1217,7 +1217,9 @@ class MIRLowering
         else
           "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
         end
-        return MIR::InlineZig.new(stub_code, "stub_call")
+        iz = MIR::InlineZig.new(stub_code, "stub_call")
+        iz.stdlib_def = { borrows: :all }
+        return iz
       end
     end
 
@@ -1361,11 +1363,12 @@ class MIRLowering
     call_mir  = lower_intrinsic(synthetic)
     call_zig  = emit_expr(call_mir)
 
-    MIR::InlineZig.new(
+    iz = MIR::InlineZig.new(
       "(if (#{inner_zig}) |#{snav_var}| #{call_zig} else null)",
-      "optional_safe_nav",
-      { borrows: :all }
+      "optional_safe_nav"
     )
+    iz.stdlib_def = { borrows: :all }
+    iz
   end
 
   def lower_intrinsic(node)
@@ -1467,7 +1470,9 @@ class MIRLowering
     args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}") { val } }
 
     iz = MIR::InlineZig.new(pattern, "intrinsic")
-    iz.stdlib_def = node.matched_stdlib_def if node.respond_to?(:matched_stdlib_def)
+    # zig_pattern was set by the annotator together with matched_stdlib_def
+    # (src/annotator.rb). Both are always present together.
+    iz.stdlib_def = node.matched_stdlib_def
     iz.allocs = resolved_allocs unless resolved_allocs.empty?
     # Store target variable name for checker cross-reference with AllocMark.
     # Use extract_root_var_name so renamed variables (same-name collision fix)
@@ -1690,7 +1695,8 @@ class MIRLowering
     code << "}"
 
     iz = MIR::InlineZig.new(code, "extern_trampoline")
-    iz.stdlib_def = { allocates: true } if call_heap_provenance_from_type?(payload_t)
+    iz.stdlib_def =
+      call_heap_provenance_from_type?(payload_t) ? { allocates: true } : { allocates: false, borrows: :all }
     iz
   end
 
@@ -1763,7 +1769,9 @@ class MIRLowering
              "            .items = [#{n}]#{promise_zig}{ #{items_list} },\n" \
              "        };\n" \
              "    }"
-      return MIR::InlineZig.new(code, "bounded_stream_init")
+      iz = MIR::InlineZig.new(code, "bounded_stream_init")
+      iz.stdlib_def = { allocates: true }
+      return iz
     end
 
     items_mir = node.items.map { |i| hoist_alloc(lower(i), i) }
@@ -2527,7 +2535,9 @@ class MIRLowering
              "    }\n" \
              "    break :#{blk_label} #{results_var};\n" \
              "}"
-      return MIR::InlineZig.new(code, "next_promise_list")
+      iz = MIR::InlineZig.new(code, "next_promise_list")
+      iz.stdlib_def = { allocates: true }
+      return iz
     end
 
     inner = lower(node.expr)
@@ -2543,7 +2553,7 @@ class MIRLowering
     arg_strs = node.args.map { |a| emit_expr(hoist_alloc(lower(a), a)) }
     arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}") { arg } }
     iz = MIR::InlineZig.new(pattern, "static_call")
-    iz.stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
+    iz.stdlib_def = node.matched_stdlib_def
     iz
   end
 
