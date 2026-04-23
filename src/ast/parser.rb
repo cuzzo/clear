@@ -1,5 +1,6 @@
 require_relative "./ast"
 require_relative "./lexer"
+require_relative "./error_registry"
 require_relative "./source_error"
 
 # ==========================================
@@ -1559,7 +1560,7 @@ class Parser
     AST::StructPattern.new(tok, fields, partial)
   end
 
-  ERROR_KINDS = %w[Transient Input System NotFound Permission Canceled].freeze
+  ERROR_KINDS = AST::ERROR_KINDS.map(&:to_s).freeze
 
   # RAISE Kind;
   # RAISE Kind, ErrorName;
@@ -2310,27 +2311,65 @@ class Parser
     node
   end
 
-  # Parse an optional ON TIMEOUT <action> or RETRY(N) THEN <action> clause
-  # following a WITH block's closing `}`. Returns a Hash or nil.
+  # Parse an optional error-handling clause following a WITH block's `}`:
+  #   ON <selectors> [RETRY(N) THEN] <action>
+  #   RETRY(N) THEN <action>                  -- sugar for ON Transient
+  # Returns a Hash { selectors:, kinds:, types:, action:, retries:, ... } or nil.
+  # Selector validation (existence, retry-is-Transient) runs in the annotator.
   def parse_lock_error_clause
-    if match!(:KEYWORD, 'RETRY')
-      consume(:CHAR, '(')
-      retries_tok = consume_number
-      retries = retries_tok.value.to_i
-      error!(retries_tok, "RETRY(N) requires N > 0, got #{retries}") if retries <= 0
-      consume(:CHAR, ')')
-      consume(:KEYWORD, 'THEN')
+    if match?(:KEYWORD, 'ON')
+      consume(:KEYWORD, 'ON')
+      selectors = parse_error_selectors
+      retries = match_optional_retry!
       action = parse_lock_action
-      action.merge(retries: retries)
-    elsif match!(:KEYWORD, 'ON')
-      consume(:KEYWORD, 'TIMEOUT')
-      parse_lock_action
+      action.merge(selectors: selectors, retries: retries)
+    elsif match?(:KEYWORD, 'RETRY')
+      retries = match_optional_retry!
+      action = parse_lock_action
+      # Sugar: `RETRY(N) THEN <action>` == `ON Transient RETRY(N) THEN <action>`.
+      action.merge(selectors: [{ form: :kind, name: :Transient, token: action[:token] }],
+                   retries: retries)
     else
       nil
     end
   end
 
-  # Parse a single lock-error action: RAISE | PASS | EXIT "msg" | -> { stmts }.
+  # Consume `RETRY '(' N ')' THEN` if present. Returns the N or nil.
+  def match_optional_retry!
+    return nil unless match!(:KEYWORD, 'RETRY')
+    consume(:CHAR, '(')
+    tok = consume_number
+    n = tok.value.to_i
+    error!(tok, "RETRY(N) requires N > 0, got #{n}") if n <= 0
+    consume(:CHAR, ')')
+    consume(:KEYWORD, 'THEN')
+    n
+  end
+
+  # Parse comma-separated error selectors. Each is either a bare TYPE_ID
+  # (error kind: Transient, System, ...) or `:' TYPE_ID (error type symbol:
+  # :LockTimeout, :Deadlock, ...).
+  def parse_error_selectors
+    selectors = [parse_error_selector]
+    while match!(:CHAR, ',')
+      selectors << parse_error_selector
+    end
+    selectors
+  end
+
+  def parse_error_selector
+    if match!(:CHAR, ':')
+      tok = consume(:TYPE_ID)
+      { form: :type, name: tok.value.to_sym, token: tok }
+    elsif match?(:TYPE_ID)
+      tok = consume(:TYPE_ID)
+      { form: :kind, name: tok.value.to_sym, token: tok }
+    else
+      error!(current, "Expected error selector: a kind like 'Transient' or a type like ':LockTimeout'")
+    end
+  end
+
+  # Parse a single error-handler action: RAISE | PASS | EXIT "msg" | -> { stmts }.
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
       { action: :raise, token: previous }
@@ -2347,7 +2386,7 @@ class Parser
       consume(:CHAR, '}')
       { action: :block, body: body, token: tok }
     else
-      error!(current, "Expected RAISE, PASS, EXIT \"msg\", or -> { ... } after lock error clause")
+      error!(current, "Expected RAISE, PASS, EXIT \"msg\", or -> { ... } after error clause")
     end
   end
 

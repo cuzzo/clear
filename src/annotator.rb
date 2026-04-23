@@ -3059,10 +3059,18 @@ private
   end
 
   # Validate WithBlock#lock_error_clause. Requires at least one fallible
-  # capability (EXCLUSIVE or write_locked_read) and visits the action's
-  # message/body so downstream passes see annotated types. The action
-  # body runs outside the WITH scope (the lock was never acquired on
-  # timeout), so visit it in the enclosing scope.
+  # capability, each selector to resolve against the error registry, RETRY
+  # to target only Transient-kind errors, and the selector set to overlap
+  # the block's possible error set. Visits action message/body so types
+  # are annotated. Action runs outside the WITH scope — the lock was never
+  # acquired on the error path — so it is visited in the enclosing scope.
+  #
+  # Possible error set for WITH EXCLUSIVE / write_locked_read:
+  #   {:LockTimeout, :LockCycle, :Deadlock}
+  # Symbols matched by the clause are stamped onto clause[:matched_types];
+  # unmatched types bubble up as their registry kind at codegen time.
+  LOCK_POSSIBLE_TYPES = %i[LockTimeout LockCycle Deadlock].freeze
+
   def validate_lock_error_clause!(node, expanded_capabilities)
     clause = node.lock_error_clause
     return unless clause
@@ -3071,10 +3079,12 @@ private
       c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
     }
     unless has_fallible
-      error!(node, "ON TIMEOUT / RETRY clause requires a WITH capability that can fail " \
+      error!(node, "ON / RETRY clause requires a WITH capability that can fail " \
                    "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). " \
-                   "The declared capabilities never produce a lock-acquire timeout.")
+                   "The declared capabilities never produce a lock-acquire error.")
     end
+
+    resolve_error_selectors!(node, clause)
 
     case clause[:action]
     when :exit
@@ -3082,6 +3092,54 @@ private
     when :block
       visit_stmts(clause[:body]) if clause[:body]
     end
+  end
+
+  # Expand each selector to its matched error-type symbols against the
+  # error registry + the block's possible error set. Enforces:
+  #   1. Every :kind selector names one of the 6 ErrorKinds.
+  #   2. Every :type selector names a known error type (AST::ERROR_TYPES).
+  #   3. Retry selectors resolve to Transient types only.
+  #   4. The matched set intersects the block's possible error set.
+  def resolve_error_selectors!(node, clause)
+    possible = LOCK_POSSIBLE_TYPES
+    matched  = []
+
+    clause[:selectors].each do |sel|
+      case sel[:form]
+      when :kind
+        unless AST.error_kind?(sel[:name])
+          error!(sel[:token], "Unknown error kind '#{sel[:name]}'. Expected one of: " \
+                              "#{AST::ERROR_KINDS.join(', ')}")
+        end
+        matched.concat(AST.types_for_kind(sel[:name]))
+      when :type
+        unless AST.error_type?(sel[:name])
+          error!(sel[:token], "Unknown error type ':#{sel[:name]}'. " \
+                              "Register it in src/ast/error_registry.rb.")
+        end
+        matched << sel[:name]
+      end
+    end
+
+    matched.uniq!
+
+    if clause[:retries]
+      non_transient = matched.reject { |t| AST.kind_of_type(t) == :Transient }
+      unless non_transient.empty?
+        error!(clause[:token] || node,
+               "RETRY only targets Transient errors. Non-retryable types in selector: " \
+               "#{non_transient.map { |s| ':' + s.to_s }.join(', ')}")
+      end
+    end
+
+    overlap = matched & possible
+    if overlap.empty?
+      error!(node, "Selectors [#{matched.map { |s| ':' + s.to_s }.join(', ')}] do not match " \
+                   "any error the WITH acquire can produce (#{possible.map { |s| ':' + s.to_s }.join(', ')}).")
+    end
+
+    clause[:matched_types] = overlap
+    clause[:bubble_types]  = possible - overlap
   end
 
   # Walk statements looking for assignments where a borrowed alias escapes

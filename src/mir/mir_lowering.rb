@@ -12,6 +12,7 @@
 require_relative "mir"
 require_relative "../ast/ast"
 require_relative "../ast/type"
+require_relative "../ast/error_registry"
 require_relative "../backends/zig_type_mapper"
 
 class MIRLowering
@@ -1903,36 +1904,38 @@ class MIRLowering
   end
 
   # Emit the acquire-or-catch binding for a fallible lock under a
-  # WithBlock#lock_error_clause. Produces Zig statements that define
-  # `guard_var` and its alias, or execute the clause's action on timeout /
-  # lock-cycle failure. Self-deadlock (error.Deadlock, user bug) always
-  # bubbles up as a Transient -> System raise regardless of the clause.
+  # WithBlock#lock_error_clause. The switch dispatches per error type
+  # using the error registry:
+  #   - Types in clause[:matched_types]  -> run the user action.
+  #   - Types in clause[:bubble_types]   -> setError(kind, name) + return
+  #                                         error.CheatError.
+  # Deadlock is always in bubble_types unless the user explicitly selected
+  # it (e.g. `ON :Deadlock -> { ... }`), in which case its action runs.
   def emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, with_node)
     action_zig = emit_lock_action_zig(clause, with_label, with_node)
-    retries = clause[:retries]
+    retries    = clause[:retries]
+    matched    = clause[:matched_types]
+    bubble     = clause[:bubble_types]
     acquire_blk = "__acq_#{with_node.object_id.abs}_#{guard_var}"
     line = with_node.token&.line.to_s
-    deadlock_bubble = %Q(#{@rt_name}.setError(.System, "Deadlock", "self-cyclic lock acquire", #{line});\nreturn error.CheatError;)
 
-    handler_body = <<~ZIG.rstrip
-      switch (__err) {
-        error.Deadlock => { #{deadlock_bubble} },
-        error.LockTimeout, error.LockCycle => {
-          #{action_zig}
-        },
-      }
-    ZIG
+    arms = []
+    unless matched.empty?
+      matched_errs = matched.map { |t| "error.#{AST.zig_name_of_type(t)}" }.join(", ")
+      if retries
+        arms << "#{matched_errs} => { if (__retry + 1 < #{retries}) continue;\n#{action_zig} }"
+      else
+        arms << "#{matched_errs} => { #{action_zig} }"
+      end
+    end
+    bubble.each do |t|
+      zig = AST.zig_name_of_type(t)
+      kind = AST.kind_of_type(t)
+      arms << %Q(error.#{zig} => { #{@rt_name}.setError(.#{kind}, "#{zig}", "lock #{zig}", #{line}); return error.CheatError; })
+    end
+    handler = "switch (__err) {\n#{arms.join(",\n")}\n}"
 
     if retries
-      retry_handler = <<~ZIG.rstrip
-        switch (__err) {
-          error.Deadlock => { #{deadlock_bubble} },
-          error.LockTimeout, error.LockCycle => {
-            if (__retry + 1 < #{retries}) continue;
-            #{action_zig}
-          },
-        }
-      ZIG
       acquire_expr = <<~ZIG.rstrip
         #{acquire_blk}: {
           var __retry: usize = 0;
@@ -1940,7 +1943,7 @@ class MIRLowering
             if (#{lock_expr}.#{err_method}()) |__g| {
               break :#{acquire_blk} __g;
             } else |__err| {
-              #{retry_handler}
+              #{handler}
             }
           }
         }
@@ -1951,7 +1954,7 @@ class MIRLowering
           if (#{lock_expr}.#{err_method}()) |__g| {
             break :#{acquire_blk} __g;
           } else |__err| {
-            #{handler_body}
+            #{handler}
           }
         }
       ZIG
@@ -1965,10 +1968,8 @@ class MIRLowering
     ZIG
   end
 
-  # Zig statements that handle a retryable lock failure (LockTimeout /
-  # LockCycle). Must terminate: return / @panic, or break :__with_<id>.
-  # The enclosing switch dispatches error.Deadlock separately, so this
-  # code never runs for self-deadlock.
+  # Zig statements for the matched-selector action. Must terminate: return
+  # / @panic, or break :__with_<id> (for PASS / `-> { }`).
   def emit_lock_action_zig(clause, with_label, with_node)
     line = with_node.token&.line.to_s
     case clause[:action]

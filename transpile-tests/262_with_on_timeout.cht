@@ -1,37 +1,42 @@
--- Test: WITH EXCLUSIVE ... ON TIMEOUT <action>.
--- Under no-contention, the lock acquires immediately and the clause
--- never fires. Exercises each action's codegen path: PASS, EXIT "msg",
--- -> { stmts }, and RETRY(N) THEN PASS. RAISE is exercised via a
--- separate fallible-return scenario below.
+-- Test: WITH EXCLUSIVE ... ON <selectors> <action>.
+-- Under no-contention the lock acquires immediately and the clause
+-- never fires. Exercises the codegen of each action + selector shape:
+-- kind selector (Transient), type selectors (:LockTimeout, :LockCycle),
+-- RETRY sugar, and the -> { stmts } block form.
 
 STRUCT Counter { value: Int64 }
 
 FN main() RETURNS Void ->
     MUTABLE c = Counter{ value: 0 } @locked;
 
-    -- PASS
+    -- ON Transient PASS (kind selector)
     WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
-    } ON TIMEOUT PASS
+    } ON Transient PASS
 
-    -- EXIT "msg"
+    -- ON :LockTimeout, :LockCycle EXIT "msg" (type selector list)
     WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
-    } ON TIMEOUT EXIT "deadlocked"
+    } ON :LockTimeout, :LockCycle EXIT "deadlocked"
 
-    -- -> { stmts }
+    -- ON Transient -> { stmts }
     MUTABLE fallback: Int64 = 0;
     WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
-    } ON TIMEOUT -> { fallback = -1; }
+    } ON Transient -> { fallback = -1; }
 
-    -- RETRY(N) THEN PASS
+    -- RETRY(N) THEN PASS (sugar for ON Transient RETRY(N) THEN PASS)
     WITH EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
     } RETRY(3) THEN PASS
 
+    -- ON :LockTimeout RETRY(2) THEN PASS (explicit type + retry)
     WITH EXCLUSIVE c AS inner {
-        ASSERT inner.value == 4, "expected 4 after 4 increments";
+        inner.value = inner.value + 1;
+    } ON :LockTimeout RETRY(2) THEN PASS
+
+    WITH EXCLUSIVE c AS inner {
+        ASSERT inner.value == 5, "expected 5 increments";
     }
 
     RETURN;

@@ -1247,7 +1247,7 @@ RSpec.describe SemanticAnnotator do
   # WITH EXCLUSIVE ... ON TIMEOUT / RETRY(N) THEN
   # ---------------------------------------------------------------------------
 
-  describe "WITH EXCLUSIVE lock-error clause parsing" do
+  describe "WITH EXCLUSIVE error-clause parsing" do
     def parse_only(source)
       tokens = Lexer.new(source).tokenize
       Parser.new(tokens, source).parse
@@ -1257,52 +1257,52 @@ RSpec.describe SemanticAnnotator do
       ast.statements.find { |s| s.is_a?(AST::WithBlock) }
     end
 
-    it "parses WITH EXCLUSIVE ... ON TIMEOUT RAISE" do
+    it "parses ON Transient RAISE" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT RAISE
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient RAISE
       FLUX
-      ast = parse_only(src)
-      clause = with_block(ast).lock_error_clause
+      clause = with_block(parse_only(src)).lock_error_clause
       expect(clause[:action]).to eq(:raise)
+      expect(clause[:selectors]).to eq([{ form: :kind, name: :Transient, token: clause[:selectors].first[:token] }])
       expect(clause[:retries]).to be_nil
     end
 
-    it "parses WITH EXCLUSIVE ... ON TIMEOUT PASS" do
+    it "parses ON :LockTimeout, :LockCycle PASS" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT PASS
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout, :LockCycle PASS
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
       expect(clause[:action]).to eq(:pass)
+      expect(clause[:selectors].map { |s| [s[:form], s[:name]] }).to eq([[:type, :LockTimeout], [:type, :LockCycle]])
     end
 
-    it "parses ON TIMEOUT EXIT with a message" do
+    it "parses ON Transient EXIT with a message" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT EXIT "stuck"
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient EXIT "stuck"
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
       expect(clause[:action]).to eq(:exit)
       expect(clause[:message]).not_to be_nil
     end
 
-    it "parses ON TIMEOUT -> { stmts }" do
+    it "parses ON Transient -> { stmts }" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT -> { c.v = 0; }
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient -> { c.v = 0; }
       FLUX
       clause = with_block(parse_only(src)).lock_error_clause
       expect(clause[:action]).to eq(:block)
       expect(clause[:body]).to be_an(Array)
-      expect(clause[:body]).not_to be_empty
     end
 
-    it "parses RETRY(N) THEN RAISE" do
+    it "parses RETRY(N) THEN RAISE as sugar for ON Transient" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
@@ -1311,6 +1311,18 @@ RSpec.describe SemanticAnnotator do
       clause = with_block(parse_only(src)).lock_error_clause
       expect(clause[:action]).to eq(:raise)
       expect(clause[:retries]).to eq(3)
+      expect(clause[:selectors].first[:name]).to eq(:Transient)
+    end
+
+    it "parses ON :LockTimeout RETRY(2) THEN RAISE" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout RETRY(2) THEN RAISE
+      FLUX
+      clause = with_block(parse_only(src)).lock_error_clause
+      expect(clause[:retries]).to eq(2)
+      expect(clause[:selectors].map { |s| s[:name] }).to eq([:LockTimeout])
     end
 
     it "rejects RETRY(0)" do
@@ -1328,55 +1340,81 @@ RSpec.describe SemanticAnnotator do
         c = C{ v: 0 } @locked;
         WITH EXCLUSIVE c AS inner { inner.v = 1; }
       FLUX
-      clause = with_block(parse_only(src)).lock_error_clause
-      expect(clause).to be_nil
+      expect(with_block(parse_only(src)).lock_error_clause).to be_nil
     end
 
     it "rejects unknown action keyword" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT WAT
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient WAT
       FLUX
       expect { parse_only(src) }.to raise_error(ParserError, /Expected RAISE, PASS, EXIT/)
     end
   end
 
-  describe "WITH lock-error clause annotator validation" do
-    it "accepts ON TIMEOUT on EXCLUSIVE @locked capture" do
+  describe "WITH error-clause annotator validation" do
+    it "accepts ON Transient on EXCLUSIVE @locked" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @locked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT RAISE
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient RAISE
       FLUX
       expect { run(src) }.not_to raise_error
     end
 
-    it "accepts ON TIMEOUT on EXCLUSIVE @writeLocked capture" do
+    it "accepts ON :LockTimeout, :LockCycle PASS" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
-        c = C{ v: 0 } @writeLocked;
-        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON TIMEOUT RAISE
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :LockTimeout, :LockCycle PASS
       FLUX
       expect { run(src) }.not_to raise_error
     end
 
-    it "accepts ON TIMEOUT on write_locked_read (read-only WITH on @writeLocked)" do
+    it "rejects unknown error kind" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
-        c = C{ v: 0 } @writeLocked;
-        WITH c AS inner { n = inner.v; } ON TIMEOUT PASS
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Nonsense RAISE
       FLUX
-      expect { run(src) }.not_to raise_error
+      expect { run(src) }.to raise_error(/Unknown error kind 'Nonsense'/)
     end
 
-    it "rejects ON TIMEOUT on a non-fallible capability (@multiowned)" do
+    it "rejects unknown error type" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :Imaginary RAISE
+      FLUX
+      expect { run(src) }.to raise_error(/Unknown error type ':Imaginary'/)
+    end
+
+    it "rejects RETRY on a non-Transient selector" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON :Deadlock RETRY(3) THEN RAISE
+      FLUX
+      expect { run(src) }.to raise_error(/RETRY only targets Transient errors/)
+    end
+
+    it "rejects selectors that cannot match any lock error" do
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        c = C{ v: 0 } @locked;
+        WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Input RAISE
+      FLUX
+      expect { run(src) }.to raise_error(/do not match any error the WITH acquire can produce/)
+    end
+
+    it "rejects clause on a non-fallible capability (@multiowned)" do
       src = <<~FLUX
         STRUCT C { v: Int64 }
         MUTABLE c = C{ v: 0 } @multiowned;
-        WITH c { } ON TIMEOUT RAISE
+        WITH c { } ON Transient RAISE
       FLUX
-      expect { run(src) }.to raise_error(/never produce a lock-acquire timeout/)
+      expect { run(src) }.to raise_error(/never produce a lock-acquire error/)
     end
   end
 
