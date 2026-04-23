@@ -68,9 +68,24 @@ pub const ErrorKind = enum(u8) {
     Unknown = 6,
 };
 
+// error_name is a u32 id into the per-program ErrorName enum, which is
+// generated at compile time from the CLEAR registry
+// (src/ast/error_registry.rb). Stable stdlib ids are baked in:
+//   0  — None (no specific type set)
+//   1  — LockTimeout
+//   2  — LockCycle
+//   3  — Deadlock
+//   4+ — user types, assigned on first RAISE / OR EXIT use
+// Runtime code stores / compares raw u32; generated user code uses
+// `@intFromEnum(ErrorName.Foo)` when calling setError / matchesName.
+pub const ErrorName_None: u32 = 0;
+pub const ErrorName_LockTimeout: u32 = 1;
+pub const ErrorName_LockCycle: u32 = 2;
+pub const ErrorName_Deadlock: u32 = 3;
+
 pub const ErrorContext = struct {
     kind: ErrorKind = .Unknown,
-    error_name: []const u8 = "",
+    error_name: u32 = 0,
     message: []const u8 = "",
     snapshot_ptr: usize = 0,       // @intFromPtr of heap-copied element, 0 = no snapshot
     snapshot_size: usize = 0,      // byte size of snapshot allocation (for generic free)
@@ -84,8 +99,8 @@ pub const ErrorContext = struct {
         return self.kind == kind;
     }
 
-    pub fn matchesName(self: *const ErrorContext, name: []const u8) bool {
-        return std.mem.eql(u8, self.error_name, name);
+    pub fn matchesName(self: *const ErrorContext, name: u32) bool {
+        return self.error_name == name;
     }
 
     /// Cast the snapshot pointer to a typed pointer. Returns null if no snapshot.
@@ -134,6 +149,18 @@ pub fn zigErrorToKind(err: anyerror) ErrorKind {
     if (std.mem.eql(u8, name, "Canceled")) return .Canceled;
     if (std.mem.eql(u8, name, "OperationAborted")) return .Canceled;
     return .Unknown;
+}
+
+/// Map a Zig error to a CLEAR ErrorName u32 id. Only stdlib-recognized
+/// errors have a specific id; everything else maps to None (0).
+/// The ids must stay in sync with src/ast/error_registry.rb's stable
+/// stdlib ids and the per-program generated ErrorName enum.
+pub fn zigErrorToName(err: anyerror) u32 {
+    const name = @errorName(err);
+    if (std.mem.eql(u8, name, "LockTimeout")) return ErrorName_LockTimeout;
+    if (std.mem.eql(u8, name, "LockCycle"))   return ErrorName_LockCycle;
+    if (std.mem.eql(u8, name, "Deadlock"))    return ErrorName_Deadlock;
+    return ErrorName_None;
 }
 
 pub const Runtime = struct {
@@ -370,7 +397,7 @@ pub const Runtime = struct {
     }
 
     // ── Error Context Helpers ─────────────────────────────────────
-    pub fn setError(self: *Runtime, kind: ErrorKind, error_name: []const u8, message: []const u8, clear_line: u32) void {
+    pub fn setError(self: *Runtime, kind: ErrorKind, error_name: u32, message: []const u8, clear_line: u32) void {
         self.__error.kind = kind;
         self.__error.error_name = error_name;
         self.__error.message = message;
@@ -381,7 +408,7 @@ pub const Runtime = struct {
     /// Called by EXTERN FN trampolines when a native Zig function returns an error.
     pub fn setZigError(self: *Runtime, err: anyerror, clear_line: u32) void {
         self.__error.kind = zigErrorToKind(err);
-        self.__error.error_name = @errorName(err);
+        self.__error.error_name = zigErrorToName(err);
         self.__error.message = "";
         self.__error.clear_line = clear_line;
     }

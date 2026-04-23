@@ -98,6 +98,7 @@ class ZigTranspiler
 
     emitter = MIREmitter.new
     body = emitter.emit(program)
+    error_name_enum = emit_error_name_enum
 
     main_variant = main_stack_variant(result.fn_nodes["main"], override: main_tier)
     footer = File.read(File.join(File.dirname(__FILE__), '..', '..', 'zig', 'runtime', 'runtime-footer.zig'))
@@ -105,12 +106,30 @@ class ZigTranspiler
                          ".{ .stack_size = .#{main_variant}, .pinned = true }")
 
     <<~ZIG
+      #{error_name_enum}
+
       #{body}
 
       // -------------------------------------------------------------------------
       // 3. Main Entry (Test Harness)
       // -------------------------------------------------------------------------
       #{footer}
+    ZIG
+  end
+
+  # Emit the per-program ErrorName enum. Populated from AST::ERROR_TYPES
+  # at the moment this is called (stdlib seed + whatever user types the
+  # annotator registered). Each emitted value's integer id is stable
+  # across runs and matches runtime.zig's ErrorName_<N> constants for
+  # the stdlib-seeded entries.
+  def emit_error_name_enum
+    lines = AST.enum_entries.map { |sym, id| "    #{sym} = #{id}," }
+    <<~ZIG.chomp
+      // Generated per-program: CLEAR error types. Stdlib ids (1..3) are
+      // stable and match runtime.zig's ErrorName_<Name> constants.
+      pub const ErrorName = enum(u32) {
+      #{lines.join("\n")}
+      };
     ZIG
   end
 

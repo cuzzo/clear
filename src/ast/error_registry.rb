@@ -1,22 +1,57 @@
 module AST
-  # Single source of truth for CLEAR error kinds and specific error types.
+  # Single source of truth for CLEAR error kinds and types.
   #
-  # ErrorKind is the coarse taxonomy users match with `ON <KIND>` (e.g.
-  # `ON TRANSIENT`). The 6 kinds mirror the ErrorKind enum in runtime.zig
-  # and must stay in sync.
+  # ErrorKind is the closed taxonomy of 6 coarse categories. It mirrors
+  # runtime.zig's ErrorKind enum exactly.
   #
-  # ErrorType is a specific error name (e.g. `:LockTimeout`) that users
-  # match with `ON :Sym`. Every error type belongs to exactly one kind.
-  # `zig_name` is the spelling the Zig runtime uses as `error.<name>`.
-  # New stdlib errors are added here and nowhere else.
+  # ErrorType is an open, auto-registered set. The stdlib seeds it with
+  # the lock-safety types at stable low IDs (LockTimeout=1, LockCycle=2,
+  # Deadlock=3). User types get ids from 4 onwards in order of first
+  # use. First use requires a kind (at RAISE / OR EXIT); subsequent uses
+  # can provide only the type and the kind is looked up. Collisions
+  # (same type, different kind) produce a diagnostic pointing at the
+  # first registration site.
+  #
+  # The enum IDs are emitted at compile time as a per-program Zig header:
+  #   pub const ErrorName = enum(u32) { None = 0, LockTimeout = 1, ... };
+  # runtime.zig stores ErrorContext.error_name as plain u32; dispatch in
+  # generated user code compares to @intFromEnum(ErrorName.<Sym>).
 
   ERROR_KINDS = %i[Transient Input System NotFound Permission Canceled].freeze
 
+  # Stable stdlib-type IDs. runtime.zig's zigErrorToName hardcodes these
+  # when mapping a Zig error (`error.LockTimeout`, etc) to a u32
+  # ErrorName id. Keep these in sync with the ids baked into the
+  # generated ErrorName enum.
+  ERROR_NAME_NONE         = 0
+  ERROR_NAME_LOCK_TIMEOUT = 1
+  ERROR_NAME_LOCK_CYCLE   = 2
+  ERROR_NAME_DEADLOCK     = 3
+  ERROR_NAME_USER_FIRST   = 4
+
+  # Mutable registry. Seeded with the three stdlib types and extended
+  # by the annotator on first use. Hash shape:
+  #   <type_sym> => {
+  #     kind: :Kind,
+  #     zig_name: "<TypeName>",
+  #     id: <u32>,
+  #     first_site: <Token|nil>,  # for collision diagnostics
+  #   }
+  # Not thread-safe; the compiler is single-threaded per-program.
   ERROR_TYPES = {
-    LockTimeout: { kind: :Transient, zig_name: "LockTimeout" },
-    LockCycle:   { kind: :Transient, zig_name: "LockCycle"   },
-    Deadlock:    { kind: :System,    zig_name: "Deadlock"    },
-  }.freeze
+    LockTimeout: { kind: :Transient, zig_name: "LockTimeout", id: ERROR_NAME_LOCK_TIMEOUT, first_site: nil },
+    LockCycle:   { kind: :Transient, zig_name: "LockCycle",   id: ERROR_NAME_LOCK_CYCLE,   first_site: nil },
+    Deadlock:    { kind: :System,    zig_name: "Deadlock",    id: ERROR_NAME_DEADLOCK,     first_site: nil },
+  }
+
+  # Counter for the next user-type id. Reset on a per-program basis via
+  # reset_user_types! (called at the start of each SemanticAnnotator run
+  # so parallel rspec runs don't bleed state).
+  @next_user_id = ERROR_NAME_USER_FIRST
+  @stdlib_frozen = ERROR_TYPES.keys.to_set
+  class << self
+    attr_reader :next_user_id, :stdlib_frozen
+  end
 
   def self.error_kind?(sym)
     ERROR_KINDS.include?(sym)
@@ -34,9 +69,61 @@ module AST
     ERROR_TYPES.dig(sym, :zig_name)
   end
 
+  def self.id_of_type(sym)
+    ERROR_TYPES.dig(sym, :id)
+  end
+
+  # Register a user-defined type with its kind. First call for a given
+  # sym seeds the entry and assigns an id; subsequent calls verify the
+  # kind matches. On mismatch, yields a diagnostic (the caller emits it
+  # via error!); on stdlib-collision (user tries to redefine a stdlib
+  # type with a different kind), same.
+  #
+  # Returns [existed?, conflict?]. conflict is a Hash
+  #   { existing_kind:, given_kind:, first_site:, is_stdlib: }
+  # or nil when registration succeeded (or was a no-op re-use).
+  def self.register_type!(type_sym, kind_sym, site_token: nil)
+    entry = ERROR_TYPES[type_sym]
+    if entry.nil?
+      id = @next_user_id
+      @next_user_id += 1
+      ERROR_TYPES[type_sym] = {
+        kind: kind_sym,
+        zig_name: type_sym.to_s,
+        id: id,
+        first_site: site_token,
+      }
+      return [false, nil]
+    end
+    return [true, nil] if entry[:kind] == kind_sym
+    [true, {
+      existing_kind: entry[:kind],
+      given_kind:    kind_sym,
+      first_site:    entry[:first_site],
+      is_stdlib:     @stdlib_frozen.include?(type_sym),
+    }]
+  end
+
+  # Reset the user-registered portion of the registry. Called at the
+  # start of every SemanticAnnotator run so test runs don't leak state
+  # from one parsed program into the next. Stdlib entries are preserved.
+  def self.reset_user_types!
+    ERROR_TYPES.keys.each do |sym|
+      ERROR_TYPES.delete(sym) unless @stdlib_frozen.include?(sym)
+    end
+    @next_user_id = ERROR_NAME_USER_FIRST
+  end
+
+  # Enum-ready list of (sym, id) pairs. Used by mir-lowering to emit
+  # the `pub const ErrorName = enum(u32) { ... };` header at the top
+  # of the generated Zig program. Sorted by id so the emitted enum is
+  # deterministic across runs.
+  def self.enum_entries
+    [[:None, ERROR_NAME_NONE]] + ERROR_TYPES.map { |sym, meta| [sym, meta[:id]] }.sort_by(&:last)
+  end
+
   # Returns the Array of error-type Symbols whose :kind == kind. Used by
-  # annotator to expand `ON TRANSIENT` into its member types, and by mir
-  # lowering to emit the matching Zig error names.
+  # the annotator to expand kind selectors into their member types.
   def self.types_for_kind(kind)
     ERROR_TYPES.select { |_, meta| meta[:kind] == kind }.keys
   end

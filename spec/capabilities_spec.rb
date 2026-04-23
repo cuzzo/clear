@@ -2044,4 +2044,66 @@ RSpec.describe SemanticAnnotator do
     end
   end
 
+  # ---------------------------------------------------------------------------
+  # RAISE grammar + auto-registration
+  # ---------------------------------------------------------------------------
+  # Verifies the unified RAISE forms and the collision / first-use rules
+  # in AST.register_type! as driven by the annotator's visit_Raise.
+
+  describe "RAISE grammar + registry auto-registration" do
+    it "accepts `RAISE Kind, Type, \"msg\"` as first use and registers the mapping" do
+      src = <<~FLUX
+        FN go() RETURNS !Void -> RAISE Input, BadParse, "oops"; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+      expect(AST.kind_of_type(:BadParse)).to eq(:Input)
+    end
+
+    it "accepts type-only `RAISE Type, \"msg\"` once registered" do
+      src = <<~FLUX
+        FN first()  RETURNS !Void -> RAISE Input, TokErr, "bad token"; END
+        FN second() RETURNS !Void -> RAISE TokErr, "another"; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+      expect(AST.kind_of_type(:TokErr)).to eq(:Input)
+    end
+
+    it "rejects type-only RAISE for an unregistered type" do
+      src = <<~FLUX
+        FN go() RETURNS !Void -> RAISE UnknownErr, "oops"; END
+      FLUX
+      expect { run(src) }.to raise_error(/Error type 'UnknownErr' is not registered/)
+    end
+
+    it "reports kind collision with the first-registration line" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input,    DupErr, "first"; END
+        FN b() RETURNS !Void -> RAISE NotFound, DupErr, "second"; END
+      FLUX
+      expect { run(src) }.to raise_error(/'DupErr' is already mapped to kind 'Input'.*line 1/)
+    end
+
+    it "accepts the same type with the same kind at multiple sites" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, MaybeOk, "first"; END
+        FN b() RETURNS !Void -> RAISE Input, MaybeOk, "second"; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+
+    it "rejects shadowing a stdlib type name with a different kind" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Input, LockTimeout, "bad"; END
+      FLUX
+      expect { run(src) }.to raise_error(/'LockTimeout' is reserved by the stdlib as kind 'Transient'/)
+    end
+
+    it "accepts re-using a stdlib type name with its stdlib kind (no-op)" do
+      src = <<~FLUX
+        FN a() RETURNS !Void -> RAISE Transient, LockTimeout, "bad"; END
+      FLUX
+      expect { run(src) }.not_to raise_error
+    end
+  end
+
 end

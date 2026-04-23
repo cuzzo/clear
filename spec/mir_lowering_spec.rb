@@ -908,7 +908,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
       code = emit(result)
-      expect(code).to include('setError(.Transient, "Timeout"')
+      expect(code).to include('setError(.Transient, @intFromEnum(ErrorName.Timeout)')
       expect(code).to include("return error.CheatError")
     end
 
@@ -918,7 +918,8 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       expect(result).to be_a(MIR::ScopeBlock)
       code = emit(result)
-      expect(code).to include('setError(.NotFound, ""')
+      # No specific type named -> None id (0) is emitted, message is "".
+      expect(code).to include('setError(.NotFound, 0,')
       expect(code).to include("return error.CheatError")
     end
   end
@@ -1809,7 +1810,7 @@ RSpec.describe MIRLowering do
       result = lowering.lower(node)
       zig = emit(result)
       expect(zig).to include("matchesKind(.Type)")
-      expect(zig).to include('matchesName("NotFound")')
+      expect(zig).to include('matchesName(@intFromEnum(ErrorName.NotFound))')
     end
   end
 

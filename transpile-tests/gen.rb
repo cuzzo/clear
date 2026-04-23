@@ -97,9 +97,11 @@ class TestGenerator
       ZIG
     end
 
+    error_name_enum = TestGenerator.emit_error_name_enum_block_scope
     <<~ZIG
       test "#{filename}" {
           #{preamble}
+          #{error_name_enum}
           const S = struct {
               #{transpiled_body}
           };
@@ -119,6 +121,32 @@ class TestGenerator
 
           #{execution_block}
       }
+    ZIG
+  end
+
+  # Emit the per-program ErrorName enum at module scope. Stdlib seeds
+  # (1..3) stay stable. User-registered types extend the enum with ids
+  # from 4+ as the annotator encounters them.
+  def self.emit_error_name_enum
+    lines = AST.enum_entries.map { |sym, id| "    #{sym} = #{id}," }
+    <<~ZIG.chomp
+      pub const ErrorName = enum(u32) {
+      #{lines.join("\n")}
+      };
+    ZIG
+  end
+
+  # Per-test-block variant: emits inside a `test { ... }` scope plus a
+  # comptime @typeName reference to placate Zig's unused-local-const /
+  # pointless-discard checks uniformly (works whether the body
+  # references ErrorName or not).
+  def self.emit_error_name_enum_block_scope
+    lines = AST.enum_entries.map { |sym, id| "    #{sym} = #{id}," }
+    <<~ZIG.chomp
+      const ErrorName = enum(u32) {
+      #{lines.join("\n")}
+      };
+      comptime { _ = @typeName(ErrorName); }
     ZIG
   end
 

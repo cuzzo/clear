@@ -1570,13 +1570,24 @@ class Parser
 
   ERROR_KINDS = AST::ERROR_KINDS.map(&:to_s).freeze
 
-  # RAISE Kind;
-  # RAISE Kind, ErrorName;
-  # RAISE Kind, ErrorName, "message";
+  # RAISE grammar (unified error system):
+  #   RAISE                            -- System kind, no type, no msg
+  #   RAISE "msg"                      -- System + msg
+  #   RAISE Kind                       -- kind only
+  #   RAISE Kind, "msg"                -- kind + msg
+  #   RAISE Kind, Type                 -- kind + type (first use or verify)
+  #   RAISE Kind, Type, "msg"          -- full
+  #   RAISE Type                       -- type only (kind looked up at annotator)
+  #   RAISE Type, "msg"                -- type + msg
+  #
+  # Disambiguation: the first TYPE_ID after RAISE is a KIND iff it's in
+  # ERROR_KINDS; any other TYPE_ID is a TYPE. When only one TYPE_ID is
+  # present, `kind` is nil and the annotator resolves it from the
+  # registered (type, kind) entry.
   def parse_raise_stmt
     tok = consume(:KEYWORD, 'RAISE')
 
-    # Legacy: RAISE "string"; (bare string = System error with message)
+    # Legacy: RAISE "string";
     if match?(:STRING)
       msg = parse_expression
       consume(:CHAR, ';')
@@ -1588,26 +1599,24 @@ class Parser
       return AST::Raise.new(tok, :System, nil, nil)
     end
 
-    # Kind (required TYPE_ID from the 6 error kinds)
-    kind_tok = consume(:TYPE_ID)
-    kind = kind_tok.value.to_sym
-    unless ERROR_KINDS.include?(kind_tok.value)
-      error!(kind_tok, "RAISE expects an error kind: #{ERROR_KINDS.join(', ')}. Got '#{kind_tok.value}'")
-    end
+    first_tok = consume(:TYPE_ID)
+    first_is_kind = ERROR_KINDS.include?(first_tok.value)
 
-    error_name = nil
+    kind = first_is_kind ? first_tok.value.to_sym : nil
+    error_name = first_is_kind ? nil : first_tok.value
     message = nil
 
     if match?(:CHAR, ',')
       consume(:CHAR, ',')
-      # Next could be a TYPE_ID (error name) or a STRING (message)
-      if match?(:TYPE_ID)
+      if first_is_kind && match?(:TYPE_ID)
+        # Kind, Type[, "msg"]
         error_name = consume(:TYPE_ID).value
         if match?(:CHAR, ',')
           consume(:CHAR, ',')
           message = parse_expression
         end
       else
+        # Kind, "msg"  or  Type, "msg"
         message = parse_expression
       end
     end

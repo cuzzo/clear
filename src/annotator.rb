@@ -75,6 +75,10 @@ class SemanticAnnotator
   end
 
   def annotate!(node)
+    # Reset user-registered error types so state from prior runs (rspec
+    # parallel, multi-program test harness) doesn't leak in. Stdlib
+    # types are preserved.
+    AST.reset_user_types!
     visit(node)
     finalize_capability_audit!
   end
@@ -1405,10 +1409,55 @@ private
   end
 
   def visit_Raise(node)
-    # RAISE "message" - signals an error
     visit(node.message_expr) if node.message_expr
+    resolve_error_registration!(node, node.kind, node.error_name, node.token)
     node.full_type = :NoReturn # Raises propagate up or are caught
     @branch_terminated = true
+  end
+
+  # Unified registration for RAISE / OR EXIT / EXIT sites that name an
+  # error type. Rules:
+  #   - kind given + type given  : register or verify (kind, type).
+  #   - kind nil   + type given  : type MUST already be registered;
+  #                                node.kind is backfilled to the
+  #                                registered kind.
+  #   - kind given + type nil    : no-op (no type to register).
+  #   - kind nil   + type nil    : no-op (legacy message-only form).
+  # On collision, emits a diagnostic anchored at the second site,
+  # naming the first registration line for context.
+  def resolve_error_registration!(node, kind_sym, type_name_str, site_tok)
+    return if type_name_str.nil?
+    type_sym = type_name_str.to_sym
+
+    if kind_sym.nil?
+      # Type-only form — require prior registration.
+      unless AST.error_type?(type_sym)
+        error!(site_tok || node,
+               "Error type '#{type_name_str}' is not registered. The first RAISE / OR EXIT site " \
+               "that names a new type must provide a kind: use 'RAISE Kind, #{type_name_str}, \"msg\"' " \
+               "or similar.")
+        return
+      end
+      # Backfill the node with the registered kind so downstream
+      # passes (mir-lowering) can emit rt.setError(.Kind, ...).
+      node.kind = AST.kind_of_type(type_sym)
+      return
+    end
+
+    # Kind + type: first use registers, subsequent verifies.
+    _, conflict = AST.register_type!(type_sym, kind_sym, site_token: site_tok)
+    return unless conflict
+    first_site = conflict[:first_site]
+    first_loc  = first_site ? " (first registered at line #{first_site.line})" : ""
+    if conflict[:is_stdlib]
+      error!(site_tok || node,
+             "'#{type_name_str}' is reserved by the stdlib as kind '#{conflict[:existing_kind]}'. " \
+             "Pick a different type name.")
+    else
+      error!(site_tok || node,
+             "'#{type_name_str}' is already mapped to kind '#{conflict[:existing_kind]}'#{first_loc}. " \
+             "Either use the same kind here, or pick a different type name.")
+    end
   end
 
   # ==========================================

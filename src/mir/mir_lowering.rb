@@ -1082,7 +1082,7 @@ class MIRLowering
       clause_body_zig = clause_mir.map { |m| emit_expr(m) }.join("\n            ")
 
       cond_parts = ["#{rt_name}.__error.matchesKind(.#{kind})"]
-      cond_parts << "#{rt_name}.__error.matchesName(\"#{error_name}\")" if error_name
+      cond_parts << "#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{error_name}))" if error_name
       cond = cond_parts.join(" and ")
 
       "if (#{cond}) {\n            #{snapshot_decl}const __error = #{rt_name}.__error;\n            _ = &__error;\n            defer #{rt_name}.freeSnapshot();\n            #{clause_body_zig}\n        }"
@@ -1956,7 +1956,7 @@ class MIRLowering
     bubble.each do |t|
       zig = AST.zig_name_of_type(t)
       kind = AST.kind_of_type(t)
-      arms << %Q(error.#{zig} => { #{@rt_name}.setError(.#{kind}, "#{zig}", "lock #{zig}", #{line}); return error.CheatError; })
+      arms << %Q(error.#{zig} => { #{@rt_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{zig}), "lock #{zig}", #{line}); return error.CheatError; })
     end
     handler = "switch (__err) {\n#{arms.join(",\n")}\n}"
 
@@ -1999,10 +1999,10 @@ class MIRLowering
     line = with_node.token&.line.to_s
     case clause[:action]
     when :raise
-      %Q(#{@rt_name}.setError(.Transient, "LockTimeout", "lock acquire timed out", #{line});\nreturn error.CheatError;)
+      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.LockTimeout), "lock acquire timed out", #{line});\nreturn error.CheatError;)
     when :exit
       msg_zig = emit_expr(lower(clause[:message]))
-      %Q(#{@rt_name}.setError(.Transient, "LockTimeout", #{msg_zig}, #{line});\nreturn error.CheatError;)
+      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.LockTimeout), #{msg_zig}, #{line});\nreturn error.CheatError;)
     when :pass
       "break :#{with_label};"
     when :block
@@ -2503,8 +2503,9 @@ class MIRLowering
   def lower_or_exit(node)
     rt = MIR::Ident.new(@rt_name)
     msg_node = node.message ? lower(node.message) : MIR::Lit.new('""')
+    # Legacy OR EXIT "msg" form: System kind, no specific type (None id 0).
     set_error = MIR::MethodCall.new(rt, "setError", [
-      MIR::Ident.new(".System"), MIR::Lit.new('""'), msg_node, MIR::Lit.new(node.token.line.to_s)
+      MIR::Ident.new(".System"), MIR::Lit.new('0'), msg_node, MIR::Lit.new(node.token.line.to_s)
     ], false)
     ret = MIR::ReturnStmt.new(MIR::Ident.new("error.CheatError"))
     MIR::ScopeBlock.new([MIR::ExprStmt.new(set_error, false), ret])
@@ -2583,7 +2584,7 @@ class MIRLowering
     kind = node.kind
     # TEST-INFRA: ASSERT_RAISES expression assembled as raw Zig; not program memory.
     expr_zig = emit_expr(lower(node.expression))
-    error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(\"#{node.error_name}\")" : ""
+    error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{node.error_name}))" : ""
     ar_code = <<~ZIG.chomp
       {
           if (#{expr_zig}) |_| {
@@ -3605,13 +3606,20 @@ class MIRLowering
   def lower_raise(node)
     rt = MIR::Ident.new(@rt_name)
     kind = ".#{node.kind || :Unknown}"
-    error_name = node.error_name ? node.error_name.to_s : ""
+    # error_name is a u32 id into the per-program ErrorName enum. Emit
+    # `@intFromEnum(ErrorName.Foo)` when a specific type is named; use
+    # `0` (the None sentinel) when it's a kind-only RAISE.
+    name_expr = if node.error_name && !node.error_name.empty?
+      "@intFromEnum(ErrorName.#{node.error_name})"
+    else
+      "0"
+    end
     msg_expr = node.message_expr ? lower(node.message_expr) : MIR::Lit.new('""')
     line = node.token.line.to_s
 
     set_error = MIR::MethodCall.new(rt, "setError", [
       MIR::Ident.new(kind),
-      MIR::Lit.new("\"#{error_name}\""),
+      MIR::Ident.new(name_expr),
       msg_expr,
       MIR::Lit.new(line)
     ], false)

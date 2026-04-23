@@ -23,20 +23,126 @@ RSpec.describe AST do
   end
 
   describe "ERROR_TYPES" do
-    it "registers LockTimeout as Transient with Zig spelling 'LockTimeout'" do
-      expect(AST::ERROR_TYPES[:LockTimeout]).to eq(kind: :Transient, zig_name: "LockTimeout")
+    it "seeds LockTimeout as Transient with stable id 1" do
+      entry = AST::ERROR_TYPES[:LockTimeout]
+      expect(entry[:kind]).to eq(:Transient)
+      expect(entry[:zig_name]).to eq("LockTimeout")
+      expect(entry[:id]).to eq(AST::ERROR_NAME_LOCK_TIMEOUT)
     end
 
-    it "registers LockCycle as Transient with Zig spelling 'LockCycle'" do
-      expect(AST::ERROR_TYPES[:LockCycle]).to eq(kind: :Transient, zig_name: "LockCycle")
+    it "seeds LockCycle as Transient with stable id 2" do
+      entry = AST::ERROR_TYPES[:LockCycle]
+      expect(entry[:kind]).to eq(:Transient)
+      expect(entry[:id]).to eq(AST::ERROR_NAME_LOCK_CYCLE)
     end
 
-    it "registers Deadlock as System with Zig spelling 'Deadlock'" do
-      expect(AST::ERROR_TYPES[:Deadlock]).to eq(kind: :System, zig_name: "Deadlock")
+    it "seeds Deadlock as System with stable id 3" do
+      entry = AST::ERROR_TYPES[:Deadlock]
+      expect(entry[:kind]).to eq(:System)
+      expect(entry[:id]).to eq(AST::ERROR_NAME_DEADLOCK)
     end
 
-    it "is frozen" do
-      expect(AST::ERROR_TYPES).to be_frozen
+    it "user types start at id 4" do
+      expect(AST::ERROR_NAME_USER_FIRST).to eq(4)
+    end
+  end
+
+  describe ".register_type!" do
+    around do |example|
+      AST.reset_user_types!
+      example.run
+      AST.reset_user_types!
+    end
+
+    it "registers a new user type and assigns the next user id" do
+      existed, conflict = AST.register_type!(:ParseError, :Input)
+      expect(existed).to be false
+      expect(conflict).to be_nil
+      expect(AST.kind_of_type(:ParseError)).to eq(:Input)
+      expect(AST.id_of_type(:ParseError)).to eq(AST::ERROR_NAME_USER_FIRST)
+    end
+
+    it "returns existed=true with no conflict on a matching second registration" do
+      AST.register_type!(:ParseError, :Input)
+      existed, conflict = AST.register_type!(:ParseError, :Input)
+      expect(existed).to be true
+      expect(conflict).to be_nil
+    end
+
+    it "reports a collision with the existing kind when the second kind differs" do
+      AST.register_type!(:ParseError, :Input)
+      _, conflict = AST.register_type!(:ParseError, :NotFound)
+      expect(conflict).not_to be_nil
+      expect(conflict[:existing_kind]).to eq(:Input)
+      expect(conflict[:given_kind]).to eq(:NotFound)
+      expect(conflict[:is_stdlib]).to be false
+    end
+
+    it "flags an attempt to shadow a stdlib type as is_stdlib" do
+      _, conflict = AST.register_type!(:LockTimeout, :Input)
+      expect(conflict).not_to be_nil
+      expect(conflict[:existing_kind]).to eq(:Transient)
+      expect(conflict[:is_stdlib]).to be true
+    end
+
+    it "accepts re-registering a stdlib type with its own kind" do
+      _, conflict = AST.register_type!(:LockTimeout, :Transient)
+      expect(conflict).to be_nil
+    end
+
+    it "records the first_site token on first registration" do
+      tok = Object.new
+      AST.register_type!(:ParseError, :Input, site_token: tok)
+      expect(AST::ERROR_TYPES[:ParseError][:first_site]).to equal(tok)
+    end
+
+    it "assigns distinct ids to different user types in order of registration" do
+      AST.register_type!(:A, :Input)
+      AST.register_type!(:B, :Input)
+      expect(AST.id_of_type(:A)).to eq(AST::ERROR_NAME_USER_FIRST)
+      expect(AST.id_of_type(:B)).to eq(AST::ERROR_NAME_USER_FIRST + 1)
+    end
+  end
+
+  describe ".reset_user_types!" do
+    it "removes user types but preserves stdlib entries" do
+      AST.register_type!(:UserA, :Input)
+      AST.reset_user_types!
+      expect(AST.error_type?(:UserA)).to be false
+      expect(AST.error_type?(:LockTimeout)).to be true
+    end
+
+    it "rewinds the next user id so subsequent user types start at 4" do
+      AST.register_type!(:UserA, :Input)
+      AST.reset_user_types!
+      AST.register_type!(:UserB, :Input)
+      expect(AST.id_of_type(:UserB)).to eq(AST::ERROR_NAME_USER_FIRST)
+    end
+  end
+
+  describe ".enum_entries" do
+    around do |example|
+      AST.reset_user_types!
+      example.run
+      AST.reset_user_types!
+    end
+
+    it "produces (:Name, id) pairs including the None=0 sentinel and stdlib at 1..3" do
+      entries = AST.enum_entries
+      expect(entries.first).to eq([:None, 0])
+      expect(entries).to include([:LockTimeout, 1])
+      expect(entries).to include([:LockCycle, 2])
+      expect(entries).to include([:Deadlock, 3])
+    end
+
+    it "includes user types at >=4 sorted by id" do
+      AST.register_type!(:UserA, :Input)
+      AST.register_type!(:UserB, :Input)
+      entries = AST.enum_entries
+      ids = entries.map(&:last)
+      expect(ids).to eq(ids.sort)
+      expect(entries).to include([:UserA, 4])
+      expect(entries).to include([:UserB, 5])
     end
   end
 
@@ -99,6 +205,7 @@ RSpec.describe AST do
     end
 
     it "returns an empty array for kinds with no registered types" do
+      AST.reset_user_types!
       expect(AST.types_for_kind(:Input)).to eq([])
       expect(AST.types_for_kind(:NotFound)).to eq([])
       expect(AST.types_for_kind(:Permission)).to eq([])
