@@ -1961,6 +1961,83 @@ RSpec.describe SemanticAnnotator do
       FLUX
       expect { run(src) }.to raise_error(ParserError, /Expected 'rank' keyword/)
     end
+
+    it "rejects inconsistent rank declarations with the error anchored at the second declaration" do
+      # Inconsistent rank is reported at the second (diverging) declaration,
+      # not the first. This matters: the programmer reading the error needs
+      # the line of the NEW decl that disagrees with the prior contract.
+      src = <<~FLUX
+        STRUCT C { v: Int64 }
+        a = C{ v: 0 } @locked(rank: 1);
+        b = C{ v: 0 } @locked(rank: 2);
+      FLUX
+      expect { run(src) }.to raise_error { |e|
+        # Message carries both ranks so the programmer can see the conflict.
+        expect(e.message).to match(/Inconsistent lock rank for type 'C'.*rank 1.*rank 2/)
+        # Annotator anchors errors by embedding "(Line N)" — the error must
+        # point at line 3 (the second declaration), not line 2 (the first).
+        expect(e.message).to include("(Line 3)")
+        expect(e.message).not_to include("(Line 2)")
+      }
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Stdlib error_kind / error_type stamping on call nodes
+  # ---------------------------------------------------------------------------
+  # Verifies the annotator propagates a stdlib entry's :error_kind / :error_type
+  # metadata onto the AST call node. The plumbing is wired through three sites
+  # (FuncCall dispatch in resolve_call, MethodCall UFCS in visit_MethodCall,
+  # method_analysis for collection methods) and has no coverage without this
+  # spec: today no stdlib entry actually sets these fields, so silent regressions
+  # in the plumbing are invisible. We monkey-patch writeFile (a can_fail stdlib
+  # entry) for the duration of each example, reverting after.
+
+  describe "stdlib error_kind / error_type stamping" do
+    let(:entry) { STD_LIB["writeFile"] }
+
+    around do |example|
+      # Deep save + restore so the registry mutation doesn't leak across tests.
+      saved = entry.dup
+      entry[:error_kind] = :Transient
+      entry[:error_type] = :LockTimeout
+      begin
+        example.run
+      ensure
+        entry.replace(saved)
+      end
+    end
+
+    def find_call(ast, name)
+      # Walk top-level statements looking for a call with the given name.
+      # writeFile("p","c"); becomes a FuncCall statement (or wrapped if it
+      # can fail and the fn return is !Void — try/OR form).
+      ast.statements.each do |s|
+        return s if s.is_a?(AST::FuncCall) && s.name == name
+        if s.is_a?(AST::BinaryOp) && s.left.is_a?(AST::FuncCall) && s.left.name == name
+          return s.left
+        end
+      end
+      nil
+    end
+
+    it "stamps error_kind and error_type from the matched stdlib entry" do
+      src = 'writeFile("p", "c") OR 0;'
+      call = find_call(run(src), "writeFile")
+      expect(call).not_to be_nil
+      expect(call.error_kind).to eq(:Transient)
+      expect(call.error_type).to eq(:LockTimeout)
+    end
+
+    it "leaves error_kind / error_type nil when the entry has no metadata" do
+      entry.delete(:error_kind)
+      entry.delete(:error_type)
+      src = 'writeFile("p", "c") OR 0;'
+      call = find_call(run(src), "writeFile")
+      expect(call).not_to be_nil
+      expect(call.error_kind).to be_nil
+      expect(call.error_type).to be_nil
+    end
   end
 
 end
