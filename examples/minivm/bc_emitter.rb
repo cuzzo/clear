@@ -1413,6 +1413,11 @@ class BcEmitter
         real_args.each { |a| compile_expr_to_value(a) }
         emit_op(MAP_PUT)
         push_type(:any); return
+      when "get"
+        compile_expr_to_value(node.receiver)
+        real_args.each { |a| compile_expr_to_value(a) }
+        emit_op(MAP_GET)
+        push_type(:any); return
       when "delete"
         compile_expr_to_value(node.receiver)
         real_args.each { |a| compile_expr_to_value(a) }

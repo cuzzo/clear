@@ -4154,6 +4154,16 @@ class MIRLowering
       return MIR::Set.new(MIR::IndexGet.new(target, idx), val)
     end
 
+    # VM path: the bc_emitter has native MAP_PUT / NATIVE_CALL list-set!
+    # dispatch on MIR::Set(IndexGet, val); avoid the Zig-templated InlineZig
+    # that the Zig backend needs.
+    if @target == :bc
+      target = lower(target_node)
+      idx = lower(node.name.index)
+      val = lower(node.value)
+      return MIR::Set.new(MIR::IndexGet.new(target, idx), val)
+    end
+
     receiver_type = Type.new(ti)
     rt_name = @rt_name
 
