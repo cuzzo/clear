@@ -300,7 +300,12 @@ class Formatter::Emitter
       return start + 1
     end
 
-    (start..arrow_idx).each { |j| out << toks[j] }
+    po, pc = find_fn_parens(toks, start, arrow_idx)
+    if should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
+      emit_fn_signature_wrapped(out, toks, start, arrow_idx, po, pc)
+    else
+      (start..arrow_idx).each { |j| out << toks[j] }
+    end
 
     # Ensure exactly one :NL after the arrow (strip any blank line directly
     # after the signature — bodies start immediately at +1 indent).
@@ -388,18 +393,113 @@ class Formatter::Emitter
     j
   end
 
+  # Locate the opening/closing parens of the FN param list. Returns
+  # [po, pc] (both may be nil for FNs with no parens, though in CLEAR
+  # they are mandatory).
+  def find_fn_parens(toks, fn_idx, arrow_idx)
+    po = nil; pc = nil; depth = 0
+    j = fn_idx + 1
+    while j < arrow_idx
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '('
+          po ||= j
+          depth += 1
+        when ')'
+          depth -= 1
+          pc = j if depth == 0 && po
+        end
+      end
+      j += 1
+    end
+    [po, pc]
+  end
+
+  # Wrap triggers (§3.1):
+  #   (a) source already has NL between `(` and `)` (preserve wrap).
+  #   (b) projected single-line length > 120 chars.
+  def should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
+    return false unless po && pc
+    return true if (po + 1 ... pc).any? { |j| toks[j].type == :NL }
+    inline = toks[start..arrow_idx].reject { |t| t.type == :NL }
+    format_line_body(inline).length > 120
+  end
+
+  # Emit a wrapped FN signature:
+  #   FN name(
+  #     p1: T,
+  #     p2: T
+  #   )
+  #   RETURNS T ->
+  def emit_fn_signature_wrapped(out, toks, start, arrow_idx, po, pc)
+    # Tokens from FN through and including `(`.
+    (start..po).each { |j| out << toks[j] }
+
+    insert_nl(out)
+    out << phantom(:INDENT_OPEN)
+
+    depth = 0
+    j = po + 1
+    j = skip_nls(toks, j)
+    while j < pc
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1; out << t; j += 1; next
+        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
+        when ','
+          if depth == 0
+            out << t; j += 1
+            insert_nl(out)
+            j = skip_nls(toks, j)
+            next
+          end
+        end
+      end
+      if t.type == :NL
+        j += 1
+        next
+      end
+      out << t
+      j += 1
+    end
+
+    out << phantom(:INDENT_CLOSE)
+    insert_nl(out)
+    out << toks[pc]  # `)`
+    insert_nl(out)
+
+    # Emit RETURNS ... -> on its own line.
+    j = pc + 1
+    j = skip_nls(toks, j)
+    while j <= arrow_idx
+      t = toks[j]
+      if t.type == :NL
+        j += 1
+        next
+      end
+      out << t
+      j += 1
+    end
+  end
+
   def find_fn_arrow(toks, fn_idx)
     depth = 0
     j = fn_idx + 1
     while j < toks.length
       t = toks[j]
-      case
-      when t.type == :SYM && t.raw == '('  then depth += 1
-      when t.type == :SYM && t.raw == ')'  then depth -= 1
-      when t.type == :SYM && t.raw == '['  then depth += 1
-      when t.type == :SYM && t.raw == ']'  then depth -= 1
-      when t.type == :OP  && t.raw == '->' && depth == 0 then return j
-      when t.type == :KEYWORD && t.raw == 'END' && depth == 0 then return nil
+      if t.type == :SYM
+        case t.raw
+        when '(', '[' then depth += 1
+        when ')', ']' then depth -= 1
+        when '{', '}', ',', ';'
+          return nil if depth == 0
+        end
+      elsif t.type == :OP && t.raw == '->' && depth == 0
+        return j
+      elsif t.type == :KEYWORD && t.raw == 'END' && depth == 0
+        return nil
       end
       j += 1
     end
