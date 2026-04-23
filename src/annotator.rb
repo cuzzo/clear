@@ -1534,6 +1534,7 @@ private
     node.stdlib_allocates = true if method_def[:allocates]
     node.mutates_receiver = true if method_def[:mutates_receiver]
     node.can_fail = true if method_def[:can_fail]
+    node.error_kind = method_def[:error_kind] if method_def[:error_kind]
     current_fn_ctx.alloc_count += 1 if current_fn_ctx && (method_def[:allocates] || method_def[:can_fail])
   end
 
@@ -1654,6 +1655,7 @@ private
     node.stdlib_allocates = true if matched_def[:allocates]
     node.mutates_receiver = true if matched_def[:mutates_receiver]
     node.can_fail = true if matched_def[:can_fail] || matched_def[:allocates]
+    node.error_kind = matched_def[:error_kind] if matched_def[:error_kind]
     current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail])
 
     # 5. Flag mutable access through list indexing.

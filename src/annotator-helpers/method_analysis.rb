@@ -133,6 +133,7 @@ module MethodAnalysis
       current_fn_ctx.heap_count += 1
     end
     node.can_fail = true if defn[:can_fail] || defn[:allocates]
+    node.error_kind = defn[:error_kind] if defn[:error_kind]
 
     true
   end
