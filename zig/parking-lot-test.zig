@@ -630,9 +630,11 @@ test "ParkingMutex: AB/BA cycle returns error.Deadlock, blocked fiber unblocked"
             // A resumes only after B has already parked on mu_a.
             try c.s.rendezvous.lock();
             defer c.s.rendezvous.unlock();
-            // B holds mu_b and B.waiting_for_lock_owner == A -> cycle.
+            // B holds mu_b and B.waiting_for_lock_owner == A -> multi-hop
+            // cycle -> error.LockCycle (Transient). error.Deadlock is
+            // reserved for chain-length-0 self-cyclic acquires.
             c.s.mu_b.lock() catch |e| {
-                c.s.a_got_deadlock = (e == error.Deadlock);
+                c.s.a_got_deadlock = (e == error.LockCycle);
                 return e; // defer mu_a.unlock() fires, waking B
             };
             c.s.mu_b.unlock();
@@ -1090,9 +1092,10 @@ test "ParkingMutex: 3-way A->B->C->A cycle detected, all fibers recover" {
             try c.s.rv2.lock();       // parks here; C unlocks rv2 after locking mu3
             defer c.s.rv2.unlock();
             // At this point: C holds mu3, C is parked on mu1; A holds mu1 and waits for mu2.
-            // Walking the chain: B.waiting=C -> C.waiting=A -> A.waiting=B -> cycle!
+            // Walking the chain: B.waiting=C -> C.waiting=A -> A.waiting=B -> multi-hop
+            // cycle -> error.LockCycle (Transient).
             c.s.mu3.lock() catch |e| {
-                c.s.b_got_deadlock = (e == error.Deadlock);
+                c.s.b_got_deadlock = (e == error.LockCycle);
                 return e; // defer mu2.unlock() fires, A wakes and gets mu2
             };
             defer c.s.mu3.unlock();
