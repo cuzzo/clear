@@ -33,6 +33,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
  - [ ] HashMap string interning
  - [ ] @sorted for lists, sets, hashmaps.
+ - [ ] Automated Property-based Testing for declarative concurrency constructs pt 1.
 
 Milestone: *Basic* SQL/CLEAR database
 
@@ -48,6 +49,7 @@ Milestone: *Basic* SQL/CLEAR database
  - [ ] Ability to write custom Control Plane strategies
  - [ ] Control Plane Capability Migration -> live shift contented workloads
  - [ ] VM supports entire language, gradual typing.
+ - [ ] Automated Property-based Testing for declarative concurrency constructs pt 2.
 
 Milestone: CLEAR-DB with native queries and hot-reload
 
@@ -65,6 +67,8 @@ Vision is clear: Gradual Typing (Ruby/Python) -> Typed (Rust) -> STRICT Typed (H
  - [ ] Fiber priorities
  - [ ] Naive fiber memory budgets (only spawned & transfered memory, not shared memory)
  - [ ] Improved fiber fault tolerence
+ - [ ] Nearly complete automated Property-based Testing for declarative concurrency constructs
+
 
 ## v0.5
 
