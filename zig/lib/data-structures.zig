@@ -338,7 +338,9 @@ pub fn bind(comptime deps: type) type {
             }
 
             pub fn acquire(self: *Self) Guard {
-                self.mutex.lock();
+                self.mutex.lock() catch |e| {
+                    std.debug.panic("Locked.acquire: {}", .{e});
+                };
                 return Guard{ .parent = self };
             }
 
