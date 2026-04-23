@@ -28,14 +28,15 @@ bill = users AS @u
 
 ```ruby
 FN myFunc(id: Int64, name: String) RETURNS MyPage ->
-  val = fetchData(id, name) OR RAISE
+  page = fetchData(id, name) OR RAISE
     s> parseHeader OR EXIT "Invalid Header"
     s> parseBody OR EXIT "Invalid Body"
     s> fetchUser
       s> RECOVER(defaultUser())
     s> TAP saveToDb(id, name, _)
     s> renderPage();
-  RETURN val; 
+    
+  RETURN page; 
 
 CATCH Input WITH(ParseError)
   IF __error.context == "Invalid Header" -> logInvalidHeader(__error.snapshot.header());
