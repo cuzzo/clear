@@ -250,6 +250,7 @@ class Formatter::Emitter
     toks = expand_method_chains(toks)
     toks = expand_bg_do_blocks(toks)
     toks = expand_record_types(toks)
+    toks = expand_call_args(toks)
     toks = collapse_newlines(toks)
     render(toks)
   end
@@ -947,6 +948,147 @@ class Formatter::Emitter
     total
   end
 
+  # ---- Long call arg wrap (§3.9) -----------------------------------------
+  #
+  # A `(args)` call-list or `Type{fields}` struct-literal wraps when:
+  #   (a) the interior already contains a newline (multi-line arg — e.g. a
+  #       nested wrapped call), OR
+  #   (b) the projected inline length (opener..closer) exceeds 120 chars.
+  # When wrapped: opener stays on current line; each top-level arg on its
+  # own line at +1; closer on its own line back at the call column.
+  # Processed bottom-up via recursive descent so an inner wrap can trigger
+  # an outer wrap.
+  def expand_call_args(toks)
+    process_call_arg_range(toks, 0, toks.length)
+  end
+
+  def process_call_arg_range(toks, start, stop)
+    out = []
+    prev_emitted = nil
+    i = start
+    while i < stop
+      t = toks[i]
+      kind = call_opener_kind(toks, i, prev_emitted)
+      if kind
+        closer = kind == :paren ? ')' : '}'
+        close_idx = find_matching_paren_or_brace(toks, i, t.raw, closer)
+        if close_idx && close_idx < stop
+          inner = process_call_arg_range(toks, i + 1, close_idx)
+          if call_args_need_wrap?(t.raw, inner, toks[close_idx].raw, out)
+            emit_wrapped_args(out, t, inner, toks[close_idx])
+          else
+            out << t
+            out.concat(inner)
+            out << toks[close_idx]
+          end
+          prev_emitted = toks[close_idx]
+          i = close_idx + 1
+          next
+        end
+      end
+      out << t
+      prev_emitted = t unless [:NL, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
+      i += 1
+    end
+    out
+  end
+
+  # :paren, :struct_lit, or nil. `prev_emitted` is the last non-whitespace
+  # non-marker token we emitted into `out` (context for the opener).
+  def call_opener_kind(toks, idx, prev_emitted)
+    t = toks[idx]
+    return nil unless t.type == :SYM
+    if t.raw == '('
+      return nil unless prev_emitted
+      return :paren if [:VAR_ID, :TYPE_ID].include?(prev_emitted.type)
+      return :paren if prev_emitted.type == :SYM && [')', ']'].include?(prev_emitted.raw)
+      # Keywords that attach `(`, like `WITH(...)`, RETRY(...), RECOVER(...).
+      return :paren if prev_emitted.type == :KEYWORD && Formatter::ATTACH_PAREN_AFTER.include?(prev_emitted.raw)
+      return nil
+    elsif t.raw == '{'
+      return :struct_lit if prev_emitted && prev_emitted.type == :TYPE_ID
+      return nil
+    end
+    nil
+  end
+
+  def find_matching_paren_or_brace(toks, open_idx, opener, closer)
+    depth = 0
+    j = open_idx
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        if t.raw == opener then depth += 1
+        elsif t.raw == closer
+          depth -= 1
+          return j if depth == 0
+        end
+      end
+      j += 1
+    end
+    nil
+  end
+
+  def call_args_need_wrap?(opener, inner, closer, out)
+    return true if inner.any? { |t| t.type == :NL }
+    prefix_len = current_line_length_in_out(out)
+    call_len   = opener.length + format_line_body(inner).length + closer.length
+    (prefix_len + call_len) > 120
+  end
+
+  # Approximate the projected length of the current output line (tokens
+  # since the last NL). Ignores indent markers and NLs.
+  def current_line_length_in_out(out)
+    start = out.length - 1
+    while start >= 0 && out[start].type != :NL
+      start -= 1
+    end
+    segment = out[(start + 1)..] || []
+    segment = segment.reject { |t| [:INDENT_OPEN, :INDENT_CLOSE, :NL].include?(t.type) }
+    format_line_body(segment).length
+  end
+
+  def emit_wrapped_args(out, open_tok, inner, close_tok)
+    # `{` is an OPEN_TERMINAL that the renderer already treats as +1
+    # depth; `}` is CLOSE_LEADING that does -1. `(` and `)` are neither,
+    # so the phantom markers provide the depth step for them.
+    use_markers = (open_tok.raw == '(')
+
+    out << open_tok
+    insert_nl(out)
+    out << phantom(:INDENT_OPEN) if use_markers
+
+    depth = 0
+    j = 0
+    # Skip any leading NLs from `inner` so we don't emit a blank line
+    # right after `(` / `{`.
+    j += 1 while j < inner.length && inner[j].type == :NL
+    while j < inner.length
+      t = inner[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1; out << t; j += 1; next
+        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
+        when ','
+          if depth == 0
+            out << t
+            j += 1
+            insert_nl(out)
+            j += 1 if j < inner.length && inner[j].type == :NL
+            next
+          end
+        end
+      end
+      out << t
+      j += 1
+    end
+
+    out.pop while out.last && out.last.type == :NL
+    out << phantom(:INDENT_CLOSE) if use_markers
+    insert_nl(out)
+    out << close_tok
+  end
+
   # ---- BG / DO multi-statement wrap (§3.10) ------------------------------
   #
   # `BG { ... }` (and `DO { ... }` fork-join branches) must be multi-line
@@ -1393,6 +1535,14 @@ class Formatter::Emitter
 
   # Spacing decision between two adjacent code tokens A (prev) and B (cur).
   def needs_space?(a, b, line, b_idx)
+    # Capability attach (§4): @X flush-attaches to a type token when the
+    # position is a type context (struct field, param type, RETURNS type).
+    # Value position (`1 @locked`, `foo() @locked`) keeps the space.
+    if b.type == :VAR_ID && b.raw.start_with?('@')
+      type_like_prev = a.type == :TYPE_ID || (a.type == :SYM && a.raw == ']')
+      return false if type_like_prev && in_type_context?(line, b_idx - 1)
+    end
+
     # No space inside opening/closing brackets.
     return false if a.type == :SYM && ['(', '[', '{'].include?(a.raw)
     return false if b.type == :SYM && [')', ']', '}'].include?(b.raw)
@@ -1447,6 +1597,34 @@ class Formatter::Emitter
 
     # Default: one space.
     true
+  end
+
+  # Scan back from `line[idx]` to determine whether the position is a
+  # type-annotation context. Returns true if the nearest non-nested
+  # separator is `:` or `RETURNS`; false for `=` / `,` / `;` / start.
+  def in_type_context?(line, idx)
+    depth = 0
+    j = idx
+    while j >= 0
+      t = line[j]
+      j -= 1
+      next if [:NL, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
+      if t.type == :SYM
+        case t.raw
+        when ')', ']', '}' then depth += 1
+        when '(', '[', '{'
+          depth -= 1
+          return false if depth < 0
+        when ',', ';', '='
+          return false if depth == 0
+        when ':'
+          return true if depth == 0
+        end
+      elsif t.type == :KEYWORD && t.raw == 'RETURNS' && depth == 0
+        return true
+      end
+    end
+    false
   end
 
   # Is position `a_idx` in `line` a unary-operator context — i.e., does

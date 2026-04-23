@@ -262,7 +262,22 @@ a bug in the rule, not in the code.
 
 ## Implementation status
 
-**v1.2 (current — forced wraps):**
+**v2 (current):**
+- Long call / struct-literal argument wrap (§3.9): any interior NL OR
+  projected line length (including receiver) exceeding 120 → all args
+  on their own lines at +1; `)` or `}` back at the call column.
+  Applies to calls `name(...)`, `obj.method(...)`, filter forms like
+  `WITH(...)`, and struct literals `Type{...}`. Processed bottom-up
+  via recursive descent so an inner wrap triggers an outer wrap.
+- Capability attach position (§4): `@X` flush-attaches to a type token
+  (`TYPE_ID`, `]`) when the position is a type context (after `:`,
+  `RETURNS`, or inside a type annotation scope). Value-position
+  `1 @locked`, `foo() @locked` keeps the space.
+- 120-char width warnings (§2): after formatting, lines exceeding 120
+  chars emit `path:line: warning: line length N exceeds 120` to stderr.
+  Opt out with `clear fmt --no-warn`.
+
+**v1.2 (forced wraps):**
 - WITH forced wraps (§3.2, §3.3): 2+ captures always wrap; trailing
   ON/RETRY/POSSIBLE_* clause forces the body-at-+2, `}`-at-+1,
   ON-at-+1 shape. Both triggers compose.

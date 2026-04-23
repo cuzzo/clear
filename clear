@@ -1147,10 +1147,12 @@ when 'fmt', 'format'
   to_stdout  = false
   paths = []
 
+  warn_width = true
   args.each do |a|
     case a
     when '--check' then check_only = true
     when '--stdout' then to_stdout = true
+    when '--no-warn' then warn_width = false
     when /\A-/ then error "Unknown flag for fmt: #{a}"
     else paths << a
     end
@@ -1181,6 +1183,16 @@ when 'fmt', 'format'
       warn "#{path}: #{e.message}"
       failed += 1
       next
+    end
+
+    if warn_width
+      out.each_line.with_index(1) do |ln, idx|
+        stripped = ln.sub(/\n\z/, '')
+        len = stripped.length
+        if len > 120
+          warn "#{path}:#{idx}: warning: line length #{len} exceeds 120"
+        end
+      end
     end
 
     if to_stdout
@@ -1222,6 +1234,7 @@ when 'help', '--help', '-h', nil
       clear fmt <file|dir>...       Format CLEAR source in place
       clear fmt --check <path>...   Exit 1 if any file is not formatted
       clear fmt --stdout <file>     Print formatted output, do not write
+      clear fmt --no-warn <path>    Suppress width warnings for >120-char lines
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary
