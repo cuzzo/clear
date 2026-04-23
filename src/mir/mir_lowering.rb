@@ -26,7 +26,7 @@ class MIRLowering
   def initialize(struct_schemas: {}, enum_schemas: {}, union_schemas: {},
                  fn_sigs: {}, moved_guard_info: {},
                  pipeline_fallback: nil, importer: nil, source_dir: nil,
-                 debug_mode: false)
+                 debug_mode: false, target: :zig)
     @struct_schemas = struct_schemas || {}
     @enum_schemas = enum_schemas || {}
     @union_schemas = union_schemas || {}
@@ -46,6 +46,7 @@ class MIRLowering
     @pending_stmts = []
     @tmp_counter = 0
     @current_bindings = {}  # set per-function by lower_function_def from fn.cleanup_bindings
+    @target = target
   end
 
   # Flush and return all pending hoisted Let statements accumulated since the
@@ -1389,6 +1390,14 @@ class MIRLowering
       return len_expr if len_expr
     end
 
+    # Target :bc with a bc-opted-in stdlib_def: emit MIR::InlineBc carrying the
+    # method/function name + unlowered MIR args. bc_emitter dispatches via
+    # compile_inline_bc. Done before Zig-specific pattern rewrites below.
+    if @target == :bc && node.matched_stdlib_def&.dig(:bc)
+      op_name = node.name.to_s.to_sym
+      return MIR::InlineBc.new(op_name, mir_args, node.matched_stdlib_def)
+    end
+
     pattern = node.zig_pattern.dup
 
     # Resolve {alloc} to a symbol and wrap TAKES string args in MIR::DupeSlice.
@@ -1438,10 +1447,10 @@ class MIRLowering
     end
 
     # Resolve &{N} as address-of for positional args
-    args_zig.each_with_index { |val, i| pattern = pattern.gsub("&{#{i}}", "&#{val}") }
+    args_zig.each_with_index { |val, i| pattern = pattern.gsub("&{#{i}}") { "&#{val}" } }
 
     # Substitute positional args
-    args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}", val) }
+    args_zig.each_with_index { |val, i| pattern = pattern.gsub("{#{i}}") { val } }
 
     iz = MIR::InlineZig.new(pattern, "intrinsic")
     iz.stdlib_def = node.matched_stdlib_def if node.respond_to?(:matched_stdlib_def)
@@ -2522,7 +2531,7 @@ class MIRLowering
     # are left inline -- the pending Lets are emitted by lower_body's
     # flush_pending before the enclosing statement.
     arg_strs = node.args.map { |a| emit_expr(hoist_alloc(lower(a), a)) }
-    arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}", arg) }
+    arg_strs.each_with_index { |arg, i| pattern = pattern.gsub("{#{i}}") { arg } }
     iz = MIR::InlineZig.new(pattern, "static_call")
     iz.stdlib_def = node.matched_stdlib_def if node.matched_stdlib_def
     iz
@@ -3032,12 +3041,14 @@ class MIRLowering
       return MIR::Call.new("std.math.pow", [MIR::Ident.new(type_arg), left, right], false)
     end
 
-    # Modulo on signed int
+    # Modulo on signed int — routed through the builtin registry so the :bc
+    # target can dispatch to MOD_I64 via MIR::InlineBc instead of parsing a
+    # "@mod" callee string at codegen time.
     if node.op == :MOD
       left_type = node.left.full_type
       resolved = left_type.is_a?(Type) ? left_type.resolved : Type.new(left_type.to_s).resolved
       if resolved == :Int64
-        return MIR::Call.new("@mod", [left, right], false)
+        return emit_builtin(:intMod, [left, right])
       end
     end
 
@@ -3072,12 +3083,13 @@ class MIRLowering
       return cmp_node if cmp_node
     end
 
-    # Integer division
+    # Integer division — same rationale as :MOD above (registry instead of
+    # raw "@divTrunc" callee string).
     if node.op == :DIV
       left_ti = node.left.type_info
       right_ti = node.right.type_info
       if left_ti&.integer? && right_ti&.integer?
-        return MIR::Call.new("@divTrunc", [left, right], false)
+        return emit_builtin(:intDiv, [left, right])
       end
     end
 
@@ -3984,7 +3996,16 @@ class MIRLowering
       proxy.slot_size = node.slot_size
       proxy.resource_close_zig = node.resource_close_zig
       proxy.var_used = node.var_used
-      lower_var_decl(proxy)
+      result = lower_var_decl(proxy)
+      # Line-suffix disambiguation in lower_var_decl stores the renamed Zig
+      # name under `proxy.object_id`. Annotator-resolved references point to
+      # the original BindExpr (`node`), not the proxy, so without this the
+      # reference lowering misses the map and emits the unsuffixed name,
+      # producing `var x_L8 = ...; ... x.len` which is undeclared Zig.
+      if @decl_zig_name_map && @decl_zig_name_map.key?(proxy.object_id)
+        @decl_zig_name_map[node.object_id] = @decl_zig_name_map[proxy.object_id]
+      end
+      result
     else
       safe = zig_safe_name(node.name)
       value = lower(node.value)
@@ -4564,6 +4585,8 @@ class MIRLowering
         { pattern: pattern, body: body }
       }
       default = (node.default_case && !node.default_case.empty?) ? lower_branch.call(node.default_case) : nil
+      # Int switches always need else => {} in Zig (Zig 0.16 requires exhaustive switch)
+      default ||= [] if is_int_match
       # Non-exhaustive enum match without DEFAULT needs else => {} to satisfy Zig
       if is_enum_match && !default
         all_variants = @enum_schemas[expr_type_sym]&.map(&:to_s)&.sort || []
@@ -4822,6 +4845,9 @@ class MIRLowering
   def emit_builtin(name, args)
     entry = BUILTIN_OPS[name]
     raise "emit_builtin: unknown builtin :#{name}" unless entry
+    if @target == :bc && entry[:bc]
+      return MIR::InlineBc.new(name, args, entry)
+    end
     pattern = entry[:zig].dup
     # Use block form of gsub so backslashes in Zig code (e.g. "\\" for a literal
     # backslash) are not interpreted as replacement specials by String#gsub.
@@ -4963,6 +4989,12 @@ class MIRLowering
   end
 
   private
+
+  # Strip pointer prefix from zig type - dupeUnionValue needs bare type (Value not *Value).
+  def bare_zig_type(ti)
+    t = transpile_type(ti.is_a?(Type) ? ti : ti)
+    t.start_with?("*") ? t[1..] : t
+  end
 
   # Dupe a borrowed non-Copy union value before storing into a TAKES container.
   def should_dupe_borrowed_union?(val_node, val_ti = nil)
