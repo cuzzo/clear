@@ -1139,6 +1139,74 @@ when 'doctor'
     end
   end
 
+when 'fmt', 'format'
+  require_relative 'src/backends/formatter'
+
+  args = ARGV[1..] || []
+  check_only = false
+  to_stdout  = false
+  paths = []
+
+  args.each do |a|
+    case a
+    when '--check' then check_only = true
+    when '--stdout' then to_stdout = true
+    when /\A-/ then error "Unknown flag for fmt: #{a}"
+    else paths << a
+    end
+  end
+
+  error "Usage: clear fmt [--check|--stdout] <file.cht|dir>..." if paths.empty?
+
+  files = []
+  paths.each do |p|
+    if File.directory?(p)
+      files.concat(Dir.glob(File.join(p, '**', '*.cht')).sort)
+    elsif File.file?(p)
+      files << p
+    else
+      error "No such file or directory: #{p}"
+    end
+  end
+  error "No .cht files found" if files.empty?
+
+  changed = 0
+  failed  = 0
+
+  files.each do |path|
+    begin
+      src = File.read(path)
+      out = Formatter.format(src)
+    rescue Formatter::Error => e
+      warn "#{path}: #{e.message}"
+      failed += 1
+      next
+    end
+
+    if to_stdout
+      print out
+      next
+    end
+
+    if out == src
+      next
+    end
+
+    changed += 1
+    if check_only
+      warn "#{path}: not formatted"
+    else
+      File.write(path, out)
+      puts path
+    end
+  end
+
+  if failed > 0
+    exit 2
+  elsif check_only && changed > 0
+    exit 1
+  end
+
 when 'help', '--help', '-h', nil
   puts <<~HELP
     CLEAR Language Compiler
@@ -1151,6 +1219,9 @@ when 'help', '--help', '-h', nil
       clear test ... --debug-frame   Enable debug frame arena (slow, detects use-after-rewind)
       clear profile <file.cht>      Build + run with profiling (heap + CPU)
       clear doctor <profile-dir>    Analyze profile data
+      clear fmt <file|dir>...       Format CLEAR source in place
+      clear fmt --check <path>...   Exit 1 if any file is not formatted
+      clear fmt --stdout <file>     Print formatted output, do not write
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary
@@ -1158,6 +1229,7 @@ when 'help', '--help', '-h', nil
       test     Build and run tests (uses test harness with leak detection)
       profile  Build with allocation tracking, run with perf (if available)
       doctor   Analyze .profile/ directory, print actionable optimization advice
+      fmt      Format CLEAR source files (see docs/agents/fmt.md)
 
     Build flags:
       -o PATH       Output binary path (default: same dir as source)
