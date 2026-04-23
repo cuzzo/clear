@@ -2,6 +2,7 @@ require_relative "./ast"
 require_relative "./lexer"
 require_relative "./error_registry"
 require_relative "./source_error"
+require_relative "./fixable_error"
 
 # ==========================================
 # PARSER
@@ -450,7 +451,7 @@ class Parser
     # 2. Validate it matches what we expect
     if (token.type == type) || (value && token.value == value)
       if value && token.value != value
-         error!(token, "Expected value '#{value}', got '#{token.value}'")
+         emit_consume_error_with_fix(token, type, value)
       end
 
       # 3. Advance the pointer
@@ -459,8 +460,80 @@ class Parser
       # 4. RETURN THE CAPTURED TOKEN (Not 'current', which is now the next one!)
       token
     else
-      error!(token, "Expected #{value || type}, got #{token.value} (#{token.type}) line #{token.line}")
+      emit_consume_error_with_fix(token, type, value)
     end
+  end
+
+  # Intercepts consume-failures with pattern-specific fixable findings
+  # where they're safe. Every helper ultimately calls `error!` (directly
+  # or via `fixable!` with `raise_in_collector: true`) so a parser error
+  # still halts parsing at the first unrecoverable site — callers of
+  # `clear fix` see the one finding in the collector and can apply the
+  # suggested edit, then re-run.
+  #
+  # Two insertion strategies:
+  #   end-of-prev-line — used when the missing token belongs after what
+  #     the user wrote on the previous line (`;` after a statement,
+  #     `THEN`/`DO`/`->` after a condition/signature that finished on
+  #     the previous line).
+  #   before-current   — used when the missing token belongs on the
+  #     same line as the unexpected token (`THEN`/`DO` directly before
+  #     an inline body on the same line as the condition).
+  SYNTAX_TOKENS_AT_STATEMENT_END = %w[; THEN DO ->].freeze
+
+  def emit_consume_error_with_fix(token, expected_type, expected_value)
+    prev_tok = @pos > 0 ? @tokens[@pos - 1] : nil
+
+    if expected_value && SYNTAX_TOKENS_AT_STATEMENT_END.include?(expected_value) && prev_tok
+      if prev_tok.line < token.line
+        return emit_syntax_insert_end_of_line!(prev_tok, token, expected_value)
+      end
+      if %w[THEN DO ->].include?(expected_value) && prev_tok.line == token.line
+        return emit_syntax_insert_before_token!(token, expected_value)
+      end
+    end
+
+    error!(token, "Expected #{expected_value || expected_type}, got #{token.value} (#{token.type}) line #{token.line}")
+  end
+
+  # Insert `<expected>` at the end of the previous source line (right
+  # after its last non-whitespace character, so canonical formatting is
+  # preserved). Works uniformly for `;`, `THEN`, `DO`, `->`.
+  def emit_syntax_insert_end_of_line!(prev_tok, next_tok, expected_value)
+    line_text  = @source_code.lines[prev_tok.line - 1] || ''
+    insert_col = line_text.rstrip.length + 1
+    leader     = (expected_value == ';') ? '' : ' '
+
+    fix = Fix.new(
+      description: "Insert `#{expected_value}` at end of line #{prev_tok.line}.",
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: prev_tok.line, col: insert_col, length: 0),
+        replacement: "#{leader}#{expected_value}"
+      )]
+    )
+
+    message = "Expected `#{expected_value}` at end of line #{prev_tok.line}; got '#{next_tok.value}' on line #{next_tok.line}."
+    fixable!(next_tok, message: message, category: :type, level: :error,
+             fixes: [fix], raise_in_collector: true)
+  end
+
+  # Insert `<expected>` just before the unexpected token (same-line
+  # missing-keyword shape, e.g., `IF x RETURN 1` needs `THEN` before
+  # `RETURN`).
+  def emit_syntax_insert_before_token!(token, expected_value)
+    fix = Fix.new(
+      description: "Insert `#{expected_value}` before '#{token.value}' at line #{token.line}.",
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: token.line, col: token.column, length: 0),
+        replacement: "#{expected_value} "
+      )]
+    )
+    fixable!(token,
+      message: "Expected `#{expected_value}`, got '#{token.value}' (line #{token.line}).",
+      category: :type, level: :error,
+      fixes: [fix], raise_in_collector: true)
   end
 
   def match?(type, val=nil)

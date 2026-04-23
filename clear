@@ -1278,17 +1278,17 @@ when 'fix'
     error "No such file: #{path}" unless File.file?(path)
     source = File.read(path)
 
-    # Run lexer + parser + annotator in collector mode.
+    # Run lexer + parser + annotator in collector mode. The parser and
+    # annotator both raise CompilerError / ParserError on unrecoverable
+    # errors; we swallow so the collector's captured findings surface.
     FixCollector.enable!
     findings = []
     begin
-      tokens = Lexer.new(source).tokenize
-      ast    = Parser.new(tokens, source).parse
       begin
+        tokens = Lexer.new(source).tokenize
+        ast    = Parser.new(tokens, source).parse
         SemanticAnnotator.new.annotate!(ast)
       rescue CompilerError, ParserError
-        # Annotator may still raise for non-fixable errors; the fixable
-        # findings emitted before the raise are in the collector.
       end
       findings = FixCollector.drain
     ensure

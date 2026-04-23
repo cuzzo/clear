@@ -155,6 +155,49 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "parser syntax fixes" do
+    it "inserts a missing `;` at end of previous line" do
+      src = "FN main() RETURNS Int64 ->\n  x = 42\n  RETURN x;\nEND\n"
+      path = write("semi.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Expected `;` at end of line 2/)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("x = 42;\n")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+
+    it "inserts a missing `THEN` at end of an IF condition line" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          x = 5;
+          IF x > 0
+            RETURN 1;
+          END
+          RETURN 0;
+        END
+      CLEAR
+      path = write("then.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Expected `THEN`/)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("IF x > 0 THEN")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+
+    it "end-to-end: `build --fix` applies a parser fix and rebuilds" do
+      src = "FN main() RETURNS Int64 ->\n  x = 42\n  RETURN x;\nEND\n"
+      path = write("bfp.cht", src)
+      cmd = "#{CLEAR_BIN} build --fix #{path} 2>&1"
+      out = `#{cmd}`
+      expect($?.exitstatus).to eq(0), out
+      expect(File.read(path)).to include("x = 42;\n")
+    end
+  end
+
   describe "typo suggestions (undefined var / fn)" do
     it "suggests the closest in-scope variable" do
       src = <<~CLEAR
