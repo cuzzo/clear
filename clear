@@ -102,6 +102,33 @@ end
 
 # Apply edits to `text`. Edits are pre-sorted last-to-first (line, col)
 # so earlier application doesn't shift later byte positions.
+# Drop edits whose span starts inside another edit's span. Keeps the
+# first (earlier in the sorted list) when spans overlap. This handles
+# the case where multiple fixable sources fire for the same syntax
+# mistake (e.g., both the operator-typo scanner and the parser
+# expected-token handler flag the same `=>`).
+def dedupe_overlapping_edits(edits)
+  kept = []
+  edits.each do |e|
+    start_col = e.span.col
+    end_col   = start_col + e.span.length
+    conflict = kept.find do |prev|
+      next false if prev.span.line != e.span.line
+      prev_start = prev.span.col
+      prev_end   = prev_start + prev.span.length
+      # An edit conflicts with a kept one if its insertion point falls
+      # within the kept edit's range, OR its replacement range
+      # overlaps the kept range. Also catches two zero-length
+      # insertions at the same column.
+      within_prev = start_col >= prev_start && start_col <= prev_end
+      ranges_overlap = start_col < prev_end && prev_start < end_col
+      within_prev || ranges_overlap
+    end
+    kept << e unless conflict
+  end
+  kept
+end
+
 def apply_edits(text, edits)
   lines = text.split("\n", -1)
   edits.each do |e|
@@ -1254,6 +1281,7 @@ when 'fix'
   require_relative 'src/ast/lexer'
   require_relative 'src/ast/parser'
   require_relative 'src/ast/fixable_error'
+  require_relative 'src/ast/syntax_typo_scanner'
   require_relative 'src/annotator'
 
   args = ARGV[1..] || []
@@ -1284,6 +1312,10 @@ when 'fix'
     FixCollector.enable!
     findings = []
     begin
+      # Rule-based operator-typo scan runs BEFORE the lexer so typos
+      # (|> for s>, => for ->) surface as fixable findings even when
+      # the lexer/parser would otherwise reject the source.
+      SyntaxTypoScanner.scan!(source)
       begin
         tokens = Lexer.new(source).tokenize
         ast    = Parser.new(tokens, source).parse
@@ -1336,16 +1368,19 @@ when 'fix'
     # Group edits by file, apply right-to-left by (line, col) within each
     # file so earlier edits don't shift later byte offsets.
     by_file = queued_edits.group_by(&:first)
+    applied_count = 0
     by_file.each do |file_key, rows|
       target_path = file_key || path
       text = File.read(target_path)
       edits = rows.map { |(_, e)| e }
                .sort_by { |e| [e.span.line, e.span.col] }
-               .reverse
+      edits = dedupe_overlapping_edits(edits)
+      edits = edits.reverse  # right-to-left application keeps offsets stable
       text = apply_edits(text, edits)
       File.write(target_path, text)
+      applied_count += edits.length
     end
-    puts "#{path}: applied #{queued_edits.length} edit(s)"
+    puts "#{path}: applied #{applied_count} edit(s)"
   end
 
 when 'fmt', 'format'

@@ -155,6 +155,72 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "operator-typo rule table" do
+    it "suggests `s>` for `|>`" do
+      src = "FN main() RETURNS Int64 ->\n  v = [1] s> SUM _;\n  RETURN v;\nEND\n"
+      # Swap the correct operator to `|>` to simulate the typo.
+      src = src.sub('s>', '|>')
+      path = write("op1.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Unknown operator `\|>`/)
+      expect(out).to match(/Replace `\|>` with `s>`/)
+    end
+
+    it "suggests `->` for `=>`" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          x = IF 1 > 0 => 1 ELSE 0 END;
+          RETURN x;
+        END
+      CLEAR
+      path = write("op2.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Unknown operator `=>`/)
+      expect(out).to match(/Replace `=>` with `->`/)
+    end
+
+    it "ignores typo patterns inside strings and line comments" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          -- pipeline: |> and arrow: =>
+          msg = "|> and => in a string";
+          RETURN;
+        END
+      CLEAR
+      path = write("safe.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).not_to match(/Unknown operator/)
+    end
+
+    it "apply + build round-trip fixes a `|>` typo" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          total = [1, 2, 3] |> SUM _;
+          RETURN total;
+        END
+      CLEAR
+      path = write("ops.cht", src)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("[1, 2, 3] s> SUM _")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+
+    it "apply + build round-trip fixes an `=>` typo" do
+      src = <<~CLEAR
+        FN greet(n: Int64) RETURNS Int64 => RETURN n; END
+        FN main() RETURNS Int64 -> RETURN greet(5); END
+      CLEAR
+      path = write("ops2.cht", src)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("RETURNS Int64 ->")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
   describe "parser syntax fixes" do
     it "inserts a missing `;` at end of previous line" do
       src = "FN main() RETURNS Int64 ->\n  x = 42\n  RETURN x;\nEND\n"
