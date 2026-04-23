@@ -11,6 +11,7 @@
  - [x] Migrate to Zig 0.16
  - [x] io_uring for networking
  - [x] Native CONCURRENT support for streaming pipelines
+ - [ ] `./clear fmt`
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
