@@ -429,7 +429,14 @@ module AST
   DieNode      = Struct.new(:token, :status) { include Locatable }
   Slice        = Struct.new(:token, :target, :start, :end) { include Locatable }
   Require      = Struct.new(:token, :path) { include Locatable }
-  WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) { include Locatable }
+  # lock_error_clause: optional Hash describing ON TIMEOUT / RETRY handling for
+  # EXCLUSIVE / write_locked_read captures. Shape:
+  #   { action: :raise | :pass | :exit | :block, message: <string|nil>, body: <Array|nil>, retries: <Integer|nil> }
+  # retries > 0 means RETRY(N) THEN <action>; retries nil/0 means plain ON TIMEOUT <action>.
+  WithBlock    = Struct.new(:token, :capabilities, :body, :deferred_drops) do
+    include Locatable
+    attr_accessor :lock_error_clause
+  end
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
   WhereOp      = Struct.new(:token, :expression) { include Locatable }
