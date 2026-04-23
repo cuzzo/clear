@@ -104,6 +104,16 @@ VM_UNSUPPORTED = {
   # Other infrastructure-heavy tests:
   "74_service_benchmark"         => :service_runtime,
   "185_borrowed_iterator"        => :borrowed_iterator,
+
+  # Narrow numeric types (Int8/Int16/Int32/UInt8..UInt64) and Float32.
+  # The VM's Value union only has Int64Val and Number (f64); there's no
+  # storage variant for smaller widths. The MIR lowering emits @intCast
+  # and similar conversions that have no VM equivalent. Would need either
+  # new Value variants + typed arithmetic, or lowering-time gating.
+  "69_numeric_types"             => :narrow_numeric_types,
+
+  # Direct FFI / extern std imports. The VM has no @import machinery.
+  "224_extern_std_ffi"           => :extern_ffi,
 }
 
 def run_primary_test
