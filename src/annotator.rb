@@ -599,19 +599,24 @@ private
       if item[:form] == :kind
         kind_sym = item[:name].to_sym
         unless AST.error_kind?(kind_sym)
-          error!(item[:token],
-                 "Unknown error kind '#{item[:name]}'. Expected one of: " \
-                 "#{AST::ERROR_KINDS.join(', ')}")
+          emit_registry_mismatch!(
+            item[:token], item[:name], AST::ERROR_KINDS,
+            "Unknown error kind '#{item[:name]}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}",
+            "closest known kind"
+          )
         end
-        kinds << kind_sym
+        kinds << kind_sym if AST.error_kind?(kind_sym)
       else
         type_sym = item[:name].to_sym
         unless AST.error_type?(type_sym)
-          error!(item[:token],
-                 "CATCH #{item[:name]}: error type '#{item[:name]}' is not registered. A type " \
-                 "must be registered via RAISE/OR EXIT before it can be CATCHed.")
+          emit_registry_mismatch!(
+            item[:token], item[:name], AST::ERROR_TYPES.keys,
+            "CATCH #{item[:name]}: error type '#{item[:name]}' is not registered. A type " \
+            "must be registered via RAISE/OR EXIT before it can be CATCHed.",
+            "closest registered type"
+          )
         end
-        types << item[:name]
+        types << item[:name] if AST.error_type?(type_sym)
       end
     end
     clause[:kinds] = kinds.uniq
@@ -3345,16 +3350,22 @@ private
       case sel[:form]
       when :kind
         unless AST.error_kind?(sel[:name])
-          error!(sel[:token], "Unknown error kind '#{sel[:name]}'. Expected one of: " \
-                              "#{AST::ERROR_KINDS.join(', ')}")
+          emit_registry_mismatch!(
+            sel[:token], sel[:name], AST::ERROR_KINDS,
+            "Unknown error kind '#{sel[:name]}'. Expected one of: #{AST::ERROR_KINDS.join(', ')}",
+            "closest known kind"
+          )
         end
-        matched.concat(AST.types_for_kind(sel[:name]))
+        matched.concat(AST.types_for_kind(sel[:name])) if AST.error_kind?(sel[:name])
       when :type
         unless AST.error_type?(sel[:name])
-          error!(sel[:token], "Unknown error type '#{sel[:name]}'. " \
-                              "Register it in src/ast/error_registry.rb.")
+          emit_registry_mismatch!(
+            sel[:token], sel[:name], AST::ERROR_TYPES.keys,
+            "Unknown error type '#{sel[:name]}'. Register it in src/ast/error_registry.rb.",
+            "closest registered type"
+          )
         end
-        matched << sel[:name]
+        matched << sel[:name] if AST.error_type?(sel[:name])
       end
     end
 

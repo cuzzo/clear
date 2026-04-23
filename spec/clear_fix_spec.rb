@@ -123,6 +123,38 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "registry: unknown error name (category 4)" do
+    let(:src) do
+      <<~CLEAR
+        FN bad() RETURNS !Int64 -> RAISE Transient, "oops"; RETURN 0; END
+
+        FN main() RETURNS Int64 ->
+          x = bad() OR EXIT "boom";
+          RETURN x;
+        CATCH LockTimout
+          RETURN -1;
+        END
+      CLEAR
+    end
+
+    it "reports a typo with a closest-match :auto fix" do
+      path = write("reg.cht", src)
+      out, _, status = run_fix("--dry-run", path)
+      expect(status).to eq(0)
+      expect(out).to match(/LockTimout/)
+      expect(out).to match(/Replace 'LockTimout' with 'LockTimeout'/)
+    end
+
+    it "applies the fix and the result still compiles" do
+      path = write("reg.cht", src)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("CATCH LockTimeout")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
   describe "error accumulation (LSP-style)" do
     it "collects multiple :error findings from a single pass" do
       src = <<~CLEAR

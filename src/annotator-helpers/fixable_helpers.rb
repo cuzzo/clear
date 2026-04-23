@@ -60,6 +60,66 @@ module FixableHelper
       fixes: fixes)
   end
 
+  # Return the name with the smallest Levenshtein distance from `input`
+  # over `candidates`, provided it's within `max_distance`. Returns nil
+  # when no candidate is close enough (don't suggest wild guesses).
+  def closest_name(input, candidates, max_distance: 3)
+    best = nil
+    best_d = max_distance + 1
+    candidates.each do |cand|
+      d = levenshtein(input.to_s, cand.to_s)
+      if d < best_d
+        best = cand
+        best_d = d
+      end
+    end
+    best_d <= max_distance ? best : nil
+  end
+
+  def levenshtein(a, b)
+    return b.length if a.empty?
+    return a.length if b.empty?
+    prev = (0..b.length).to_a
+    a.each_char.with_index do |ac, i|
+      curr = [i + 1]
+      b.each_char.with_index do |bc, j|
+        cost = ac == bc ? 0 : 1
+        curr << [curr[j] + 1, prev[j + 1] + 1, prev[j] + cost].min
+      end
+      prev = curr
+    end
+    prev.last
+  end
+
+  # Registry: an ON/CATCH selector names an identifier that isn't in
+  # the registry. When a close match exists, emit an :auto replace-
+  # the-name fix; otherwise fall through to the plain `error!` path.
+  #
+  #   token       — the selector's name token (line/col used for the edit span)
+  #   name        — the user-typed identifier (Symbol or String)
+  #   candidates  — list of valid identifiers (Symbols or Strings)
+  #   message     — user-facing error message when no fix is applicable
+  #   fix_label   — short description of what the replacement represents
+  #                 (e.g. "closest known kind", "closest registered type")
+  def emit_registry_mismatch!(token, name, candidates, message, fix_label)
+    best = closest_name(name, candidates)
+    fixes = []
+    if best
+      fixes << Fix.new(
+        description: "Replace '#{name}' with '#{best}' (#{fix_label}).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: token.line, col: token.column, length: name.to_s.length),
+          replacement: best.to_s
+        )]
+      )
+    end
+
+    return error!(token, message) if fixes.empty?
+
+    fixable!(token, message: message, category: :registry, level: :error, fixes: fixes)
+  end
+
   # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
   # locates the original declaration (via the enclosing scope's info)
   # and inserts `MUTABLE ` at its column. If the declaration can't be
