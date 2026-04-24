@@ -3,7 +3,7 @@
 ## v0.1 (Target = May 1)
 
  - [x] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
- - [ ] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
+ - [x] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
  - [x] STRUCT/FN DEFAULTS
  - [x] Partial Deadlock protection (detect *possible* lock cycles and *possible* true system deadlock at compile time, raise handle-able errors at runtime when encountered, rather than *actually* deadlocking)
  - [x] String@symbol
@@ -11,7 +11,7 @@
  - [x] Migrate to Zig 0.16
  - [x] io_uring for networking
  - [x] Native CONCURRENT support for streaming pipelines
- - [ ] `./clear fmt`
+ - [x] `./clear fmt`
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
