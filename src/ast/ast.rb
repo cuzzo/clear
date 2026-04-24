@@ -635,6 +635,7 @@ module AST
     attr_accessor :computed_stack_tier  # auto-computed tier from call-graph analysis (:micro, :standard, :large, :xl)
     attr_accessor :captures_resource  # true when BG captures a TCP/resource fd — spawn on accepting scheduler
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash + safety flags
+    attr_accessor :capture_strategies  # Hash name => CaptureStrategy::* (populated by mir_lowering; Step 2 of vm-bugs migration)
     attr_accessor :exit_promote  # Hash { strategy: :string_dupe } when exit value needs scope-exit promotion
     attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the BG run fn
   end

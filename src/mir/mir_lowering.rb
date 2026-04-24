@@ -10,6 +10,7 @@
 # introspection and allocator resolution happens HERE, not in the emitter.
 
 require_relative "mir"
+require_relative "capture_strategy"
 require_relative "../ast/ast"
 require_relative "../ast/type"
 require_relative "../ast/error_registry"
@@ -2274,6 +2275,26 @@ class MIRLowering
     resource_captures = analysis&.resource_captures || Set.new
 
     rt_name = @rt_name
+
+    # CaptureStrategy classification (Step 2 of the migration plan in
+    # docs/agents/vm-bugs.md). Runs alongside the existing piecewise
+    # logic with no behavior change — the strategies are computed and
+    # stashed on the node for later steps. Steps 3+ convert individual
+    # emission paths to read from the strategy map instead of the legacy
+    # Set/Hash-based state.
+    #
+    # Today GIVE/COPY at capture sites don't parse, so site_info is
+    # always empty; heap-backed captures classify as Refuse. Refuse is
+    # NOT yet enforced — falling back to legacy behavior — so existing
+    # tests stay green while we audit what needs to change.
+    site_info = CaptureStrategy::CaptureSiteInfo.empty
+    node.capture_strategies = captured.each_with_object({}) do |(name, type_obj), h|
+      t = type_obj ? Type.new(type_obj) : nil
+      next unless t
+      h[name] = CaptureStrategy.classify(
+        name: name, type: t, site_info: site_info, rt_name: rt_name,
+      )
+    end
 
     # Build capture fields. Use is_field: true so dynamic arrays (Int64[])
     # render as slices (`[]i64`) instead of ArrayListUnmanaged — the
