@@ -571,6 +571,55 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
         RETURN Value.Nil;
     END
+    IF id == 108 THEN
+        -- iota(start, end): list [start, start+1, ..., end-1]. Supports
+        -- Zig's `0..N` range syntax lowered as MIR::IterRange.
+        lo = getInt(evaled[1]);
+        hi = getInt(evaled[2]);
+        MUTABLE out: Value[]@list = List[];
+        IF hi > lo THEN
+            FOR k IN (lo ..< hi) DO
+                out.append(Value{ Int64Val: k });
+            END
+        END
+        RETURN Value{ List: out };
+    END
+    IF id == 109 THEN
+        -- slice(lst, start, end): lst[start..end]
+        MATCH evaled[1] START
+            Value.List AS lst ->
+                s = getInt(evaled[2]);
+                e = getInt(evaled[3]);
+                IF s < 0 THEN s = 0; END
+                IF e > lst.length() THEN e = lst.length(); END
+                MUTABLE out: Value[]@list = List[];
+                IF s < e THEN
+                    FOR k IN (s ..< e) DO
+                        out.append(COPY lst[k]);
+                    END
+                END
+                RETURN Value{ List: out };,
+            DEFAULT -> RETURN Value.Nil;
+        END
+        RETURN Value.Nil;
+    END
+    IF id == 110 THEN
+        -- slice-from(lst, start): lst[start..]
+        MATCH evaled[1] START
+            Value.List AS lst ->
+                s = getInt(evaled[2]);
+                IF s < 0 THEN s = 0; END
+                MUTABLE out: Value[]@list = List[];
+                IF s < lst.length() THEN
+                    FOR k IN (s ..< lst.length()) DO
+                        out.append(COPY lst[k]);
+                    END
+                END
+                RETURN Value{ List: out };,
+            DEFAULT -> RETURN Value.Nil;
+        END
+        RETURN Value.Nil;
+    END
 
     RETURN Value.Nil;
 END

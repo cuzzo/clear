@@ -126,6 +126,10 @@ class MIREmitter
     when MIR::AddressOf        then "&#{emit(node.expr)}"
     when MIR::Deref            then "#{emit(node.expr)}.*"
     when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
+    when MIR::AllocatorRef     then emit_allocator_ref(node)
+    when MIR::Undef            then node.zig_type ? "@as(#{node.zig_type}, undefined)" : "undefined"
+    when MIR::TypeSentinel     then emit_type_sentinel(node)
+    when MIR::IterRange        then "#{emit(node.start)}..#{emit(node.end_val)}"
     when MIR::RangeLit         then emit_range_lit(node)
     when MIR::HasField         then emit_has_field(node)
     when MIR::ItemsAccess      then emit_items_access(node)
@@ -739,11 +743,12 @@ class MIREmitter
   def emit_slice_expr(node)
     target = emit(node.target)
     s = emit(node.start)
-    e = emit(node.end_expr)
+    # node.end_expr may be nil to indicate an open-ended slice `target[start..]`.
+    range = node.end_expr ? "#{s}..#{emit(node.end_expr)}" : "#{s}.."
     if node.elem_type
-      "@as([]const #{node.elem_type}, #{target}[#{s}..#{e}])"
+      "@as([]const #{node.elem_type}, #{target}[#{range}])"
     else
-      "#{target}[#{s}..#{e}]"
+      "#{target}[#{range}]"
     end
   end
 
@@ -794,6 +799,31 @@ class MIREmitter
 
   def emit_if_optional(node)
     "(if (#{emit(node.optional)}) |#{node.capture}| #{emit(node.then_expr)} else #{emit(node.else_expr)})"
+  end
+
+  def emit_allocator_ref(node)
+    case node.kind
+    when :heap    then "rt.heapAlloc()"
+    when :frame   then "rt.frameAlloc()"
+    when :cleanup then "rt.cleanupAlloc()"
+    else               "rt.heapAlloc()"
+    end
+  end
+
+  def emit_type_sentinel(node)
+    t = node.zig_type.to_s
+    case node.extreme
+    when :max
+      if t =~ /\Af/         then "std.math.floatMax(#{t})"
+      elsif t =~ /\A(u|i)\d+/ then "std.math.maxInt(#{t})"
+      else                       "std.math.floatMax(f64)"
+      end
+    when :min
+      if t =~ /\Af/         then "-std.math.floatMax(#{t})"
+      elsif t =~ /\A(u|i)\d+/ then "std.math.minInt(#{t})"
+      else                       "-std.math.floatMax(f64)"
+      end
+    end
   end
 
   def emit_range_lit(node)

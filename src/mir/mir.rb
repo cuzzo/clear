@@ -719,6 +719,37 @@ module MIR
     include Expr
   end
 
+  # Allocator reference. Zig-side: rt.heapAlloc() / rt.frameAlloc() /
+  # rt.cleanupAlloc(). VM-side: no-op (VM is GC'd); strip_alloc_args drops
+  # these at call sites. kind: :heap | :frame | :cleanup.
+  AllocatorRef = Struct.new(:kind) do
+    include Expr
+  end
+
+  # Uninitialized-memory sentinel. Zig: `undefined`. VM: nil (the slot is
+  # about to be written before use).
+  Undef = Struct.new(:zig_type) do
+    include Expr
+    # zig_type is optional — used by the Zig emitter when it needs a typed
+    # undefined like `@as(T, undefined)`.
+  end
+
+  # Type sentinel — floatMax/floatMin/intMax/intMin style bootstrap value.
+  # Zig: std.math.floatMax(T), -std.math.floatMax(T), std.math.maxInt(T), etc.
+  # VM: a large concrete literal sufficient for accumulator-seed purposes.
+  # kind: :max | :min      extreme: which end of the type range.
+  # zig_type: the Zig type string (e.g. "f64", "i64").
+  TypeSentinel = Struct.new(:extreme, :zig_type) do
+    include Expr
+  end
+
+  # Bare integer range for Zig `for (0..N) |i| { ... }` loops. Distinct from
+  # RangeLit which wraps as CheatLib.IntRange{...}. IterRange emits literal
+  # `start..end` and is legal only inside ForStmt iterables.
+  IterRange = Struct.new(:start, :end_val) do
+    include Expr
+  end
+
   # Optional unwrap.
   # Zig: expr.?
   OptionalUnwrap = Struct.new(:expr) do

@@ -452,11 +452,9 @@ class PipelineHost
     var_decl = MIR::Let.new("pipe_mat",
       MIR::InlineZig.new("std.ArrayListUnmanaged(#{elem_zig}).empty", "mat_init"),
       true, nil, nil)
-    alloc_ref = MIR::InlineZig.new(HEAP_ALLOC, "alloc")
-    alloc_ref.stdlib_def = ALLOC_REF_DEF
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",
-        [alloc_ref], false)
+        [MIR::AllocatorRef.new(:heap)], false)
     )
     [var_decl, defer]
   end
@@ -468,20 +466,16 @@ class PipelineHost
 
   # try pipe_mat.append(rt.heapAlloc(), value_expr)
   def mat_append(value_expr)
-    alloc_ref = MIR::InlineZig.new(HEAP_ALLOC, "alloc")
-    alloc_ref.stdlib_def = ALLOC_REF_DEF
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "append",
-        [alloc_ref, value_expr], true), false)
+        [MIR::AllocatorRef.new(:heap), value_expr], true), false)
   end
 
   # try pipe_mat.appendSlice(rt.heapAlloc(), slice_expr)
   def mat_append_slice(slice_expr)
-    alloc_ref = MIR::InlineZig.new(HEAP_ALLOC, "alloc")
-    alloc_ref.stdlib_def = ALLOC_REF_DEF
     MIR::ExprStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "appendSlice",
-        [alloc_ref, slice_expr], true), false)
+        [MIR::AllocatorRef.new(:heap), slice_expr], true), false)
   end
 
   # Sharded pool: for each shard, for each slot, append alive values.
@@ -503,7 +497,7 @@ class PipelineHost
       nil)
 
     outer_loop = MIR::ForStmt.new(
-      MIR::InlineZig.new("0..#{n}", "range"), "__psi", [inner_loop], nil)
+      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Lit.new(n.to_s)), "__psi", [inner_loop], nil)
 
     [var_decl, defer, outer_loop, mat_items_let]
   end
@@ -521,7 +515,7 @@ class PipelineHost
       MIR::Ident.new("__psi"))
 
     loop_node = MIR::ForStmt.new(
-      MIR::InlineZig.new("0..@intCast(pipe_src_list.data.len)", "range"),
+      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data")), "usize", :intCast)),
       "__psi",
       [MIR::IfStmt.new(alive_check, [mat_append(value_expr)], nil)],
       nil)
@@ -573,7 +567,7 @@ class PipelineHost
       "get", [MIR::Ident.new("__psi")], false)
 
     loop_node = MIR::ForStmt.new(
-      MIR::InlineZig.new("0..@intCast(pipe_src_list.data.len)", "range"),
+      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("pipe_src_list"), "data")), "usize", :intCast)),
       "__psi",
       [mat_append(value_expr)],
       nil)
@@ -593,7 +587,7 @@ class PipelineHost
       "items")
 
     loop_node = MIR::ForStmt.new(
-      MIR::InlineZig.new("0..#{n}", "range"), "__psi",
+      MIR::IterRange.new(MIR::Lit.new("0"), MIR::Lit.new(n.to_s)), "__psi",
       [mat_append_slice(shard_items)],
       nil)
 
@@ -669,7 +663,7 @@ class PipelineHost
           MIR::InlineZig.new(
             "if (#{items}.len == 0) @panic(\"MIN applied to empty list\")",
             "min_empty_check"), nil),
-        MIR::Let.new("min_result", MIR::InlineZig.new("std.math.floatMax(f64)", "float_max"),
+        MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, "f64"),
           true, "f64", nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("min_val", expr_mir, false, nil, nil),
@@ -691,7 +685,7 @@ class PipelineHost
           MIR::InlineZig.new(
             "if (#{items}.len == 0) @panic(\"MAX applied to empty list\")",
             "max_empty_check"), nil),
-        MIR::Let.new("max_result", MIR::InlineZig.new("-std.math.floatMax(f64)", "float_min"),
+        MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, "f64"),
           true, "f64", nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("max_val", expr_mir, false, nil, nil),
@@ -743,7 +737,7 @@ class PipelineHost
     lower_pipeline_block(list_node) do |items, label|
       [
         MIR::Let.new("find_result",
-          MIR::InlineZig.new("undefined", "undef"), true, elem_zig_type, nil),
+          MIR::Undef.new(nil), true, elem_zig_type, nil),
         MIR::Let.new("find_found", MIR::Lit.new("false"), true, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("find_matches", pred_mir, false, nil, nil),
@@ -782,7 +776,7 @@ class PipelineHost
           MIR::IfStmt.new(MIR::Ident.new("matches"), [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("it")], true), nil)
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("it")], true), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -803,7 +797,7 @@ class PipelineHost
           MIR::Let.new("val", expr_mir, false, nil, nil),
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("res_list"), "append",
-            [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("val")], true), nil)
+            [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")], true), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
@@ -820,7 +814,8 @@ class PipelineHost
         MIR::Let.new("lim_requested",
           MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
         MIR::Let.new("lim_actual",
-          MIR::InlineZig.new("@min(lim_requested, #{items}.len)", "min_len"),
+          MIR::Call.new("@min", [MIR::Ident.new("lim_requested"),
+                                 MIR::ListLength.new(MIR::Ident.new(items))], false),
           false, nil, nil),
         MIR::BreakStmt.new(label,
           MIR::InlineZig.new(
@@ -845,7 +840,7 @@ class PipelineHost
             [MIR::BreakStmt.new(nil, nil)], nil),
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("res_list"), "append",
-            [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("it")], true), nil)
+            [MIR::AllocatorRef.new(alloc), MIR::Ident.new("it")], true), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
@@ -867,10 +862,12 @@ class PipelineHost
       MIR::Let.new("skip_requested",
         MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
       MIR::Let.new("skip_actual",
-        MIR::InlineZig.new("@min(skip_requested, __skip_items.len)", "skip_min"),
+        MIR::Call.new("@min", [MIR::Ident.new("skip_requested"),
+                               MIR::ListLength.new(MIR::Ident.new("__skip_items"))], false),
         false, nil, nil),
       MIR::BreakStmt.new(label,
-        MIR::InlineZig.new("__skip_items[skip_actual..]", "skip_slice"))
+        MIR::SliceExpr.new(MIR::Ident.new("__skip_items"),
+                           MIR::Ident.new("skip_actual"), nil, nil))
     ])
   end
 
@@ -907,7 +904,7 @@ class PipelineHost
            MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
            MIR::ExprStmt.new(MIR::MethodCall.new(
              MIR::Ident.new("dist_set"), "insert",
-             [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF },
+             [MIR::AllocatorRef.new(alloc),
               MIR::Ident.new("dist_key")], true), nil)],
           p[:initial_capture], nil, nil, nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
@@ -921,7 +918,7 @@ class PipelineHost
           MIR::Let.new("dist_key", expr_mir, false, nil, nil),
           MIR::ExprStmt.new(MIR::MethodCall.new(
             MIR::Ident.new("dist_set"), "insert",
-            [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF },
+            [MIR::AllocatorRef.new(alloc),
              MIR::Ident.new("dist_key")], true), nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
@@ -949,7 +946,7 @@ class PipelineHost
           MIR::ForStmt.new(MIR::Ident.new("unn_inner_items"), "inner_it", [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
-              [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("inner_it")], true), nil)
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("inner_it")], true), nil)
           ], nil)
         ], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -1003,12 +1000,15 @@ class PipelineHost
                     MIR::Ident.new("__w_size"))),
                 [
                   MIR::Let.new("window_slice",
-                    MIR::InlineZig.new("#{items}[__wi .. __wi + __w_size]", "window_slice_expr"),
+                    MIR::SliceExpr.new(MIR::Ident.new(items),
+                      MIR::Ident.new("__wi"),
+                      MIR::BinOp.new("+", MIR::Ident.new("__wi"), MIR::Ident.new("__w_size")),
+                      nil),
                     false, nil, nil),
                   MIR::Let.new("val", expr_mir, false, nil, nil),
                   MIR::ExprStmt.new(MIR::MethodCall.new(
                     MIR::Ident.new("res_list"), "append",
-                    [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF }, MIR::Ident.new("val")],
+                    [MIR::AllocatorRef.new(alloc), MIR::Ident.new("val")],
                     true), nil)
                 ],
                 nil,
@@ -1073,7 +1073,7 @@ class PipelineHost
     lower_pipeline_block(list_node) do |items, label|
       [
         MIR::Let.new("idx_result",
-          MIR::InlineZig.new(".{ .alloc = #{alloc_zig_str(alloc)} }", "idx_init_val"),
+          MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(alloc)}]),
           true, map_type, nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("idx_key", expr_mir, false, nil, nil),
@@ -1133,7 +1133,7 @@ class PipelineHost
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts],
       MIR::Let.new("idx_result",
-        MIR::InlineZig.new(".{ .alloc = #{alloc_str} }", "idx_init_val"),
+        MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(:heap)}]),
         true, map_type, nil),
       *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next, [
@@ -1222,8 +1222,10 @@ class PipelineHost
         ], nil),
         MIR::ExprStmt.new(MIR::MethodCall.new(
           MIR::Ident.new("res_list"), "append",
-          [MIR::InlineZig.new(alloc_zig_str(alloc), "alloc").tap { |iz| iz.stdlib_def = ALLOC_REF_DEF },
-           MIR::InlineZig.new(".{ .left = __jl, .right = __match }", "join_pair")],
+          [MIR::AllocatorRef.new(alloc),
+           MIR::StructInit.new(nil, [
+             {name: "left",  value: MIR::Ident.new("__jl")},
+             {name: "right", value: MIR::Ident.new("__match")}])],
           true), nil)
       ], nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
@@ -1296,7 +1298,7 @@ class PipelineHost
         MIR::Let.new("__soa_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
         *field_slice_lets,
         MIR::ForStmt.new(
-          MIR::InlineZig.new("0..@intCast(__soa_src.data.len)", "soa_range"),
+          MIR::IterRange.new(MIR::Lit.new("0"), MIR::Cast.new(MIR::ListLength.new(MIR::FieldGet.new(MIR::Ident.new("__soa_src"), "data")), "usize", :intCast)),
           "__soa_i",
           [*alive_guard, *body_mir],
           nil)
@@ -1589,7 +1591,7 @@ class PipelineHost
     when AST::MinOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
       init  = [MIR::Let.new("__bc_acc",
-                 MIR::InlineZig.new("std.math.floatMax(f64)", "float_max"), true, "f64", nil)]
+                 MIR::TypeSentinel.new(:max, "f64"), true, "f64", nil)]
       accum = [MIR::Let.new("__bc_val", expr, false, nil, nil),
                MIR::IfStmt.new(
                  MIR::BinOp.new("<", MIR::Ident.new("__bc_val"), MIR::Ident.new("__bc_acc")),
@@ -1599,7 +1601,7 @@ class PipelineHost
     when AST::MaxOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
       init  = [MIR::Let.new("__bc_acc",
-                 MIR::InlineZig.new("-std.math.floatMax(f64)", "float_min"), true, "f64", nil)]
+                 MIR::TypeSentinel.new(:min, "f64"), true, "f64", nil)]
       accum = [MIR::Let.new("__bc_val", expr, false, nil, nil),
                MIR::IfStmt.new(
                  MIR::BinOp.new(">", MIR::Ident.new("__bc_val"), MIR::Ident.new("__bc_acc")),
@@ -1627,7 +1629,7 @@ class PipelineHost
       result_ft = Type.new(smooth_node.full_type)
       find_zig  = result_ft.optional? ? transpile_type(result_ft.wrapped_type.resolved.to_s) : placeholder
       pred = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init = [MIR::Let.new("__bc_result", MIR::InlineZig.new("undefined", "undef"), true, find_zig, nil),
+      init = [MIR::Let.new("__bc_result", MIR::Undef.new(nil), true, find_zig, nil),
               MIR::Let.new("__bc_found", MIR::Lit.new("false"), true, nil, nil)]
       accum = [MIR::IfStmt.new(pred, [
                  MIR::Set.new(MIR::Ident.new("__bc_result"), MIR::Ident.new(placeholder)),
@@ -1879,10 +1881,9 @@ class PipelineHost
     when AST::MinOp
       expr_sym = smooth_node.full_type.resolved  # exact type set by pipe_analysis
       acc_zig  = transpile_type(smooth_node.full_type.to_s)
-      min_init, _max_init = agg_minmax_sentinels(acc_zig, expr_sym)
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
       acc_init_stmts << MIR::Let.new("__fold_acc",
-        MIR::InlineZig.new(min_init, "numeric_min"), true, acc_zig, nil)
+        MIR::TypeSentinel.new(:max, acc_zig), true, acc_zig, nil)
       acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::Let.new("__fold_val", expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
@@ -1896,10 +1897,9 @@ class PipelineHost
     when AST::MaxOp
       expr_sym = smooth_node.full_type.resolved  # exact type set by pipe_analysis
       acc_zig  = transpile_type(smooth_node.full_type.to_s)
-      _min_init, max_init = agg_minmax_sentinels(acc_zig, expr_sym)
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
       acc_init_stmts << MIR::Let.new("__fold_acc",
-        MIR::InlineZig.new(max_init, "numeric_max"), true, acc_zig, nil)
+        MIR::TypeSentinel.new(:min, acc_zig), true, acc_zig, nil)
       acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::Let.new("__fold_val", expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
@@ -1934,7 +1934,7 @@ class PipelineHost
       find_zig  = result_ft.optional? ? transpile_type(result_ft.wrapped_type.resolved.to_s) : elem_zig
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
       acc_init_stmts << MIR::Let.new("__fold_result",
-        MIR::InlineZig.new("undefined", "undef"), true, find_zig, nil)
+        MIR::Undef.new(nil), true, find_zig, nil)
       acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
         MIR::Set.new(MIR::Ident.new("__fold_result"), MIR::Ident.new(item_var)),

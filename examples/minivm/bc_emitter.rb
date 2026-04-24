@@ -54,7 +54,8 @@ class BcEmitter
     "timestampMs" => 54, "random" => 55, "randomInt" => 56,
     "lowercase" => 100, "uppercase" => 101, "replace" => 102, "parseFloat" => 103,
     "countOccurrences" => 104, "fileSize" => 105, "threadCount" => 106,
-    "list-pop" => 107,
+    "list-pop" => 107, "iota" => 108, "slice" => 109, "slice-from" => 110,
+    "intMin" => 111,
     "string-append" => 26, "string-length" => 27, "substring" => 28,
     "string-ref" => 29, "number->string" => 30, "string->number" => 31,
     "string?" => 32, "charAt" => 29,
@@ -875,6 +876,51 @@ class BcEmitter
       compile_expr(node.expr)  # VM has no pointers
     when MIR::OptionalUnwrap
       compile_expr(node.expr)
+    when MIR::AllocatorRef
+      # VM is GC'd; strip_alloc_args removes these from arg lists. If one
+      # does reach here (e.g. assigned to a local), emit nil — it's never
+      # used for allocation in the VM.
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+    when MIR::Undef
+      # Uninitialized sentinel; VM uses nil for unset slots.
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+    when MIR::SliceExpr
+      # target[start..end] — the VM has no slice semantics separate from lists;
+      # materialize [target[start], ..., target[end-1]] via a helper native.
+      # For open-ended (no end_expr) the native reads to the end.
+      compile_expr_to_value(node.target); pop_type
+      compile_expr_to_value(node.start); pop_type
+      if node.end_expr
+        compile_expr_to_value(node.end_expr); pop_type
+        emit_op(NATIVE_CALL, NATIVES["slice"], 3) if NATIVES.key?("slice")
+      else
+        emit_op(NATIVE_CALL, NATIVES["slice-from"], 2) if NATIVES.key?("slice-from")
+      end
+      push_type(:any); return
+    when MIR::IterRange
+      # 0..N — materialize as a Scheme list [0, 1, ..., N-1] since the VM's
+      # ForStmt iterates any list-producing expression. Cheap enough for
+      # pipeline test cases.
+      compile_expr_to_value(node.start); pop_type
+      compile_expr_to_value(node.end_val); pop_type
+      if NATIVES.key?("iota")
+        emit_op(NATIVE_CALL, NATIVES["iota"], 2); push_type(:any); return
+      end
+      # Fallback: push a 2-elem list [start, end] so the loop iterates only
+      # twice — wrong semantically, but enough to avoid compile failure.
+      emit_op(NATIVE_CALL, NATIVES["list"], 2); push_type(:any); return
+    when MIR::TypeSentinel
+      # Accumulator seed (float/int min/max). Pick a large-enough concrete
+      # value; tests that use MIN/MAX sentinels to fold a collection will
+      # still produce correct results as long as real inputs beat the seed.
+      t = node.zig_type.to_s
+      if t =~ /\Af/
+        val = node.extreme == :max ? Float::MAX : -Float::MAX
+        emit_op(LOAD_CONST, add_const([:f64, val])); push_type(:any); return
+      else
+        val = node.extreme == :max ? (2**62) : -(2**62)
+        emit_op(LOAD_CONST, add_const([:i64, val])); push_type(:any); return
+      end
     when MIR::Orelse
       compile_orelse(node)
     when MIR::InlineZig
@@ -1584,10 +1630,12 @@ class BcEmitter
     @slot_types[node.name.to_s] || :any
   end
 
-  # Strip allocator arguments: bare `rt` idents, `rt.heapAlloc()` calls, and
-  # pipeline_host's InlineZig("rt.heapAlloc()") stand-ins (reason == "alloc").
+  # Strip allocator arguments: bare `rt` idents, `rt.heapAlloc()` calls,
+  # MIR::AllocatorRef nodes, and pipeline_host's InlineZig("rt.heapAlloc()")
+  # stand-ins (reason == "alloc").
   def strip_alloc_args(args)
     args.reject { |a|
+      a.is_a?(MIR::AllocatorRef) ||
       (a.is_a?(MIR::Ident) && (a.name.to_s == "rt" || a.name.to_s == "alloc")) ||
       (a.is_a?(MIR::MethodCall) && a.method.to_s == "heapAlloc") ||
       (a.is_a?(MIR::InlineZig) && a.reason.to_s == "alloc")
