@@ -1595,13 +1595,13 @@ class BcEmitter
   end
 
   def compile_unary(node)
-    compile_expr(node.operand)
+    compile_expr_to_value(node.operand); pop_type
     case node.op
-    when "!", "not" then emit_op(NOT)
+    when "!", "not"
+      emit_op(NOT); push_type(:any)
     when "-"
-      neg_idx = add_const([:i64, -1])
-      emit_op(LOAD_CONST, neg_idx)
-      emit_op(MUL)
+      emit_op(LOAD_CONST, add_const([:i64, -1]))
+      emit_op(MUL); push_type(:any)
     end
   end
 
