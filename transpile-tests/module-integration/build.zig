@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     // Absolute paths (needed for addSystemCommand args and --pkg flags)
     // -----------------------------------------------------------------------
     const build_root  = b.build_root.path orelse ".";
-    const transpiler  = b.fmt("{s}/../../src/transpiler.rb", .{build_root});
+    const transpiler  = b.fmt("{s}/../../src/backends/transpiler.rb", .{build_root});
     const math_src    = b.fmt("{s}/packages/math/src/lib.cht", .{build_root});
     const geom_src    = b.fmt("{s}/packages/geometry/src/lib.cht", .{build_root});
     const main_src    = b.fmt("{s}/src/main.cht", .{build_root});
@@ -38,7 +38,7 @@ pub fn build(b: *std.Build) void {
     // math package: transpile lib.cht → Zig module
     // -----------------------------------------------------------------------
     const transpile_math = b.addSystemCommand(&.{ "ruby", transpiler, "--module", math_src });
-    const math_zig = transpile_math.captureStdOut();
+    const math_zig = transpile_math.captureStdOut(.{});
 
     const math_mod = b.createModule(.{ .root_source_file = math_zig });
     math_mod.addImport("cheat_runtime", cheat_runtime_mod);
@@ -50,7 +50,7 @@ pub fn build(b: *std.Build) void {
         "ruby", transpiler, "--module", geom_src,
         "--pkg", math_pkg_arg,
     });
-    const geom_zig = transpile_geom.captureStdOut();
+    const geom_zig = transpile_geom.captureStdOut(.{});
 
     const geom_mod = b.createModule(.{ .root_source_file = geom_zig });
     geom_mod.addImport("cheat_runtime", cheat_runtime_mod);
@@ -68,7 +68,7 @@ pub fn build(b: *std.Build) void {
         "--pkg", math_pkg_arg,
         "--pkg", geom_pkg_arg,
     });
-    const main_zig = transpile_main.captureStdOut();
+    const main_zig = transpile_main.captureStdOut(.{});
 
     const main_mod = b.createModule(.{
         .root_source_file = main_zig,
@@ -84,12 +84,12 @@ pub fn build(b: *std.Build) void {
     // -----------------------------------------------------------------------
     const test_step = b.step("test", "Run CLEAR package integration tests");
 
-    const integration_test = b.addTest(.{ .root_module = main_mod });
-
     // Assembly is required for the fiber runtime context switching
-    integration_test.addAssemblyFile(b.path("../../zig/runtime/switch.S"));
-    integration_test.addAssemblyFile(b.path("../../zig/runtime/onRoot.S"));
-    integration_test.linkLibC();
+    main_mod.addAssemblyFile(b.path("../../zig/runtime/switch.S"));
+    main_mod.addAssemblyFile(b.path("../../zig/runtime/onRoot.S"));
+    main_mod.link_libc = true;
+
+    const integration_test = b.addTest(.{ .root_module = main_mod });
 
     const run_test = b.addRunArtifact(integration_test);
     test_step.dependOn(&run_test.step);

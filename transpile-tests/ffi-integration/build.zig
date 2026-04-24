@@ -8,7 +8,7 @@ pub fn build(b: *std.Build) void {
     // Absolute paths
     // -----------------------------------------------------------------------
     const build_root = b.build_root.path orelse ".";
-    const transpiler = b.fmt("{s}/../../src/transpiler.rb", .{build_root});
+    const transpiler = b.fmt("{s}/../../src/backends/transpiler.rb", .{build_root});
     const main_src   = b.fmt("{s}/src/main.cht", .{build_root});
 
     // -----------------------------------------------------------------------
@@ -41,7 +41,7 @@ pub fn build(b: *std.Build) void {
     // The build system wires the actual module via addImport below.
     // -----------------------------------------------------------------------
     const transpile_main = b.addSystemCommand(&.{ "ruby", transpiler, "--module", main_src });
-    const main_zig = transpile_main.captureStdOut();
+    const main_zig = transpile_main.captureStdOut(.{});
 
     const main_mod = b.createModule(.{
         .root_source_file = main_zig,
@@ -56,10 +56,11 @@ pub fn build(b: *std.Build) void {
     // -----------------------------------------------------------------------
     const test_step = b.step("test", "Run CLEAR FFI integration tests");
 
+    main_mod.addAssemblyFile(b.path("../../zig/runtime/switch.S"));
+    main_mod.addAssemblyFile(b.path("../../zig/runtime/onRoot.S"));
+    main_mod.link_libc = true;
+
     const integration_test = b.addTest(.{ .root_module = main_mod });
-    integration_test.addAssemblyFile(b.path("../../zig/runtime/switch.S"));
-    integration_test.addAssemblyFile(b.path("../../zig/runtime/onRoot.S"));
-    integration_test.linkLibC();
 
     const run_test = b.addRunArtifact(integration_test);
     test_step.dependOn(&run_test.step);

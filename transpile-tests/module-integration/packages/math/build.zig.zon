@@ -1,5 +1,6 @@
 .{
     .name = .math,
+    .fingerprint = 0xa927044d1013b83b,
     .version = "0.1.0",
     .dependencies = .{},
     .paths = .{""},
