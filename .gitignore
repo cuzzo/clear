@@ -2,6 +2,7 @@ vendor
 .byebug_history
 examples/*.fluxc
 examples/**/_*
+!examples/minivm/_bc_runner.cht
 examples/**/interpreter_test
 examples/**/debug_test*
 log.txt
