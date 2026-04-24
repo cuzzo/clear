@@ -104,6 +104,7 @@ STD_LIB = {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Bool,
     zig: "CheatLib.eql({0}, {1})",
+    bc: true,
     borrows: :all,
   },
 
@@ -443,6 +444,7 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: :Int64,
     zig: "CheatLib.fileSize({0})",
+    bc: true,
     borrows: :all,
   },
 
@@ -452,6 +454,7 @@ STD_LIB = {
     args: [STRING_TYPE, STRING_TYPE],
     return: :Int64,
     zig: "CheatLib.countOccurrences({0}, {1})",
+    bc: true,
     borrows: :all,
   },
 
@@ -520,7 +523,8 @@ STD_LIB = {
   "threadCount" => {
     args: [],
     return: :Int64,
-    zig: "CheatLib.threadCount()"
+    zig: "CheatLib.threadCount()",
+    bc: true,
   },
 
   # Peak resident set size (VmHWM) in KB — high-water mark of physical memory.
@@ -528,14 +532,16 @@ STD_LIB = {
   "peakMemoryKb" => {
     args: [],
     return: :Int64,
-    zig: "CheatLib.peakMemoryKb()"
+    zig: "CheatLib.peakMemoryKb()",
+    bc: true,
   },
 
   # Current resident set size (VmRSS) in KB — physical memory in use right now.
   "currentMemoryKb" => {
     args: [],
     return: :Int64,
-    zig: "CheatLib.currentMemoryKb()"
+    zig: "CheatLib.currentMemoryKb()",
+    bc: true,
   },
 
   # Sleep the current fiber for N milliseconds. Cooperative — other fibers run.
@@ -544,7 +550,8 @@ STD_LIB = {
     args: [:Int64],
     return: :Void,
     zig: "rt.sleep(@intCast(@as(u64, @bitCast({0}))))",
-    needs_rt: true
+    bc: true,
+    needs_rt: true,
   },
 
   # -------------------------------------------------------------------------

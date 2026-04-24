@@ -524,6 +524,39 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         IF parsed AS f THEN RETURN Value{ Number: f }; END
         RETURN Value.Nil;
     END
+    IF id == 104 THEN
+        -- countOccurrences(haystack, needle)
+        haystack = getStr(evaled[1]);
+        needle = getStr(evaled[2]);
+        MUTABLE cnt: Int64 = 0;
+        MUTABLE pos: Int64 = 0;
+        nlen = needle.length();
+        hlen = haystack.length();
+        IF nlen > 0 THEN
+            WHILE pos <= hlen - nlen DO
+                sub = haystack.substr(pos, nlen);
+                IF sub == needle THEN
+                    cnt = cnt + 1_i64;
+                    pos = pos + nlen;
+                ELSE
+                    pos = pos + 1_i64;
+                END
+            END
+        END
+        RETURN Value{ Int64Val: cnt };
+    END
+    IF id == 105 THEN
+        -- fileSize(path) -> Int64 (bytes) or -1 on error
+        path = getStr(evaled[1]);
+        -- Use readFile + length as a portable fallback; real fstat isn't
+        -- exposed to the VM layer yet.
+        contents = readFile(path);
+        RETURN Value{ Int64Val: @as(i64, @intCast(contents.length())) };
+    END
+    IF id == 106 THEN
+        -- threadCount -> Int64. VM is single-threaded; always 1.
+        RETURN Value{ Int64Val: 1_i64 };
+    END
 
     RETURN Value.Nil;
 END

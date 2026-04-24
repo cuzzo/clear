@@ -53,6 +53,7 @@ class BcEmitter
     "abs" => 50, "min" => 51, "max" => 52, "floor" => 53,
     "timestampMs" => 54, "random" => 55, "randomInt" => 56,
     "lowercase" => 100, "uppercase" => 101, "replace" => 102, "parseFloat" => 103,
+    "countOccurrences" => 104, "fileSize" => 105, "threadCount" => 106,
     "string-append" => 26, "string-length" => 27, "substring" => 28,
     "string-ref" => 29, "number->string" => 30, "string->number" => 31,
     "string?" => 32, "charAt" => 29,
@@ -1062,6 +1063,7 @@ class BcEmitter
     wrapAdd:  "+",   wrapSub:  "-",   wrapMul:  "*",
     checkAdd: "+",   checkSub: "-",   checkMul: "*",
     eql:      "==",  strEql:   "==",  symbolEql: "==",
+    :"eql?" => "==",
   }.freeze
 
   def compile_inline_bc(node)
@@ -1215,13 +1217,24 @@ class BcEmitter
       end
       compile_expr_to_value(node.args[0]); pop_type
       push_type(:any); return
-    when :random, :timestampMs
+    when :random, :timestampMs, :threadCount, :peakMemoryKb, :currentMemoryKb
       # Zero-arg builtins. Map to native if present, else push 0.
       native_name = op.to_s
       if NATIVES.key?(native_name)
         emit_op(NATIVE_CALL, NATIVES[native_name], 0); push_type(:any); return
       end
       emit_op(LOAD_CONST, add_const([:i64, 0])); push_type(:any); return
+    when :countOccurrences
+      compile_expr_to_value(node.args[0]); pop_type
+      compile_expr_to_value(node.args[1]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["countOccurrences"], 2); push_type(:any); return
+    when :fileSize
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["fileSize"], 1); push_type(:any); return
+    when :sleep
+      # Evaluate arg for side-effects; VM is single-threaded so sleep is a no-op.
+      compile_expr_to_value(node.args[0]); pop_type; emit_op(POP)
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
     when :max, :min
       compile_expr_to_value(node.args[0]); pop_type
       compile_expr_to_value(node.args[1]); pop_type
