@@ -151,5 +151,6 @@ pub fn main() !void {
         false;
     if (profiling_enabled) {
         @import("runtime/alloc-profile.zig").dump();
+        @import("runtime/channel-profile.zig").dumpToEnvFile();
     }
 }

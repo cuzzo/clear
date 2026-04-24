@@ -1148,6 +1148,12 @@ pub fn bind(comptime deps: type) type {
             const Self = @This();
             pub const MAX_CONSUMERS: usize = 64;
 
+            // Telemetry id — points into ChannelProfile.stats when
+            // CLEAR_PROFILE == true; `void` (erased) otherwise.
+            const rt_profile = @import("../runtime/runtime-header.zig");
+            const ChannelProfile = @import("../runtime/channel-profile.zig");
+            const ProfId = if (rt_profile.CLEAR_PROFILE) usize else void;
+
             pub const Inner = struct {
                 buf: []T,
                 mask: usize,
@@ -1168,6 +1174,8 @@ pub fn bind(comptime deps: type) type {
                 closed: bool = false,
                 err: ?anyerror = null,
                 alloc: std.mem.Allocator,
+
+                prof_id: ProfId = if (rt_profile.CLEAR_PROFILE) 0 else {},
 
                 pub fn capacity(self: *Inner) usize { return self.mask + 1; }
                 pub fn used(self: *Inner) usize     { return self.head - self.tail; }
@@ -1225,6 +1233,9 @@ pub fn bind(comptime deps: type) type {
                     .mask = cap - 1,
                     .alloc = alloc,
                 };
+                if (rt_profile.CLEAR_PROFILE) {
+                    inner.prof_id = ChannelProfile.register(@intCast(cap));
+                }
                 return .{ .inner = inner };
             }
 
@@ -1232,6 +1243,7 @@ pub fn bind(comptime deps: type) type {
             /// Returns error.StreamClosed if close() or setError() was called.
             pub fn push(self: *Self, val: T) anyerror!void {
                 const inner = self.inner;
+                var blocked_this_call: bool = false;
                 while (true) {
                     inner.mutex.lock();
                     if (inner.closed) {
@@ -1241,6 +1253,10 @@ pub fn bind(comptime deps: type) type {
                     if (inner.used() < inner.capacity()) {
                         inner.buf[inner.head & inner.mask] = val;
                         inner.head += 1;
+                        if (rt_profile.CLEAR_PROFILE) {
+                            const depth: u64 = @intCast(inner.head - inner.tail);
+                            ChannelProfile.recordPush(inner.prof_id, depth, blocked_this_call);
+                        }
                         inner.wakeOneConsumer();
                         inner.mutex.unlock();
                         return;
@@ -1253,9 +1269,11 @@ pub fn bind(comptime deps: type) type {
                         inner.producer_sched = fp.active_scheduler;
                         task.status.store(.Blocked, .release);
                         inner.mutex.unlock();
+                        blocked_this_call = true;
                         task.base.yield();
                     } else {
                         inner.mutex.unlock();
+                        blocked_this_call = true;
                         std.Thread.yield() catch {};
                     }
                 }
@@ -1277,6 +1295,9 @@ pub fn bind(comptime deps: type) type {
                     if (inner.head != inner.tail) {
                         const val = inner.buf[inner.tail & inner.mask];
                         inner.tail += 1;
+                        if (rt_profile.CLEAR_PROFILE) {
+                            ChannelProfile.recordPop(inner.prof_id);
+                        }
                         inner.wakeProducer();
                         inner.mutex.unlock();
                         return val;
@@ -1286,6 +1307,9 @@ pub fn bind(comptime deps: type) type {
                         return null; // drained and closed (no error)
                     }
                     // Ring empty and open — park until producer pushes or closes.
+                    if (rt_profile.CLEAR_PROFILE) {
+                        ChannelProfile.recordPopBlocked(inner.prof_id);
+                    }
                     if (fp.scheduler_running and fp.active_scheduler.current_task != null) {
                         const slot = inner.findConsumerSlot() orelse {
                             inner.mutex.unlock();

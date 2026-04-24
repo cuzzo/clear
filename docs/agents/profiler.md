@@ -38,18 +38,20 @@ a new tier-1 pattern is pure Ruby work in the `clear doctor` analyzer.
 | FREEZE opportunity | LLC miss rate >20% + small-alloc clustering |
 | Lock contention (coarse) | `pthread_rwlock_*` in CPU top-10 |
 
-### Tier 2 — new runtime telemetry (deferred)
+### Tier 2 — new runtime telemetry
 
-Patterns that need the runtime to record new metrics. All MUST be
-gated on the `CLEAR_PROFILE` comptime flag (see "zero overhead" below).
+Patterns that need the runtime to record new metrics. All are gated
+on the `CLEAR_PROFILE` comptime flag (see "zero overhead" below) —
+Zig's comptime evaluation erases the telemetry entirely in production
+builds.
 
-| Pattern | Telemetry |
-|---|---|
-| Fast producer / slow consumer | Per-channel queue depth histogram + saturation timer |
-| Lock hold-time distribution | `pthread_rwlock_*` timestamps on acquire/release |
-| Fiber lifetime distribution | Spawn/exit timestamps |
-| Workstealing balance | Per-scheduler fibers-run counter |
-| Per-lock contention attribution | Per-lock wait-time counter |
+| Pattern | Telemetry | Status |
+|---|---|---|
+| Fast producer / slow consumer | `BoundedChannel` pushes/pops/push_blocked/pop_blocked/max_depth, written to `.profile/channels.txt` | **done** |
+| Lock hold-time distribution | `pthread_rwlock_*` timestamps on acquire/release | deferred |
+| Fiber lifetime distribution | Spawn/exit timestamps | deferred |
+| Workstealing balance | Per-scheduler fibers-run counter | deferred |
+| Per-lock contention attribution | Per-lock wait-time counter | deferred |
 
 ### Tier 3 — extensive telemetry (deferred)
 

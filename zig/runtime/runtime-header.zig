@@ -4,6 +4,17 @@ const linux = std.os.linux;
 const compat = @import("../lib/compat.zig");
 pub const Runtime = @import("runtime.zig").Runtime;
 
+// ── CLEAR_PROFILE comptime gate ────────────────────────────────────
+// `clear profile` prepends `pub const CLEAR_PROFILE = true;` to the
+// transpiled entry module. The runtime reads that const from the root
+// module at comptime so profile-only telemetry compiles to nothing in
+// normal `clear build` / `clear build --optimized` / `--safe` output.
+// Default is `false` when the entry doesn't define it.
+pub const CLEAR_PROFILE: bool = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "CLEAR_PROFILE")) root.CLEAR_PROFILE else false;
+};
+
 // SIMD-accelerated byte search from libc. Not exposed in std.c in Zig 0.16.
 extern "c" fn memchr(s: [*]const u8, c: c_int, n: usize) ?[*]const u8;
 const fc = @import("fiber-core.zig");

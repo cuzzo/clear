@@ -989,7 +989,11 @@ when 'profile'
     File.read('/proc/sys/kernel/perf_event_paranoid').strip.to_i <= 2
 
   # Build the run command
-  env_parts = ["CLEAR_ALLOC_PROFILE=#{alloc_file}"]
+  channel_file = File.join(profile_dir, 'channels.txt')
+  env_parts = [
+    "CLEAR_ALLOC_PROFILE=#{alloc_file}",
+    "CLEAR_CHANNEL_PROFILE=#{channel_file}",
+  ]
   env_parts << "CLEAR_THREADS=#{ENV['CLEAR_THREADS']}" if ENV['CLEAR_THREADS']
   target_env = env_parts.join(' ')
 
@@ -1190,6 +1194,52 @@ when 'doctor'
         end
         puts ""
       end
+    end
+  end
+
+  # ── Channel Saturation ──
+  # Each BoundedChannel records pushes, pops, push_blocked, pop_blocked,
+  # max_depth, capacity (comptime-gated in the runtime). Ratios reveal
+  # fast-producer-slow-consumer (producer blocks often + max_depth at
+  # capacity) or slow-producer-fast-consumer (consumer blocks often +
+  # max_depth nowhere near capacity).
+  channel_file = File.join(profile_dir, 'channels.txt')
+  if File.exist?(channel_file)
+    rows = File.readlines(channel_file).reject { |l| l.start_with?('#') || l.strip.empty? }
+    channels = rows.map do |l|
+      f = l.split
+      next nil if f.size < 7
+      {
+        id: f[0].to_i, pushes: f[1].to_i, pops: f[2].to_i,
+        push_blocked: f[3].to_i, pop_blocked: f[4].to_i,
+        max_depth: f[5].to_i, capacity: f[6].to_i,
+      }
+    end.compact.reject { |c| c[:pushes] == 0 && c[:pops] == 0 }
+
+    if channels.any?
+      puts "=== Channel Saturation ==="
+      puts ""
+      printf "  %-4s %10s %10s %10s %10s %8s  %s\n",
+             "id", "pushes", "pops", "pblk", "cblk", "depth/cap", "diagnosis"
+      channels.each do |c|
+        cap = c[:capacity]
+        ratio = cap > 0 ? (c[:max_depth].to_f / cap * 100).round : 0
+        push_blk_pct = c[:pushes] > 0 ? (c[:push_blocked].to_f / c[:pushes] * 100).round : 0
+        pop_blk_pct  = c[:pops]   > 0 ? (c[:pop_blocked].to_f  / c[:pops]   * 100).round : 0
+        diagnosis =
+          if push_blk_pct >= 20 && ratio >= 80
+            "slow consumer (producer blocked #{push_blk_pct}%, max depth #{ratio}%)"
+          elsif pop_blk_pct >= 20 && ratio < 50
+            "slow producer (consumer blocked #{pop_blk_pct}%, max depth #{ratio}%)"
+          elsif push_blk_pct >= 20 || pop_blk_pct >= 20
+            "backpressure (push #{push_blk_pct}% / pop #{pop_blk_pct}%)"
+          else
+            "balanced"
+          end
+        printf "  %-4d %10d %10d %10d %10d %7d%% %s\n",
+               c[:id], c[:pushes], c[:pops], c[:push_blocked], c[:pop_blocked], ratio, diagnosis
+      end
+      puts ""
     end
   end
 
