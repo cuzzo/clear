@@ -418,7 +418,14 @@ class BcEmitter
       end
     when MIR::RawZig, MIR::InlineZig
       raise Unimplemented, "#{mir_node.class.name.split('::').last} not supported in VM path"
-    when MIR::BgBlock, MIR::DoBlock, MIR::CatchWrapper
+    when MIR::BgBlock
+      # VM is single-threaded; run the fiber body inline. Captures are by
+      # reference in the VM model, so no explicit copy needed.
+      if mir_node.run_body
+        mir_node.run_body.each { |s| compile_stmt(s, nil) }
+      end
+      push_type(:void)
+    when MIR::DoBlock, MIR::CatchWrapper
       raise Unimplemented, "#{mir_node.class.name.split('::').last} not yet supported"
     else
       if ast_node
@@ -935,6 +942,13 @@ class BcEmitter
       # leave inner as MIR::RawZig which the VM can't compile; the inner
       # RawZig dispatch raises with a better error than a silent passthrough.
       compile_expr(node.inner)
+    when MIR::BgBlock
+      # VM is single-threaded. BgBlock in expression position returns a
+      # "future"; run the body inline and push nil as a stand-in Future.
+      if node.run_body
+        node.run_body.each { |s| compile_stmt(s, nil) }
+      end
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
     when NilClass
       cidx = add_const(nil)
       emit_op(LOAD_CONST, cidx)
