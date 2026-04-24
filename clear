@@ -979,6 +979,10 @@ when 'profile'
   do_build(source, output: output, opt_level: 'ReleaseFast', profile: true)
   puts "Built: #{output} (ReleaseFast + alloc profiling)"
 
+  # Copy the CLEAR source alongside the transpiled.zig so `clear doctor`
+  # can show source snippets next to hot-line attributions.
+  FileUtils.cp(source, File.join(profile_dir, 'source.cht')) rescue nil
+
   # CPU profiling via perf
   has_perf = system('which perf > /dev/null 2>&1') &&
     File.readable?('/proc/sys/kernel/perf_event_paranoid') &&
@@ -1130,6 +1134,63 @@ when 'doctor'
       puts "  (no samples collected - program may have run too briefly)"
     end
     puts ""
+
+    # ── CLEAR Source Hot Lines ──
+    # Attributes perf samples to CLEAR source lines by (a) asking perf
+    # for srcline-sorted samples against the transpiled Zig, (b)
+    # mapping each Zig line back to its CLEAR source line via the
+    # `// CLR:N` comments the transpiler emits. Pipeline stages (lines
+    # containing `s>`) are called out explicitly — they're the most
+    # common perf "why is this slow" question.
+    zig_source = File.join(profile_dir, 'transpiled.zig')
+    clear_source = File.join(profile_dir, 'source.cht')
+    if File.exist?(zig_source) && File.exist?(perf_data)
+      zig_to_clear = {}
+      current_clear = nil
+      File.readlines(zig_source).each_with_index do |line, idx|
+        if line =~ %r{// CLR:(\d+)}
+          current_clear = $1.to_i
+        end
+        zig_to_clear[idx + 1] = current_clear if current_clear
+      end
+
+      srcline_out = `perf report -i #{perf_data} --stdio --no-children -g none --sort=srcline 2>/dev/null`
+      clear_samples = Hash.new(0.0)
+      # The running binary's debug info points perf at the original temp
+      # Zig file (`._clear_tmp_<name>.zig` or `<basename>.zig`), not the
+      # profile-dir copy. Match any Zig filename that isn't a known
+      # runtime/stdlib file.
+      runtime_zigs = %w[
+        runtime.zig slab-alloc.zig parking-lot.zig Allocator.zig
+        compiler_rt.zig array_list.zig format.zig fmt.zig io.zig
+        start.zig mem.zig math.zig std.zig
+      ].to_set
+      srcline_out.each_line do |line|
+        next unless line =~ /^\s*(\d+\.\d+)%.*?(\S+\.zig):(\d+)/
+        pct = $1.to_f
+        file = File.basename($2)
+        zig_line = $3.to_i
+        next if runtime_zigs.include?(file)
+        clear_line = zig_to_clear[zig_line]
+        clear_samples[clear_line] += pct if clear_line
+      end
+
+      if clear_samples.any?
+        puts "=== CLEAR Source Hot Lines ==="
+        puts ""
+        source_lines = File.exist?(clear_source) ? File.readlines(clear_source) : []
+        top = clear_samples.sort_by { |_, pct| -pct }.first(10)
+        top.each do |line_no, pct|
+          snippet = source_lines[line_no - 1]&.rstrip || ''
+          # Detect `s>` as a standalone token. Avoid matching identifiers
+          # that happen to contain the substring.
+          pipeline = snippet =~ /(^|[\s(;])s>/ ? ' [pipeline stage]' : ''
+          trimmed = snippet.lstrip[0, 64]
+          puts "  %5.1f%%  line %-4d  %s%s" % [pct, line_no, trimmed, pipeline]
+        end
+        puts ""
+      end
+    end
   end
 
   # ── Syscalls ──
