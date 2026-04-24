@@ -1,0 +1,25 @@
+-- Regression: BG block capturing a slice-typed parameter.
+-- Bug: the generated BG capture context struct typed the field as
+-- std.ArrayListUnmanaged(T) instead of []T, failing to compile with
+-- "expected type 'array_list.Aligned(i64,null)', found '[]i64'".
+-- Cause: mir_lowering.lower_bg_block called Type#zig_type without
+-- is_field: true, so dynamic arrays lowered to ArrayListUnmanaged
+-- instead of slices.
+
+FN consume(ops: Int64[]) RETURNS Int64 ->
+    RETURN ops.length();
+END
+
+FN runit(ops: Int64[]) RETURNS Int64 ->
+    promise: ~Int64 = BG {
+        consume(ops);
+    };
+    n: Int64 = NEXT promise;
+    RETURN n;
+END
+
+FN main() RETURNS Void ->
+    arr: Int64[] = [1_i64, 2_i64, 3_i64];
+    n: Int64 = runit(arr);
+    ASSERT n == 3, "slice-param captured into BG + forwarded to fn";
+END

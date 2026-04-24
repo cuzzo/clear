@@ -2275,10 +2275,13 @@ class MIRLowering
 
     rt_name = @rt_name
 
-    # Build capture fields
+    # Build capture fields. Use is_field: true so dynamic arrays (Int64[])
+    # render as slices (`[]i64`) instead of ArrayListUnmanaged — the
+    # captured value at the call-site is a slice, and the ctx struct field
+    # has to match or Zig rejects the `.name = name` init.
     capture_fields = captured.map { |name, type_obj|
       t = type_obj ? Type.new(type_obj) : nil
-      zig_t = t ? t.zig_type : "anyopaque"
+      zig_t = t ? t.zig_type(is_field: true) : "anyopaque"
       pointer_captures.include?(name) ? "#{name}: *#{zig_t}," : "#{name}: #{zig_t},"
     }.join("\n        ")
 
