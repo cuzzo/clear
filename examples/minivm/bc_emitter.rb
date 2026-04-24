@@ -446,6 +446,13 @@ class BcEmitter
       push_type(:void)
     when MIR::DoBlock, MIR::CatchWrapper
       raise Unimplemented, "#{mir_node.class.name.split('::').last} not yet supported"
+    when MIR::Lit, MIR::Ident, MIR::ConcatStr, MIR::BinOp, MIR::BlockExpr
+      # Bare expression in statement position (e.g. the last value of a
+      # bg-block body, used as the fiber's return). Evaluate for side
+      # effects and drop the result.
+      compile_expr(mir_node); t = pop_type
+      emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      push_type(:void)
     else
       if ast_node
         compile_ast_stmt(ast_node)
