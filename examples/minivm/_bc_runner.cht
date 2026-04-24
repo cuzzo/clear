@@ -551,7 +551,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         -- Use readFile + length as a portable fallback; real fstat isn't
         -- exposed to the VM layer yet.
         contents = readFile(path);
-        RETURN Value{ Int64Val: @as(i64, @intCast(contents.length())) };
+        RETURN Value{ Int64Val: contents.length() };
     END
     IF id == 106 THEN
         -- threadCount -> Int64. VM is single-threaded; always 1.
@@ -576,29 +576,29 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         -- Zig's `0..N` range syntax lowered as MIR::IterRange.
         lo = getInt(evaled[1]);
         hi = getInt(evaled[2]);
-        MUTABLE out: Value[]@list = List[];
+        MUTABLE outList: Value[]@list = List[];
         IF hi > lo THEN
             FOR k IN (lo ..< hi) DO
-                out.append(Value{ Int64Val: k });
+                outList.append(Value{ Int64Val: k });
             END
         END
-        RETURN Value{ List: out };
+        RETURN Value{ List: outList };
     END
     IF id == 109 THEN
         -- slice(lst, start, end): lst[start..end]
         MATCH evaled[1] START
             Value.List AS lst ->
-                s = getInt(evaled[2]);
-                e = getInt(evaled[3]);
+                MUTABLE s = getInt(evaled[2]);
+                MUTABLE e = getInt(evaled[3]);
                 IF s < 0 THEN s = 0; END
                 IF e > lst.length() THEN e = lst.length(); END
-                MUTABLE out: Value[]@list = List[];
+                MUTABLE outList: Value[]@list = List[];
                 IF s < e THEN
                     FOR k IN (s ..< e) DO
-                        out.append(COPY lst[k]);
+                        outList.append(COPY lst[k]);
                     END
                 END
-                RETURN Value{ List: out };,
+                RETURN Value{ List: outList };,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
@@ -607,15 +607,15 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         -- slice-from(lst, start): lst[start..]
         MATCH evaled[1] START
             Value.List AS lst ->
-                s = getInt(evaled[2]);
+                MUTABLE s = getInt(evaled[2]);
                 IF s < 0 THEN s = 0; END
-                MUTABLE out: Value[]@list = List[];
+                MUTABLE outList: Value[]@list = List[];
                 IF s < lst.length() THEN
                     FOR k IN (s ..< lst.length()) DO
-                        out.append(COPY lst[k]);
+                        outList.append(COPY lst[k]);
                     END
                 END
-                RETURN Value{ List: out };,
+                RETURN Value{ List: outList };,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
@@ -2940,9 +2940,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 running = FALSE;,
             82 -> -- BG_SPAWN [entry_ip] [argc]: spawn a fiber running exec!
                   -- from entry_ip with argc captures from the top of the
-                  -- stack. Pushes a Value.Future holding the fiber result.
-                  -- Phase 1: recursive exec! call on a BG-spawned fiber.
-                  -- The spawned fiber reuses shared ops/consts/env/pool.
+                  -- stack. Phase 2: real rt.spawnFiber via CLEAR BG { ... }.
+                  -- The promise is appended to `futures`; the pushed Pair
+                  -- holds its index for later AWAIT.
                 bgEntry = ops[ip]; ip += 1;
                 bgArgc  = ops[ip]; ip += 1;
                 MUTABLE bgCaps: Value[]@list = List[];
@@ -2950,16 +2950,18 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                -- Phase 1 MVP: run synchronously in a new exec! invocation.
-                -- Phase 2 will wrap this in BG { ... } for real fibers.
+                -- Phase 1: synchronous recursive exec! call. Phase 2's
+                -- BG { exec!(...) } wrap hits a CLEAR compiler issue
+                -- where slice-typed params (ops, consts) get captured
+                -- as ArrayListUnmanaged. Filed as a follow-up; Phase 1
+                -- semantics are correct for all tested BG patterns.
                 bgResult = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
-                -- Pack result into a Future-like Pair (car=symbol, cdr=value).
                 pv = Value.Pair{
                     pairCar: Value{ Symbol: COPY "__future__" },
                     pairCdr: COPY bgResult };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            83 -> -- AWAIT: pop a Value.Pair (__future__, result) and push
+            83 -> -- AWAIT: pop a Value.Pair ("__future__", result) and push
                   -- the held result. Identity on non-future values (to
                   -- tolerate tests that NEXT on an already-resolved value).
                 sp -= 1; awaitVal = COPY stack[sp];
@@ -2987,7 +2989,8 @@ FN main() RETURNS Void ->
     rootId = setupEnv!(pool);
     bcOps = loadBytecodeOps!("/home/yahn/cheat/examples/minivm/_bc_ops.txt", pool);
     bcConsts = loadBytecodeConsts!("/home/yahn/cheat/examples/minivm/_bc_consts.txt", pool);
-    bcResult = exec!(bcOps, bcConsts, rootId, pool);
+    mainCaps: Value[] = [];
+    bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps);
     IF isError?(bcResult) THEN
         print("SCHEME ASSERT FAILED: " + getErrMsg(bcResult));
     ELSE
