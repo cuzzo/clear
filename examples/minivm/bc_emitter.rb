@@ -339,6 +339,8 @@ class BcEmitter
       compile_expr_stmt(mir_node, ast_node)
     when MIR::IfStmt
       compile_if(mir_node)
+    when MIR::IfBindStmt
+      compile_if_bind(mir_node)
     when MIR::WhileStmt
       compile_while(mir_node)
     when MIR::ForStmt
@@ -565,6 +567,39 @@ class BcEmitter
   # ================================================================
   # Control flow
   # ================================================================
+
+  def compile_if_bind(node)
+    # For each binding: compile expr, test nil, store capture slot, on any
+    # nil short-circuit to else.
+    skip_patches = []
+    node.bindings.each do |b|
+      compile_expr_to_value(b[:expr]); pop_type
+      emit_op(DUP) if respond_to?(:emit_dup_stub)  # we'll do it manually
+      # The VM doesn't have a DUP opcode exposed by default here — emit a
+      # store-then-load to keep the value available for both the nil test and
+      # the binding.
+      capture = b[:capture].to_s
+      alloc_slot(capture, :any) unless has_slot?(capture)
+      @slot_types[capture] = :any
+      emit_op(STORE_SLOT, @slots[capture])
+      emit_op(LOAD_SLOT, @slots[capture])
+      emit_op(JUMP_IF_FALSE)  # nil is falsy
+      skip_patches << @ops.length
+      emit_op(0)
+    end
+
+    emit_body_stmts(node.then_body)
+
+    if node.else_body && !node.else_body.empty?
+      emit_op(JUMP); end_patch = @ops.length; emit_op(0)
+      skip_patches.each { |idx| @ops[idx] = @ops.length }
+      emit_body_stmts(node.else_body)
+      @ops[end_patch] = @ops.length
+    else
+      skip_patches.each { |idx| @ops[idx] = @ops.length }
+    end
+    push_type(:void)
+  end
 
   def compile_if(node)
     compile_cond(node.cond)
@@ -1136,6 +1171,16 @@ class BcEmitter
       # VM strings are immutable/boxed; forward the source bytes (arg[1]).
       compile_expr_to_value(node.args[1]); pop_type
       push_type(:any); return
+    when :log, :exp, :floor, :shell
+      # Unary float builtins / shell exec. VM has a native for each.
+      native_name = { log: "log", exp: "exp", floor: "floor", shell: "shell" }[op]
+      if NATIVES.key?(native_name)
+        compile_expr_to_value(node.args[0]); pop_type
+        emit_op(NATIVE_CALL, NATIVES[native_name], 1); push_type(:any); return
+      end
+      # floor is the only one guaranteed present; if log/exp aren't registered,
+      # fall through so we raise Unimplemented with a clear signal.
+      raise Unimplemented, "MIR::InlineBc op :#{op} has no VM native"
     when :setMemberGet
       # if (set.contains(item)) item else nil
       # args: [set, item, elem_zig_type]
@@ -1392,11 +1437,13 @@ class BcEmitter
     @slot_types[node.name.to_s] || :any
   end
 
-  # Strip allocator arguments: bare `rt` idents and `rt.heapAlloc()` calls.
+  # Strip allocator arguments: bare `rt` idents, `rt.heapAlloc()` calls, and
+  # pipeline_host's InlineZig("rt.heapAlloc()") stand-ins (reason == "alloc").
   def strip_alloc_args(args)
     args.reject { |a|
-      (a.is_a?(MIR::Ident) && a.name.to_s == "rt") ||
-      (a.is_a?(MIR::MethodCall) && a.method.to_s == "heapAlloc")
+      (a.is_a?(MIR::Ident) && (a.name.to_s == "rt" || a.name.to_s == "alloc")) ||
+      (a.is_a?(MIR::MethodCall) && a.method.to_s == "heapAlloc") ||
+      (a.is_a?(MIR::InlineZig) && a.reason.to_s == "alloc")
     }
   end
 

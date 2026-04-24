@@ -359,27 +359,31 @@ STD_LIB = {
   "log" => {
     args: [:Float64],
     return: :Float64,
-    zig: "@log({0})"
+    zig: "@log({0})",
+    bc: true,
   },
 
   # exp(x) -> e^x
   "exp" => {
     args: [:Float64],
     return: :Float64,
-    zig: "@exp({0})"
+    zig: "@exp({0})",
+    bc: true,
   },
 
   # floor(x) -> largest integer <= x (as Float64)
   "floor" => {
     args: [:Float64],
     return: :Float64,
-    zig: "@floor({0})"
+    zig: "@floor({0})",
+    bc: true,
   },
 
   "shell" => {
     args: [STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.shell({alloc}, {0})",
+    bc: true,
     allocates: true,
     alloc: :node_storage,
   },
