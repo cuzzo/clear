@@ -152,5 +152,6 @@ pub fn main() !void {
     if (profiling_enabled) {
         @import("runtime/alloc-profile.zig").dump();
         @import("runtime/channel-profile.zig").dumpToEnvFile();
+        @import("runtime/fiber-profile.zig").dumpToEnvFile();
     }
 }

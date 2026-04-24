@@ -5,6 +5,11 @@ const qs = @import("queues.zig");
 const fc = @import("fiber-core.zig");
 const fm = @import("fiber-memory.zig");
 const compat = @import("../lib/compat.zig");
+// Profile telemetry (comptime-gated). Imports are cheap; actual calls
+// live inside `if (rt_profile.CLEAR_PROFILE)` blocks that compile away
+// when the flag is false.
+const rt_profile = @import("runtime-header.zig");
+const fp_mod = @import("fiber-profile.zig");
 const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
@@ -540,6 +545,9 @@ pub const Scheduler = struct {
                             // inbox_link, etc. are properly initialized — not garbage
                             // from the allocator.
                             t.* = Task{ .base = fiber_ptr, .user_fn = msg.user_fn.? };
+                            if (rt_profile.CLEAR_PROFILE) {
+                                t.spawn_ns = fp_mod.nowNs();
+                            }
                             break :blk t;
                         };
                         task.context = msg.args;
@@ -686,6 +694,9 @@ pub const Scheduler = struct {
                     __pinned_local_alloc = self.local_arena.allocator();
                 }
 
+                if (rt_profile.CLEAR_PROFILE) {
+                    fp_mod.recordSchedulerRun(self.index);
+                }
                 // 1. Switch to the Task
                 task.base.switchTo(&self.main_ctx);
 
@@ -694,6 +705,9 @@ pub const Scheduler = struct {
 
                 switch (task.status.load(.acquire)) {
                     .Finished => {
+                        if (rt_profile.CLEAR_PROFILE) {
+                            fp_mod.recordFiberExit(task.spawn_ns, fp_mod.nowNs());
+                        }
                         _ = self.active_tasks.fetchSub(1, .monotonic);
                         // Remove from lock_waiters before destroying to prevent stale pointer access.
                         // A task can register itself there via registerLockWaiter and then complete

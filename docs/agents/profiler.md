@@ -47,11 +47,17 @@ builds.
 
 | Pattern | Telemetry | Status |
 |---|---|---|
-| Fast producer / slow consumer | `BoundedChannel` pushes/pops/push_blocked/pop_blocked/max_depth, written to `.profile/channels.txt` | **done** |
+| Fast producer / slow consumer | `BoundedChannel` pushes/pops/push_blocked/pop_blocked/max_depth -> `.profile/channels.txt` | **done** |
+| Fiber lifetime distribution | Spawn/exit timestamps on Task -> `.profile/fibers.txt` | **done** |
+| Workstealing balance | Per-scheduler fibers-run counter -> `.profile/fibers.txt` | **done** |
 | Lock hold-time distribution | `pthread_rwlock_*` timestamps on acquire/release | deferred |
-| Fiber lifetime distribution | Spawn/exit timestamps | deferred |
-| Workstealing balance | Per-scheduler fibers-run counter | deferred |
 | Per-lock contention attribution | Per-lock wait-time counter | deferred |
+
+The two deferred lock-level patterns share the same missing piece:
+per-instance lock identity. CLEAR's parking-lot primitives don't
+currently carry a profile-id the way `BoundedChannel` now does.
+Adding one is ~30 lines of plumbing but an invasive touch to the
+parking-lot API. Treat as its own commit when picked up.
 
 ### Tier 3 — extensive telemetry (deferred)
 

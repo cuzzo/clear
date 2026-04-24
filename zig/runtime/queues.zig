@@ -353,6 +353,12 @@ pub const Task = struct {
     /// cleared when drainInbox processes it. Detects double-push.
     in_inbox: Atomic(bool) = Atomic(bool).init(false),
     wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
+    // Profile-only: spawn timestamp in ns. Populated by submitSpawn
+    // when `CLEAR_PROFILE == true`, read by the scheduler's .Finished
+    // path to emit a fiber lifetime sample. Field exists always for
+    // simplicity (8 bytes per Task); the update sites compile out in
+    // non-profile builds so there's no instruction-level cost.
+    spawn_ns: u64 = 0,
 
     // Parking-lot lock fields. Set by ParkingMutex/ParkingRwLock on park.
     // Read by the scheduler's timeout scanner. Always null when not parked.

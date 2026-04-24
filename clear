@@ -990,9 +990,11 @@ when 'profile'
 
   # Build the run command
   channel_file = File.join(profile_dir, 'channels.txt')
+  fiber_file   = File.join(profile_dir, 'fibers.txt')
   env_parts = [
     "CLEAR_ALLOC_PROFILE=#{alloc_file}",
     "CLEAR_CHANNEL_PROFILE=#{channel_file}",
+    "CLEAR_FIBER_PROFILE=#{fiber_file}",
   ]
   env_parts << "CLEAR_THREADS=#{ENV['CLEAR_THREADS']}" if ENV['CLEAR_THREADS']
   target_env = env_parts.join(' ')
@@ -1238,6 +1240,81 @@ when 'doctor'
           end
         printf "  %-4d %10d %10d %10d %10d %7d%% %s\n",
                c[:id], c[:pushes], c[:pops], c[:push_blocked], c[:pop_blocked], ratio, diagnosis
+      end
+      puts ""
+    end
+  end
+
+  # ── Fibers & Workstealing Balance ──
+  # Parses `.profile/fibers.txt`: fiber-lifetime summary + per-scheduler
+  # fibers-run counter. Diagnoses micro-fiber overhead (fibers dominated
+  # by sub-10us setup cost) and scheduler imbalance (one scheduler doing
+  # most of the work while others are idle).
+  fiber_file = File.join(profile_dir, 'fibers.txt')
+  if File.exist?(fiber_file)
+    totals = {}
+    sched_rows = []
+    in_sched = false
+    File.readlines(fiber_file).each do |l|
+      s = l.strip
+      next if s.empty? || s.start_with?('#') && !s.include?('per-scheduler')
+      if s.include?('per-scheduler')
+        in_sched = true
+        next
+      end
+      if in_sched
+        f = s.split
+        next if f.size < 2
+        sched_rows << { idx: f[0].to_i, runs: f[1].to_i } if f[0] =~ /\A\d+\z/
+      else
+        if s =~ /\A(\w+):\s*(\d+)/
+          totals[$1] = $2.to_i
+        end
+      end
+    end
+
+    if totals['total_fibers'] && totals['total_fibers'] > 0
+      total = totals['total_fibers']
+      short = totals['short_fibers_under_1ms'] || 0
+      vshort = totals['vshort_fibers_under_10us'] || 0
+      total_ns = totals['total_lifetime_ns'] || 0
+      max_ns = totals['max_lifetime_ns'] || 0
+      avg_ns = total > 0 ? total_ns / total : 0
+      short_pct  = total > 0 ? (short.to_f / total * 100).round : 0
+      vshort_pct = total > 0 ? (vshort.to_f / total * 100).round : 0
+
+      puts "=== Fibers ==="
+      puts ""
+      puts "  total:   #{total}"
+      puts "  average: #{(avg_ns / 1000.0).round(1)} us"
+      puts "  max:     #{(max_ns / 1000.0).round(1)} us"
+      puts "  < 1ms:   #{short} (#{short_pct}%)"
+      puts "  < 10us:  #{vshort} (#{vshort_pct}%)"
+      if vshort_pct >= 50 && total >= 50
+        puts ""
+        puts "  *** #{vshort_pct}% of fibers finished in under 10us. Setup cost"
+        puts "      likely dominates work. Consider inlining, batching, or"
+        puts "      a pool of long-lived workers instead of per-item BG."
+      end
+      puts ""
+    end
+
+    if sched_rows.any?
+      puts "=== Workstealing Balance ==="
+      puts ""
+      total_runs = sched_rows.sum { |r| r[:runs] }
+      max_runs   = sched_rows.map { |r| r[:runs] }.max || 0
+      sched_rows.each do |r|
+        pct = total_runs > 0 ? (r[:runs].to_f / total_runs * 100).round : 0
+        bar = '█' * (pct * 40 / 100.0).round
+        puts "  sched #{r[:idx]}: %6d  %3d%% %s" % [r[:runs], pct, bar]
+      end
+      imbalance_pct = total_runs > 0 ? (max_runs.to_f / total_runs * 100).round : 0
+      if sched_rows.length >= 2 && imbalance_pct >= 80
+        puts ""
+        puts "  *** Scheduler imbalance: one scheduler ran #{imbalance_pct}%"
+        puts "      of all fibers. Other schedulers were idle. BG spawn"
+        puts "      policy may be routing too aggressively to a single target."
       end
       puts ""
     end
