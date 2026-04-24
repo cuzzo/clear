@@ -3924,7 +3924,9 @@ class MIRLowering
 
   def lower_move(node)
     if node.value.is_a?(AST::Identifier)
-      MIR::Ident.new(zig_safe_name(node.value.name))
+      # Route through lower_identifier so BG capture-map rewrites apply:
+      # GIVE lst inside BG { ... } must emit __ctx_N.lst, not lst.
+      lower_identifier(node.value)
     else
       lower(node.value)
     end
