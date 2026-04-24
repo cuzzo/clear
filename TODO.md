@@ -30,7 +30,8 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] VM can automatically generate and run LOOM tests for concurrent code
  - [ ] An RSpec like testing framework as the first standard library module
  - [ ] A statistical benchmarking & profiling framework like Go/Rust
- - [ ] `./clear doctor` to automatically fix most syntax, conversion, affine errors and profiling recomendations if you choose
+ - [ ] `./clear fix` fixes *most* errors that *can* be fixed.
+ - [ ] Typed Holes
  - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
  - [ ] HashMap string interning
  - [ ] @sorted for lists, sets, hashmaps.
