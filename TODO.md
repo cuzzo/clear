@@ -32,6 +32,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] A statistical benchmarking & profiling framework like Go/Rust
  - [ ] `./clear fix` fixes *most* errors that *can* be fixed.
  - [ ] Typed Holes
+ - [ ] Zig 0.16.0 style streaming IO 
  - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
  - [ ] HashMap string interning
  - [ ] @sorted for lists, sets, hashmaps.
