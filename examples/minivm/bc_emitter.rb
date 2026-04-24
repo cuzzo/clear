@@ -422,8 +422,21 @@ class BcEmitter
       else
         raise Unimplemented, "MIR::BreakStmt outside of a known loop"
       end
-    when MIR::RawZig, MIR::InlineZig
-      raise Unimplemented, "#{mir_node.class.name.split('::').last} not supported in VM path"
+    when MIR::InlineZig
+      # Reason-based pass-throughs for Zig-specific statement leaves the VM
+      # can safely ignore (no-op semantics). 'with_block_bindings' unwraps
+      # Rc/Arc/locked wrappers into aliases — VM has no sync distinction so
+      # the binding is inert. 'suppress_unused_inner_capture' is a Zig
+      # unused-var suppressor. Others still raise.
+      case mir_node.reason.to_s
+      when "with_block_bindings", "suppress_unused_inner_capture",
+           "item_cleanup"
+        push_type(:void)
+      else
+        raise Unimplemented, "InlineZig not supported in VM path"
+      end
+    when MIR::RawZig
+      raise Unimplemented, "RawZig not supported in VM path"
     when MIR::BgBlock
       # VM is single-threaded; run the fiber body inline. Captures are by
       # reference in the VM model, so no explicit copy needed.
@@ -688,7 +701,6 @@ class BcEmitter
     emit_op(STORE_SLOT, @slots[coll_name])
     emit_op(POP)
     emit_op(LOAD_CONST, add_const([:i64, 0]))
-    emit_op(I_TO_VAL)
     emit_op(STORE_SLOT, @slots[idx_name])
     emit_op(POP)
 
