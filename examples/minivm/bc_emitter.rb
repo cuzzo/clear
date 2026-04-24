@@ -1094,11 +1094,28 @@ class BcEmitter
       compile_expr(node.inner)
     when MIR::BgBlock
       # VM is single-threaded. BgBlock in expression position returns a
-      # "future"; run the body inline and push nil as a stand-in Future.
-      if node.run_body
-        node.run_body.each { |s| compile_stmt(s, nil) }
+      # future-like; Phase 0.5: run the body inline and leave the last
+      # expression's value on the stack (which serves as the "future").
+      # NEXT on this value is identity (see compile_method_call for "next").
+      stmts = semantic_mir_nodes(node.run_body || [])
+      if stmts.empty?
+        emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
       end
-      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+      stmts[0...-1].each { |s| compile_stmt(s, nil); t = pop_type
+        emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      }
+      last = stmts[-1]
+      if last.is_a?(MIR::ExprStmt)
+        compile_expr(last.expr)
+      elsif last.respond_to?(:expr?) && last.expr?
+        compile_expr(last)
+      else
+        compile_stmt(last, nil)
+        t = pop_type
+        emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+        emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
+      end
+      return
     when NilClass
       cidx = add_const(nil)
       emit_op(LOAD_CONST, cidx)
@@ -1151,6 +1168,10 @@ class BcEmitter
 
   def compile_ident(node)
     name = node.name.to_s
+    # BG block capture ident: MIR lowers `x` inside a bg body to `__ctx_N.x`
+    # (Zig-side context unpacking). VM inlines the body, so strip the prefix
+    # and read the outer slot directly.
+    name = $1 if name =~ /\A__ctx_\d+\.(.*)\z/
     vt = @slot_types[name] || :any
     if vt == :i64 && @islots[name]
       emit_op(LOAD_ISLOT, @islots[name]); push_type(:i64)
@@ -1763,6 +1784,14 @@ class BcEmitter
   def compile_method_call_expr(node)
     method = node.method.to_s
     rtype  = receiver_slot_type(node.receiver)
+
+    # NEXT on a promise (future-like value). VM runs BG bodies inline
+    # (Phase 0.5: the Future is just the body's last value), so NEXT is
+    # identity on the receiver.
+    if method == "next" && node.args.empty?
+      compile_expr(node.receiver)
+      return
+    end
 
     # HashMap operations
     if rtype == :map || %w[put delete keys values count].include?(method)
