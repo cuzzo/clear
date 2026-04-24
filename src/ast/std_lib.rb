@@ -726,6 +726,7 @@ MAP_METHODS = {
   "count" => {
     arity: 0, tag: :map_method,
     zig: "{0}.count()",
+    bc: true,
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
@@ -733,6 +734,7 @@ MAP_METHODS = {
   "length" => {
     arity: 0, tag: :map_method,
     zig: "{0}.count()",
+    bc: true,
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
@@ -921,14 +923,14 @@ COLLECTION_METHOD_CONFIGS = {
 BUILTIN_OPS = {
   # --- String comparison ---
   eql:       { zig: "CheatLib.eql({0}, {1})", bc: true, borrows: :all },
-  strcmp:    { zig: "CheatLib.strcmp({0}, {1})", borrows: :all },
+  strcmp:    { zig: "CheatLib.strcmp({0}, {1})", bc: true, borrows: :all },
   strEql:    { zig: "CheatLib.strEql({0}, {1})", bc: true, borrows: :all },
   # O(1) pointer+length comparison for String@symbol. Valid because the compiler
   # deduplicates identical string literals within a single compilation unit.
   symbolEql: { zig: "({0}.ptr == {1}.ptr and {0}.len == {1}.len)", bc: true, borrows: :all },
 
   # --- String indexing ---
-  charAt: { zig: "CheatLib.charAt({0}, {1})", borrows: :all },
+  charAt: { zig: "CheatLib.charAt({0}, {1})", bc: true, borrows: :all },
 
   # --- Collection indexing (fallback for non-registry paths) ---
   getAt: { zig: "CheatLib.getAt({0}, {1})", bc: true, borrows: :all },

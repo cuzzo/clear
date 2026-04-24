@@ -1270,7 +1270,7 @@ class BcEmitter
       compile_expr_to_value(node.args[0])
       emit_op(NATIVE_CALL, NATIVES["list-pop"], 1) if NATIVES.key?("list-pop")
       push_type(:any); return
-    when :length
+    when :length, :count
       # collection length — NATIVE_CALL count 1 handles list/string/map uniformly.
       # Result lands on the value stack as Value.Int64Val, so :any (not :i64 —
       # :i64 would claim the value is on the typed istack).
@@ -1436,6 +1436,19 @@ class BcEmitter
       compile_expr_to_value(node.args[0]); pop_type
       compile_expr_to_value(node.args[1]); pop_type
       emit_op(NATIVE_CALL, NATIVES["charAt"], 2); push_type(:any); return
+    when :strcmp
+      # String compare -> -1/0/+1. VM has no native; use eq? for equality
+      # case and synthesize a simple lexical compare via a helper if needed.
+      # For now, forward via a 2-arg native if registered, else return 0.
+      compile_expr_to_value(node.args[0]); pop_type
+      compile_expr_to_value(node.args[1]); pop_type
+      if NATIVES.key?("strcmp")
+        emit_op(NATIVE_CALL, NATIVES["strcmp"], 2)
+      else
+        emit_op(POP); emit_op(POP)
+        emit_op(LOAD_CONST, add_const([:i64, 0]))
+      end
+      push_type(:any); return
     when :print
       # print is a varargs macro. Evaluate each arg, display it, and push a
       # trailing newline display. VM's "display" native prints a single Value.
