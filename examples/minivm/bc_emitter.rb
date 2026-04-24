@@ -54,6 +54,7 @@ class BcEmitter
     "timestampMs" => 54, "random" => 55, "randomInt" => 56,
     "lowercase" => 100, "uppercase" => 101, "replace" => 102, "parseFloat" => 103,
     "countOccurrences" => 104, "fileSize" => 105, "threadCount" => 106,
+    "list-pop" => 107,
     "string-append" => 26, "string-length" => 27, "substring" => 28,
     "string-ref" => 29, "number->string" => 30, "string->number" => 31,
     "string?" => 32, "charAt" => 29,
@@ -1084,9 +1085,8 @@ class BcEmitter
       compile_expr_to_value(node.args[1])
       compile_expr_to_value(node.args[2])
       emit_op(NATIVE_CALL, NATIVES["list-set!"], 3); push_type(:void); return
-    when :append
-      # list.append(x) — VM list-push native; update the slot holding the list
-      # so the mutation is observable.
+    when :append, :insert, :push
+      # list.{append,insert,push}(x) — all aliases for list-push.
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
       emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
@@ -1095,6 +1095,17 @@ class BcEmitter
         emit_store(recv.name.to_s, :any)
       end
       push_type(:void); return
+    when :reserve
+      # list.reserve(n) — no-op in VM (lists are growable per-mutation)
+      compile_expr_to_value(node.args[0]); pop_type; emit_op(POP)
+      compile_expr_to_value(node.args[1]); pop_type; emit_op(POP)
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+    when :pop
+      # list.pop() -> ?T. VM returns the tail or nil. Use NATIVES["count"]
+      # to peek length, then list-ref + manipulate. Simpler: new native below.
+      compile_expr_to_value(node.args[0])
+      emit_op(NATIVE_CALL, NATIVES["list-pop"], 1) if NATIVES.key?("list-pop")
+      push_type(:any); return
     when :length
       # collection length — NATIVE_CALL count 1 handles list/string/map uniformly.
       # Result lands on the value stack as Value.Int64Val, so :any (not :i64 —

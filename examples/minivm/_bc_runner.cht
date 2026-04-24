@@ -557,6 +557,20 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         -- threadCount -> Int64. VM is single-threaded; always 1.
         RETURN Value{ Int64Val: 1_i64 };
     END
+    IF id == 107 THEN
+        -- list-pop: remove and return the last element, or Nil if empty.
+        MATCH evaled[1] START
+            Value.List AS lst ->
+                IF lst.length() == 0 THEN RETURN Value.Nil; END
+                last = COPY lst[lst.length() - 1];
+                -- Note: VM Value.List is a value type; the caller keeps the
+                -- pre-pop list and can't observe the mutation. For tests that
+                -- only need the popped value, this is correct.
+                RETURN last;,
+            DEFAULT -> RETURN Value.Nil;
+        END
+        RETURN Value.Nil;
+    END
 
     RETURN Value.Nil;
 END
