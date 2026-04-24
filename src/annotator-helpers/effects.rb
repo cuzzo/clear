@@ -29,12 +29,51 @@ module EffectTracker
   YIELD        = :YIELD
   IO           = :IO
 
-  ALL_EFFECTS = [HEAP, BLOCKING, REENTRANT, LOOP_UNBOUND, EXTERN, YIELD, IO].freeze
+  # SUSPENDS family — fiber may suspend (IO, NEXT, YIELD, lock wait).
+  # The three variants form an orthogonal set: a function may hold any
+  # subset. Display form uses colon syntax (SUSPENDS:LOOP).
+  #
+  #   SUSPENDS             — function may suspend at a linear call site
+  #   SUSPENDS_CONDITIONAL — function has a suspension point inside an IF/MATCH branch
+  #   SUSPENDS_LOOP        — function has a suspension point inside a loop
+  #
+  # Propagation is context-sensitive: a caller that invokes a SUSPENDS-tagged
+  # function inside a loop inherits SUSPENDS_LOOP (not plain SUSPENDS).
+  #
+  # Note: master added the simpler YIELD/IO pair independently while this
+  # branch was developing SUSPENDS_*. They overlap in intent (both classify
+  # fiber suspension points); kept side by side for now -- a follow-up
+  # commit can unify them once both call sites are audited together.
+  SUSPENDS             = :SUSPENDS
+  SUSPENDS_CONDITIONAL = :SUSPENDS_CONDITIONAL
+  SUSPENDS_LOOP        = :SUSPENDS_LOOP
+  SUSPENDS_FAMILY      = [SUSPENDS, SUSPENDS_CONDITIONAL, SUSPENDS_LOOP].freeze
+
+  ALL_EFFECTS = [
+    HEAP, BLOCKING, REENTRANT, LOOP_UNBOUND, EXTERN,
+    YIELD, IO,
+    SUSPENDS, SUSPENDS_CONDITIONAL, SUSPENDS_LOOP,
+  ].freeze
+
+  # Display format: :SUSPENDS_LOOP -> "SUSPENDS:LOOP".
+  def self.display(effect)
+    case effect
+    when SUSPENDS             then "SUSPENDS"
+    when SUSPENDS_CONDITIONAL then "SUSPENDS:CONDITIONAL"
+    when SUSPENDS_LOOP        then "SUSPENDS:LOOP"
+    else effect.to_s
+    end
+  end
 
   # --- Phase 1: Direct collection ---
 
   def effects_init!
     @fn_direct_effects = {}   # fn_name => Set of direct effect symbols
+    # Per-caller map of callee => worst-case call-site context
+    # {loop: bool, cond: bool}. Populated by record_call_site during body
+    # scanning. Used by compute_effects! to promote SUSPENDS → SUSPENDS_LOOP
+    # or SUSPENDS_CONDITIONAL when the call site sits in that context.
+    @call_site_context = Hash.new { |h, k| h[k] = {} }
   end
 
   # Called at the start of visit_FunctionDef to prepare a fresh effect set.
@@ -43,21 +82,65 @@ module EffectTracker
   end
 
   # Record a direct effect for the function currently being analyzed.
+  # For SUSPENDS specifically, promote based on current loop/conditional
+  # context so the recorded effect reflects where the suspension occurs.
   def record_effect(effect)
     return unless current_fn_ctx&.name
+    effect = promote_suspends_for_current_context(effect)
     @fn_direct_effects[current_fn_ctx.name]&.add(effect)
+  end
+
+  # Promote a bare SUSPENDS to SUSPENDS_LOOP / SUSPENDS_CONDITIONAL based
+  # on the current visit context. Non-SUSPENDS effects pass through.
+  def promote_suspends_for_current_context(effect)
+    return effect unless effect == SUSPENDS
+    if current_loop_depth > 0
+      SUSPENDS_LOOP
+    elsif current_conditional_depth > 0
+      SUSPENDS_CONDITIONAL
+    else
+      SUSPENDS
+    end
+  end
+
+  def current_loop_depth
+    current_fn_ctx&.loop_depth || @loop_depth || 0
+  end
+
+  def current_conditional_depth
+    current_fn_ctx&.conditional_depth || @conditional_depth || 0
+  end
+
+  # Record a call site's context so transitive propagation can promote the
+  # callee's SUSPENDS effects. Worst-case merge across multiple call sites.
+  def record_call_site(callee_name)
+    return unless current_fn_ctx&.name
+    caller_name = current_fn_ctx.name
+    in_loop = current_loop_depth > 0
+    in_cond = current_conditional_depth > 0
+    return unless in_loop || in_cond
+    existing = @call_site_context[caller_name][callee_name] || { loop: false, cond: false }
+    @call_site_context[caller_name][callee_name] = {
+      loop: existing[:loop] || in_loop,
+      cond: existing[:cond] || in_cond,
+    }
   end
 
   # --- Phase 2: Transitive propagation ---
 
   # Fixed-point propagation through @call_graph.
   # Follows the same pattern as compute_needs_rt! and compute_can_fail!.
+  #
+  # SUSPENDS-family effects promote based on call-site context: if foo
+  # calls bar inside a loop, foo inherits SUSPENDS_LOOP regardless of
+  # bar's own variant. Non-SUSPENDS effects inherit verbatim.
   def compute_effects!
     # Seed from direct effects.
     resolved = {}
     @fn_direct_effects.each { |name, effs| resolved[name] = effs.dup }
 
-    # Propagate: if foo calls bar, foo inherits bar's effects.
+    # Propagate: if foo calls bar, foo inherits bar's effects
+    # (with context promotion for SUSPENDS family).
     changed = true
     while changed
       changed = false
@@ -67,7 +150,8 @@ module EffectTracker
           callee_effs = resolved[callee]
           next unless callee_effs
           before = current.size
-          current.merge(callee_effs)
+          site_ctx = @call_site_context[fn_name][callee]
+          inherit_effects_from_callee(current, callee_effs, site_ctx)
           changed = true if current.size > before
         end
       end
@@ -76,6 +160,25 @@ module EffectTracker
     # Store frozen effect sets on FunctionDef nodes.
     @fn_nodes.each do |name, fn_node|
       fn_node.effects = (resolved[name] || Set.new).freeze
+    end
+  end
+
+  # Merge callee's effects into caller, applying context-sensitive
+  # SUSPENDS promotion based on the call site's loop/cond bits.
+  def inherit_effects_from_callee(caller_set, callee_set, site_ctx)
+    in_loop = site_ctx && site_ctx[:loop]
+    in_cond = site_ctx && site_ctx[:cond]
+    callee_set.each do |eff|
+      if SUSPENDS_FAMILY.include?(eff)
+        has_loop = (eff == SUSPENDS_LOOP) || in_loop
+        has_cond = (eff == SUSPENDS_CONDITIONAL) || in_cond
+        # Inherit base SUSPENDS so callers can still see linear suspend paths.
+        caller_set.add(SUSPENDS)
+        caller_set.add(SUSPENDS_LOOP)        if has_loop
+        caller_set.add(SUSPENDS_CONDITIONAL) if has_cond
+      else
+        caller_set.add(eff)
+      end
     end
   end
 
@@ -204,6 +307,180 @@ module EffectTracker
       end
     end
     traverse.call(program_node.statements)
+  end
+
+  # --- FSM viability classifier (Phase A) ---
+  #
+  # Decides per-function whether the body can be compiled to an FsmTask
+  # resume fn (stackless state machine) or must remain a stackful fiber.
+  #
+  # Eligibility rules (Phase A conservative set):
+  #   - body has at least one SUSPENDS-family effect (otherwise nothing to
+  #     translate, and a one-shot task is cheaper than an FSM state struct);
+  #   - body does NOT have REENTRANT (recursion needs a stack);
+  #   - body does NOT have EXTERN (opaque to the scheduler);
+  #   - function is not annotated @reentrant.
+  #
+  # BLOCKING (lock wait) is no longer disqualifying: ParkingMutex and
+  # ParkingRwLock both support FSM waiters in the runtime.
+  # LOOP_UNBOUND is not disqualifying: SUSPENDS_LOOP is designed for it.
+  def compute_fsm_eligibility!
+    @fn_nodes.each do |_name, fn_node|
+      effs = fn_node.effects || Set.new
+
+      reason = nil
+      if effs.include?(REENTRANT) || fn_node.reentrant == :reentrant
+        reason = :reentrant
+      elsif effs.include?(EXTERN)
+        reason = :extern
+      elsif !effs.any? { |e| SUSPENDS_FAMILY.include?(e) }
+        reason = :no_suspends
+      end
+
+      fn_node.fsm_eligible = reason.nil?
+      fn_node.fsm_ineligible_reason = reason
+    end
+  end
+
+  # --- FSM suspend-point enumeration (Phase A) ---
+  #
+  # Walks each fsm_eligible function's body and tags the yield-relevant
+  # call sites with a sequential id. Kinds:
+  #   :io    — stdlib call flagged :suspends in STD_LIB
+  #   :lock  — WithBlock acquiring an exclusive / write-locked-read lock
+  #   :yield — YieldExpr inside a BG STREAM
+  #   :next  — NextExpr awaiting a promise
+  #   :call  — FuncCall/MethodCall to a SUSPENDS-tagged named function
+  #
+  # Stores fn.fsm_suspend_points as an Array of { id:, kind:, node: }.
+  # Does not descend into nested FunctionDef bodies.
+  def enumerate_fsm_suspend_points!
+    @fn_nodes.each do |_name, fn_node|
+      next unless fn_node.fsm_eligible
+      points = []
+      scan_suspend_points(fn_node.body, fn_node, points)
+      fn_node.fsm_suspend_points = points
+    end
+  end
+
+  def scan_suspend_points(node, fn_node, points)
+    case node
+    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      # terminal
+    when Array
+      node.each { |n| scan_suspend_points(n, fn_node, points) }
+    when AST::FunctionDef
+      # don't descend into nested defs
+    when AST::NextExpr
+      points << { id: points.size, kind: :next, node: node }
+      scan_suspend_points(node.expr, fn_node, points)
+    when AST::YieldExpr
+      points << { id: points.size, kind: :yield, node: node }
+      scan_suspend_points(node.expr, fn_node, points)
+    when AST::WithBlock
+      if with_block_suspends?(node)
+        points << { id: points.size, kind: :lock, node: node }
+      end
+      node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
+    when AST::FuncCall, AST::MethodCall
+      if func_call_suspends?(node)
+        kind = node.matched_stdlib_def && node.matched_stdlib_def[:suspends] ? :io : :call
+        points << { id: points.size, kind: kind, node: node }
+      end
+      node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) }
+    else
+      node.each_pair { |_, v| scan_suspend_points(v, fn_node, points) } if node.respond_to?(:each_pair)
+    end
+  end
+
+  # A WithBlock suspends if any of its captures acquires an exclusive /
+  # write-locked-read capability. Mirrors visit_WithBlock's test for
+  # recording the SUSPENDS effect. `:capability` has been normalized
+  # (e.g. :infer → :EXCLUSIVE) by acquire_capability! at this point.
+  def with_block_suspends?(node)
+    caps = node.capabilities
+    return false unless caps.is_a?(Array)
+    caps.any? do |c|
+      cap = c.is_a?(Hash) ? c[:capability] : nil
+      cap == :EXCLUSIVE || cap == :write_locked_read
+    end
+  end
+
+  def func_call_suspends?(node)
+    return true if node.matched_stdlib_def && node.matched_stdlib_def[:suspends]
+    return false if node.respond_to?(:fn_var_call) && node.fn_var_call
+    callee = @fn_nodes[node.name]
+    return false unless callee
+    effs = callee.effects
+    effs && effs.any? { |e| SUSPENDS_FAMILY.include?(e) }
+  end
+
+  # --- BG spawn-form classifier (Phase A) ---
+  #
+  # For each BgBlock / BgStreamBlock, decide whether it could be spawned as
+  # an FsmTask (:fsm) or must use the existing stackful fiber path
+  # (:stackful). A BG is :fsm iff every named function transitively reachable
+  # from the body is itself fsm_eligible. Pure-compute bodies (no SUSPENDS
+  # in the reachable set) are still :fsm — they collapse to a trivial
+  # 1-state machine that runs in a single dispatch.
+  #
+  # A BG is :stackful iff any transitive callee is REENTRANT or EXTERN, or
+  # the body directly calls a fn-variable / fn-pointer (opaque call graph).
+  def classify_bg_spawn_form!(program_node)
+    traverse = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      when Array
+        n.each { |item| traverse.call(item) }
+      when Hash
+        n.each_value { |v| traverse.call(v) }
+      when AST::BgBlock, AST::BgStreamBlock
+        calls, has_fnptr = scan_for_calls(n.body)
+        # Explicit stack-size prefix (@micro / @large / @xl) is a user
+        # directive that the body needs a real stack — keep it stackful.
+        explicit_stack = n.respond_to?(:stack_size) && n.stack_size
+        if explicit_stack
+          n.spawn_form = :stackful
+          n.fsm_ineligible_reason = :explicit_stack_size
+        else
+          n.spawn_form, n.fsm_ineligible_reason = bg_spawn_form_for(calls, has_fnptr)
+        end
+        n.fsm_suspend_points = n.spawn_form == :fsm ? collect_bg_suspend_points(n) : nil
+        n.body.each { |s| traverse.call(s) }
+      else
+        n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    traverse.call(program_node.statements)
+  end
+
+  # Returns [spawn_form, reason]. reason is non-nil only for :stackful.
+  def bg_spawn_form_for(callee_names, has_fnptr)
+    return [:stackful, :fn_pointer] if has_fnptr
+    visited = Set.new
+    queue = callee_names.to_a.dup
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+      fn = @fn_nodes[name]
+      # Stdlib / extern callees not in @fn_nodes: treat as FSM-compatible
+      # unless the callee is explicitly EXTERN at the scope level.
+      next unless fn
+      effs = fn.effects || Set.new
+      return [:stackful, :reentrant] if effs.include?(REENTRANT) || fn.reentrant == :reentrant
+      return [:stackful, :extern]    if effs.include?(EXTERN)
+      (@call_graph[name] || []).each { |c| queue << c }
+    end
+    [:fsm, nil]
+  end
+
+  # Walk a BG body and collect its suspend points using the same rules as
+  # enumerate_fsm_suspend_points!, but anchored to the BgBlock scope.
+  def collect_bg_suspend_points(bg_node)
+    points = []
+    scan_suspend_points(bg_node.body, bg_node, points)
+    points
   end
 
   # --- Stack tier recommendation ---

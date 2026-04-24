@@ -1,0 +1,64 @@
+-- FSM Phase B2-WITH (lock_error_clause): the ON action is lowered
+-- into the resume fn's `.Error =>` arm.
+--
+-- All four action shapes:
+--   :raise          — set inner.result = error.CheatError, finish.
+--   :exit "msg"     — same with overridden message.
+--   :pass           — fall through to post-stmts (skip CS).
+--   -> { stmts }    — run recovery body, fall through.
+--
+-- We can't easily force a lock error in a single-process test
+-- (Deadlock requires a contention pattern that crosses threads
+-- with predictable timing), so this test verifies the HAPPY PATH
+-- still works correctly when an ON-clause is present — i.e., the
+-- 2-state machine emits successfully and the lock acquires + CS
+-- runs. Combined with the structural Ruby specs that verify the
+-- .Error arm content, this gives full coverage.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+  c1 = Counter{ value: 0 } @locked;
+  c2 = Counter{ value: 0 } @locked;
+  c3 = Counter{ value: 0 } @locked;
+  c4 = Counter{ value: 0 } @locked;
+
+  -- 1. ON Transient RAISE — happy-path (no contention).
+  p1: ~Void = BG {
+    WITH EXCLUSIVE c1 AS inner { inner.value = 1; } ON Transient RAISE
+  };
+  NEXT p1;
+  WITH EXCLUSIVE c1 AS inner {
+    ASSERT inner.value == 1, "1: ON RAISE happy path";
+  }
+
+  -- 2. ON Transient EXIT "custom" — happy-path.
+  p2: ~Void = BG {
+    WITH EXCLUSIVE c2 AS inner { inner.value = 2; } ON Transient EXIT "lock failed"
+  };
+  NEXT p2;
+  WITH EXCLUSIVE c2 AS inner {
+    ASSERT inner.value == 2, "2: ON EXIT happy path";
+  }
+
+  -- 3. ON Transient PASS — happy-path.
+  p3: ~Void = BG {
+    WITH EXCLUSIVE c3 AS inner { inner.value = 3; } ON Transient PASS
+  };
+  NEXT p3;
+  WITH EXCLUSIVE c3 AS inner {
+    ASSERT inner.value == 3, "3: ON PASS happy path";
+  }
+
+  -- 4. ON Transient -> { recovery } — happy-path. Recovery body
+  --    references no captures (would compile but not run on success).
+  p4: ~Void = BG {
+    WITH EXCLUSIVE c4 AS inner { inner.value = 4; } ON Transient -> { }
+  };
+  NEXT p4;
+  WITH EXCLUSIVE c4 AS inner {
+    ASSERT inner.value == 4, "4: ON block happy path";
+  }
+
+  RETURN;
+END

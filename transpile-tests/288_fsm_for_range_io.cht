@@ -1,0 +1,9 @@
+FN main() RETURNS Void ->
+  p1: ~Void = BG {
+    FOR i IN (0 ..< 3) DO
+      sleep(10);
+    END
+  };
+  NEXT p1;
+  RETURN;
+END

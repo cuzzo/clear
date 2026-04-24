@@ -2,6 +2,7 @@ const std = @import("std");
 const compat = @import("compat.zig");
 const fp = @import("../runtime/scheduler.zig");
 const Task = @import("../runtime/queues.zig").Task;
+const queues = @import("../runtime/queues.zig");
 const pl = @import("parking-lot.zig");
 
 pub fn bind(comptime deps: type) type {
@@ -348,6 +349,25 @@ pub fn bind(comptime deps: type) type {
             pub fn acquireOrErr(self: *Self) pl.LockError!Guard {
                 try self.mutex.lock();
                 return Guard{ .parent = self };
+            }
+
+            // FSM Phase B2 — non-yielding lock acquire for stackless tasks.
+            // Returns Acquired when the lock was free, Registered when the
+            // FSM was queued and the resume fn must yield WaitForLock, or
+            // Error on safety violation (re-entrancy / cycle / timeout).
+            pub fn tryLockForFsm(
+                self: *Self,
+                fsm_task: *fp.FsmTask,
+                waiter: *queues.WaiterNode,
+                sched: *fp.Scheduler,
+            ) pl.FsmLockResultTop {
+                return self.mutex.tryLockForFsm(fsm_task, waiter, sched);
+            }
+
+            // Pair with tryLockForFsm: release the mutex when the FSM has
+            // finished its critical section.
+            pub fn unlock(self: *Self) void {
+                self.mutex.unlock();
             }
 
             pub const Guard = struct {

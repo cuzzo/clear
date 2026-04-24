@@ -1,0 +1,21 @@
+-- FSM WITH whose CS body contains a suspend (sleep). The lock
+-- must be held across runFn boundaries (lock_held ctx flag,
+-- destroyTask err-path release), then released explicitly at end
+-- of CS body before transitioning to the post-WITH continuation.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+  c = Counter{ value: 0 } @locked;
+  p1: ~Void = BG {
+    WITH EXCLUSIVE c AS inner {
+      sleep(1);
+      inner.value = inner.value + 1;
+    }
+  };
+  NEXT p1;
+  WITH EXCLUSIVE c AS inner {
+    ASSERT inner.value == 1, "1: lock held across IO suspend in CS";
+  }
+  RETURN;
+END

@@ -151,6 +151,26 @@ pub fn build(b: *std.Build) void {
         .{ .path = "epoll-steal-test.zig", .tsan = true },
         .{ .path = "ffi-concurrency-test.zig", .tsan = true },
         .{ .path = "fiber-test.zig", .tsan = true },
+        // FSM (stackless task) tests
+        .{ .path = "fsm-benchmark-test.zig", .tsan = true },
+        .{ .path = "fsm-concurrent-test.zig", .tsan = true },
+        .{ .path = "fsm-cross-scheduler-test.zig", .tsan = true },
+        .{ .path = "fsm-endtoend-fairness-test.zig", .tsan = true },
+        .{ .path = "fsm-fairness-test.zig", .tsan = true },
+        .{ .path = "fsm-hammer-test.zig", .tsan = true },
+        .{ .path = "fsm-lock-safety-test.zig", .tsan = true },
+        .{ .path = "fsm-lock-test.zig", .tsan = true },
+        .{ .path = "fsm-lock-vopr-test.zig", .tsan = true },
+        // fsm-loom-test does exhaustive interleaving like vopr-loom-test;
+        // TSan adds nothing on top. Run under regular test only.
+        .{ .path = "fsm-loom-test.zig", .tsan = false },
+        .{ .path = "fsm-race-test.zig", .tsan = true },
+        .{ .path = "fsm-rwlock-test.zig", .tsan = true },
+        .{ .path = "fsm-scheduler-test.zig", .tsan = true },
+        .{ .path = "fsm-steal-test.zig", .tsan = true },
+        .{ .path = "fsm-test.zig", .tsan = true },
+        .{ .path = "fsm-vopr-test.zig", .tsan = true },
+        .{ .path = "fsm-wg-test.zig", .tsan = true },
         .{ .path = "inbox-race-smoke-test.zig", .tsan = true },
         .{ .path = "inbox-race-test.zig", .tsan = true },
         .{ .path = "inf-stream-test.zig", .tsan = true },
@@ -526,19 +546,19 @@ pub fn build(b: *std.Build) void {
     // LOOM -- Deterministic atomic interleaving tests
     // -------------------------------------------------------------------------
     const loom_step = b.step("loom", "Run Loom deterministic interleaving tests");
+    // Module root is `zig/` (not `runtime/`) so runtime/*.zig files can
+    // `@import("../lib/foo.zig")` — Zig 0.16 rejects `../lib/` imports
+    // when the module root is `runtime/`. The wrapper at zig/vopr-loom-runner.zig
+    // re-exports SimAtomic / SimRing so the comptime Atomic alias in
+    // queues.zig picks SimAtomic via @import("root").
     const loom_exe = b.addExecutable(.{
         .name = "loom",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("runtime/vopr-loom.zig"),
+            .root_source_file = b.path("vopr-loom-runner.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         }),
     });
-    loom_exe.root_module.addImport("fiber-core", fiber_core_mod);
-    loom_exe.root_module.addImport("safety", safety_mod);
-    loom_exe.root_module.addImport("ebr", ebr_mod);
-    loom_exe.root_module.addImport("ownership", ownership_mod);
-    loom_exe.root_module.addImport("compat", compat_mod);
     loom_exe.root_module.addAssemblyFile(switch_s);
     loom_exe.root_module.addAssemblyFile(onroot_s);
     loom_exe.root_module.link_libc = true;

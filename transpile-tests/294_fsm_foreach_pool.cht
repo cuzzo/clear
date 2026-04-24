@@ -1,0 +1,25 @@
+-- FSM ForEach over a @pool collection with a suspend in the body.
+-- Pool iteration uses indexed access into `coll.slots[i].value` and
+-- skips any slot whose `.alive` flag is false. Drives the
+-- :pool_indexed shape registered via Type#fsm_foreach_descriptor.
+
+STRUCT Entity { health: Int64 }
+
+FN main() RETURNS Void ->
+  MUTABLE pool: Entity[8]@pool = [];
+  pool.insert(Entity{ health: 10 });
+  pool.insert(Entity{ health: 20 });
+  pool.insert(Entity{ health: 30 });
+
+  p1: ~Int64 = BG {
+    MUTABLE total = 0_i64;
+    FOR e IN pool DO
+      sleep(1);
+      total = total + e.health;
+    END
+    total;
+  };
+  result = NEXT p1;
+  ASSERT result == 60, "1: ForEach over @pool with suspend";
+  RETURN;
+END

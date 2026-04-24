@@ -170,7 +170,14 @@ pub const RunQueue = struct {
         const b = self.bottom.load(.monotonic);
         const t = self.top.load(.acquire);
         var arr = self.array.load(.monotonic).?;
-        if (b -% t > arr.mask) {
+        // Compare via signed delta. `b -% t` is unsigned wrapping arithmetic;
+        // when an interleaved pop has incremented `top` but not yet restored
+        // `bottom`, b can be transiently less than t and the unsigned diff
+        // wraps to ~MAX_U32, falsely tripping grow() and looping `MAX_U32`
+        // copies. The signed compare correctly observes the transient
+        // negative size as "no grow needed" — the queue still has room.
+        const size_signed = @as(i64, b) - @as(i64, t);
+        if (size_signed > @as(i64, arr.mask)) {
             try self.grow(b, t);
             arr = self.array.load(.monotonic).?;
         }
@@ -259,9 +266,14 @@ pub const WaiterKind = enum(u8) { Write, Read };
 
 pub const WaiterNode = struct {
     task: *Task = undefined,
+    fsm_task: ?*anyopaque = null, // *FsmTask, erased to avoid circular import
     sched_ptr: *anyopaque = undefined, // *Scheduler, erased to avoid circular import
     next: ?*WaiterNode = null,
     kind: WaiterKind = .Write,
+
+    pub fn isFsm(self: *const WaiterNode) bool {
+        return self.fsm_task != null;
+    }
 };
 
 // Spinlock-protected intrusive FIFO queue of WaiterNodes.

@@ -533,6 +533,50 @@ class Type
     map? || pool? || list_collection? || set_collection?
   end
 
+  # Iteration shape for the FSM ForEach lowering. The recursive
+  # splitter dispatches on the kind to build a per-iteration
+  # segment graph. Returns nil for collection shapes the FSM
+  # transform can't yet model (the body falls back to stackful).
+  #
+  # Shapes:
+  #   :indexed_slice -- usize index iterates a slice. Suffix is
+  #                     ".items" for ArrayList-backed collections,
+  #                     "" for raw arrays.
+  #   :pool_indexed  -- usize index iterates `coll.slots`, skipping
+  #                     entries where `.alive == false`. The bound
+  #                     element is `slot.value`.
+  #   :iterator      -- a stateful iterator object lives on ctx;
+  #                     `.next()` returns ?T (or ?*T for sets), and
+  #                     the bound var captures the unwrapped value.
+  #
+  # Adding a new collection = adding one branch here. The splitter
+  # never inspects the type directly.
+  def fsm_foreach_descriptor
+    if pool?
+      { kind: :pool_indexed, var_zig_type: element_type&.zig_type || "anyopaque" }
+    elsif map?
+      # FOR k IN map iterates KEYS. keyIterator yields ?*K, so the
+      # bound var dereferences (deref: true).
+      { kind: :iterator, init_method: "keyIterator", advance_method: "next",
+        deref: true, var_zig_type: key_type.zig_type }
+    elsif set_collection?
+      # FOR v IN set: keyIterator yields ?*T, so the bound var is
+      # the element type (after deref).
+      { kind: :iterator, init_method: "keyIterator", advance_method: "next",
+        deref: true, var_zig_type: element_type&.zig_type || "anyopaque" }
+    elsif list_collection?
+      { kind: :indexed_slice, slice_suffix: ".items",
+        var_zig_type: element_type&.zig_type || "anyopaque" }
+    elsif array? && !dynamic?
+      { kind: :indexed_slice, slice_suffix: "",
+        var_zig_type: element_type&.zig_type || "anyopaque" }
+    elsif array? && dynamic?
+      { kind: :indexed_slice, slice_suffix: ".items",
+        var_zig_type: element_type&.zig_type || "anyopaque" }
+    else nil
+    end
+  end
+
   # Returns the canonical registry key for this type.
   # Used as the single lookup key for INDEX_OPS, COLLECTION_METHOD_CONFIGS, etc.
   # All type-to-dispatch mappings must go through here — never add new if/elsif

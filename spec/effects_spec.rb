@@ -247,4 +247,293 @@ RSpec.describe "Effect Tracking" do
       expect(effs).to be_empty
     end
   end
+
+  # --- SUSPENDS family ---
+
+  describe "SUSPENDS effect" do
+    it "is recorded for NEXT on a BG promise" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          p: ~Int64 = BG { 42; };
+          x = NEXT p;
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS)
+    end
+
+    it "is recorded for IO intrinsics (readFile)" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          content = readFile("foo.txt");
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS)
+    end
+
+    it "is recorded for TCP read" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          server = TCPServer::listen(8080);
+          client = accept(server);
+          data = tcpRead(client);
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS)
+    end
+
+    it "is absent for pure code" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          x = 1 + 2;
+          RETURN;
+        END
+      CLEAR
+      expect(effs).not_to include(:SUSPENDS)
+      expect(effs).not_to include(:SUSPENDS_CONDITIONAL)
+      expect(effs).not_to include(:SUSPENDS_LOOP)
+    end
+
+    it "BLOCKING implies SUSPENDS (lock wait may yield)" do
+      effs = effects_of(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 0 } @locked;
+          WITH EXCLUSIVE c AS inner { inner.value; }
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:BLOCKING)
+      expect(effs).to include(:SUSPENDS)
+    end
+  end
+
+  describe "SUSPENDS:CONDITIONAL effect" do
+    it "is set when suspension is inside an IF branch" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE x = 1;
+          IF x > 0 THEN
+            content = readFile("foo.txt");
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_CONDITIONAL)
+      expect(effs).not_to include(:SUSPENDS_LOOP)
+    end
+
+    it "is set when suspension is inside a MATCH arm" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE x: Int64 = 1;
+          PARTIAL MATCH x START
+            1 -> y = readFile("a.txt");,
+            DEFAULT -> y = "";
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_CONDITIONAL)
+    end
+
+    it "is NOT set when the suspension is linear (outside any IF)" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          content = readFile("foo.txt");
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS)
+      expect(effs).not_to include(:SUSPENDS_CONDITIONAL)
+    end
+  end
+
+  describe "SUSPENDS:LOOP effect" do
+    it "is set when suspension is inside a WHILE loop" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE x = 10;
+          WHILE x > 0 DO
+            content = readFile("foo.txt");
+            x = x - 1;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_LOOP)
+    end
+
+    it "is set when suspension is inside a FOR loop" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          FOR i IN (0 ..< 3) DO
+            content = readFile("foo.txt");
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_LOOP)
+    end
+
+    it "is NOT set when the loop contains no suspension" do
+      effs = effects_of(<<~CLEAR)
+        FN main() RETURNS Void ->
+          MUTABLE sum = 0;
+          FOR i IN (0 ..< 10) DO
+            sum = sum + i;
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).not_to include(:SUSPENDS_LOOP)
+    end
+  end
+
+  describe "SUSPENDS propagation through call graph" do
+    it "linear caller inherits callee's plain SUSPENDS" do
+      effs = effects_of(<<~CLEAR)
+        FN load() RETURNS String ->
+          RETURN readFile("foo.txt");
+        END
+
+        FN main() RETURNS Void ->
+          x = load();
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS)
+      expect(effs).not_to include(:SUSPENDS_CONDITIONAL)
+      expect(effs).not_to include(:SUSPENDS_LOOP)
+    end
+
+    it "caller calling a SUSPENDS fn inside a loop gets SUSPENDS:LOOP" do
+      effs = effects_of(<<~CLEAR)
+        FN load() RETURNS String ->
+          RETURN readFile("foo.txt");
+        END
+
+        FN main() RETURNS Void ->
+          FOR i IN (0 ..< 3) DO
+            x = load();
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_LOOP)
+    end
+
+    it "caller calling a SUSPENDS fn inside IF gets SUSPENDS:CONDITIONAL" do
+      effs = effects_of(<<~CLEAR)
+        FN load() RETURNS String ->
+          RETURN readFile("foo.txt");
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE gate = 1;
+          IF gate > 0 THEN
+            x = load();
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_CONDITIONAL)
+      expect(effs).not_to include(:SUSPENDS_LOOP)
+    end
+
+    it "intrinsic callee with SUSPENDS:LOOP still promotes to LOOP at linear site" do
+      # If 'process' has SUSPENDS:LOOP internally, any caller that calls it
+      # linearly must still see SUSPENDS:LOOP — loop-ness is intrinsic to callee.
+      effs = effects_of(<<~CLEAR)
+        FN process() RETURNS Void ->
+          FOR i IN (0 ..< 3) DO
+            x = readFile("foo.txt");
+          END
+          RETURN;
+        END
+
+        FN main() RETURNS Void ->
+          process();
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_LOOP)
+    end
+
+    it "loop-wrapping a SUSPENDS:CONDITIONAL fn yields both LOOP and CONDITIONAL" do
+      effs = effects_of(<<~CLEAR)
+        FN maybe_load() RETURNS Void ->
+          MUTABLE gate = 1;
+          IF gate > 0 THEN
+            x = readFile("foo.txt");
+          END
+          RETURN;
+        END
+
+        FN main() RETURNS Void ->
+          FOR i IN (0 ..< 3) DO
+            maybe_load();
+          END
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_LOOP)
+      expect(effs).to include(:SUSPENDS_CONDITIONAL)
+    end
+
+    it "multi-level propagation keeps worst-case LOOP tag" do
+      effs = effects_of(<<~CLEAR)
+        FN inner() RETURNS String ->
+          RETURN readFile("foo.txt");
+        END
+
+        FN middle() RETURNS Void ->
+          FOR i IN (0 ..< 3) DO
+            x = inner();
+          END
+          RETURN;
+        END
+
+        FN main() RETURNS Void ->
+          middle();
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS_LOOP)
+    end
+
+    it "propagates across pure wrapper functions" do
+      effs = effects_of(<<~CLEAR)
+        FN inner() RETURNS String ->
+          RETURN readFile("foo.txt");
+        END
+
+        FN wrap() RETURNS String ->
+          RETURN inner();
+        END
+
+        FN main() RETURNS Void ->
+          x = wrap();
+          RETURN;
+        END
+      CLEAR
+      expect(effs).to include(:SUSPENDS)
+      expect(effs).not_to include(:SUSPENDS_LOOP)
+    end
+  end
+
+  describe "EffectTracker.display" do
+    it "renders SUSPENDS family with colon syntax" do
+      expect(EffectTracker.display(:SUSPENDS)).to eq("SUSPENDS")
+      expect(EffectTracker.display(:SUSPENDS_CONDITIONAL)).to eq("SUSPENDS:CONDITIONAL")
+      expect(EffectTracker.display(:SUSPENDS_LOOP)).to eq("SUSPENDS:LOOP")
+    end
+
+    it "passes non-SUSPENDS effects through" do
+      expect(EffectTracker.display(:HEAP)).to eq("HEAP")
+      expect(EffectTracker.display(:BLOCKING)).to eq("BLOCKING")
+    end
+  end
 end

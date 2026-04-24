@@ -349,6 +349,31 @@ Each pass owns a category of facts and stamps them on the AST. Downstream passes
 
 If you find yourself writing `if some_ast_node.is_a?(...)` in `mir_lowering` to make a *semantic* decision (rather than a syntactic dispatch), that is a re-derivation — read the stamp the annotator already placed.
 
+13. **FSM emission is ONE general transform. NEVER add a per-shape emitter.**
+    Every FSM-eligible BG body lowers through a single universal CPS
+    transform (segment-split at suspend points, liveness across
+    suspends, state-machine emit). Adding a new shape (multi-IO,
+    accept-loop, try-around-IO, nested with, IO-in-loop, ...) means
+    extending the transform's suspend-op kinds or control-flow handlers,
+    NEVER adding a new emit_fsm_*_bg_code function. The history of
+    snowflake emitters (B1 / B2-IO / B2-WITH / B2-LOOP / B2-NEXT-CHAIN)
+    is a cautionary tale: each added a per-shape codegen path, the
+    cross-product of shapes blew up, and common patterns like
+    `BG { read; write }` or `BG { while accept }` weren't covered until
+    each got its own emitter. The general transform replaces them.
+    - **NEVER** introduce a new `emit_fsm_<shape>_bg_code` function.
+    - **NEVER** add shape-detection branching to the FSM classifier.
+      The classifier asks one question: "is this BG FSM-eligible?"
+      It does not select between emit shapes.
+    - **NEVER** copy the universal transform "with a small tweak for
+      shape X". If shape X needs different handling, the difference
+      lives in the suspend-op table or the control-flow visitor, not
+      in a new emitter.
+    - When a benchmark or feature reveals a body shape the transform
+      doesn't handle (e.g. an IF with a suspend in one branch),
+      extend the transform's control-flow handler. The result is one
+      more case in the visitor, not 100 lines of new emitter code.
+
 ## Language Semantics
 
 CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how it's accessed).

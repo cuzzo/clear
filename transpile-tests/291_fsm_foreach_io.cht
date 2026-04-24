@@ -1,0 +1,18 @@
+-- FSM ForEach with suspend in body. List iteration over a captured
+-- list, sleeping per element. Verifies the recursive splitter
+-- handles ForEach the way it handles ForRange.
+
+FN main() RETURNS Void ->
+  items = [10_i64, 20, 30];
+  p1: ~Int64 = BG {
+    MUTABLE total = 0_i64;
+    FOR v IN items DO
+      sleep(1);
+      total = total + v;
+    END
+    total;
+  };
+  result = NEXT p1;
+  ASSERT result == 60, "1: ForEach over list with suspend";
+  RETURN;
+END

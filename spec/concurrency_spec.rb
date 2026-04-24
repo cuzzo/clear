@@ -283,8 +283,11 @@ RSpec.describe SemanticAnnotator do
       it "respects @parallel — emits spawnBest, not submitSpawn" do
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("spawnBest")
-        expect(user_code).not_to include("submitSpawn")
+        # Phase B2-WITH: a BG containing exactly one WITH EXCLUSIVE
+        # lowers to an FsmTask; @parallel still routes to the
+        # least-loaded scheduler, but via spawnFsmBest.
+        expect(user_code).to match(/spawn(Best|FsmBest)\(/)
+        expect(user_code).not_to match(/submitSpawn\(/)
       end
     end
 
@@ -302,7 +305,8 @@ RSpec.describe SemanticAnnotator do
       it "uses spawnBest by default (no auto-pin)" do
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
-        expect(user_code).to include("spawnBest")
+        # Pure-compute body becomes an FSM (Phase B1) — spawn dispatch is spawnFsmBest.
+        expect(user_code).to match(/spawn(Best|FsmBest)/)
       end
     end
 
@@ -390,10 +394,13 @@ RSpec.describe SemanticAnnotator do
         FLUX
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
-        # @local fibers must stay on the caller's scheduler - no synchronization
-        expect(user_code).to include("submitSpawn")
+        # @local fibers must stay on the caller's scheduler - no synchronization.
+        # Pure-compute body is Phase-B1 FSM-eligible, so dispatch is via
+        # submitFsmSpawn (same-scheduler FSM queue) rather than submitSpawn.
+        expect(user_code).to match(/submit(Spawn|FsmSpawn)/)
         expect(user_code).not_to include("spawnPinned")
-        expect(user_code).not_to include("spawnBest")
+        expect(user_code).not_to include("spawnBest(")
+        expect(user_code).not_to include("spawnFsmBest(")
       end
     end
 
@@ -1696,7 +1703,9 @@ RSpec.describe SemanticAnnotator do
         src = "FN f() RETURNS Void -> p: ~Float64 = BG { 42.0; }; r: Float64 = NEXT p; RETURN; END"
         out = transpile_fn(src)
         expect(out).to include("CheatLib.Promise(f64).spawn(")
-        expect(out).to include("spawnBest(")
+        # Pure-compute body is Phase-B1 FSM-eligible — dispatch is spawnFsmBest
+        # (same call shape, same Promise wiring, FsmTask-backed execution).
+        expect(out).to match(/spawn(Best|FsmBest)\(/)
         expect(out).to include("break :")
         expect(out).to include("__ctx_0.inner.result = 42")
       end

@@ -315,7 +315,13 @@ module MIR
   # run_body: [MIR::Stmt] — lowered MIR for the fiber run function body.
   #   Carries the MIR so the checker can see allocations inside the fiber.
   #   Emission still uses code (raw Zig). nil for legacy callers; checker skips.
-  BgBlock = Struct.new(:code, :captures, :run_body) do
+  # fsm_structure: MIR::FsmStructure | nil. For BG bodies lowered to a
+  #   stackless FSM, carries the structural metadata (captures, state
+  #   fields, per-step bodies, cleanup placements) so the MIR checker
+  #   can verify cross-step liveness invariants. nil for non-FSM BGs
+  #   and for FSM Phase B1 (pure-compute, no suspend) where there's
+  #   only one logical step.
+  BgBlock = Struct.new(:code, :captures, :run_body, :fsm_structure) do
     include Stmt
     def expr?; true; end
   end
@@ -332,6 +338,120 @@ module MIR
     def expr?; true; end
   end
 
+  # ================================================================
+  # FSM Structure — visibility into stackless state machines
+  # ================================================================
+  #
+  # The FSM lowering (src/mir/fsm_lowering.rb) renders a multi-step
+  # stackless state machine as raw Zig text inside a BgBlock. That
+  # text contains memory-safety decisions (which step a `defer`
+  # fires in, which captures live across suspend, when ctx-owned
+  # heap allocations are freed) that the MIR checker cannot see.
+  #
+  # FsmStructure makes those decisions visible: the lowering builds
+  # an FsmStructure alongside the Zig text, and the checker (see
+  # `MirChecker.check_fsm_structure!`) verifies the placement
+  # invariants BEFORE the text is rendered into final output.
+  #
+  # Shape:
+  #
+  #   captures: [
+  #     { name: String, type: Type-like, cleanup_at: :finalize | Integer }
+  #   ]
+  #     Captures are heap-dupe'd into the FSM ctx at spawn. They may
+  #     be read by ANY step (the lowering does not statically
+  #     restrict this), so cleanup_at MUST be :finalize. cleanup_at
+  #     pointing at a specific step index means the lowering placed
+  #     the cleanup inside that step's body — a UAF if any later
+  #     step reads the capture.
+  #
+  #   state_fields: [
+  #     { name: String, finalize_at: :finalize | Integer | nil,
+  #       error_handled_in_setup: Boolean }
+  #   ]
+  #     Per-call state struct fields (e.g. rf_buf, rf_fd). Cleanup
+  #     placement is template-driven via :fsm_state_finalize. The
+  #     `error_handled_in_setup` flag indicates step-0 errdefer
+  #     coverage so the checker can require it on heap-alloc'd
+  #     state fields.
+  #
+  #   steps: [
+  #     { index: Integer, reads: [String], cleanups: [String] }
+  #   ]
+  #     One entry per step. `reads` is the set of binding names
+  #     (captures + state_fields + ctx fields) referenced in this
+  #     step's emitted body, derived by scanning the rendered Zig
+  #     for `__ctx_<id>.<name>` patterns. `cleanups` is the set of
+  #     names whose `defer free(...)` line was placed at the start
+  #     of this step.
+  #
+  #   finalize_cleanups: [String]
+  #     Names whose cleanup is placed at FSM finalize (start of the
+  #     last step, fires after post-stmts).
+  #
+  #   ctx_id: Integer
+  #     The numeric id used in `__ctx_<id>.<name>` references. The
+  #     checker uses this to scan step bodies for reads.
+  #
+  #   result_aliases_finalized: String | nil
+  #     Set to the name of a finalized state field IF the BG body's
+  #     terminal expression aliases that field via the bound var
+  #     (e.g. `BG { content = readFile(p); content; }` aliases
+  #     rf_buf — which is finalized — through `content`). The
+  #     checker rejects on any non-nil value: the slice would
+  #     escape the FSM but its backing storage dies at finalize.
+  FsmStructure = Struct.new(
+    :captures, :state_fields, :steps, :finalize_cleanups, :ctx_id,
+    :result_aliases_finalized
+  ) do
+    include Emittable
+  end
+
+  # ================================================================
+  # FSM-IO state-machine wrapper (structural)
+  # ================================================================
+  #
+  # The previous lowering for FSM-IO bodies built the entire state
+  # machine — outer label block, ctx struct decl, runStep0/runStep1,
+  # resumeFn switch, alloc / init / spawn / break — as a single Zig
+  # heredoc inside `emit_fsm_io_bg_code`. That meant the wrapper's
+  # structure (where the resumeFn dispatch lives, where the step-0
+  # error catch sits, what the spawn call looks like) was implicit
+  # in string interpolation. The MIR checker had no view into it.
+  #
+  # The types below replace that heredoc with explicit MIR nodes.
+  # The lowering builds an `MIR::FsmIoBody` tree; the renderer in
+  # `src/mir/fsm_wrapper_emitter.rb` walks the tree and produces
+  # the same Zig text — but now every structural piece is named,
+  # typed, and inspectable. `FsmIoBody` lives inside an
+  # `MIR::BgBlock.code` field for emitter compatibility, but the
+  # tree itself is the source of truth and any future MIR pass
+  # (checker, transformer, dumper) walks the structure rather than
+  # the rendered string.
+  #
+  # Body content that comes from the surrounding fiber-body lowering
+  # (pre_stmts, post_stmts, post_result_line, etc.) is still Zig
+  # text at this layer — that's a Phase 4 transpiler concern. The
+  # wrapper structure is fully MIR; the per-step body fragments are
+  # an array of pre-rendered lines the renderer joins with
+  # newlines + indentation. Once the fiber-body lowering itself
+  # emits MIR, those fragments become MIR nodes too.
+
+  # Top-level FSM-IO body. Renders to:
+  #   <blk_label>: {
+  #     <ctx_struct>
+  #     <spawn_setup>
+  #     break :<blk_label> <promise_var>;
+  #   }
+  FsmIoBody = Struct.new(
+    :blk_label,           # String, e.g. "__bg0"
+    :ctx_struct,          # MIR::FsmCtxStruct
+    :spawn_setup,         # MIR::FsmSpawnSetup
+  ) do
+    include Stmt
+    def expr?; true; end
+  end
+
   # BC-only: producer-side rendezvous push. Emitted by lower_yield when
   # the enclosing BG STREAM is is_inf? and @target == :bc. The single
   # `value` is pushed into the channel; producer fiber blocks until the
@@ -340,6 +460,385 @@ module MIR
     include Stmt
     def expr?; true; end
   end
+
+  # Top-level FSM Phase B1 (pure-compute) body. Same labeled-block
+  # shape as FsmIoBody; the inner ctx struct has only ONE member
+  # fn (runBody, no step counter, no suspend) and a simple
+  # resumeFn that calls runBody once and returns Done.
+  FsmB1Body = Struct.new(
+    :blk_label,
+    :ctx_struct,          # MIR::FsmB1CtxStruct
+    :spawn_setup,         # MIR::FsmSpawnSetup (same as IO)
+  ) do
+    include Stmt
+    def expr?; true; end
+  end
+
+  # B1 ctx struct: like FsmCtxStruct but without `step` / two-step
+  # member fns. Holds a single runBody whose body is a list of MIR
+  # statements (or strings as transitional fallback).
+  FsmB1CtxStruct = Struct.new(
+    :type_name,
+    :promise_zig,
+    :captures_decl_zig,
+    :run_body,            # MIR::FsmStep (re-using the same shape;
+                          # index=0, but the renderer for B1 emits
+                          # the fn name as `runBody` not
+                          # `runStep0`).
+  )
+
+  # Generic FSM body shape that hosts FSM emit forms beyond
+  # FSM-IO and B1. Used for B2-LOOP, B2-WITH, B2-NEXT-CHAIN --
+  # forms whose dispatch is form-specific but whose member-fn
+  # bodies are typed MIR going through MIREmitter.
+  #
+  # The dispatch (`resume_fn_zig`) is the protocol contract for
+  # each form: a labeled-while-switch for NEXT-CHAIN, a __cs_block
+  # with retry loop for WITH, the `step` switch for LOOP. Those
+  # are fixed Zig per form and do not vary based on user code, so
+  # carrying them as raw Zig strings on the wrapper node is
+  # acceptable -- the variability is in the per-step bodies,
+  # which are MIR.
+  FsmGenericBody = Struct.new(
+    :blk_label,
+    :ctx_struct,          # MIR::FsmGenericCtxStruct
+    :spawn_setup,         # MIR::FsmSpawnSetup (shared)
+  ) do
+    include Stmt
+    def expr?; true; end
+  end
+
+  # Ctx struct for the generic body. Holds:
+  #   - the standard task / rt / inner / alloc fields (added by
+  #     the renderer);
+  #   - a list of extra field decl lines (step counter, sp
+  #     promise fields, retry counter, lock_waiter, etc.);
+  #   - promoted-local field decls;
+  #   - a list of MIR::FsmStep entries with their fn name and
+  #     signature (not just `runStepN`);
+  #   - the resume_fn_zig contributed by the form's emitter.
+  FsmGenericCtxStruct = Struct.new(
+    :type_name,
+    :promise_zig,
+    :captures_decl_zig,
+    :extra_field_decls,    # [String]
+    :promoted_field_decls, # [String]
+    :member_fns,           # [MIR::FsmMemberFn]
+    :resume_fn_zig,        # String -- protocol-specific dispatch
+    :destroy_extra_zig,    # optional String -- extra Zig run inside
+                           # destroyTask BEFORE alloc.destroy(ctx).
+                           # Used for WITH+suspend-in-CS to release
+                           # locks held across runFn boundaries on
+                           # err paths (Zig defer can't span runFn
+                           # boundaries; the per-cap __lock_held_<i>
+                           # flag tells destroyTask which to release).
+  )
+
+  # A named member fn on the FSM ctx struct. fn_name is used as
+  # the Zig fn name (`runPre`, `runLoopPre`, `runStep0`, ...).
+  # signature is the Zig signature minus the fn name (e.g.
+  # `(__ctx_0: *@This()) anyerror!void`). body_stmts are typed
+  # MIR statements (or transitional Strings) rendered via
+  # MIREmitter.
+  FsmMemberFn = Struct.new(
+    :fn_name,
+    :ctx_id,
+    :bg_rt,                # "__rt_bg0"
+    :rt_suppress_zig,
+    :body_stmts,           # [MIR::Stmt | String]
+    :extra_prologue_zig,   # optional pre-body Zig (e.g. defer
+                           # unlock for runCsBody) -- appears
+                           # before body_stmts in the rendered fn
+  )
+
+  # The `const __BgCtxN = struct { ... };` declaration that holds
+  # task / rt / inner / alloc / captures / step / state_decls /
+  # promoted fields, plus the runStep0 / runStep1 / resumeFn member
+  # functions.
+  FsmCtxStruct = Struct.new(
+    :type_name,            # "__BgCtx0"
+    :promise_zig,          # "CheatLib.Promise(i64)"
+    :captures_decl_zig,    # raw Zig field decls from fiber lowering
+    :state_decls,          # [FsmOps::StateFieldDecl]
+    :promoted_field_decls, # [String] — raw lines
+    :step0,                # MIR::FsmStep
+    :step1,                # MIR::FsmStep
+    :resume_fn,            # MIR::FsmDispatch
+  )
+
+  # One `fn runStepN(__ctx_<id>: *@This()) anyerror!void` body.
+  #
+  # `body_stmts` is a list of MIR statement nodes (or plain Strings
+  # as a transitional escape hatch). The wrapper renderer uses the
+  # standard MIREmitter to walk each one, so all MIR statement
+  # types -- MIR::Let, MIR::Set, MIR::DeferStmt, MIR::RawZig,
+  # MIR::ExprStmt, etc. -- are valid here. Plain strings are
+  # accepted because MIREmitter.emit handles them as a base case;
+  # they exist so the lowering can pass through Zig text from the
+  # surrounding fiber-body lowering without a forced wrap.
+  #
+  # The renderer concatenates each emitted statement with newlines
+  # and the function body indentation. It does NOT insert ';'s or
+  # pick statement order; those are decisions of the lowering and
+  # are encoded in the MIR node type.
+  FsmStep = Struct.new(
+    :index,                # 0 or 1
+    :ctx_id,               # int matching __ctx_<id>
+    :bg_rt,                # "__rt_bg0"
+    :rt_suppress_zig,      # "_ = &__rt_bg0;" or ""
+    :body_stmts,           # [MIR::Stmt | String]
+  )
+
+  # ================================================================
+  # FSM SuspendDescriptor (kind-agnostic suspend contract)
+  # ================================================================
+  #
+  # A suspend point yields a "future-like thing" with a uniform
+  # protocol: setup before yield, dispatch transition, bind on
+  # resume. SuspendDescriptor captures that protocol so the unified
+  # FSM emit can handle ANY suspend kind (IO, NEXT, LOCK, future
+  # TCP/channel/...) without per-kind branching.
+  #
+  # Resolvers in src/mir/fsm_transform/suspend_resolvers.rb turn a
+  # Segments::IoSuspend / NextSuspend / LockSuspend into a
+  # SuspendDescriptor. The unified emit consumes the descriptor
+  # without caring which kind it is.
+  #
+  # Shape (for a suspend at the END of segment K, transitioning to
+  # segment K+1):
+  #
+  #   setup_stmts: [MIR::Stmt]
+  #     Appended to segment K's runStep body. Registers the wait
+  #     source, submits any syscalls, etc. For IO this is the
+  #     stdlib fsm_setup template. For NEXT it's the
+  #     `ctx.sp_<K> = <promise_expr>` stash. May read captures /
+  #     promoted locals (already in capture_map by the time the
+  #     emit calls this).
+  #
+  #   bind_stmts: [MIR::Stmt]
+  #     Prepended to segment K+1's runStep body. Extracts the
+  #     resumed value into result_var, propagates errors. For IO
+  #     this is the fsm_finish_block + finish_value. For NEXT it's
+  #     the `if ctx.sp.inner.result |r| { result_var = r } else
+  #     |e| { return err }` destructure.
+  #
+  #   tail: MIR::FsmTailYield | MIR::FsmTailRegisterYield
+  #     The dispatch transition emitted in the resumeFn arm K.
+  #     Always-yield (IO) -> FsmTailYield. Conditional register
+  #     (NEXT) -> FsmTailRegisterYield. Compound shapes (LOCK
+  #     retry-loop) fan out into multiple segments at split-time
+  #     instead of needing a richer tail.
+  #
+  #   ctx_field_decls: [String]
+  #     Extra Zig field decl lines this suspend needs in the ctx
+  #     struct (e.g. "sp_1: Promise(T) = undefined," or
+  #     "rf_fd: i32 = -1,"). Liveness output covers user-visible
+  #     locals that cross the boundary; these are
+  #     suspend-protocol fields beyond that.
+  #
+  #   result_var: String | nil
+  #   result_zig_type: String | nil
+  #     Name + Zig type of the local the bind produces. Visible
+  #     to subsequent segments as a Zig local (or, if Liveness
+  #     flagged it as cross-segment, as a ctx field). nil for
+  #     suspends without a bound result (Void IO, bare NEXT).
+  SuspendDescriptor = Struct.new(
+    :setup_stmts,
+    :bind_stmts,
+    :tail,
+    :ctx_field_decls,
+    :result_var,
+    :result_zig_type,
+  )
+
+  # ================================================================
+  # FSM dispatch (structured replacement for `resume_fn_zig: String`)
+  # ================================================================
+  #
+  # Per-state dispatch table. The renderer walks `arms` and emits a
+  # `switch (step) { ... }` (optionally wrapped in `__sw: while(true)`
+  # for shapes that use jump tails or back-edges).
+  #
+  # Shape coverage:
+  #   - B2-IO          (2 arms: runStep0 + Yield -> runStep1 + Done)
+  #   - B2-LOOP        (4 arms: pre / cond+loop_pre / bind+loop_post / post)
+  #   - B2-NEXT-CHAIN  (N+1 arms: per-NEXT register-yield + final post)
+  #
+  # Not yet covered (still rendered as raw Zig templates):
+  #   - B1            -- simple, no switch needed (single runBody call)
+  #   - B2-WITH       -- multi-block lock-retry dispatch with
+  #                       __cs_block + __try_loop + per-clause error
+  #                       arms; structurally distinct from a flat
+  #                       switch and remains template-driven for now.
+  #
+  # The renderer is in src/mir/fsm_wrapper_emitter.rb#render_dispatch.
+  # Tail variants are the entirety of "what happens after the arm's
+  # member fn returns ok"; adding a new suspend kind = new tail
+  # variant + new arm in `render_tail`. NEVER a new dispatcher.
+  FsmDispatch = Struct.new(
+    :ctx_id,                  # Integer
+    :arms,                    # [FsmStateArm]
+    :uses_loop_label,         # Bool: wrap switch in `__sw: while (true) { ... }`?
+                              #   true when any tail uses Jump / RegisterYield
+                              #   (which can fall through to another arm
+                              #   without re-entering resumeFn).
+  )
+
+  # One state-machine arm. Sequence of effects:
+  #   1. If pre_body_skip is set and its cond holds, jump to skip_step
+  #      (no body, no tail). Used by B2-LOOP arm 1 ("if !cond goto post").
+  #   2. Run pre_body_zig (free-form Zig injected before the body fn).
+  #      Used by B2-LOOP arm 2 to bind sp.result into a ctx field
+  #      BEFORE runLoopPost reads it.
+  #   3. Else call body_fn_name (skipped when nil); on error: emit
+  #      err_cleanups (per-arm direct cleanups, e.g. capture frees in
+  #      a B2-IO step-0 catch), store err on inner, wg.done, destroy
+  #      ctx, return Done.
+  #   4. Dispatch via tail.
+  FsmStateArm = Struct.new(
+    :index,                   # Integer state number
+    :pre_body_skip,           # FsmTailCondSkip | nil
+    :pre_body_zig,            # String | nil
+    :body_fn_name,            # String | nil
+    :err_cleanups,            # [MIR::Stmt] | nil -- direct cleanups
+                              #   in the err handler of this arm,
+                              #   placed before the standard
+                              #   inner.result = err / wg.done /
+                              #   destroy / return Done sequence.
+                              #   Used by B2-IO step-0 for capture
+                              #   frees on setup error.
+    :tail,                    # FsmTailDone | FsmTailYield |
+                              #   FsmTailRegisterYield | FsmTailJump |
+                              #   FsmTailCondJump
+  )
+
+  # Conditional pre-body skip: used inside an arm to short-circuit
+  # past the body and tail to a different state.
+  #   if (<cond_zig>) { step = <skip_step>; continue :__sw; }
+  FsmTailCondSkip = Struct.new(:cond_zig, :skip_step)
+
+  # ================================================================
+  # LOCK-fan-out tail variants (composable B2-WITH dispatch)
+  # ================================================================
+  #
+  # WITH's dispatch decomposes into per-step segments tied together
+  # by these narrower tail variants. Each variant is generic enough
+  # to combine with other shapes (WhileLoop+WITH, IF+WITH, etc.)
+  # because the dispatch is FLAT once fanned out.
+  #
+  # Three-way branch on tryLock outcome:
+  #   const __lock_r = <lock_field_ref>.<try_method>(
+  #       &__ctx.task, &__ctx.lock_waiter, __ctx.rt.getSched());
+  #   switch (__lock_r) {
+  #       .Acquired   => { step = ok_step;    continue :__sw; },
+  #       .Registered => { step = wait_step;  return .WaitForLock; },
+  #       .Error      => { step = error_step; continue :__sw; },
+  #   }
+  FsmTailLockTry = Struct.new(
+    :try_method,        # "tryLockForFsm" / "tryWriteLockForFsm" / ...
+    :lock_field_ref,    # Zig string for the lock receiver
+    :ok_step,           # state to enter on .Acquired
+    :wait_step,         # state to enter when re-entered after wake
+    :error_step,        # state to enter on .Error
+  ) do
+    def kind; :lock_try; end
+  end
+
+  # Post-resume check after a .Registered yield. Reads
+  # task.lock_error: if .None we got the lock (jump to ok_step);
+  # else jump to error_step (which checks retry / runs error_arm).
+  #   const __lerr = __ctx.task.lock_error;
+  #   __ctx.task.lock_error = .None;
+  #   if (__lerr == .None) { step = ok_step;    continue :__sw; }
+  #   step = error_step; continue :__sw;
+  FsmTailWokenCheck = Struct.new(
+    :ok_step,
+    :error_step,
+  ) do
+    def kind; :woken_check; end
+  end
+
+  # Retry-or-fail: if retries remaining, increment retry_count and
+  # jump back to the lock-try step; else jump to the error_arm step.
+  #   if (<retries> > 0 and __ctx.retry_count < <retries>) {
+  #       __ctx.retry_count += 1;
+  #       step = retry_step; continue :__sw;
+  #   }
+  #   step = fail_step; continue :__sw;
+  FsmTailRetryOrError = Struct.new(
+    :retries,           # Integer (0 => never retry; always fail)
+    :retry_step,        # state to retry from (the lock-try step)
+    :fail_step,         # state to run the error_arm body in
+  ) do
+    def kind; :retry_or_error; end
+  end
+
+
+  # Final state. Renders to:
+  #   inner.result = err_or_pass_through;  // err_action handles
+  #   inner.wg.done();
+  #   alloc.destroy(ctx);
+  #   return .{ .Done = {} };
+  FsmTailDone = Struct.new(:_) { def kind; :done; end }
+
+  # Pure transition (no yield).
+  #   step = next_step;
+  #   continue :__sw;
+  FsmTailJump = Struct.new(:next_step) { def kind; :jump; end }
+
+  # Set step + return YieldReason. Used by the IO-template shape and
+  # any tail that ALWAYS yields without conditional registration.
+  #   step = next_step;
+  #   return .{ .<reason> = {} };
+  FsmTailYield = Struct.new(:next_step, :yield_reason) do
+    def kind; :yield; end
+  end
+
+  # Conditional-yield: register on a wake source; if the registration
+  # took (we'll be woken later), yield; otherwise the source already
+  # completed synchronously, so jump straight to next_step.
+  #
+  #   if (<register_zig>) { step = next_step; return .{ .<reason> = {} }; }
+  #   step = next_step;
+  #   continue :__sw;
+  #
+  # Used by NEXT (registerFsmWaiter on Promise.wg). LOCK uses a
+  # different shape (try-loop with retry); kept as template for now.
+  FsmTailRegisterYield = Struct.new(
+    :next_step,
+    :register_zig,
+    :yield_reason,
+  ) do
+    def kind; :register_yield; end
+  end
+
+  # Conditional jump (cond ? then_step : else_step).
+  #   if (<cond_zig>) { step = then_step; continue; }
+  #   step = else_step; continue;
+  FsmTailCondJump = Struct.new(:cond_zig, :then_step, :else_step) do
+    def kind; :cond_jump; end
+  end
+
+  # Post-struct setup: alloc the ctx, spawn the promise, allocate +
+  # initialize the ctx struct, init the FsmTask, fire the spawn,
+  # break with the promise. All decisions (alloc kind, spawn fn,
+  # ctx init field map) are explicit fields on this node — the
+  # renderer walks them.
+  FsmSpawnSetup = Struct.new(
+    :alloc_var,            # "__bg0_alloc"
+    :alloc_expr_zig,       # "rt.heapAlloc()" or "rt.getSched().allocator"
+    :promise_var,          # "__bg0_promise"
+    :promise_zig,          # "CheatLib.Promise(i64)"
+    :promoted_decls_zig,   # raw
+    :ctx_var,              # "__bg0_ctx"
+    :ctx_type,             # "__BgCtx0"
+    :ctx_init_zig,         # raw Zig for the .{ ... } body of the
+                           # ctx struct initializer (fixed prefix
+                           # for task / rt / inner / alloc plus
+                           # capture inits the lowering decided)
+    :spawn_call_zig,       # "try ...spawn(&ctx.task);"
+    :rt_name,              # "rt" (the surrounding fn's runtime)
+  )
 
   # Catch wrapper. Wraps raw Zig code for try/catch but exposes
   # error-path reassignment metadata for allocator consistency (INV-9).

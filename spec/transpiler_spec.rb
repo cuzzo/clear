@@ -1405,7 +1405,7 @@ RSpec.describe ZigTranspiler do
   # BG spawn: @local uses same-scheduler, not round-robin
   # ===========================================================================
   describe "BG spawn dispatch" do
-    it "uses spawnPinned (round-robin) for @locked captures" do
+    it "uses spawnFsmBest (cross-scheduler) for @locked captures via FSM" do
       src = <<~CLEAR
         STRUCT Counter { value: Int64 }
         FN inc(c: Counter) RETURNS Void -> RETURN; END
@@ -1417,9 +1417,14 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # Affine @locked: Mutex-protected but lifetime tied to frame — must pin
+      # @locked auto-pins to :shared. FSM bodies under :shared use
+      # spawnFsmBest (cross-scheduler) -- the FSM's lock-acquire and
+      # IO suspends route via parking-lot/io_uring regardless of
+      # the spawning scheduler. The legacy stackful path used
+      # spawnPinned for @locked; FSM unification removes that
+      # restriction.
       user_code = zig.split("// 3. Main Entry").first
-      expect(user_code).to include("spawnPinned")
+      expect(user_code).to include("spawnFsmBest")
     end
 
     it "uses submitSpawn (same-scheduler) for @local captures" do
@@ -1434,11 +1439,14 @@ RSpec.describe ZigTranspiler do
         END
       CLEAR
       zig = transpile(src)
-      # @local is shared-nothing — all fibers on same scheduler
+      # @local is shared-nothing — all fibers on same scheduler. Pure-compute
+      # body is Phase-B1 FSM-eligible, so dispatch is submitFsmSpawn (same
+      # scheduler, FSM queue) rather than submitSpawn (same scheduler, stackful).
       user_code = zig.split("// 3. Main Entry").first
-      expect(user_code).to include("submitSpawn")
-      expect(user_code).not_to include("spawnPinned")
-      expect(user_code).not_to include("spawnBest")
+      expect(user_code).to match(/submit(Spawn|FsmSpawn)\(/)
+      expect(user_code).not_to include("spawnPinned(")
+      expect(user_code).not_to include("spawnBest(")
+      expect(user_code).not_to include("spawnFsmBest(")
     end
   end
 

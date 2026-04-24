@@ -1,0 +1,27 @@
+-- FSM Phase B2-LOOP+IO: a BG body whose WhileLoop body contains a
+-- single suspending stdlib call (sleep). Per-iteration, the FSM
+-- yields .WaitForLock until the timer fires, then re-enters at the
+-- cond head -- never burning a full fiber stack.
+--
+-- Different from B2-LOOP+NEXT (existing: WhileLoop + NEXT in body)
+-- and B2-IO (no loop, single suspend at top level). After the
+-- Phase 7 splitter extension + emit_fsm_loop_bg_code dispatching on
+-- suspend_kind, this lowers via the same unified emit path the
+-- other shapes use -- no per-shape codegen.
+
+FN main() RETURNS Void ->
+  -- Loop with a sleep per iteration, then a post-loop assertion
+  -- on the iteration count.
+  p1: ~Int64 = BG {
+    MUTABLE i = 0_i64;
+    WHILE i < 3 DO
+      sleep(10);
+      i = i + 1;
+    END
+    i;
+  };
+  result1 = NEXT p1;
+  ASSERT result1 == 3, "1: WhileLoop+IO ran exactly 3 iterations";
+
+  RETURN;
+END

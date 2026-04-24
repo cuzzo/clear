@@ -1,0 +1,25 @@
+-- FSM Phase B2-IO + pipeline: a BG body whose suspending call sits
+-- inside an `s>` pipeline. The pipeline desugars (via lower_step_stmts'
+-- ThenChain flattening) into a sequence of stmts, so the suspending
+-- stage shows up as a top-level stdlib call -- exactly the shape
+-- Segments.split / B2-IO already handles.
+
+FN doubleLen(s: String) RETURNS Int64 ->
+  RETURN s.length() * 2;
+END
+
+FN main() RETURNS Void ->
+  -- Set up a small file to read from.
+  writeFile("/tmp/fsm_pipeline_test.txt", "hello-pipeline");
+
+  -- Two-stage pipeline. The first stage `readFile(path)` is the
+  -- suspending stdlib call (must run in step 0 + suspend). The
+  -- second stage `s> doubleLen` runs on the result in step 1.
+  p1: ~Int64 = BG {
+    readFile("/tmp/fsm_pipeline_test.txt") s> doubleLen;
+  };
+  n1 = NEXT p1;
+  ASSERT n1 == 28, "pipeline IO -> non-IO post-stage";
+
+  RETURN;
+END

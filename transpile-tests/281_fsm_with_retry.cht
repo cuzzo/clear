@@ -1,0 +1,96 @@
+-- FSM Phase B2-WITH (RETRY): the lock_error_clause's RETRY(N) is
+-- lowered into the FSM's resume fn as a retry counter that loops
+-- back to the try-lock state on .LockTimeout.
+--
+-- This test exercises the happy paths for the four RETRY shapes
+-- (RAISE / EXIT / PASS / block as the THEN-action). Verifying actual
+-- timeout-fires-then-retry is timing-sensitive; the structural Ruby
+-- specs in spec/fsm_classifier_spec.rb cover the emission shape.
+
+STRUCT Counter { value: Int64 }
+
+-- sleep()'s stdlib template hardcodes `rt.`, which breaks on a
+-- comptime literal arg. Wrapping in a plain FN ensures the arg is
+-- typed Int64 so @bitCast resolves.
+FN napFor(ms: Int64) RETURNS Void ->
+    sleep(ms);
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+  c1 = Counter{ value: 0 } @locked;
+  c2 = Counter{ value: 0 } @locked;
+  c3 = Counter{ value: 0 } @locked;
+  c4 = Counter{ value: 0 } @locked;
+
+  -- 1. RETRY(3) THEN RAISE
+  p1: ~Void = BG {
+    WITH EXCLUSIVE c1 AS inner { inner.value = 1; } ON Transient RETRY(3) THEN RAISE
+  };
+  NEXT p1;
+  WITH EXCLUSIVE c1 AS inner {
+    ASSERT inner.value == 1, "1: RETRY THEN RAISE happy path";
+  }
+
+  -- 2. RETRY(2) THEN EXIT "msg"
+  p2: ~Void = BG {
+    WITH EXCLUSIVE c2 AS inner { inner.value = 2; } ON Transient RETRY(2) THEN EXIT "exhausted"
+  };
+  NEXT p2;
+  WITH EXCLUSIVE c2 AS inner {
+    ASSERT inner.value == 2, "2: RETRY THEN EXIT happy path";
+  }
+
+  -- 3. RETRY(5) THEN PASS
+  p3: ~Void = BG {
+    WITH EXCLUSIVE c3 AS inner { inner.value = 3; } ON Transient RETRY(5) THEN PASS
+  };
+  NEXT p3;
+  WITH EXCLUSIVE c3 AS inner {
+    ASSERT inner.value == 3, "3: RETRY THEN PASS happy path";
+  }
+
+  -- 4. RETRY(1) THEN -> { recovery }
+  p4: ~Void = BG {
+    WITH EXCLUSIVE c4 AS inner { inner.value = 4; } ON Transient RETRY(1) THEN -> { }
+  };
+  NEXT p4;
+  WITH EXCLUSIVE c4 AS inner {
+    ASSERT inner.value == 4, "4: RETRY THEN block happy path";
+  }
+
+  -- 5. Real contention: a stackful holder sleeps 300ms while holding
+  --    the lock; debug builds have lock_timeout_ms=100 so the FSM
+  --    waiter parks → scanFsmLockWaiters fires LockTimeout → resume
+  --    fn's retry path increments retry_count and re-enters
+  --    try-lock. After holder releases (300ms), the FSM eventually
+  --    acquires on a retry.
+  --
+  --    With many retries (10 × 100ms = 1s of total retry budget), the
+  --    300ms holder will release before retries are exhausted.
+  c5 = Counter{ value: 0 } @shared:locked;
+
+  -- Holder is stackful (contains a SUSPENDS sleep call). Waiter has
+  -- only the WITH suspend, so it lowers to FSM. Main sleeps briefly
+  -- between spawns so the holder runs first and acquires.
+  holder: ~Void = BG {
+    WITH EXCLUSIVE c5 AS inner {
+      napFor(300);
+      inner.value = 1;
+    }
+  };
+  napFor(20);
+  waiter: ~Void = BG {
+    WITH EXCLUSIVE c5 AS inner {
+      inner.value = inner.value + 10;
+    } ON Transient RETRY(10) THEN PASS
+  };
+  NEXT holder;
+  NEXT waiter;
+  WITH EXCLUSIVE c5 AS inner {
+    -- Holder set value=1, then waiter set value=11.
+    ASSERT inner.value == 11, "5: FSM retry survived real contention";
+  }
+
+  RETURN;
+END

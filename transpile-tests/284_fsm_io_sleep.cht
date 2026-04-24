@@ -1,0 +1,63 @@
+-- FSM Phase B2-IO: a BG body containing a single suspending stdlib
+-- IO call (here: `sleep`) lowers to a 2-state FsmTask. The setup
+-- runs at the call site before yielding WaitForLock; the scheduler
+-- wakes the FSM via fsm_sleeping_queue when the wake-time elapses.
+--
+-- The same `sleep` call still works in stackful BGs (and at the
+-- top-level `main`) — both forms compile and coexist on the same
+-- scheduler.
+
+-- The stackful `sleep` template uses `rt.` directly; inside a BG run
+-- fn the runtime is renamed `__rt_bgN`. Wrap it in a plain FN so the
+-- compiler trampolines through needs_rt for the @xl case.
+FN napFor(ms: Int64) RETURNS Void -> sleep(ms); RETURN; END
+
+FN main() RETURNS Void ->
+  -- 1. Single FSM that sleeps then returns.
+  before1 = timestampMs();
+  p1: ~Int64 = BG {
+    sleep(50);
+    42;
+  };
+  result1 = NEXT p1;
+  after1 = timestampMs();
+  ASSERT result1 == 42, "1: result returned after sleep";
+  ASSERT (after1 - before1) >= 40, "1: at least ~50ms elapsed";
+
+  -- 2. FSM with pre-stmts before the sleep, then post-stmts using
+  --    a pre-local that survives the suspend.
+  before2 = timestampMs();
+  p2: ~Int64 = BG {
+    seed = 100_i64;
+    sleep(30);
+    seed + 7;             -- 107
+  };
+  result2 = NEXT p2;
+  after2 = timestampMs();
+  ASSERT result2 == 107, "2: pre-local survives the FSM suspend";
+  ASSERT (after2 - before2) >= 25, "2: at least ~30ms elapsed";
+
+  -- 3. Multiple FSMs sleeping concurrently. Each waits for itself,
+  --    NOT serialized — total wait should be ~max(sleeps), not sum.
+  before3 = timestampMs();
+  q1: ~Int64 = BG { sleep(40); 1; };
+  q2: ~Int64 = BG { sleep(40); 2; };
+  q3: ~Int64 = BG { sleep(40); 3; };
+  q4: ~Int64 = BG { sleep(40); 4; };
+  total = (NEXT q1) + (NEXT q2) + (NEXT q3) + (NEXT q4);
+  after3 = timestampMs();
+  ASSERT total == 10, "3: 4 FSMs all return their values";
+  -- Each FSM sleeps 40ms; running concurrently total time ~40ms,
+  -- definitely under 4*40=160ms even with overhead.
+  ASSERT (after3 - before3) < 130, "3: 4 FSM sleeps run concurrently, not serialized";
+
+  -- 4. Mixed: an FSM sleep + a stackful sleep (forced via @xl).
+  --    Both should work on the same scheduler.
+  ps_fsm: ~Int64 = BG { sleep(30); 100; };
+  ps_stackful: ~Int64 = BG { @xl -> napFor(30); 200; };
+  rs1 = NEXT ps_fsm;
+  rs2 = NEXT ps_stackful;
+  ASSERT rs1 + rs2 == 300, "4: FSM and stackful sleep coexist";
+
+  RETURN;
+END

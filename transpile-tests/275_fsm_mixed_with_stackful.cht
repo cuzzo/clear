@@ -1,0 +1,31 @@
+-- FSM Phase B1: mixed FSM + stackful BGs in the same function.
+--
+-- A pure-compute BG should lower to FSM, while a BG that does IO (or
+-- otherwise has a SUSPENDS effect in its call graph) must stay
+-- stackful. Both forms must coexist on the same scheduler and
+-- interoperate via Promise/NEXT.
+
+FN doubleIt(x: Int64) RETURNS Int64 ->
+  RETURN x * 2;
+END
+
+FN main() RETURNS Void ->
+  -- A: pure compute → FSM
+  pa: ~Int64 = BG { doubleIt(21); };
+
+  -- B: stackful (explicit @xl forces real stack — Phase B1 keeps stackful
+  -- whenever the user supplies a stack-size prefix).
+  pb: ~Int64 = BG { @xl -> doubleIt(50); };
+
+  -- C: another pure compute → FSM
+  pc: ~Int64 = BG { doubleIt(100); };
+
+  ra = NEXT pa;
+  rb = NEXT pb;
+  rc = NEXT pc;
+
+  ASSERT ra == 42, "FSM pa";
+  ASSERT rb == 100, "Stackful pb";
+  ASSERT rc == 200, "FSM pc";
+  RETURN;
+END

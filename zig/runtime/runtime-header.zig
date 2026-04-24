@@ -31,6 +31,45 @@ pub const WaitGroup = fp.WaitGroup;
 pub const Semaphore = fp.Semaphore;
 pub const TaskFn = @import("queues.zig").TaskFn;
 
+// FSM types re-exported for Phase B1 pure-compute BG lowering.
+pub const FsmTask = fp.FsmTask;
+pub const YieldReason = fp.YieldReason;
+pub const FsmIoWaiter = @import("fsm.zig").FsmIoWaiter;
+
+// WaiterNode re-exported for FSM-WITH (Phase B2-WITH): the state
+// struct embeds one to register on a parking-lot queue when an FSM
+// suspends on a contended lock.
+pub const WaiterNode = @import("queues.zig").WaiterNode;
+
+// Monotonic millisecond timestamp re-exported for FSM-IO templates
+// (Phase B2-IO). Wraps the same `compat.milliTimestamp()` the
+// scheduler uses for sleep wake-time bookkeeping.
+pub fn milliTimestamp() i64 {
+    return compat.milliTimestamp();
+}
+
+// File-IO helpers re-exported for FSM-mode `readFile` / `writeFile`
+// templates. These are the same syscalls the stackful versions use,
+// just publicly callable via `CheatHeader.X` from emitted templates.
+pub fn fsmOpenForRead(path: []const u8) !std.posix.fd_t {
+    return openPathFd(path, .{ .ACCMODE = .RDONLY }, 0);
+}
+pub fn fsmOpenForWrite(path: []const u8) !std.posix.fd_t {
+    return openPathFd(path, .{ .ACCMODE = .WRONLY, .CREAT = true, .TRUNC = true }, 0o644);
+}
+pub fn fsmFileSize(fd: std.posix.fd_t) !u64 {
+    return compat.fileSizeFd(fd);
+}
+pub fn fsmCloseFd(fd: std.posix.fd_t) void {
+    compat.closeFd(fd);
+}
+// Translate a negative io_uring CQE result into an error. Public
+// shim around scheduler.Scheduler.ioError so templates can use a
+// short-named call.
+pub fn fsmIoError(result: i32) std.posix.UnexpectedError {
+    return fp.Scheduler.ioError(result);
+}
+
 // Scheduler + fiber-memory re-exported for test harness scheduler setup.
 pub const scheduler = fp;
 pub const fiber_memory = @import("fiber-memory.zig");
@@ -3209,6 +3248,34 @@ pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, con
     const lb = b.active_tasks.load(.monotonic);
     const target = if (la <= lb) a else b;
     try target.submitSpawn(trampoline_addr, user_fn, args, config);
+}
+
+/// Module-level spawnFsmOn: submit an FSM task to a specific scheduler.
+/// The caller owns the state struct that embeds the FsmTask; the task
+/// pointer must outlive the scheduler run.
+pub fn spawnFsmOn(target: *fp.Scheduler, fsm_task: *fp.FsmTask) !void {
+    try target.submitFsmSpawn(fsm_task);
+}
+
+/// Module-level spawnFsmBest: distribute an FSM task to the least-loaded
+/// scheduler. Fully lock-free via pickTwo, same as stackful spawnBest.
+pub fn spawnFsmBest(fsm_task: *fp.FsmTask) !void {
+    const pair = fp.global_registry.pickTwo();
+    const a = pair.a orelse {
+        if (fp.scheduler_running) {
+            try fp.active_scheduler.submitFsmSpawn(fsm_task);
+            return;
+        }
+        return error.NoSchedulerAvailable;
+    };
+    const b = pair.b orelse {
+        try a.submitFsmSpawn(fsm_task);
+        return;
+    };
+    const la = a.active_tasks.load(.monotonic);
+    const lb = b.active_tasks.load(.monotonic);
+    const target = if (la <= lb) a else b;
+    try target.submitFsmSpawn(fsm_task);
 }
 
 /// Spawn a BG block on a dedicated OS thread (not a green fiber).

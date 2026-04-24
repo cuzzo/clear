@@ -1,5 +1,15 @@
+require_relative "../mir/fsm_ops"
+
 STRING_TYPE = :String
 HEAP_STRING_TYPE = :String
+
+# Shorthand for FsmOps DSL constructors used in FSM templates below.
+# Usage in std_lib entries:
+#   fsm_setup: [
+#     FO.assign_field("rf_fd", FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true)),
+#     ...
+#   ]
+FO = FsmOps::DSL
 
 STD_LIB = {
   # Method Name => { args: [Type...], return: Type, zig: Pattern }
@@ -216,6 +226,65 @@ STD_LIB = {
     bc: true,
     allocates: true,
     alloc: :frame,
+    suspends: true,   # io_uring submitRead + yield
+    # FSM-mode templates (Phase B2-IO). Single-syscall variant: open
+    # → fileSize → alloc buffer → one io_uring read → close. Most
+    # files return all bytes in a single read; the stackful version's
+    # chunked-read loop is omitted here. Files larger than what one
+    # read returns will be truncated — for those, force stackful via
+    # @xl on the BG block.
+    # KNOWN LIMITATION: rf_buf is heap-allocated via the BG's allocator
+    # but the consumer's NEXT site does not emit a matching free. This
+    # leaks for read-into-BG patterns. Tracked as a follow-up: the FSM
+    # lowering must teach MIR/promotion-plan that the FSM-lowered BG
+    # result owns heap data so the consumer auto-cleans.
+    fsm_state_decls: [
+      FsmOps::StateFieldDecl.new("rf_fd", "i32", "-1"),
+      FsmOps::StateFieldDecl.new("rf_buf", "[]u8", "&[_]u8{}"),
+      FsmOps::StateFieldDecl.new("rf_waiter", "CheatHeader.FsmIoWaiter", "undefined"),
+    ],
+    fsm_setup: [
+      # ctx.rf_fd = try fsmOpenForRead(path)
+      FO.assign_field("rf_fd",
+        FO.call("CheatHeader.fsmOpenForRead", [FO.arg(0)], is_try: true)),
+      # errdefer fsmCloseFd(ctx.rf_fd)
+      FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("rf_fd")]),
+      # const __rf_size: usize = @as(usize, @intCast(try fsmFileSize(ctx.rf_fd)))
+      FO.let_const("__rf_size", "usize",
+        FO.intcast("usize",
+          FO.call("CheatHeader.fsmFileSize", [FO.state("rf_fd")], is_try: true))),
+      # ctx.rf_buf = try ctx.alloc.alloc(u8, __rf_size)
+      FO.assign_field("rf_buf",
+        FO.alloc_expr("u8", FO.local("__rf_size"))),
+      # errdefer ctx.alloc.free(ctx.rf_buf)
+      FO.err_defer_free_field("rf_buf"),
+      # ctx.rf_waiter = CheatHeader.FsmIoWaiter.init(&ctx.task)
+      FO.assign_field("rf_waiter",
+        FO.call("CheatHeader.FsmIoWaiter.init",
+                [FO.addr(FO.state("task"))])),
+      # try ctx.rt.getSched().submitReadForFsm(&ctx.rf_waiter, ctx.rf_fd, ctx.rf_buf)
+      FO.io_submit(:read, "rf_waiter", [FO.state("rf_fd"), FO.state("rf_buf")]),
+    ],
+    fsm_finish_block: [
+      # fsmCloseFd(ctx.rf_fd);
+      FO.stmt_call("CheatHeader.fsmCloseFd", [FO.state("rf_fd")]),
+      # if (ctx.rf_waiter.result < 0) return fsmIoError(ctx.rf_waiter.result);
+      FO.if_neg_return_call("rf_waiter", "result",
+        "CheatHeader.fsmIoError",
+        [FO.subf(FO.state("rf_waiter"), "result")]),
+    ],
+    # Bound expression: ctx.rf_buf[0..@as(usize, @intCast(ctx.rf_waiter.result))]
+    fsm_finish_value: FO.slice_intcast(
+      FO.state("rf_buf"),
+      FO.subf(FO.state("rf_waiter"), "result"),
+    ),
+    # defer ctx.alloc.free(ctx.rf_buf) at start of runStep1 — fires
+    # AFTER post-stmts read the slice. Step 0 success guarantees
+    # rf_buf was allocated. Result-aliasing case rejected by
+    # INV-FSM-RESULT-NO-FINALIZED-ALIAS in MIRChecker.
+    fsm_state_finalize: [
+      FO.defer_free_field("rf_buf"),
+    ],
   },
 
   # 5. Write File
@@ -226,6 +295,31 @@ STD_LIB = {
     bc: true,
     can_fail: true,
     borrows: :all,
+    suspends: true,
+    # FSM-mode templates: open (CREAT + TRUNC) → one io_uring write
+    # → close. Single-syscall write; large content where one write
+    # returns less than full length is truncated. Force stackful via
+    # @xl when partial-write robustness is required.
+    fsm_state_decls: [
+      FsmOps::StateFieldDecl.new("wf_fd", "i32", "-1"),
+      FsmOps::StateFieldDecl.new("wf_waiter", "CheatHeader.FsmIoWaiter", "undefined"),
+    ],
+    fsm_setup: [
+      FO.assign_field("wf_fd",
+        FO.call("CheatHeader.fsmOpenForWrite", [FO.arg(0)], is_try: true)),
+      FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("wf_fd")]),
+      FO.assign_field("wf_waiter",
+        FO.call("CheatHeader.FsmIoWaiter.init",
+                [FO.addr(FO.state("task"))])),
+      FO.io_submit(:write, "wf_waiter", [FO.state("wf_fd"), FO.arg(1)]),
+    ],
+    fsm_finish_block: [
+      FO.stmt_call("CheatHeader.fsmCloseFd", [FO.state("wf_fd")]),
+      FO.if_neg_return_call("wf_waiter", "result",
+        "CheatHeader.fsmIoError",
+        [FO.subf(FO.state("wf_waiter"), "result")]),
+    ],
+    fsm_finish_value: nil,   # Void return
   },
 
   # 6. Read Line from stdin
@@ -411,6 +505,7 @@ STD_LIB = {
     bc: true, bc_op: :file_read_all,
     allocates: true,
     alloc: :heap,
+    suspends: true,
   },
 
   # Write a String to an open writable File resource (created via File::create).
@@ -422,6 +517,7 @@ STD_LIB = {
     bc: true, bc_op: :file_write,
     can_fail: true,
     borrows: :all,
+    suspends: true,
   },
 
   # List all files in a directory. Returns a list of filenames (not full paths).
@@ -479,6 +575,7 @@ STD_LIB = {
     can_fail: true,
     allocates: true,  # produces owned resource (TCPClient)
     borrows: :all,
+    suspends: true,
   },
 
   # Read up to 4096 bytes from a connected TCP client into a heap String.
@@ -490,6 +587,7 @@ STD_LIB = {
     zig: "try CheatLib.socketRead({alloc}, {0})",
     allocates: true,
     alloc: :node_storage,
+    suspends: true,
   },
 
   # Write a String to a connected TCP client.
@@ -501,6 +599,7 @@ STD_LIB = {
     zig: "try CheatLib.socketWriteVoid({0}, {1})",
     can_fail: true,
     borrows: :all,
+    suspends: true,
   },
 
   # -------------------------------------------------------------------------
@@ -559,6 +658,32 @@ STD_LIB = {
     zig: "{rt}.sleep(@intCast(@as(u64, @bitCast({0}))))",
     bc: true,
     needs_rt: true,
+    suspends: true,    # rt.sleep yields the fiber — not safe inside an FSM body
+    # FSM-mode templates (Phase B2-IO): split the suspend across two
+    # state machine steps. fsm_setup runs at the call site BEFORE the
+    # WaitForLock yield; fsm_finish is the expression bound to the
+    # result var on resume (nil for Void).
+    #
+    # The setup queues the FSM on fsm_sleeping_queue with a wake
+    # time; the resume fn must immediately return WaitForLock so the
+    # scheduler treats the FSM as Blocked. The slow-path scan in
+    # run() re-enqueues to fsm_ready_queue when fsm_wake_time is
+    # reached.
+    # FSM templates as op trees (FsmOps DSL). One setup op registers
+    # the FSM on fsm_sleeping_queue with a wake time; finish_value
+    # is nil because sleep returns Void.
+    fsm_setup: [
+      FO.stmt_call(
+        "__FSM_CTX.rt.getSched().fsmSleepTask",
+        [
+          FO.addr(FO.state("task")),
+          FO.binop("+",
+                   FO.call("CheatHeader.milliTimestamp", []),
+                   FO.intcast("i64", FO.arg(0))),
+        ],
+      ),
+    ],
+    fsm_finish_value: nil,
   },
 
   # -------------------------------------------------------------------------

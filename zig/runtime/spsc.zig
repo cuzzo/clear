@@ -16,6 +16,17 @@ pub const MessageTag = enum(u8) {
     Spawn,
     Resume,
     RemoteCall,
+    /// FSM (stackless) task spawn. Unlike `Spawn`, the target scheduler
+    /// does not allocate a fiber/stack — `fsm_task` points to a
+    /// caller-owned, pre-initialized FsmTask that is appended to the
+    /// scheduler's fsm_ready_queue as-is. See docs/agents/finite-state-machines.md.
+    FsmSpawn,
+    /// FSM (stackless) task resume — wake a previously-parked FSM back
+    /// into the target scheduler's fsm_ready_queue. Unlike FsmSpawn,
+    /// this does NOT increment active_tasks (the task was already
+    /// counted when originally enqueued). Used by ParkingMutex unlock
+    /// to wake an FSM waiter on a different scheduler.
+    FsmResume,
 };
 
 /// A value-type message copied into the ring buffer.
@@ -35,6 +46,9 @@ pub const Message = struct {
     rc_func: ?*const fn (*anyopaque) void = null,
     rc_ctx: ?*anyopaque = null,
     rc_wg: ?*anyopaque = null, // *WaitGroup as opaque
+    // FsmSpawn fields — reuses `task` would conflate with Resume, so
+    // a dedicated pointer field keeps decoding branch-free.
+    fsm_task: ?*anyopaque = null, // *FsmTask as opaque
 };
 
 /// SPSC ring buffer.  Fixed capacity, power-of-two size.

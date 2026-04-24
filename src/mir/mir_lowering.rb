@@ -16,9 +16,12 @@ require_relative "../ast/ast"
 require_relative "../ast/type"
 require_relative "../ast/error_registry"
 require_relative "../backends/zig_type_mapper"
+require_relative "fsm_lowering"
+require_relative "fsm_transform"
 
 class MIRLowering
   include ZigTypeMapper
+  include FsmLowering
 
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
 
@@ -2489,9 +2492,36 @@ class MIRLowering
                                  fresh_heap_alloc: alloc_var,
                                  fresh_heap_id: id)
 
-    capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n        ")
+    # If this BG sits inside an outer fiber/FSM whose capture_map
+    # rewrites the surrounding scope's identifiers (e.g. an outer
+    # FSM-NEXT chain stores cross-suspend values in __ctx_OUTER.X),
+    # the bare-name init AND the @TypeOf(...) field type below must
+    # use that rewritten reference too — the outer name is no longer
+    # in scope at the spawn site, only the rewritten one is.
+    # Promoted strings and FreshHeapCopy dupes already point to a
+    # local generated above the spawn, so they don't need rewriting.
+    outer_capture_map = @do_capture_map || {}
+    capture_fields = caps.specs.map { |s|
+      ftype = if s.dupe_decl_zig || promoted_names[s.name] || outer_capture_map[s.name].nil?
+                s.field_type_zig
+              else
+                # @TypeOf(<outer_ref>) so the field type resolves under the
+                # rewritten scope (e.g. @TypeOf(__ctx_0.x) instead of
+                # @TypeOf(x)).
+                s.field_type_zig.sub(/\(#{Regexp.escape(s.name)}\)/, "(#{outer_capture_map[s.name]})")
+              end
+      "#{s.name}: #{ftype},"
+    }.join("\n        ")
     capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
-                     caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
+                     caps.specs.map { |s|
+                       outer_ref = outer_capture_map[s.name]
+                       init_val = if s.dupe_decl_zig || promoted_names[s.name] || outer_ref.nil?
+                                    s.init_value_zig
+                                  else
+                                    outer_ref
+                                  end
+                       ".#{s.name} = #{init_val}"
+                     }).join(", ")
     fresh_heap_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
     fresh_heap_cleanups = caps.specs.filter_map(&:body_cleanup_zig).join("\n                    ")
 
@@ -2607,6 +2637,66 @@ class MIRLowering
 
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
     pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
+
+    # Universal transform path (CLAUDE.md Invariant 13). The
+    # transform inspects the AST body via Segments.split, produces
+    # a typed segment graph, and Emit.build builds the wrapper
+    # body. Runs FIRST -- before any per-shape use_fsm_* branch --
+    # so shape detection lives in one place. Returns nil for
+    # graphs the transform doesn't yet cover; the matching legacy
+    # branch below fires for those. As migration stages land, the
+    # nil-returning surface shrinks until the legacy branches are
+    # deleted entirely (Stage 4).
+    #
+    # The transform handles per-shape pin_mode constraints
+    # itself: B1 / B2-IO / B2-NEXT-CHAIN reject :shared (matching
+    # legacy use_fsm / use_fsm_io / use_fsm_next), B2-WITH
+    # accepts :shared (matching legacy use_fsm_with). The outer
+    # guard is just `spawn_form == :fsm`.
+    if node.spawn_form == :fsm
+      transform_ctx = {
+        node: node,
+        blk_label: blk_label, ctx_type: ctx_type, promise_zig: promise_zig,
+        id: id, bg_rt: bg_rt, capture_fields: capture_fields,
+        captured: captured, capture_close_zig: capture_close_zig,
+        pointer_captures: pointer_captures, bg_string_promotes: bg_string_promotes,
+        stmt_code: stmt_code, result_line: result_line,
+        capture_frees: capture_frees, arena_init: arena_init,
+        # FreshHeapCopy body cleanups (master's `defer CheatLib.cleanup
+        # (...)` lines) need to lift to destroyTask in the FSM path so
+        # they fire once when the ctx tears down, not on each segment
+        # return. Thread them separately from capture_frees so the
+        # transform can emit them as destroy lines (see emit.rb).
+        fresh_heap_cleanups: fresh_heap_cleanups,
+        is_void: is_void, alloc_var: alloc_var, promise_var: promise_var,
+        ctx_var: ctx_var, promoted_decls: promoted_decls,
+        capture_inits: capture_inits, rt_name: rt_name, pin_mode: pin_mode,
+        inner_zig: inner_zig, arena_init_flag: !!node.arena_mode,
+      }
+      transform_result = FsmTransform.transform(node, transform_ctx, self)
+      if transform_result
+        bg_code, fsm_structure = transform_result
+        MIRChecker.check_fsm_structure!(fsm_structure, source: node) if fsm_structure
+        # Match legacy emit_fsm_*_bg_code call sites: pass [] for
+        # run_body. The fiber body is consumed inside the FSM
+        # state machine; exposing it again to the BgBlock-level
+        # checker double-walks ownership and triggers spurious
+        # diagnostics.
+        return MIR::BgBlock.new(bg_code, captured, [], fsm_structure)
+      end
+    end
+
+    # All FSM-eligible BG bodies route through FsmTransform above
+    # (CLAUDE.md Invariant 13). If the transform returned nil, the
+    # body falls outside the universal transform's coverage today
+    # (e.g. nested suspends inside a user fn call) and lowers to a
+    # stackful fiber via the standard spawn path below. The legacy
+    # use_fsm_io / use_fsm_next / use_fsm_with / use_fsm branches +
+    # find_fsm_*_split shape detectors + emit_fsm_*_bg_code emit
+    # functions are still available in fsm_lowering.rb so Stage 3
+    # delegation works; Stage 4b inlines them into Emit.build_*
+    # and deletes them.
+
     spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, pin_mode)
 
     bg_code = <<~ZIG.chomp
@@ -4616,13 +4706,17 @@ class MIRLowering
       # kResult = resolveTco(...)) and their cleanup guards reference the
       # same Zig variable that the earlier decl created.
       safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
+      # Consult @do_capture_map so a reassignment to a captured /
+      # promoted local rewrites the LHS to the appropriate ctx-field
+      # reference (FSM Phase B2 promotion).
+      mapped = @do_capture_map && @do_capture_map[node.name]
       value = lower(node.value)
       if node.reassign_cleanup
         zig_type = node.reassign_cleanup[:zig_type] || "UNKNOWN"
         alloc = alloc_from_sym(node.reassign_cleanup[:alloc])
-        MIR::ReassignWithCleanup.new(safe, value, zig_type, alloc)
+        MIR::ReassignWithCleanup.new(mapped || safe, value, zig_type, alloc)
       else
-        MIR::Set.new(MIR::Ident.new(safe), value)
+        MIR::Set.new(MIR::Ident.new(mapped || safe), value)
       end
     end
   end
@@ -4644,7 +4738,11 @@ class MIRLowering
     end
 
     target = if node.name.is_a?(String)
-      MIR::Ident.new(zig_safe_name(node.name))
+      # Consult @do_capture_map so an assignment to a captured /
+      # promoted local rewrites the LHS to the appropriate
+      # ctx-field reference (FSM Phase B2 promotion).
+      mapped = @do_capture_map && @do_capture_map[node.name]
+      MIR::Ident.new(mapped || zig_safe_name(node.name))
     else
       lower(node.name)
     end

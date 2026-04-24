@@ -115,7 +115,7 @@ module CaptureStrategy
   #                                     (File, TCPClient, etc.); the
   #                                     existing resource_captures machinery
   #                                     handles the ownership transfer.
-  def self.classify(name:, type:, site_info:, rt_name: "rt", is_resource: false)
+  def self.classify(name:, type:, site_info:, rt_name: "rt", is_resource: false, schema_lookup: nil)
     zig_t = field_zig_type(type)
 
     # 1. Explicit user annotation wins: COPY/GIVE apply regardless of
@@ -140,8 +140,10 @@ module CaptureStrategy
     end
 
     # 3. Value-like captures are always safe: primitives, strings
-    #    (CLEAR semantics: []const u8 is Copy), enums.
-    return ByValue.new(zig_t, name) if value_like?(type)
+    #    (CLEAR semantics: []const u8 is Copy), enums, plus structs
+    #    whose fields are all themselves value-like (resolved via
+    #    schema_lookup).
+    return ByValue.new(zig_t, name) if value_like?(type, schema_lookup)
 
     # 4. @multiowned / @shared / @locked / @writeLocked / @local clone
     #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
@@ -157,7 +159,7 @@ module CaptureStrategy
 
   # True iff the capture's data fits entirely in the union/value header,
   # with no aliased heap backing. Safe to byte-copy into the ctx struct.
-  def self.value_like?(type)
+  def self.value_like?(type, schema_lookup = nil)
     return true if type.primitive?
     return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
     # Id<T> handles are opaque u64 indices into a pool — the pool owns the
@@ -165,6 +167,14 @@ module CaptureStrategy
     if type.respond_to?(:generic_instance?) && type.generic_instance? &&
        type.respond_to?(:generic_base) && type.generic_base == :Id
       return true
+    end
+    # Plain structs / enums / unions whose fields are all
+    # implicitly-Copy: byte-copying the value into the fiber's ctx
+    # struct is safe (no heap aliasing). Requires the program's
+    # schema lookup; without it, fall back to the schema-less
+    # `copyable?` (which only succeeds for primitives/strings).
+    if schema_lookup && type.respond_to?(:implicitly_copyable?)
+      return true if type.implicitly_copyable?(schema_lookup)
     end
     return true if type.respond_to?(:copyable?) && type.copyable?
     false

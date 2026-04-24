@@ -45,6 +45,28 @@ class SemanticAnnotator
     @function_context_stack.last
   end
 
+  # Run the given block with conditional_depth incremented on the current
+  # function context (or the global fallback when outside a function).
+  # Used to tag SUSPENDS effects recorded inside IF branches / MATCH arms
+  # as SUSPENDS:CONDITIONAL.
+  def with_conditional_context
+    if current_fn_ctx
+      current_fn_ctx.conditional_depth += 1
+      begin
+        yield
+      ensure
+        current_fn_ctx.conditional_depth -= 1
+      end
+    else
+      @conditional_depth += 1
+      begin
+        yield
+      ensure
+        @conditional_depth -= 1
+      end
+    end
+  end
+
   # `source_code` is optional — used ONLY by fixable-error helpers to
   # locate source-level spans (e.g., the `;` at the end of a
   # declaration line so `@multiowned` can be inserted before it).
@@ -60,6 +82,7 @@ class SemanticAnnotator
     @scope_stack = [Scope.new]
     @function_context_stack = [] # Stack of expected return types
     @loop_depth = 0 # Track if we are inside a loop
+    @conditional_depth = 0 # Track if we are inside an IF branch or MATCH arm
     @smooth_depth = 0
     @match_pattern_context = false # True when visiting a MATCH case value (suppresses inline-struct GetField error)
     # Reentrancy analysis
@@ -113,7 +136,7 @@ class SemanticAnnotator
     # OwnershipDataflow, MIRPass, and mir_lowering can READ instead
     # of each re-deriving with their own walker (the divergence class
     # of bug fixed in 378036a0 / 1522e534).
-    BgCaptureClassifier.classify_all!(@fn_nodes)
+    BgCaptureClassifier.classify_all!(@fn_nodes, schema_lookup: ->(t) { lookup_type_schema(t) rescue nil })
     # P3.2: infer per-function effects (yield/alloc_heap/io/fail) and
     # propagate transitively through the call graph.
     EffectInference.analyze!(@fn_nodes)
@@ -311,6 +334,14 @@ private
 
     # PASS 6: Compute effect sets for every function via call-graph fixed-point.
     compute_effects!
+
+    # PASS 6a: FSM Phase A — classify each function for stackless-fsm
+    # compilation, enumerate suspend points, and tag every BG block with
+    # spawn_form (:fsm / :stackful). Phase A only records metadata; the
+    # emitter still produces stackful spawns. Phase B consumes this data.
+    compute_fsm_eligibility!
+    enumerate_fsm_suspend_points!
+    classify_bg_spawn_form!(node)
 
     # PASS 6b: Static lock-cycle / self-deadlock detection. Propagates
     # lock acquires through @call_graph, synthesizes held-while-calling
@@ -923,12 +954,12 @@ private
 
     branch_logic = [
       proc {
-        visit_stmts(node.then_branch)
+        with_conditional_context { visit_stmts(node.then_branch) }
         finalize_scope(node, branch: :then)
         node.then_drops
       },
       proc {
-        visit_stmts(node.else_branch)
+        with_conditional_context { visit_stmts(node.else_branch) }
         finalize_scope(node, branch: :else)
         node.else_drops
       }
@@ -1262,14 +1293,14 @@ private
             end
           end
         end
-        visit_stmts(c[:body])
+        with_conditional_context { visit_stmts(c[:body]) }
         collect_scope_drops(node: node)
       }
     end
 
     if node.default_case
       branch_logic << proc {
-        visit_stmts(node.default_case)
+        with_conditional_context { visit_stmts(node.default_case) }
         collect_scope_drops(node: node)
       }
     end
@@ -1891,6 +1922,11 @@ private
 
     resolve_call(node, node.args)
 
+    # Record call-site context (loop/cond) for effects propagation.
+    # A call sitting inside a loop promotes the callee's SUSPENDS effects
+    # to SUSPENDS_LOOP; likewise for conditional.
+    record_call_site(node.name) if node.name.is_a?(String)
+
     # Phase 2: when this call happens inside a held WITH scope and targets
     # a user-defined function, record a held->callee site so the post-pass
     # can add (held, T) edges for every T the callee transitively acquires.
@@ -1939,6 +1975,9 @@ private
     # Fall through to UFCS: obj.method(args) → method(obj, args)
     ufcs_args = [node.object] + node.args
     resolve_call(node, ufcs_args)
+
+    # Record call-site context for effects propagation (see visit_FuncCall).
+    record_call_site(node.name) if node.name.is_a?(String)
   end
 
   # Shared logic for resolving function/method calls.
@@ -2000,6 +2039,7 @@ private
     node.error_kind = matched_def[:error_kind] if matched_def[:error_kind]
     node.error_type = matched_def[:error_type] if matched_def[:error_type]
     current_fn_ctx.alloc_count += 1 if current_fn_ctx && (matched_def[:allocates] || matched_def[:can_fail] || matched_def[:needs_rt])
+    record_effect(EffectTracker::SUSPENDS) if matched_def[:suspends]
 
     # 5. Flag mutable access through list indexing.
     #    When a mutating intrinsic (e.g., append, remove) is called on a receiver
@@ -3427,6 +3467,9 @@ private
     expanded_capabilities.each do |cap|
       next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
       record_with_acquire!(fn_name_for_lock, cap, held_entries_now, node.deadlock_escape)
+      # Exclusive lock acquisition may suspend the fiber on contention.
+      record_effect(EffectTracker::BLOCKING)
+      record_effect(EffectTracker::SUSPENDS)
     end
 
     # Track which variable names / lock types become "held" on entering
@@ -3679,6 +3722,7 @@ private
     visit(node.expr)
     node.full_type = node.expr.full_type || :Void
     @stream_yield_types << Type.new(node.full_type)
+    record_effect(EffectTracker::SUSPENDS)
   end
 
   def visit_BgBlock(node)
@@ -3816,6 +3860,9 @@ private
     unless promise_type.future?
       error!(node, "NEXT requires a future value (~T), got #{node.expr.full_type}")
     end
+
+    # NEXT awaits a promise/stream — always a fiber suspension point.
+    record_effect(EffectTracker::SUSPENDS)
 
     if promise_type.promise_list?
       # NEXT on ~T[]@list: await all promises, return T[]@list.

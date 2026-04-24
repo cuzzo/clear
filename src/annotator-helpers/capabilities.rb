@@ -500,6 +500,20 @@ module CapabilityHelper
             result.pointer_captures << name if t&.needs_pointer_passing?
             result.string_captures << name if t&.string?
             result.resource_captures << name if t&.resource? || info.close_zig
+            # Plain string-keyed HashMap captures (no @sharded / @shared /
+            # @locked / @multiowned wrappers): same MoveInto pattern as
+            # @set / @pool. CheatLib.StringMap stores its own allocator
+            # internally; the 2-arg deinit signature is `(self, key_alloc,
+            # bucket_alloc)` — both args are ignored, self.alloc drives
+            # the actual frees. Wrapped variants take the RcClone /
+            # safe-shared path in the classifier and don't need this.
+            if t&.map? && !t&.numeric_map? && !info.close_zig &&
+               !t&.sharded? && !(t.respond_to?(:striped?) && t.striped?) &&
+               !t&.shared? && !t&.multiowned? &&
+               !(t.respond_to?(:any_sync?) && t.any_sync?)
+              result.resource_captures << name
+              result.close_patterns[name] ||= "{0}.deinit(rt.heapAlloc(), rt.heapAlloc())"
+            end
           end
           if info.close_zig
             result.close_patterns[name] ||= info.close_zig

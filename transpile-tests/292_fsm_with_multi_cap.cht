@@ -1,0 +1,54 @@
+-- FSM WITH with multiple capabilities. The recursive splitter
+-- chains N LockSuspend fragments (one per cap) and renders the
+-- CS body once at the end of the chain. Validates that lock
+-- acquire ordering is deterministic (driven by the lock-sort
+-- pass) and that a fail in cap N+1 releases caps 0..N.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+  -- Two-lock WITH: both locks acquired, CS body atomically updates
+  -- both. (Lock-sort guarantees deterministic order so multi-BG
+  -- contention can't deadlock.)
+  a = Counter{ value: 0 } @locked;
+  b = Counter{ value: 100 } @locked;
+  p1: ~Void = BG {
+    WITH EXCLUSIVE a AS la, EXCLUSIVE b AS lb {
+      la.value = la.value + 1;
+      lb.value = lb.value - 1;
+    }
+  };
+  NEXT p1;
+  WITH EXCLUSIVE a AS la {
+    ASSERT la.value == 1, "1a: cap-0 mutation visible";
+  }
+  WITH EXCLUSIVE b AS lb {
+    ASSERT lb.value == 99, "1b: cap-1 mutation visible";
+  }
+
+  -- Two BGs each lock both, contending. Either ordering must
+  -- produce final values (a.value == 2, b.value == 98).
+  c = Counter{ value: 0 } @locked;
+  d = Counter{ value: 100 } @locked;
+  q1: ~Void = BG {
+    WITH EXCLUSIVE c AS lc, EXCLUSIVE d AS ld {
+      lc.value = lc.value + 1;
+      ld.value = ld.value - 1;
+    }
+  };
+  q2: ~Void = BG {
+    WITH EXCLUSIVE c AS lc, EXCLUSIVE d AS ld {
+      lc.value = lc.value + 1;
+      ld.value = ld.value - 1;
+    }
+  };
+  NEXT q1;
+  NEXT q2;
+  WITH EXCLUSIVE c AS lc {
+    ASSERT lc.value == 2, "2a: contending BGs both incremented c";
+  }
+  WITH EXCLUSIVE d AS ld {
+    ASSERT ld.value == 98, "2b: contending BGs both decremented d";
+  }
+  RETURN;
+END

@@ -1,0 +1,88 @@
+-- FSM Phase B1: pure-compute BG blocks lowered to FsmTask.
+--
+-- Verifies end-to-end that pure-compute BGs (no IO, no lock, no NEXT,
+-- no YIELD in the reachable call graph) execute correctly as stackless
+-- finite-state-machine tasks instead of stackful fibers.
+--
+-- Each BG below is spawn_form=:fsm with zero suspend points, so the
+-- emitted Zig uses submitFsmSpawn / spawnFsmBest + FsmTask.resumeFn
+-- instead of submitSpawn / entryWrapper.
+
+STRUCT Pair { a: Int64, b: Int64 }
+
+FN doubleIt(x: Int64) RETURNS Int64 ->
+  RETURN x * 2;
+END
+
+FN sumPair(p: Pair) RETURNS Int64 ->
+  RETURN p.a + p.b;
+END
+
+FN noop() RETURNS Void ->
+  RETURN;
+END
+
+FN main() RETURNS Void ->
+  -- 1. Trivial literal return.
+  p1: ~Int64 = BG { 42; };
+  r1 = NEXT p1;
+  ASSERT r1 == 42, "1: literal";
+
+  -- 2. Captured int used inside FSM body.
+  x = 10_i64;
+  y = 32_i64;
+  p2: ~Int64 = BG { x + y; };
+  r2 = NEXT p2;
+  ASSERT r2 == 42, "2: int captures";
+
+  -- 3. Function call inside body (pure-compute callee, no SUSPENDS).
+  base = 7_i64;
+  p3: ~Int64 = BG { doubleIt(base) + 1; };
+  r3 = NEXT p3;
+  ASSERT r3 == 15, "3: fn call";
+
+  -- 4. Void body — promise yields {}.
+  p4: ~Void = BG { noop(); };
+  NEXT p4;
+
+  -- 5. Struct capture + method-style call.
+  pair = Pair{ a: 20, b: 22 };
+  p5: ~Int64 = BG { sumPair(pair); };
+  r5 = NEXT p5;
+  ASSERT r5 == 42, "5: struct capture";
+
+  -- 6. Many concurrent FSMs — exercises work-stealing and fsm_ready_queue.
+  q1: ~Int64 = BG { 1; };
+  q2: ~Int64 = BG { 2; };
+  q3: ~Int64 = BG { 3; };
+  q4: ~Int64 = BG { 4; };
+  q5: ~Int64 = BG { 5; };
+  q6: ~Int64 = BG { 6; };
+  q7: ~Int64 = BG { 7; };
+  q8: ~Int64 = BG { 8; };
+  total = (NEXT q1) + (NEXT q2) + (NEXT q3) + (NEXT q4) +
+          (NEXT q5) + (NEXT q6) + (NEXT q7) + (NEXT q8);
+  ASSERT total == 36, "6: many concurrent";
+
+  -- 7. Sequential NEXT on promises spawned in bulk.
+  s1: ~Int64 = BG { 100; };
+  s2: ~Int64 = BG { 200; };
+  s3: ~Int64 = BG { 300; };
+  v1 = NEXT s1;
+  v2 = NEXT s2;
+  v3 = NEXT s3;
+  ASSERT v1 + v2 + v3 == 600, "7: sequential NEXT";
+
+  -- 8. FSM with multi-statement body (last expr is the promise result).
+  a0 = 1_i64;
+  b0 = 2_i64;
+  c0 = 3_i64;
+  p8: ~Int64 = BG {
+    sum = a0 + b0;
+    sum + c0;
+  };
+  r8 = NEXT p8;
+  ASSERT r8 == 6, "8: multi-stmt";
+
+  RETURN;
+END

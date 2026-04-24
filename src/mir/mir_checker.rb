@@ -131,6 +131,130 @@ class MIRChecker
     all_errors
   end
 
+  # ===================================================================
+  # FSM structural validation
+  # ===================================================================
+  #
+  # Verifies the cleanup-placement decisions baked into a stackless
+  # FSM body before its rendered Zig text reaches the emitter. The
+  # FSM lowering produces a `MIR::FsmStructure` alongside the Zig
+  # text; this method runs over the structure and raises on any
+  # violation of the FSM-specific invariants below. Called from
+  # `mir_lowering.rb` immediately after `emit_fsm_io_bg_code` returns,
+  # so a violation aborts the whole compile rather than producing
+  # silently-incorrect Zig output.
+  #
+  # INV-FSM-CAPTURE-FINALIZE
+  #   Every entry in `structure.captures` must have
+  #   `cleanup_at == :finalize`. Captures (heap-dupe'd into the FSM
+  #   ctx at spawn) may be read by ANY step; placing their `defer
+  #   free()` inside an earlier step fires the cleanup before later
+  #   steps run, leaving freed pointers in ctx fields. This is
+  #   exactly the UAF that shipped in the readFile/writeFile commit.
+  #
+  # INV-FSM-CAPTURE-CLEANUP-PRESENT
+  #   Every capture must appear in `structure.finalize_cleanups`. A
+  #   capture with NO cleanup leaks the heap-dupe.
+  #
+  # INV-FSM-STEP-READS-LIVE
+  #   For each step S and each name read in S, the name must either
+  #   (a) be in `finalize_cleanups` (lives until FSM end), or
+  #   (b) have its cleanup in a step >= S (still alive when S reads).
+  #   A name read in step S whose cleanup lives in step T < S is a
+  #   cross-step UAF.
+  #
+  # INV-FSM-RESULT-NO-FINALIZED-ALIAS
+  #   The BG body's terminal result expression must not alias a
+  #   state field that is freed at FSM finalize. Aliasing happens
+  #   when (a) bind_line declares a local whose RHS references a
+  #   finalized field, AND (b) post_result_line assigns that local
+  #   directly into inner.result. The slice escapes the FSM but its
+  #   backing memory dies when the finalize defer fires — the
+  #   consumer reads a dangling pointer. Detected by the lowering
+  #   (see emit_fsm_io_bg_code) and recorded as
+  #   `structure.result_aliases_finalized`.
+  #
+  # Raises FsmStructureError on the first violation, with a message
+  # naming the binding and the bad step index. Future invariants get
+  # added here, NOT in the rendering code.
+  class FsmStructureError < StandardError; end
+
+  def self.check_fsm_structure!(structure, source: nil)
+    return unless structure
+    captures = structure.captures || []
+    finalize_cleanups = structure.finalize_cleanups || []
+    steps = structure.steps || []
+
+    # INV-FSM-CAPTURE-FINALIZE
+    captures.each do |cap|
+      unless cap[:cleanup_at] == :finalize
+        raise FsmStructureError, format_fsm_error(
+          "INV-FSM-CAPTURE-FINALIZE",
+          "capture '#{cap[:name]}' has cleanup_at=#{cap[:cleanup_at].inspect}; " \
+          "captures may be read by any step and MUST cleanup at FSM finalize. " \
+          "Cleanup placed in an earlier step fires before later steps run -> UAF.",
+          source,
+        )
+      end
+    end
+
+    # INV-FSM-CAPTURE-CLEANUP-PRESENT
+    captures.each do |cap|
+      unless finalize_cleanups.include?(cap[:name])
+        raise FsmStructureError, format_fsm_error(
+          "INV-FSM-CAPTURE-CLEANUP-PRESENT",
+          "capture '#{cap[:name]}' has no entry in finalize_cleanups; " \
+          "the heap-dupe at spawn would leak.",
+          source,
+        )
+      end
+    end
+
+    # INV-FSM-STEP-READS-LIVE
+    cleanup_step_index = {}
+    steps.each do |step|
+      (step[:cleanups] || []).each { |name| cleanup_step_index[name] = step[:index] }
+    end
+    steps.each do |step|
+      (step[:reads] || []).each do |name|
+        next if finalize_cleanups.include?(name)  # lives until end
+        cleanup_step = cleanup_step_index[name]
+        next if cleanup_step.nil?                  # no cleanup recorded -> separate invariant
+        next if cleanup_step >= step[:index]
+        raise FsmStructureError, format_fsm_error(
+          "INV-FSM-STEP-READS-LIVE",
+          "step #{step[:index]} reads '#{name}' but its cleanup was placed in " \
+          "step #{cleanup_step} (earlier). The defer fires before step #{step[:index]} " \
+          "runs -> cross-step UAF.",
+          source,
+        )
+      end
+    end
+
+    # INV-FSM-RESULT-NO-FINALIZED-ALIAS
+    if structure.respond_to?(:result_aliases_finalized) && structure.result_aliases_finalized
+      aliased = structure.result_aliases_finalized
+      raise FsmStructureError, format_fsm_error(
+        "INV-FSM-RESULT-NO-FINALIZED-ALIAS",
+        "BG body's terminal expression aliases finalized state field '#{aliased}' " \
+        "via the bound local. The slice would escape the FSM via inner.result, but " \
+        "its backing memory is freed when the finalize defer fires at end of last " \
+        "step -> consumer reads a dangling pointer. Either compute a fresh value " \
+        "from the bound local before returning (e.g. wrap in a function call that " \
+        "returns a value type), or drop the FSM templates for this stdlib so the " \
+        "stackful escape-promotion path handles ownership.",
+        source,
+      )
+    end
+
+    nil
+  end
+
+  def self.format_fsm_error(invariant, message, source)
+    loc = source && source.respond_to?(:line) && source.line ? " at line #{source.line}" : ""
+    "[FSM checker]#{loc} #{invariant}: #{message}"
+  end
+
   private
 
   # Tree walker -- yields every node in the MIR tree.

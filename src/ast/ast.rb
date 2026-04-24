@@ -443,6 +443,13 @@ module AST
     attr_accessor :cleanup_bindings   # stamped by MIRPass: { var_name => entry_hash } for MIRLowering
     attr_accessor :heap_carry_return      # true when a heap carry var is the return value (caller must free)
     attr_accessor :heap_carry_return_vars # Set of var names that are heap carry return vars (their cleanup is skipped inside __pr_body)
+    # FSM Phase A: set by FsmClassifier. fsm_eligible=true means this function can be
+    # compiled as an FsmTask (state-machine resume fn) rather than a stackful fiber.
+    # fsm_suspend_points is an Array of { id:, kind:, node: } enumerating the
+    # yield-relevant call sites inside the body.
+    attr_accessor :fsm_eligible
+    attr_accessor :fsm_ineligible_reason  # Symbol: :reentrant, :extern, :self_recursive, :no_suspends
+    attr_accessor :fsm_suspend_points
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do
@@ -793,6 +800,12 @@ module AST
     attr_accessor :capture_analysis  # CaptureAnalysis: captures, strategies, derived sets, safety flags
     attr_accessor :exit_promote  # Hash { strategy: :string_dupe } when exit value needs scope-exit promotion
     attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the BG run fn
+    # FSM Phase A: spawn_form = :fsm or :stackful. Chosen by FsmClassifier based
+    # on the BG body's transitive call set. Phase A only records this; Phase B
+    # will use it to emit spawnFsmBest / spawnFsmOn instead of spawnBest.
+    attr_accessor :spawn_form
+    attr_accessor :fsm_ineligible_reason
+    attr_accessor :fsm_suspend_points
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.
@@ -810,6 +823,10 @@ module AST
     attr_accessor :capture_analysis  # CaptureAnalysis with captures hash
     attr_accessor :capture_string_dupes  # Set of capture names that need heap-dupe inside the stream run fn
     attr_accessor :yields_frame_strings  # true when any YIELD expr is a frame string (NEXT caller owns the duped copy)
+    # FSM Phase A: set by FsmClassifier (see effects.rb).
+    attr_accessor :spawn_form
+    attr_accessor :fsm_ineligible_reason
+    attr_accessor :fsm_suspend_points
   end
 
   # YieldExpr: push a value into the enclosing BG STREAM's buffer.

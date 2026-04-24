@@ -1,0 +1,536 @@
+// fsm.zig — Stackless finite-state-machine tasks for the CLEAR scheduler.
+//
+// An FsmTask is an alternative execution form for fiber bodies whose control
+// flow does not require a stack: it runs inline on the worker thread's stack
+// and returns a YieldReason value instead of performing an assembly context
+// switch. This is cheaper than a stackful Task on both memory (~80 bytes of
+// task metadata + caller-sized state struct vs a minimum 2 KB fiber stack)
+// and CPU (no switch.S round-trip).
+//
+// The scheduler integrates FsmTasks alongside stackful Tasks via a separate
+// ready queue (fsm_ready_queue); they can await io_uring completions through
+// FsmIoWaiter, which encodes a marker in the CQE user_data so the scheduler's
+// existing drain path routes the wake to the FSM queue.
+//
+// FsmTasks are user-allocated (the caller owns the state struct that embeds
+// or owns the *FsmTask). This file provides the shape, protocol, and a
+// couple of small helpers; it intentionally does not allocate.
+//
+// Out-of-scope for this module (handled by the caller / scheduler):
+//   - state struct layout (user-defined)
+//   - parking-lot lock waits (FSM tasks fall back to stackful today)
+//   - FSM <-> stackful await interop (handled by promise wake path)
+
+const std = @import("std");
+
+// -----------------------------------------------------------------------------
+// Status
+// -----------------------------------------------------------------------------
+
+pub const FsmStatus = enum(u8) {
+    /// Task is in the ready queue or currently running.
+    Ready = 0,
+    /// Task has produced YieldReason.Done and is ready to be freed.
+    Finished = 1,
+    /// Task returned YieldReason.WaitForIO and is parked on an FsmIoWaiter.
+    /// Re-enqueued to Ready by processCqes when the CQE arrives.
+    Blocked = 2,
+};
+
+// -----------------------------------------------------------------------------
+// YieldReason — what the resume function reports back to the scheduler
+// -----------------------------------------------------------------------------
+//
+// Returned by value from every FSM resume call. The scheduler dispatches on
+// the tag and either frees the task, re-queues it, or stashes it blocked.
+//
+// Intentionally simple for the MVP: adding new wait reasons (timer, lock)
+// only requires extending this union and the scheduler's dispatch arm.
+
+pub const YieldReason = union(enum) {
+    /// Task body has completed. Scheduler frees the task (caller still owns
+    /// the state struct; tasks do not self-free their state).
+    Done: void,
+    /// Task has more work and wants to be re-scheduled. Typically used to
+    /// break up long compute into cooperative chunks.
+    Yielded: void,
+    /// Task has submitted an io_uring SQE whose user_data is
+    /// `waiter.encode()`. Scheduler stashes the task; CQE wake re-enqueues.
+    WaitForIO: *FsmIoWaiter,
+    /// Task has registered on a ParkingMutex/ParkingRwLock waiter queue
+    /// via tryLockOrRegister. Scheduler stashes the task; the lock's
+    /// unlock path wakes it via submitFsmResume. The waiter node lives
+    /// in the user state struct alongside the FsmTask.
+    WaitForLock: void,
+};
+
+// -----------------------------------------------------------------------------
+// Resume function signature
+// -----------------------------------------------------------------------------
+//
+// Every FSM task has a single resume function. On each invocation it dispatches
+// on the state index stored in the task (or in the user state struct), runs up
+// to the next suspension point, and returns a YieldReason.
+//
+// The convention is that the resume fn never calls the scheduler directly; it
+// communicates only via its return value. This keeps FSM dispatch a single
+// inline function call — no yield/switch, no allocation, no hidden state.
+
+pub const ResumeFn = *const fn (*FsmTask) YieldReason;
+
+// -----------------------------------------------------------------------------
+// FsmTask
+// -----------------------------------------------------------------------------
+//
+// Type-erased handle to a state machine. The state pointer is opaque; the
+// resume fn knows how to cast it to the concrete state type.
+//
+// Preferred allocation shape: user embeds FsmTask as the first field of their
+// state struct so state_ptr = &user_state.task and a downcast via @fieldParentPtr
+// recovers the state with no extra pointer hop.
+//
+// Size: ~48 bytes on 64-bit. Compare to Task (~160 B) + Fiber + stack (2 KB).
+
+/// Error surfaced by a parking-lot lock op on an FSM. Stored on
+/// `FsmTask.lock_error` and observed by the resume fn on next dispatch.
+/// Mirrors `parking-lot.LockError`.
+pub const FsmLockError = enum(u8) {
+    None = 0,
+    Deadlock = 1,
+    LockCycle = 2,
+    LockTimeout = 3,
+};
+
+pub const FsmTask = struct {
+    /// Invoked by the scheduler to make progress on this task.
+    resume_fn: ResumeFn,
+    /// Opaque pointer to the user state struct. Meaning known only to resume_fn.
+    state_ptr: *anyopaque,
+    /// Current status.
+    status: FsmStatus = .Ready,
+    /// Profile-only: spawn timestamp in ns.
+    spawn_ns: u64 = 0,
+    /// Non-null when blocked on IO.
+    waiter: ?*FsmIoWaiter = null,
+    /// Non-null when blocked on a parking-lot lock. Opaque `*WaiterNode`.
+    lock_waiter: ?*anyopaque = null,
+    /// Non-null when blocked on a parking-lot lock — points at the
+    /// lock's WaiterList so scanFsmLockWaiters can remove the waiter
+    /// node on timeout. Mirrors stackful Task.waiting_for_lock_list.
+    waiting_for_lock_list: ?*anyopaque = null,
+    /// Surfaced by parking-lot / scheduler when a lock op fails. The
+    /// resume fn reads and clears on next dispatch.
+    lock_error: FsmLockError = .None,
+    /// Points to the lock this task is parked on (opaque). Cleared on wake.
+    waiting_for_lock: ?*anyopaque = null,
+    /// FSM holder of the lock we're parked on (if FSM-held). Used by
+    /// detectCycleFsm to walk mixed and pure-FSM cycles.
+    waiting_for_fsm_owner: ?*FsmTask = null,
+    /// Monotonic ms timestamp of when this FSM parked. Read by the
+    /// scheduler's lock timeout scanner.
+    lock_wait_start_ms: i64 = 0,
+    /// Monotonic ms timestamp at which this FSM should be woken
+    /// from a sleep. Set by Scheduler.fsmSleepTask before the resume
+    /// fn yields WaitForLock; the scan loop in run() compares
+    /// against this and re-enqueues the FSM when reached.
+    fsm_wake_time: i64 = 0,
+    /// Optional callback invoked by the scheduler after the task
+    /// reaches .Finished. Frees the user-owned ctx struct (which
+    /// contains this FsmTask -- so the callback frees itself).
+    ///
+    /// Required for FSM-emitted bodies: the resume fn used to call
+    /// `alloc.destroy(ctx)` on the Done path then return, but
+    /// dispatchOnce reads `task.status` AFTER the resume fn returns,
+    /// which is a use-after-free once ctx is gone. Moving the
+    /// destroy here closes the window: dispatchOnce writes status
+    /// while ctx is still live, then the scheduler invokes
+    /// destroy_fn separately after the dispatch returns.
+    ///
+    /// The FSM emit synthesizes a per-ctx-type fn:
+    ///   fn destroyTask(t: *FsmTask) void {
+    ///       const c: *@This() = @fieldParentPtr("task", t);
+    ///       c.alloc.destroy(c);
+    ///   }
+    /// and stores its pointer here at spawn time.
+    destroy_fn: ?*const fn (*FsmTask) void = null,
+
+    pub fn init(resume_fn: ResumeFn, state_ptr: *anyopaque) FsmTask {
+        return .{ .resume_fn = resume_fn, .state_ptr = state_ptr };
+    }
+};
+
+// -----------------------------------------------------------------------------
+// FsmIoWaiter
+// -----------------------------------------------------------------------------
+//
+// Parallel to scheduler.IoWaiter, but for FSM tasks. The CQE user_data encoding
+// uses bit 0 as the "is waiter" marker and bit 1 as the "is FSM" marker, so
+// the scheduler's processCqes can tell apart:
+//   ud & 0b01 == 0 : direct *Task pointer (poll readiness wake)
+//   ud & 0b11 == 1 : stackful IoWaiter
+//   ud & 0b11 == 3 : FsmIoWaiter (this type)
+//
+// Result is filled by the scheduler on CQE drain, then the task is enqueued
+// back onto fsm_ready_queue.
+
+pub const FsmIoWaiter = struct {
+    task: *FsmTask,
+    result: i32 = undefined,
+
+    pub fn init(task: *FsmTask) FsmIoWaiter {
+        return .{ .task = task };
+    }
+
+    pub fn encode(self: *FsmIoWaiter) u64 {
+        // Pointers to extern / regular struct data are at least 4-byte
+        // aligned on all supported architectures, so the low two bits are
+        // available for tagging.
+        return @intFromPtr(self) | 0b11;
+    }
+
+    pub fn decode(ud: u64) *FsmIoWaiter {
+        return @ptrFromInt(ud & ~@as(u64, 0b11));
+    }
+
+    pub fn isFsmMarker(ud: u64) bool {
+        return (ud & 0b11) == 0b11;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// FsmRunQueue — work-stealing Chase-Lev deque for FsmTasks
+// -----------------------------------------------------------------------------
+//
+// Identical algorithm to queues.zig:RunQueue but specialized for *FsmTask.
+// Owner does push/pop from the bottom; thieves do stealOne from the top via
+// CAS. tryStealFrom grabs ~half of the victim's queue.
+//
+// Separate type (rather than generalizing RunQueue) so the stackful hot path
+// is untouched; the algorithms are the same, but correctness for FSM stealing
+// is validated independently through fsm-steal-test.zig and the race/VOPR
+// tests.
+//
+// The Chase-Lev algorithm itself has extensive Loom coverage via RunQueue
+// (queues-test.zig + vopr-loom.zig); since FsmRunQueue mirrors it verbatim
+// with only the element type changed, the memory-ordering correctness
+// carries over.
+
+const Atomic = std.atomic.Value;
+
+pub const FsmRunQueue = struct {
+    pub const INITIAL_LOG_SIZE: u5 = 6; // 2^6 = 64 slots
+
+    pub const CircularArray = struct {
+        data: []Atomic(?*FsmTask),
+        mask: u32,
+    };
+
+    array: Atomic(?*CircularArray),
+    allocator: std.mem.Allocator,
+    old_arrays: std.ArrayListUnmanaged(*CircularArray) = .empty,
+
+    top: Atomic(u32) = Atomic(u32).init(0),
+    bottom: Atomic(u32) = Atomic(u32).init(0),
+
+    pub fn initWithAllocator(alloc: std.mem.Allocator) !FsmRunQueue {
+        const arr = try makeArray(alloc, INITIAL_LOG_SIZE);
+        return .{ .array = Atomic(?*CircularArray).init(arr), .allocator = alloc };
+    }
+
+    fn makeArray(alloc: std.mem.Allocator, log_size: u5) !*CircularArray {
+        const size = @as(u32, 1) << log_size;
+        const data = try alloc.alloc(Atomic(?*FsmTask), size);
+        for (data) |*slot| slot.* = Atomic(?*FsmTask).init(null);
+        const arr = try alloc.create(CircularArray);
+        arr.* = .{ .data = data, .mask = size - 1 };
+        return arr;
+    }
+
+    fn freeArray(self: *FsmRunQueue, arr: *CircularArray) void {
+        self.allocator.free(arr.data);
+        self.allocator.destroy(arr);
+    }
+
+    pub fn deinit(self: *FsmRunQueue) void {
+        if (self.array.load(.monotonic)) |arr| self.freeArray(arr);
+        for (self.old_arrays.items) |old| self.freeArray(old);
+        self.old_arrays.deinit(self.allocator);
+    }
+
+    fn grow(self: *FsmRunQueue, b: u32, t: u32) !void {
+        const old_arr = self.array.load(.monotonic).?;
+        const old_log: u5 = @intCast(@ctz(old_arr.mask + 1));
+        const new_arr = try makeArray(self.allocator, old_log + 1);
+        var i = t;
+        while (i != b) : (i +%= 1) {
+            new_arr.data[i & new_arr.mask].store(
+                old_arr.data[i & old_arr.mask].load(.monotonic),
+                .monotonic,
+            );
+        }
+        self.old_arrays.append(self.allocator, old_arr) catch {};
+        self.array.store(new_arr, .release);
+    }
+
+    /// Owner only. Append at bottom. Extend array if full.
+    pub fn push(self: *FsmRunQueue, alloc: std.mem.Allocator, task: *FsmTask) !void {
+        _ = alloc;
+        const b = self.bottom.load(.monotonic);
+        const t = self.top.load(.acquire);
+        var arr = self.array.load(.monotonic).?;
+        if (b -% t > arr.mask) {
+            try self.grow(b, t);
+            arr = self.array.load(.monotonic).?;
+        }
+        arr.data[b & arr.mask].store(task, .monotonic);
+        self.bottom.store(b +% 1, .release);
+    }
+
+    /// Owner only. Remove from bottom. Returns null when empty.
+    pub fn pop(self: *FsmRunQueue) ?*FsmTask {
+        const b = self.bottom.load(.monotonic);
+        const t_check = self.top.load(.monotonic);
+        if (b -% t_check == 0) return null;
+        const new_b = b -% 1;
+        self.bottom.store(new_b, .seq_cst);
+        const t = self.top.load(.seq_cst);
+        const arr = self.array.load(.monotonic).?;
+        const task = arr.data[new_b & arr.mask].load(.monotonic);
+        const size = new_b -% t;
+        if (size > arr.mask) {
+            self.bottom.store(b, .monotonic);
+            return null;
+        }
+        if (t == new_b) {
+            if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
+                self.bottom.store(t +% 1, .monotonic);
+                return null;
+            }
+            self.bottom.store(t +% 1, .monotonic);
+            return task;
+        }
+        return task;
+    }
+
+    /// Approximate length. Safe to call from any thread.
+    pub fn len(self: *const FsmRunQueue) usize {
+        const b = self.bottom.load(.monotonic);
+        const t = self.top.load(.monotonic);
+        return b -% t;
+    }
+
+    /// Thief only. Remove from top with a CAS. Returns null if empty or
+    /// a concurrent stealer/popper won the race.
+    pub fn stealOne(self: *FsmRunQueue) ?*FsmTask {
+        const t = self.top.load(.acquire);
+        const b = self.bottom.load(.seq_cst);
+        const arr = self.array.load(.acquire) orelse return null;
+        const size = b -% t;
+        if (size == 0 or size > arr.mask) return null;
+        const task = arr.data[t & arr.mask].load(.acquire);
+        if (self.top.cmpxchgStrong(t, t +% 1, .seq_cst, .monotonic) != null) {
+            return null;
+        }
+        return task;
+    }
+
+    /// Thief helper: take ~half of victim's queue into self's queue.
+    /// Returns number of tasks stolen.
+    pub fn tryStealFrom(self: *FsmRunQueue, victim: *FsmRunQueue, alloc: std.mem.Allocator) usize {
+        const v_len = victim.len();
+        if (v_len == 0) return 0;
+        const target = (v_len + 1) / 2;
+        var stolen_count: usize = 0;
+        while (stolen_count < target) {
+            const task = victim.stealOne() orelse break;
+            self.push(alloc, task) catch break;
+            stolen_count += 1;
+        }
+        return stolen_count;
+    }
+};
+
+// -----------------------------------------------------------------------------
+// Dispatch helper (used by the scheduler; exposed for tests)
+// -----------------------------------------------------------------------------
+//
+// Runs the task's resume fn once and applies the returned YieldReason to the
+// task's status. The caller is responsible for enqueue / free based on the
+// resulting status. Returns the YieldReason so the scheduler can stash the
+// waiter pointer when the task blocks.
+pub fn dispatchOnce(task: *FsmTask) YieldReason {
+    // Clear any previous waiter; a WaitForIO / WaitForLock will set fresh.
+    task.waiter = null;
+    task.lock_waiter = null;
+    const reason = task.resume_fn(task);
+    switch (reason) {
+        .Done => task.status = .Finished,
+        .Yielded => task.status = .Ready,
+        .WaitForIO => |w| {
+            task.status = .Blocked;
+            task.waiter = w;
+        },
+        .WaitForLock => {
+            // The resume fn has already set task.lock_waiter via
+            // tryLockOrRegister before returning this variant.
+            task.status = .Blocked;
+        },
+    }
+    return reason;
+}
+
+// -----------------------------------------------------------------------------
+// Unit tests
+// -----------------------------------------------------------------------------
+
+const testing = std.testing;
+
+test "FsmTask: trivial single-state task completes" {
+    const State = struct {
+        task: FsmTask,
+        seen: u32 = 0,
+
+        fn doResume(t: *FsmTask) YieldReason {
+            const self: *@This() = @fieldParentPtr("task", t);
+            self.seen += 1;
+            return .{ .Done = {} };
+        }
+    };
+    var s: State = .{ .task = undefined, .seen = 0 };
+    s.task = FsmTask.init(&State.doResume, &s);
+
+    const reason = dispatchOnce(&s.task);
+    try testing.expect(reason == .Done);
+    try testing.expectEqual(@as(u32, 1), s.seen);
+    try testing.expectEqual(FsmStatus.Finished, s.task.status);
+}
+
+test "FsmTask: multi-step state machine advances per resume" {
+    const State = struct {
+        task: FsmTask,
+        step: u8 = 0,
+        accumulator: u64 = 0,
+
+        fn doResume(t: *FsmTask) YieldReason {
+            const self: *@This() = @fieldParentPtr("task", t);
+            switch (self.step) {
+                0 => {
+                    self.accumulator = 10;
+                    self.step = 1;
+                    return .{ .Yielded = {} };
+                },
+                1 => {
+                    self.accumulator *= 2;
+                    self.step = 2;
+                    return .{ .Yielded = {} };
+                },
+                2 => {
+                    self.accumulator += 7;
+                    return .{ .Done = {} };
+                },
+                else => unreachable,
+            }
+        }
+    };
+    var s: State = .{ .task = undefined };
+    s.task = FsmTask.init(&State.doResume, &s);
+
+    try testing.expect(dispatchOnce(&s.task) == .Yielded);
+    try testing.expectEqual(FsmStatus.Ready, s.task.status);
+    try testing.expect(dispatchOnce(&s.task) == .Yielded);
+    try testing.expect(dispatchOnce(&s.task) == .Done);
+    try testing.expectEqual(FsmStatus.Finished, s.task.status);
+    try testing.expectEqual(@as(u64, 27), s.accumulator);
+}
+
+test "FsmTask: WaitForIO sets Blocked and stashes waiter" {
+    const State = struct {
+        task: FsmTask,
+        waiter: FsmIoWaiter = undefined,
+        step: u8 = 0,
+
+        fn doResume(t: *FsmTask) YieldReason {
+            const self: *@This() = @fieldParentPtr("task", t);
+            switch (self.step) {
+                0 => {
+                    self.step = 1;
+                    self.waiter = FsmIoWaiter.init(&self.task);
+                    return .{ .WaitForIO = &self.waiter };
+                },
+                1 => {
+                    // The scheduler would have filled self.waiter.result
+                    // before re-dispatching; mirror that here.
+                    if (self.waiter.result < 0) return .{ .Done = {} };
+                    return .{ .Done = {} };
+                },
+                else => unreachable,
+            }
+        }
+    };
+    var s: State = .{ .task = undefined };
+    s.task = FsmTask.init(&State.doResume, &s);
+
+    const reason = dispatchOnce(&s.task);
+    try testing.expect(reason == .WaitForIO);
+    try testing.expectEqual(FsmStatus.Blocked, s.task.status);
+    try testing.expect(s.task.waiter == &s.waiter);
+
+    // Simulate CQE arrival: scheduler fills result, re-enqueues, re-dispatches.
+    s.waiter.result = 42;
+    const second = dispatchOnce(&s.task);
+    try testing.expect(second == .Done);
+    try testing.expectEqual(FsmStatus.Finished, s.task.status);
+    // Waiter is cleared on re-dispatch entry.
+    try testing.expect(s.task.waiter == null);
+}
+
+test "FsmIoWaiter: encode/decode round-trips with FSM marker" {
+    var dummy_task: FsmTask = .{ .resume_fn = undefined, .state_ptr = undefined };
+    var waiter = FsmIoWaiter.init(&dummy_task);
+    const ud = waiter.encode();
+
+    try testing.expect(FsmIoWaiter.isFsmMarker(ud));
+    const decoded = FsmIoWaiter.decode(ud);
+    try testing.expectEqual(&waiter, decoded);
+}
+
+test "FsmIoWaiter: marker distinguishes FSM from stackful IoWaiter" {
+    var dummy_task: FsmTask = .{ .resume_fn = undefined, .state_ptr = undefined };
+    var fsm_waiter = FsmIoWaiter.init(&dummy_task);
+    const fsm_ud = fsm_waiter.encode();
+
+    // Stackful IoWaiter uses `ptr | 1` (bit 1 = 0).
+    const fake_stackful_ud: u64 = @intFromPtr(&fsm_waiter) | 1;
+
+    try testing.expect(FsmIoWaiter.isFsmMarker(fsm_ud));
+    try testing.expect(!FsmIoWaiter.isFsmMarker(fake_stackful_ud));
+    // Plain Task pointer (bit 0 = 0) also not an FSM marker.
+    try testing.expect(!FsmIoWaiter.isFsmMarker(@intFromPtr(&fsm_waiter)));
+}
+
+test "dispatchOnce: Yielded reuses task across many iterations" {
+    const State = struct {
+        task: FsmTask,
+        remaining: u32 = 0,
+        sum: u64 = 0,
+
+        fn doResume(t: *FsmTask) YieldReason {
+            const self: *@This() = @fieldParentPtr("task", t);
+            if (self.remaining == 0) return .{ .Done = {} };
+            self.sum += self.remaining;
+            self.remaining -= 1;
+            return .{ .Yielded = {} };
+        }
+    };
+    var s: State = .{ .task = undefined, .remaining = 100 };
+    s.task = FsmTask.init(&State.doResume, &s);
+
+    var loops: u32 = 0;
+    while (true) {
+        const r = dispatchOnce(&s.task);
+        loops += 1;
+        if (r == .Done) break;
+    }
+    try testing.expectEqual(@as(u32, 101), loops);
+    try testing.expectEqual(@as(u64, 5050), s.sum);
+}

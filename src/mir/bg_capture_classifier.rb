@@ -32,7 +32,7 @@ require_relative "../ast/scope"
 # MIRPass's view of "we should suppress cleanup for this" structurally
 # impossible -- they read the same field.
 module BgCaptureClassifier
-  def self.classify_all!(fn_nodes)
+  def self.classify_all!(fn_nodes, schema_lookup: nil)
     fn_nodes.each do |_name, fn|
       next unless fn&.body
       # `Scope.live_param_syms` returns the {name => live SymbolEntry}
@@ -44,7 +44,7 @@ module BgCaptureClassifier
       # docs/agents/sync-boundary-unification.md (Gap C) and fixes
       # transpile-tests/257_concurrent_capture_locked_param.cht.
       live_param_syms = Scope.live_param_syms(fn)
-      AST.each_capture_analysis(fn.body) { |a| classify_one!(a, live_param_syms) }
+      AST.each_capture_analysis(fn.body) { |a| classify_one!(a, live_param_syms, schema_lookup: schema_lookup) }
     end
   end
 
@@ -52,7 +52,7 @@ module BgCaptureClassifier
   # BgStreamBlock, DoBlock branch (Hash with :capture_analysis key),
   # or ConcurrentOp -- all use the same analysis machinery and now
   # share strategy classification.
-  def self.classify_one!(a, live_param_syms = {})
+  def self.classify_one!(a, live_param_syms = {}, schema_lookup: nil)
     return unless a && a.captures
     # Refresh capture_symbols against the live function-param entries
     # (which propagate_caller_sync! mutates in place). Without this,
@@ -78,7 +78,8 @@ module BgCaptureClassifier
         name: name,
         type: t,
         site_info: site_info,
-        is_resource: a.resource_captures&.include?(name) || false
+        is_resource: a.resource_captures&.include?(name) || false,
+        schema_lookup: schema_lookup
       )
     end
 

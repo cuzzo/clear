@@ -38,6 +38,7 @@ const Atomic = blk: {
 const qs = @import("../runtime/queues.zig");
 const fc = @import("../runtime/fiber-core.zig");
 const fp = @import("../runtime/scheduler.zig");
+const compat = @import("compat.zig");
 
 const Task = qs.Task;
 const WaiterNode = qs.WaiterNode;
@@ -110,18 +111,27 @@ inline fn getScheduler() ?*fp.Scheduler {
     return fp.active_scheduler;
 }
 
-// Walk the owner chain from `owner` looking for `waiter`. If found, return
-// error.Deadlock when the owner is the waiter (depth 0, self-cyclic,
-// always a user bug) or error.LockCycle when the cycle is multi-hop (AB/BA,
-// resolvable by one party backing off). Depth-limited to 64 to guard
-// against corrupted state. Read locks store null in waiting_for_lock_owner
-// and act as chain terminators.
 // Walk the owner chain from `owner` looking for `waiter`. If found,
 // return error.Deadlock when the owner is the waiter (depth 0,
 // self-cyclic, always a user bug) or error.LockCycle when the cycle
 // is multi-hop (AB/BA, resolvable by one party backing off).
-// Depth-limited to 64 to guard against corrupted state. Read locks
-// store null in waiting_for_lock_owner and act as chain terminators.
+// Depth-limited to MAX_CHAIN_DEPTH (32) to guard against corrupted
+// state. Read locks store null in waiting_for_lock_owner and act as
+// chain terminators.
+
+/// Result of an FSM-side lock acquisition attempt. Shared between
+/// ParkingMutex.tryLockForFsm, ParkingRwLock.tryWriteLockForFsm and
+/// ParkingRwLock.tryReadLockForFsm.
+pub const FsmLockResultTop = enum {
+    /// Lock acquired synchronously; caller proceeds to CS.
+    Acquired,
+    /// Waiter was registered on the lock's queue. Caller's FSM resume
+    /// fn must return YieldReason.WaitForLock.
+    Registered,
+    /// Safety violation (re-entrancy, cycle). Specific error is on
+    /// `fsm_task.lock_error`.
+    Error,
+};
 //
 // Best-effort under TOCTOU: per-Task fields are atomic with paired
 // release/acquire ordering (see queues.zig for park/wake store order),
@@ -381,6 +391,62 @@ fn detectCycle(waiter: *Task, lock_ptr: *anyopaque, lock_kind: u8) LockError!voi
     return;
 }
 
+/// Cycle detection for an FSM waiter attempting to acquire `lock_ptr`.
+/// Walks the chain of holders. At each hop: prefer the FSM chain
+/// (waiting_for_fsm_owner) if set, fall back to the stackful chain
+/// (waiting_for_lock_owner). Finds FSM↔FSM cycles and FSM→Stackful
+/// one-hop cycles. Does NOT trace FSM→Stackful→FSM cycles yet —
+/// requires FsmTask to track waiting_for_task_owner (follow-up).
+///
+/// TODO(rebase-onto-vm-fix-rewrite): tighten this to match
+/// detectCycle's option-C protocol (slab pin per Task hop,
+/// generation check, atomic per-hop lock-state snapshot, retry on
+/// torn snapshot, atomic loads on FsmTask back-pointer fields).
+/// See "FSM safety parity" in the rebase plan.
+fn detectCycleFsm(
+    waiter: *fp.FsmTask,
+    initial_task_owner: ?*Task,
+    initial_fsm_owner: ?*fp.FsmTask,
+    lock_ptr: *anyopaque,
+) LockError!void {
+    var depth: usize = 0;
+    var cur_task: ?*Task = initial_task_owner;
+    var cur_fsm: ?*fp.FsmTask = initial_fsm_owner;
+    while (depth < 64) : (depth += 1) {
+        if (cur_fsm) |ft| {
+            if (ft == waiter) {
+                if (depth == 0) {
+                    std.debug.print(
+                        "DEADLOCK: FSM {*} re-acquired lock {*}\n",
+                        .{ waiter, lock_ptr },
+                    );
+                    return error.Deadlock;
+                }
+                std.debug.print(
+                    "LOCK CYCLE: FSM {*} waiting on lock {*} via {} hop(s)\n",
+                    .{ waiter, lock_ptr, depth },
+                );
+                return error.LockCycle;
+            }
+            // FsmTask.waiting_for_fsm_owner is a plain ?*FsmTask in
+            // thunks-cleanup. Atomicizing FsmTask fields is the
+            // follow-up step for FSM safety parity; for now read
+            // unsynchronized — the FsmTask lifetime is bounded by
+            // its scheduler's run loop (no cross-scheduler free
+            // window) so this is best-effort.
+            const next_fsm_any = ft.waiting_for_fsm_owner;
+            cur_task = null;
+            cur_fsm = next_fsm_any;
+        } else if (cur_task) |t| {
+            // FSM waiter cannot equal a Task holder; follow the stackful
+            // chain. .acquire pairs with the .release stores in lockSlow's
+            // park sequence after vm-fix-rewrite atomicized the field.
+            cur_fsm = null;
+            cur_task = t.waiting_for_lock_owner.load(.acquire);
+        } else break;
+    }
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ParkingMutex — exclusive (write) lock
@@ -414,6 +480,11 @@ pub const ParkingMutex = struct {
     pub const STATE_WAKE_BITS:          u64 = STATE_HAS_WAITERS | STATE_HAS_THREAD_SLEEPER;
 
     state: Atomic(u64) = Atomic(u64).init(0),
+    // FSM owner side field. Task owners live in the state word's owner
+    // bits; FSM owners live here to avoid alignment assumptions on
+    // FsmTask pointers. Set on Acquired by tryLockForFsm, cleared by
+    // unlock. Read by detectCycleFsm during cycle-walk.
+    fsm_owner: Atomic(?*fp.FsmTask) = Atomic(?*fp.FsmTask).init(null),
     // Spinlock protecting the waiter queue.
     queue_spin: Atomic(u32) = Atomic(u32).init(0),
     waiters: WaiterList = .{},
@@ -459,6 +530,100 @@ pub const ParkingMutex = struct {
             0;
         const new_state = cur | STATE_LOCKED | owner_val;
         return self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null;
+    }
+
+    pub const FsmLockResult = FsmLockResultTop;
+
+    /// FSM lock acquisition.
+    ///
+    /// Non-blocking from the fiber-yield perspective. On success, returns
+    /// `.Acquired` and the caller owns the lock. On contention, registers
+    /// `waiter` (storage supplied by the caller — lives in the FSM's user
+    /// state struct) on the mutex's waiter queue, sets `fsm_task.lock_waiter`,
+    /// and returns `.Registered`. The caller's FSM resume function must
+    /// then return `YieldReason.WaitForLock`; the scheduler parks the
+    /// task, and `unlock()` on the owner wakes it via `submitFsmResume`.
+    ///
+    /// Returns `.Error` with `fsm_task.lock_error` set on safety
+    /// violations (re-entrancy, cycle). Timeout is surfaced by the
+    /// scheduler's scanFsmLockWaiters via the same lock_error field.
+    pub fn tryLockForFsm(
+        self: *ParkingMutex,
+        fsm_task: *fp.FsmTask,
+        waiter: *WaiterNode,
+        sched: *fp.Scheduler,
+    ) FsmLockResult {
+        // Safety: re-entrancy.
+        if (self.fsm_owner.load(.acquire)) |cur_fsm| {
+            if (cur_fsm == fsm_task) {
+                std.debug.print(
+                    "DEADLOCK: FSM {*} re-acquired mutex {*} it already holds\n",
+                    .{ fsm_task, self },
+                );
+                fsm_task.lock_error = .Deadlock;
+                return .Error;
+            }
+        }
+        // Safety: cycle detection.
+        const pre_state = self.state.load(.acquire);
+        const pre_task_owner = ownerOf(pre_state);
+        const pre_fsm_owner = self.fsm_owner.load(.acquire);
+        detectCycleFsm(fsm_task, pre_task_owner, pre_fsm_owner, self) catch |err| {
+            fsm_task.lock_error = switch (err) {
+                error.Deadlock => .Deadlock,
+                error.LockCycle => .LockCycle,
+                else => .Deadlock,
+            };
+            return .Error;
+        };
+
+        // Fast path: uncontended CAS.
+        const cur = self.state.load(.acquire);
+        if ((cur & STATE_LOCKED) == 0) {
+            const new_state = cur | STATE_LOCKED;
+            if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) {
+                self.fsm_owner.store(fsm_task, .release);
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, false);
+                }
+                return .Acquired;
+            }
+        }
+
+        // Contended path: register under queue_spin.
+        self.spinAcquireQueue();
+        const recheck = self.state.load(.acquire);
+        if ((recheck & STATE_LOCKED) == 0) {
+            const new_state = recheck | STATE_LOCKED;
+            if (self.state.cmpxchgWeak(recheck, new_state, .acquire, .monotonic) == null) {
+                self.fsm_owner.store(fsm_task, .release);
+                self.spinReleaseQueue();
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, true);
+                }
+                return .Acquired;
+            }
+        }
+        _ = self.state.fetchOr(STATE_HAS_WAITERS, .release);
+
+        waiter.* = WaiterNode{
+            .task = undefined,
+            .fsm_task = fsm_task,
+            .sched_ptr = sched,
+            .kind = .Write,
+        };
+        self.waiters.push(waiter);
+        fsm_task.lock_waiter = waiter;
+        fsm_task.waiting_for_lock = self;
+        fsm_task.waiting_for_lock_list = &self.waiters;
+        fsm_task.waiting_for_fsm_owner = pre_fsm_owner;
+        fsm_task.lock_wait_start_ms = compat.milliTimestamp();
+        sched.registerFsmLockWaiter(fsm_task);
+
+        self.spinReleaseQueue();
+        return .Registered;
     }
 
     pub fn lock(self: *ParkingMutex) LockError!void {
@@ -654,6 +819,11 @@ pub const ParkingMutex = struct {
                 self.hold_start_ns = 0;
             }
         }
+        // fsm_owner is set only by FSM-side acquire/transfer paths and
+        // is null when a stackful Task holds the lock — no clear needed
+        // here. Adding an extra .release store every unlock would burn
+        // a SimAtomic yield point and (per loom regression) destabilize
+        // the lost-wake schedule space without functional benefit.
         // Single atomic op: clear LOCKED + OWNER, preserving flag bits.
         // fetchAnd returns the prior value, which tells us whether to wake.
         const prev = self.state.fetchAnd(STATE_FLAG_MASK & ~STATE_LOCKED, .release);
@@ -680,8 +850,11 @@ pub const ParkingMutex = struct {
                 const more_after = w.next != null;
                 const sleeper_bit: u64 = cur_state & STATE_HAS_THREAD_SLEEPER;
                 const more_bit: u64 = if (more_after) STATE_HAS_WAITERS else 0;
-                const new_state: u64 = STATE_LOCKED | sleeper_bit | more_bit
-                    | @intFromPtr(w.task);
+                // FSM wakers do not encode an owner pointer (FSMs hold
+                // exclusivity via self.fsm_owner instead — packed
+                // owner-bits are reserved for stackful Task pointers).
+                const owner_bits: u64 = if (w.isFsm()) @as(u64, 0) else @intFromPtr(w.task);
+                const new_state: u64 = STATE_LOCKED | sleeper_bit | more_bit | owner_bits;
                 if (self.state.cmpxchgStrong(cur_state, new_state, .release, .monotonic) != null) {
                     // State changed (concurrent fast-path acquire). Bail.
                     self.spinReleaseQueue();
@@ -689,17 +862,35 @@ pub const ParkingMutex = struct {
                 }
                 // Transfer succeeded — now safe to pop and wake.
                 _ = self.waiters.pop();
-                // Wake-side ordering: lock cleared FIRST (with .release)
-                // so a concurrent detectCycle reader sees lock==null and
-                // does not chase a stale waiting_for_lock_owner.
-                w.task.waiting_for_lock.store(null, .release);
-                w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
-                w.task.waiting_for_lock_owner.store(null, .release);
-                w.task.waiting_for_lock_list.store(null, .release);
-                w.task.lock_waiter_node.store(null, .release);
-                _ = w.task.seq.fetchAdd(1, .release);
-                const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
-                sched.submitResume(w.task);
+                if (w.isFsm()) {
+                    // FSM wake: clear FSM-side fields, set fsm_owner so
+                    // detectCycleFsm sees this FSM as the holder, then
+                    // submit FSM resume. FsmTask field atomicization is
+                    // a follow-up; fields are set non-atomically here
+                    // (FsmTask lifetime is bounded by its scheduler's
+                    // run loop).
+                    const ft: *fp.FsmTask = @ptrCast(@alignCast(w.fsm_task.?));
+                    self.fsm_owner.store(ft, .release);
+                    ft.lock_waiter = null;
+                    ft.waiting_for_lock = null;
+                    ft.waiting_for_lock_list = null;
+                    ft.waiting_for_fsm_owner = null;
+                    const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
+                    sched.submitFsmResume(ft) catch unreachable;
+                } else {
+                    // Stackful wake-side ordering: lock cleared FIRST
+                    // (with .release) so a concurrent detectCycle reader
+                    // sees lock==null and does not chase a stale
+                    // waiting_for_lock_owner.
+                    w.task.waiting_for_lock.store(null, .release);
+                    w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+                    w.task.waiting_for_lock_owner.store(null, .release);
+                    w.task.waiting_for_lock_list.store(null, .release);
+                    w.task.lock_waiter_node.store(null, .release);
+                    _ = w.task.seq.fetchAdd(1, .release);
+                    const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
+                    sched.submitResume(w.task);
+                }
                 self.spinReleaseQueue();
                 return;
             }
@@ -763,8 +954,14 @@ pub const ParkingRwLock = struct {
     waiters: WaiterList = .{},
     // GAP-A fix: was `std.atomic.Value(?*Task)`. With the comptime alias,
     // SimAtomic substitution under loom now covers every read/write of
-    // write_owner — including the cycle-detect read in currentChainOwner.
+    // write_owner — including the cycle-detect reads in detectCycle's
+    // option-C readLockState path.
     write_owner: Atomic(?*Task) = Atomic(?*Task).init(null),
+    // Parallel FSM owner side field. Set when an FSM holds the write
+    // lock; stackful holders use write_owner instead. Null while
+    // unlocked or reader-held (readers have no single owner). Enables
+    // re-entrancy + cycle detection for FSM writers.
+    fsm_write_owner: Atomic(?*fp.FsmTask) = Atomic(?*fp.FsmTask).init(null),
     // Profile-only: write-lock hold start. Reader lock hold times are
     // trickier (multiple concurrent readers) and deferred; for now we
     // instrument the write path since that's where contention bites.
@@ -919,6 +1116,11 @@ pub const ParkingRwLock = struct {
             }
         }
         self.write_owner.store(null, .release);
+        // fsm_write_owner is set only by FSM-side acquire/transfer paths
+        // and is null when a stackful Task holds the lock. Skipping the
+        // clear here saves a SimAtomic yield point on the hot stackful
+        // unlock path (otherwise the address-ordered VOPR loom test
+        // exhausts MAX_STEPS).
         // Clear write bit. fetchAnd returns the prior value so we can detect
         // HAS_WAITERS in one atomic op (no separate load).
         const prev = self.state.fetchAnd(~WRITE_LOCKED_BIT, .release);
@@ -927,6 +1129,152 @@ pub const ParkingRwLock = struct {
             self.wakeNext();
             self.spinReleaseQueue();
         }
+    }
+
+    // FSM write lock — non-blocking registration.
+    //
+    // Returns `.Acquired` / `.Registered` / `.Error` (on safety
+    // violation via fsm_task.lock_error). Parallels ParkingMutex's
+    // tryLockForFsm with the rwlock state encoding. Re-entrancy and
+    // cycle detection match Mutex behavior — a writer chain is a
+    // single-owner chain, so detectCycleFsm applies.
+    pub fn tryWriteLockForFsm(
+        self: *ParkingRwLock,
+        fsm_task: *fp.FsmTask,
+        waiter: *WaiterNode,
+        sched: *fp.Scheduler,
+    ) FsmLockResultTop {
+        // Safety: write re-entrancy on the same FSM.
+        if (self.fsm_write_owner.load(.acquire)) |cur| {
+            if (cur == fsm_task) {
+                std.debug.print(
+                    "DEADLOCK: FSM {*} re-acquired rwlock write {*}\n",
+                    .{ fsm_task, self },
+                );
+                fsm_task.lock_error = .Deadlock;
+                return .Error;
+            }
+        }
+        // Safety: cycle detection across stackful/FSM writer chains.
+        const pre_task_owner = self.write_owner.load(.acquire);
+        const pre_fsm_owner = self.fsm_write_owner.load(.acquire);
+        detectCycleFsm(fsm_task, pre_task_owner, pre_fsm_owner, self) catch |err| {
+            fsm_task.lock_error = switch (err) {
+                error.Deadlock => .Deadlock,
+                error.LockCycle => .LockCycle,
+                else => .Deadlock,
+            };
+            return .Error;
+        };
+
+        // Fast path: state == 0 → claim WRITE_LOCKED.
+        const cur = self.state.load(.acquire);
+        if (cur == 0) {
+            if (self.state.cmpxchgWeak(0, WRITE_LOCKED_BIT, .acquire, .monotonic) == null) {
+                self.fsm_write_owner.store(fsm_task, .release);
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, false);
+                }
+                return .Acquired;
+            }
+        }
+
+        // Slow path: register under queue_spin.
+        self.spinAcquireQueue();
+        const recheck = self.state.load(.acquire);
+        if (recheck == 0) {
+            if (self.state.cmpxchgWeak(0, WRITE_LOCKED_BIT, .acquire, .monotonic) == null) {
+                self.fsm_write_owner.store(fsm_task, .release);
+                self.spinReleaseQueue();
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, true);
+                }
+                return .Acquired;
+            }
+        }
+        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+
+        waiter.* = WaiterNode{
+            .task = undefined,
+            .fsm_task = fsm_task,
+            .sched_ptr = sched,
+            .kind = .Write,
+        };
+        self.waiters.push(waiter);
+        fsm_task.lock_waiter = waiter;
+        fsm_task.waiting_for_lock = self;
+        fsm_task.waiting_for_lock_list = &self.waiters;
+        fsm_task.waiting_for_fsm_owner = pre_fsm_owner;
+        fsm_task.lock_wait_start_ms = compat.milliTimestamp();
+        sched.registerFsmLockWaiter(fsm_task);
+
+        self.spinReleaseQueue();
+        return .Registered;
+    }
+
+    // FSM read lock — non-blocking registration.
+    //
+    // No re-entrancy check: read locks are stackable by design. No
+    // owner-chain entry: readers have no single owner to walk through
+    // (consistent with the stackful path). Timeout scanning still
+    // applies via registerFsmLockWaiter.
+    pub fn tryReadLockForFsm(
+        self: *ParkingRwLock,
+        fsm_task: *fp.FsmTask,
+        waiter: *WaiterNode,
+        sched: *fp.Scheduler,
+    ) FsmLockResultTop {
+        // Fast path: optimistic fetchAdd. Undo if WRITE_LOCKED or HAS_WAITERS set.
+        const prev = self.state.fetchAdd(1, .acquire);
+        if ((prev & NON_READER_BITS) == 0) {
+            if (rt_profile.CLEAR_PROFILE) {
+                self.hold_start_ns = lock_profile.now();
+                lock_profile.recordAcquire(@intFromPtr(self), 0, false);
+            }
+            return .Acquired;
+        }
+        // Conflict: undo the optimistic increment, then register as a reader waiter.
+        _ = self.state.fetchSub(1, .release);
+
+        self.spinAcquireQueue();
+        // Re-check: maybe lock cleared and no writer waiters in the queue.
+        const st = self.state.load(.acquire);
+        if ((st & WRITE_LOCKED_BIT) == 0) {
+            // No writer holds. But if there are writer waiters, we still
+            // park to preserve write-priority fairness (mirror stackful).
+            const head = self.waiters.peek();
+            const has_writer_ahead = head != null and head.?.kind == .Write;
+            if (!has_writer_ahead) {
+                _ = self.state.fetchAdd(1, .acquire);
+                self.spinReleaseQueue();
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, true);
+                }
+                return .Acquired;
+            }
+        }
+        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+
+        waiter.* = WaiterNode{
+            .task = undefined,
+            .fsm_task = fsm_task,
+            .sched_ptr = sched,
+            .kind = .Read,
+        };
+        self.waiters.push(waiter);
+        fsm_task.lock_waiter = waiter;
+        fsm_task.waiting_for_lock = self;
+        fsm_task.waiting_for_lock_list = &self.waiters;
+        // Readers have no single owner; leave waiting_for_fsm_owner null.
+        fsm_task.waiting_for_fsm_owner = null;
+        fsm_task.lock_wait_start_ms = compat.milliTimestamp();
+        sched.registerFsmLockWaiter(fsm_task);
+
+        self.spinReleaseQueue();
+        return .Registered;
     }
 
     // Shared (read) lock
@@ -1095,16 +1443,27 @@ pub const ParkingRwLock = struct {
                         break; // CAS succeeded
                     }
                     const w = self.waiters.pop().?;
-                    self.write_owner.store(w.task, .release);
-                    // Wake-side ordering: lock cleared FIRST.
-                    w.task.waiting_for_lock.store(null, .release);
-                    w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
-                    w.task.waiting_for_lock_owner.store(null, .release);
-                    w.task.waiting_for_lock_list.store(null, .release);
-                    w.task.lock_waiter_node.store(null, .release);
-                    _ = w.task.seq.fetchAdd(1, .release);
-                    const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
-                    sched.submitResume(w.task);
+                    if (w.isFsm()) {
+                        const ft: *fp.FsmTask = @ptrCast(@alignCast(w.fsm_task.?));
+                        self.fsm_write_owner.store(ft, .release);
+                        self.write_owner.store(null, .release);
+                        ft.lock_waiter = null;
+                        ft.waiting_for_lock = null;
+                        ft.waiting_for_fsm_owner = null;
+                        const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
+                        sched.submitFsmResume(ft) catch unreachable;
+                    } else {
+                        self.write_owner.store(w.task, .release);
+                        // Wake-side ordering: lock cleared FIRST.
+                        w.task.waiting_for_lock.store(null, .release);
+                        w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+                        w.task.waiting_for_lock_owner.store(null, .release);
+                        w.task.waiting_for_lock_list.store(null, .release);
+                        w.task.lock_waiter_node.store(null, .release);
+                        _ = w.task.seq.fetchAdd(1, .release);
+                        const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
+                        sched.submitResume(w.task);
+                    }
                     return; // grant one writer per wakeNext
                 },
                 .Read => {
@@ -1113,13 +1472,22 @@ pub const ParkingRwLock = struct {
                     // stays set; we'll fix it up after the drain.
                     _ = self.state.fetchAdd(1, .acquire);
                     const r = self.waiters.pop().?;
-                    r.task.waiting_for_lock_list.store(null, .release);
-                    r.task.lock_waiter_node.store(null, .release);
-                    r.task.waiting_for_lock.store(null, .release);
-                    r.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
-                    _ = r.task.seq.fetchAdd(1, .release);
-                    const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
-                    sched.submitResume(r.task);
+                    if (r.isFsm()) {
+                        const ft: *fp.FsmTask = @ptrCast(@alignCast(r.fsm_task.?));
+                        ft.lock_waiter = null;
+                        ft.waiting_for_lock = null;
+                        ft.waiting_for_fsm_owner = null;
+                        const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
+                        sched.submitFsmResume(ft) catch unreachable;
+                    } else {
+                        r.task.waiting_for_lock_list.store(null, .release);
+                        r.task.lock_waiter_node.store(null, .release);
+                        r.task.waiting_for_lock.store(null, .release);
+                        r.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+                        _ = r.task.seq.fetchAdd(1, .release);
+                        const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
+                        sched.submitResume(r.task);
+                    }
                     // Continue draining: next head might be another reader.
                 },
             }
@@ -1175,6 +1543,37 @@ pub fn ParkingRwLocked(comptime T: type) type {
         pub fn writeOrErr(self: *Self) LockError!WriteGuard {
             try self.rw.lock();
             return .{ .parent = self };
+        }
+
+        // FSM Phase B2-WITH (rwlock) — non-yielding acquire variants.
+        // Same protocol as ParkingMutex.tryLockForFsm: returns Acquired
+        // on success, Registered if the FSM was queued (caller yields
+        // WaitForLock), or Error on safety violation. Pair with
+        // unlock()/unlockShared() once the CS finishes.
+        pub fn tryWriteLockForFsm(
+            self: *Self,
+            fsm_task: *fp.FsmTask,
+            waiter: *qs.WaiterNode,
+            sched: *fp.Scheduler,
+        ) FsmLockResultTop {
+            return self.rw.tryWriteLockForFsm(fsm_task, waiter, sched);
+        }
+
+        pub fn tryReadLockForFsm(
+            self: *Self,
+            fsm_task: *fp.FsmTask,
+            waiter: *qs.WaiterNode,
+            sched: *fp.Scheduler,
+        ) FsmLockResultTop {
+            return self.rw.tryReadLockForFsm(fsm_task, waiter, sched);
+        }
+
+        pub fn unlock(self: *Self) void {
+            self.rw.unlock();
+        }
+
+        pub fn unlockShared(self: *Self) void {
+            self.rw.unlockShared();
         }
 
         pub const ReadGuard = struct {

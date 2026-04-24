@@ -1,0 +1,20 @@
+-- FSM Phase B2 + IF+IO: a BG body whose IF branch contains a
+-- suspending stdlib call. Lowers via the recursive splitter into
+-- a flat segment graph: pre + CondBranch + then-branch (with
+-- IoSuspend) + else-branch + convergence. No per-shape codegen --
+-- the recursive splitter + unified emit handle it.
+
+FN main() RETURNS Void ->
+  -- Conditional sleep: if cond, sleep+do; else skip.
+  p1: ~Int64 = BG {
+    flag = 1_i64;
+    IF flag > 0 THEN
+      sleep(10);
+    END
+    flag;
+  };
+  result1 = NEXT p1;
+  ASSERT result1 == 1, "1: IF+IO ran the then-branch with the suspend";
+
+  RETURN;
+END

@@ -1,0 +1,79 @@
+-- FSM Phase B2-WITH: 2-state FSM for BG bodies with exactly one
+-- WITH EXCLUSIVE.
+--
+-- Verifies the CPS transform end-to-end: an FSM-eligible BG body
+-- containing exactly one top-level WITH EXCLUSIVE lowers to a state
+-- machine that suspends via tryLockForFsm + WaitForLock and resumes
+-- via the parking-lot wakeNext path.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+  -- 1. Single FSM acquires + releases the lock; main verifies.
+  c1 = Counter{ value: 0 } @locked;
+  p1: ~Void = BG {
+    WITH EXCLUSIVE c1 AS inner {
+      inner.value = inner.value + 1;
+    }
+  };
+  NEXT p1;
+  WITH EXCLUSIVE c1 AS inner {
+    ASSERT inner.value == 1, "1: single FSM holds + releases";
+  }
+
+  -- 2. Two concurrent FSMs contend for the same lock; both increment
+  --    safely (one will hit Acquired path, the other Registered).
+  c2 = Counter{ value: 0 } @locked;
+  q1: ~Void = BG { WITH EXCLUSIVE c2 AS inner { inner.value = inner.value + 1; } };
+  q2: ~Void = BG { WITH EXCLUSIVE c2 AS inner { inner.value = inner.value + 1; } };
+  NEXT q1;
+  NEXT q2;
+  WITH EXCLUSIVE c2 AS inner {
+    ASSERT inner.value == 2, "2: two contending FSMs both incremented";
+  }
+
+  -- 3. Pre-stmts before WITH: locals that survive the suspend.
+  c3 = Counter{ value: 100 } @locked;
+  p3: ~Void = BG {
+    delta = 7_i64;
+    WITH EXCLUSIVE c3 AS inner {
+      inner.value = inner.value + delta;       -- delta crosses the suspend
+    }
+  };
+  NEXT p3;
+  WITH EXCLUSIVE c3 AS inner {
+    ASSERT inner.value == 107, "3: pre-suspend local read inside CS";
+  }
+
+  -- 4. Post-stmts after WITH: state mutation continues after lock
+  --    release (still inside the FSM body).
+  c4 = Counter{ value: 0 } @locked;
+  p4: ~Void = BG {
+    WITH EXCLUSIVE c4 AS inner {
+      inner.value = 5;
+    }
+    -- Lock has been released here, but FSM body continues.
+  };
+  NEXT p4;
+  WITH EXCLUSIVE c4 AS inner {
+    ASSERT inner.value == 5, "4: lock released before post-stmts";
+  }
+
+  -- 5. Heavy contention: 8 FSMs each increment by 1.
+  c5 = Counter{ value: 0 } @locked;
+  r1: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  r2: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  r3: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  r4: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  r5: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  r6: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  r7: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  r8: ~Void = BG { WITH EXCLUSIVE c5 AS inner { inner.value = inner.value + 1; } };
+  NEXT r1; NEXT r2; NEXT r3; NEXT r4;
+  NEXT r5; NEXT r6; NEXT r7; NEXT r8;
+  WITH EXCLUSIVE c5 AS inner {
+    ASSERT inner.value == 8, "5: 8 contending FSMs all incremented";
+  }
+
+  RETURN;
+END

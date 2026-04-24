@@ -4,7 +4,7 @@
 class FunctionContext
   attr_accessor :name, :return_type, :lifetime, :type_params,
                 :frame_count, :heap_count, :alloc_count,
-                :loop_depth, :returns,
+                :loop_depth, :conditional_depth, :returns,
                 :stack_vars_bytes  # accumulated bytes for stack-local variables
 
   def initialize(name:, return_type:, lifetime: nil, type_params: [])
@@ -16,6 +16,7 @@ class FunctionContext
     @heap_count = 0
     @alloc_count = 0
     @loop_depth = 0
+    @conditional_depth = 0
     @returns = []
     @stack_vars_bytes = 0
   end

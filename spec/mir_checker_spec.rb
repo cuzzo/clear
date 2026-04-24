@@ -640,4 +640,111 @@ RSpec.describe MIRChecker do
       expect(errors).to be_empty
     end
   end
+
+  # ===========================================================================
+  # FSM structural invariants
+  # ===========================================================================
+  #
+  # Verifies the FSM-specific cleanup-placement checks. These exist
+  # because the FSM lowering renders multi-step state machines as
+  # opaque Zig text -- the regular checker can't see step boundaries
+  # or `defer` placement. FsmStructure exposes those decisions to
+  # the checker; check_fsm_structure! enforces invariants on it.
+  #
+  # The motivating bug: capture cleanups (`defer free(filepath)`)
+  # were placed inside runStep0, firing at end of step 0 -- BEFORE
+  # runStep1 ever ran. runStep1 then read freed capture memory,
+  # producing wrong results in the file-search benchmark with no
+  # compile-time warning.
+
+  describe "check_fsm_structure!" do
+    it "rejects capture cleanup placed in a step (not finalize)" do
+      structure = MIR::FsmStructure.new(
+        [{ name: "needle", cleanup_at: 0 }],
+        [],
+        [
+          { index: 0, reads: ["needle"], cleanups: ["needle"] },
+          { index: 1, reads: ["needle"], cleanups: [] },
+        ],
+        [],
+        0,
+        nil,
+      )
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-CAPTURE-FINALIZE/)
+    end
+
+    it "rejects capture with no cleanup at all" do
+      structure = MIR::FsmStructure.new(
+        [{ name: "needle", cleanup_at: :finalize }],
+        [],
+        [{ index: 0, reads: [], cleanups: [] }],
+        [],
+        0,
+        nil,
+      )
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-CAPTURE-CLEANUP-PRESENT/)
+    end
+
+    it "rejects step N reading a name whose cleanup is in step M < N" do
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "tmp", finalize_at: nil }],
+        [
+          { index: 0, reads: ["tmp"], cleanups: ["tmp"] },
+          { index: 1, reads: ["tmp"], cleanups: [] },
+        ],
+        [],
+        0,
+        nil,
+      )
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-STEP-READS-LIVE/)
+    end
+
+    it "rejects result aliasing a finalized state field" do
+      structure = MIR::FsmStructure.new(
+        [],
+        [{ name: "rf_buf", finalize_at: :finalize }],
+        [{ index: 1, reads: ["rf_buf"], cleanups: ["rf_buf"] }],
+        ["rf_buf"],
+        0,
+        "rf_buf",  # aliasing detected by lowering
+      )
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.to raise_error(MIRChecker::FsmStructureError, /INV-FSM-RESULT-NO-FINALIZED-ALIAS/)
+    end
+
+    it "passes a well-formed FSM structure" do
+      structure = MIR::FsmStructure.new(
+        [{ name: "needle", cleanup_at: :finalize }],
+        [{ name: "rf_buf", finalize_at: :finalize }],
+        [
+          { index: 0, reads: ["needle"], cleanups: [] },
+          {
+            index: 1,
+            reads: ["needle", "rf_buf"],
+            cleanups: ["needle", "rf_buf"],
+          },
+        ],
+        ["needle", "rf_buf"],
+        0,
+        nil,
+      )
+      expect {
+        MIRChecker.check_fsm_structure!(structure)
+      }.not_to raise_error
+    end
+
+    it "ignores nil structure (non-FSM BgBlocks)" do
+      expect {
+        MIRChecker.check_fsm_structure!(nil)
+      }.not_to raise_error
+    end
+  end
 end

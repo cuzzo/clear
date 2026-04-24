@@ -4,6 +4,12 @@ const builtin = @import("builtin");
 const qs = @import("queues.zig");
 const fc = @import("fiber-core.zig");
 const fm = @import("fiber-memory.zig");
+const fsm_mod = @import("fsm.zig");
+pub const FsmTask = fsm_mod.FsmTask;
+pub const FsmIoWaiter = fsm_mod.FsmIoWaiter;
+pub const FsmStatus = fsm_mod.FsmStatus;
+pub const YieldReason = fsm_mod.YieldReason;
+pub const FsmRunQueue = fsm_mod.FsmRunQueue;
 const compat = @import("../lib/compat.zig");
 // Profile telemetry (comptime-gated). Imports are cheap; actual calls
 // live inside `if (rt_profile.CLEAR_PROFILE)` blocks that compile away
@@ -202,11 +208,30 @@ pub const Scheduler = struct {
     fiber_pool: std.ArrayListUnmanaged(*Task) = .empty,
     ready_queue: RunQueue,
     pinned_queue: std.ArrayListUnmanaged(*Task) = .empty,
+    // FSM (stackless) tasks — Chase-Lev work-stealing deque, algorithmically
+    // identical to the stackful ready_queue above but specialized for
+    // *FsmTask. Owner pushes/pops from the bottom; idle siblings steal
+    // half from the top. Drained once per main-loop iteration (see run()).
+    fsm_ready_queue: FsmRunQueue,
+    // Staging list for .Yielded FSM tasks during a single drain. The
+    // Chase-Lev deque is LIFO for the owner, so re-pushing a yielded
+    // task would have it immediately re-dispatched — one task could
+    // monopolize the batch. Instead we collect yielded tasks here and
+    // flush them back to the main queue after the batch, guaranteeing
+    // FIFO-style progress across all yielders.
+    fsm_deferred_queue: std.ArrayListUnmanaged(*FsmTask) = .empty,
     stack_cache: std.ArrayListUnmanaged([]u8) = .empty,   // LIFO Cache for Stacks
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .empty,
     // Fibers parked waiting for a ParkingMutex or ParkingRwLock.
     // Scanned in the run loop's slow path for LOCK_TIMEOUT_MS deadlock detection.
     lock_waiters: std.ArrayListUnmanaged(*Task) = .empty,
+    // FSM parallel to lock_waiters. Populated by ParkingMutex.tryLockForFsm
+    // on .Registered. Scanned every run() iteration for timeout expiry.
+    fsm_lock_waiters: std.ArrayListUnmanaged(*FsmTask) = .empty,
+    // FSM parallel to sleeping_queue. Populated by Scheduler.fsmSleepTask
+    // before the resume fn yields WaitForLock. The slow-path scan in run()
+    // re-enqueues to fsm_ready_queue when fsm_wake_time is reached.
+    fsm_sleeping_queue: std.ArrayListUnmanaged(*FsmTask) = .empty,
 
     // 2. Communication — Pure SPSC (no MPSC linked list)
     /// SPSC channels: lazily allocated, one per potential sender (max 64).
@@ -322,6 +347,9 @@ pub const Scheduler = struct {
             .stack_pool = stack_pool,
             .fiber_pool = .empty,
             .ready_queue = try RunQueue.initWithAllocator(allocator),
+            .fsm_ready_queue = try FsmRunQueue.initWithAllocator(allocator),
+            .fsm_lock_waiters = .empty,
+            .fsm_sleeping_queue = .empty,
             .stack_cache = .empty,
             .sleeping_queue = .empty,
             .event_fd = efd,
@@ -349,6 +377,8 @@ pub const Scheduler = struct {
 
     pub fn deinit(self: *Scheduler) void {
         self.lock_waiters.deinit(self.allocator);
+        self.fsm_lock_waiters.deinit(self.allocator);
+        self.fsm_sleeping_queue.deinit(self.allocator);
         const queues = .{ &self.fiber_pool, &self.sleeping_queue };
         inline for (queues) |q| {
             for (q.items) |task| {
@@ -395,6 +425,11 @@ pub const Scheduler = struct {
             self.task_slab.destroy(task);
         }
         self.pinned_queue.deinit(self.allocator);
+        // FSM tasks have caller-owned state structs. We do not free them
+        // here — just release the queue storage. Any unfinished FSM is the
+        // caller's responsibility.
+        self.fsm_ready_queue.deinit();
+        self.fsm_deferred_queue.deinit(self.allocator);
 
         self.stack_pool.flushLocalCache();
         self.stack_cache.deinit(self.allocator);
@@ -489,6 +524,72 @@ pub const Scheduler = struct {
             .config_timeout_ms = config.timeout_ms,
         };
         // Wait-and-work: if ring is full, drain our own channels + yield
+        while (!ring.push(msg)) {
+            if (scheduler_running) {
+                active_scheduler.drainChannels();
+                active_scheduler.coopYield();
+            } else {
+                std.Thread.yield() catch {};
+            }
+        }
+        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
+        self.event_fd.notify();
+    }
+
+    // ------------------------------------------------------------
+    // 1b. FSM SPAWN (cross-scheduler)
+    // ------------------------------------------------------------
+    /// Submit a pre-initialized FsmTask to this scheduler's FSM queue
+    /// via SPSC. Fast path enqueues directly when the caller is running
+    /// on the same scheduler; cross-thread callers go through the ring.
+    /// Caller owns the state struct that embeds the FsmTask; the task
+    /// pointer must outlive the scheduler run.
+    pub fn submitFsmSpawn(self: *Scheduler, fsm_task: *FsmTask) !void {
+        // Fast path: same scheduler — avoid the ring + eventfd roundtrip.
+        if (scheduler_running and self == active_scheduler) {
+            self.enqueueFsm(fsm_task);
+            return;
+        }
+
+        const sender_idx = if (scheduler_running) active_scheduler.index else 0;
+        std.debug.assert(sender_idx < self.channels.len);
+        const ring = try self.ensureChannel(sender_idx);
+        const msg = SpscMessage{
+            .tag = .FsmSpawn,
+            .fsm_task = fsm_task,
+        };
+        while (!ring.push(msg)) {
+            if (scheduler_running) {
+                active_scheduler.drainChannels();
+                active_scheduler.coopYield();
+            } else {
+                std.Thread.yield() catch {};
+            }
+        }
+        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
+        self.event_fd.notify();
+    }
+
+    /// Wake a previously-parked FSM task. Same routing as submitFsmSpawn
+    /// (same-scheduler fast path, SPSC slow path) but tagged as
+    /// FsmResume so drainChannels does NOT increment active_tasks (the
+    /// task was counted when originally enqueued). Called by parking-lot
+    /// unlock when the waker is an FSM.
+    pub fn submitFsmResume(self: *Scheduler, fsm_task: *FsmTask) !void {
+        if (scheduler_running and self == active_scheduler) {
+            // Same-scheduler fast path: bypass active_tasks increment
+            // by pushing directly. enqueueFsm would double-count.
+            fsm_task.status = .Ready;
+            self.fsm_ready_queue.push(self.allocator, fsm_task) catch unreachable;
+            return;
+        }
+        const sender_idx = if (scheduler_running) active_scheduler.index else 0;
+        std.debug.assert(sender_idx < self.channels.len);
+        const ring = try self.ensureChannel(sender_idx);
+        const msg = SpscMessage{
+            .tag = .FsmResume,
+            .fsm_task = fsm_task,
+        };
         while (!ring.push(msg)) {
             if (scheduler_running) {
                 active_scheduler.drainChannels();
@@ -654,6 +755,18 @@ pub const Scheduler = struct {
                         task.status.store(.Ready, .release);
                         self.enqueueTask(task);
                     },
+                    .FsmSpawn => {
+                        const fsm_task: *FsmTask = @ptrCast(@alignCast(msg.fsm_task.?));
+                        self.enqueueFsm(fsm_task);
+                    },
+                    .FsmResume => {
+                        // Wake (not spawn): push to queue without incrementing
+                        // active_tasks. The task was counted at its original
+                        // enqueueFsm and remains counted while parked.
+                        const fsm_task: *FsmTask = @ptrCast(@alignCast(msg.fsm_task.?));
+                        fsm_task.status = .Ready;
+                        self.fsm_ready_queue.push(self.allocator, fsm_task) catch unreachable;
+                    },
                     .RemoteCall => {
                         if (self.draining) {
                             std.debug.print("RE-ENTRANT DRAIN: sched={d}\n", .{self.index});
@@ -691,10 +804,24 @@ pub const Scheduler = struct {
 
         const my_id = std.Thread.getCurrentId();
 
-        // Ensure thread-locals always point to this scheduler when run() is
-        // called. Tests that set these before calling run() get the same value;
-        // tests that omit the setup (relying on implicit state from a previous
-        // test) get the correct scheduler without fragile stack-address aliasing.
+        // CRITICAL: clear thread-locals on exit, regardless of how we
+        // leave (normal return, panic, error). If we leave them set,
+        // subsequent code on this thread that calls submitSpawn or any
+        // helper gated on getScheduler() reads a dangling pointer — in
+        // Debug the `sender_idx < channels.len` assert fires, in Release
+        // the garbage pointer silently corrupts state. Before this defer
+        // every caller had to remember to reset; missing it was a latent
+        // landmine exposed whenever Scheduler's layout shifted.
+        //
+        // We clear rather than save/restore: a dirty prior state is
+        // either (a) a bug the caller should fix, or (b) an intentional
+        // nested invocation that should have set the state itself before
+        // re-entering run(). Clearing is the safe default.
+        defer {
+            active_scheduler = undefined;
+            scheduler_running = false;
+        }
+
         active_scheduler = self;
         scheduler_running = true;
 
@@ -724,6 +851,7 @@ pub const Scheduler = struct {
             //      (not timeout) are only lazily cleaned in this scan, so
             //      #2 also means the list grows without bound.
             _ = self.scanLockWaiters();
+            self.scanFsmLockWaiters();
 
             // ── Fast path: if any queue has work, run it immediately.
             if (self.hasWork()) {
@@ -749,10 +877,38 @@ pub const Scheduler = struct {
                         }
                     }
                 }
+
+                // Wake sleeping FSM tasks. Same wake-time semantics
+                // as the stackful sleeping_queue, but routed onto
+                // fsm_ready_queue. submitFsmResume is the bypass-
+                // active_tasks-increment variant (the FSM was
+                // counted at original spawn).
+                if (self.fsm_sleeping_queue.items.len > 0) {
+                    const now = milliTimestamp();
+                    var i: usize = 0;
+                    while (i < self.fsm_sleeping_queue.items.len) {
+                        const fsm_task = self.fsm_sleeping_queue.items[i];
+                        if (now >= fsm_task.fsm_wake_time) {
+                            _ = self.fsm_sleeping_queue.swapRemove(i);
+                            fsm_task.status = .Ready;
+                            self.fsm_ready_queue.push(self.allocator, fsm_task) catch unreachable;
+                        } else {
+                            i += 1;
+                        }
+                    }
+                }
             } // end slow path
 
+            // FSM tasks run inline on the worker stack — drain them before
+            // context-switching to any stackful task. dispatchFsmTask
+            // snapshots the queue length so cooperative yields (.Yielded)
+            // defer to the next iteration.
+            if (self.fsm_ready_queue.len() > 0) {
+                self.drainFsmQueue();
+            }
+
             // Look for tasks ready to start:
-            if (self.hasWork()) {
+            if (self.ready_queue.len() > 0 or self.pinned_queue.items.len > 0) {
                 // Pinned queue first (owner-local, no steal contention).
                 const task = if (self.pinned_queue.items.len > 0)
                     self.pinned_queue.swapRemove(0)
@@ -831,13 +987,25 @@ pub const Scheduler = struct {
                 if (pair.b) |victim| {
                     // Don't steal from myself
                     if (victim != self) {
-                        // Lock the victim's queue and take half tasks
+                        // Stackful steal: take half of victim's stackful queue.
                         const stolen = self.ready_queue.tryStealFrom(&victim.ready_queue, self.allocator);
                         if (stolen > 0) {
                             // update my queue size to account for steals
                             _ = self.active_tasks.fetchAdd(stolen, .monotonic);
                             // update victim queue size to account for steals
                             _ = victim.active_tasks.fetchSub(stolen, .monotonic);
+                        }
+                        // FSM steal: if still idle after stackful steal,
+                        // grab half of victim's FSM queue. Same algorithm,
+                        // separate type. Stealing transfers ownership of
+                        // the *FsmTask handle; state struct is still owned
+                        // by the original caller (scheduler-agnostic).
+                        if (stolen == 0) {
+                            const fsm_stolen = self.fsm_ready_queue.tryStealFrom(&victim.fsm_ready_queue, self.allocator);
+                            if (fsm_stolen > 0) {
+                                _ = self.active_tasks.fetchAdd(fsm_stolen, .monotonic);
+                                _ = victim.active_tasks.fetchSub(fsm_stolen, .monotonic);
+                            }
                         }
                     }
                 }
@@ -863,6 +1031,11 @@ pub const Scheduler = struct {
                 // 1ms poll for sleepers. (Existing behavior; the sleep
                 // queue's exact next wake_time is not consulted.)
                 timeout_ns = 1_000_000;
+            }
+            if (self.fsm_sleeping_queue.items.len > 0) {
+                // 1ms poll for FSM sleepers. Same coarseness as the
+                // stackful sleeping_queue.
+                if (timeout_ns == 0 or 1_000_000 < timeout_ns) timeout_ns = 1_000_000;
             }
             if (self.lock_waiters.items.len > 0) {
                 // Arm the wait for the earliest lock-waiter deadline so an
@@ -926,7 +1099,8 @@ pub const Scheduler = struct {
                 self.active_tasks.load(.monotonic) == 0 and
                 !self.hasWork() and
                 !self.hasChannelMessages() and
-                self.sleeping_queue.items.len == 0)
+                self.sleeping_queue.items.len == 0 and
+                self.fsm_sleeping_queue.items.len == 0)
             {
                 self.scavengeMemory(true);
                 break;
@@ -956,8 +1130,82 @@ pub const Scheduler = struct {
         }
     }
 
+    /// Enqueue an FSM (stackless) task on this scheduler's local queue.
+    /// FSM tasks run inline on the worker stack. They CAN migrate via
+    /// work-stealing (tryStealFrom) when a sibling scheduler is idle.
+    /// Caller owns the backing state struct; scheduler only moves the handle.
+    pub fn enqueueFsm(self: *Scheduler, task: *FsmTask) void {
+        task.status = .Ready;
+        self.fsm_ready_queue.push(self.allocator, task) catch unreachable;
+        _ = self.active_tasks.fetchAdd(1, .monotonic);
+    }
+
+    /// Maximum FSM tasks dispatched per scheduler iteration. Bounds the
+    /// wait time a stackful task can incur when the FSM queue is under
+    /// burst load. With 141 ns/FSM (measured), 64 caps stackful latency
+    /// at ~9 us per iteration. Newly-yielded FSMs beyond this batch are
+    /// deferred to the next iteration (not lost).
+    const FSM_DRAIN_BATCH: usize = 64;
+
+    /// Drain up to FSM_DRAIN_BATCH ready FSMs for this iteration. Bounded
+    /// so stackful task latency is not held hostage by FSM burst load.
+    /// Yielded tasks go to fsm_deferred_queue and are flushed back to the
+    /// main queue after the batch — this guarantees FIFO-style progress
+    /// across all yielders (without this, Chase-Lev's LIFO owner-pop would
+    /// let a single yielded task monopolize the batch).
+    pub fn drainFsmQueue(self: *Scheduler) void {
+        const snapshot = @min(self.fsm_ready_queue.len(), FSM_DRAIN_BATCH);
+        var i: usize = 0;
+        while (i < snapshot) : (i += 1) {
+            const task = self.fsm_ready_queue.pop() orelse break;
+            const reason = fsm_mod.dispatchOnce(task);
+            switch (reason) {
+                .Done => {
+                    if (rt_profile.CLEAR_PROFILE) {
+                        fp_mod.recordFiberExit(task.spawn_ns, fp_mod.nowNs());
+                    }
+                    _ = self.active_tasks.fetchSub(1, .monotonic);
+                    // State struct is owned by the caller; the FSM emit
+                    // synthesizes a destroy_fn that frees it. We invoke
+                    // it here -- AFTER dispatchOnce has finished writing
+                    // task.status -- so the resume fn no longer needs
+                    // to call alloc.destroy(ctx) inline (which racing
+                    // with dispatchOnce's status write was a UAF).
+                    if (task.destroy_fn) |df| df(task);
+                },
+                .Yielded => {
+                    // Stage for flush after the batch. Prevents LIFO starvation.
+                    self.fsm_deferred_queue.append(self.allocator, task) catch unreachable;
+                },
+                .WaitForIO => {
+                    // Parked; CQE path will re-enqueue via enqueueFsm when the
+                    // completion arrives. Scheduler stores nothing — the task's
+                    // waiter field retains the pointer for decode.
+                },
+                .WaitForLock => {
+                    // Parked on a ParkingMutex/RwLock. Unlock path wakes us
+                    // via submitFsmResume. The waiter node lives in the
+                    // user state struct; we hold a pointer to it in
+                    // task.lock_waiter for future timeout-scan support.
+                },
+            }
+        }
+        // Flush deferred tasks back to the main queue for the next iteration.
+        for (self.fsm_deferred_queue.items) |t| {
+            self.fsm_ready_queue.push(self.allocator, t) catch unreachable;
+        }
+        self.fsm_deferred_queue.clearRetainingCapacity();
+    }
+
     fn hasWork(self: *Scheduler) bool {
-        return self.ready_queue.len() > 0 or self.pinned_queue.items.len > 0;
+        return self.ready_queue.len() > 0
+            or self.pinned_queue.items.len > 0
+            or self.fsm_ready_queue.len() > 0;
+    }
+
+    /// Public alias of hasWork for tests that need to inspect scheduler state.
+    pub fn hasWorkPub(self: *Scheduler) bool {
+        return self.hasWork();
     }
 
     pub noinline fn coopYield(self: *Scheduler) void {
@@ -976,6 +1224,18 @@ pub const Scheduler = struct {
         self.sleeping_queue.append(self.allocator, task) catch unreachable;
     }
 
+    /// FSM-mode parallel of sleepTask: park an FSM task on the
+    /// fsm_sleeping_queue with a wake time. The user's resume fn
+    /// must return YieldReason.WaitForLock immediately after this
+    /// call so the scheduler treats the FSM as Blocked. The slow-
+    /// path scan in run() compares now against fsm_wake_time and
+    /// re-enqueues to fsm_ready_queue when reached.
+    pub fn fsmSleepTask(self: *Scheduler, fsm_task: *FsmTask, wake_time: i64) void {
+        fsm_task.fsm_wake_time = wake_time;
+        fsm_task.status = .Blocked;
+        self.fsm_sleeping_queue.append(self.allocator, fsm_task) catch unreachable;
+    }
+
     // Register a lock-parked task for timeout scanning.
     // Called by parking-lot.zig before the fiber yields.
     // The task's waiting_for_lock / waiting_for_lock_list / lock_waiter_node
@@ -986,6 +1246,61 @@ pub const Scheduler = struct {
         // (after work-stealing, `self` may not be the original spawner).
         task.lock_wait_start_ms.store(milliTimestamp(), .release);
         self.lock_waiters.append(self.allocator, task) catch {};
+    }
+
+    /// FSM parallel to registerLockWaiter. lock_wait_start_ms is set by
+    /// the caller (tryLockForFsm) since the FSM locking path owns the
+    /// waiter-node setup.
+    pub fn registerFsmLockWaiter(self: *Scheduler, fsm_task: *FsmTask) void {
+        self.fsm_lock_waiters.append(self.allocator, fsm_task) catch {};
+    }
+
+    /// Lock-timeout scanner for FSM waiters. Mirrors scanLockWaiters.
+    /// On expiry: set lock_error = .LockTimeout, clear waiting_for_lock,
+    /// re-enqueue for dispatch. Resume fn reads lock_error and surfaces
+    /// the error on its next call.
+    fn scanFsmLockWaiters(self: *Scheduler) void {
+        const now_ms = milliTimestamp();
+        var i: usize = 0;
+        while (i < self.fsm_lock_waiters.items.len) {
+            const task = self.fsm_lock_waiters.items[i];
+            if (task.waiting_for_lock == null) {
+                _ = self.fsm_lock_waiters.swapRemove(i);
+                continue;
+            }
+            if (now_ms - task.lock_wait_start_ms > self.lock_timeout_ms) {
+                // Remove the FSM's WaiterNode from the parking-lot's
+                // waiter list (mirrors stackful scanLockWaiters). If
+                // we don't, a later unlock will pop the stale node and
+                // either grant ownership to a Done-or-retrying FSM
+                // (use-after-free risk) or push it twice on retry.
+                if (task.waiting_for_lock_list) |raw| {
+                    const wl: *qs.WaiterList = @ptrCast(@alignCast(raw));
+                    if (task.lock_waiter) |raw_w| {
+                        const node: *qs.WaiterNode = @ptrCast(@alignCast(raw_w));
+                        wl.spinAcquire();
+                        _ = wl.remove(node);
+                        wl.spinRelease();
+                    }
+                }
+                task.lock_error = .LockTimeout;
+                task.waiting_for_lock = null;
+                task.waiting_for_lock_list = null;
+                task.lock_waiter = null;
+                task.waiting_for_fsm_owner = null;
+                task.status = .Ready;
+                self.fsm_ready_queue.push(self.allocator, task) catch {};
+                _ = self.fsm_lock_waiters.swapRemove(i);
+                continue;
+            }
+            i += 1;
+        }
+    }
+
+    /// Public drain pass for the FSM lock scanner — used by tests that
+    /// don't run the full main loop.
+    pub fn scanFsmLockWaitersPub(self: *Scheduler) void {
+        self.scanFsmLockWaiters();
     }
 
     // -----------------------------------------------------------------
@@ -1040,6 +1355,22 @@ pub const Scheduler = struct {
         waiter.task.status.store(.Blocked, .release);
     }
 
+    /// FSM-mode variant of submitRead. Same SQE shape, but the
+    /// user_data is FsmIoWaiter.encode() so processCqes routes the
+    /// completion to the FSM ready queue (via submitFsmResume) and
+    /// stores the CQE.res on `waiter.result` for the resume fn to
+    /// read on next dispatch.
+    ///
+    /// Caller (the user FSM's resume fn) is responsible for:
+    ///   - waiter pointer outlives the SQE (lives in the user state struct);
+    ///   - returning YieldReason.WaitForIO from the resume fn after this call;
+    ///   - reading waiter.result on the next dispatch.
+    pub fn submitReadForFsm(self: *Scheduler, waiter: *fsm_mod.FsmIoWaiter, fd: posix.fd_t, buffer: []u8) !void {
+        _ = try self.ring.read(waiter.encode(), fd, .{ .buffer = buffer }, 0);
+        self.ring_dirty = true;
+        waiter.task.status = .Blocked;
+    }
+
     /// Submit an IORING_OP_WRITE for `fd` from `buffer` and park `waiter.task`.
     pub fn submitWrite(self: *Scheduler, waiter: *IoWaiter, fd: posix.fd_t, buffer: []const u8) !void {
         _ = try self.ring.write(waiter.encode(), fd, buffer, 0);
@@ -1069,6 +1400,26 @@ pub const Scheduler = struct {
         _ = try self.ring.recv(waiter.encode(), fd, .{ .buffer = buffer }, 0);
         self.ring_dirty = true;
         waiter.task.status.store(.Blocked, .release);
+    }
+
+    /// FSM-mode submitRecv. Same SQE shape as submitRecv but tags
+    /// the user_data with the FsmIoWaiter marker so processCqes
+    /// routes the completion to the FSM ready queue. The user
+    /// FSM's resume fn must return YieldReason.WaitForIO after this
+    /// call and read waiter.result on next dispatch.
+    pub fn submitRecvForFsm(self: *Scheduler, waiter: *fsm_mod.FsmIoWaiter, fd: posix.fd_t, buffer: []u8) !void {
+        _ = try self.ring.recv(waiter.encode(), fd, .{ .buffer = buffer }, 0);
+        self.ring_dirty = true;
+        waiter.task.status = .Blocked;
+    }
+
+    /// FSM-mode submitWrite. Same SQE shape as submitWrite but tags
+    /// the user_data with the FsmIoWaiter marker. CQE result is
+    /// bytes written or negative -errno.
+    pub fn submitWriteForFsm(self: *Scheduler, waiter: *fsm_mod.FsmIoWaiter, fd: posix.fd_t, buffer: []const u8) !void {
+        _ = try self.ring.write(waiter.encode(), fd, buffer, 0);
+        self.ring_dirty = true;
+        waiter.task.status = .Blocked;
     }
 
     /// Submit an IORING_OP_SEND for `fd` from `buffer` and park `waiter.task`.
@@ -1203,8 +1554,21 @@ pub const Scheduler = struct {
                 self.event_fd.consume();
             } else if (ud == TIMEOUT_SENTINEL) {
                 // Timeout expired or cancelled -- no action needed.
+            } else if (FsmIoWaiter.isFsmMarker(ud)) {
+                // FSM IoWaiter: stackless task's IO completion. Check this
+                // BEFORE the stackful IoWaiter path because FSM encoding
+                // (bits 00 = 11) also satisfies bit 0 = 1.
+                //
+                // Re-enqueue without incrementing active_tasks: the task
+                // was counted at original spawn and has not been
+                // decremented (it just moved Blocked -> Ready). Mirrors
+                // submitFsmResume's bypass.
+                const fsm_waiter = FsmIoWaiter.decode(ud);
+                fsm_waiter.result = cqe.res;
+                fsm_waiter.task.status = .Ready;
+                self.fsm_ready_queue.push(self.allocator, fsm_waiter.task) catch unreachable;
             } else if (ud & 1 == 1) {
-                // IoWaiter: file I/O completion (READ, WRITE, etc.)
+                // Stackful IoWaiter: file I/O completion (READ, WRITE, etc.)
                 const waiter = IoWaiter.decode(ud);
                 waiter.result = cqe.res;
                 waiter.task.status.store(.Ready, .release);
@@ -1488,6 +1852,12 @@ pub const WaitGroup = struct {
     lock: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
 
     waiting_task: ?*Task = null,
+    /// FSM Phase B2 — set by NEXT-on-promise FSM lowering when an FSM
+    /// task awaits a Promise's WaitGroup. wakeWaiter dispatches the
+    /// stackful or FSM branch based on which slot is non-null.
+    /// Single-waiter invariant matches `waiting_task`: each Promise has
+    /// its own WaitGroup with count=1 and a single NEXT consumer.
+    waiting_fsm: ?*fsm_mod.FsmTask = null,
     sched: *Scheduler,
 
     pub fn init(sched: *Scheduler) WaitGroup {
@@ -1517,8 +1887,10 @@ pub const WaitGroup = struct {
 
         // counter just dropped to 0 — wake the waiter (if parked).
         const task = self.waiting_task;
+        const fsm_task = self.waiting_fsm;
         const sched = self.sched;
         self.waiting_task = null;
+        self.waiting_fsm = null;
         self.lock.store(0, .release);
 
         if (task) |t| {
@@ -1526,6 +1898,40 @@ pub const WaitGroup = struct {
             // and free *self. Do NOT touch self after this point.
             sched.schedule(t);
         }
+        if (fsm_task) |ft| {
+            // FSM was parked via registerFsmWaiter. submitFsmResume is
+            // the bypass-active_tasks-increment variant (the task was
+            // counted at original spawn).
+            sched.submitFsmResume(ft) catch unreachable;
+        }
+    }
+
+    /// FSM Phase B2 — register an FSM task to be woken when count→0.
+    /// Returns true if registered (caller must yield WaitForLock; the
+    /// scheduler's wake path will re-enqueue via submitFsmResume).
+    /// Returns false if count is already 0 (no need to suspend; caller
+    /// can read the result inline).
+    ///
+    /// Mirrors the stackful `wait()` registration pattern but does not
+    /// itself yield — the FSM's resume fn must return WaitForLock after
+    /// this function returns true.
+    pub fn registerFsmWaiter(self: *WaitGroup, fsm_task: *fsm_mod.FsmTask) bool {
+        if (self.counter.load(.seq_cst) == 0) return false;
+
+        while (self.lock.swap(1, .acquire) == 1) {
+            std.Thread.yield() catch {};
+        }
+
+        // Re-check under the lock — count may have hit 0 between the
+        // load above and acquiring the lock.
+        if (self.counter.load(.seq_cst) == 0) {
+            self.lock.store(0, .release);
+            return false;
+        }
+
+        self.waiting_fsm = fsm_task;
+        self.lock.store(0, .release);
+        return true;
     }
 
     // Blocking Wait (Yields Fiber)
