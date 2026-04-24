@@ -13,7 +13,9 @@
 #   fork_lightweight / merge(other)    — branch analysis (IF/ELSE)
 
 class OwnershipGraph
-  Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line, keyword_init: true) do
+  Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line,
+                    :move_line, :move_col,
+                    keyword_init: true) do
     def live?;    state == :live; end
     def moved?;   state == :moved; end
     def dropped?; state == :dropped; end
@@ -64,7 +66,7 @@ class OwnershipGraph
   end
 
   # Move ownership from source to target. Invalidates source and all children.
-  def transfer(from, to)
+  def transfer(from, to, at_token: nil)
     source = @nodes[from]
     return unless source
 
@@ -74,7 +76,13 @@ class OwnershipGraph
       type_info: source.type_info, scope_depth: source.scope_depth, line: source.line
     )
 
-    # Invalidate source and all owned children
+    # Invalidate source and all owned children; record the move site
+    # (when a token is given) so `clear fix` can locate where the
+    # consuming reference lives.
+    if at_token
+      source.move_line = at_token.respond_to?(:line)   ? at_token.line   : nil
+      source.move_col  = at_token.respond_to?(:column) ? at_token.column : nil
+    end
     invalidate(from)
   end
 

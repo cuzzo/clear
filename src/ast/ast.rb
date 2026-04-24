@@ -352,7 +352,13 @@ module AST
   }
   HashLit      = Struct.new(:token, :pairs, :storage) { include Locatable }
   DefaultLit   = Struct.new(:token) { include Locatable }
-  StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) { include Locatable }
+  StructLit    = Struct.new(:token, :name, :fields, :storage, :type_args) do
+    include Locatable
+    # Parallel map of field_name (String) -> the lexer Token that parsed
+    # the name. Populated by the parser so `clear fix` can locate a
+    # misspelled field-name for a fixable edit span.
+    attr_accessor :field_tokens
+  end
   LambdaLit    = Struct.new(:token, :params, :captures, :body, :storage, :deferred_drops) { include Locatable }
   IfStatement  = Struct.new(:token, :condition, :then_branch, :else_branch, :then_drops, :else_drops) do
     include Locatable

@@ -155,6 +155,72 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "struct-literal field typo" do
+    it "suggests the closest struct field" do
+      src = <<~CLEAR
+        STRUCT Point {x: Int64, y: Int64}
+        FN main() RETURNS Int64 ->
+          p = Point{x: 1, yy: 2};
+          RETURN p.x;
+        END
+      CLEAR
+      path = write("sl.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Struct 'Point' has no field 'yy'/)
+      expect(out).to match(/Replace 'yy' with 'y'/)
+    end
+
+    it "applies the fix and the result compiles" do
+      src = <<~CLEAR
+        STRUCT Point {x: Int64, y: Int64}
+        FN main() RETURNS Int64 ->
+          p = Point{x: 1, yy: 2};
+          RETURN p.x;
+        END
+      CLEAR
+      path = write("sl.cht", src)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("y: 2")
+      expect(File.read(path)).not_to include("yy: 2")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
+  describe "use-of-moved value" do
+    let(:src) do
+      <<~CLEAR
+        STRUCT Config {id: Float64, data: HashMap<Float64>}
+
+        FN main() RETURNS Void ->
+          a = Config {id: 1.0, data: {"x": 1.0}};
+          b = a;
+          c = a;
+          RETURN;
+        END
+      CLEAR
+    end
+
+    it "reports the move line in the message" do
+      path = write("m.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Use of moved value 'a' \(moved at line 5\)/)
+      expect(out).to match(/Wrap the consuming reference with COPY at line 5/)
+    end
+
+    it "applies the COPY fix at the move site and the result compiles" do
+      path = write("m.cht", src)
+      # --yes picks the first (and only) candidate non-interactively.
+      out, _, _ = run_fix("--yes", path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("b = (COPY a);")
+      expect(File.read(path)).to include("c = a;")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
   describe "enum / union variant typos" do
     it "suggests the closest enum variant" do
       src = <<~CLEAR

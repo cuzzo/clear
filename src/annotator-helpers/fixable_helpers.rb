@@ -215,6 +215,44 @@ module FixableHelper
              fixes: fixes, raise_in_collector: cascade)
   end
 
+  # Ownership: `Use of moved value 'x'`. Uses the move-site tracking
+  # on the OwnershipGraph node to emit an :interactive fix that wraps
+  # the consuming reference with `COPY` at the move site. This keeps
+  # the original alive for the later use.
+  #
+  # Deferred candidates (documented, not emitted):
+  # - @multiowned / @shared upgrades at the DECLARATION need to append
+  #   the capability at the end of the value expression (before `;`).
+  #   Computing that span cleanly from the AST alone is tricky; done
+  #   properly requires source-text access on the annotator. For now
+  #   the COPY fix handles the common case.
+  #
+  # When the move site isn't tracked (e.g., branch-merge paths, BG
+  # captures), we fall through to the plain `error!` so the legacy
+  # diagnostic still surfaces.
+  def emit_use_of_moved_error!(use_node, og_node)
+    name = use_node.name.to_s
+    return error!(use_node, "Use of moved value '#{name}'") unless og_node
+    return error!(use_node, "Use of moved value '#{name}'") unless og_node.move_line && og_node.move_col
+
+    fix = Fix.new(
+      description: "Wrap the consuming reference with COPY at line #{og_node.move_line} " \
+                   "(the original survives for the later use).",
+      confidence: :interactive,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: og_node.move_line, col: og_node.move_col, length: name.length),
+        replacement: "(COPY #{name})"
+      )]
+    )
+
+    fixable!(use_node,
+      message: "Use of moved value '#{name}' (moved at line #{og_node.move_line})",
+      category: :ownership,
+      level: :error,
+      fixes: [fix],
+      raise_in_collector: true)
+  end
+
   # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
   # locates the original declaration (via the enclosing scope's info)
   # and inserts `MUTABLE ` at its column. If the declaration can't be

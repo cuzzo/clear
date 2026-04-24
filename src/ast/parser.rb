@@ -1937,17 +1937,23 @@ class Parser
         end
         consume(:CHAR, '>')
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
-          k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression
-          [k, v]
+          name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+          consume(:CHAR, ':'); v = parse_expression
+          [[name_tok.value, v], name_tok]
         end
-        return AST::StructLit.new(type_token, name, fields.to_h, storage, type_args)
+        lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage, type_args)
+        lit.field_tokens = fields.each_with_object({}) { |(kv, t), h| h[kv.first] = t }
+        return lit
       elsif match?(:CHAR, '{') && !@suppress_struct_lit
         # Struct literal: User{ id: 1 }
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
-          k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value; consume(:CHAR, ':'); v = parse_expression
-          [k, v]
+          name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+          consume(:CHAR, ':'); v = parse_expression
+          [[name_tok.value, v], name_tok]
         end
-        return AST::StructLit.new(type_token, name, fields.to_h, storage)
+        lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage)
+        lit.field_tokens = fields.each_with_object({}) { |(kv, t), h| h[kv.first] = t }
+        return lit
       else
         # Type name reference — e.g. enum variant access: Color.Red
         node = AST::Identifier.new(type_token, name)

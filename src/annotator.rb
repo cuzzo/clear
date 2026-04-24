@@ -2021,11 +2021,7 @@ private
 
     # 3. Liveness
     if @og&.moved?(node.name)
-      # TODO: auto-fix requires tracking the move SITE (where the value
-      # was consumed), not the use site — `(COPY x)` at the use site is
-      # semantically wrong because `x` is already moved. Revisit once
-      # OwnershipGraph records per-path move provenance.
-      error!(node, "Use of moved value '#{node.name}'")
+      emit_use_of_moved_error!(node, @og.nodes[node.name])
     end
 
     # 5. Mark variable as read so the transpiler can skip `_ = &x` suppression.
@@ -2541,10 +2537,18 @@ private
 
       raw_expected = schema[field_name]
       if raw_expected.nil?
-        # TODO: auto-fix needs the field-name token stored by the
-        # parser in StructLit.fields. Today `fields` is name -> value
-        # node; the field-name token is discarded.
-        error!(node, "Struct '#{node.name}' has no field '#{field_name}'")
+        valid_fields = schema.keys.reject { |k| k == :borrowed_fields || k.to_s.start_with?('_') }
+        name_tok = node.field_tokens&.[](field_name)
+        if name_tok
+          emit_typo_suggestion!(
+            name_tok, field_name, valid_fields,
+            "Struct '#{node.name}' has no field '#{field_name}'",
+            "field of #{node.name}",
+            category: :type, cascade: true
+          )
+        else
+          error!(node, "Struct '#{node.name}' has no field '#{field_name}'")
+        end
       end
 
       # Check if this field is declared BORROWED in the struct definition
@@ -3805,7 +3809,10 @@ private
         error!(node, "Cannot move borrowed value '#{rhs_name}'. Parameters are implicit borrows unless TAKES.")
       end
       lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
-      og_move(rhs_name, lhs_name)
+      # Track the move site at the RHS identifier's token so
+      # use-of-moved errors can suggest fixes at the consuming line.
+      move_tok = node.value.respond_to?(:token) ? node.value.token : node.token
+      og_move(rhs_name, lhs_name, at_token: move_tok)
       node.value.was_moved = true
     end
   end
@@ -4299,7 +4306,7 @@ private
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end
 
-  def og_move(from, to)  = @og.transfer(from, to)
+  def og_move(from, to, at_token: nil) = @og.transfer(from, to, at_token: at_token)
   def og_set_moved(name) = (@og[name]&.state = :moved)
 
   # Mark an identifier as moved if its type is non-Copy.
