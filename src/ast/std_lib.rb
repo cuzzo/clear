@@ -518,7 +518,8 @@ STD_LIB = {
   "framePeakBytes" => {
     args: [],
     return: :Int64,
-    zig: "@as(i64, @intCast(rt.framePeakBytes()))"
+    zig: "@as(i64, @intCast(rt.framePeakBytes()))",
+    bc: true,
   },
 
   # Number of scheduler threads (main + workers). Matches CLEAR_THREADS env var.

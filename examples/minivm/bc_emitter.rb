@@ -1392,7 +1392,8 @@ class BcEmitter
       end
       compile_expr_to_value(node.args[0]); pop_type
       push_type(:any); return
-    when :random, :timestampMs, :threadCount, :peakMemoryKb, :currentMemoryKb
+    when :random, :timestampMs, :threadCount, :peakMemoryKb, :currentMemoryKb,
+         :framePeakBytes
       # Zero-arg builtins. Map to native if present, else push 0.
       native_name = op.to_s
       if NATIVES.key?(native_name)
