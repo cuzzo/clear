@@ -1474,6 +1474,39 @@ class BcEmitter
     # Skip &address-of wrapper
     args = args.map { |a| a.is_a?(MIR::AddressOf) ? a.expr : a }
 
+    # Zig's std.debug.print is how macro_print (CLEAR's `print`) is emitted.
+    # Args are: [format_string_lit, tuple_ident_like ".{a, b, c}"]. The
+    # tuple Ident's name is a raw Zig snippet we can't parse; recover the
+    # formatted arg list from the AST when available, or best-effort from
+    # the tuple-literal string contents.
+    if callee == "std.debug.print"
+      # Pull arg names out of the synthetic tuple Ident (name is ".{a, b}").
+      tuple = args[1]
+      if tuple.is_a?(MIR::Ident) && tuple.name.to_s =~ /\A\.\{(.*)\}\z/m
+        inner = $1
+        parts = inner.split(/,\s*/).map do |p|
+          p = p.strip
+          p = $1 if p =~ /\A@as\([^,]*,\s*(.*)\)\z/m
+          p
+        end
+        parts.each do |raw|
+          if raw =~ /\A"(.*)"\z/m
+            str = $1.gsub(/\\n/, "\n").gsub(/\\t/, "\t").gsub(/\\"/, '"').gsub(/\\\\/, '\\')
+            emit_op(LOAD_CONST, add_const([:str, str]))
+          elsif has_slot?(raw)
+            emit_op(LOAD_SLOT, @slots[raw])
+          else
+            emit_op(LOAD_NAME, add_const(raw))
+          end
+          emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+        end
+        # print() always ends with a newline (the {s}\n style format string).
+        emit_op(LOAD_CONST, add_const([:str, "\n"]))
+        emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+      end
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+    end
+
     # Compiled helper function: emit direct BC_CALL with the fixed target IP
     # recorded when the helper body was laid out. Bypasses name lookup.
     if @fn_start_ips.key?(callee)

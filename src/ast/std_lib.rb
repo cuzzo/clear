@@ -204,8 +204,7 @@ STD_LIB = {
   "print" => {
     args: :Varargs,      # Special marker: Accept any number of arguments
     return: :Void,
-    zig: :macro_print,   # Special marker: Dispatch to 'macro_print' method
-    bc: true,
+    zig: :macro_print    # Special marker: Dispatch to 'macro_print' method
   },
 
   # 4. Read File
