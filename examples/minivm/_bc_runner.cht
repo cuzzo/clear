@@ -2299,13 +2299,17 @@ END
 -- Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
 -- Returns the value on top of the stack at halt.
 
-FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool,
+         entryIp: Int64, initCaps: Value[]) RETURNS Value @reentrant ->
     MUTABLE stack: Value[]@list = List[];
     MUTABLE slots: Value[]@list = List[];
     MUTABLE sp: Int64 = 0;
-    MUTABLE ip: Int64 = 0;
+    MUTABLE ip: Int64 = entryIp;
     MUTABLE curEnv: Id<Env> = COPY envId;
     MUTABLE running = TRUE;
+    -- Fiber return value: set by FIBER_RET opcode, read by caller.
+    MUTABLE fiberRetVal: Value = Value.Nil;
+    MUTABLE fiberReturned = FALSE;
     -- Typed stacks: avoid 40-byte Value union copies for typed arithmetic
     MUTABLE istack: Int64[] = [];
     MUTABLE isp: Int64 = 0;
@@ -2320,6 +2324,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     FOR si IN (0_i64 ..< 64) DO fstack.append(0.0); END
     FOR si IN (0_i64 ..< 64) DO islots.append(0_i64); END
     FOR si IN (0_i64 ..< 64) DO fslots.append(0.0); END
+    -- Load initial fiber captures into slots 0..N-1 (for spawned fibers).
+    FOR ci IN (0_i64 ..< initCaps.length()) DO
+        slots[ci] = COPY initCaps[ci];
+    END
     -- Call frame stack for BC_CALL/BC_RET helper function calls
     MUTABLE callRetIps: Int64[]@list = List[];
     MUTABLE callRetSps: Int64[]@list = List[];
@@ -2922,11 +2930,52 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                   -- Emitted by bc_emitter on MIR::MoveMark.
                 movedSlot = ops[ip]; ip += 1;
                 slots[movedSlot] = Value.Nil;,
+            81 -> -- FIBER_RET: terminate this exec! invocation. Pops the
+                  -- fiber's result value off the stack and exits. Used at
+                  -- the end of a BG body to return the fiber's value.
+                IF sp > 0 THEN
+                    sp -= 1; fiberRetVal = COPY stack[sp];
+                END
+                fiberReturned = TRUE;
+                running = FALSE;,
+            82 -> -- BG_SPAWN [entry_ip] [argc]: spawn a fiber running exec!
+                  -- from entry_ip with argc captures from the top of the
+                  -- stack. Pushes a Value.Future holding the fiber result.
+                  -- Phase 1: recursive exec! call on a BG-spawned fiber.
+                  -- The spawned fiber reuses shared ops/consts/env/pool.
+                bgEntry = ops[ip]; ip += 1;
+                bgArgc  = ops[ip]; ip += 1;
+                MUTABLE bgCaps: Value[]@list = List[];
+                FOR bi IN (0_i64 ..< bgArgc) DO
+                    bgCaps.append(COPY stack[sp - bgArgc + bi]);
+                END
+                sp -= bgArgc;
+                -- Phase 1 MVP: run synchronously in a new exec! invocation.
+                -- Phase 2 will wrap this in BG { ... } for real fibers.
+                bgResult = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
+                -- Pack result into a Future-like Pair (car=symbol, cdr=value).
+                pv = Value.Pair{
+                    pairCar: Value{ Symbol: COPY "__future__" },
+                    pairCdr: COPY bgResult };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            83 -> -- AWAIT: pop a Value.Pair (__future__, result) and push
+                  -- the held result. Identity on non-future values (to
+                  -- tolerate tests that NEXT on an already-resolved value).
+                sp -= 1; awaitVal = COPY stack[sp];
+                MATCH awaitVal START
+                    Value.Pair AS fp -> pv = COPY fp.pairCdr;,
+                    DEFAULT -> pv = COPY awaitVal;
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
             DEFAULT ->
                 running = FALSE;
         END
     END
 
+    -- FIBER_RET landed: return the explicit fiber value.
+    IF fiberReturned THEN RETURN fiberRetVal; END
     IF sp > 0 THEN
         RETURN COPY stack[sp - 1];
     END

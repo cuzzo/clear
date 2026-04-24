@@ -38,6 +38,9 @@ class BcEmitter
   SET_INSERT  = 73; SET_CONTAINS = 74; SET_REMOVE = 75; SET_TOLIST  = 76
   BC_CALL     = 77; BC_RET      = 78; BC_RET_VOID = 79
   MARK_MOVED  = 80
+  FIBER_RET   = 81
+  BG_SPAWN    = 82
+  AWAIT       = 83
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -438,11 +441,10 @@ class BcEmitter
     when MIR::RawZig
       raise Unimplemented, "RawZig not supported in VM path"
     when MIR::BgBlock
-      # VM is single-threaded; run the fiber body inline. Captures are by
-      # reference in the VM model, so no explicit copy needed.
-      if mir_node.run_body
-        mir_node.run_body.each { |s| compile_stmt(s, nil) }
-      end
+      # Expression-position handler does the real work (emit deferred body
+      # + BG_SPAWN). At stmt position we just evaluate and discard.
+      compile_expr(mir_node); t = pop_type
+      emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
       push_type(:void)
     when MIR::DoBlock, MIR::CatchWrapper
       raise Unimplemented, "#{mir_node.class.name.split('::').last} not yet supported"
@@ -1093,28 +1095,85 @@ class BcEmitter
       # RawZig dispatch raises with a better error than a silent passthrough.
       compile_expr(node.inner)
     when MIR::BgBlock
-      # VM is single-threaded. BgBlock in expression position returns a
-      # future-like; Phase 0.5: run the body inline and leave the last
-      # expression's value on the stack (which serves as the "future").
-      # NEXT on this value is identity (see compile_method_call for "next").
+      # Phase 1: emit the body as a separate bytecode chunk with its own
+      # entry_ip + FIBER_RET at the end, then emit BG_SPAWN to invoke it
+      # in a recursive exec! call. The pushed value is a Future-like Pair.
+      # Captures come from node.captures (name => type). Push each capture
+      # onto the stack, then BG_SPAWN argc = len(captures).
+      captures = (node.captures || {}).keys.map(&:to_s)
+      # Jump over the deferred body chunk at the call site.
+      emit_op(JUMP)
+      skip_patch = @ops.length; emit_op(0)
+      entry_ip = @ops.length
+
+      # Emit body prologue: captures are loaded into slots 0..N-1 by exec!'s
+      # initCaps handling. We need those captures bound by their CLEAR names
+      # (e.g., `x`). Map slot 0..N-1 to capture names.
+      saved_slots    = @slots
+      saved_islots   = @islots
+      saved_fslots   = @fslots
+      saved_types    = @slot_types
+      saved_mutables = @mutables
+      saved_next     = @next_slot
+      saved_nexti    = @next_islot
+      saved_nextf    = @next_fslot
+      saved_stack    = @type_stack
+      @slots = {}; @islots = {}; @fslots = {}
+      @slot_types = {}; @mutables = Set.new
+      @next_slot = 0; @next_islot = 0; @next_fslot = 0
+      @type_stack = []
+      captures.each_with_index do |cname, idx|
+        @slots[cname] = idx
+        @slot_types[cname] = :any
+      end
+      @next_slot = captures.length
+
+      # Compile body. Last statement's value is the fiber's return.
       stmts = semantic_mir_nodes(node.run_body || [])
       if stmts.empty?
-        emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
-      end
-      stmts[0...-1].each { |s| compile_stmt(s, nil); t = pop_type
-        emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
-      }
-      last = stmts[-1]
-      if last.is_a?(MIR::ExprStmt)
-        compile_expr(last.expr)
-      elsif last.respond_to?(:expr?) && last.expr?
-        compile_expr(last)
+        emit_op(LOAD_CONST, add_const(nil))
       else
-        compile_stmt(last, nil)
-        t = pop_type
-        emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
-        emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
+        stmts[0...-1].each do |s|
+          compile_stmt(s, nil); t = pop_type
+          emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+        end
+        last = stmts[-1]
+        if last.is_a?(MIR::ExprStmt)
+          compile_expr(last.expr); pop_type
+        elsif last.respond_to?(:expr?) && last.expr?
+          compile_expr(last); pop_type
+        else
+          compile_stmt(last, nil); t = pop_type
+          emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+          emit_op(LOAD_CONST, add_const(nil))
+        end
       end
+      emit_op(FIBER_RET)
+
+      # Restore caller's slot context.
+      @slots = saved_slots
+      @islots = saved_islots
+      @fslots = saved_fslots
+      @slot_types = saved_types
+      @mutables = saved_mutables
+      @next_slot = saved_next
+      @next_islot = saved_nexti
+      @next_fslot = saved_nextf
+      @type_stack = saved_stack
+
+      # Patch the jump-over-body target.
+      @ops[skip_patch] = @ops.length
+
+      # Push each capture as an arg, then BG_SPAWN.
+      captures.each do |cname|
+        if has_slot?(cname)
+          emit_op(LOAD_SLOT, @slots[cname])
+        else
+          emit_op(LOAD_NAME, add_const(cname))
+        end
+      end
+      emit_op(BG_SPAWN, entry_ip, captures.length)
+      push_type(:any)
       return
     when NilClass
       cidx = add_const(nil)
@@ -1785,11 +1844,13 @@ class BcEmitter
     method = node.method.to_s
     rtype  = receiver_slot_type(node.receiver)
 
-    # NEXT on a promise (future-like value). VM runs BG bodies inline
-    # (Phase 0.5: the Future is just the body's last value), so NEXT is
-    # identity on the receiver.
+    # NEXT on a promise (future-like value). Emit AWAIT opcode which
+    # unwraps a Pair(Symbol("__future__"), result) to the held result;
+    # identity on non-future values.
     if method == "next" && node.args.empty?
-      compile_expr(node.receiver)
+      compile_expr(node.receiver); pop_type
+      emit_op(AWAIT)
+      push_type(:any)
       return
     end
 
