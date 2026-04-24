@@ -12,6 +12,7 @@
  - [x] io_uring for networking
  - [x] Native CONCURRENT support for streaming pipelines
  - [x] `./clear fmt`
+ - [ ] `./clear fix`
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
