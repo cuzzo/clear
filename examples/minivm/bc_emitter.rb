@@ -52,6 +52,7 @@ class BcEmitter
     "endsWith?" => 48, "join" => 49,
     "abs" => 50, "min" => 51, "max" => 52, "floor" => 53,
     "timestampMs" => 54, "random" => 55, "randomInt" => 56,
+    "lowercase" => 100, "uppercase" => 101, "replace" => 102, "parseFloat" => 103,
     "string-append" => 26, "string-length" => 27, "substring" => 28,
     "string-ref" => 29, "number->string" => 30, "string->number" => 31,
     "string?" => 32, "charAt" => 29,
@@ -1206,7 +1207,7 @@ class BcEmitter
       native_name = {
         bytes:           "string-length",
         codepointCount:  "string-length",  # VM strings are bytes, not UTF-8 decoded
-        toNumber:        "string->number",
+        toNumber:        "parseFloat",
       }[op] || op.to_s
       if NATIVES.key?(native_name)
         compile_expr_to_value(node.args[0]); pop_type
@@ -1231,16 +1232,17 @@ class BcEmitter
       # Fallback: pop one, leave the other. Best effort; tests dependent on
       # correctness will still fail the assertion rather than the compile.
       emit_op(POP); push_type(:any); return
-    when :lowercase, :uppercase
-      # No VM native; best-effort pass through the original string.
+    when :lowercase
       compile_expr_to_value(node.args[0]); pop_type
-      push_type(:any); return
+      emit_op(NATIVE_CALL, NATIVES["lowercase"], 1); push_type(:any); return
+    when :uppercase
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["uppercase"], 1); push_type(:any); return
     when :replace
-      # No VM native for replace; forward the source string. Downstream tests
-      # that actually depend on the replacement will assert-fail instead of
-      # blocking the whole compile.
       compile_expr_to_value(node.args[0]); pop_type
-      push_type(:any); return
+      compile_expr_to_value(node.args[1]); pop_type
+      compile_expr_to_value(node.args[2]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["replace"], 3); push_type(:any); return
     when :charAt
       compile_expr_to_value(node.args[0]); pop_type
       compile_expr_to_value(node.args[1]); pop_type
