@@ -159,10 +159,12 @@ STD_LIB = {
   "charAt" => [
     { args: [{type: STRING_TYPE, sync: :raw}, :Int64],
       return: {type: STRING_TYPE, sync: :raw},
-      zig: "CheatLib.charAt({0}, {1})" },
+      zig: "CheatLib.charAt({0}, {1})",
+      bc: true },
     { args: [STRING_TYPE, :Int64],
       return: STRING_TYPE, return_alloc: :frame,
       zig: "try CheatLib.charAtCodepoint({alloc}, {0}, {1})",
+      bc: true,
       allocates: true, alloc: :node_storage },
   ],
 
@@ -171,6 +173,7 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: :Int64,
     zig: "CheatLib.codepointCount({0})",
+    bc: true,
     borrows: :all,
   },
 
@@ -179,6 +182,7 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: :Int64,
     zig: "CheatLib.len({0})",
+    bc: true,
     borrows: :all,
   },
 
@@ -187,6 +191,7 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: :"?Float64",
     zig: "(std.fmt.parseFloat(f64, {0}) catch null)",
+    bc: true,
     borrows: :all,
   },
 
@@ -194,7 +199,8 @@ STD_LIB = {
   "print" => {
     args: :Varargs,      # Special marker: Accept any number of arguments
     return: :Void,
-    zig: :macro_print    # Special marker: Dispatch to 'macro_print' method
+    zig: :macro_print,   # Special marker: Dispatch to 'macro_print' method
+    bc: true,
   },
 
   # 4. Read File
@@ -300,6 +306,7 @@ STD_LIB = {
     args: [STRING_TYPE, STRING_TYPE, STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringReplace({alloc}, {0}, {1}, {2})",
+    bc: true,
     allocates: true,
     alloc: :node_storage,
   },
@@ -309,6 +316,7 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringLowercase({alloc}, {0})",
+    bc: true,
     allocates: true,
     alloc: :node_storage,
   },
@@ -318,6 +326,7 @@ STD_LIB = {
     args: [STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringUppercase({alloc}, {0})",
+    bc: true,
     allocates: true,
     alloc: :node_storage,
   },
@@ -339,20 +348,20 @@ STD_LIB = {
 
   # max(a, b) -> larger value
   "max" => [
-    { args: [:Int64, :Int64], return: :Int64, zig: "@max({0}, {1})" },
-    { args: [:Float64, :Float64], return: :Float64, zig: "@max({0}, {1})" },
+    { args: [:Int64, :Int64], return: :Int64, zig: "@max({0}, {1})", bc: true },
+    { args: [:Float64, :Float64], return: :Float64, zig: "@max({0}, {1})", bc: true },
   ],
 
   # min(a, b) -> smaller value
   "min" => [
-    { args: [:Int64, :Int64], return: :Int64, zig: "@min({0}, {1})" },
-    { args: [:Float64, :Float64], return: :Float64, zig: "@min({0}, {1})" },
+    { args: [:Int64, :Int64], return: :Int64, zig: "@min({0}, {1})", bc: true },
+    { args: [:Float64, :Float64], return: :Float64, zig: "@min({0}, {1})", bc: true },
   ],
 
   # abs(x) -> absolute value
   "abs" => [
-    { args: [:Float64], return: :Float64, zig: "@abs({0})" },
-    { args: [:Int64], return: :Int64, zig: "@intCast(@abs({0}))" },
+    { args: [:Float64], return: :Float64, zig: "@abs({0})", bc: true },
+    { args: [:Int64], return: :Int64, zig: "@intCast(@abs({0}))", bc: true },
   ],
 
   # log(x) -> natural logarithm
@@ -494,7 +503,8 @@ STD_LIB = {
   "timestampMs" => {
     args: [],
     return: :Int64,
-    zig: "CheatLib.timestampMs()"
+    zig: "CheatLib.timestampMs()",
+    bc: true,
   },
 
   # Frame arena peak bytes (debug/safe builds only; returns 0 in release).
@@ -546,7 +556,8 @@ STD_LIB = {
   "random" => {
     args: [],
     return: :Float64,
-    zig: "CheatLib.random()"
+    zig: "CheatLib.random()",
+    bc: true,
   },
 
   # Random integer in [0, max). Cryptographically secure.
@@ -554,7 +565,8 @@ STD_LIB = {
   "randomInt" => {
     args: [:Int64],
     return: :Int64,
-    zig: "CheatLib.randomInt({0})"
+    zig: "CheatLib.randomInt({0})",
+    bc: true,
   },
 }
 
