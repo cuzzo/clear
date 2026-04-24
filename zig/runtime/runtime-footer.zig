@@ -153,5 +153,6 @@ pub fn main() !void {
         @import("runtime/alloc-profile.zig").dump();
         @import("runtime/channel-profile.zig").dumpToEnvFile();
         @import("runtime/fiber-profile.zig").dumpToEnvFile();
+        @import("runtime/lock-profile.zig").dumpToEnvFile();
     }
 }

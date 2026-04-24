@@ -991,10 +991,12 @@ when 'profile'
   # Build the run command
   channel_file = File.join(profile_dir, 'channels.txt')
   fiber_file   = File.join(profile_dir, 'fibers.txt')
+  lock_file    = File.join(profile_dir, 'locks.txt')
   env_parts = [
     "CLEAR_ALLOC_PROFILE=#{alloc_file}",
     "CLEAR_CHANNEL_PROFILE=#{channel_file}",
     "CLEAR_FIBER_PROFILE=#{fiber_file}",
+    "CLEAR_LOCK_PROFILE=#{lock_file}",
   ]
   env_parts << "CLEAR_THREADS=#{ENV['CLEAR_THREADS']}" if ENV['CLEAR_THREADS']
   target_env = env_parts.join(' ')
@@ -1315,6 +1317,58 @@ when 'doctor'
         puts "  *** Scheduler imbalance: one scheduler ran #{imbalance_pct}%"
         puts "      of all fibers. Other schedulers were idle. BG spawn"
         puts "      policy may be routing too aggressively to a single target."
+      end
+      puts ""
+    end
+  end
+
+  # ── Lock Hold & Contention ──
+  # Per-mutex stats from ParkingMutex + ParkingRwLock (write path).
+  # Each row = one unique lock instance. Diagnoses:
+  #   - high contention  (contended_acquires / acquires > 20%)
+  #   - long critical sections (avg hold > 1ms)
+  #   - hot lock (>10k acquires; recommends finer-grained locking)
+  lock_prof = File.join(profile_dir, 'locks.txt')
+  if File.exist?(lock_prof)
+    rows = File.readlines(lock_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
+    locks = rows.map do |l|
+      f = l.split
+      next nil if f.size < 7
+      {
+        addr: f[0], acquires: f[1].to_i, contended: f[2].to_i,
+        total_wait_ns: f[3].to_i, max_wait_ns: f[4].to_i,
+        total_hold_ns: f[5].to_i, max_hold_ns: f[6].to_i,
+      }
+    end.compact.reject { |c| c[:acquires] == 0 }.sort_by { |c| -c[:total_hold_ns] }
+
+    if locks.any?
+      puts "=== Lock Hold & Contention ==="
+      puts ""
+      printf "  %-12s %8s %6s %12s %10s %12s %10s  %s\n",
+             "addr", "acqs", "cont%", "avg_hold", "max_hold", "avg_wait", "max_wait", "diagnosis"
+      locks.first(10).each do |l|
+        cont_pct = l[:acquires] > 0 ? (l[:contended].to_f / l[:acquires] * 100).round : 0
+        avg_hold = l[:acquires] > 0 ? l[:total_hold_ns] / l[:acquires] : 0
+        avg_wait = l[:acquires] > 0 ? l[:total_wait_ns] / l[:acquires] : 0
+
+        diagnosis =
+          if cont_pct >= 20 && avg_hold > 1_000_000
+            "hot lock + long hold — break up the critical section"
+          elsif cont_pct >= 20
+            "contended — consider @mvcc or finer-grained locking"
+          elsif avg_hold > 1_000_000
+            "long critical section (#{(avg_hold / 1_000_000.0).round(1)}ms avg)"
+          elsif l[:acquires] >= 100_000
+            "hot lock (very frequent; low overhead but possible bottleneck)"
+          else
+            "ok"
+          end
+
+        printf "  %-12s %8d %5d%% %10.1fus %8.1fus %10.1fus %8.1fus  %s\n",
+               l[:addr], l[:acquires], cont_pct,
+               avg_hold / 1000.0, l[:max_hold_ns] / 1000.0,
+               avg_wait / 1000.0, l[:max_wait_ns] / 1000.0,
+               diagnosis
       end
       puts ""
     end

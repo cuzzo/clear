@@ -50,14 +50,14 @@ builds.
 | Fast producer / slow consumer | `BoundedChannel` pushes/pops/push_blocked/pop_blocked/max_depth -> `.profile/channels.txt` | **done** |
 | Fiber lifetime distribution | Spawn/exit timestamps on Task -> `.profile/fibers.txt` | **done** |
 | Workstealing balance | Per-scheduler fibers-run counter -> `.profile/fibers.txt` | **done** |
-| Lock hold-time distribution | `pthread_rwlock_*` timestamps on acquire/release | deferred |
-| Per-lock contention attribution | Per-lock wait-time counter | deferred |
+| Lock hold-time + contention | `ParkingMutex` + `ParkingRwLock` write-path acquire/release timing, addr-keyed stats -> `.profile/locks.txt` | **done** |
+| ParkingRwLock **read-path** hold time | (deferred — concurrent readers make "hold time" per-reader, needs per-reader slot) | deferred |
 
-The two deferred lock-level patterns share the same missing piece:
-per-instance lock identity. CLEAR's parking-lot primitives don't
-currently carry a profile-id the way `BoundedChannel` now does.
-Adding one is ~30 lines of plumbing but an invasive touch to the
-parking-lot API. Treat as its own commit when picked up.
+All Tier 2 surfaces share the pattern established by channel-profile:
+conditional `HoldStart` field on the lock struct (`u64` when
+CLEAR_PROFILE, `void` otherwise), updates gated by
+`if (rt_profile.CLEAR_PROFILE)` blocks, stats stored by-value in a
+fixed-size hash table keyed by lock address, dumped at atexit.
 
 ### Tier 3 — extensive telemetry (deferred)
 

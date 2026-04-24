@@ -37,6 +37,13 @@ const Task = qs.Task;
 const WaiterNode = qs.WaiterNode;
 const WaiterList = qs.WaiterList;
 
+// Profile telemetry (comptime-gated). HoldStart is a conditional field:
+// when CLEAR_PROFILE == false it's `void` (zero-sized), so production
+// builds have exactly the same ParkingMutex layout they did before.
+const rt_profile = @import("../runtime/runtime-header.zig");
+const lock_profile = @import("../runtime/lock-profile.zig");
+const HoldStart = if (rt_profile.CLEAR_PROFILE) u64 else void;
+
 pub const LockError = error{
     // Self-cyclic: the waiter is the owner (same fiber re-acquired). Always a
     // user bug; not retryable. Maps to ErrorKind.System.
@@ -157,6 +164,11 @@ pub const ParkingMutex = struct {
     // Spinlock protecting the waiter queue.
     queue_spin: Atomic(u32) = Atomic(u32).init(0),
     waiters: WaiterList = .{},
+    // Profile-only: captured at acquire success, read at unlock entry
+    // to compute hold time. Only ever touched by the thread holding
+    // the lock, so no synchronization needed. Zero-sized in non-
+    // profile builds via the `HoldStart` conditional alias.
+    hold_start_ns: HoldStart = if (rt_profile.CLEAR_PROFILE) 0 else {},
 
     inline fn ownerOf(state_val: u64) ?*Task {
         const owner_bits = state_val & STATE_OWNER_MASK;
@@ -197,6 +209,8 @@ pub const ParkingMutex = struct {
     }
 
     pub fn lock(self: *ParkingMutex) LockError!void {
+        const wait_start: u64 = if (rt_profile.CLEAR_PROFILE) lock_profile.now() else 0;
+
         // Fast path: load + CAS preserving any flag bits already set,
         // packing owner into state in the same atomic op as LOCKED.
         const cur = self.state.load(.acquire);
@@ -207,10 +221,19 @@ pub const ParkingMutex = struct {
                 0;
             const new_state = cur | STATE_LOCKED | owner_val;
             if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) {
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, false);
+                }
                 return;
             }
         }
-        return self.lockSlow();
+        try self.lockSlow();
+        if (rt_profile.CLEAR_PROFILE) {
+            const acquired_at = lock_profile.now();
+            self.hold_start_ns = acquired_at;
+            lock_profile.recordAcquire(@intFromPtr(self), acquired_at - wait_start, true);
+        }
     }
 
     fn lockSlow(self: *ParkingMutex) LockError!void {
@@ -328,6 +351,13 @@ pub const ParkingMutex = struct {
     }
 
     pub fn unlock(self: *ParkingMutex) void {
+        if (rt_profile.CLEAR_PROFILE) {
+            if (self.hold_start_ns != 0) {
+                const hold = lock_profile.now() - self.hold_start_ns;
+                lock_profile.recordRelease(@intFromPtr(self), hold);
+                self.hold_start_ns = 0;
+            }
+        }
         // Single atomic op: clear LOCKED + OWNER, preserving flag bits.
         // fetchAnd returns the prior value, which tells us whether to wake.
         const prev = self.state.fetchAnd(STATE_FLAG_MASK & ~STATE_LOCKED, .release);
@@ -415,6 +445,10 @@ pub const ParkingRwLock = struct {
     queue_spin: Atomic(u32) = Atomic(u32).init(0),
     waiters: WaiterList = .{},
     write_owner: std.atomic.Value(?*Task) = std.atomic.Value(?*Task).init(null),
+    // Profile-only: write-lock hold start. Reader lock hold times are
+    // trickier (multiple concurrent readers) and deferred; for now we
+    // instrument the write path since that's where contention bites.
+    hold_start_ns: HoldStart = if (rt_profile.CLEAR_PROFILE) 0 else {},
 
     // Aliases to keep the existing field-access API surface used by tests/
     // benchmarks readable. These are NOT separate fields -- they read the
@@ -437,14 +471,25 @@ pub const ParkingRwLock = struct {
 
     // Exclusive (write) lock
     pub fn lock(self: *ParkingRwLock) LockError!void {
+        const wait_start: u64 = if (rt_profile.CLEAR_PROFILE) lock_profile.now() else 0;
+
         // Fast path: only succeeds if state is fully zero.
         if (self.state.cmpxchgWeak(0, WRITE_LOCKED_BIT, .acquire, .monotonic) == null) {
             if (getScheduler()) |sched| {
                 self.write_owner.store(sched.current_task, .release);
             }
+            if (rt_profile.CLEAR_PROFILE) {
+                self.hold_start_ns = lock_profile.now();
+                lock_profile.recordAcquire(@intFromPtr(self), 0, false);
+            }
             return;
         }
-        return self.lockSlow();
+        try self.lockSlow();
+        if (rt_profile.CLEAR_PROFILE) {
+            const acquired_at = lock_profile.now();
+            self.hold_start_ns = acquired_at;
+            lock_profile.recordAcquire(@intFromPtr(self), acquired_at - wait_start, true);
+        }
     }
 
     fn lockSlow(self: *ParkingRwLock) LockError!void {
@@ -525,6 +570,13 @@ pub const ParkingRwLock = struct {
     }
 
     pub fn unlock(self: *ParkingRwLock) void {
+        if (rt_profile.CLEAR_PROFILE) {
+            if (self.hold_start_ns != 0) {
+                const hold = lock_profile.now() - self.hold_start_ns;
+                lock_profile.recordRelease(@intFromPtr(self), hold);
+                self.hold_start_ns = 0;
+            }
+        }
         self.write_owner.store(null, .release);
         // Clear write bit. fetchAnd returns the prior value so we can detect
         // HAS_WAITERS in one atomic op (no separate load).
