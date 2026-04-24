@@ -326,7 +326,7 @@ module FunctionAnalysis
         # Rule 2: The Variable being passed must be MUTABLE
         # We check the scope to see if the user declared it with 'MUTABLE'
         if current_scope.is_immutable?(arg_node.name)
-          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, i+1, param[:name], arg_node.name)
+          emit_immutable_arg_error!(arg_node, current_scope, i + 1, param[:name])
         end
       end
 

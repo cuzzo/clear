@@ -50,7 +50,12 @@ module MethodAnalysis
     defn = registry[node.name]
     unless defn
       available = registry.keys.join(", ")
-      error!(node, "Unknown method '#{node.name}' on #{type_label}. Available: #{available}")
+      emit_typo_suggestion!(
+        node.token, node.name, registry.keys,
+        "Unknown method '#{node.name}' on #{type_label}. Available: #{available}",
+        "method of #{type_label}",
+        category: :type, cascade: true
+      )
       return true
     end
 

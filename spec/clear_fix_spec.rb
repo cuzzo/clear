@@ -155,6 +155,72 @@ RSpec.describe "./clear fix", :integration do
     end
   end
 
+  describe "method typo (typed collections)" do
+    it "suggests closest method and applies the fix" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          m: HashMap<Int64> = {"a": 1};
+          RETURN m.coutn();
+        END
+      CLEAR
+      path = write("mc.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Unknown method 'coutn'/)
+      expect(out).to match(/Replace 'coutn' with 'count'/)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("m.count()")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
+  describe "@local never-shared" do
+    it "removes the @local capability when the variable never crosses fibers" do
+      src = <<~CLEAR
+        STRUCT Counter {value: Int64}
+        FN main() RETURNS Int64 ->
+          MUTABLE c = Counter {value: 0} @local;
+          c.value = c.value + 1;
+          RETURN c.value;
+        END
+      CLEAR
+      path = write("local.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/@local but never shared/)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).not_to include("@local")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
+  describe "immutable arg passed as MUTABLE" do
+    it "declares the caller variable MUTABLE at its binding site" do
+      src = <<~CLEAR
+        FN bump!(MUTABLE x: Int64) RETURNS Int64 ->
+          x = x + 1;
+          RETURN x;
+        END
+
+        FN main() RETURNS Int64 ->
+          y = 5;
+          RETURN bump!(y);
+        END
+      CLEAR
+      path = write("ia.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/Argument 1 \('x'\) is MUTABLE/)
+      expect(out).to match(/Declare 'y' as MUTABLE/)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("MUTABLE y = 5")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
   describe "struct-literal field typo" do
     it "suggests the closest struct field" do
       src = <<~CLEAR

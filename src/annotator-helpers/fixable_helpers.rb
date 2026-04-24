@@ -376,36 +376,96 @@ module FixableHelper
       raise_in_collector: true)
   end
 
-  # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
-  # locates the original declaration (via the enclosing scope's info)
-  # and inserts `MUTABLE ` at its column. If the declaration can't be
-  # located or already has `MUTABLE`, falls through to the plain error
-  # path so the build still halts.
-  def emit_immutable_assignment_error!(node, scope)
-    info = scope.locals[node.name]
-    decl = info&.reg
+  # Lint: `Variable 'x' is @local but never shared across fibers`. When
+  # we have the annotator's source text, find `@local` on the
+  # declaration's source line and emit an :auto fix that removes it
+  # (plus one adjacent space). Falls back to a plain stderr note when
+  # source isn't available or the text isn't found on the line.
+  def emit_local_never_shared_finding!(info)
+    name = info[:var]
+    line = info[:line]
+    msg = "Variable '#{name}' is @local but never shared across fibers. " \
+          "You are paying for a heap allocation with no sharing benefit. Consider removing @local."
     fixes = []
-    if decl && decl.respond_to?(:token) && decl.token
-      tok = decl.token
-      already_mutable = tok.respond_to?(:value) && tok.value == 'MUTABLE'
-      unless already_mutable
+
+    if @source_code && line
+      src_line = @source_code.lines[line - 1] || ''
+      idx = src_line.index('@local')
+      if idx
+        trail = (src_line[idx + 6] == ' ') ? 1 : 0
+        lead  = (idx > 0 && src_line[idx - 1] == ' ') ? 1 : 0
+        start_col = idx + 1 - lead
+        length    = 6 + lead + trail
         fixes << Fix.new(
-          description: "Declare '#{node.name}' as MUTABLE at its binding site (line #{tok.line}).",
+          description: "Remove `@local` capability from '#{name}' (never shared across fibers).",
           confidence: :auto,
           edits: [Edit.new(
-            span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
-            replacement: 'MUTABLE '
+            span: Span.new(file: nil, line: line, col: start_col, length: length),
+            replacement: ''
           )]
         )
       end
     end
 
-    return error!(node, "Variable '#{node.name}' is immutable") if fixes.empty?
+    if fixes.empty?
+      loc = line ? " (line #{line})" : ""
+      $stderr.puts "\e[36m[Note]\e[0m #{msg}#{loc}"
+      return
+    end
 
+    anchor = anchor_at(line, info[:column] || 1)
+    fixable!(anchor,
+      message: msg,
+      category: :lint,
+      level: :info,
+      fixes: fixes)
+  end
+
+  # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
+  # locates the original declaration and inserts `MUTABLE ` at its
+  # column.
+  def emit_immutable_assignment_error!(node, scope)
+    fix = build_declare_mutable_fix(node.name, scope)
+    return error!(node, "Variable '#{node.name}' is immutable") unless fix
     fixable!(node,
       message: "Variable '#{node.name}' is immutable",
       category: :ownership,
       level: :error,
-      fixes: fixes)
+      fixes: [fix])
+  end
+
+  # Ownership: `Argument i ('param') is MUTABLE, but you passed
+  # immutable variable 'x'`. Same fix shape as the assignment case —
+  # declare the passed variable MUTABLE at its binding site.
+  def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name)
+    fix = build_declare_mutable_fix(arg_node.name, scope)
+    msg = "Argument #{arg_idx} ('#{param_name}') is MUTABLE, but you passed immutable variable '#{arg_node.name}'."
+    return error!(arg_node, msg) unless fix
+    fixable!(arg_node,
+      message: msg,
+      category: :ownership,
+      level: :error,
+      fixes: [fix],
+      raise_in_collector: true)
+  end
+
+  # Shared helper — returns a Fix that inserts `MUTABLE ` at the
+  # declaration of `name` in `scope`. Returns nil when the declaration
+  # isn't locatable or already carries `MUTABLE`.
+  def build_declare_mutable_fix(name, scope)
+    info = scope.locals[name]
+    decl = info&.reg
+    return nil unless decl && decl.respond_to?(:token) && decl.token
+    tok = decl.token
+    return nil if tok.respond_to?(:value) && tok.value == 'MUTABLE'
+
+    Fix.new(
+      description: "Declare '#{name}' as MUTABLE at its binding site (line #{tok.line}).",
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+        replacement: 'MUTABLE '
+      )]
+    )
   end
 end

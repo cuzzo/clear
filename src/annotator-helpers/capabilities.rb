@@ -565,8 +565,7 @@ module CapabilityAudit
       end
 
       if sync == :local && !info[:captured_bg]
-        $stderr.puts "\e[36m[Note]\e[0m Variable '#{info[:var]}' is @local but never shared across fibers. " \
-                     "You are paying for a heap allocation with no sharing benefit. Consider removing @local.#{loc}"
+        emit_local_never_shared_finding!(info)
       end
     end
   end
