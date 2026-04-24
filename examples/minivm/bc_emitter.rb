@@ -402,7 +402,12 @@ class BcEmitter
       # See compile_expr's MIR::Pipeline branch.
       compile_stmt(mir_node.inner, nil)
     when MIR::ContinueStmt
-      if @loop_continue_target
+      if @loop_continue_target == :deferred_for
+        emit_op(JUMP)
+        @loop_for_continue_patches << @ops.length
+        emit_op(0)
+        push_type(:void)
+      elsif @loop_continue_target
         emit_op(JUMP, @loop_continue_target)
         push_type(:void)
       else
@@ -660,9 +665,89 @@ class BcEmitter
   def compile_for(node, ast_node = nil)
     if ast_node
       compile_ast_stmt(ast_node)
-    else
-      raise Unimplemented, "ForStmt without AST fallback"
+      return
     end
+    # Structural ForStmt: iterate a list-producing expression (iter),
+    # binding each element to `capture` (and optionally index to
+    # index_capture). ContinueStmt jumps to the index-increment; BreakStmt
+    # patches into the loop exit.
+    capture = node.capture.to_s.sub(/\A\*/, "")  # strip Zig `*` pointer sigil
+    idx_name  = "__for_idx_#{@ops.length}"
+    coll_name = "__for_coll_#{@ops.length}"
+    alloc_slot(idx_name, :any); alloc_slot(coll_name, :any)
+    alloc_slot(capture, :any) unless has_slot?(capture)
+    @slot_types[capture] = :any
+    if node.index_capture
+      idx_cap = node.index_capture.to_s.sub(/\A\*/, "")
+      alloc_slot(idx_cap, :any) unless has_slot?(idx_cap)
+      @slot_types[idx_cap] = :any
+    end
+
+    # coll = iter; idx = 0
+    compile_expr_to_value(node.iter); pop_type
+    emit_op(STORE_SLOT, @slots[coll_name])
+    emit_op(POP)
+    emit_op(LOAD_CONST, add_const([:i64, 0]))
+    emit_op(I_TO_VAL)
+    emit_op(STORE_SLOT, @slots[idx_name])
+    emit_op(POP)
+
+    loop_start = @ops.length
+    # if idx >= len(coll): jump exit
+    emit_op(LOAD_SLOT, @slots[idx_name])
+    emit_op(LOAD_SLOT, @slots[coll_name])
+    emit_op(NATIVE_CALL, NATIVES["count"], 1)
+    emit_op(LT)
+    emit_op(JUMP_IF_FALSE)
+    jump_exit = @ops.length; emit_op(0)
+
+    # capture = coll[idx]
+    emit_op(LOAD_SLOT, @slots[coll_name])
+    emit_op(LOAD_SLOT, @slots[idx_name])
+    emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+    emit_op(STORE_SLOT, @slots[capture])
+    emit_op(POP)
+    # optional index capture
+    if node.index_capture
+      idx_cap = node.index_capture.to_s.sub(/\A\*/, "")
+      emit_op(LOAD_SLOT, @slots[idx_name])
+      emit_op(STORE_SLOT, @slots[idx_cap])
+      emit_op(POP)
+    end
+
+    # body — wire break/continue targets
+    saved_continue = @loop_continue_target
+    saved_breaks   = @loop_break_patches
+    continue_label = nil  # we'll patch after loop body
+    @loop_break_patches = []
+    # Continue target points to the increment block below.
+    continue_patches = []
+    @loop_continue_target = nil  # set after body emission via patch list
+    continue_marker = -> (ip) { continue_patches << ip }
+    # Replace ContinueStmt emission: use a patch list that resolves to the
+    # increment block's IP. To minimize changes, set the continue target to
+    # a placeholder that we rewrite once we know the increment IP.
+    @loop_continue_target = :deferred_for
+    @loop_for_continue_patches = continue_patches
+    semantic_mir_nodes(node.body).each { |s| compile_stmt(s, nil) }
+    break_patches = @loop_break_patches
+    @loop_continue_target = saved_continue
+    @loop_break_patches   = saved_breaks
+    @loop_for_continue_patches = nil
+
+    # Increment block
+    increment_ip = @ops.length
+    continue_patches.each { |ip| @ops[ip] = increment_ip }
+    emit_op(LOAD_SLOT, @slots[idx_name])
+    emit_op(LOAD_CONST, add_const([:i64, 1]))
+    emit_op(ADD)
+    emit_op(STORE_SLOT, @slots[idx_name])
+    emit_op(POP)
+    emit_op(JUMP, loop_start)
+
+    @ops[jump_exit] = @ops.length
+    break_patches.each { |ip| @ops[ip] = @ops.length }
+    push_type(:void)
   end
 
   def compile_switch(node, ast_node)
