@@ -1,0 +1,315 @@
+# VM Phase 2 / Concurrency — Compiler Bugs and Gap Analysis
+
+Discovered while attempting to land real `rt.spawnFiber`-backed
+concurrency in `examples/minivm/_bc_runner.cht`'s `BG_SPAWN` handler.
+Every bug observed in the VM's compiled code is, by definition, a bug
+in the compiler that compiled it — this doc tracks each.
+
+Regression tests: `spec/vm_bg_capture_bugs_spec.rb`.
+
+---
+
+## The dangling-pointer family (Bugs #2, #3, #6)
+
+The original doc enumerated these as separate bugs. After careful
+reproduction, **all three are the same root bug**: a borrow / shared
+heap-pointer from a local scope escapes into an async `BG` fiber
+without ownership transfer, and the outer scope's auto-generated
+`defer` frees the backing before the fiber reads it.
+
+### Reproducer #1 — direct slice borrow
+
+```cht
+FN work(xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
+
+FN runit() RETURNS Int64 ->
+    MUTABLE lst: Int64[]@list = List[];
+    lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
+    slice: Int64[] = lst;         -- slice borrows lst's backing
+    p: ~Int64 = BG {
+        work(slice);               -- captured into async fiber
+    };
+    RETURN NEXT p;                 -- lst dies on scope exit
+END
+```
+
+Observed: compiles clean; runtime assertion fails (fiber reads 0, not 3).
+
+### Reproducer #2 — same pattern through a union variant
+
+```cht
+UNION V { Nil, IntV: Int64 }
+
+FN consumeSlice(xs: V[]) RETURNS Int64 ->
+    IF xs.length() > 0 THEN
+        MATCH xs[0] START
+            V.IntV AS i -> RETURN i;,
+            DEFAULT -> RETURN 0_i64;
+        END
+    END
+    RETURN 0_i64;
+END
+
+FN runit() RETURNS Int64 ->
+    MUTABLE xsList: V[]@list = List[];
+    xsList.append(V{ IntV: 42 });
+    xsSlice: V[] = xsList;          -- borrow
+    p: ~Int64 = BG {
+        consumeSlice(xsSlice);
+    };
+    RETURN NEXT p;
+END
+```
+
+Observed: compiles clean; `ASSERTION FAILED` at runtime (reads 0, not 42).
+
+### Reproducer #3 — the VM's Phase 2 attempt
+
+Inside `_bc_runner.cht`'s BG_SPAWN opcode handler:
+
+```cht
+MUTABLE bgCapsList: Value[]@list = List[];
+FOR bi IN (0_i64 ..< bgArgc) DO
+    bgCapsList.append(COPY stack[sp - bgArgc + bi]);
+END
+bgCaps: Value[] = bgCapsList;       -- slice borrow from @list
+append(futures, BG {
+    vmFiberRun!(ops, consts, bgEntry, bgCaps);   -- escapes
+});
+```
+
+Observed: compiles clean; fiber reads empty captures (zero-length
+slice → `slot[0] = Nil` → `0 + 1.0 = 1.0` instead of `7.0 + 1.0 = 8.0`
+for the `58_bg.cht` test).
+
+### Why all three are the same bug
+
+Each emits the same MIR shape:
+- An `AllocMark` + `Cleanup` for the owning `@list` local.
+- An assignment creating a slice that shares the owner's heap buffer —
+  **no marker node**.
+- A `BgBlock` whose captures include that slice — **no marker node**
+  pinning the borrow's lifetime to the fiber.
+
+MIRChecker sees:
+- AllocMark matched to Cleanup → INV #1, #2 satisfied.
+- AllocMark matched to AllocMark → INV #3 satisfied.
+- No other markers. Program accepted.
+
+The slice borrow is invisible to MIRChecker. See the gap analysis
+below for why.
+
+---
+
+## Bug #4: `COPY` at BG capture site → cryptic Zig error
+
+**Status**: reproducible with the right context. Not an independent
+root bug — it surfaces when `COPY` is applied to a union literal whose
+field owns a heap container, and the result is captured into BG.
+
+### Reproducer
+
+```cht
+UNION V { Nil, IntV: Int64, Vec: V[] }
+
+FN consumeVec(v: V) RETURNS Int64 ->
+    MATCH v START
+        V.Vec AS items -> RETURN items.length();,
+        DEFAULT -> RETURN 0_i64;
+    END
+    RETURN 0_i64;
+END
+
+FN runit() RETURNS Int64 ->
+    MUTABLE xs: V[]@list = List[];
+    xs.append(V{ IntV: 1 });
+    vec: V = COPY V{ Vec: xs };     -- COPY of union literal with list field
+    p: ~Int64 = BG { consumeVec(vec); };
+    RETURN NEXT p;
+END
+
+FN main() RETURNS Void ->
+    n: Int64 = runit();
+    ASSERT n == 1, "COPY'd Value.Vec captured into BG";
+END
+```
+
+Observed error at compile time:
+```
+._clear_tmp_bug4_vm.zig:89:81: error: expected type '*T', found 'T'
+```
+
+The diagnostic is a Zig-level type error with no CLEAR-level context.
+The user sees a codegen-internal message, not a diagnostic pointing at
+their source line.
+
+### Why this matters
+
+`COPY` in expression position should either:
+- Produce a deep-copy of the expression result (the "natural" semantic),
+  OR
+- Be rejected at the CLEAR level with a clear message: "COPY requires
+  an l-value binding; use `x: T = COPY source` or `x: T = source` and
+  COPY at the point of use."
+
+Currently it compiles the wrong Zig. This is a **lowering bug** — the
+MIR lowering for `COPY E` doesn't correctly produce the deep-copy
+shape when `E` is a union literal containing heap-owned fields. The
+checker doesn't catch it because, again, the MIR looks internally
+consistent — it just produces Zig that doesn't type-check.
+
+---
+
+## Gap analysis — Why MIRChecker doesn't catch the dangling-pointer family
+
+This is the central question the rest of this doc needs to answer
+cleanly. The claim from CLAUDE.md is that MIRChecker's seven invariants
+should be sufficient. If a bug slips through, the gap is upstream (in
+the lowering), not in the checker.
+
+### What the checker can see
+
+The checker operates on a stream of MIR marker nodes:
+- `AllocMark(name, alloc)` — something got allocated.
+- `Cleanup(name, entry)` / `ErrCleanup(name, entry)` — something
+  should be freed on normal / error paths.
+- `MoveMark(name)` — ownership transferred out; suppress the
+  corresponding guarded `Cleanup`.
+- `FrameSave` / `FrameRestore` — loop-iteration arena rewind points.
+- `AllocMark` allocator symbols (`:heap` / `:frame` / `:cleanup`).
+
+The seven invariants are relationships **between these markers**:
+1. Every AllocMark ↔ Cleanup (or ErrCleanup).
+2. Every Cleanup ↔ AllocMark.
+3. Allocator symbols agree between paired marks.
+4. Heap-returning calls in statement position must bind to a var.
+5. InlineZig/RawZig with ownership effects must declare `stdlib_def`.
+6. InlineZig allocator symbols match container's AllocMark.
+7. Loop bodies with frame allocs must have `FrameRestore`.
+
+### What the checker CANNOT see
+
+**Anything the lowering doesn't emit a marker for.**
+
+For reproducer #1 (slice borrow), the lowering emits:
+
+```
+AllocMark(lst, :heap)
+Cleanup(lst, entry=...)        -- fires when runit() returns
+-- slice = lst: no marker emitted (it's a borrow, no allocation)
+BgBlock(captures={slice}, body=[...])    -- captures list is data,
+                                          -- not a marker the checker audits
+```
+
+Walk the seven invariants:
+- INV #1: AllocMark(lst) has Cleanup(lst). ✓
+- INV #2: Cleanup(lst) has AllocMark(lst). ✓
+- INV #3: allocators match. ✓
+- INV #4–7: N/A.
+
+**Every invariant passes.** The program is accepted.
+
+### Can an existing invariant be made to fire?
+
+Answer: **not without the lowering emitting additional markers**. The
+checker's invariants are about marker relationships — it literally has
+nothing to look at for the unsafe borrow escape, because the lowering
+never generates a marker node pertaining to it.
+
+This is the correct design: the checker should be *simple*. Its job is
+to verify that markers agree with each other, not to re-do the
+lowering's job of deciding what to mark.
+
+### Two valid fixes — both in lowering
+
+**Fix A — lowering refuses, no markers needed.**
+
+`lower_bg_block` inspects each capture at lowering time:
+
+```
+for each capture (name, type) in node.captures:
+    if type is borrow_like (slice of owned, @indirect, field-of-owner):
+        if !explicitly_moved(source_owner) and !explicitly_copied(name):
+            raise lowering_error:
+              "Capture '{name}' borrows from '{owner}'; cannot escape
+               into async BG fiber. Transfer ownership with `GIVE` at
+               the BG site, or deep-copy with `COPY`."
+```
+
+This never produces MIR for the unsafe case. The checker never sees
+it. No new invariant needed.
+
+**Fix B — lowering emits markers, existing invariants fire.**
+
+If the user writes `GIVE slice` at the BG site:
+- Lowering emits `MoveMark(slice)` at the BG point, which implies
+  `MoveMark(lst)` (the underlying owner).
+- The outer `Cleanup(lst)` now has no live allocation to clean
+  (`MoveMark` consumed it) → INV #2 (**orphan cleanup**) fires if the
+  lowering emitted a `Cleanup` without recognizing the move.
+- Properly: lowering marks the outer Cleanup as guarded by
+  `lst_moved` so INV #1/#2 can verify the guarded path.
+
+If the user writes `COPY slice` at the BG site:
+- Lowering emits a fresh `AllocMark` inside the BG body (the deep
+  copy is a new allocation owned by the fiber).
+- A `Cleanup` inside the BG body closes the pair → INV #1/#2 satisfied.
+- The original `slice`'s owner is untouched → outer `AllocMark/Cleanup`
+  pair also intact.
+
+If the user writes **neither**:
+- Fix A above: lowering refuses with a CLEAR-level diagnostic.
+
+Both paths keep the checker on seven invariants. The lowering bends.
+
+### Why not a new invariant?
+
+The user's directive: **MIRChecker stays simple; everything bends to
+it**. Adding a "no-borrow-escapes-BG" invariant to the checker would:
+- Require the checker to inspect `BgBlock.captures` and cross-reference
+  with ownership info — a brand-new class of analysis.
+- Conflate "emit correct markers" (lowering's job) with "verify markers
+  are consistent" (checker's job).
+- Set a precedent for adding invariants every time the lowering grows
+  a new construct (concurrent, streaming, ffi, …).
+
+Keeping the checker fixed forces discipline in the lowering: any
+operation that has ownership implications must either emit markers
+the existing seven can act on, or refuse at lowering time.
+
+---
+
+## Current bug list
+
+| # | Status | Root cause |
+|---|---|---|
+| Bug #1 | **FIXED** (`6de9a874`) — regression test | BG ctx field type wrong for slice fn-params |
+| Dangling-pointer family (#2/#3/#6) | **OPEN** | Borrow escapes async BG; lowering emits no markers; checker has nothing to fire on |
+| Bug #4 | **OPEN** | `COPY` in expression position on union literals with heap-owned fields generates bad Zig |
+
+## Fix priorities (for the VM specifically)
+
+1. **Dangling-pointer family** — Fix A (lowering refuses at BG
+   capture): unblocks safety. Phase 2 VM concurrency is still blocked
+   without Fix B, but at least the silent UAF stops.
+
+2. **`COPY` expr-position lowering** — bug in how COPY rewrites union
+   literals with heap fields. Either implement deep-copy codegen
+   correctly, or refuse the pattern at CLEAR level.
+
+3. **Phase 2 design completion** — give users a way to say "move this
+   heap-owned capture into the BG fiber". Options:
+   - Capture-site `GIVE x` syntax: `append(futures, BG (GIVE x) { ... })`.
+   - `@multiowned` / `@shared` containers passed into BG directly
+     (already works, but not what the VM needs for short-lived captures).
+   - Implicit move for captures (violates "zero implicit copies").
+
+## Regression spec structure
+
+`spec/vm_bg_capture_bugs_spec.rb` currently holds:
+- Positive regression for Bug #1 (verifies `6de9a874` stays in).
+- Negative regression for the dangling-pointer family (asserts the
+  current broken behavior; flip when Fix A lands).
+
+When fixes land, the specs flip from "assert broken" to "assert
+diagnostic" or "assert correct runtime result".

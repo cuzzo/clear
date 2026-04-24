@@ -1,0 +1,209 @@
+require "rspec"
+require "set"
+
+require_relative "../src/ast/ast"
+require_relative "../src/ast/type"
+require_relative "../src/mir/capture_strategy"
+
+RSpec.describe CaptureStrategy do
+  let(:empty_site) { CaptureStrategy::CaptureSiteInfo.empty }
+
+  def t(raw, **opts) = Type.new(raw, **opts)
+
+  def classify(name: "x", type:, site_info: empty_site)
+    CaptureStrategy.classify(name: name, type: type, site_info: site_info)
+  end
+
+  # ----------------------------------------------------------------
+  # ByValue — primitives and string ([]const u8)
+  # ----------------------------------------------------------------
+  describe "ByValue: primitives and strings" do
+    %i[Int64 Float64 Bool Int8 Int16 Int32 UInt8 UInt16 UInt32 UInt64].each do |raw|
+      it "classifies #{raw} as ByValue" do
+        strat = classify(type: t(raw))
+        expect(strat).to be_a(CaptureStrategy::ByValue)
+        expect(strat.marker_plan).to be_empty
+        expect(strat.needs_capture_site_annotation?).to be false
+      end
+    end
+
+    it "classifies String as ByValue (CLEAR treats []const u8 as Copy)" do
+      strat = classify(type: t(:String))
+      expect(strat).to be_a(CaptureStrategy::ByValue)
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # RcClone — @multiowned / @shared
+  # ----------------------------------------------------------------
+  describe "RcClone: @multiowned and @shared" do
+    it "classifies @multiowned struct as RcClone" do
+      strat = classify(type: t(:Counter, ownership: :multiowned))
+      expect(strat).to be_a(CaptureStrategy::RcClone)
+      expect(strat.marker_plan).to be_empty
+    end
+
+    it "classifies @shared struct as RcClone" do
+      strat = classify(type: t(:Counter, ownership: :shared))
+      expect(strat).to be_a(CaptureStrategy::RcClone)
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # Refuse — heap-backed / borrow without explicit transfer
+  # ----------------------------------------------------------------
+  describe "Refuse: heap-backed / borrow without COPY or GIVE at capture site" do
+    it "refuses @list local capture" do
+      strat = classify(type: t(:"Int64[]", collection: :list))
+      expect(strat).to be_a(CaptureStrategy::Refuse)
+      expect(strat.reason).to eq(:list_borrow_without_transfer)
+    end
+
+    it "refuses @pool local capture" do
+      strat = classify(type: t(:"Env[100]", collection: :pool))
+      expect(strat).to be_a(CaptureStrategy::Refuse)
+      # @pool satisfies needs_pointer_passing, so reason prefers pointer-passed
+      expect(strat.reason).to eq(:pointer_passed_without_transfer)
+    end
+
+    it "refuses slice (Int64[]) capture" do
+      strat = classify(type: t(:"Int64[]"))
+      expect(strat).to be_a(CaptureStrategy::Refuse)
+      expect(strat.reason).to eq(:array_borrow_without_transfer)
+    end
+
+    it "refuses HashMap capture" do
+      strat = classify(type: t(:"HashMap<Int64>"))
+      expect(strat).to be_a(CaptureStrategy::Refuse)
+      expect(strat.reason).to eq(:pointer_passed_without_transfer)
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # MoveInto — user wrote GIVE x at the BG capture site
+  # ----------------------------------------------------------------
+  describe "MoveInto: explicit GIVE at capture site" do
+    let(:site) { CaptureStrategy::CaptureSiteInfo.new(Set.new, Set["xs"]) }
+
+    it "classifies @list as MoveInto when GIVE is present" do
+      strat = CaptureStrategy.classify(
+        name: "xs",
+        type: t(:"Int64[]", collection: :list),
+        site_info: site,
+      )
+      expect(strat).to be_a(CaptureStrategy::MoveInto)
+      expect(strat.source_name).to eq("xs")
+      expect(strat.marker_plan).to eq([[:move_mark, "xs"]])
+    end
+
+    it "classifies slice as MoveInto when GIVE is present" do
+      strat = CaptureStrategy.classify(
+        name: "xs",
+        type: t(:"Int64[]"),
+        site_info: site,
+      )
+      expect(strat).to be_a(CaptureStrategy::MoveInto)
+    end
+
+    it "does not refuse when the user gave ownership away" do
+      strat = CaptureStrategy.classify(
+        name: "xs",
+        type: t(:"Int64[]"),
+        site_info: site,
+      )
+      expect(strat).not_to be_a(CaptureStrategy::Refuse)
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # FreshHeapCopy — user wrote COPY x at the BG capture site
+  # ----------------------------------------------------------------
+  describe "FreshHeapCopy: explicit COPY at capture site" do
+    let(:site) { CaptureStrategy::CaptureSiteInfo.new(Set["xs"], Set.new) }
+
+    it "classifies @list as FreshHeapCopy when COPY is present" do
+      strat = CaptureStrategy.classify(
+        name: "xs",
+        type: t(:"Int64[]", collection: :list),
+        site_info: site,
+      )
+      expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
+      expect(strat.alloc_sym).to eq(:heap)
+      expect(strat.marker_plan).to include([:alloc_mark, "xs", :heap])
+      expect(strat.marker_plan).to include([:cleanup, "xs", :heap])
+    end
+
+    it "classifies slice as FreshHeapCopy when COPY is present" do
+      strat = CaptureStrategy.classify(
+        name: "xs",
+        type: t(:"Int64[]"),
+        site_info: site,
+      )
+      expect(strat).to be_a(CaptureStrategy::FreshHeapCopy)
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # Exhaustiveness — no silent fall-through
+  # ----------------------------------------------------------------
+  describe "Exhaustiveness" do
+    it "always returns exactly one of the five strategy variants" do
+      types_to_try = [
+        t(:Int64),
+        t(:Float64),
+        t(:Bool),
+        t(:String),
+        t(:Counter, ownership: :multiowned),
+        t(:Counter, ownership: :shared),
+        t(:"Int64[]", collection: :list),
+        t(:"Env[100]", collection: :pool),
+        t(:"HashMap<Int64>"),
+        t(:"Int64[]"),
+      ]
+      types_to_try.each do |type|
+        strat = classify(type: type)
+        variants = [
+          CaptureStrategy::ByValue, CaptureStrategy::RcClone,
+          CaptureStrategy::FreshHeapCopy, CaptureStrategy::MoveInto,
+          CaptureStrategy::Refuse,
+        ]
+        expect(variants).to include(strat.class),
+          "type #{type.inspect} produced unexpected strategy class #{strat.class}"
+      end
+    end
+
+    it "never silently produces ByValue for heap-backed types (the gap that caused Bug #3)" do
+      heap_backed = [
+        t(:"Int64[]", collection: :list),
+        t(:"Value[]", collection: :list),
+        t(:"Env[100]", collection: :pool),
+        t(:"HashMap<Int64>"),
+        t(:"Int64[]"),  # slice — borrow of some owner
+      ]
+      heap_backed.each do |type|
+        strat = classify(type: type)
+        expect(strat).not_to be_a(CaptureStrategy::ByValue),
+          "heap-backed #{type.inspect} was silently classified as ByValue; this is the dangling-pointer gap"
+      end
+    end
+  end
+
+  # ----------------------------------------------------------------
+  # CaptureSiteInfo
+  # ----------------------------------------------------------------
+  describe "CaptureSiteInfo" do
+    it "exposes copied?/moved? predicates" do
+      info = CaptureStrategy::CaptureSiteInfo.new(Set["a"], Set["b"])
+      expect(info.copied?("a")).to be true
+      expect(info.copied?("b")).to be false
+      expect(info.moved?("b")).to be true
+      expect(info.moved?("a")).to be false
+    end
+
+    it "builds an empty info cleanly" do
+      info = CaptureStrategy::CaptureSiteInfo.empty
+      expect(info.copied?("x")).to be false
+      expect(info.moved?("x")).to be false
+    end
+  end
+end

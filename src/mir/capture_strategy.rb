@@ -1,0 +1,175 @@
+# frozen_string_literal: true
+
+# CaptureStrategy -- classifies how a BG (and other fiber-like) capture
+# must be lowered, based on the capture's type and user-supplied
+# capture-site annotations (GIVE / COPY).
+#
+# The central claim is that every capture falls into exactly ONE of the
+# five strategies below, and each strategy dictates the complete
+# treatment: the ctx-struct field Zig type, the ctx-init RHS, and which
+# MIRChecker marker nodes must be emitted. With this classifier, the
+# existing capture paths in mir_lowering.lower_bg_block (pointer_captures,
+# resource_captures, promoted_names, capture_close_zig, ad-hoc per-type
+# forks) collapse to: classify -> dispatch.
+#
+# Why a classifier and not piecewise decisions:
+# - Today the lowering asks "is this a pointer?" / "is this a string?" /
+#   "is this a resource?" separately, with each answer driving a
+#   different hash/set. The piecewise default ("none of the above -> byte
+#   copy the header") is the gap that lets borrows slip through into
+#   async scopes and UAF at runtime.
+# - A single exhaustive classifier has no silent default: everything
+#   outside an explicit strategy maps to Refuse, which raises a
+#   CLEAR-level diagnostic at lowering time.
+#
+# Why this keeps MIRChecker simple:
+# - Strategies prescribe which existing marker nodes (MoveMark,
+#   AllocMark, Cleanup) the lowering must emit. The existing seven
+#   invariants of MIRChecker then catch any misuse. No new invariant is
+#   required; the checker stays fixed.
+#
+# Migration stance: this file is PURE CLASSIFICATION. Step 1 of the
+# migration plan (docs/agents/vm-bugs.md) adds it but does not call it
+# from lower_bg_block yet. Step 2 onwards converts the emission.
+
+module CaptureStrategy
+  # A capture that can be byte-copied into the ctx struct: primitives,
+  # strings (CLEAR treats []const u8 as copyable), enums, small
+  # all-primitive structs. No markers required; no runtime ownership
+  # transfer; the fiber sees a value equal to but independent of the
+  # outer binding.
+  ByValue = Struct.new(:zig_type, :ctx_init_name) do
+    def marker_plan = []
+    def needs_capture_site_annotation? = false
+  end
+
+  # A capture of an @multiowned or @shared (Rc/Arc) container. The BG
+  # capture clones the reference count; the fiber holds its own strong
+  # ref, which is released on fiber cleanup via the existing
+  # retain/release machinery. No new markers required beyond the
+  # existing RC discipline.
+  RcClone = Struct.new(:zig_type, :ctx_init_name) do
+    def marker_plan = []
+    def needs_capture_site_annotation? = false
+  end
+
+  # Explicit deep-copy at the BG capture site (user wrote COPY x). The
+  # fiber's ctx owns a freshly-allocated heap copy; the outer binding is
+  # untouched. Emits a new AllocMark inside the BG body and pairs it
+  # with a fiber-scope Cleanup. INV #1 / INV #2 verify the pair.
+  FreshHeapCopy = Struct.new(:zig_type, :ctx_init_name, :alloc_sym) do
+    def marker_plan
+      [ [:alloc_mark, ctx_init_name, alloc_sym],
+        [:cleanup,    ctx_init_name, alloc_sym] ]
+    end
+    def needs_capture_site_annotation? = true
+  end
+
+  # Explicit ownership transfer at the BG capture site (user wrote GIVE
+  # x). The outer binding's Cleanup is suppressed (MoveMark on the
+  # source) and the ctx takes over. The existing INV #2 guard-check
+  # machinery already covers this: after MoveMark, the outer Cleanup
+  # must be guarded (defer if (!x_moved) cleanup(x)), and the ctx's
+  # cleanup path takes over on fiber exit.
+  MoveInto = Struct.new(:zig_type, :ctx_init_name, :source_name) do
+    def marker_plan
+      [ [:move_mark, source_name] ]
+    end
+    def needs_capture_site_annotation? = true
+  end
+
+  # Fail-closed classification: a heap-backed or borrow-like capture
+  # reached the classifier without the user providing COPY/GIVE. Raise
+  # at lowering time; do not produce MIR. The diagnostic is a
+  # CLEAR-level error with a source span, so the user sees their own
+  # code, not a Zig type error later.
+  Refuse = Struct.new(:reason, :owner_name) do
+    def marker_plan = []
+    def needs_capture_site_annotation? = false
+  end
+
+  # Carries the per-capture user-supplied annotations (COPY / GIVE)
+  # collected at the BG site. Populated by the parser / AST walker; read
+  # here. Until capture-site GIVE / COPY surface syntax lands, both sets
+  # are empty and the classifier will Refuse heap-backed captures.
+  #
+  # copied_names  : Set<String>   -- names the user wrapped in COPY at BG site
+  # moved_names   : Set<String>   -- names the user wrapped in GIVE at BG site
+  CaptureSiteInfo = Struct.new(:copied_names, :moved_names) do
+    def copied?(name) = copied_names&.include?(name) || false
+    def moved?(name)  = moved_names&.include?(name)  || false
+
+    def self.empty
+      new(Set.new, Set.new)
+    end
+  end
+
+  # Primary entry point. Returns exactly one of the five strategies above.
+  #
+  # name           : String          -- capture name (for diagnostics + marker naming)
+  # type           : Type            -- the capture's static type (unwrapped)
+  # site_info      : CaptureSiteInfo -- what the user wrote at the BG site
+  # rt_name        : String          -- runtime reference (for FreshHeapCopy's allocator)
+  def self.classify(name:, type:, site_info:, rt_name: "rt")
+    zig_t = field_zig_type(type)
+
+    # 1. Explicit user annotation wins: COPY/GIVE apply regardless of
+    #    type, as long as the type supports the operation. (We don't
+    #    second-guess: if the user wrote GIVE on a primitive, MoveInto
+    #    still works because MoveMark on a primitive is a no-op.)
+    if site_info.moved?(name)
+      return MoveInto.new(zig_t, name, name)
+    end
+
+    if site_info.copied?(name)
+      alloc_sym = fiber_copy_alloc_for(type)
+      return FreshHeapCopy.new(zig_t, name, alloc_sym)
+    end
+
+    # 2. Value-like captures are always safe: primitives, strings
+    #    (CLEAR semantics: []const u8 is Copy), enums.
+    return ByValue.new(zig_t, name) if value_like?(type)
+
+    # 3. @multiowned / @shared clone their ref-count automatically.
+    return RcClone.new(zig_t, name) if type.multiowned? || type.shared?
+
+    # 4. Anything else (heap-backed, borrow, pointer-passed) requires
+    #    explicit transfer at the capture site. Refuse with the reason.
+    Refuse.new(refuse_reason_for(type), name)
+  end
+
+  # --- Helpers: purely local predicates, no external side effects. ---
+
+  # True iff the capture's data fits entirely in the union/value header,
+  # with no aliased heap backing. Safe to byte-copy into the ctx struct.
+  def self.value_like?(type)
+    return true if type.primitive?
+    return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
+    return true if type.respond_to?(:copyable?) && type.copyable?
+    false
+  end
+
+  # Where the fiber's deep-copy should live when the user writes COPY.
+  # Fibers outlive the spawning scope, so heap is the safe default.
+  def self.fiber_copy_alloc_for(_type)
+    :heap
+  end
+
+  # Narrow Zig-field type selection. Reuses Type#zig_type(is_field: true)
+  # so dynamic arrays render as []T (slices) rather than ArrayListUnmanaged.
+  # Pointer-passed types render as *T in the field (same as historical
+  # behavior for @pool / @map captures).
+  def self.field_zig_type(type)
+    base = type.zig_type(is_field: true)
+    (type.respond_to?(:needs_pointer_passing?) && type.needs_pointer_passing?) ? "*#{base}" : base
+  end
+
+  def self.refuse_reason_for(type)
+    return :pointer_passed_without_transfer if type.respond_to?(:needs_pointer_passing?) && type.needs_pointer_passing?
+    return :list_borrow_without_transfer   if type.list_collection?
+    return :pool_borrow_without_transfer   if type.pool?
+    return :array_borrow_without_transfer  if type.array?
+    return :heap_backed_without_transfer   if type.respond_to?(:heap?) && type.heap?
+    :unclassified_capture
+  end
+end
