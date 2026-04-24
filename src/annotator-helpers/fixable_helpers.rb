@@ -215,27 +215,28 @@ module FixableHelper
              fixes: fixes, raise_in_collector: cascade)
   end
 
-  # Ownership: `Use of moved value 'x'`. Uses the move-site tracking
-  # on the OwnershipGraph node to emit an :interactive fix that wraps
-  # the consuming reference with `COPY` at the move site. This keeps
-  # the original alive for the later use.
+  # Ownership: `Use of moved value 'x'`. Uses move-site tracking on
+  # the OwnershipGraph node + (optional) annotator `source_code` to
+  # build up to three interactive candidates:
   #
-  # Deferred candidates (documented, not emitted):
-  # - @multiowned / @shared upgrades at the DECLARATION need to append
-  #   the capability at the end of the value expression (before `;`).
-  #   Computing that span cleanly from the AST alone is tricky; done
-  #   properly requires source-text access on the annotator. For now
-  #   the COPY fix handles the common case.
+  #   1. Wrap the consuming reference with `COPY` at the move site.
+  #      Always available when the move site is tracked.
+  #   2. Change the declaration to `@multiowned` — single-scheduler Rc;
+  #      moves become automatic clones. Available when we can locate
+  #      the declaration's `;` (via source_code).
+  #   3. Change the declaration to `@shared` — atomic Arc; safe across
+  #      fibers and schedulers. Same requirement as (2).
   #
   # When the move site isn't tracked (e.g., branch-merge paths, BG
-  # captures), we fall through to the plain `error!` so the legacy
+  # captures), fall through to the plain `error!` so the legacy
   # diagnostic still surfaces.
   def emit_use_of_moved_error!(use_node, og_node)
     name = use_node.name.to_s
     return error!(use_node, "Use of moved value '#{name}'") unless og_node
     return error!(use_node, "Use of moved value '#{name}'") unless og_node.move_line && og_node.move_col
 
-    fix = Fix.new(
+    fixes = []
+    fixes << Fix.new(
       description: "Wrap the consuming reference with COPY at line #{og_node.move_line} " \
                    "(the original survives for the later use).",
       confidence: :interactive,
@@ -245,9 +246,131 @@ module FixableHelper
       )]
     )
 
+    # Declaration-level `@multiowned` / `@shared` fixes — append after
+    # the value expression (before the statement-terminating `;`).
+    scope = lookup_scope_for(name)
+    decl = scope&.locals&.[](name)&.reg
+    src = @source_code
+    if decl && decl.respond_to?(:token) && decl.token && src
+      dline = decl.token.line
+      line_text = src.lines[dline - 1] || ''
+      # Find the `;` that terminates the declaration (skip trailing
+      # whitespace). Only suggest capability upgrades when the `;` is
+      # on the same physical line as the declaration — multi-line
+      # value expressions would need a broader span calc.
+      semi_idx = line_text.index(';')
+      if semi_idx
+        insert_col = semi_idx + 1  # 1-based column at the `;`
+        ['@multiowned', '@shared'].each do |cap|
+          fixes << Fix.new(
+            description: "Change '#{name}' to `#{cap}` at its declaration " \
+                         "(#{cap == '@multiowned' ? 'single-scheduler Rc; automatic clone on move' : 'atomic Arc; safe across fibers'}).",
+            confidence: :interactive,
+            edits: [Edit.new(
+              span: Span.new(file: nil, line: dline, col: insert_col, length: 0),
+              replacement: " #{cap}"
+            )]
+          )
+        end
+      end
+    end
+
     fixable!(use_node,
       message: "Use of moved value '#{name}' (moved at line #{og_node.move_line})",
       category: :ownership,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
+  end
+
+  # Type: `Integer literal N overflows T (range ...)`. When the
+  # literal is written in suffixed form (`1000_u8`) and there's a
+  # wider known type that fits the value, emit an :auto fix that
+  # replaces just the suffix. Annotation-form overflows (`x: Byte =
+  # 1000`) fall through to the legacy error path — locating the
+  # annotation token from the literal's context is non-trivial and
+  # deferred.
+  INT_SUFFIXES = {
+    Int8: 'i8', Byte: 'u8',
+    Int16: 'i16', UInt16: 'u16',
+    Int32: 'i32', UInt32: 'u32',
+    Int64: 'i64', UInt64: 'u64',
+  }.freeze
+
+  # Order smallest-first so `find` picks the tightest fit.
+  SIGNED_ORDER    = [:Int8,  :Int16,  :Int32,  :Int64 ].freeze
+  UNSIGNED_ORDER  = [:Byte,  :UInt16, :UInt32, :UInt64].freeze
+
+  def smallest_fitting_int_type(val)
+    order = val >= 0 ? UNSIGNED_ORDER : SIGNED_ORDER
+    order.find do |t|
+      max = Type::INT_TYPE_MAX[t]
+      min = Type::INT_TYPE_MIN[t] || 0
+      val >= min && val <= max
+    end
+  end
+
+  def emit_int_overflow_error!(node, val, target_type, min, max)
+    msg = "Integer literal (#{val}) overflows #{target_type} (range #{min}..#{max})"
+    tok = node.respond_to?(:token) ? node.token : nil
+    return error!(node, msg) unless tok && @source_code
+
+    best = smallest_fitting_int_type(val)
+    return error!(node, msg) unless best
+
+    line_text = @source_code.lines[tok.line - 1] || ''
+
+    # Prefer the suffix form first (precise span; local replacement).
+    snippet = line_text[(tok.column - 1)..] || ''
+    if (m = snippet.match(/\A(\d[\d_]*)_([a-z]\d+)/))
+      old_suffix = m[2]
+      new_suffix = INT_SUFFIXES[best]
+      if new_suffix && new_suffix != old_suffix
+        suffix_col = tok.column + m[1].length + 1
+        return emit_overflow_suffix_fix!(node, msg, tok, suffix_col, old_suffix, new_suffix, val)
+      end
+    end
+
+    # Annotation form: scan the line for `: <target_type>` and replace
+    # the type token (e.g., `x: Byte = 1000` -> `x: UInt16 = 1000`).
+    target_name = target_type.to_s
+    ann_match = line_text.match(/:\s*(#{Regexp.escape(target_name)})\b/)
+    if ann_match
+      ann_col = ann_match.begin(1) + 1  # 1-based column of the type name
+      new_type = best.to_s
+      if new_type != target_name
+        fix = Fix.new(
+          description: "Widen annotation `#{target_name}` to `#{new_type}` (smallest type that fits #{val}).",
+          confidence: :auto,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: tok.line, col: ann_col, length: target_name.length),
+            replacement: new_type
+          )]
+        )
+        return fixable!(node,
+          message: msg,
+          category: :type,
+          level: :error,
+          fixes: [fix],
+          raise_in_collector: true)
+      end
+    end
+
+    error!(node, msg)
+  end
+
+  def emit_overflow_suffix_fix!(node, msg, tok, suffix_col, old_suffix, new_suffix, val)
+    fix = Fix.new(
+      description: "Widen suffix `_#{old_suffix}` to `_#{new_suffix}` (smallest type that fits #{val}).",
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: tok.line, col: suffix_col, length: old_suffix.length),
+        replacement: new_suffix
+      )]
+    )
+    fixable!(node,
+      message: msg,
+      category: :type,
       level: :error,
       fixes: [fix],
       raise_in_collector: true)

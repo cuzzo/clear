@@ -40,10 +40,17 @@ class SemanticAnnotator
     @function_context_stack.last
   end
 
-  def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false)
+  # `source_code` is optional — used ONLY by fixable-error helpers to
+  # locate source-level spans (e.g., the `;` at the end of a
+  # declaration line so `@multiowned` can be inserted before it).
+  # When nil, affected helpers fall back to the plain `error!` path.
+  attr_accessor :source_code
+
+  def initialize(importer: nil, compiler: nil, source_dir: nil, strict_test: false, source_code: nil)
     @importer   = importer || compiler
     @source_dir = source_dir ? File.expand_path(source_dir) : Dir.pwd
     @strict_test = strict_test
+    @source_code = source_code
     # We start with a global scope
     @scope_stack = [Scope.new]
     @function_context_stack = [] # Stack of expected return types
@@ -1682,7 +1689,22 @@ private
     unless method_def
       available = static_methods.keys.join(", ")
       available = "(none)" if available.empty?
-      error!(node, :STATIC_UNKNOWN_METHOD, node.method_name, type_name, available)
+      method_tok = node.type_name.token
+      # Method name starts at `TypeName::` + 2 (the `::`).
+      if method_tok
+        anchor = anchor_at(
+          method_tok.line,
+          method_tok.column + node.type_name.name.to_s.length + 2
+        )
+        emit_typo_suggestion!(
+          anchor, node.method_name, static_methods.keys,
+          "Type Error: No static method '#{node.method_name}' on '#{type_name}'. Available: #{available}.",
+          "static method of #{type_name}",
+          category: :type, cascade: true
+        )
+      else
+        error!(node, :STATIC_UNKNOWN_METHOD, node.method_name, type_name, available)
+      end
     end
 
     expected_args = method_def[:args]

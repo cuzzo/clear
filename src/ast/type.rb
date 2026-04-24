@@ -1724,7 +1724,11 @@ module TypeHelper
     return unless max  # Not a known integer type; let type checker handle the mismatch
     min = Type::INT_TYPE_MIN[t] || 0
     if val < min || val > max
-      error!(node, "Integer literal (#{val}) overflows #{t} (range #{min}..#{max})")
+      if respond_to?(:emit_int_overflow_error!)
+        emit_int_overflow_error!(node, val, t, min, max)
+      else
+        error!(node, "Integer literal (#{val}) overflows #{t} (range #{min}..#{max})")
+      end
     end
   end
 

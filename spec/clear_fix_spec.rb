@@ -202,22 +202,48 @@ RSpec.describe "./clear fix", :integration do
       CLEAR
     end
 
-    it "reports the move line in the message" do
+    it "reports the move line and three candidate fixes" do
       path = write("m.cht", src)
       out, _, _ = run_fix("--dry-run", path)
       expect(out).to match(/Use of moved value 'a' \(moved at line 5\)/)
       expect(out).to match(/Wrap the consuming reference with COPY at line 5/)
+      expect(out).to match(/Change 'a' to `@multiowned`/)
+      expect(out).to match(/Change 'a' to `@shared`/)
     end
 
     it "applies the COPY fix at the move site and the result compiles" do
       path = write("m.cht", src)
-      # --yes picks the first (and only) candidate non-interactively.
       out, _, _ = run_fix("--yes", path)
       expect(out).to match(/applied 1 edit/)
       expect(File.read(path)).to include("b = (COPY a);")
       expect(File.read(path)).to include("c = a;")
       build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
       expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
+  describe "integer-overflow annotation widening" do
+    it "widens a type annotation when the literal doesn't fit" do
+      src = "FN main() RETURNS UInt16 ->\n  x: Byte = 1000;\n  RETURN x;\nEND\n"
+      path = write("ovf.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/overflows Byte/)
+      expect(out).to match(/Widen annotation `Byte` to `UInt16`/)
+      out, _, _ = run_fix(path)
+      expect(out).to match(/applied 1 edit/)
+      expect(File.read(path)).to include("x: UInt16 = 1000")
+      build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
+      expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
+    end
+  end
+
+  describe "static method typo" do
+    it "suggests the closest static method" do
+      src = "FN main() RETURNS Void ->\n  f = File::oepn(\"/tmp/x\");\n  RETURN;\nEND\n"
+      path = write("sm.cht", src)
+      out, _, _ = run_fix("--dry-run", path)
+      expect(out).to match(/No static method 'oepn' on 'File'/)
+      expect(out).to match(/Replace 'oepn' with 'open'/)
     end
   end
 
