@@ -2276,25 +2276,27 @@ class MIRLowering
 
     rt_name = @rt_name
 
-    # CaptureStrategy classification (Step 2 of the migration plan in
-    # docs/agents/vm-bugs.md). Runs alongside the existing piecewise
-    # logic with no behavior change — the strategies are computed and
-    # stashed on the node for later steps. Steps 3+ convert individual
-    # emission paths to read from the strategy map instead of the legacy
-    # Set/Hash-based state.
-    #
-    # Today GIVE/COPY at capture sites don't parse, so site_info is
-    # always empty; heap-backed captures classify as Refuse. Refuse is
-    # NOT yet enforced — falling back to legacy behavior — so existing
-    # tests stay green while we audit what needs to change.
-    site_info = CaptureStrategy::CaptureSiteInfo.empty
+    # CaptureStrategy classification. Populates site_info from the BG
+    # body's AST — any captured name wrapped in GIVE / MOVE becomes
+    # MoveInto; wrapped in COPY / CLONE becomes FreshHeapCopy. Bare
+    # references (no wrapper) are classified by type: primitives and
+    # Rc/Arc pass through; heap-backed (@list / @pool / @map / slice
+    # borrow) become Refuse — and we raise a CLEAR-level diagnostic,
+    # refusing to lower the program at all. This closes the
+    # dangling-pointer gap documented in docs/agents/vm-bugs.md by
+    # using the SAME ownership rules as everywhere else (GIVE to a
+    # TAKES param, COPY/CLONE for deep-copy) rather than a parallel
+    # analysis.
+    site_info = collect_bg_capture_site_info(node.body, captured.keys)
     node.capture_strategies = captured.each_with_object({}) do |(name, type_obj), h|
       t = type_obj ? Type.new(type_obj) : nil
       next unless t
       h[name] = CaptureStrategy.classify(
         name: name, type: t, site_info: site_info, rt_name: rt_name,
+        is_resource: resource_captures.include?(name),
       )
     end
+    enforce_bg_capture_strategies!(node, captured)
 
     # Build capture fields. Use is_field: true so dynamic arrays (Int64[])
     # render as slices (`[]i64`) instead of ArrayListUnmanaged — the
@@ -2455,6 +2457,76 @@ class MIRLowering
       }
     ZIG
     MIR::BgBlock.new(bg_code, captured, run_body || [])
+  end
+
+  # Walk the BG body's AST to find captured names referenced via GIVE /
+  # MOVE (→ moved_names) or COPY / CLONE (→ copied_names). Uses AST
+  # nodes, not MIR — the information is already present from the
+  # parser; we just read it.
+  def collect_bg_capture_site_info(body_stmts, capture_names)
+    capture_set = capture_names.to_set
+    moved = Set.new
+    copied = Set.new
+    walker = lambda do |node|
+      case node
+      when AST::MoveNode  # GIVE x / MOVE x
+        if node.value.is_a?(AST::Identifier) && capture_set.include?(node.value.name.to_s)
+          moved << node.value.name.to_s
+        end
+        walker.call(node.value)
+      when AST::CopyNode  # COPY x
+        if node.value.is_a?(AST::Identifier) && capture_set.include?(node.value.name.to_s)
+          copied << node.value.name.to_s
+        end
+        walker.call(node.value)
+      when AST::CloneNode  # CLONE x (equivalent to deep-copy here)
+        if node.value.is_a?(AST::Identifier) && capture_set.include?(node.value.name.to_s)
+          copied << node.value.name.to_s
+        end
+        walker.call(node.value)
+      else
+        if node.is_a?(Array)
+          node.each { |n| walker.call(n) }
+        elsif node.respond_to?(:members) && node.class.name&.start_with?("AST::")
+          node.members.each { |m| walker.call(node[m]) }
+        end
+      end
+    end
+    body_stmts.each { |stmt| walker.call(stmt) }
+    CaptureStrategy::CaptureSiteInfo.new(copied, moved)
+  end
+
+  # Raise a CLEAR-level diagnostic if any capture classifies as Refuse.
+  # This is the rule enforcement step — refusing at lowering time stops
+  # the dangling-pointer family of bugs (docs/agents/vm-bugs.md) from
+  # producing silent UAFs. Users must write GIVE / COPY / CLONE inside
+  # the BG body to transfer ownership, or wrap the container in
+  # @shared:locked / @multiowned for shared access.
+  def enforce_bg_capture_strategies!(node, captured)
+    refused = (node.capture_strategies || {}).select do |_name, strat|
+      strat.is_a?(CaptureStrategy::Refuse)
+    end
+    return if refused.empty?
+    lines = refused.map do |name, strat|
+      hint = case strat.reason
+             when :pointer_passed_without_transfer
+               "'#{name}' is @pool/@map/HashMap — wrap in @shared:locked, or GIVE/COPY inside the BG body."
+             when :list_borrow_without_transfer
+               "'#{name}' is @list — GIVE inside the BG body to transfer ownership, or COPY to deep-copy."
+             when :pool_borrow_without_transfer
+               "'#{name}' is @pool — wrap in @shared:locked, or GIVE inside the BG body."
+             when :array_borrow_without_transfer
+               "'#{name}' is a slice borrow — COPY inside the BG body for a fresh heap copy."
+             when :heap_backed_without_transfer
+               "'#{name}' is heap-backed — GIVE/COPY inside the BG body, or use @multiowned/@shared."
+             else
+               "'#{name}' cannot be safely captured (#{strat.reason})."
+             end
+      "  - #{hint}"
+    end
+    raise "BG block captures values that cannot safely cross the fiber boundary:\n" +
+          lines.join("\n") +
+          "\n(See docs/agents/vm-bugs.md for the ownership rules.)"
   end
 
   def lower_bg_stream_block(node)

@@ -110,7 +110,12 @@ module CaptureStrategy
   # type           : Type            -- the capture's static type (unwrapped)
   # site_info      : CaptureSiteInfo -- what the user wrote at the BG site
   # rt_name        : String          -- runtime reference (for FreshHeapCopy's allocator)
-  def self.classify(name:, type:, site_info:, rt_name: "rt")
+  # is_resource    : Boolean         -- true when escape-analysis already
+  #                                     flagged this capture as a resource
+  #                                     (File, TCPClient, etc.); the
+  #                                     existing resource_captures machinery
+  #                                     handles the ownership transfer.
+  def self.classify(name:, type:, site_info:, rt_name: "rt", is_resource: false)
     zig_t = field_zig_type(type)
 
     # 1. Explicit user annotation wins: COPY/GIVE apply regardless of
@@ -126,14 +131,24 @@ module CaptureStrategy
       return FreshHeapCopy.new(zig_t, name, alloc_sym)
     end
 
-    # 2. Value-like captures are always safe: primitives, strings
+    # 2. Resource captures (File, TCPClient, etc.) already have their
+    #    ownership transfer tracked by escape_analysis; the BG body's
+    #    close_patterns machinery emits the right defer for the fiber.
+    #    Treat as MoveInto so the outer scope's cleanup is suppressed.
+    if is_resource
+      return MoveInto.new(zig_t, name, name)
+    end
+
+    # 3. Value-like captures are always safe: primitives, strings
     #    (CLEAR semantics: []const u8 is Copy), enums.
     return ByValue.new(zig_t, name) if value_like?(type)
 
-    # 3. @multiowned / @shared clone their ref-count automatically.
-    return RcClone.new(zig_t, name) if type.multiowned? || type.shared?
+    # 4. @multiowned / @shared / @locked / @writeLocked / @local clone
+    #    their ref-count (Rc/Arc) automatically and cross fiber boundaries
+    #    safely via the existing retain/release discipline.
+    return RcClone.new(zig_t, name) if safe_shared_across_fibers?(type)
 
-    # 4. Anything else (heap-backed, borrow, pointer-passed) requires
+    # 5. Anything else (heap-backed, borrow, pointer-passed) requires
     #    explicit transfer at the capture site. Refuse with the reason.
     Refuse.new(refuse_reason_for(type), name)
   end
@@ -146,6 +161,19 @@ module CaptureStrategy
     return true if type.primitive?
     return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
     return true if type.respond_to?(:copyable?) && type.copyable?
+    false
+  end
+
+  # True iff the capture can be cloned (Rc/Arc retain) into the fiber's
+  # context without new ownership analysis. @multiowned is Rc;
+  # @shared is Arc; @locked/@writeLocked/@local are sync wrappers on
+  # top of these; @sharded/@striped are Arc-containing container
+  # topologies. All of these preserve the safe-sharing guarantee.
+  def self.safe_shared_across_fibers?(type)
+    return true if type.multiowned? || type.shared?
+    return true if type.respond_to?(:any_sync?) && type.any_sync?
+    return true if type.respond_to?(:sharded?) && type.sharded?
+    return true if type.respond_to?(:striped?) && type.striped?
     false
   end
 
