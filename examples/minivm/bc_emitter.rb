@@ -1138,10 +1138,13 @@ class BcEmitter
           emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
         end
         last = stmts[-1]
+        # FIBER_RET pops from the value stack, so the fiber's result must
+        # land there (not on the typed istack/fstack). compile_expr_to_value
+        # boxes typed results via I_TO_VAL/F_TO_VAL.
         if last.is_a?(MIR::ExprStmt)
-          compile_expr(last.expr); pop_type
+          compile_expr_to_value(last.expr); pop_type
         elsif last.respond_to?(:expr?) && last.expr?
-          compile_expr(last); pop_type
+          compile_expr_to_value(last); pop_type
         else
           compile_stmt(last, nil); t = pop_type
           emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
@@ -1164,9 +1167,19 @@ class BcEmitter
       # Patch the jump-over-body target.
       @ops[skip_patch] = @ops.length
 
-      # Push each capture as an arg, then BG_SPAWN.
+      # Push each capture as a Value onto the value stack. Typed slots
+      # (:i64 / :f64) need I_TO_VAL / F_TO_VAL to box as Value because
+      # initCaps in exec! is Value[]. Without boxing, LOAD_ISLOT/LOAD_FSLOT
+      # would put a raw int/float on the typed stack and BG_SPAWN would
+      # read garbage Values from the value stack.
       captures.each do |cname|
-        if has_slot?(cname)
+        if @islots.key?(cname)
+          emit_op(LOAD_ISLOT, @islots[cname])
+          emit_op(I_TO_VAL)
+        elsif @fslots.key?(cname)
+          emit_op(LOAD_FSLOT, @fslots[cname])
+          emit_op(F_TO_VAL)
+        elsif has_slot?(cname)
           emit_op(LOAD_SLOT, @slots[cname])
         else
           emit_op(LOAD_NAME, add_const(cname))

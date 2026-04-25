@@ -2318,12 +2318,13 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     -- Native typed slots: avoid Value wrapping for i64/f64 locals
     MUTABLE islots: Int64[] = [];
     MUTABLE fslots: Float64[] = [];
-    -- Pre-allocate 64 slots and 64 typed stack/slot entries
-    FOR si IN (0_i64 ..< 64) DO slots.append(Value.Nil); END
-    FOR si IN (0_i64 ..< 64) DO istack.append(0_i64); END
-    FOR si IN (0_i64 ..< 64) DO fstack.append(0.0); END
-    FOR si IN (0_i64 ..< 64) DO islots.append(0_i64); END
-    FOR si IN (0_i64 ..< 64) DO fslots.append(0.0); END
+    -- Pre-allocate SLOT_COUNT slots/typed-stack/typed-slot entries.
+    -- SLOT_COUNT must match the stride used by BC_CALL save/restore below.
+    FOR si IN (0_i64 ..< 256) DO slots.append(Value.Nil); END
+    FOR si IN (0_i64 ..< 256) DO istack.append(0_i64); END
+    FOR si IN (0_i64 ..< 256) DO fstack.append(0.0); END
+    FOR si IN (0_i64 ..< 256) DO islots.append(0_i64); END
+    FOR si IN (0_i64 ..< 256) DO fslots.append(0.0); END
     -- Load initial fiber captures into slots 0..N-1 (for spawned fibers).
     FOR ci IN (0_i64 ..< initCaps.length()) DO
         slots[ci] = COPY initCaps[ci];
@@ -2651,7 +2652,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         END
                     ELSE_IF eql?(dbgCmd, ":locals") || eql?(dbgCmd, ":l") THEN
                         print("  slots:");
-                        FOR di IN (0_i64 ..< 64) DO
+                        FOR di IN (0_i64 ..< 256) DO
                             MATCH slots[di] START
                                 Value.Nil ->,
                                 DEFAULT ->
@@ -2887,8 +2888,8 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 -- Save return address and sp-before-args
                 callRetIps.append(ip);
                 callRetSps.append(sp - bcCallArgc);
-                -- Save current slots (64 entries)
-                FOR bci IN (0_i64 ..< 64) DO callSavedSlots.append(COPY slots[bci]); END
+                -- Save current slots (must match SLOT_COUNT=256 above)
+                FOR bci IN (0_i64 ..< 256) DO callSavedSlots.append(COPY slots[bci]); END
                 -- Move args into slots 0..argc-1
                 FOR bci IN (0_i64 ..< bcCallArgc) DO
                     slots[bci] = COPY stack[(sp - bcCallArgc) + bci];
@@ -2897,10 +2898,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 ip = bcCallIp;,
             78 -> -- BC_RET: pop return value, restore frame, push return value
                 sp -= 1; bcRetVal = COPY stack[sp];
-                -- Restore slots
-                savedBase = (callSavedSlots.length() - 64);
-                FOR bci IN (0_i64 ..< 64) DO slots[bci] = COPY callSavedSlots[savedBase + bci]; END
-                FOR bci IN (0_i64 ..< 64) DO callSavedSlots.remove(savedBase); END
+                -- Restore slots (stride must match BC_CALL above)
+                savedBase = (callSavedSlots.length() - 256);
+                FOR bci IN (0_i64 ..< 256) DO slots[bci] = COPY callSavedSlots[savedBase + bci]; END
+                FOR bci IN (0_i64 ..< 256) DO callSavedSlots.remove(savedBase); END
                 -- Restore ip and sp
                 retSp = callRetSps[callRetSps.length() - 1];
                 callRetSps.remove(callRetSps.length() - 1);
@@ -2911,10 +2912,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(bcRetVal); ELSE stack[sp] = bcRetVal; END
                 sp += 1;,
             79 -> -- BC_RET_VOID: restore frame, no push
-                -- Restore slots
-                savedBaseV = (callSavedSlots.length() - 64);
-                FOR bci IN (0_i64 ..< 64) DO slots[bci] = COPY callSavedSlots[savedBaseV + bci]; END
-                FOR bci IN (0_i64 ..< 64) DO callSavedSlots.remove(savedBaseV); END
+                -- Restore slots (stride must match BC_CALL above)
+                savedBaseV = (callSavedSlots.length() - 256);
+                FOR bci IN (0_i64 ..< 256) DO slots[bci] = COPY callSavedSlots[savedBaseV + bci]; END
+                FOR bci IN (0_i64 ..< 256) DO callSavedSlots.remove(savedBaseV); END
                 -- Restore ip and sp
                 retSpV = callRetSps[callRetSps.length() - 1];
                 callRetSps.remove(callRetSps.length() - 1);
