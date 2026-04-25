@@ -460,6 +460,10 @@ class MIREmitter
     g = !errdefer && entry[:has_moved_guard]
     zig_type = entry[:zig_type] || "UNKNOWN"
     elem_zig = entry[:elem_zig_type] || "UNKNOWN"
+    # via_pointer: true when the binding is already *T (e.g. needs_pointer_passing?
+    # TAKES params). Skip the & wrappers and use .* / direct access.
+    vp = entry[:via_pointer]
+    deref = vp ? "#{name}.*" : name
 
     case entry[:kind]
     when :resource
@@ -473,11 +477,11 @@ class MIREmitter
       "#{kw} #{name}.deinit();\n"
 
     when :list_with_elem_cleanup
-      body = "{ for (#{name}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{name}.deinit(rt.frameAlloc()); }"
+      body = "{ for (#{deref}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{deref}.deinit(rt.frameAlloc()); }"
       guarded_defer(name, body, g, errdefer:)
 
     when :list, :string_map, :numeric_map
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
 
     when :frozen
       kw = errdefer ? "errdefer" : "defer"
@@ -485,11 +489,12 @@ class MIREmitter
 
     when :pool, :fixed_soa
       kw = errdefer ? "errdefer" : "defer"
-      "#{kw} #{name}.deinit(#{alloc});\n"
+      "#{kw} #{deref}.deinit(#{alloc});\n"
 
     when :set
       kw = errdefer ? "errdefer" : "defer"
-      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+      arg = vp ? name : "&#{name}"
+      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg});\n"
 
     when :rc
       rc_alloc = entry[:rc_alloc] ? alloc_from_sym(entry[:rc_alloc]) : alloc
@@ -537,7 +542,7 @@ class MIREmitter
       end
 
     when :takes_union
-      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:, via_pointer: vp)
 
     when :takes_slice, :match_as_slice
       body = "{ if (comptime CheatLib.needsCleanup(#{elem_zig})) { for (#{name}) |*__e| { CheatLib.cleanup(#{elem_zig}, #{alloc}, __e); } } if (#{name}.len > 0) #{alloc}.free(#{name}); }"
@@ -904,12 +909,17 @@ class MIREmitter
     end
   end
 
-  def guarded_cleanup(name, zig_type, alloc, guarded, errdefer: false)
+  # +via_pointer+: when true, +name+ is already *T (e.g. needs_pointer_passing?
+  # TAKES params arrive as *HashMap or *Pool from the call site's & wrapping).
+  # CheatLib.cleanup expects *const T, so re-applying & would produce *const *T.
+  # Pass +name+ directly in that case.
+  def guarded_cleanup(name, zig_type, alloc, guarded, errdefer: false, via_pointer: false)
     kw = errdefer ? "errdefer" : "defer"
+    arg = via_pointer ? name : "&#{name}"
     if guarded
-      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name})", true, errdefer:)
+      guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", true, errdefer:)
     else
-      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, &#{name});\n"
+      "#{kw} CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg});\n"
     end
   end
 end

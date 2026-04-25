@@ -1863,11 +1863,11 @@ pub fn bind(comptime deps: type) type {
                 }
             }
 
-            pub fn count(self: *Self) i64 {
+            pub fn count(self: *const Self) i64 {
                 return @intCast(self.inner.count());
             }
 
-            pub fn length(self: *Self) i64 {
+            pub fn length(self: *const Self) i64 {
                 return self.count();
             }
 

@@ -407,58 +407,65 @@ module CleanupClassifier
 
   # ── Walk TAKES parameters ───────────────────────────────────────
 
+  # TAKES params get the SAME cleanup recipe a local of the same type would
+  # get — there is one source of truth for "what does cleanup look like for
+  # this type?" (the entry/classify_* helpers below). This implements
+  # CLAUDE.md INV-14: cleanup contracts are inherited, never synthesized at
+  # the destination via a parallel dispatch table.
+  #
+  # Three TAKES-specific overrides on top of the base recipe:
+  #   1. has_moved_guard: true    — MATCH AS / re-consumption inside the fn
+  #                                  body always requires a moved guard.
+  #   2. alloc: :heap             — INV-1 commits the callee to heap-freeing;
+  #                                  the caller must supply heap-owned values
+  #                                  (enforced by EscapeAnalysis condition 8
+  #                                  for cross-fn GIVE/TAKES).
+  #   3. via_pointer: true        — needs_pointer_passing? types (HashMap,
+  #                                  Pool) arrive at the callee already as
+  #                                  *T; cleanup must NOT re-apply &.
   private_class_method def self.walk_takes_params(fn_node, schema_lookup, bindings)
     (fn_node.params || []).select { |p| p[:takes] }.each do |p|
       ti = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
       name = p[:name].to_s
 
-      schema = schema_lookup.call(ti.resolved) rescue nil
-      is_resource = schema.is_a?(Hash) && schema[:kind] == :resource
-      is_union = schema.is_a?(Hash) && schema[:kind] == :union
+      base = takes_param_base_entry(ti, schema_lookup)
+      next unless base
 
-      if is_resource
-        close_zig = schema[:close_zig]
-        bindings[name] = {
-          needs_cleanup: true, alloc: :heap, kind: :resource,
-          has_moved_guard: true,
-          resource_close_zig: close_zig
-        }
-      elsif is_union
-        has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
-        if has_heap
-          bindings[name] = {
-            needs_cleanup: true, alloc: :heap, kind: :takes_union,
-            has_moved_guard: true
-          }
-        end
-      elsif ti.string?
-        bindings[name] = {
-          needs_cleanup: true, alloc: :heap, kind: :takes_string,
-          has_moved_guard: true, source_kind: :takes_param
-        }
-      elsif ti.list_collection?
-        # TAKES @list param: callee owns the full ArrayListUnmanaged. Cleanup
-        # uses CheatLib.cleanup(ArrayListUnmanaged, ...) — must come before the
-        # generic array? branch which assumes a slice shape.
-        bindings[name] = entry(:list)
-      elsif ti.array? && !ti.string?
-        # TAKES slice param: callee owns the buffer. Caller must pass a
-        # heap-owned buffer (via implicit COPY of @list or explicit COPY).
-        bindings[name] = {
-          needs_cleanup: true, alloc: :heap, kind: :takes_slice,
-          has_moved_guard: true, source_kind: :takes_param
-        }
-      elsif ti.map? && !ti.numeric_map?
-        bindings[name] = entry(:string_map)
-      elsif ti.numeric_map?
-        bindings[name] = entry(:numeric_map)
-      else
-        # Struct with cleanup fields (strings, collections, rc refs).
-        # Pass nil as node -- skips rodata optimization, conservatively adds cleanup.
-        result = classify_struct_cleanup_fields(ti, nil, schema_lookup)
-        bindings[name] = result if result
-      end
+      base[:has_moved_guard] = true
+      base[:alloc] = :heap
+      base[:source_kind] ||= :takes_param
+      base[:via_pointer] = true if ti.respond_to?(:needs_pointer_passing?) && ti.needs_pointer_passing?
+      bindings[name] = base
     end
+  end
+
+  # Build the base cleanup entry for a TAKES param of type ti. Defers to the
+  # same per-kind helpers locals use (classify_collection, etc.) so adding a
+  # new collection kind requires updating ONE dispatch site, not two.
+  private_class_method def self.takes_param_base_entry(ti, schema_lookup)
+    schema = schema_lookup.call(ti.resolved) rescue nil
+
+    # Schema-driven kinds: resource (close_zig) and union (heap variants).
+    if schema.is_a?(Hash) && schema[:kind] == :resource
+      return entry(:resource, resource_close_zig: schema[:close_zig])
+    end
+    if schema.is_a?(Hash) && schema[:kind] == :union
+      has_heap = (schema[:variants] || {}).any? { |_, vt| Type.variant_has_heap?(vt) }
+      return has_heap ? entry(:takes_union) : nil
+    end
+
+    return entry(:takes_string) if ti.string?
+
+    # Collection kinds: reuse the locals classifier (covers @list, @pool,
+    # @set, @sharded list, HashMap, numeric map, fixed_soa, RC-wrapped maps).
+    coll = classify_collection(ti, schema_lookup)
+    return coll if coll
+
+    # Plain slice (Int64[] without a collection modifier).
+    return entry(:takes_slice) if ti.array? && !ti.string?
+
+    # Struct fallback (strings/collections/rc as fields).
+    classify_struct_cleanup_fields(ti, nil, schema_lookup)
   end
 
   # ── Walk MATCH AS bindings ──────────────────────────────────────

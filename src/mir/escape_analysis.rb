@@ -46,7 +46,7 @@ module EscapeAnalysis
 
   # ── Phase E2 ─────────────────────────────────────────────────────────────
 
-  # Per-function escape scan: applies all 6 escape conditions to stamp
+  # Per-function escape scan: applies all escape conditions to stamp
   # storage/provenance on declaration nodes before CleanupClassifier runs.
   #
   # Escape conditions handled:
@@ -56,6 +56,9 @@ module EscapeAnalysis
   #   4. :assign_escape      — frame value (requires_move?) assigned to heap field → storage :heap
   #   5. :loop_carry_string  — string reassigned in mark_per_iter loop → heap
   #   6. :transitive_callee  — declaration value is call to heap-returning fn → provenance :heap
+  #   7. :concat_into_heap   — frame string-concat passed into heap container's mutator → heap
+  #   8. :takes_arg_escape   — frame collection passed into a TAKES heap-cleanup param → heap
+  #                            (INV-1: callee frees with heapAlloc, source must match)
   #
   # Replaces MIRPass#upgrade_loop_string_carries_to_heap!,
   #           MIRPass#upgrade_always_escaped_to_heap!,
@@ -77,7 +80,7 @@ module EscapeAnalysis
     fn_nodes.each do |name, fn|
       next unless fn&.body
       plan   = promotion_plans[name]
-      result = per_fn_scan!(fn, heap_fns, plan)
+      result = per_fn_scan!(fn, heap_fns, plan, fn_nodes)
 
       all_bg_upgraded.merge(result[:bg_upgraded])
 
@@ -146,7 +149,7 @@ module EscapeAnalysis
 
   # ── E2 private helpers ───────────────────────────────────────────────────
 
-  private_class_method def self.per_fn_scan!(fn, heap_fns, plan)
+  private_class_method def self.per_fn_scan!(fn, heap_fns, plan, fn_nodes = {})
     bg_upgraded    = Set.new
     always_escaped = Set.new
     carry_ret_vars = Set.new
@@ -283,6 +286,49 @@ module EscapeAnalysis
       node.args.each { |arg| e2_promote_frame_concats!(arg) }
     end
 
+    # ── Condition 8: GIVE-to-TAKES allocator coordination ──
+    # When a value is given to a TAKES param of a heap-cleanup type, the
+    # callee will free with rt.heapAlloc(). The caller's source binding
+    # therefore MUST be heap-allocated, or the alloc identities mismatch
+    # at the boundary (silent UB on release; alignment crash on Debug).
+    # See CLAUDE.md INV-1 (single allocator per binding lifetime).
+    #
+    # Closes the bug class documented by transpile-tests 277/278/280:
+    # frame-allocated @list/@pool/@set GIVEn to TAKES of the same type.
+    e2_walk_calls(fn.body) do |call|
+      callee_name = call.name.to_s
+      callee_fn = fn_nodes[callee_name] || fn_nodes[callee_name.to_sym]
+      next unless callee_fn&.respond_to?(:params) && callee_fn.params
+
+      args = call.args || []
+      callee_fn.params.each_with_index do |param, idx|
+        next unless param[:takes]
+        arg = args[idx]
+        next unless arg
+
+        # Unwrap GIVE wrapper to find the source identifier.
+        src = arg.is_a?(AST::MoveNode) ? arg.value : arg
+        next unless src.is_a?(AST::Identifier) && src.symbol
+
+        # Heap-cleanup-type? Only collections need allocator coordination
+        # (string TAKES already auto-COPY via ensure_owned_value!).
+        ti = src.symbol.type
+        ti = ti.is_a?(Type) ? ti : (Type.new(ti) rescue nil)
+        next unless ti && (ti.list_collection? || ti.pool? || ti.set_collection? ||
+                           ti.map?)
+
+        # Already heap? Nothing to do.
+        next if [:heap, :multiowned, :shared].include?(src.symbol.storage)
+
+        # Promote the source binding to heap so the callee's heapAlloc-bound
+        # cleanup matches.
+        src.symbol.storage = :heap
+        decl = src.symbol.reg
+        decl.storage = :heap if decl.respond_to?(:storage=)
+        ti.provenance = :heap if ti.respond_to?(:provenance=) && !ti.heap_provenance?
+      end
+    end
+
     { bg_upgraded: bg_upgraded, always_escaped: always_escaped, carry_return_vars: carry_ret_vars }
   end
 
@@ -327,6 +373,53 @@ module EscapeAnalysis
     nodes = []
     AST.walk_body(body) { |n| nodes << n if n.is_a?(AST::ReturnNode) }
     nodes
+  end
+
+  # Yield every FuncCall / MethodCall reachable from body — including those
+  # nested in expressions (VarDecl/BindExpr/Assignment values, ReturnNode
+  # values, struct/list/hash literal fields, control-flow conditions). Used
+  # by Condition 8.
+  private_class_method def self.e2_walk_calls(body, &blk)
+    AST.walk_body(body) { |stmt| e2_walk_calls_in_expr(stmt, &blk) }
+  end
+
+  private_class_method def self.e2_walk_calls_in_expr(node, &blk)
+    return unless node
+    case node
+    when AST::FuncCall
+      yield node
+      node.args&.each { |a| e2_walk_calls_in_expr(a, &blk) }
+    when AST::MethodCall
+      yield node
+      e2_walk_calls_in_expr(node.object, &blk)
+      node.args&.each { |a| e2_walk_calls_in_expr(a, &blk) }
+    when AST::VarDecl, AST::BindExpr, AST::Assignment
+      e2_walk_calls_in_expr(node.value, &blk)
+    when AST::ReturnNode
+      e2_walk_calls_in_expr(node.value, &blk)
+    when AST::MoveNode, AST::CopyNode, AST::CloneNode, AST::FreezeNode, AST::CapabilityWrap
+      e2_walk_calls_in_expr(node.value, &blk)
+    when AST::BinaryOp
+      e2_walk_calls_in_expr(node.left, &blk)
+      e2_walk_calls_in_expr(node.right, &blk)
+    when AST::UnaryOp
+      e2_walk_calls_in_expr(node.right, &blk)
+    when AST::GetField
+      e2_walk_calls_in_expr(node.target, &blk)
+    when AST::GetIndex
+      e2_walk_calls_in_expr(node.target, &blk)
+      e2_walk_calls_in_expr(node.index, &blk)
+    when AST::StructLit
+      node.fields&.each_value { |v| e2_walk_calls_in_expr(v, &blk) }
+    when AST::ListLit
+      node.items&.each { |i| e2_walk_calls_in_expr(i, &blk) }
+    when AST::IfStatement
+      e2_walk_calls_in_expr(node.condition, &blk)
+    when AST::WhileLoop
+      e2_walk_calls_in_expr(node.condition, &blk)
+    when AST::MatchStatement
+      e2_walk_calls_in_expr(node.expr, &blk)
+    end
   end
 
   # Collect names of BG-captured collection variables (list/map/pool/set).

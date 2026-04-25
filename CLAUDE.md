@@ -273,6 +273,26 @@ These invariants MUST remain true. Verify them before every commit.
     - **ALWAYS** set `ownership_contract` on RawZig and `stdlib_def` on InlineZig that call functions which allocate or transfer ownership.
     - **ALWAYS** use BUILTIN_OPS registry for CheatLib calls instead of raw InlineZig strings.
     - Pure expressions (casts, ranges, field access, Zig builtins like `@intCast`) are safe without annotations.
+13. **Single source of truth for "callee takes."** `arg.was_moved` (set by the annotator when `param[:takes] || GIVE`) is authoritative. `mir_lowering` reads it; it does NOT re-derive the take/borrow distinction from `is_a?(CopyNode)` / `is_a?(MoveNode)` syntax. A COPY into a borrow-position param is NOT a take. (Enforced by: code review; fixed in mir_lowering call-site logic.)
+14. **Cleanup contracts are inherited, never synthesized at the destination.** Every consuming site (TAKES param, struct/union field store, container store, return) uses the source's cleanup recipe. For TAKES params, `walk_takes_params` MUST dispatch through the same `entry(...)` builders that locals use (`classify_collection`, `classify_struct_cleanup_fields`, etc.) — no parallel dispatch table that misses kinds. (Enforced by: code review; structural in `promotion_plan.rb`.)
+15. **Container shape dispatches to runtime polymorphism.** For `@list`/`@pool`/`@set`/`HashMap`, length/indexing/iteration emit calls to `CheatLib.len` / `CheatLib.getAt` / `CheatLib.setAt` or `MIR::ItemsAccess(safe: true)`. These helpers use comptime `@hasField` and resolve to the correct shape with zero runtime cost. The lowering does NOT branch on `is_param`, `is_field_access`, or similar AST flags to choose container shape. (Enforced by: code review; comptime resolution makes this free.)
+16. **Storage and provenance live on declarations.** `storage` and `provenance` are stamps placed on declaration AST nodes by `EscapeAnalysis` (Pass 2a). Use sites and `mir_lowering` READ them; they do NOT re-classify at the use site. (Enforced by: `EscapeAnalysis` is the single writer.)
+
+### Authority boundaries
+
+Each pass owns a category of facts and stamps them on the AST. Downstream passes READ stamps and never re-derive. This is the project's single-source-of-truth contract.
+
+| Authority | Owns | Stamps on AST as |
+|---|---|---|
+| `Type` | static type properties (`list_collection?`, `pool?`, `needs_pointer_passing?`, `zig_type`, ...) | `type_info` / `full_type` |
+| `OwnershipGraph` | dynamic ownership during annotation walk (`live?`, `moved`, `borrowed_alias`) | (transient — read by annotator) |
+| `Annotator` | intent and AST-position relationships (this position consumes; this is a borrow; callee takes this arg) | `was_moved`, `container_borrow`, `matched_stdlib_def`, `param[:takes]`, `full_type` |
+| `EscapeAnalysis` (Pass 2a) | cross-scope flow → storage | `storage`, `provenance` (on declarations) |
+| `CleanupClassifier` (Pass 2b) | per-binding cleanup recipe | `bindings[name] = entry` |
+| `MIRPass` (Pass 2b) | inserts MIR markers (`MIR::SuppressCleanup`, `MIR::Drop`, `MIR::AllocMark`) | inline MIR nodes |
+| `mir_lowering` (Pass 4) | passive consumer | reads stamps + entries; emits MIR; never derives |
+
+If you find yourself writing `if some_ast_node.is_a?(...)` in `mir_lowering` to make a *semantic* decision (rather than a syntactic dispatch), that is a re-derivation — read the stamp the annotator already placed.
 
 ## Language Semantics
 
