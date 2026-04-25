@@ -1261,9 +1261,11 @@ class MIRLowering
 
     # Standard call
     args_mir = node.args.map { |a|
-      # CopyNode/MoveNode = TAKES: callee owns the value on success, so only clean
-      # up on error (partial failure). Non-TAKES args are borrowed; use Cleanup.
-      takes = a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
+      # The annotator stamps was_moved when the callee takes ownership of this
+      # arg on success (param[:takes] || GIVE). That is the SINGLE source of
+      # truth for "callee takes" — the lowering must not re-derive it from
+      # CopyNode/MoveNode wrappers (a COPY into a borrow param is NOT a take).
+      takes = a.respond_to?(:was_moved) && a.was_moved
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       # Array/List args: convert to slice via .items (skip strings - already []const u8)
       ti = a.type_info
@@ -1332,7 +1334,9 @@ class MIRLowering
     # Standard UFCS call: method(object, args...)
     obj_mir = lower(node.object)
     args_mir = node.args.map { |a|
-      takes = a.is_a?(AST::CopyNode) || a.is_a?(AST::MoveNode)
+      # Single source of truth: was_moved (set by annotator when callee TAKES).
+      # See note in lower_call_inner.
+      takes = a.respond_to?(:was_moved) && a.was_moved
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
       ti = a.type_info
       if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
