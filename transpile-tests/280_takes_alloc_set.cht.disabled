@@ -1,0 +1,15 @@
+-- Bug: frame-allocated @set GIVE'd to TAKES @set param → alloc mismatch.
+-- Same architectural cause as 277.
+
+FN consume!(TAKES s: Int64[]@set) RETURNS Int64 ->
+    RETURN s.length();
+END
+
+FN main() RETURNS Void ->
+    MUTABLE s: Int64[]@set = Set[];
+    s.insert(10_i64);
+    s.insert(20_i64);
+    s.insert(30_i64);
+    n: Int64 = consume!(GIVE s);
+    ASSERT n == 3_i64, "GIVE frame @set to TAKES @set param";
+END

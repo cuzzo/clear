@@ -1,0 +1,17 @@
+-- Bug: frame-allocated @pool GIVE'd to TAKES @pool param → alloc mismatch.
+-- Same architectural cause as 277.
+
+STRUCT Env { x: Int64 }
+
+FN consume!(TAKES p: Env[10]@pool) RETURNS Int64 ->
+    RETURN p.length();
+END
+
+FN main() RETURNS Void ->
+    MUTABLE pool: Env[10]@pool = [];
+    pool.insert(Env{ x: 1_i64 });
+    pool.insert(Env{ x: 2_i64 });
+    pool.insert(Env{ x: 3_i64 });
+    n: Int64 = consume!(GIVE pool);
+    ASSERT n == 3_i64, "GIVE frame @pool to TAKES @pool param";
+END
