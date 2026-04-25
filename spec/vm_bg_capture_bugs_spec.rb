@@ -158,17 +158,16 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)" do
   end
 
   describe "Escape hatches work: GIVE inside BG body transfers ownership" do
+    # The fiber takes ownership via the BG capture; outer scope's cleanup
+    # is suppressed (lst_moved guard). Verifies the full pipeline:
+    # ownership dataflow -> SuppressCleanup insertion -> capture-map
+    # rewriting in lower_move -> guarded outer defer.
     let(:src) { <<~CHT }
-      FN consume!(TAKES xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
-
-      FN make_lst() RETURNS Int64[]@list ->
-          MUTABLE lst: Int64[]@list = List[];
-          lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
-          RETURN lst;
-      END
+      FN consume!(TAKES xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
       FN runit() RETURNS Int64 ->
-          lst = make_lst();
+          MUTABLE lst: Int64[]@list = List[];
+          lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
           p: ~Int64 = BG { consume!(GIVE lst); };
           RETURN NEXT p;
       END
@@ -179,15 +178,9 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)" do
       END
     CHT
 
-    # Best-effort: the escape hatch is part of the design, but full
-    # end-to-end correctness of the Zig backend for GIVE-inside-BG may
-    # still need downstream fixes. If this flips to green, great —
-    # track it. If not, the diagnostic still points the user at the
-    # right syntax.
-    it "compiles (escape hatch accepted by lowering)" do
-      result = compile(src)
-      skip "GIVE-inside-BG not yet E2E; diagnostic path works" unless result[:ok]
-      expect(result[:ok]).to be(true)
+    it "compiles and runs cleanly (no double-free, no UAF)" do
+      result = compile_and_run(src)
+      expect(result[:ok]).to be(true), "regressed? #{result[:output]}"
     end
   end
 end

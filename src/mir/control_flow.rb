@@ -617,6 +617,12 @@ class OwnershipDataflow
       stmt.capture_analysis&.resource_captures&.each do |name|
         mark_moved!(state, name) if state[name]
       end
+      # User-written GIVE x inside the BG body (where x is a captured
+      # outer binding) transfers ownership out of the outer scope too.
+      # COPY/CLONE do NOT consume — those deep-copy / rc-clone.
+      collect_bg_body_gives(stmt).each do |name|
+        mark_moved!(state, name) if state[name]
+      end
     end
   end
 
@@ -686,6 +692,10 @@ class OwnershipDataflow
       node.capture_analysis&.resource_captures&.each do |name|
         consumed << name if state[name]
       end
+      # GIVE x inside the BG body moves the outer x into the fiber.
+      collect_bg_body_gives(node).each do |name|
+        consumed << name if state[name]
+      end
 
     else
       collect_explicit_in(node, state, consumed)
@@ -739,12 +749,33 @@ class OwnershipDataflow
       expr.capture_analysis&.resource_captures&.each do |name|
         consumed << name if state[name]
       end
+      collect_bg_body_gives(expr).each do |name|
+        consumed << name if state[name]
+      end
     when AST::FuncCall
       expr.args&.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
     when AST::MethodCall
       _walk_bg_captures_in_expr(expr.object, state, consumed)
       expr.args&.each { |a| _walk_bg_captures_in_expr(a, state, consumed) }
     end
+  end
+
+  # Walks the BG body looking for `GIVE capture` (MoveNode wrapping an
+  # Identifier whose name is in the BG's capture set). Each such GIVE
+  # transfers ownership of the outer binding into the fiber. COPY/CLONE
+  # do not consume — those paths deep-copy / rc-clone instead (handled
+  # by walk_expr_skip_copy refusing to recurse into CopyNode).
+  def collect_bg_body_gives(bg_node)
+    capture_names = (bg_node.capture_analysis&.captures || {}).keys.map(&:to_s).to_set
+    return [] if capture_names.empty?
+    moves = []
+    AST.walk_body(bg_node.body) do |stmt|
+      walk_expr_skip_copy(stmt) do |sub|
+        next unless sub.is_a?(AST::MoveNode) && sub.value.is_a?(AST::Identifier)
+        moves << sub.value.name.to_s if capture_names.include?(sub.value.name.to_s)
+      end
+    end
+    moves.uniq
   end
 
   # Returns true if this identifier's type is Copy (no move on assignment).

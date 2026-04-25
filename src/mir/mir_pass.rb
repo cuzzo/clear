@@ -254,6 +254,10 @@ class MIRPass
 
       # BG blocks that capture resources transfer ownership — suppress outer cleanup.
       insert_bg_resource_suppress!(result, stmt, bindings)
+
+      # BG blocks where the body uses `GIVE x` on a captured outer name also
+      # transfer ownership to the fiber — same rule as a GIVE elsewhere.
+      insert_bg_give_suppress!(result, stmt, bindings)
     end
     result
   end
@@ -285,7 +289,7 @@ class MIRPass
         b[:body] = transform_body(b[:body], bindings, promo) if b[:body]
       end
     when AST::BgBlock, AST::BgStreamBlock
-      stmt.body = transform_body(stmt.body, bindings, promo) if stmt.body
+      stmt.body = transform_body(stmt.body, bg_inner_bindings(stmt, bindings), promo) if stmt.body
     end
     # Process BgBlock bodies found in expression positions (MethodCall/FuncCall
     # args, VarDecl/BindExpr values). AST.walk_body misses these since it doesn't
@@ -295,15 +299,27 @@ class MIRPass
     when AST::VarDecl, AST::BindExpr, AST::Assignment
       val = stmt.respond_to?(:value) ? stmt.value : nil
       if val.is_a?(AST::BgBlock) && val.body
-        val.body = transform_body(val.body, bindings, promo)
+        val.body = transform_body(val.body, bg_inner_bindings(val, bindings), promo)
       end
     when AST::MethodCall, AST::FuncCall
       stmt.args&.each do |a|
         if a.is_a?(AST::BgBlock) && a.body
-          a.body = transform_body(a.body, bindings, promo)
+          a.body = transform_body(a.body, bg_inner_bindings(a, bindings), promo)
         end
       end
     end
+  end
+
+  # Bindings as seen from INSIDE a BG body: captured names belong to the
+  # outer scope and their moved-guard vars (e.g. `lst_moved`) are not
+  # visible here, so we must not emit SuppressCleanup for them inside the
+  # fiber. The outer-scope pass (insert_bg_give_suppress!) handles moves
+  # of captures; inside the body only BG-local bindings are consumable.
+  def bg_inner_bindings(bg_node, bindings)
+    return bindings unless bindings
+    captures = bg_node.capture_analysis&.captures
+    return bindings unless captures&.any?
+    bindings.reject { |name, _| captures.key?(name) }
   end
 
   # Insert MIR::SuppressCleanup after statements that consume ownership of
@@ -345,6 +361,72 @@ class MIRPass
     when AST::MethodCall
       _walk_expr_for_bg(expr.object, &block)
       expr.args&.each { |a| _walk_expr_for_bg(a, &block) }
+    end
+  end
+
+  # Insert MIR::SuppressCleanup for outer bindings consumed by `GIVE x`
+  # inside a BG body. Mirrors insert_bg_resource_suppress! — the fiber
+  # takes ownership, so the outer scope's defer must be guarded.
+  def insert_bg_give_suppress!(result, stmt, bindings)
+    each_bg_in_stmt(stmt) do |bg|
+      next unless bg.body
+      captures = (bg.capture_analysis&.captures || {}).keys.map(&:to_s).to_set
+      next if captures.empty?
+      gives = collect_bg_body_give_names(bg.body, captures)
+      gives.each do |name|
+        entry = bindings&.dig(name)
+        next if entry && !entry[:needs_cleanup]
+        result << MIR::SuppressCleanup.new(stmt.token, name)
+      end
+    end
+  end
+
+  # Walk a BG body looking for `GIVE capture` — MoveNode wrapping an
+  # Identifier whose name is in the capture set.
+  def collect_bg_body_give_names(body, capture_names)
+    out = []
+    AST.walk_body(body) do |node|
+      _walk_expr_for_give(node, capture_names, out)
+    end
+    out.uniq
+  end
+
+  def _walk_expr_for_give(node, capture_names, out)
+    return unless node
+    case node
+    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
+      # COPY / CLONE do not consume the source.
+    when AST::MoveNode
+      if node.value.is_a?(AST::Identifier) && capture_names.include?(node.value.name.to_s)
+        out << node.value.name.to_s
+      else
+        _walk_expr_for_give(node.value, capture_names, out)
+      end
+    when AST::BinaryOp
+      _walk_expr_for_give(node.left, capture_names, out)
+      _walk_expr_for_give(node.right, capture_names, out)
+    when AST::UnaryOp
+      _walk_expr_for_give(node.right, capture_names, out)
+    when AST::FuncCall
+      node.args&.each { |a| _walk_expr_for_give(a, capture_names, out) }
+    when AST::MethodCall
+      _walk_expr_for_give(node.object, capture_names, out)
+      node.args&.each { |a| _walk_expr_for_give(a, capture_names, out) }
+    when AST::GetField
+      _walk_expr_for_give(node.target, capture_names, out)
+    when AST::GetIndex
+      _walk_expr_for_give(node.target, capture_names, out)
+      _walk_expr_for_give(node.index, capture_names, out)
+    when AST::StructLit
+      node.fields&.each_value { |v| _walk_expr_for_give(v, capture_names, out) }
+    when AST::ListLit
+      node.items&.each { |i| _walk_expr_for_give(i, capture_names, out) }
+    when AST::VarDecl, AST::BindExpr, AST::Assignment
+      _walk_expr_for_give(node.value, capture_names, out)
+    when AST::ReturnNode
+      _walk_expr_for_give(node.value, capture_names, out)
+    when AST::CapabilityWrap
+      _walk_expr_for_give(node.value, capture_names, out)
     end
   end
 
