@@ -4683,7 +4683,14 @@ class MIRLowering
                      !ct.string? && !is_param && !is_field_access
       iter = if is_arraylist
         MIR::ListItems.new(coll)
-      elsif is_param || (is_field_access && ct.array? && (ct.dynamic? || ct.list_collection?))
+      elsif is_param
+        # @list params are anytype — could be ArrayList (TAKES) or slice (borrow,
+        # via .items at call site). MIR::ItemsAccess(safe: true) emits a comptime
+        # @hasField check that resolves to xs.items or xs at compile time, with
+        # zero runtime overhead. Defer container shape to the runtime/comptime
+        # layer instead of re-deriving from "is this a param?".
+        MIR::ItemsAccess.new(coll, true)
+      elsif is_field_access && ct.array? && (ct.dynamic? || ct.list_collection?)
         coll
       else
         MIR::AddressOf.new(coll)
