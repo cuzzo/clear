@@ -1726,7 +1726,10 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("futures.append(")
       end
 
-      it "emits direct indexed access plus .next() for NEXT futures[0]" do
+      it "emits indexed access plus .next() for NEXT futures[0]" do
+        # Indexing now defers to CheatLib.getAt (polymorphic ArrayList/slice
+        # dispatch via comptime @hasField). The lowering no longer hard-codes
+        # `.items[i]` for @list.
         src = <<~CLEAR
           FN f() RETURNS Void ->
             MUTABLE futures: ~Int64[]@list = [];
@@ -1736,7 +1739,7 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         out = transpile_fn(src)
-        expect(out).to match(/futures\.items\[@as\(usize, @intCast\(0\)\)\]\.next\(\)/)
+        expect(out).to match(/CheatLib\.getAt\(futures, 0\)\.next\(\)/)
       end
     end
   end

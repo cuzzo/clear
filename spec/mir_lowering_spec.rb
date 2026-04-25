@@ -454,7 +454,10 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("CheatLib.len(items)")
     end
 
-    it "lowers parameter slice length to direct len" do
+    it "lowers parameter array length via the polymorphic CheatLib.len helper" do
+      # Defers to runtime polymorphism: CheatLib.len uses comptime @hasField
+      # to dispatch ArrayList (.items.len) vs slice (.len). The lowering does
+      # NOT re-derive container shape from "is_param" anymore.
       target = make_id("items", full_type: :"Int64[]")
       node = AST::MethodCall.new(tok, target, "length", [])
       node.full_type = :Int64
@@ -462,8 +465,7 @@ RSpec.describe MIRLowering do
       l = lowering
       l.instance_variable_set(:@current_fn_param_names, ["items"])
       result = l.lower(node)
-      expect(result).to be_a(MIR::Cast)
-      expect(emit(result)).to eq("@as(i64, @intCast(items.len))")
+      expect(emit(result)).to eq("CheatLib.len(items)")
     end
   end
 

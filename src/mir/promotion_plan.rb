@@ -436,6 +436,11 @@ module CleanupClassifier
           needs_cleanup: true, alloc: :heap, kind: :takes_string,
           has_moved_guard: true, source_kind: :takes_param
         }
+      elsif ti.list_collection?
+        # TAKES @list param: callee owns the full ArrayListUnmanaged. Cleanup
+        # uses CheatLib.cleanup(ArrayListUnmanaged, ...) — must come before the
+        # generic array? branch which assumes a slice shape.
+        bindings[name] = entry(:list)
       elsif ti.array? && !ti.string?
         # TAKES slice param: callee owns the buffer. Caller must pass a
         # heap-owned buffer (via implicit COPY of @list or explicit COPY).
@@ -443,8 +448,6 @@ module CleanupClassifier
           needs_cleanup: true, alloc: :heap, kind: :takes_slice,
           has_moved_guard: true, source_kind: :takes_param
         }
-      elsif ti.list_collection?
-        bindings[name] = entry(:list)
       elsif ti.map? && !ti.numeric_map?
         bindings[name] = entry(:string_map)
       elsif ti.numeric_map?

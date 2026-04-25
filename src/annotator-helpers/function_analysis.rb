@@ -359,6 +359,11 @@ module FunctionAnalysis
         move_if_not_copyable!(inner_node)
         inner_node.was_moved = true
         arg_node.was_moved = true
+        # If ensure_owned_value! wrapped the arg in a fresh CopyNode (auto-COPY
+        # for TAKES), the new wrapper at node.args[i] must also carry was_moved
+        # so the lowering can see "callee TAKES this on success" without
+        # re-deriving from CopyNode/MoveNode syntax. Single source of truth.
+        node.args[i].was_moved = true if node.args[i].respond_to?(:was_moved=)
       end
 
       # D0. @link arguments cannot be passed to functions expecting a concrete type.

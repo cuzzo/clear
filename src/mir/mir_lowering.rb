@@ -5099,19 +5099,15 @@ class MIRLowering
   end
 
   def direct_index_get(target, index, ast_node, type_info)
-    cast_idx = MIR::Cast.new(index, "usize", :intCast)
     ti = Type.new(type_info)
-    list_param = ti.list_collection? && ast_node.is_a?(AST::Identifier) &&
-                 @current_fn_param_names&.include?(ast_node.name)
-    base =
-      if ti.list_collection? && !list_param
-        MIR::ListItems.new(target)
-      elsif direct_slice_backed_expr?(ast_node, ti) || list_param
-        target
-      else
-        return nil
-      end
-    MIR::IndexGet.new(base, cast_idx)
+    # @list types defer to CheatLib.getAt (the registry fallback). The runtime
+    # helper dispatches ArrayList vs slice via comptime @hasField, so we don't
+    # re-derive container shape from "is this a param?" here. Keep direct
+    # IndexGet only for true slice-backed exprs (string@raw, fixed slices).
+    return nil if ti.list_collection?
+    return nil unless direct_slice_backed_expr?(ast_node, ti)
+    cast_idx = MIR::Cast.new(index, "usize", :intCast)
+    MIR::IndexGet.new(target, cast_idx)
   end
 
   def lower_direct_length(node)
@@ -5121,23 +5117,21 @@ class MIRLowering
     recv_ti = recv_ast.type_info rescue nil
     return nil unless recv_ti
 
-    recv = lower(recv_ast)
     ti = Type.new(recv_ti)
-    is_param = recv_ast.is_a?(AST::Identifier) &&
-               @current_fn_param_names&.include?(recv_ast.name)
+    # Containers (list/array/slice) all defer to CheatLib.len, which dispatches
+    # ArrayList vs slice via comptime @hasField. Returning nil here falls back
+    # to the regular stdlib-registry path that emits CheatLib.len({0}). The
+    # runtime is the single source of truth for container shape — the lowering
+    # MUST NOT re-derive shape from "is this a param?" or similar shortcuts
+    # (TAKES @list params receive ArrayList; borrow @list params receive a
+    # slice via .items; the runtime helper handles both).
+    return nil if ti.list_collection? || (ti.array? && !ti.string?)
+
+    recv = lower(recv_ast)
     len_expr =
-      if ti.list_collection?
-        if is_param
-          # Parameters receive slices ([]T via .items at call site) — no .items wrapper.
-          MIR::ListLength.new(recv)
-        else
-          MIR::ListLength.new(MIR::ListItems.new(recv))
-        end
-      elsif ti.string? || (ti.array? && !ti.string? && direct_slice_backed_expr?(recv_ast, ti))
+      if ti.string?
         MIR::ListLength.new(recv)
       else
-        # Local dynamic arrays: CheatLib.len handles both ArrayListUnmanaged
-        # (via .items.len) and slices (via .len) at runtime — fall back to it.
         nil
       end
 

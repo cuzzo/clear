@@ -1,0 +1,13 @@
+FN consume!(TAKES xs: Int64[]@list) RETURNS Int64 -> RETURN xs.length(); END
+
+FN make_lst() RETURNS Int64[]@list ->
+    MUTABLE lst: Int64[]@list = List[];
+    lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
+    RETURN lst;
+END
+
+FN main() RETURNS Void ->
+    lst = make_lst();
+    n: Int64 = consume!(GIVE lst);
+    ASSERT n == 3, "consume! saw all three items via .length() on @list TAKES";
+END
