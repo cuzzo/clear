@@ -160,6 +160,12 @@ module CaptureStrategy
   def self.value_like?(type)
     return true if type.primitive?
     return true if type.respond_to?(:string?) && type.string?  # []const u8 is Copy
+    # Id<T> handles are opaque u64 indices into a pool — the pool owns the
+    # data; the Id is just a key. Byte-copy is always safe.
+    if type.respond_to?(:generic_instance?) && type.generic_instance? &&
+       type.respond_to?(:generic_base) && type.generic_base == :Id
+      return true
+    end
     return true if type.respond_to?(:copyable?) && type.copyable?
     false
   end

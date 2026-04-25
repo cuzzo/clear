@@ -2951,11 +2951,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                -- Phase 1: synchronous recursive exec! call. Phase 2's
-                -- BG { exec!(...) } wrap hits a CLEAR compiler issue
-                -- where slice-typed params (ops, consts) get captured
-                -- as ArrayListUnmanaged. Filed as a follow-up; Phase 1
-                -- semantics are correct for all tested BG patterns.
+                -- Phase 1: synchronous recursive exec! (semantics correct,
+                -- not concurrent). Phase 2 requires pool to become
+                -- @shared:locked or @sharded:locked so the spawned fiber
+                -- can capture it safely; the rest of the BG capture story
+                -- (Id<Env>, slice COPY, list GIVE) is now compiler-clean.
                 bgResult = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
                 pv = Value.Pair{
                     pairCar: Value{ Symbol: COPY "__future__" },
