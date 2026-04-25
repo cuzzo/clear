@@ -466,6 +466,12 @@ module CapabilityHelper
     return unless node.is_a?(AST::Locatable)
     return if node.is_a?(AST::BgBlock)
 
+    # COPY x / CLONE x at a BG capture site does NOT move x. COPY deep-
+    # copies into the fiber; CLONE retains an Rc/Arc. The outer binding
+    # remains live. Only MoveNode (GIVE) and bare captures of resource/
+    # affine values trigger the move below.
+    return if node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode) || node.is_a?(AST::FreezeNode)
+
     if node.is_a?(AST::Identifier)
       name = node.name
       return if locally_bound.include?(name)
