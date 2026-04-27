@@ -203,6 +203,26 @@ module MIR
     include Stmt
   end
 
+  # Panic with a literal message. Never returns (control-flow terminator).
+  # Used for compiler-emitted preconditions where the only sensible
+  # response is to crash (e.g. MIN/MAX on empty list, INDEX allocation
+  # failure). Both backends terminate execution.
+  # Zig: @panic("message");
+  Panic = Struct.new(:message) do
+    include Stmt
+  end
+
+  # In-place sort.
+  # Borrows `items_expr`; mutates the underlying slice. The comparator is
+  # encoded as two key extraction expressions (key_a, key_b) — both are MIR
+  # expression trees referring to placeholder identifiers `a` and `b`. The
+  # emitter wraps them in the appropriate Zig closure / VM comparator.
+  # No allocation; ownership of items unchanged.
+  # Zig: std.mem.sort(T, items, {}, struct { fn lessThan(_, a, b) {...} });
+  Sort = Struct.new(:elem_type, :items_expr, :key_a, :key_b) do
+    include Stmt
+  end
+
   # Defer statement.
   # Zig: defer { body };  or  defer expr;
   DeferStmt = Struct.new(:body) do

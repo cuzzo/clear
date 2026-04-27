@@ -59,6 +59,8 @@ class MIREmitter
     when MIR::ReturnStmt       then emit_return(node)
     when MIR::BreakStmt        then emit_break(node)
     when MIR::ContinueStmt     then "continue;"
+    when MIR::Panic            then "@panic(#{node.message.inspect});"
+    when MIR::Sort             then emit_sort(node)
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
@@ -382,6 +384,16 @@ class MIREmitter
     parts << ":#{node.label}" if node.label
     parts << emit(node.value) if node.value
     "#{parts.join(' ')};"
+  end
+
+  def emit_sort(node)
+    et = node.elem_type
+    items = emit(node.items_expr)
+    "std.mem.sort(#{et}, #{items}, {}, struct {\n" \
+      "    pub fn lessThan(_: void, a: #{et}, b: #{et}) bool {\n" \
+      "        return #{emit(node.key_a)} < #{emit(node.key_b)};\n" \
+      "    }\n" \
+      "}.lessThan);"
   end
 
   def emit_scope_block(node)

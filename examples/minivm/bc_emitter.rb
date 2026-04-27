@@ -471,6 +471,18 @@ class BcEmitter
       push_type(:void)
     when MIR::DoBlock, MIR::CatchWrapper
       raise Unimplemented, "#{mir_node.class.name.split('::').last} not yet supported"
+    when MIR::Panic
+      # Print message + halt. The VM has no @panic equivalent; surfacing the
+      # message via display() and emitting HALT is the closest analogue.
+      emit_op(LOAD_CONST, add_const([:str, "PANIC: #{mir_node.message}"]))
+      emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+      emit_op(HALT)
+      push_type(:void)
+    when MIR::Sort
+      # The VM has no in-place sort native. Implementing it requires either
+      # a recursive-into-bytecode comparator dispatch or a pre-compiled
+      # comparator helper. Defer until VM grows higher-order support.
+      raise Unimplemented, "MIR::Sort not yet supported in VM path"
     when MIR::Lit, MIR::Ident, MIR::ConcatStr, MIR::BinOp, MIR::BlockExpr
       # Bare expression in statement position (e.g. the last value of a
       # bg-block body, used as the fiber's return). Evaluate for side

@@ -667,10 +667,12 @@ class PipelineHost
     expr_mir = visit_pipeline_expr_mir(list_node, min_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::ExprStmt.new(
-          MIR::InlineZig.new(
-            "if (#{items}.len == 0) @panic(\"MIN applied to empty list\")",
-            "min_empty_check"), nil),
+        MIR::IfStmt.new(
+          MIR::BinOp.new("==",
+            MIR::FieldGet.new(MIR::Ident.new(items), "len"),
+            MIR::Lit.new("0")),
+          [MIR::Panic.new("MIN applied to empty list")],
+          nil),
         MIR::Let.new("min_result", MIR::TypeSentinel.new(:max, "f64"),
           true, "f64", nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -689,10 +691,12 @@ class PipelineHost
     expr_mir = visit_pipeline_expr_mir(list_node, max_node.expression)
     lower_pipeline_block(list_node) do |items, label|
       [
-        MIR::ExprStmt.new(
-          MIR::InlineZig.new(
-            "if (#{items}.len == 0) @panic(\"MAX applied to empty list\")",
-            "max_empty_check"), nil),
+        MIR::IfStmt.new(
+          MIR::BinOp.new("==",
+            MIR::FieldGet.new(MIR::Ident.new(items), "len"),
+            MIR::Lit.new("0")),
+          [MIR::Panic.new("MAX applied to empty list")],
+          nil),
         MIR::Let.new("max_result", MIR::TypeSentinel.new(:min, "f64"),
           true, "f64", nil),
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
@@ -1031,22 +1035,15 @@ class PipelineHost
     alloc = pipeline_alloc(smooth_node)
     key_a = with_pipeline_context(placeholder: "a") { visit_mir(order_node.expression) }
     key_b = with_pipeline_context(placeholder: "b") { visit_mir(order_node.expression) }
-    sort_code = "std.mem.sort(#{elem_zig}, ord_result.items, {}, struct {\n" \
-                "    pub fn lessThan(_: void, a: #{elem_zig}, b: #{elem_zig}) bool {\n" \
-                "        return #{@emitter.emit(key_a)} < #{@emitter.emit(key_b)};\n" \
-                "    }\n" \
-                "}.lessThan)"
     lower_pipeline_block(list_node) do |items, label|
       [
         MIR::Let.new("ord_result",
           MIR::Call.new("CheatLib.makeList",
             [MIR::Ident.new(elem_zig), MIR::AllocatorRef.new(alloc), MIR::Ident.new(items)],
             true), true, nil, "_ = &ord_result;"),
-        # The sort comparator is an anonymous Zig struct with a closure over
-        # the key extraction expression. There's no MIR equivalent for that
-        # shape today; sort would need a dedicated MIR::Sort node carrying
-        # the key expression, plus VM support. Left as InlineZig.
-        MIR::ExprStmt.new(MIR::InlineZig.new(sort_code, "order_by_sort"), nil),
+        MIR::Sort.new(elem_zig,
+          MIR::FieldGet.new(MIR::Ident.new("ord_result"), "items"),
+          key_a, key_b),
         MIR::BreakStmt.new(label, MIR::Ident.new("ord_result"))
       ]
     end
