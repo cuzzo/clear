@@ -315,6 +315,48 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 - **Borrow state lives in the OwnershipGraph.** All borrow/lifetime decisions are resolved via the OG, not by inspecting specific AST node types. The OG is the single source of truth for ownership state.
 - **TODO:** Lambda `USE` captures are borrows by default. Add `USE TAKES y` syntax for move captures (like Rust's `move ||`).
 
+### Concurrency Model (capability-as-binding-metadata)
+
+CLEAR's concurrency story is built on a strict separation of two sigil groups, attached to **bindings**, not types. The same function works under any combination of sync/storage modalities through comptime polymorphism.
+
+**Group 1 (sync / ownership wrappers):** `@locked`, `@writeLocked`, `@shared`, `@multiowned`, `@local`. Stored on `SymbolEntry#sync` and `#storage`, *not* on `Type`.
+
+**Group 2 (data shape):** `@pool`, `@list`, `@set`, `@map`, `@sharded`, `@striped`. Stored on `Type` shape attrs.
+
+Sigils chain: `pool: Env[N]@pool:shared:locked` means a Pool of Env, wrapped in Arc, wrapped in RwLock. `Type#bare_data_type` strips Group 1, leaving the bare data type for `ContainerInit` to construct. `MIR::CapWrap` then composes Group 1 layers around it.
+
+**REQUIRES clause** constrains a parameter's sync family without committing to a specific implementation:
+```clear
+FN incr!(MUTABLE c: Counter) REQUIRES c: LOCKABLE -> ...
+```
+The function body uses `WITH EXCLUSIVE c { ... }` and works whether the caller passes `@locked` or `@writeLocked`. Callers without sync (i.e., `@local`) are rejected at the call site.
+
+**WITH MATCH / WHEN arms** allow per-modality code paths in functions that accept multiple sync families:
+```clear
+WITH MATCH c
+    WHEN @locked -> EXCLUSIVE c { c.incr(); }
+    WHEN @local  -> c.incr();
+END
+```
+
+**Effect lattice** (`:yield`, `:alloc_heap`, `:io`, `:fail`) is inferred per function. Used by:
+- **P3.3** "hold-lock-across-yield" detection (forbids holding a lock across `:yield`).
+- **P3.4** "naked nested-WITH" detection (forbids unranked re-acquire).
+- **P3.5** "compile-time reentrant lock" detection (forbids recursive lock acquire on the same binding without `@reentrant` annotation, which the runtime upgrades to a re-entrant lock).
+
+**Cross-module sync propagation** has three sources of truth, in priority order:
+1. **REQUIRES-seed** (`function_analysis.rb`): when `REQUIRES p: LOCKABLE`, seed `entry.sync = :locked` on the param at decl time. Ensures `WITH p` lowers to lock acquire even when caller info is unavailable (e.g., types.cht annotated standalone).
+2. **Caller propagation** (`propagate_caller_sync!`): transitive flow from caller binding into callee param. Uses `collect_callsites_deep` (deep AST walker) so call-sites inside expressions are seen.
+3. **Storage axis fallback** (`escape_analysis.rb`): if `entry.type.shared?` or `multiowned?`, treat as `:shared` / `:multiowned` storage even when no caller stamp exists.
+
+**Comptime Arc-unwrap** at WITH lowering uses Zig `@hasField`:
+```zig
+(if (@hasField(@TypeOf(pool.*), "ctrl")) pool.ctrl.data.* else pool.*)
+```
+This makes the same function body work for `@shared:locked` parameters (Arc<Locked<T>>) and bare-T parameters with zero runtime cost.
+
+**Key rule:** `WITH ... AS alias { ... }` aliases are non-escaping (`SymbolEntry#non_escaping = true`). `RETURN alias` and `RETURN alias.field` (or any GetField/GetIndex chain rooted at a non-escaping symbol) are rejected by `visit_ReturnNode`. `RETURN COPY alias` is allowed because COPY breaks the borrow.
+
 ## Design Principles
 
 - **Immutability:** Default. `x = value` declares an immutable binding; `MUTABLE x = value` declares a mutable one. Reassignment uses `x = value` (no keyword) and only works on mutable variables.
