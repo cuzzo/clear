@@ -285,11 +285,12 @@ class BcEmitter
       # allocation hoisting — the emitter can inline them (compile_expr
       # on the subsequent use evaluates the init in place).
       #
-      # DO NOT strip:
-      #   __ret       — return-value binding referenced by ReturnStmt
-      #   __hm        — hashmap/set literal receiver that subsequent .put()
-      #                 calls mutate; stripping causes load-by-name to fail.
-      (n.is_a?(MIR::Let) && n.name.to_s =~ /\A__(?!ret\z|hm\z)/)
+      # The filter MUST only match these specific prefixes — the previous
+      # broad `__(?!ret|hm)` regex stripped pipeline-generated bindings like
+      # __res1 (pipeline accumulator), __pt_unwrap (WITH alias), __each_src
+      # (TAP/EACH source cache), etc. Those are real bindings; stripping
+      # them caused subsequent LOAD_SLOT to read uninitialized memory.
+      (n.is_a?(MIR::Let) && n.name.to_s =~ /\A__(hpt|tmp)_\d+\z/)
     }
   end
 
@@ -1452,11 +1453,18 @@ class BcEmitter
       emit_op(NATIVE_CALL, NATIVES["list-pop"], 1) if NATIVES.key?("list-pop")
       push_type(:any); return
     when :length, :count
-      # collection length — NATIVE_CALL count 1 handles list/string/map uniformly.
-      # Result lands on the value stack as Value.Int64Val, so :any (not :i64 —
-      # :i64 would claim the value is on the typed istack).
+      # Sets/maps live in the env pool (Value.MapRef); the count native
+      # (id 13) calls listLen which doesn't reach into the pool. Emit
+      # MAP_LENGTH for those receivers; otherwise the count native handles
+      # list/string uniformly. Result lands on vstack as Int64Val (:any).
+      arg_hint = expr_type_hint(node.args[0])
       compile_expr_to_value(node.args[0])
-      emit_op(NATIVE_CALL, NATIVES["count"], 1); push_type(:any); return
+      if arg_hint == :set || arg_hint == :map
+        emit_op(MAP_LENGTH)
+      else
+        emit_op(NATIVE_CALL, NATIVES["count"], 1)
+      end
+      push_type(:any); return
     when :remove
       # list.remove(idx) — compile_list_remove is the existing AST helper;
       # just inline the same opcodes here using MIR args.
@@ -1491,9 +1499,20 @@ class BcEmitter
       compile_expr_to_value(node.args[1])
       emit_op(NATIVE_CALL, NATIVES["endsWith?"], 2); push_type(:any); return
     when :"contains?"
+      # Sets are Value.MapRef in the VM; the string "contains?" native
+      # (id 41) only handles strings. Use SET_CONTAINS / MAP_CONTAINS for
+      # collection-typed receivers.
+      arg_hint = expr_type_hint(node.args[0])
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
-      emit_op(NATIVE_CALL, NATIVES["contains?"], 2); push_type(:any); return
+      if arg_hint == :set
+        emit_op(SET_CONTAINS)
+      elsif arg_hint == :map
+        emit_op(MAP_CONTAINS)
+      else
+        emit_op(NATIVE_CALL, NATIVES["contains?"], 2)
+      end
+      push_type(:any); return
     when :substr
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
