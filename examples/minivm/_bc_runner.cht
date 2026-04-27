@@ -628,18 +628,25 @@ END
 
 -- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
-    IF pool[envId] AS env THEN
-        IF env.vars.contains?(name) THEN
-            env.vars[name] = COPY val;
-            RETURN TRUE;
+FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
+    MUTABLE recurseTo: ?Id<Env> = NIL;
+    WITH EXCLUSIVE pool AS p {
+        IF p[envId] AS env THEN
+            IF env.vars.contains?(name) THEN
+                env.vars[name] = COPY val;
+                RETURN TRUE;
+            END
+            parentVal = env.vars["__p"] OR Value.Nil;
+            MATCH parentVal START
+                Value.EnvRef AS pid -> recurseTo = pid;,
+                DEFAULT -> recurseTo = NIL;
+            END
         END
-        parentVal = env.vars["__p"] OR Value.Nil;
-        MATCH parentVal START
-            Value.EnvRef AS pid -> RETURN envSet!(pid, name, val, pool);,
-            DEFAULT -> RETURN FALSE;
-        END
-    END
+    }
+    IF recurseTo AS pid THEN RETURN envSet!(pid, name, val, pool); END
     RETURN FALSE;
 END
 
@@ -726,13 +733,19 @@ FN getTcoAst(v: Value) RETURNS Value ->
     RETURN Value.Nil;
 END
 
-FN getTcoEnv!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
+FN getTcoEnv!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
+  REQUIRES pool: LOCKABLE
+->
     MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoEnv;, DEFAULT ->
-        dummy: Id<Env> = pool.insert(Env{ vars: {} });
-        RETURN dummy;
+        WITH EXCLUSIVE pool AS p {
+            dummy: Id<Env> = p.insert(Env{ vars: {} });
+            RETURN dummy;
+        }
     END
-    dummy2: Id<Env> = pool.insert(Env{ vars: {} });
-    RETURN dummy2;
+    WITH EXCLUSIVE pool AS p {
+        dummy2: Id<Env> = p.insert(Env{ vars: {} });
+        RETURN dummy2;
+    }
 END
 
 FN isError?(v: Value) RETURNS Bool ->
@@ -750,16 +763,25 @@ FN getErrKind(v: Value) RETURNS String ->
     RETURN "";
 END
 
-FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value ->
+FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
+  REQUIRES pool: LOCKABLE
+->
     MATCH catchExpr START
         Value.List AS catchItems ->
-            catchEnvId: Id<Env> = pool.insert(Env{ vars: {} });
-            IF pool[catchEnvId] AS catchEnv THEN
-                catchEnv.vars["__p"] = Value{ EnvRef: envId };
-                errBindName = getSymName(catchItems[1]);
-                catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+            MUTABLE catchEnvIdHolder: ?Id<Env> = NIL;
+            WITH EXCLUSIVE pool AS p {
+                catchEnvId: Id<Env> = p.insert(Env{ vars: {} });
+                IF p[catchEnvId] AS catchEnv THEN
+                    catchEnv.vars["__p"] = Value{ EnvRef: envId };
+                    errBindName = getSymName(catchItems[1]);
+                    catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+                END
+                catchEnvIdHolder = catchEnvId;
+            }
+            IF catchEnvIdHolder AS theId THEN
+                RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: theId };
             END
-            RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: catchEnvId };,
+            RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };,
         DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
     END
     RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
@@ -771,7 +793,10 @@ FN isSymbol?(v: Value) RETURNS Bool ->
 END
 
 -- resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
-FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     MATCH v START
         Value.Tco AS tco ->
             tcoAst = COPY tco.tcoAst;
@@ -784,7 +809,10 @@ END
 
 -- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
@@ -808,7 +836,10 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
     RETURN Value.Nil;
 END
 
-FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     MUTABLE result: Value = evalOnce!(GIVE ast, envId, pool);
     MUTABLE bouncing = isTco?(result);
     WHILE bouncing DO
@@ -820,7 +851,10 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURN
     RETURN result;
 END
 
-FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
@@ -1541,11 +1575,11 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "source-line" THEN
         -- (source-line N) -> track current CLEAR source line for error messages
         lineVal = eval!(COPY items[1], envId, pool);
-        IF pool[envId] AS env THEN env.vars["__source_line"] = lineVal; END
+        WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__source_line"] = lineVal; END }
         RETURN Value.Nil;
 
     ELSE_IF formName == "sandbox-enable" THEN
-        IF pool[envId] AS env THEN env.vars["__sandbox"] = Value.TrueVal; END
+        WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__sandbox"] = Value.TrueVal; END }
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-manhattan" THEN
@@ -1602,12 +1636,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "debug-set-break" THEN
         -- (debug-set-break "fnName") -> register breakpoint
         bpName = eval!(COPY items[1], envId, pool);
-        IF pool[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END
+        WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END }
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-clear-break" THEN
         bpName = eval!(COPY items[1], envId, pool);
-        IF pool[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END
+        WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END }
         RETURN Value.Nil;
 
     -- Error introspection: special forms to avoid error propagation
@@ -1654,7 +1688,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         defName = getSymName(items[1]);
         val = eval!(COPY items[2], envId, pool);
         IF isError?(val) THEN RETURN val; END
-        IF pool[envId] AS env THEN env.vars[defName] = COPY val; END
+        WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars[defName] = COPY val; END }
         RETURN val;
 
     ELSE_IF formName == "set!" THEN
@@ -1744,9 +1778,15 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "let*" || formName == "let" THEN
         MATCH items[1] START
             Value.List AS binds ->
-                letId: Id<Env> = pool.insert(Env{ vars: {} });
-                IF pool[letId] AS letEnv THEN
-                    letEnv.vars["__p"] = Value{ EnvRef: envId };
+                MUTABLE letIdHolder: ?Id<Env> = NIL;
+                WITH EXCLUSIVE pool AS p {
+                    letIdNew: Id<Env> = p.insert(Env{ vars: {} });
+                    IF p[letIdNew] AS letEnv THEN
+                        letEnv.vars["__p"] = Value{ EnvRef: envId };
+                    END
+                    letIdHolder = letIdNew;
+                }
+                IF letIdHolder AS letId THEN
                     IF binds.length() > 0 && isList?(binds[0]) THEN
                         FOR bi IN (0_i64 ..< binds.length()) DO
                             MATCH binds[bi] START
@@ -1754,7 +1794,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                                     bName = getSymName(pair[0]);
                                     bVal = eval!(COPY pair[1], letId, pool);
                                     IF isError?(bVal) THEN RETURN bVal; END
-                                    letEnv.vars[bName] = bVal;,
+                                    WITH EXCLUSIVE pool AS p {
+                                        IF p[letId] AS letEnv THEN letEnv.vars[bName] = bVal; END
+                                    },
                                 DEFAULT -> PASS;
                             END
                         END
@@ -1764,12 +1806,15 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                             bName = getSymName(binds[bi]);
                             bVal = eval!(COPY binds[bi + 1], letId, pool);
                             IF isError?(bVal) THEN RETURN bVal; END
-                            letEnv.vars[bName] = bVal;
+                            WITH EXCLUSIVE pool AS p {
+                                IF p[letId] AS letEnv THEN letEnv.vars[bName] = bVal; END
+                            }
                             bi += 2;
                         END
                     END
+                    RETURN Value.Tco{ tcoAst: COPY items[2], tcoEnv: letId };
                 END
-                RETURN Value.Tco{ tcoAst: COPY items[2], tcoEnv: letId };,
+                RETURN Value.Nil;,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
@@ -1851,13 +1896,15 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             IF shouldBreak THEN
                 -- Push call stack
                 oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
-                IF pool[envId] AS dbgEnv THEN
-                    IF oldStack.length() > 0 THEN
-                        dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc + " < " + oldStack };
-                    ELSE
-                        dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc };
+                WITH EXCLUSIVE pool AS p {
+                    IF p[envId] AS dbgEnv THEN
+                        IF oldStack.length() > 0 THEN
+                            dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc + " < " + oldStack };
+                        ELSE
+                            dbgEnv.vars["__dbg_stack"] = Value{ Str: COPY callDesc };
+                        END
                     END
-                END
+                }
 
                 MUTABLE action = debugPause!(callDesc, envId, "", pool);
 
@@ -1869,31 +1916,40 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 END
 
                 -- Set step mode based on debug action
-                IF pool[envId] AS dbgEnv2 THEN
-                    dbgEnv2.vars["__dbg_step"] = Value{ Number: toFloat(action) };
-                    dbgEnv2.vars["__dbg_target_depth"] = Value{ Number: curDepth };
-                    -- Restore stack
-                    dbgEnv2.vars["__dbg_stack"] = Value{ Str: COPY oldStack };
-                END
+                WITH EXCLUSIVE pool AS p {
+                    IF p[envId] AS dbgEnv2 THEN
+                        dbgEnv2.vars["__dbg_step"] = Value{ Number: toFloat(action) };
+                        dbgEnv2.vars["__dbg_target_depth"] = Value{ Number: curDepth };
+                        -- Restore stack
+                        dbgEnv2.vars["__dbg_stack"] = Value{ Str: COPY oldStack };
+                    END
+                }
             END
 
             -- Track call depth for step-over/out
-            IF pool[envId] AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END
+            WITH EXCLUSIVE pool AS p { IF p[envId] AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END }
         END
 
         IF isLambda?(f) THEN
             MATCH f START
                 Value.Lambda AS lam ->
-                    callId: Id<Env> = pool.insert(Env{ vars: {} });
-                    IF pool[callId] AS callEnv THEN
-                        callEnv.vars["__p"] = Value{ EnvRef: lam.envId };
-                        FOR pi IN (0_i64 ..< lam.params.length()) DO
-                            pname = getSymName(lam.params[pi]);
-                            callEnv.vars[pname] = evaled[pi + 1];
+                    MUTABLE callIdHolder: ?Id<Env> = NIL;
+                    WITH EXCLUSIVE pool AS p {
+                        callIdNew: Id<Env> = p.insert(Env{ vars: {} });
+                        IF p[callIdNew] AS callEnv THEN
+                            callEnv.vars["__p"] = Value{ EnvRef: lam.envId };
+                            FOR pi IN (0_i64 ..< lam.params.length()) DO
+                                pname = getSymName(lam.params[pi]);
+                                callEnv.vars[pname] = evaled[pi + 1];
+                            END
                         END
+                        callIdHolder = callIdNew;
+                    }
+                    IF callIdHolder AS callId THEN
+                        bodyAst: Value = COPY lam.body;
+                        RETURN eval!(GIVE bodyAst, callId, pool);
                     END
-                    bodyAst: Value = COPY lam.body;
-                    RETURN eval!(GIVE bodyAst, callId, pool);,
+                    RETURN Value.Nil;,
                 DEFAULT -> RETURN Value.Nil;
             END
         ELSE
@@ -1908,7 +1964,10 @@ END
 
 -- runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -1918,9 +1977,12 @@ END
 -- Setup: create root env with all native functions registered.
 -- Returns the root env Id.
 
-FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
-    rootId: Id<Env> = pool.insert(Env{ vars: {} });
-    IF pool[rootId] AS root THEN
+FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
+  REQUIRES pool: LOCKABLE
+->
+    WITH EXCLUSIVE pool AS p {
+        rootId: Id<Env> = p.insert(Env{ vars: {} });
+        IF p[rootId] AS root THEN
         -- Arithmetic: 1-4
         root.vars["+"] = Value{ NativeFn: 1 };
         root.vars["-"] = Value{ NativeFn: 2 };
@@ -2003,9 +2065,9 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
         root.vars["set-insert"] = Value{ NativeFn: 63 };
         root.vars["set-remove"] = Value{ NativeFn: 64 };
         root.vars["parse-i64"] = Value{ NativeFn: 65 };
-    END
-    -- error?, error-message, error-kind, list-append! are special forms
-    RETURN rootId;
+        END
+        RETURN rootId;
+    }
 END
 
 -- ============================================================================
@@ -2068,7 +2130,9 @@ STRUCT Frame {
 
 -- Bytecode loader: reads ops and consts from files written by Ruby compiler
 
-FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[] ->
+FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[]
+  REQUIRES pool: LOCKABLE
+->
     raw = readFile(path) OR RAISE;
     -- Split on commas using the interpreter's split function
     parts = split(raw, ",");
@@ -2084,7 +2148,9 @@ FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[]
     RETURN ops;
 END
 
-FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Value[] ->
+FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Value[]
+  REQUIRES pool: LOCKABLE
+->
     raw = readFile(path) OR RAISE;
     MUTABLE consts: Value[]@list = List[];
     -- Parse line by line
@@ -2104,7 +2170,9 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Valu
     RETURN consts;
 END
 
-FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value ->
+FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
+  REQUIRES pool: LOCKABLE
+->
     IF line == "N" THEN RETURN Value.Nil; END
     IF startsWith?(line, "I:") THEN
         numStr = substr(line, 2, line.length() - 2);
@@ -2161,7 +2229,10 @@ END
 -- compile! stores results in pool env at __bc_ops and __bc_consts keys.
 -- Caller reads them from pool[envId] after the call.
 
-FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
+FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     MUTABLE ops: Value[]@list = List[];
     MUTABLE consts: Value[]@list = List[];
 
@@ -2169,7 +2240,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
         symName = getSymName(ast);
         -- Check if this symbol has a slot assignment
         MUTABLE slotLookup = Value{ Number: 0.0 - 1.0 };
-        IF pool[envId] AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR Value{ Number: 0.0 - 1.0 }; END
+        WITH EXCLUSIVE pool AS p { IF p[envId] AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR Value{ Number: 0.0 - 1.0 }; END }
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
             -- LOAD_SLOT
@@ -2221,12 +2292,14 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
                 ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(c1) });
                 defName = getSymName(items[1]);
                 MUTABLE nextSlot: Int64 = 0;
-                IF pool[envId] AS defSlotEnv THEN
-                    slotCounter = defSlotEnv.vars["__slotN"] OR Value{ Number: 0.0 };
-                    nextSlot = toInt(getNum(slotCounter));
-                    defSlotEnv.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
-                    defSlotEnv.vars["__slotN"] = Value{ Number: toFloat(nextSlot + 1) };
-                END
+                WITH EXCLUSIVE pool AS p {
+                    IF p[envId] AS defSlotEnv THEN
+                        slotCounter = defSlotEnv.vars["__slotN"] OR Value{ Number: 0.0 };
+                        nextSlot = toInt(getNum(slotCounter));
+                        defSlotEnv.vars["__slot_" + defName] = Value{ Number: toFloat(nextSlot) };
+                        defSlotEnv.vars["__slotN"] = Value{ Number: toFloat(nextSlot + 1) };
+                    END
+                }
                 ops.append(Value{ Number: 21.0 }); ops.append(Value{ Number: toFloat(nextSlot) });
                 cidx = consts.length(); consts.append(Value{ Symbol: COPY defName });
                 ops.append(Value{ Number: 2.0 }); ops.append(Value{ Number: toFloat(cidx) });
@@ -2280,16 +2353,18 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
 
     ops.append(Value{ Number: 19.0 });
     -- Store in env entry-by-entry (Value.Number is inline, survives arena free)
-    IF pool[envId] AS bcEnv THEN
-        bcEnv.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
-        FOR wi IN (0_i64 ..< ops.length()) DO
-            bcEnv.vars["__bc_o" + wi.toString()] = ops[wi];
+    WITH EXCLUSIVE pool AS p {
+        IF p[envId] AS bcEnv THEN
+            bcEnv.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
+            FOR wi IN (0_i64 ..< ops.length()) DO
+                bcEnv.vars["__bc_o" + wi.toString()] = ops[wi];
+            END
+            bcEnv.vars["__bc_cN"] = Value{ Number: toFloat(consts.length()) };
+            FOR wi IN (0_i64 ..< consts.length()) DO
+                bcEnv.vars["__bc_c" + wi.toString()] = consts[wi];
+            END
         END
-        bcEnv.vars["__bc_cN"] = Value{ Number: toFloat(consts.length()) };
-        FOR wi IN (0_i64 ..< consts.length()) DO
-            bcEnv.vars["__bc_c" + wi.toString()] = consts[wi];
-        END
-    END
+    }
     RETURN;
 END
 
@@ -2300,7 +2375,10 @@ END
 -- Returns the value on top of the stack at halt.
 
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool,
-         entryIp: Int64, initCaps: Value[]) RETURNS Value @reentrant ->
+         entryIp: Int64, initCaps: Value[]) RETURNS Value
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     MUTABLE stack: Value[]@list = List[];
     MUTABLE slots: Value[]@list = List[];
     MUTABLE sp: Int64 = 0;
@@ -2352,7 +2430,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             2 ->  -- STORE_NAME
                 idx = ops[ip]; ip += 1;
-                IF pool[curEnv] AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1]; END,
+                WITH EXCLUSIVE pool AS p { IF p[curEnv] AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1]; END },
             3 ->  -- POP
                 sp -= 1;,
             4 ->  -- ADD (polymorphic)
@@ -2436,16 +2514,23 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 ELSE_IF isLambda?(fnVal) THEN
                     MATCH fnVal START
                         Value.Lambda AS lam ->
-                            callId: Id<Env> = pool.insert(Env{ vars: {} });
-                            IF pool[callId] AS bcCallEnv THEN
-                                bcCallEnv.vars["__p"] = Value{ EnvRef: lam.envId };
-                                FOR pi IN (0_i64 ..< argc) DO
-                                    pname = getSymName(lam.params[pi]);
-                                    bcCallEnv.vars[pname] = COPY stack[sp - argc + pi];
+                            MUTABLE bcCallIdHolder: ?Id<Env> = NIL;
+                            WITH EXCLUSIVE pool AS p {
+                                bcCallIdNew: Id<Env> = p.insert(Env{ vars: {} });
+                                IF p[bcCallIdNew] AS bcCallEnv THEN
+                                    bcCallEnv.vars["__p"] = Value{ EnvRef: lam.envId };
+                                    FOR pi IN (0_i64 ..< argc) DO
+                                        pname = getSymName(lam.params[pi]);
+                                        bcCallEnv.vars[pname] = COPY stack[sp - argc + pi];
+                                    END
                                 END
-                            END
+                                bcCallIdHolder = bcCallIdNew;
+                            }
                             sp -= argc + 1;
-                            pv = eval!(COPY lam.body, callId, pool);
+                            pv = Value.Nil;
+                            IF bcCallIdHolder AS bcCallId THEN
+                                pv = eval!(COPY lam.body, bcCallId, pool);
+                            END
                             IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                             sp += 1;,
                         DEFAULT ->
@@ -2741,8 +2826,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             66 -> -- MAP_NEW: push new empty MapRef
                 MUTABLE newMapEnv: Env = Env{ vars: {} };
-                newMapId = pool.insert(newMapEnv);
-                pv = Value{ MapRef: newMapId };
+                MUTABLE newMapIdHolder: ?Id<Env> = NIL;
+                WITH EXCLUSIVE pool AS p { newMapIdHolder = p.insert(newMapEnv); }
+                pv = Value.Nil;
+                IF newMapIdHolder AS newMapId THEN pv = Value{ MapRef: newMapId }; END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             67 -> -- MAP_PUT: pop map, key, value; insert; push Nil
@@ -2751,9 +2838,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; mapPutRef = COPY stack[sp];
                 MATCH mapPutRef START
                     Value.MapRef AS mapId ->
-                        IF pool[mapId] AS mapEnv THEN
-                            mapEnv.vars[getStr(mapPutKey)] = mapPutVal;
-                        END,
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[mapId] AS mapEnv THEN
+                                mapEnv.vars[getStr(mapPutKey)] = mapPutVal;
+                            END
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value.Nil;
@@ -2764,9 +2853,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; mapGetRef = COPY stack[sp];
                 MATCH mapGetRef START
                     Value.MapRef AS mapId ->
-                        IF pool[mapId] AS mapEnv THEN
-                            pv = COPY (mapEnv.vars[getStr(mapGetKey)] OR Value.Nil);
-                        END,
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[mapId] AS mapEnv THEN
+                                pv = COPY (mapEnv.vars[getStr(mapGetKey)] OR Value.Nil);
+                            END
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
@@ -2776,9 +2867,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; mapCRef = COPY stack[sp];
                 MATCH mapCRef START
                     Value.MapRef AS mapId ->
-                        IF pool[mapId] AS mapEnv THEN
-                            pv = boolVal(mapEnv.vars.contains?(getStr(mapCKey)));
-                        END,
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[mapId] AS mapEnv THEN
+                                pv = boolVal(mapEnv.vars.contains?(getStr(mapCKey)));
+                            END
+                        },
                     DEFAULT -> pv = Value.FalseVal;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
@@ -2788,9 +2881,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; mapDelRef = COPY stack[sp];
                 MATCH mapDelRef START
                     Value.MapRef AS mapId ->
-                        IF pool[mapId] AS mapEnv THEN
-                            mapEnv.vars.delete(getStr(mapDelKey));
-                        END,
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[mapId] AS mapEnv THEN
+                                mapEnv.vars.delete(getStr(mapDelKey));
+                            END
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value.Nil;
@@ -2801,12 +2896,14 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 MUTABLE mapKeyList: Value[]@list = List[];
                 MATCH mapKRef START
                     Value.MapRef AS mapId ->
-                        IF pool[mapId] AS mapEnv THEN
-                            knames = mapEnv.vars.keys();
-                            FOR ki IN (0_i64 ..< knames.length()) DO
-                                mapKeyList.append(Value{ Str: "" + knames[ki] });
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[mapId] AS mapEnv THEN
+                                knames = mapEnv.vars.keys();
+                                FOR ki IN (0_i64 ..< knames.length()) DO
+                                    mapKeyList.append(Value{ Str: "" + knames[ki] });
+                                END
                             END
-                        END,
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value{ List: mapKeyList };
@@ -2817,9 +2914,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 MUTABLE mapLen: Int64 = 0;
                 MATCH mapLRef START
                     Value.MapRef AS mapId ->
-                        IF pool[mapId] AS mapEnv THEN
-                            mapLen = mapEnv.vars.count();
-                        END,
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[mapId] AS mapEnv THEN
+                                mapLen = mapEnv.vars.count();
+                            END
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value{ Int64Val: mapLen };
@@ -2830,10 +2929,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; setInsRef = COPY stack[sp];
                 MATCH setInsRef START
                     Value.MapRef AS setId ->
-                        IF pool[setId] AS setEnv THEN
-                            setKey = prStr(setInsVal, TRUE);
-                            setEnv.vars[setKey] = setInsVal;
-                        END,
+                        setKey = prStr(setInsVal, TRUE);
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[setId] AS setEnv THEN
+                                setEnv.vars[setKey] = setInsVal;
+                            END
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value.Nil;
@@ -2844,10 +2945,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; setChkRef = COPY stack[sp];
                 MATCH setChkRef START
                     Value.MapRef AS setId ->
-                        IF pool[setId] AS setEnv THEN
-                            setChkKey = prStr(setChkVal, TRUE);
-                            pv = boolVal(setEnv.vars.contains?(setChkKey));
-                        END,
+                        setChkKey = prStr(setChkVal, TRUE);
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[setId] AS setEnv THEN
+                                pv = boolVal(setEnv.vars.contains?(setChkKey));
+                            END
+                        },
                     DEFAULT -> pv = Value.FalseVal;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
@@ -2857,10 +2960,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; setRmRef = COPY stack[sp];
                 MATCH setRmRef START
                     Value.MapRef AS setId ->
-                        IF pool[setId] AS setEnv THEN
-                            setRmKey = prStr(setRmVal, TRUE);
-                            setEnv.vars.delete(setRmKey);
-                        END,
+                        setRmKey = prStr(setRmVal, TRUE);
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[setId] AS setEnv THEN
+                                setEnv.vars.delete(setRmKey);
+                            END
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value.Nil;
@@ -2871,12 +2976,14 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 MUTABLE setTlList: Value[]@list = List[];
                 MATCH setTlRef START
                     Value.MapRef AS setId ->
-                        IF pool[setId] AS setEnv THEN
-                            tlKeys = setEnv.vars.keys();
-                            FOR tli IN (0_i64 ..< tlKeys.length()) DO
-                                setTlList.append(COPY (setEnv.vars[tlKeys[tli]] OR Value.Nil));
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[setId] AS setEnv THEN
+                                tlKeys = setEnv.vars.keys();
+                                FOR tli IN (0_i64 ..< tlKeys.length()) DO
+                                    setTlList.append(COPY (setEnv.vars[tlKeys[tli]] OR Value.Nil));
+                                END
                             END
-                        END,
+                        },
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value{ List: setTlList };
@@ -2985,7 +3092,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     RETURN Value.Nil;
 END
 FN main() RETURNS Void ->
-    MUTABLE pool: Env[50000]@pool = [];
+    MUTABLE pool: Env[50000]@pool:shared:locked = [];
     MUTABLE penv: HashMap<Value> = {};
     rootId = setupEnv!(pool);
     bcOps = loadBytecodeOps!("/home/yahn/cheat/examples/minivm/_bc_ops.txt", pool);

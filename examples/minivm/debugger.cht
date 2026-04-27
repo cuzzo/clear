@@ -21,7 +21,10 @@ END
 -- When returning 4, the parsed inspect AST is stored in env at "__dbg_inspect".
 -- The caller should eval it, format with prStr, and re-call with the result string.
 
-FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64 @reentrant ->
+FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
     -- If we have an inspect result from the caller, write it before resuming polling
     IF inspectResult.length() > 0 THEN
         writeFile("/tmp/_debug_resp.txt", inspectResult);
@@ -62,7 +65,9 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
                 tokenizeToEnv!(inspPenv, inspectExpr);
                 inspPenv["__rp"] = Value{ Number: 0.0 };
                 inspAst = readFormEnv!(inspPenv);
-                IF pool[envId] AS dbgInspEnv THEN dbgInspEnv.vars["__dbg_inspect"] = COPY inspAst; END
+                WITH EXCLUSIVE pool AS p {
+                    IF p[envId] AS dbgInspEnv THEN dbgInspEnv.vars["__dbg_inspect"] = COPY inspAst; END
+                }
                 debugAction = 4; debugActive = FALSE;
             ELSE_IF cmdRaw == ":l" || cmdRaw == ":locals" THEN
                 localsStr = envGet!(envId, "__dbg_locals", pool);

@@ -143,17 +143,24 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
     RETURN "";
 END
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
-    IF pool[envId] AS env THEN
-        IF env.vars.contains?(name) THEN
-            RETURN COPY (env.vars[name] OR Value.Nil);
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
+  REQUIRES pool: LOCKABLE
+  @reentrant
+->
+    MUTABLE recurseTo: ?Id<Env> = NIL;
+    WITH EXCLUSIVE pool AS p {
+        IF p[envId] AS env THEN
+            IF env.vars.contains?(name) THEN
+                RETURN COPY (env.vars[name] OR Value.Nil);
+            END
+            parentVal = env.vars["__p"] OR Value.Nil;
+            MATCH parentVal START
+                Value.EnvRef AS pid -> recurseTo = pid;,
+                DEFAULT -> recurseTo = NIL;
+            END
         END
-        parentVal = env.vars["__p"] OR Value.Nil;
-        MATCH parentVal START
-            Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
-            DEFAULT -> RETURN Value.Nil;
-        END
-    END
+    }
+    IF recurseTo AS pid THEN RETURN envGet!(pid, name, pool); END
     RETURN Value.Nil;
 END
 
