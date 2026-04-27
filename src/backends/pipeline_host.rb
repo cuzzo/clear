@@ -449,8 +449,15 @@ class PipelineHost
 
   # Common: var pipe_mat = ArrayListUnmanaged(T){}; defer pipe_mat.deinit(alloc);
   def mat_var_and_defer(elem_zig)
+    # Use a structural MIR node so both backends can dispatch. The Zig
+    # backend's ContainerInit emitter produces `@as(std.ArrayListUnmanaged(T),
+    # .empty)` for :list_empty + this zig_type prefix, matching what the
+    # legacy InlineZig string used to produce. The VM's bc_emitter compiles
+    # ContainerInit :list_empty to LOAD_CONST [:empty_list], giving it a real
+    # Value.List to grow via list-push.
     var_decl = MIR::Let.new("pipe_mat",
-      MIR::InlineZig.new("std.ArrayListUnmanaged(#{elem_zig}).empty", "mat_init"),
+      MIR::ContainerInit.new("std.ArrayListUnmanaged(#{elem_zig})",
+        :list_empty, :heap, nil),
       true, nil, nil)
     defer = MIR::DeferStmt.new(
       MIR::MethodCall.new(MIR::Ident.new("pipe_mat"), "deinit",

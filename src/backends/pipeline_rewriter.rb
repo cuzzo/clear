@@ -665,6 +665,7 @@ class PipelineRewriter
       append = AST::MethodCall.new(token, res_ident, "append", [inner_it.dup])
       append.full_type = :Void
       append.zig_pattern = STD_LIB["append"][:zig]
+      append.matched_stdlib_def = STD_LIB["append"]
 
       # Iterate directly over the expression (avoids ArrayList/slice confusion).
       # Mark collection as a slice so the transpiler uses &expr, not .items.
@@ -679,16 +680,19 @@ class PipelineRewriter
       insert_call = AST::MethodCall.new(token, res_ident.dup, "insert", [key_expr])
       insert_call.full_type = :Void
       insert_call.zig_pattern = "try {0}.insert({alloc}, {1})"
+      insert_call.matched_stdlib_def = STD_LIB["insert"] if STD_LIB.key?("insert")
       [insert_call]
     when nil, AST::SelectOp, AST::WhereOp, AST::TapOp, AST::TakeWhileOp
       # Produces a list
       call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
       call.full_type = :Void
       call.zig_pattern = STD_LIB["append"][:zig]
+      call.matched_stdlib_def = STD_LIB["append"]
       [call]
     else
       call = AST::MethodCall.new(token, res_ident, "append", [current_val.dup])
       call.zig_pattern = STD_LIB["append"][:zig]
+      call.matched_stdlib_def = STD_LIB["append"]
       [call]
     end
   end
