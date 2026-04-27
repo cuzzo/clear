@@ -864,9 +864,7 @@ class PipelineHost
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__skip_src", source_mir, false, nil, nil),
       MIR::Let.new("__skip_items",
-        MIR::InlineZig.new(
-          'if (@hasField(@TypeOf(__skip_src), "items")) __skip_src.items else __skip_src[0..]',
-          "skip_items"), false, nil, nil),
+        MIR::ItemsAccess.new(MIR::Ident.new("__skip_src"), true), false, nil, nil),
       MIR::Let.new("skip_requested",
         MIR::Cast.new(count_mir, "usize", :intCast), false, nil, nil),
       MIR::Let.new("skip_actual",
@@ -948,9 +946,7 @@ class PipelineHost
         MIR::ForStmt.new(MIR::Ident.new(items), "it", [
           MIR::Let.new("unn_inner", expr_mir, false, nil, nil),
           MIR::Let.new("unn_inner_items",
-            MIR::InlineZig.new(
-              'if (@hasField(@TypeOf(unn_inner), "items")) unn_inner.items else unn_inner',
-              "unnest_items"), false, nil, nil),
+            MIR::ItemsAccess.new(MIR::Ident.new("unn_inner"), true), false, nil, nil),
           MIR::ForStmt.new(MIR::Ident.new("unn_inner_items"), "inner_it", [
             MIR::ExprStmt.new(MIR::MethodCall.new(
               MIR::Ident.new("res_list"), "append",
@@ -1221,9 +1217,8 @@ class PipelineHost
       MIR::Let.new("__jr_items",
         MIR::ItemsAccess.new(MIR::Ident.new("__jr_src"), true), false, nil, nil),
       MIR::Let.new("res_list",
-        MIR::InlineZig.new(
-          "try CheatLib.makeList(#{result_zig}, #{alloc_zig_str(alloc)}, &.{})",
-          "join_make_list").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, true, nil, nil),
+        MIR::ContainerInit.new("std.ArrayListUnmanaged(#{result_zig})",
+          :list_empty, alloc, nil), true, nil, nil),
       MIR::ForStmt.new(MIR::Ident.new("__jl_items"), "__jl", [
         MIR::Let.new("__match", MIR::Lit.new("null"), true, "?#{right_zig}", nil),
         MIR::ForStmt.new(MIR::Ident.new("__jr_items"), "__jr", [
@@ -1348,9 +1343,7 @@ class PipelineHost
       return MIR::ScopeBlock.new([
         MIR::Let.new("__each_src", source_mir, false, nil, nil),
         MIR::Let.new("__each_items",
-          MIR::InlineZig.new(
-            'if (@hasField(@TypeOf(__each_src), "items")) __each_src.items else __each_src[0..]',
-            "each_items"), false, nil, nil),
+          MIR::ItemsAccess.new(MIR::Ident.new("__each_src"), true), false, nil, nil),
         MIR::ForStmt.new(MIR::Ident.new("__each_items"), "__each_item", body_mir, nil)
       ])
     end
@@ -1399,7 +1392,8 @@ class PipelineHost
             "lazy_range"),
           true, nil, nil),
         MIR::WhileStmt.new(
-          MIR::InlineZig.new("try __range_src.next(rt)", "lazy_range_next"),
+          MIR::MethodCall.new(MIR::Ident.new("__range_src"), "next",
+            [MIR::Ident.new("rt")], true),
           body_mir, capture_name, nil, nil, nil)
       ])
     end
@@ -1528,15 +1522,11 @@ class PipelineHost
         end
 
         inner_loop = MIR::ForStmt.new(
-          MIR::InlineZig.new(
-            'if (@hasField(@TypeOf(__bc_unn), "items")) __bc_unn.items else __bc_unn[0..]',
-            "bc_unnest_items"),
+          MIR::ItemsAccess.new(MIR::Ident.new("__bc_unn"), true),
           inner_zig, loop_body, nil)
 
         outer_loop = MIR::ForStmt.new(
-          MIR::InlineZig.new(
-            'if (@hasField(@TypeOf(__bc_src), "items")) __bc_src.items else __bc_src[0..]',
-            "bc_src_items"),
+          MIR::ItemsAccess.new(MIR::Ident.new("__bc_src"), true),
           outer_zig,
           [
             MIR::Let.new("__bc_unn", unnest_mir, false, nil, nil),
