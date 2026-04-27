@@ -1043,9 +1043,13 @@ class PipelineHost
     lower_pipeline_block(list_node) do |items, label|
       [
         MIR::Let.new("ord_result",
-          MIR::InlineZig.new(
-            "try CheatLib.makeList(#{elem_zig}, #{alloc_zig_str(alloc)}, #{items})",
-            "make_ord_list").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, true, nil, "_ = &ord_result;"),
+          MIR::Call.new("CheatLib.makeList",
+            [MIR::Ident.new(elem_zig), MIR::AllocatorRef.new(alloc), MIR::Ident.new(items)],
+            true), true, nil, "_ = &ord_result;"),
+        # The sort comparator is an anonymous Zig struct with a closure over
+        # the key extraction expression. There's no MIR equivalent for that
+        # shape today; sort would need a dedicated MIR::Sort node carrying
+        # the key expression, plus VM support. Left as InlineZig.
         MIR::ExprStmt.new(MIR::InlineZig.new(sort_code, "order_by_sort"), nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("ord_result"))
       ]
@@ -1122,6 +1126,10 @@ class PipelineHost
   def lower_stream_index(range_chain, expr_node, elem_zig, alloc, map_type)
     alloc_str = HEAP_ALLOC
     # Filtered-out items must have their heap sub-fields freed; comptime no-op for primitives.
+    # CheatLib.cleanup is in BUILTIN_OPS but takes a comptime-Type argument
+    # which doesn't have a structural representation today (MIR::Ident with
+    # a Zig type identifier is the closest, but the lowering's hoist_alloc
+    # path on a Call mishandles it). Left as InlineZig.
     on_skip = ->(var) {
       [MIR::ExprStmt.new(
         MIR::InlineZig.new("CheatLib.cleanup(#{elem_zig}, #{alloc_str}, &#{var})", "item_cleanup"), nil)]

@@ -1891,6 +1891,15 @@ class BcEmitter
       return
     end
 
+    # CheatLib.makeList(T, alloc, items): produce a fresh growable list
+    # initialized from `items`. In the VM, Value.List already supports
+    # growth and there's no T/alloc distinction — forward `items`.
+    if callee == "CheatLib.makeList"
+      compile_expr_to_value(args.last); pop_type
+      push_type(:any)
+      return
+    end
+
     # Other CheatLib.* that aren't deep-copy / not mapped to a native:
     # emit a compile-time error so the failure points at the right MIR
     # node instead of silently LOAD_NAME'ing something that will fail at
