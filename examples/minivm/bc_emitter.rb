@@ -197,7 +197,11 @@ class BcEmitter
   # emit BC_CALL with a fixed target IP.
   def compile_helper_fn_mir(mir_fn)
     name   = mir_fn.name.to_s
-    ast_fn = lookup_ast_fn(name)
+    # REQUIRE-imported helpers carry their AST on the MIR node directly
+    # (see lower_require :bc target branch). Local helpers fall back to
+    # @fn_nodes which only indexes the main AST.
+    ast_fn = mir_fn.instance_variable_get(:@ast_fn) if mir_fn.respond_to?(:instance_variable_get)
+    ast_fn ||= lookup_ast_fn(name)
     raise Unimplemented, "no AST fn for helper #{name}" unless ast_fn
 
     saved = {
@@ -432,8 +436,27 @@ class BcEmitter
       # the binding is inert. 'suppress_unused_inner_capture' is a Zig
       # unused-var suppressor. Others still raise.
       case mir_node.reason.to_s
-      when "with_block_bindings", "suppress_unused_inner_capture",
-           "item_cleanup"
+      when "with_block_bindings"
+        # Compiler-emitted Arc-unwrap pattern:
+        #   const __X_unwrap = X.ctrl.data.*;
+        # Bind __X_unwrap to the same slot/value as X so subsequent code
+        # accessing __X_unwrap inside the WITH body works. The VM has no
+        # Arc indirection — alias and source point at the same boxed value.
+        mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|
+          if has_slot?(src_name)
+            t = @slot_types[src_name] || :any
+            alloc_slot(alias_name, t)
+            case t
+            when :i64 then emit_op(LOAD_ISLOT, @islots[src_name])
+            when :f64 then emit_op(LOAD_FSLOT, @fslots[src_name])
+            else           emit_op(LOAD_SLOT,  @slots[src_name])
+            end
+            emit_store(alias_name, t)
+            @slot_types[alias_name] = t
+          end
+        end
+        push_type(:void)
+      when "suppress_unused_inner_capture", "item_cleanup"
         push_type(:void)
       else
         raise Unimplemented, "InlineZig not supported in VM path"
@@ -596,9 +619,45 @@ class BcEmitter
         emit_op(NATIVE_CALL, NATIVES["vector-set!"], 3)
       end
     when MIR::IndexGet
-      compile_expr(node.value); pop_type
-      compile_expr(target.object)
-      compile_expr(target.index)
+      # Walk the IndexGet chain inside-out so multi-dim assigns (e.g.
+      # matrix[i][j] = v) update each level functionally and store the
+      # final list back to the root binding. ListItems wrappers are
+      # transparent — the VM stores Value.List directly.
+      chain = []
+      cur = target
+      while cur.is_a?(MIR::IndexGet)
+        chain << cur
+        cur = cur.object
+        cur = cur.list if cur.is_a?(MIR::ListItems)
+      end
+      root_node = cur
+      root_name = root_node.is_a?(MIR::Ident) ? root_node.name.to_s : nil
+      if root_name && has_slot?(root_name) && chain.length >= 1
+        @nested_set_counter ||= 0
+        @nested_set_counter += 1
+        tmp = "__nset#{@nested_set_counter}"
+        compile_expr_to_value(node.value); pop_type
+        alloc_slot(tmp, :any); emit_op(STORE_SLOT, @slots[tmp]); @slot_types[tmp] = :any
+        # chain[0] is outermost, chain[-1] is innermost. Update inside-out:
+        # tmp <- list-set!(<innermost level>, <innermost idx>, tmp)
+        # ... up to the root.
+        chain.reverse.each do |idx_node|
+          obj = idx_node.object
+          obj = obj.list if obj.is_a?(MIR::ListItems)
+          compile_expr_to_value(obj); pop_type
+          compile_expr_to_value(idx_node.index); pop_type
+          emit_op(LOAD_SLOT, @slots[tmp])
+          emit_op(NATIVE_CALL, NATIVES["list-set!"], 3)
+          emit_op(STORE_SLOT, @slots[tmp])
+        end
+        emit_op(LOAD_SLOT, @slots[tmp])
+        emit_op(STORE_SLOT, @slots[root_name])
+      else
+        # Fallback: original 3-arg push, callers must handle the open stack.
+        compile_expr(node.value); pop_type
+        compile_expr(target.object)
+        compile_expr(target.index)
+      end
     end
     push_type(:void)
   end
@@ -1766,9 +1825,14 @@ class BcEmitter
 
     # Compiled helper function: emit direct BC_CALL with the fixed target IP
     # recorded when the helper body was laid out. Bypasses name lookup.
-    if @fn_start_ips.key?(callee)
+    # Also strip a leading namespace prefix (e.g. `require_helper.addPub`) so
+    # REQUIRE-imported helpers resolve to the bare-named FnDef the lowering
+    # emitted under the local helper region.
+    helper_callee = callee
+    helper_callee = helper_callee.split(".").last if !@fn_start_ips.key?(helper_callee) && helper_callee.include?(".")
+    if @fn_start_ips.key?(helper_callee)
       args.each { |a| compile_expr_to_value(a) }
-      emit_op(BC_CALL, @fn_start_ips[callee], args.length)
+      emit_op(BC_CALL, @fn_start_ips[helper_callee], args.length)
       push_type(:any)
       return
     end
@@ -1856,6 +1920,19 @@ class BcEmitter
   def compile_method_call_expr(node)
     method = node.method.to_s
     rtype  = receiver_slot_type(node.receiver)
+
+    # rt.checkYield() is a fiber-cooperation hook for the Zig runtime. The VM
+    # has no fiber scheduler, so the call is dead weight. Skip without emitting
+    # any ops; without this, the lowering inserts a name-resolved CALL per
+    # loop iteration which dominates VM hot paths (env HashMap lookup +
+    # getSymName string concat) and pushes simple workloads ~60x slower than
+    # Ruby. Receiver detection: `rt.checkYield()` arrives as MIR::MethodCall
+    # whose receiver is the literal Ident "rt".
+    if method == "checkYield" && node.receiver.is_a?(MIR::Ident) && node.receiver.name.to_s == "rt"
+      push_type(:any)
+      emit_op(LOAD_CONST, add_const(nil))
+      return
+    end
 
     # NEXT on a promise (future-like value). Emit AWAIT opcode which
     # unwraps a Pair(Symbol("__future__"), result) to the held result;
@@ -2029,6 +2106,17 @@ class BcEmitter
     if node.field.to_s == "len"
       compile_expr_to_value(node.object); pop_type
       emit_op(NATIVE_CALL, NATIVES["count"], 1)
+      push_type(:any)
+      return
+    end
+    # Arc/Rc unwrap synthetic fields: in the Zig backend, multiowned/shared
+    # values are wrapped in an Arc(T)/Rc(T) struct exposing `.ctrl.data.*` to
+    # access the inner T. The VM stores the inner value directly (CapWrap is a
+    # no-op on the value side — see MIR::CapWrap dispatch above), so the
+    # unwrap chain must collapse to identity. Without this, `a.value` lowers
+    # to `a.ctrl.data.value` and vector-ref(Nil, idx) returns 0.
+    if node.field.to_s == "ctrl" || node.field.to_s == "data"
+      compile_expr_to_value(node.object); pop_type
       push_type(:any)
       return
     end

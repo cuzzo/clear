@@ -42,12 +42,13 @@ if $PROGRAM_NAME == __FILE__
     interp_base = bc_runner_src_text[0...main_idx] if main_idx
 
     bc_runner_main  = "FN main() RETURNS Void ->\n"
-    bc_runner_main += "    MUTABLE pool: Env[50000]@pool = [];\n"
+    bc_runner_main += "    MUTABLE pool: Env[50000]@pool:shared:locked = [];\n"
     bc_runner_main += "    MUTABLE penv: HashMap<Value> = {};\n"
     bc_runner_main += "    rootId = setupEnv!(pool);\n"
     bc_runner_main += "    bcOps = loadBytecodeOps!(\"#{bc_ops_file}\", pool);\n"
     bc_runner_main += "    bcConsts = loadBytecodeConsts!(\"#{bc_consts_file}\", pool);\n"
-    bc_runner_main += "    bcResult = exec!(bcOps, bcConsts, rootId, pool);\n"
+    bc_runner_main += "    mainCaps: Value[] = [];\n"
+    bc_runner_main += "    bcResult = exec!(bcOps, bcConsts, rootId, pool, 0_i64, mainCaps);\n"
     bc_runner_main += "    IF isError?(bcResult) THEN\n"
     bc_runner_main += "        print(\"SCHEME ASSERT FAILED: \" + getErrMsg(bcResult));\n"
     bc_runner_main += "    ELSE\n"
@@ -109,8 +110,10 @@ if $PROGRAM_NAME == __FILE__
       output, _status = Open3.capture2e(bc_runner_path)
       print output
     ensure
-      File.delete(bc_ops_file)    if File.exist?(bc_ops_file)
-      File.delete(bc_consts_file) if File.exist?(bc_consts_file)
+      unless ENV["BC_KEEP"]
+        File.delete(bc_ops_file)    if File.exist?(bc_ops_file)
+        File.delete(bc_consts_file) if File.exist?(bc_consts_file)
+      end
     end
   end
 end
