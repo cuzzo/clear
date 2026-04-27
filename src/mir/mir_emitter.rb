@@ -854,7 +854,10 @@ class MIREmitter
   def emit_items_access(node)
     inner = emit(node.expr)
     if node.safe
-      "(if (@hasField(@TypeOf(#{inner}), \"items\")) #{inner}.items else #{inner})"
+      # Slice coercion in the else branch: array literals ([N]T) need
+      # `[0..]` to coerce to slice; runtime slices ([]T) are accepted
+      # by `[0..]` too. ArrayList values match the .items branch.
+      "(if (@hasField(@TypeOf(#{inner}), \"items\")) #{inner}.items else #{inner}[0..])"
     else
       "#{inner}.items"
     end

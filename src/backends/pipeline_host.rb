@@ -421,10 +421,11 @@ class PipelineHost
     elsif lhs_type&.set_collection?
       [build_mat_set(lhs_type), "pipe_items"]
     else
-      # Plain array/list: hasField check for .items vs raw slice
-      init = MIR::InlineZig.new(
-        'if (@hasField(@TypeOf(pipe_src_list), "items")) pipe_src_list.items else pipe_src_list[0..]',
-        "pipe_items_access")
+      # Plain array/list: structural ItemsAccess(safe: true) emits the same
+      # comptime hasField pattern (with [0..] slice coercion in the else
+      # branch). Resolves to identity in the VM since Value.List has no
+      # ArrayList/raw-slice distinction.
+      init = MIR::ItemsAccess.new(MIR::Ident.new("pipe_src_list"), true)
       [[MIR::Let.new("pipe_items", init, false, nil, nil)], "pipe_items"]
     end
   end
@@ -1208,13 +1209,9 @@ class PipelineHost
       MIR::Let.new("__jl_src", source_mir, false, nil, nil),
       MIR::Let.new("__jr_src", right_src_mir, false, nil, nil),
       MIR::Let.new("__jl_items",
-        MIR::InlineZig.new(
-          'if (@hasField(@TypeOf(__jl_src), "items")) __jl_src.items else __jl_src[0..]',
-          "join_left_items"), false, nil, nil),
+        MIR::ItemsAccess.new(MIR::Ident.new("__jl_src"), true), false, nil, nil),
       MIR::Let.new("__jr_items",
-        MIR::InlineZig.new(
-          'if (@hasField(@TypeOf(__jr_src), "items")) __jr_src.items else __jr_src[0..]',
-          "join_right_items"), false, nil, nil),
+        MIR::ItemsAccess.new(MIR::Ident.new("__jr_src"), true), false, nil, nil),
       MIR::Let.new("res_list",
         MIR::InlineZig.new(
           "try CheatLib.makeList(#{result_zig}, #{alloc_zig_str(alloc)}, &.{})",
@@ -1249,9 +1246,7 @@ class PipelineHost
     MIR::BlockExpr.new(label, [
       MIR::Let.new("__tap_src", source_mir, false, nil, nil),
       MIR::Let.new("__tap_items",
-        MIR::InlineZig.new(
-          'if (@hasField(@TypeOf(__tap_src), "items")) __tap_src.items else __tap_src[0..]',
-          "tap_items"), false, nil, nil),
+        MIR::ItemsAccess.new(MIR::Ident.new("__tap_src"), true), false, nil, nil),
       MIR::ForStmt.new(MIR::Ident.new("__tap_items"), "__tap_item", body_mir, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("__tap_src"))
     ])

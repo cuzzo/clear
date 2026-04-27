@@ -637,6 +637,7 @@ SET_METHODS = {
   "insert" => {
     arity: 1, tag: :set_method, allocates: true,
     zig: "try {0}.insert({alloc}, {1})",
+    bc: true,
     alloc: :heap,
     mutates_receiver: true,
     borrows: :all,  # set dupes strings internally; caller retains ownership
@@ -653,12 +654,14 @@ SET_METHODS = {
   "contains?" => {
     arity: 1, tag: :set_method,
     zig: "{0}.contains({1})",
+    bc: true,
     return_type: ->(_) { :Bool },
     borrows: :all,
   },
   "remove" => {
     arity: 1, tag: :set_method,
     zig: "{0}.remove({alloc}, {1})",
+    bc: true,
     alloc: :heap,
     mutates_receiver: true,
     return_type: ->(_) { :Void },
@@ -667,6 +670,7 @@ SET_METHODS = {
   "length" => {
     arity: 0, tag: :set_method,
     zig: "{0}.length()",
+    bc: true,
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
   },
@@ -711,6 +715,7 @@ MAP_METHODS = {
   "contains?" => {
     arity: 1, tag: :map_method,
     zig: "{0}.contains({1})",
+    bc: true,
     numeric_zig: "CheatLib.numericMapContains({key_zig}, {val_zig}, {0}, {1})",
     validate: ->(node, args, obj_type, error_fn) {
       arg_type = Type.new(args[0].resolved_type)
