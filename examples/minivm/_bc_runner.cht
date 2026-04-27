@@ -3095,6 +3095,23 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
+            84 -> -- VAL_TO_I64 (vstack Value -> istack Int64 via getInt)
+                sp -= 1;
+                istack[isp] = getInt(stack[sp]);
+                isp += 1;,
+            85 -> -- VAL_TO_F64 (vstack Value -> fstack Float64 via getNum)
+                sp -= 1;
+                fstack[fsp] = getNum(stack[sp]);
+                fsp += 1;,
+            86 -> -- IS_ERR (pop vstack, push Value bool: TrueVal if Value.Error)
+                sp -= 1;
+                pv = boolVal(isError?(stack[sp]));
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            87 -> -- PUSH_ERR (push Value.Error sentinel)
+                pv = Value.Error{ errMsg: "runtime error", errKind: "CheatError" };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
             DEFAULT ->
                 running = FALSE;
         END

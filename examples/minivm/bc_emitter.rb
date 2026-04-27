@@ -41,6 +41,10 @@ class BcEmitter
   FIBER_RET   = 81
   BG_SPAWN    = 82
   AWAIT       = 83
+  VAL_TO_I64  = 84  # vstack Value → istack Int64 (via getInt)
+  VAL_TO_F64  = 85  # vstack Value → fstack Float64 (via getNum)
+  IS_ERR      = 86  # pop vstack Value, push Value.TrueVal if Value.Error else FalseVal
+  PUSH_ERR    = 87  # push a Value.Error{errMsg:"", errKind:"runtime"} sentinel
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -372,7 +376,17 @@ class BcEmitter
       compile_if_chain(mir_node, ast_node)
     when MIR::ReturnStmt
       has_value = mir_node.value && !void_expr?(mir_node.value)
-      compile_expr(mir_node.value) if has_value
+      # `RETURN error.CheatError` is the lowering's RAISE-out-of-fn shape
+      # (mir_lowering emits setError + return error.CheatError for any
+      # !T-returning function's raise). The VM has no Zig error union;
+      # surface a Value.Error sentinel so callers using TryCatch / OR
+      # can detect the failure via IS_ERR.
+      if has_value && mir_node.value.is_a?(MIR::Ident) &&
+         mir_node.value.name.to_s == "error.CheatError"
+        emit_op(PUSH_ERR); push_type(:any)
+      elsif has_value
+        compile_expr(mir_node.value)
+      end
       if @in_helper_fn
         ensure_value_stack if has_value
         emit_op(has_value ? BC_RET : BC_RET_VOID)
@@ -412,8 +426,19 @@ class BcEmitter
       emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
       push_type(:void)
     when MIR::ScopeBlock
+      # WITH blocks lower to ScopeBlock with an InlineZig binding-prologue
+      # at the head. The prologue's alias_to_source records the source for
+      # each alias in @with_aliases. After the body, write each alias back
+      # to its source so in-block mutations (`c.value = c.value + 1`) are
+      # visible after the WITH (Zig backend does this via guard pointer
+      # aliasing; VM uses by-value slots).
       inner = semantic_mir_nodes(mir_node.body)
+      @with_aliases ||= {}
+      saved_keys = @with_aliases.keys
       inner.each { |n| compile_stmt(n, nil) }
+      new_aliases = @with_aliases.keys - saved_keys
+      new_aliases.each { |a| alias_writeback(a) }
+      new_aliases.each { |a| @with_aliases.delete(a) }
     when MIR::Pipeline
       # See compile_expr's MIR::Pipeline branch.
       compile_stmt(mir_node.inner, nil)
@@ -446,23 +471,24 @@ class BcEmitter
       # unused-var suppressor. Others still raise.
       case mir_node.reason.to_s
       when "with_block_bindings"
-        # Compiler-emitted Arc-unwrap pattern:
-        #   const __X_unwrap = X.ctrl.data.*;
-        # Bind __X_unwrap to the same slot/value as X so subsequent code
-        # accessing __X_unwrap inside the WITH body works. The VM has no
-        # Arc indirection — alias and source point at the same boxed value.
+        # Compiler-emitted WITH-block binding patterns:
+        #   const __X_unwrap = X.ctrl.data.*;        (Arc/multiowned unwrap)
+        #   const c = __X_guard_N.get();              (locked sync acquire)
+        # In both cases, bind the alias to the same slot value as the source.
+        # The VM has no Arc/lock indirection — alias and source share storage.
+        # The source is named in stdlib_def[:borrows].
+        sources = (mir_node.stdlib_def && mir_node.stdlib_def[:borrows]) || []
+        # First pattern: Arc unwrap via .ctrl.data.*
         mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|
-          if has_slot?(src_name)
-            t = @slot_types[src_name] || :any
-            alloc_slot(alias_name, t)
-            case t
-            when :i64 then emit_op(LOAD_ISLOT, @islots[src_name])
-            when :f64 then emit_op(LOAD_FSLOT, @fslots[src_name])
-            else           emit_op(LOAD_SLOT,  @slots[src_name])
-            end
-            emit_store(alias_name, t)
-            @slot_types[alias_name] = t
-          end
+          alias_to_source(alias_name, src_name)
+        end
+        # Second pattern: locked guard.get() — alias source is in borrows[].
+        # Each `const NAME = __VAR_guard_N.get();` introduces NAME aliased to
+        # the corresponding borrows entry (1:1, in order).
+        guard_aliases = mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*__\w+_guard_\d+\.get\(\)/).flatten
+        guard_aliases.each_with_index do |alias_name, i|
+          src_name = sources[i] || sources.last
+          alias_to_source(alias_name, src_name) if src_name
         end
         push_type(:void)
       when "suppress_unused_inner_capture", "item_cleanup"
@@ -478,7 +504,18 @@ class BcEmitter
       compile_expr(mir_node); t = pop_type
       emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
       push_type(:void)
-    when MIR::DoBlock, MIR::CatchWrapper
+    when MIR::DoBlock
+      # The Zig backend hands each DO branch to fp.run_concurrent for
+      # true parallelism. The VM has no parallel scheduler in exec!
+      # itself; running the branches sequentially preserves semantics
+      # for the common pattern (mutex-protected counter increment, etc.)
+      # since each branch's WITH EXCLUSIVE serializes against the lock
+      # anyway. Emit each branch's MIR stmts in order.
+      (mir_node.branch_bodies || []).each do |branch|
+        branch.each { |s| compile_stmt(s, nil); pop_type }
+      end
+      push_type(:void)
+    when MIR::CatchWrapper
       raise Unimplemented, "#{mir_node.class.name.split('::').last} not yet supported"
     when MIR::Panic
       # Print message + halt. The VM has no @panic equivalent; surfacing the
@@ -640,13 +677,19 @@ class BcEmitter
         emit_op(SET_NAME, name_idx)
       end
     when MIR::FieldGet
-      # vector-set! expects [vector, idx, value] on the vstack in that order.
+      # vector-set!(vec, idx, val) returns a new Value.Vector with the
+      # field replaced (CLEAR semantics: structs are values). Store the
+      # result back to the root slot so `obj.field = v` actually mutates.
       compile_expr_to_value(target.object); pop_type
       idx = find_field_index(target.field)
       if idx
         emit_op(LOAD_CONST, add_const([:i64, idx]))
         compile_expr_to_value(node.value); pop_type
         emit_op(NATIVE_CALL, NATIVES["vector-set!"], 3)
+        # Store the rebuilt vector back to the source slot.
+        if target.object.is_a?(MIR::Ident) && has_slot?(target.object.name.to_s)
+          emit_store(target.object.name.to_s, :any)
+        end
       end
     when MIR::IndexGet
       # Walk the IndexGet chain inside-out so multi-dim assigns (e.g.
@@ -1040,7 +1083,27 @@ class BcEmitter
     when MIR::TryExpr
       compile_expr(node.expr)  # VM doesn't propagate Zig errors
     when MIR::TryCatch
-      compile_expr(node.expr)  # VM treats error-union as bare value
+      # `expr OR catch_body`. compile expr; stash to a temp slot; check
+      # IS_ERR; if error: discard stash, evaluate catch_body; else: load
+      # the original value. Mirrors Zig's `try/catch` control flow with
+      # the VM's Value.Error sentinel taking the place of error unions.
+      @trycatch_counter ||= 0
+      @trycatch_counter += 1
+      tmp = "__tc_#{@trycatch_counter}"
+      compile_expr_to_value(node.expr); pop_type
+      alloc_slot(tmp, :any)
+      emit_op(STORE_SLOT, @slots[tmp])
+      emit_op(IS_ERR)
+      emit_op(JUMP_IF_FALSE)
+      keep_patch = @ops.length; emit_op(0)
+      # Error path: stash already taken, fall through to catch_body
+      compile_expr_to_value(node.catch_body); pop_type
+      emit_op(JUMP); end_patch = @ops.length; emit_op(0)
+      # Non-error path: load the original value
+      @ops[keep_patch] = @ops.length
+      emit_op(LOAD_SLOT, @slots[tmp])
+      @ops[end_patch] = @ops.length
+      push_type(:any)
     when MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade
       compile_expr(node.source)  # RC ops are no-op in VM; forward the inner value
     when MIR::FreeSlice
@@ -1347,13 +1410,18 @@ class BcEmitter
     # (Zig-side context unpacking). VM inlines the body, so strip the prefix
     # and read the outer slot directly.
     name = $1 if name =~ /\A__ctx_\d+\.(.*)\z/
-    vt = @slot_types[name] || :any
-    if vt == :i64 && @islots[name]
+    # Slot table is the source of truth: alloc_slot put the binding in
+    # exactly one of @islots / @fslots / @slots and that placement never
+    # changes. @slot_types tracks the most-recently-stored value's type,
+    # which can drift to :any when a typed binding is reassigned with a
+    # vstack value (compile_set's emit_store coerces but slot_types still
+    # gets the new tag). Don't let that drift mis-route the load.
+    if @islots[name]
       emit_op(LOAD_ISLOT, @islots[name]); push_type(:i64)
-    elsif vt == :f64 && @fslots[name]
+    elsif @fslots[name]
       emit_op(LOAD_FSLOT, @fslots[name]); push_type(:f64)
     elsif @slots[name]
-      emit_op(LOAD_SLOT, @slots[name]); push_type(vt)
+      emit_op(LOAD_SLOT, @slots[name]); push_type(@slot_types[name] || :any)
     else
       emit_op(LOAD_NAME, add_const(name)); push_type(:any)
     end
@@ -2896,15 +2964,76 @@ class BcEmitter
     end
   end
 
+  # Bind an alias slot to the same value the source slot currently holds.
+  # Used for WITH-block bindings (Arc unwrap, locked-guard get) — the VM
+  # has no indirection, so alias-and-source share storage by copy. The
+  # corresponding writeback (alias_writeback) reverses this so mutations
+  # to the alias are reflected in the source after the block.
+  def alias_to_source(alias_name, src_name)
+    return unless has_slot?(src_name)
+    t = if @islots[src_name] then :i64
+        elsif @fslots[src_name] then :f64
+        else (@slot_types[src_name] || :any)
+        end
+    alloc_slot(alias_name, t)
+    case t
+    when :i64 then emit_op(LOAD_ISLOT, @islots[src_name])
+    when :f64 then emit_op(LOAD_FSLOT, @fslots[src_name])
+    else           emit_op(LOAD_SLOT,  @slots[src_name])
+    end
+    emit_store(alias_name, t)
+    @slot_types[alias_name] = t
+    @with_aliases ||= {}
+    @with_aliases[alias_name] = src_name
+  end
+
+  # Reverse of alias_to_source: write the alias's current value back to the
+  # source slot. Emitted after a WITH body so any in-block mutation to the
+  # alias persists. The Zig backend gets this for free via pointer aliasing
+  # through the lock guard; the VM uses by-value slots.
+  def alias_writeback(alias_name)
+    return unless @with_aliases && @with_aliases.key?(alias_name)
+    src_name = @with_aliases[alias_name]
+    return unless has_slot?(alias_name) && has_slot?(src_name)
+    t = if @islots[alias_name] then :i64
+        elsif @fslots[alias_name] then :f64
+        else (@slot_types[alias_name] || :any)
+        end
+    case t
+    when :i64 then emit_op(LOAD_ISLOT, @islots[alias_name])
+    when :f64 then emit_op(LOAD_FSLOT, @fslots[alias_name])
+    else           emit_op(LOAD_SLOT,  @slots[alias_name])
+    end
+    emit_store(src_name, t)
+  end
+
   def has_slot?(name)
     @islots.key?(name) || @fslots.key?(name) || @slots.key?(name)
   end
 
   def emit_store(name, val_type)
-    case val_type
-    when :i64 then emit_op(STORE_ISLOT, @islots[name])
-    when :f64 then emit_op(STORE_FSLOT, @fslots[name])
-    else           emit_op(STORE_SLOT,  @slots[name])
+    # The slot was allocated in exactly one of @islots / @fslots / @slots
+    # by alloc_slot, based on the original allocation type. Subsequent
+    # stores must use the same table, so coerce val_type → slot table.
+    if @islots.key?(name)
+      case val_type
+      when :i64, :bool then emit_op(STORE_ISLOT, @islots[name])
+      when :f64        then emit_op(F64_TO_INT); emit_op(STORE_ISLOT, @islots[name])
+      else                  emit_op(VAL_TO_I64); emit_op(STORE_ISLOT, @islots[name])
+      end
+    elsif @fslots.key?(name)
+      case val_type
+      when :f64 then emit_op(STORE_FSLOT, @fslots[name])
+      when :i64 then emit_op(INT_TO_F64); emit_op(STORE_FSLOT, @fslots[name])
+      else           emit_op(VAL_TO_F64); emit_op(STORE_FSLOT, @fslots[name])
+      end
+    else
+      case val_type
+      when :i64  then emit_op(I_TO_VAL);    emit_op(STORE_SLOT, @slots[name])
+      when :f64  then emit_op(F_TO_VAL);    emit_op(STORE_SLOT, @slots[name])
+      when :bool then emit_op(BOOL_TO_VAL); emit_op(STORE_SLOT, @slots[name])
+      else            emit_op(STORE_SLOT,   @slots[name])
+      end
     end
   end
 
