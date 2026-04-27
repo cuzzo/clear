@@ -511,6 +511,34 @@ class Type
   # Backwards compat alias used in a few places
   alias any_locked? any_sync?
 
+  # Group 1 vs Group 2 separation: return a copy of this type with the
+  # synchronization/ownership wrappers stripped, preserving only the data
+  # shape (collection kind, element type, capacity, shard count, soa flag,
+  # etc.).
+  #
+  # Used by mir_lowering when constructing collection inits — `ContainerInit`
+  # needs the BARE shape (`Pool([50000]Env)`), and the Locked/Arc layers are
+  # composed AROUND it via a separate wrapping pass. Without this split, the
+  # lowering bakes the sync/ownership wrappers into the `initCapacity`
+  # receiver type and emits `Arc(Locked(Pool)).initCapacity(...)`, which
+  # fails because `initCapacity` lives on the inner `Pool`.
+  def bare_data_type
+    bare = Type.new(self)
+    bare.ownership = :affine
+    bare.sync      = nil
+    bare.instance_variable_set(:@elem_ownership, nil)
+    bare.instance_variable_set(:@elem_sync, nil)
+    # Provenance was set by sync/ownership wrappers (Type#initialize
+    # forces :heap when @sync is set). Stripping the wrappers means the
+    # bare shape's provenance must come from its OWN nature (e.g.
+    # HashMap is always heap; a plain struct has no forced provenance).
+    # Reset; the outer wrap layer that consumes this bare form is
+    # responsible for re-pinning.
+    bare.provenance = nil
+    bare.instance_variable_set(:@zig_type_cache, nil)
+    bare
+  end
+
   def has_capabilities?
     @ownership != :affine || any_sync?
   end
@@ -681,7 +709,14 @@ class Type
   # Resolve the Zig close/deinit statement for resource types.
   # Returns [is_resource, close_zig_template] where close_zig_template uses
   # {0} as placeholder for the variable name. Returns [false, nil] for non-resources.
+  #
+  # Group 1 / Group 2 separation: when a Group-2 shape (pool/set/...) is
+  # wrapped with Group-1 ownership (Arc/Rc), the bare-shape `.deinit()`
+  # call doesn't apply against the wrapper. Skip the resource path so the
+  # cleanup classifier picks the rc/sync entry instead, which cascades
+  # through the wrapper down to the inner shape's destruction.
   def resolve_resource_close(schema_lookup = nil)
+    return [false, nil] if any_rc?
     return [true, "{0}.deinit(rt.heapAlloc())"] if pool?
     return [true, "{0}.deinit(rt.heapAlloc())"] if set_collection?
     return [true, "{0}.deinit()"] if open_stream? || inf_stream? || split_open_stream?
@@ -1561,7 +1596,11 @@ class Type
           base_zig = element_type.zig_type(is_param: is_param, is_field: is_field)
           inner_zig = "CheatLib.SoaList(#{base_zig})"
         else
-          inner_zig = Type.new(resolved.to_s).zig_type(is_param: is_param, is_field: is_field)
+          # Group 1 / Group 2 separation: the inner zig type is the data
+          # shape with sync/ownership stripped. bare_data_type preserves
+          # shape attrs (@pool, @sharded, capacity, element_type) that
+          # `Type.new(resolved.to_s)` would lose.
+          inner_zig = bare_data_type.zig_type(is_param: is_param, is_field: is_field)
         end
         inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
         inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked

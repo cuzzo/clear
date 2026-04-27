@@ -8,8 +8,12 @@ require_relative "annotator-helpers/function_signature"
 require_relative "annotator-helpers/function_analysis"
 require_relative "annotator-helpers/pipe_analysis"
 require_relative "mir/ownership_graph"
+require_relative "mir/escape_analysis"
+require_relative "mir/effect_inference"
+require_relative "mir/concurrency_checks"
 require_relative "annotator-helpers/generic_analysis"
 require_relative "annotator-helpers/capabilities"
+require_relative "annotator-helpers/with_match_check"
 require_relative "annotator-helpers/fixable_helpers"
 require_relative "annotator-helpers/effects"
 require_relative "annotator-helpers/lock_helper"
@@ -74,6 +78,11 @@ class SemanticAnnotator
     init_lock_analysis!
     # @pinned escape safety: true when inside a @pinned BG block.
     @current_bg_pinned = false
+    # P1.7: WITH validations on parameter bindings are deferred to a
+    # post-annotation pass so EscapeAnalysis.propagate_caller_sync! has a
+    # chance to populate sync from callers' arg bindings first. Each entry:
+    # { node:, var_node:, capability:, kind: :exclusive | :write_locked_read }
+    @deferred_with_validations = []
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = nil
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
@@ -90,10 +99,66 @@ class SemanticAnnotator
     # types are preserved.
     AST.reset_user_types!
     visit(node)
+    # P1.7: now that all bodies are annotated and arg.symbol is wired at
+    # every call site, propagate caller sync into callee param entries.
+    # Then re-check the WITH validations that we deferred during the body
+    # walk; any param whose entry.sync is still nil is a genuine error.
+    EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
+    # P3.2: infer per-function effects (yield/alloc_heap/io/fail) and
+    # propagate transitively through the call graph.
+    EffectInference.analyze!(@fn_nodes)
+    err = ->(n, msg) { error!(n, msg) }
+    warn = ->(n, msg) { note!(n, msg) }
+    sig_lookup = ->(name) {
+      @scope_stack.first.locals[name]&.type
+    }
+    # P2.4 / P2.5 / P2.7 first: validates per-fn REQUIRES ↔ WITH and
+    # auto-fills `fn.requires` for legacy code via the deprecation shim.
+    @fn_nodes.each_value { |fn| WithMatchCheck.check_function!(fn, err, warn_handler: warn) }
+    # Re-stamp signatures so call-site checks below see any shim-inferred
+    # REQUIRES clauses.
+    @fn_nodes.each do |name, fn|
+      sig = @scope_stack.first.locals[name]&.type
+      sig.requires = fn.requires if sig.is_a?(FunctionSignature)
+    end
+    # P2.6: call-site family check now runs against finalized REQUIRES.
+    @fn_nodes.each_value { |fn| WithMatchCheck.check_call_sites!(fn, sig_lookup, err) }
+    # P3.3-3.5: compile-time concurrency checks (hold-across-yield,
+    # naked-nested-WITH, reentrant). The lock_ranks registry exempts
+    # @locked(rank: N) sites from P3.4 — those are governed by the
+    # pre-existing rank-DAG analysis instead.
+    ConcurrencyChecks.check_all!(@fn_nodes, sig_lookup, err,
+                                 lock_ranks: @lock_type_ranks || {})
+    # Residual deferred WITH validations (any param whose sync is still
+    # nil after propagation, e.g., a function called from no callsite).
+    flush_deferred_with_validations!
     finalize_capability_audit!
   end
 
 private
+
+  # P1.7: replay each deferred WITH-on-param check now that caller-sync
+  # propagation has had a chance to populate entry.sync. If a param's sync
+  # is still nil, fire the original eager error.
+  def flush_deferred_with_validations!
+    @deferred_with_validations.each do |d|
+      var_node = d[:var_node]
+      syn = var_node.symbol&.sync
+      case d[:capability]
+      when :EXCLUSIVE
+        next if syn
+        storage = var_node.symbol&.storage
+        error!(d[:node],
+          "EXCLUSIVE capability requires a @locked or @writeLocked variable, " \
+          "got #{storage || 'unknown'}")
+      when :write_locked_read
+        next if syn == :write_locked
+        error!(d[:node],
+          "WITH #{var_node.name}: read access requires a @writeLocked variable")
+      end
+    end
+    @deferred_with_validations.clear
+  end
 
   def setup_builtins
     STD_LIB.each do |name, config|
@@ -384,13 +449,15 @@ private
         required: p[:default].nil?,
         default: p[:default],
         mutable: p[:mutable],
-        takes: p[:takes] || false
+        takes: p[:takes] || false,
+        sync: (p[:type].is_a?(Type) && p[:type].any_sync?) ? p[:type].sync : nil
       }},
       return_type: (node.return_type || :Any),
       return_lifetime: get_lifetime_path(node),
       visibility: node.visibility,
       reentrant: node.reentrant == :reentrant
     )
+    signature.requires = node.requires
 
     current_scope.declare(
       node.name,
@@ -455,13 +522,15 @@ private
     signature = FunctionSignature.new(
       params: node.params.map { |p| {
         name: p[:name], type: p[:type], required: p[:default].nil?,
-        default: p[:default], mutable: p[:mutable], takes: p[:takes]
+        default: p[:default], mutable: p[:mutable], takes: p[:takes],
+        sync: (p[:type].is_a?(Type) && p[:type].any_sync?) ? p[:type].sync : nil
       }},
       return_type: declared_return, return_lifetime: lifetime_path,
       visibility: node.visibility,
       type_params: fn_type_params.any? ? fn_type_params : nil,
       reentrant: node.reentrant == :reentrant
     )
+    signature.requires = node.requires
     current_scope.declare(node.name, nil, signature, false, false, nil, :static)
 
     # Register function node BEFORE body analysis so visit_ReturnNode can
@@ -858,6 +927,17 @@ private
     node.full_type = :Void
   end
 
+  # Walk through field/index chains to the root binding. Used to determine
+  # whether an IF-AS source borrows from a non_escaping binding.
+  def ifbind_source_root(expr)
+    case expr
+    when AST::Identifier  then expr
+    when AST::GetField    then ifbind_source_root(expr.target)
+    when AST::GetIndex    then ifbind_source_root(expr.target)
+    else                       nil
+    end
+  end
+
   def visit_IfBind(node)
     # Visit and validate each binding expression.
     node.bindings.each do |b|
@@ -887,6 +967,15 @@ private
           current_scope.declare(b[:name], nil, unwrapped, false, false, nil, :stack)
           entry = current_scope.locals[b[:name]]
           b[:symbol] = entry
+          # Propagate non_escaping when the source is borrow-derived from a
+          # non_escaping binding (a WITH alias or another transitive borrow
+          # of one). IF-AS on `p[i]` / `p.field` where `p` is the alias
+          # makes the new binding a borrow into locked data; it must not
+          # escape the enclosing WITH scope either.
+          src_root = ifbind_source_root(b[:expr])
+          if src_root && src_root.respond_to?(:symbol) && src_root.symbol&.non_escaping
+            entry.non_escaping = true
+          end
           classify_ownership!(entry)
           og_declare(b[:name].to_s, nil, unwrapped)
         end
@@ -1579,11 +1668,6 @@ private
   # ==========================================
 
   def visit_ReturnNode(node)
-    # RETURN inside a WITH block is forbidden — borrows/locks would escape or deadlock.
-    if (@with_block_depth || 0) > 0
-      error!(node, "RETURN inside a WITH block is not allowed. Borrowed/locked values cannot escape their scope.")
-    end
-
     # Handle optional return node for Void functions.
     expected = current_fn_ctx&.return_type
     if node.value.nil?
@@ -1598,6 +1682,27 @@ private
     end
 
     visit(node.value)
+
+    # RETURN inside a WITH block is forbidden ONLY when the returned value
+    # carries a borrow of the WITH alias (the `AS` binding). Pure values
+    # — primitives, fresh values returned by methods on the alias (e.g.
+    # `p.insert(...)` returning a fresh Id<T>) — escape safely. The
+    # SymbolEntry#non_escaping flag is set on every WITH alias by
+    # declare_capability_scope!; it's the same flag ensure_owned_value!
+    # already uses to prevent storing WITH-scoped values in containers.
+    if (@with_block_depth || 0) > 0
+      val = node.value
+      if val.is_a?(AST::Identifier) && val.symbol&.non_escaping
+        error!(node, "Cannot RETURN '#{val.name}' from inside a WITH block. " \
+                     "WITH aliases are borrows of locked data and cannot escape their scope.")
+      elsif val.is_a?(AST::GetField) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
+        error!(node, "Cannot RETURN a field of a WITH-scoped binding. " \
+                     "Field access borrows from the locked data; the borrow cannot escape the WITH scope.")
+      elsif val.is_a?(AST::GetIndex) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
+        error!(node, "Cannot RETURN an indexed access of a WITH-scoped binding. " \
+                     "Index access borrows from the locked data; the borrow cannot escape the WITH scope.")
+      end
+    end
     promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
     promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
 
@@ -2068,7 +2173,7 @@ private
     elsif type_obj.multiowned? || type_obj.shared? ||
           entry.storage == :multiowned || entry.storage == :shared
       :rc
-    elsif type_obj.any_sync? || entry.sync
+    elsif entry.sync
       :sync
     elsif type_obj.collection?
       :collection
@@ -3107,8 +3212,9 @@ private
 
     # COPY of a primitive or Id<T> is a semantic no-op (value copy, no allocation).
     # All other explicit COPYs produce heap-owned data.
+    source_sync = node.value.respond_to?(:symbol) ? node.value.symbol&.sync : nil
     is_value_copy = ti.is_a?(Type) &&
-      !ti.any_sync? && !ti.multiowned? && !ti.shared? &&
+      source_sync.nil? && !ti.multiowned? && !ti.shared? &&
       (ti.primitive? || (ti.generic_instance? && ti.generic_base == :Id))
     unless is_value_copy
       # COPY always produces heap-owned data for non-value types.
@@ -3542,6 +3648,7 @@ private
   def visit_BgBlock(node)
     # Body runs in a separate fiber. The last expression's type determines T in ~T.
     # node.stack_size: :standard | :micro | :large | :xl | nil  (nil → STANDARD default)
+    record_effect(EffectTracker::YIELD)
     outer_scope = current_scope
     locally_bound = Set.new
     prev_bg_pinned = @current_bg_pinned
@@ -3666,6 +3773,7 @@ private
   end
 
   def visit_NextExpr(node)
+    record_effect(EffectTracker::YIELD)
     visit(node.expr)
     promise_type = Type.new(node.expr.full_type || :Void)
 
@@ -4319,7 +4427,8 @@ private
   end
 
   def og_declare(name, node, type_info)
-    kind = classify_og_kind(type_info)
+    entry = current_scope.locals[name] rescue nil
+    kind = classify_og_kind(type_info, sync: entry&.sync)
     ti = type_info.is_a?(Type) ? type_info : (type_info ? Type.new(type_info) : nil)
     @og.declare(name, kind: kind, type_info: ti,
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
@@ -4369,12 +4478,12 @@ private
     @og.merge(snapshot) if snapshot
   end
 
-  def classify_og_kind(type_info)
+  def classify_og_kind(type_info, sync: nil)
     return :affine unless type_info
     t = type_info.is_a?(Type) ? type_info : Type.new(type_info)
     if t.multiowned? || t.shared?
       :rc
-    elsif t.any_sync?
+    elsif sync
       :sync
     elsif t.implicitly_copyable? { |name| lookup_type_schema(name) }
       :value

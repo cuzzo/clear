@@ -266,6 +266,74 @@ RSpec.describe "./clear fmt", :integration do
     expect(out).to include("CONCURRENT(workers: 4) EACH")
   end
 
+  describe "FN signature metadata-wrap (REQUIRES / EFFECTS)" do
+    it "drops RETURNS and REQUIRES to their own 1-space-indented lines when REQUIRES is present" do
+      src = <<~CLEAR
+        STRUCT Counter { value: Int64 }
+
+        FN bumpIt(c: Counter) RETURNS Void
+          REQUIRES c: LOCKABLE
+        ->
+            WITH EXCLUSIVE c AS inner {
+                inner.value = inner.value + 1;
+            }
+        END
+
+        FN main() RETURNS Void ->
+        END
+      CLEAR
+      path = write("metawrap.cht", src)
+      out, _, _ = run_fmt("--no-warn", "--stdout", path)
+      expect(out).to include("FN bumpIt(c: Counter)\n RETURNS Void\n REQUIRES c: LOCKABLE\n->\n")
+      expect(out).to include("FN main() RETURNS Void ->")
+    end
+
+    it "renders metadata at 1-space indent for grouped REQUIRES" do
+      src = <<~CLEAR
+        STRUCT Account { balance: Int64 }
+
+        FN transact(x: Account, y: Account, amount: Int64, audit: Bool) RETURNS Bool
+          REQUIRES x, y: LOCKABLE
+        ->
+          RETURN TRUE;
+        END
+      CLEAR
+      path = write("metawrap_params.cht", src)
+      out, _, _ = run_fmt("--no-warn", "--stdout", path)
+      expect(out).to include("FN transact(x: Account, y: Account, amount: Int64, audit: Bool)\n RETURNS Bool\n REQUIRES x, y: LOCKABLE\n->\n")
+    end
+
+    it "is idempotent across two format passes" do
+      src = <<~CLEAR
+        STRUCT Counter { value: Int64 }
+
+        FN bumpIt(c: Counter) RETURNS Void
+          REQUIRES c: LOCKABLE
+        ->
+            WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
+        END
+      CLEAR
+      path = write("metawrap_idem.cht", src)
+      first, _, _ = run_fmt("--no-warn", "--stdout", path)
+      again_path = write("metawrap_idem_2.cht", first)
+      second, _, _ = run_fmt("--no-warn", "--stdout", again_path)
+      expect(second).to eq(first)
+    end
+
+    it "leaves single-line FN signatures compact when no REQUIRES is present" do
+      src = <<~CLEAR
+        FN add(a: Int64, b: Int64) RETURNS Int64 ->
+          RETURN a + b;
+        END
+      CLEAR
+      path = write("nometa.cht", src)
+      out, _, _ = run_fmt("--no-warn", "--stdout", path)
+      expect(out).to include("FN add(a: Int64, b: Int64) RETURNS Int64 ->")
+      expect(out).not_to match(/^ RETURNS/)
+      expect(out).not_to match(/^ REQUIRES/)
+    end
+  end
+
   it "is idempotent on the whole transpile-tests corpus" do
     root = File.expand_path("../transpile-tests", __dir__)
     files = Dir.glob(File.join(root, "**", "*.cht"))

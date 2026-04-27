@@ -19,6 +19,11 @@ class FunctionSignature
   # Intrinsic marker
   attr_accessor :intrinsic, :zig_pattern
 
+  # P2: REQUIRES clause as { param_name_string => Set[Symbol] } or nil.
+  # Mirrors FunctionDef#requires; needed at signature level so call-site
+  # checks survive cross-module flow.
+  attr_accessor :requires
+
   def initialize(params:, return_type:, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,

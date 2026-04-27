@@ -22,8 +22,14 @@ module EffectTracker
   REENTRANT    = :REENTRANT
   LOOP_UNBOUND = :LOOP_UNBOUND
   EXTERN       = :EXTERN
+  # Phase 3 closed-lattice effects. Recorded directly at visit_BgBlock /
+  # visit_NextExpr (and FFI sites for IO). Propagated transitively by
+  # compute_effects! over the existing call graph. Read by EffectSet
+  # projection (src/mir/effect_inference.rb) and ConcurrencyChecks.
+  YIELD        = :YIELD
+  IO           = :IO
 
-  ALL_EFFECTS = [HEAP, BLOCKING, REENTRANT, LOOP_UNBOUND, EXTERN].freeze
+  ALL_EFFECTS = [HEAP, BLOCKING, REENTRANT, LOOP_UNBOUND, EXTERN, YIELD, IO].freeze
 
   # --- Phase 1: Direct collection ---
 

@@ -1836,31 +1836,45 @@ class MIRLowering
     is_arc = ti.respond_to?(:shared?) && ti.shared?
     is_rc = ti.respond_to?(:multiowned?) && ti.multiowned?
     if is_arc || is_rc
-      bare_ft = Type.new(ti.resolved.to_s)
-      bare_ft.shard_count = ti.shard_count if ti.respond_to?(:shard_count) && ti.shard_count
-      bare_ft.sync = ti.sync if ti.respond_to?(:sync) && ti.shard_count && ti.sync
-      zig_t = bare_ft.zig_type
+      # Sharded maps have their sync mode built into the Zig type
+      # (e.g. MutexShardedStringMap), so they need the legacy direct-
+      # composition path that preserves shard_count + sync on bare_ft.
+      # Plain (non-sharded) maps go through compose_capability_wrap for
+      # the unified Group 1 / Group 2 separation.
+      is_striped = ti.respond_to?(:striped?) && ti.striped?
+      if is_striped
+        bare_ft = Type.new(ti.resolved.to_s)
+        bare_ft.shard_count = ti.shard_count if ti.respond_to?(:shard_count) && ti.shard_count
+        bare_ft.sync = ti.sync if ti.respond_to?(:sync) && ti.shard_count && ti.sync
+        zig_t = bare_ft.zig_type
 
-      needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
-                    (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType"))
-      inner = if needs_alloc
-        MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
-      else
-        MIR::StructInit.new(zig_t, [])
-      end
-
-      # Apply sync wrapping if needed (skip for striped maps)
-      if !bare_ft.respond_to?(:striped?) || !bare_ft.striped?
-        if ti.sync == :write_locked
-          inner = MIR::Call.new("CheatLib.RwLocked(#{zig_t}).init", [inner], false)
-        elsif ti.sync == :locked
-          inner = MIR::Call.new("CheatLib.Locked(#{zig_t}).init", [inner], false)
+        needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
+                      (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType"))
+        inner = if needs_alloc
+          MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
+        else
+          MIR::StructInit.new(zig_t, [])
         end
-      end
 
-      wrap_fn = is_arc ? "arcCreate" : "rcCreate"
-      inner = MIR::Call.new("CheatLib.#{wrap_fn}", [MIR::Ident.new(zig_t), MIR::Ident.new(alloc_str), inner], true)
-      return inner if node.pairs.empty?
+        wrap_fn = is_arc ? "arcCreate" : "rcCreate"
+        inner = MIR::Call.new("CheatLib.#{wrap_fn}", [MIR::Ident.new(zig_t), MIR::Ident.new(alloc_str), inner], true)
+        return inner if node.pairs.empty?
+      else
+        bare_ft = ti.bare_data_type
+        zig_t = bare_ft.zig_type
+
+        needs_alloc = bare_ft.respond_to?(:map_init_needs_alloc?) ? bare_ft.map_init_needs_alloc? :
+                      (!zig_t.include?("PartitionedStringMap") && !zig_t.include?("PartitionedNumericMap") && !zig_t.include?("NumericMapType"))
+        inner = if needs_alloc
+          MIR::StructInit.new(zig_t, [{ name: "alloc", value: MIR::Ident.new(alloc_str) }])
+        else
+          MIR::StructInit.new(zig_t, [])
+        end
+
+        wrapped = compose_capability_wrap(inner, zig_t, ti, :heap)
+        return wrapped if node.pairs.empty?
+        inner = wrapped
+      end
     end
 
     zig_t = transpile_type(ti)
@@ -1898,6 +1912,80 @@ class MIRLowering
   # Concurrent / capability blocks
   # ================================================================
 
+  # WITH-capture helpers. Group 1 (sync/ownership) on a binding can apply
+  # to either the whole binding (Identifier capture) or to a specific
+  # field of it (GetField capture, e.g. `WITH EXCLUSIVE env.vars AS v`).
+  # These helpers paper over the difference for the lowering loop.
+
+  # User-visible name of the bound entity — used for naming guard vars.
+  def with_cap_var_name(var_node)
+    case var_node
+    when AST::GetField then var_node.field.to_s
+    else
+      var_node.respond_to?(:name) ? var_node.name : var_node.to_s
+    end
+  end
+
+  # Sync + storage flags for the bound entity.
+  # Identifier → from the symbol entry (post-propagation).
+  # GetField   → from the field's declared type (carries @sync/@ownership
+  #              from the struct field declaration).
+  def with_cap_sync_storage(var_node)
+    if var_node.is_a?(AST::GetField) && var_node.full_type.is_a?(Type)
+      ft = var_node.full_type
+      sync = ft.sync
+      storage = case ft.ownership
+                when :shared     then :shared
+                when :multiowned then :multiowned
+                else nil
+                end
+      return [sync, storage]
+    end
+    sym = var_node.respond_to?(:symbol) ? var_node.symbol : nil
+    [sym&.sync, sym&.storage]
+  end
+
+  # Zig expression naming the locked-inner. Identifier → its Zig name (or
+  # DO-capture rename). GetField → the chained field path (e.g.
+  # `env.vars`), built recursively for nested fields.
+  def with_cap_zig_target(var_node, var_name)
+    if var_node.is_a?(AST::GetField)
+      build_field_path_zig(var_node)
+    else
+      @do_capture_map&.dig(var_name) || var_name
+    end
+  end
+
+  # True when the WITH-bound entity is a function parameter (vs. a local
+  # binding). Parameters' runtime wrappers come from the caller and may
+  # not be statically known at this fn's codegen time.
+  def with_cap_is_param?(var_node)
+    return false unless var_node.is_a?(AST::Identifier)
+    var_node.symbol&.is_param == true
+  end
+
+  # Comptime-dispatched lock target: at compile time, Zig picks
+  # `x.ctrl.data.*` if the underlying type is `Arc(...)` (has a `ctrl`
+  # field), else the bare value. The same fn body then works for both
+  # `Locked(T)` and `Arc(Locked(T))` callers without runtime overhead.
+  # Mutable parameters arrive as `*T`, so probe and deref through `*`.
+  def comptime_arc_unwrap_expr(zig_var)
+    "(if (@hasField(@TypeOf(#{zig_var}.*), \"ctrl\")) #{zig_var}.ctrl.data.* else #{zig_var}.*)"
+  end
+
+  # Recursively build the Zig string for a (possibly nested) field path.
+  # Stops at the root Identifier; intermediate GetFields chain via `.`.
+  def build_field_path_zig(node)
+    case node
+    when AST::Identifier
+      @do_capture_map&.dig(node.name) || node.name
+    when AST::GetField
+      "#{build_field_path_zig(node.target)}.#{node.field}"
+    else
+      node.to_s
+    end
+  end
+
   def lower_with_block(node)
     rt_name = @rt_name
     bindings = []
@@ -1929,10 +2017,19 @@ class MIRLowering
     end
 
     (node.capabilities || []).each do |cap|
-      var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
+      # var_name is the user-visible name of the bound entity. For an
+      # Identifier it's the variable name; for a GetField (`obj.field`)
+      # we use the field name so guard variables are named after what's
+      # being locked (`__vars_guard_X`, not `__obj_guard_X`).
+      var_node = cap[:var_node]
+      var_name = with_cap_var_name(var_node)
       alias_name = cap[:alias] || var_name
       resolved = cap[:resolved_type]
-      zig_var = @do_capture_map&.dig(var_name) || var_name
+      var_sync, var_storage = with_cap_sync_storage(var_node)
+      # zig_var is the Zig expression that names the inner being locked.
+      # Identifier → variable name (or its DO-capture rename). GetField
+      # → the full field path emitted as Zig (`obj.field`).
+      zig_var = with_cap_zig_target(var_node, var_name)
 
       case cap[:capability]
       when :multiowned, :shared
@@ -1944,9 +2041,19 @@ class MIRLowering
         # WITHs on the same variable (permitted via POSSIBLE_DEADLOCK)
         # don't produce colliding Zig identifiers.
         guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
-        lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
-        panic_method = resolved&.write_locked? ? "write" : "acquire"
-        err_method   = resolved&.write_locked? ? "writeOrErr" : "acquireOrErr"
+        is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
+        # For function parameters, the caller's wrapper is unknown at
+        # this fn's standalone codegen time (cross-module case). Emit
+        # comptime-dispatched lock_expr so the SAME function body works
+        # for both `Locked(T)` and `Arc(Locked(T))` callers.
+        is_param = with_cap_is_param?(var_node)
+        lock_expr = if is_param && !is_arc
+          comptime_arc_unwrap_expr(zig_var)
+        else
+          is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
+        end
+        panic_method = var_sync == :write_locked ? "write" : "acquire"
+        err_method   = var_sync == :write_locked ? "writeOrErr" : "acquireOrErr"
         if clause
           bindings << emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, node)
         else
@@ -1955,7 +2062,8 @@ class MIRLowering
       when :write_locked_read
         next if needs_sort
         guard_var = "__#{var_name}_guard_#{node.object_id.abs}"
-        lock_expr = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
+        is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
+        lock_expr = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
         if clause
           bindings << emit_fallible_lock_binding(lock_expr, "readOrErr", guard_var, alias_name, clause, with_label, node)
         else
@@ -1966,7 +2074,7 @@ class MIRLowering
         source_zig = emit_expr(lower(cap[:var_node]))
         bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
       when :RESTRICT
-        if !resolved&.any_sync?
+        if var_sync.nil?
           # PURE: same as BORROWED; var_node is a simple variable reference.
           source_zig = emit_expr(lower(cap[:var_node]))
           if cap[:alias_mutable]
@@ -2121,15 +2229,18 @@ class MIRLowering
       resolved   = cap[:resolved_type]
       zig_var    = @do_capture_map&.dig(var_name) || var_name
       # lock_expr is the "logical lock container" we call .acquire()/.read()/.write() on.
-      lock_expr  = resolved&.any_rc? ? "#{zig_var}.ctrl.data.*" : zig_var
+      var_storage = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.storage : nil
+      is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
+      lock_expr  = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
       # addr_expr is the stable runtime identity used as the sort key.
       # Arc's ctrl.data is already a *T — take that pointer directly, no
       # deref-then-addr. For direct Locked(T), take &zig_var (stable for
       # the variable's lifetime, and captures across fibers share it).
-      addr_expr  = resolved&.any_rc? ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
+      addr_expr  = is_arc ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
+      var_sync   = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.sync : nil
       method = case cap[:capability]
                when :EXCLUSIVE
-                 resolved&.write_locked? ? "write" : "acquire"
+                 var_sync == :write_locked ? "write" : "acquire"
                when :write_locked_read
                  "read"
                end
@@ -2901,8 +3012,31 @@ class MIRLowering
       # Opaque: body comes from a completed separate transpile pass (mod.transpiled_body).
       # Decomposition requires threading MIR through the module-importer pipeline
       # (separate, larger refactor from Phase 2). Justified in RAW_JUSTIFIED_REASONS.
-      MIR::RawZig.new(lines.join("\n"), "require_local_module_opaque",
+      raw = MIR::RawZig.new(lines.join("\n"), "require_local_module_opaque",
         { consumes: [], produces: [], borrows: [] })
+
+      # VM target also needs the imported function bodies as MIR FnDefs so the
+      # bytecode emitter can lay out helpers and resolve namespaced calls
+      # (e.g. `require_helper.addPub`). Lower each public function from the
+      # module AST and tag its name with the importer namespace; the call-site
+      # lookup in bc_emitter treats `<ns>.<fn>` as a synonym for the bare name.
+      if @target == :bc && mod.ast
+        helper_fns = []
+        mod.ast.statements.each do |stmt|
+          next unless stmt.is_a?(AST::FunctionDef)
+          fn_mir = lower_function_def(stmt)
+          if fn_mir
+            # Stash the AST on the MIR FnDef so bc_emitter's parallel walk can
+            # find it without going through CompilerFrontend's fn_nodes (which
+            # only sees the top-level AST, not imported modules).
+            fn_mir.instance_variable_set(:@ast_fn, stmt) if fn_mir.respond_to?(:instance_variable_set)
+            helper_fns << fn_mir
+          end
+        end
+        return [raw, *helper_fns] if helper_fns.any?
+      end
+
+      raw
     end
   end
 
@@ -3543,12 +3677,13 @@ class MIRLowering
     if node.target.is_a?(AST::OptionalUnwrap)
       inner_ti = node.target.type_info  # T (unwrapped)
       inner_mir = lower(node.target.target)
+      inner_sync = node.target.target.respond_to?(:symbol) ? node.target.target.symbol&.sync : nil
       field_expr = if inner_ti&.multiowned? || inner_ti&.shared? ||
-                       inner_ti&.locked? || inner_ti&.write_locked?
+                       inner_sync == :locked || inner_sync == :write_locked
         "_r.ctrl.data.#{node.field}"
       elsif inner_ti&.frozen?
         "_r.#{node.field}"
-      elsif inner_ti&.always_mutable?
+      elsif inner_sync == :always_mutable
         "_r.data.#{node.field}"
       else
         "_r.#{node.field}"
@@ -3569,6 +3704,7 @@ class MIRLowering
     is_rc_unwrapped = node.target.is_a?(AST::Identifier) && rc_map.key?(node.target.name)
     is_locked_unwrapped = node.target.is_a?(AST::Identifier) && locked_map.key?(node.target.name)
 
+    target_sync = node.target.respond_to?(:symbol) ? node.target.symbol&.sync : nil
     if (ti&.multiowned? || ti&.shared?) && !is_rc_unwrapped
       # target.ctrl.data.field
       ctrl = MIR::FieldGet.new(target, "ctrl")
@@ -3577,12 +3713,12 @@ class MIRLowering
     elsif ti&.frozen?
       # *const T auto-derefs in Zig — no _root needed
       return MIR::FieldGet.new(target, node.field.to_s)
-    elsif (ti&.locked? || ti&.write_locked?) && !is_locked_unwrapped
+    elsif (target_sync == :locked || target_sync == :write_locked) && !is_locked_unwrapped
       # target.ctrl.data.field
       ctrl = MIR::FieldGet.new(target, "ctrl")
       data = MIR::FieldGet.new(ctrl, "data")
       return MIR::FieldGet.new(data, node.field.to_s)
-    elsif ti&.always_mutable? && !is_locked_unwrapped
+    elsif target_sync == :always_mutable && !is_locked_unwrapped
       # target.data.field
       data = MIR::FieldGet.new(target, "data")
       return MIR::FieldGet.new(data, node.field.to_s)
@@ -4003,6 +4139,48 @@ class MIRLowering
   # Declarations
   # ================================================================
 
+  # Compose Group-1 (sync + ownership) wrappers around a Group-2 (data
+  # shape) construction. Used by every collection-init path so the
+  # construction concern (initCapacity / `T{}` / etc.) is decoupled from
+  # the wrapping concern (Locked → RwLocked → RefCell → Arc/Rc).
+  #
+  # The inner construction MUST be the bare data shape — no
+  # sync/ownership wrappers in its zig type. Use `Type#bare_data_type`
+  # to derive that before passing to ContainerInit / similar.
+  #
+  # `inner_mir`    : MIR node whose Zig string evaluates to the bare inner.
+  # `bare_zig_t`   : the inner's Zig type (used to spell out wrap types).
+  # `ft`           : the full Type (carries .sync and .ownership).
+  # `alloc`        : :heap | :frame | :static — used by arcCreate/rcCreate.
+  #
+  # Returns the wrapped MIR node (typically MIR::CapWrap).
+  def compose_capability_wrap(inner_mir, bare_zig_t, ft, alloc)
+    sync_fn = case ft.sync
+              when :locked         then "lockedCreate"
+              when :write_locked   then "rwLockedCreate"
+              when :always_mutable then "refCellCreate"
+              end
+    sync_t  = case ft.sync
+              when :locked         then "CheatLib.Locked(#{bare_zig_t})"
+              when :write_locked   then "CheatLib.RwLocked(#{bare_zig_t})"
+              when :always_mutable then "CheatLib.RefCell(#{bare_zig_t})"
+              end
+    own_fn  = case ft.ownership
+              when :shared      then "arcCreate"
+              when :multiowned  then "rcCreate"
+              end
+
+    if sync_fn && own_fn
+      MIR::CapWrap.new(inner_mir, bare_zig_t, :both, sync_fn, sync_t, own_fn, alloc)
+    elsif sync_fn
+      MIR::CapWrap.new(inner_mir, bare_zig_t, :sync_only, sync_fn, sync_t, nil, alloc)
+    elsif own_fn
+      MIR::CapWrap.new(inner_mir, bare_zig_t, :own_only, nil, nil, own_fn, alloc)
+    else
+      inner_mir
+    end
+  end
+
   def lower_var_decl(node)
     is_mutable = node.respond_to?(:mutable) && node.mutable
     ft = Type.new(node.full_type || :Void)
@@ -4047,9 +4225,19 @@ class MIRLowering
     else
       binding_entry&.dig(:alloc) || :heap
     end
+    # Group 2 (data shape) is constructed against the BARE type — no
+    # sync/ownership wrappers. Group 1 wrapping is applied via
+    # compose_capability_wrap once the inner is built. This separation is
+    # what makes "@<shape>:<sync>:<ownership>" combinations compose without
+    # per-shape × per-cap glue.
+    has_caps = ft.any_sync? || ft.ownership != :affine
+    bare_ft = has_caps ? ft.bare_data_type : ft
+    bare_zig = transpile_type(bare_ft)
+
     init = if ft.pool?
       cap = ft.capacity
-      MIR::ContainerInit.new(transpile_type(ft), :pool, decl_alloc, cap)
+      inner = MIR::ContainerInit.new(bare_zig, :pool, decl_alloc, cap)
+      has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     elsif ft.set_collection?
       rhs = node.value
       # DISTINCT pipeline: the init is a SMOOTH node (pipeline result) — lower it directly.
@@ -4057,7 +4245,8 @@ class MIRLowering
       if rhs.is_a?(AST::BinaryOp) && rhs.op == :SMOOTH
         lower(node.value)
       else
-        MIR::ContainerInit.new(transpile_type(ft), :set_empty, nil, nil)
+        inner = MIR::ContainerInit.new(bare_zig, :set_empty, nil, nil)
+        has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
       end
     elsif ft.list_collection?
       rhs = node.value
@@ -4069,13 +4258,16 @@ class MIRLowering
       elsif rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall)
         lower(node.value)
       elsif ft.capacity.is_a?(Integer) && ft.capacity > 0
-        MIR::ContainerInit.new(transpile_type(ft), :list_capacity, decl_alloc, ft.capacity)
+        inner = MIR::ContainerInit.new(bare_zig, :list_capacity, decl_alloc, ft.capacity)
+        has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
       else
-        MIR::ContainerInit.new(transpile_type(ft), :list_empty, nil, nil)
+        inner = MIR::ContainerInit.new(bare_zig, :list_empty, nil, nil)
+        has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
       end
     elsif ft.fixed_soa?
       # T[N]@soa: pre-allocate with initCapacity to avoid frame-arena doubling waste
-      MIR::ContainerInit.new(transpile_type(ft), :list_capacity, decl_alloc, ft.capacity)
+      inner = MIR::ContainerInit.new(bare_zig, :list_capacity, decl_alloc, ft.capacity)
+      has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner
     else
       rhs = node.value.is_a?(AST::MoveNode) ? node.value.value : node.value
       is_move = node.value.is_a?(AST::MoveNode)

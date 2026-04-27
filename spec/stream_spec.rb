@@ -1056,14 +1056,17 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "allows CLONE inline inside DO branches" do
+        # The point of this test is "CLONE works as an arg to NEXT inline
+        # inside a DO branch." The original fixture wrapped each branch
+        # in WITH EXCLUSIVE on a @locked counter, but that pattern holds
+        # the lock across NEXT (P3.3 hold-lock-across-yield). The lock
+        # was incidental — drop it to keep the CLONE coverage clean.
         src = <<~CLEAR
-          STRUCT Counter { value: Int64 }
           FN f() RETURNS Void ->
             s: ~?Int64[] @split = BG STREAM { YIELD 1; };
-            counter = Counter{ value: 0 } @locked;
             DO {
-              WITH EXCLUSIVE counter AS c { c.value = c.value + (NEXT (CLONE s))?; },
-              WITH EXCLUSIVE counter AS c { c.value = c.value + (NEXT (CLONE s))?; }
+              (NEXT (CLONE s))?,
+              (NEXT (CLONE s))?
             }
             RETURN;
           END

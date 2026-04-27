@@ -546,9 +546,39 @@ module FunctionAnalysis
         end
       end
 
+      # Thread sync into the binding's SymbolEntry. Sources, in priority:
+      #   1. Explicit :sync on the signature param (cross-module form).
+      #   2. The param's declared type's sync (legacy direct-annotation).
+      #   3. The function's REQUIRES clause — if the param is constrained
+      #      to a sync family (LOCKABLE, etc.), seed a default sync that
+      #      satisfies the deferred WITH validation. This unblocks the
+      #      cross-module case where propagate_caller_sync! can't see
+      #      callers (e.g., a helper in a REQUIRE'd file). The actual
+      #      caller-supplied sync still flows in via P1.4 propagation
+      #      when callers are visible; this seed just keeps the in-file
+      #      annotation valid.
+      param_sync = nil
+      if param[:sync]
+        param_sync = param[:sync]
+      elsif param[:type].is_a?(Type) && param[:type].any_sync?
+        param_sync = param[:type].sync
+      elsif node.respond_to?(:requires) && node.requires
+        families = node.requires[param[:name].to_s]
+        if families && families.include?(:LOCKABLE)
+          param_sync = :locked
+        end
+      end
       current_scope.declare(
-        param[:name], nil, param[:type], param[:mutable], false, nil, :stack
+        param[:name], nil, param[:type], param[:mutable], false, nil, :stack,
+        Set.new, [], sync: param_sync
       )
+      # Stash the SymbolEntry on the param hash so the transitive sync
+      # propagation pass (P1.4) and downstream code can find it without
+      # walking the body for an Identifier reference.
+      param[:symbol] = current_scope.locals[param[:name]]
+      # Mark as a parameter so deferred WITH validation (P1.7) can
+      # distinguish it from local bindings.
+      param[:symbol].is_param = true
       # TAKES parameters own the data — force :affine so cleanup is emitted.
       current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])

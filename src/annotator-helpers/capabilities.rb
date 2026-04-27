@@ -71,6 +71,33 @@ end
 # Mixed into SemanticAnnotator. Provides validate_capability and
 # acquire_capability! used by visit_WithBlock.
 module CapabilityHelper
+  # WITH can be applied to an Identifier or a GetField (`obj.field`).
+  # For an Identifier, sync/ownership lives on the SymbolEntry. For a
+  # GetField, it lives on the field's declared type (recorded on the
+  # struct schema and projected onto the GetField node's full_type
+  # during annotation). These helpers paper over the difference so the
+  # rest of the WITH logic doesn't have to.
+  def cap_var_sync(var_node)
+    sym_sync = var_node.respond_to?(:symbol) && var_node.symbol ? var_node.symbol.sync : nil
+    return sym_sync if sym_sync
+    if var_node.respond_to?(:full_type) && var_node.full_type.is_a?(Type)
+      return var_node.full_type.sync
+    end
+    nil
+  end
+
+  def cap_var_storage(var_node)
+    sym = var_node.respond_to?(:symbol) ? var_node.symbol : nil
+    return sym.storage if sym
+    if var_node.respond_to?(:full_type) && var_node.full_type.is_a?(Type)
+      case var_node.full_type.ownership
+      when :shared     then return :shared
+      when :multiowned then return :multiowned
+      end
+    end
+    nil
+  end
+
   # Validate that a capability type is legal for the given variable.
   def validate_capability(node, capability_type, var_node)
     var_type = var_node.full_type
@@ -82,20 +109,37 @@ module CapabilityHelper
 
     case capability_type
     when :EXCLUSIVE
-      syn = var_node.symbol&.sync
+      syn = cap_var_sync(var_node)
       unless syn
-        storage = var_node.symbol&.storage
-        error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
+        # P1.7: defer the check for function parameters. Their entry.sync
+        # may still be nil here because EscapeAnalysis.propagate_caller_sync!
+        # hasn't run yet — it runs at the end of annotate!. Locals (non-
+        # params) error eagerly because no propagation will fix them.
+        if var_node.respond_to?(:symbol) && var_node.symbol&.is_param
+          @deferred_with_validations << {
+            node: node, var_node: var_node, capability: :EXCLUSIVE
+          }
+        else
+          storage = cap_var_storage(var_node)
+          error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
+        end
       end
 
     when :write_locked_read
-      syn = var_node.symbol&.sync
+      syn = cap_var_sync(var_node)
       unless syn == :write_locked
-        error!(node, "WITH #{var_node.name}: read access requires a @writeLocked variable")
+        if var_node.respond_to?(:symbol) && var_node.symbol&.is_param && syn.nil?
+          @deferred_with_validations << {
+            node: node, var_node: var_node, capability: :write_locked_read
+          }
+        else
+          name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+          error!(node, "WITH #{name}: read access requires a @writeLocked variable")
+        end
       end
 
     when :RESTRICT
-      if var_node.symbol && !var_node.symbol.mutable
+      if var_node.respond_to?(:symbol) && var_node.symbol && !var_node.symbol.mutable
         error!(node, "RESTRICT capability requires a mutable variable, but '#{var_node.name}' is immutable")
       end
 
@@ -104,13 +148,15 @@ module CapabilityHelper
       # No special validation needed beyond the identity check above.
 
     when :multiowned
-      unless var_node.symbol&.storage == :multiowned
-        error!(node, "WITH #{var_node.name}: expected a @multiowned variable")
+      unless cap_var_storage(var_node) == :multiowned
+        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        error!(node, "WITH #{name}: expected a @multiowned variable")
       end
 
     when :shared
-      unless var_node.symbol&.storage == :shared
-        error!(node, "WITH #{var_node.name}: expected a @shared variable")
+      unless cap_var_storage(var_node) == :shared
+        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        error!(node, "WITH #{name}: expected a @shared variable")
       end
 
     else
@@ -134,15 +180,16 @@ module CapabilityHelper
 
     # Infer capability from the variable's storage when not stated explicitly
     if cap[:capability] == :infer
-      storage = var_node.symbol&.storage
-      syn     = var_node.symbol&.sync
+      storage = cap_var_storage(var_node)
+      syn     = cap_var_sync(var_node)
       cap[:capability] = case
                          when syn == :locked            then :EXCLUSIVE
                          when syn == :write_locked      then :write_locked_read
                          when storage == :multiowned    then :multiowned
                          when storage == :shared        then :shared
                          else
-                           error!(node, "WITH #{var_node.name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, or another capability type")
+                           name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+                           error!(node, "WITH #{name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, or another capability type")
                            :unknown
                          end
     end
@@ -194,9 +241,42 @@ module CapabilityHelper
 
   def declare_capability_scope!(cap)
     var_name = cap_var_name(cap[:var_node])
-    syn = cap[:old_scope]&.locals&.[](var_name)&.sync
-    if syn && !cap[:var_node].is_a?(AST::GetField)
+    source_entry = cap[:old_scope]&.locals&.[](var_name)
+    # Sync may live on the binding (Identifier path) or on the field's
+    # declared type (GetField path) — cap_var_sync covers both.
+    syn = cap_var_sync(cap[:var_node])
+    # P1.7: a WITH EXCLUSIVE / write_locked_read on a parameter whose sync
+    # has not yet been propagated should still declare its inner alias.
+    # Propagation runs after annotation; the deferred WITH validation will
+    # error later if sync stays nil. Optimistically declaring the alias
+    # avoids a misleading "Undefined variable 'inner'" cascade.
+    deferred_param = source_entry&.is_param && syn.nil? &&
+      (cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read)
+    is_field = cap[:var_node].is_a?(AST::GetField)
+
+    if syn && is_field
+      # WITH on a sync-wrapped struct field. The alias holds the unwrapped
+      # inner value (post-`.acquire().get()`). Resolve the bare inner type
+      # from the field's declared type and declare the alias.
+      inner_type = cap[:var_node].full_type
+      if inner_type.is_a?(Type) && (inner_type.any_sync? || inner_type.ownership != :affine)
+        inner_type = inner_type.bare_data_type
+      end
+      alias_name = cap[:alias] || var_name
+      current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
+      current_scope.locals[alias_name].non_escaping = true
+      og_declare(alias_name, nil, inner_type)
+      current_scope.declare_with_new_capability(cap)
+    elsif (syn || deferred_param) && !is_field
+      # The WITH alias represents the unwrapped inner value for the
+      # lifetime of the lock. Its type must be the bare data shape — no
+      # sync/ownership wrappers — so downstream lowerings (method calls,
+      # field access) don't re-emit Arc / Locked indirection on top of
+      # the already-unwrapped guard pointer.
       inner_type = cap[:old_scope].resolve_type(var_name)
+      if inner_type.is_a?(Type) && (inner_type.any_sync? || inner_type.ownership != :affine)
+        inner_type = inner_type.bare_data_type
+      end
       alias_name = cap[:alias] || var_name
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       current_scope.locals[alias_name].non_escaping = true

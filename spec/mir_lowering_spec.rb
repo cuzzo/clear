@@ -35,9 +35,12 @@ RSpec.describe MIRLowering do
     node
   end
 
-  def make_id(name, full_type: :Int64)
+  def make_id(name, full_type: :Int64, sync: nil)
     node = AST::Identifier.new(tok, name)
     node.full_type = full_type
+    if sync
+      node.symbol = SymbolEntry.new(reg: name, type: full_type, mutable: true, storage: :stack, sync: sync)
+    end
     node
   end
 
@@ -1357,7 +1360,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers EXCLUSIVE mutex capability with acquire/release" do
-      var_node = make_id("counter", full_type: :Counter)
+      var_node = make_id("counter", full_type: :Counter, sync: :locked)
       resolved = Type.new(:Counter, sync: :locked)
       cap = { var_node: var_node, alias: "c", capability: :EXCLUSIVE, resolved_type: resolved }
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
@@ -1374,7 +1377,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers EXCLUSIVE write_locked capability with write()" do
-      var_node = make_id("counter", full_type: :Counter)
+      var_node = make_id("counter", full_type: :Counter, sync: :write_locked)
       resolved = Type.new(:Counter, sync: :write_locked)
       cap = { var_node: var_node, alias: "c", capability: :EXCLUSIVE, resolved_type: resolved }
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)
@@ -1389,7 +1392,7 @@ RSpec.describe MIRLowering do
     end
 
     it "lowers write_locked_read capability with read()" do
-      var_node = make_id("counter", full_type: :Counter)
+      var_node = make_id("counter", full_type: :Counter, sync: :write_locked)
       resolved = Type.new(:Counter, sync: :write_locked)
       cap = { var_node: var_node, alias: "c", capability: :write_locked_read, resolved_type: resolved }
       body_lit = make_lit(:NUMBER, 1, full_type: :Int64)

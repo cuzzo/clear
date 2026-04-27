@@ -589,15 +589,17 @@ module CleanupClassifier
     return nil if node.respond_to?(:container_borrow) && node.container_borrow
     return nil if ti.borrow_provenance?  # borrow return -- caller owns data
 
+    sync = node.respond_to?(:symbol) ? node.symbol&.sync : nil
+
     classify_frozen(ti) ||
       classify_inf_stream(ti) ||
       classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||
       classify_array_struct_strings(ti, node, schema_lookup) ||
       classify_rc_or_link(ti, schema_lookup) ||
-      classify_sync(ti) ||
-      classify_heap_provenance(ti, node, schema_lookup) ||
-      classify_heap_struct_plain(ti, node, schema_lookup) ||
+      classify_sync(ti, sync) ||
+      classify_heap_provenance(ti, node, schema_lookup, sync) ||
+      classify_heap_struct_plain(ti, node, schema_lookup, sync) ||
       classify_struct_cleanup_fields(ti, node, schema_lookup) ||
       classify_non_copy_union(ti, schema_lookup)
   end
@@ -628,6 +630,13 @@ module CleanupClassifier
   end
 
   private_class_method def self.classify_collection(ti, schema_lookup)
+    # Group 1 / Group 2 separation: when a collection is wrapped with
+    # Arc/Rc ownership, the cleanup is `arcRelease` / `rcRelease` — which
+    # cascades through the wrapper down to the inner data shape's deinit.
+    # Defer to classify_rc_or_link instead of emitting a bare-shape
+    # `pool.deinit()` / `list.deinit()` / etc. against the outer wrapper.
+    return nil if ti.any_rc?
+
     # T[N]@soa: fixed SOA array backed by SoaList — needs deinit like a list.
     return entry(:fixed_soa, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.fixed_soa?
     if ti.list_collection? && !ti.sharded? && !ti.heap_provenance?
@@ -636,7 +645,6 @@ module CleanupClassifier
                    alloc: :frame, elem_needs_cleanup: has_heap_elems)
     end
     return entry(:list, has_moved_guard: !ti.sharded?) if ti.list_collection?
-    return entry(:rc) if ti.map? && !ti.numeric_map? && ti.shared?
     return entry(:string_map) if ti.map? && !ti.numeric_map?
     return entry(:numeric_map) if ti.numeric_map?
     return entry(:pool, alloc: ti.provenance_alloc || :heap, has_moved_guard: false) if ti.pool?
@@ -688,16 +696,16 @@ module CleanupClassifier
     end
   end
 
-  private_class_method def self.classify_sync(ti)
-    return entry(:locked) if ti.locked?
-    return entry(:write_locked) if ti.write_locked?
-    return entry(:always_mutable) if ti.always_mutable?
+  private_class_method def self.classify_sync(ti, sync = nil)
+    return entry(:locked) if sync == :locked
+    return entry(:write_locked) if sync == :write_locked
+    return entry(:always_mutable) if sync == :always_mutable
     nil
   end
 
-  private_class_method def self.classify_heap_provenance(ti, node, schema_lookup)
+  private_class_method def self.classify_heap_provenance(ti, node, schema_lookup, sync = nil)
     return nil unless ti.heap_provenance?
-    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked? || ti.always_mutable?
+    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable
     return nil if ti.collection?
 
     return entry(:heap_string) if ti.string?
@@ -731,10 +739,10 @@ module CleanupClassifier
   #
   # This makes the choice based solely on node.storage, so MIRPass upgrades do
   # NOT need to mutate type_info.provenance for struct variables.
-  private_class_method def self.classify_heap_struct_plain(ti, node, schema_lookup)
+  private_class_method def self.classify_heap_struct_plain(ti, node, schema_lookup, sync = nil)
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
-    return nil if ti.any_rc? || ti.link? || ti.locked? || ti.write_locked? || ti.always_mutable?
+    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable
     # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?

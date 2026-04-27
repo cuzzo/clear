@@ -33,6 +33,11 @@ class MIRPass
     # Must run before PromotionClassifier so HPT downgrade sees stable provenance.
     EscapeAnalysis.tag_transitive_provenance!(@fn_nodes, heap_fns)
 
+    # E3c: propagate caller arg sync into callee param SymbolEntry#sync.
+    # Runs after annotation has stamped local bindings; before classification
+    # passes that read sync (CleanupClassifier, mir_lowering).
+    EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
+
     # Phase 1: classify promotions for all functions.
     # Must run before E2 so promotion_plans are available for :always_returned detection.
     promotion_plans = {}

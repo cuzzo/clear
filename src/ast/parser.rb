@@ -1071,6 +1071,14 @@ class Parser
       return_type = parse_type_annotation()
     end
 
+    # 3.5. Parse optional REQUIRES clause: gates which sync families this
+    # function accepts on its parameters. Mandatory whenever the body uses
+    # WITH on a parameter (P2.5 enforces). Stored as { param => Set[Family] }.
+    requires_clause = nil
+    if match!(:KEYWORD, 'REQUIRES')
+      requires_clause = parse_requires_clause
+    end
+
     # 4. Parse optional @reentrant / @nonReentrant / @reentrant:tailCall function annotation.
     reentrant = nil
     tail_call = false
@@ -1170,7 +1178,53 @@ class Parser
     node.type_params = type_params unless type_params.empty?
     node.reentrant = reentrant
     node.tail_call = tail_call
+    node.requires = requires_clause
     node
+  end
+
+  # Parse the REQUIRES clause body (the keyword has already been consumed):
+  #
+  #   <name-list> ':' <family-disjunction>
+  #     [',' <name-list> ':' <family-disjunction>]*
+  #
+  # Disambiguation: while parsing a name-list (before ':'), every ',NAME'
+  # extends the name-list. After ':' and the family disjunction, a ','
+  # starts a new group.
+  #
+  # Returns: { param_name_string => Set[Symbol] }
+  REQUIRES_VALID_FAMILIES = %w[LOCKABLE VERSIONED ACTOR LOCK_FREE].to_set.freeze
+
+  def parse_requires_clause
+    requires_hash = {}
+
+    loop do
+      names = [consume(:VAR_ID).value]
+      while match!(:CHAR, ',')
+        names << consume(:VAR_ID).value
+      end
+      consume(:CHAR, ':')
+
+      families = Set.new
+      families << parse_requires_family
+      while match!(:CHAR, '|')
+        families << parse_requires_family
+      end
+
+      names.each { |n| requires_hash[n] = families }
+
+      break unless match!(:CHAR, ',')
+    end
+
+    requires_hash
+  end
+
+  def parse_requires_family
+    tok = consume(:TYPE_ID)
+    unless REQUIRES_VALID_FAMILIES.include?(tok.value)
+      error!(tok, "Unknown REQUIRES family '#{tok.value}'. Expected one of: " \
+                  "#{REQUIRES_VALID_FAMILIES.to_a.join(', ')}.")
+    end
+    tok.value.to_sym
   end
 
   def parse_block_body(stop_words = ['END'])
@@ -2511,6 +2565,22 @@ class Parser
       break unless match!(:CHAR, ',')
     end
 
+    # P2.3: WITH MATCH form. After the binding-list, an optional MATCH
+    # keyword introduces per-family arms.
+    if match!(:KEYWORD, 'MATCH')
+      arms = parse_with_match_arms
+      consume(:KEYWORD, 'END')
+      node = AST::WithBlock.new(with_token, capabilities, [])
+      node.arms = arms
+      if escape_tok
+        node.deadlock_escape = {
+          kind: escape_tok.value == 'POSSIBLE_DEADLOCK' ? :deadlock : :lock_cycle,
+          token: escape_tok,
+        }
+      end
+      return node
+    end
+
     # Parse block
     consume(:CHAR, '{')
     body = parse_block_body(['}'])
@@ -2525,6 +2595,41 @@ class Parser
       }
     end
     node
+  end
+
+  # Parse one or more WHEN arms. Grammar:
+  #
+  #   WHEN <FAMILY>
+  #       '->' '{' <body> '}'
+  #       [ ON <selectors> <action> | RETRY '(' N ')' THEN <action> ]*
+  #
+  # Returns an array of arm hashes. The terminating END is consumed by
+  # the caller.
+  def parse_with_match_arms
+    arms = []
+    while match?(:KEYWORD, 'WHEN')
+      when_tok = consume(:KEYWORD, 'WHEN')
+      family = parse_requires_family
+      consume(:ARROW, '->')
+      consume(:CHAR, '{')
+      body = parse_block_body(['}'])
+      consume(:CHAR, '}')
+
+      # Per-arm ON / RETRY clauses, zero or more.
+      lock_error_clauses = []
+      while match?(:KEYWORD, 'ON') || match?(:KEYWORD, 'RETRY')
+        clause = parse_lock_error_clause
+        lock_error_clauses << clause if clause
+      end
+
+      arms << { family: family, body: body, lock_error_clauses: lock_error_clauses, token: when_tok }
+    end
+
+    if arms.empty?
+      error!(current, "WITH MATCH requires at least one WHEN arm.")
+    end
+
+    arms
   end
 
   # Parse an optional error-handling clause following a WITH block's `}`:

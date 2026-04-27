@@ -577,6 +577,21 @@ class MIRChecker
       check_expr_for_unhoisted(expr.expr, allow_top: allow_top)
       return
     end
+    # CapWrap composes a sync/ownership layer around an inner data-shape
+    # allocation. The outer CapWrap is the alloc-tracked node (AllocMark);
+    # the inner ContainerInit's lifetime is owned by the wrapper. Treat
+    # CapWrap.inner as if it were in Let-init position so the inner
+    # ContainerInit is not flagged as unhoisted.
+    if expr.is_a?(MIR::CapWrap)
+      # Top-level CapWrap is also subject to the allow_top check.
+      if !allow_top && allocating_expr?(expr)
+        @errors << error(:UNHOISTED_ALLOC, @fn_name,
+          "CapWrap in non-Let-init position (must be hoisted to a named variable)")
+        return
+      end
+      check_expr_for_unhoisted(expr.inner, allow_top: true) if expr.inner
+      return
+    end
     if !allow_top && allocating_expr?(expr)
       kind = expr.class.name.split("::").last
       @errors << error(:UNHOISTED_ALLOC, @fn_name,

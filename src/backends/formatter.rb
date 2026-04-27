@@ -367,7 +367,13 @@ class Formatter::Emitter
     end
 
     po, pc = find_fn_parens(toks, start, arrow_idx)
-    if should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
+    # A function signature with REQUIRES or EFFECTS uses the metadata-wrap
+    # layout: each clause keyword (RETURNS, REQUIRES, EFFECTS) on its own
+    # line at 1-space indent (HALF_INDENT), then `->` at FN level. Mirrors
+    # the visual scope of Ruby's public/private outdent.
+    if has_fn_signature_metadata?(toks, pc, arrow_idx)
+      emit_fn_signature_metadata_wrapped(out, toks, start, arrow_idx, po, pc)
+    elsif should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
       emit_fn_signature_wrapped(out, toks, start, arrow_idx, po, pc)
     else
       (start..arrow_idx).each { |j| out << toks[j] }
@@ -550,6 +556,113 @@ class Formatter::Emitter
     end
   end
 
+  # Function-level metadata clauses that trigger the multi-line wrap.
+  # RETURNS is included so RETURNS comes along when REQUIRES is present;
+  # by itself, RETURNS uses the legacy inline form.
+  FN_METADATA_KEYWORDS = %w[RETURNS REQUIRES EFFECTS].freeze
+  FN_METADATA_TRIGGERS = %w[REQUIRES EFFECTS].freeze
+
+  # True when the signature between `)` (pc) and `->` (arrow_idx) contains
+  # at least one trigger keyword (REQUIRES or EFFECTS today).
+  def has_fn_signature_metadata?(toks, pc, arrow_idx)
+    return false unless pc && arrow_idx
+    (pc + 1...arrow_idx).any? do |j|
+      toks[j].type == :KEYWORD && FN_METADATA_TRIGGERS.include?(toks[j].raw)
+    end
+  end
+
+  # Emit a FN signature with metadata clauses on their own lines:
+  #
+  #     FN name(p1: T, p2: T)
+  #      RETURNS R
+  #      REQUIRES x: LOCKABLE
+  #     ->
+  #
+  # The `->` lands at FN-level (column 0) on its own line. Body indent
+  # then opens at +1 from FN-level via OPEN_TERMINAL on `->`.
+  def emit_fn_signature_metadata_wrapped(out, toks, start, arrow_idx, po, pc)
+    # 1. Emit `FN name(...)`. Reuse existing param-wrapping rules so a
+    # long param list still expands correctly.
+    if po && pc && should_wrap_fn_sig?(toks, start, arrow_idx, po, pc)
+      emit_fn_params_only_wrapped(out, toks, start, po, pc)
+    elsif pc
+      (start..pc).each { |j| out << toks[j] }
+    else
+      (start..arrow_idx - 1).each { |j| out << toks[j] }
+    end
+    insert_nl(out)
+
+    # 2. One line per metadata clause. Each clause runs from its keyword
+    # to (but not including) the next clause keyword or `->`.
+    if pc
+      collect_fn_metadata_clauses(toks, pc + 1, arrow_idx).each do |clause_toks|
+        out << phantom(:HALF_INDENT)
+        clause_toks.each { |t| out << t unless t.type == :NL }
+        insert_nl(out)
+      end
+    end
+
+    # 3. `->` on its own line at FN level.
+    out << toks[arrow_idx]
+  end
+
+  # Emit the FN keyword through to `)` only, wrapping params if the
+  # existing rules say to. Mirrors emit_fn_signature_wrapped but stops at
+  # `)` instead of running through `->`.
+  def emit_fn_params_only_wrapped(out, toks, start, po, pc)
+    (start..po).each { |j| out << toks[j] }
+    insert_nl(out)
+    out << phantom(:INDENT_OPEN)
+
+    depth = 0
+    j = po + 1
+    j = skip_nls(toks, j)
+    while j < pc
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1; out << t; j += 1; next
+        when ')', ']', '}' then depth -= 1; out << t; j += 1; next
+        when ','
+          if depth == 0
+            out << t; j += 1
+            insert_nl(out)
+            j = skip_nls(toks, j)
+            next
+          end
+        end
+      end
+      if t.type == :NL
+        j += 1
+        next
+      end
+      out << t
+      j += 1
+    end
+
+    out << phantom(:INDENT_CLOSE)
+    insert_nl(out)
+    out << toks[pc]
+  end
+
+  # Split tokens between `)` and `->` into per-clause groups. Each clause
+  # starts at one of FN_METADATA_KEYWORDS and runs until the next.
+  def collect_fn_metadata_clauses(toks, start, stop)
+    clauses = []
+    current = nil
+    (start...stop).each do |j|
+      t = toks[j]
+      if t.type == :KEYWORD && FN_METADATA_KEYWORDS.include?(t.raw)
+        clauses << current if current && !current.empty?
+        current = [t]
+      elsif current
+        current << t
+      end
+    end
+    clauses << current if current && !current.empty?
+    clauses
+  end
+
   def find_fn_arrow(toks, fn_idx)
     depth = 0
     j = fn_idx + 1
@@ -559,9 +672,13 @@ class Formatter::Emitter
         case t.raw
         when '(', '[' then depth += 1
         when ')', ']' then depth -= 1
-        when '{', '}', ',', ';'
+        when '{', '}', ';'
           return nil if depth == 0
         end
+        # `,` is permitted at depth 0 — REQUIRES clauses use it
+        # (`REQUIRES x, y: LOCKABLE`). The arrow only ever appears as
+        # the FN-body opener at top level, so a comma can't be confused
+        # for it.
       elsif t.type == :OP && t.raw == '->' && depth == 0
         return j
       elsif t.type == :KEYWORD && t.raw == 'END' && depth == 0
@@ -1600,6 +1717,7 @@ class Formatter::Emitter
     depth = 0
     out = +""
     lines.each do |raw_line|
+      half_indent = raw_line.any? { |t| t.type == :HALF_INDENT }
       pre_delta, post_delta, line = split_indent_markers(raw_line)
       depth = [depth + pre_delta, 0].max
 
@@ -1620,7 +1738,13 @@ class Formatter::Emitter
         line_depth = [depth - 1, 0].max
       end
 
-      out << (INDENT * line_depth)
+      if half_indent
+        # Function-signature metadata clause (RETURNS / REQUIRES / EFFECTS)
+        # — render at exactly 1 space regardless of depth.
+        out << " "
+      else
+        out << (INDENT * line_depth)
+      end
       out << format_line_body(line)
       out << "\n"
 
@@ -1646,6 +1770,8 @@ class Formatter::Emitter
         seen_code ? post += 1 : pre += 1
       elsif t.type == :INDENT_CLOSE
         seen_code ? post -= 1 : pre -= 1
+      elsif t.type == :HALF_INDENT
+        # Marker only; consumed by render's half_indent flag.
       else
         filtered << t
         seen_code = true if t.type != :COMMENT

@@ -914,7 +914,7 @@ module PipeAnalysis
       if entry
         t = entry.type
         t = Type.new(t) unless t.is_a?(Type)
-        names << node.name if t.sharded? && !t.any_sync?
+        names << node.name if t.sharded? && entry.sync.nil?
       end
     end
     return if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
@@ -935,7 +935,7 @@ module PipeAnalysis
       return false unless entry
       t = entry.type
       t = Type.new(t) unless t.is_a?(Type)
-      return t.sharded? && !t.any_sync?
+      return t.sharded? && entry.sync.nil?
     end
     return false if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
     node.class.members.any? do |member|
@@ -1002,7 +1002,7 @@ module PipeAnalysis
     entry = scope.locals[map_name]
     map_type = entry&.type
     map_type = Type.new(map_type) unless map_type.is_a?(Type)
-    return unless map_type.sharded? && !map_type.any_sync?
+    return unless map_type.sharded? && entry&.sync.nil?
 
     # Check for multiple different key expressions on the same map
     this_map_accesses = sharded_accesses.select { |a| a[:map_name] == map_name }
@@ -1039,7 +1039,7 @@ module PipeAnalysis
         gi = node.name
         if gi.target.is_a?(AST::Identifier)
           ti = gi.target.type_info
-          if ti.is_a?(Type) && ti.sharded? && !ti.any_sync?
+          if ti.is_a?(Type) && ti.sharded? && gi.target.symbol&.sync.nil?
             results << { map_name: gi.target.name, key_expr: gi.index, map_token: gi.target.token }
           end
         end
@@ -1067,7 +1067,7 @@ module PipeAnalysis
       next unless node.is_a?(AST::Locatable)
       if node.is_a?(AST::GetIndex) && node.target.is_a?(AST::Identifier)
         ti = node.target.type_info
-        if ti.is_a?(Type) && ti.sharded? && !ti.any_sync?
+        if ti.is_a?(Type) && ti.sharded? && node.target.symbol&.sync.nil?
           results << { map_name: node.target.name, key_expr: node.index, map_token: node.target.token }
         end
       end
@@ -1117,7 +1117,8 @@ module PipeAnalysis
     # so we can validate numeric key type against the map's declared key type.
     visit(shard_op.target_map)
     target_info = shard_op.target_map.type_info
-    unless target_info&.sharded? && !target_info&.any_sync?
+    target_sync = shard_op.target_map.respond_to?(:symbol) ? shard_op.target_map.symbol&.sync : nil
+    unless target_info&.sharded? && target_sync.nil?
       error!(shard_op.target_map, "SHARD target must be a HashMap@sharded(N) without :locked. " \
              "SHARD routes items to owning schedulers — :locked maps don't have ownership.")
     end

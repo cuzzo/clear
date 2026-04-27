@@ -8,6 +8,7 @@ class SymbolEntry
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
                 :takes,          # true if parameter declared with TAKES (callee owns)
+                :is_param,       # true when entry was declared as a function parameter
                 :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
                 :non_escaping,   # true for WITH-scoped bindings — cannot be returned, stored, or TAKES'd
                 :borrowed_alias  # true only for BORROWED/RESTRICT aliases — fiber capture is stack-UAF

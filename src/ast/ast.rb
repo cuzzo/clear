@@ -282,6 +282,11 @@ module AST
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_clauses, :default_catch, :visibility, :deferred_drops, :uses_frame) do
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
+    attr_accessor :requires      # P2: REQUIRES clause — { param_name => Set[Family] } or nil
+                                 #     Family symbols: :LOCKABLE, :VERSIONED, :ACTOR, :LOCK_FREE
+    attr_accessor :effect_set    # P3: projected EffectSet (yield/alloc_heap/io/fail)
+                                 #     view over fn.effects + fn.can_fail
+    attr_accessor :inferred_effects  # alias of effect_set; used by formatter
     attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
     attr_accessor :tail_call     # true if @reentrant:tailCall — compiler emits @call(.always_tail, ...)
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
@@ -447,6 +452,11 @@ module AST
     #   { kind: :deadlock | :lock_cycle, token: Token }
     # nil = no opt-out; annotator rejects violating nesting.
     attr_accessor :deadlock_escape
+    # P2.3: arms for the WITH MATCH form. nil for plain WITH (single-family).
+    # Array of { family: Symbol, body: [stmts], lock_error_clauses: [clause, ...], token: Token }.
+    # Single-family WITH is a one-arm WithMatch internally; the parser
+    # leaves arms nil when no MATCH keyword was used.
+    attr_accessor :arms
   end
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
