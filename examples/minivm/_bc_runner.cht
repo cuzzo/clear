@@ -2153,19 +2153,36 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Valu
 ->
     raw = readFile(path) OR RAISE;
     MUTABLE consts: Value[]@list = List[];
-    -- Parse line by line
-    MUTABLE lineStart: Int64 = 0;
-    FOR ci IN (0_i64 ..< raw.length()) DO
-        IF charAt(raw, ci) == "\n" THEN
-            line = substr(raw, lineStart, ci - lineStart);
+    MUTABLE pos: Int64 = 0;
+    n = raw.length();
+    WHILE pos < n DO
+        -- S: records are length-prefixed: `S:<bytesize>:<exactly bytesize bytes>`.
+        -- The byte payload is read verbatim; it may contain any byte
+        -- (including \n). Other records are line-terminated.
+        IF pos + 1 < n && charAt(raw, pos) == "S" && charAt(raw, pos + 1) == ":" THEN
+            -- Find the colon after the length
+            MUTABLE lenEnd: Int64 = pos + 2;
+            WHILE lenEnd < n && charAt(raw, lenEnd) != ":" DO
+                lenEnd += 1;
+            END
+            lenStr = substr(raw, pos + 2, lenEnd - pos - 2);
+            payloadLen = toInt(toNumber(lenStr) OR 0.0);
+            payloadStart = lenEnd + 1;
+            payload = substr(raw, payloadStart, payloadLen);
+            consts.append(Value{ Str: COPY payload });
+            pos = payloadStart + payloadLen;
+            -- Skip trailing record separator (if any)
+            IF pos < n && charAt(raw, pos) == "\n" THEN pos += 1; END
+        ELSE
+            -- Line-terminated record
+            MUTABLE lineEnd: Int64 = pos;
+            WHILE lineEnd < n && charAt(raw, lineEnd) != "\n" DO
+                lineEnd += 1;
+            END
+            line = substr(raw, pos, lineEnd - pos);
             consts.append(parseConstLine!(line, pool));
-            lineStart = ci + 1;
+            pos = lineEnd + 1;
         END
-    END
-    -- Last line (no trailing newline)
-    IF lineStart < raw.length() THEN
-        line = substr(raw, lineStart, raw.length() - lineStart);
-        consts.append(parseConstLine!(line, pool));
     END
     RETURN consts;
 END
@@ -2185,9 +2202,8 @@ FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
         n = toNumber(numStr) OR 0.0;
         RETURN Value{ Number: n };
     END
-    IF startsWith?(line, "S:") THEN
-        RETURN Value{ Str: substr(line, 2, line.length() - 2) };
-    END
+    -- Note: `S:` records are handled inline by loadBytecodeConsts! (they are
+    -- length-prefixed, not line-terminated, so they never reach parseConstLine!).
     IF startsWith?(line, "B:") THEN
         IF substr(line, 2, line.length() - 2) == "true" THEN RETURN Value.TrueVal; END
         RETURN Value.FalseVal;

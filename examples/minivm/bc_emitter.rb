@@ -152,6 +152,14 @@ class BcEmitter
     lines.join("\n")
   end
 
+  # Separate accessors for the two output files. bc_run.rb writes ops and
+  # consts to distinct paths; previously it split serialize()'s output by
+  # `\n`, which corrupted any S: const containing a newline byte. The
+  # const blob may now embed real newlines inside S:LEN:BYTES records,
+  # so callers MUST NOT split it by line.
+  def serialize_ops_blob; @ops.join(","); end
+  def serialize_consts_blob; @consts.map { |c| serialize_const(c) }.join("\n"); end
+
   private
 
   # ================================================================
@@ -1317,7 +1325,13 @@ class BcEmitter
     when /\A-?[\d]+\.[\d]+(?:e[-+]?\d+)?\z/i
       emit_op(LOAD_CONST_F64, add_const([:f64, val.to_f])); push_type(:f64)
     when /\A"(.*)"\z/m
-      emit_op(LOAD_CONST, add_const([:str, $1])); push_type(:str)
+      # Resolve Zig-source escape sequences here, in Ruby. The lexer
+      # already interpreted the original CLEAR-source escapes; the MIR
+      # lowering re-encoded them as Zig source for the Zig backend.
+      # bc_emitter undoes that re-encoding so the const carries the
+      # actual bytes the program intended. The serialize_const :str
+      # length-prefixes the bytes; the VM never sees escape syntax.
+      emit_op(LOAD_CONST, add_const([:str, unescape_zig_source_str($1)])); push_type(:str)
     else
       emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
     end
@@ -2939,6 +2953,30 @@ class BcEmitter
     nil
   end
 
+  # Reverse the Zig-source string escaping that mir_lowering applies in
+  # lower_literal. Compile-time only; runs in Ruby.
+  def unescape_zig_source_str(raw)
+    raw.gsub(/\\(x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.)/m) { |_|
+      esc = $1
+      if esc.start_with?("x")
+        esc[1..].to_i(16).chr
+      elsif esc.start_with?("u{")
+        esc[2..-2].to_i(16).chr(Encoding::UTF_8)
+      else
+        case esc
+        when "n"  then "\n"
+        when "t"  then "\t"
+        when "r"  then "\r"
+        when "\\" then "\\"
+        when '"'  then '"'
+        when "'"  then "'"
+        when "0"  then "\0"
+        else "\\#{esc}"
+        end
+      end
+    }
+  end
+
   def serialize_const(c)
     case c
     when nil   then "N"
@@ -2947,7 +2985,12 @@ class BcEmitter
       case type
       when :i64        then "I:#{val}"
       when :f64        then "F:#{val}"
-      when :str        then "S:#{val}"
+      # Length-prefixed: `S:<bytesize>:<exactly bytesize bytes>`. The
+      # bytes are written verbatim — they may contain any byte value,
+      # including `\n`. The VM's loadBytecodeConsts! reads exactly
+      # bytesize bytes after the second `:`, so no line-splitting or
+      # escape parsing is needed at load time.
+      when :str        then "S:#{val.bytesize}:#{val}"
       when :bool       then "B:#{val}"
       when :empty_list then "L"
       when :compiled_fn

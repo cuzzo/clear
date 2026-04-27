@@ -72,7 +72,7 @@ if $PROGRAM_NAME == __FILE__
   source      = File.read(source_file)
   source_dir  = File.dirname(source_file)
 
-  bc_txt = begin
+  bc_emitter = begin
     importer  = ModuleImporter.new(base_dir: source_dir)
     fe_result = CompilerFrontend.compile(source, importer: importer, source_dir: source_dir)
     lowering  = MIRLowering.new(
@@ -91,9 +91,9 @@ if $PROGRAM_NAME == __FILE__
       $stderr.puts "MIR validation errors: #{mir_errors.first}"
       nil
     else
-      emitter = BcEmitter.new(fe_result, source: source)
-      emitter.compile(program)
-      emitter.serialize
+      e = BcEmitter.new(fe_result, source: source)
+      e.compile(program)
+      e
     end
   rescue => e
     $stderr.puts "Bytecode compilation error: #{e.message}"
@@ -101,12 +101,13 @@ if $PROGRAM_NAME == __FILE__
     nil
   end
 
-  if bc_txt
+  if bc_emitter
     begin
-      ops_str     = bc_txt.lines[0].chomp
-      const_lines = bc_txt.lines[1..].map(&:chomp)
-      File.write(bc_ops_file, ops_str)
-      File.write(bc_consts_file, const_lines.join("\n"))
+      # Write ops and consts to separate files. Do NOT split serialize()'s
+      # output by `\n` — string consts are length-prefixed and may embed
+      # newline bytes, which a naive line-split would corrupt.
+      File.write(bc_ops_file, bc_emitter.serialize_ops_blob)
+      File.write(bc_consts_file, bc_emitter.serialize_consts_blob)
       output, _status = Open3.capture2e(bc_runner_path)
       print output
     ensure
