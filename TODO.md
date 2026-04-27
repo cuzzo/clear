@@ -20,7 +20,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
 ## v0.2 (Target = July 15)
 
  - [ ] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
- - [ ] Finite State Machines for non-conditional, non-reeentrant, and non-nested looping fibers
+ - [ ] Finite State Machines for non-conditional, non-reeentrant, and non-nested looping fibers (in progress)
  - [ ] Re-entrant Thunks (to avoid unbounded recursive growth, auto insert max_depth, auto-insert co-operative yields)
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
