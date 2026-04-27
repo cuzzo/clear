@@ -830,9 +830,11 @@ class PipelineHost
                                  MIR::ListLength.new(MIR::Ident.new(items))], false),
           false, nil, nil),
         MIR::BreakStmt.new(label,
-          MIR::InlineZig.new(
-            "try CheatLib.makeList(#{elem_zig}, #{alloc_zig_str(alloc)}, #{items}[0..lim_actual])",
-            "make_limited_list").tap { |iz| iz.stdlib_def = ALLOCATING_DEF })
+          MIR::Call.new("CheatLib.makeList",
+            [MIR::Ident.new(elem_zig), MIR::AllocatorRef.new(alloc),
+             MIR::SliceExpr.new(MIR::Ident.new(items),
+               MIR::Lit.new("0"), MIR::Ident.new("lim_actual"), nil)],
+            true))
       ]
     end
   end
@@ -1277,7 +1279,7 @@ class PipelineHost
       source_mir = visit_mir(list_node)
       field_slice_lets = @soa_needed_fields.map { |f|
         MIR::Let.new("__soa_#{f}",
-          MIR::InlineZig.new("__soa_src.data.items(.#{f})", "soa_field_#{f}"),
+          MIR::SoaFieldAccess.new(MIR::Ident.new("__soa_src"), f),
           false, nil, nil)
       }
 

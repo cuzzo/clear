@@ -223,6 +223,13 @@ module MIR
     include Stmt
   end
 
+  # Typed-slice extraction from a Struct-of-Arrays container.
+  # Borrows the SoA container; returns a slice view of one field.
+  # Zig: container.data.items(.fieldname)
+  SoaFieldAccess = Struct.new(:soa_expr, :field_name) do
+    include Expr
+  end
+
   # Defer statement.
   # Zig: defer { body };  or  defer expr;
   DeferStmt = Struct.new(:body) do

@@ -483,6 +483,10 @@ class BcEmitter
       # a recursive-into-bytecode comparator dispatch or a pre-compiled
       # comparator helper. Defer until VM grows higher-order support.
       raise Unimplemented, "MIR::Sort not yet supported in VM path"
+    when MIR::SoaFieldAccess
+      # The VM uses Value.List uniformly; SoA layout (separate slice per
+      # field) has no equivalent. Defer until VM models multi-array shape.
+      raise Unimplemented, "MIR::SoaFieldAccess not yet supported in VM path"
     when MIR::Lit, MIR::Ident, MIR::ConcatStr, MIR::BinOp, MIR::BlockExpr
       # Bare expression in statement position (e.g. the last value of a
       # bg-block body, used as the fiber's return). Evaluate for side
