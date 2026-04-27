@@ -82,6 +82,7 @@ FN listLen(v: Value) RETURNS Int64 ->
         Value.List AS items -> RETURN items.length();,
         Value.TypedI64Arr AS iarr -> RETURN iarr.length();,
         Value.TypedF64Arr AS farr -> RETURN farr.length();,
+        Value.Str AS s -> RETURN s.length();,
         DEFAULT -> RETURN 0;
     END
     RETURN 0;

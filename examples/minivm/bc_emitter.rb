@@ -1273,9 +1273,12 @@ class BcEmitter
     val = node.value.to_s
     case val
     when "true"
-      emit_op(LOAD_CONST, add_const([:bool, true])); push_type(:bool)
+      # LOAD_CONST puts Value.TrueVal on the value stack, not the typed
+      # istack. push_type(:bool) would mislead compile_expr_to_value into
+      # emitting BOOL_TO_VAL (which pops istack and panics on underflow).
+      emit_op(LOAD_CONST, add_const([:bool, true])); push_type(:any)
     when "false"
-      emit_op(LOAD_CONST, add_const([:bool, false])); push_type(:bool)
+      emit_op(LOAD_CONST, add_const([:bool, false])); push_type(:any)
     when "null", "undefined", "void"
       emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
     when /\A@as\(i64,\s*(-?\d+)\)\z/
@@ -1752,7 +1755,11 @@ class BcEmitter
     @ops[patch] = @ops.length
     emit_op(LOAD_CONST, add_const([:bool, false]))
     @ops[end_patch] = @ops.length
-    push_type(:bool)
+    # Result is Value.TrueVal/FalseVal on the value stack (compile_expr_to_value
+    # + LOAD_CONST [:bool] both push to vstack). push_type(:bool) would
+    # mislead callers (compile_while, compile_let) into emitting istack-only
+    # opcodes (JUMP_IF_FALSE_I, etc.) → istack underflow.
+    push_type(:any)
   end
 
   def compile_or(node)
@@ -1764,7 +1771,7 @@ class BcEmitter
     @ops[patch] = @ops.length
     emit_op(LOAD_CONST, add_const([:bool, true]))
     @ops[end_patch] = @ops.length
-    push_type(:bool)
+    push_type(:any)
   end
 
   def compile_unary(node)
