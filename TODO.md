@@ -13,6 +13,7 @@
  - [x] Native CONCURRENT support for streaming pipelines
  - [x] `./clear fmt`
  - [ ] `./clear fix`
+ - [ ] Binding metadata for capabilities + `REQUIRES` for overloaded syncronization strategies.
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
