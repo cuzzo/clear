@@ -1082,40 +1082,53 @@ class PipelineHost
         MIR::Let.new("idx_result",
           MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(alloc)}]),
           true, map_type, nil),
-        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
-          MIR::Let.new("idx_key", expr_mir, false, nil, nil),
-          # Dupe the key so the HashMap owns its own copy. If found_existing, the duped
-          # copy is unused — free it immediately to avoid a leak.
-          MIR::Let.new("idx_key_owned",
-            MIR::InlineZig.new(
-              "try #{alloc_zig_str(alloc)}.dupe(u8, idx_key)",
-              "idx_key_dupe").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
-          MIR::Let.new("gop",
-            MIR::InlineZig.new(
-              "idx_result.inner.getOrPut(#{alloc_zig_str(alloc)}, idx_key_owned) catch @panic(\"INDEX allocation failed\")",
-              "idx_get_or_put").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
-          MIR::IfStmt.new(
-            MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing"),
-            [MIR::ExprStmt.new(
-              MIR::InlineZig.new(
-                "#{alloc_zig_str(alloc)}.free(idx_key_owned)",
-                "idx_key_free"), nil)
-            ], nil),
-          MIR::IfStmt.new(
-            MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing")),
-            [MIR::ExprStmt.new(
-              MIR::InlineZig.new(
-                "gop.value_ptr.* = .empty",
-                "idx_init_slot"), nil)
-            ], nil),
-          MIR::ExprStmt.new(
-            MIR::InlineZig.new(
-              "gop.value_ptr.append(#{alloc_zig_str(alloc)}, it) catch @panic(\"INDEX append failed\")",
-              "idx_append").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, nil)
-        ], nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", build_index_gop_body(expr_mir, alloc, "it"), nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
       ]
     end
+  end
+
+  # INDEX op gop pattern: structural decomposition of:
+  #   key_owned = try alloc.dupe(u8, key)
+  #   gop = idx_result.inner.getOrPut(alloc, key_owned) catch @panic(...)
+  #   if (gop.found_existing) alloc.free(key_owned)
+  #   else gop.value_ptr.* = .empty
+  #   gop.value_ptr.append(alloc, item) catch @panic(...)
+  def build_index_gop_body(expr_mir, alloc, item_var)
+    alloc_ref = MIR::AllocatorRef.new(alloc)
+    gop_value_ptr = MIR::Deref.new(MIR::FieldGet.new(MIR::Ident.new("gop"), "value_ptr"))
+    [
+      MIR::Let.new("idx_key", expr_mir, false, nil, nil),
+      # Dupe so the HashMap owns its own copy. If found_existing, the dup is
+      # unused — free it immediately to avoid a leak.
+      MIR::Let.new("idx_key_owned",
+        MIR::TryExpr.new(
+          MIR::MethodCall.new(alloc_ref, "dupe",
+            [MIR::Ident.new("u8"), MIR::Ident.new("idx_key")], false)),
+        false, nil, nil),
+      MIR::Let.new("gop",
+        MIR::TryOrPanic.new(
+          MIR::MethodCall.new(
+            MIR::FieldGet.new(MIR::Ident.new("idx_result"), "inner"),
+            "getOrPut",
+            [alloc_ref, MIR::Ident.new("idx_key_owned")], false),
+          "INDEX allocation failed"),
+        false, nil, nil),
+      MIR::IfStmt.new(
+        MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing"),
+        [MIR::ExprStmt.new(
+          MIR::MethodCall.new(alloc_ref, "free", [MIR::Ident.new("idx_key_owned")], false),
+          nil)],
+        [MIR::Set.new(gop_value_ptr,
+          MIR::ContainerInit.new("std.ArrayListUnmanaged(@TypeOf(#{item_var}))",
+            :list_empty, alloc, nil), nil)]),
+      MIR::ExprStmt.new(
+        MIR::TryOrPanic.new(
+          MIR::MethodCall.new(gop_value_ptr, "append",
+            [alloc_ref, MIR::Ident.new(item_var)], false),
+          "INDEX append failed"),
+        nil)
+    ]
   end
 
   def lower_stream_index(range_chain, expr_node, elem_zig, alloc, map_type)
@@ -1149,31 +1162,7 @@ class PipelineHost
       *([defer_deinit].compact),
       MIR::WhileStmt.new(range_next, [
         *p[:stage_stmts],
-        MIR::Let.new("idx_key", expr_mir, false, nil, nil),
-        MIR::Let.new("idx_key_owned",
-          MIR::InlineZig.new(
-            "try #{alloc_str}.dupe(u8, idx_key)",
-            "idx_key_dupe").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
-        MIR::Let.new("gop",
-          MIR::InlineZig.new(
-            "idx_result.inner.getOrPut(#{alloc_str}, idx_key_owned) catch @panic(\"INDEX allocation failed\")",
-            "idx_get_or_put").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, false, nil, nil),
-        MIR::IfStmt.new(
-          MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing"),
-          [MIR::ExprStmt.new(
-            MIR::InlineZig.new(
-              "#{alloc_str}.free(idx_key_owned)",
-              "idx_key_free"), nil)
-          ], nil),
-        MIR::IfStmt.new(
-          MIR::UnaryOp.new("!", MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing")),
-          [MIR::ExprStmt.new(
-            MIR::InlineZig.new("gop.value_ptr.* = .empty", "idx_init_slot"), nil)
-          ], nil),
-        MIR::ExprStmt.new(
-          MIR::InlineZig.new(
-            "gop.value_ptr.append(#{alloc_str}, #{item_var}) catch @panic(\"INDEX append failed\")",
-            "idx_append").tap { |iz| iz.stdlib_def = ALLOCATING_DEF }, nil)
+        *build_index_gop_body(expr_mir, :heap, item_var)
       ], p[:initial_capture], nil, nil, nil),
       MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
     ])

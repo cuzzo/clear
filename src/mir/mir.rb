@@ -230,6 +230,15 @@ module MIR
     include Expr
   end
 
+  # Fallible expression with literal-message panic on error. Replaces
+  # `try X catch @panic("message")` patterns where the catch is purely
+  # for "this can't legitimately fail at runtime, but the API is fallible".
+  # Used by INDEX op (HashMap getOrPut, value_ptr.append) and similar.
+  # Zig: <expr> catch @panic("message")
+  TryOrPanic = Struct.new(:expr, :panic_msg) do
+    include Expr
+  end
+
   # Defer statement.
   # Zig: defer { body };  or  defer expr;
   DeferStmt = Struct.new(:body) do

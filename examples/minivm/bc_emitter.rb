@@ -487,6 +487,11 @@ class BcEmitter
       # The VM uses Value.List uniformly; SoA layout (separate slice per
       # field) has no equivalent. Defer until VM models multi-array shape.
       raise Unimplemented, "MIR::SoaFieldAccess not yet supported in VM path"
+    when MIR::TryOrPanic
+      # The VM treats fallible operations as infallible (no error union
+      # propagation). Compile the expr; the @panic-on-error path is dead
+      # in this backend since the expr never raises in the VM model.
+      compile_expr(mir_node.expr)
     when MIR::Lit, MIR::Ident, MIR::ConcatStr, MIR::BinOp, MIR::BlockExpr
       # Bare expression in statement position (e.g. the last value of a
       # bg-block body, used as the fiber's return). Evaluate for side
@@ -1057,6 +1062,11 @@ class BcEmitter
       compile_expr(node.expr)  # VM has no pointers
     when MIR::OptionalUnwrap
       compile_expr(node.expr)
+    when MIR::TryOrPanic
+      # VM has no error union propagation; the catch arm is unreachable.
+      compile_expr(node.expr)
+    when MIR::SoaFieldAccess
+      raise Unimplemented, "MIR::SoaFieldAccess not yet supported in VM path"
     when MIR::AllocatorRef
       # VM is GC'd; strip_alloc_args removes these from arg lists. If one
       # does reach here (e.g. assigned to a local), emit nil — it's never
