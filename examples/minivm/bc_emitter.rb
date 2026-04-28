@@ -87,6 +87,7 @@ class BcEmitter
     @helper_fn_returned = false
     @loop_continue_target = nil  # bytecode index to jump to for MIR::ContinueStmt
     @loop_break_patches = nil    # Array of op indices needing loop-exit patch
+    @block_break_patches = nil   # Array of op indices for MIR::BreakStmt(value) -> block-expr exit
   end
 
   def compile(program)
@@ -209,12 +210,50 @@ class BcEmitter
   # emit BC_CALL with a fixed target IP.
   def compile_helper_fn_mir(mir_fn)
     name   = mir_fn.name.to_s
-    # REQUIRE-imported helpers carry their AST on the MIR node directly
-    # (see lower_require :bc target branch). Local helpers fall back to
-    # @fn_nodes which only indexes the main AST.
+    # Comptime-instantiated MIR::FnDef nodes have no AST counterpart and
+    # no runtime equivalent: they're Zig's "fn returning a type" pattern
+    # for generic structs/unions/fns (e.g. `Pair(T)`, `Option(T)`) and
+    # the synthesized closure helpers the lowering generates around
+    # try/catch and union-arm handlers (`__caseA_body`, `__processUser_body`,
+    # `__handleWithCatch_body`, etc.). The Zig backend specializes them at
+    # call sites; the VM has no comptime, so just drop them — call sites
+    # that try to BC_CALL them won't find an entry in @fn_start_ips and
+    # fall through to the LOAD_NAME slow path (which is also dead because
+    # these names don't exist at runtime). Tests that *actually* call the
+    # generic at runtime will fail later with a clear error.
     ast_fn = mir_fn.instance_variable_get(:@ast_fn) if mir_fn.respond_to?(:instance_variable_get)
     ast_fn ||= lookup_ast_fn(name)
-    raise Unimplemented, "no AST fn for helper #{name}" unless ast_fn
+    if ast_fn.nil?
+      return
+    end
+    if mir_fn.respond_to?(:comptime_params) && mir_fn.comptime_params &&
+       !mir_fn.comptime_params.empty?
+      return
+    end
+    # MIR::CatchWrapper-only bodies are Zig-codegen scaffolding for the
+    # unified CATCH grammar: the user-facing fn `foo` becomes a wrapper
+    # `return __foo_body(...) catch { ... };` while the actual logic lives
+    # in `__foo_body`. The VM has no try/catch error-union model and the
+    # __body helper carries the real AST, so skip the wrapper. Call sites
+    # that reach `foo` will fall through to LOAD_NAME and fail at runtime
+    # with a clearer error than the AST/MIR mismatch.
+    body = mir_fn.respond_to?(:body) ? (mir_fn.body || []) : []
+    if body.length == 1 && body.first.is_a?(MIR::CatchWrapper)
+      return
+    end
+    # Synthesized closure helpers (`__caseA_body`, `__handleWithCatch_body`,
+    # `__processUser_body`, ...) likewise have no AST counterpart -- the
+    # lowering generates them around try/catch / OR-fallback / union-arm
+    # bodies. lookup_ast_fn typically resolves them to an unrelated user
+    # fn, which causes MIR/AST length mismatches when compiled. The exception
+    # is `__<userFn>_body` which carries the real CATCH-grammar logic --
+    # the AST that lookup_ast_fn finds for it (the wrapper's user-fn) IS
+    # the right body. Detect that case by checking if the AST shape pairs.
+    if name.start_with?("__") && name.end_with?("_body")
+      # Allow it through; the MIR body shape should pair with the AST.
+    elsif name.start_with?("__")
+      return
+    end
 
     saved = {
       slots: @slots, islots: @islots, fslots: @fslots,
@@ -272,7 +311,14 @@ class BcEmitter
     # pair 1:1 with AST stmts.
     synthetic_only = ->(n) {
       n.is_a?(MIR::MoveMark) ||
-      (n.is_a?(MIR::Let) && n.name.to_s =~ /\A__(hpt|tmp)_\d+\z/)
+      (n.is_a?(MIR::Let) && n.name.to_s =~ /\A__(hpt|tmp)_\d+\z/) ||
+      # Lowering inserts `MIR::Let name=X init=Ident("_m_X")` at the top of
+      # any helper fn body that has a MUTABLE param: it renames the param to
+      # `_m_X` and then re-binds `X = _m_X` so the user-visible name is the
+      # mutable handle. The Let is real (allocates a slot + copies), but
+      # has no AST counterpart -- the param name is `X` in the source.
+      (n.is_a?(MIR::Let) && n.init.is_a?(MIR::Ident) &&
+       n.init.name.to_s == "_m_#{n.name}")
     }
     mir_paired = mir_stmts.reject(&synthetic_only)
     if mir_paired.length != ast_stmts.length
@@ -454,7 +500,16 @@ class BcEmitter
         raise Unimplemented, "ContinueStmt outside of a known loop target"
       end
     when MIR::BreakStmt
-      if @loop_break_patches
+      if mir_node.value && @block_break_patches
+        # Block-expression escape: BreakStmt(label, value) inside an IfStmt
+        # body that is itself inside a BlockExpr. Push the value to vstack
+        # and JUMP to the block-expr exit; compile_block_expr patches.
+        compile_expr(mir_node.value); pop_type
+        emit_op(JUMP)
+        @block_break_patches << @ops.length
+        emit_op(0)
+        push_type(:void)
+      elsif @loop_break_patches
         emit_op(JUMP)
         @loop_break_patches << @ops.length
         emit_op(0)
@@ -1144,6 +1199,11 @@ class BcEmitter
       compile_ast_expr(node.value) if node.value
     when AST::MatchStatement
       compile_ast_match(node)
+    when AST::StructDef, AST::EnumDef, AST::UnionDef
+      # Type declarations have no runtime side effect in the VM (schemas are
+      # registered up-front during compile()'s top-level scan). Treat as no-op
+      # so stmt-position type-decls don't blow up the AST walker.
+      push_type(:void)
     else
       raise Unimplemented, "unhandled AST stmt: #{node.class}"
     end
@@ -1284,6 +1344,15 @@ class BcEmitter
       if NATIVES.key?("iota")
         emit_op(NATIVE_CALL, NATIVES["iota"], 2); push_type(:any); return
       end
+    when MIR::RangeLit
+      # CheatLib.IntRange / CheatLib.Range materializes as the same flat
+      # list of integers — the VM has no lazy stream type, so concrete
+      # materialization is the only way to keep ForStmt / pipeline-source
+      # iteration correct.
+      compile_expr_to_value(node.start); pop_type
+      compile_expr_to_value(node.end_val); pop_type
+      emit_op(NATIVE_CALL, NATIVES["iota"], 2)
+      push_type(:any); return
       # Fallback: push a 2-elem list [start, end] so the loop iterates only
       # twice — wrong semantically, but enough to avoid compile failure.
       emit_op(NATIVE_CALL, NATIVES["list"], 2); push_type(:any); return
@@ -1360,6 +1429,29 @@ class BcEmitter
       compile_expr(node.inner)
     when MIR::BlockExpr
       compile_block_expr(node)
+    when MIR::ScopeBlock
+      # ScopeBlock in expression position: walk the body with the WITH-alias
+      # bookkeeping that the stmt-form uses, but leave the trailing value on
+      # the stack (the last semantic-stmt's compile_expr / compile_stmt push).
+      inner = semantic_mir_nodes(node.body)
+      @with_aliases ||= {}
+      saved_keys = @with_aliases.keys
+      last_t = :any
+      inner.each_with_index do |n, i|
+        if i < inner.length - 1
+          compile_stmt(n, nil)
+          t = pop_type
+          emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+        else
+          compile_stmt(n, nil)
+          last_t = pop_type
+        end
+      end
+      new_aliases = @with_aliases.keys - saved_keys
+      new_aliases.each { |a| alias_writeback(a) }
+      new_aliases.each { |a| @with_aliases.delete(a) }
+      push_type(last_t)
+      return
     when MIR::Pipeline
       # Migrated pipeline operators produce a real MIR tree via
       # pipeline_host.lower_pipeline — compile that directly. Legacy operators
@@ -2538,9 +2630,17 @@ class BcEmitter
   end
 
   def compile_block_expr(node)
-    # Emit all but last statement, then leave result on stack
+    # BlockExpr leaves a single value on the stack. Two break shapes show
+    # up here: (1) a top-level BreakStmt as the last (or every-branch) stmt,
+    # which compile_expr handles inline; (2) BreakStmt nested inside an
+    # IfStmt / IfChain body for the `IF cond THEN <expr> ELSE <expr> END`
+    # expression form. Case (2) needs a labeled jump out of the block,
+    # so we set up @block_break_patches that compile_stmt(BreakStmt)
+    # consumes -- emit value to vstack, JUMP to block exit.
     stmts = semantic_mir_nodes(node.body)
     last_break_type = :any
+    saved_block_breaks = @block_break_patches
+    @block_break_patches = []
     stmts.each_with_index do |s, i|
       if i < stmts.length - 1
         if s.is_a?(MIR::BreakStmt) && s.value
@@ -2560,6 +2660,10 @@ class BcEmitter
         end
       end
     end
+    # Patch all nested BreakStmt jumps to land here (after the trailing
+    # value already on the stack from the fallthrough path).
+    @block_break_patches.each { |idx| @ops[idx] = @ops.length }
+    @block_break_patches = saved_block_breaks
     push_type(last_break_type)
   end
 
@@ -2783,9 +2887,18 @@ class BcEmitter
     loop_start = @ops.length
     emit_op(LOAD_NAME, var_idx)
     compile_ast_expr(node.end_expr)
+    end_t = pop_type
+    case end_t
+    when :i64 then emit_op(I_TO_VAL)
+    when :f64 then emit_op(F_TO_VAL)
+    end
     emit_op(LT); emit_op(JUMP_IF_FALSE)
     jump_exit = @ops.length; emit_op(0)
-    node.body.each { |s| compile_ast_stmt(s); emit_op(POP) }
+    node.body.each do |s|
+      compile_ast_stmt(s)
+      t = pop_type
+      emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+    end
     emit_op(LOAD_NAME, var_idx)
     emit_op(LOAD_CONST, add_const([:i64, 1]))
     emit_op(ADD); emit_op(SET_NAME, var_idx); emit_op(POP)
@@ -2814,7 +2927,11 @@ class BcEmitter
     emit_op(LOAD_NAME, idx_name)
     emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
     emit_op(STORE_NAME, add_const(var)); emit_op(POP)
-    node.body.each { |s| compile_ast_stmt(s); emit_op(POP) }
+    node.body.each do |s|
+      compile_ast_stmt(s)
+      t = pop_type
+      emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+    end
     emit_op(LOAD_NAME, idx_name)
     emit_op(LOAD_CONST, add_const([:i64, 1]))
     emit_op(ADD); emit_op(SET_NAME, idx_name); emit_op(POP)
@@ -2929,6 +3046,59 @@ class BcEmitter
     compile_ast_expr(node.right); right_type = pop_type
     both_i64 = (left_type == :i64 && right_type == :i64)
     both_f64 = (left_type == :f64 && right_type == :f64)
+    # Mixed typed/untyped operands: typed ops live on istack/fstack, the
+    # untyped op on vstack, so a polymorphic ADD/LT etc. would underflow
+    # the wrong stack. Hoist the typed side to the value stack first; the
+    # right operand is on top, so we must coerce the left BEFORE compiling
+    # the right (it would already be there). Since we've already compiled
+    # both, fall back to "if mismatched, coerce both": insert the right
+    # coercion directly above and re-emit a coercion for the left by
+    # peek-then-swap... simpler: reject the mismatch upstream by coercing
+    # both at-load.
+    if !both_i64 && !both_f64 && (left_type == :i64 || left_type == :f64 || right_type == :i64 || right_type == :f64)
+      # right is on top of stack(s); coerce it first if typed.
+      case right_type
+      when :i64 then emit_op(I_TO_VAL); right_type = :any
+      when :f64 then emit_op(F_TO_VAL); right_type = :any
+      end
+      # left is below right on its stack; we can't easily reach it without
+      # a SWAP. Coerce by re-loading is not straightforward here either.
+      # For now, support the common case where left was typed (LOAD_ISLOT/
+      # LOAD_FSLOT); after right is on vstack, reach back via VAL_TO_I64
+      # round-trip is wrong. Use the typed-stack ops if applicable.
+      if left_type == :i64 || left_type == :f64
+        # Promote the i64/f64 typed result to vstack via I_TO_VAL/F_TO_VAL,
+        # which expects the value on top of istack/fstack. The right
+        # coercion above moved right off the typed stack, so left is now
+        # exposed on top and can be coerced.
+        # WAIT: we already moved right via I_TO_VAL above (typed -> vstack).
+        # In the i64/f64 mismatch case where ONLY one side was typed,
+        # the typed side's value is at the top of its stack.
+        if left_type == :i64
+          # Insert I_TO_VAL but... operand order on vstack must remain
+          # left, right. After right's I_TO_VAL, vstack: [..., right].
+          # Now I_TO_VAL on left would push it on top: [..., right, left].
+          # Swap them. The VM has no SWAP opcode; the simplest fix is to
+          # store right to a tmp slot, I_TO_VAL the left, then re-load right.
+          @binop_tmp_counter ||= 0; @binop_tmp_counter += 1
+          tmp = "__binop_tmp_#{@binop_tmp_counter}"
+          alloc_slot(tmp, :any) unless has_slot?(tmp)
+          emit_op(STORE_SLOT, @slots[tmp])  # peek-store, vstack still has right
+          emit_op(POP)
+          emit_op(I_TO_VAL)                 # left from istack -> vstack
+          emit_op(LOAD_SLOT, @slots[tmp])   # vstack: [left, right]
+        elsif left_type == :f64
+          @binop_tmp_counter ||= 0; @binop_tmp_counter += 1
+          tmp = "__binop_tmp_#{@binop_tmp_counter}"
+          alloc_slot(tmp, :any) unless has_slot?(tmp)
+          emit_op(STORE_SLOT, @slots[tmp])
+          emit_op(POP)
+          emit_op(F_TO_VAL)
+          emit_op(LOAD_SLOT, @slots[tmp])
+        end
+        left_type = :any
+      end
+    end
     case op
     when :ADD
       if left_type == :str || right_type == :str then emit_op(CONCAT); push_type(:str)

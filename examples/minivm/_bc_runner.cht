@@ -3034,7 +3034,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 -- Push return value
                 IF sp >= stack.length() THEN stack.append(bcRetVal); ELSE stack[sp] = bcRetVal; END
                 sp += 1;,
-            79 -> -- BC_RET_VOID: restore frame, no push
+            79 -> -- BC_RET_VOID: restore frame, push Value.Nil so callers
+                  -- can uniformly POP the return value (the caller emits
+                  -- POP after every BC_CALL regardless of return type).
                 -- Restore slots (stride must match BC_CALL above)
                 savedBaseV = (callSavedSlots.length() - 256);
                 FOR bci IN (0_i64 ..< 256) DO slots[bci] = COPY callSavedSlots[savedBaseV + bci]; END
@@ -3044,7 +3046,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 callRetSps.remove(callRetSps.length() - 1);
                 ip = callRetIps[callRetIps.length() - 1];
                 callRetIps.remove(callRetIps.length() - 1);
-                sp = retSpV;,
+                sp = retSpV;
+                IF sp >= stack.length() THEN stack.append(Value.Nil); ELSE stack[sp] = Value.Nil; END
+                sp += 1;,
             80 -> -- MARK_MOVED [slot]: release this slot's ownership by
                   -- replacing it with Nil. The next slot overwrite (via
                   -- STORE_SLOT reassignment or BC_RET slot-restore) becomes
