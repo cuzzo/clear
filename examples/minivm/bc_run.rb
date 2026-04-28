@@ -25,7 +25,8 @@ if $PROGRAM_NAME == __FILE__
   ARGV.delete("--run")  # accepted but ignored (run is always the mode)
 
   project_root   = File.expand_path("../../", __dir__)
-  bc_runner_path = File.join(__dir__, "_bc_runner")
+  optimized = !ENV["BC_OPT"].nil? && ENV["BC_OPT"] != "0"
+  bc_runner_path = File.join(__dir__, optimized ? "_bc_runner_opt" : "_bc_runner")
   bc_runner_src  = File.join(__dir__, "_bc_runner.cht")
   bc_ops_file    = File.join(__dir__, "_bc_ops.txt")
   bc_consts_file = File.join(__dir__, "_bc_consts.txt")
@@ -58,8 +59,10 @@ if $PROGRAM_NAME == __FILE__
     bc_runner_main += "    RETURN;\nEND\n"
 
     File.write(bc_runner_src, interp_base + bc_runner_main)
-    system("#{project_root}/clear", "build", "--use-c-allocator", bc_runner_src, "-o", bc_runner_path,
-           [:out, :err] => File::NULL)
+    build_args = ["build", "--use-c-allocator"]
+    build_args << "--optimized" if optimized
+    build_args.concat([bc_runner_src, "-o", bc_runner_path])
+    system("#{project_root}/clear", *build_args, [:out, :err] => File::NULL)
   end
 
   require_relative "bc_emitter"
