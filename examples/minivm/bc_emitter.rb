@@ -45,6 +45,8 @@ class BcEmitter
   VAL_TO_F64  = 85  # vstack Value → fstack Float64 (via getNum)
   IS_ERR      = 86  # pop vstack Value, push Value.TrueVal if Value.Error else FalseVal
   PUSH_ERR    = 87  # push a Value.Error{errMsg:"", errKind:"runtime"} sentinel
+  RAISE_ERR   = 88  # pop msg+kind strings, push Value.Error{errMsg=msg, errKind=kind}
+  GET_ERR_KIND = 89 # peek top Value.Error, push Value.Str(errKind)
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -227,14 +229,24 @@ class BcEmitter
   # AST fn_nodes key the main fn under `main` (or `cheatMain`) but MIR renames
   # it to `clearMain`. Try each candidate.
   def lookup_ast_fn(name)
-    @fn_nodes[name.to_sym] || @fn_nodes[name] ||
-      @fn_nodes["#{name}!".to_sym] || @fn_nodes["#{name}!"] || (
-      MAIN_NAMES.include?(name) ?
-        (@fn_nodes[:main] || @fn_nodes["main"] ||
-         @fn_nodes[:cheatMain] || @fn_nodes["cheatMain"] ||
-         @fn_nodes[:clearMain] || @fn_nodes["clearMain"]) :
-        nil
-    )
+    direct = @fn_nodes[name.to_sym] || @fn_nodes[name] ||
+             @fn_nodes["#{name}!".to_sym] || @fn_nodes["#{name}!"]
+    return direct if direct
+    # `__<X>_body` is the inner half of the CATCH-grammar pair; the AST is
+    # the user-facing fn `X`. Strip the wrapper prefix/suffix so the
+    # paired-walk lookup finds the real body.
+    if name.to_s =~ /\A__(.+)_body\z/
+      base = $1
+      direct = @fn_nodes[base.to_sym] || @fn_nodes[base] ||
+               @fn_nodes["#{base}!".to_sym] || @fn_nodes["#{base}!"]
+      return direct if direct
+    end
+    if MAIN_NAMES.include?(name)
+      return @fn_nodes[:main] || @fn_nodes["main"] ||
+             @fn_nodes[:cheatMain] || @fn_nodes["cheatMain"] ||
+             @fn_nodes[:clearMain] || @fn_nodes["clearMain"]
+    end
+    nil
   end
 
   # Compile a non-main helper function into the shared op stream, isolated
@@ -271,15 +283,41 @@ class BcEmitter
       type_generator = body.empty? || (body.length == 1 && body.first.is_a?(MIR::InlineZig))
       return if type_generator
     end
-    # MIR::CatchWrapper-only bodies are Zig-codegen scaffolding for the
-    # unified CATCH grammar: the user-facing fn `foo` becomes a wrapper
-    # `return __foo_body(...) catch { ... };` while the actual logic lives
-    # in `__foo_body`. The VM has no try/catch error-union model and the
-    # __body helper carries the real AST, so skip the wrapper. Call sites
-    # that reach `foo` will fall through to LOAD_NAME and fail at runtime
-    # with a clearer error than the AST/MIR mismatch.
+    # MIR::CatchWrapper-only bodies are the user-facing wrappers around a
+    # `__<name>_body` inner helper. The wrapper's body parses the inner
+    # call + per-clause kind matchers from the embedded Zig source.
+    # We compile this entry directly without AST pairing (the AST has the
+    # full CATCH-grammar source, but the wrapper's MIR is structural).
     body = mir_fn.respond_to?(:body) ? (mir_fn.body || []) : []
     if body.length == 1 && body.first.is_a?(MIR::CatchWrapper)
+      saved = {
+        slots: @slots, islots: @islots, fslots: @fslots,
+        slot_types: @slot_types, mutables: @mutables,
+        next_slot: @next_slot, next_islot: @next_islot, next_fslot: @next_fslot,
+        type_stack: @type_stack,
+      }
+      @slots = {}; @islots = {}; @fslots = {}
+      @slot_types = {}; @mutables = Set.new
+      @next_slot = 0; @next_islot = 0; @next_fslot = 0
+      @type_stack = []
+      @in_helper_fn = true
+      @helper_fn_returned = false
+      @fn_start_ips[name] = @ops.length
+      ast_param_types = ast_param_vm_types(ast_fn)
+      (mir_fn.params || []).each do |p|
+        pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
+        next if pname == "rt"
+        base_name = pname.start_with?("_m_") ? pname[3..] : pname
+        alloc_slot(pname, ast_param_types[base_name] || :any)
+      end
+      compile_catch_wrapper(body.first); pop_type
+      emit_op(BC_RET_VOID) unless @helper_fn_returned
+      @slots = saved[:slots]; @islots = saved[:islots]; @fslots = saved[:fslots]
+      @slot_types = saved[:slot_types]; @mutables = saved[:mutables]
+      @next_slot = saved[:next_slot]; @next_islot = saved[:next_islot]
+      @next_fslot = saved[:next_fslot]; @type_stack = saved[:type_stack]
+      @in_helper_fn = false
+      @helper_fn_returned = false
       return
     end
     # Synthesized closure helpers (`__caseA_body`, `__handleWithCatch_body`,
@@ -531,6 +569,24 @@ class BcEmitter
       emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
       push_type(:void)
     when MIR::ScopeBlock
+      # RAISE detection: lower_raise produces
+      #   ScopeBlock([
+      #     ExprStmt(MethodCall(rt, "setError", [.Kind, name_id, msg, line])),
+      #     ReturnStmt(Ident("error.CheatError"))
+      #   ])
+      # The VM has no rt.__error infrastructure; lift the kind+msg into
+      # a Value.Error sentinel via RAISE_ERR + BC_RET instead.
+      if (raise_info = detect_raise_scope(mir_node))
+        kind, msg_expr = raise_info
+        emit_op(LOAD_CONST, add_const([:str, kind]))
+        compile_expr_to_value(msg_expr); pop_type
+        emit_op(RAISE_ERR)
+        emit_op(BC_RET) if @in_helper_fn
+        @helper_fn_returned = true if @in_helper_fn
+        push_type(:void)
+        return
+      end
+
       # WITH blocks lower to ScopeBlock with an InlineZig binding-prologue
       # at the head. The prologue's alias_to_source records the source for
       # each alias in @with_aliases. After the body, write each alias back
@@ -647,7 +703,7 @@ class BcEmitter
       end
       push_type(:void)
     when MIR::CatchWrapper
-      raise Unimplemented, "#{mir_node.class.name.split('::').last} not yet supported"
+      compile_catch_wrapper(mir_node)
     when MIR::Panic
       # Print message + halt. The VM has no @panic equivalent; surfacing the
       # message via display() and emitting HALT is the closest analogue.
@@ -2503,6 +2559,127 @@ class BcEmitter
   def receiver_slot_type(node)
     return :any unless node.is_a?(MIR::Ident)
     @slot_types[node.name.to_s] || :any
+  end
+
+  # The outer CATCH-wrapper FN is structurally:
+  #   try __<inner>_body(rt, ...args) catch { ...clauses... }
+  # In the VM, compile to:
+  #   1. BC_CALL the inner fn with the same args we received.
+  #   2. Peek the result; IS_ERR test.
+  #   3. If error: parse CatchWrapper.code for `matchesKind(.X)` clauses and
+  #      walk them in order, comparing GET_ERR_KIND to each kind. The matching
+  #      clause's body is one of the pre-lowered clause_bodies. The `else`
+  #      arm is the final clause_body (default).
+  #   4. If not error: BC_RET that value.
+  def compile_catch_wrapper(node)
+    code = node.code.to_s
+    inner_call = code[/return\s+(\w+)\s*\(\s*([^)]*)\)\s*catch/, 1]
+    inner_args = code[/return\s+\w+\s*\(\s*([^)]*)\)\s*catch/, 1]
+    arg_names = (inner_args || "").split(/,\s*/).map(&:strip).reject(&:empty?)
+    # Each clause's match info: extract `matchesKind(.X)` (and optional
+    # `matchesName(@intFromEnum(ErrorName.Y))`). The else arm has none.
+    clause_kinds = []
+    code.scan(/(?:if|else if)\s*\(rt\.__error\.matchesKind\(\.(\w+)\)(?:\s+and\s+rt\.__error\.matchesName\(@intFromEnum\(ErrorName\.(\w+)\)\))?\)/).each do |kind, name|
+      clause_kinds << { kind: kind, name: name }
+    end
+    has_default = code.include?("} else {")
+    # Sanity: clause_bodies length should equal clause_kinds.length + (default ? 1 : 0).
+
+    if inner_call.nil? || !@fn_start_ips.key?(inner_call)
+      raise Unimplemented, "compile_catch_wrapper: inner fn `#{inner_call}` has no entry"
+    end
+
+    # Push args matching the names parsed from the Zig call. Each name
+    # should be a current parameter slot (set by compile_helper_fn_mir's
+    # param prologue) or `rt` (skipped). `rt` is always first; the helper
+    # at the inner_call entry expects 0 args (rt is auto-passed by the
+    # interpreter via callSavedSlots), so skip rt and emit only the rest.
+    user_args = arg_names.reject { |n| n == "rt" }
+    user_args.each do |name|
+      emit_load_any(name)
+    end
+    emit_op(BC_CALL, @fn_start_ips[inner_call], user_args.length)
+    push_type(:any)
+    # After BC_CALL the result Value is on top of vstack. Peek IS_ERR.
+    # IS_ERR pops; we want to keep the value for the success path. Save
+    # to a temp slot.
+    @catch_tmp_counter ||= 0; @catch_tmp_counter += 1
+    tmp = "__catch_res_#{@catch_tmp_counter}"
+    alloc_slot(tmp, :any)
+    emit_op(STORE_SLOT, @slots[tmp]); pop_type
+    emit_op(LOAD_SLOT, @slots[tmp])
+    emit_op(IS_ERR)
+    # If NOT error: jump past clause dispatch and BC_RET the saved value.
+    emit_op(JUMP_IF_FALSE)
+    not_err_jump = @ops.length; emit_op(0)
+    # Error path: load tmp again, GET_ERR_KIND, walk clause_kinds.
+    end_jumps = []
+    bodies = (node.clause_bodies || [])
+    clause_kinds.each_with_index do |ck, ci|
+      # GET_ERR_KIND peeks; we want it on top to compare. Load result, then GET_ERR_KIND.
+      emit_op(LOAD_SLOT, @slots[tmp])
+      emit_op(GET_ERR_KIND)
+      # Result is now Value.Str(errKind). Move it forward so we don't keep the error under it.
+      # Actually GET_ERR_KIND pushes errKind on top WITHOUT popping the error — stack is now [..., err, errKind].
+      # We want to compare errKind to ck[:kind] then JUMP_IF_FALSE. EQ pops 2.
+      # So we have: [..., err, errKind, "Kind"]; EQ pops 2 → bool; stack [..., err, bool].
+      emit_op(LOAD_CONST, add_const([:str, ck[:kind]]))
+      emit_op(EQ)
+      emit_op(JUMP_IF_FALSE)
+      skip_idx = @ops.length; emit_op(0)
+      # Drop the error from the stack before running the clause body.
+      emit_op(POP)
+      # Compile the clause body.
+      body = bodies[ci] || []
+      semantic_mir_nodes(body).each { |s| compile_stmt(s, nil); pop_type }
+      emit_op(JUMP); end_jumps << @ops.length; emit_op(0)
+      @ops[skip_idx] = @ops.length
+      # On non-match, we still have [..., err, bool] -- drop the bool.
+      # Actually JUMP_IF_FALSE consumed the bool. So stack is [..., err]. Loop continues.
+    end
+    # Default body: drop the error and run.
+    if has_default
+      emit_op(POP)  # drop the err that's still on top
+      default_body = bodies.last || []
+      semantic_mir_nodes(default_body).each { |s| compile_stmt(s, nil); pop_type }
+    else
+      # No default and nothing matched: rethrow the error.
+      emit_op(BC_RET)
+    end
+    # After clause body has run and BC_RET'd inside its body, this point
+    # is unreachable; if a clause body fell through (no return), we land
+    # here and the result is on stack. That's a no-op.
+    end_jumps.each { |idx| @ops[idx] = @ops.length }
+    # NOT-error path target: load saved value and BC_RET.
+    @ops[not_err_jump] = @ops.length
+    emit_op(LOAD_SLOT, @slots[tmp])
+    emit_op(BC_RET)
+    @helper_fn_returned = true
+    pop_type
+    push_type(:void)
+  end
+
+  # Detect the lowering shape `lower_raise` produces:
+  #   ScopeBlock([ExprStmt(MethodCall(rt, "setError", [.Kind, name_id, msg, line])),
+  #               ReturnStmt(Ident("error.CheatError"))])
+  # Return [kind_string, msg_mir_expr] when matched, nil otherwise.
+  def detect_raise_scope(node)
+    return nil unless node.is_a?(MIR::ScopeBlock)
+    body = node.body
+    return nil unless body.is_a?(Array) && body.length == 2
+    err_call, ret_stmt = body
+    return nil unless err_call.is_a?(MIR::ExprStmt)
+    return nil unless ret_stmt.is_a?(MIR::ReturnStmt) &&
+                      ret_stmt.value.is_a?(MIR::Ident) &&
+                      ret_stmt.value.name.to_s == "error.CheatError"
+    call = err_call.expr
+    return nil unless call.is_a?(MIR::MethodCall) &&
+                      call.method.to_s == "setError"
+    return nil unless call.args.length >= 3
+    kind_arg = call.args[0]
+    msg_arg  = call.args[2]
+    return nil unless kind_arg.is_a?(MIR::Ident) && kind_arg.name.to_s.start_with?(".")
+    [kind_arg.name.to_s.sub(/\A\./, ""), msg_arg]
   end
 
   # Strip allocator arguments: bare `rt` idents, `rt.heapAlloc()` calls,

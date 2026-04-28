@@ -313,7 +313,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     -- File I/O: 45=readFile, 46=writeFile, 47=shell
     IF id == 45 THEN
         path = getStr(evaled[1]);
-        content = readFile(path);
+        content = readFile(path) OR "";
+        IF content == "" THEN
+            -- readFile failed (file not found, perm denied, etc). Return a
+            -- Value.Error sentinel so OR RAISE / OR <fallback> sees an error
+            -- instead of crashing the scheduler with the unwrapped Zig error.
+            RETURN Value.Error{ errMsg: "readFile failed", errKind: "NotFound" };
+        END
         RETURN Value{ Str: COPY content };
     END
     IF id == 46 THEN
@@ -3116,6 +3122,23 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             87 -> -- PUSH_ERR (push Value.Error sentinel)
                 pv = Value.Error{ errMsg: "runtime error", errKind: "CheatError" };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            88 -> -- RAISE_ERR (pop msg, kind; push Value.Error{errMsg: msg, errKind: kind})
+                -- Stack order: ..., kind, msg  (msg is top)
+                sp -= 1; raiseMsg = getStr(COPY stack[sp]);
+                sp -= 1; raiseKind = getStr(COPY stack[sp]);
+                pv = Value.Error{ errMsg: COPY raiseMsg, errKind: COPY raiseKind };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            89 -> -- GET_ERR_KIND (peek top Value.Error, push Value.Str of its errKind)
+                -- Does NOT pop the error: the caller's code typically wants
+                -- both the kind dispatch and a chance to extract msg later.
+                getErrKindRef = COPY stack[sp - 1];
+                MATCH getErrKindRef START
+                    Value.Error AS gek -> pv = Value{ Str: COPY gek.errKind };,
+                    DEFAULT -> pv = Value{ Str: "" };
+                END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             DEFAULT ->
