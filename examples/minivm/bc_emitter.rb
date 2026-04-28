@@ -146,6 +146,19 @@ class BcEmitter
     helpers = fns.reject { |f| MAIN_NAMES.include?(f.name.to_s) }
     mains   = fns.select { |f| MAIN_NAMES.include?(f.name.to_s) }
 
+    # Build a `name -> comptime_params count` map so call sites can strip
+    # the leading type-arg Idents that the lowering injects for generic
+    # functions (`identity<f64>(42.0)` -> Call("identity", [Ident("f64"), 42.0])).
+    # The VM is dynamically typed, so type args are dead weight; without
+    # stripping, `identity` would receive "f64" in slot 0 and the actual
+    # value in slot 1.
+    @fn_comptime_arity = {}
+    fns.each do |f|
+      n = (f.respond_to?(:comptime_params) ? (f.comptime_params || []) : []).length
+      next if n == 0
+      @fn_comptime_arity[f.name.to_s] = n
+    end
+
     # Emit helper bodies before main so call sites can patch fixed IPs.
     # Jump over the helper region into main; patch the jump target after
     # helpers are laid out.
@@ -245,9 +258,18 @@ class BcEmitter
     if ast_fn.nil?
       return
     end
+    # User-defined generic functions like `FN identity<T>(x: T) RETURNS T`
+    # have non-empty comptime_params but DO have a real AST body that we
+    # can compile type-erased -- the VM is dynamically typed so the type
+    # parameter T is irrelevant at runtime. Type-returning generators
+    # (`Pair(T)` -> Zig type) have no AST body and should still be skipped;
+    # detect them by their body shape (single InlineZig "type emit" or
+    # single ReturnStmt with a type expression).
     if mir_fn.respond_to?(:comptime_params) && mir_fn.comptime_params &&
        !mir_fn.comptime_params.empty?
-      return
+      body = mir_fn.respond_to?(:body) ? (mir_fn.body || []) : []
+      type_generator = body.empty? || (body.length == 1 && body.first.is_a?(MIR::InlineZig))
+      return if type_generator
     end
     # MIR::CatchWrapper-only bodies are Zig-codegen scaffolding for the
     # unified CATCH grammar: the user-facing fn `foo` becomes a wrapper
@@ -2296,6 +2318,14 @@ class BcEmitter
     }
     # Skip &address-of wrapper
     args = args.map { |a| a.is_a?(MIR::AddressOf) ? a.expr : a }
+
+    # Strip leading comptime type-arg Idents for generic fns. The MIR call
+    # for `identity<f64>(42.0)` is Call("identity", [Ident("f64"), Lit(42.0)]).
+    # The VM has no comptime; type arg Idents would land in the helper's
+    # slot 0 (the formal type parameter) shifting all real args by one.
+    if @fn_comptime_arity && (n = @fn_comptime_arity[callee])
+      args = args.drop(n)
+    end
 
     # Zig's std.debug.print is how macro_print (CLEAR's `print`) is emitted.
     # Args are: [format_string_lit, tuple_ident_like ".{a, b, c}"]. The
