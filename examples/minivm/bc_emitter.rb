@@ -521,6 +521,11 @@ class BcEmitter
         @loop_for_continue_patches << @ops.length
         emit_op(0)
         push_type(:void)
+      elsif @loop_continue_target == :deferred_while_update
+        emit_op(JUMP)
+        @loop_while_update_patches << @ops.length
+        emit_op(0)
+        push_type(:void)
       elsif @loop_continue_target
         emit_op(JUMP, @loop_continue_target)
         push_type(:void)
@@ -571,6 +576,18 @@ class BcEmitter
         guard_aliases.each_with_index do |alias_name, i|
           src_name = sources[i] || sources.last
           alias_to_source(alias_name, src_name) if src_name
+        end
+        # Third pattern: plain WITH BORROWED / RESTRICT — emits Zig-side
+        #   const ref = greeting;       (immutable borrow)
+        #   const ref = &greeting;      (mutable borrow, Zig pointer)
+        # The VM has no borrow indirection; alias and source share storage
+        # via alias_to_source. The mutable case still copies (writeback
+        # below) so reassigning through the alias is visible on the source.
+        mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*&?(\w+)(?:\.\w+)*\s*;/).each do |alias_name, src_name|
+          # Skip the patterns already handled above (Arc unwrap, guard.get()).
+          next if alias_name.start_with?("__") && alias_name.end_with?("_unwrap")
+          next if mir_node.code.to_s.match?(/const\s+#{Regexp.escape(alias_name)}\s*=\s*__\w+_guard_\d+\.get\(\)/)
+          alias_to_source(alias_name, src_name) if has_slot?(src_name)
         end
         push_type(:void)
       when "suppress_unused_inner_capture", "item_cleanup"
@@ -907,14 +924,35 @@ class BcEmitter
     jump_exit_idx = @ops.length
     emit_op(0)
 
+    # Zig-style `while (cond) : (update) { body }` lowers FOR-range loops
+    # to WhileStmt with a non-nil `update` (the iterator increment). The
+    # update runs on every iteration after the body and BEFORE the next
+    # condition check; CONTINUE must therefore jump to the update block,
+    # not back to loop_start (otherwise the iterator never advances).
+    has_update = node.respond_to?(:update) && node.update
     saved_continue = @loop_continue_target
     saved_breaks   = @loop_break_patches
-    @loop_continue_target = loop_start
+    update_patches = []
+    if has_update
+      @loop_continue_target = :deferred_while_update
+      @loop_while_update_patches = update_patches
+    else
+      @loop_continue_target = loop_start
+    end
     @loop_break_patches   = []
     emit_body_stmts(node.body)
     break_patches = @loop_break_patches
     @loop_continue_target = saved_continue
     @loop_break_patches   = saved_breaks
+
+    if has_update
+      update_ip = @ops.length
+      update_patches.each { |ip| @ops[ip] = update_ip }
+      compile_stmt(node.update, nil)
+      t = pop_type
+      emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      @loop_while_update_patches = nil
+    end
     emit_op(JUMP, loop_start)
     @ops[jump_exit_idx] = @ops.length
     break_patches.each { |idx| @ops[idx] = @ops.length }
