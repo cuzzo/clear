@@ -2290,21 +2290,60 @@ class BcEmitter
       tuple = args[1]
       if tuple.is_a?(MIR::Ident) && tuple.name.to_s =~ /\A\.\{(.*)\}\z/m
         inner = $1
-        parts = inner.split(/,\s*/).map do |p|
-          p = p.strip
-          p = $1 if p =~ /\A@as\([^,]*,\s*(.*)\)\z/m
-          p
+        # Strip Zig wrappers iteratively: `try CheatLib.X(alloc, V)`, `@as(T, V)`,
+        # `@intFromFloat(V)`, `@floatFromInt(V)`. Each peels one layer; we
+        # rerun until no more match. split_print_tuple keeps nested calls
+        # intact so we can address each comma-arg position correctly.
+        unwrap = lambda do |p|
+          loop do
+            stripped = p.strip
+            if stripped =~ /\Atry\s+(.*)\z/m
+              p = $1.strip; next
+            end
+            if stripped =~ /\A([@\w][\w.]*)\s*\((.*)\)\s*\z/m
+              fn = $1; argstr = $2
+              args_split = split_print_tuple(argstr).map(&:strip)
+              # @as(T, V) / CheatLib.intToString(alloc, V) / @intFromFloat(V)
+              # — the value of interest is the LAST arg in every common case.
+              if args_split.length >= 1
+                last = args_split.last
+                # Drop a leading `{alloc}` placeholder still present.
+                last = last.strip
+                if fn == "@as" || fn == "@intFromFloat" || fn == "@floatFromInt" ||
+                   fn.start_with?("CheatLib.")
+                  p = last; next
+                end
+              end
+            end
+            break
+          end
+          p.strip
         end
+        parts = split_print_tuple(inner).map { |p| unwrap.call(p) }
         parts.each do |raw|
           if raw =~ /\A"(.*)"\z/m
             str = $1.gsub(/\\n/, "\n").gsub(/\\t/, "\t").gsub(/\\"/, '"').gsub(/\\\\/, '\\')
             emit_op(LOAD_CONST, add_const([:str, str]))
+            emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+          elsif raw =~ /\A([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\z/ && has_slot?($1)
+            # `obj.field` access against a known slot — emit FieldGet via vector-ref.
+            obj_name = $1; fld = $2
+            emit_op(LOAD_SLOT, @slots[obj_name])
+            idx = find_field_index(fld)
+            if idx
+              emit_op(LOAD_CONST, add_const([:i64, idx]))
+              emit_op(NATIVE_CALL, NATIVES["vector-ref"], 2)
+            end
+            emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
           elsif has_slot?(raw)
             emit_op(LOAD_SLOT, @slots[raw])
+            emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
           else
+            # Unknown expression — fall back to LOAD_NAME (likely prints nil
+            # but doesn't crash).
             emit_op(LOAD_NAME, add_const(raw))
+            emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
           end
-          emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
         end
         # print() always ends with a newline (the {s}\n style format string).
         emit_op(LOAD_CONST, add_const([:str, "\n"]))
@@ -2662,6 +2701,42 @@ class BcEmitter
       return idx if idx
     end
     nil
+  end
+
+  # Split a `.{a, b, c}` tuple literal's inner text on top-level commas
+  # only, respecting nested parens / braces / brackets / quoted strings.
+  # The naive `inner.split(/,\s*/)` shreds calls like
+  #   try CheatLib.intToString(alloc, @as(i64, @intFromFloat(p.first)))
+  # into 3 pieces and breaks every print(p.field.toString()) call.
+  def split_print_tuple(inner)
+    out = []
+    depth = 0
+    in_quote = false
+    cur = +""
+    i = 0
+    while i < inner.length
+      c = inner[i]
+      if in_quote
+        cur << c
+        if c == "\\" && i + 1 < inner.length
+          cur << inner[i + 1]; i += 2; next
+        end
+        in_quote = false if c == '"'
+      elsif c == '"'
+        in_quote = true; cur << c
+      elsif "([{".include?(c)
+        depth += 1; cur << c
+      elsif ")]}".include?(c)
+        depth -= 1; cur << c
+      elsif c == "," && depth == 0
+        out << cur; cur = +""
+      else
+        cur << c
+      end
+      i += 1
+    end
+    out << cur unless cur.empty?
+    out
   end
 
   # ================================================================
