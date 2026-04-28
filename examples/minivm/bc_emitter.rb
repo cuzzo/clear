@@ -332,6 +332,16 @@ class BcEmitter
     mir_stmts = semantic_mir_nodes(mir_body)
     ast_stmts = semantic_ast_nodes(ast_body)
 
+    # Pre-pass: harvest `name -> struct_base` from MIR::AllocMark nodes so
+    # compile_let can stamp `:struct_<Base>` on slots whose initializer is
+    # a function call (which otherwise pushes :any and loses dispatch
+    # info). Without this, `h1.items` against a struct returned from a
+    # helper would fall through the .items short-circuit (treating it as
+    # the Zig ArrayList wrapper identity) and assertion-side counts would
+    # see h1 instead of h1.items.
+    @alloc_struct_hints ||= {}
+    walk_for_alloc_marks(mir_body)
+
     # Ownership-only MIR nodes (MoveMark) and synthetic hoisted temps
     # (__hpt_N / __tmp_N Lets) have no AST counterpart -- the lowering
     # inserts them for HPT lifting and ownership tracking. Compile them
@@ -718,6 +728,13 @@ class BcEmitter
       elsif ann_type != :any then ann_type
       else val_type
       end
+    # AllocMark struct hint: compile_main pre-walked the body and
+    # recorded `name -> base_struct_name` for any AllocMark with a
+    # known type_info. Use it when val_type fell through as :any (e.g.
+    # the init was a function call that lost type info via BC_CALL).
+    if effective_type == :any && @alloc_struct_hints && @alloc_struct_hints[name]
+      effective_type = :"struct_#{@alloc_struct_hints[name]}"
+    end
     alloc_slot(name, effective_type)
     emit_store(name, effective_type)
     if effective_type == :f64 && val_type == :i64
@@ -2290,10 +2307,16 @@ class BcEmitter
       tuple = args[1]
       if tuple.is_a?(MIR::Ident) && tuple.name.to_s =~ /\A\.\{(.*)\}\z/m
         inner = $1
-        # Strip Zig wrappers iteratively: `try CheatLib.X(alloc, V)`, `@as(T, V)`,
-        # `@intFromFloat(V)`, `@floatFromInt(V)`. Each peels one layer; we
-        # rerun until no more match. split_print_tuple keeps nested calls
-        # intact so we can address each comma-arg position correctly.
+        # Strip Zig wrappers iteratively, but only the formatting/conversion
+        # ones: `try`, `@as(T, V)`, `@intFromFloat(V)`, `@floatFromInt(V)`,
+        # and `CheatLib.intToString(alloc, V)` / `CheatLib.floatToString`.
+        # Keep operational CheatLib calls (`CheatLib.len`, `CheatLib.getAt`,
+        # `CheatLib.indexOf`, ...) intact so the printer can dispatch them
+        # to the right native instead of taking their first slot-arg as
+        # the value (which would print the container, not the result).
+        peelable_calls = %w[
+          CheatLib.intToString CheatLib.floatToString CheatLib.numberToString
+        ].freeze
         unwrap = lambda do |p|
           loop do
             stripped = p.strip
@@ -2303,16 +2326,10 @@ class BcEmitter
             if stripped =~ /\A([@\w][\w.]*)\s*\((.*)\)\s*\z/m
               fn = $1; argstr = $2
               args_split = split_print_tuple(argstr).map(&:strip)
-              # @as(T, V) / CheatLib.intToString(alloc, V) / @intFromFloat(V)
-              # — the value of interest is the LAST arg in every common case.
-              if args_split.length >= 1
-                last = args_split.last
-                # Drop a leading `{alloc}` placeholder still present.
-                last = last.strip
-                if fn == "@as" || fn == "@intFromFloat" || fn == "@floatFromInt" ||
-                   fn.start_with?("CheatLib.")
-                  p = last; next
-                end
+              if args_split.length >= 1 && (
+                   fn == "@as" || fn == "@intFromFloat" || fn == "@floatFromInt" ||
+                   peelable_calls.include?(fn))
+                p = args_split.last; next
               end
             end
             break
@@ -2325,18 +2342,33 @@ class BcEmitter
             str = $1.gsub(/\\n/, "\n").gsub(/\\t/, "\t").gsub(/\\"/, '"').gsub(/\\\\/, '\\')
             emit_op(LOAD_CONST, add_const([:str, str]))
             emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+          elsif raw =~ /\ACheatLib\.len\((.+)\)\z/m && (sub = $1.strip; emit_print_subexpr(sub))
+            # `CheatLib.len(EXPR)` -> count(EXPR) native, leaving Value.Int64Val.
+            # emit_print_subexpr loaded EXPR onto vstack; finalize with count + display.
+            emit_op(NATIVE_CALL, NATIVES["count"], 1)
+            emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+          elsif raw =~ /\ACheatLib\.getAt\((.+),\s*(\d+)\)\z/m && (sub = $1.strip; idx = $2.to_i; emit_print_subexpr(sub))
+            # `CheatLib.getAt(EXPR, N)` -> list-ref(EXPR, N).
+            emit_op(LOAD_CONST, add_const([:i64, idx]))
+            emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+            emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
           elsif raw =~ /\A([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\z/ && has_slot?($1)
             # `obj.field` access against a known slot — emit FieldGet via vector-ref.
             obj_name = $1; fld = $2
-            emit_op(LOAD_SLOT, @slots[obj_name])
-            idx = find_field_index(fld)
+            emit_load_any(obj_name)
+            struct_name = nil
+            t = @slot_types[obj_name]
+            if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+              struct_name = t.to_s.sub(/\Astruct_/, "")
+            end
+            idx = find_field_index(fld, struct_name: struct_name)
             if idx
               emit_op(LOAD_CONST, add_const([:i64, idx]))
               emit_op(NATIVE_CALL, NATIVES["vector-ref"], 2)
             end
             emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
           elsif has_slot?(raw)
-            emit_op(LOAD_SLOT, @slots[raw])
+            emit_load_any(raw)
             emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
           else
             # Unknown expression — fall back to LOAD_NAME (likely prints nil
@@ -2593,8 +2625,13 @@ class BcEmitter
     # becomes Pair(car=Str("Circle"), cdr=payload_vector). A unit variant
     # (MIR::Lit{"{}"}) gets an empty vector payload. Multi-field inline-struct
     # variants are already lowered by annotator as a single StructInit field,
-    # so node.fields has at most one entry here.
-    if @union_types&.include?(zig_type)
+    # so node.fields has at most one entry here. Strip any generic suffix
+    # so `Option(Float64){Some: ...}` resolves to the registered `Option`
+    # union schema (otherwise the lookup misses and we fall through to the
+    # plain-struct path, which constructs a vector instead of a cons-pair).
+    union_lookup = zig_type
+    union_lookup = $1 if zig_type =~ /\A([A-Za-z_]\w*)\(/
+    if @union_types&.include?(union_lookup)
       variant = node.fields.first&.[](:name).to_s
       value   = node.fields.first&.[](:value)
       emit_op(LOAD_CONST, add_const(variant))
@@ -2608,10 +2645,48 @@ class BcEmitter
       return
     end
 
-    # Plain struct: positional fields through `vector`.
+    # Plain struct: positional fields through `vector`. Stamp the struct
+    # base name onto the type stack so compile_let can scope find_field_index
+    # for accesses against the resulting slot. Without this, when two
+    # structs share a field name (e.g. KeyValue<K,V>{key, value} and
+    # Wrapper<T>{value}), find_field_index returns whichever is registered
+    # first, which mis-routes `kv.value` to index 0 (kv.key).
     node.fields.each { |f| compile_expr_to_value(f[:value]); pop_type }
     emit_op(NATIVE_CALL, NATIVES["vector"], node.fields.length)
-    push_type(:any)
+    base = struct_base_name(zig_type)
+    push_type(base ? :"struct_#{base}" : :any)
+  end
+
+  # Strip generic instantiation suffix from a zig type so we get the
+  # bare struct name registered in @struct_fields. `Pair(Float64)` -> `Pair`,
+  # `KeyValue(Float64, Bool)` -> `KeyValue`, `User` -> `User`. Used to
+  # disambiguate same-named fields across distinct struct types.
+  def struct_base_name(zig_type)
+    s = zig_type.to_s
+    base = s[/\A([A-Za-z_]\w*)/, 1]
+    return nil unless base && @struct_fields.key?(base)
+    base
+  end
+
+  # Pre-walk a body collecting MIR::AllocMark struct hints into
+  # @alloc_struct_hints[name] = base_struct_name. compile_let consults
+  # this when its emitted val_type is :any so function-call inits
+  # (which lose type info) still produce a struct-typed slot.
+  def walk_for_alloc_marks(stmts)
+    return unless stmts.is_a?(Array)
+    stmts.each do |s|
+      next unless s.is_a?(MIR::AllocMark)
+      ti = s.type_info
+      raw = if ti.respond_to?(:raw) then ti.raw
+            elsif ti.is_a?(Symbol) then ti
+            else nil
+            end
+      next if raw.nil?
+      base = raw.to_s[/\A([A-Za-z_]\w*)/, 1]
+      next if base.nil? || base.empty?
+      next unless @struct_fields.key?(base)
+      @alloc_struct_hints[s.name.to_s] = base
+    end
   end
 
   def compile_field_get(node)
@@ -2641,16 +2716,35 @@ class BcEmitter
     # ArrayList-around-slice indirection — lists are Value.List directly,
     # strings are Value.Str. Treat `x.items` as identity and `x.len`
     # as a length() native call.
-    if node.field.to_s == "items"
-      compile_expr_to_value(node.object); pop_type
-      push_type(:any)
-      return
-    end
-    if node.field.to_s == "len"
-      compile_expr_to_value(node.object); pop_type
-      emit_op(NATIVE_CALL, NATIVES["count"], 1)
-      push_type(:any)
-      return
+    #
+    # IMPORTANT: only fire this short-circuit when the receiver is NOT a
+    # user struct that defines a real `items` / `len` field. Otherwise
+    # a ListHolder{ items: ..., label: ... } with a literal `items` field
+    # would be passed through unchanged (h1.items === h1) and the asserts
+    # downstream count h1 instead of h1.items.
+    field_name = node.field.to_s
+    if field_name == "items" || field_name == "len"
+      receiver_struct = nil
+      if node.object.is_a?(MIR::Ident)
+        t = @slot_types[node.object.name.to_s]
+        if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+          receiver_struct = t.to_s.sub(/\Astruct_/, "")
+        end
+      end
+      has_real_field = receiver_struct &&
+        @struct_fields[receiver_struct]&.include?(field_name)
+      unless has_real_field
+        if field_name == "items"
+          compile_expr_to_value(node.object); pop_type
+          push_type(:any)
+          return
+        else
+          compile_expr_to_value(node.object); pop_type
+          emit_op(NATIVE_CALL, NATIVES["count"], 1)
+          push_type(:any)
+          return
+        end
+      end
     end
     # Arc/Rc unwrap synthetic fields: in the Zig backend, multiowned/shared
     # values are wrapped in an Arc(T)/Rc(T) struct exposing `.ctrl.data.*` to
@@ -2664,8 +2758,21 @@ class BcEmitter
       return
     end
 
+    # Receiver-typed lookup: if the receiver is an Ident slot stamped with
+    # a `:struct_<Name>` type (set by compile_struct_init via push_type),
+    # scope find_field_index to that struct's field list. Without this,
+    # find_field_index returns the first match across ALL struct schemas,
+    # which mis-routes `kv.value` (KeyValue idx 1) to whichever struct's
+    # `value` field appears first in @struct_fields (e.g. Wrapper idx 0).
+    receiver_struct = nil
+    if node.object.is_a?(MIR::Ident)
+      t = @slot_types[node.object.name.to_s]
+      if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+        receiver_struct = t.to_s.sub(/\Astruct_/, "")
+      end
+    end
     compile_expr_to_value(node.object)
-    idx = find_field_index(node.field)
+    idx = find_field_index(node.field, struct_name: receiver_struct)
     if idx
       # vector-ref is a NATIVE_CALL that reads both args from the value
       # stack — the idx must be pushed there too. Using LOAD_CONST_I64
@@ -2694,8 +2801,12 @@ class BcEmitter
     push_type(:any)
   end
 
-  def find_field_index(field_name)
+  def find_field_index(field_name, struct_name: nil)
     fname = field_name.to_s
+    if struct_name && @struct_fields.key?(struct_name)
+      idx = @struct_fields[struct_name].index(fname)
+      return idx if idx
+    end
     @struct_fields.each_value do |fields|
       idx = fields.index(fname)
       return idx if idx
@@ -3547,6 +3658,47 @@ class BcEmitter
 
   def has_slot?(name)
     @islots.key?(name) || @fslots.key?(name) || @slots.key?(name)
+  end
+
+  # Emit code to evaluate a small print-template subexpression (a slot
+  # name, or `obj.field` against a known slot). Returns true on emit, or
+  # false to signal the caller to fall through to a different branch.
+  # Supports recursive nesting so `CheatLib.len(h1.items)` can compose.
+  def emit_print_subexpr(expr)
+    expr = expr.strip
+    if expr =~ /\A[a-zA-Z_]\w*\z/ && has_slot?(expr)
+      emit_load_any(expr); return true
+    end
+    if expr =~ /\A([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\z/ && has_slot?($1)
+      obj_name = $1; fld = $2
+      emit_load_any(obj_name)
+      struct_name = nil
+      t = @slot_types[obj_name]
+      struct_name = t.to_s.sub(/\Astruct_/, "") if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+      idx = find_field_index(fld, struct_name: struct_name)
+      if idx
+        emit_op(LOAD_CONST, add_const([:i64, idx]))
+        emit_op(NATIVE_CALL, NATIVES["vector-ref"], 2)
+      end
+      return true
+    end
+    false
+  end
+
+  # Emit a load that lands on the value stack regardless of where the slot
+  # actually lives. For typed slots, follow the load with I_TO_VAL / F_TO_VAL.
+  # Used by the print-template path so `print(x)` works whether x is :i64,
+  # :f64, or :any.
+  def emit_load_any(name)
+    if @islots.key?(name)
+      emit_op(LOAD_ISLOT, @islots[name]); emit_op(I_TO_VAL)
+    elsif @fslots.key?(name)
+      emit_op(LOAD_FSLOT, @fslots[name]); emit_op(F_TO_VAL)
+    elsif @slots.key?(name)
+      emit_op(LOAD_SLOT, @slots[name])
+    else
+      emit_op(LOAD_NAME, add_const(name))
+    end
   end
 
   def emit_store(name, val_type)
