@@ -1984,6 +1984,38 @@ class BcEmitter
       return :i64 if @islots[name]
       return :f64 if @fslots[name]
       @slot_types[name] || :any
+    when MIR::UnaryOp
+      # Negation/not preserves the operand's typed-stack residency.
+      expr_type_hint(node.operand)
+    when MIR::BinOp
+      lh = expr_type_hint(node.left)
+      rh = expr_type_hint(node.right)
+      if lh == :i64 && rh == :i64
+        case node.op.to_s
+        when "==", "!=", "<", ">", "<=", ">=" then :bool
+        else :i64
+        end
+      elsif lh == :f64 && rh == :f64
+        case node.op.to_s
+        when "==", "!=", "<", ">", "<=", ">=" then :bool
+        else :f64
+        end
+      else
+        :any
+      end
+    when MIR::InlineBc
+      # Arithmetic ops route through compile_binop, which stays on the
+      # istack only when BOTH operands hint as :i64. Mirror that here so
+      # downstream callers don't assume typed-stack residency in mixed
+      # cases. :length and :charAt always emit to the vstack via NATIVE_CALL,
+      # so they remain :any.
+      case node.op
+      when :intAdd, :intSub, :intMul, :intDiv, :intMod
+        a = node.args[0] && expr_type_hint(node.args[0])
+        b = node.args[1] && expr_type_hint(node.args[1])
+        (a == :i64 && b == :i64) ? :i64 : :any
+      else :any
+      end
     else
       :any
     end
@@ -2109,13 +2141,35 @@ class BcEmitter
   end
 
   def compile_unary(node)
-    compile_expr_to_value(node.operand); pop_type
+    # Stay on the typed istack/fstack when the operand is an int/float
+    # literal so subsequent typed ops (DIV_I64 et al.) preserve int
+    # truncation semantics. compile_expr (not compile_expr_to_value)
+    # leaves the value on its native stack.
+    compile_expr(node.operand)
+    t = pop_type
     case node.op
     when "!", "not"
+      ensure_value_stack if respond_to?(:ensure_value_stack, true)
       emit_op(NOT); push_type(:any)
     when "-"
-      emit_op(LOAD_CONST, add_const([:i64, -1]))
-      emit_op(MUL); push_type(:any)
+      case t
+      when :i64
+        @neg_tmp_counter ||= 0; @neg_tmp_counter += 1
+        tmp = "__mneg_tmp_#{@neg_tmp_counter}"
+        @islots[tmp] = (@next_islot ||= 0); @next_islot += 1
+        emit_op(STORE_ISLOT, @islots[tmp])
+        emit_op(LOAD_CONST_I64, add_const([:i64, 0]))
+        emit_op(LOAD_ISLOT, @islots[tmp])
+        emit_op(SUB_I64)
+        push_type(:i64)
+      when :f64
+        emit_op(LOAD_CONST_F64, add_const([:f64, -1.0]))
+        emit_op(MUL_F64)
+        push_type(:f64)
+      else
+        emit_op(LOAD_CONST, add_const([:i64, -1]))
+        emit_op(MUL); push_type(:any)
+      end
     end
   end
 
@@ -3163,10 +3217,34 @@ class BcEmitter
 
   def compile_ast_unary(node)
     compile_ast_expr(node.right)
+    t = pop_type
     case node.op
-    when :NOT, :BANG, :EXCL then emit_op(NOT)
+    when :NOT, :BANG, :EXCL
+      emit_op(NOT); push_type(:any)
     when :SUB, :NEG
-      emit_op(LOAD_CONST, add_const([:i64, -1])); emit_op(MUL)
+      # Stay on the typed stack when the operand is i64/f64 so subsequent
+      # typed ops (DIV_I64 et al.) see int operands (their @divTrunc /
+      # truncate-toward-zero semantics rely on int division). Polymorphic
+      # MUL on vstack would coerce to Float64 and break int truncation.
+      case t
+      when :i64
+        # Emit (0 - val) on istack: load 0, swap order via STORE_ISLOT temp
+        @neg_tmp_counter ||= 0; @neg_tmp_counter += 1
+        tmp = "__neg_tmp_#{@neg_tmp_counter}"
+        @islots[tmp] = (@next_islot ||= 0); @next_islot += 1
+        emit_op(STORE_ISLOT, @islots[tmp])      # save val
+        emit_op(LOAD_CONST_I64, add_const([:i64, 0]))
+        emit_op(LOAD_ISLOT, @islots[tmp])
+        emit_op(SUB_I64)
+        push_type(:i64)
+      when :f64
+        emit_op(LOAD_CONST_F64, add_const([:f64, -1.0]))
+        emit_op(MUL_F64)
+        push_type(:f64)
+      else
+        emit_op(LOAD_CONST, add_const([:i64, -1])); emit_op(MUL)
+        push_type(:any)
+      end
     end
   end
 

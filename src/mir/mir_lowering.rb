@@ -3995,7 +3995,16 @@ class MIRLowering
 
   def lower_assert(node)
     cond = lower(node.condition)
-    msg = node.message.to_s.gsub('"', '\\"')
+    # Parser's optional-pattern slot pushes the symbol :Any when no message
+    # follows the assertion's condition. Normalize to "assertion failed"
+    # so the user-visible message isn't the literal string "Any".
+    raw = node.message
+    msg_str = if raw.nil? || raw == :Any || (raw.respond_to?(:empty?) && raw.empty?)
+      "assertion failed"
+    else
+      raw.to_s
+    end
+    msg = msg_str.gsub('"', '\\"')
     emit_builtin(:assert, [cond, MIR::Lit.new("\"#{msg}\"")])
   end
 

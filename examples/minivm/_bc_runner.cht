@@ -2193,8 +2193,10 @@ FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
     IF line == "N" THEN RETURN Value.Nil; END
     IF startsWith?(line, "I:") THEN
         numStr = substr(line, 2, line.length() - 2);
-        n = toNumber(numStr) OR 0.0;
-        intVal = toInt(n);
+        -- Parse directly as Int64. toNumber + toInt round-trips through
+        -- Float64 and loses precision for ints >2^52 (e.g.
+        -- 4611686018427387903 rounds to 2^62 in Float64).
+        intVal = toInt(numStr) OR 0_i64;
         RETURN Value{ Int64Val: intVal };
     END
     IF startsWith?(line, "F:") THEN
