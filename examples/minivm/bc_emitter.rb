@@ -107,6 +107,25 @@ class BcEmitter
     @enum_types = Set.new((@result.enum_schemas || {}).keys.map(&:to_s))
     @union_types = Set.new((@result.union_schemas || {}).keys.map(&:to_s))
 
+    # All union-variant tag names across every UNION. The VM represents a
+    # union value as Pair(car=Symbol("Variant"), cdr=payload). MATCH-capture
+    # binds the payload via FieldGet(union, "Variant"), which must lower to
+    # cdr(obj). Without this set, FieldGet falls through to vector-ref(obj,
+    # find_field_index("Variant")), which returns Nil for non-inline-struct
+    # variants (the payload Pair has no field named "Variant"). Building
+    # the set up front gives an O(1) check inside compile_field_get.
+    @union_variant_names = Set.new
+    (@result.union_schemas || {}).each do |_uname, variants|
+      (variants || {}).each_key { |vname| @union_variant_names << vname.to_s }
+    end
+    # Don't shadow any registered struct field names (a non-inline-struct
+    # union variant doesn't put fields into @struct_fields, so the only
+    # collision is between two ad-hoc names — keep struct semantics in
+    # that case).
+    flat_struct_fields = Set.new
+    @struct_fields.each_value { |fs| fs.each { |f| flat_struct_fields << f.to_s } }
+    @union_variant_names -= flat_struct_fields
+
     # Inline-struct union variants (`UNION Shape { Circle { radius: ... } }`)
     # have no entry in struct_schemas — they're described only inside
     # union_schemas as `{ :kind => :inline_struct, :fields => {name=>Type} }`.
@@ -275,10 +294,19 @@ class BcEmitter
     # to every fn; callers don't pass it (compile_call_expr strips `rt`
     # from its args filter), so the helper's slot layout must also skip
     # it or slot 0/1 misalign with what BC_CALL deposits.
+    #
+    # Stamp the slot type from the AST param's declared type when known
+    # (HashMap -> :map, Set -> :set). MIR drops the user-facing type into
+    # `zig_type = "anytype"` for comptime-polymorphic params, so we'd lose
+    # the dispatch hint without consulting the AST. Without the stamp,
+    # `map[key] = val` inside a `MUTABLE map: HashMap<...>` callee would
+    # fall through to list-set! (default :any path) and corrupt the map.
+    ast_param_types = ast_param_vm_types(ast_fn)
     (mir_fn.params || []).each do |p|
       pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
       next if pname == "rt"
-      alloc_slot(pname, :any)
+      base_name = pname.start_with?("_m_") ? pname[3..] : pname
+      alloc_slot(pname, ast_param_types[base_name] || :any)
     end
 
     compile_main(mir_fn.body, ast_fn.body)
@@ -692,6 +720,31 @@ class BcEmitter
                     ann.include?("PartitionedNumericMap") || ann.include?("StripedNumericMap") ||
                     ann.include?("MutexShardedStringMap")
     return :set  if ann.include?("CheatLib.Set(")
+    :any
+  end
+
+  # Build { ast_param_name => vm_slot_type } for a function's AST params.
+  # The AST keeps the user-facing CLEAR type (`HashMap<...>`, `Set<...>`),
+  # which is the only place to recover dispatch info for comptime-polymorphic
+  # params (MIR's zig_type is "anytype" for those).
+  def ast_param_vm_types(ast_fn)
+    out = {}
+    return out unless ast_fn.respond_to?(:params)
+    (ast_fn.params || []).each do |ap|
+      next unless ap.is_a?(Hash)
+      pname = ap[:name].to_s
+      out[pname] = vm_type_from_ast_type(ap[:type])
+    end
+    out
+  end
+
+  def vm_type_from_ast_type(t)
+    return :any if t.nil?
+    raw = (t.respond_to?(:raw) ? t.raw : t).to_s
+    return :map if raw.start_with?("HashMap")
+    return :map if raw.start_with?("StringMap") || raw.start_with?("NumericMap")
+    return :map if raw.include?("ShardedStringMap") || raw.include?("StripedNumericMap")
+    return :set if raw == "Set" || raw.start_with?("Set<") || raw.start_with?("HashSet")
     :any
   end
 
@@ -2492,13 +2545,18 @@ class BcEmitter
       return
     end
 
-    # (Union-variant payload access via FieldGet(union, variant) was
-    # attempted here but the object's union type isn't accessible on
-    # MIR::Ident — MIR nodes don't carry type_info the way AST does, so
-    # there's no reliable distinguisher between "union.Variant" (cdr)
-    # and "struct.field" (vector-ref). Left as unimplemented; the
-    # tests that hit this pattern currently fail on the struct-field
-    # fallback (vector-ref on a Pair), not silently wrong-path.)
+    # Union-variant payload access: MATCH `Value.Str AS s` lowers to
+    # `Let s = FieldGet(v, "Str")`. The VM represents the union as
+    # Pair(car=Symbol("Str"), cdr=payload), so emit cdr(obj). The
+    # @union_variant_names set is pre-built from all union schemas
+    # (and stripped of any name that also appears as a struct field
+    # to avoid mis-routing struct.field accesses).
+    if @union_variant_names&.include?(node.field.to_s)
+      compile_expr_to_value(node.object); pop_type
+      emit_op(NATIVE_CALL, NATIVES["cdr"], 1)
+      push_type(:any)
+      return
+    end
 
     # Zig-specific list "decomposition" fields. In Zig, an
     # std.ArrayListUnmanaged(T) exposes `.items` (the []T slice) and the
