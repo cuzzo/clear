@@ -47,6 +47,11 @@ class BcEmitter
   PUSH_ERR    = 87  # push a Value.Error{errMsg:"", errKind:"runtime"} sentinel
   RAISE_ERR   = 88  # pop msg+kind strings, push Value.Error{errMsg=msg, errKind=kind}
   GET_ERR_KIND = 89 # peek top Value.Error, push Value.Str(errKind)
+  # Wrapping i64 arithmetic for `%+`, `%-`, `%*` (RNGs / hashes that
+  # intentionally overflow). Distinct from the panicking ADD_I64/SUB_I64/MUL_I64.
+  WRAP_ADD_I64 = 90
+  WRAP_SUB_I64 = 91
+  WRAP_MUL_I64 = 92
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -1911,7 +1916,11 @@ class BcEmitter
   INLINE_BC_BINOP_MAP = {
     intAdd:   "+",   intSub:   "-",   intMul:   "*",
     intDiv:   "/",   intMod:   "@mod",
-    wrapAdd:  "+",   wrapSub:  "-",   wrapMul:  "*",
+    # Use distinct synthetic ops for wrapping arithmetic — compile_binop
+    # routes them to WRAP_*_I64 opcodes so `%+` / `%* `wrap in Zig
+    # (Debug-mode `*` panics on overflow; user code intentionally
+    # overflows for hashes/RNGs).
+    wrapAdd:  "wrap+", wrapSub: "wrap-", wrapMul: "wrap*",
     checkAdd: "+",   checkSub: "-",   checkMul: "*",
     eql:      "==",  strEql:   "==",  symbolEql: "==",
     :"eql?" => "==",
@@ -2246,7 +2255,8 @@ class BcEmitter
       # cases. :length and :charAt always emit to the vstack via NATIVE_CALL,
       # so they remain :any.
       case node.op
-      when :intAdd, :intSub, :intMul, :intDiv, :intMod
+      when :intAdd, :intSub, :intMul, :intDiv, :intMod,
+           :wrapAdd, :wrapSub, :wrapMul
         a = node.args[0] && expr_type_hint(node.args[0])
         b = node.args[1] && expr_type_hint(node.args[1])
         (a == :i64 && b == :i64) ? :i64 : :any
@@ -2304,6 +2314,23 @@ class BcEmitter
       if both_i64    then emit_op(MUL_I64); push_type(:i64)
       elsif both_f64 then emit_op(MUL_F64); push_type(:f64)
       else emit_op(MUL); push_type(:any)
+      end
+    when "wrap+"
+      # wrapping add: only meaningful for i64; fall back to ADD elsewhere.
+      if both_i64 then emit_op(WRAP_ADD_I64); push_type(:i64)
+      else
+        # Float / mixed-type wrap is rare; just treat as plain ADD.
+        ensure_value_stack; emit_op(ADD); push_type(:any)
+      end
+    when "wrap-"
+      if both_i64 then emit_op(WRAP_SUB_I64); push_type(:i64)
+      else
+        ensure_value_stack; emit_op(SUB); push_type(:any)
+      end
+    when "wrap*"
+      if both_i64 then emit_op(WRAP_MUL_I64); push_type(:i64)
+      else
+        ensure_value_stack; emit_op(MUL); push_type(:any)
       end
     when "/"
       if both_i64    then emit_op(DIV_I64); push_type(:i64)

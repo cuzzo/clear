@@ -3141,6 +3141,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
+            90 -> -- WRAP_ADD_I64 (istack, two's-complement wrap on overflow)
+                istack[isp - 2] = istack[isp - 2] %+ istack[isp - 1];
+                isp -= 1;,
+            91 -> -- WRAP_SUB_I64 (istack, two's-complement wrap on overflow)
+                istack[isp - 2] = istack[isp - 2] %- istack[isp - 1];
+                isp -= 1;,
+            92 -> -- WRAP_MUL_I64 (istack, two's-complement wrap on overflow)
+                istack[isp - 2] = istack[isp - 2] %* istack[isp - 1];
+                isp -= 1;,
             DEFAULT ->
                 running = FALSE;
         END
