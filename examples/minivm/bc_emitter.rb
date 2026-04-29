@@ -108,13 +108,20 @@ class BcEmitter
     # Build struct field list from result schemas (field order matters for
     # vector-ref index). Schema shape varies: Hash{name=>{type,...}} from the
     # annotator, or Array of field specs from older paths. Normalize both.
+    @struct_defaults = {}  # { "Name" => [default_ast_or_nil, ...] in field order }
     (@result.struct_schemas || {}).each do |name, fields|
-      @struct_fields[name.to_s] =
-        case fields
-        when Hash then fields.keys.map(&:to_s)
-        when Array then fields.map { |f| f.is_a?(Hash) ? f[:name].to_s : f.to_s }
-        else []
-        end
+      sname = name.to_s
+      case fields
+      when Hash
+        @struct_fields[sname]   = fields.keys.map(&:to_s)
+        @struct_defaults[sname] = fields.values.map { |spec| spec.is_a?(Hash) ? spec[:default] : nil }
+      when Array
+        @struct_fields[sname] = fields.map { |f| f.is_a?(Hash) ? f[:name].to_s : f.to_s }
+        @struct_defaults[sname] = fields.map { |f| f.is_a?(Hash) ? f[:default] : nil }
+      else
+        @struct_fields[sname] = []
+        @struct_defaults[sname] = []
+      end
     end
 
     # Track enum type names so field access emits symbols (not nil)
@@ -2998,10 +3005,61 @@ class BcEmitter
     # structs share a field name (e.g. KeyValue<K,V>{key, value} and
     # Wrapper<T>{value}), find_field_index returns whichever is registered
     # first, which mis-routes `kv.value` to index 0 (kv.key).
-    node.fields.each { |f| compile_expr_to_value(f[:value]); pop_type }
-    emit_op(NATIVE_CALL, NATIVES["vector"], node.fields.length)
     base = struct_base_name(zig_type)
+    schema_names = base ? (@struct_fields[base] || []) : []
+    # If the literal omits fields that have schema-level defaults, the Zig
+    # backend fills them silently. Match that here so `Config{}` (all
+    # defaulted) and `Config{ retries: 5 }` (timeout defaults to 1000)
+    # both produce the right vector instead of an empty / partial one.
+    field_values = if schema_names.any? && node.fields.length < schema_names.length
+      provided = {}
+      node.fields.each { |f| provided[f[:name].to_s] = f[:value] }
+      defaults = base ? (@struct_defaults[base] || []) : []
+      schema_names.each_with_index.map do |fname, idx|
+        provided[fname] || defaults[idx]
+      end
+    else
+      node.fields.map { |f| f[:value] }
+    end
+    field_values.each_with_index do |v, idx|
+      if v.nil?
+        # No default and no provided value — emit nil sentinel so vector-ref
+        # at least returns something rather than reading past the end.
+        emit_op(LOAD_CONST, add_const(nil))
+      elsif v.is_a?(AST::DefaultLit)
+        # DEFAULT for a struct-typed field: construct an empty struct of the
+        # field's declared type. The schema knows the type — drill down for
+        # nested-default-from-default support.
+        compile_default_for_field(base, schema_names[idx])
+      elsif v.is_a?(AST::Literal)
+        # Schema-default ASTs reach us as raw AST literals; compile via the
+        # AST path which already handles primitive types (Int64/Float64/
+        # String/Bool/Nil).
+        compile_ast_expr_to_value(v); pop_type
+      else
+        compile_expr_to_value(v); pop_type
+      end
+    end
+    emit_op(NATIVE_CALL, NATIVES["vector"], field_values.length)
     push_type(base ? :"struct_#{base}" : :any)
+  end
+
+  # Emit a default value for `parent_struct.field_name`. If the field type
+  # is itself a registered struct, recurse via a synthesized empty StructInit;
+  # otherwise emit nil (caller hits this for fields that have no schema
+  # default and no DEFAULT keyword either).
+  def compile_default_for_field(parent_struct, field_name)
+    fields_hash = (@result.struct_schemas || {})[parent_struct&.to_sym]
+    spec = fields_hash.is_a?(Hash) ? fields_hash[field_name] : nil
+    type_obj = spec.is_a?(Hash) ? spec[:type] : nil
+    raw_type = type_obj.respond_to?(:raw) ? type_obj.raw.to_s : type_obj.to_s
+    if @struct_fields.key?(raw_type)
+      # Recursively construct the inner struct with all defaults.
+      synth = MIR::StructInit.new(raw_type, [])
+      compile_struct_init(synth); pop_type
+    else
+      emit_op(LOAD_CONST, add_const(nil))
+    end
   end
 
   # Strip generic instantiation suffix from a zig type so we get the
