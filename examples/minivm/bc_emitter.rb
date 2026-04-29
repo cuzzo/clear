@@ -3454,6 +3454,12 @@ class BcEmitter
         node.args.each { |a| compile_ast_expr_to_value(a) }
         emit_op(NATIVE_CALL, native_id, node.args.length)
         push_type(:any)
+      elsif @fn_start_ips.key?(name)
+        # User-defined helper fn compiled into bytecode: use BC_CALL.
+        # LOAD_NAME would do a dynamic env lookup that doesn't see helpers.
+        node.args.each { |a| compile_ast_expr_to_value(a) }
+        emit_op(BC_CALL, @fn_start_ips[name], node.args.length)
+        push_type(:any)
       else
         fn_idx = add_const(name)
         emit_op(LOAD_NAME, fn_idx)
