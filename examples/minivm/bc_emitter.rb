@@ -1047,10 +1047,12 @@ class BcEmitter
     emit_op(STORE_SLOT, @slots[cur_tmp])
     emit_op(POP)
 
-    # Walk innermost (last collected) to outermost: at each level rebuild
-    # owner with the current tmp value substituted, then write the rebuilt
-    # owner back into cur_tmp for the next level out.
-    chain.reverse.each do |entry|
+    # Walk outermost (first collected) to innermost. The collected order is
+    # outer→inner (the FieldGet wraps the IndexGet which wraps the Ident).
+    # For the rebuild we go in the same order: at each level rebuild the
+    # owner using the current tmp value, then move on to the next-outer
+    # owner whose substitution is the just-rebuilt value.
+    chain.each do |entry|
       kind, owner, *rest = entry
       compile_expr_to_value(unwrap.call(owner)); pop_type
       case kind
