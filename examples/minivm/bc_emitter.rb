@@ -524,8 +524,7 @@ class BcEmitter
       val_type = pop_type
       name = mir_node.name.to_s
       alloc_slot(name, val_type) unless has_slot?(name)
-      emit_store(name, val_type)
-      @slot_types[name] = val_type
+      emit_store(name, val_type)  # authoritative @slot_types update
       push_type(:void)
     when MIR::ExprStmt
       compile_expr_stmt(mir_node, ast_node)
@@ -927,8 +926,7 @@ class BcEmitter
       end
       name = target.name.to_s
       if has_slot?(name)
-        emit_store(name, val_type)
-        @slot_types[name] = val_type
+        emit_store(name, val_type)  # authoritative @slot_types update
       else
         name_idx = add_const(name)
         emit_op(SET_NAME, name_idx)
@@ -2349,22 +2347,47 @@ class BcEmitter
       elsif both_f64 then emit_op(MUL_F64); push_type(:f64)
       else emit_op(MUL); push_type(:any)
       end
-    when "wrap+"
-      # wrapping add: only meaningful for i64; fall back to ADD elsewhere.
-      if both_i64 then emit_op(WRAP_ADD_I64); push_type(:i64)
+    when "wrap+", "wrap-", "wrap*"
+      wrap_op = { "wrap+" => WRAP_ADD_I64, "wrap-" => WRAP_SUB_I64, "wrap*" => WRAP_MUL_I64 }.fetch(op)
+      # Wrap-arithmetic always uses two's-complement on i64. If the operand
+      # type-stack tags don't already say :i64, hoist the values from vstack
+      # to istack via VAL_TO_I64 (top first, then under). This preserves
+      # wrap semantics regardless of where the values landed (typed stack
+      # for compile-time-known i64s, vstack for runtime values from :any
+      # slots / params). Falling back to the untyped MUL/ADD/SUB would
+      # panic on overflow for `*` semantics — wrong for `%*`.
+      coerce_top_to_istack = ->(t) {
+        case t
+        when :i64 then nil  # already on istack
+        else
+          # Move from vstack to istack. ensure_value_stack first if value
+          # is on a different typed stack (:f64 / :bool).
+          case t
+          when :f64  then emit_op(F_TO_VAL)
+          when :bool then emit_op(BOOL_TO_VAL)
+          end
+          emit_op(VAL_TO_I64)
+        end
+      }
+      if both_i64 then emit_op(wrap_op); push_type(:i64)
       else
-        # Float / mixed-type wrap is rare; just treat as plain ADD.
-        ensure_value_stack; emit_op(ADD); push_type(:any)
-      end
-    when "wrap-"
-      if both_i64 then emit_op(WRAP_SUB_I64); push_type(:i64)
-      else
-        ensure_value_stack; emit_op(SUB); push_type(:any)
-      end
-    when "wrap*"
-      if both_i64 then emit_op(WRAP_MUL_I64); push_type(:i64)
-      else
-        ensure_value_stack; emit_op(MUL); push_type(:any)
+        # Coerce right (top of stack) first so left stays underneath.
+        coerce_top_to_istack.call(right_type)
+        # Coerce left: it's beneath right on whichever stack it landed.
+        # If left is :i64 already, skip. Otherwise we need to swap before
+        # coercing — but the runner has no SWAP. Easiest path: re-walk
+        # via vstack with a temp slot.
+        if left_type != :i64
+          # Stash right on a temp val slot so we can coerce left.
+          @wrap_tmp_counter ||= 0
+          @wrap_tmp_counter += 1
+          tmp = "__wraptmp_#{@wrap_tmp_counter}"
+          alloc_slot(tmp, :i64) unless has_slot?(tmp)
+          emit_op(STORE_ISLOT, @islots[tmp])  # right is on istack
+          coerce_top_to_istack.call(left_type)  # now left is on top
+          emit_op(LOAD_ISLOT, @islots[tmp])  # right back on top
+        end
+        emit_op(wrap_op); push_type(:i64)
       end
     when "/"
       if both_i64    then emit_op(DIV_I64); push_type(:i64)
@@ -3588,7 +3611,7 @@ class BcEmitter
       compile_ast_expr(node.value); val_type = pop_type
       name = node.name.to_s
       if has_slot?(name)
-        emit_store(name, val_type); @slot_types[name] = val_type
+        emit_store(name, val_type)  # authoritative @slot_types update
       else
         emit_op(SET_NAME, add_const(name))
       end
@@ -4347,24 +4370,48 @@ class BcEmitter
     # The slot was allocated in exactly one of @islots / @fslots / @slots
     # by alloc_slot, based on the original allocation type. Subsequent
     # stores must use the same table, so coerce val_type → slot table.
+    #
+    # Also writes @slot_types[name] to the slot's RESIDENCY tag (:i64 for
+    # @islots, :f64 for @fslots, value-stack tag for @slots), not the
+    # value's incoming type. compile_ident + expr_type_hint use this tag
+    # to decide whether subsequent loads land on the typed stack — so a
+    # vstack-resident slot must never be tagged :i64/:f64/:bool, even
+    # right after an i64 was stored into it (the i64 was wrapped to
+    # Value.Int64Val on the way in).
     if @islots.key?(name)
       case val_type
       when :i64, :bool then emit_op(STORE_ISLOT, @islots[name])
       when :f64        then emit_op(F64_TO_INT); emit_op(STORE_ISLOT, @islots[name])
       else                  emit_op(VAL_TO_I64); emit_op(STORE_ISLOT, @islots[name])
       end
+      @slot_types[name] = :i64
     elsif @fslots.key?(name)
       case val_type
       when :f64 then emit_op(STORE_FSLOT, @fslots[name])
       when :i64 then emit_op(INT_TO_F64); emit_op(STORE_FSLOT, @fslots[name])
       else           emit_op(VAL_TO_F64); emit_op(STORE_FSLOT, @fslots[name])
       end
+      @slot_types[name] = :f64
     else
       case val_type
       when :i64  then emit_op(I_TO_VAL);    emit_op(STORE_SLOT, @slots[name])
       when :f64  then emit_op(F_TO_VAL);    emit_op(STORE_SLOT, @slots[name])
       when :bool then emit_op(BOOL_TO_VAL); emit_op(STORE_SLOT, @slots[name])
       else            emit_op(STORE_SLOT,   @slots[name])
+      end
+      # Typed-stack tags would falsely imply istack/fstack residency.
+      # When val_type carries no useful tag (:any), preserve whatever
+      # alloc_slot stamped (e.g. :struct_<Name>) — that's where the
+      # structural hint came from.
+      new_tag = case val_type
+                when :i64, :f64, :bool then :any
+                else                        val_type
+                end
+      if new_tag == :any && @slot_types[name] && @slot_types[name] != :any
+        # Keep existing tag (:struct_X / :map / :set) — emit_store has no
+        # better information than alloc_slot did.
+      else
+        @slot_types[name] = new_tag
       end
     end
   end
