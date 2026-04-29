@@ -436,7 +436,17 @@ class BcEmitter
       # mutable handle. The Let is real (allocates a slot + copies), but
       # has no AST counterpart -- the param name is `X` in the source.
       (n.is_a?(MIR::Let) && n.init.is_a?(MIR::Ident) &&
-       n.init.name.to_s == "_m_#{n.name}")
+       n.init.name.to_s == "_m_#{n.name}") ||
+      # @nonReentrant / @reentrant lowering injects a StackGuard at fn entry:
+      #   Let _guard = safety.StackGuard.enter(@src)
+      #   _guard.push()
+      # The matching pop is in a DeferStmt (already skipped). The VM has
+      # no StackGuard machinery; treat all three as synthetic so they
+      # don't break the MIR/AST pairing.
+      (n.is_a?(MIR::Let) && n.name.to_s == "_guard") ||
+      (n.is_a?(MIR::ExprStmt) && n.expr.is_a?(MIR::MethodCall) &&
+       n.expr.receiver.is_a?(MIR::Ident) &&
+       n.expr.receiver.name.to_s == "_guard")
     }
     mir_paired = mir_stmts.reject(&synthetic_only)
     if mir_paired.length != ast_stmts.length
