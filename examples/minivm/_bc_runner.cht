@@ -601,7 +601,8 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ List: outList };
     END
     IF id == 109 THEN
-        -- slice(lst, start, end): lst[start..end]
+        -- slice(lst, start, end): lst[start..end] (exclusive on end).
+        -- Supports List, TypedI64Arr, TypedF64Arr, and Str byte-slicing.
         MATCH evaled[1] START
             Value.List AS lst ->
                 MUTABLE s = getInt(evaled[2]);
@@ -615,12 +616,35 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
                     END
                 END
                 RETURN Value{ List: outList };,
+            Value.TypedI64Arr AS iarr ->
+                MUTABLE si = getInt(evaled[2]);
+                MUTABLE ei = getInt(evaled[3]);
+                IF si < 0 THEN si = 0; END
+                IF ei > iarr.length() THEN ei = iarr.length(); END
+                MUTABLE outIarr: Int64[]@list = List[];
+                IF si < ei THEN FOR k IN (si ..< ei) DO outIarr.append(iarr[k]); END END
+                RETURN Value{ TypedI64Arr: outIarr };,
+            Value.TypedF64Arr AS farr ->
+                MUTABLE sf = getInt(evaled[2]);
+                MUTABLE ef = getInt(evaled[3]);
+                IF sf < 0 THEN sf = 0; END
+                IF ef > farr.length() THEN ef = farr.length(); END
+                MUTABLE outFarr: Float64[]@list = List[];
+                IF sf < ef THEN FOR k IN (sf ..< ef) DO outFarr.append(farr[k]); END END
+                RETURN Value{ TypedF64Arr: outFarr };,
+            Value.Str AS str ->
+                MUTABLE ss = getInt(evaled[2]);
+                MUTABLE es = getInt(evaled[3]);
+                IF ss < 0 THEN ss = 0; END
+                IF es > str.length() THEN es = str.length(); END
+                IF ss >= es THEN RETURN Value{ Str: COPY "" }; END
+                RETURN Value{ Str: substr(str, ss, es - ss) };,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
     END
     IF id == 110 THEN
-        -- slice-from(lst, start): lst[start..]
+        -- slice-from(lst, start): lst[start..]. Same shape support as slice.
         MATCH evaled[1] START
             Value.List AS lst ->
                 MUTABLE s = getInt(evaled[2]);
@@ -632,6 +656,23 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
                     END
                 END
                 RETURN Value{ List: outList };,
+            Value.TypedI64Arr AS iarr2 ->
+                MUTABLE si2 = getInt(evaled[2]);
+                IF si2 < 0 THEN si2 = 0; END
+                MUTABLE outIarr2: Int64[]@list = List[];
+                IF si2 < iarr2.length() THEN FOR k IN (si2 ..< iarr2.length()) DO outIarr2.append(iarr2[k]); END END
+                RETURN Value{ TypedI64Arr: outIarr2 };,
+            Value.TypedF64Arr AS farr2 ->
+                MUTABLE sf2 = getInt(evaled[2]);
+                IF sf2 < 0 THEN sf2 = 0; END
+                MUTABLE outFarr2: Float64[]@list = List[];
+                IF sf2 < farr2.length() THEN FOR k IN (sf2 ..< farr2.length()) DO outFarr2.append(farr2[k]); END END
+                RETURN Value{ TypedF64Arr: outFarr2 };,
+            Value.Str AS str2 ->
+                MUTABLE ss2 = getInt(evaled[2]);
+                IF ss2 < 0 THEN ss2 = 0; END
+                IF ss2 >= str2.length() THEN RETURN Value{ Str: COPY "" }; END
+                RETURN Value{ Str: substr(str2, ss2, str2.length() - ss2) };,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
