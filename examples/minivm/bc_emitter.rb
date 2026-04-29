@@ -490,6 +490,7 @@ class BcEmitter
   # ================================================================
 
   def compile_stmt(mir_node, ast_node)
+    @current_ast_stmt = ast_node
     case mir_node
     when MIR::Let
       if mir_node.init.is_a?(MIR::InlineZig) || mir_node.init.is_a?(MIR::RawZig)
@@ -741,6 +742,8 @@ class BcEmitter
 
   def compile_expr_stmt(mir_node, ast_node)
     expr = mir_node.expr
+    saved_ast = @current_ast_stmt
+    @current_ast_stmt = ast_node
     case expr
     when MIR::Call
       compile_call_expr(expr)
@@ -751,6 +754,7 @@ class BcEmitter
     else
       compile_expr(expr)
     end
+    @current_ast_stmt = saved_ast
     t = pop_type
     emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
     push_type(:void)  # signal to compile_main that POP was already handled
@@ -852,6 +856,15 @@ class BcEmitter
 
   def vm_type_from_ast_type(t)
     return :any if t.nil?
+    # `T[]@set` / `T[]@map` carry the collection kind on the Type object's
+    # `collection` attr (the `[]` is just element-shape). Check that first
+    # so `Int64[]@set` resolves to :set even though raw is "Int64[]".
+    if t.respond_to?(:collection)
+      case t.collection
+      when :set then return :set
+      when :map then return :map
+      end
+    end
     raw = (t.respond_to?(:raw) ? t.raw : t).to_s
     return :map if raw.start_with?("HashMap")
     return :map if raw.start_with?("StringMap") || raw.start_with?("NumericMap")
@@ -1907,7 +1920,19 @@ class BcEmitter
       compile_expr_to_value(node.args[2])
       emit_op(NATIVE_CALL, NATIVES["list-set!"], 3); push_type(:void); return
     when :append, :insert, :push
-      # list.{append,insert,push}(x) — all aliases for list-push.
+      # `set.insert(x)` and `list.{append,insert,push}(x)` collide on op name.
+      # Dispatch on receiver shape: sets live in the env pool as MapRef and
+      # need SET_INSERT; lists go through the list-push native.
+      tag = node.stdlib_def && node.stdlib_def[:tag]
+      arg_hint = expr_type_hint(node.args[0])
+      if tag == :set_method || arg_hint == :set
+        compile_expr_to_value(node.args[0])
+        compile_expr_to_value(node.args[1])
+        emit_op(SET_INSERT)
+        # SET_INSERT pushes Value.Nil as its result; mark :any so callers
+        # in statement position emit POP instead of leaking it on vstack.
+        push_type(:any); return
+      end
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
       emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
@@ -1941,8 +1966,17 @@ class BcEmitter
       end
       push_type(:any); return
     when :remove
-      # list.remove(idx) — compile_list_remove is the existing AST helper;
-      # just inline the same opcodes here using MIR args.
+      # set.remove(val) needs SET_REMOVE (MapRef-backed); list.remove(idx)
+      # falls back to list-ref (no in-place mutation in the VM yet).
+      tag = node.stdlib_def && node.stdlib_def[:tag]
+      arg_hint = expr_type_hint(node.args[0])
+      if tag == :set_method || arg_hint == :set
+        compile_expr_to_value(node.args[0])
+        compile_expr_to_value(node.args[1])
+        emit_op(SET_REMOVE)
+        # SET_REMOVE pushes Value.Nil; mark :any so stmt-position emits POP.
+        push_type(:any); return
+      end
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
       emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)  # gets element for return
@@ -2389,6 +2423,19 @@ class BcEmitter
     # formatted arg list from the AST when available, or best-effort from
     # the tuple-literal string contents.
     if callee == "std.debug.print"
+      # AST-first path: when we have the original print(...) AST, we can
+      # compile each arg via compile_ast_expr — that handles arbitrary
+      # method chains (s.length(), p.contains?(x), x.toString()) without
+      # the brittle string regex parser below.
+      ast_print_args = ast_print_args_from(@current_ast_stmt)
+      if ast_print_args
+        ast_print_args.each do |aarg|
+          compile_ast_print_arg(aarg)
+        end
+        emit_op(LOAD_CONST, add_const([:str, "\n"]))
+        emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+        emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+      end
       # Pull arg names out of the synthetic tuple Ident (name is ".{a, b}").
       tuple = args[1]
       if tuple.is_a?(MIR::Ident) && tuple.name.to_s =~ /\A\.\{(.*)\}\z/m
@@ -2437,6 +2484,17 @@ class BcEmitter
             # `CheatLib.getAt(EXPR, N)` -> list-ref(EXPR, N).
             emit_op(LOAD_CONST, add_const([:i64, idx]))
             emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+            emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+          elsif raw =~ /\A([a-zA-Z_]\w*)\.(length|count)\(\s*\)\z/ && has_slot?($1)
+            # `obj.length()` / `obj.count()` — collection size; opcode depends on slot kind.
+            obj_name = $1
+            emit_load_any(obj_name)
+            t = @slot_types[obj_name]
+            if t == :set || t == :map
+              emit_op(MAP_LENGTH)
+            else
+              emit_op(NATIVE_CALL, NATIVES["count"], 1)
+            end
             emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
           elsif raw =~ /\A([a-zA-Z_]\w*)\.([a-zA-Z_]\w*)\z/ && has_slot?($1)
             # `obj.field` access against a known slot — emit FieldGet via vector-ref.
@@ -3356,10 +3414,49 @@ class BcEmitter
 
   def compile_ast_method_call(node)
     name = node.name.to_s
+    obj_kind = ast_receiver_kind(node.object)
     case name
-    when "length"
+    when "length", "count"
       compile_ast_expr_to_value(node.object)
-      emit_op(NATIVE_CALL, NATIVES["list-length"], 1); push_type(:i64)
+      if obj_kind == :set || obj_kind == :map
+        emit_op(MAP_LENGTH)
+      else
+        emit_op(NATIVE_CALL, NATIVES["list-length"], 1)
+      end
+      push_type(:any)
+    when "contains?"
+      compile_ast_expr_to_value(node.object)
+      compile_ast_expr_to_value(node.args[0])
+      if obj_kind == :set
+        emit_op(SET_CONTAINS)
+      elsif obj_kind == :map
+        emit_op(MAP_CONTAINS)
+      else
+        emit_op(NATIVE_CALL, NATIVES["contains?"], 2)
+      end
+      push_type(:any)
+    when "insert"
+      compile_ast_expr_to_value(node.object)
+      compile_ast_expr_to_value(node.args[0])
+      if obj_kind == :set
+        emit_op(SET_INSERT)
+        push_type(:any)
+      else
+        emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+        if node.object.is_a?(AST::Identifier)
+          emit_op(SET_NAME, add_const(node.object.name.to_s))
+        end
+        push_type(:void)
+      end
+    when "remove"
+      compile_ast_expr_to_value(node.object)
+      compile_ast_expr_to_value(node.args[0])
+      if obj_kind == :set
+        emit_op(SET_REMOVE)
+      else
+        emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+      end
+      push_type(:any)
     when "append"
       compile_ast_expr_to_value(node.object)
       compile_ast_expr_to_value(node.args[0])
@@ -3535,6 +3632,20 @@ class BcEmitter
     when AST::BindExpr    then compile_ast_bind(node)
     when AST::VarDecl     then compile_ast_vardecl(node)
     when AST::ReturnNode  then compile_ast_expr(node.value) if node.value
+    when AST::StringConcat
+      # `"${a}${b}"` interpolated string. Compile each part to a value, then
+      # chain CONCAT operations. Empty StringConcat → empty string literal.
+      if node.parts.empty?
+        emit_op(LOAD_CONST, add_const([:str, ""])); push_type(:str)
+      else
+        node.parts.each_with_index do |p, idx|
+          compile_ast_expr_to_value(p)
+          if idx > 0
+            emit_op(CONCAT)
+            pop_type; pop_type; push_type(:str)
+          end
+        end
+      end
     when NilClass
       emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
     else
@@ -3871,6 +3982,46 @@ class BcEmitter
   # name, or `obj.field` against a known slot). Returns true on emit, or
   # false to signal the caller to fall through to a different branch.
   # Supports recursive nesting so `CheatLib.len(h1.items)` can compose.
+  # Resolve the slot kind (:set, :map, :any) for a method-call receiver
+  # AST node. Identifiers use the slot table directly; other shapes don't
+  # (yet) propagate type info, so they fall back to :any.
+  def ast_receiver_kind(node)
+    return :any unless node.is_a?(AST::Identifier)
+    @slot_types[node.name.to_s] || :any
+  end
+
+  # Find the AST args of the original CLEAR `print(...)` call corresponding
+  # to a MIR `std.debug.print(...)` call. Returns an Array<AST node> or nil
+  # if the AST lookup fails (synthetic stmt, lookup mismatch). When non-nil,
+  # callers can compile each via compile_ast_print_arg without going through
+  # the Zig-template string parser.
+  def ast_print_args_from(ast_stmt)
+    return nil unless ast_stmt
+    node = ast_stmt
+    node = node.expression if node.respond_to?(:expression) && node.expression
+    node = node.value      if node.respond_to?(:value)      && node.value && !node.respond_to?(:args)
+    return nil unless node.respond_to?(:args)
+    name = if node.respond_to?(:name)
+      node.name.is_a?(AST::Identifier) ? node.name.name.to_s : node.name.to_s
+    end
+    return nil unless name == "print"
+    node.args
+  end
+
+  # Compile one AST arg of a `print(...)` and emit display+POP. Each arg
+  # produces one rendered chunk on stdout; the trailing newline is emitted
+  # once by the caller.
+  def compile_ast_print_arg(arg)
+    if arg.is_a?(AST::Literal) && arg.type == :string
+      emit_op(LOAD_CONST, add_const([:str, arg.value.to_s]))
+      emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+      return
+    end
+    compile_ast_expr_to_value(arg)
+    pop_type if @type_stack.any?
+    emit_op(NATIVE_CALL, NATIVES["display"], 1); emit_op(POP)
+  end
+
   def emit_print_subexpr(expr)
     expr = expr.strip
     if expr =~ /\A[a-zA-Z_]\w*\z/ && has_slot?(expr)
