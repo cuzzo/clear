@@ -1964,12 +1964,40 @@ class BcEmitter
     # (Zig-side context unpacking). VM inlines the body, so strip the prefix
     # and read the outer slot directly.
     name = $1 if name =~ /\A__ctx_\d+\.(.*)\z/
-    # Slot table is the source of truth: alloc_slot put the binding in
-    # exactly one of @islots / @fslots / @slots and that placement never
-    # changes. @slot_types tracks the most-recently-stored value's type,
-    # which can drift to :any when a typed binding is reassigned with a
-    # vstack value (compile_set's emit_store coerces but slot_types still
-    # gets the new tag). Don't let that drift mis-route the load.
+    # Arc/Rc-unwrap path. The MIR lowers an `IF resolved AS r ... r.value`
+    # to a synthetic Ident("_r.ctrl.data.value") — a Zig path expression
+    # that the Zig backend would emit literally. In the VM, Value already
+    # is the inner value (no Arc box), so peel `.ctrl.data.*` and treat
+    # subsequent dotted segments as field accesses.
+    if name.include?(".")
+      head, *tail = name.split(".")
+      # Strip Arc-unwrap path markers that have no VM analogue.
+      tail = tail.reject { |seg| seg == "ctrl" || seg == "data" }
+      compile_ident_root(head)
+      tail.each do |field|
+        receiver_struct = nil
+        t = @slot_types[head]
+        if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+          receiver_struct = t.to_s.sub(/\Astruct_/, "")
+        end
+        idx = find_field_index(field, struct_name: receiver_struct)
+        if idx
+          emit_op(LOAD_CONST, add_const([:i64, idx]))
+          emit_op(NATIVE_CALL, NATIVES["vector-ref"], 2)
+        else
+          # Unknown field — fall back to nil to keep the stack balanced.
+          emit_op(POP); emit_op(LOAD_CONST, add_const(nil))
+        end
+      end
+      pop_type if @type_stack.any?
+      push_type(:any)
+      return
+    end
+    compile_ident_root(name)
+  end
+
+  # Load a single (un-dotted) name onto the stack and tag the type stack.
+  def compile_ident_root(name)
     if @islots[name]
       emit_op(LOAD_ISLOT, @islots[name]); push_type(:i64)
     elsif @fslots[name]
@@ -3999,6 +4027,14 @@ class BcEmitter
     when AST::BindExpr    then compile_ast_bind(node)
     when AST::VarDecl     then compile_ast_vardecl(node)
     when AST::ReturnNode  then compile_ast_expr(node.value) if node.value
+    when AST::OptionalUnwrap
+      # `expr?` — safe-navigation prefix. The VM's Value union is already
+      # nullable (Value.Nil is a variant), so OptionalUnwrap is identity:
+      # the surrounding `OR fallback` (parser-introduced for `?.field OR x`)
+      # already does the nil dispatch.
+      compile_ast_expr(node.target)
+    when AST::Copy
+      compile_ast_expr(node.value)  # VM has uniform Value semantics; COPY is identity
     when AST::StringConcat
       # `"${a}${b}"` interpolated string. Compile each part to a value, then
       # chain CONCAT operations. Empty StringConcat → empty string literal.
