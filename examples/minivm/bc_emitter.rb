@@ -102,6 +102,7 @@ class BcEmitter
     @loop_continue_target = nil  # bytecode index to jump to for MIR::ContinueStmt
     @loop_break_patches = nil    # Array of op indices needing loop-exit patch
     @block_break_patches = nil   # Array of op indices for MIR::BreakStmt(value) -> block-expr exit
+    @block_break_types   = nil   # Parallel array of typed-stack residencies for each break value
   end
 
   def compile(program)
@@ -645,7 +646,13 @@ class BcEmitter
         # Block-expression escape: BreakStmt(label, value) inside an IfStmt
         # body that is itself inside a BlockExpr. Push the value to vstack
         # and JUMP to the block-expr exit; compile_block_expr patches.
-        compile_expr(mir_node.value); pop_type
+        compile_expr(mir_node.value)
+        # Record the break value's typed-stack residency so the enclosing
+        # compile_block_expr knows where the value lives at the join. The
+        # statement-position `push_type(:void)` below is for the local
+        # control-flow sense (this statement doesn't yield to its enclosing
+        # statement list); it's separate from the block-expression result.
+        @block_break_types << pop_type if @block_break_types
         emit_op(JUMP)
         @block_break_patches << @ops.length
         emit_op(0)
@@ -837,10 +844,11 @@ class BcEmitter
       effective_type = :"struct_#{@alloc_struct_hints[name]}"
     end
     alloc_slot(name, effective_type)
-    emit_store(name, effective_type)
-    if effective_type == :f64 && val_type == :i64
-      emit_op(INT_TO_F64)
-    end
+    # Pass val_type (where the value actually lives), not effective_type
+    # (where the slot lives). emit_store does the cross-stack coercion
+    # itself — passing the slot type would skip the coercion and store
+    # past the wrong stack.
+    emit_store(name, val_type)
     push_type(:void)
   end
 
@@ -3376,11 +3384,15 @@ class BcEmitter
     emit_op(cond_type == :bool ? JUMP_IF_FALSE_I : JUMP_IF_FALSE)
     patch_false = @ops.length; emit_op(0)
     compile_expr(node.then_val)
+    then_type = pop_type   # only one branch runs at runtime — exactly
     emit_op(JUMP); patch_end = @ops.length; emit_op(0)
     @ops[patch_false] = @ops.length
     compile_expr(node.else_val)
+    else_type = pop_type   # one type-stack slot survives, pushed below
     @ops[patch_end] = @ops.length
-    push_type(peek_type)
+    # Result type: prefer agreement; otherwise fall back to :any so callers
+    # don't assume a specific typed-stack residency.
+    push_type(then_type == else_type ? then_type : :any)
   end
 
   # MIR::UnionVariantGet: union payload access, routed to native cdr.
@@ -3426,7 +3438,9 @@ class BcEmitter
     stmts = semantic_mir_nodes(node.body)
     last_break_type = :any
     saved_block_breaks = @block_break_patches
+    saved_block_types  = @block_break_types
     @block_break_patches = []
+    @block_break_types   = []
     stmts.each_with_index do |s, i|
       if i < stmts.length - 1
         if s.is_a?(MIR::BreakStmt) && s.value
@@ -3449,8 +3463,20 @@ class BcEmitter
     # Patch all nested BreakStmt jumps to land here (after the trailing
     # value already on the stack from the fallthrough path).
     @block_break_patches.each { |idx| @ops[idx] = @ops.length }
+    # The block's result type is the agreement across all break paths.
+    # If the last stmt was a control-flow node (IfStmt etc.) that doesn't
+    # itself yield a value, last_break_type is :void — that's a "no value
+    # at this join" marker, not a type to agree on, so drop it from the
+    # consensus (the Breaks are the only paths that actually pushed
+    # something at the join). When there are no Breaks, last_break_type is
+    # the only signal.
+    types = @block_break_types.dup
+    types << last_break_type if types.empty? || last_break_type != :void
+    types.uniq!
+    STDERR.puts "block_expr types: #{types.inspect}" if ENV["BC_TRACE_BLK"]
     @block_break_patches = saved_block_breaks
-    push_type(last_break_type)
+    @block_break_types   = saved_block_types
+    push_type(types.length == 1 ? types.first : :any)
   end
 
   # ================================================================

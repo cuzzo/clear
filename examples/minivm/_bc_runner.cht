@@ -72,8 +72,18 @@ END
 
 FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     -- Arithmetic
-    -- Modulo
+    -- Modulo. For Int64-valued operands, avoid the float round-trip:
+    -- toInt(toFloat(big)) loses precision past 2^53 and panics with
+    -- "integer part of floating point value out of bounds" for values
+    -- that occur naturally in wrap-arithmetic chains (`%* * %+`).
     IF id == 37 THEN
+        IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN
+            iam = getInt(evaled[1]);
+            ibm = getInt(evaled[2]);
+            MUTABLE modIntResult: Int64 = 0;
+            IF ibm != 0 THEN modIntResult = iam MOD ibm; END
+            RETURN Value{ Int64Val: modIntResult };
+        END
         ia = toInt(getNum(evaled[1]));
         ib = toInt(getNum(evaled[2]));
         MUTABLE modResult: Int64 = 0;
@@ -2470,18 +2480,32 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            5 ->  -- SUB
-                pv = Value{ Number: getNum(stack[sp - 2]) - getNum(stack[sp - 1]) };
+            5 ->  -- SUB (polymorphic — Int64/Int64 stays integer)
+                IF isInt64?(stack[sp - 2]) && isInt64?(stack[sp - 1]) THEN
+                    pv = Value{ Int64Val: getInt(stack[sp - 2]) - getInt(stack[sp - 1]) };
+                ELSE
+                    pv = Value{ Number: getNum(stack[sp - 2]) - getNum(stack[sp - 1]) };
+                END
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            6 ->  -- MUL
-                pv = Value{ Number: getNum(stack[sp - 2]) * getNum(stack[sp - 1]) };
+            6 ->  -- MUL (polymorphic — Int64/Int64 stays integer)
+                IF isInt64?(stack[sp - 2]) && isInt64?(stack[sp - 1]) THEN
+                    pv = Value{ Int64Val: getInt(stack[sp - 2]) * getInt(stack[sp - 1]) };
+                ELSE
+                    pv = Value{ Number: getNum(stack[sp - 2]) * getNum(stack[sp - 1]) };
+                END
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            7 ->  -- DIV
-                pv = Value{ Number: getNum(stack[sp - 2]) / getNum(stack[sp - 1]) };
+            7 ->  -- DIV (polymorphic — Int64/Int64 stays integer division when divisor != 0)
+                IF isInt64?(stack[sp - 2]) && isInt64?(stack[sp - 1]) THEN
+                    divIb = getInt(stack[sp - 1]);
+                    IF divIb == 0 THEN pv = Value{ Int64Val: 0 };
+                    ELSE pv = Value{ Int64Val: getInt(stack[sp - 2]) / divIb }; END
+                ELSE
+                    pv = Value{ Number: getNum(stack[sp - 2]) / getNum(stack[sp - 1]) };
+                END
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
