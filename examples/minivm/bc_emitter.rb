@@ -432,6 +432,9 @@ class BcEmitter
         next
       end
       ast_node = ast_stmts[ast_cursor]; ast_cursor += 1
+      if ENV["BC_TRACE_PAIR"]
+        STDERR.puts "MIR: #{mir_node.class} | AST: #{ast_node.class}"
+      end
       compile_stmt(mir_node, ast_node)
       # Every top-level stmt should leave the vstack balanced. compile_stmt
       # leaves a type-stack entry per stmt; pop it and emit POP if the value
@@ -910,15 +913,28 @@ class BcEmitter
       # vector-set!(vec, idx, val) returns a new Value.Vector with the
       # field replaced (CLEAR semantics: structs are values). Store the
       # result back to the root slot so `obj.field = v` actually mutates.
+      # Walk through @alwaysMutable's `.get()` accessor (identity in the
+      # VM) so the root binding can be located for storeback.
+      root = target.object
+      root = root.receiver if root.is_a?(MIR::MethodCall) && root.method.to_s == "get" && root.args.empty?
       compile_expr_to_value(target.object); pop_type
-      idx = find_field_index(target.field)
+      # Resolve struct hint from the root binding so find_field_index
+      # disambiguates same-named fields across structs.
+      receiver_struct = nil
+      if root.is_a?(MIR::Ident)
+        t = @slot_types[root.name.to_s]
+        if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+          receiver_struct = t.to_s.sub(/\Astruct_/, "")
+        end
+      end
+      idx = find_field_index(target.field, struct_name: receiver_struct)
       if idx
         emit_op(LOAD_CONST, add_const([:i64, idx]))
         compile_expr_to_value(node.value); pop_type
         emit_op(NATIVE_CALL, NATIVES["vector-set!"], 3)
-        # Store the rebuilt vector back to the source slot.
-        if target.object.is_a?(MIR::Ident) && has_slot?(target.object.name.to_s)
-          emit_store(target.object.name.to_s, :any)
+        # Store the rebuilt vector back to the root slot.
+        if root.is_a?(MIR::Ident) && has_slot?(root.name.to_s)
+          emit_store(root.name.to_s, :any)
         end
       end
     when MIR::IndexGet
@@ -2779,6 +2795,15 @@ class BcEmitter
       return
     end
 
+    # @alwaysMutable's `.get()` accessor: in the Zig backend it unwraps a
+    # RefCell-style wrapper. In the VM, values are stored directly (no
+    # interior-mutability box), so `.get()` is identity. Don't fall through
+    # to UFCS — there's no top-level `get` function.
+    if method == "get" && node.args.empty? && rtype != :map
+      compile_expr(node.receiver)
+      return
+    end
+
     # HashMap operations
     if rtype == :map || %w[put delete keys values count].include?(method)
       real_args = strip_alloc_args(node.args)
@@ -3855,11 +3880,24 @@ class BcEmitter
       push_type(:any)
       return
     end
+    # Resolve receiver's struct hint if available so find_field_index can
+    # disambiguate same-named fields across structs (e.g. `Config.retries`
+    # vs `User.retries`). Without this, the global first-match wins and
+    # `cfg.retries` reads the wrong slot.
+    struct_name = nil
+    if node.target.is_a?(AST::Identifier)
+      t = @slot_types[node.target.name.to_s]
+      if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+        struct_name = t.to_s.sub(/\Astruct_/, "")
+      end
+    end
     compile_ast_expr_to_value(node.target)
     field = node.field.to_s
-    idx = find_field_index(field)
+    idx = find_field_index(field, struct_name: struct_name)
     if idx
-      emit_op(LOAD_CONST_I64, add_const([:i64, idx]))
+      # Use LOAD_CONST (vstack), not LOAD_CONST_I64 (istack), because
+      # NATIVE_CALL reads its args from vstack — same fix as compile_field_get.
+      emit_op(LOAD_CONST, add_const([:i64, idx]))
       emit_op(NATIVE_CALL, NATIVES["vector-ref"], 2)
     else
       emit_op(POP); emit_op(LOAD_CONST, add_const(nil))
