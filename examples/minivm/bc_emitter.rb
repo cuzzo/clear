@@ -444,9 +444,6 @@ class BcEmitter
 
     ast_cursor = 0
     mir_stmts.each do |mir_node|
-      if ENV["BC_TRACE_MAIN"]
-        STDERR.puts "MAIN MIR: #{mir_node.class} ops_pos=#{@ops.length} synth=#{synthetic_only.call(mir_node)}"
-      end
       if synthetic_only.call(mir_node)
         compile_stmt(mir_node, nil)
         t = pop_type

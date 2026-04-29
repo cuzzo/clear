@@ -9,16 +9,16 @@ runnable tests after VM_UNSUPPORTED filter) and known issues.
 
 | Bucket | Count |
 |---|---:|
-| **pass** | **181 / 294 supportable** (61%) |
-| fail | 26 |
-| panic | 5 |
-| heap_corrupt | 21 |
+| **pass** | **183 / 294 supportable** (62%) |
+| fail | 25 |
+| panic | 4 |
+| heap_corrupt | 19 |
 | compile_unimpl | 47 |
 | error (timeout-classified) | 11 |
-| unknown (warning-misclassified) | 3 |
+| unknown (warning-misclassified) | 5 |
 | unsupported | 13 (infinite-stream, FFI, narrow numerics) |
 
-This session: 178 -> 181 passing. Five committed fixes covered:
+This session: 178 -> 183 passing. Committed fixes:
 
 - set/map InlineBc :insert / :remove dispatch (66_set, 280_takes_alloc_set).
 - @alwaysMutable .get() identity + AST GetField vstack-idx (72_always_mutable).
@@ -30,6 +30,11 @@ This session: 178 -> 181 passing. Five committed fixes covered:
   semantics; remains in ERROR due to historical-test 10s timeout).
 - AST-driven print template path (handles arbitrary method chains in
   `print(expr.method().toString())`).
+- Struct field defaults + DEFAULT lit support (244_defaults).
+- Arc/Rc data unwrap doesn't shadow user-declared `data` field
+  (103_nested_collection_escape).
+- AST OR_RESCUE + union unit-variant + map index dispatch (no test
+  delta but fixes deeper print-template cases).
 
 ## What's Complete
 
