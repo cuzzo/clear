@@ -2781,6 +2781,31 @@ class BcEmitter
             if stripped =~ /\Atry\s+(.*)\z/m
               p = $1.strip; next
             end
+            # `("STR")[N..]` and `("STR")[N..M]` — Zig string-literal slice
+            # produced by the lowering when materializing a const string for
+            # std.debug.print. The slice is structural (always 0..), so the
+            # contents are equivalent to the inner literal for VM display.
+            if stripped =~ /\A\("(.*)"\)\[\d*\.\.\d*\]\z/m
+              p = "\"#{$1}\""; next
+            end
+            # Bare parenthesized expression: `(EXPR)` -> `EXPR`.
+            # Only peel when the outer parens enclose a balanced expression
+            # (depth never returns to 0 mid-string).
+            if stripped =~ /\A\((.+)\)\z/m
+              inner_p = $1
+              depth = 0; balanced = true
+              inner_p.each_char do |c|
+                if c == '('
+                  depth += 1
+                elsif c == ')'
+                  depth -= 1
+                  if depth < 0 then balanced = false; break end
+                end
+              end
+              if balanced && depth == 0
+                p = inner_p; next
+              end
+            end
             if stripped =~ /\A([@\w][\w.]*)\s*\((.*)\)\s*\z/m
               fn = $1; argstr = $2
               args_split = split_print_tuple(argstr).map(&:strip)
@@ -2794,7 +2819,44 @@ class BcEmitter
           end
           p.strip
         end
-        parts = split_print_tuple(inner).map { |p| unwrap.call(p) }
+        # std.mem.concat(allocator, T, &.{S1, S2, ...}) -> dispatch to each
+        # array literal element. The lowering builds this for `"a" + b + "c"`
+        # patterns inside print(...). Without the rewrite, the whole concat
+        # call falls into the unknown-expr LOAD_NAME branch and prints "nil".
+        rewritten = inner
+        loop do
+          stripped = rewritten.strip
+          peeled = stripped.sub(/\Atry\s+/, "")
+          if peeled =~ /\Astd\.mem\.concat\s*\(/
+            # Find matching close paren of the outer call.
+            i = peeled.index("(")
+            depth = 0; close_idx = nil
+            (i...peeled.length).each do |k|
+              c = peeled[k]
+              if c == "("
+                depth += 1
+              elsif c == ")"
+                depth -= 1
+                if depth == 0 then close_idx = k; break end
+              end
+            end
+            break unless close_idx
+            argstr = peeled[(i+1)...close_idx]
+            cargs = split_print_tuple(argstr)
+            # Last arg is `&.{S1, S2, ...}` (or `.{ ... }`).
+            last = cargs.last&.strip
+            break unless last
+            arr_inner = nil
+            if last =~ /\A&?\s*\.\{(.*)\}\z/m
+              arr_inner = $1
+            end
+            break unless arr_inner
+            rewritten = arr_inner
+          else
+            break
+          end
+        end
+        parts = split_print_tuple(rewritten).map { |p| unwrap.call(p) }
         parts.each do |raw|
           if raw =~ /\A"(.*)"\z/m
             str = $1.gsub(/\\n/, "\n").gsub(/\\t/, "\t").gsub(/\\"/, '"').gsub(/\\\\/, '\\')
