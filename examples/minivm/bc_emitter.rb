@@ -3735,9 +3735,15 @@ class BcEmitter
   def compile_ast_ident(node)
     name = node.name.to_s
     vt = @slot_types[name] || :any
-    if vt == :i64 && @islots[name]
+    # Slot tables (@islots / @fslots / @slots) are authoritative for storage
+    # location; @slot_types may be unstamped (:any) for slots that were
+    # allocated through paths that didn't tag the type. Always honor the
+    # presence in the typed table even when vt is :any — without this,
+    # `print(int_slot.toString())` falls through to LOAD_NAME and reads
+    # the global env, which doesn't contain locals.
+    if @islots[name]
       emit_op(LOAD_ISLOT, @islots[name]); push_type(:i64)
-    elsif vt == :f64 && @fslots[name]
+    elsif @fslots[name]
       emit_op(LOAD_FSLOT, @fslots[name]); push_type(:f64)
     elsif @slots[name]
       emit_op(LOAD_SLOT, @slots[name]); push_type(vt)
