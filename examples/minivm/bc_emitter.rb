@@ -3896,15 +3896,23 @@ class BcEmitter
       else                emit_op(GTE);     push_type(:any)
       end
     when :MOD
-      if both_i64 then emit_op(MOD_I64) else emit_op(NATIVE_CALL, NATIVES["modulo"], 2) end
-      push_type(:i64)
+      # NATIVE_CALL puts result on vstack; MOD_I64 stays on istack.
+      # Type tag must follow the actual residency.
+      if both_i64
+        emit_op(MOD_I64); push_type(:i64)
+      else
+        emit_op(NATIVE_CALL, NATIVES["modulo"], 2); push_type(:any)
+      end
     when :AND, :OR then push_type(:bool)
     when :WRAP_ADD, :CHECK_ADD
-      if both_i64 then emit_op(ADD_I64) else emit_op(ADD) end; push_type(:i64)
+      if both_i64 then emit_op(WRAP_ADD_I64); push_type(:i64)
+      else emit_op(ADD); push_type(:any) end
     when :WRAP_SUB, :CHECK_SUB
-      if both_i64 then emit_op(SUB_I64) else emit_op(SUB) end; push_type(:i64)
+      if both_i64 then emit_op(WRAP_SUB_I64); push_type(:i64)
+      else emit_op(SUB); push_type(:any) end
     when :WRAP_MUL, :CHECK_MUL
-      if both_i64 then emit_op(MUL_I64) else emit_op(MUL) end; push_type(:i64)
+      if both_i64 then emit_op(WRAP_MUL_I64); push_type(:i64)
+      else emit_op(MUL); push_type(:any) end
     else emit_op(ADD); push_type(:any)
     end
   end
