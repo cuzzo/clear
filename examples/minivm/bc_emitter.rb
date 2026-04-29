@@ -2368,8 +2368,16 @@ class BcEmitter
       else                emit_op(GTE);     push_type(:any)
       end
     when "@mod", "%"
-      if both_i64 then emit_op(MOD_I64) else emit_op(NATIVE_CALL, NATIVES["modulo"], 2) end
-      push_type(:i64)
+      # MOD_I64 stays on the istack; NATIVE_CALL modulo pushes its result
+      # onto the vstack as Value.Int64Val. Tag the type stack accordingly
+      # so downstream emit_store / I_TO_VAL pick the right path. Tagging
+      # both as :i64 mis-routes the vstack case through I_TO_VAL on an
+      # empty istack.
+      if both_i64
+        emit_op(MOD_I64); push_type(:i64)
+      else
+        emit_op(NATIVE_CALL, NATIVES["modulo"], 2); push_type(:any)
+      end
     else
       raise Unimplemented, "unsupported Zig BinOp: #{op}"
     end
