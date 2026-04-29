@@ -444,6 +444,9 @@ class BcEmitter
 
     ast_cursor = 0
     mir_stmts.each do |mir_node|
+      if ENV["BC_TRACE_MAIN"]
+        STDERR.puts "MAIN MIR: #{mir_node.class} ops_pos=#{@ops.length} synth=#{synthetic_only.call(mir_node)}"
+      end
       if synthetic_only.call(mir_node)
         compile_stmt(mir_node, nil)
         t = pop_type
@@ -3890,7 +3893,23 @@ class BcEmitter
     if op == :SMOOTH
       raise Unimplemented, "SMOOTH pipeline"
     elsif op == :OR_RESCUE
-      compile_ast_expr(node.left)
+      # `expr OR fallback` — if expr evaluates to nil/falsy, replace with
+      # fallback. Mirror compile_orelse's MIR-side flow: stash expr in a
+      # temp slot, NOT-NOT to boolify, JUMP_IF_FALSE to the fallback path,
+      # otherwise reload the original.
+      @ast_orelse_counter ||= 0; @ast_orelse_counter += 1
+      tmp_idx = add_const("__ast_orelse_#{@ast_orelse_counter}")
+      compile_ast_expr_to_value(node.left); pop_type
+      emit_op(STORE_NAME, tmp_idx)
+      emit_op(NOT); emit_op(NOT)
+      emit_op(JUMP_IF_FALSE)
+      patch_fallback = @ops.length; emit_op(0)
+      emit_op(LOAD_NAME, tmp_idx)
+      emit_op(JUMP); patch_end = @ops.length; emit_op(0)
+      @ops[patch_fallback] = @ops.length
+      compile_ast_expr_to_value(node.right); pop_type
+      @ops[patch_end] = @ops.length
+      push_type(:any)
       return
     end
     compile_ast_expr(node.left);  left_type  = pop_type
@@ -4060,6 +4079,16 @@ class BcEmitter
       push_type(:any)
       return
     end
+    # Union unit variant: Type.Variant → cons("Variant", empty_vector).
+    # Mirrors compile_struct_init's union dispatch: a union value in the VM
+    # is Pair(car=Symbol(\"Variant\"), cdr=payload_or_empty_vector).
+    if node.target.is_a?(AST::Identifier) && @union_types&.include?(node.target.name.to_s)
+      emit_op(LOAD_CONST, add_const(node.field.to_s))
+      emit_op(NATIVE_CALL, NATIVES["vector"], 0)
+      emit_op(NATIVE_CALL, NATIVES["cons"], 2)
+      push_type(:any)
+      return
+    end
     # Resolve receiver's struct hint if available so find_field_index can
     # disambiguate same-named fields across structs (e.g. `Config.retries`
     # vs `User.retries`). Without this, the global first-match wins and
@@ -4086,9 +4115,23 @@ class BcEmitter
   end
 
   def compile_ast_get_index(node)
+    # Map indexing must dispatch through MAP_GET, not list-ref. Check the
+    # target's slot tag — direct Ident hits @slot_types directly; FieldGet
+    # walks through @struct_schemas via expr_collection_kind. Mirrors
+    # compile_index_get on the MIR side.
+    kind =
+      if node.target.is_a?(AST::Identifier)
+        @slot_types[node.target.name.to_s] || :any
+      else
+        :any
+      end
     compile_ast_expr_to_value(node.target)
     compile_ast_expr_to_value(node.index)
-    emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+    if kind == :map
+      emit_op(MAP_GET)
+    else
+      emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+    end
     push_type(:any)
   end
 
