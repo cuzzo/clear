@@ -59,6 +59,11 @@ class BcEmitter
   # Value.List is value-typed so a non-rebuilding list-ref couldn't model
   # the side effect.
   LIST_REMOVE_AT = 93
+  # LIST_POP_LAST: pop list, push (shrunk_list, popped_elem). If list is
+  # empty, popped_elem is Value.Nil. Used by `xs.pop()` so callers can
+  # store the shrunk list back through the same chain-set machinery as
+  # remove(idx).
+  LIST_POP_LAST = 94
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -1145,11 +1150,36 @@ class BcEmitter
 
   def compile_while(node)
     loop_start = @ops.length
-    compile_cond(node.cond)
+    capture = node.respond_to?(:capture) ? node.capture : nil
+    compile_cond(node.cond); ensure_value_stack
     cond_type = pop_type
-    emit_op(cond_type == :bool ? JUMP_IF_FALSE_I : JUMP_IF_FALSE)
-    jump_exit_idx = @ops.length
-    emit_op(0)
+    if capture
+      # WHILE-bind (`WHILE expr AS v DO ...`): on each iteration evaluate
+      # `expr`; if non-nil, bind `v` to its value and run the body. The
+      # cond value is the binding source — stash it before NOT/NOT
+      # boolifies it, then load into the capture slot inside the live
+      # branch.
+      capture_name = capture.to_s
+      alloc_slot(capture_name, :any) unless has_slot?(capture_name)
+      @while_bind_tmp_counter ||= 0; @while_bind_tmp_counter += 1
+      tmp = "__wbind_#{@while_bind_tmp_counter}"
+      alloc_slot(tmp, :any) unless has_slot?(tmp)
+      emit_op(STORE_SLOT, @slots[tmp]); emit_op(POP)  # tmp = cond value
+      emit_op(LOAD_SLOT, @slots[tmp])
+      emit_op(NOT); emit_op(NOT)
+      emit_op(JUMP_IF_FALSE)
+      jump_exit_idx = @ops.length
+      emit_op(0)
+      # Live branch: capture = tmp.
+      emit_op(LOAD_SLOT, @slots[tmp])
+      emit_op(STORE_SLOT, @slots[capture_name])
+      emit_op(POP)
+      cond_type = :any  # we already converted via NOT/NOT to bool then popped
+    else
+      emit_op(cond_type == :bool ? JUMP_IF_FALSE_I : JUMP_IF_FALSE)
+      jump_exit_idx = @ops.length
+      emit_op(0)
+    end
 
     # Zig-style `while (cond) : (update) { body }` lowers FOR-range loops
     # to WhileStmt with a non-nil `update` (the iterator increment). The
@@ -2144,10 +2174,42 @@ class BcEmitter
       compile_expr_to_value(node.args[1]); pop_type; emit_op(POP)
       emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
     when :pop
-      # list.pop() -> ?T. VM returns the tail or nil. Use NATIVES["count"]
-      # to peek length, then list-ref + manipulate. Simpler: new native below.
+      # list.pop() -> ?T. LIST_POP_LAST mutates: pushes (shrunk_list, popped).
+      # Storeback: shrunk_list goes back to receiver; popped is the
+      # expression value. Same chain-set pattern as :remove.
       compile_expr_to_value(node.args[0])
-      emit_op(NATIVE_CALL, NATIVES["list-pop"], 1) if NATIVES.key?("list-pop")
+      emit_op(LIST_POP_LAST)
+      recv = node.args[0]
+      recv = recv.list if recv.is_a?(MIR::ListItems)
+      # LIST_POP_LAST leaves [shrunk, popped] on the stack (popped on top).
+      # Stash both, write shrunk back through the receiver chain, then
+      # leave popped as the expression value.
+      if recv.is_a?(MIR::Ident) && has_slot?(recv.name.to_s)
+        @list_pop_tmp_counter ||= 0; @list_pop_tmp_counter += 1
+        ptmp = "__lpop_p#{@list_pop_tmp_counter}"
+        stmp = "__lpop_s#{@list_pop_tmp_counter}"
+        alloc_slot(ptmp, :any) unless has_slot?(ptmp)
+        alloc_slot(stmp, :any) unless has_slot?(stmp)
+        emit_op(STORE_SLOT, @slots[ptmp]); emit_op(POP)  # popped -> ptmp
+        emit_op(STORE_SLOT, @slots[stmp]); emit_op(POP)  # shrunk -> stmp
+        emit_op(LOAD_SLOT, @slots[stmp])
+        emit_store(recv.name.to_s, :any)                  # write shrunk back
+        # STORE_SLOT in the runner keeps a copy on the vstack — pop it so
+        # the only value left at the end is the popped element.
+        emit_op(POP)
+        emit_op(LOAD_SLOT, @slots[ptmp])                  # popped as result
+      elsif recv.is_a?(MIR::FieldGet) || recv.is_a?(MIR::IndexGet)
+        @list_pop_tmp_counter ||= 0; @list_pop_tmp_counter += 1
+        ptmp = "__lpop_p#{@list_pop_tmp_counter}"
+        stmp = "__lpop_s#{@list_pop_tmp_counter}"
+        alloc_slot(ptmp, :any) unless has_slot?(ptmp)
+        alloc_slot(stmp, :any) unless has_slot?(stmp)
+        emit_op(STORE_SLOT, @slots[ptmp]); emit_op(POP)
+        emit_op(STORE_SLOT, @slots[stmp]); emit_op(POP)
+        synth = MIR::Set.new(recv, MIR::Ident.new(stmp), nil)
+        compile_set(synth); pop_type
+        emit_op(LOAD_SLOT, @slots[ptmp])
+      end
       push_type(:any); return
     when :length, :count
       # Sets/maps live in the env pool (Value.MapRef); the count native

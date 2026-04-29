@@ -3238,6 +3238,27 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;
                 IF sp >= stack.length() THEN stack.append(lraRemoved); ELSE stack[sp] = lraRemoved; END
                 sp += 1;,
+            94 -> -- LIST_POP_LAST: pop list, push (shrunk_list, popped_elem).
+                  -- Empty list -> popped_elem is Value.Nil; shrunk_list is also empty.
+                lplSrc = COPY stack[sp - 1];
+                sp -= 1;
+                MUTABLE lplNew: Value[]@list = List[];
+                MUTABLE lplPopped: Value = Value.Nil;
+                MATCH lplSrc START
+                    Value.List AS lplItems ->
+                        IF lplItems.length() > 0 THEN
+                            FOR lplK IN (0_i64 ..< lplItems.length() - 1) DO
+                                lplNew.append(COPY lplItems[lplK]);
+                            END
+                            lplPopped = COPY lplItems[lplItems.length() - 1];
+                        END,
+                    DEFAULT -> lplPopped = Value.Nil;
+                END
+                pv = Value{ List: lplNew };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;
+                IF sp >= stack.length() THEN stack.append(lplPopped); ELSE stack[sp] = lplPopped; END
+                sp += 1;,
             DEFAULT ->
                 running = FALSE;
         END
