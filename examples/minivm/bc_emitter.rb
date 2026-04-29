@@ -1493,7 +1493,36 @@ class BcEmitter
     when MIR::FnRef
       emit_op(LOAD_CONST, add_const([:sym, node.name.to_s])); push_type(:any); return
     when MIR::TryExpr
-      compile_expr(node.expr)  # VM doesn't propagate Zig errors
+      # `try EXPR` (Zig-style): if EXPR is a Value.Error, propagate by
+      # returning early from the enclosing helper fn with the error
+      # sentinel still on the stack. Otherwise leave EXPR's value on
+      # the stack and fall through. Without this, OR-RAISE patterns
+      # like `readFile(x) OR RAISE` silently swallowed the failure.
+      compile_expr(node.expr); ensure_value_stack; pop_type
+      # IS_ERR pops the operand and pushes a bool, so stash the value
+      # first and reload it on each path.
+      @tryexpr_counter ||= 0; @tryexpr_counter += 1
+      tmp = "__try_#{@tryexpr_counter}"
+      alloc_slot(tmp, :any) unless has_slot?(tmp)
+      emit_op(STORE_SLOT, @slots[tmp])  # STORE_SLOT keeps a copy on the vstack too
+      emit_op(IS_ERR)                    # pops the on-stack copy, pushes bool
+      emit_op(JUMP_IF_FALSE)              # not error -> jump to success path
+      patch_ok = @ops.length; emit_op(0)
+      # Error path: load the stashed Error sentinel and return early.
+      emit_op(LOAD_SLOT, @slots[tmp])
+      if @in_helper_fn
+        emit_op(BC_RET)
+        @helper_fn_returned = true
+      else
+        # In main, there's nothing useful to return — leave the error
+        # on the stack so the surrounding TryCatch / explicit catch
+        # handler (if any) can dispatch on it.
+      end
+      @ops[patch_ok] = @ops.length
+      # Success path: reload the value from the stash so the result is
+      # left on the vstack just like any other expression.
+      emit_op(LOAD_SLOT, @slots[tmp])
+      push_type(:any)
     when MIR::TryCatch
       # `expr OR catch_body`. compile expr; stash to a temp slot; check
       # IS_ERR; if error: discard stash, evaluate catch_body; else: load
