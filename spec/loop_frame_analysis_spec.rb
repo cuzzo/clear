@@ -8,7 +8,7 @@ require_relative "../src/backends/transpiler"
 #   A  mark_per_iter = true  (loop-local frame collections)
 #   B  mark_per_iter = false (no frame locals, or locals that escape)
 #   C  heap carry var promotion (outer string reassignment upgraded to heap)
-#   D  outer container heap promotion (direct_outer_mutations)
+#   D  outer container heap promotion (promote_outer_mutations!)
 #   E  outer struct/map field promotion (promote_outer_field_assigns!)
 #   F  Zig output: saveLoopMark/restoreLoopMark emitted
 
@@ -339,7 +339,7 @@ RSpec.describe LoopFrameAnalysis do
   end
 
   # ===========================================================================
-  # Group D: outer container heap promotion (direct_outer_mutations)
+  # Group D: outer container heap promotion (promote_outer_mutations!)
   # ===========================================================================
   describe "Group D: outer container promoted to heap when loop rewinds" do
 

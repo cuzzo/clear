@@ -1182,19 +1182,15 @@ module LoopFrameAnalysis
     if loop_node.mark_per_iter
       # When the loop rewinds, backing-store extensions of OUTER frame containers
       # are corrupted — for ANY mutation in this loop's iteration, including
-      # ones buried inside nested loops / nested control-flow. The frame arena
-      # is fiber-wide; the inner FOR's own saveLoopMark and the outer WHILE's
-      # restoreLoopMark both reach the growth buffer.
+      # ones buried inside nested loops or other nested control-flow. The frame
+      # arena is fiber-wide; nested loops share it with the enclosing loop.
       #
-      # So the promotion scan walks the WHOLE subtree (stopping only at
-      # FunctionDef boundaries), and excludes names declared anywhere inside
-      # the subtree (so a nested-loop-local container isn't accidentally
-      # promoted; its own loop's analysis owns that decision).
-      subtree_locals = subtree_local_names(body)
-      subtree_outer_mutations(body).each do |receiver_node|
-        next if subtree_locals.include?(receiver_node.name)
-        promote_to_heap!(receiver_node)
-      end
+      # Authoritative locality data is already on each Identifier: the
+      # annotator set `ident.symbol.reg` to the variable's declaration AST
+      # node. So "is this receiver outer to the loop?" reduces to "is the
+      # declaration node OUTSIDE this loop's body subtree?" — no string-name
+      # matching, no ad-hoc scope tracking.
+      promote_outer_mutations!(body)
     end
 
     # Always: promote string-typed RHS expressions to heap when assigned to outer
@@ -1265,83 +1261,39 @@ module LoopFrameAnalysis
     found
   end
 
-  # mutates_receiver calls in DIRECT body where receiver is an outer container.
-  # Returns the receiver Identifier nodes for promotion.
-  def self.direct_outer_mutations(body, local_names)
-    receivers = []
-    scan_direct(body) do |s|
-      next unless s.respond_to?(:mutates_receiver) && s.mutates_receiver
-      receiver = case s
-                 when AST::MethodCall then s.object
-                 when AST::FuncCall   then s.args&.first
-                 end
-      if receiver.is_a?(AST::Identifier) && !local_names.include?(receiver.name)
-        receivers << receiver
-      end
-    end
-    receivers
-  end
-
-  # Like collect_local_names, but descends through nested loops too. Used
-  # by the outer-mutation promotion check, which has to filter receivers
-  # that are local to ANY enclosed scope (the nested loop's own analysis
-  # is responsible for those).
-  def self.subtree_local_names(body)
-    names = Set.new
-    scan_subtree(body) do |s|
-      case s
+  # Walk the loop body subtree once. For each mutates_receiver call, ask the
+  # symbol table where the receiver was declared and promote it to heap if
+  # the declaration is outside this loop's body.
+  #
+  # Identity check via `ident.symbol.reg` (set by the annotator) is the
+  # authoritative locality answer — no need to re-derive it from string-name
+  # matching against a recomputed local_names set.
+  def self.promote_outer_mutations!(body)
+    # Pre-collect the declaration AST nodes that live anywhere within this
+    # loop's subtree. AST.walk_body is the existing deep walker; we only
+    # need to skip FunctionDef nodes, which are a different frame arena.
+    local_decls = Set.new
+    AST.walk_body(body) do |n|
+      next if n.is_a?(AST::FunctionDef)
+      case n
       when AST::VarDecl
-        names << s.name.to_s if s.name.is_a?(String)
+        local_decls << n.object_id
       when AST::BindExpr
-        names << s.name.to_s if s.name.is_a?(String) && s.mode == :decl
+        local_decls << n.object_id if n.mode == :decl
       end
     end
-    names
-  end
 
-  # mutates_receiver calls anywhere in the subtree (descends through nested
-  # loops). Caller filters by subtree_local_names to keep only outer
-  # receivers. Necessary because the per-iteration frame rewind affects all
-  # allocations made anywhere within the loop body — not just direct ones.
-  def self.subtree_outer_mutations(body)
-    receivers = []
-    scan_subtree(body) do |s|
-      next unless s.respond_to?(:mutates_receiver) && s.mutates_receiver
-      receiver = case s
-                 when AST::MethodCall then s.object
-                 when AST::FuncCall   then s.args&.first
+    AST.walk_body(body) do |n|
+      next if n.is_a?(AST::FunctionDef)
+      next unless n.respond_to?(:mutates_receiver) && n.mutates_receiver
+      receiver = case n
+                 when AST::MethodCall then n.object
+                 when AST::FuncCall   then n.args&.first
                  end
-      receivers << receiver if receiver.is_a?(AST::Identifier)
-    end
-    receivers
-  end
-
-  # Walk the body subtree, descending through everything except FunctionDef
-  # (which is a true scope boundary — the callee has its own frame arena).
-  # Unlike scan_direct, DOES descend into nested loops because frame allocs
-  # there share the enclosing fiber's frame arena.
-  def self.scan_subtree(body, &block)
-    return unless body.is_a?(Array)
-    body.each do |s|
-      yield s
-      case s
-      when AST::FunctionDef
-        next  # different fiber/frame arena — true boundary
-      when AST::WhileLoop, AST::WhileBindLoop
-        scan_subtree(s.do_branch, &block)
-      when AST::ForRange, AST::ForEach
-        scan_subtree(s.body, &block)
-      when AST::IfStatement
-        scan_subtree(s.then_branch, &block)
-        scan_subtree(s.else_branch, &block)
-      when AST::MatchStatement
-        s.cases&.each { |c| scan_subtree(c[:body], &block) }
-        scan_subtree(s.default_case, &block)
-      when AST::WithBlock
-        scan_subtree(s.body, &block)
-      when AST::DoBlock
-        s.branches&.each { |b| scan_subtree(b[:body], &block) }
-      end
+      next unless receiver.is_a?(AST::Identifier)
+      decl = receiver.symbol&.reg
+      next if decl.nil? || local_decls.include?(decl.object_id)
+      promote_to_heap!(receiver)
     end
   end
 
