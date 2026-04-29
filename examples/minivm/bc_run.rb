@@ -26,7 +26,15 @@ if $PROGRAM_NAME == __FILE__
 
   project_root   = File.expand_path("../../", __dir__)
   optimized = !ENV["BC_OPT"].nil? && ENV["BC_OPT"] != "0"
-  bc_runner_path = File.join(__dir__, optimized ? "_bc_runner_opt" : "_bc_runner")
+  # BC_DEBUG_ALLOC=1 builds the runner with std.heap.DebugAllocator's safety
+  # checks (double-free / UAF panic with stack trace). Cached separately so
+  # normal runs aren't affected.
+  debug_alloc = !ENV["BC_DEBUG_ALLOC"].nil? && ENV["BC_DEBUG_ALLOC"] != "0"
+  runner_basename = if optimized then "_bc_runner_opt"
+                    elsif debug_alloc then "_bc_runner_dbg"
+                    else "_bc_runner"
+                    end
+  bc_runner_path = File.join(__dir__, runner_basename)
   bc_runner_src  = File.join(__dir__, "_bc_runner.cht")
   bc_ops_file    = File.join(__dir__, "_bc_ops.txt")
   bc_consts_file = File.join(__dir__, "_bc_consts.txt")
@@ -59,10 +67,22 @@ if $PROGRAM_NAME == __FILE__
     bc_runner_main += "    RETURN;\nEND\n"
 
     File.write(bc_runner_src, interp_base + bc_runner_main)
-    build_args = ["build", "--use-c-allocator"]
+    build_args = ["build"]
+    # DebugAllocator + libc are mutually exclusive: the debug allocator is
+    # the whole point — it's the source of truth for alloc/free pairing.
+    if debug_alloc
+      build_args << "--debug-allocator"
+    else
+      build_args << "--use-c-allocator"
+    end
     build_args << "--optimized" if optimized
     build_args.concat([bc_runner_src, "-o", bc_runner_path])
-    system("#{project_root}/clear", *build_args, [:out, :err] => File::NULL)
+    if debug_alloc
+      # Surface compile errors when wiring the new flag through the build.
+      system("#{project_root}/clear", *build_args)
+    else
+      system("#{project_root}/clear", *build_args, [:out, :err] => File::NULL)
+    end
   end
 
   require_relative "bc_emitter"

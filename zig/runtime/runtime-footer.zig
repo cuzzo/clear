@@ -21,12 +21,56 @@ pub fn main() !void {
     // per-thread arenas, zero contention). Debug/ReleaseSafe defaults to
     // smp_allocator for scalable concurrent allocation. Override with
     // USE_C_ALLOCATOR declaration.
+    //
+    // USE_DEBUG_ALLOCATOR opts into std.heap.DebugAllocator with safety +
+    // retain_metadata + never_unmap so double-free / use-after-free panics
+    // with a stack trace pointing at the offending alloc/free site. Used
+    // by `clear build --debug-allocator` to localize compiler bugs that
+    // emit unsafe Zig.
+    const use_debug_alloc = if (@hasDecl(@import("root"), "USE_DEBUG_ALLOCATOR"))
+        @import("root").USE_DEBUG_ALLOCATOR
+    else
+        false;
     const use_c_alloc = if (@hasDecl(@import("root"), "USE_C_ALLOCATOR"))
         @import("root").USE_C_ALLOCATOR
     else
         (@import("builtin").mode == .ReleaseFast or @import("builtin").mode == .ReleaseSmall);
 
-    const allocator = if (use_c_alloc) std.heap.c_allocator else std.heap.smp_allocator;
+    // safety + retain_metadata + never_unmap means: every freed page is kept
+    // mapped read/write and detected on subsequent access by an explicit
+    // poison check rather than by libc's allocator metadata getting clobbered
+    // (which gives the cryptic `malloc(): mismatching next->prev_size`
+    // diagnostics that don't point at the offending alloc/free site). With
+    // these on, double-free panics with the alloc + free stack traces and a
+    // clear "Double free detected." message; UAF reads return undefined
+    // bytes (Zig's safety mode catches some patterns; libc's check did not).
+    //
+    // stack_trace_frames bumped up so the printed trace climbs past the
+    // generic `CheatLib.cleanup` shim into the user-emitted Zig that's the
+    // real bug source.
+    var dbg_gpa: std.heap.DebugAllocator(.{
+        .safety = true,
+        // Default DebugAllocator: catches double-free (panics with both
+        // alloc + free stack traces) and out-of-bounds writes. DOES NOT
+        // catch UAF on its own — for that, set retain_metadata + never_unmap
+        // (which trades correctness-coverage for memory growth).
+        .retain_metadata = false,
+        .never_unmap = false,
+        .thread_safe = true,
+        .stack_trace_frames = 16,
+    }) = .{};
+    defer if (use_debug_alloc) {
+        // Print leaks/invalid frees to stderr; ignore the leak status code so
+        // the program's exit code reflects normal termination.
+        _ = dbg_gpa.deinit();
+    };
+
+    const allocator = if (use_debug_alloc)
+        dbg_gpa.allocator()
+    else if (use_c_alloc)
+        std.heap.c_allocator
+    else
+        std.heap.smp_allocator;
 
     // 2. Setup Contexts
     var global_ctx = EbrContext{};

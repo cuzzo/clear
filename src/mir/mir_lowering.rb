@@ -386,7 +386,8 @@ class MIRLowering
   end
 
   # Lower a full program into MIR::Program with standard imports + footer.
-  def lower_program(node, use_c_allocator: false, needs_safety: false)
+  def lower_program(node, use_c_allocator: false, needs_safety: false, use_debug_allocator: false)
+    @use_debug_allocator = use_debug_allocator
     items = []
 
     # Auto-detect needs_safety from @nonReentrant functions
@@ -402,6 +403,9 @@ class MIRLowering
 
     if use_c_allocator || @used_sharded_map
       items << MIR::PubConst.new("USE_C_ALLOCATOR", "true")
+    end
+    if @use_debug_allocator
+      items << MIR::PubConst.new("USE_DEBUG_ALLOCATOR", "true")
     end
 
     # Lower each statement, adding source line comments

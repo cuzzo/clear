@@ -187,7 +187,7 @@ def build_metadata_path(output)
   File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
 end
 
-def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil)
+def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil, use_debug_allocator: false)
   {
     "source" => File.expand_path(source),
     "output" => File.expand_path(output),
@@ -196,6 +196,7 @@ def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, pr
     "module_mode" => module_mode,
     "profile" => profile,
     "use_c_allocator" => use_c_allocator,
+    "use_debug_allocator" => use_debug_allocator,
     "default_stack" => default_stack,
     "strict_test" => strict_test,
     "exact_tiers" => exact_tiers&.transform_keys(&:to_s),
@@ -339,7 +340,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, main_tier: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -355,6 +356,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     module_mode: module_mode,
     profile: profile,
     use_c_allocator: use_c_allocator,
+    use_debug_allocator: use_debug_allocator,
     default_stack: default_stack,
     strict_test: strict_test,
     exact_tiers: exact_tiers,
@@ -376,6 +378,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # Transpile
   transpile_flag = module_mode ? '--test' : ''
   transpile_flag += " --use-c-allocator" if use_c_allocator
+  transpile_flag += " --debug-allocator" if use_debug_allocator
   transpile_flag += " --default-stack #{default_stack}" if default_stack
   transpile_flag += " --strict" if strict_test
   if exact_tiers
@@ -555,6 +558,7 @@ when 'build'
   opt_level = 'Debug'
   extra_flags = ['-fno-llvm', '-fno-lld']
   use_c_allocator = false
+  use_debug_allocator = false
 
   # Parse build flags
   remaining = []
@@ -593,6 +597,11 @@ when 'build'
     when '--use-c-allocator'
       use_c_allocator = true
       i += 1
+    when '--debug-allocator'
+      # std.heap.DebugAllocator with safety + retain_metadata + never_unmap.
+      # Catches double-free and use-after-free with stack traces.
+      use_debug_allocator = true
+      i += 1
     else
       remaining << args[i]
       i += 1
@@ -606,7 +615,7 @@ when 'build'
   stack_check = (opt_level != 'Debug') if stack_check.nil?
 
   default_stack = (opt_level == 'Debug') ? 'Large' : nil
-  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator)
+  result = do_build(source, output: output, opt_level: opt_level, extra_flags: extra_flags, default_stack: default_stack, force: !!@force_build, use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator)
   output_path = output || File.join(File.dirname(File.expand_path(source)), File.basename(source, '.cht'))
   exit 0 if result == :up_to_date
   puts "Built: #{output_path}"

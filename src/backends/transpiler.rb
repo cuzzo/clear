@@ -49,14 +49,15 @@ class ZigTranspiler
 
   # Single-file entry point (used by the CLI and simple callers).
   # pkg_paths: { "name" => "/abs/path/to/lib.cht" } for REQUIRE "pkg:name" resolution.
-  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil)
+  def transpile(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil)
     transpile_mir(cheat_code, source_dir: source_dir, pkg_paths: pkg_paths,
-                  use_c_allocator: use_c_allocator, test_mode: test_mode, strict_test: strict_test,
+                  use_c_allocator: use_c_allocator, use_debug_allocator: use_debug_allocator,
+                  test_mode: test_mode, strict_test: strict_test,
                   exact_tiers: exact_tiers, main_tier: main_tier)
   end
 
   # MIR pipeline: front-end -> MIRLowering -> MIREmitter -> Zig output.
-  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil)
+  def transpile_mir(cheat_code, source_dir: @source_dir, pkg_paths: {}, use_c_allocator: false, use_debug_allocator: false, test_mode: false, strict_test: false, exact_tiers: nil, main_tier: nil)
     @source_dir = File.expand_path(source_dir)
     @test_mode = test_mode
     @importer ||= ModuleImporter.new(base_dir: @source_dir, pkg_paths: pkg_paths, use_mir: true)
@@ -87,7 +88,7 @@ class ZigTranspiler
     )
 
     needs_c_alloc = use_c_allocator
-    program = lowering.lower_program(result.ast, use_c_allocator: needs_c_alloc)
+    program = lowering.lower_program(result.ast, use_c_allocator: needs_c_alloc, use_debug_allocator: use_debug_allocator)
 
     # Post-MIR verification: check the ACTUAL code that will be emitted.
     checker = MIRChecker.new
@@ -276,6 +277,9 @@ if __FILE__ == $0
     opts.on('--use-c-allocator', 'Use the C allocator (jemalloc/mimalloc) instead of GPA') do
       options[:use_c_allocator] = true
     end
+    opts.on('--debug-allocator', 'Use std.heap.DebugAllocator (catches double-free / UAF with stack traces)') do
+      options[:use_debug_allocator] = true
+    end
     opts.on('--test', 'Emit as test module') do
       options[:mode] = :test
     end
@@ -312,6 +316,7 @@ if __FILE__ == $0
     else
       puts transpiler.transpile(code, source_dir: source_dir, pkg_paths: options[:pkg_paths],
                                 use_c_allocator: !!options[:use_c_allocator],
+                                use_debug_allocator: !!options[:use_debug_allocator],
                                 exact_tiers: options[:exact_tiers],
                                 main_tier: options[:main_tier])
     end
