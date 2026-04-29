@@ -389,6 +389,64 @@ RSpec.describe LoopFrameAnalysis do
       expect(zig).to include("heapAlloc")
     end
 
+    # Regression for the bc_runner UAF family (#76, #89, #115, #121, #156, #174,
+    # #271, #78). When a rewinding loop has the outer-mutation buried inside a
+    # nested loop / nested control-flow, scan_direct stops at the inner loop
+    # boundary and never sees the mutation. The outer container then keeps its
+    # frame allocator and the per-iteration rewind frees its growth buffer mid-run.
+    it "outer @list mutated inside a nested loop INSIDE a rewinding loop is heap-promoted" do
+      src = <<~CLEAR
+        UNION Val { Nil, Number: Float64 }
+        FN main() RETURNS Void ->
+          MUTABLE outer: Val[]@list = [];
+          MUTABLE i = 0_i64;
+          WHILE i < 5 DO
+            -- frame-alloc in WHILE's direct body drives mark_per_iter=true
+            MUTABLE buf: Val[]@list = [];
+            buf.append(Val.Nil);
+            FOR k IN (0_i64 ..< 4_i64) DO
+              -- Mutation buried inside a nested FOR; transitively in a
+              -- rewinding loop's body.
+              outer.append(Val.Nil);
+            END
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("saveLoopMark")
+      # outer.append must use heapAlloc — anything else is a UAF when the
+      # WHILE rewinds.
+      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
+    end
+
+    # Same pattern but the nested control-flow is a MATCH instead of a FOR.
+    # MATCH is currently included in scan_direct's recursion, so this passes
+    # today — keep the invariant explicit so a future scan_direct refactor
+    # doesn't quietly drop coverage.
+    it "outer @list mutated inside a MATCH branch INSIDE a rewinding loop is heap-promoted" do
+      src = <<~CLEAR
+        UNION Val { Nil, Number: Float64 }
+        FN main() RETURNS Void ->
+          MUTABLE outer: Val[]@list = [];
+          MUTABLE i = 0_i64;
+          WHILE i < 5 DO
+            MUTABLE buf: Val[]@list = [];
+            buf.append(Val.Nil);
+            MATCH i START
+              DEFAULT -> outer.append(Val.Nil);
+            END
+            i = i + 1_i64;
+          END
+          RETURN;
+        END
+      CLEAR
+      zig = transpile(src)
+      expect(zig).to include("saveLoopMark")
+      expect(zig).to match(/outer\.append\(rt\.heapAlloc\(\)/)
+    end
+
   end
 
   # ===========================================================================

@@ -1071,7 +1071,10 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         zig = transpile(code)
-        expect(zig).not_to include("safety")
+        # Must not import the safety lib; the .safety field on the
+        # DebugAllocator config (always present in the runtime footer)
+        # is unrelated to this check.
+        expect(zig).not_to include('@import("runtime/../lib/safety.zig")')
       end
     end
 

@@ -1181,8 +1181,18 @@ module LoopFrameAnalysis
 
     if loop_node.mark_per_iter
       # When the loop rewinds, backing-store extensions of OUTER frame containers
-      # in the DIRECT body are corrupted.  Promote them to heap.
-      direct_outer_mutations(body, local_names).each do |receiver_node|
+      # are corrupted — for ANY mutation in this loop's iteration, including
+      # ones buried inside nested loops / nested control-flow. The frame arena
+      # is fiber-wide; the inner FOR's own saveLoopMark and the outer WHILE's
+      # restoreLoopMark both reach the growth buffer.
+      #
+      # So the promotion scan walks the WHOLE subtree (stopping only at
+      # FunctionDef boundaries), and excludes names declared anywhere inside
+      # the subtree (so a nested-loop-local container isn't accidentally
+      # promoted; its own loop's analysis owns that decision).
+      subtree_locals = subtree_local_names(body)
+      subtree_outer_mutations(body).each do |receiver_node|
+        next if subtree_locals.include?(receiver_node.name)
         promote_to_heap!(receiver_node)
       end
     end
@@ -1270,6 +1280,69 @@ module LoopFrameAnalysis
       end
     end
     receivers
+  end
+
+  # Like collect_local_names, but descends through nested loops too. Used
+  # by the outer-mutation promotion check, which has to filter receivers
+  # that are local to ANY enclosed scope (the nested loop's own analysis
+  # is responsible for those).
+  def self.subtree_local_names(body)
+    names = Set.new
+    scan_subtree(body) do |s|
+      case s
+      when AST::VarDecl
+        names << s.name.to_s if s.name.is_a?(String)
+      when AST::BindExpr
+        names << s.name.to_s if s.name.is_a?(String) && s.mode == :decl
+      end
+    end
+    names
+  end
+
+  # mutates_receiver calls anywhere in the subtree (descends through nested
+  # loops). Caller filters by subtree_local_names to keep only outer
+  # receivers. Necessary because the per-iteration frame rewind affects all
+  # allocations made anywhere within the loop body — not just direct ones.
+  def self.subtree_outer_mutations(body)
+    receivers = []
+    scan_subtree(body) do |s|
+      next unless s.respond_to?(:mutates_receiver) && s.mutates_receiver
+      receiver = case s
+                 when AST::MethodCall then s.object
+                 when AST::FuncCall   then s.args&.first
+                 end
+      receivers << receiver if receiver.is_a?(AST::Identifier)
+    end
+    receivers
+  end
+
+  # Walk the body subtree, descending through everything except FunctionDef
+  # (which is a true scope boundary — the callee has its own frame arena).
+  # Unlike scan_direct, DOES descend into nested loops because frame allocs
+  # there share the enclosing fiber's frame arena.
+  def self.scan_subtree(body, &block)
+    return unless body.is_a?(Array)
+    body.each do |s|
+      yield s
+      case s
+      when AST::FunctionDef
+        next  # different fiber/frame arena — true boundary
+      when AST::WhileLoop, AST::WhileBindLoop
+        scan_subtree(s.do_branch, &block)
+      when AST::ForRange, AST::ForEach
+        scan_subtree(s.body, &block)
+      when AST::IfStatement
+        scan_subtree(s.then_branch, &block)
+        scan_subtree(s.else_branch, &block)
+      when AST::MatchStatement
+        s.cases&.each { |c| scan_subtree(c[:body], &block) }
+        scan_subtree(s.default_case, &block)
+      when AST::WithBlock
+        scan_subtree(s.body, &block)
+      when AST::DoBlock
+        s.branches&.each { |b| scan_subtree(b[:body], &block) }
+      end
+    end
   end
 
   # Does expr (or any sub-expression) contain a frame-allocating expression?

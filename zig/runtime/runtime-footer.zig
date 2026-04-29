@@ -22,11 +22,10 @@ pub fn main() !void {
     // smp_allocator for scalable concurrent allocation. Override with
     // USE_C_ALLOCATOR declaration.
     //
-    // USE_DEBUG_ALLOCATOR opts into std.heap.DebugAllocator with safety +
-    // retain_metadata + never_unmap so double-free / use-after-free panics
-    // with a stack trace pointing at the offending alloc/free site. Used
-    // by `clear build --debug-allocator` to localize compiler bugs that
-    // emit unsafe Zig.
+    // USE_DEBUG_ALLOCATOR opts into std.heap.DebugAllocator with checks for
+    // double-free / use-after-free, so the panic stack trace points at the
+    // offending alloc/free site. Used by `clear build --debug-allocator` to
+    // localize compiler bugs that emit unsafe Zig.
     const use_debug_alloc = if (@hasDecl(@import("root"), "USE_DEBUG_ALLOCATOR"))
         @import("root").USE_DEBUG_ALLOCATOR
     else
@@ -36,14 +35,12 @@ pub fn main() !void {
     else
         (@import("builtin").mode == .ReleaseFast or @import("builtin").mode == .ReleaseSmall);
 
-    // safety + retain_metadata + never_unmap means: every freed page is kept
-    // mapped read/write and detected on subsequent access by an explicit
-    // poison check rather than by libc's allocator metadata getting clobbered
-    // (which gives the cryptic `malloc(): mismatching next->prev_size`
-    // diagnostics that don't point at the offending alloc/free site). With
-    // these on, double-free panics with the alloc + free stack traces and a
-    // clear "Double free detected." message; UAF reads return undefined
-    // bytes (Zig's safety mode catches some patterns; libc's check did not).
+    // The .safety field below catches double-free panics with both the
+    // alloc + free stack traces. Setting retain_metadata + never_unmap
+    // additionally keeps freed pages mapped so UAF reads return undefined
+    // bytes instead of corrupting libc allocator metadata (which gives the
+    // cryptic `malloc(): mismatching next->prev_size` diagnostics that
+    // don't point at the offending site).
     //
     // stack_trace_frames bumped up so the printed trace climbs past the
     // generic `CheatLib.cleanup` shim into the user-emitted Zig that's the
