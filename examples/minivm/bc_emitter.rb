@@ -451,9 +451,6 @@ class BcEmitter
         next
       end
       ast_node = ast_stmts[ast_cursor]; ast_cursor += 1
-      if ENV["BC_TRACE_PAIR"]
-        STDERR.puts "MIR: #{mir_node.class} | AST: #{ast_node.class}"
-      end
       compile_stmt(mir_node, ast_node)
       # Every top-level stmt should leave the vstack balanced. compile_stmt
       # leaves a type-stack entry per stmt; pop it and emit POP if the value
@@ -2834,7 +2831,9 @@ class BcEmitter
 
   def compile_method_call_expr(node)
     method = node.method.to_s
-    rtype  = receiver_slot_type(node.receiver)
+    # Resolve through FieldGet so `h.data.get(k)` (where data is a HashMap
+    # field on a struct) routes through MAP_GET, not the UFCS fallback.
+    rtype  = expr_collection_kind(node.receiver)
 
     # rt.checkYield() is a fiber-cooperation hook for the Zig runtime. The VM
     # has no fiber scheduler, so the call is dead weight. Skip without emitting
@@ -3157,10 +3156,26 @@ class BcEmitter
     # no-op on the value side — see MIR::CapWrap dispatch above), so the
     # unwrap chain must collapse to identity. Without this, `a.value` lowers
     # to `a.ctrl.data.value` and vector-ref(Nil, idx) returns 0.
+    #
+    # Guard against shadowing user-declared fields named `ctrl` or `data`:
+    # only collapse when the receiver isn't a user struct that actually
+    # defines this field (otherwise `MapHolder.data: HashMap` becomes
+    # identity-h, and h2.data["x"] reads from h2's vector instead of the map).
     if node.field.to_s == "ctrl" || node.field.to_s == "data"
-      compile_expr_to_value(node.object); pop_type
-      push_type(:any)
-      return
+      receiver_struct = nil
+      if node.object.is_a?(MIR::Ident)
+        t = @slot_types[node.object.name.to_s]
+        if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+          receiver_struct = t.to_s.sub(/\Astruct_/, "")
+        end
+      end
+      has_real_field = receiver_struct &&
+        @struct_fields[receiver_struct]&.include?(node.field.to_s)
+      unless has_real_field
+        compile_expr_to_value(node.object); pop_type
+        push_type(:any)
+        return
+      end
     end
 
     # Receiver-typed lookup: if the receiver is an Ident slot stamped with
@@ -3194,7 +3209,8 @@ class BcEmitter
   end
 
   def compile_index_get(node)
-    if receiver_slot_type(node.object) == :map
+    kind = expr_collection_kind(node.object)
+    if kind == :map
       compile_expr_to_value(node.object)
       compile_expr_to_value(node.index)
       emit_op(MAP_GET)
@@ -3204,6 +3220,35 @@ class BcEmitter
       emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
     end
     push_type(:any)
+  end
+
+  # Resolve whether `node` refers to a `:map`, `:set`, or other collection.
+  # Direct Idents look up their slot type; FieldGet recurses through the
+  # struct schema so `h.data` (where data is `HashMap<...>`) routes
+  # through MAP_GET / MAP_PUT instead of list-ref / list-set!.
+  def expr_collection_kind(node)
+    return receiver_slot_type(node) if node.is_a?(MIR::Ident)
+    if node.is_a?(MIR::FieldGet) && node.object.is_a?(MIR::Ident)
+      t = @slot_types[node.object.name.to_s]
+      return :any unless t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+      sname = t.to_s.sub(/\Astruct_/, "")
+      schema = (@result.struct_schemas || {})[sname.to_sym]
+      return :any unless schema.is_a?(Hash)
+      spec = schema[node.field.to_s]
+      return :any unless spec.is_a?(Hash)
+      ftype = spec[:type]
+      if ftype.respond_to?(:collection)
+        case ftype.collection
+        when :set then return :set
+        when :map then return :map
+        end
+      end
+      raw = ftype.respond_to?(:raw) ? ftype.raw.to_s : ftype.to_s
+      return :map if raw.start_with?("HashMap") || raw.start_with?("StringMap") ||
+                     raw.start_with?("NumericMap")
+      return :set if raw.start_with?("Set") || raw.start_with?("HashSet")
+    end
+    :any
   end
 
   def find_field_index(field_name, struct_name: nil)
