@@ -52,6 +52,13 @@ class BcEmitter
   WRAP_ADD_I64 = 90
   WRAP_SUB_I64 = 91
   WRAP_MUL_I64 = 92
+  # LIST_REMOVE_AT: pop list + idx, rebuild list without that index, push
+  # both the new list AND the removed element. Caller stores the new list
+  # back to the source binding and keeps the element on the stack as the
+  # expression's value. This is what `xs.remove(i)` should do — the VM's
+  # Value.List is value-typed so a non-rebuilding list-ref couldn't model
+  # the side effect.
+  LIST_REMOVE_AT = 93
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -1992,7 +1999,9 @@ class BcEmitter
       push_type(:any); return
     when :remove
       # set.remove(val) needs SET_REMOVE (MapRef-backed); list.remove(idx)
-      # falls back to list-ref (no in-place mutation in the VM yet).
+      # uses LIST_REMOVE_AT which pushes (new_list, removed_elem) so we can
+      # both rebuild the receiver and produce the removed element as the
+      # expression value.
       tag = node.stdlib_def && node.stdlib_def[:tag]
       arg_hint = expr_type_hint(node.args[0])
       if tag == :set_method || arg_hint == :set
@@ -2004,10 +2013,23 @@ class BcEmitter
       end
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
-      emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)  # gets element for return
-      # Note: ordered-remove side effect not yet modeled; returning the element
-      # is the minimum for test compat. Tests that rely on ordered removal
-      # will need a dedicated opcode in a follow-up.
+      emit_op(LIST_REMOVE_AT)
+      # Stack: [..., new_list, removed_elem]. Store new_list back to the
+      # receiver slot if it's a known binding, then leave the removed
+      # element as the expression result. We need to swap-store: store the
+      # second-from-top (new_list) without losing the top (removed_elem).
+      recv = node.args[0]
+      if recv.is_a?(MIR::Ident) && has_slot?(recv.name.to_s)
+        # Stash removed elem, store new_list, push removed elem back.
+        @list_remove_tmp_counter ||= 0
+        @list_remove_tmp_counter += 1
+        tmp = "__lrm_#{@list_remove_tmp_counter}"
+        alloc_slot(tmp, :any) unless has_slot?(tmp)
+        emit_op(STORE_SLOT, @slots[tmp])  # stash removed (no pop)
+        emit_op(POP)                      # discard removed from vstack
+        emit_store(recv.name.to_s, :any)  # store new_list, pops it
+        emit_op(LOAD_SLOT, @slots[tmp])   # restore removed as expr value
+      end
       push_type(:any); return
     when :indexOf
       compile_expr_to_value(node.args[0])

@@ -3150,6 +3150,29 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             92 -> -- WRAP_MUL_I64 (istack, two's-complement wrap on overflow)
                 istack[isp - 2] = istack[isp - 2] %* istack[isp - 1];
                 isp -= 1;,
+            93 -> -- LIST_REMOVE_AT: pop list + idx, push (new_list, removed_elem)
+                  -- Caller storeback consumes new_list; removed elem stays as expr value.
+                lraIdx = getInt(stack[sp - 1]);
+                lraSrc = COPY stack[sp - 2];
+                sp -= 2;
+                MUTABLE lraNew: Value[]@list = List[];
+                MUTABLE lraRemoved: Value = Value.Nil;
+                MATCH lraSrc START
+                    Value.List AS lraItems ->
+                        FOR lraK IN (0_i64 ..< lraItems.length()) DO
+                            IF lraK == lraIdx THEN
+                                lraRemoved = COPY lraItems[lraK];
+                            ELSE
+                                lraNew.append(COPY lraItems[lraK]);
+                            END
+                        END,
+                    DEFAULT -> lraRemoved = Value.Nil;
+                END
+                pv = Value{ List: lraNew };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;
+                IF sp >= stack.length() THEN stack.append(lraRemoved); ELSE stack[sp] = lraRemoved; END
+                sp += 1;,
             DEFAULT ->
                 running = FALSE;
         END
