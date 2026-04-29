@@ -942,33 +942,12 @@ class BcEmitter
         emit_op(SET_NAME, name_idx)
       end
     when MIR::FieldGet
-      # vector-set!(vec, idx, val) returns a new Value.Vector with the
-      # field replaced (CLEAR semantics: structs are values). Store the
-      # result back to the root slot so `obj.field = v` actually mutates.
-      # Walk through @alwaysMutable's `.get()` accessor (identity in the
-      # VM) so the root binding can be located for storeback.
-      root = target.object
-      root = root.receiver if root.is_a?(MIR::MethodCall) && root.method.to_s == "get" && root.args.empty?
-      compile_expr_to_value(target.object); pop_type
-      # Resolve struct hint from the root binding so find_field_index
-      # disambiguates same-named fields across structs.
-      receiver_struct = nil
-      if root.is_a?(MIR::Ident)
-        t = @slot_types[root.name.to_s]
-        if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
-          receiver_struct = t.to_s.sub(/\Astruct_/, "")
-        end
-      end
-      idx = find_field_index(target.field, struct_name: receiver_struct)
-      if idx
-        emit_op(LOAD_CONST, add_const([:i64, idx]))
-        compile_expr_to_value(node.value); pop_type
-        emit_op(NATIVE_CALL, NATIVES["vector-set!"], 3)
-        # Store the rebuilt vector back to the root slot.
-        if root.is_a?(MIR::Ident) && has_slot?(root.name.to_s)
-          emit_store(root.name.to_s, :any)
-        end
-      end
+      # `obj.field = v`. Two cases:
+      #   - obj is a direct Ident slot: vector-set!(obj, idx, v); store back.
+      #   - obj is a chain (IndexGet / FieldGet / get()-unwrap): walk the
+      #     full chain via compile_chain_set so each level rebuilds and
+      #     the final root slot gets the rebuilt value.
+      compile_chain_set(target, node.value)
     when MIR::IndexGet
       # Walk the IndexGet chain inside-out so multi-dim assigns (e.g.
       # matrix[i][j] = v) update each level functionally and store the
@@ -1011,6 +990,96 @@ class BcEmitter
       end
     end
     push_type(:void)
+  end
+
+  # `target = value` where target is a (possibly nested) chain of
+  # FieldGet / IndexGet / .get() rooted at an Ident slot. CLEAR's
+  # collections are values, so each level must rebuild and the rebuilt
+  # value at level N becomes the input at level N-1.
+  #
+  # Strategy: compute the new value, stash it, then walk the chain
+  # outside-in collecting each level. After the walk, emit each level's
+  # rebuild op (vector-set! for FieldGet, list-set! for IndexGet) inside
+  # to outside, finally storing into the root slot.
+  def compile_chain_set(target, value_node)
+    # Unwrap .get() identity layers so the chain analysis sees through
+    # @alwaysMutable accessors.
+    unwrap = ->(n) {
+      while n.is_a?(MIR::MethodCall) && n.method.to_s == "get" && n.args.empty?
+        n = n.receiver
+      end
+      n.is_a?(MIR::ListItems) ? n.list : n
+    }
+
+    # Collect chain entries from outermost to innermost. Each entry is
+    # either [:field, owner, field_name, struct_name] or
+    # [:index, owner, index_node].
+    chain = []
+    cur = target
+    loop do
+      cur = unwrap.call(cur)
+      case cur
+      when MIR::FieldGet
+        owner = unwrap.call(cur.object)
+        receiver_struct = nil
+        if owner.is_a?(MIR::Ident)
+          t = @slot_types[owner.name.to_s]
+          if t.is_a?(Symbol) && t.to_s.start_with?("struct_")
+            receiver_struct = t.to_s.sub(/\Astruct_/, "")
+          end
+        end
+        chain << [:field, cur.object, cur.field, receiver_struct]
+        cur = cur.object
+      when MIR::IndexGet
+        chain << [:index, cur.object, cur.index]
+        cur = cur.object
+      else
+        break
+      end
+    end
+    root = unwrap.call(cur)
+
+    # Compute and stash the new value.
+    @chain_set_counter ||= 0; @chain_set_counter += 1
+    cur_tmp = "__cset_#{@chain_set_counter}_v"
+    alloc_slot(cur_tmp, :any) unless has_slot?(cur_tmp)
+    compile_expr_to_value(value_node); pop_type
+    emit_op(STORE_SLOT, @slots[cur_tmp])
+    emit_op(POP)
+
+    # Walk innermost (last collected) to outermost: at each level rebuild
+    # owner with the current tmp value substituted, then write the rebuilt
+    # owner back into cur_tmp for the next level out.
+    chain.reverse.each do |entry|
+      kind, owner, *rest = entry
+      compile_expr_to_value(unwrap.call(owner)); pop_type
+      case kind
+      when :field
+        field, struct_name = rest
+        idx = find_field_index(field, struct_name: struct_name)
+        if idx.nil?
+          # Bail on unresolved field — leave cur_tmp as-is.
+          emit_op(POP)
+          next
+        end
+        emit_op(LOAD_CONST, add_const([:i64, idx]))
+        emit_op(LOAD_SLOT, @slots[cur_tmp])
+        emit_op(NATIVE_CALL, NATIVES["vector-set!"], 3)
+      when :index
+        index_node = rest[0]
+        compile_expr_to_value(index_node); pop_type
+        emit_op(LOAD_SLOT, @slots[cur_tmp])
+        emit_op(NATIVE_CALL, NATIVES["list-set!"], 3)
+      end
+      emit_op(STORE_SLOT, @slots[cur_tmp])
+      emit_op(POP)
+    end
+
+    # Final store into the root slot (if it's a known Ident).
+    if root.is_a?(MIR::Ident) && has_slot?(root.name.to_s)
+      emit_op(LOAD_SLOT, @slots[cur_tmp])
+      emit_store(root.name.to_s, :any)
+    end
   end
 
   # ================================================================
@@ -2017,9 +2086,26 @@ class BcEmitter
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
       emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+      # Storeback strategy: append builds a NEW list value (CLEAR semantics
+      # — collections are values). The new list lives on top of vstack;
+      # without storing it back, the receiver still references the OLD
+      # empty list and the mutation is lost.
       recv = node.args[0]
+      recv = recv.list if recv.is_a?(MIR::ListItems)
       if recv.is_a?(MIR::Ident) && has_slot?(recv.name.to_s)
         emit_store(recv.name.to_s, :any)
+      elsif recv.is_a?(MIR::FieldGet) || recv.is_a?(MIR::IndexGet)
+        # Nested target: stash the new list and synthesize a Set so
+        # compile_set's existing FieldGet / IndexGet chain handler walks
+        # back through the levels (vector-set! through fields, list-set!
+        # through indices) and stores the final root value.
+        @chain_append_counter ||= 0; @chain_append_counter += 1
+        tmp = "__chappend_#{@chain_append_counter}"
+        alloc_slot(tmp, :any) unless has_slot?(tmp)
+        emit_op(STORE_SLOT, @slots[tmp])  # STORE_SLOT keeps a copy on stack
+        emit_op(POP)                        # discard the redundant copy
+        synth = MIR::Set.new(recv, MIR::Ident.new(tmp), nil)
+        compile_set(synth); pop_type
       end
       push_type(:void); return
     when :reserve
