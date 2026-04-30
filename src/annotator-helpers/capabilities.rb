@@ -531,6 +531,22 @@ module CapabilityHelper
       # Don't recurse into nested BG/DO blocks — they have their own capture scope.
       next if node.is_a?(AST::BgBlock) || node.is_a?(AST::DoBlock)
 
+      # ThenChain.steps is an Array of Hashes (`{ expr:, binding: }`), not
+      # AST::Locatable nodes — the generic Struct-member walk below would
+      # skip them because the `next unless Locatable` filter rejects each
+      # Hash. Recurse explicitly so the chain's expressions contribute to
+      # the BG block's capture set.
+      if node.is_a?(AST::ThenChain)
+        bound_in_chain = locally_bound.dup
+        (node.steps || []).each do |step|
+          if step.is_a?(Hash)
+            _unified_capture_walk([step[:expr]], bound_in_chain, result, is_parallel) if step[:expr]
+            bound_in_chain = bound_in_chain | Set[step[:binding].to_s] if step[:binding]
+          end
+        end
+        next
+      end
+
       node.class.members.each do |member|
         val = node[member]
         if val.is_a?(Array)

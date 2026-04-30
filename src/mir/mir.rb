@@ -827,9 +827,14 @@ module MIR
 
   # Lambda expression (anonymous function pointer via struct trick).
   # Zig: &(struct { fn name(params) ret { body } }).name
-  LambdaExpr = Struct.new(:fn_def) do
+  LambdaExpr = Struct.new(:fn_def, :captures) do
     include Expr
     # fn_def: MIR::FnDef with the lambda's implementation
+    # captures: optional Array<String> — USE-captured variable names
+    # from the AST. The Zig backend ignores these (the synthesized
+    # struct's `fn` accesses outer scope); the BC backend uses them
+    # to emit STORE_NAME at lambda creation and LOAD_NAME inside the
+    # body so the values survive across the BC_CALL boundary.
   end
 
   # Pipeline IR node. Wraps the pre-computed MIR output of a s> chain.

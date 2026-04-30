@@ -1771,7 +1771,16 @@ class MIRLowering
     body_mir << MIR::ReturnStmt.new(lower(node.body))
 
     fn_def = MIR::FnDef.new(fn_name, params_mir, ret_str, body_mir, nil, false, nil)
-    MIR::LambdaExpr.new(fn_def)
+    captures = node.captures&.map { |c|
+      if c.is_a?(Hash)
+        c[:name].to_s
+      elsif c.respond_to?(:name)
+        c.name.to_s
+      else
+        c.to_s
+      end
+    } || []
+    MIR::LambdaExpr.new(fn_def, captures)
   end
 
   # ================================================================

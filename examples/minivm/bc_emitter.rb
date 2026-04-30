@@ -466,6 +466,13 @@ class BcEmitter
   # so the lambda can be stored in a slot or passed as a value. The CALL
   # opcode dispatches Value.BCFn through inline BC_CALL semantics, so a
   # callee like `cb(5)` resolves the slot to a BCFn and jumps to its body.
+  #
+  # USE captures: the AST attaches a list of captured variable names to
+  # MIR::LambdaExpr.captures. At lambda creation we LOAD_SLOT each and
+  # STORE_NAME them under a per-lambda env key (`__cap_<id>_<name>`); the
+  # body's free references resolve to LOAD_NAME of the same key. The
+  # env survives across BC_CALL boundaries (curEnv is preserved), so the
+  # captured values persist through the lambda's later invocation.
   def compile_lambda_expr(node)
     fn = node.fn_def
     params = (fn.respond_to?(:params) ? (fn.params || []) : [])
@@ -475,6 +482,19 @@ class BcEmitter
       pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
       is_synthetic_rt.call(pname)
     }.length
+
+    captures = (node.respond_to?(:captures) ? (node.captures || []) : []).map(&:to_s)
+    @lambda_capture_counter = (@lambda_capture_counter || 0) + 1
+    cap_id = @lambda_capture_counter
+    cap_keys = captures.to_h { |c| [c, "__cap_#{cap_id}_#{c}"] }
+
+    # Capture parent slots into per-lambda env keys BEFORE we jump over
+    # the body — these run when the lambda is created, not when it runs.
+    captures.each do |c|
+      next unless has_slot?(c)
+      emit_load_any(c)
+      emit_op(STORE_NAME, add_const(cap_keys[c]))
+    end
 
     # Jump over the lambda body so straight-line execution doesn't fall
     # into it. Patched after the body is laid out.
@@ -487,6 +507,7 @@ class BcEmitter
       next_slot: @next_slot, next_islot: @next_islot, next_fslot: @next_fslot,
       type_stack: @type_stack,
       in_helper_fn: @in_helper_fn, helper_fn_returned: @helper_fn_returned,
+      lambda_cap_keys: @lambda_cap_keys,
     }
     @slots = {}; @islots = {}; @fslots = {}
     @slot_types = {}; @mutables = Set.new
@@ -494,6 +515,9 @@ class BcEmitter
     @type_stack = []
     @in_helper_fn = true
     @helper_fn_returned = false
+    # Body's free references to captured names resolve to LOAD_NAME under
+    # cap_keys (see compile_ident_root). Saved/restored for nested lambdas.
+    @lambda_cap_keys = cap_keys
 
     body_ip = @ops.length
     params.each do |p|
@@ -510,6 +534,7 @@ class BcEmitter
     @next_fslot = saved[:next_fslot]; @type_stack = saved[:type_stack]
     @in_helper_fn = saved[:in_helper_fn]
     @helper_fn_returned = saved[:helper_fn_returned]
+    @lambda_cap_keys = saved[:lambda_cap_keys]
 
     @ops[skip_idx] = @ops.length
     emit_op(MAKE_BC_FN, body_ip, argc)
@@ -2384,6 +2409,16 @@ class BcEmitter
   # Load a single (un-dotted) name onto the stack and tag the type stack.
   def compile_ident_root(name)
     STDERR.puts "DBG compile_ident_root name=#{name} fn=#{@fn_start_ips&.key?(name).inspect}" if ENV["BC_TRACE_CALL"]
+    # Inside a lambda body, USE-captured names resolve via LOAD_NAME of
+    # the per-lambda env key set up at creation time. This shadows any
+    # accidental same-name slot leftover from the enclosing scope (the
+    # lambda body has its own slot table, but emit_body_stmts may
+    # synthesize aux slots that collide with capture names).
+    if @lambda_cap_keys && @lambda_cap_keys.key?(name)
+      emit_op(LOAD_NAME, add_const(@lambda_cap_keys[name]))
+      push_type(:any)
+      return
+    end
     if @islots[name]
       emit_op(LOAD_ISLOT, @islots[name]); push_type(:i64)
     elsif @fslots[name]
