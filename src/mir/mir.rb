@@ -318,7 +318,7 @@ module MIR
   # clause_bodies: Array<Array<MIR::Stmt>> — one per catch clause + default.
   #   Carries the lowered MIR so the checker can see allocations inside each
   #   catch body. Emission still uses code (raw Zig). nil for legacy callers.
-  CatchWrapper = Struct.new(:code, :error_reassigns, :clause_bodies) do
+  CatchWrapper = Struct.new(:code, :error_reassigns, :clause_bodies, :clause_meta, :has_default) do
     include Stmt
   end
 

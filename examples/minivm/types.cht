@@ -15,7 +15,7 @@ UNION Value {
     NativeFn: Int64,
     EnvRef: Id<Env>,
     Tco { tcoAst: Value @indirect, tcoEnv: Id<Env> },
-    Error { errMsg: String, errKind: String },
+    Error { errMsg: String, errKind: String, errType: String },
     Int64Val: Int64,
     TypedI64Arr: Int64[],
     TypedF64Arr: Float64[],
@@ -175,7 +175,11 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Lambda -> RETURN "#<function>";,
         Value.EnvRef -> RETURN "#<envref>";,
         Value.Tco -> RETURN "#<tco>";,
-        Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";,
+        Value.Error AS e ->
+            IF e.errType.length() > 0 THEN
+                RETURN "#<error:" + e.errKind + ":" + e.errType + ":" + e.errMsg + ">";
+            END
+            RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";,
         Value.MapRef -> RETURN "#<map>";,
         Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";,
         Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";,

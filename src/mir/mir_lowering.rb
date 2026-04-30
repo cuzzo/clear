@@ -1086,8 +1086,17 @@ class MIRLowering
 
       catch_zig, catch_clause_bodies = build_catch_clauses(node, fn_can_fail)
       error_reassigns = collect_catch_reassigns(node)
+      catch_meta = (node.catch_clauses || []).map { |clause|
+        {
+          kinds: (clause[:kinds] || []).map(&:to_s),
+          types: (clause[:types] || []).map(&:to_s),
+          filter_types: (clause[:filter_types] || []).map(&:to_s),
+          filter_messages: (clause[:filter_messages] || []).map { |m| lower(m) },
+        }
+      }
+      has_default = node.default_catch.is_a?(Array) && node.default_catch.any?
       outer_body = [
-        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_zig}\n};", error_reassigns, catch_clause_bodies)
+        MIR::CatchWrapper.new("return #{inner_call} catch {\n    #{catch_zig}\n};", error_reassigns, catch_clause_bodies, catch_meta, has_default)
       ]
 
       outer_fn = MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,

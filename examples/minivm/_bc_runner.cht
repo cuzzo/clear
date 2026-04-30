@@ -180,7 +180,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 31 THEN
         parsed = toNumber(getStr(evaled[1])) OR (0.0 - 999999.0);
-        IF parsed == 0.0 - 999999.0 THEN RETURN Value.Error{ errMsg: "parse failed", errKind: "Input" }; END
+        IF parsed == 0.0 - 999999.0 THEN RETURN Value.Error{ errMsg: "parse failed", errKind: "Input", errType: "" }; END
         RETURN Value{ Number: parsed };
     END
     IF id == 32 THEN
@@ -328,7 +328,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
             -- readFile failed (file not found, perm denied, etc). Return a
             -- Value.Error sentinel so OR RAISE / OR <fallback> sees an error
             -- instead of crashing the scheduler with the unwrapped Zig error.
-            RETURN Value.Error{ errMsg: "readFile failed", errKind: "NotFound" };
+            RETURN Value.Error{ errMsg: "readFile failed", errKind: "NotFound", errType: "" };
         END
         RETURN Value{ Str: COPY content };
     END
@@ -837,6 +837,11 @@ FN getErrKind(v: Value) RETURNS String ->
     RETURN "";
 END
 
+FN getErrType(v: Value) RETURNS String ->
+    MATCH v START Value.Error AS e -> RETURN COPY e.errType;, DEFAULT -> RETURN ""; END
+    RETURN "";
+END
+
 FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKABLE
 ->
@@ -848,17 +853,17 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
                 IF p[catchEnvId] AS catchEnv THEN
                     catchEnv.vars["__p"] = Value{ EnvRef: envId };
                     errBindName = getSymName(catchItems[1]);
-                    catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+                    catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
                 END
                 catchEnvIdHolder = catchEnvId;
             }
             IF catchEnvIdHolder AS theId THEN
                 RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: theId };
             END
-            RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };,
-        DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+            RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };,
+        DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
     END
-    RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+    RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
 END
 
 FN isSymbol?(v: Value) RETURNS Bool ->
@@ -900,7 +905,7 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
         Value.Int64Val AS i -> RETURN Value{ Int64Val: i };,
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.NativeFn AS id -> RETURN Value{ NativeFn: id };,
-        Value.Error AS e -> RETURN Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind };,
+        Value.Error AS e -> RETURN Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind, errType: "" };,
         Value.Lambda AS lam -> RETURN Value.Lambda{ params: COPY lam.params, body: COPY lam.body, envId: lam.envId };,
         Value.Vector AS vec -> RETURN Value{ Vector: vec };,
         Value.TypedI64Arr AS iarr -> RETURN Value{ TypedI64Arr: iarr };,
@@ -1141,7 +1146,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 END,
             DEFAULT -> PASS;
         END
-        RETURN Value.Error{ errMsg: "key not found", errKind: "NotFound" };
+        RETURN Value.Error{ errMsg: "key not found", errKind: "NotFound", errType: "" };
 
     ELSE_IF formName == "list-slice" THEN
         listVal = eval!(COPY items[1], envId, pool);
@@ -1583,7 +1588,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             Value.TypedI64Arr AS iarr ->
                 result = nativeSum(iarr);
                 RETURN Value{ Int64Val: result };,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum requires typed Int64 array", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum requires typed Int64 array", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1593,7 +1598,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MATCH arrVal START
             Value.TypedF64Arr AS farr ->
                 RETURN Value{ Number: nativeSumF64(farr) };,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum-f64 requires typed Float64 array", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum-f64 requires typed Float64 array", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1607,9 +1612,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 MATCH bVal START
                     Value.TypedF64Arr AS fb ->
                         RETURN Value{ Number: nativeDot(fa, fb) };,
-                    DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires two Float64 arrays", errKind: "Type" };
+                    DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires two Float64 arrays", errKind: "Type", errType: "" };
                 END,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires Float64 arrays", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires Float64 arrays", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1617,7 +1622,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "sandboxed-read" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
-            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
+            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
         pathVal = eval!(COPY items[1], envId, pool);
         IF isError?(pathVal) THEN RETURN pathVal; END
@@ -1627,7 +1632,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "sandboxed-write" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
-            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
+            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
         pathVal = eval!(COPY items[1], envId, pool);
         IF isError?(pathVal) THEN RETURN pathVal; END
@@ -1639,7 +1644,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "sandboxed-shell" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
-            RETURN Value.Error{ errMsg: "shell not permitted (run with --allow-io)", errKind: "Permission" };
+            RETURN Value.Error{ errMsg: "shell not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
         cmdVal = eval!(COPY items[1], envId, pool);
         IF isError?(cmdVal) THEN RETURN cmdVal; END
@@ -1669,9 +1674,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 MATCH bCdr START
                     Value.TypedI64Arr AS bi ->
                         RETURN Value{ Int64Val: nativePointManhattan(ai, bi) };,
-                    DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+                    DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type", errType: "" };
                 END,
-            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1691,7 +1696,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 trData.append(si[0] + getInt(dxVal));
                 trData.append(si[1] + getInt(dyVal));
                 RETURN Value.Pair{ pairCar: COPY tagVal, pairCdr: Value{ TypedI64Arr: trData } };,
-            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1703,7 +1708,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
                 RETURN boolVal(nativeContains(iarr, getInt(needleVal)));,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-contains requires typed Int64 array", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-contains requires typed Int64 array", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1746,7 +1751,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             lineNum = toInt(getNum(srcLine));
             errMsg = errMsg + " (line " + lineNum.toString() + ")";
         END
-        RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind) };
+        RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind), errType: "" };
 
     ELSE_IF formName == "try" THEN
         -- (try expr (catch e handler))
@@ -3252,14 +3257,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             87 -> -- PUSH_ERR (push Value.Error sentinel)
-                pv = Value.Error{ errMsg: "runtime error", errKind: "CheatError" };
+                pv = Value.Error{ errMsg: "runtime error", errKind: "CheatError", errType: "" };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            88 -> -- RAISE_ERR (pop msg, kind; push Value.Error{errMsg: msg, errKind: kind})
-                -- Stack order: ..., kind, msg  (msg is top)
+            88 -> -- RAISE_ERR (pop msg, kind, type; push Value.Error{...})
+                -- Stack order: ..., type, kind, msg  (msg is top)
                 sp -= 1; raiseMsg = getStr(COPY stack[sp]);
                 sp -= 1; raiseKind = getStr(COPY stack[sp]);
-                pv = Value.Error{ errMsg: COPY raiseMsg, errKind: COPY raiseKind };
+                sp -= 1; raiseType = getStr(COPY stack[sp]);
+                pv = Value.Error{ errMsg: COPY raiseMsg, errKind: COPY raiseKind, errType: COPY raiseType };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             89 -> -- GET_ERR_KIND (peek top Value.Error, push Value.Str of its errKind)
@@ -3272,6 +3278,59 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
+            108 -> -- GET_ERR_TYPE (peek top Value.Error, push Value.Str of errType)
+                getErrTypeRef = COPY stack[sp - 1];
+                MATCH getErrTypeRef START
+                    Value.Error AS get1 -> pv = Value{ Str: COPY get1.errType };,
+                    DEFAULT -> pv = Value{ Str: "" };
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            109 -> -- GET_ERR_MSG (peek top Value.Error, push Value.Str of errMsg)
+                getErrMsgRef = COPY stack[sp - 1];
+                MATCH getErrMsgRef START
+                    Value.Error AS gem -> pv = Value{ Str: COPY gem.errMsg };,
+                    DEFAULT -> pv = Value{ Str: "" };
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            110 -> -- ERR_SET_KIND (top: error, just below: new_kind str). Pops kind,
+                   -- mutates error.errKind, leaves error on top. For OR EXIT.
+                sp -= 1; eskKind = getStr(COPY stack[sp]);
+                eskRef = COPY stack[sp - 1];
+                MATCH eskRef START
+                    Value.Error AS eske ->
+                        stack[sp - 1] = Value.Error{
+                            errMsg: COPY eske.errMsg,
+                            errKind: COPY eskKind,
+                            errType: COPY eske.errType
+                        };,
+                    DEFAULT -> PASS;
+                END,
+            111 -> -- ERR_SET_TYPE (pop new_type, mutate error.errType under it)
+                sp -= 1; estType = getStr(COPY stack[sp]);
+                estRef = COPY stack[sp - 1];
+                MATCH estRef START
+                    Value.Error AS este ->
+                        stack[sp - 1] = Value.Error{
+                            errMsg: COPY este.errMsg,
+                            errKind: COPY este.errKind,
+                            errType: COPY estType
+                        };,
+                    DEFAULT -> PASS;
+                END,
+            112 -> -- ERR_SET_MSG (pop new_msg, mutate error.errMsg under it)
+                sp -= 1; esmMsg = getStr(COPY stack[sp]);
+                esmRef = COPY stack[sp - 1];
+                MATCH esmRef START
+                    Value.Error AS esme ->
+                        stack[sp - 1] = Value.Error{
+                            errMsg: COPY esmMsg,
+                            errKind: COPY esme.errKind,
+                            errType: COPY esme.errType
+                        };,
+                    DEFAULT -> PASS;
+                END,
             90 -> -- WRAP_ADD_I64 (istack, two's-complement wrap on overflow)
                 istack[isp - 2] = istack[isp - 2] %+ istack[isp - 1];
                 isp -= 1;,

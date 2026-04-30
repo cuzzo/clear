@@ -45,7 +45,7 @@ class BcEmitter
   VAL_TO_F64  = 85  # vstack Value → fstack Float64 (via getNum)
   IS_ERR      = 86  # pop vstack Value, push Value.TrueVal if Value.Error else FalseVal
   PUSH_ERR    = 87  # push a Value.Error{errMsg:"", errKind:"runtime"} sentinel
-  RAISE_ERR   = 88  # pop msg+kind strings, push Value.Error{errMsg=msg, errKind=kind}
+  RAISE_ERR   = 88  # pop msg+kind+type strings, push Value.Error{errMsg=msg, errKind=kind, errType=type}
   GET_ERR_KIND = 89 # peek top Value.Error, push Value.Str(errKind)
   # Wrapping i64 arithmetic for `%+`, `%-`, `%*` (RNGs / hashes that
   # intentionally overflow). Distinct from the panicking ADD_I64/SUB_I64/MUL_I64.
@@ -91,6 +91,18 @@ class BcEmitter
   # pushed onto the value stack. Used for BG STREAM / NEXT materialization
   # so successive NEXT calls see the slot's tail.
   LIST_POP_FRONT = 107
+  # GET_ERR_TYPE / GET_ERR_MSG: peek top Value.Error, push errType/errMsg.
+  # Used by compile_catch_wrapper so multi-clause CATCH can match
+  # (kind, type, msg) tuples — kind via GET_ERR_KIND, type via this op,
+  # msg via GET_ERR_MSG.
+  GET_ERR_TYPE = 108
+  GET_ERR_MSG  = 109
+  # ERR_SET_*: pop a string (kind/type/msg) and mutate the error sitting
+  # just below on the stack. Used by OR EXIT to inherit-or-replace fields
+  # without rebuilding the error sentinel.
+  ERR_SET_KIND = 110
+  ERR_SET_TYPE = 111
+  ERR_SET_MSG  = 112
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -703,7 +715,9 @@ class BcEmitter
       # The VM has no rt.__error infrastructure; lift the kind+msg into
       # a Value.Error sentinel via RAISE_ERR + BC_RET instead.
       if (raise_info = detect_raise_scope(mir_node))
-        kind, msg_expr = raise_info
+        kind, type_str, msg_expr = raise_info
+        # RAISE_ERR pops 3 strings: type, kind, msg (msg on top).
+        emit_op(LOAD_CONST, add_const([:str, type_str]))
         emit_op(LOAD_CONST, add_const([:str, kind]))
         compile_expr_to_value(msg_expr); pop_type
         emit_op(RAISE_ERR)
@@ -1930,9 +1944,9 @@ class BcEmitter
       push_type(:any)
     when MIR::TryCatch
       # `expr OR catch_body`. compile expr; stash to a temp slot; check
-      # IS_ERR; if error: discard stash, evaluate catch_body; else: load
-      # the original value. Mirrors Zig's `try/catch` control flow with
-      # the VM's Value.Error sentinel taking the place of error unions.
+      # IS_ERR; if error: bind to node.binding (if any), evaluate
+      # catch_body; else: load the original value. Mirrors Zig's
+      # `try/catch` control flow with the VM's Value.Error sentinel.
       @trycatch_counter ||= 0
       @trycatch_counter += 1
       tmp = "__tc_#{@trycatch_counter}"
@@ -1942,7 +1956,26 @@ class BcEmitter
       emit_op(IS_ERR)
       emit_op(JUMP_IF_FALSE)
       keep_patch = @ops.length; emit_op(0)
-      # Error path: stash already taken, fall through to catch_body
+      # Error path: bind the error to node.binding if set, then run catch.
+      if node.respond_to?(:binding) && node.binding
+        alloc_slot(node.binding.to_s, :any)
+        emit_op(LOAD_SLOT, @slots[tmp])
+        emit_op(STORE_SLOT, @slots[node.binding.to_s])
+      end
+      # OR EXIT pattern detection: the catch_body is a ScopeBlock of
+      # RawZigs with reason starting with `or_exit_` plus a trailing
+      # ReturnStmt. The RawZigs are no-ops in BC; the actual field
+      # mutations need to happen via ERR_SET_KIND/TYPE/MSG against the
+      # bound error. Detect and lower to opcodes.
+      if compile_or_exit_catch_body(node, tmp)
+        # compile_or_exit_catch_body emits BC_RET, no further work needed.
+        emit_op(JUMP); end_patch = @ops.length; emit_op(0)
+        @ops[keep_patch] = @ops.length
+        emit_op(LOAD_SLOT, @slots[tmp])
+        @ops[end_patch] = @ops.length
+        push_type(:any)
+        return
+      end
       compile_expr_to_value(node.catch_body); pop_type
       emit_op(JUMP); end_patch = @ops.length; emit_op(0)
       # Non-error path: load the original value
@@ -3380,6 +3413,23 @@ class BcEmitter
     if @fn_start_ips.key?(helper_callee)
       args.each { |a| compile_expr_to_value(a) }
       emit_op(BC_CALL, @fn_start_ips[helper_callee], args.length)
+      # Auto-try propagation: when the MIR call is marked try_wrap (the
+      # callee can_fail), and we're inside a helper, check IS_ERR and
+      # propagate the error sentinel via BC_RET. This mirrors Zig's
+      # `try fn()` short-circuit and is what makes `valid = u s> failable`
+      # actually exit the function on failure rather than letting the
+      # error sentinel get bound to `valid` and ignored.
+      if node.try_wrap && @in_helper_fn
+        emit_op(STORE_SLOT, alloc_slot("__try_call_res", :any))
+        emit_op(LOAD_SLOT, @slots["__try_call_res"])
+        emit_op(IS_ERR)
+        emit_op(JUMP_IF_FALSE)
+        ok_patch = @ops.length; emit_op(0)
+        emit_op(LOAD_SLOT, @slots["__try_call_res"])
+        emit_op(BC_RET)
+        @ops[ok_patch] = @ops.length
+        emit_op(LOAD_SLOT, @slots["__try_call_res"])
+      end
       push_type(:any)
       return
     end
@@ -3474,89 +3524,126 @@ class BcEmitter
   # In the VM, compile to:
   #   1. BC_CALL the inner fn with the same args we received.
   #   2. Peek the result; IS_ERR test.
-  #   3. If error: parse CatchWrapper.code for `matchesKind(.X)` clauses and
-  #      walk them in order, comparing GET_ERR_KIND to each kind. The matching
-  #      clause's body is one of the pre-lowered clause_bodies. The `else`
-  #      arm is the final clause_body (default).
+  #   3. If error: walk node.clause_meta in order, evaluating each clause's
+  #      (kinds, types, filter_types, filter_messages) match against
+  #      errKind / errType / errMsg. The matching clause's body is the
+  #      corresponding entry in node.clause_bodies. If has_default, the
+  #      last clause_body is the DEFAULT; otherwise BC_RET the error.
   #   4. If not error: BC_RET that value.
   def compile_catch_wrapper(node)
+    STDERR.puts "DBG compile_catch_wrapper meta=#{(node.clause_meta || []).map { |m| m.inspect[0..120] }.inspect}" if ENV["BC_TRACE_SNAP"]
     code = node.code.to_s
     inner_call = code[/return\s+(\w+)\s*\(\s*([^)]*)\)\s*catch/, 1]
     inner_args = code[/return\s+\w+\s*\(\s*([^)]*)\)\s*catch/, 1]
     arg_names = (inner_args || "").split(/,\s*/).map(&:strip).reject(&:empty?)
-    # Each clause's match info: extract `matchesKind(.X)` (and optional
-    # `matchesName(@intFromEnum(ErrorName.Y))`). The else arm has none.
-    clause_kinds = []
-    code.scan(/(?:if|else if)\s*\(rt\.__error\.matchesKind\(\.(\w+)\)(?:\s+and\s+rt\.__error\.matchesName\(@intFromEnum\(ErrorName\.(\w+)\)\))?\)/).each do |kind, name|
-      clause_kinds << { kind: kind, name: name }
-    end
-    has_default = code.include?("} else {")
-    # Sanity: clause_bodies length should equal clause_kinds.length + (default ? 1 : 0).
 
     if inner_call.nil? || !@fn_start_ips.key?(inner_call)
       raise Unimplemented, "compile_catch_wrapper: inner fn `#{inner_call}` has no entry"
     end
 
-    # Push args matching the names parsed from the Zig call. Each name
-    # should be a current parameter slot (set by compile_helper_fn_mir's
-    # param prologue) or `rt` (skipped). `rt` is always first; the helper
-    # at the inner_call entry expects 0 args (rt is auto-passed by the
-    # interpreter via callSavedSlots), so skip rt and emit only the rest.
+    # Push args matching the names parsed from the Zig call. `rt` is
+    # auto-passed by the interpreter via callSavedSlots; skip it and
+    # push only the user args.
     user_args = arg_names.reject { |n| n == "rt" }
-    user_args.each do |name|
-      emit_load_any(name)
-    end
+    user_args.each { |name| emit_load_any(name) }
     emit_op(BC_CALL, @fn_start_ips[inner_call], user_args.length)
     push_type(:any)
-    # After BC_CALL the result Value is on top of vstack. Peek IS_ERR.
-    # IS_ERR pops; we want to keep the value for the success path. Save
-    # to a temp slot.
+    # Stash result in a temp so we can peek IS_ERR without losing it.
     @catch_tmp_counter ||= 0; @catch_tmp_counter += 1
     tmp = "__catch_res_#{@catch_tmp_counter}"
     alloc_slot(tmp, :any)
     emit_op(STORE_SLOT, @slots[tmp]); pop_type
     emit_op(LOAD_SLOT, @slots[tmp])
     emit_op(IS_ERR)
-    # If NOT error: jump past clause dispatch and BC_RET the saved value.
     emit_op(JUMP_IF_FALSE)
     not_err_jump = @ops.length; emit_op(0)
-    # Error path: load tmp again, GET_ERR_KIND, walk clause_kinds.
+    # Error path: walk clause_meta. Each clause emits:
+    #   <items_check>     -> if no item matches, JUMP next_clause
+    #   <filter_check>    -> if filter non-empty and no filter matches, JUMP next_clause
+    #   <body>; JUMP end
+    #   next_clause:
     end_jumps = []
+    meta = node.clause_meta || []
     bodies = (node.clause_bodies || [])
-    clause_kinds.each_with_index do |ck, ci|
-      # GET_ERR_KIND peeks; we want it on top to compare. Load result, then GET_ERR_KIND.
-      emit_op(LOAD_SLOT, @slots[tmp])
-      emit_op(GET_ERR_KIND)
-      # Result is now Value.Str(errKind). Move it forward so we don't keep the error under it.
-      # Actually GET_ERR_KIND pushes errKind on top WITHOUT popping the error — stack is now [..., err, errKind].
-      # We want to compare errKind to ck[:kind] then JUMP_IF_FALSE. EQ pops 2.
-      # So we have: [..., err, errKind, "Kind"]; EQ pops 2 → bool; stack [..., err, bool].
-      emit_op(LOAD_CONST, add_const([:str, ck[:kind]]))
-      emit_op(EQ)
-      emit_op(JUMP_IF_FALSE)
-      skip_idx = @ops.length; emit_op(0)
-      # Drop the error from the stack before running the clause body.
-      emit_op(POP)
-      # Compile the clause body.
+    emit_match_any = ->(load_op, candidates, render_arg) {
+      # Emit a sequence that checks if errKind/errType/errMsg matches any of
+      # `candidates`. Each candidate generates a JUMP_IF_TRUE-equivalent
+      # that jumps to a shared "matched" label. After all candidates, emit
+      # a JUMP to a "no-match" label. Returns [matched_jumps, no_match_jump_idx].
+      # The caller backpatches both labels.
+      matched_jumps = []
+      candidates.each do |c|
+        emit_op(LOAD_SLOT, @slots[tmp]); emit_op(load_op)
+        render_arg.call(c)
+        emit_op(EQ)
+        # JUMP_IF_FALSE skips the "matched" jump for non-matches.
+        emit_op(JUMP_IF_FALSE)
+        skip_match = @ops.length; emit_op(0)
+        emit_op(JUMP); matched_jumps << @ops.length; emit_op(0)
+        @ops[skip_match] = @ops.length
+      end
+      # No candidate matched: caller emits JUMP to next_clause.
+      matched_jumps
+    }
+    meta.each_with_index do |m, ci|
+      kinds           = m[:kinds] || []
+      types           = m[:types] || []
+      filter_types    = m[:filter_types] || []
+      filter_messages = m[:filter_messages] || []
+
+      # Items: kinds (errKind) and types (errType) — any match passes.
+      item_match_jumps = []
+      item_match_jumps += emit_match_any.call(GET_ERR_KIND, kinds.map(&:to_s),
+        ->(k) { emit_op(LOAD_CONST, add_const([:str, k])) })
+      item_match_jumps += emit_match_any.call(GET_ERR_TYPE, types.map(&:to_s),
+        ->(t) { emit_op(LOAD_CONST, add_const([:str, t])) })
+      # No item matched -> skip this clause.
+      emit_op(JUMP); item_no_match = @ops.length; emit_op(0)
+      # Item matched landing.
+      item_match_jumps.each { |idx| @ops[idx] = @ops.length }
+
+      # Filter (if any): filter_types (errType) and filter_messages (errMsg)
+      # — any match passes. If no filter, fall through directly to body.
+      filter_no_match = nil
+      if !filter_types.empty? || !filter_messages.empty?
+        filter_match_jumps = []
+        filter_match_jumps += emit_match_any.call(GET_ERR_TYPE, filter_types.map(&:to_s),
+          ->(t) { emit_op(LOAD_CONST, add_const([:str, t])) })
+        filter_messages.each do |m_mir|
+          emit_op(LOAD_SLOT, @slots[tmp]); emit_op(GET_ERR_MSG)
+          compile_expr_to_value(m_mir); pop_type
+          emit_op(EQ)
+          emit_op(JUMP_IF_FALSE)
+          skip_match = @ops.length; emit_op(0)
+          emit_op(JUMP); filter_match_jumps << @ops.length; emit_op(0)
+          @ops[skip_match] = @ops.length
+        end
+        emit_op(JUMP); filter_no_match = @ops.length; emit_op(0)
+        filter_match_jumps.each { |idx| @ops[idx] = @ops.length }
+      end
+
+      # Bind `snapshot` to the captured value (if any) so CATCH bodies can
+      # reference `snapshot.field`. captureSnapshot stores into __snapshot
+      # earlier in the SMOOTH pipe lowering; alias here for the body's scope.
+      alias_snapshot_for_catch_body
+      # Run clause body.
       body = bodies[ci] || []
       semantic_mir_nodes(body).each { |s| compile_stmt(s, nil); pop_type }
       emit_op(JUMP); end_jumps << @ops.length; emit_op(0)
-      @ops[skip_idx] = @ops.length
-      # On non-match, we still have [..., err, bool] -- drop the bool.
-      # Actually JUMP_IF_FALSE consumed the bool. So stack is [..., err]. Loop continues.
+
+      # next_clause label: backpatch all "no match" jumps here.
+      @ops[item_no_match] = @ops.length
+      @ops[filter_no_match] = @ops.length if filter_no_match
     end
-    # Default body: drop the error and run.
-    if has_default
-      emit_op(POP)  # drop the err that's still on top
+    # Default / fallthrough.
+    if node.has_default
+      alias_snapshot_for_catch_body
       default_body = bodies.last || []
       semantic_mir_nodes(default_body).each { |s| compile_stmt(s, nil); pop_type }
     else
-      # No default and nothing matched: rethrow the error.
+      emit_op(LOAD_SLOT, @slots[tmp])
       emit_op(BC_RET)
     end
-    # After clause body has run and BC_RET'd inside its body, this point
-    # is unreachable; if a clause body fell through (no return), we land
-    # here and the result is on stack. That's a no-op.
     end_jumps.each { |idx| @ops[idx] = @ops.length }
     # NOT-error path target: load saved value and BC_RET.
     @ops[not_err_jump] = @ops.length
@@ -3570,7 +3657,88 @@ class BcEmitter
   # Detect the lowering shape `lower_raise` produces:
   #   ScopeBlock([ExprStmt(MethodCall(rt, "setError", [.Kind, name_id, msg, line])),
   #               ReturnStmt(Ident("error.CheatError"))])
-  # Return [kind_string, msg_mir_expr] when matched, nil otherwise.
+  # Return [kind_string, type_string, msg_mir_expr] when matched, nil otherwise.
+  # type_string is "" for kind-only RAISE; otherwise the error_name (e.g.
+  # "ParseErr"). lower_raise emits the type as `@intFromEnum(ErrorName.Foo)`
+  # via MIR::Ident; we extract the bare name for VM string compares.
+  # Inside a CATCH body, the user can reference `snapshot.field` to
+  # inspect the SMOOTH pipe LHS that the failed call saw. captureSnapshot
+  # stashes the value via STORE_NAME ("__snapshot") inside the inner
+  # body — the env is shared across BC_CALL boundaries — so the outer
+  # CATCH wrapper picks it back up via LOAD_NAME and aliases `snapshot`
+  # to that slot for the user code's reach.
+  def alias_snapshot_for_catch_body
+    alloc_slot("snapshot", :any)
+    emit_op(LOAD_NAME, add_const("__snapshot"))
+    emit_op(STORE_SLOT, @slots["snapshot"])
+  end
+
+  # Detect the OR EXIT catch_body shape produced by lower_orelse:
+  #   ScopeBlock([
+  #     ExprStmt(RawZig("rt.__error.kind = .X", "or_exit_kind")),
+  #     ExprStmt(RawZig("rt.__error.error_name = ...", "or_exit_type"|"or_exit_clear_type")),
+  #     ExprStmt(RawZig("rt.__error.message = ...", "or_exit_msg")),         (optional)
+  #     ExprStmt(RawZig("rt.__error.clear_line = N", "or_exit_line")),
+  #     ReturnStmt(Ident("__exit_err"))
+  #   ])
+  # On match, emit ERR_SET_* opcodes against the error stashed in tmp,
+  # then BC_RET the mutated error. Returns true on match, false otherwise.
+  def compile_or_exit_catch_body(node, tmp)
+    body = node.catch_body
+    return false unless body.is_a?(MIR::ScopeBlock)
+    stmts = body.body
+    return false unless stmts.is_a?(Array) && stmts.length >= 2
+    last = stmts.last
+    return false unless last.is_a?(MIR::ReturnStmt)
+    # All non-Return stmts must be ExprStmt(RawZig with or_exit_* reason).
+    rawzigs = stmts[0...-1].map do |s|
+      return false unless s.is_a?(MIR::ExprStmt) && s.expr.is_a?(MIR::RawZig)
+      s.expr
+    end
+    return false unless rawzigs.all? { |rz| rz.reason.to_s.start_with?("or_exit_") }
+    # Load the error sentinel and mutate fields in-place.
+    emit_op(LOAD_SLOT, @slots[tmp])
+    rawzigs.each do |rz|
+      case rz.reason.to_s
+      when "or_exit_kind", "or_exit_kind_from_type"
+        if (m = rz.code.to_s.match(/__error\.kind = \.(\w+)/))
+          emit_op(LOAD_CONST, add_const([:str, m[1]]))
+          emit_op(ERR_SET_KIND)
+        end
+      when "or_exit_type"
+        if (m = rz.code.to_s.match(/ErrorName\.(\w+)/))
+          emit_op(LOAD_CONST, add_const([:str, m[1]]))
+          emit_op(ERR_SET_TYPE)
+        end
+      when "or_exit_clear_type"
+        emit_op(LOAD_CONST, add_const([:str, ""]))
+        emit_op(ERR_SET_TYPE)
+      when "or_exit_msg"
+        # The Zig source reads `rt.__error.message = <expr>`. The expr
+        # was an emit_expr of a lowered string literal — typically a
+        # quoted string. Extract via a permissive regex.
+        if (m = rz.code.to_s.match(/__error\.message\s*=\s*(.+)\z/m))
+          src = m[1].strip
+          if src =~ /\A"(.*)"\z/m
+            emit_op(LOAD_CONST, add_const([:str, $1]))
+            emit_op(ERR_SET_MSG)
+          end
+        end
+      when "or_exit_line"
+        # No-op for BC; we don't track source line on the error sentinel.
+      end
+    end
+    # Store mutated error back to tmp, then BC_RET it (the catch_body's
+    # ReturnStmt expects __exit_err which we already bound at the slot).
+    emit_op(STORE_SLOT, @slots[tmp])
+    emit_op(LOAD_SLOT, @slots[tmp])
+    if @in_helper_fn
+      emit_op(BC_RET)
+      @helper_fn_returned = true
+    end
+    true
+  end
+
   def detect_raise_scope(node)
     return nil unless node.is_a?(MIR::ScopeBlock)
     body = node.body
@@ -3585,9 +3753,16 @@ class BcEmitter
                       call.method.to_s == "setError"
     return nil unless call.args.length >= 3
     kind_arg = call.args[0]
+    name_arg = call.args[1]
     msg_arg  = call.args[2]
     return nil unless kind_arg.is_a?(MIR::Ident) && kind_arg.name.to_s.start_with?(".")
-    [kind_arg.name.to_s.sub(/\A\./, ""), msg_arg]
+    type_str = if name_arg.is_a?(MIR::Ident) &&
+                  name_arg.name.to_s =~ /@intFromEnum\(ErrorName\.(\w+)\)/
+                 $1
+               else
+                 ""
+               end
+    [kind_arg.name.to_s.sub(/\A\./, ""), type_str, msg_arg]
   end
 
   # Strip allocator arguments: bare `rt` idents, `rt.heapAlloc()` calls,
@@ -3618,6 +3793,23 @@ class BcEmitter
     if method == "checkYield" && node.receiver.is_a?(MIR::Ident) && node.receiver.name.to_s == "rt"
       push_type(:any)
       emit_op(LOAD_CONST, add_const(nil))
+      return
+    end
+
+    # rt.captureSnapshot(T, &input) records the LHS of a SMOOTH pipe so a
+    # downstream CATCH clause can reference `snapshot` to inspect what the
+    # failed call saw. Args: [Ident(zig_type), AddressOf(Ident("__snap_input"))].
+    # Stash via STORE_NAME so the value survives BC_CALL/BC_RET (curEnv is
+    # preserved across calls), letting the outer CATCH wrapper read it.
+    if method == "captureSnapshot" && node.receiver.is_a?(MIR::Ident) &&
+       node.receiver.name.to_s == "rt" && node.args.length >= 2
+      STDERR.puts "DBG captureSnapshot args=#{node.args.map(&:class)}" if ENV["BC_TRACE_SNAP"]
+      addr = node.args[1]
+      val_node = addr.is_a?(MIR::AddressOf) ? addr.expr : addr
+      compile_expr_to_value(val_node); pop_type
+      emit_op(STORE_NAME, add_const("__snapshot"))
+      emit_op(LOAD_CONST, add_const(nil))
+      push_type(:any)
       return
     end
 
