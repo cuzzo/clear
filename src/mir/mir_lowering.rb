@@ -3844,6 +3844,15 @@ class MIRLowering
         MIR::MethodCall.new(target, "get", [index], false)
       end
     elsif ti&.pool?
+      # BC backend: emit a structural MIR::InlineBc tagged :pool_method so
+      # bc_emitter's compile_inline_bc :get dispatch routes through list-ref.
+      # The Zig backend keeps the MIR::MethodCall (lowered to {target}.get(index)).
+      if @target == :bc
+        elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
+        elem_name = elem_t.respond_to?(:resolved) ? elem_t.resolved.to_s : elem_t.to_s
+        return MIR::InlineBc.new(:get, [target, index],
+                                 { tag: :pool_method, elem: elem_name })
+      end
       MIR::MethodCall.new(target, "get", [index], false)
     elsif ti&.set_collection?
       # @set[item]: membership check — returns ?T (item if present, null otherwise)

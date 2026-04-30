@@ -226,6 +226,13 @@ class BcEmitter
       @fn_comptime_arity[f.name.to_s] = n
     end
 
+    # Track which names are helper fns so call sites can emit deferred
+    # BC_CALL placeholders for forward references (mutual recursion). The
+    # patches list collects [op_idx, callee_name] pairs to fix up after
+    # all helpers have been laid out.
+    @helper_fn_names = Set.new(helpers.map { |h| h.name.to_s })
+    @deferred_bc_calls = []
+
     # Emit helper bodies before main so call sites can patch fixed IPs.
     # Jump over the helper region into main; patch the jump target after
     # helpers are laid out.
@@ -235,6 +242,15 @@ class BcEmitter
       emit_op(0)
       helpers.each { |h| compile_helper_fn_mir(h) }
       @ops[jump_to_main_idx] = @ops.length
+    end
+
+    # Patch deferred BC_CALL sites (forward references emitted while
+    # compiling earlier helpers that called later helpers). Each entry is
+    # [op_idx_for_target, callee_name]; @fn_start_ips now has the IP.
+    @deferred_bc_calls.each do |op_idx, callee|
+      ip = @fn_start_ips[callee]
+      raise "deferred BC_CALL: no IP for #{callee.inspect}" unless ip
+      @ops[op_idx] = ip
     end
 
     mains.each { |m| process_fn_def(m) }
@@ -294,8 +310,12 @@ class BcEmitter
   # AST fn_nodes key the main fn under `main` (or `cheatMain`) but MIR renames
   # it to `clearMain`. Try each candidate.
   def lookup_ast_fn(name)
+    # MIR strips `?` and `!` suffixes via zig_safe_name. Try both stripped
+    # and original forms so predicate fns (`even?`) and bang fns (`incr!`)
+    # resolve back to their AST counterpart.
     direct = @fn_nodes[name.to_sym] || @fn_nodes[name] ||
-             @fn_nodes["#{name}!".to_sym] || @fn_nodes["#{name}!"]
+             @fn_nodes["#{name}!".to_sym] || @fn_nodes["#{name}!"] ||
+             @fn_nodes["#{name}?".to_sym] || @fn_nodes["#{name}?"]
     return direct if direct
     # `__<X>_body` is the inner half of the CATCH-grammar pair; the AST is
     # the user-facing fn `X`. Strip the wrapper prefix/suffix so the
@@ -303,7 +323,8 @@ class BcEmitter
     if name.to_s =~ /\A__(.+)_body\z/
       base = $1
       direct = @fn_nodes[base.to_sym] || @fn_nodes[base] ||
-               @fn_nodes["#{base}!".to_sym] || @fn_nodes["#{base}!"]
+               @fn_nodes["#{base}!".to_sym] || @fn_nodes["#{base}!"] ||
+               @fn_nodes["#{base}?".to_sym] || @fn_nodes["#{base}?"]
       return direct if direct
     end
     if MAIN_NAMES.include?(name)
@@ -1189,8 +1210,11 @@ class BcEmitter
   def compile_set(node)
     target = node.target
 
-    # HashMap index assignment: m[key] = val → MAP_PUT(map, key, val)
-    if target.is_a?(MIR::IndexGet) && receiver_slot_type(target.object) == :map
+    # HashMap index assignment: m[key] = val → MAP_PUT(map, key, val).
+    # Use expr_collection_kind so chained receivers (e.g. `env.vars[k] = v`
+    # where vars is a HashMap field of a struct) also route through MAP_PUT
+    # instead of falling into compile_chain_set's list-set! rebuild.
+    if target.is_a?(MIR::IndexGet) && expr_collection_kind(target.object) == :map
       compile_expr_to_value(target.object)
       compile_expr_to_value(target.index)
       compile_expr_to_value(node.value)
@@ -1380,23 +1404,47 @@ class BcEmitter
     # For each binding: compile expr, test nil, store capture slot, on any
     # nil short-circuit to else.
     skip_patches = []
+    # Pool-element bindings (`IF pool[id] AS env { ... mutate env ... }`)
+    # need writeback at body end: env is a COPY of the pool slot in the VM
+    # (pool elements are Values, not pointers), so mutations to env don't
+    # reach pool[id] without an explicit list-set! at scope exit.
+    pool_writebacks = []
     node.bindings.each do |b|
-      compile_expr_to_value(b[:expr]); pop_type
-      emit_op(DUP) if respond_to?(:emit_dup_stub)  # we'll do it manually
-      # The VM doesn't have a DUP opcode exposed by default here — emit a
-      # store-then-load to keep the value available for both the nil test and
-      # the binding.
+      expr = b[:expr]
       capture = b[:capture].to_s
+      pool_node, idx_node, pool_elem = pool_get_components(expr)
+      compile_expr_to_value(expr); pop_type
       alloc_slot(capture, :any) unless has_slot?(capture)
-      @slot_types[capture] = :any
+      # Pool element struct hint: when the bound value is a struct fetched
+      # from a typed pool, stamp the slot so field-access dispatch
+      # (expr_collection_kind / find_field_index) can route through the
+      # right struct schema (e.g. env.vars -> :map for HashMap<...> fields).
+      if pool_elem && @struct_fields&.key?(pool_elem)
+        @slot_types[capture] = :"struct_#{pool_elem}"
+      else
+        @slot_types[capture] = :any
+      end
       emit_op(STORE_SLOT, @slots[capture])
       emit_op(LOAD_SLOT, @slots[capture])
       emit_op(JUMP_IF_FALSE)  # nil is falsy
       skip_patches << @ops.length
       emit_op(0)
+      pool_writebacks << [capture, pool_node, idx_node] if pool_node
     end
 
     emit_body_stmts(node.then_body)
+
+    # Writeback each pool binding: pool = list-set!(pool, idx, env). Must
+    # happen on the success path (after body, before exiting to else/end).
+    pool_writebacks.each do |capture, pool_node, idx_node|
+      next unless pool_node.is_a?(MIR::Ident) && has_slot?(pool_node.name.to_s)
+      compile_expr_to_value(pool_node); pop_type
+      compile_expr_to_value(idx_node); pop_type
+      emit_op(LOAD_SLOT, @slots[capture])
+      emit_op(NATIVE_CALL, NATIVES["list-set!"], 3)
+      emit_store(pool_node.name.to_s, :any)
+      emit_op(POP)  # consume the new_list copy STORE_SLOT left
+    end
 
     if node.else_body && !node.else_body.empty?
       emit_op(JUMP); end_patch = @ops.length; emit_op(0)
@@ -1407,6 +1455,18 @@ class BcEmitter
       skip_patches.each { |idx| @ops[idx] = @ops.length }
     end
     push_type(:void)
+  end
+
+  # Returns [pool_node, index_node, elem_name] if `expr` is an InlineBc :get
+  # tagged :pool_method (the form mir_lowering emits for `pool[id]`);
+  # otherwise nil. Used by compile_if_bind to plan writeback for
+  # pool-element AS-bindings and to stamp the capture slot's struct hint.
+  def pool_get_components(expr)
+    return nil unless expr.is_a?(MIR::InlineBc) && expr.op == :get
+    tag = expr.stdlib_def && expr.stdlib_def[:tag]
+    return nil unless tag == :pool_method
+    elem = expr.stdlib_def[:elem]
+    [expr.args[0], expr.args[1], elem]
   end
 
   def compile_if(node)
@@ -3459,9 +3519,20 @@ class BcEmitter
     # emitted under the local helper region.
     helper_callee = callee
     helper_callee = helper_callee.split(".").last if !@fn_start_ips.key?(helper_callee) && helper_callee.include?(".")
-    if @fn_start_ips.key?(helper_callee)
+    # Forward reference: callee is a helper that hasn't been compiled yet
+    # (typical of mutual recursion when the callee appears later in
+    # source order). Emit BC_CALL with a placeholder IP and register a
+    # post-pass patch in @deferred_bc_calls. Without this, the call falls
+    # through to LOAD_NAME + CALL, which fails because helper names
+    # aren't registered as runtime values.
+    forward = !@fn_start_ips.key?(helper_callee) && @helper_fn_names&.include?(helper_callee)
+    if @fn_start_ips.key?(helper_callee) || forward
       compile_helper_args(helper_callee, args)
-      emit_op(BC_CALL, @fn_start_ips[helper_callee], args.length)
+      if forward
+        emit_op(BC_CALL); @deferred_bc_calls << [@ops.length, helper_callee]; emit_op(0); emit_op(args.length)
+      else
+        emit_op(BC_CALL, @fn_start_ips[helper_callee], args.length)
+      end
       # Auto-try propagation: when the MIR call is marked try_wrap (the
       # callee can_fail), and we're inside a helper, check IS_ERR and
       # propagate the error sentinel via BC_RET. This mirrors Zig's
