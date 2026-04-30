@@ -709,3 +709,357 @@ pub fn concurrentBoundedEach(
     const err_int = err_code.load(.seq_cst);
     if (err_int != 0) return @errorFromInt(err_int);
 }
+
+// Dynamic-stream variants of the concurrent helpers above. They mirror
+// concurrentBoundedSelect/Where/Each but pull items via `next()` /
+// `nextOrNull()` over an unsized source stream, fanning items out to
+// N worker fibers through a BoundedChannel. A single feeder fiber owns
+// the source; workers race on the channel head.
+//
+// `is_inf` chooses the source pop method: `nextOrNull()` for infinite
+// streams (returns null at end-of-stream) vs `next()` for bounded/open.
+//
+// `ChannelT` is supplied as a comptime parameter so streams.zig doesn't
+// take a hard dependency on data-structures.zig — runtime-header.zig
+// resolves it to `CheatLib.BoundedChannel(T)` at the call site.
+
+pub fn concurrentStreamSelect(
+    comptime WaitGroupT: type,
+    comptime ChannelT: type,
+    comptime T: type,
+    comptime R: type,
+    comptime mapFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    comptime cleanupResultFn: anytype,
+    comptime is_inf: bool,
+    alloc: std.mem.Allocator,
+    rt: anytype,
+    src: anytype,
+    workers: usize,
+    capacity: usize,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+) !std.ArrayListUnmanaged(R) {
+    _ = T;
+    const SrcPtr = @TypeOf(src);
+    const RuntimeT = @TypeOf(rt.*);
+
+    var chan = try ChannelT.init(alloc, capacity);
+    defer chan.deinit();
+    var err_code = std.atomic.Value(u16).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+
+    const Feeder = struct {
+        wg: *WaitGroupT,
+        src: SrcPtr,
+        chan: *ChannelT,
+
+        fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            defer ctx.chan.close();
+            if (is_inf) {
+                while (try ctx.src.nextOrNull()) |item| {
+                    try ctx.chan.push(item);
+                }
+            } else {
+                while (try ctx.src.next()) |item| {
+                    try ctx.chan.push(item);
+                }
+            }
+        }
+    };
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        chan: *ChannelT,
+        local: std.ArrayListUnmanaged(R),
+        alloc: std.mem.Allocator,
+        err: *std.atomic.Value(u16),
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            while (try ctx.chan.pop()) |item| {
+                const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |e| {
+                    _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
+                    continue;
+                };
+                try ctx.local.append(ctx.alloc, mapped);
+                worker_rt.checkYield();
+            }
+        }
+    };
+
+    const MAX_WORKERS: usize = 64;
+    const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, MAX_WORKERS);
+    var feeder_ctx = Feeder{ .wg = &wg, .src = src, .chan = &chan };
+    var worker_ctxs: [MAX_WORKERS]Worker = undefined;
+    wg.add(1 + actual_workers);
+
+    // Feeder: always local-scheduler so the source is owned by one fiber.
+    try localSpawnFn(wg.sched, @ptrCast(&Feeder.run), &feeder_ctx, task_cfg);
+
+    for (0..actual_workers) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .chan = &chan,
+            .local = .empty,
+            .alloc = alloc,
+            .err = &err_code,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    errdefer {
+        for (0..actual_workers) |i| {
+            for (worker_ctxs[i].local.items) |*v| cleanupResultFn(alloc, v);
+            worker_ctxs[i].local.deinit(alloc);
+        }
+    }
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+
+    var total: usize = 0;
+    for (0..actual_workers) |i| total += worker_ctxs[i].local.items.len;
+    var out = try std.ArrayListUnmanaged(R).initCapacity(alloc, total);
+    errdefer {
+        for (out.items) |*v| cleanupResultFn(alloc, v);
+        out.deinit(alloc);
+    }
+    for (0..actual_workers) |i| {
+        out.appendSliceAssumeCapacity(worker_ctxs[i].local.items);
+        worker_ctxs[i].local.deinit(alloc);
+    }
+    return out;
+}
+
+pub fn concurrentStreamWhere(
+    comptime WaitGroupT: type,
+    comptime ChannelT: type,
+    comptime T: type,
+    comptime predFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    comptime cleanupItemFn: anytype,
+    comptime is_inf: bool,
+    alloc: std.mem.Allocator,
+    rt: anytype,
+    src: anytype,
+    workers: usize,
+    capacity: usize,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+) !std.ArrayListUnmanaged(T) {
+    const SrcPtr = @TypeOf(src);
+    const RuntimeT = @TypeOf(rt.*);
+
+    var chan = try ChannelT.init(alloc, capacity);
+    defer chan.deinit();
+    var err_code = std.atomic.Value(u16).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+
+    const Feeder = struct {
+        wg: *WaitGroupT,
+        src: SrcPtr,
+        chan: *ChannelT,
+
+        fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            defer ctx.chan.close();
+            if (is_inf) {
+                while (try ctx.src.nextOrNull()) |item| {
+                    try ctx.chan.push(item);
+                }
+            } else {
+                while (try ctx.src.next()) |item| {
+                    try ctx.chan.push(item);
+                }
+            }
+        }
+    };
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        chan: *ChannelT,
+        local: std.ArrayListUnmanaged(T),
+        alloc: std.mem.Allocator,
+        err: *std.atomic.Value(u16),
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            while (try ctx.chan.pop()) |item| {
+                var item_mut = item;
+                const keep = predFn(worker_rt, ctx.user_ctx, item) catch |e| {
+                    _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
+                    cleanupItemFn(ctx.alloc, &item_mut);
+                    continue;
+                };
+                if (keep) {
+                    try ctx.local.append(ctx.alloc, item);
+                } else {
+                    cleanupItemFn(ctx.alloc, &item_mut);
+                }
+                worker_rt.checkYield();
+            }
+        }
+    };
+
+    const MAX_WORKERS: usize = 64;
+    const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, MAX_WORKERS);
+    var feeder_ctx = Feeder{ .wg = &wg, .src = src, .chan = &chan };
+    var worker_ctxs: [MAX_WORKERS]Worker = undefined;
+    wg.add(1 + actual_workers);
+
+    try localSpawnFn(wg.sched, @ptrCast(&Feeder.run), &feeder_ctx, task_cfg);
+
+    for (0..actual_workers) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .chan = &chan,
+            .local = .empty,
+            .alloc = alloc,
+            .err = &err_code,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    errdefer {
+        for (0..actual_workers) |i| {
+            for (worker_ctxs[i].local.items) |*v| cleanupItemFn(alloc, v);
+            worker_ctxs[i].local.deinit(alloc);
+        }
+    }
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+
+    var total: usize = 0;
+    for (0..actual_workers) |i| total += worker_ctxs[i].local.items.len;
+    var out = try std.ArrayListUnmanaged(T).initCapacity(alloc, total);
+    errdefer {
+        for (out.items) |*v| cleanupItemFn(alloc, v);
+        out.deinit(alloc);
+    }
+    for (0..actual_workers) |i| {
+        out.appendSliceAssumeCapacity(worker_ctxs[i].local.items);
+        worker_ctxs[i].local.deinit(alloc);
+    }
+    return out;
+}
+
+pub fn concurrentStreamEach(
+    comptime WaitGroupT: type,
+    comptime ChannelT: type,
+    comptime T: type,
+    comptime eachFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    comptime is_inf: bool,
+    alloc: std.mem.Allocator,
+    rt: anytype,
+    src: anytype,
+    workers: usize,
+    capacity: usize,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+) !void {
+    _ = T;
+    const SrcPtr = @TypeOf(src);
+    const RuntimeT = @TypeOf(rt.*);
+
+    var chan = try ChannelT.init(alloc, capacity);
+    defer chan.deinit();
+    var err_code = std.atomic.Value(u16).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+
+    const Feeder = struct {
+        wg: *WaitGroupT,
+        src: SrcPtr,
+        chan: *ChannelT,
+
+        fn run(_: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            defer ctx.chan.close();
+            if (is_inf) {
+                while (try ctx.src.nextOrNull()) |item| {
+                    try ctx.chan.push(item);
+                }
+            } else {
+                while (try ctx.src.next()) |item| {
+                    try ctx.chan.push(item);
+                }
+            }
+        }
+    };
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        chan: *ChannelT,
+        err: *std.atomic.Value(u16),
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            while (try ctx.chan.pop()) |item| {
+                eachFn(worker_rt, ctx.user_ctx, item) catch |e| {
+                    _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
+                    continue;
+                };
+                worker_rt.checkYield();
+            }
+        }
+    };
+
+    const MAX_WORKERS: usize = 64;
+    const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, MAX_WORKERS);
+    var feeder_ctx = Feeder{ .wg = &wg, .src = src, .chan = &chan };
+    var worker_ctxs: [MAX_WORKERS]Worker = undefined;
+    wg.add(1 + actual_workers);
+
+    try localSpawnFn(wg.sched, @ptrCast(&Feeder.run), &feeder_ctx, task_cfg);
+
+    for (0..actual_workers) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .chan = &chan,
+            .err = &err_code,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+}
