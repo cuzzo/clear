@@ -2223,6 +2223,19 @@ class PipelineHost
       return lower_concurrent_bounded_stream(smooth_node.left, conc_op)
     end
 
+    # Dynamic / infinite / open stream sources: structural lowering for
+    # the Zig backend. BC has no fiber/channel runtime for stream pipelines,
+    # so it still falls through to the legacy RawZig path (which BC then
+    # rejects -- tests 240/241/242/243 stay UNIMPL until BC grows the
+    # infrastructure).
+    if @lowering.instance_variable_get(:@target) != :bc
+      lhs_ti = smooth_node.left.type_info
+      stream_lhs = lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.open_stream? || lhs_ti.inf_stream?)
+      if stream_lhs && conc_op.op.is_a?(AST::SelectOp)
+        return lower_concurrent_stream_select(smooth_node.left, conc_op, conc_op.op)
+      end
+    end
+
     # Detect `list AS @u s> CONCURRENT SELECT @u.field` -- thread the binding
     # into the CONCURRENT worker body so @u resolves to ctx.items[__idx].
     lhs = smooth_node.left
@@ -2664,6 +2677,82 @@ class PipelineHost
       cb[:ctx_let],
       *setup_stmts,
       MIR::ExprStmt.new(call, false),
+    ])
+  end
+
+  # Element type for ~T[] / ~T[INF] / open-stream sources, mirroring the
+  # extraction in the legacy transpile_concurrent_stream_* paths.
+  def stream_concurrent_element_type(lhs_ti)
+    if lhs_ti.inf_stream?
+      Type.new(lhs_ti.inf_stream_element_type.resolved)
+    elsif lhs_ti.open_stream?
+      Type.new(lhs_ti.open_stream_element_type.resolved)
+    else
+      Type.new(lhs_ti.tense_type.element_type.resolved)
+    end
+  end
+
+  # Source pointer for the feeder fiber. Identifiers can be referenced
+  # directly with `&ident`; non-Ident sources (range literals, method
+  # chains) need a local temp so the feeder can hold a stable pointer.
+  def stream_concurrent_source_setup_mir(lhs, id)
+    src = visit_mir(lhs)
+    if lhs.is_a?(AST::Identifier)
+      [[], MIR::AddressOf.new(src)]
+    else
+      local = "__stream_conc_src_#{id}"
+      setup = MIR::Let.new(local, src, true, nil, "_ = &#{local};")
+      [[setup], MIR::AddressOf.new(MIR::Ident.new(local))]
+    end
+  end
+
+  # Capacity expression for the BoundedChannel. User-provided value via
+  # `CONCURRENT(capacity: N)` overrides the default. Default rounds the
+  # worker count to the next power of 2 (>= 4, <= 64) so the channel's
+  # ring buffer satisfies its `cap & (cap-1) == 0` invariant.
+  def stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+    if (cap_node = conc_op.options&.[]("capacity"))
+      cap_zig = @lowering.send(:emit_expr, @lowering.lower(cap_node))
+      MIR::InlineZig.new("@intCast(#{cap_zig})", "stream_conc_capacity_user")
+    else
+      expr = "blk: { var c: usize = 4; while (c < #{n_workers_zig} * 4) : (c <<= 1) {} break :blk @min(c, 64); }"
+      MIR::InlineZig.new(expr, "stream_conc_capacity_default")
+    end
+  end
+
+  def lower_concurrent_stream_select(lhs, conc_op, inner)
+    lhs_ti  = lhs.type_info
+    item_t  = stream_concurrent_element_type(lhs_ti)
+    result_t = Type.new(inner.expression.full_type)
+    cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
+    setup_stmts, src_ptr = stream_concurrent_source_setup_mir(lhs, cb[:id])
+    is_inf = lhs_ti.inf_stream? ? "true" : "false"
+
+    n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
+    n_workers_zig = @lowering.send(:emit_expr, n_workers_mir)
+    cap_mir = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+
+    call = @lowering.send(:emit_builtin, :concurrentStreamSelect, [
+      MIR::Ident.new(item_t.zig_type),
+      MIR::Ident.new(result_t.zig_type),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::Lit.new(is_inf),
+      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::Ident.new("rt"),
+      src_ptr,
+      n_workers_mir,
+      cap_mir,
+      bounded_concurrent_parallel_mir(conc_op),
+      bounded_concurrent_task_cfg_mir(conc_op),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+    ])
+
+    label = next_pipe_label
+    MIR::BlockExpr.new(label, [
+      cb[:ctx_def],
+      cb[:ctx_let],
+      *setup_stmts,
+      MIR::BreakStmt.new(label, call),
     ])
   end
 
