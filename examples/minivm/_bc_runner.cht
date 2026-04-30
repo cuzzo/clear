@@ -3503,6 +3503,57 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
+            113 -> -- SPLIT_STREAM_NEW: pop a Value.List, allocate a fresh
+                   -- buffer Env in the pool whose vars["b"] holds the list,
+                   -- push Value.SplitStream{bufId, cursor=0}.
+                sp -= 1; ssnBuf = COPY stack[sp];
+                ssnEnvId = pool.insert(Env{ vars: {} });
+                IF pool[ssnEnvId] AS ssnEnv THEN
+                    ssnEnv.vars["b"] = COPY ssnBuf;
+                END
+                pv = Value.SplitStream{ splitBufId: ssnEnvId, splitCursor: 0_i64 };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            114 -> -- SPLIT_STREAM_NEXT [slot_idx]: read the slot's SplitStream
+                   -- handle, fetch buf[cursor] from the buffer Env, advance
+                   -- the cursor in the slot (writeback), push the value or Nil.
+                ssxSlot = ops[ip]; ip += 1;
+                ssxHandle = COPY slots[ssxSlot];
+                pv = Value.Nil;
+                MATCH ssxHandle START
+                    Value.SplitStream AS ssxH ->
+                        IF pool[ssxH.splitBufId] AS ssxBufEnv THEN
+                            ssxBuf = ssxBufEnv.vars["b"] OR Value.Nil;
+                            MATCH ssxBuf START
+                                Value.List AS ssxElems ->
+                                    IF ssxH.splitCursor < ssxElems.length() THEN
+                                        pv = COPY ssxElems[ssxH.splitCursor];
+                                        slots[ssxSlot] = Value.SplitStream{
+                                            splitBufId: ssxH.splitBufId,
+                                            splitCursor: ssxH.splitCursor + 1
+                                        };
+                                    END,
+                                DEFAULT -> PASS;
+                            END
+                        END,
+                    DEFAULT -> PASS;
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            115 -> -- SPLIT_STREAM_CLONE: pop a SplitStream, push a new one
+                   -- with the same bufId and current cursor. Independent reader.
+                sp -= 1; sscSrc = COPY stack[sp];
+                pv = Value.Nil;
+                MATCH sscSrc START
+                    Value.SplitStream AS sscH ->
+                        pv = Value.SplitStream{
+                            splitBufId: sscH.splitBufId,
+                            splitCursor: sscH.splitCursor
+                        };,
+                    DEFAULT -> pv = COPY sscSrc;
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
             DEFAULT ->
                 running = FALSE;
         END

@@ -103,6 +103,17 @@ class BcEmitter
   ERR_SET_KIND = 110
   ERR_SET_TYPE = 111
   ERR_SET_MSG  = 112
+  # Split stream (~T[]@split) opcodes. SPLIT_STREAM_NEW pops a
+  # materialized List and wraps it in a Value.SplitStream{bufId, 0}
+  # where bufId references a fresh Env in the shared pool whose
+  # vars["b"] holds the buffer list. SPLIT_STREAM_NEXT [slot_idx]
+  # reads buf[cursor], advances the cursor in the slot's SplitStream
+  # value (writeback), and pushes the value (or Nil if exhausted).
+  # SPLIT_STREAM_CLONE pops a SplitStream and pushes a new one with
+  # the same bufId and current cursor — independent reader.
+  SPLIT_STREAM_NEW   = 113
+  SPLIT_STREAM_NEXT  = 114
+  SPLIT_STREAM_CLONE = 115
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -1119,6 +1130,14 @@ class BcEmitter
       collection_pin = effective_type == :map || effective_type == :set
       effective_type = pre_box_type if pre_box_type && !collection_pin
     end
+    # @split_stream_slots tracks slots holding Value.SplitStream handles.
+    # NEXT on these slots emits SPLIT_STREAM_NEXT (cursor advance with
+    # writeback) instead of LIST_POP_FRONT.
+    @split_stream_slots ||= Set.new
+    if val_type == :split_stream
+      @split_stream_slots << name
+      val_type = :any
+    end
     # Mark stream-materialized slots so NEXT pops from the slot's list.
     # The BlockExpr produced by lower_bg_stream_block is a list-init +
     # body (yields) + break(local). Detect it by label prefix. Also
@@ -2083,7 +2102,19 @@ class BcEmitter
       @ops[end_patch] = @ops.length
       push_type(:any)
     when MIR::RcRetain
-      compile_expr(node.source)  # retain: no real refcount in VM
+      # CLONE on a split stream produces an INDEPENDENT reader with the
+      # source's current cursor. Without specialization this would
+      # alias-share the SplitStream value (same cursor advanced by both
+      # handles), which fails 225/226's clone-replays-from-zero semantics.
+      if node.func.to_s == "splitRetain"
+        compile_expr(node.source); pop_type
+        emit_op(SPLIT_STREAM_CLONE)
+        # :split_stream lets compile_let stamp the destination slot so
+        # subsequent NEXT calls route through SPLIT_STREAM_NEXT.
+        push_type(:split_stream)
+      else
+        compile_expr(node.source)  # arcRetain: no real refcount in VM
+      end
     when MIR::RcDowngrade
       # LINK x: snapshot the inner value into a frame-owned weak cell.
       # The cell is invalidated when the frame that performed the LINK
@@ -2991,6 +3022,13 @@ class BcEmitter
       # Evaluate arg for side-effects; VM is single-threaded so sleep is a no-op.
       compile_expr_to_value(node.args[0]); pop_type; emit_op(POP)
       emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
+    when :split_stream_new
+      # Wrap a materialized BG STREAM list as Value.SplitStream{bufId, 0}.
+      # Args[0] is the BlockExpr that computes the buffer list. Result
+      # type is :split_stream so compile_let stamps the slot accordingly.
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(SPLIT_STREAM_NEW)
+      push_type(:split_stream); return
     when :max, :min
       compile_expr_to_value(node.args[0]); pop_type
       compile_expr_to_value(node.args[1]); pop_type
@@ -3961,6 +3999,14 @@ class BcEmitter
     if method == "next" && node.args.empty?
       if node.receiver.is_a?(MIR::Ident)
         rname = node.receiver.name.to_s
+        # Split stream: SPLIT_STREAM_NEXT advances the cursor in the
+        # slot's SplitStream value (writeback) and pushes buf[cursor]
+        # or Nil. Each handle's cursor is independent.
+        if has_slot?(rname) && @split_stream_slots&.include?(rname)
+          emit_op(SPLIT_STREAM_NEXT, @slots[rname])
+          push_type(:any)
+          return
+        end
         if has_slot?(rname) && (rname.start_with?("__sg") || @stream_slots&.include?(rname))
           emit_op(LIST_POP_FRONT, @slots[rname])
           push_type(:any)

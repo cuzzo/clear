@@ -31,6 +31,12 @@ UNION Value {
     -- BG fibers see the same Env id (the pool is shared across exec!
     -- recursion), so mutations through BOX_STORE propagate.
     Boxed: Id<Env>,
+    -- Split stream handle. bufId references an Env in the shared pool
+    -- whose vars["b"] holds the materialized buffer list (Value.List).
+    -- cursor is the per-handle read position. CLONE creates a new
+    -- SplitStream with the same bufId and current cursor; NEXT reads
+    -- buf[cursor] and advances the handle's cursor (writeback to slot).
+    SplitStream { splitBufId: Id<Env>, splitCursor: Int64 },
 }
 
 -- Pure helpers
@@ -183,7 +189,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.MapRef -> RETURN "#<map>";,
         Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";,
         Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";,
-        Value.Boxed -> RETURN "#<box>";
+        Value.Boxed -> RETURN "#<box>";,
+        Value.SplitStream AS sst -> RETURN "#<split:" + sst.splitCursor.toString() + ">";
     END
     RETURN "";
 END

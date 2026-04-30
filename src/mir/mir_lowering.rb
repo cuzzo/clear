@@ -2706,11 +2706,18 @@ class MIRLowering
       @current_stream_local = prev_stream_local
       @current_stream_is_inf = prev_stream_is_inf
 
-      return MIR::BlockExpr.new(blk_label, [
+      block = MIR::BlockExpr.new(blk_label, [
         MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, "anytype", nil),
         *run_body,
         MIR::BreakStmt.new(blk_label, MIR::Ident.new(local_stream))
       ])
+      # @split: wrap the materialized list in a Value.SplitStream so the
+      # value carries a per-handle cursor. CLONE on a split stream then
+      # produces an independent handle pointing at the same buffer.
+      if tense_t.split_open_stream?
+        return MIR::InlineBc.new(:split_stream_new, [block], { tag: :split_stream })
+      end
+      return block
     end
 
     analysis = node.capture_analysis
