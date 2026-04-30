@@ -2237,6 +2237,8 @@ class PipelineHost
           return lower_concurrent_stream_select(smooth_node.left, conc_op, conc_op.op)
         when AST::WhereOp
           return lower_concurrent_stream_where(smooth_node.left, conc_op, conc_op.op)
+        when AST::EachOp
+          return lower_concurrent_stream_each(smooth_node.left, conc_op, conc_op.op)
         end
       end
     end
@@ -2792,6 +2794,39 @@ class PipelineHost
       cb[:ctx_let],
       *setup_stmts,
       MIR::BreakStmt.new(label, call),
+    ])
+  end
+
+  def lower_concurrent_stream_each(lhs, conc_op, inner)
+    lhs_ti  = lhs.type_info
+    item_t  = stream_concurrent_element_type(lhs_ti)
+    cb = build_bounded_concurrent_callback(conc_op, item_t, :Void, :each)
+    setup_stmts, src_ptr = stream_concurrent_source_setup_mir(lhs, cb[:id])
+    is_inf = lhs_ti.inf_stream? ? "true" : "false"
+
+    n_workers_mir = bounded_concurrent_worker_count_mir(conc_op)
+    n_workers_zig = @lowering.send(:emit_expr, n_workers_mir)
+    cap_mir = stream_concurrent_capacity_mir(conc_op, n_workers_zig)
+
+    call = @lowering.send(:emit_builtin, :concurrentStreamEach, [
+      MIR::Ident.new(item_t.zig_type),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::Lit.new(is_inf),
+      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::Ident.new("rt"),
+      src_ptr,
+      n_workers_mir,
+      cap_mir,
+      bounded_concurrent_parallel_mir(conc_op),
+      bounded_concurrent_task_cfg_mir(conc_op),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+    ])
+
+    MIR::ScopeBlock.new([
+      cb[:ctx_def],
+      cb[:ctx_let],
+      *setup_stmts,
+      MIR::ExprStmt.new(call, false),
     ])
   end
 
