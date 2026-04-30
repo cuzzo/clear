@@ -1028,4 +1028,8 @@ BUILTIN_OPS = {
     zig: "try CheatLib.concurrentStreamEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
     borrows: :all
   },
+  concurrentListSelect: {
+    zig: "try CheatLib.concurrentListSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})",
+    allocates: true
+  },
 }.freeze

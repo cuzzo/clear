@@ -2241,6 +2241,18 @@ class PipelineHost
           return lower_concurrent_stream_each(smooth_node.left, conc_op, conc_op.op)
         end
       end
+
+      # List-source CONCURRENT (Zig backend). Skip the AS @u binding case
+      # and any source needing the @concurrent_outer_binding rewrite path
+      # -- that flow runs through the legacy template below until the
+      # binding semantics are also structural.
+      lhs_node = smooth_node.left
+      if lhs_ti && lhs_ti.list_collection? && !(lhs_node.is_a?(AST::BinaryOp) && lhs_node.op == :BIND_VAR)
+        case conc_op.op
+        when AST::SelectOp
+          return lower_concurrent_list_select(lhs_node, conc_op, conc_op.op)
+        end
+      end
     end
 
     # Detect `list AS @u s> CONCURRENT SELECT @u.field` -- thread the binding
@@ -2827,6 +2839,53 @@ class PipelineHost
       cb[:ctx_let],
       *setup_stmts,
       MIR::ExprStmt.new(call, false),
+    ])
+  end
+
+  # Source materialization for list-source CONCURRENT. Reuses the
+  # legacy build_pipe_items_block / visit() to produce a Zig prelude
+  # that binds `pipe_src_list` and `pipe_items` (a slice). The shape
+  # adaptation (sharded pool / SoA / etc.) lives in build_pipe_items_block;
+  # only the worker-pool wiring is migrated to structural MIR.
+  def list_concurrent_source_setup_iz(lhs)
+    lhs_type = lhs.type_info
+    list_zig = visit(lhs)
+    src_needs_cleanup = lhs.is_a?(AST::MethodCall) &&
+                        %w[values keys].include?(lhs.name.to_s) &&
+                        lhs.object.type_info&.sharded?
+    cleanup_line = src_needs_cleanup ? "defer pipe_src_list.deinit(rt.heapAlloc());\n" : ""
+    src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
+    items_block  = build_pipe_items_block(lhs_type, "rt.heapAlloc()")
+
+    setup = "#{src_decl} = #{list_zig};\n#{cleanup_line}_ = &pipe_src_list;\n#{items_block}"
+    MIR::InlineZig.new(setup, "list_concurrent_src_setup")
+  end
+
+  def lower_concurrent_list_select(lhs, conc_op, inner)
+    item_t  = Type.new(lhs.type_info.element_type.resolved)
+    result_t = Type.new(inner.expression.full_type)
+    cb = build_bounded_concurrent_callback(conc_op, item_t, result_t, :expr)
+    setup_iz = list_concurrent_source_setup_iz(lhs)
+
+    call = @lowering.send(:emit_builtin, :concurrentListSelect, [
+      MIR::Ident.new(item_t.zig_type),
+      MIR::Ident.new(result_t.zig_type),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::Ident.new("rt"),
+      MIR::Ident.new("pipe_items"),
+      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_parallel_mir(conc_op),
+      bounded_concurrent_task_cfg_mir(conc_op),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+    ])
+
+    label = next_pipe_label
+    MIR::BlockExpr.new(label, [
+      setup_iz,
+      cb[:ctx_def],
+      cb[:ctx_let],
+      MIR::BreakStmt.new(label, call),
     ])
   end
 
