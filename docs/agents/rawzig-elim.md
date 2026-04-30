@@ -9,8 +9,8 @@ transfer all sit outside its reach.
 
 ## Status
 
-VM coverage as of 2026-04-30: **270 / 294 supportable passing (91%)**.
-The remaining 14 UNIMPL + 2 FAIL trace to RawZig/InlineZig templates
+VM coverage as of 2026-04-30: **278 / 294 supportable passing (94%)**.
+The remaining 7 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
 or runtime features the VM doesn't implement.
 
 ## What we already did (BC short-circuits, not unifications)
@@ -137,30 +137,52 @@ have no failing test today since their connect/listen requires
 real socket setup the VM doesn't model. Schema entries can adopt
 `bc:` flags + new VM natives later when needed.
 
-### Cluster C: Stream-source CONCURRENT (4 UNIMPL)
+### Cluster C: Stream-source CONCURRENT -- DONE for Zig backend
 
-Tests: 240_concurrent_stream_pipelines, 241_open_stream_pipelines,
-242_concurrent_capacity, 243_batch_window.
+Tests passing on Zig: 240_concurrent_stream_pipelines,
+241_open_stream_pipelines, 242_concurrent_capacity, 243_batch_window.
 
 **What it does:** `~T[]` (dynamic stream) and `~T[INF]` (inf stream)
 sources passed through `s> CONCURRENT SELECT/WHERE/EACH`.
 
-**What it looks like now:** Same `MIR::RawZig` template as
-list-source CONCURRENT. The BC short-circuit (#4 above) explicitly
-gates these out because `lower_select` / `lower_where` /
-`lower_each` don't handle stream sources -- they expect array-like
-inputs.
+**What changed:**
 
-**Why this matters for correctness:** Same as Cluster D below. The
-template is the SAME RawZig as list-source CONCURRENT, just consumed
-on a stream lhs.
+1. Added three runtime helpers in `zig/lib/streams.zig`:
+   `concurrentStreamSelect`, `concurrentStreamWhere`,
+   `concurrentStreamEach`. Each is a feeder fiber + N worker fibers
+   wired through a `BoundedChannel(T)`. Comptime `is_inf` chooses
+   `nextOrNull()` (inf stream) vs `next()` (bounded/open). `ChannelT`
+   is a comptime parameter so streams.zig keeps no hard dependency
+   on data-structures.zig.
 
-**Structural MIR target:** Same as Cluster D (concurrent pipeline).
-Streams need `lower_select` / `lower_where` / `lower_each` to grow
-a stream-materialization branch (NEXT loop -> append to result).
+2. Added thin CheatLib wrappers in `zig/runtime/runtime-header.zig`
+   that pin WaitGroup, spawn fns, channel type, and per-T cleanup.
 
-**Effort:** Small *if* Cluster D is done structurally; otherwise a
-~1-day fix to teach lower_X to materialize streams.
+3. Replaced the inline RawZig blob in
+   `pipeline_generator#transpile_concurrent_stream_*` with structural
+   MIR in `pipeline_host#lower_concurrent_stream_select/where/each`.
+   Each lowering reuses `build_bounded_concurrent_callback` to emit
+   the worker as `MIR::FnDef` inside `MIR::StructDef`, then calls
+   `emit_builtin :concurrentStreamSelect` (etc.). Three new helpers:
+   `stream_concurrent_element_type`, `stream_concurrent_source_setup_mir`,
+   `stream_concurrent_capacity_mir`.
+
+4. `lower_concurrent` dispatch routes Zig-backend stream
+   SELECT/WHERE/EACH through the structural path. BC continues
+   falling through to the legacy RawZig fallback (still UNIMPL on
+   BC -- see remaining work below).
+
+**What this gains the checker:** the worker callback is now visible
+as a normal MIR `FnDef` body; capture promotion, allocator pairing,
+and ownership transfer are all visible to the standard MIR invariants.
+The opaque RawZig blob for the Zig path is gone.
+
+**Remaining BC work:** tests 240/241/242/243 stay UNIMPL on BC. The
+VM has no fiber scheduler / channel runtime, so the structural call
+to `concurrentStreamSelect` has no `bc: true` dispatch. A future
+commit can either model `BC_FIBER_SPAWN` + a queue-style channel,
+or sequentially simulate (feeder produces full list, workers
+sequentially walk it).
 
 ### Cluster D: Concurrent pipeline (Zig-side) -- the big one
 
@@ -264,18 +286,40 @@ MIR::RangeStream.new(start, end, step, inclusive:)
 
 **Effort:** Small. Mostly mechanical.
 
-### Cluster G: Bounded stream concurrent (1 UNIMPL)
+### Cluster G: Bounded stream concurrent -- DONE
 
-Test: 228_concurrent_bounded_stream.
+Test passing on both backends: 228_concurrent_bounded_stream.
 
 **What it does:** `~T[N] s> CONCURRENT SELECT/WHERE/EACH`.
 
-**What it looks like now:** Already structural! Uses
-`build_bounded_concurrent_callback` which emits `MIR::FnDef`,
-`MIR::StructDef`, and `MIR::Param` nodes. The blocker is purely
-that `bc_emitter` doesn't handle `MIR::StructDef` yet.
+**What changed:** `bc_emitter.rb` now handles the structural shape
+the lowering already produced:
 
-**Effort:** Small. Add `MIR::StructDef` dispatch in bc_emitter.
+- `collect_nested_fn_defs` walks `MIR::StructDef.methods` for
+  `__BoundedConcurrentCtx<N>` and registers each `apply` method
+  under the qualified name `<StructName>.apply`. Field names are
+  registered in `@struct_fields` so `compile_field_get` resolves
+  `ctx.<field>` indices via `find_field_index`.
+- `compile_synthesized_helper_fn_mir` compiles the AST-less worker
+  bodies; it filters `MIR::Suppress` / `MIR::FrameSave` etc. the
+  same way `compile_main` does.
+- `compile_concurrent_bounded` is the InlineBc dispatch site: it
+  unwraps `AddressOf` / `FieldGet(_, "items")` to find the source,
+  pre-stashes `ctx`, allocates the result list (SELECT/WHERE),
+  then iterates items via FOR + BC_CALL of the worker.
+- The `with_block_bindings` handler grew a captured-field prefetch
+  pass: when the WITH source is rooted at `ctx.FIELD.*` (which
+  happens when a `WITH EXCLUSIVE total AS t` lives inside the
+  worker body and `total` was rewritten to `ctx.total.*`), load
+  `ctx.FIELD` into a slot named after the borrows entry so
+  `alias_to_source` resolves. The field holds the same Box as the
+  original (AddressOf is identity in BC), so writes through the
+  alias propagate.
+- `compile_expr` `MIR::AddressOf` skips `BOX_LOAD` when the operand
+  is a boxed slot ident; capturing into a struct field needs the
+  underlying cell-id, not the dereferenced value.
+
+The Zig path was already structural; this commit added the BC half.
 
 ### Cluster H: VM-only architectural (2 FAIL)
 
@@ -296,21 +340,27 @@ These require runtime infrastructure the VM doesn't have:
 
 ## Priority order (correctness payoff vs effort)
 
-1. **#2 unification (pool[id] InlineBc)** -- trivial, removes one
-   asymmetry, makes pool indexing a registered stdlib op visible to
-   the checker on both backends.
-2. **Cluster A (Sharded ops)** -- highest concentrated correctness
-   payoff. Cross-shard ownership transfer is the most subtle
-   ownership story in the codebase.
-3. **Cluster B (File RAII)** -- well-defined lifecycle; gives the
-   checker visibility into close-on-error paths.
-4. **Cluster G (bounded stream concurrent)** -- small effort,
-   unblocks one test, exercises bc_emitter's MIR::StructDef path.
-5. **Cluster D (Concurrent pipeline Zig-side)** -- largest payoff
-   but largest effort. Worth doing once the smaller fish are off
-   the plate.
-6. **Cluster C (stream-source CONCURRENT)** -- subsumed by D
-   structurally; alternatively a 1-day fix to teach `lower_select`
-   etc. about streams.
-7. **Clusters E, F** (thread pinning, promise list/range) --
+DONE:
+1. **#2 unification (pool[id] InlineBc)**
+2. **Cluster A (Sharded ops)**
+3. **Cluster B (File RAII)**
+4. **Cluster G (bounded stream concurrent)**
+5. **Cluster C (stream-source CONCURRENT)** -- Zig backend done; BC
+   still UNIMPL pending fiber/channel runtime work.
+
+Remaining:
+6. **Cluster D (List-source CONCURRENT, Zig-side)** -- largest payoff
+   but largest effort. The list-source CONCURRENT path
+   (`transpile_concurrent_select/where/each` for plain lists, not
+   streams) still emits RawZig on Zig. The bounded-stream and
+   stream-source migrations established the structural pattern
+   (`build_bounded_concurrent_callback` + `concurrent*Select/Where/Each`
+   helpers), so this should now be a smaller incremental migration:
+   wire list sources through the same callback shape, with `items`
+   exposed as a slice rather than a stream.
+7. **Cluster C BC half** -- model fiber/channel runtime in BC, or
+   sequentially simulate (feeder builds the full list first, workers
+   walk it sequentially). Either path unblocks tests 240/241/242/243
+   on BC.
+8. **Clusters E, F** (thread pinning, promise list/range) --
    mechanical; do as cleanup.
