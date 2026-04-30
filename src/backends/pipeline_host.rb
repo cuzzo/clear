@@ -2193,6 +2193,16 @@ class PipelineHost
   # atomics, spawn -- too complex for MIR nodes), but with stdlib_def so the
   # checker knows the allocation effects.
   def lower_concurrent(_lhs, conc_op, smooth_node)
+    # SHARD + CONCURRENT EACH: structural lowering for both backends.
+    # This is a fused single-fiber loop (no real concurrency); produce a
+    # ScopeBlock + ForStmt that both backends consume directly. The
+    # body's `map[k] = v` routes through ShardedMapPut/Get with
+    # shard_direct mode for Zig (putDirect/getDirect) and through
+    # MAP_PUT/MAP_GET for BC.
+    if conc_op.respond_to?(:shard_context) && conc_op.shard_context
+      return lower_shard_concurrent_each(smooth_node.left, conc_op, smooth_node)
+    end
+
     # BC backend has no fiber scheduler -- CONCURRENT is sequential
     # simulation. Strip the CONCURRENT wrapper and redispatch the inner
     # op through the regular pipeline lowering. Result-order-deterministic
@@ -2254,12 +2264,6 @@ class PipelineHost
   def lower_concurrent_bc(lhs, conc_op, smooth_node)
     inner = conc_op.op
 
-    # SHARD + CONCURRENT EACH: annotator sets conc_op.shard_context.
-    # Sequential VM simulation is just `for i in range { key = key_expr; body }`.
-    if conc_op.respond_to?(:shard_context) && conc_op.shard_context
-      return lower_bc_shard_concurrent_each(lhs, conc_op, smooth_node)
-    end
-
     real_lhs = lhs
     bind_name = nil
     if lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
@@ -2310,39 +2314,118 @@ class PipelineHost
     [:default, expr]
   end
 
-  # SHARD + CONCURRENT EACH on BC: sequential simulation. The shard
-  # routing is meaningless without a real fiber scheduler; just iterate
-  # the range, compute the key per iteration with `_` bound to the loop
-  # index, and run the EACH body with `_` bound to the key. The body's
-  # `map[_] = ...` lowers to MIR::Set + MIR::IndexGet → MAP_PUT through
-  # the existing structural path.
-  def lower_bc_shard_concurrent_each(lhs, conc_op, smooth_node)
+  # SHARD + CONCURRENT EACH (both backends): produces structural MIR
+  # describing a fused single-fiber loop. The "CONCURRENT" name is
+  # misleading -- the original transpile_shard_concurrent_each emitted
+  # a serial while-loop with no real fibers; the body's map[k] = v
+  # used putDirect with the shard idx computed per iteration.
+  #
+  # Both backends produce the same shape:
+  #   ScopeBlock {
+  #     // (Zig only) Let map_ptr = &map; map_ptr.ensureOwnership();
+  #     // (Zig only) ForStmt body has Let sh = @TypeOf(map.*).shardIndexWithHash(key)
+  #     ForStmt(IterRange(start, end), idx_var, [
+  #       Let key_var = key_expr_with_idx
+  #       ...body lowered with shard_context set so map[k]=v
+  #          dispatches to ShardedMapPut(shard_direct)...
+  #     ])
+  #   }
+  #
+  # For BC, shard_idx/shard_key on the ShardedMapPut are ignored and
+  # the put compiles to plain MAP_PUT.
+  def lower_shard_concurrent_each(lhs, conc_op, smooth_node)
     ctx = conc_op.shard_context
     each_op = conc_op.op
     range_node = ctx[:auto_detected] ? lhs : lhs.left
-    @bc_shard_counter ||= 0
-    id = (@bc_shard_counter += 1)
-    idx_var = "__bc_sh_i_#{id}"
-    key_var = "__bc_sh_key_#{id}"
+    is_bc = bc_target?
+
+    @sh_counter ||= 0
+    id = (@sh_counter += 1)
+    idx_var = "__sh#{id}_i"
+    key_var = "__sh#{id}_key"
+    sh_var = "__sh#{id}_sh"
+    map_ptr = "__sh#{id}_map"
 
     start_mir = visit_mir(range_node.start)
     end_mir   = visit_mir(range_node.finish)
     end_expr  = range_node.inclusive ?
       MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
 
-    key_mir = with_pipeline_context(placeholder: idx_var) {
-      visit_mir(ctx[:key_expr])
-    }
-    body_mir = visit_pipeline_body_mir(each_op.body, placeholder: key_var)
+    map_node = ctx[:map_var]
+    map_var_name = map_node.is_a?(AST::Identifier) ? map_node.name.to_s : nil
 
-    MIR::ForStmt.new(
-      MIR::IterRange.new(start_mir, end_expr),
-      idx_var,
-      [
-        MIR::Let.new(key_var, key_mir, false, nil, nil),
-        *body_mir
-      ],
-      nil)
+    # Set mir_lowering's @shard_context so the body's map[k] = v dispatches
+    # to ShardedMapPut/Get with shard_direct mode (Zig) -- BC ignores these
+    # fields but the same path runs for both backends.
+    prev_ctx = @lowering.instance_variable_get(:@shard_context)
+    @lowering.instance_variable_set(:@shard_context, is_bc ? nil : {
+      map: map_var_name,
+      idx: "#{sh_var}.shard",
+      key: key_var,
+      hash: "#{sh_var}.hash"
+    })
+
+    key_mir, body_mir = nil, nil
+    begin
+      key_mir = with_pipeline_context(placeholder: idx_var) {
+        visit_mir(ctx[:key_expr])
+      }
+      body_mir = visit_pipeline_body_mir(each_op.body, placeholder: key_var)
+    ensure
+      @lowering.instance_variable_set(:@shard_context, prev_ctx)
+    end
+
+    inner = []
+    if !is_bc && ctx[:key_allocates_frame]
+      # The key expression allocates from the frame arena (e.g. a string
+      # concat). Save/restore per iteration so successive iterations
+      # don't accumulate frame memory. Mirrors what
+      # transpile_shard_concurrent_each used to emit.
+      lm_var = "__sh#{id}_loop_mark"
+      rt = @do_rt_name || "rt"
+      inner << MIR::InlineZig.new("const #{lm_var} = #{rt}.saveLoopMark();", "shard_loop_save_mark")
+      inner << MIR::InlineZig.new("defer #{rt}.restoreLoopMark(#{lm_var});", "shard_loop_restore_mark")
+    end
+    inner << MIR::Let.new(key_var, key_mir, false, nil, nil)
+    unless is_bc
+      # __sh#_sh = @TypeOf(__sh#_map.*).shardIndexWithHash(__sh#_key)
+      # Used by the body's putDirect / getDirect (via ShardedMapPut shard_idx).
+      inner << MIR::Let.new(sh_var,
+        MIR::Call.new("@TypeOf(#{map_ptr}.*).shardIndexWithHash",
+          [MIR::Ident.new(key_var)], false),
+        false, nil, nil)
+    end
+    inner.concat(body_mir)
+
+    if is_bc
+      # BC: ForStmt over IterRange (the VM iterates Int64 directly so
+      # the idx_var binds an Int64). No map ptr setup or ensureOwnership.
+      return MIR::ForStmt.new(
+        MIR::IterRange.new(start_mir, end_expr),
+        idx_var, inner, nil)
+    end
+
+    # Zig: WhileStmt with explicit i64 counter so the idx_var has the
+    # right type for @mod/arithmetic in the key expression. ForStmt's
+    # `for (0..n) |i|` would bind i as usize, mismatching with i64
+    # operands in the typical key_expr pattern.
+    op_str = range_node.inclusive ? "<=" : "<"
+    end_var = "__sh#{id}_end"
+    MIR::ScopeBlock.new([
+      MIR::Let.new(map_ptr, MIR::UnaryOp.new("&", visit_mir(map_node)), false, nil, nil),
+      MIR::ExprStmt.new(
+        MIR::MethodCall.new(MIR::Ident.new(map_ptr), "ensureOwnership", [], false), false),
+      MIR::ScopeBlock.new([
+        MIR::Let.new(idx_var, start_mir, true, "i64", nil),
+        MIR::Let.new(end_var, end_mir, false, "i64", nil),
+        MIR::WhileStmt.new(
+          MIR::BinOp.new(op_str, MIR::Ident.new(idx_var), MIR::Ident.new(end_var)),
+          inner, nil,
+          MIR::Set.new(MIR::Ident.new(idx_var),
+            MIR::BinOp.new("+", MIR::Ident.new(idx_var), MIR::Lit.new("1"))),
+          nil, nil)
+      ])
+    ])
   end
 
   # CONCURRENT SELECT ... OR PRUNE: build a structural for-loop that runs

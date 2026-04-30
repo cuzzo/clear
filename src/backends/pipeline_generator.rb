@@ -1167,11 +1167,9 @@ module PipelineGenerator
     when AST::WhereOp
       transpile_concurrent_where(lhs, inner, id, workers_code, rt_name, options)
     when AST::EachOp
-      if conc.shard_context
-        transpile_shard_concurrent_each(lhs, inner, id, rt_name, conc.shard_context)
-      else
-        transpile_concurrent_each(lhs, inner, id, workers_code, rt_name, options)
-      end
+      # SHARD + CONCURRENT EACH lowers structurally via
+      # PipelineHost#lower_shard_concurrent_each -- never falls back here.
+      transpile_concurrent_each(lhs, inner, id, workers_code, rt_name, options)
     when AST::SumOp
       transpile_concurrent_reduce(lhs, inner, id, workers_code, rt_name, options, :sum, smooth_node)
     when AST::CountOp
@@ -2151,82 +2149,10 @@ module PipelineGenerator
     end
   end
 
-  # =========================================================
-  # SHARD + CONCURRENT EACH: true shared-nothing pipeline
-  # =========================================================
-  #
-  # Emits:
-  #   1. Route phase: iterate input, hash keys, fill per-shard queues
-  #   2. Execute phase: spawn one fiber per shard on owning scheduler
-  #   3. Join: WaitGroup.wait()
-  #
-  def transpile_shard_concurrent_each(lhs_node, each_op, id, rt_name, shard_ctx)
-    auto_detected = shard_ctx[:auto_detected]
-    shard_count = shard_ctx[:shard_count]
-    map_node    = shard_ctx[:map_var]
-    key_expr_node = shard_ctx[:key_expr]
-    key_needs_frame_mark  = shard_ctx[:key_allocates_frame]
-    body_needs_frame_mark = shard_ctx[:body_allocates_frame]
-
-    map_code = visit(map_node)
-    map_var_name = map_node.is_a?(AST::Identifier) ? map_node.name : nil
-
-    # Determine range node
-    if auto_detected
-      # LHS is the raw range (no ShardOp wrapper)
-      range_node = lhs_node
-    else
-      # LHS is BinaryOp(SMOOTH, range, ShardOp)
-      range_node = lhs_node.left
-    end
-
-    range_start = visit(range_node.start)
-    range_end   = visit(range_node.finish)
-    exclusive   = !range_node.inclusive
-
-    # Build the key expression with `_` bound to the routing loop variable.
-    key_code = with_pipeline_context(placeholder: "__sh#{id}_i") { visit(key_expr_node) }
-
-    # Build the EACH body. Map accesses use putDirect/getDirect (no double hash).
-    # Fused streaming: route + process in a single loop. No intermediate queues,
-    # no fibers, no ring buffers. Each item is processed and discarded immediately.
-    # The placeholder `_` resolves to the current key string.
-    body_code = with_pipeline_context(
-      placeholder: "__sh#{id}_key",
-      shard_map: map_var_name,
-      shard_idx: "__sh#{id}_sh.shard",
-      shard_key: "__sh#{id}_key",
-      shard_hash: "__sh#{id}_sh.hash"
-    ) do
-      each_op.body.map { |stmt|
-        code = visit(stmt)
-        code.strip.end_with?(";") ? code : "#{code};"
-      }.join("\n              ")
-    end
-
-    range_op = exclusive ? "<" : "<="
-
-    <<~ZIG.chomp
-      {
-          // ── SHARD + CONCURRENT EACH (fused streaming) ──
-          // Bounded range: route + process each item in a single loop.
-          // Zero intermediate storage, zero fibers, zero atomics.
-          // Memory: O(1) per iteration (key lives on frame arena, freed by rewind).
-          const __sh#{id}_map = &#{map_code};
-          __sh#{id}_map.ensureOwnership();
-          {
-              var __sh#{id}_i: i64 = #{range_start};
-              const __sh#{id}_end: i64 = #{range_end};
-              while (__sh#{id}_i #{range_op} __sh#{id}_end) : (__sh#{id}_i += 1) {
-                  #{key_needs_frame_mark ? "const __sh#{id}_loop_mark = #{rt_name}.saveLoopMark(); defer #{rt_name}.restoreLoopMark(__sh#{id}_loop_mark);" : ""}
-                  const __sh#{id}_key = #{key_code};
-                  const __sh#{id}_sh = @TypeOf(__sh#{id}_map.*).shardIndexWithHash(__sh#{id}_key);
-                  #{body_code}
-              }
-          }
-      }
-    ZIG
-  end
+  # SHARD + CONCURRENT EACH was migrated to structural MIR in
+  # PipelineHost#lower_shard_concurrent_each. This callee no longer
+  # exists; the dispatch in transpile_concurrent now never reaches the
+  # shard branch (lower_pipeline always returns non-nil for this case).
 
   def visit_Placeholder(node)
     # Return the name of the loop variable

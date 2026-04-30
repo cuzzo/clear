@@ -38,7 +38,7 @@ the fiber boundary.
 
 ## Remaining RawZig / InlineZig clusters
 
-### Cluster A: Sharded operations -- DONE for HashMap put/get
+### Cluster A: Sharded operations -- DONE
 
 Tests passing: 108_shard_pipeline, 229_shard_numeric_keys,
 64_sharded_collections, 109_shared_sharded_map. 
@@ -82,14 +82,19 @@ BC backend (bc_emitter.rb): `compile_sharded_map_put` /
 `compile_sharded_map_get` emit `MAP_PUT` / `MAP_GET`. The VM has no
 shard routing; sharded maps share a single MapRef cell.
 
-What's NOT yet structured (still RawZig in pipeline_generator):
-- `transpile_shard_concurrent_each` -- the SHARD + CONCURRENT EACH
-  outer loop that iterates the range, computes the shard for each
-  key, dispatches workers. The body's `map[k] = v` already routes
-  through ShardedMapPut, but the outer fiber-spawn scaffold is still
-  a giant RawZig blob.
+SHARD + CONCURRENT EACH is also structurally lowered. The original
+`transpile_shard_concurrent_each` (~70 lines of RawZig in
+pipeline_generator) was deleted -- its work moved to
+`PipelineHost#lower_shard_concurrent_each` which produces a
+ScopeBlock + WhileStmt (Zig) or ForStmt (BC) tree both backends
+consume. Inside the loop body, `map[k] = v` routes through
+ShardedMapPut/Get with `shard_idx` set, so the checker has full
+visibility into the shard-direct ownership story (key dupe is
+elided, value transfer is direct, container borrow is implicit).
 
-Subsumed by Cluster D (concurrent pipeline) when that lands.
+Cluster A is genuinely complete: no RawZig remains for sharded ops,
+both backends consume the same MIR for the entire pipeline (outer
+loop + shard lookup + per-iteration put/get).
 
 ### Cluster B: File / TCP resources (3 UNIMPL)
 
