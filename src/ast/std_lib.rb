@@ -593,6 +593,7 @@ STD_LIB = {
 POOL_METHODS = {
   "insert" => {
     arity: 1, tag: :pool_method, allocates: true,
+    bc: true,
     takes_args: [0],  # Pool.insert takes ownership of the value
     zig: "try {0}.insert({alloc}, {1})",
     alloc: :heap,
@@ -608,12 +609,14 @@ POOL_METHODS = {
   },
   "get" => {
     arity: 1, tag: :pool_method,
+    bc: true,
     zig: "{0}.get({1})",
     return_type: ->(obj_type) { Type.new(:"?#{obj_type.element_type.resolved}") },
     borrows: :all,  # returns borrowed pointer into pool storage
   },
   "remove" => {
     arity: 1, tag: :pool_method,
+    bc: true,
     zig: "{0}.remove({1})",
     mutates_receiver: true,
     return_type: ->(_) { :Void },
@@ -621,12 +624,14 @@ POOL_METHODS = {
   },
   "length" => {
     arity: 0, tag: :pool_method,
+    bc: true,
     zig: "{0}.length()",
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
   },
   "contains?" => {
     arity: 1, tag: :pool_method,
+    bc: true,
     zig: "({0}.get({1}) != null)",
     return_type: ->(_) { :Bool },
     borrows: :all,

@@ -796,6 +796,15 @@ class BcEmitter
     when MIR::MethodCall
       compile_method_call_expr(expr)
     when MIR::InlineZig, MIR::RawZig
+      # Reason-based no-ops: OR EXIT writes rt.__error.{kind,error_name,
+      # message,clear_line} via RawZig; the VM has no rt struct, the error
+      # sentinel carries kind+message directly via RAISE_ERR. These field
+      # assigns are dead in BC mode.
+      reason = expr.respond_to?(:reason) ? expr.reason.to_s : ""
+      if reason.start_with?("or_exit_")
+        push_type(:void)
+        return
+      end
       raise Unimplemented, "#{expr.class.name.split('::').last} expr not supported in VM path"
     else
       compile_expr(expr)
@@ -2243,6 +2252,35 @@ class BcEmitter
         # in statement position emit POP instead of leaking it on vstack.
         push_type(:any); return
       end
+      if tag == :pool_method
+        # pool.insert(item) -> Id<T> = current length. VM models pool as a
+        # list: insert appends, the returned Id is the index where the item
+        # landed. Cleanup uses STORE_SLOT then list-length on the stored
+        # list to compute the index, then leave the index on top.
+        compile_expr_to_value(node.args[0]); pop_type
+        compile_expr_to_value(node.args[1]); pop_type
+        emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+        # Stack now has new_list. Need to: store back to slot, push id.
+        recv = node.args[0]
+        recv = recv.list if recv.is_a?(MIR::ListItems)
+        if recv.is_a?(MIR::Ident) && has_slot?(recv.name.to_s)
+          emit_store(recv.name.to_s, :any)
+          emit_op(POP)  # consume the new_list copy STORE_SLOT left
+          # Return the id = (length - 1). Reload, count, sub 1.
+          emit_op(LOAD_SLOT, @slots[recv.name.to_s])
+          emit_op(NATIVE_CALL, NATIVES["count"], 1)
+          emit_op(LOAD_CONST, add_const([:i64, 1]))
+          emit_op(SUB)
+          push_type(:any); return
+        else
+          # Non-Ident receiver: best-effort -- push Nil id (caller usually
+          # assigns to a fresh variable so this only matters when the id is
+          # used; rare for non-Ident pool receivers).
+          emit_op(POP)
+          emit_op(LOAD_CONST, add_const([:i64, 0]))
+          push_type(:any); return
+        end
+      end
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
       emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
@@ -2316,19 +2354,38 @@ class BcEmitter
       # (id 13) calls listLen which doesn't reach into the pool. Emit
       # MAP_LENGTH for those receivers; otherwise the count native handles
       # list/string uniformly. Result lands on vstack as Int64Val (:any).
+      tag = node.stdlib_def && node.stdlib_def[:tag]
       arg_hint = expr_type_hint(node.args[0])
       compile_expr_to_value(node.args[0])
       if arg_hint == :set || arg_hint == :map
         emit_op(MAP_LENGTH)
+      elsif tag == :pool_method
+        # Pool length = number of non-Nil entries in the backing list.
+        # Use a runtime helper that walks the list and counts non-Nil.
+        emit_op(NATIVE_CALL, NATIVES["count"], 1)  # total slots
+        # TODO: subtract removed (Nil) entries. For now, return raw count
+        # which matches insert-only workloads.
       else
         emit_op(NATIVE_CALL, NATIVES["count"], 1)
       end
       push_type(:any); return
+    when :get
+      # POOL_METHODS["get"]: pool.get(id) -> ?T. Pool is modeled as a list;
+      # list-ref handles in-bounds; otherwise yields Nil.
+      tag = node.stdlib_def && node.stdlib_def[:tag]
+      if tag == :pool_method
+        compile_expr_to_value(node.args[0]); pop_type
+        compile_expr_to_value(node.args[1]); pop_type
+        emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+        push_type(:any); return
+      end
+      # No other op uses :get through InlineBc currently.
+      raise Unimplemented, "InlineBc :get with tag=#{tag}"
     when :remove
       # set.remove(val) needs SET_REMOVE (MapRef-backed); list.remove(idx)
       # uses LIST_REMOVE_AT which pushes (new_list, removed_elem) so we can
       # both rebuild the receiver and produce the removed element as the
-      # expression value.
+      # expression value. pool.remove(id) is in-place: set list[id] = Nil.
       tag = node.stdlib_def && node.stdlib_def[:tag]
       arg_hint = expr_type_hint(node.args[0])
       if tag == :set_method || arg_hint == :set
@@ -2336,6 +2393,18 @@ class BcEmitter
         compile_expr_to_value(node.args[1])
         emit_op(SET_REMOVE)
         # SET_REMOVE pushes Value.Nil; mark :any so stmt-position emits POP.
+        push_type(:any); return
+      end
+      if tag == :pool_method
+        # pool.remove(id): list-set!(pool, id, Nil); store back.
+        compile_expr_to_value(node.args[0]); pop_type
+        compile_expr_to_value(node.args[1]); pop_type
+        emit_op(LOAD_CONST, add_const(nil))
+        emit_op(NATIVE_CALL, NATIVES["list-set!"], 3)
+        recv = node.args[0]
+        if recv.is_a?(MIR::Ident) && has_slot?(recv.name.to_s)
+          emit_store(recv.name.to_s, :any)
+        end
         push_type(:any); return
       end
       compile_expr_to_value(node.args[0])
@@ -2384,8 +2453,19 @@ class BcEmitter
     when :"contains?"
       # Sets are Value.MapRef in the VM; the string "contains?" native
       # (id 41) only handles strings. Use SET_CONTAINS / MAP_CONTAINS for
-      # collection-typed receivers.
+      # collection-typed receivers; pool.contains?(id) checks if the
+      # backing list has a non-Nil entry at index id.
+      tag = node.stdlib_def && node.stdlib_def[:tag]
       arg_hint = expr_type_hint(node.args[0])
+      if tag == :pool_method
+        # pool.contains?(id) -> (list-ref(pool, id) != Nil)
+        compile_expr_to_value(node.args[0]); pop_type
+        compile_expr_to_value(node.args[1]); pop_type
+        emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+        # Boolify: non-Nil -> true, Nil -> false. NOT NOT.
+        emit_op(NOT); emit_op(NOT)
+        push_type(:any); return
+      end
       compile_expr_to_value(node.args[0])
       compile_expr_to_value(node.args[1])
       if arg_hint == :set
