@@ -2251,6 +2251,8 @@ class PipelineHost
         case conc_op.op
         when AST::SelectOp
           return lower_concurrent_list_select(lhs_node, conc_op, conc_op.op)
+        when AST::WhereOp
+          return lower_concurrent_list_where(lhs_node, conc_op, conc_op.op)
         end
       end
     end
@@ -2870,6 +2872,32 @@ class PipelineHost
     call = @lowering.send(:emit_builtin, :concurrentListSelect, [
       MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new(result_t.zig_type),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
+      MIR::Ident.new("rt"),
+      MIR::Ident.new("pipe_items"),
+      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_parallel_mir(conc_op),
+      bounded_concurrent_task_cfg_mir(conc_op),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+    ])
+
+    label = next_pipe_label
+    MIR::BlockExpr.new(label, [
+      setup_iz,
+      cb[:ctx_def],
+      cb[:ctx_let],
+      MIR::BreakStmt.new(label, call),
+    ])
+  end
+
+  def lower_concurrent_list_where(lhs, conc_op, inner)
+    item_t  = Type.new(lhs.type_info.element_type.resolved)
+    cb = build_bounded_concurrent_callback(conc_op, item_t, :Bool, :expr)
+    setup_iz = list_concurrent_source_setup_iz(lhs)
+
+    call = @lowering.send(:emit_builtin, :concurrentListWhere, [
+      MIR::Ident.new(item_t.zig_type),
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
