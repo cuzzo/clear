@@ -1132,15 +1132,17 @@ class PipelineHost
   end
 
   def lower_stream_index(range_chain, expr_node, elem_zig, alloc, map_type)
-    alloc_str = HEAP_ALLOC
-    # Filtered-out items must have their heap sub-fields freed; comptime no-op for primitives.
-    # CheatLib.cleanup is in BUILTIN_OPS but takes a comptime-Type argument
-    # which doesn't have a structural representation today (MIR::Ident with
-    # a Zig type identifier is the closest, but the lowering's hoist_alloc
-    # path on a Call mishandles it). Left as InlineZig.
+    # Filtered-out items must have their heap sub-fields freed; comptime no-op
+    # for primitives. CheatLib.cleanup takes a comptime Type as its first arg;
+    # we encode it as MIR::Ident(zig_type_str), matching mir_lowering's other
+    # CheatLib.cleanup call sites (lower_field_assignment_with_cleanup).
     on_skip = ->(var) {
       [MIR::ExprStmt.new(
-        MIR::InlineZig.new("CheatLib.cleanup(#{elem_zig}, #{alloc_str}, &#{var})", "item_cleanup"), nil)]
+        MIR::Call.new("CheatLib.cleanup", [
+          MIR::Ident.new(elem_zig),
+          MIR::Ident.new(HEAP_ALLOC),
+          MIR::AddressOf.new(MIR::Ident.new(var))
+        ], false), nil)]
     }
     p = build_lazy_range_prefix(range_chain[:source], range_chain[:stages], on_skip: on_skip)
     item_var   = p[:item_var]
@@ -1353,37 +1355,27 @@ class PipelineHost
       ])
     end
 
-    # Range source: zero-allocation lazy iteration via LazyRange(T).
-    # `(start..<end) s> EACH { body }` emits a while loop that pulls items
-    # one-by-one from a LazyRange without materializing the range into a list.
+    # Range source: zero-allocation lazy iteration via Zig's literal range
+    # syntax inside ForStmt (`for (start..end) |item| { body }`). Equivalent
+    # to the prior LazyRange(T).init + while(.next()) pattern -- LazyRange's
+    # next() is just `current < end ? current++ : null` with no yield -- so
+    # the structural ForStmt + IterRange compiles to the same loop in Zig
+    # while giving the VM a backend-native iteration shape.
     if list_node.is_a?(AST::RangeLit)
       start_mir = visit_mir(list_node.start)
       end_mir   = visit_mir(list_node.finish)
-      start_code = @emitter.emit(start_mir)
-      end_code   = @emitter.emit(end_mir)
-      end_expr   = list_node.inclusive ? "#{end_code} + 1" : end_code
-
-      start_ft = list_node.start.respond_to?(:full_type) ? list_node.start.full_type : nil
-      elem_zig = (start_ft && Type.new(start_ft).zig_type) || "i64"
+      end_expr  = list_node.inclusive ?
+        MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
 
       body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
 
-      # Use `|_|` as the while capture when the body doesn't reference the
-      # element, to avoid Zig's "unused capture" error. Use `|__each_item|`
-      # when the body does reference it.
+      # Use `_` as the for capture when the body doesn't reference the
+      # element, to avoid Zig's "unused capture" error.
       capture_name = ast_stmts_use_placeholder?(each_op.body) ? "__each_item" : "_"
 
-      return MIR::ScopeBlock.new([
-        MIR::Let.new("__range_src",
-          MIR::InlineZig.new(
-            "CheatLib.LazyRange(#{elem_zig}).init(@as(#{elem_zig}, #{start_code}), @as(#{elem_zig}, #{end_expr}))",
-            "lazy_range"),
-          true, nil, nil),
-        MIR::WhileStmt.new(
-          MIR::MethodCall.new(MIR::Ident.new("__range_src"), "next",
-            [MIR::Ident.new("rt")], true),
-          body_mir, capture_name, nil, nil, nil)
-      ])
+      return MIR::ForStmt.new(
+        MIR::IterRange.new(start_mir, end_expr),
+        capture_name, body_mir, nil)
     end
 
     nil  # Fall through to string path
@@ -1502,10 +1494,10 @@ class PipelineHost
         unless inner_name
           body_text = loop_body.map { |s| @emitter.emit(s).to_s }.join
           unless body_text.include?(inner_zig)
-            suppress_iz = MIR::InlineZig.new("_ = #{inner_zig};", "suppress_unused_inner_capture")
-            suppress_iz.stdlib_def = { allocates: false, borrows: :all }
-            suppress = suppress_iz
-            loop_body = [suppress, *loop_body]
+            # Structural unused-capture suppression: MIR::Suppress emits
+            # `_ = &name;` which silences Zig's unused-capture error and
+            # is a no-op the VM skips entirely.
+            loop_body = [MIR::Suppress.new(inner_zig), *loop_body]
           end
         end
 
@@ -1878,8 +1870,9 @@ class PipelineHost
         MIR::BinOp.new("<", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
         [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
          MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true"))], nil)
-      post_loop_stmts << MIR::ExprStmt.new(MIR::InlineZig.new(
-        "if (!__fold_found) @panic(\"MIN applied to empty sequence\")", "min_check"), nil)
+      post_loop_stmts << MIR::IfStmt.new(
+        MIR::UnaryOp.new("!", MIR::Ident.new("__fold_found")),
+        [MIR::Panic.new("MIN applied to empty sequence")], nil)
       result_expr = MIR::Ident.new("__fold_acc")
 
     when AST::MaxOp
@@ -1894,8 +1887,9 @@ class PipelineHost
         MIR::BinOp.new(">", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
         [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
          MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true"))], nil)
-      post_loop_stmts << MIR::ExprStmt.new(MIR::InlineZig.new(
-        "if (!__fold_found) @panic(\"MAX applied to empty sequence\")", "max_check"), nil)
+      post_loop_stmts << MIR::IfStmt.new(
+        MIR::UnaryOp.new("!", MIR::Ident.new("__fold_found")),
+        [MIR::Panic.new("MAX applied to empty sequence")], nil)
       result_expr = MIR::Ident.new("__fold_acc")
 
     when AST::AnyOp
