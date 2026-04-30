@@ -824,6 +824,37 @@ class BcEmitter
     name = node.name.to_s
     ann_type = annotation_to_vm_type(node.annotation)
 
+    # Auto-lock alias setup. The lowering for `c.value = X` on @locked /
+    # @writeLocked emits:
+    #   Let __c_guard = c.acquire()    (or .write() / .shared())
+    #   defer __c_guard.release()
+    #   Let __c_inner = __c_guard.get()
+    #   Set(__c_inner.value, ...)
+    # In the Zig backend the guard is a pointer-bearing struct; in the VM,
+    # the guard and inner are aliases of the source so writes through inner
+    # propagate. Detect both Lets and call alias_to_source so the
+    # surrounding ScopeBlock writeback machinery commits inner.value back
+    # to c.
+    if node.init.is_a?(MIR::MethodCall)
+      mc = node.init
+      mname = mc.method.to_s
+      recv_name = mc.receiver.is_a?(MIR::Ident) ? mc.receiver.name.to_s : nil
+      if recv_name && %w[acquire write shared].include?(mname) && mc.args.empty? && has_slot?(recv_name)
+        @with_aliases ||= {}
+        alias_to_source(name, recv_name)
+        push_type(:void)
+        return
+      end
+      if mname == "get" && mc.args.empty? && recv_name && @with_aliases&.key?(recv_name)
+        # __c_inner = __c_guard.get() — chain through to the original source.
+        src = @with_aliases[recv_name]
+        @with_aliases ||= {}
+        alias_to_source(name, src)
+        push_type(:void)
+        return
+      end
+    end
+
     if node.init
       # HashMap/Set StructInit (non-empty literal lowered to StructInit with alloc field)
       # — replace with MAP_NEW since the VM uses MapRef, not a Zig struct.
@@ -3344,6 +3375,24 @@ class BcEmitter
     if method == "checkYield" && node.receiver.is_a?(MIR::Ident) && node.receiver.name.to_s == "rt"
       push_type(:any)
       emit_op(LOAD_CONST, add_const(nil))
+      return
+    end
+
+    # @locked / @writeLocked auto-lock acquire/release: in the Zig backend,
+    # `c.acquire()` returns a guard with `.get()` -> *Counter. The VM has no
+    # mutex semantics (single fiber), so acquire/write are identity on the
+    # receiver value, and release is a no-op. The lowered IR uses these for
+    # WITH EXCLUSIVE / WITH SHARED / auto-lock dispatch.
+    if (method == "acquire" || method == "write" || method == "shared") && node.args.empty?
+      compile_expr(node.receiver)
+      return
+    end
+    if method == "release" && node.args.empty?
+      # Stmt-position release is a no-op; push Nil so the surrounding
+      # expr-stmt POP balances cleanly.
+      compile_expr(node.receiver); pop_type
+      emit_op(POP)
+      emit_op(LOAD_CONST, add_const(nil)); push_type(:any)
       return
     end
 
