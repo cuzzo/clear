@@ -643,6 +643,23 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
         RETURN Value.Nil;
     END
+    IF id == 111 THEN
+        -- pool-live-count(lst): returns count of non-Nil entries. The VM
+        -- models @pool as a list with removed slots set to Nil; the live
+        -- count is the count of non-Nil entries.
+        MATCH evaled[1] START
+            Value.List AS poolLst ->
+                MUTABLE pcount: Int64 = 0;
+                FOR pk IN (0_i64 ..< poolLst.length()) DO
+                    MATCH poolLst[pk] START
+                        Value.Nil -> ,
+                        DEFAULT -> pcount += 1;
+                    END
+                END
+                RETURN Value{ Int64Val: pcount };,
+            DEFAULT -> RETURN Value{ Int64Val: 0 };
+        END
+    END
     IF id == 110 THEN
         -- slice-from(lst, start): lst[start..]. Same shape support as slice.
         MATCH evaled[1] START

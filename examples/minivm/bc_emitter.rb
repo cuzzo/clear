@@ -84,6 +84,7 @@ class BcEmitter
     "lowercase" => 100, "uppercase" => 101, "replace" => 102, "parseFloat" => 103,
     "countOccurrences" => 104, "fileSize" => 105, "threadCount" => 106,
     "list-pop" => 107, "iota" => 108, "slice" => 109, "slice-from" => 110,
+    "pool-live-count" => 111,
     "intMin" => 111,
     "string-append" => 26, "string-length" => 27, "substring" => 28,
     "string-ref" => 29, "number->string" => 30, "string->number" => 31,
@@ -2360,11 +2361,10 @@ class BcEmitter
       if arg_hint == :set || arg_hint == :map
         emit_op(MAP_LENGTH)
       elsif tag == :pool_method
-        # Pool length = number of non-Nil entries in the backing list.
-        # Use a runtime helper that walks the list and counts non-Nil.
-        emit_op(NATIVE_CALL, NATIVES["count"], 1)  # total slots
-        # TODO: subtract removed (Nil) entries. For now, return raw count
-        # which matches insert-only workloads.
+        # Pool length = count of non-Nil entries (live items). pool.remove
+        # sets the slot to Nil; pool-live-count walks the list and excludes
+        # those.
+        emit_op(NATIVE_CALL, NATIVES["pool-live-count"], 1)
       else
         emit_op(NATIVE_CALL, NATIVES["count"], 1)
       end

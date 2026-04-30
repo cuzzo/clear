@@ -418,7 +418,7 @@ class PipelineHost
       [build_mat_sharded_pool(lhs_type), "pipe_items"]
     elsif lhs_type&.pool? && lhs_type&.soa? && !bc_mode
       [build_mat_soa_pool(lhs_type), "pipe_items"]
-    elsif lhs_type&.pool?
+    elsif lhs_type&.pool? && !bc_mode
       [build_mat_pool(lhs_type), "pipe_items"]
     elsif (lhs_type&.list_collection? || lhs_type&.fixed_soa?) && lhs_type&.soa? && !bc_mode
       [build_mat_soa_list(lhs_type), "pipe_items"]
