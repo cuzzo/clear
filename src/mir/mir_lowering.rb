@@ -1426,8 +1426,12 @@ class MIRLowering
     mir_args = if node.is_a?(AST::MethodCall)
       obj_mir = lower(node.object)
       # Auto-deref Arc/Rc-wrapped receivers: obj.ctrl.data.*
+      # Zig only -- BC has no Arc-wrapping. Without the gate, methods on
+      # shared collections (e.g. map.contains?, map.count) get rewritten
+      # to operate on `Deref(map.ctrl.data)`, which the bc_emitter doesn't
+      # resolve to the underlying MapRef.
       obj_ti = node.object.type_info
-      if obj_ti&.shared? || obj_ti&.multiowned?
+      if (obj_ti&.shared? || obj_ti&.multiowned?) && @target != :bc
         obj_mir = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(obj_mir, "ctrl"), "data"))
       elsif obj_ti&.frozen?
         # *const T auto-derefs for method calls in Zig — no _root deref needed
@@ -3815,7 +3819,12 @@ class MIRLowering
     ti = node.target.type_info
 
     # Auto-deref Arc/Rc-wrapped maps: target.ctrl.data.*
-    if ti&.map? && (ti&.shared? || ti&.multiowned?)
+    # Zig only -- BC has no Arc-wrapping (values are uniformly value-typed
+    # and shared maps live as a single MapRef cell). Without this gate the
+    # PUT path (which short-circuits the Arc deref for BC) and the GET
+    # path use different identifiers; PUTs land in `map` while GETs read
+    # from `Deref(map.ctrl.data)` and miss every entry.
+    if ti&.map? && (ti&.shared? || ti&.multiowned?) && @target != :bc
       target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
     end
 
@@ -3827,10 +3836,12 @@ class MIRLowering
       # BC dispatch: when @target == :bc and the INDEX_OPS entry opts in
       # via bc_op, emit a structural MIR::InlineBc carrying the unified
       # op name. Both numeric and string maps converge on the same VM
-      # opcode (the runner stringifies numeric keys via keyAsStr).
+      # opcode (the runner stringifies numeric keys via keyAsStr). Sharded
+      # / striped HashMaps fall through here too -- the VM has no shard
+      # routing; treat them as a single MapRef. Stays gated out of the
+      # shard-direct body case where {shard_idx} substitution is needed.
       if @target == :bc && op&.dig(:bc_op) &&
-         !(@shard_context && target_var == @shard_context[:map]) &&
-         !(map_ft.sharded? || map_ft.striped?)
+         !(@shard_context && target_var == @shard_context[:map])
         return MIR::InlineBc.new(op[:bc_op], [target, index], op)
       end
       if @shard_context && target_var == @shard_context[:map]
@@ -4568,12 +4579,13 @@ class MIRLowering
     end
 
     # BC dispatch: structural MIR::InlineBc when the INDEX_OPS :set entry
-    # opts in via bc_op. Skip in shard / striped contexts -- those need
-    # the Zig-only sharded dispatch path.
+    # opts in via bc_op. Sharded / striped HashMaps go through here too --
+    # the VM has no shard routing; treat as a single MapRef. Stays gated
+    # out of the shard-direct body case where {shard_idx} substitution is
+    # needed.
     target_var_for_bc = target_node.is_a?(AST::Identifier) ? target_node.name : nil
     if @target == :bc && op[:bc_op] &&
-       !(@shard_context && target_var_for_bc == @shard_context[:map]) &&
-       !(receiver_type&.sharded? || receiver_type&.striped?)
+       !(@shard_context && target_var_for_bc == @shard_context[:map])
       return MIR::ExprStmt.new(
         MIR::InlineBc.new(op[:bc_op], [target, idx, val], op), false)
     end

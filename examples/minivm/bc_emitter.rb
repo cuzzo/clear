@@ -3643,10 +3643,15 @@ class BcEmitter
     end
 
     # RC constructors: in the VM all values are uniformly boxed; Rc/Arc wrap
-    # is transparent. Forward the payload (the last positional arg is the value).
+    # is transparent. Forward the payload (the last positional arg is the
+    # value) AND propagate its type so the destination slot keeps the
+    # inner shape (e.g. :map for an Arc-wrapped HashMap). Without the
+    # forward, `MUTABLE m: HashMap<...>@shared = {}` ends up :any-typed
+    # and `m[k] = v` falls into the list-set! chain instead of MAP_PUT.
     if callee == "CheatLib.rcCreate" || callee == "CheatLib.arcCreate"
-      compile_expr_to_value(args.last); pop_type
-      push_type(:any)
+      compile_expr_to_value(args.last)
+      inner_type = pop_type
+      push_type(inner_type)
       return
     end
 

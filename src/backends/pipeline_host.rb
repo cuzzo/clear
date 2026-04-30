@@ -1256,8 +1256,14 @@ class PipelineHost
   def lower_each(list_node, each_op, smooth_node)
     lhs_type = list_node.type_info
 
-    # Sharded pools/lists need fibers -- stay on string path
-    return nil if lhs_type&.sharded?
+    # Sharded pools/lists need fibers on the Zig backend (one per shard) --
+    # stay on the string path there. For BC we can short-circuit sharded
+    # POOLs (the underlying pool is a single Value.List and methods already
+    # work via POOL_METHODS), but sharded @list uses a different shape
+    # (multiple shard-lists fed by append) that the regular pool/list
+    # iteration below doesn't know about. Keep sharded lists on the
+    # legacy path (UNIMPL) until they get structural support.
+    return nil if lhs_type&.sharded? && !(bc_target? && lhs_type&.pool?)
 
     # In BC mode the VM has no SoA layout, so the field-slice optimization
     # has no benefit. Skip the SoaFieldAccess emission and let the regular
@@ -2247,6 +2253,13 @@ class PipelineHost
   # role on the Zig path.
   def lower_concurrent_bc(lhs, conc_op, smooth_node)
     inner = conc_op.op
+
+    # SHARD + CONCURRENT EACH: annotator sets conc_op.shard_context.
+    # Sequential VM simulation is just `for i in range { key = key_expr; body }`.
+    if conc_op.respond_to?(:shard_context) && conc_op.shard_context
+      return lower_bc_shard_concurrent_each(lhs, conc_op, smooth_node)
+    end
+
     real_lhs = lhs
     bind_name = nil
     if lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
@@ -2295,6 +2308,41 @@ class PipelineHost
       return [:raise, expr.left] if expr.right.is_a?(AST::OrRaise)
     end
     [:default, expr]
+  end
+
+  # SHARD + CONCURRENT EACH on BC: sequential simulation. The shard
+  # routing is meaningless without a real fiber scheduler; just iterate
+  # the range, compute the key per iteration with `_` bound to the loop
+  # index, and run the EACH body with `_` bound to the key. The body's
+  # `map[_] = ...` lowers to MIR::Set + MIR::IndexGet → MAP_PUT through
+  # the existing structural path.
+  def lower_bc_shard_concurrent_each(lhs, conc_op, smooth_node)
+    ctx = conc_op.shard_context
+    each_op = conc_op.op
+    range_node = ctx[:auto_detected] ? lhs : lhs.left
+    @bc_shard_counter ||= 0
+    id = (@bc_shard_counter += 1)
+    idx_var = "__bc_sh_i_#{id}"
+    key_var = "__bc_sh_key_#{id}"
+
+    start_mir = visit_mir(range_node.start)
+    end_mir   = visit_mir(range_node.finish)
+    end_expr  = range_node.inclusive ?
+      MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
+
+    key_mir = with_pipeline_context(placeholder: idx_var) {
+      visit_mir(ctx[:key_expr])
+    }
+    body_mir = visit_pipeline_body_mir(each_op.body, placeholder: key_var)
+
+    MIR::ForStmt.new(
+      MIR::IterRange.new(start_mir, end_expr),
+      idx_var,
+      [
+        MIR::Let.new(key_var, key_mir, false, nil, nil),
+        *body_mir
+      ],
+      nil)
   end
 
   # CONCURRENT SELECT ... OR PRUNE: build a structural for-loop that runs
