@@ -804,11 +804,12 @@ class BcEmitter
         # body that is itself inside a BlockExpr. Push the value to vstack
         # and JUMP to the block-expr exit; compile_block_expr patches.
         compile_expr(mir_node.value)
-        # Record the break value's typed-stack residency so the enclosing
-        # compile_block_expr knows where the value lives at the join. The
-        # statement-position `push_type(:void)` below is for the local
-        # control-flow sense (this statement doesn't yield to its enclosing
-        # statement list); it's separate from the block-expression result.
+        # Force every break path to land on the value stack so the join
+        # has uniform residency. Without this, an IF-expr with one
+        # f64-typed branch (LOAD_CONST_F64 → fstack) and another :any
+        # branch (vstack DIV) leaves the consumer trying to STORE_SLOT
+        # an empty vstack on the typed-stack path (222 avg_empty crash).
+        ensure_value_stack
         @block_break_types << pop_type if @block_break_types
         emit_op(JUMP)
         @block_break_patches << @ops.length
@@ -4480,16 +4481,25 @@ class BcEmitter
     cond_type = pop_type
     emit_op(cond_type == :bool ? JUMP_IF_FALSE_I : JUMP_IF_FALSE)
     patch_false = @ops.length; emit_op(0)
-    compile_expr(node.then_val)
-    then_type = pop_type   # only one branch runs at runtime — exactly
+    # Always coerce both branches to vstack at the join. With mixed
+    # then/else residency (e.g. then=Cast(Lit(0),f64,:as) → fstack vs
+    # else=BinOp(/,...) → vstack from compile_binop's want_typed=false
+    # path), the consumer's STORE_SLOT pops the wrong stack and reads
+    # uninit memory (222 avg_empty crash). Coerce typed→vstack on both
+    # branches so the join is uniformly :any.
+    coerce_to_vstack = ->(t) {
+      case t
+      when :i64  then emit_op(I_TO_VAL)
+      when :f64  then emit_op(F_TO_VAL)
+      when :bool then emit_op(BOOL_TO_VAL)
+      end
+    }
+    compile_expr(node.then_val); coerce_to_vstack.call(pop_type)
     emit_op(JUMP); patch_end = @ops.length; emit_op(0)
     @ops[patch_false] = @ops.length
-    compile_expr(node.else_val)
-    else_type = pop_type   # one type-stack slot survives, pushed below
+    compile_expr(node.else_val); coerce_to_vstack.call(pop_type)
     @ops[patch_end] = @ops.length
-    # Result type: prefer agreement; otherwise fall back to :any so callers
-    # don't assume a specific typed-stack residency.
-    push_type(then_type == else_type ? then_type : :any)
+    push_type(:any)
   end
 
   # MIR::UnionVariantGet: union payload access, routed to native cdr.
