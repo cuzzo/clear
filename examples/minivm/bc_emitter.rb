@@ -404,11 +404,13 @@ class BcEmitter
       slot_types: @slot_types, mutables: @mutables,
       next_slot: @next_slot, next_islot: @next_islot, next_fslot: @next_fslot,
       type_stack: @type_stack,
+      boxed_slots: @boxed_slots, stream_slots: @stream_slots,
     }
     @slots = {}; @islots = {}; @fslots = {}
     @slot_types = {}; @mutables = Set.new
     @next_slot = 0; @next_islot = 0; @next_fslot = 0
     @type_stack = []
+    @boxed_slots = Set.new; @stream_slots = Set.new
     @in_helper_fn = true
     @helper_fn_returned = false
 
@@ -435,11 +437,21 @@ class BcEmitter
     # `map[key] = val` inside a `MUTABLE map: HashMap<...>` callee would
     # fall through to list-set! (default :any path) and corrupt the map.
     ast_param_types = ast_param_vm_types(ast_fn)
+    requires_clauses = ast_fn.respond_to?(:requires) ? (ast_fn.requires || {}) : {}
     (mir_fn.params || []).each do |p|
       pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
       next if pname == "rt"
       base_name = pname.start_with?("_m_") ? pname[3..] : pname
       alloc_slot(pname, ast_param_types[base_name] || :any)
+      # REQUIRES p: LOCKABLE — caller passed a Boxed cell-id; mark the
+      # param as boxed so reads/writes through this slot deref via
+      # BOX_LOAD / BOX_STORE just like a local @local / @shared:locked
+      # binding. BOX_LOAD is a passthrough on non-Boxed values, so this
+      # is safe even when callers pass plain values.
+      param_requires = requires_clauses[base_name.to_sym] || requires_clauses[base_name]
+      if param_requires.is_a?(Set) && param_requires.include?(:LOCKABLE)
+        @boxed_slots << pname
+      end
     end
 
     compile_main(mir_fn.body, ast_fn.body)
@@ -453,6 +465,7 @@ class BcEmitter
     @slot_types = saved[:slot_types]; @mutables = saved[:mutables]
     @next_slot = saved[:next_slot]; @next_islot = saved[:next_islot]
     @next_fslot = saved[:next_fslot]; @type_stack = saved[:type_stack]
+    @boxed_slots = saved[:boxed_slots]; @stream_slots = saved[:stream_slots]
     @in_helper_fn = false
     @helper_fn_returned = false
   end
