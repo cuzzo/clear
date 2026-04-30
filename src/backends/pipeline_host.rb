@@ -2187,6 +2187,22 @@ class PipelineHost
   # atomics, spawn -- too complex for MIR nodes), but with stdlib_def so the
   # checker knows the allocation effects.
   def lower_concurrent(_lhs, conc_op, smooth_node)
+    # BC backend has no fiber scheduler -- CONCURRENT is sequential
+    # simulation. Strip the CONCURRENT wrapper and redispatch the inner
+    # op through the regular pipeline lowering. Result-order-deterministic
+    # tests pass identically; tests asserting via order-invariant aggregates
+    # (sum/count/min/max) don't care. Stream sources still fall through to
+    # the RawZig path below — the regular lower_select / lower_where don't
+    # handle stream materialization, and the BC stream-pipeline story is
+    # its own piece of work (see UNIMPL: 240/241/242/243).
+    if @lowering.instance_variable_get(:@target) == :bc
+      lhs_ti = smooth_node.left.type_info
+      stream_lhs = lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.bounded_stream? ||
+                              lhs_ti.open_stream? || lhs_ti.inf_stream? ||
+                              smooth_node.left.is_a?(AST::RangeLit))
+      return lower_concurrent_bc(smooth_node.left, conc_op, smooth_node) unless stream_lhs
+    end
+
     if smooth_node.left.type_info&.bounded_stream?
       return lower_concurrent_bounded_stream(smooth_node.left, conc_op)
     end
@@ -2215,6 +2231,126 @@ class PipelineHost
       "concurrent_#{inner.class.name.split('::').last.downcase}",
       { consumes: [], produces: [], borrows: [] },
       stdlib_def)
+  end
+
+  # BC sequential simulation of CONCURRENT. Strips the CONCURRENT wrapper
+  # (workers/parallel/capacity options become no-ops) and redispatches the
+  # inner op as a regular pipeline. OR PRUNE inside the inner expression
+  # gets explicit isError checking because the standard SELECT auto-tries
+  # failable expressions, which would propagate errors instead of skipping.
+  #
+  # When `lhs` is `BIND_VAR(source, @u)`, register @u as an alias for the
+  # pipeline iterator "it" and use the unwrapped source as the actual
+  # data source. This makes `users AS @u s> CONCURRENT SELECT @u.field`
+  # work — substitute_placeholders rewrites @u → it inside the inner
+  # expression at MIR-build time. Mirrors @concurrent_outer_binding's
+  # role on the Zig path.
+  def lower_concurrent_bc(lhs, conc_op, smooth_node)
+    inner = conc_op.op
+    real_lhs = lhs
+    bind_name = nil
+    if lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
+      bind_name = lhs.right.name
+      real_lhs = lhs.left
+    end
+
+    work = lambda do
+      case inner
+      when AST::SelectOp
+        policy, inner_expr = extract_concurrent_error_policy_for_bc(inner.expression)
+        next lower_bc_concurrent_select_prune(real_lhs, inner_expr, smooth_node) if policy == :prune
+        lower_select(real_lhs, inner_expr, smooth_node)
+
+      when AST::WhereOp
+        policy, inner_expr = extract_concurrent_error_policy_for_bc(inner.expression)
+        next lower_bc_concurrent_where_prune(real_lhs, inner_expr, smooth_node) if policy == :prune
+        lower_where(real_lhs, inner_expr, smooth_node)
+
+      when AST::EachOp
+        lower_each(real_lhs, inner, smooth_node)
+
+      when AST::SumOp     then lower_sum(real_lhs, inner, smooth_node)
+      when AST::CountOp   then lower_count(real_lhs, inner, smooth_node)
+      when AST::MinOp     then lower_min(real_lhs, inner, smooth_node)
+      when AST::MaxOp     then lower_max(real_lhs, inner, smooth_node)
+      when AST::AverageOp then lower_average(real_lhs, inner, smooth_node)
+      when AST::AnyOp     then lower_any(real_lhs, inner, smooth_node)
+      when AST::AllOp     then lower_all(real_lhs, inner, smooth_node)
+      when AST::FindOp    then lower_find(real_lhs, inner, smooth_node)
+      else
+        raise "lower_concurrent_bc: unsupported inner op #{inner.class}"
+      end
+    end
+
+    bind_name ? with_named_binding(bind_name, "it", &work) : work.call
+  end
+
+  # Mirror of pipeline_generator.rb's extract_concurrent_error_policy --
+  # peels OR PRUNE / OR RAISE from the inner pipeline expression. We
+  # duplicate it here (instead of borrowing from the generator) so the BC
+  # path is self-contained.
+  def extract_concurrent_error_policy_for_bc(expr)
+    if expr.is_a?(AST::BinaryOp) && expr.op == :OR_RESCUE
+      return [:prune, expr.left] if expr.right.is_a?(AST::OrPrune)
+      return [:raise, expr.left] if expr.right.is_a?(AST::OrRaise)
+    end
+    [:default, expr]
+  end
+
+  # CONCURRENT SELECT ... OR PRUNE: build a structural for-loop that runs
+  # the failable expression, checks for an error sentinel, and only appends
+  # on success. Result list element type is the SUCCESS type of the
+  # failable expression (smooth_node.full_type).
+  def lower_bc_concurrent_select_prune(lhs, inner_expr, smooth_node)
+    res_zig = transpile_type(smooth_node.full_type.element_type.resolved.to_s)
+    alloc = pipeline_alloc(smooth_node)
+    expr_mir = visit_pipeline_expr_mir(lhs, inner_expr)
+
+    lower_pipeline_block(lhs) do |items, label|
+      [
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("__cv", expr_mir, false, nil, nil),
+          MIR::IfStmt.new(MIR::UnaryOp.new("!",
+            MIR::InlineBc.new(:is_error, [MIR::Ident.new("__cv")], { bc: true })), [
+            MIR::ExprStmt.new(MIR::MethodCall.new(
+              MIR::Ident.new("res_list"), "append",
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("__cv")], true), nil)
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ]
+    end
+  end
+
+  # CONCURRENT WHERE ... OR PRUNE: predicate evaluation that raises is
+  # treated as "false" (item skipped). Same loop shape as lower_where but
+  # the truthiness check is gated by !isError.
+  def lower_bc_concurrent_where_prune(lhs, inner_expr, smooth_node)
+    elem_type = lhs.full_type.element_type.resolved.to_s
+    elem_zig = transpile_type(elem_type)
+    alloc = pipeline_alloc(smooth_node)
+    pred_mir = visit_pipeline_expr_mir(lhs, inner_expr)
+
+    lower_pipeline_block(lhs) do |items, label|
+      [
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new(items), "it", [
+          MIR::Let.new("__cv", pred_mir, false, nil, nil),
+          MIR::IfStmt.new(MIR::BinOp.new("and",
+            MIR::UnaryOp.new("!",
+              MIR::InlineBc.new(:is_error, [MIR::Ident.new("__cv")], { bc: true })),
+            MIR::Ident.new("__cv")), [
+            MIR::ExprStmt.new(MIR::MethodCall.new(
+              MIR::Ident.new("res_list"), "append",
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("it")], true), nil)
+          ], nil)
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ]
+    end
   end
 
   def lower_concurrent_bounded_stream(lhs, conc_op)

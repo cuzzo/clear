@@ -3029,6 +3029,14 @@ class BcEmitter
       compile_expr_to_value(node.args[0]); pop_type
       emit_op(SPLIT_STREAM_NEW)
       push_type(:split_stream); return
+    when :is_error
+      # Pop a Value, push :bool — TRUE if Value.Error, FALSE otherwise.
+      # Used by CONCURRENT ... OR PRUNE lowering in BC mode to gate
+      # append-on-success without triggering the auto-try error
+      # propagation that lower_select normally emits for failable expressions.
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(IS_ERR)
+      push_type(:bool); return
     when :max, :min
       compile_expr_to_value(node.args[0]); pop_type
       compile_expr_to_value(node.args[1]); pop_type
