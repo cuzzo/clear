@@ -75,6 +75,7 @@ class CompilerFrontend
         fs.needs_rt = stmt.needs_rt
         fs.can_fail = stmt.can_fail
         fs.effects = stmt.effects
+        fs.requires = stmt.requires if stmt.respond_to?(:requires)
         fn_sigs[stmt.name] = fs
       end
     end

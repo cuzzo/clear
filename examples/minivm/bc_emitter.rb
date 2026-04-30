@@ -3460,7 +3460,7 @@ class BcEmitter
     helper_callee = callee
     helper_callee = helper_callee.split(".").last if !@fn_start_ips.key?(helper_callee) && helper_callee.include?(".")
     if @fn_start_ips.key?(helper_callee)
-      args.each { |a| compile_expr_to_value(a) }
+      compile_helper_args(helper_callee, args)
       emit_op(BC_CALL, @fn_start_ips[helper_callee], args.length)
       # Auto-try propagation: when the MIR call is marked try_wrap (the
       # callee can_fail), and we're inside a helper, check IS_ERR and
@@ -5405,6 +5405,40 @@ class BcEmitter
 
   def has_slot?(name)
     @islots.key?(name) || @fslots.key?(name) || @slots.key?(name)
+  end
+
+  # Compile call-site args to a helper FN. Mirrors `args.each { |a|
+  # compile_expr_to_value(a) }` but suppresses BOX_LOAD for args that
+  # land in a `REQUIRES p: LOCKABLE` param. That param-side handling
+  # in compile_helper_def already marks the slot @boxed_slots, so reads
+  # through the param auto-deref. Without the call-side mirror, we'd
+  # debox the @shared:locked Boxed cell-id in the caller, then re-pass
+  # the unwrapped struct by value — mutations through the param would
+  # update a copy, not the original cell.
+  def compile_helper_args(callee_name, args)
+    sig = @result.fn_sigs&.dig(callee_name) ||
+          @result.fn_sigs&.dig(callee_name.to_sym) ||
+          @result.fn_sigs&.dig(callee_name.to_s)
+    requires = sig.respond_to?(:requires) ? (sig.requires || {}) : {}
+    sig_params = sig.respond_to?(:params) ? (sig.params || []) : []
+    real_params = sig_params.reject { |p| (p.is_a?(Hash) ? p[:name] : nil).to_s == "rt" }
+
+    args.each_with_index do |a, i|
+      lockable = false
+      if (p = real_params[i])
+        pname = (p.is_a?(Hash) ? p[:name] : nil).to_s
+        rset = requires[pname.to_sym] || requires[pname]
+        lockable = rset.is_a?(Set) && rset.include?(:LOCKABLE)
+      end
+      if lockable && a.is_a?(MIR::Ident) &&
+         @boxed_slots&.include?(a.name.to_s) && @slots[a.name.to_s]
+        emit_op(LOAD_SLOT, @slots[a.name.to_s])
+        push_type(:any)
+        ensure_value_stack
+      else
+        compile_expr_to_value(a)
+      end
+    end
   end
 
   # Does the callee's signature return an error union (`!T` or
