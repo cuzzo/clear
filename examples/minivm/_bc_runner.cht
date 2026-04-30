@@ -2929,7 +2929,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
-                                mapEnv.vars[getStr(mapPutKey)] = mapPutVal;
+                                mapEnv.vars[keyAsStr(mapPutKey)] = mapPutVal;
                             END
                         },
                     DEFAULT -> pv = Value.Nil;
@@ -2944,7 +2944,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
-                                pv = COPY (mapEnv.vars[getStr(mapGetKey)] OR Value.Nil);
+                                pv = COPY (mapEnv.vars[keyAsStr(mapGetKey)] OR Value.Nil);
                             END
                         },
                     DEFAULT -> pv = Value.Nil;
@@ -2958,7 +2958,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
-                                pv = boolVal(mapEnv.vars.contains?(getStr(mapCKey)));
+                                pv = boolVal(mapEnv.vars.contains?(keyAsStr(mapCKey)));
                             END
                         },
                     DEFAULT -> pv = Value.FalseVal;
@@ -2972,7 +2972,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
-                                mapEnv.vars.delete(getStr(mapDelKey));
+                                mapEnv.vars.delete(keyAsStr(mapDelKey));
                             END
                         },
                     DEFAULT -> pv = Value.Nil;
@@ -3258,6 +3258,24 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;
                 IF sp >= stack.length() THEN stack.append(lplPopped); ELSE stack[sp] = lplPopped; END
+                sp += 1;,
+            95 -> -- MAP_VALUES: pop map; push List of Value values.
+                sp -= 1; mapVRef = COPY stack[sp];
+                MUTABLE mapValList: Value[]@list = List[];
+                MATCH mapVRef START
+                    Value.MapRef AS mapId ->
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[mapId] AS mapEnv THEN
+                                vnames = mapEnv.vars.keys();
+                                FOR vi IN (0_i64 ..< vnames.length()) DO
+                                    mapValList.append(COPY (mapEnv.vars[vnames[vi]] OR Value.Nil));
+                                END
+                            END
+                        },
+                    DEFAULT -> pv = Value.Nil;
+                END
+                pv = Value{ List: mapValList };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             DEFAULT ->
                 running = FALSE;

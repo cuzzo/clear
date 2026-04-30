@@ -64,6 +64,9 @@ class BcEmitter
   # store the shrunk list back through the same chain-set machinery as
   # remove(idx).
   LIST_POP_LAST = 94
+  # MAP_VALUES: pop map, push List of Value (the map's values in iteration
+  # order). Used by HashMap.values() in BC mode.
+  MAP_VALUES = 95
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -2186,6 +2189,46 @@ class BcEmitter
       compile_expr_to_value(node.args[1])
       compile_expr_to_value(node.args[2])
       emit_op(NATIVE_CALL, NATIVES["list-set!"], 3); push_type(:void); return
+    when :map_get
+      # m[k] for both string_map and numeric_map. Runner's keyAsStr
+      # stringifies numeric keys so the same MAP_GET handles both.
+      compile_expr_to_value(node.args[0]); pop_type
+      compile_expr_to_value(node.args[1]); pop_type
+      emit_op(MAP_GET); push_type(:any); return
+    when :map_set
+      # m[k] = v for both string_map and numeric_map. MAP_PUT mutates the
+      # MapRef in-place; the trailing Nil is consumed by the surrounding
+      # ExprStmt's POP.
+      compile_expr_to_value(node.args[0]); pop_type
+      compile_expr_to_value(node.args[1]); pop_type
+      compile_expr_to_value(node.args[2]); pop_type
+      emit_op(MAP_PUT); push_type(:any); return
+    when :numericMapGet
+      # emit_builtin(:numericMapGet, [key_zig_ident, val_zig_ident, target, index])
+      # The first two are comptime type hints (Zig-only); skip them.
+      compile_expr_to_value(node.args[2]); pop_type
+      compile_expr_to_value(node.args[3]); pop_type
+      emit_op(MAP_GET); push_type(:any); return
+    when :put
+      # MAP_METHODS["put"] -> map.put(key, value). Same VM op for string/numeric maps.
+      compile_expr_to_value(node.args[0]); pop_type
+      compile_expr_to_value(node.args[1]); pop_type
+      compile_expr_to_value(node.args[2]); pop_type
+      emit_op(MAP_PUT); push_type(:any); return
+    when :delete
+      # MAP_METHODS["delete"] -> map.delete(key).
+      compile_expr_to_value(node.args[0]); pop_type
+      compile_expr_to_value(node.args[1]); pop_type
+      emit_op(MAP_DELETE); push_type(:any); return
+    when :keys
+      # MAP_METHODS["keys"] -> map.keys() returns String[].
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(MAP_KEYS); push_type(:any); return
+    when :values
+      # MAP_METHODS["values"] -> map.values() returns V[]. The runner walks
+      # the env vars and collects them; needs a MAP_VALUES opcode.
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(MAP_VALUES); push_type(:any); return
     when :append, :insert, :push
       # `set.insert(x)` and `list.{append,insert,push}(x)` collide on op name.
       # Dispatch on receiver shape: sets live in the env pool as MapRef and

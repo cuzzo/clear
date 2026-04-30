@@ -3765,11 +3765,20 @@ class MIRLowering
     if node.target.metatype == :hashmap
       target_var = node.target.is_a?(AST::Identifier) ? node.target.name : nil
       map_ft = Type.new(node.target.full_type)
+      kind = map_ft.numeric_map? ? :numeric_map : :string_map
+      op = INDEX_OPS.dig(kind, :get)
+      # BC dispatch: when @target == :bc and the INDEX_OPS entry opts in
+      # via bc_op, emit a structural MIR::InlineBc carrying the unified
+      # op name. Both numeric and string maps converge on the same VM
+      # opcode (the runner stringifies numeric keys via keyAsStr).
+      if @target == :bc && op&.dig(:bc_op) &&
+         !(@shard_context && target_var == @shard_context[:map]) &&
+         !(map_ft.sharded? || map_ft.striped?)
+        return MIR::InlineBc.new(op[:bc_op], [target, index], op)
+      end
       if @shard_context && target_var == @shard_context[:map]
         # Inside SHARD body: use getDirect (no routing, no sendAndWait)
         target_zig = emit_expr(target)
-        kind = map_ft.numeric_map? ? :numeric_map : :string_map
-        op = INDEX_OPS.dig(kind, :get)
         pattern = op[:shard_direct_zig].dup
         pattern = pattern.gsub("{target}", target_zig)
         pattern = pattern.gsub("{shard_idx}", @shard_context[:idx])
@@ -4490,6 +4499,17 @@ class MIRLowering
     # Fallback for unknown container types or missing registry entries
     unless op
       return MIR::ExprStmt.new(emit_builtin(:setAt, [target, idx, val]), false)
+    end
+
+    # BC dispatch: structural MIR::InlineBc when the INDEX_OPS :set entry
+    # opts in via bc_op. Skip in shard / striped contexts -- those need
+    # the Zig-only sharded dispatch path.
+    target_var_for_bc = target_node.is_a?(AST::Identifier) ? target_node.name : nil
+    if @target == :bc && op[:bc_op] &&
+       !(@shard_context && target_var_for_bc == @shard_context[:map]) &&
+       !(receiver_type&.sharded? || receiver_type&.striped?)
+      return MIR::ExprStmt.new(
+        MIR::InlineBc.new(op[:bc_op], [target, idx, val], op), false)
     end
 
     # Pick shard-direct zig when inside a SHARD pipeline body and target matches

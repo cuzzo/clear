@@ -67,6 +67,22 @@ FN getStr(v: Value) RETURNS String ->
     RETURN "";
 END
 
+-- Key conversion for HashMap operations. String keys pass through; numeric
+-- keys (Int64Val / Number) stringify so HashMap<Int64, V> and HashMap<F64, V>
+-- share the env-backed string-keyed storage. Stringification is round-trip
+-- stable for integers and is unique for finite floats, so semantics match
+-- the Zig-side numericMapGet/Put.
+FN keyAsStr(v: Value) RETURNS String ->
+    MATCH v START
+        Value.Str AS s         -> RETURN "" + s;,
+        Value.Int64Val AS i    -> RETURN i.toString();,
+        Value.Number AS n      -> RETURN n.toString();,
+        Value.Symbol AS s      -> RETURN "" + s;,
+        DEFAULT                -> RETURN "";
+    END
+    RETURN "";
+END
+
 FN getNativeId(v: Value) RETURNS Int64 ->
     MATCH v START Value.NativeFn AS id -> RETURN id;, DEFAULT -> RETURN 0; END
     RETURN 0;

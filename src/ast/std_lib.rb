@@ -680,6 +680,7 @@ MAP_METHODS = {
   "put" => {
     arity: 2, tag: :map_method, allocates: true,
     mutates_receiver: true,
+    bc: true,
     takes_args: [1],  # value (arg 1) is TAKES
     zig: "try {0}.put({alloc}, {alloc}, {1}, {2})",
     alloc: :heap,
@@ -697,6 +698,7 @@ MAP_METHODS = {
   },
   "delete" => {
     arity: 1, tag: :map_method,
+    bc: true,
     zig: "{0}.remove({alloc}, {1})",
     alloc: :heap,
     mutates_receiver: true,
@@ -746,6 +748,7 @@ MAP_METHODS = {
   },
   "keys" => {
     arity: 0, tag: :map_method, allocates: true,
+    bc: true,
     zig: "try CheatLib.mapKeys({val_zig}, {alloc}, {0}.inner)",
     alloc: :frame,
     sharded_zig: "try {0}.keys({alloc})",
@@ -756,6 +759,7 @@ MAP_METHODS = {
   },
   "values" => {
     arity: 0, tag: :map_method, allocates: true,
+    bc: true,
     zig: "try CheatLib.mapValues({val_zig}, {alloc}, {0}.inner)",
     alloc: :frame,
     sharded_zig: "try {0}.values({alloc})",
@@ -794,6 +798,7 @@ INDEX_OPS = {
       shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})",
       return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
       container_borrow: true,
+      bc: true, bc_op: :map_get,
     },
     set: {
       zig: "try {target}.put({key_alloc}, {val_alloc}, {index}, {value})",
@@ -805,6 +810,7 @@ INDEX_OPS = {
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
       shard_direct_value_transforms: [],  # putDirect dupes key+value internally; no caller-side transforms
       shard_alloc: :heap,
+      bc: true, bc_op: :map_set,
     },
   },
   numeric_map: {
@@ -813,6 +819,7 @@ INDEX_OPS = {
       shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})",
       return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
       container_borrow: true,
+      bc: true, bc_op: :map_get,
     },
     set: {
       zig: "try CheatLib.numericMapPut({key_zig}, {val_zig}, {alloc}, &{target}, {index}, {value})",
@@ -824,6 +831,7 @@ INDEX_OPS = {
       shard_direct_zig: "try {target}.putDirect({shard_idx}, {shard_alloc}, {shard_key}, {value})",
       shard_direct_value_transforms: [],
       shard_alloc: :heap,
+      bc: true, bc_op: :map_set,
     },
   },
   array: {
@@ -940,7 +948,7 @@ BUILTIN_OPS = {
   # --- Collection indexing (fallback for non-registry paths) ---
   getAt: { zig: "CheatLib.getAt({0}, {1})", bc: true, borrows: :all },
   setAt: { zig: "CheatLib.setAt({0}, {1}, {2})", bc: true, borrows: :all },
-  numericMapGet: { zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", borrows: :all },
+  numericMapGet: { zig: "CheatLib.numericMapGet({0}, {1}, {2}, {3})", bc: true, borrows: :all },
 
   # --- Checked integer arithmetic ---
   intAdd: { zig: "CheatLib.intAdd({0}, {1})", bc: true, borrows: :all },
