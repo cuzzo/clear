@@ -42,8 +42,20 @@ RSpec.describe AST do
       expect(entry[:id]).to eq(AST::ERROR_NAME_DEADLOCK)
     end
 
-    it "user types start at id 4" do
-      expect(AST::ERROR_NAME_USER_FIRST).to eq(4)
+    it "seeds UnexpectedRecursion as System with stable id 4" do
+      entry = AST::ERROR_TYPES[:UnexpectedRecursion]
+      expect(entry[:kind]).to eq(:System)
+      expect(entry[:id]).to eq(AST::ERROR_NAME_UNEXPECTED_RECURSION)
+    end
+
+    it "seeds MaxDepthExceeded as System with stable id 5" do
+      entry = AST::ERROR_TYPES[:MaxDepthExceeded]
+      expect(entry[:kind]).to eq(:System)
+      expect(entry[:id]).to eq(AST::ERROR_NAME_MAX_DEPTH_EXCEEDED)
+    end
+
+    it "user types start at id 6 (after stdlib + UnexpectedRecursion + MaxDepthExceeded)" do
+      expect(AST::ERROR_NAME_USER_FIRST).to eq(6)
     end
   end
 
@@ -135,14 +147,14 @@ RSpec.describe AST do
       expect(entries).to include([:Deadlock, 3])
     end
 
-    it "includes user types at >=4 sorted by id" do
+    it "includes user types at >=6 sorted by id" do
       AST.register_type!(:UserA, :Input)
       AST.register_type!(:UserB, :Input)
       entries = AST.enum_entries
       ids = entries.map(&:last)
       expect(ids).to eq(ids.sort)
-      expect(entries).to include([:UserA, 4])
-      expect(entries).to include([:UserB, 5])
+      expect(entries).to include([:UserA, 6])
+      expect(entries).to include([:UserB, 7])
     end
   end
 

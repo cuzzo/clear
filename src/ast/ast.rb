@@ -429,6 +429,61 @@ module AST
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter
     attr_accessor :reentrant     # :reentrant, :non_reentrant, or nil (default: non-reentrant, no guard)
     attr_accessor :tail_call     # true if @reentrant:tailCall — compiler emits @call(.always_tail, ...)
+    attr_accessor :reentrant_token   # Token for the legacy @reentrant annotation (drives `clear fix` span)
+    attr_accessor :arrow_token       # Token for the `->` after the function header (drives REQUIRES insertion span)
+    # Phase 4f.2: { start_tok:, end_tok: } pair covering the full
+    # `EFFECTS REENTRANT[:VARIANT]` clause text. Used by `clear fix`
+    # to swap variants (e.g., `:THUNK` -> plain or `:NOT_LOGICAL`).
+    attr_accessor :effects_span
+    # Phase 4f.3: positive Int from `EFFECTS REENTRANT:MAX_DEPTH(N)`.
+    # Set on parse; the bridge validates `!T` return and the prologue
+    # codegen path emits `safety.enterDepth(@src(), N)` /
+    # `defer safety.exitDepth(@src())`.
+    attr_accessor :max_depth_n
+    # When true, the function declared `:TIGHT` (or `:TIGHT:VARIANT`)
+    # — skip the entry `rt.checkYield()` co-op-yield injection.
+    # Mirrors `TIGHT WHILE`; same opt-out, same risks (long
+    # workloads stall the scheduler). For `:MAX_DEPTH(N)` TIGHT is
+    # IMPLIED and not user-settable; the bridge force-flips it on
+    # iff `N <= YIELD_BUDGET`.
+    attr_accessor :tight_reentrance
+    # Token at the start of the return type annotation (after RETURNS,
+    # past any lifetime-prefix). Used for fixable spans that prepend
+    # `!` to the declared return type.
+    attr_accessor :return_type_token
+    # Thunk Phase 1: declared via `EFFECTS REENTRANT[:VARIANT]` after RETURNS.
+    # Values:
+    #   nil                       no declaration
+    #   :reentrant                EFFECTS REENTRANT (plain — must run on @service or @size:canSmash)
+    #   :reentrant_thunk          EFFECTS REENTRANT:THUNK (CPS state machine + trampoline; non-contagious)
+    #   :reentrant_tail_call      EFFECTS REENTRANT:TAIL_CALL (self-loop; verified by stack pass)
+    #   :reentrant_not_logical    EFFECTS REENTRANT:NOT_LOGICAL (runtime StackGuard;
+    #                                                            requires `!T` return type)
+    #   :reentrant_max_depth      EFFECTS REENTRANT:MAX_DEPTH(N) (runtime depth counter;
+    #                                                             requires `!T` return type;
+    #                                                             max_depth_n stamped on FunctionDef)
+    # The annotator bridges this with the legacy `@reentrant`/`tail_call` attrs into a
+    # canonical reentrance_kind via src/annotator-helpers/reentrance.rb (Phase 1.3).
+    attr_accessor :effects_decl
+    # Thunk Phase 1.3: canonical, post-bridge reentrance kind. Read THIS, not
+    # `effects_decl` or `reentrant` directly. Same value space as effects_decl;
+    # the bridge unifies legacy and new declarations into one field.
+    attr_accessor :reentrance_kind
+    # Thunk Phase 4c: when the splitter recognizes a simple-recurrence
+    # shape on a `:reentrant_thunk` function, the annotator stamps the
+    # Plan here and lifts the Phase 4b "non-tail" error. Phase 4d's
+    # MIR lowering then synthesizes the trampoline body from this.
+    attr_accessor :thunk_plan
+    # Thunk Phase 4f.1: when every member of a `:reentrant_thunk` cycle
+    # matches the tail-position-mutual shape, the annotator stamps a
+    # MutualThunkPlan on each member naming the cycle and the per-
+    # member tail target. MIR lowering synthesizes a tagged-union
+    # trampoline body from it (one trampoline per entry fn; same union
+    # shape across cycle members).
+    attr_accessor :mutual_thunk_plan
+    # Thunk Phase 1.2: `REQUIRES <name>: NON_REENTRANT` clauses constrain function-typed
+    # parameters. Hash mapping param name (String) to constraint symbol (e.g. :non_reentrant).
+    attr_accessor :requires_clauses
     attr_accessor :needs_rt      # computed by compute_needs_rt! post-pass; nil = not yet computed
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
@@ -483,6 +538,12 @@ module AST
     def lazy_fields = (op == :OR_RESCUE ? [:right] : [])
   end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
+  # Thunk Phase 4.1 / 4.2: parser-only placeholder for `@thunk(N) f(args)`
+  # and `@maxDepth(N) f(args)` call-site overrides. `kind` is :thunk or
+  # :maxDepth. The annotator emits a "not yet implemented" diagnostic
+  # for both -- runtime semantics defer to v0.3 (per-call-site
+  # monomorphization of the callee).
+  CallSiteOverride = Struct.new(:token, :kind, :n, :inner) { include Locatable }
   Identifier   = Struct.new(:token, :name) do
     include Locatable
     attr_accessor :fn_ref           # true when the identifier refers to a named function used as a value
@@ -806,6 +867,10 @@ module AST
     attr_accessor :spawn_form
     attr_accessor :fsm_ineligible_reason
     attr_accessor :fsm_suspend_points
+    # Phase 4g: tokens that drive `clear fix` for stack-tier sigil
+    # rewrites. open_brace_token = `{` (insert @service -> after);
+    # prefix_token = the user's existing tier sigil (replace).
+    attr_accessor :open_brace_token, :prefix_token
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.

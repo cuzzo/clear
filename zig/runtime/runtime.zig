@@ -75,13 +75,17 @@ pub const ErrorKind = enum(u8) {
 //   1  — LockTimeout
 //   2  — LockCycle
 //   3  — Deadlock
-//   4+ — user types, assigned on first RAISE / OR EXIT use
+//   4  — UnexpectedRecursion (raised by safety.StackGuard.enter)
+//   5  — MaxDepthExceeded    (raised by safety.enterDepth)
+//   6+ — user types, assigned on first RAISE / OR EXIT use
 // Runtime code stores / compares raw u32; generated user code uses
 // `@intFromEnum(ErrorName.Foo)` when calling setError / matchesName.
 pub const ErrorName_None: u32 = 0;
 pub const ErrorName_LockTimeout: u32 = 1;
 pub const ErrorName_LockCycle: u32 = 2;
 pub const ErrorName_Deadlock: u32 = 3;
+pub const ErrorName_UnexpectedRecursion: u32 = 4;
+pub const ErrorName_MaxDepthExceeded: u32 = 5;
 
 pub const ErrorContext = struct {
     kind: ErrorKind = .Unknown,
@@ -128,6 +132,8 @@ pub fn zigErrorToKind(err: anyerror) ErrorKind {
     if (std.mem.eql(u8, name, "DiskQuota")) return .System;
     if (std.mem.eql(u8, name, "NoSpaceLeft")) return .System;
     if (std.mem.eql(u8, name, "Deadlock")) return .System;
+    if (std.mem.eql(u8, name, "UnexpectedRecursion")) return .System;
+    if (std.mem.eql(u8, name, "MaxDepthExceeded")) return .System;
     // Transient: temporary, retryable. Covers lock acquisition timeouts,
     // AB/BA lock cycles (one party backing off resolves them), and network
     // transients.
@@ -164,9 +170,11 @@ pub fn zigErrorToKind(err: anyerror) ErrorKind {
 /// stdlib ids and the per-program generated ErrorName enum.
 pub fn zigErrorToName(err: anyerror) u32 {
     const name = @errorName(err);
-    if (std.mem.eql(u8, name, "LockTimeout")) return ErrorName_LockTimeout;
-    if (std.mem.eql(u8, name, "LockCycle"))   return ErrorName_LockCycle;
-    if (std.mem.eql(u8, name, "Deadlock"))    return ErrorName_Deadlock;
+    if (std.mem.eql(u8, name, "LockTimeout"))         return ErrorName_LockTimeout;
+    if (std.mem.eql(u8, name, "LockCycle"))           return ErrorName_LockCycle;
+    if (std.mem.eql(u8, name, "Deadlock"))            return ErrorName_Deadlock;
+    if (std.mem.eql(u8, name, "UnexpectedRecursion")) return ErrorName_UnexpectedRecursion;
+    if (std.mem.eql(u8, name, "MaxDepthExceeded"))    return ErrorName_MaxDepthExceeded;
     return ErrorName_None;
 }
 

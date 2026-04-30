@@ -1,0 +1,29 @@
+-- @leak_skip
+-- Phase 5b: tail-recursive sum under :TAIL_CALL.
+--
+-- Every self-call is in tail position; the compiler verifies
+-- this and lowers to `@call(.always_tail, ...)` which LLVM
+-- TCO's into a self-`jmp` loop. Stack usage stays at one frame.
+
+-- Polynomial hash: `acc = acc * 31 + i`. LLVM has no closed form,
+-- so the loop body actually runs N times.
+FN hash_tc(n: Int64, acc: Int64) RETURNS Int64
+  EFFECTS REENTRANT:TAIL_CALL ->
+  IF n <= 0 -> RETURN acc;
+  RETURN hash_tc(n - 1, (acc %* 31_i64) %+ n);
+END
+
+FN main() RETURNS Void ->
+  -- 100M iterations. N is derived from `timestampMs() %% 1` (always 0)
+  -- so LLVM can't constant-fold the closed-form sum away; the actual
+  -- recursive work runs every time. Any non-TCO'd variant would
+  -- overflow the OS thread stack at this depth.
+  t0 = timestampMs();
+  n = 999999000_i64 %+ (t0 MOD 1000_i64);
+  r = hash_tc(n, 0_i64);
+  elapsed = timestampMs() - t0;
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("hash_tc(${n.toString()}, 0) = ${r.toString()}");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
+END

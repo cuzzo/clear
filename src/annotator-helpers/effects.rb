@@ -139,6 +139,20 @@ module EffectTracker
     resolved = {}
     @fn_direct_effects.each { |name, effs| resolved[name] = effs.dup }
 
+    # F2: recursive functions that emit `rt.checkYield()` (either at
+    # the prologue for plain :reentrant / :TAIL_CALL / :MAX_DEPTH, or
+    # inside the trampoline loop for :THUNK) yield to the scheduler.
+    # Seed YIELD on those fns so P3.3 (`hold-lock-across-yield`) sees
+    # the suspension when the call happens inside a WITH lock body.
+    # TIGHT skips the yield emission, so TIGHT fns aren't seeded.
+    # NOT_LOGICAL never yields (the StackGuard doesn't suspend).
+    @fn_nodes.each do |name, fn_node|
+      next if fn_node.tight_reentrance
+      kind = fn_node.reentrance_kind
+      next unless [:reentrant, :reentrant_tail_call, :reentrant_thunk, :reentrant_max_depth].include?(kind)
+      (resolved[name] ||= Set.new).add(YIELD)
+    end
+
     # Propagate: if foo calls bar, foo inherits bar's effects
     # (with context promotion for SUSPENDS family).
     changed = true
@@ -199,7 +213,16 @@ module EffectTracker
       }
       has_catch = fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
       has_raise = @fn_raises_directly[name]
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || name == "main"
+      # Thunk Phase 4d: :reentrant_thunk fns whose body the splitter
+      # recognized get a synthesized trampoline that allocates child
+      # frames via rt.heapAlloc(). Force needs_rt=true so callers
+      # pass rt when calling them.
+      thunk_uses_rt = !fn_node.thunk_plan.nil? || !fn_node.mutual_thunk_plan.nil?
+      # Phase: recursion co-op yield. Non-TIGHT recursive fns get
+      # `rt.checkYield()` injected at entry by mir_lowering, so they
+      # need rt threaded.
+      yield_uses_rt = recursion_yield_needed?(fn_node)
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
     end
 
     # Seed imported (cross-module) functions: if a callee is not a local function
@@ -497,18 +520,72 @@ module EffectTracker
   #
   STACK_TIER_BUDGET = { micro: 4096, standard: 16384, large: 65536, xl: 262144, service: 2_097_152 }.freeze
 
+  # Recursion co-op yield budget: matches the runtime's YIELD_BUDGET
+  # constant in zig/runtime/runtime.zig. The compiler injects
+  # `rt.checkYield()` at the entry of every non-TIGHT recursive fn
+  # (plain :reentrant, :TAIL_CALL); the trampoline body of :THUNK
+  # already includes one. For :MAX_DEPTH(N), TIGHT is implied iff
+  # N <= BUDGET; if N > BUDGET, the compiler injects the yield to
+  # avoid stalling the scheduler at deep recursion.
+  RECURSION_YIELD_BUDGET = 4096
+
+  # Mirror of MIRLowering#needs_recursion_yield? for compute_needs_rt!.
+  # Both must agree -- a fn that gets a yield-injected prologue must
+  # have needs_rt=true so callers thread `rt`.
+  def recursion_yield_needed?(fn_node)
+    return false if fn_node.tight_reentrance
+    case fn_node.reentrance_kind
+    when :reentrant, :reentrant_tail_call, :reentrant_max_depth
+      true
+    else
+      false
+    end
+  end
+
   def compute_stack_tiers!
     # Phase 1: assign base tier per function from its own effects.
+    # Reentrance variants (Phase 4g):
+    #   :reentrant            unbounded -> :service (OS thread)
+    #   :reentrant_thunk      bounded; trampoline keeps depth = 1 on
+    #                         the fiber stack (recursive Frames live
+    #                         on the heap)
+    #   :reentrant_tail_call  bounded; TCO turns recursion into a
+    #                         self-`jmp` loop, depth = 1
+    #   :reentrant_not_logical bounded; runtime asserts depth = 1 or
+    #                         traps via System UnexpectedRecursion
+    #   :reentrant_max_depth  bounded by N; effective stack budget
+    #                         is frame * N; mutual cycles fall back
+    #                         to :unbounded (interleaved counters
+    #                         are too hard to bound precisely -- TODO
+    #                         (Phase 5+): SCC-aware product bound)
     @fn_nodes.each do |name, fn_node|
       effs = fn_node.effects || Set.new
       stack_bytes = fn_node.stack_vars_bytes || 0
+      kind = fn_node.reentrance_kind
 
-      # Reentrant functions are :unbounded - their total stack is depth * frame_size.
-      if fn_node.reentrant == :reentrant
+      if kind == :reentrant
         fn_node.stack_tier = :unbounded
         fn_node.stack_vars_bytes = stack_bytes
         next
       end
+
+      if kind == :reentrant_max_depth
+        n = fn_node.max_depth_n || 1
+        if mutually_recursive_in_call_graph?(name)
+          fn_node.stack_tier = :unbounded
+          fn_node.stack_vars_bytes = stack_bytes
+          next
+        end
+        # Bounded; multiply per-frame stack into the worst-case bound
+        # before tier selection.
+        stack_bytes = stack_bytes * n
+      end
+
+      # NOTE: kind in (:reentrant_thunk, :reentrant_tail_call,
+      # :reentrant_not_logical, :reentrant_max_depth (single-self),
+      # nil) all reach this base-tier path. Their effective depth
+      # is bounded; treat per-frame size as the worst-case stack
+      # contribution (modulo MAX_DEPTH's *N already applied above).
 
       tier = if effs.include?(HEAP) || effs.include?(BLOCKING) || effs.include?(EXTERN)
         :standard
@@ -549,6 +626,32 @@ module EffectTracker
         end
       end
     end
+  end
+
+  # Phase 4g: detect mutual recursion in @call_graph (the graph
+  # already excludes self-loops -- see annotator.rb:530). Returns
+  # true iff `start` participates in a cycle that goes through at
+  # least one other function. Used to fall back :MAX_DEPTH(N) to
+  # :unbounded when the depth bound becomes a product across
+  # interleaved per-fn counters.
+  def mutually_recursive_in_call_graph?(start)
+    (@call_graph[start] || Set.new).any? do |callee|
+      next false if callee == start
+      reachable_in_call_graph?(callee, start)
+    end
+  end
+
+  def reachable_in_call_graph?(from_name, target)
+    visited = Set.new
+    queue = [from_name]
+    until queue.empty?
+      n = queue.shift
+      next if visited.include?(n)
+      visited << n
+      return true if n == target
+      queue.concat((@call_graph[n] || Set.new).to_a)
+    end
+    false
   end
 
   # Compute the maximum stack tier needed by a set of function names,

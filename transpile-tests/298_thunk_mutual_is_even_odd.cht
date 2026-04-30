@@ -1,0 +1,30 @@
+-- Thunk Phase 4f.1 -- tail-position mutual recursion compiles via
+-- a tagged-union trampoline. Each cycle member emits its own fn
+-- whose body is a `union(enum) { is_even: ..., is_odd: ... }`
+-- trampoline; the active variant is replaced in place at each
+-- partner tail call (depth stays at 1, no per-call frame alloc
+-- needed because depth=1 / replace-in-place).
+
+FN is_even(n: Int64) RETURNS Bool
+  EFFECTS REENTRANT:THUNK ->
+  IF n == 0 -> RETURN TRUE;
+  RETURN is_odd(n - 1);
+END
+
+FN is_odd(n: Int64) RETURNS Bool
+  EFFECTS REENTRANT:THUNK ->
+  IF n == 0 -> RETURN FALSE;
+  RETURN is_even(n - 1);
+END
+
+FN main() RETURNS Void ->
+  ASSERT is_even(0_i64) == TRUE,  "is_even(0) == TRUE";
+  ASSERT is_even(1_i64) == FALSE, "is_even(1) == FALSE";
+  ASSERT is_even(4_i64) == TRUE,  "is_even(4) == TRUE";
+  ASSERT is_odd(7_i64)  == TRUE,  "is_odd(7) == TRUE";
+  -- Deep alternation: 1000 ping-pongs between is_even and is_odd.
+  -- Replace-in-place keeps fiber stack depth at 1.
+  ASSERT is_even(1000_i64) == TRUE, "is_even(1000) == TRUE";
+  ASSERT is_odd(999_i64)   == TRUE, "is_odd(999) == TRUE";
+  RETURN;
+END

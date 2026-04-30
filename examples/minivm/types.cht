@@ -141,7 +141,7 @@ FN isBoxed?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
-FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
+FN prStr(v: Value, readably: Bool) RETURNS String EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.TrueVal -> RETURN "true";,
@@ -203,7 +203,7 @@ END
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     MUTABLE recurseTo: ?Id<Env> = NIL;
     WITH EXCLUSIVE pool AS p {
@@ -222,7 +222,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS 
     RETURN Value.Nil;
 END
 
-FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
+FN valEqual?(a: Value, b: Value) RETURNS Bool EFFECTS REENTRANT ->
     PARTIAL MATCH a START
         Value.Nil -> PARTIAL MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
         Value.TrueVal -> PARTIAL MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,

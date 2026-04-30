@@ -23,7 +23,7 @@ END
 
 FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     -- If we have an inspect result from the caller, write it before resuming polling
     IF inspectResult.length() > 0 THEN

@@ -7,12 +7,12 @@
 -- Usage: ./du
 -- Compare: du -sb .
 
-FN scanDir(path: String) RETURNS Int64 @reentrant ->
+FN scanDir(path: String) RETURNS Int64 EFFECTS REENTRANT ->
     entries = listAll(path);
     MUTABLE total: Int64 = 0;
 
     -- Collect subdirectory scan promises for parallel execution.
-    MUTABLE futures: ~Int64[]@list = [];
+    futures: ~Int64[]@list = [];
 
     FOR i IN (0_i64 ..< entries.length()) DO
         entry = entries[i];
@@ -24,7 +24,7 @@ FN scanDir(path: String) RETURNS Int64 @reentrant ->
             size = fileSize(fullPath);
             IF size > 0 -> total += size;
         ELSE_IF prefix == "d:" THEN
-            append(futures, BG { @large:canSmash ->
+            append(futures, BG { @service ->
                 scanDir(fullPath);
             });
         END

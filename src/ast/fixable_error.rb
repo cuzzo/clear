@@ -71,7 +71,7 @@ class FixableFinding
   # values (Hint, Information, Warning, Error). :error is the only
   # blocking level; everything else is advisory.
   LEVELS = [:hint, :info, :warning, :error].freeze
-  CATEGORIES = [:lint, :ownership, :capability, :escape, :type, :registry].freeze
+  CATEGORIES = [:lint, :ownership, :capability, :escape, :type, :registry, :reentrance].freeze
 
   attr_reader :level, :message, :token, :category, :fixes
 

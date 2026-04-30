@@ -18,6 +18,7 @@ require_relative "../ast/error_registry"
 require_relative "../backends/zig_type_mapper"
 require_relative "fsm_lowering"
 require_relative "fsm_transform"
+require_relative "thunk_transform"
 
 class MIRLowering
   include ZigTypeMapper
@@ -921,6 +922,13 @@ class MIRLowering
     final_type = transpile_type(ret_type)
 
     fn_needs_rt = node.needs_rt.nil? ? true : node.needs_rt
+    # Thunk Phase 4d: the synthesized trampoline allocates child
+    # frames via rt.heapAlloc(), so force needs_rt=true regardless
+    # of what the user's body looks like.
+    fn_needs_rt = true if node.thunk_plan
+    # Thunk Phase 4f.1: tagged-union mutual trampoline calls
+    # rt.checkYield() each iteration; force needs_rt=true.
+    fn_needs_rt = true if node.mutual_thunk_plan
     fn_can_fail = node.can_fail.nil? ? true : node.can_fail
     @current_fn_has_rt = fn_needs_rt
     @current_fn_tail_call = node.tail_call
@@ -1038,16 +1046,47 @@ class MIRLowering
       end
     end
 
-    # NonReentrant guard
+    # NonReentrant guard. Two prologue shapes:
+    #   :NOT_LOGICAL (max_depth_n nil) -> StackGuard linked-list
+    #     (raises System UnexpectedRecursion on re-entry)
+    #   :MAX_DEPTH(N) (max_depth_n set) -> per-fn depth counter
+    #     (raises System MaxDepthExceeded above N).
+    # Phase 4g will read max_depth_n to compute precise stack size.
     if node.reentrant == :non_reentrant
-      guard_init = MIR::Let.new("_guard",
-        MIR::TryExpr.new(MIR::Call.new("safety.StackGuard.enter", [MIR::Call.new("@src", [], false)], false)),
-        true, nil, nil)
-      guard_push = MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "push", [], false), false)
-      guard_defer = MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "pop", [], false))
-      prologue.unshift(guard_defer)
-      prologue.unshift(guard_push)
-      prologue.unshift(guard_init)
+      if node.max_depth_n
+        # try safety.enterDepth(@src(), N);
+        # defer safety.exitDepth(@src());
+        enter_call = MIR::Call.new(
+          "safety.enterDepth",
+          [MIR::Call.new("@src", [], false), MIR::Lit.new(node.max_depth_n.to_s)],
+          false
+        )
+        prologue.unshift(MIR::DeferStmt.new(MIR::Call.new(
+          "safety.exitDepth", [MIR::Call.new("@src", [], false)], false)))
+        prologue.unshift(MIR::ExprStmt.new(MIR::TryExpr.new(enter_call), false))
+      else
+        guard_init = MIR::Let.new("_guard",
+          MIR::TryExpr.new(MIR::Call.new("safety.StackGuard.enter", [MIR::Call.new("@src", [], false)], false)),
+          true, nil, nil)
+        guard_push = MIR::ExprStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "push", [], false), false)
+        guard_defer = MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new("_guard"), "pop", [], false))
+        prologue.unshift(guard_defer)
+        prologue.unshift(guard_push)
+        prologue.unshift(guard_init)
+      end
+    end
+
+    # Recursion co-op yield: emit `rt.checkYield();` at fn entry for
+    # every recursive fn that isn't TIGHT. Same opt-out + same budget
+    # (4096 inline counter ticks before scheduler hand-off) as
+    # `WHILE`. The :THUNK trampoline body has its own checkYield;
+    # for the user's TIGHT request we strip that one in
+    # ThunkTransform::Emit (driven by node.tight_reentrance).
+    if fn_needs_rt && needs_recursion_yield?(node)
+      prologue.unshift(MIR::ExprStmt.new(
+        MIR::MethodCall.new(MIR::Ident.new(@rt_name), "checkYield", [], false),
+        false
+      ))
     end
 
     # Param suppressions for unused params
@@ -1080,7 +1119,21 @@ class MIRLowering
     has_catch = node.catch_clauses.is_a?(Array) && node.catch_clauses.any?
     @current_fn_has_catch = has_catch
     @current_fn_snapshot_types = Set.new if has_catch
-    body_mir = takes_mir + lower_body(node.body)
+    # Thunk Phase 4d: when the annotator stamped thunk_plan on the
+    # FunctionDef (Phase 4c shape recognized), bypass normal body
+    # lowering and synthesize the trampoline body via
+    # ThunkTransform::Emit. The function's signature stays normal so
+    # callers see no change.
+    if node.thunk_plan
+      trampoline_zig = ThunkTransform::Emit.emit_trampoline(node, self)
+      body_mir = takes_mir + [MIR::RawZig.new(trampoline_zig, :thunk_trampoline_body, nil, nil)]
+    elsif node.mutual_thunk_plan
+      # Phase 4f.1: tagged-union trampoline for mutual recursion.
+      trampoline_zig = ThunkTransform::Emit.emit_mutual_trampoline(node, self)
+      body_mir = takes_mir + [MIR::RawZig.new(trampoline_zig, :thunk_trampoline_body, nil, nil)]
+    else
+      body_mir = takes_mir + lower_body(node.body)
+    end
 
     if has_catch
       # Emit inner/outer function pair
@@ -5828,6 +5881,24 @@ class MIRLowering
   end
 
   private
+
+  # Should we inject `rt.checkYield()` at the entry of this fn?
+  # Returns true for non-TIGHT recursive fns (plain :reentrant,
+  # :TAIL_CALL, :MAX_DEPTH(N) when N > BUDGET). Skipped for :THUNK
+  # (the trampoline body emits its own yield) and :NOT_LOGICAL
+  # (depth=1 by assertion -- yield is meaningless).
+  def needs_recursion_yield?(node)
+    return false if node.tight_reentrance
+    case node.reentrance_kind
+    when :reentrant, :reentrant_tail_call, :reentrant_max_depth
+      true
+    else
+      # :reentrant_thunk handled in ThunkTransform::Emit (its
+      # trampoline always yields per iteration unless TIGHT).
+      # :reentrant_not_logical never yields.
+      false
+    end
+  end
 
   # Strip pointer prefix from zig type - dupeUnionValue needs bare type (Value not *Value).
   def bare_zig_type(ti)

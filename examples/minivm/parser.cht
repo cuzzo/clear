@@ -87,7 +87,7 @@ FN getTokenStr!(MUTABLE penv: HashMap<Value>, idx: Int64) RETURNS String ->
     RETURN getStr(val);
 END
 
-FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     posVal = penv["__rp"] OR Value{ Number: 0.0 };
     tcVal = penv["__tc"] OR Value{ Number: 0.0 };
     pos = toInt(getNum(posVal));
@@ -107,7 +107,7 @@ FN readFormEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
     RETURN readAtom(tok);
 END
 
-FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN readListEnv!(MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     MUTABLE items: Value[]@list = List[];
     MUTABLE listDone = FALSE;
     WHILE listDone == FALSE DO

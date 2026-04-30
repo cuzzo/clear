@@ -1,0 +1,33 @@
+-- Thunk Phase 4e -- deep recursion under :THUNK works because the
+-- trampoline keeps the fiber stack at depth=1; each recursive call
+-- allocates a Frame on rt.heapAlloc(). 1000 levels of recursion
+-- consumes ~1000 * sizeof(Frame) heap bytes, NOT 1000 stack frames.
+--
+-- Cooperative yield via rt.checkYield() inside the trampoline loop
+-- ensures the fiber gives the scheduler a chance to run other tasks
+-- between iterations (Phase 4e wiring; per-call @thunk(N) gas
+-- override lands in Phase 4.1).
+--
+-- We use a simple recurrence (1 + count_down(n - 1)) to count to
+-- a depth that would smash a 16 KB fiber stack with normal
+-- recursion (~hundreds of frames depending on per-frame size).
+
+FN count_down(n: Int64) RETURNS Int64
+  EFFECTS REENTRANT:THUNK ->
+  IF n <= 0 -> RETURN 0;
+  RETURN 1 + count_down(n - 1);
+END
+
+FN main() RETURNS Void ->
+  shallow = count_down(10_i64);
+  ASSERT shallow == 10_i64, "count_down(10) == 10";
+
+  -- 1000-deep recursion: would blow a normal fiber stack with each
+  -- frame being even 50 bytes (50 * 1000 = 50 KB > the default 16 KB).
+  -- The trampoline allocates frames on the heap so depth is bounded
+  -- only by available heap memory.
+  deep = count_down(1000_i64);
+  ASSERT deep == 1000_i64, "count_down(1000) == 1000";
+
+  RETURN;
+END

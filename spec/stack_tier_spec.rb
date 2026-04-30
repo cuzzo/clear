@@ -169,24 +169,39 @@ RSpec.describe "Stack Tier Recommendations" do
   end
 
   describe "@canSmash validation" do
-    it "auto-promotes to service when BG calls @reentrant without @canSmash" do
+    it "errors when BG calls @reentrant without explicit @service (Phase 4g)" do
+      # Phase 4g: plain :reentrant requires explicit @service on the
+      # spawn site. The compiler no longer auto-infers OS-thread cost.
       src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN main() RETURNS Void ->\n" \
             "    p: ~Float64 = BG { fib(10.0); };\n" \
             "    result: Float64 = NEXT p; RETURN;\nEND\n"
+      expect { analyze(src) }.to raise_error(CompilerError, /Declare `@service` explicitly/)
+    end
+
+    it "compiles when BG with @service calls @reentrant" do
+      src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
+            "    IF n < 2.0 THEN RETURN n; END\n" \
+            "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
+            "FN main() RETURNS Void ->\n" \
+            "    p: ~Float64 = BG { @service -> fib(10.0); };\n" \
+            "    result: Float64 = NEXT p; RETURN;\nEND\n"
       expect { analyze(src) }.not_to raise_error
     end
 
-    it "allows @canSmash to override reentrant check" do
+    it "@canSmash on a fiber is rejected as not-yet-supported (reserved for v0.3)" do
+      # The runtime has stack-hysteresis page-guards, but the
+      # compiler does not yet wire that feature on. The user
+      # must use @service instead.
       src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN main() RETURNS Void ->\n" \
             "    p: ~Float64 = BG { @canSmash -> fib(10.0); };\n" \
             "    result: Float64 = NEXT p; RETURN;\nEND\n"
-      expect { analyze(src) }.not_to raise_error
+      expect { analyze(src) }.to raise_error(CompilerError, /`@canSmash`.*not yet supported.*v0\.3/m)
     end
 
     it "errors when user picks @micro for a function that needs @standard" do
@@ -208,7 +223,7 @@ RSpec.describe "Stack Tier Recommendations" do
       expect { analyze(src) }.to raise_error(CompilerError, /Stack safety.*@micro.*too small/)
     end
 
-    it "allows @micro:canSmash to override size check" do
+    it "rejects @micro:canSmash with the same not-yet-supported error" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
         FN make() RETURNS %Point ->
@@ -224,7 +239,7 @@ RSpec.describe "Stack Tier Recommendations" do
             result: Float64 = NEXT p; RETURN;
         END
       CLEAR
-      expect { analyze(src) }.not_to raise_error
+      expect { analyze(src) }.to raise_error(CompilerError, /`@canSmash`.*not yet supported.*v0\.3/m)
     end
 
     it "does not error for auto-sized (no user override) calls" do
@@ -242,7 +257,7 @@ RSpec.describe "Stack Tier Recommendations" do
       expect { analyze(src) }.not_to raise_error
     end
 
-    it "auto-promotes to service when DO block calls @reentrant without @canSmash" do
+    it "errors when DO branch calls @reentrant without @service (Phase 4g)" do
       src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
@@ -251,17 +266,17 @@ RSpec.describe "Stack Tier Recommendations" do
             "FN main() RETURNS Void ->\n" \
             "    DO { work() }\n" \
             "    RETURN;\nEND\n"
-      expect { analyze(src) }.not_to raise_error
+      expect { analyze(src) }.to raise_error(CompilerError, /Declare `@service` explicitly/)
     end
 
-    it "allows @canSmash on DO block branches" do
+    it "compiles when DO branch declares @service" do
       src = "FN fib(n: Float64) RETURNS Float64 @reentrant ->\n" \
             "    IF n < 2.0 THEN RETURN n; END\n" \
             "    RETURN fib(n - 1.0) + fib(n - 2.0);\nEND\n" \
             "FN work() RETURNS Float64 ->\n" \
             "    RETURN fib(10.0);\nEND\n" \
             "FN main() RETURNS Void ->\n" \
-            "    DO { @canSmash -> work() }\n" \
+            "    DO { @service -> work() }\n" \
             "    RETURN;\nEND\n"
       expect { analyze(src) }.not_to raise_error
     end
@@ -278,10 +293,13 @@ RSpec.describe "Stack Tier Recommendations" do
     end
 
     it "errors when tail call is not in tail position" do
+      # Phase 3 made the strictness whole-body: every recursive
+      # self-call must be the direct value of a RETURN node. The
+      # error message names the offending site as "non-tail position".
       src = "FN bad(n: Float64) RETURNS Float64 @reentrant:tailCall ->\n" \
-            "    IF n < 1.0 THEN RETURN 1.0; END\n" \
+            "    IF n < 1.0 THEN RETURN bad(0.0); END\n" \
             "    RETURN bad(n - 1.0) + 1.0;\nEND\n"
-      expect { analyze(src) }.to raise_error(CompilerError, /tailCall/)
+      expect { analyze(src) }.to raise_error(CompilerError, /non-tail position/)
     end
 
     it "errors when applied to non-recursive function" do

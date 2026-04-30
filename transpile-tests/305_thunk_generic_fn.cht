@@ -1,0 +1,28 @@
+-- F3 (Tranche 2): generic THUNK function.
+--
+-- The simple-recurrence splitter in `recursive_splitter.rb` walks the
+-- AST without inspecting type parameters; the codegen's `param_zig_type`
+-- consults `param[:type].zig_type` which is a fully-resolved Type by
+-- the time emit runs. So instantiating a generic `<T>` THUNK should
+-- compile per the contract -- this pins that contract.
+
+FN factorialT<T>(n: T, one: T) RETURNS T
+  EFFECTS REENTRANT:THUNK ->
+  IF n <= one -> RETURN one;
+  RETURN n * factorialT(n - one, one);
+END
+
+FN main() RETURNS Void ->
+  -- Instantiate with Int64.
+  r5_i64 = factorialT(5_i64, 1_i64);
+  ASSERT r5_i64 == 120_i64, "factorialT<Int64>(5) == 120";
+
+  r10_i64 = factorialT(10_i64, 1_i64);
+  ASSERT r10_i64 == 3628800_i64, "factorialT<Int64>(10) == 3628800";
+
+  -- Instantiate with Float64 (different Zig type, same body).
+  r5_f64 = factorialT(5.0, 1.0);
+  ASSERT r5_f64 == 120.0, "factorialT<Float64>(5.0) == 120.0";
+
+  RETURN;
+END

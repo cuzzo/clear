@@ -465,6 +465,7 @@ class MIRChecker
     pipeline_fallback_test
     pipeline_legacy_host
     require_local_module_opaque
+    thunk_trampoline_body
   ].freeze
 
   # Reason prefixes whose every concrete variant is justified (the

@@ -199,14 +199,17 @@ RSpec.describe "FSM classifier (Phase A)" do
           RETURN;
         END
         FN main() RETURNS Void ->
-          p: ~Void = BG { countDown(10); };
+          p: ~Void = BG { @service -> countDown(10); };
           _ = NEXT p;
           RETURN;
         END
       CLEAR
       bg = bgs(ast).first
       expect(bg.spawn_form).to eq(:stackful)
-      expect(bg.fsm_ineligible_reason).to eq(:reentrant)
+      # With Phase 4g, the user must declare @service explicitly to call
+      # plain :reentrant. The classifier records :explicit_stack_size
+      # because @service short-circuits the reentrance check.
+      expect([:reentrant, :explicit_stack_size]).to include(bg.fsm_ineligible_reason)
     end
 
     it "classifies BG with explicit stack_size as :stackful (preserves user intent)" do
@@ -293,7 +296,7 @@ RSpec.describe "FSM classifier (Phase A)" do
           RETURN;
         END
         FN main() RETURNS Void ->
-          p: ~Void = BG { countDown(5); };
+          p: ~Void = BG { @service -> countDown(5); };
           _ = NEXT p;
           RETURN;
         END

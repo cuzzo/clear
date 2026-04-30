@@ -1,0 +1,66 @@
+-- @leak_skip
+-- Recursion co-op yield overhead: TAIL_CALL with vs without
+-- the entry yield-check. Both forms compute the same polynomial
+-- hash (`acc * 31 + i`) over a runtime-derived N so LLVM can't
+-- fold the recursion to a closed form.
+--
+-- Variant 1 (default): rt.checkYield() runs at every recursive
+-- entry. Counter wraps + AND + branch on every iteration; yield
+-- only fires every YIELD_BUDGET (4096) entries when a peer
+-- fiber is ready.
+--
+-- Variant 2 (TIGHT): yield-check elided. Pure self-`jmp` loop
+-- after TCO. The delta between the two is the per-iteration
+-- cost of the protection.
+--
+-- This is the same protection model as `WHILE` (yield at the
+-- back-edge of every non-TIGHT loop); BENCH_RESULT reports the
+-- delta so the cost can be tracked across compiler revisions.
+
+-- Workload: variable-modulus accumulator. LLVM's scalar-evolution
+-- pass folds simple polynomial recurrences (`acc * 31 + i`) to
+-- closed form -- earlier versions of this bench used that pattern
+-- and got UNFAIR numbers because the TIGHT variant got folded
+-- while DEFAULT didn't (the yield-check inhibits the optimization).
+-- The variable-modulus form (`acc MOD (n + 7)`) cannot be reduced
+-- by scalar evolution -- both variants run all N iterations in
+-- sequence, giving an apples-to-apples cost of the yield-check.
+FN hash_default(n: Int64, acc: Int64) RETURNS Int64
+  EFFECTS REENTRANT:TAIL_CALL ->
+  IF n <= 0 -> RETURN acc;
+  RETURN hash_default(n - 1, ((acc %+ n) %* 1103515245_i64) MOD (n %+ 7_i64));
+END
+
+FN hash_tight(n: Int64, acc: Int64) RETURNS Int64
+  EFFECTS REENTRANT:TIGHT:TAIL_CALL ->
+  IF n <= 0 -> RETURN acc;
+  RETURN hash_tight(n - 1, ((acc %+ n) %* 1103515245_i64) MOD (n %+ 7_i64));
+END
+
+FN main() RETURNS Void ->
+  -- N derived from timestampMs() so LLVM can't constant-fold.
+  t0 = timestampMs();
+  n = 999999000_i64 %+ (t0 MOD 1000_i64);
+
+  -- TIGHT first (no yield-check; baseline).
+  t1 = timestampMs();
+  r_tight = hash_tight(n, 0_i64);
+  e_tight = timestampMs() - t1;
+
+  -- DEFAULT (with yield-check).
+  t2 = timestampMs();
+  r_default = hash_default(n, 0_i64);
+  e_default = timestampMs() - t2;
+
+  -- Same workload -> same hash.
+  ASSERT r_tight == r_default, "tight and default agree";
+
+  -- BENCH_RESULT records the DEFAULT path's wall time. The
+  -- runner can compare across revisions; the README documents
+  -- the delta vs. the TIGHT baseline.
+  print("BENCH_RESULT: ${e_default.toString()} ms");
+  print("hash(${n.toString()}) = ${r_default.toString()}");
+  print("default = ${e_default.toString()} ms (with yield-check)");
+  print("tight   = ${e_tight.toString()} ms (no yield-check)");
+  RETURN;
+END

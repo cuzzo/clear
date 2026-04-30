@@ -21,8 +21,31 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
 
 ## v0.1.5 (Target = May 30)
 
- - [x] Finite State Machines
+ - [x] Finite State Machines for non-conditional, non-reeentrant, and non-nested looping fibers (FSM Phase A + B1 + B2 landed)
  - [x] Re-entrant Thunks (to avoid unbounded recursive growth, auto insert max_depth, auto-insert co-operative yields)
+    - [x] Phase 1.1 — Parser: `EFFECTS REENTRANT[:VARIANT]` on FN definitions (commit 4584ff7e)
+    - [x] Phase 1.2 — Parser: `REQUIRES x: NON_REENTRANT` constraint clauses (commit ae585446)
+    - [x] Phase 1.3 — Annotator: ReentranceBridge unifies `@reentrant` + `EFFECTS REENTRANT` into `fn_node.reentrance_kind` (commit 0da44eb0)
+    - [x] Phase 1.4 — `clear fix`: `@reentrant` → `EFFECTS REENTRANT` (commit a66f5b26)
+    - [x] Phase 1.5 — `clear fix`: add `REQUIRES <name>: NON_REENTRANT` for unconstrained fn-typed params (commit d9f69cbc)
+    - [x] Phase 2 — Warn on unconstrained fn parameters; offer two fixes (REQUIRES NON_REENTRANT auto / EFFECTS REENTRANT interactive) (commit af355b60)
+    - [x] Phase 3 — `EFFECTS REENTRANT:TAIL_CALL` strictness: whole-body walker, every self-call MUST be tail-position, error names `:THUNK` fallback (commit cc561d24)
+    - [x] Phase 4 — `src/mir/thunk_transform/` pass (THUNK lowering)
+        - [x] Phase 4a — Scaffolding: thunk_transform/ skeleton + self-recursion validation (commit a540fa80)
+        - [x] Phase 4b — Tail-recursive :THUNK piggybacks on existing TailCall MIR (commit f911fc4b)
+        - [x] Phase 4c — Detect simple-recurrence shape (factorial-style); Zig codegen in 4d (commit 84bd6efa)
+        - [x] Phase 4d — Zig codegen for simple-recurrence; factorial works end-to-end (commit 08175849)
+        - [x] Phase 4e — Cooperative yield via rt.checkYield in trampoline; deep recursion (1000-level) verified (commit 8d039bf5)
+        - [x] Phase 4f — Detect mutual recursion + precise error; tagged-union codegen deferred to 4f.1 (commit dd4200ba)
+        - [x] Phase 4f.1 — Tagged-union frame codegen for mutual recursion (transpile-tests 298)
+        - [x] Phase 4f.2 — `EFFECTS REENTRANT:NOT_LOGICAL` + runtime StackGuard wiring + fixable mutual-recursion error (return type `T` -> `!T`; `System UnexpectedRecursion`)
+        - [x] Phase 4f.3 — `EFFECTS REENTRANT:MAX_DEPTH(N)` + per-fn depth counter + fixable third option (return type `T` -> `!T`; `System MaxDepthExceeded` above N; transpile-test 301)
+        - [x] Phase 4g — Per-variant stack-sizing dispatch + explicit `@service` requirement (transpile-test 302)
+    - [~] Phase 4.1 — `@thunk(N)` call-site override: PARSER RESERVES the syntax (commit landed); runtime semantics (per-call-site monomorphization of the callee + recursive-call rewriting inside the clone) deferred to v0.3 alongside the broader monomorphization pass. Annotator emits "not yet implemented" diagnostic.
+    - [~] Phase 4.2 — `@maxDepth(N)` call-site override: same status as 4.1, same monomorphization-pass dependency. Both share one parser path (CallSiteOverride node).
+    - [x] Phase 5 — Service-stack reduction
+        - [x] Phase 5a — `:THUNK` and `:TAIL_CALL` no longer force `:service` (Phase 4g) + `clear fix` audit nudges plain `EFFECTS REENTRANT` toward bounded variants when shape allows
+        - [x] Phase 5b — benchmarks/clear-only/{thunk_recursion,tail_call_loop}: THUNK vs `@service` reentrant (RSS gap), TAIL_CALL vs hand-written loop (~28% gap on hash accumulator)
  - [x] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
  - [x] Observable aggregations for streaming pipelines (@shared aggregate results)
  - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
@@ -48,6 +71,8 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] @sorted for lists, sets, hashmaps.
 
 Milestone: *Basic* SQL/CLEAR database
+
+ - [ ] `@canSmash` on BG/DO blocks: parser recognizes the sigil but compiler errors with "not yet supported, use `@service`" (runtime stack-hysteresis exists; compiler wiring deferred to v0.3) -- spec/can_smash_deferred_spec.rb
 
 ## v0.3 (Target = Oct 1)
 

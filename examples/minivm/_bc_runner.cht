@@ -70,7 +70,7 @@ END
 --      30=number->string 31=string->number 32=string? 33=display
 --      34=list-ref 35=list-length 36=list-push 62=list-set!
 
-FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
+FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     -- Arithmetic
     -- Modulo. For Int64-valued operands, avoid the float round-trip:
     -- toInt(toFloat(big)) loses precision past 2^53 and panics with
@@ -740,7 +740,7 @@ END
 
 FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     MUTABLE recurseTo: ?Id<Env> = NIL;
     WITH EXCLUSIVE pool AS p {
@@ -910,7 +910,7 @@ END
 -- resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
 FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     PARTIAL MATCH v START
         Value.Tco AS tco ->
@@ -926,7 +926,7 @@ END
 
 FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym ->
@@ -953,7 +953,7 @@ END
 
 FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     MUTABLE result: Value = evalOnce!(GIVE ast, envId, pool);
     MUTABLE bouncing = isTco?(result);
@@ -968,7 +968,7 @@ END
 
 FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
@@ -2081,7 +2081,7 @@ END
 
 FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
@@ -2364,7 +2364,7 @@ END
 
 FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     MUTABLE ops: Value[]@list = List[];
     MUTABLE consts: Value[]@list = List[];
@@ -2510,7 +2510,7 @@ END
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool,
          entryIp: Int64, initCaps: Value[]) RETURNS Value
   REQUIRES pool: LOCKED
-  @reentrant
+  EFFECTS REENTRANT
 ->
     MUTABLE stack: Value[]@list = List[];
     MUTABLE slots: Value[]@list = List[];
@@ -3318,7 +3318,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                bgFut: ~Value = BG {
+                bgFut: ~Value = BG { @service ->
                     exec!(COPY ops, COPY consts, curEnv, pool, bgEntry, GIVE bgCaps);
                 };
                 bgFid = futureTable.length();

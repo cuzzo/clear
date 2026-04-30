@@ -1070,12 +1070,14 @@ class Parser
 
     # 3. Parse optional RETURNS
     return_type = nil
+    return_type_token = nil
     if match!(:KEYWORD, 'RETURNS')
       if current.type == :VAR_ID
         return_lifetime = parse_var_id
         consume(:CHAR, ':')
       end
 
+      return_type_token = current
       return_type = parse_type_annotation()
     end
 
@@ -1083,16 +1085,29 @@ class Parser
     # function accepts on its parameters. Mandatory whenever the body uses
     # WITH on a parameter (P2.5 enforces). Stored as { param => Set[Family] }.
     requires_clause = nil
+    early_requires_clauses = nil
     if match!(:KEYWORD, 'REQUIRES')
       requires_clause = parse_requires_clause
+      # If this REQUIRES contained reentrance kinds (e.g. NON_REENTRANT),
+      # parse_requires_clause stashed them on @last_requires_clauses --
+      # forward them to the same `requires_clauses` hash that
+      # parse_requires_clauses (post-RETURNS) populates.
+      early_requires_clauses = @last_requires_clauses
     end
 
     # 4. Parse optional @reentrant / @nonReentrant / @reentrant:tailCall function annotation.
+    # NOTE: this is the LEGACY annotation form. Thunk Phase 1 introduces
+    # `EFFECTS REENTRANT[:VARIANT]` as the canonical declaration; both are
+    # accepted in parallel (the annotator bridges them in
+    # src/annotator-helpers/reentrance.rb). `clear fix` will migrate the
+    # legacy form to the new clause.
     reentrant = nil
     tail_call = false
+    reentrant_token = nil
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       cap_tok = consume(:VAR_ID)
       reentrant = cap_tok.value == '@reentrant' ? :reentrant : :non_reentrant
+      reentrant_token = cap_tok if reentrant == :reentrant
       # Check for :tailCall suffix
       if reentrant == :reentrant && match?(:CHAR, ':') && @tokens[@pos + 1]&.value == 'tailCall'
         consume(:CHAR, ':')
@@ -1101,6 +1116,38 @@ class Parser
       end
     end
 
+    # 5. Parse optional `EFFECTS REENTRANT[:VARIANT]` declaration.
+    # See docs/agents/thunks.md. Variants:
+    #   EFFECTS REENTRANT             -> :reentrant              (real recursion;
+    #                                                             caller runs on @service)
+    #   EFFECTS REENTRANT:THUNK       -> :reentrant_thunk        (CPS + trampoline)
+    #   EFFECTS REENTRANT:TAIL_CALL   -> :reentrant_tail_call    (self-loop, verified)
+    #   EFFECTS REENTRANT:NOT_LOGICAL -> :reentrant_not_logical  (runtime StackGuard;
+    #                                                             requires `!T` return)
+    effects_decl, effects_span = parse_effects_decl
+    if effects_decl && reentrant
+      error!(fn_token, "Function '#{name}' has both legacy '@reentrant' annotation and new 'EFFECTS REENTRANT' clause. Pick one.")
+    end
+
+    # 6. Parse zero or more `REQUIRES <name>: <KIND>` constraint clauses.
+    # Today only NON_REENTRANT is recognized (Thunk Phase 1.2). Constraints
+    # bind to a parameter by name; validation that the name actually
+    # references a parameter happens in the annotator (Phase 1.3) so the
+    # parser stays purely syntactic.
+    requires_clauses = parse_requires_clauses(name)
+    # Merge any reentrance kinds caught by the early-position
+    # parse_requires_clause into the canonical hash. Duplicates
+    # across the two positions still error.
+    if early_requires_clauses && !early_requires_clauses.empty?
+      early_requires_clauses.each do |k, v|
+        if requires_clauses.key?(k)
+          error!(fn_token, "Function '#{name}' has duplicate REQUIRES clause for '#{k}'.")
+        end
+        requires_clauses[k] = v
+      end
+    end
+
+    arrow_token = current
     consume(:ARROW, '->')
     body = parse_block_body(['END', 'CATCH'])
 
@@ -1187,6 +1234,14 @@ class Parser
     node.reentrant = reentrant
     node.tail_call = tail_call
     node.requires = requires_clause
+    node.reentrant_token = reentrant_token
+    node.arrow_token = arrow_token
+    node.effects_decl = effects_decl
+    node.effects_span = effects_span if effects_span
+    node.max_depth_n = effects_span[:max_depth] if effects_span && effects_span[:max_depth]
+    node.tight_reentrance = effects_span[:tight] if effects_span
+    node.requires_clauses = requires_clauses unless requires_clauses.empty?
+    node.return_type_token = return_type_token
     node
   end
 
@@ -1201,9 +1256,16 @@ class Parser
   #
   # Returns: { param_name_string => Set[Symbol] }
   REQUIRES_VALID_FAMILIES = %w[LOCKED VERSIONED ACTOR LOCK_FREE].to_set.freeze
+  # Reentrancy constraints (Thunk Phase 1.2) live alongside capability
+  # families in the same `REQUIRES` grammar slot. The parse_requires_clause
+  # parser routes them into the NON_REENTRANT-only `requires_clauses` hash
+  # (returned via @last_requires_clauses) so they don't pollute the
+  # capability-family `requires` hash.
+  REQUIRES_REENTRANCE_KINDS = %w[NON_REENTRANT].to_set.freeze
 
   def parse_requires_clause
     requires_hash = {}
+    @last_requires_clauses = {}
 
     loop do
       names = [consume(:VAR_ID).value]
@@ -1213,12 +1275,18 @@ class Parser
       consume(:CHAR, ':')
 
       families = Set.new
-      families << parse_requires_family
+      reentrance_kinds = []
+      first = parse_requires_family_or_reentrance
+      first[:family] ? (families << first[:family]) : reentrance_kinds << first[:reentrance]
       while match!(:CHAR, '|')
-        families << parse_requires_family
+        nxt = parse_requires_family_or_reentrance
+        nxt[:family] ? (families << nxt[:family]) : reentrance_kinds << nxt[:reentrance]
       end
 
-      names.each { |n| requires_hash[n] = families }
+      names.each do |n|
+        requires_hash[n] = families if !families.empty?
+        reentrance_kinds.each { |k| @last_requires_clauses[n] = k }
+      end
 
       break unless match!(:CHAR, ',')
     end
@@ -1226,13 +1294,133 @@ class Parser
     requires_hash
   end
 
-  def parse_requires_family
+  # Returns { family: Symbol } or { reentrance: Symbol } based on the
+  # token. Family kinds go into the capability `requires` hash; reentrance
+  # kinds are forwarded into `requires_clauses`.
+  def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
-    unless REQUIRES_VALID_FAMILIES.include?(tok.value)
-      error!(tok, "Unknown REQUIRES family '#{tok.value}'. Expected one of: " \
-                  "#{REQUIRES_VALID_FAMILIES.to_a.join(', ')}.")
+    if REQUIRES_VALID_FAMILIES.include?(tok.value)
+      { family: tok.value.to_sym }
+    elsif REQUIRES_REENTRANCE_KINDS.include?(tok.value)
+      kind = case tok.value
+             when 'NON_REENTRANT' then :non_reentrant
+             end
+      { reentrance: kind }
+    else
+      error!(tok, "Unknown REQUIRES family or kind '#{tok.value}'. Expected a capability family " \
+                  "(#{REQUIRES_VALID_FAMILIES.to_a.join(', ')}) or a reentrance kind " \
+                  "(#{REQUIRES_REENTRANCE_KINDS.to_a.join(', ')}).")
     end
-    tok.value.to_sym
+  end
+
+  # Legacy thin wrapper: callers that only need families.
+  def parse_requires_family
+    res = parse_requires_family_or_reentrance
+    error!(current, "Expected capability family, got reentrance kind") unless res[:family]
+    res[:family]
+  end
+
+  # Thunk Phase 1.2: parse zero or more `REQUIRES <name>: <KIND>` clauses
+  # between the function header and the `->` arrow. Returns a Hash<String,
+  # Symbol> mapping the parameter name to the constraint kind. Each clause
+  # is one keyword + var name + colon + kind name; multiple clauses run
+  # back-to-back.
+  #
+  #   REQUIRES f: NON_REENTRANT REQUIRES g: NON_REENTRANT ->
+  #
+  # NOTE: this lives ALONGSIDE master's `parse_requires_clause` (above).
+  # Both REQUIRES grammars currently coexist; master's handles capability
+  # families (LOCKABLE / VERSIONED / ACTOR / LOCK_FREE) with a comma-list,
+  # this one handles the reentrancy constraint NON_REENTRANT with one
+  # keyword per clause. Unifying them is a follow-up cleanup.
+  def parse_requires_clauses(fn_name)
+    out = {}
+    while match?(:KEYWORD, 'REQUIRES')
+      consume(:KEYWORD, 'REQUIRES')
+      name_tok = consume(:VAR_ID)
+      consume(:CHAR, ':')
+      kind_tok = consume(:TYPE_ID)
+      kind =
+        case kind_tok.value
+        when 'NON_REENTRANT' then :non_reentrant
+        else
+          error!(kind_tok, "Unknown REQUIRES kind '#{kind_tok.value}'. Valid: NON_REENTRANT.")
+        end
+      if out.key?(name_tok.value)
+        error!(name_tok, "Function '#{fn_name}' has duplicate REQUIRES clause for '#{name_tok.value}'.")
+      end
+      out[name_tok.value] = kind
+    end
+    out
+  end
+
+  # Thunk Phase 1.1: parse optional `EFFECTS REENTRANT[:VARIANT]` after the
+  # function header's RETURNS clause. Returns one of nil, :reentrant,
+  # :reentrant_thunk, :reentrant_tail_call. The variant tokens (REENTRANT,
+  # THUNK, TAIL_CALL) parse as TYPE_IDs matched by value -- they are not
+  # added to the lexer KEYWORD set because the only context they appear in
+  # is right after the EFFECTS keyword.
+  def parse_effects_decl
+    return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
+    eff_kw = consume(:KEYWORD, 'EFFECTS')
+    eff_tok = consume(:TYPE_ID)
+    unless eff_tok.value == 'REENTRANT'
+      error!(eff_tok, "Unknown effect '#{eff_tok.value}'. Function-level EFFECTS only accepts REENTRANT today.")
+    end
+    span_start = eff_kw
+    span_end_tok = eff_tok # tail of `EFFECTS REENTRANT` so far
+    unless match!(:CHAR, ':')
+      return [:reentrant, { start_tok: span_start, end_tok: span_end_tok, tight: false }]
+    end
+
+    # Optional `:TIGHT` modifier (mirrors `TIGHT WHILE`). Order:
+    # `REENTRANT:TIGHT:VARIANT`. Valid before THUNK / TAIL_CALL only;
+    # MAX_DEPTH implies TIGHT (so :TIGHT:MAX_DEPTH is redundant and
+    # rejected); NOT_LOGICAL has depth=1 so TIGHT is meaningless and
+    # rejected too.
+    tight = false
+    tight_tok = nil
+    if match?(:KEYWORD, 'TIGHT')
+      tight_tok = consume(:KEYWORD, 'TIGHT')
+      tight = true
+      span_end_tok = tight_tok
+      # `:TIGHT` alone (no following variant) is allowed -- means "plain
+      # :reentrant but skip the entry yield-check".
+      if match!(:CHAR, ':')
+        # fall through to variant parsing below
+      else
+        return [:reentrant, { start_tok: span_start, end_tok: span_end_tok, tight: true }]
+      end
+    end
+
+    variant_tok = consume(:TYPE_ID)
+    kind = case variant_tok.value
+           when 'THUNK'       then :reentrant_thunk
+           when 'TAIL_CALL'   then :reentrant_tail_call
+           when 'NOT_LOGICAL' then :reentrant_not_logical
+           when 'MAX_DEPTH'   then :reentrant_max_depth
+           else
+             error!(variant_tok, "Unknown REENTRANT variant ':#{variant_tok.value}'. Valid: :TIGHT, :TIGHT:THUNK, :TIGHT:TAIL_CALL, :THUNK, :TAIL_CALL, :NOT_LOGICAL, :MAX_DEPTH(N).")
+           end
+    if tight && (kind == :reentrant_not_logical || kind == :reentrant_max_depth)
+      label = kind == :reentrant_not_logical ? "NOT_LOGICAL" : "MAX_DEPTH"
+      error!(variant_tok, ":TIGHT:#{label} is invalid. " \
+        "#{label == 'MAX_DEPTH' ? 'MAX_DEPTH(N) implies TIGHT (the bounded depth replaces the yield-check); just write :MAX_DEPTH(N).' : 'NOT_LOGICAL has depth=1 by runtime assertion, so TIGHT is meaningless.'}")
+    end
+    span_end_tok = variant_tok
+    max_depth_n = nil
+    if kind == :reentrant_max_depth
+      consume(:CHAR, '(')
+      n_tok = current
+      n_lit = consume_number
+      max_depth_n = n_lit.value.to_i
+      if max_depth_n <= 0
+        error!(n_tok, ":MAX_DEPTH(N) requires a positive integer N (got #{max_depth_n}).")
+      end
+      close_tok = consume(:CHAR, ')')
+      span_end_tok = close_tok
+    end
+    [kind, { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight }]
   end
 
   def parse_block_body(stop_words = ['END'])
@@ -1427,6 +1615,26 @@ class Parser
       # Recursively parse the thing being negated (handles --5)
       right = parse_unary
       return AST::UnaryOp.new(op_token, AST::OP_TO_OP_CODE[v], right)
+    end
+    # Thunk Phase 4.1 / 4.2: call-site override prefixes. The
+    # parser RECOGNIZES `@thunk(N)` and `@maxDepth(N)` immediately
+    # before a call expression, but the runtime semantics
+    # (per-call-site monomorphization of the callee) are deferred
+    # to v0.3. The annotator emits a clear "not yet implemented"
+    # error so the syntax is reserved without producing wrong
+    # codegen.
+    if current.type == :VAR_ID && (current.value == '@thunk' || current.value == '@maxDepth')
+      sigil_tok = consume(:VAR_ID)
+      consume(:CHAR, '(')
+      n_tok = current
+      n_lit = consume_number
+      n = n_lit.value.to_i
+      if n <= 0
+        error!(n_tok, "#{sigil_tok.value}(N) requires a positive integer N (got #{n}).")
+      end
+      consume(:CHAR, ')')
+      inner = parse_primary
+      return AST::CallSiteOverride.new(sigil_tok, sigil_tok.value.sub('@', '').to_sym, n, inner)
     end
     parse_primary
   end
@@ -2865,15 +3073,17 @@ class Parser
   end
 
   # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
-  # Returns the stack_size symbol (:micro/:standard/:large/:xl) or nil.
+  # Returns { ..., stack_size_token: } where stack_size_token is the
+  # token of the FIRST sigil that contributed a stack_size (or nil).
   def parse_bg_prefix
     pinned     = false
     parallel   = false
     arena      = false
     can_smash  = false
     stack_size = nil
+    stack_size_token = nil
 
-    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash } unless
+    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: nil } unless
       current.type == :VAR_ID && BG_SIGILS.key?(current.value)
 
     loop do
@@ -2885,6 +3095,7 @@ class Parser
       if attrs[:stack_size]
         error!(tok, "Duplicate stack size in BG prefix") if stack_size
         stack_size = attrs[:stack_size]
+        stack_size_token = tok
       end
       pinned    = true if attrs[:pinned]
       parallel  = true if attrs[:parallel]
@@ -2897,7 +3108,7 @@ class Parser
     end
 
     consume(:ARROW, '->')
-    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash }
+    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: stack_size_token }
   end
 
   def parse_bg_block
@@ -2905,11 +3116,14 @@ class Parser
     if match?(:KEYWORD, 'STREAM')
       return parse_bg_stream_block(bg_token)
     end
-    consume(:CHAR, '{')
+    open_brace = consume(:CHAR, '{')
     prefix = parse_bg_prefix
     body = parse_bg_then_body
     consume(:CHAR, '}')
-    AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel], prefix[:arena], prefix[:can_smash])
+    node = AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel], prefix[:arena], prefix[:can_smash])
+    node.open_brace_token = open_brace
+    node.prefix_token = prefix[:stack_size_token]
+    node
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.

@@ -70,7 +70,7 @@ END
 --      30=number->string 31=string->number 32=string? 33=display
 --      34=list-ref 35=list-length 36=list-push 62=list-set!
 
-FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
+FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     -- Arithmetic
     -- Modulo
     IF id == 37 THEN
@@ -170,7 +170,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 31 THEN
         parsed = toNumber(getStr(evaled[1])) OR (0.0 - 999999.0);
-        IF parsed == 0.0 - 999999.0 THEN RETURN Value.Error{ errMsg: "parse failed", errKind: "Input" }; END
+        IF parsed == 0.0 - 999999.0 THEN RETURN Value.Error{ errMsg: "parse failed", errKind: "Input", errType: "" }; END
         RETURN Value{ Number: parsed };
     END
     IF id == 32 THEN
@@ -502,7 +502,7 @@ END
 
 -- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
-FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
+FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool EFFECTS REENTRANT ->
     IF pool[envId] AS env THEN
         IF env.vars.contains?(name) THEN
             env.vars[name] = COPY val;
@@ -631,12 +631,12 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
             IF pool[catchEnvId] AS catchEnv THEN
                 catchEnv.vars["__p"] = Value{ EnvRef: envId };
                 errBindName = getSymName(catchItems[1]);
-                catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+                catchEnv.vars[errBindName] = Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
             END
             RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: catchEnvId };,
-        DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+        DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
     END
-    RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
+    RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind, errType: "" };
 END
 
 FN isSymbol?(v: Value) RETURNS Bool ->
@@ -645,7 +645,7 @@ FN isSymbol?(v: Value) RETURNS Bool ->
 END
 
 -- resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
-FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Tco AS tco ->
             tcoAst = COPY tco.tcoAst;
@@ -658,7 +658,7 @@ END
 
 -- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
-FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
@@ -672,7 +672,7 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
         Value.Int64Val AS i -> RETURN Value{ Int64Val: i };,
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.NativeFn AS id -> RETURN Value{ NativeFn: id };,
-        Value.Error AS e -> RETURN Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind };,
+        Value.Error AS e -> RETURN Value.Error{ errMsg: COPY e.errMsg, errKind: COPY e.errKind, errType: "" };,
         Value.Lambda AS lam -> RETURN Value.Lambda{ params: COPY lam.params, body: COPY lam.body, envId: lam.envId };,
         Value.Vector AS vec -> RETURN Value{ Vector: vec };,
         Value.TypedI64Arr AS iarr -> RETURN Value{ TypedI64Arr: iarr };,
@@ -682,7 +682,7 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
     RETURN Value.Nil;
 END
 
-FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     MUTABLE result: Value = evalOnce!(GIVE ast, envId, pool);
     MUTABLE bouncing = isTco?(result);
     WHILE bouncing DO
@@ -694,7 +694,7 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURN
     RETURN result;
 END
 
-FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
@@ -907,7 +907,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 END,
             DEFAULT -> PASS;
         END
-        RETURN Value.Error{ errMsg: "key not found", errKind: "NotFound" };
+        RETURN Value.Error{ errMsg: "key not found", errKind: "NotFound", errType: "" };
 
     ELSE_IF formName == "list-slice" THEN
         listVal = eval!(COPY items[1], envId, pool);
@@ -1349,7 +1349,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             Value.TypedI64Arr AS iarr ->
                 result = nativeSum(iarr);
                 RETURN Value{ Int64Val: result };,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum requires typed Int64 array", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum requires typed Int64 array", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1359,7 +1359,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         PARTIAL MATCH arrVal START
             Value.TypedF64Arr AS farr ->
                 RETURN Value{ Number: nativeSumF64(farr) };,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum-f64 requires typed Float64 array", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-sum-f64 requires typed Float64 array", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1373,9 +1373,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 PARTIAL MATCH bVal START
                     Value.TypedF64Arr AS fb ->
                         RETURN Value{ Number: nativeDot(fa, fb) };,
-                    DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires two Float64 arrays", errKind: "Type" };
+                    DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires two Float64 arrays", errKind: "Type", errType: "" };
                 END,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires Float64 arrays", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires Float64 arrays", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1383,7 +1383,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "sandboxed-read" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
-            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
+            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
         pathVal = eval!(COPY items[1], envId, pool);
         IF isError?(pathVal) THEN RETURN pathVal; END
@@ -1393,7 +1393,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "sandboxed-write" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
-            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission" };
+            RETURN Value.Error{ errMsg: "I/O not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
         pathVal = eval!(COPY items[1], envId, pool);
         IF isError?(pathVal) THEN RETURN pathVal; END
@@ -1405,7 +1405,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "sandboxed-shell" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
-            RETURN Value.Error{ errMsg: "shell not permitted (run with --allow-io)", errKind: "Permission" };
+            RETURN Value.Error{ errMsg: "shell not permitted (run with --allow-io)", errKind: "Permission", errType: "" };
         END
         cmdVal = eval!(COPY items[1], envId, pool);
         IF isError?(cmdVal) THEN RETURN cmdVal; END
@@ -1435,9 +1435,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 PARTIAL MATCH bCdr START
                     Value.TypedI64Arr AS bi ->
                         RETURN Value{ Int64Val: nativePointManhattan(ai, bi) };,
-                    DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+                    DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type", errType: "" };
                 END,
-            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1457,7 +1457,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 trData.append(si[0] + getInt(dxVal));
                 trData.append(si[1] + getInt(dyVal));
                 RETURN Value.Pair{ pairCar: COPY tagVal, pairCdr: Value{ TypedI64Arr: trData } };,
-            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1469,7 +1469,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         PARTIAL MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
                 RETURN boolVal(nativeContains(iarr, getInt(needleVal)));,
-            DEFAULT -> RETURN Value.Error{ errMsg: "native-contains requires typed Int64 array", errKind: "Type" };
+            DEFAULT -> RETURN Value.Error{ errMsg: "native-contains requires typed Int64 array", errKind: "Type", errType: "" };
         END
         RETURN Value.Nil;
 
@@ -1512,7 +1512,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             lineNum = toInt(getNum(srcLine));
             errMsg = errMsg + " (line " + lineNum.toString() + ")";
         END
-        RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind) };
+        RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind), errType: "" };
 
     ELSE_IF formName == "try" THEN
         -- (try expr (catch e handler))
@@ -1782,7 +1782,7 @@ END
 
 -- runTest: tokenize + parse + eval
 
-FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
+FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -2035,7 +2035,7 @@ END
 -- compile! stores results in pool env at __bc_ops and __bc_consts keys.
 -- Caller reads them from pool[envId] after the call.
 
-FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
+FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void EFFECTS REENTRANT ->
     MUTABLE ops: Value[]@list = List[];
     MUTABLE consts: Value[]@list = List[];
 
@@ -2173,7 +2173,7 @@ END
 -- Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
 -- Returns the value on top of the stack at halt.
 
-FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
+FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value EFFECTS REENTRANT ->
     MUTABLE stack: Value[]@list = List[];
     MUTABLE slots: Value[]@list = List[];
     MUTABLE sp: Int64 = 0;

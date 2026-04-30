@@ -1,0 +1,34 @@
+-- @leak_skip
+-- Phase 5b: deep recursion under :THUNK.
+--
+-- The factorial-shape body is rewritten to a heap-allocated
+-- CPS state machine + trampoline; depth on the fiber stack
+-- stays at 1 regardless of N. Memory cost per call: one
+-- Frame struct on rt.heapAlloc().
+
+FN sum_n(n: Int64) RETURNS Int64
+  EFFECTS REENTRANT:THUNK ->
+  IF n <= 0 -> RETURN 0;
+  RETURN 1 + sum_n(n - 1);
+END
+
+FN main() RETURNS Void ->
+  -- 1 call at depth = 100,000. The trampoline allocates one
+  -- Frame per recursion level on the heap (~100 KB peak) and
+  -- frees as it pops. The fiber's stack stays at depth = 1.
+  --
+  -- Plain :reentrant on @service can't reach this depth on
+  -- safety builds (~256 bytes/frame × 100K = 25 MB > 2 MB
+  -- @service stack); on optimized it might fit. The realistic
+  -- comparison: @service requires an OS thread (2 MB
+  -- pre-allocated regardless of depth used) where THUNK lives
+  -- on a regular fiber.
+  t0 = timestampMs();
+  n = 99000_i64 %+ (t0 MOD 1000_i64);
+  r = sum_n(n);
+  elapsed = timestampMs() - t0;
+  ASSERT r == n, "sum_n returns N";
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
+END

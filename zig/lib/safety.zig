@@ -84,3 +84,37 @@ pub const StackGuard = struct {
     }
 };
 
+/// Per-fn depth counter for `EFFECTS REENTRANT:MAX_DEPTH(N)`. Each
+/// unique `src` (one per :MAX_DEPTH function definition site) gets
+/// its own threadlocal counter via comptime parameterization. The
+/// fiber scheduler MUST move depth state on/off fibers BEFORE
+/// switching (same rule as stack_guard_head).
+///
+/// On entry: returns `error.MaxDepthExceeded` if the new depth would
+/// exceed `max`; otherwise increments and returns. The caller is
+/// responsible for calling `exitDepth(src)` on exit (typically via
+/// `defer`).
+pub fn DepthCounter(comptime src: std.builtin.SourceLocation) type {
+    _ = src;
+    return struct {
+        pub threadlocal var depth: usize = 0;
+    };
+}
+
+pub fn enterDepth(comptime src: std.builtin.SourceLocation, comptime max: usize) !void {
+    const C = DepthCounter(src);
+    if (C.depth >= max) return error.MaxDepthExceeded;
+    C.depth += 1;
+}
+
+pub fn exitDepth(comptime src: std.builtin.SourceLocation) void {
+    const C = DepthCounter(src);
+    // The codegen always pairs `enterDepth(src, max)` at fn entry with
+    // `defer exitDepth(src)`, so depth > 0 is a structural invariant
+    // here. A debug-only assert catches future miswiring loudly while
+    // compiling out in ReleaseFast (small win vs. the previous
+    // `if (depth > 0)` runtime branch).
+    std.debug.assert(C.depth > 0);
+    C.depth -= 1;
+}
+

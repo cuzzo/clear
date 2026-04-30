@@ -1,0 +1,61 @@
+-- T1 (Tranche 2): 3-cycle mutual recursion via tagged-union THUNK.
+--
+-- The validator already accepts cycles of size >= 2 (Phase 4f.1
+-- detection in reentrance.rb#try_stamp_mutual_thunk_plan). The
+-- existing tests only exercise 2-cycle (is_even/is_odd). This pins
+-- 3-cycle behavior:
+--
+--   cycleA(0) = 1
+--   cycleB(0) = 2
+--   cycleC(0) = 3
+--   cycleA(N) = cycleB(N-1)    -- A -> B
+--   cycleB(N) = cycleC(N-1)    -- B -> C
+--   cycleC(N) = cycleA(N-1)    -- C -> A
+--
+-- Starting from cycleA(N), the cycle visits A,B,C,A,B,C,... and
+-- terminates when one of them hits 0. With N=0 -> A returns 1.
+-- With N=1 -> A->B(0)=2. With N=2 -> A->B(1)->C(0)=3. With N=3
+-- -> A->B(2)->C(1)->A(0)=1. The result is `((N % 3) + 1)`.
+--
+-- The tagged-union frame must hold THREE variants and the in-place
+-- variant swap must work for any cycle member -> any other cycle
+-- member.
+
+FN cycleA(n: Int64) RETURNS Int64
+  EFFECTS REENTRANT:THUNK ->
+  IF n == 0 -> RETURN 1_i64;
+  RETURN cycleB(n - 1_i64);
+END
+
+FN cycleB(n: Int64) RETURNS Int64
+  EFFECTS REENTRANT:THUNK ->
+  IF n == 0 -> RETURN 2_i64;
+  RETURN cycleC(n - 1_i64);
+END
+
+FN cycleC(n: Int64) RETURNS Int64
+  EFFECTS REENTRANT:THUNK ->
+  IF n == 0 -> RETURN 3_i64;
+  RETURN cycleA(n - 1_i64);
+END
+
+FN main() RETURNS Void ->
+  -- Direct base cases.
+  ASSERT cycleA(0_i64) == 1_i64, "cycleA(0) == 1";
+  ASSERT cycleB(0_i64) == 2_i64, "cycleB(0) == 2";
+  ASSERT cycleC(0_i64) == 3_i64, "cycleC(0) == 3";
+
+  -- One hop each direction from A.
+  ASSERT cycleA(1_i64) == 2_i64, "cycleA(1) -> cycleB(0) == 2";
+  ASSERT cycleA(2_i64) == 3_i64, "cycleA(2) -> cycleC(0) == 3";
+  ASSERT cycleA(3_i64) == 1_i64, "cycleA(3) -> ... -> cycleA(0) == 1";
+
+  -- Verify each entry point sees a full lap.
+  ASSERT cycleB(1_i64) == 3_i64, "cycleB(1) -> cycleC(0) == 3";
+  ASSERT cycleC(1_i64) == 1_i64, "cycleC(1) -> cycleA(0) == 1";
+
+  -- Many laps: 999 ping-pongs (333 full cycles) lands at cycleA(0)=1.
+  ASSERT cycleA(999_i64) == 1_i64, "cycleA(999) == 1 (333 laps)";
+
+  RETURN;
+END

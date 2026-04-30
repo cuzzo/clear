@@ -23,13 +23,15 @@ module AST
   # when mapping a Zig error (`error.LockTimeout`, etc) to a u32
   # ErrorName id. Keep these in sync with the ids baked into the
   # generated ErrorName enum.
-  ERROR_NAME_NONE         = 0
-  ERROR_NAME_LOCK_TIMEOUT = 1
-  ERROR_NAME_LOCK_CYCLE   = 2
-  ERROR_NAME_DEADLOCK     = 3
-  ERROR_NAME_USER_FIRST   = 4
+  ERROR_NAME_NONE                 = 0
+  ERROR_NAME_LOCK_TIMEOUT         = 1
+  ERROR_NAME_LOCK_CYCLE           = 2
+  ERROR_NAME_DEADLOCK             = 3
+  ERROR_NAME_UNEXPECTED_RECURSION = 4
+  ERROR_NAME_MAX_DEPTH_EXCEEDED   = 5
+  ERROR_NAME_USER_FIRST           = 6
 
-  # Mutable registry. Seeded with the three stdlib types and extended
+  # Mutable registry. Seeded with the five stdlib types and extended
   # by the annotator on first use. Hash shape:
   #   <type_sym> => {
   #     kind: :Kind,
@@ -39,9 +41,11 @@ module AST
   #   }
   # Not thread-safe; the compiler is single-threaded per-program.
   ERROR_TYPES = {
-    LockTimeout: { kind: :Transient, zig_name: "LockTimeout", id: ERROR_NAME_LOCK_TIMEOUT, first_site: nil },
-    LockCycle:   { kind: :Transient, zig_name: "LockCycle",   id: ERROR_NAME_LOCK_CYCLE,   first_site: nil },
-    Deadlock:    { kind: :System,    zig_name: "Deadlock",    id: ERROR_NAME_DEADLOCK,     first_site: nil },
+    LockTimeout:         { kind: :Transient, zig_name: "LockTimeout",         id: ERROR_NAME_LOCK_TIMEOUT,         first_site: nil },
+    LockCycle:           { kind: :Transient, zig_name: "LockCycle",           id: ERROR_NAME_LOCK_CYCLE,           first_site: nil },
+    Deadlock:            { kind: :System,    zig_name: "Deadlock",            id: ERROR_NAME_DEADLOCK,             first_site: nil },
+    UnexpectedRecursion: { kind: :System,    zig_name: "UnexpectedRecursion", id: ERROR_NAME_UNEXPECTED_RECURSION, first_site: nil },
+    MaxDepthExceeded:    { kind: :System,    zig_name: "MaxDepthExceeded",    id: ERROR_NAME_MAX_DEPTH_EXCEEDED,   first_site: nil },
   }
 
   # Counter for the next user-type id. Reset on a per-program basis via

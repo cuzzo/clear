@@ -8,12 +8,12 @@ REQUIRE "interpreter.cht";
 
 -- Test helpers: create fresh interpreter, run input, return result string.
 
-FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String @reentrant ->
+FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String EFFECTS REENTRANT ->
     val = runTest!(input, rootId, pool, penv);
     RETURN COPY prStr(val, readable);
 END
 
-FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String @reentrant ->
+FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String EFFECTS REENTRANT ->
     MUTABLE result: Value = Value.Nil;
     FOR i IN (0_i64 ..< inputs.length()) DO
         result = runTest!(inputs[i], rootId, pool, penv);
@@ -25,7 +25,7 @@ END
 -- Uses the tree-walker's eval! to run compile! (which is CLEAR code),
 -- then extracts the result and runs it on exec!.
 
-FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String @reentrant ->
+FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
@@ -47,7 +47,7 @@ FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[5
     RETURN prStr(result, readable);
 END
 
-FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
+FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void EFFECTS REENTRANT ->
     -- Test 1: (10 - 4) * 3 = 18 (arithmetic + stack ops)
     MUTABLE ops1: Int64[]@list = List[];
     MUTABLE c1: Value[]@list = List[];

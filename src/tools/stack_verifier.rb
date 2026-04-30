@@ -70,6 +70,13 @@ class StackVerifier
         entry[:line] = fn.respond_to?(:line) ? fn.line : nil
         is_unbounded = fn.stack_tier == :unbounded
         entry[:unbounded] = is_unbounded
+        # Phase 4f.3 hook (Phase 4g will land the precise math):
+        # if fn.max_depth_n is set, the worst-case stack is
+        # f[:stack_bytes] * fn.max_depth_n -- a tighter bound than
+        # the tier budget alone. The verifier should compare that
+        # to the budget and warn if max_depth_n is suspiciously
+        # large for the per-frame cost. Left as TODO until 4g.
+        entry[:max_depth_n] = fn.max_depth_n if fn.respond_to?(:max_depth_n) && fn.max_depth_n
         budget = TIER_BUDGET[fn.stack_tier] || 12288
         entry[:budget] = budget
         entry[:usage_pct] = (f[:stack_bytes].to_f / budget * 100).round(1)
@@ -79,7 +86,7 @@ class StackVerifier
           report[:warnings] << {
             level: :info,
             message: "#{loc}'#{f[:name]}' is unbounded: #{f[:stack_bytes]} bytes/frame * unknown depth. " \
-                     "Requires @canSmash on BG/DO blocks."
+                     "Requires `@service` on BG/DO blocks (`@canSmash` is reserved for v0.3)."
           }
         elsif f[:stack_bytes] > budget
           entry[:overflow] = true
@@ -265,10 +272,17 @@ class StackVerifier
 
   # Compute the deepest stack path cost from a given entry function address.
   # Uses DFS with memoization. Returns total bytes for the worst-case call chain.
-  # Cycles (recursion) are detected and excluded (reentrant functions have
-  # unbounded depth - they must use @canSmash).
+  # Cycles (recursion) are detected and treated based on the recursing
+  # function's reentrance kind (Phase 4g):
+  #   - :reentrant_max_depth(N) -> own_frame * N (bounded by the runtime
+  #                                  depth counter)
+  #   - other / unknown          -> 0 (default underestimate; the
+  #                                  compile-time tier already forces
+  #                                  :unbounded -> :service for plain
+  #                                  :reentrant, so this path only
+  #                                  matters as a sanity check)
   # Functions that trampoline off the fiber stack are treated as leaf nodes.
-  def deepest_path_cost(entry_addr, graph_data)
+  def deepest_path_cost(entry_addr, graph_data, fn_nodes: nil)
     frame_sizes = graph_data[:frame_sizes]
     call_graph  = graph_data[:call_graph]
     fn_names    = graph_data[:fn_names]
@@ -277,7 +291,15 @@ class StackVerifier
 
     dfs = lambda do |addr|
       return memo[addr] if memo.key?(addr)
-      return 0 if in_stack.include?(addr)  # cycle -> reentrant
+      if in_stack.include?(addr)
+        # Cycle -> consult the CLEAR FunctionDef for a precise bound.
+        clear_name = fn_names[addr] && zig_to_clear_name(fn_names[addr])
+        fn = fn_nodes&.[](clear_name)
+        if fn && fn.respond_to?(:reentrance_kind) && fn.reentrance_kind == :reentrant_max_depth && fn.max_depth_n
+          return (frame_sizes[addr] || 0) * fn.max_depth_n
+        end
+        return 0
+      end
 
       my_frame = frame_sizes[addr] || 0
 
@@ -309,14 +331,14 @@ class StackVerifier
 
   # Compute optimal tier for the main fiber (clearMain entry point).
   # Returns { entry_name:, path_cost:, optimal_tier: } or nil if clearMain not found.
-  def compute_main_optimal_tier
+  def compute_main_optimal_tier(fn_nodes: nil)
     graph_data = extract_full_call_graph
     return nil unless graph_data
 
     addr, name = graph_data[:fn_names].find { |_, n| n =~ /\.clearMain$/ }
     return nil unless addr
 
-    cost = deepest_path_cost(addr, graph_data)
+    cost = deepest_path_cost(addr, graph_data, fn_nodes: fn_nodes)
     { entry_name: name, path_cost: cost, optimal_tier: cost_to_tier(cost) }
   end
 
@@ -333,7 +355,7 @@ class StackVerifier
       next unless name =~ /__BgCtx(\d+)\.run/
       bg_index = $1.to_i
 
-      cost = deepest_path_cost(addr, graph_data)
+      cost = deepest_path_cost(addr, graph_data, fn_nodes: fn_nodes)
       tier = cost_to_tier(cost)
 
       results << {

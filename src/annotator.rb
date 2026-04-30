@@ -17,6 +17,8 @@ require_relative "annotator-helpers/capabilities"
 require_relative "annotator-helpers/with_match_check"
 require_relative "annotator-helpers/fixable_helpers"
 require_relative "annotator-helpers/effects"
+require_relative "annotator-helpers/reentrance"
+require_relative "mir/thunk_transform"
 require_relative "annotator-helpers/lock_helper"
 require_relative "mir/alloc"
 require_relative "annotator-helpers/method_analysis"
@@ -32,6 +34,7 @@ class SemanticAnnotator
   include TypeHelper
   include GenericAnalysis
   include EffectTracker
+  include ReentranceBridge
   include CapabilityHelper
   include CapabilityAudit
   include AllocHelper
@@ -290,6 +293,15 @@ private
     # Pre-register synthesized default functions so Pass 3 bodies can call them.
     @synthetic_fns.each { |fn| pre_register_function(fn) }
 
+    # PASS 2.6: Bridge legacy `@reentrant` and new `EFFECTS REENTRANT`
+    # into a canonical `fn_node.reentrance_kind` field, and validate
+    # every `REQUIRES <name>: NON_REENTRANT` clause names a real
+    # parameter. Runs after Pass 2 (so @fn_nodes is fully populated)
+    # and BEFORE Pass 3 (so visit_FunctionDef's recursion check sees
+    # the back-filled legacy attrs when only EFFECTS REENTRANT was
+    # declared). See annotator-helpers/reentrance.rb.
+    bridge_reentrance!(node)
+
     # PASS 2.9: Seed the error-type registry from every RAISE site that
     # provides both a kind and a type. This pre-pass means CATCH Type
     # clauses can reference types registered by later-in-source RAISE
@@ -322,6 +334,26 @@ private
     # Now that all function bodies have been analyzed and @call_graph is complete,
     # detect mutually-recursive function groups and require @reentrant or @nonReentrant.
     check_indirect_reentrancy!
+
+    # PASS 4.1a (F1): NOT_LOGICAL static-recursion validation.
+    # Reject `:reentrant_not_logical` on a function the call-graph
+    # proves is reachable from itself; nudge toward `:THUNK` /
+    # `:MAX_DEPTH(N)` instead.
+    validate_not_logical_recursion!
+
+    # PASS 4.1b (F4): MAX_DEPTH-mutual-cycle warning. A `:MAX_DEPTH`
+    # fn caught in a mutual cycle silently demotes to ':unbounded'
+    # tier; warn so the user can pick the actual fix.
+    validate_max_depth_mutual_cycle!
+
+    # PASS 4.1: Thunk recursion validation. Distinguishes between
+    # not-recursive-at-all, directly-self-recursive, and
+    # mutually-recursive `:reentrant_thunk` functions. Mutual
+    # recursion needs tagged-union frames -- not yet implemented;
+    # error with a precise forward-pointing message so users know
+    # to refactor to direct self-recursion or use plain
+    # 'EFFECTS REENTRANT' for now.
+    validate_thunk_recursion!
 
     # PASS 5: Compute needs_rt and can_fail for every function via call-graph fixed-point.
     compute_needs_rt!
@@ -598,8 +630,20 @@ private
       record_effect(EffectTracker::REENTRANT)
       case node.reentrant
       when :non_reentrant
-        error!(node, "Reentrancy Error: '#{node.name}' directly calls itself. " \
-                     "Use @reentrant (not @nonReentrant) for directly recursive functions.")
+        # F1 (NOT_LOGICAL) gets a specific compile-time error from
+        # `validate_not_logical_recursion!` in PASS 4.1a, so skip the
+        # legacy phrasing here.
+        # MAX_DEPTH on direct self-recursion is FINE -- the runtime
+        # depth counter is exactly the mechanism that bounds it; the
+        # legacy "Use @reentrant" message would mislead. The cycle-
+        # member case still gets a fixable warning from
+        # `validate_max_depth_mutual_cycle!`.
+        # Both share `reentrant = :non_reentrant` (the bridge piggybacks
+        # on the legacy codegen path), so suppress here for either.
+        unless [:reentrant_not_logical, :reentrant_max_depth].include?(node.reentrance_kind)
+          error!(node, "Reentrancy Error: '#{node.name}' directly calls itself. " \
+                       "Use @reentrant (not @nonReentrant) for directly recursive functions.")
+        end
       when nil
         error!(node, "Reentrancy Error: '#{node.name}' calls itself recursively. " \
                      "Add @reentrant to the function signature to allow this.")
@@ -609,9 +653,39 @@ private
       if node.tail_call
         validate_tail_call!(node)
       end
+
+      # Thunk Phase 4b/4c: :reentrant_thunk handling. The bridge
+      # sets node.tail_call = true for tail-recursive :THUNK fns so
+      # the line above handles them via the existing TailCall MIR
+      # emission. Non-tail :THUNK lands here -- Phase 4c detects the
+      # simple-recurrence pattern (factorial-shape); Phase 4d will
+      # land the Zig codegen. Until then, the error message reports
+      # whether the splitter recognized the shape so users can plan.
+      if node.reentrance_kind == :reentrant_thunk && !node.tail_call
+        plan = ThunkTransform::RecursiveSplitter.split(node.body, node.name, self)
+        if plan
+          # Phase 4d: shape recognized -- stamp the plan so MIR
+          # lowering can synthesize the trampoline body.
+          node.thunk_plan = plan
+        else
+          error!(node, "EFFECTS REENTRANT:THUNK on '#{node.name}' has non-tail recursion in " \
+                        "a shape this phase does not yet recognize. Supported: simple " \
+                        "recurrence (zero or more `IF base -> RETURN const;` followed by a final " \
+                        "`RETURN expr <op> #{node.name}(args);`). Wider shapes (multi-recursion, " \
+                        "arbitrary control flow with recursion) land in later sub-phases. For " \
+                        "now, declare ':TAIL_CALL' or use plain 'EFFECTS REENTRANT'.")
+        end
+      end
     elsif node.tail_call
       error!(node, "@reentrant:tailCall on '#{node.name}' but the function is not recursive. " \
                    "Remove :tailCall - it only applies to self-recursive functions.")
+    elsif node.reentrance_kind == :reentrant_thunk
+      # The "directly recursive" branch above is false here. The
+      # function might still be MUTUALLY recursive (A calls B calls
+      # A), which @call_graph hasn't fully recorded yet at this
+      # point in Pass 3. Defer the THUNK-recursion validation to
+      # Pass 4.1 (validate_thunk_recursion!) which runs after
+      # check_indirect_reentrancy populates the cycle data.
     end
 
     # Note: calling through a fn-type variable (parameter or local lambda) does NOT
@@ -2573,6 +2647,22 @@ private
     end
   end
 
+  # Thunk Phase 4.1 / 4.2 (parser-only commit): the syntax is
+  # reserved; runtime semantics defer to v0.3. Emit a precise
+  # "not yet implemented" error so users get a clear forward-
+  # pointing diagnostic instead of silently wrong codegen.
+  def visit_CallSiteOverride(node)
+    sigil = node.kind == :thunk ? "@thunk" : "@maxDepth"
+    error!(node,
+      "#{sigil}(#{node.n}) is parsed but not yet implemented. Per-call-site " \
+      "monomorphization (cloning the callee + rewriting recursive calls inside " \
+      "the clone so the depth counter / trampoline applies to internal recursion) " \
+      "lands in v0.3 alongside the broader monomorphization pass. For now, " \
+      "declare the variant on the function instead: " \
+      "#{node.kind == :thunk ? "'EFFECTS REENTRANT:THUNK'" : "'EFFECTS REENTRANT:MAX_DEPTH(#{node.n})'"} " \
+      "(call-site overrides will be a strictly additive feature when 4.1/4.2 land).")
+  end
+
   def visit_UnaryOp(node)
     visit(node.right)
 
@@ -4376,24 +4466,74 @@ private
   # Verify that @reentrant:tailCall functions have the self-recursive call
   # in tail position: the RETURN expression must be a direct call to self
   # with no wrapping operations (no +, -, etc.).
+  # Thunk Phase 3: every recursive self-call inside a function declared
+  # `EFFECTS REENTRANT:TAIL_CALL` (or legacy `@reentrant:tailCall`) MUST
+  # be the direct value of a RETURN node. Any other position -- statement,
+  # nested expression inside a RETURN, body of a WHILE/FOR loop, etc. --
+  # is a hard error: the codegen lowering relies on the call being a
+  # self-loop, and a non-tail call would consume real stack on every
+  # invocation.
+  #
+  # Approach: walk the body recursively, collecting every self-call
+  # AST::FuncCall, then collecting every RETURN whose value IS a self-
+  # call (those are the "blessed" tail calls). Error on each self-call
+  # that isn't blessed. Recurses through IF / WHILE / FOR / WITH bodies.
   def validate_tail_call!(fn_node)
     fn_name = fn_node.name
-    returns = fn_node.body.select { |s| s.is_a?(AST::ReturnNode) }
-    has_tail = returns.any? { |r| r.value.is_a?(AST::FuncCall) && r.value.name == fn_name }
-    unless has_tail
-      error!(fn_node, "@reentrant:tailCall requires at least one RETURN that directly " \
-                       "calls '#{fn_name}' in tail position (e.g., RETURN #{fn_name}(...)). " \
-                       "The recursive call cannot be wrapped in an expression.")
+    all_self_calls = collect_self_calls(fn_node.body, fn_name)
+
+    blessed = collect_returns(fn_node.body).filter_map { |r|
+      r.value if r.value.is_a?(AST::FuncCall) && r.value.name == fn_name
+    }
+    blessed_ids = blessed.map(&:object_id).to_set
+
+    if blessed.empty?
+      error!(fn_node, "EFFECTS REENTRANT:TAIL_CALL on '#{fn_name}' requires at least one " \
+                       "RETURN that directly calls '#{fn_name}' in tail position " \
+                       "(e.g., RETURN #{fn_name}(...)). The recursive call cannot be " \
+                       "wrapped in an expression.")
     end
 
-    # Check that no RETURN has a non-tail self-call (e.g., RETURN fib(n) + fib(n))
-    returns.each do |r|
-      next if r.value.is_a?(AST::FuncCall) && r.value.name == fn_name  # direct tail call - OK
-      if contains_self_call?(r.value, fn_name)
-        error!(r, "@reentrant:tailCall: RETURN expression contains '#{fn_name}' in " \
-                   "non-tail position. The recursive call must be the ENTIRE return expression.")
-      end
+    all_self_calls.each do |call|
+      next if blessed_ids.include?(call.object_id)
+      error!(call, "EFFECTS REENTRANT:TAIL_CALL: '#{fn_name}' is called in non-tail position. " \
+                    "All recursive self-calls must be the ENTIRE return expression (e.g., " \
+                    "RETURN #{fn_name}(...)). Non-tail recursion would consume the fiber " \
+                    "stack on every invocation. If recursion is genuinely non-tail, declare " \
+                    "':THUNK' instead -- it handles arbitrary recursion via a heap state-struct.")
     end
+  end
+
+  # Recursively walk an AST subtree collecting every AST::FuncCall whose
+  # name matches `fn_name`. Args are also visited (so nested self-calls
+  # inside outer-call arguments are found and flagged).
+  def collect_self_calls(node, fn_name, out = [])
+    return out if node.nil?
+    case node
+    when Array
+      node.each { |n| collect_self_calls(n, fn_name, out) }
+    when AST::FuncCall
+      out << node if node.name == fn_name
+      (node.args || []).each { |a| collect_self_calls(a, fn_name, out) }
+    else
+      node.each_pair { |_, v| collect_self_calls(v, fn_name, out) } if node.respond_to?(:each_pair)
+    end
+    out
+  end
+
+  # Recursively walk an AST subtree collecting every AST::ReturnNode.
+  def collect_returns(node, out = [])
+    return out if node.nil?
+    case node
+    when Array
+      node.each { |n| collect_returns(n, out) }
+    when AST::ReturnNode
+      out << node
+      collect_returns(node.value, out) if node.respond_to?(:value)
+    else
+      node.each_pair { |_, v| collect_returns(v, out) } if node.respond_to?(:each_pair)
+    end
+    out
   end
 
   def contains_self_call?(node, fn_name)
@@ -4427,6 +4567,7 @@ private
         calls = scan_for_calls(n.body).first
         raw = max_tier_for_calls(calls)
         n.computed_stack_tier = (raw == :unbounded) ? :service : raw
+        validate_fiber_stack!(n, calls, n.stack_size, false)
         n.body.each { |s| traverse.call(s) }
       when AST::DoBlock
         n.branches.each do |branch|
@@ -4444,21 +4585,151 @@ private
   end
 
   # Validate stack sizing for a fiber spawn.
-  # Errors if: user picked a size smaller than the computed tier without @canSmash.
-  # Reentrant call chains auto-promote to :service (Huge) instead of erroring.
+  # Phase 4g: plain `EFFECTS REENTRANT` callees REQUIRE explicit
+  # `@service` on the spawn site. The compiler no longer auto-
+  # infers OS-thread stacks -- the user pays the cost knowingly,
+  # or chooses a bounded variant (`:THUNK` / `:TAIL_CALL` /
+  # `:NOT_LOGICAL` / `:MAX_DEPTH(N)`) on the callee.
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
-    return if can_smash  # user acknowledged the risk
+    if can_smash
+      error!(node,
+        "`@canSmash` on BG/DO blocks is recognized but not yet supported by the " \
+        "compiler. The runtime has stack-hysteresis (page-guarded soft overflow " \
+        "detection) to protect fiber stacks, but the compiler does not yet wire " \
+        "that feature on. Use `@service` instead (spawns on a dedicated OS thread " \
+        "with a 2 MB pre-allocated stack); `@canSmash` is expected to be supported " \
+        "in v0.3.")
+      return
+    end
+
+    plain_reentrant_callee = find_plain_reentrant_callee(call_names)
+    if plain_reentrant_callee && user_size != :service
+      emit_service_required_error!(node, plain_reentrant_callee, user_size)
+      return
+    end
 
     raw = max_tier_for_calls(call_names)
-    # Reentrant chains auto-promote to :service rather than erroring.
+    # Bounded variants no longer hit :unbounded; only mutual-MAX_DEPTH
+    # falls back to :unbounded here (via compute_stack_tiers!), which
+    # also requires @service via the plain_reentrant_callee path? No --
+    # mutual MAX_DEPTH callees aren't `:reentrant` plain. They land in
+    # the :unbounded case below; without @service we error too.
     computed = (raw == :unbounded) ? :service : raw
+
+    if raw == :unbounded && user_size != :service
+      mutual_md_callee = find_mutual_max_depth_callee(call_names)
+      if mutual_md_callee
+        error!(node, "Stack safety: this fiber transitively calls '#{mutual_md_callee}' " \
+                     "which is `:MAX_DEPTH(N)` AND mutually recursive. Mutual depth-bounds " \
+                     "compose as a product across counters and can't be statically bounded; " \
+                     "the spawn site must be `@service` (OS thread). Either declare `@service` " \
+                     "explicitly or break the cycle (see `:THUNK` for unbounded-depth fibers).")
+        return
+      end
+    end
 
     # User-specified size too small
     if user_size && TIER_ORDER.fetch(user_size, 0) < TIER_ORDER.fetch(computed, 0)
       error!(node, "Stack safety: @#{user_size} (#{EffectTracker::STACK_TIER_BUDGET[user_size]} bytes) " \
                    "is too small for this fiber. Call-graph analysis requires at least @#{computed}. " \
-                   "Either use @#{computed} or add @canSmash to override: BG { @#{user_size}:canSmash -> ... }")
+                   "Use @#{computed} (or @service for OS-thread). " \
+                   "(`@canSmash` is reserved for v0.3 -- runtime stack-hysteresis is implemented " \
+                   "but not yet wired through the compiler.)")
     end
+  end
+
+  # Walk the call graph from the BG body and return the name of the
+  # first callee whose `reentrance_kind == :reentrant` (plain). Other
+  # variants (:thunk, :tail_call, :not_logical, :max_depth) are
+  # bounded and don't trigger the @service-required rule.
+  def find_plain_reentrant_callee(call_names)
+    visited = Set.new
+    queue = call_names.to_a.dup
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+      fn = @fn_nodes[name]
+      return name if fn && fn.reentrance_kind == :reentrant
+      (@call_graph[name] || []).each { |c| queue << c }
+    end
+    nil
+  end
+
+  # Walk the call graph and return the first callee that has
+  # `:reentrant_max_depth` AND is in a non-trivial SCC (mutually
+  # recursive). Such fns force the spawn site to :service via
+  # compute_stack_tiers!'s :unbounded fallback.
+  def find_mutual_max_depth_callee(call_names)
+    visited = Set.new
+    queue = call_names.to_a.dup
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+      fn = @fn_nodes[name]
+      return name if fn && fn.reentrance_kind == :reentrant_max_depth && mutually_recursive_in_call_graph?(name)
+      (@call_graph[name] || []).each { |c| queue << c }
+    end
+    nil
+  end
+
+  # Phase 4g: emit the @service-required diagnostic as a fixable
+  # finding. Two interactive fixes:
+  #   1. Insert `@service ->` right after `{` (no-prefix case)
+  #   2. Replace the existing tier sigil with `@service`
+  # When neither span is locatable (e.g. DO branches), fall back
+  # to a plain error! with the message text.
+  def emit_service_required_error!(node, reentrant_fn, user_size)
+    msg = "Stack safety: this fiber transitively calls '#{reentrant_fn}' which is " \
+          "`EFFECTS REENTRANT` (plain) -- the call chain is unbounded and MUST run on " \
+          "an OS thread. Declare `@service` explicitly on the spawn site (the compiler " \
+          "no longer auto-infers this). Alternatively, change '#{reentrant_fn}' to a " \
+          "bounded reentrance variant: `:THUNK` (heap CPS, depth=1 fiber stack), " \
+          "`:TAIL_CALL` (TCO loop, depth=1), `:NOT_LOGICAL` (asserts non-recursion), " \
+          "or `:MAX_DEPTH(N)` (bounded counter)."
+
+    fixes = []
+    if node.respond_to?(:prefix_token) && node.prefix_token
+      tok = node.prefix_token
+      fixes << Fix.new(
+        description: "Replace `@#{user_size}` with `@service` (this fiber transitively calls a plain :reentrant fn).",
+        confidence: :interactive,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column, length: tok.value.to_s.length),
+          replacement: "@service",
+        )],
+      )
+    elsif node.respond_to?(:open_brace_token) && node.open_brace_token
+      tok = node.open_brace_token
+      fixes << Fix.new(
+        description: "Insert `@service ->` after `{` (this fiber transitively calls a plain :reentrant fn).",
+        confidence: :interactive,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column + 1, length: 0),
+          replacement: " @service ->",
+        )],
+      )
+    end
+
+    return error!(node, msg) if fixes.empty?
+
+    fixable!(node, message: msg, category: :reentrance, level: :error,
+             fixes: fixes, raise_in_collector: false)
+  end
+
+  # Find the first :unbounded callee in the call chain (for error messages).
+  def find_unbounded_callee(call_names)
+    visited = Set.new
+    queue = call_names.to_a.dup
+    until queue.empty?
+      name = queue.shift
+      next if visited.include?(name)
+      visited << name
+      return name if @fn_nodes[name]&.stack_tier == :unbounded
+      (@call_graph[name] || []).each { |c| queue << c }
+    end
+    nil
   end
 
   # ── Ownership Graph Operations ─────────────────────────────────

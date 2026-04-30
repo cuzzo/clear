@@ -25,7 +25,7 @@ UNION JsonValue {
 -- Printer (for test output)
 -- =========================================================================
 
-FN jsonToString(v: JsonValue) RETURNS String @reentrant ->
+FN jsonToString(v: JsonValue) RETURNS String EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         JsonValue.Null -> RETURN "null";,
         JsonValue.JBool AS b -> IF b THEN RETURN "true"; END RETURN "false";,
@@ -92,7 +92,7 @@ FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS 
     RETURN result;
 END
 
-FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: Int64) RETURNS JsonValue @reentrant ->
+FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: Int64) RETURNS JsonValue EFFECTS REENTRANT ->
     MUTABLE p = skipWhitespace(json, pos);
 
     IF p >= json.length() THEN
