@@ -785,7 +785,6 @@ class BcEmitter
         # The VM has no Arc/lock indirection — alias and source share storage.
         # The source is named in stdlib_def[:borrows].
         sources = (mir_node.stdlib_def && mir_node.stdlib_def[:borrows]) || []
-        STDERR.puts "DBG with_block code:\n#{mir_node.code}\nsources=#{sources.inspect}\n----" if ENV["BC_TRACE_WITH"]
         # First pattern: Arc unwrap via .ctrl.data.*
         mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|
           alias_to_source(alias_name, src_name)
