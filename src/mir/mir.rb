@@ -929,4 +929,52 @@ module MIR
     include Stmt
     def expr?; true; end  # can appear in expression position too
   end
+
+  # Sharded HashMap put / get -- structural representation of a write/read
+  # against a (possibly sharded, possibly Arc-wrapped) HashMap. Replaces
+  # the InlineZig template substitution path so the checker has visibility
+  # into key allocation, value transfer, and shard-direct vs routed
+  # dispatch.
+  #
+  # Fields:
+  #   target:      MIR node for the container being read/written.
+  #   key:         MIR node for the lookup key (string or numeric).
+  #   value:       MIR node for the value being written (Put only).
+  #   shard_idx:   MIR node (typically Ident) for the shard index var
+  #                when emitted inside a SHARD pipeline body. nil ->
+  #                routed dispatch (target.put / target.get computes
+  #                the shard internally).
+  #   shard_key:   MIR node for the shard-keyed lookup string (only set
+  #                when shard_idx is non-nil and the shard_direct
+  #                template uses it).
+  #   map_kind:    :string_map | :numeric_map -- chooses key encoding.
+  #   stdlib_def:  the INDEX_OPS entry (with :zig, :shard_direct_zig,
+  #                :sharded_zig, allocator keys, value_transforms,
+  #                bc_op). The Zig emitter reads this to pick the
+  #                template; the checker reads it to validate
+  #                ownership effects.
+  #   key_zig:     Optional Zig type string for numeric_map key (for
+  #                CheatLib.numericMapGet template). Set when relevant.
+  #   val_zig:     Same, for value type.
+  # resolved_allocs: Hash of allocator placeholder name (:alloc, :key_alloc,
+  #   :val_alloc, :shard_alloc) to a resolved allocator symbol (:heap |
+  #   :frame). The lowering pre-resolves :receiver_storage / :node_storage
+  #   to a concrete kind based on the receiver/target context, so the
+  #   emitter only needs to map symbol -> Zig string.
+  # template_kind: :zig | :sharded_zig | :shard_direct_zig -- which
+  #   INDEX_OPS template the lowering chose. The emitter uses this to
+  #   pick the same template without re-running the lowering's
+  #   shard-context inspection.
+  ShardedMapPut = Struct.new(:target, :key, :value, :shard_idx, :shard_key,
+                              :map_kind, :stdlib_def, :key_zig, :val_zig,
+                              :resolved_allocs, :template_kind) do
+    include Stmt
+    def expr?; true; end
+  end
+
+  ShardedMapGet = Struct.new(:target, :key, :shard_idx, :shard_key,
+                              :map_kind, :stdlib_def, :key_zig, :val_zig,
+                              :resolved_allocs, :template_kind) do
+    include Expr
+  end
 end

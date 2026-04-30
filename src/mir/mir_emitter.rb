@@ -142,6 +142,8 @@ class MIREmitter
     when MIR::InlineZig        then emit_inline_zig(node)
     when MIR::InlineBc         then emit_inline_bc_as_zig(node)
     when MIR::RawBc            then emit_raw_bc_as_zig(node)
+    when MIR::ShardedMapPut    then emit_sharded_map_put(node)
+    when MIR::ShardedMapGet    then emit_sharded_map_get(node)
 
     else
       raise "MIREmitter: unknown node type #{node.class}"
@@ -157,6 +159,52 @@ class MIREmitter
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry[:zig]
     pattern = entry[:zig].dup
     node.args.each_with_index { |a, i| pattern = pattern.gsub("{#{i}}") { emit(a) } }
+    pattern
+  end
+
+  # Emit Zig source for a sharded HashMap put. Picks the template based
+  # on dispatch mode: shard_idx non-nil means we're inside a SHARD body
+  # and use putDirect; otherwise pick sharded_zig (when the receiver
+  # type is sharded/striped) or default zig. Substitutes positional
+  # placeholders, allocator placeholders, and shard-direct identifiers.
+  def emit_sharded_map_put(node)
+    pattern = sharded_map_template(node).dup
+    pattern = pattern
+      .gsub("{target}", emit(node.target))
+      .gsub("&{target}", "&#{emit(node.target)}")
+      .gsub("{index}", emit(node.key))
+      .gsub("{value}", emit(node.value))
+    sharded_map_substitute_common(pattern, node)
+  end
+
+  def emit_sharded_map_get(node)
+    pattern = sharded_map_template(node).dup
+    pattern = pattern
+      .gsub("{target}", emit(node.target))
+      .gsub("{index}", emit(node.key))
+    sharded_map_substitute_common(pattern, node)
+  end
+
+  # Pick the Zig template the lowering committed to. template_kind is
+  # set on the node by mir_lowering after inspecting shard_context and
+  # the receiver type.
+  def sharded_map_template(node)
+    op = node.stdlib_def
+    kind = node.template_kind || :zig
+    op[kind] or raise "ShardedMap: op has no :#{kind} template (op keys=#{op.keys})"
+  end
+
+  def sharded_map_substitute_common(pattern, node)
+    if node.shard_idx
+      pattern = pattern
+        .gsub("{shard_idx}", emit(node.shard_idx))
+        .gsub("{shard_key}", emit(node.shard_key))
+    end
+    pattern = pattern.gsub("{key_zig}", node.key_zig) if node.key_zig
+    pattern = pattern.gsub("{val_zig}", node.val_zig) if node.val_zig
+    (node.resolved_allocs || {}).each do |alloc_key, sym|
+      pattern = pattern.gsub("{#{alloc_key}}", alloc_zig(sym))
+    end
     pattern
   end
 

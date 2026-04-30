@@ -821,6 +821,7 @@ INDEX_OPS = {
   numeric_map: {
     get: {
       zig: "CheatLib.numericMapGet({key_zig}, {val_zig}, {target}, {index})",
+      sharded_zig: "{target}.get({index})",
       shard_direct_zig: "{target}.getDirect({shard_idx}, {shard_key})",
       return_type: ->(ct) { :"?#{ct.value_type.resolved}" },
       container_borrow: true,

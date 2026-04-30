@@ -749,6 +749,13 @@ class BcEmitter
       end
     when MIR::InlineBc
       compile_inline_bc(mir_node)
+    when MIR::ShardedMapPut
+      # Statement-position sharded HashMap put -- emit MAP_PUT (the VM
+      # has no shard routing; sharded maps share a single MapRef).
+      compile_sharded_map_put(mir_node)
+      t = pop_type
+      emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      push_type(:void)
     when MIR::RawBc
       # Statement-position RawBc — walk its template for side effects,
       # discard the result.
@@ -2254,6 +2261,10 @@ class BcEmitter
       raise Unimplemented, "InlineZig/RawZig in expression position (no bc template in stdlib)"
     when MIR::InlineBc
       compile_inline_bc(node)
+    when MIR::ShardedMapPut
+      compile_sharded_map_put(node)
+    when MIR::ShardedMapGet
+      compile_sharded_map_get(node)
     when MIR::RawBc
       compile_raw_bc(node)
     when MIR::ConcatStr
@@ -2619,6 +2630,26 @@ class BcEmitter
     eql:      "==",  strEql:   "==",  symbolEql: "==",
     :"eql?" => "==",
   }.freeze
+
+  # Compile a sharded HashMap put. The VM has no shard routing -- treat
+  # all variants (routed, shard-direct, sharded receiver) the same:
+  # MAP_PUT against the underlying MapRef. shard_idx / shard_key /
+  # value_transforms / allocator placeholders are Zig-only.
+  def compile_sharded_map_put(node)
+    compile_expr_to_value(node.target); pop_type
+    compile_expr_to_value(node.key); pop_type
+    compile_expr_to_value(node.value); pop_type
+    emit_op(MAP_PUT)
+    push_type(:any)
+  end
+
+  # Compile a sharded HashMap get. Same simplification as put.
+  def compile_sharded_map_get(node)
+    compile_expr_to_value(node.target); pop_type
+    compile_expr_to_value(node.key); pop_type
+    emit_op(MAP_GET)
+    push_type(:any)
+  end
 
   def compile_inline_bc(node)
     op = node.op

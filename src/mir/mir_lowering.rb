@@ -3833,34 +3833,35 @@ class MIRLowering
       map_ft = Type.new(node.target.full_type)
       kind = map_ft.numeric_map? ? :numeric_map : :string_map
       op = INDEX_OPS.dig(kind, :get)
-      # BC dispatch: when @target == :bc and the INDEX_OPS entry opts in
-      # via bc_op, emit a structural MIR::InlineBc carrying the unified
-      # op name. Both numeric and string maps converge on the same VM
-      # opcode (the runner stringifies numeric keys via keyAsStr). Sharded
-      # / striped HashMaps fall through here too -- the VM has no shard
-      # routing; treat them as a single MapRef. Stays gated out of the
-      # shard-direct body case where {shard_idx} substitution is needed.
-      if @target == :bc && op&.dig(:bc_op) &&
-         !(@shard_context && target_var == @shard_context[:map])
-        return MIR::InlineBc.new(op[:bc_op], [target, index], op)
+
+      # Structural MIR::ShardedMapGet for both backends. Carries the
+      # full INDEX_OPS entry (templates, ownership effects) so the
+      # checker can validate ownership semantics. shard_idx is set
+      # only inside a SHARD pipeline body where the shard index var
+      # is computed by the surrounding loop -- direct dispatch skips
+      # routing.
+      shard_direct = @shard_context && target_var == @shard_context[:map]
+      template_kind = if shard_direct then :shard_direct_zig
+                      elsif (map_ft.sharded? || map_ft.striped?) && op[:sharded_zig]
+                        :sharded_zig
+                      else :zig
+                      end
+      template = op[template_kind]
+      resolved_allocs = {}
+      [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
+        next unless template&.include?("{#{alloc_key}}")
+        sym = op[alloc_key] || :heap
+        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, map_ft, node.target, node)
       end
-      if @shard_context && target_var == @shard_context[:map]
-        # Inside SHARD body: use getDirect (no routing, no sendAndWait)
-        target_zig = emit_expr(target)
-        pattern = op[:shard_direct_zig].dup
-        pattern = pattern.gsub("{target}", target_zig)
-        pattern = pattern.gsub("{shard_idx}", @shard_context[:idx])
-        pattern = pattern.gsub("{shard_key}", @shard_context[:key])
-        iz = MIR::InlineZig.new(pattern, "shard_direct_get")
-        iz.stdlib_def = op
-        iz
-      elsif map_ft.numeric_map? && !(map_ft.sharded? || map_ft.striped?)
-        key_zig = map_ft.key_type.zig_type
-        val_zig = map_ft.value_type.zig_type
-        emit_builtin(:numericMapGet, [MIR::Ident.new(key_zig), MIR::Ident.new(val_zig), target, index])
-      else
-        MIR::MethodCall.new(target, "get", [index], false)
+      key_zig = (kind == :numeric_map) ? map_ft.key_type.zig_type : nil
+      val_zig = (kind == :numeric_map) ? map_ft.value_type.zig_type : nil
+      if shard_direct
+        return MIR::ShardedMapGet.new(target, index,
+          MIR::Ident.new(@shard_context[:idx]),
+          MIR::Ident.new(@shard_context[:key]),
+          kind, op, key_zig, val_zig, resolved_allocs, template_kind)
       end
+      MIR::ShardedMapGet.new(target, index, nil, nil, kind, op, key_zig, val_zig, resolved_allocs, template_kind)
     elsif ti&.pool?
       # Both backends consume MIR::InlineBc(:get, [target, index], POOL_METHODS["get"]).
       # BC dispatches via compile_inline_bc :get on tag == :pool_method
@@ -4568,21 +4569,92 @@ class MIRLowering
     idx = lower(node.name.index)
     val = lower(node.value)
 
-    # Auto-deref Arc/Rc-wrapped containers
-    if ti&.map? && (ti&.shared? || ti&.multiowned?)
-      target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
-    end
-
     # Fallback for unknown container types or missing registry entries
     unless op
       return MIR::ExprStmt.new(emit_builtin(:setAt, [target, idx, val]), false)
     end
 
-    # BC dispatch: structural MIR::InlineBc when the INDEX_OPS :set entry
-    # opts in via bc_op. Sharded / striped HashMaps go through here too --
-    # the VM has no shard routing; treat as a single MapRef. Stays gated
-    # out of the shard-direct body case where {shard_idx} substitution is
-    # needed.
+    # HashMap (string/numeric, possibly sharded/striped/Arc-wrapped):
+    # emit the structural MIR::ShardedMapPut. Both backends consume it
+    # directly, so the checker has visibility into key dupe / value
+    # transforms / shard-direct vs routed dispatch from the node fields.
+    if kind == :string_map || kind == :numeric_map
+      target_var = target_node.is_a?(AST::Identifier) ? target_node.name : nil
+
+      # Map keys are duped internally by put -- always frame-allocate the
+      # key expression so it's cleaned by arena rewind (no orphaned heap
+      # temporary).
+      if kind == :string_map && idx.is_a?(MIR::ConcatStr)
+        idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
+      end
+
+      # Apply value transforms in the lowering (Zig-only effect — BC's
+      # MAP_PUT handles value storage uniformly via the Value union).
+      shard_direct = @shard_context && target_var == @shard_context[:map] && op[:shard_direct_zig]
+      if @target != :bc
+        val_node = node.value
+        val_ti = val_node.type_info rescue nil
+        transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []
+                     else op[:value_transforms] || []
+                     end
+        transforms.each do |transform|
+          case transform
+          when :dupe_string_literal
+            if val_ti&.string? && !val_node.is_a?(AST::CopyNode)
+              val = MIR::DupeSlice.new(val, :heap)
+            end
+          when :dupe_borrowed_union
+            unless val_ti&.string?
+              if should_dupe_borrowed_union?(val_node, val_ti)
+                zig_t = bare_zig_type(val_ti)
+                val = emit_builtin(:dupeUnionValue, [MIR::Ident.new(zig_t), val, MIR::Ident.new(alloc_zig_str(:heap))])
+              end
+            end
+          when :container_promote
+            unless val_ti&.string?
+              zig_type = node.container_promote_zig_type
+              if zig_type
+                val_zig = emit_expr(val)
+                new_zig = apply_container_promote_zig(val_zig, rt_name, zig_type)
+                val = MIR::InlineZig.new(new_zig, "index_promote")
+                val.stdlib_def = { allocates: true }
+              end
+            end
+          end
+        end
+
+        # Auto-deref Arc/Rc-wrapped containers (Zig-only -- BC has no
+        # .ctrl.data wrapping and a single MapRef cell holds the data).
+        if ti&.map? && (ti&.shared? || ti&.multiowned?)
+          target = MIR::Deref.new(MIR::FieldGet.new(MIR::FieldGet.new(target, "ctrl"), "data"))
+        end
+      end
+
+      key_zig = (kind == :numeric_map) ? receiver_type.key_type&.zig_type : nil
+      val_zig = (kind == :numeric_map) ? receiver_type.value_type&.zig_type : nil
+      template_kind = if shard_direct then :shard_direct_zig
+                      elsif (receiver_type&.sharded? || receiver_type&.striped?) && op[:sharded_zig]
+                        :sharded_zig
+                      else :zig
+                      end
+      template = op[template_kind]
+      resolved_allocs = {}
+      [:alloc, :key_alloc, :val_alloc, :shard_alloc].each do |alloc_key|
+        next unless template&.include?("{#{alloc_key}}")
+        sym = op[alloc_key] || :heap
+        resolved_allocs[alloc_key] = resolve_alloc_sym(sym, receiver_type, target_node, node)
+      end
+      if shard_direct
+        return MIR::ShardedMapPut.new(target, idx, val,
+          MIR::Ident.new(@shard_context[:idx]),
+          MIR::Ident.new(@shard_context[:key]),
+          kind, op, key_zig, val_zig, resolved_allocs, template_kind)
+      end
+      return MIR::ShardedMapPut.new(target, idx, val, nil, nil, kind, op, key_zig, val_zig, resolved_allocs, template_kind)
+    end
+
+    # Non-HashMap kinds (array, list, pool, set_collection) keep their
+    # InlineZig template path below.
     target_var_for_bc = target_node.is_a?(AST::Identifier) ? target_node.name : nil
     if @target == :bc && op[:bc_op] &&
        !(@shard_context && target_var_for_bc == @shard_context[:map])
@@ -4590,7 +4662,6 @@ class MIRLowering
         MIR::InlineBc.new(op[:bc_op], [target, idx, val], op), false)
     end
 
-    # Pick shard-direct zig when inside a SHARD pipeline body and target matches
     target_var = target_node.is_a?(AST::Identifier) ? target_node.name : nil
     shard_direct = @shard_context && target_var == @shard_context[:map] && op[:shard_direct_zig]
     zig = if shard_direct
@@ -4601,14 +4672,6 @@ class MIRLowering
       op[:zig]
     end
 
-    # Map keys are duped internally by put -- always frame-allocate the key
-    # expression so it's cleaned by arena rewind (no orphaned heap temporary).
-    if kind == :string_map && idx.is_a?(MIR::ConcatStr)
-      idx = MIR::ConcatStr.new(idx.parts, alloc_expr(:frame), idx.rt_expr)
-    end
-
-    # Select value transforms for the chosen zig variant. Each variant declares
-    # its own transforms (e.g. shard_direct_value_transforms for putDirect).
     val_node = node.value
     val_ti = val_node.type_info rescue nil
     transforms = if shard_direct then op[:shard_direct_value_transforms] || op[:value_transforms] || []

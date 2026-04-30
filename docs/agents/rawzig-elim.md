@@ -38,46 +38,58 @@ the fiber boundary.
 
 ## Remaining RawZig / InlineZig clusters
 
-### Cluster A: Sharded operations (3 UNIMPL + 1 FAIL)
+### Cluster A: Sharded operations -- DONE for HashMap put/get
 
-Tests: 108_shard_pipeline, 229_shard_numeric_keys, 64_sharded_collections,
-109_shared_sharded_map (FAIL).
+Tests passing: 108_shard_pipeline, 229_shard_numeric_keys,
+64_sharded_collections, 109_shared_sharded_map. 
 
-**What it does:** `@sharded` HashMap routing. A sharded map has N
-underlying shards, each with its own mutex. Cross-shard puts route
-through `put` (which computes shardIdx and dispatches), shard-direct
-puts use `putDirect` (caller already knows the shard). Strings are
-duped to the shard's allocator; values are TAKES'd.
+Replaced the InlineZig template-substitution path for sharded HashMap
+put/get with two structural MIR nodes that both backends consume:
 
-**What it looks like now:** `MIR::RawZig` with `@shard_context`
-discriminating direct vs routed. The lowering already differentiates
-`shard_direct_zig` vs `zig` patterns in `INDEX_OPS[:string_map][:set]`,
-but the templates themselves are opaque strings.
-
-**Why this matters for correctness:** the most subtle ownership
-story in the codebase. Cross-shard puts dupe keys to the shard
-allocator; if the shard's lock-fail path drops the key, the dupe
-must be freed. Direct puts skip the dupe (caller owns). A regression
-in either template silently leaks or double-frees. The checker
-currently can't fire.
-
-**Structural MIR target:**
 ```ruby
-MIR::ShardPut.new(target, shard_idx_or_nil, key, value,
-                   key_alloc: :shard_or_caller,
-                   val_alloc: :receiver_storage,
-                   key_dupe: bool, value_dupe: bool)
-MIR::ShardGet.new(target, shard_idx_or_nil, key)
-MIR::ShardRoute.new(map, key)  # shardIdx computation
+MIR::ShardedMapPut.new(target, key, value, shard_idx, shard_key,
+                        map_kind, stdlib_def, key_zig, val_zig,
+                        resolved_allocs, template_kind)
+MIR::ShardedMapGet.new(target, key, shard_idx, shard_key,
+                        map_kind, stdlib_def, key_zig, val_zig,
+                        resolved_allocs, template_kind)
 ```
 
-The checker validates: when `key_dupe == true`, an `AllocMark` for
-the duped key must pair with a `Cleanup` (or `ErrCleanup` on the
-lock-fail path). When `shard_idx` is non-nil, no routing -- skip the
-dupe.
+Field semantics:
+- `target`, `key`, `value`: MIR sub-expressions (not pre-emitted Zig
+  strings). The checker can recurse into them for ownership analysis.
+- `shard_idx`/`shard_key`: MIR Ident nodes for the shard index/key
+  vars in scope when emitted inside a SHARD pipeline body. nil for
+  routed dispatch.
+- `template_kind`: `:zig | :sharded_zig | :shard_direct_zig` -- the
+  template family the lowering chose based on the receiver type and
+  shard context. Both backends consume this directly.
+- `resolved_allocs`: pre-resolved allocator symbols (`:heap | :frame`)
+  for the placeholders the chosen template uses. The lowering runs
+  resolve_alloc_sym at lowering time so the emitter only does the
+  symbol -> Zig string mapping.
+- `stdlib_def`: full INDEX_OPS entry (templates + ownership flags).
+  The checker reads this to validate ownership effects (key dupe,
+  value transfer, container borrow).
 
-**Effort:** Medium. Three new MIR nodes, BC + Zig emitter handlers,
-one structural lowering pass replacing the existing RawZig templates.
+Zig backend (mir_emitter.rb): `emit_sharded_map_put` /
+`emit_sharded_map_get` pick the template by `template_kind` and
+substitute `{target}`, `{index}`, `{value}`, `{shard_idx}`,
+`{shard_key}`, `{key_zig}`, `{val_zig}`, `{key_alloc}`, `{val_alloc}`,
+`{shard_alloc}` etc. Same Zig output as the previous InlineZig path.
+
+BC backend (bc_emitter.rb): `compile_sharded_map_put` /
+`compile_sharded_map_get` emit `MAP_PUT` / `MAP_GET`. The VM has no
+shard routing; sharded maps share a single MapRef cell.
+
+What's NOT yet structured (still RawZig in pipeline_generator):
+- `transpile_shard_concurrent_each` -- the SHARD + CONCURRENT EACH
+  outer loop that iterates the range, computes the shard for each
+  key, dispatches workers. The body's `map[k] = v` already routes
+  through ShardedMapPut, but the outer fiber-spawn scaffold is still
+  a giant RawZig blob.
+
+Subsumed by Cluster D (concurrent pipeline) when that lands.
 
 ### Cluster B: File / TCP resources (3 UNIMPL)
 
