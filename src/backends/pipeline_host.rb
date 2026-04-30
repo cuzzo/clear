@@ -1800,6 +1800,20 @@ class PipelineHost
         MIR::ForStmt.new(iter, cap, [*p[:stage_stmts], *body_mir], nil)
       ])
     end
+    # BC backend, variable-backed finite stream (`s: ~T[] = 0..<n; s s> EACH`):
+    # the source slot holds the materialized list (RangeLit -> iota in BC), so
+    # iterate it as a list instead of going through .next() coroutine semantics.
+    if bc_target? && range_lit.is_a?(AST::Identifier)
+      ti = range_lit.type_info
+      if ti&.dynamic_stream? || ti&.bounded_stream?
+        cap = capture_name == "_" ? "_" : initial_capture
+        return MIR::ScopeBlock.new([
+          *p[:outer_stmts],
+          MIR::ForStmt.new(visit_mir(range_lit), cap,
+            [*p[:stage_stmts], *body_mir], nil)
+        ])
+      end
+    end
 
     range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
 
@@ -1967,6 +1981,16 @@ class PipelineHost
         MIR::BreakStmt.new(label, result_expr)
       ])
     end
+    if bc_target? && range_lit.is_a?(AST::Identifier) &&
+       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream?)
+      return MIR::BlockExpr.new(label, [
+        *p[:outer_stmts], *acc_init_stmts,
+        MIR::ForStmt.new(visit_mir(range_lit), capture_name,
+          [*p[:stage_stmts], *loop_acc_stmts], nil),
+        *post_loop_stmts,
+        MIR::BreakStmt.new(label, result_expr)
+      ])
+    end
 
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts], *acc_init_stmts,
@@ -2004,6 +2028,16 @@ class PipelineHost
         *p[:outer_stmts],
         MIR::Let.new("acc", init_mir, true, acc_zig, nil),
         MIR::ForStmt.new(iter, cap,
+          [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
+      ])
+    end
+    if bc_target? && range_lit.is_a?(AST::Identifier) &&
+       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream?)
+      return MIR::BlockExpr.new(label, [
+        *p[:outer_stmts],
+        MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+        MIR::ForStmt.new(visit_mir(range_lit), p[:initial_capture],
           [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)], nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
       ])
