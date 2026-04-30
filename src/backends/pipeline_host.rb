@@ -333,11 +333,14 @@ class PipelineHost
     lhs_type = lhs.type_info
 
     # SOA scalar operators have zero allocations -- field-slice path in the
-    # string generator is strictly better (no materialization overhead).
-    # Let them fall through to the string path where field-slice optimization applies.
+    # string generator is strictly better (no materialization overhead) on
+    # the Zig backend. The VM has no SoA layout (Value.List is uniform), so
+    # in BC mode, treat the SoA source as a regular list and dispatch through
+    # the structural fold path. This keeps both backends going through MIR
+    # nodes the bc_emitter can compile.
     is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
     scalar_op = RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
-    return nil if is_soa && scalar_op
+    return nil if is_soa && scalar_op && @lowering.instance_variable_get(:@target) != :bc
 
     # Range source with fold terminal: fuse into a single accumulating while loop.
     if RANGE_FOLD_OPS.any? { |t| rhs.is_a?(t) }
@@ -408,13 +411,16 @@ class PipelineHost
   # Build materialization MIR nodes. Returns [stmts_array, items_ident_string].
   # Pool/sharded sources materialize live items into a temp buffer.
   def build_pipe_items_mir(lhs_type)
+    # In BC mode the VM has no SoA layout; treat @soa lists as regular lists
+    # so the structural ItemsAccess path below applies uniformly.
+    bc_mode = @lowering.instance_variable_get(:@target) == :bc
     if lhs_type&.pool? && lhs_type&.sharded?
       [build_mat_sharded_pool(lhs_type), "pipe_items"]
-    elsif lhs_type&.pool? && lhs_type&.soa?
+    elsif lhs_type&.pool? && lhs_type&.soa? && !bc_mode
       [build_mat_soa_pool(lhs_type), "pipe_items"]
     elsif lhs_type&.pool?
       [build_mat_pool(lhs_type), "pipe_items"]
-    elsif (lhs_type&.list_collection? || lhs_type&.fixed_soa?) && lhs_type&.soa?
+    elsif (lhs_type&.list_collection? || lhs_type&.fixed_soa?) && lhs_type&.soa? && !bc_mode
       [build_mat_soa_list(lhs_type), "pipe_items"]
     elsif lhs_type&.list_collection? && lhs_type&.sharded?
       [build_mat_sharded_list(lhs_type), "pipe_items"]
@@ -1226,7 +1232,11 @@ class PipelineHost
     # Sharded pools/lists need fibers -- stay on string path
     return nil if lhs_type&.sharded?
 
-    is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?)
+    # In BC mode the VM has no SoA layout, so the field-slice optimization
+    # has no benefit. Skip the SoaFieldAccess emission and let the regular
+    # per-item ForStmt path below handle iteration uniformly.
+    is_soa = lhs_type&.soa? && (lhs_type&.pool? || lhs_type&.list_collection? || lhs_type&.fixed_soa?) &&
+             @lowering.instance_variable_get(:@target) != :bc
 
     if is_soa
       # SOA path: field-slice access (preserves SOA cache locality).
