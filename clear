@@ -440,6 +440,12 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       zig_code = zig_code.gsub("@import(\"#{pkg_name}\")", "@import(\"#{pkg_name}.zig\")")
     end
   end
+  # EXTERN ... FROM "cheat_runtime" emits `@import("cheat_runtime")`, but in
+  # the standalone (`./clear build`) flow there is no Zig module by that
+  # name -- the runtime is included as a relative file. Map the import to
+  # the file path so EXTERN against the runtime works without needing a
+  # multi-package build.zig.
+  zig_code = zig_code.gsub('@import("cheat_runtime")', '@import("runtime/runtime-header.zig")')
   write_if_changed(tmp_zig, zig_code)
 
   # Auto-detect FFI modules: scan source for EXTERN ... FROM "module" declarations

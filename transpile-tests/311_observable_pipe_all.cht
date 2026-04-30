@@ -1,0 +1,34 @@
+-- Pipeline-terminal observable ALL.
+--
+-- A BG STREAM produces values; ALL stays true until the first item
+-- fails the predicate, then flips to false (`fetchAnd`-backed
+-- AtomicAll inside an `*ObservableAll()` wrapper).
+
+FN main() RETURNS Void ->
+    gen_all_true: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 50_i64 DO
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    running1: ~Bool@observable = gen_all_true s> ALL _ < 100_i64;
+    final1 = NEXT running1;
+    ASSERT final1 == TRUE, "ALL true: every item < 100";
+
+    gen_one_false: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 50_i64 DO
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    running2: ~Bool@observable = gen_one_false s> ALL _ < 25_i64;
+    final2 = NEXT running2;
+    ASSERT final2 == FALSE, "ALL false: items 25..49 violate";
+
+    print("ok");
+    RETURN;
+END

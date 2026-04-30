@@ -1,0 +1,30 @@
+-- Pipeline-terminal observable DISTINCT into ~T[]@set:observable.
+--
+-- A BG STREAM yields values; DISTINCT folds them into a heap-allocated
+-- `*ObservableStreamSet(i64)` (= ObservableTerminal(StreamSet(i64))).
+-- The producer fiber submits each item via `acc.inner.submit`; the
+-- StreamSet dedups (single-writer, lock-free reads) and grows
+-- geometrically.
+--
+-- `NEXT running` waits for the producer to finish, then materializes
+-- an owned ArrayListUnmanaged(i64) snapshot via the wrapper's
+-- `materializeNext(alloc)`. The receiving binding owns the slice and
+-- the standard list-cleanup path frees it at scope exit.
+
+FN main() RETURNS Void ->
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 10_i64 DO
+            YIELD i MOD 3_i64;
+            i = i + 1_i64;
+        END
+    };
+
+    running: ~Int64[]@set:observable = gen s> DISTINCT _;
+    final = NEXT running;
+
+    -- 0..9 mod 3 yields {0, 1, 2} -- 3 unique items.
+    ASSERT final.length() == 3_i64, "expected 3 unique values";
+    print("ok");
+    RETURN;
+END

@@ -183,6 +183,9 @@ class Parser
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
   primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
   primary(:KEYWORD, 'RECOVER') { parse_recover_op }
+  # COLLECT: pipe-terminal that joins a `~T@observable` (blocking)
+  # and returns the underlying T. Takes no expression argument.
+  primary(:KEYWORD, 'COLLECT', AST::CollectOp, ['COLLECT'])
   primary(:KEYWORD, 'WINDOW') { parse_window_op }
   primary(:KEYWORD, 'JOIN') { parse_join_op }
   primary(:KEYWORD, 'SHARD') { parse_shard_op }
@@ -2262,12 +2265,18 @@ class Parser
 
   # REDUCE(initial_value) expression
   # e.g., myList s> REDUCE(0) acc + _.value
+  #
+  # The body must use the pipe-precedence (1) so it stops before the
+  # next `s>` token, matching every other pipeline op (SELECT/WHERE/...).
+  # Otherwise `list s> REDUCE(0) acc + _ s> COLLECT` parses as
+  # `list s> REDUCE(0) (acc + _ s> COLLECT)` -- COLLECT gets eaten by
+  # the body and the chain breaks.
   def parse_reduce_op
     reduce_token = consume(:KEYWORD, 'REDUCE')
     consume(:CHAR, '(')
     initial_value = parse_expression
     consume(:CHAR, ')')
-    body = parse_expression
+    body = parse_expression(1)
     AST::ReduceOp.new(reduce_token, initial_value, body)
   end
 
@@ -2512,6 +2521,8 @@ class Parser
     is_soa      = caps&.dig(:is_soa) || false
     is_indirect = caps&.dig(:is_indirect) || false
     shard_count = caps&.dig(:shard_count)
+    observable  = caps&.dig(:observable) || false
+    observable_token = caps&.dig(:observable_token)
 
     # @indirect on non-array types (union fields) only sets @last_indirect_consumed
     # (signals union field parser). The Type itself is not heap-boxed.
@@ -2520,10 +2531,11 @@ class Parser
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
     loc = is_heap ? :heap : (is_indirect ? :heap : nil)
-    t = Type.new(base_sym, ownership: ownership, sync: sync, location: loc, collection: collection, shard_count: shard_count)
+    t = Type.new(base_sym, ownership: ownership, sync: sync, location: loc, collection: collection, shard_count: shard_count, observable: observable)
     t.soa = true if is_soa
     t.elem_ownership = elem_ownership if elem_ownership
     t.elem_sync = elem_sync if elem_sync
+    t.observable_token = observable_token if observable_token
     t
   end
 
@@ -2637,7 +2649,7 @@ class Parser
   end
 
   # All recognized capability tokens.
-  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @indirect @link @raw @symbol @list @pool @set @soa @sharded].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
   # Returns nil if no capability token is present, or a Hash:
@@ -2646,7 +2658,7 @@ class Parser
   def parse_capabilities
     return nil unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
 
-    result = { ownership: nil, sync: nil, collection: nil, is_soa: false, is_indirect: false, shard_count: nil }
+    result = { ownership: nil, sync: nil, collection: nil, is_soa: false, is_indirect: false, shard_count: nil, observable: false }
     apply_capability!(result, consume(:VAR_ID))
 
     # ':' chaining (e.g., @shared:locked, @soa:shared:locked, @list:soa)
@@ -2717,6 +2729,14 @@ class Parser
       consume(:CHAR, '(')
       result[:shard_count] = consume_number.value.to_i
       consume(:CHAR, ')')
+    when "@observable"
+      error!(token, "Duplicate observable") if result[:observable]
+      result[:observable] = true
+      # A20: stash the token's location so I1's fixable error can
+      # offer to delete the literal `@observable` (or `:observable`
+      # in a chained capability list) text from the source. No effect
+      # on type semantics; consumed by capabilities that need a span.
+      result[:observable_token] = token
     else
       error!(token, "Unknown capability modifier: #{value}")
     end
@@ -2728,6 +2748,14 @@ class Parser
 
   def parse_with_capability
     with_token = consume(:KEYWORD, 'WITH')
+
+    # Observables Phase 2.3 / 2.4: `WITH VIEW v AS s { ... }` or
+    # `WITH MATERIALIZED VIEW v AS s { ... }`. Routed before the
+    # generic capability-list parser so VIEW / MATERIALIZED don't have
+    # to participate in the comma-separated capability grammar.
+    if match?(:KEYWORD, 'VIEW') || match?(:KEYWORD, 'MATERIALIZED')
+      return parse_view_block(with_token)
+    end
 
     # Optional deadlock-escape modifier: one of POSSIBLE_DEADLOCK /
     # POSSIBLE_LOCK_CYCLE, immediately after WITH. Acts as a per-block
@@ -2803,6 +2831,59 @@ class Parser
         token: escape_tok,
       }
     end
+    node
+  end
+
+  # Observables Phase 2.3 / 2.4. Grammar:
+  #
+  #   WITH VIEW <var> AS <alias> { <body> } [END]
+  #   WITH MATERIALIZED VIEW <var> AS <alias> { <body> } [END]
+  #
+  # Builds an AST::WithBlock with view_kind = :view / :materialized_view
+  # and a single capability entry { capability: :VIEW | :MATERIALIZED_VIEW,
+  # var_node:, alias: }. The optional END after `}` is consumed if present.
+  def parse_view_block(with_token)
+    view_kind = nil
+    view_token = nil
+    if match?(:KEYWORD, 'MATERIALIZED')
+      mat_tok = consume(:KEYWORD, 'MATERIALIZED')
+      view_token = consume(:KEYWORD, 'VIEW')
+      view_kind = :materialized_view
+      capability = :MATERIALIZED_VIEW
+      view_token = mat_tok # span starts at MATERIALIZED
+    else
+      view_token = consume(:KEYWORD, 'VIEW')
+      view_kind = :view
+      capability = :VIEW
+    end
+
+    var_node = parse_var_id
+    consume(:KEYWORD, 'AS')
+    alias_name = consume(:VAR_ID).value
+
+    # Optional ARROW for the WITH ... AS s -> ... shape used in docs.
+    # The brace form `{ body }` is canonical; the arrow form is sugar.
+    if match!(:ARROW, '->')
+      body = parse_block_body(['END'])
+      consume(:KEYWORD, 'END')
+    else
+      consume(:CHAR, '{')
+      body = parse_block_body(['}'])
+      consume(:CHAR, '}')
+    end
+
+    # `view_token` is read by `emit_view_not_observable_finding!` in
+    # capabilities.rb to compute the exact replacement span for the
+    # Phase 2.8 fixable error (VIEW -> MATERIALIZED VIEW). Do NOT
+    # drop this field on a refactor without updating that path.
+    node = AST::WithBlock.new(with_token, [{
+      capability: capability,
+      var_node: var_node,
+      alias: alias_name,
+      alias_mutable: false,
+      view_token: view_token,
+    }], body)
+    node.view_kind = view_kind
     node
   end
 

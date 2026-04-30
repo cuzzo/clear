@@ -35,6 +35,63 @@ module PipeAnalysis
       node.type_info&.bounded_stream? || node.type_info&.open_stream?
   end
 
+  # Observable Phase 2.2 + COLLECT-default: a fold-terminal whose
+  # source is a tense stream (`~T[...]`) is observable by default.
+  # The pipe BinaryOp gets:
+  #   - `observable_terminal = true` (Phase 2.2 marker; consumed by
+  #     WITH VIEW gating)
+  #   - `observable_dest = true` (codegen marker; consumed by the
+  #     pipeline_host SumOp branch to emit accumulator+finish)
+  # The caller (analyze_sum_op etc.) ALSO lifts the pipe's
+  # full_type to `~T@observable` so the binding inherits the
+  # observable type without requiring an explicit annotation. The
+  # user joins via `s> COLLECT` (or NEXT) to get back a scalar T.
+  def stamp_observable_terminal!(node)
+    # RangeLits annotate as `~Int64[]` (a tense dynamic_stream) but
+    # fold eagerly to a scalar -- there's no fiber producing values
+    # while a reader could WITH VIEW the accumulator. Exclude them.
+    return if node.left.is_a?(AST::RangeLit)
+    ti = node.left.type_info
+    return unless ti && ti.future? &&
+                  (ti.dynamic_stream? || ti.inf_stream? || ti.open_stream? || ti.bounded_stream?)
+    node.observable_terminal = true
+    node.observable_dest = true
+  end
+
+  # Lift a fold-pipe's result type to its `~T@observable` form when
+  # the source qualifies (per stamp_observable_terminal!). Caller
+  # passes the terminal kind and the lifted-Type kwargs (raw symbol
+  # + capability flags); we wrap and stamp on the pipe so downstream
+  # type-checking (the bind site, COLLECT, NEXT) sees the observable
+  # type. Type#zig_type uses `observable_terminal` to pick the right
+  # `Observable*` wrapper.
+  #
+  #   lift_to_observable_if_terminal!(node, terminal: :sum,
+  #     raw: :"~Int64")
+  #   lift_to_observable_if_terminal!(node, terminal: :distinct,
+  #     raw: :"~Int64[]", collection: :set)
+  def lift_to_observable_if_terminal!(node, terminal:, raw:, **type_kwargs)
+    return unless node.observable_terminal
+    node.full_type = Type.new(raw,
+                              observable: true,
+                              observable_terminal: terminal,
+                              **type_kwargs)
+  end
+
+  # M5: collapse the stamp + lift pair that every analyze_*_op call site
+  # repeats. Equivalent to:
+  #   stamp_observable_terminal!(node)
+  #   lift_to_observable_if_terminal!(node, terminal:, raw:, **type_kwargs)
+  # Two-line stamp + lift remained the previous shape because earlier
+  # the lift had a separate guard. With both checks now living in
+  # stamp_observable_terminal!, the only argumentation a call site
+  # carries is terminal kind + raw type + extra type kwargs, so a
+  # single helper is enough.
+  def mark_observable_terminal!(node, terminal:, raw:, **type_kwargs)
+    stamp_observable_terminal!(node)
+    lift_to_observable_if_terminal!(node, terminal: terminal, raw: raw, **type_kwargs)
+  end
+
   def bounded_stream_source?(node)
     node.type_info&.bounded_stream?
   end
@@ -81,7 +138,8 @@ module PipeAnalysis
     node.is_a?(AST::WindowOp) ||
     node.is_a?(AST::BatchWindowOp) ||
     node.is_a?(AST::JoinOp) ||
-    node.is_a?(AST::RecoverOp)
+    node.is_a?(AST::RecoverOp) ||
+    node.is_a?(AST::CollectOp)
   end
 
   def analyze_higher_order_op(node)
@@ -132,6 +190,40 @@ module PipeAnalysis
       analyze_join_op(node)
     when AST::RecoverOp
       analyze_recover_op(node)
+    when AST::CollectOp
+      analyze_collect_op(node)
+    end
+  end
+
+  # COLLECT: pipe-terminal that joins a `~T@observable` and returns
+  # the underlying T. Validates the LHS is observable; sets result
+  # type to the inner element of the observable. Marks the LHS as
+  # moved so the consume-or-transfer rule for ~T futures sees the
+  # binding as consumed.
+  def analyze_collect_op(node)
+    lhs_t = node.left.type_info
+    unless lhs_t&.future? && lhs_t&.observable?
+      ty = lhs_t&.resolved || "<unknown>"
+      error!(node, "COLLECT requires a `~T@observable` source, got #{ty}. " \
+                   "Streaming aggregates produce observables when the source " \
+                   "is a tense stream; non-observable sources fold synchronously " \
+                   "and don't need COLLECT.")
+    end
+    # Mark the source binding as consumed -- COLLECT is the explicit
+    # join, equivalent to NEXT for the future-consume check.
+    og_set_moved(node.left.name) if node.left.is_a?(AST::Identifier)
+    inner = lhs_t&.tense_type
+    # Collection observable (DISTINCT producing `~T[]@set:observable`):
+    # COLLECT yields an owned `T[]` snapshot via `materializeNext`, not
+    # the bare set type. Mirrors visit_NextExpr's collection branch so
+    # the binding's cleanup classifier picks the list-cleanup template.
+    if lhs_t&.observable? && inner&.array?
+      elem_sym = inner.element_type.to_sym
+      node.full_type = Type.new(:"#{elem_sym}[]")
+      node.storage   = :heap
+    else
+      node.full_type = inner ? inner.resolved : :Any
+      node.storage   = :stack
     end
   end
 
@@ -414,6 +506,34 @@ module PipeAnalysis
     node.full_type = acc_type
     node.right.full_type = acc_type
     node.storage = :stack
+
+    # REDUCE is observable only with a scalar atomic-backing accumulator.
+    # Collection accumulators (REDUCE acc.append(_)) use moving structure.
+    # H10: scalar must additionally be a numeric primitive -- AtomicReduce
+    # uses AtomicFor(T), which only specializes for int/float. String,
+    # Bool, struct, and tagged-union accumulators would compile-error
+    # inside Zig with "observable accumulator: T must be int or float";
+    # reject them here with a CLEAR-level message instead.
+    acc_t = Type.new(acc_type)
+    if !acc_t.array? && !acc_t.list_collection? && !acc_t.set_collection? && !acc_t.map?
+      if observable_reducible_scalar?(acc_type)
+        mark_observable_terminal!(node, terminal: :reduce, raw: :"~#{acc_type}")
+      end
+    end
+  end
+
+  # True for accumulator types AtomicReduce(T) can wrap. AtomicFor(T) in
+  # observable.zig admits int and float only; Bool / String / structs
+  # would compile-error in Zig. Mirrored here so we reject the bind at
+  # CLEAR-annotation time with a clear error.
+  OBSERVABLE_REDUCIBLE_NUMERIC = %i[
+    Int8 Int16 Int32 Int64
+    UInt8 Byte UInt16 UInt32 UInt64
+    Float32 Float64
+  ].freeze
+
+  def observable_reducible_scalar?(acc_type)
+    OBSERVABLE_REDUCIBLE_NUMERIC.include?(acc_type)
   end
 
   def analyze_limit_op(node)
@@ -488,7 +608,7 @@ module PipeAnalysis
 
   def analyze_distinct_op(node)
     # DISTINCT: list s> DISTINCT _.field (or just DISTINCT _)
-    # Returns a Set of unique key values (T[]@set).
+    # Returns a Set of unique key values (T[]@set or T[N]@set).
     lhs_type  = node.left.type_info
     is_inf    = lhs_type&.inf_stream?
     is_stream = finite_stream_source?(node.left) || is_inf
@@ -512,9 +632,26 @@ module PipeAnalysis
     # Key type is what the expression evaluates to; result is a Set of those keys.
     key_type = node.right.expression.resolved_type
     node.right.full_type = key_type
-    node.full_type = Type.new(:"#{key_type}[]", collection: :set)
-    node.storage = :heap
-    current_fn_ctx.heap_count += 1 if current_fn_ctx
+
+    # Bounded stream source (~T[N]) → lift to ~K[N]@set:observable so the
+    # codegen picks ObservableStreamSetBounded(K, N): fixed-capacity, no
+    # grow path, no refcounted snapshots. Falls back to dynamic ~K[]@set
+    # for unbounded / range / dynamic / inf-stream sources.
+    bounded_n = if lhs_type&.bounded_stream?
+      shape = lhs_type.tense_type.fixed? ? lhs_type.tense_type : lhs_type.optional_stream_shape_type
+      shape&.capacity
+    end
+    if bounded_n
+      node.full_type = Type.new(:"#{key_type}[#{bounded_n}]", collection: :set)
+      node.storage = :heap
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
+      mark_observable_terminal!(node, terminal: :distinct, raw: :"~#{key_type}[#{bounded_n}]", collection: :set)
+    else
+      node.full_type = Type.new(:"#{key_type}[]", collection: :set)
+      node.storage = :heap
+      current_fn_ctx.heap_count += 1 if current_fn_ctx
+      mark_observable_terminal!(node, terminal: :distinct, raw: :"~#{key_type}[]", collection: :set)
+    end
   end
 
   def analyze_pipe_to_func_call(node)
@@ -708,6 +845,7 @@ module PipeAnalysis
 
     node.full_type = :"?#{item_type}"
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :find, raw: :"~?#{item_type}")
   end
 
   def analyze_any_op(node)
@@ -727,6 +865,7 @@ module PipeAnalysis
 
     node.full_type = :Bool
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :any, raw: :"~Bool")
   end
 
   def analyze_all_op(node)
@@ -746,6 +885,7 @@ module PipeAnalysis
 
     node.full_type = :Bool
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :all, raw: :"~Bool")
   end
 
   def analyze_count_op(node)
@@ -765,6 +905,7 @@ module PipeAnalysis
 
     node.full_type = :Int64
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :count, raw: :"~Int64")
   end
 
   # =========================================================
@@ -792,6 +933,7 @@ module PipeAnalysis
 
     node.full_type = sum_result_clear_type(expr_type)
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :sum, raw: :"~#{sum_result_clear_type(expr_type)}")
   end
 
   def analyze_average_op(node)
@@ -812,6 +954,7 @@ module PipeAnalysis
 
     node.full_type = :Float64
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :avg, raw: :"~Float64")
   end
 
   def analyze_min_op(node)
@@ -832,6 +975,7 @@ module PipeAnalysis
 
     node.full_type = expr_type
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :min, raw: :"~#{expr_type}")
   end
 
   def analyze_max_op(node)
@@ -852,6 +996,7 @@ module PipeAnalysis
 
     node.full_type = expr_type
     node.storage   = :stack
+    mark_observable_terminal!(node, terminal: :max, raw: :"~#{expr_type}")
   end
 
   # =========================================================

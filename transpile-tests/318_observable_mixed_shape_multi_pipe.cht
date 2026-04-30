@@ -1,0 +1,29 @@
+-- Mixed-shape multi-pipe: SUM (scalar `:observable` cleanup) and
+-- DISTINCT (collection `:observable` cleanup) in the same function.
+-- Confirms the cleanup classifier handles two terminals with the
+-- same kind tag but different inner shapes correctly when both are
+-- alive in the same scope. Also exercises ObservableTerminal.destroy's
+-- comptime `@hasDecl(Inner, "deinit")` branching: scalar AtomicSum
+-- skips deinit; collection StreamSet runs it.
+
+FN main() RETURNS Void ->
+    gen1: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
+    };
+    gen2: ~?Int64[] = BG STREAM {
+        MUTABLE j: Int64 = 0_i64;
+        WHILE j < 6_i64 DO YIELD j MOD 3_i64; j = j + 1_i64; END
+    };
+
+    sum_running:      ~Int64@observable      = gen1 s> SUM _;
+    distinct_running: ~Int64[]@set:observable = gen2 s> DISTINCT _;
+
+    sum_final = NEXT sum_running;
+    dist_final = NEXT distinct_running;
+
+    ASSERT sum_final == 10_i64, "sum 0..4 = 10";
+    ASSERT dist_final.length() == 3_i64, "distinct {0,1,2} = 3 items";
+    print("ok");
+    RETURN;
+END

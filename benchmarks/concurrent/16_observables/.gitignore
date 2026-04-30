@@ -1,0 +1,5 @@
+bench_clear
+bench_rust
+.zig-cache/
+zig-out/
+root

@@ -1,0 +1,36 @@
+-- WITH VIEW on a pipeline-terminal observable. Verifies the
+-- canonical reader form works:
+--
+--     running: ~Int64@observable = stream s> SUM _;
+--     WITH VIEW running AS s -> use(s); END
+--
+-- The reader sees the accumulator's running value via a single
+-- atomic `.view()` load. The producer fiber runs concurrently
+-- (spawned by the SUM observable_dest emit), so the snapshot can
+-- be ANY partial sum in [0, 45]. NEXT joins the producer and
+-- guarantees the final 45.
+
+FN main() RETURNS Void ->
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 10_i64 DO
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    running: ~Int64@observable = gen s> SUM _;
+
+    -- WITH VIEW reads the accumulator without joining the producer.
+    -- The producer races against this read; s is in [0, 45].
+    WITH VIEW running AS s {
+        ASSERT s >= 0_i64, "snapshot below 0";
+        ASSERT s <= 45_i64, "snapshot above 45";
+    }
+
+    -- NEXT explicitly joins; final == 45 confirms convergence.
+    final = NEXT running;
+    ASSERT final == 45_i64, "final mismatch";
+    print("ok");
+    RETURN;
+END

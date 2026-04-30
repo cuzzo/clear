@@ -2154,6 +2154,68 @@ private
   # Shared declaration body used by visit_VarDecl and the declaration path of
   # visit_BindExpr. mutable_flag is node.mutable for VarDecl and false for BindExpr
   # (BindExpr declarations are immutable by default).
+  # Pipeline-terminal observable detection (Commit 3 of the
+  # observable wiring). When the bind site has shape:
+  #
+  #   running: ~Int64@observable = stream s> SUM _;
+  #
+  # Phase 2.2 already stamped `observable_terminal = true` on the
+  # pipe BinaryOp. Here we lift the pipe's apparent type from
+  # scalar (`Int64`) to the LHS type (`~Int64@observable`) so the
+  # subsequent `coerce!` check passes, and stamp `observable_dest`
+  # so pipeline_generator.rb (Commit 4) emits the accumulator path
+  # instead of an inline fold.
+  def promote_pipe_to_observable_dest!(node)
+    return unless node.respond_to?(:type) && node.type
+    return unless node.respond_to?(:value) && node.value
+    target = node.type.is_a?(Type) ? node.type : Type.new(node.type)
+    return unless target.future? && target.observable?
+    pipe = node.value
+    return unless pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH
+    return unless pipe.observable_terminal
+    pipe.observable_dest = true
+    # Preserve the terminal kind set by lift_to_observable_if_terminal!.
+    # The LHS annotation (`~Int64@observable`) carries no terminal info;
+    # only the fold's analyzer knows whether this is :sum/:count/:max/...
+    # Copying it onto node.type also propagates the kind to the binding's
+    # symbol entry (so WITH VIEW / NEXT / cleanup all see it).
+    if pipe.full_type.is_a?(Type) && pipe.full_type.observable_terminal
+      pipe_terminal = pipe.full_type.observable_terminal
+      target_t = node.type.is_a?(Type) ? node.type : Type.new(node.type)
+      # The pipe is the authority on terminal kind: only the fold's
+      # analyzer knows whether this is :sum / :count / :max / ... .
+      # The LHS annotation (`~Int64@observable`) never carries one, so
+      # an existing non-nil stamp here means a prior pass disagreed
+      # with the analyzer. Reject loudly instead of silently winning
+      # one of the two via `||=` (H7).
+      if target_t.observable_terminal && target_t.observable_terminal != pipe_terminal
+        raise CompilerError.new(
+          "Observable terminal mismatch: LHS stamped #{target_t.observable_terminal.inspect}, " \
+          "pipe analyzer produced #{pipe_terminal.inspect}",
+          node.location,
+        )
+      end
+      target_t.observable_terminal = pipe_terminal
+      node.type = target_t
+      # node.full_type is the resolved Type read by mir_lowering's
+      # transpile_type; propagate the terminal kind there too so
+      # OBSERVABLE_WRAPPERS can find it. Without this, the binding's
+      # emitted Zig wrapper would default-or-raise. Same mismatch
+      # check as above.
+      if node.respond_to?(:full_type) && node.full_type.is_a?(Type) && node.full_type.observable?
+        if node.full_type.observable_terminal && node.full_type.observable_terminal != pipe_terminal
+          raise CompilerError.new(
+            "Observable terminal mismatch on full_type: stamped " \
+            "#{node.full_type.observable_terminal.inspect}, pipe produced #{pipe_terminal.inspect}",
+            node.location,
+          )
+        end
+        node.full_type.observable_terminal = pipe_terminal
+      end
+    end
+    pipe.full_type = node.type
+  end
+
   def finalize_decl_node!(node, mutable_flag)
     verify_unrestricted!(node)
     handle_assign_move(node)
@@ -2161,6 +2223,71 @@ private
 
     validate_type_annotation!(node, node.type) if node.type
     validate_stream_type!(node)
+
+    # Pipeline-terminal observable: when LHS is `~T@observable` and
+    # RHS is a fold-pipe whose source is a tense stream (Phase 2.2's
+    # `observable_terminal` stamp), promote the pipe's apparent type
+    # to match the LHS so coerce! accepts the assignment. The
+    # `observable_dest` flag tells pipeline_generator.rb to emit the
+    # accumulator-and-fiber codegen path (Commit 4).
+    promote_pipe_to_observable_dest!(node)
+
+    # I1: an `~T@observable` binding has no usable shape unless it was
+    # initialized by a fold-pipe over a tense stream -- the
+    # heap-allocated wrapper, the producer fiber, and the WaitGroup
+    # bridge are all created in lower_range_fold_observable_default.
+    # A bare `running: ~Int64@observable` (no initializer) or one
+    # initialized from another value would dangle: no producer fiber
+    # exists, NEXT/COLLECT would deadlock, and the cleanup recipe
+    # would call destroy() on an uninitialized struct. Reject here
+    # before downstream passes see the bad shape. The post-promote
+    # check is correct because promote_pipe_to_observable_dest! sets
+    # `observable_dest` only when the RHS is a SMOOTH-pipe over a
+    # tense source; any other shape leaves it false.
+    if node.type.is_a?(Type) && node.type.future? && node.type.observable?
+      pipe = node.value
+      ok = pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH && pipe.observable_dest
+      unless ok
+        msg = "`~T@observable` bindings must be initialized by a pipeline-terminal fold " \
+              "over a tense stream (e.g. `running: ~Int64@observable = stream s> SUM _`). " \
+              "The producer fiber, atomic accumulator, and WaitGroup wiring all live in " \
+              "the fold's codegen path -- a bare declaration or a non-fold initializer has " \
+              "no producer, so NEXT/COLLECT would deadlock and cleanup would touch an " \
+              "uninitialized wrapper."
+
+        # A20: offer a fixable that drops `@observable` from the type
+        # annotation. When the parser captured a token for the
+        # `@observable` capability, we can target it precisely. If the
+        # capability was chained (`~Int64@locked:observable` → token's
+        # value is `:observable` rather than `@observable`), we span
+        # the colon-prefix; otherwise the token is `@observable`. This
+        # lands as :interactive (not :auto) because the user almost
+        # always wanted a fold-pipe initializer instead — dropping
+        # @observable changes the type semantics. We only offer the
+        # drop fix; the "add a fold-pipe initializer" alternative is
+        # too context-specific to template.
+        fixes = []
+        obs_tok = node.type.observable_token if node.type.respond_to?(:observable_token)
+        if obs_tok && obs_tok.respond_to?(:line) && obs_tok.respond_to?(:column)
+          # Token value is `@observable` (first cap) or `:observable`
+          # (chained after another cap). Match length to the actual
+          # token text so the edit deletes exactly the right span.
+          tok_text = obs_tok.respond_to?(:value) ? obs_tok.value.to_s : "@observable"
+          fixes << Fix.new(
+            description: "Drop `#{tok_text}` from the binding's type annotation. The remaining type behaves as a regular binding (no producer fiber, no WITH VIEW); use this if you didn't actually want streaming-aggregate semantics.",
+            confidence: :interactive,
+            edits: [Edit.new(
+              span: Span.new(file: nil, line: obs_tok.line, col: obs_tok.column, length: tok_text.length),
+              replacement: "",
+            )],
+          )
+        end
+
+        return error!(node, msg) if fixes.empty?
+        fixable!(node, message: msg, category: :type, level: :error,
+                 fixes: fixes, raise_in_collector: false)
+      end
+    end
 
     final_type, error = node.value.coerce!(node.type)
     error!(node, error) if error
@@ -2204,6 +2331,20 @@ private
     if val_ti&.link?
       link_src = val_ti.link_source
       node.symbol.link_source = link_src if link_src
+    end
+    # `~T@observable` bindings are non_escaping: the heap accumulator's
+    # producer fiber holds a borrow of the source iterator (`gen`),
+    # which is bound to this scope's frame. Returning, GIVE-ing, or
+    # capturing the binding into a longer-lived context (BG fiber,
+    # struct field, collection element) leaves the producer fiber
+    # with a dangling pointer when the original frame rewinds. The
+    # existing Lockdown 2/3 checks (BG capture / struct+collection
+    # store) fire automatically once non_escaping is set; RETURN is
+    # rejected by visit_ReturnNode's non_escaping guard. Users get the
+    # value out via `s> COLLECT` (joins + extracts scalar) or
+    # `WITH MATERIALIZED VIEW` (deep-copy snapshot).
+    if node.type_info&.observable?
+      node.symbol.non_escaping = true
     end
     classify_ownership!(node.symbol)
     og_declare(node.name, node, node.type_info || final_type)
@@ -3962,6 +4103,23 @@ private
       end
       elem_sym = promise_type.tense_type.element_type.to_sym
       node.full_type = Type.new(:"#{elem_sym}[]", collection: :list)
+    elsif promise_type.observable? && promise_type.tense_type&.array?
+      # NEXT on ~T[]@set:observable: wait for the producer fiber, then
+      # take an owned `T[]` snapshot via `materializeNext(alloc)`. The
+      # codegen path lives in lower_next_expr; here we just stamp the
+      # binding's type so downstream `final.length()` etc. resolve.
+      #
+      # Mark the source binding moved so a second NEXT is rejected.
+      # The cleanup path destroys the StreamSet at end-of-scope; a
+      # second NEXT after that would be UAF. Even before scope exit,
+      # `materializeNext` waits for `finish()` -- the producer is
+      # done after the first call, so a second NEXT would just
+      # re-take the same snapshot, violating the consume-or-transfer
+      # semantics. Match scalar-NEXT behavior: linearly consume.
+      og_set_moved(node.expr.name) if node.expr.is_a?(AST::Identifier)
+      elem_sym = promise_type.tense_type.element_type.to_sym
+      node.full_type = Type.new(:"#{elem_sym}[]")
+      node.storage   = :heap
     elsif promise_type.dynamic_stream?
       elem_sym = promise_type.tense_type.element_type.to_sym
       node.full_type = :"?#{elem_sym}"

@@ -312,6 +312,20 @@ module AST
         new_t.soa = final_type.soa if final_type.is_a?(Type) && final_type.soa
         new_t.soa ||= val_ti.soa if val_ti&.respond_to?(:soa) && val_ti.soa
         new_t.collection = val_ti.collection if val_ti&.collection && !new_t.collection
+        # Carry @observable through finalize_storage! — without this the
+        # binding's full_type loses the @is_observable bit and downstream
+        # cleanup classification can't recognise `~T@observable`. The
+        # terminal kind (`:sum`/`:count`/.../`:distinct`) must come along
+        # too so OBSERVABLE_WRAPPERS can pick the right wrapper Zig type;
+        # without it the lookup falls back to a default and silently
+        # emits the wrong wrapper.
+        new_t.is_observable = true if (final_type.is_a?(Type) && final_type.observable?) ||
+                                       (val_ti.respond_to?(:observable?) && val_ti.observable?)
+        if final_type.is_a?(Type) && final_type.observable_terminal
+          new_t.observable_terminal = final_type.observable_terminal
+        elsif val_ti.respond_to?(:observable_terminal) && val_ti.observable_terminal
+          new_t.observable_terminal = val_ti.observable_terminal
+        end
         new_t.elem_ownership = final_type.elem_ownership if final_type.is_a?(Type) && final_type.elem_ownership
         new_t.elem_ownership ||= val_ti.elem_ownership if val_ti&.respond_to?(:elem_ownership) && val_ti&.elem_ownership
         new_t.elem_sync = final_type.elem_sync if final_type.is_a?(Type) && final_type.elem_sync
@@ -536,6 +550,15 @@ module AST
     # any pending allocs. OR_RESCUE's right side is the fallback expression;
     # its allocations must only run when the orelse short-circuits to it.
     def lazy_fields = (op == :OR_RESCUE ? [:right] : [])
+    # Observable Phase 2.2: true on a `s> SUM/MAX/MIN/COUNT/AVERAGE/ANY/ALL/FIND/DISTINCT/REDUCE`
+    # whose source is a still-running tense stream — fold terminal is backed by
+    # an Observable<T> / atomic accumulator and may be observed via WITH VIEW.
+    attr_accessor :observable_terminal
+    # Pipeline-terminal observable wiring (Commit 3): set by the
+    # annotator when the pipe's destination is a `~T@observable`
+    # binding. Read by pipeline_generator.rb (Commit 4) to switch
+    # from inline-fold to fiber-spawn-with-accumulator codegen.
+    attr_accessor :observable_dest
   end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   # Thunk Phase 4.1 / 4.2: parser-only placeholder for `@thunk(N) f(args)`
@@ -671,6 +694,10 @@ module AST
     # Single-family WITH is a one-arm WithMatch internally; the parser
     # leaves arms nil when no MATCH keyword was used.
     attr_accessor :arms
+    # Observables Phase 2.3/2.4: :view (cheap immutable borrow on
+    # ~T@observable) or :materialized_view (owned snapshot on any ~T
+    # aggregate). nil for traditional capability blocks.
+    attr_accessor :view_kind
   end
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
@@ -691,6 +718,11 @@ module AST
   TapOp        = Struct.new(:token, :body) { include Locatable }
   # SKIP: skip first N elements, return rest (inverse of LIMIT).
   SkipOp       = Struct.new(:token, :count) { include Locatable }
+  # COLLECT: pipe-terminal that consumes a `~T@observable` (typically
+  # produced by a fold over a tense stream) by blocking until the
+  # producer's `finish()`, then returning the underlying T. Lowers
+  # to `lhs.next()` (same shape as NEXT for ~T promises).
+  CollectOp    = Struct.new(:token) { include Locatable }
   # TAKE_WHILE: take elements from the front while predicate is true.
   TakeWhileOp = Struct.new(:token, :expression) { include Locatable }
   # WINDOW(size): sliding window of `size` elements. _ is the sub-slice.
@@ -1036,7 +1068,7 @@ module AST
     '!*' => :CHECK_MUL,
   }
 
-  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED]
+  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW]
 end
 
 # ==========================================

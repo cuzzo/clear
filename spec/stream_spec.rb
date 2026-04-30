@@ -1482,10 +1482,13 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "accepts REDUCE on variable-backed ~T[]" do
+        # REDUCE-scalar on a tense stream now produces a `~T@observable`
+        # value -- consume via COLLECT (or carry the `~T@observable`
+        # binding annotation if the user wants to read it concurrently).
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~Int64[] = 0 ..< 8;
-            total = s s> REDUCE(0_i64) acc + _;
+            _ = s s> REDUCE(0_i64) acc + _ s> COLLECT;
             RETURN;
           END
         CLEAR
@@ -1516,10 +1519,12 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "accepts REDUCE on BG/open streams as sequential pipeline op" do
+        # REDUCE-scalar on a tense stream now produces a `~T@observable`
+        # -- consume via COLLECT.
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
-            total = s s> REDUCE(0) acc + _;
+            _ = s s> REDUCE(0) acc + _ s> COLLECT;
             RETURN;
           END
         CLEAR

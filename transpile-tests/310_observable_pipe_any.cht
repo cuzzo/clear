@@ -1,0 +1,22 @@
+-- Pipeline-terminal observable ANY.
+--
+-- A BG STREAM produces values; ANY publishes "true" on the first item
+-- matching the predicate (`fetchOr`-backed AtomicAny inside an
+-- `*ObservableAny()` wrapper); NEXT joins and returns the final boolean.
+
+FN main() RETURNS Void ->
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 100_i64 DO
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    running: ~Bool@observable = gen s> ANY _ > 50_i64;
+    final = NEXT running;
+
+    ASSERT final == TRUE, "running ANY mismatch";
+    print("ok");
+    RETURN;
+END

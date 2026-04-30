@@ -85,14 +85,76 @@ module GenericAnalysis
     end
 
     # @list/@pool/@set require an array type.
-    if type_obj.list_collection? && !type_obj.array? && !type_obj.promise_list?
+    # `~T[]@set:observable` (and friends) is a tense-wrapped collection
+    # produced by a pipeline-terminal observable; the array shape lives
+    # on the inner tense_type, not the outer tense wrapper. Accept those
+    # by also checking tense_type.array?.
+    inner_array = type_obj.tense? && type_obj.tense_type&.array?
+    if type_obj.list_collection? && !type_obj.array? && !type_obj.promise_list? && !inner_array
       error!(node, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
     end
-    if type_obj.pool? && !type_obj.array?
+    if type_obj.pool? && !type_obj.array? && !inner_array
       error!(node, "Collection capability @pool requires an array type (e.g. User[]@pool or User[N]@pool)")
     end
-    if type_obj.set_collection? && !type_obj.array?
+    if type_obj.set_collection? && !type_obj.array? && !inner_array
       error!(node, "Collection capability @set requires an array type (e.g. String[]@set)")
+    end
+
+    # `~T[]@observable` (without `@set`) silently miscompiled before --
+    # tense_observable? returned false for the array shape, the
+    # observable carve-out skipped it, and execution fell through to
+    # the promise_list path emitting `ArrayList(Promise(T))`, which
+    # is not an observable backing at all. Reject explicitly: the
+    # only observable shape over an array today is `@set:observable`
+    # (DISTINCT terminal). Plain array observables are not supported.
+    if type_obj.tense? && type_obj.observable? && type_obj.tense_type&.array? &&
+       !type_obj.set_collection?
+      error!(node, "@observable on `T[]` requires `@set` (e.g. `~T[]@set:observable` for DISTINCT). " \
+                   "Plain `~T[]@observable` is not a supported shape; the only collection " \
+                   "observable today is the DISTINCT terminal's `~T[]@set:observable`.")
+    end
+
+    # I2: sync / ownership wrappers on `~T@observable` are nonsensical.
+    # The observable IS the synchronization primitive (lock-free atomic
+    # accumulator owned by a single producer fiber); wrapping it in
+    # @locked / @writeLocked / @shared / @multiowned would either build
+    # double-locking around an already-lock-free type, or attempt to
+    # share a heap pointer whose lifecycle is owned by the binding's
+    # scope (UAF risk). The DISTINCT carve-out (`~T[]@set:observable`)
+    # is the only collection shape and `@set` is a data-shape sigil,
+    # not a sync wrapper -- explicitly allowed below.
+    if type_obj.tense? && type_obj.observable?
+      offending_sync = type_obj.sync if type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
+      offending_own = type_obj.ownership if %i[multiowned shared split].include?(type_obj.ownership)
+      if offending_sync || offending_own
+        labels = []
+        labels << "sync wrapper :#{offending_sync}" if offending_sync
+        labels << "ownership wrapper :#{offending_own}" if offending_own
+        # A19: explain the WHY in the same message so users don't
+        # have to read source comments to understand the constraint.
+        # Two cases, both surfaced:
+        #   - sync (@locked / @writeLocked): the observable is itself
+        #     lock-free (atomic accumulator); wrapping it in a lock
+        #     would double-synchronize for no benefit, and the lock's
+        #     guard semantics conflict with WITH VIEW (which is meant
+        #     to be a non-blocking single-load).
+        #   - ownership (@shared / @multiowned / @split): the wrapper
+        #     is a heap pointer owned by the producing scope. The
+        #     producer fiber's `defer ctx.acc.finish()` and the scope's
+        #     wait()-then-destroy() cleanup template assume one owner.
+        #     Sharing the pointer across owners would race the
+        #     producer's lifetime against an unbounded set of readers
+        #     and corrupt the WaitGroup bridge.
+        explain = if offending_sync && offending_own
+          "The observable is already a lock-free single-producer accumulator (extra sync is redundant) AND its heap-pointer lifetime is owned by the producing scope (sharing it across owners would race the producer's `finish()` against the cleanup-side `wait(); destroy()`)."
+        elsif offending_sync
+          "The observable is already a lock-free single-producer accumulator; layering :#{offending_sync} on top would double-synchronize, and its guard semantics conflict with WITH VIEW (which is meant to be a non-blocking single-load)."
+        else
+          "The observable's heap-pointer lifetime is owned by the producing scope (the producer fiber's `defer ctx.acc.finish()` plus the scope's `wait(); destroy()` cleanup assume exactly one owner). Sharing it via :#{offending_own} would race the producer's lifetime against the destroy and corrupt the WaitGroup bridge."
+        end
+        error!(node, "@observable cannot be combined with #{labels.join(' / ')}. " \
+                     "#{explain} Drop the wrapper or pick a non-observable type.")
+      end
     end
 
     # @soa requires a fixed-size array (or collection, which handles its own SOA).

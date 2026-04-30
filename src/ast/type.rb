@@ -13,6 +13,9 @@ class Type
   attr_accessor :elem_sync      # Element-level sync: T@locked[] = Array<Locked<T>>
   attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
   attr_writer :is_resource      # set by annotator; read internally as @is_resource in #resource?
+  attr_accessor :is_observable  # true on ~T@observable — backed by single-writer snapshot / atomic accumulator
+  attr_accessor :observable_terminal  # :sum/:count/:max/:min/:avg/:any/:all/:find/:reduce — picks the Zig wrapper
+  attr_accessor :observable_token   # A20: source token for the `@observable` capability, used by I1's fixable to offer to delete it
 
   # Unified provenance: where was this data allocated?
   #   :rodata — string literal in binary, valid forever, never freed
@@ -149,7 +152,7 @@ class Type
 
   public
 
-  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil) # stripe_count kept for backwards compat (ignored)
+  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil) # stripe_count kept for backwards compat (ignored)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
@@ -179,6 +182,8 @@ class Type
       @elem_sync             = other.elem_sync
       @link_source           = other.link_source
       @provenance            = other.provenance
+      @is_observable         = other.instance_variable_get(:@is_observable)
+      @observable_terminal   = other.instance_variable_get(:@observable_terminal)
     else
       @raw = raw_input
       parse_raw_input
@@ -200,6 +205,8 @@ class Type
       @provenance = :heap if collection == :pool
     end
     @shard_count = shard_count if shard_count
+    @is_observable = true if observable
+    @observable_terminal = observable_terminal if observable_terminal
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
@@ -603,8 +610,17 @@ class Type
 
   # True when backing storage operations require the heap allocator.
   # Used by the transpiler to resolve :receiver_storage allocator symbols.
+  #
+  # A1: tense_observable? is included so mir_lowering's downgrade branch
+  # (lower_var_decl, around line 4594) preserves classify_observable's
+  # `entry[:alloc] = :heap` instead of overwriting it with the result of
+  # cleanup_allocator (which falls through to :frame for observable
+  # shapes). Without this guard, the :observable cleanup template's
+  # `name.destroy(<alloc>)` would emit a frame allocator for a wrapper
+  # that was created on the heap -- a cross-allocator destroy that
+  # surfaces as a leak under DebugAllocator and silent UB elsewhere.
   def needs_heap_backing?
-    pool? || sharded? || heap_provenance? || map?
+    pool? || sharded? || heap_provenance? || map? || tense_observable?
   end
 
   # True when this map type stores an allocator in its Zig struct initializer.
@@ -773,6 +789,152 @@ class Type
   # Tense (Promise) types: ~T — a background task that will produce T
   def tense?
     !!@is_tense
+  end
+
+  # Observable accumulator: ~T@observable.
+  # The runtime backing is a single-writer snapshot (Observable<T>) or atomic
+  # accumulator. Only such types may be the target of `WITH VIEW`.
+  def observable?
+    !!@is_observable
+  end
+
+  # True when this is a pipeline-terminal observable binding shape:
+  #   - `~T@observable`              (scalar terminals: SUM/COUNT/MAX/...)
+  #   - `~T[]@set:observable`        (DISTINCT)
+  # Captures the carve-out used by both Type#zig_type's observable
+  # branch and CleanupClassifier's classify_observable so the
+  # invariant lives in one place.
+  def tense_observable?
+    return false unless tense? && observable?
+    inner = tense_type
+    return true if !inner&.array? && !inner&.map?  # scalar terminal
+    set_collection?  # collection terminal (DISTINCT)
+  end
+
+  # A3: single source of truth for every pipeline-terminal observable.
+  # Each entry consolidates the three pieces of information previously
+  # split across OBSERVABLE_WRAPPERS (here), PUBLISH_SPEC + FOLD_OP_OBSERVABLE_TERMINAL
+  # (pipeline_host.rb):
+  #
+  #   :wrapper   -- lambda(tense_type) -> "ObservableX(...)" Zig string.
+  #                 Builders use Type API on tense_type (zig_type,
+  #                 element_type, wrapped_type, fixed?, capacity); no
+  #                 string surgery. Caller prepends "*CheatLib.obs.".
+  #   :ast_class -- the Pipeline-AST class (AST::SumOp, etc.) so the
+  #                 codegen's `lower_range_fold` can dispatch from a
+  #                 fold_op instance to the terminal symbol. Omitted on
+  #                 :reduce / :distinct because they have their own
+  #                 dedicated lowering helpers (lower_range_reduce_observable
+  #                 / lower_range_fold_observable_distinct) and never
+  #                 hit the default fold-op dispatch.
+  #   :publish   -- per-item publish recipe { method:, expr:, gate: }
+  #                 consumed by lower_range_fold_observable_default.
+  #                 Same omission for :reduce / :distinct.
+  #
+  # Lazy class method (rather than top-level constant) so the AST::*
+  # class references resolve at first-call time, after src/ast/ast.rb
+  # has finished loading. type.rb is required from inside ast.rb, so
+  # AST::SumOp is not yet defined while type.rb's class body evaluates.
+  def self.observable_terminals
+    @observable_terminals ||= {
+      sum: {
+        wrapper:   ->(t) { "ObservableSum(#{t.zig_type})" },
+        ast_class: AST::SumOp,
+        publish:   { method: "add", expr: :typed, gate: :always },
+      },
+      count: {
+        wrapper:   ->(_) { "ObservableCount()" },
+        ast_class: AST::CountOp,
+        publish:   { method: "inc", expr: :none, gate: :pred },
+      },
+      avg: {
+        # AVG view is always f64.
+        wrapper:   ->(_) { "ObservableAvg(f64)" },
+        ast_class: AST::AverageOp,
+        publish:   { method: "add", expr: :f64, gate: :always },
+      },
+      max: {
+        wrapper:   ->(t) { "ObservableMax(#{t.zig_type})" },
+        ast_class: AST::MaxOp,
+        publish:   { method: "submit", expr: :typed, gate: :always },
+      },
+      min: {
+        wrapper:   ->(t) { "ObservableMin(#{t.zig_type})" },
+        ast_class: AST::MinOp,
+        publish:   { method: "submit", expr: :typed, gate: :always },
+      },
+      any: {
+        wrapper:   ->(_) { "ObservableAny()" },
+        ast_class: AST::AnyOp,
+        publish:   { method: "submit", expr: :pred, gate: :always },
+      },
+      all: {
+        wrapper:   ->(_) { "ObservableAll()" },
+        ast_class: AST::AllOp,
+        publish:   { method: "submit", expr: :pred, gate: :always },
+      },
+      find: {
+        # FIND's tense_type is `?T`; AtomicFind stores the unwrapped T.
+        wrapper:   ->(t) { "ObservableFind(#{t.wrapped_type.zig_type})" },
+        ast_class: AST::FindOp,
+        publish:   { method: "submit", expr: :item, gate: :pred },
+      },
+      reduce: {
+        # REDUCE has its own lower_range_reduce_observable helper because
+        # the user-supplied reducer body references stage-context (`_`
+        # and `acc`) which the default publish recipe can't express.
+        wrapper:   ->(t) { "ObservableReduce(#{t.zig_type})" },
+      },
+      distinct: {
+        # DISTINCT's tense_type is `T[]@set` (dynamic) or `T[N]@set`
+        # (bounded). Dynamic uses geometric-doubling StreamSet; bounded
+        # uses fixed-capacity StreamSetBounded (no grow, no refcounted
+        # snapshots, [N]T buffer never relocates). Has its own
+        # lower_range_fold_observable_distinct helper.
+        wrapper:   ->(t) {
+          elem = t.element_type.zig_type
+          if t.fixed?
+            "ObservableStreamSetBounded(#{elem}, #{t.capacity})"
+          else
+            "ObservableStreamSet(#{elem})"
+          end
+        },
+      },
+    }.freeze
+  end
+
+  # Backwards-compat shim: pre-A3 callers indexed `OBSERVABLE_WRAPPERS[sym]`
+  # to get the wrapper builder. Keep the hash exposed so external callers
+  # (and the existing observable_wrapper_zig method) can continue to
+  # work without rewriting. Lazy via class method for the same load-order
+  # reason as observable_terminals.
+  def self.observable_wrappers
+    @observable_wrappers ||= observable_terminals.transform_values { |e| e[:wrapper] }.freeze
+  end
+  def observable_wrapper_zig(tense_type)
+    # A2: a missing terminal stamp here means an upstream pass produced
+    # an `~T@observable` Type without going through pipe_analysis's
+    # mark_observable_terminal! (which sets observable_terminal as it
+    # lifts the LHS type). The C5 audit fixed every known caller so
+    # this should be unreachable in practice, but if it does fire we
+    # need a clear compiler-level message rather than the previous
+    # internal "BYPASS at <ruby caller>" debug raise.
+    if @observable_terminal.nil?
+      raise CompilerError.new(
+        "Internal: Type#observable_wrapper_zig called on `#{self.to_s}` " \
+        "without an observable_terminal stamp. The terminal kind " \
+        "(:sum / :count / :max / :min / :avg / :any / :all / :find / :reduce / :distinct) " \
+        "is set by pipe_analysis's mark_observable_terminal! at fold-pipe analysis " \
+        "time; reaching here means an `@observable` Type was constructed by a path " \
+        "that bypasses that analyzer.",
+      )
+    end
+    builder = self.class.observable_wrappers[@observable_terminal] or
+      raise CompilerError.new(
+        "Internal: unknown observable terminal kind #{@observable_terminal.inspect}. " \
+        "Add an entry to Type.observable_terminals in src/ast/type.rb.",
+      )
+    builder.call(tense_type)
   end
 
   # Preferred predicate name for ~T / stream-like future values.
@@ -1095,9 +1257,20 @@ class Type
   # Determine the allocator needed for cleanup of this type.
   # Returns :heap or :frame. Centralizes the type-specific logic that
   # was previously inline in annotator.rb's set_cleanup_alloc!.
+  #
+  # A21: tense_observable? is in this list because the wrapper struct
+  # is unconditionally heap-allocated by lower_range_fold_observable
+  # (`*ObservableTerminal(Inner)` produced by `WrapperT.new(rt.heapAlloc())
+  # catch unreachable`). Without this branch, observable bindings fell
+  # through to :frame and mir_lowering's lower_var_decl downgrade guard
+  # had to use needs_heap_backing? as a parallel signal to preserve the
+  # :heap entry. With it here, the entry-derived allocator path is
+  # self-consistent and the needs_heap_backing? guard becomes a defense-
+  # in-depth backstop rather than the load-bearing path.
   def cleanup_allocator(schema_lookup = nil)
     return :heap if heap_provenance? || map? || any_rc? || any_sync? ||
-                     resource? || sharded? || striped? || link?
+                     resource? || sharded? || striped? || link? ||
+                     tense_observable?
     if schema_lookup
       schema = schema_lookup.call(resolved) rescue nil
       if schema.is_a?(Hash) && !schema[:kind]
@@ -1455,10 +1628,24 @@ class Type
   # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
   def compute_zig_type(is_param: false, is_field: false)
     # 0. Handle Tense types:
-    #    ~T[N]      -> CheatLib.BoundedStream(T, N)
-    #    ~T@shared  -> CheatLib.SharedPromise(T)
-    #    ~T         -> CheatLib.Promise(T)
+    #    ~T[N]              -> CheatLib.BoundedStream(T, N)
+    #    ~T@shared          -> CheatLib.SharedPromise(T)
+    #    ~T@observable      -> *CheatLib.obs.Observable<Terminal>(T)
+    #    ~T[]@set:observable -> *CheatLib.obs.ObservableStreamSet(T)
+    #    ~T                 -> CheatLib.Promise(T)
     if tense?
+      # `~T@observable`: pipeline-terminal observable. Maps to a
+      # heap-pointed `Observable<Terminal>(T)` (the per-terminal alias
+      # picks the right Inner accumulator: SUM→AtomicSum, COUNT→AtomicCount,
+      # DISTINCT→StreamSet, ...). The pointer form is needed because
+      # the accumulator outlives the producer fiber and is read across
+      # fibers via WITH VIEW. Order matters: this branch must come
+      # before the generic shape predicates so a `~Int64@observable`
+      # binding doesn't fall through to BoundedStream / Promise.
+      #
+      if tense_observable? && !promise_list?
+        return "*CheatLib.obs.#{observable_wrapper_zig(tense_type)}"
+      end
       if promise_list?
         elem_zig = tense_type.element_type.zig_type(is_param: is_param, is_field: is_field)
         return "std.ArrayListUnmanaged(CheatLib.Promise(#{elem_zig}))"

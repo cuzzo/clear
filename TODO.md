@@ -21,6 +21,13 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
 
 ## v0.1.5 (Target = May 30)
 
+ - [x] IMMUTABLE Stream Observables (only the stream can mutate the underlying data; design in `docs/agents/observables.md`)
+    - [x] Lockdown 1/2/3 — already landed on master (commit `8cd91f04`); verified by `spec/borrowed_escape_spec.rb`
+    - [x] Phase 1 — Runtime (Zig): AtomicSum/Max/Min/Count/Any/All/Avg/Find/Reduce, StreamSet(T) for DISTINCT, Observable<T>
+    - [x] Phase 2 — Compiler (Ruby): @observable Type flag, terminal inference, WITH VIEW + WITH MATERIALIZED VIEW
+    - [x] Tests + benchmarks: 60 zig tests, concurrent reader stress, compiler specs, AtomicSum 2.9x faster than @locked Int64
+    - Phase 3a (standalone Observable types) deferred to v0.3
+    - Observable Maps deferred until streaming-map support exists
  - [x] Finite State Machines for non-conditional, non-reeentrant, and non-nested looping fibers (FSM Phase A + B1 + B2 landed)
  - [x] Re-entrant Thunks (to avoid unbounded recursive growth, auto insert max_depth, auto-insert co-operative yields)
     - [x] Phase 1.1 — Parser: `EFFECTS REENTRANT[:VARIANT]` on FN definitions (commit 4584ff7e)

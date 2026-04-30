@@ -591,7 +591,8 @@ module CleanupClassifier
 
     sync = node.respond_to?(:symbol) ? node.symbol&.sync : nil
 
-    classify_frozen(ti) ||
+    classify_observable(ti) ||
+      classify_frozen(ti) ||
       classify_inf_stream(ti) ||
       classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||
@@ -614,6 +615,23 @@ module CleanupClassifier
   private_class_method def self.classify_resource(_ti, node)
     return nil unless node.respond_to?(:resource_close_zig) && node.resource_close_zig
     entry(:resource, resource_close_zig: node.resource_close_zig)
+  end
+
+  # ~T@observable / ~T[]@set:observable: heap-allocated
+  # `*Observable<Terminal>(T)` produced by a streaming-aggregate fold
+  # over a tense source. The accumulator outlives the producer fiber
+  # and is destroyed at the binding's scope exit. Cleanup calls
+  # `wait()` (parks on the producer fiber's WaitGroup until `finish()`
+  # is published) before `destroy()` to avoid racing the fiber.
+  # `ObservableTerminal.destroy` itself comptime-detects whether the
+  # Inner has a `deinit()` (StreamSet does; the scalar atomics don't)
+  # and calls it before freeing self -- one cleanup recipe handles all
+  # terminal shapes. No moved guard: NEXT/COLLECT only read the inner
+  # value; the heap pointer always belongs to the binding.
+  private_class_method def self.classify_observable(ti)
+    return nil unless ti.tense_observable?
+    return nil if ti.promise_list?
+    entry(:observable, alloc: :heap, has_moved_guard: false)
   end
 
   # ~T[INF] InfStream: heap-allocated generator stream requiring deinit.

@@ -358,7 +358,7 @@ class PipelineHost
     # Range source with REDUCE: fuse into a single accumulating while loop.
     if rhs.is_a?(AST::ReduceOp)
       range_chain = unwrap_range_chain(lhs)
-      return lower_range_reduce(range_chain[:source], range_chain[:stages], rhs) if range_chain
+      return lower_range_reduce(range_chain[:source], range_chain[:stages], rhs, node) if range_chain
     end
 
     # Binding-unnest chain: source AS @u s> UNNEST expr [AS @o] s> [stages] s> fold
@@ -934,6 +934,18 @@ class PipelineHost
   end
 
   def lower_distinct(list_node, distinct_node, smooth_node)
+    # Observable variant: `~T[]@set:observable` -- producer-fiber-spawn
+    # backed by `*ObservableStreamSet(T)` (= ObservableTerminal(StreamSet(T))).
+    # Per-item: `_ = acc.inner.submit(item) catch unreachable`.
+    if smooth_node.observable_dest
+      range_chain = unwrap_range_chain(list_node)
+      if range_chain
+        p = build_lazy_range_prefix(range_chain[:source], range_chain[:stages])
+        return lower_range_fold_observable_distinct(p, distinct_node, smooth_node,
+          next_pipe_label, range_chain[:source])
+      end
+    end
+
     # smooth_node.full_type is T[]@set; element_type gives the key type T.
     elem_zig = transpile_type(smooth_node.full_type.element_type.resolved.to_s)
     set_zig  = "CheatLib.Set(#{elem_zig})"
@@ -1969,23 +1981,12 @@ class PipelineHost
     body
   end
 
-  # Lower a fold expression and wrap in @as(f64, @floatFromInt(...)) if integer.
-  # SUM/AVERAGE/MIN/MAX accumulators are f64; integer range elements need coercion.
-  # Returns a proper MIR node -- no InlineZig string embedding.
-  def numeric_fold_expr_f64(expr_ast, item_var)
-    expr_mir = with_pipeline_context(placeholder: item_var) { visit_mir(expr_ast) }
-    expr_type = expr_ast.respond_to?(:full_type) ? expr_ast.full_type : nil
-    if expr_type && Type.new(expr_type).integer?
-      # @as(f64, @floatFromInt(expr)) -- keeps MIR structure visible to checker
-      MIR::Cast.new(MIR::Cast.new(expr_mir, nil, :floatFromInt), "f64", :as)
-    else
-      expr_mir
-    end
-  end
-
-  # Like numeric_fold_expr_f64 but targets any accumulator type.
-  # For float accumulators, converts integer expressions via @floatFromInt.
-  # For integer accumulators, returns the expression as-is.
+  # Lower a fold expression with integer→float coercion when the
+  # accumulator is a float type. SUM/AVERAGE/MIN/MAX accumulators may
+  # be f64 (always for AVERAGE); integer items in those folds need
+  # `@floatFromInt`. Integer-into-integer and float-into-float folds
+  # pass through unchanged. Returns a proper MIR node -- no InlineZig
+  # string embedding.
   def numeric_fold_expr_typed(expr_ast, item_var, acc_zig)
     expr_mir  = with_pipeline_context(placeholder: item_var) { visit_mir(expr_ast) }
     expr_type = expr_ast.respond_to?(:full_type) ? expr_ast.full_type : nil
@@ -2181,6 +2182,415 @@ class PipelineHost
     @lowering.instance_variable_get(:@target) == :bc
   end
 
+  # Generic pipeline-terminal observable lowering. SUM/COUNT/MAX/MIN/
+  # AVG/ANY/ALL/FIND/REDUCE-scalar all share the same scaffold:
+  #
+  #   1. Heap-allocate `*Observable<Terminal>` + a WaitGroup, wire the
+  #      WG into the observable's completion callback.
+  #   2. Spawn a consumer fiber cross-scheduler whose body pulls from
+  #      `gen` and publishes each item to the accumulator.
+  #   3. Return the accumulator pointer to the surrounding BlockExpr.
+  #
+  # Per-terminal differences are isolated to TWO inputs:
+  #
+  #   - `acc_alloc_zig`: the Zig expression that constructs the wrapper
+  #     (typically `WrapperT.new(rt.heapAlloc()) catch unreachable`,
+  #     but seeded variants like REDUCE pass `WrapperT.newWith(...)`).
+  #   - `publish_stmts`: the MIR statements that publish one item to
+  #     the accumulator. Each terminal builds its own (e.g. SUM emits
+  #     `acc.inner.add(expr)`; COUNT emits `if pred then acc.inner.inc()`;
+  #     ANY/ALL emit `acc.inner.submit(pred_eval)`; ...). The wrapper
+  #     does not expose `add`/`inc`/`submit`/`update` -- consumers go
+  #     through `acc.inner` so ObservableTerminal stays per-terminal
+  #     surface-free.
+  def lower_range_fold_observable(p, smooth_node, label, source_node,
+                                  acc_alloc_zig:, publish_stmts:)
+    range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
+    capture_name = p[:initial_capture]
+
+    # Zig type of the wrapper, sourced from the binding's full_type.
+    # Type#zig_type switches on `observable_terminal` to pick
+    # ObservableSum / ObservableCount / etc. -- single source of truth.
+    obs_zig    = transpile_type(smooth_node.full_type)            # "*CheatLib.obs.ObservableSum(i64)"
+    obs_zig    = obs_zig.sub(/\Aconst\s+/, '')                    # defensive
+    # Source type: must be hard-coded (Zig struct fields can't reference
+    # function-local vars via @TypeOf — "crosses namespace boundary").
+    source_ti  = source_node.respond_to?(:type_info) ? source_node.type_info : nil
+    source_zig = source_ti ? Type.new(source_ti).zig_type : "*anyopaque"
+    rt_name    = @do_rt_name || "rt"
+
+    # Heap-allocate the observable accumulator + a WaitGroup, then
+    # wire the WG into the observable's completion callback. The
+    # producer fiber's `defer ctx.acc.finish()` issues `wg.done()`;
+    # joiners (`NEXT running` / `s> COLLECT`) park on `wg.wait()`.
+    # observable.zig stays runtime-free -- the WG bridge lives in
+    # runtime-header.zig (CheatHeader.obsWg*).
+    # H9: every InlineZig that allocates carries a stdlib_def so the MIR
+    # checker can see the ownership effect. The observable's `:observable`
+    # cleanup template owns both the wrapper and the WaitGroup it wraps
+    # (destroy() forwards via done_destroy_fn), so neither needs a
+    # separate MIR::Cleanup -- but the `allocates: true` declaration
+    # makes the heap touch explicit instead of slipping past INV-12.
+    acc_alloc = MIR::InlineZig.new(acc_alloc_zig, "obs_alloc")
+    acc_alloc.stdlib_def = ALLOCATING_DEF
+    wg_init_zig = <<~ZIG.chomp
+      blk: {
+          const __wg = #{rt_name}.heapAlloc().create(CheatHeader.WaitGroup) catch unreachable;
+          __wg.* = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
+          __wg.add(1);
+          break :blk __wg;
+      }
+    ZIG
+    wg_init = MIR::InlineZig.new(wg_init_zig, "obs_wg_alloc")
+    wg_init.stdlib_def = ALLOCATING_DEF
+    set_completion = MIR::InlineZig.new(
+      "__obs_acc.setCompletion(@as(*anyopaque, @ptrCast(__obs_wg)), CheatHeader.obsWgDone, CheatHeader.obsWgWait, CheatHeader.obsWgDestroy)",
+      "obs_set_completion")
+    # setCompletion mutates __obs_acc to take ownership of __obs_wg; no
+    # net allocation here. Borrows both pointers.
+    set_completion.stdlib_def = ALLOC_REF_DEF
+    acc_init_stmts = [
+      *([p[:range_let]].compact), *p[:outer_stmts],
+      MIR::Let.new("__obs_acc", acc_alloc, false, obs_zig, nil),
+      MIR::Let.new("__obs_wg", wg_init,
+        false, "*CheatHeader.WaitGroup", nil),
+      MIR::ExprStmt.new(set_completion, nil),
+    ]
+
+    # Consumer fiber body: while-consume + per-item publish stmts.
+    # The defer in the spawn scaffold's run() fn handles `acc.finish()`
+    # on every exit path (normal end, error, early-exit), so we don't
+    # emit a post-loop finish here -- doing so would double-decrement
+    # the observable's WaitGroup and corrupt joiner wake state.
+    body_mir = [
+      MIR::WhileStmt.new(range_next,
+        [*p[:stage_stmts], *publish_stmts],
+        capture_name, nil, nil, nil),
+    ]
+
+    # Generate per-call ids so two observable pipes in one fn don't
+    # collide on struct/ctx names.
+    fid = (@lowering.instance_variable_get(:@bg_block_counter) || 0)
+    @lowering.instance_variable_set(:@bg_block_counter, fid + 1)
+    ctx_type = "__ObsConsumerCtx#{fid}"
+    ctx_var  = "__obs_consumer_ctx#{fid}"
+    fiber_rt = "__rt_obs_#{fid}"
+
+    # Emit the body MIR as Zig, then post-process to rewrite
+    # outer-scope identifiers to their ctx-scoped equivalents. The
+    # rewrite is textual: lower_bg_block's with_fiber_capture_map
+    # operates during lower() (AST→MIR) and doesn't apply when MIR
+    # is constructed directly (as we do here). \b word boundaries
+    # avoid clobbering substrings.
+    #
+    # C8 partial: the runtime-name rewrite is now done via the
+    # emitter's `rt_name` swap rather than a textual gsub on the
+    # emitted Zig. This eliminates the most fragile of the three
+    # rewrites (the gsub for `\brt\b` could in principle match any
+    # user-named identifier with the bytes "rt"; swapping rt_name
+    # during emit produces fiber-scoped `__rt_obs_N.X` directly).
+    # The remaining two gsubs target reserved-prefix names
+    # (`__obs_acc`) or a generated source-name local, both safely
+    # under the codegen's namespace; replacing them with a true MIR
+    # walker remains future work because no general-purpose tree
+    # mutator exists in this codebase yet.
+    # The body emits through `@lowering.emit_expr` which sets its own
+    # internal emitter's rt_name from `@lowering.rt_name` on every
+    # call. Swapping `@emitter.rt_name` is insufficient -- swap the
+    # lowering's `@rt_name` too so AllocatorRef / alloc_zig / and any
+    # other rt-aware emitter codepath produce fiber-scoped names.
+    saved_emit_rt = @emitter.rt_name
+    saved_low_rt  = @lowering.instance_variable_get(:@rt_name)
+    @emitter.rt_name = fiber_rt
+    @lowering.instance_variable_set(:@rt_name, fiber_rt)
+    body_zig = begin
+      body_mir.filter_map { |m|
+        code = @lowering.send(:emit_expr, m)
+        next nil if code.nil? || code.empty?
+        code.strip.end_with?("}", ";") ? code : "#{code};"
+      }.join("\n            ")
+    ensure
+      @emitter.rt_name = saved_emit_rt
+      @lowering.instance_variable_set(:@rt_name, saved_low_rt)
+    end
+    body_zig = body_zig
+      .gsub(/\b__obs_acc\b/, "ctx.acc")
+      .gsub(/\b#{Regexp.escape(p[:source_name])}\b/, "ctx.gen")
+
+    # Spawn the consumer cross-scheduler (unpinned) so in
+    # multi-threaded mode it can run on a different worker thread
+    # than the joiner. This is critical for hot-poll patterns
+    # (`WHILE current < expected DO WITH VIEW running AS s ... END`)
+    # where the joiner is a pinned main: pinned-first pickNext
+    # (scheduler.zig:826-830) would starve a same-scheduler
+    # consumer. With the consumer on a sibling scheduler, the two
+    # OS threads make actual concurrent progress -- main can spin
+    # on `.view()` and the consumer publishes items in parallel.
+    task_cfg = @lowering.send(:task_config_zig, nil, nil)
+
+    spawn_zig = <<~ZIG.chomp
+      const #{ctx_type} = struct {
+              acc: #{obs_zig},
+              gen: #{source_zig},
+              fn run(__raw_rt_obs_#{fid}: *anyopaque, __raw_args_obs_#{fid}: ?*anyopaque) anyerror!void {
+                  const #{fiber_rt} = @as(*Runtime, @ptrCast(@alignCast(__raw_rt_obs_#{fid})));
+                  #{body_zig.include?(fiber_rt) ? "" : "_ = &#{fiber_rt};"}
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(__raw_args_obs_#{fid}.?)));
+                  defer #{fiber_rt}.heapAlloc().destroy(ctx);
+                  defer ctx.acc.finish();
+                  #{body_zig}
+              }
+          };
+          const #{ctx_var} = #{rt_name}.heapAlloc().create(#{ctx_type}) catch unreachable;
+          errdefer #{rt_name}.heapAlloc().destroy(#{ctx_var});
+          #{ctx_var}.* = .{ .acc = __obs_acc, .gen = #{p[:source_name]} };
+          try CheatHeader.spawnBest(
+              @intFromPtr(&Runtime.entryWrapper),
+              @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
+              #{ctx_var},
+              #{task_cfg}
+          )
+    ZIG
+
+    spawn_inline = MIR::InlineZig.new(spawn_zig, "obs_consumer_spawn")
+    # spawn_inline allocates the consumer-fiber ctx (heapAlloc().create)
+    # and transfers ownership to the spawned fiber. The fiber's run() has
+    # `defer rt.heapAlloc().destroy(ctx)` and the alloc site itself has
+    # `errdefer rt.heapAlloc().destroy(ctx_var)` so cleanup is closed-form
+    # within this block. From outside, it's a no-net-allocation effect:
+    # mark as borrowing the allocator + ctx-init args. (H9)
+    spawn_inline.stdlib_def = ALLOC_REF_DEF
+
+    MIR::BlockExpr.new(label, [
+      *acc_init_stmts,
+      MIR::ExprStmt.new(spawn_inline, nil),
+      MIR::BreakStmt.new(label, MIR::Ident.new("__obs_acc"))
+    ])
+  end
+
+  # Per-terminal publish specs for default-init observables. Each
+  # terminal contributes only:
+  #   - `:method`       -- the Inner accumulator's publish method name
+  #                        (`add` / `inc` / `submit`).
+  #   - `:expr`         -- :typed (numeric coerced to inner Zig type) /
+  #                        :f64 (numeric coerced to f64, AVG-style) /
+  #                        :pred (boolean predicate evaluated as-is) /
+  #                        :item (the raw item, no expression eval) /
+  #                        :none (no argument; method takes nothing).
+  #   - `:gate`         -- :always (publish unconditionally) /
+  #                        :pred (publish only when the predicate is true;
+  #                        the predicate IS the fold expression and is
+  #                        not passed to the publish method).
+  # Allocator is the default `Wrapper.new(...)` -- terminals needing a
+  # seeded init (REDUCE, DISTINCT) take their own dedicated path.
+  #
+  # A3: derived from Type.observable_terminals (the single source of
+  # truth). Adding a default-handled terminal means one entry there;
+  # this projection picks up the :publish key automatically.
+  PUBLISH_SPEC = Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
+    h[sym] = entry[:publish] if entry[:publish]
+  }.freeze
+
+  # Single shared lowering for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND.
+  # REDUCE and DISTINCT need seeded inits or inline CAS, so they keep
+  # dedicated helpers below.
+  def lower_range_fold_observable_default(p, fold_op, smooth_node, label, source_node, terminal:)
+    spec  = PUBLISH_SPEC.fetch(terminal)
+    item  = p[:item_var]
+    inner_recv = MIR::FieldGet.new(MIR::Ident.new("__obs_acc"), "inner")
+
+    arg = case spec[:expr]
+          when :typed
+            inner_zig = transpile_type(smooth_node.full_type.tense_type)
+            [numeric_fold_expr_typed(fold_op.expression, item, inner_zig)]
+          when :f64
+            [numeric_fold_expr_typed(fold_op.expression, item, "f64")]
+          when :pred
+            [with_pipeline_context(placeholder: item) { visit_mir(fold_op.expression) }]
+          when :item
+            [MIR::Ident.new(item)]
+          when :none
+            []
+          end
+
+    call = MIR::ExprStmt.new(
+      MIR::MethodCall.new(inner_recv, spec[:method], arg, false), nil)
+
+    publish = case spec[:gate]
+              when :always then [call]
+              when :pred
+                pred_mir = with_pipeline_context(placeholder: item) {
+                  visit_mir(fold_op.expression)
+                }
+                # #203: when the source stream yields heap-owned items
+                # (currently only String → []const u8), the consumer
+                # fiber owns each item it pulls from `gen.next()`.
+                # FIND with `expr: :item` transfers ownership into the
+                # accumulator's submit() on the truthy branch, so the
+                # else branch must free the item explicitly. Other
+                # predicate-gated terminals (COUNT) don't pass the
+                # item to the call, so they must free unconditionally
+                # — but a String-source COUNT-observable isn't yet
+                # exercised end-to-end and would need additional
+                # codegen work; this fix is scoped to FIND-on-string.
+                else_body = string_source_else_free(p, source_node, terminal, spec)
+                [MIR::IfStmt.new(pred_mir, [call], else_body)]
+              end
+
+    lower_range_fold_observable(p, smooth_node, label, source_node,
+      acc_alloc_zig: default_obs_alloc_zig(smooth_node),
+      publish_stmts: publish)
+  end
+
+  # #203: produce an `else` body that frees a heap-owned item when the
+  # predicate-gated terminal didn't consume it. Only FIND for now —
+  # FIND's truthy branch transfers ownership via submit, so the else
+  # branch is the only leak path. Returns nil when the source is not
+  # heap-owned-element (numeric streams, etc.).
+  #
+  # Uses MIR::FreeSlice with MIR::AllocatorRef(:heap) so the emitter
+  # picks up the consumer fiber's runtime name during body-emit
+  # (lower_range_fold_observable swaps @emitter.rt_name to fiber_rt
+  # for the consumer body — C8 partial fix). A literal InlineZig
+  # like "rt.heapAlloc().free(...)" would bake in the outer scope's
+  # `rt` and crash with "rt not accessible from inner function".
+  def string_source_else_free(p, source_node, terminal, spec)
+    return nil unless terminal == :find
+    src_ti = source_node.respond_to?(:type_info) ? source_node.type_info : nil
+    return nil unless src_ti
+    src_t = src_ti.is_a?(Type) ? src_ti : Type.new(src_ti)
+    elem_t = src_t.tense_type&.element_type
+    return nil unless elem_t&.string?
+    [MIR::ExprStmt.new(
+      MIR::FreeSlice.new(MIR::Ident.new(p[:item_var]), MIR::AllocatorRef.new(:heap)),
+      nil,
+    )]
+  end
+
+  # REDUCE-scalar: per-item publish is a CAS loop that applies the
+  # user-supplied reducer body. We emit the loop inline (rather than
+  # using AtomicReduce.update + a comptime fn pointer) because the
+  # reducer body references stage-context (`_` and `acc`), which is
+  # easier to inline than to lift into a top-level Zig fn.
+  #
+  # Wrapper: `*ObservableReduce(T)` -- the Inner is `AtomicReduce(T)`
+  # which needs a seeded init(initial). Caller passes `newWith(...)`.
+  def lower_range_reduce_observable(p, reduce_op, smooth_node, label, source_node)
+    inner_zig = transpile_type(smooth_node.full_type.tense_type)
+    init_mir  = visit_mir(reduce_op.initial_value)
+    init_zig  = @lowering.send(:emit_expr, init_mir)
+
+    # Use a fid-prefixed sentinel for the `acc` substitution so
+    # nothing in the user's reducer body can collide. Two REDUCE
+    # pipes in the same fn pick different fids → different sentinels;
+    # any user identifier `__obs_reduce_curr_<N>` would have to
+    # collide on the exact same N to interfere.
+    fid = (@lowering.instance_variable_get(:@bg_block_counter) || 0)
+    curr_var = "__obs_reduce_curr_#{fid}"
+    next_var = "__obs_reduce_next_#{fid}"
+    actual_var = "__obs_reduce_actual_#{fid}"
+    blk_label = "__obs_reduce_blk_#{fid}"
+
+    body_mir = with_pipeline_context(placeholder: p[:item_var], acc: curr_var) {
+      visit_mir(reduce_op.expression)
+    }
+    body_zig = @lowering.send(:emit_expr, body_mir)
+
+    # Inline CAS-loop publish, wrapped as a labeled block expression so
+    # ExprStmt's trailing `;` is well-formed (`(blk: { ... break :blk 0; });`).
+    # References `__obs_acc` so the surrounding lower_range_fold_observable
+    # text-rewrite (-> ctx.acc) catches it.
+    #
+    # A4: routes through AtomicReduce's public `view`/`tryCommit`/`markSeen`
+    # methods instead of poking the private `inner.inner.load`,
+    # `inner.inner.cmpxchgWeak`, and `inner.seen.store` fields. Also
+    # picks up the .release ordering on markSeen (was .monotonic, a
+    # latent ordering bug since a reader's `started()` acquire-load
+    # didn't synchronize-with the publish).
+    cas_zig = <<~ZIG.chomp
+      #{blk_label}: {
+                  var #{curr_var}: #{inner_zig} = __obs_acc.inner.view();
+                  while (true) {
+                      const #{next_var}: #{inner_zig} = #{body_zig};
+                      if (__obs_acc.inner.tryCommit(#{curr_var}, #{next_var})) |#{actual_var}| {
+                          #{curr_var} = #{actual_var};
+                      } else { break; }
+                  }
+                  __obs_acc.inner.markSeen();
+                  break :#{blk_label} @as(i32, 0);
+              }
+    ZIG
+    publish = [MIR::ExprStmt.new(MIR::InlineZig.new(cas_zig, "obs_reduce_publish"), true)]
+
+    rt_name = @do_rt_name || "rt"
+    obs_target = transpile_type(smooth_node.full_type).sub(/\A\*/, '')
+    acc_alloc = "#{obs_target}.newWith(#{rt_name}.heapAlloc(), CheatLib.obs.AtomicReduce(#{inner_zig}).init(#{init_zig})) catch unreachable"
+
+    lower_range_fold_observable(p, smooth_node, label, source_node,
+      acc_alloc_zig: acc_alloc,
+      publish_stmts: publish)
+  end
+
+  # DISTINCT into ~T[]@set:observable (dynamic) or ~T[N]@set:observable
+  # (bounded). Inner is `StreamSet(T)` for the dynamic shape (geometric
+  # grow + refcounted snapshots) or `StreamSetBounded(T, N)` for the
+  # bounded shape (fixed [N]T buffer, no grow, no refcounting). Both
+  # take an allocator -- non-default-init Inner -- so we use newWith(...).
+  # Per-item publish:
+  #   - dynamic:  `_ = acc.inner.submit(item) catch unreachable`  (fallible: grow can fail)
+  #   - bounded:  `_ = acc.inner.submit(item)`                    (infallible: no grow path)
+  def lower_range_fold_observable_distinct(p, distinct_op, smooth_node, label, source_node)
+    key_expr_mir = with_pipeline_context(placeholder: p[:item_var]) {
+      visit_mir(distinct_op.expression)
+    }
+    rt_name      = @do_rt_name || "rt"
+    obs_zig      = transpile_type(smooth_node.full_type)        # "*CheatLib.obs.ObservableStreamSet(i64)" or "*CheatLib.obs.ObservableStreamSetBounded(i64, 8)"
+    target       = obs_zig.sub(/\A\*/, '')
+    set_type     = smooth_node.full_type.tense_type
+    elem_zig     = transpile_type(set_type.element_type)
+    is_bounded   = set_type.fixed?
+    cap          = set_type.capacity
+
+    submit_call = "_ = __obs_acc.inner.submit(#{@lowering.send(:emit_expr, key_expr_mir)})"
+    submit_call = "#{submit_call} catch unreachable" unless is_bounded
+    publish = [
+      MIR::ExprStmt.new(MIR::InlineZig.new(submit_call, "obs_distinct_publish"), nil),
+    ]
+
+    inner_ctor = if is_bounded
+      "CheatLib.obs.StreamSetBounded(#{elem_zig}, #{cap}).init(#{rt_name}.heapAlloc()) catch unreachable"
+    else
+      "CheatLib.obs.StreamSet(#{elem_zig}).init(#{rt_name}.heapAlloc()) catch unreachable"
+    end
+
+    lower_range_fold_observable(p, smooth_node, label, source_node,
+      acc_alloc_zig: "#{target}.newWith(#{rt_name}.heapAlloc(), #{inner_ctor}) catch unreachable",
+      publish_stmts: publish)
+  end
+
+  # Default-init Observable<Terminal>.new allocator call. The wrapper Zig
+  # type comes from Type#zig_type via smooth_node.full_type, so terminals
+  # whose Inner default-constructs (SUM/COUNT/AVG/ANY/ALL/FIND) all share
+  # this one builder. MAX/MIN/REDUCE need a seeded init -- they pass
+  # their own `acc_alloc_zig`.
+  def default_obs_alloc_zig(smooth_node)
+    rt_name = @do_rt_name || "rt"
+    target  = transpile_type(smooth_node.full_type).sub(/\A\*/, '')
+    "#{target}.new(#{rt_name}.heapAlloc()) catch unreachable"
+  end
+
+  # Single source of truth mapping fold-op AST class to its observable
+  # terminal kind. Replaces the per-case `if observable_dest` branches
+  # that previously duplicated the dispatch shape eight times in
+  # lower_range_fold (H8 / M6).
+  #
+  # A3: derived from Type.observable_terminals; entries without an
+  # `:ast_class` (REDUCE / DISTINCT) are skipped — they have their own
+  # lowering helpers and never hit the default fold-op dispatch.
+  FOLD_OP_OBSERVABLE_TERMINAL = Type.observable_terminals.each_with_object({}) { |(sym, entry), h|
+    h[entry[:ast_class]] = sym if entry[:ast_class]
+  }.freeze
+
   # Emit a single fused accumulating while loop for range s> stages s> fold.
   # fold_op is one of CountOp, SumOp, AverageOp, AnyOp, AllOp, FindOp, MinOp, MaxOp.
   # Returns a MIR::BlockExpr (labeled) so the accumulated result can be used as an expression.
@@ -2217,6 +2627,24 @@ class PipelineHost
     post_loop_stmts = []  # post-loop checks (panic for MIN/MAX on empty)
     result_expr    = nil  # MIR expression evaluated as the block result
 
+    # Observable destination: dispatch through the central terminal-kind
+    # registry instead of repeating an `if observable_dest` arm in every
+    # `case fold_op` branch (H8). Adding a new terminal is then one
+    # FOLD_OP_OBSERVABLE_TERMINAL entry plus the per-terminal accumulator
+    # builder, with no per-shape codegen branch here.
+    if smooth_node.observable_dest
+      terminal = FOLD_OP_OBSERVABLE_TERMINAL[fold_op.class]
+      if terminal.nil?
+        raise CompilerError.new(
+          "lower_range_fold: observable_dest set but no terminal registered for #{fold_op.class.name}",
+          range_lit.location,
+        )
+      end
+      return lower_range_fold_observable_default(
+        p, fold_op, smooth_node, label, range_lit, terminal: terminal,
+      )
+    end
+
     case fold_op
     when AST::CountOp
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
@@ -2236,7 +2664,7 @@ class PipelineHost
       result_expr = MIR::Ident.new(fold_acc)
 
     when AST::AverageOp
-      expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
+      expr_f64 = numeric_fold_expr_typed(fold_op.expression, item_var, "f64")
       acc_init_stmts << MIR::Let.new(fold_sum, MIR::Lit.new("0"), true, "f64", nil)
       acc_init_stmts << MIR::Let.new(fold_cnt, MIR::Lit.new("0"), true, "i64", nil)
       loop_acc_stmts << MIR::Set.new(MIR::Ident.new(fold_sum),
@@ -2362,10 +2790,15 @@ class PipelineHost
 
   # Emit a single fused accumulating while loop for range s> stages s> REDUCE(init) body.
   # Returns a MIR::BlockExpr so the accumulated result can be used as an expression.
-  def lower_range_reduce(range_lit, stages, reduce_op)
+  def lower_range_reduce(range_lit, stages, reduce_op, smooth_node = nil)
     p = build_lazy_range_prefix(range_lit, stages)
     item_var   = p[:item_var]
     range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
+
+    if smooth_node && smooth_node.respond_to?(:observable_dest) && smooth_node.observable_dest
+      label = next_pipe_label
+      return lower_range_reduce_observable(p, reduce_op, smooth_node, label, range_lit)
+    end
 
     label    = next_pipe_label
     acc_zig  = transpile_type(reduce_op.full_type.to_s)

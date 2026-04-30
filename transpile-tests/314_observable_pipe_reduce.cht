@@ -1,0 +1,24 @@
+-- Pipeline-terminal observable REDUCE-scalar.
+--
+-- A BG STREAM produces values; REDUCE folds them into a
+-- `~Int64@observable` binding (heap-allocated `*ObservableReduce(i64)`)
+-- using a user-supplied reducer body wrapped in a CAS loop.
+-- NEXT joins the producer and returns the final accumulator.
+
+FN main() RETURNS Void ->
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 1_i64;
+        WHILE i <= 5_i64 DO
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    -- Sum via REDUCE: 1 + 2 + 3 + 4 + 5 = 15
+    running: ~Int64@observable = gen s> REDUCE(0_i64) acc + _;
+    final = NEXT running;
+
+    ASSERT final == 15_i64, "running reduce-sum mismatch";
+    print("ok");
+    RETURN;
+END

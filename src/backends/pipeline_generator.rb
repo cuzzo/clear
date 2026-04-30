@@ -950,6 +950,7 @@ module PipelineGenerator
   # =========================================================
 
   def transpile_find(list_node, find_node, smooth_node)
+    raise "transpile_find: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     elem_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
     expr_code = visit_pipeline_expr(list_node, find_node.expression)
 
@@ -971,6 +972,7 @@ module PipelineGenerator
   end
 
   def transpile_any(list_node, any_node, smooth_node)
+    raise "transpile_any: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, any_node.expression)
 
     transpile_pipeline_macro(list_node, smooth_node) do
@@ -988,6 +990,7 @@ module PipelineGenerator
   end
 
   def transpile_all(list_node, all_node, smooth_node)
+    raise "transpile_all: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, all_node.expression)
 
     transpile_pipeline_macro(list_node, smooth_node) do
@@ -1005,6 +1008,7 @@ module PipelineGenerator
   end
 
   def transpile_count(list_node, count_node, smooth_node)
+    raise "transpile_count: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, count_node.expression)
 
     transpile_pipeline_macro(list_node, smooth_node) do
@@ -1040,6 +1044,15 @@ module PipelineGenerator
   end
 
   def transpile_sum(list_node, sum_node, smooth_node)
+    # M8: observable destinations always route through
+    # lower_range_fold_observable_default (the producer-fiber-spawn
+    # path) before this fallback fires. The previous early return to
+    # `transpile_observable_sum` (a synchronous collect-then-fold
+    # variant from before producer-spawn landed) is unreachable today
+    # and was removed; if a future change re-routes an observable
+    # source through `pipe_items`, the assertion below will catch it.
+    raise "transpile_sum: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
+
     expr_code = visit_pipeline_expr(list_node, sum_node.expression)
     acc_type  = transpile_type(smooth_node.full_type.to_s)  # already upsized by pipe_analysis
 
@@ -1054,7 +1067,18 @@ module PipelineGenerator
     end
   end
 
+  # A13: every pipe-terminal transpile_* should reject observable_dest
+  # at this fallback path. Observables route through
+  # lower_range_fold_observable_default before the pipe_items materializer
+  # below ever runs. A future regression that leaks an observable into
+  # the legacy collect-then-fold path would silently miscompile -- no
+  # producer fiber, no WaitGroup, no atomic accumulator -- so we want
+  # a loud assertion instead. Mirrors the guard added to transpile_sum
+  # in M8.
+  OBS_DEST_GUARD_MSG = "observable_dest unexpected here -- should route through lower_range_fold_observable_default"
+
   def transpile_average(list_node, avg_node, smooth_node)
+    raise "transpile_average: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, avg_node.expression)
 
     transpile_pipeline_macro(list_node, smooth_node) do
@@ -1070,6 +1094,7 @@ module PipelineGenerator
   end
 
   def transpile_min(list_node, min_node, smooth_node)
+    raise "transpile_min: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, min_node.expression)
     expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
     acc_type  = transpile_type(smooth_node.full_type.to_s)
@@ -1089,6 +1114,7 @@ module PipelineGenerator
   end
 
   def transpile_max(list_node, max_node, smooth_node)
+    raise "transpile_max: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, max_node.expression)
     expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
     acc_type  = transpile_type(smooth_node.full_type.to_s)

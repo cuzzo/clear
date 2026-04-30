@@ -203,6 +203,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "spsc-test.zig", .tsan = true },
         .{ .path = "steal-hammer-test.zig", .tsan = true },
         .{ .path = "stream-test.zig", .tsan = true },
+        .{ .path = "observable-test.zig", .tsan = true },
         .{ .path = "tcp-fairness-test.zig", .tsan = true },
         .{ .path = "tcp-starvation-test.zig", .tsan = true },
         // vopr-loom-test does exhaustive interleaving (16K+ paths per test) which

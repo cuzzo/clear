@@ -22,6 +22,11 @@ const fp = @import("scheduler.zig");
 const streams = @import("../lib/streams.zig");
 const freeze_mod = @import("../experimental/freeze.zig");
 
+/// Lock-free observable accumulators (AtomicSum, AtomicCount,
+/// Observable<T>, StreamSet, ...). Re-exported so CLEAR programs
+/// can reach them via `EXTERN ... FROM "cheat_runtime"`.
+pub const obs = @import("../lib/observable.zig");
+
 pub const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const Task = @import("queues.zig").Task;
 const Fiber = fc.Fiber;
@@ -30,6 +35,27 @@ const Fiber = fc.Fiber;
 pub const WaitGroup = fp.WaitGroup;
 pub const Semaphore = fp.Semaphore;
 pub const TaskFn = @import("queues.zig").TaskFn;
+
+// Trampolines that bridge ObservableSum's runtime-agnostic
+// completion-callback shape (?*anyopaque + fn ptrs) to the
+// scheduler's WaitGroup. The codegen calls
+// `obs.ObservableSum(T).setCompletion(wg_ptr, obsWgDone, obsWgWait,
+// obsWgDestroy)` so the producer fiber's `acc.finish()` issues
+// `wg.done()` and the joiner's `acc.next()` parks on `wg.wait()`.
+// observable.zig stays runtime-free; the runtime knowledge lives
+// here.
+pub fn obsWgDone(handle: ?*anyopaque) void {
+    const wg: *fp.WaitGroup = @ptrCast(@alignCast(handle.?));
+    wg.done();
+}
+pub fn obsWgWait(handle: ?*anyopaque) void {
+    const wg: *fp.WaitGroup = @ptrCast(@alignCast(handle.?));
+    wg.wait();
+}
+pub fn obsWgDestroy(handle: ?*anyopaque, alloc: std.mem.Allocator) void {
+    const wg: *fp.WaitGroup = @ptrCast(@alignCast(handle.?));
+    alloc.destroy(wg);
+}
 
 // FSM types re-exported for Phase B1 pure-compute BG lowering.
 pub const FsmTask = fp.FsmTask;
@@ -94,6 +120,10 @@ noinline fn openPathFd(path: []const u8, flags: std.posix.O, mode: std.posix.mod
 pub const CheatLib = struct {
     pub const Range = streams.Range;
     pub const IntRange = streams.IntRange;
+    /// Lock-free observable accumulators (pipeline-terminal backings
+    /// for ~T@observable). Re-exported from the top-level `obs` so
+    /// emitted Zig can reach them via `CheatLib.obs.ObservableSum(T)`.
+    pub const obs = @import("../lib/observable.zig");
     pub fn SplitStream(comptime T: type) type {
         return streams.SplitStream(T, WaitGroup, struct {
             fn cloneValue(alloc: std.mem.Allocator, value: T) !T {

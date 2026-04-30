@@ -63,7 +63,9 @@ FN main() RETURNS Void ->
             i4 = i4 + 1;
         END
     };
-    total4 = gen4 s> SUM _;
+    -- SUM on a tense stream produces ~Int64@observable; COLLECT
+    -- joins the producer and returns the final scalar.
+    total4 = gen4 s> SUM _ s> COLLECT;
     ASSERT total4 == 15, "open stream SUM: 1+2+3+4+5=15";
 
     -- -------------------------------------------------------
@@ -75,7 +77,9 @@ FN main() RETURNS Void ->
         YIELD 300;
         YIELD 400;
     };
-    n5 = gen5 s> COUNT _ > 150;
+    -- COUNT on a tense stream produces ~Int64@observable; COLLECT
+    -- joins the producer and returns the final scalar.
+    n5 = gen5 s> COUNT _ > 150 s> COLLECT;
     ASSERT n5 == 3, "open stream COUNT: 200+300+400 > 150";
 
     -- -------------------------------------------------------
@@ -88,6 +92,8 @@ FN main() RETURNS Void ->
             i6 = i6 + 1;
         END
     };
+    -- WHERE strips the source's tenseness, so SUM here folds
+    -- eagerly to scalar (no observable lift, no COLLECT).
     total6 = gen6 s> WHERE _ MOD 2 == 0 s> SUM _;
     ASSERT total6 == 30, "open stream WHERE+SUM: 2+4+6+8+10=30";
 

@@ -1,0 +1,28 @@
+-- Two observable pipelines in the same function -- verifies the
+-- per-pipe `fid` counter keeps `__obs_acc` / `__ObsConsumerCtx` /
+-- `__rt_obs_*` symbols unique across observables. Without that
+-- uniqueness the second pipe's struct/var declarations would
+-- shadow the first's and Zig would either reject the redefinition
+-- or (worse) the consumer fibers would clobber each other.
+
+FN main() RETURNS Void ->
+    gen1: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
+    };
+    gen2: ~?Int64[] = BG STREAM {
+        MUTABLE j: Int64 = 0_i64;
+        WHILE j < 4_i64 DO YIELD j; j = j + 1_i64; END
+    };
+
+    sum_running:   ~Int64@observable = gen1 s> SUM _;
+    count_running: ~Int64@observable = gen2 s> COUNT _ > 0_i64;
+
+    sum_final   = NEXT sum_running;
+    count_final = NEXT count_running;
+
+    ASSERT sum_final == 10_i64, "sum 0..4 = 10";
+    ASSERT count_final == 3_i64, "count of {1,2,3} > 0 = 3";
+    print("ok");
+    RETURN;
+END

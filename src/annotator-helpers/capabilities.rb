@@ -147,6 +147,25 @@ module CapabilityHelper
       # BORROWED is an immutable borrow — any variable can be borrowed.
       # No special validation needed beyond the identity check above.
 
+    when :VIEW
+      # Observables Phase 2.3 + 2.8: source MUST be a tense observable
+      # type. When it isn't, emit a fixable error proposing
+      # `WITH MATERIALIZED VIEW` (always-correct, O(N)) as :auto and
+      # the @observable annotation as :interactive.
+      t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
+      unless t.future? && t.observable?
+        emit_view_not_observable_finding!(node, var_node, t)
+      end
+
+    when :MATERIALIZED_VIEW
+      # Observables Phase 2.4 placeholder: any tense aggregate is allowed
+      # (observable or not). Reject non-tense sources with a clear message.
+      t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
+      unless t.future?
+        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        error!(node, "WITH MATERIALIZED VIEW requires a `~T` (tense) source, got #{t.resolved} for '#{name}'.")
+      end
+
     when :multiowned
       unless cap_var_storage(var_node) == :multiowned
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
@@ -162,6 +181,37 @@ module CapabilityHelper
     else
       error!(node, "Unknown capability type: #{capability_type}")
     end
+  end
+
+  # Observables Phase 2.8: emit a fixable error for `WITH VIEW v AS s`
+  # where v is not `@observable`. The :auto fix replaces `VIEW` with
+  # `MATERIALIZED VIEW` (always-correct, owned O(N) snapshot). The
+  # :interactive fix proposes adding `@observable` at the source's
+  # declaration -- skipped here because the declaration may be in
+  # another module / file; `clear fix` will surface only the :auto fix.
+  def emit_view_not_observable_finding!(node, var_node, var_type)
+    name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+    msg = "WITH VIEW requires an `@observable` source, but '#{name}' has type #{var_type.resolved}. " \
+          "Use `WITH MATERIALIZED VIEW` for non-observable aggregates, or annotate the binding as `~T@observable`."
+
+    cap_entry = (node.capabilities || []).find { |c| c[:capability] == :VIEW && c[:var_node].equal?(var_node) }
+    view_tok = cap_entry && cap_entry[:view_token]
+
+    fixes = []
+    if view_tok
+      fixes << Fix.new(
+        description: "Replace `VIEW` with `MATERIALIZED VIEW` (owned O(N) snapshot, works on any `~T` aggregate).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: view_tok.line, col: view_tok.column, length: 'VIEW'.length),
+          replacement: 'MATERIALIZED VIEW',
+        )],
+      )
+    end
+
+    return error!(node, msg) if fixes.empty?
+    fixable!(node, message: msg, category: :capability, level: :error,
+             fixes: fixes, raise_in_collector: false)
   end
 
   # Resolve and validate a single capability entry from a WITH block.
@@ -304,6 +354,25 @@ module CapabilityHelper
         sym.borrowed_alias = true  # RESTRICT alias: fiber capture is stack-UAF
         og_declare(alias_name, nil, resolved_type)
       end
+    elsif cap[:capability] == :VIEW || cap[:capability] == :MATERIALIZED_VIEW
+      # Observables Phase 2.3 / 2.4. Bind alias to `?T` where T is the
+      # inner element type of the tense source. VIEW is immutable +
+      # non_escaping (borrow); MATERIALIZED_VIEW is owned and may escape.
+      source_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name)
+      st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
+      inner = st.future? && st.tense_type ? st.tense_type : st
+      # Wrap as ?T so the binding is null until the first item lands.
+      # If `inner` is already optional (FIND yields `~?T@observable`,
+      # whose tense_type is `?T`), don't double-wrap into `??T`.
+      bind_type_sym = inner.optional? ? inner.resolved : :"?#{inner.resolved}"
+      alias_name = cap[:alias] || var_name
+      current_scope.declare(alias_name, nil, bind_type_sym, false, false, nil, :stack)
+      sym = current_scope.locals[alias_name]
+      if cap[:capability] == :VIEW
+        sym.non_escaping  = true
+        sym.borrowed_alias = true
+      end
+      og_declare(alias_name, nil, bind_type_sym)
     elsif cap[:capability] == :BORROWED
       # BORROWED guarantees the aliased data is stable for the borrow duration.
       # @shared/@locked/@multiowned types can be concurrently written — the

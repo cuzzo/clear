@@ -1,0 +1,28 @@
+-- #203: FIND-on-String observable. AtomicFind for `[]const u8` routes
+-- to AtomicFindString (heap-pointer-CAS variant) since a slice value
+-- can't fit in a single atomic word.
+--
+-- Producer fiber submits each yielded String to the FIND accumulator.
+-- The first item matching the predicate wins; subsequent submits free
+-- their incoming bytes (ownership-transfer pattern, mirroring StreamSet).
+-- NEXT waits for the producer to finish and returns the matched
+-- ?String — null if nothing matched.
+
+FN main() RETURNS Void ->
+    gen: ~?String[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 5_i64 DO
+            YIELD i.toString();
+            i = i + 1_i64;
+        END
+    };
+
+    -- Find the first item with character '3' in it.
+    matched: ~?String@observable = gen s> FIND _.contains?("3");
+    final = NEXT matched;
+
+    -- final is ?String. Verify a match was found.
+    ASSERT final != NIL, "should have found a match";
+    print("ok");
+    RETURN;
+END

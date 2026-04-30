@@ -870,13 +870,18 @@ class MIRLowering
     end
   end
 
+  # Module roots that resolve as Zig MODULES (not relative .zig files):
+  # - std, builtin: Zig stdlib
+  # - cheat_runtime: CLEAR runtime, wired via build.zig as a module
+  EXTERN_MODULE_ROOTS = %w[std builtin cheat_runtime].to_set.freeze
+
   def lower_extern_fn(node)
     mod = node.from_module
     if @emitted_extern_modules.add?(mod)
       mod_parts = mod.split(".")
       import_expr = "@import(\"#{mod_parts.first}\")" + mod_parts[1..].map { |p| ".#{p}" }.join
       mod_alias = mod.gsub(".", "_")
-      module_path = mod_parts.first == "std" ? mod_parts.first : "#{mod_parts.first}.zig"
+      module_path = EXTERN_MODULE_ROOTS.include?(mod_parts.first) ? mod_parts.first : "#{mod_parts.first}.zig"
       MIR::Import.new(mod_alias, module_path, mod_parts.length > 1 ? mod_parts[1..].join(".") : nil)
     else
       MIR::Noop.new("extern_fn_import_already_emitted")
@@ -892,7 +897,7 @@ class MIRLowering
       items = []
       if @emitted_extern_modules.add?(mod)
         member_chain = mod_parts[1..].any? ? mod_parts[1..].join(".") : nil
-        module_path = mod_parts.first == "std" ? mod_parts.first : "#{mod_parts.first}.zig"
+        module_path = EXTERN_MODULE_ROOTS.include?(mod_parts.first) ? mod_parts.first : "#{mod_parts.first}.zig"
         items << MIR::Import.new(mod_alias, module_path, member_chain)
       end
       # AS "ZigTypeExpr" allows aliasing to parameterized types like Parsed(JsonRecord).
@@ -2189,6 +2194,89 @@ class MIRLowering
             bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
           end
         end
+      when :VIEW
+        # Observables Phase 2.5/2.6. The runtime backing (AtomicSum,
+        # AtomicMax, ..., StreamSet, Observable<T>) exposes a
+        # uniform `.view()` method.
+        #   - Scalar wrappers (Atomic*) return the current value by
+        #     copy; no resource to release.
+        #   - Collection / handle wrappers (StreamSet, Observable<T>)
+        #     return a refcounted snapshot whose `.release()` must
+        #     run on scope exit.
+        # `inner` is the tense element type; collection / non-primitive
+        # shapes get a `defer s.release()`. Primitive scalars do not.
+        #
+        # After the view, yield cooperatively (when the scheduler is
+        # active) so a hot-poll WHILE loop gives the producer fiber a
+        # turn. Without this, a `WHILE done == FALSE { WITH VIEW
+        # running AS s { ... } }` loop monopolises the CPU and the
+        # producer never advances. The yield is a no-op when no other
+        # task is ready (single-fiber programs).
+        source_zig = emit_expr(lower(cap[:var_node]))
+        safe_alias = zig_safe_name(alias_name)
+        rt = resolved.is_a?(Type) ? resolved : Type.new(resolved)
+        inner_t = rt.future? && rt.tense_type ? rt.tense_type : rt
+        # Value-shaped types — no `.release()` needed:
+        #   - `T` where T is primitive (Int64 / Bool / etc.)
+        #   - `T` where T is a string (heap-managed but FIND/scalar
+        #     observables return them by value or as `?String`)
+        #   - `?T` where T is primitive OR string (FIND on
+        #     `~Int64@observable` or `~String@observable`)
+        # Without these carve-outs the codegen emits
+        # `defer s.release()` on a value that has no `release()`.
+        is_value_shape = inner_t.primitive? || inner_t.string? ||
+                         (inner_t.optional? && inner_t.wrapped_type &&
+                          (inner_t.wrapped_type.primitive? || inner_t.wrapped_type.string?))
+        wants_release = !is_value_shape && (
+                          inner_t.array? || inner_t.list_collection? ||
+                          inner_t.set_collection? || inner_t.pool? ||
+                          inner_t.map? || !inner_t.primitive?
+                        )
+        # Drain channels FIRST so SPSC-queued spawns (e.g. the consumer
+        # fiber for a sibling observable) become Ready before pickNext;
+        # without this, in a tight `WHILE { WITH VIEW ... }` loop a
+        # pinned main always wins over a not-yet-drained consumer
+        # (scheduler.zig:825-830 picks pinned-first).
+        coop_yield = "if (CheatHeader.scheduler.scheduler_running) { CheatHeader.scheduler.active_scheduler.drainChannels(); CheatHeader.scheduler.active_scheduler.coopYield(); }"
+        if wants_release
+          bindings << "var #{safe_alias} = #{source_zig}.view();\ndefer #{safe_alias}.release();\n#{coop_yield}\n_ = &#{safe_alias};"
+        else
+          bindings << "const #{safe_alias} = #{source_zig}.view();\n#{coop_yield}\n_ = &#{safe_alias};"
+        end
+      when :MATERIALIZED_VIEW
+        # Observables Phase 2.7. Owned snapshot — the runtime
+        # backing's `.materialize(allocator)` performs an explicit
+        # O(n) copy. For scalar observables (SUM/MAX/...) the result
+        # is a value-type T (no heap, no cleanup). For collection
+        # observables (DISTINCT) it's an owned `[]T` slice that the
+        # alias must free at end-of-WITH, otherwise it leaks (the
+        # rt.heapAlloc() bulk-free at process exit masks the leak in
+        # tests but it's a real bug in long-running programs).
+        #
+        # We detect collection shape from the source binding's type:
+        # `tense_type.array?` means the source is `~T[]@set:observable`
+        # (DISTINCT), whose materialize returns `[]T`. Scalars skip
+        # the defer.
+        source_zig = emit_expr(lower(cap[:var_node]))
+        safe_alias = zig_safe_name(alias_name)
+        rt = resolved.is_a?(Type) ? resolved : Type.new(resolved)
+        is_collection = rt.future? && rt.tense_type&.array?
+        bindings << "var #{safe_alias} = try #{source_zig}.materialize(#{@rt_name}.heapAlloc());\n_ = &#{safe_alias};"
+        if is_collection
+          # Owned slice: free the backing at end-of-WITH. The element
+          # type is whatever materialize returned ([]const u8 for
+          # string keys, []T otherwise). For string-key DISTINCT the
+          # deep-dupe in materialize gives us per-element ownership;
+          # iterate and free each, then free the outer slice.
+          elem_t = rt.tense_type.element_type
+          elem_zig = elem_t.zig_type
+          if elem_t.string?
+            bindings << "defer { for (#{safe_alias}) |__s| #{@rt_name}.heapAlloc().free(__s); #{@rt_name}.heapAlloc().free(#{safe_alias}); }"
+          else
+            bindings << "defer #{@rt_name}.heapAlloc().free(#{safe_alias});"
+          end
+          _ = elem_zig
+        end
       end
     end
 
@@ -3004,6 +3092,19 @@ class MIRLowering
       iz = MIR::InlineZig.new(code, "next_promise_list")
       iz.stdlib_def = { allocates: true }
       return iz
+    end
+
+    # Collection observable (`~T[]@set:observable`): NEXT yields an owned
+    # ArrayListUnmanaged(T) via `materializeNext(alloc)` rather than a
+    # snapshot handle, so user code (`final = NEXT running`) gets
+    # something it can iterate without explicit `.release()`. Use
+    # `heapAlloc()` unconditionally -- the StreamSet's internal buffers
+    # live on the heap, and the receiving CLEAR binding's cleanup runs
+    # via the standard list-cleanup path with the same allocator.
+    if promise_type&.observable? && promise_type.tense_type&.array?
+      inner = lower(node.expr)
+      return MIR::MethodCall.new(inner, "materializeNext",
+        [MIR::InlineZig.new("#{@rt_name}.heapAlloc()", "obs_alloc")], true)
     end
 
     inner = lower(node.expr)
@@ -3836,6 +3937,59 @@ class MIRLowering
         { consumes: [], produces: [], borrows: [] })
       inner.stdlib_def = { allocates: true, borrows: :all }
       return MIR::Pipeline.new(node, inner, source_type, nil, nil, nil)
+    end
+
+    # COLLECT: x s> COLLECT -> joins the observable + destroys the heap
+    # allocation when `x` is an inline sub-expression (no binding owns
+    # cleanup). When `x` is a named binding, the binding's
+    # `:observable` cleanup entry handles destroy at scope exit;
+    # COLLECT only needs to call .next() to read the final value.
+    if rhs.is_a?(AST::CollectOp)
+      left = lower(node.left)
+      ft = if node.left.respond_to?(:full_type) && node.left.full_type
+        node.left.full_type.is_a?(Type) ? node.left.full_type : Type.new(node.left.full_type)
+      else
+        nil
+      end
+      # Collection observable (DISTINCT producing `~T[]@set:observable`):
+      # COLLECT must yield an owned ArrayList(T), not the StreamSetSnapshot
+      # that `next()` returns. Mirrors lower_next_expr's collection branch
+      # so `final = stream s> DISTINCT _ s> COLLECT` and `final = NEXT
+      # (stream s> DISTINCT _)` produce the same shape.
+      collect_method = (ft && ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
+      collect_args = collect_method == "materializeNext" ?
+        [MIR::InlineZig.new("#{@rt_name}.heapAlloc()", "obs_alloc")] : []
+      named_source = node.left.is_a?(AST::Identifier)
+      if named_source
+        return MIR::MethodCall.new(left, collect_method, collect_args, true)
+      end
+      inner_zig = ft && ft.tense? && ft.tense_type ? Type.new(ft.tense_type).zig_type : "i64"
+      # The accumulator's Zig type comes from the observable's full_type
+      # (e.g. *ObservableCount() / *ObservableSum(i64) / *ObservableMax(f64))
+      # — `transpile_type` honors `observable_terminal` to pick the right
+      # per-terminal wrapper. Hardcoding ObservableSum here breaks every
+      # non-SUM terminal (COUNT/AVG/MIN/MAX/ANY/ALL/FIND/...).
+      acc_zig = ft ? transpile_type(ft) : "*CheatLib.obs.ObservableSum(#{inner_zig})"
+      @block_expr_counter += 1
+      label = "__collect_blk_#{@block_expr_counter}"
+      collect_var = "__collect_acc_#{@block_expr_counter}"
+      val_var = "__collect_val_#{@block_expr_counter}"
+      return MIR::BlockExpr.new(label, [
+        MIR::Let.new(collect_var, left, false,
+          acc_zig, nil),
+        # Let Zig infer the View type — observable terminals expose
+        # different View shapes per terminal (scalars expose T directly;
+        # DISTINCT exposes StreamSetSnapshot(T); etc.). Hardcoding
+        # `inner_zig` from `tense_type` only matches scalar terminals
+        # and breaks DISTINCT/REDUCE-collection paths.
+        MIR::Let.new(val_var,
+          MIR::MethodCall.new(MIR::Ident.new(collect_var), collect_method, collect_args, true),
+          false, nil, nil),
+        MIR::ExprStmt.new(MIR::InlineZig.new(
+          "#{collect_var}.destroy(#{@rt_name}.heapAlloc())",
+          "obs_collect_destroy"), nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new(val_var))
+      ])
     end
 
     # RecoverOp: x s> RECOVER(default) -> (x catch default)

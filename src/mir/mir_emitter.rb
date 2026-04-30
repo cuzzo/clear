@@ -563,6 +563,26 @@ class MIREmitter
       kw = errdefer ? "errdefer" : "defer"
       "#{kw} #{name}.deinit();\n"
 
+    when :observable
+      # ~T@observable / ~T[]@set:observable: wait for the consumer fiber
+      # to publish .finish() (spins on isFinished), then free the heap
+      # allocation. Wait-then-destroy is critical: destroying while the
+      # fiber still publishes is a UAF.
+      #
+      # Use `wait()` not `next()` so collection inners (StreamSet) don't
+      # acquire a snapshot the cleanup would discard -- that would leak
+      # the snapshot's buffer refcount. Shape-independent: same body
+      # for SUM/COUNT/MAX/MIN/AVG/ANY/ALL/FIND/REDUCE/DISTINCT.
+      # M7 (now landable, after A1): derive the destroy allocator from
+      # the entry. classify_observable stamps `:heap`; A1 added
+      # tense_observable? to Type#needs_heap_backing? so lower_var_decl
+      # no longer downgrades the entry to :frame. alloc_from_entry now
+      # returns "rt.heapAlloc()" reliably for every observable binding,
+      # matching the allocator that built the *ObservableTerminal
+      # wrapper in lower_range_fold_observable.
+      kw = errdefer ? "errdefer" : "defer"
+      "#{kw} { #{name}.wait(); #{name}.destroy(#{alloc}); }\n"
+
     when :list_with_elem_cleanup
       body = "{ for (#{deref}.items) |*__e| { CheatLib.cleanup(#{elem_zig}, rt.cleanupAlloc(), __e); } #{deref}.deinit(rt.frameAlloc()); }"
       guarded_defer(name, body, g, errdefer:)
@@ -897,11 +917,17 @@ class MIREmitter
   end
 
   def emit_allocator_ref(node)
+    # Use @rt_name (matches alloc_zig) so callers that swap rt_name
+    # — e.g. lower_range_fold_observable's body-emit phase, which
+    # rewrites `rt` to the consumer fiber's `__rt_obs_N` — produce
+    # consistent allocator strings across both AllocatorRef and
+    # alloc_zig-emitted call sites.
+    rt = @rt_name || "rt"
     case node.kind
-    when :heap    then "rt.heapAlloc()"
-    when :frame   then "rt.frameAlloc()"
-    when :cleanup then "rt.cleanupAlloc()"
-    else               "rt.heapAlloc()"
+    when :heap    then "#{rt}.heapAlloc()"
+    when :frame   then "#{rt}.frameAlloc()"
+    when :cleanup then "#{rt}.cleanupAlloc()"
+    else               "#{rt}.heapAlloc()"
     end
   end
 

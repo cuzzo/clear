@@ -1,0 +1,29 @@
+-- DISTINCT observable with String keys. Verifies:
+--
+--   1. StreamSet's comptime StringHashMap routing (T == []const u8
+--      → StringHashMap; primitives → AutoHashMap). Same-content
+--      strings dedupe by content, not pointer identity.
+--   2. Producer-allocated string ownership transfers to StreamSet
+--      on submit. Duplicates are freed immediately; uniques are
+--      retained until the wrapper's destroy() runs Inner.deinit().
+--   3. materialize deep-dupes for string keys so the receiving
+--      `T[]` binding owns its strings independently from the
+--      StreamSet's lifetime.
+--
+-- 6 yields, 3 unique → 3 duplicates dedup'd. Without ownership
+-- transfer, the 3 dropped strings would leak.
+
+FN main() RETURNS Void ->
+    gen: ~?String[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 6_i64 DO
+            YIELD (i MOD 3_i64).toString();
+            i = i + 1_i64;
+        END
+    };
+    running: ~String[]@set:observable = gen s> DISTINCT _;
+    final = NEXT running;
+    ASSERT final.length() == 3_i64, "3 unique strings";
+    print("ok");
+    RETURN;
+END

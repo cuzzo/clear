@@ -1,0 +1,40 @@
+-- T1: Producer-fiber mid-stream error on a REDUCE-scalar pipe.
+-- Sister to 321 (which exercises SUM under the same scenario).
+--
+-- The producer raises after publishing 0, 1, 2 into the REDUCE
+-- accumulator, then NEXT returns the partial reduction. The wrapper's
+-- contract still holds:
+--
+--   1. The consumer fiber's `defer ctx.acc.finish()` fires on the
+--      error-return path so NEXT unblocks instead of deadlocking.
+--   2. The CAS loop publishes each commit through `markSeen()` so
+--      the partial accumulator is observable post-error.
+--   3. The :observable cleanup template runs `wait()` then `destroy()`
+--      with no UAF on the heap-allocated *ObservableReduce.
+--
+-- This catches a class of bugs where the REDUCE codegen path's CAS
+-- loop wouldn't unwind cleanly on producer error -- e.g. if the
+-- inline CAS loop caches `inner` mid-iteration, and the producer
+-- raises before publishing, a stale read could be observed by NEXT.
+--
+-- The scheduler logs "Task Crashed" for the failed BG fiber; that's
+-- expected diagnostic output, not a failure.
+
+FN main() RETURNS Void ->
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 10_i64 DO
+            IF i == 3_i64 THEN RAISE "producer failed at i=3"; END
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    -- Reduce-sum: 0 + 1 + 2 = 3 before the producer raises.
+    running: ~Int64@observable = gen s> REDUCE(0_i64) acc + _;
+    final = NEXT running;
+
+    ASSERT final == 3_i64, "partial reduce-sum mismatch";
+    print("ok");
+    RETURN;
+END

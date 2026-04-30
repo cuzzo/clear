@@ -23,6 +23,12 @@ module WithMatchCheck
 
     AST.walk_body(fn.body) do |node|
       next unless node.is_a?(AST::WithBlock)
+      # Observables: WITH VIEW / WITH MATERIALIZED VIEW are reads on
+      # an `@observable` source -- not lock acquisitions -- so the
+      # LOCKABLE auto-shim must NOT fire here. The shim's purpose is
+      # to bridge pre-Phase-2 lock-using code; observable view blocks
+      # are unrelated.
+      next if node.view_kind
 
       bound_params = collect_bound_param_names(node, param_names)
 

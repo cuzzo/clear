@@ -30,7 +30,7 @@ RSpec.describe "AST walker coverage" do
     SelectOp WhereOp IndexOp OrderByOp LimitOp SkipOp UnnestOp DistinctOp
     EachOp FindOp AnyOp AllOp CountOp SumOp AverageOp MaxOp MinOp
     TakeWhileOp WindowOp BatchWindowOp ReduceOp RecoverOp TapOp
-    ShardOp ConcurrentOp JoinOp
+    ShardOp ConcurrentOp JoinOp CollectOp
   ].freeze
 
   it "every AST::Locatable Struct has a visit_ method or an INDIRECT_DISPATCH entry" do

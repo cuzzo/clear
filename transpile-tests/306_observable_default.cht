@@ -1,0 +1,21 @@
+-- Streaming aggregates produce observables by default.
+-- A SUM on a tense-stream source no longer needs an explicit
+-- `~Int64@observable` annotation -- the type lifts automatically,
+-- and `s> COLLECT` joins to get the final scalar.
+
+FN main() RETURNS Void ->
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 10_i64 DO
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    -- Canonical user form: no `~Int64@observable` annotation
+    -- needed; SUM lifts automatically; COLLECT joins.
+    final = gen s> SUM _ s> COLLECT;
+    ASSERT final == 45_i64, "default observable mismatch";
+    print("ok");
+    RETURN;
+END

@@ -1,0 +1,25 @@
+-- COLLECT pipe-terminal: `running s> COLLECT` blocks until the
+-- observable's producer finishes and returns the final T.
+-- Equivalent to `NEXT running` but pipe-shaped, so the canonical
+-- form is `total = stream s> SUM _ s> COLLECT;` (after fold
+-- terminals start producing observables by default in a followup).
+
+FN main() RETURNS Void ->
+    gen: ~?Int64[] = BG STREAM {
+        MUTABLE i: Int64 = 0_i64;
+        WHILE i < 10_i64 DO
+            YIELD i;
+            i = i + 1_i64;
+        END
+    };
+
+    -- Today fold terminals only produce observables when the LHS is
+    -- explicitly annotated; the followup commit makes the observable
+    -- form the default for tense-stream sources.
+    running: ~Int64@observable = gen s> SUM _;
+    final = running s> COLLECT;
+
+    ASSERT final == 45_i64, "collect mismatch";
+    print("ok");
+    RETURN;
+END
