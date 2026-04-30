@@ -26,6 +26,11 @@ UNION Value {
     -- Created by MAKE_BC_FN, called via the regular CALL opcode (which
     -- detects BCFn and dispatches to BC_CALL semantics inline).
     BCFn { bcFnIp: Int64, bcFnArgc: Int64 },
+    -- Shared mutable cell. Holds an Id<Env> whose vars["v"] is the cell
+    -- value. Created by BOX_NEW for @local / @shared:locked bindings.
+    -- BG fibers see the same Env id (the pool is shared across exec!
+    -- recursion), so mutations through BOX_STORE propagate.
+    Boxed: Id<Env>,
 }
 
 -- Pure helpers
@@ -120,6 +125,11 @@ FN isBCFn?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
+FN isBoxed?(v: Value) RETURNS Bool ->
+    MATCH v START Value.Boxed -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
 FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
     MATCH v START
         Value.Nil -> RETURN "nil";,
@@ -168,7 +178,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";,
         Value.MapRef -> RETURN "#<map>";,
         Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";,
-        Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";
+        Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";,
+        Value.Boxed -> RETURN "#<box>";
     END
     RETURN "";
 END

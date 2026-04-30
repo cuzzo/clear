@@ -3381,6 +3381,52 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value.BCFn{ bcFnIp: bcFnIp, bcFnArgc: bcFnArgc };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
+            104 -> -- BOX_NEW: pop val, allocate single-cell Env in the
+                   -- shared pool, push Value.Boxed{envId}. BG fibers spawn
+                   -- with the same pool reference, so reads/writes through
+                   -- the same Boxed propagate.
+                sp -= 1; bnVal = COPY stack[sp];
+                MUTABLE bnEnvVal: Env = Env{ vars: {} };
+                bnEnvVal.vars["v"] = COPY bnVal;
+                MUTABLE bnIdHolder: ?Id<Env> = NIL;
+                WITH EXCLUSIVE pool AS bnP { bnIdHolder = bnP.insert(bnEnvVal); }
+                pv = Value.Nil;
+                IF bnIdHolder AS bnId THEN pv = Value{ Boxed: bnId }; END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            105 -> -- BOX_LOAD: pop Boxed (or any value — passthrough for
+                   -- non-Boxed so the same opcode is safe to emit for slots
+                   -- that only conditionally hold Boxed). Push cell value.
+                sp -= 1; blRef = COPY stack[sp];
+                pv = COPY blRef;
+                MATCH blRef START
+                    Value.Boxed AS blEnvId ->
+                        WITH EXCLUSIVE pool AS blP {
+                            IF blP[blEnvId] AS blEnv THEN
+                                IF blEnv.vars["v"] AS blStored THEN
+                                    pv = COPY blStored;
+                                ELSE
+                                    pv = Value.Nil;
+                                END
+                            END
+                        },
+                    DEFAULT -> PASS;
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            106 -> -- BOX_STORE: pop Boxed (top), pop val, store val in cell.
+                   -- For non-Boxed top, drop both (no-op write).
+                sp -= 1; bsRef = COPY stack[sp];
+                sp -= 1; bsVal = COPY stack[sp];
+                MATCH bsRef START
+                    Value.Boxed AS bsEnvId ->
+                        WITH EXCLUSIVE pool AS bsP {
+                            IF bsP[bsEnvId] AS bsEnv THEN
+                                bsEnv.vars["v"] = COPY bsVal;
+                            END
+                        },
+                    DEFAULT -> PASS;
+                END,
             DEFAULT ->
                 running = FALSE;
         END

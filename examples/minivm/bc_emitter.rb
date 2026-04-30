@@ -77,6 +77,15 @@ class BcEmitter
   # BCFn through inline BC_CALL semantics, so a fn-pointer slot can be
   # called via the same opcode path as a named native or scheme lambda.
   MAKE_BC_FN   = 98
+  # BOX_NEW: pop val, allocate single-cell Env in the shared pool, push
+  # Value.Boxed{envId}. Used for @local / @shared:locked bindings so
+  # mutations via BOX_STORE propagate across BG fibers (which spawn with
+  # the same pool reference). BOX_LOAD/BOX_STORE are passthrough on
+  # non-Boxed values, so emitting them on slots that may not be Boxed
+  # is safe.
+  BOX_NEW      = 104
+  BOX_LOAD     = 105
+  BOX_STORE    = 106
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -929,6 +938,7 @@ class BcEmitter
       end
     end
 
+    pre_box_type = nil
     if node.init
       # HashMap/Set StructInit (non-empty literal lowered to StructInit with alloc field)
       # — replace with MAP_NEW since the VM uses MapRef, not a Zig struct.
@@ -936,8 +946,19 @@ class BcEmitter
         emit_op(MAP_NEW)
         val_type = ann_type
       else
+        # Detect MIR::CapWrap wrapping a typed inner so we can preserve
+        # the inner struct's type stamp for the slot. compile_expr on a
+        # CapWrap returns :boxed, which would otherwise lose the
+        # `:struct_<Name>` info that compile_ast_get_field uses to scope
+        # find_field_index. Peek the inner before the BOX_NEW emission.
+        if node.init.is_a?(MIR::CapWrap) &&
+           [:local, :sync_only, :own_only, :both].include?(node.init.strategy)
+          @boxed_pending_inner_hint = pre_box_type_for(node.init.inner)
+        end
         compile_expr(node.init)
         val_type = pop_type
+        pre_box_type = @boxed_pending_inner_hint
+        @boxed_pending_inner_hint = nil
       end
     else
       cidx = add_const(nil)
@@ -978,13 +999,40 @@ class BcEmitter
     if effective_type == :any && @alloc_struct_hints && @alloc_struct_hints[name]
       effective_type = :"struct_#{@alloc_struct_hints[name]}"
     end
+    # @boxed_slots tracks bindings whose slot value is a Value.Boxed
+    # cell-id. Reads of `c` or `c.field` auto-deref via BOX_LOAD; writes
+    # `c.field = X` route the rebuilt struct through BOX_STORE so all
+    # holders of the cell-id see the update. When boxing, preserve the
+    # inner expression's struct hint as the slot's effective type so
+    # field-access dispatch (find_field_index) still scopes by struct.
+    @boxed_slots ||= Set.new
+    if val_type == :boxed
+      @boxed_slots << name
+      val_type = :any
+      effective_type = pre_box_type if pre_box_type
+    end
     alloc_slot(name, effective_type)
     # Pass val_type (where the value actually lives), not effective_type
     # (where the slot lives). emit_store does the cross-stack coercion
     # itself — passing the slot type would skip the coercion and store
     # past the wrong stack.
     emit_store(name, val_type)
+    # emit_store re-stamps @slot_types based on the residency of val_type.
+    # For boxed slots we want the struct hint preserved, so re-apply it
+    # after the store.
+    @slot_types[name] = effective_type if @boxed_slots.include?(name) && effective_type
     push_type(:void)
+  end
+
+  # Inspect a MIR expression to recover a `:struct_<Name>` hint without
+  # actually compiling it. Used to preserve the inner type stamp across
+  # a BOX_NEW wrap so field-access find_field_index still scopes correctly.
+  def pre_box_type_for(node)
+    case node
+    when MIR::StructInit
+      base = struct_base_name(node.zig_type.to_s)
+      base ? :"struct_#{base}" : nil
+    end
   end
 
   def annotation_to_vm_type(ann)
@@ -1203,10 +1251,25 @@ class BcEmitter
       emit_op(POP)
     end
 
-    # Final store into the root slot (if it's a known Ident).
-    if root.is_a?(MIR::Ident) && has_slot?(root.name.to_s)
-      emit_op(LOAD_SLOT, @slots[cur_tmp])
-      emit_store(root.name.to_s, :any)
+    # Final store into the root slot (if it's a known Ident). When the
+    # root is a boxed @local binding, the slot itself holds the cell-id
+    # (Value.Boxed) — never overwrite it. Instead, route the rebuilt
+    # value through BOX_STORE so all holders of the cell-id see the
+    # update. Strip BG-context prefix so a capture rewritten to
+    # `__ctx_0.c` still resolves to slot `c` and the @boxed_slots check.
+    if root.is_a?(MIR::Ident)
+      rname = root.name.to_s
+      rname = $1 if rname =~ /\A__ctx_\d+\.(.*)\z/
+      if has_slot?(rname)
+        if @boxed_slots&.include?(rname)
+          emit_op(LOAD_SLOT, @slots[cur_tmp])  # rebuilt value
+          emit_op(LOAD_SLOT, @slots[rname])    # Boxed cell-id
+          emit_op(BOX_STORE)
+        else
+          emit_op(LOAD_SLOT, @slots[cur_tmp])
+          emit_store(rname, :any)
+        end
+      end
     end
   end
 
@@ -2002,13 +2065,18 @@ class BcEmitter
         push_type(:str)
       end
     when MIR::CapWrap
-      # Capability wrappers (Rc/Arc/locked) have no VM representation —
-      # the VM doesn't distinguish reference-counted from affine values.
-      # Just forward the inner expression. This is safe because the VM
-      # also doesn't model capability-specific semantics (e.g. RC retain),
-      # so tests that exercise those paths would fail at their actual
-      # assertions, not here.
+      # Sharing strategies (:local, :sync_only, :own_only, :both) all need
+      # a heap-shared mutable cell so BG fibers / closures see the same
+      # state. The VM has no lock or refcount semantics, so all four reduce
+      # to BOX_NEW; compile_let detects the :boxed stamp and tracks the
+      # slot in @boxed_slots for auto-deref/writeback. :passthrough alone
+      # is identity (e.g. Arc-of-immutable).
       compile_expr(node.inner)
+      if [:local, :sync_only, :own_only, :both].include?(node.strategy)
+        pop_type
+        emit_op(BOX_NEW)
+        push_type(:boxed)
+      end
     when MIR::BlockExpr
       compile_block_expr(node)
     when MIR::ScopeBlock
@@ -2242,7 +2310,13 @@ class BcEmitter
     elsif @fslots[name]
       emit_op(LOAD_FSLOT, @fslots[name]); push_type(:f64)
     elsif @slots[name]
-      emit_op(LOAD_SLOT, @slots[name]); push_type(@slot_types[name] || :any)
+      emit_op(LOAD_SLOT, @slots[name])
+      # @local / @shared:locked: slot holds Value.Boxed cell-id, so all
+      # reads must auto-deref. BOX_LOAD is a passthrough on non-Boxed
+      # values, so emitting it for slots that may not always be Boxed
+      # at runtime is safe.
+      emit_op(BOX_LOAD) if @boxed_slots&.include?(name)
+      push_type(@slot_types[name] || :any)
     elsif @fn_start_ips&.key?(name)
       # Named helper function used as a VALUE (passed as fn-pointer arg
       # or stored in an FN-typed binding). Emit MAKE_BC_FN so the runtime
@@ -4602,7 +4676,9 @@ class BcEmitter
     elsif @fslots[name]
       emit_op(LOAD_FSLOT, @fslots[name]); push_type(:f64)
     elsif @slots[name]
-      emit_op(LOAD_SLOT, @slots[name]); push_type(vt)
+      emit_op(LOAD_SLOT, @slots[name])
+      emit_op(BOX_LOAD) if @boxed_slots&.include?(name)
+      push_type(vt)
     elsif @fn_start_ips&.key?(name)
       # Named helper fn used as a value (e.g. passed as fn-pointer arg).
       argc = @fn_arity&.dig(name) || 0
@@ -4938,6 +5014,14 @@ class BcEmitter
     @slot_types[alias_name] = t
     @with_aliases ||= {}
     @with_aliases[alias_name] = src_name
+    # Propagate the boxed-slot stamp so reads/writes through the alias
+    # also auto-deref via BOX_LOAD and route writes through BOX_STORE.
+    # Both alias and source carry the same Value.Boxed cell-id, so any
+    # mutation via the alias is already visible to the source — no
+    # writeback is needed.
+    if @boxed_slots&.include?(src_name)
+      @boxed_slots << alias_name
+    end
   end
 
   # Reverse of alias_to_source: write the alias's current value back to the
@@ -4948,6 +5032,11 @@ class BcEmitter
     return unless @with_aliases && @with_aliases.key?(alias_name)
     src_name = @with_aliases[alias_name]
     return unless has_slot?(alias_name) && has_slot?(src_name)
+    # Boxed alias shares its cell-id with the source; any inner mutation
+    # already reached the cell through BOX_STORE, so a slot-to-slot copy
+    # would be a no-op at best and could overwrite the source's cell-id
+    # with itself.
+    return if @boxed_slots&.include?(alias_name)
     t = if @islots[alias_name] then :i64
         elsif @fslots[alias_name] then :f64
         else (@slot_types[alias_name] || :any)
@@ -5040,6 +5129,12 @@ class BcEmitter
       emit_op(LOAD_FSLOT, @fslots[name]); emit_op(F_TO_VAL)
     elsif @slots.key?(name)
       emit_op(LOAD_SLOT, @slots[name])
+      # @local / @shared:locked binding: the slot holds a Value.Boxed
+      # cell-id, not the underlying value. Auto-deref so callers see
+      # the actual struct/scalar. BOX_LOAD is a passthrough on non-Boxed
+      # values, so emitting it for a slot that turned out not to be
+      # Boxed at runtime is safe.
+      emit_op(BOX_LOAD) if @boxed_slots&.include?(name)
     else
       emit_op(LOAD_NAME, add_const(name))
     end
