@@ -239,6 +239,20 @@ module MIR
     include Expr
   end
 
+  # INDEX-bucket insert: append `value` to the list bucket of `map` at `key`,
+  # creating the bucket if missing. The Zig backend lowers this to the
+  # getOrPut + value_ptr.append pattern with key dup/free; the VM lowers it
+  # to MAP_GET + (Nil ? new_list : append) + MAP_PUT, which has matching
+  # semantics for HashMap<K, []V> indexing.
+  # `key_zig_type` is the comptime element type used by alloc.dupe in the
+  # Zig backend (e.g. "u8"); ignored by the VM.
+  # `elem_zig_type` is the comptime list-element type used by the empty-list
+  # initializer in the Zig backend; ignored by the VM.
+  IndexInsert = Struct.new(:map, :key_expr, :value_expr,
+                           :key_zig_type, :elem_zig_type, :alloc) do
+    include Stmt
+  end
+
   # Defer statement.
   # Zig: defer { body };  or  defer expr;
   DeferStmt = Struct.new(:body) do

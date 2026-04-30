@@ -63,6 +63,7 @@ class MIREmitter
     when MIR::Sort             then emit_sort(node)
     when MIR::SoaFieldAccess   then "#{emit(node.soa_expr)}.data.items(.#{node.field_name})"
     when MIR::TryOrPanic       then "#{emit(node.expr)} catch @panic(#{node.panic_msg.inspect})"
+    when MIR::IndexInsert      then emit_index_insert(node)
     when MIR::DeferStmt        then emit_defer(node)
     when MIR::ErrDeferStmt     then emit_errdefer(node)
     when MIR::ExprStmt         then emit_expr_stmt(node)
@@ -386,6 +387,30 @@ class MIREmitter
     parts << ":#{node.label}" if node.label
     parts << emit(node.value) if node.value
     "#{parts.join(' ')};"
+  end
+
+  def emit_index_insert(node)
+    map = emit(node.map)
+    key = emit(node.key_expr)
+    val = emit(node.value_expr)
+    key_t = node.key_zig_type || "u8"
+    elem_t = node.elem_zig_type
+    alloc_str = case node.alloc
+                when :heap, nil then "#{@rt_name || 'rt'}.heapAlloc()"
+                when :frame     then "#{@rt_name || 'rt'}.frameAlloc()"
+                else node.alloc.to_s
+                end
+    # Decompose to the existing getOrPut + value_ptr.append idiom.
+    "{\n" \
+    "    const __idx_key_owned = try #{alloc_str}.dupe(#{key_t}, #{key});\n" \
+    "    var __gop = #{map}.inner.getOrPut(#{alloc_str}, __idx_key_owned) catch @panic(\"INDEX allocation failed\");\n" \
+    "    if (__gop.found_existing) {\n" \
+    "        #{alloc_str}.free(__idx_key_owned);\n" \
+    "    } else {\n" \
+    "        __gop.value_ptr.* = @as(std.ArrayListUnmanaged(#{elem_t}), .empty);\n" \
+    "    }\n" \
+    "    __gop.value_ptr.append(#{alloc_str}, #{val}) catch @panic(\"INDEX append failed\");\n" \
+    "}"
   end
 
   def emit_sort(node)

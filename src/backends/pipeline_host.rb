@@ -1088,46 +1088,19 @@ class PipelineHost
     end
   end
 
-  # INDEX op gop pattern: structural decomposition of:
-  #   key_owned = try alloc.dupe(u8, key)
-  #   gop = idx_result.inner.getOrPut(alloc, key_owned) catch @panic(...)
-  #   if (gop.found_existing) alloc.free(key_owned)
-  #   else gop.value_ptr.* = .empty
-  #   gop.value_ptr.append(alloc, item) catch @panic(...)
+  # INDEX op: append item to map[key] bucket, creating the bucket if missing.
+  # Lowered to MIR::IndexInsert which both backends decompose: Zig emits the
+  # getOrPut + dupe/free + value_ptr.append idiom; the VM emits MAP_GET +
+  # APPEND/MAKE_LIST + MAP_PUT.
   def build_index_gop_body(expr_mir, alloc, item_var)
-    alloc_ref = MIR::AllocatorRef.new(alloc)
-    gop_value_ptr = MIR::Deref.new(MIR::FieldGet.new(MIR::Ident.new("gop"), "value_ptr"))
+    elem_zig_type = "@TypeOf(#{item_var})"
     [
       MIR::Let.new("idx_key", expr_mir, false, nil, nil),
-      # Dupe so the HashMap owns its own copy. If found_existing, the dup is
-      # unused — free it immediately to avoid a leak.
-      MIR::Let.new("idx_key_owned",
-        MIR::TryExpr.new(
-          MIR::MethodCall.new(alloc_ref, "dupe",
-            [MIR::Ident.new("u8"), MIR::Ident.new("idx_key")], false)),
-        false, nil, nil),
-      MIR::Let.new("gop",
-        MIR::TryOrPanic.new(
-          MIR::MethodCall.new(
-            MIR::FieldGet.new(MIR::Ident.new("idx_result"), "inner"),
-            "getOrPut",
-            [alloc_ref, MIR::Ident.new("idx_key_owned")], false),
-          "INDEX allocation failed"),
-        false, nil, nil),
-      MIR::IfStmt.new(
-        MIR::FieldGet.new(MIR::Ident.new("gop"), "found_existing"),
-        [MIR::ExprStmt.new(
-          MIR::MethodCall.new(alloc_ref, "free", [MIR::Ident.new("idx_key_owned")], false),
-          nil)],
-        [MIR::Set.new(gop_value_ptr,
-          MIR::ContainerInit.new("std.ArrayListUnmanaged(@TypeOf(#{item_var}))",
-            :list_empty, alloc, nil), nil)]),
-      MIR::ExprStmt.new(
-        MIR::TryOrPanic.new(
-          MIR::MethodCall.new(gop_value_ptr, "append",
-            [alloc_ref, MIR::Ident.new(item_var)], false),
-          "INDEX append failed"),
-        nil)
+      MIR::IndexInsert.new(
+        MIR::Ident.new("idx_result"),
+        MIR::Ident.new("idx_key"),
+        MIR::Ident.new(item_var),
+        "u8", elem_zig_type, alloc)
     ]
   end
 

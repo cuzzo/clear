@@ -755,6 +755,9 @@ class BcEmitter
     when MIR::Sort
       compile_sort(mir_node)
       push_type(:void)
+    when MIR::IndexInsert
+      compile_index_insert(mir_node)
+      push_type(:void)
     when MIR::SoaFieldAccess
       # The VM uses Value.List uniformly; SoA layout (separate slice per
       # field) has no equivalent. Defer until VM models multi-array shape.
@@ -1214,6 +1217,60 @@ class BcEmitter
     @ops[jump_exit_idx] = @ops.length
     break_patches.each { |idx| @ops[idx] = @ops.length }
     push_type(:void)
+  end
+
+  # MIR::IndexInsert: append `value` to the list bucket of `map` at `key`,
+  # creating the bucket on first hit. Lowering pattern matches the Zig
+  # backend's getOrPut + value_ptr.append idiom; here we use MAP_GET +
+  # list-push/MAKE_LIST + MAP_PUT.
+  def compile_index_insert(node)
+    @idx_insert_counter ||= 0; @idx_insert_counter += 1
+    n = @idx_insert_counter
+    tmp_key  = "__idx_key#{n}"
+    tmp_val  = "__idx_val#{n}"
+    tmp_list = "__idx_list#{n}"
+    alloc_slot(tmp_key,  :any) unless has_slot?(tmp_key)
+    alloc_slot(tmp_val,  :any) unless has_slot?(tmp_val)
+    alloc_slot(tmp_list, :any) unless has_slot?(tmp_list)
+
+    # Stash key and val into temp slots so we can reload them as needed
+    # without re-evaluating side effects.
+    compile_expr_to_value(node.key_expr); pop_type
+    emit_op(STORE_SLOT, @slots[tmp_key]); emit_op(POP)
+    compile_expr_to_value(node.value_expr); pop_type
+    emit_op(STORE_SLOT, @slots[tmp_val]); emit_op(POP)
+
+    # Probe map[key] -> existing list or Nil.
+    compile_expr_to_value(node.map); pop_type
+    emit_op(LOAD_SLOT, @slots[tmp_key])
+    emit_op(MAP_GET)
+
+    # Boolify (Nil -> false, list -> true) then dispatch.
+    emit_op(NOT); emit_op(NOT)
+    emit_op(JUMP_IF_FALSE)
+    create_branch_idx = @ops.length; emit_op(0)
+
+    # Existing branch: reload list, append val (list-push returns a NEW list).
+    compile_expr_to_value(node.map); pop_type
+    emit_op(LOAD_SLOT, @slots[tmp_key])
+    emit_op(MAP_GET)
+    emit_op(LOAD_SLOT, @slots[tmp_val])
+    emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+    emit_op(JUMP); merge_jump_idx = @ops.length; emit_op(0)
+
+    # Create branch: fresh single-element list [val].
+    @ops[create_branch_idx] = @ops.length
+    emit_op(LOAD_SLOT, @slots[tmp_val])
+    emit_op(NATIVE_CALL, NATIVES["list"], 1)
+
+    # Merge: stack top is the new list. Stash + put back into map[key].
+    @ops[merge_jump_idx] = @ops.length
+    emit_op(STORE_SLOT, @slots[tmp_list]); emit_op(POP)
+    compile_expr_to_value(node.map); pop_type
+    emit_op(LOAD_SLOT, @slots[tmp_key])
+    emit_op(LOAD_SLOT, @slots[tmp_list])
+    emit_op(MAP_PUT)
+    emit_op(POP)  # discard the Nil pushed by MAP_PUT
   end
 
   # MIR::Sort lowers `items s> ORDER_BY <key>` to a comparator-as-expression
@@ -2315,8 +2372,17 @@ class BcEmitter
       compile_expr_to_value(node.args[0])
       emit_op(NATIVE_CALL, NATIVES["number->string"], 1); push_type(:any); return
     when :toFloat
-      compile_expr_to_value(node.args[0])
-      emit_op(NATIVE_CALL, NATIVES["string->number"], 1); push_type(:any); return
+      # `toFloat(intExpr)` converts Int64 -> Float64. The arg lands on the
+      # typed istack (or vstack as Int64Val); INT_TO_F64 expects istack so
+      # ensure the arg is on istack first (VAL_TO_I64 wrapper for vstack).
+      compile_expr(node.args[0])
+      arg_t = pop_type
+      case arg_t
+      when :i64  then emit_op(INT_TO_F64)
+      when :f64  then # already f64 — identity
+      else            emit_op(VAL_TO_I64); emit_op(INT_TO_F64)
+      end
+      push_type(:f64); return
     when :assert
       # CheatLib.assert(cond, msg_expr) — emit branch-on-false + display(msg).
       # Mirrors compile_ast_assert exactly (the message argument is a MIR::Lit
@@ -3249,6 +3315,23 @@ class BcEmitter
 
     # UFCS: obj.method(args) -> (method obj args)
     args = strip_alloc_args(node.args)
+
+    # Pipeline-host-emitted MIR::MethodCall for `list.append(alloc, val)`
+    # bypasses lower_method_call, so it doesn't carry matched_stdlib_def
+    # and never reaches the InlineBc :append dispatch. Route it directly
+    # to the same list-push storeback the InlineBc path uses, so pipeline
+    # WINDOW/JOIN/etc. accumulators actually mutate.
+    if method == "append" && args.length == 1
+      compile_expr_to_value(node.receiver); pop_type
+      compile_expr_to_value(args[0]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+      if node.receiver.is_a?(MIR::Ident) && has_slot?(node.receiver.name.to_s)
+        emit_store(node.receiver.name.to_s, :any)
+        emit_op(POP)
+      end
+      push_type(:any)
+      return
+    end
 
     native_id = NATIVES[method]
     if native_id
