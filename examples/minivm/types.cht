@@ -21,6 +21,11 @@ UNION Value {
     TypedF64Arr: Float64[],
     MapRef: Id<Env>,
     Weak: Int64,
+    -- Bytecode-compiled function pointer. bcIp is the entry IP into the
+    -- ops stream; bcArgc is the number of arguments the helper expects.
+    -- Created by MAKE_BC_FN, called via the regular CALL opcode (which
+    -- detects BCFn and dispatches to BC_CALL semantics inline).
+    BCFn { bcFnIp: Int64, bcFnArgc: Int64 },
 }
 
 -- Pure helpers
@@ -110,6 +115,11 @@ FN isLambda?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
+FN isBCFn?(v: Value) RETURNS Bool ->
+    MATCH v START Value.BCFn -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    RETURN FALSE;
+END
+
 FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
     MATCH v START
         Value.Nil -> RETURN "nil";,
@@ -157,7 +167,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Tco -> RETURN "#<tco>";,
         Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";,
         Value.MapRef -> RETURN "#<map>";,
-        Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";
+        Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";,
+        Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";
     END
     RETURN "";
 END

@@ -73,6 +73,10 @@ class BcEmitter
   # during the exiting frame as dead.
   WEAK_NEW     = 96
   WEAK_RESOLVE = 97
+  # MAKE_BC_FN [ip] [argc]: push Value.BCFn{ip, argc}. CALL dispatches
+  # BCFn through inline BC_CALL semantics, so a fn-pointer slot can be
+  # called via the same opcode path as a named native or scheme lambda.
+  MAKE_BC_FN   = 98
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -383,6 +387,14 @@ class BcEmitter
     @helper_fn_returned = false
 
     @fn_start_ips[name] = @ops.length
+    @fn_arity ||= {}
+    @fn_arity[name] = (mir_fn.params || []).reject { |p|
+      pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
+      pname == "rt" || pname == "_rt" || pname =~ /\A__rt_bg\d+\z/
+    }.length
+    if ENV["BC_TRACE_FN"]
+      STDERR.puts "DBG fn=#{name} ip=#{@fn_start_ips[name]} arity=#{@fn_arity[name]} params=#{(mir_fn.params || []).map { |p| p.respond_to?(:name) ? p.name : p }.inspect}"
+    end
 
     # Allocate slots 0..argc-1 for parameters (BC_CALL deposits args there).
     # MIR lowering prepends a synthetic `rt` param (the runtime handle)
@@ -422,6 +434,61 @@ class BcEmitter
   # ================================================================
   # Main body: parallel walk of MIR and AST
   # ================================================================
+
+  # MIR::LambdaExpr: compile the lambda's fn_def body inline at the
+  # current emission point, jumping over it, then push Value.BCFn{ip, argc}
+  # so the lambda can be stored in a slot or passed as a value. The CALL
+  # opcode dispatches Value.BCFn through inline BC_CALL semantics, so a
+  # callee like `cb(5)` resolves the slot to a BCFn and jumps to its body.
+  def compile_lambda_expr(node)
+    fn = node.fn_def
+    params = (fn.respond_to?(:params) ? (fn.params || []) : [])
+    body   = (fn.respond_to?(:body)   ? (fn.body   || []) : [])
+    is_synthetic_rt = ->(pname) { pname == "rt" || pname == "_rt" || pname =~ /\A__rt_bg\d+\z/ }
+    argc   = params.reject { |p|
+      pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
+      is_synthetic_rt.call(pname)
+    }.length
+
+    # Jump over the lambda body so straight-line execution doesn't fall
+    # into it. Patched after the body is laid out.
+    emit_op(JUMP)
+    skip_idx = @ops.length; emit_op(0)
+
+    saved = {
+      slots: @slots, islots: @islots, fslots: @fslots,
+      slot_types: @slot_types, mutables: @mutables,
+      next_slot: @next_slot, next_islot: @next_islot, next_fslot: @next_fslot,
+      type_stack: @type_stack,
+      in_helper_fn: @in_helper_fn, helper_fn_returned: @helper_fn_returned,
+    }
+    @slots = {}; @islots = {}; @fslots = {}
+    @slot_types = {}; @mutables = Set.new
+    @next_slot = 0; @next_islot = 0; @next_fslot = 0
+    @type_stack = []
+    @in_helper_fn = true
+    @helper_fn_returned = false
+
+    body_ip = @ops.length
+    params.each do |p|
+      pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
+      next if is_synthetic_rt.call(pname)
+      alloc_slot(pname, :any)
+    end
+    emit_body_stmts(body)
+    emit_op(BC_RET_VOID) unless @helper_fn_returned
+
+    @slots = saved[:slots]; @islots = saved[:islots]; @fslots = saved[:fslots]
+    @slot_types = saved[:slot_types]; @mutables = saved[:mutables]
+    @next_slot = saved[:next_slot]; @next_islot = saved[:next_islot]
+    @next_fslot = saved[:next_fslot]; @type_stack = saved[:type_stack]
+    @in_helper_fn = saved[:in_helper_fn]
+    @helper_fn_returned = saved[:helper_fn_returned]
+
+    @ops[skip_idx] = @ops.length
+    emit_op(MAKE_BC_FN, body_ip, argc)
+    push_type(:any)
+  end
 
   def compile_main(mir_body, ast_body)
     mir_stmts = semantic_mir_nodes(mir_body)
@@ -797,6 +864,7 @@ class BcEmitter
     expr = mir_node.expr
     saved_ast = @current_ast_stmt
     @current_ast_stmt = ast_node
+    STDERR.puts "DBG compile_expr_stmt expr=#{expr.class}" if ENV["BC_TRACE_CALL"]
     case expr
     when MIR::Call
       compile_call_expr(expr)
@@ -1709,7 +1777,17 @@ class BcEmitter
     when MIR::FreezeExpr
       compile_expr(node.inner)  # VM has no const/freeze semantics
     when MIR::FnRef
-      emit_op(LOAD_CONST, add_const([:sym, node.name.to_s])); push_type(:any); return
+      # Named helper fn used as a value (e.g. `cb = isPositive` or
+      # `apply(isPositive, 10)`). Emit MAKE_BC_FN so the slot stores a
+      # Value.BCFn that the CALL opcode dispatches via inline BC_CALL.
+      fname = node.name.to_s
+      if @fn_start_ips&.key?(fname)
+        argc = @fn_arity&.dig(fname) || 0
+        emit_op(MAKE_BC_FN, @fn_start_ips[fname], argc)
+        push_type(:any)
+        return
+      end
+      emit_op(LOAD_CONST, add_const([:sym, fname])); push_type(:any); return
     when MIR::TryExpr
       # `try EXPR` (Zig-style): if EXPR is a Value.Error, propagate by
       # returning early from the enclosing helper fn with the error
@@ -2061,6 +2139,9 @@ class BcEmitter
       emit_op(LOAD_CONST, cidx)
       push_type(:any)
     else
+      if node.is_a?(MIR::LambdaExpr)
+        return compile_lambda_expr(node)
+      end
       raise Unimplemented, "unhandled MIR expr: #{node.class}"
     end
   end
@@ -2155,12 +2236,20 @@ class BcEmitter
 
   # Load a single (un-dotted) name onto the stack and tag the type stack.
   def compile_ident_root(name)
+    STDERR.puts "DBG compile_ident_root name=#{name} fn=#{@fn_start_ips&.key?(name).inspect}" if ENV["BC_TRACE_CALL"]
     if @islots[name]
       emit_op(LOAD_ISLOT, @islots[name]); push_type(:i64)
     elsif @fslots[name]
       emit_op(LOAD_FSLOT, @fslots[name]); push_type(:f64)
     elsif @slots[name]
       emit_op(LOAD_SLOT, @slots[name]); push_type(@slot_types[name] || :any)
+    elsif @fn_start_ips&.key?(name)
+      # Named helper function used as a VALUE (passed as fn-pointer arg
+      # or stored in an FN-typed binding). Emit MAKE_BC_FN so the runtime
+      # can dispatch the callsite via the regular CALL opcode.
+      argc = @fn_arity&.dig(name) || 0
+      emit_op(MAKE_BC_FN, @fn_start_ips[name], argc)
+      push_type(:any)
     else
       emit_op(LOAD_NAME, add_const(name)); push_type(:any)
     end
@@ -3239,9 +3328,17 @@ class BcEmitter
       raise Unimplemented, "CheatLib.* call not mapped in VM path: #{callee}"
     end
 
-    # Unknown callee: fall back to the global name table.
-    fn_idx = add_const(callee)
-    emit_op(LOAD_NAME, fn_idx)
+    # Unknown callee: prefer LOAD_SLOT if the name is in the slot table
+    # (this handles fn-pointer slot variables — `cb: FN(...) -> ... = %();
+    # cb(5)` -- which are Value.BCFn at runtime). Falls back to LOAD_NAME
+    # for actual env-bound names (scheme-style runtime fns).
+    STDERR.puts "DBG call_expr fallback callee=#{callee} has_slot?=#{has_slot?(callee)}" if ENV["BC_TRACE_CALL"]
+    if has_slot?(callee)
+      emit_load_any(callee)
+    else
+      fn_idx = add_const(callee)
+      emit_op(LOAD_NAME, fn_idx)
+    end
     args.each { |a| compile_expr_to_value(a) }
     emit_op(CALL, args.length)
     push_type(:any)
@@ -4181,6 +4278,7 @@ class BcEmitter
 
   def compile_ast_func_call(node)
     name = node.name.to_s
+    STDERR.puts "DBG compile_ast_func_call name=#{name} fn_start_ips_has=#{@fn_start_ips&.key?(name).inspect} has_slot=#{has_slot?(name)}" if ENV["BC_TRACE_CALL"]
     case name
     when "print"
       node.args.each { |a| compile_ast_expr_to_value(a) }
@@ -4201,6 +4299,13 @@ class BcEmitter
         # LOAD_NAME would do a dynamic env lookup that doesn't see helpers.
         node.args.each { |a| compile_ast_expr_to_value(a) }
         emit_op(BC_CALL, @fn_start_ips[name], node.args.length)
+        push_type(:any)
+      elsif has_slot?(name)
+        # Fn-pointer slot variable (cb: FN(...) -> ... = lambda or named fn).
+        # Slot holds Value.BCFn; CALL dispatches BCFn through BC_CALL semantics.
+        emit_load_any(name)
+        node.args.each { |a| compile_ast_expr_to_value(a) }
+        emit_op(CALL, node.args.length)
         push_type(:any)
       else
         fn_idx = add_const(name)
@@ -4484,6 +4589,7 @@ class BcEmitter
 
   def compile_ast_ident(node)
     name = node.name.to_s
+    STDERR.puts "DBG compile_ast_ident name=#{name}" if ENV["BC_TRACE_CALL"]
     vt = @slot_types[name] || :any
     # Slot tables (@islots / @fslots / @slots) are authoritative for storage
     # location; @slot_types may be unstamped (:any) for slots that were
@@ -4497,6 +4603,11 @@ class BcEmitter
       emit_op(LOAD_FSLOT, @fslots[name]); push_type(:f64)
     elsif @slots[name]
       emit_op(LOAD_SLOT, @slots[name]); push_type(vt)
+    elsif @fn_start_ips&.key?(name)
+      # Named helper fn used as a value (e.g. passed as fn-pointer arg).
+      argc = @fn_arity&.dig(name) || 0
+      emit_op(MAKE_BC_FN, @fn_start_ips[name], argc)
+      push_type(:any)
     else
       emit_op(LOAD_NAME, add_const(name)); push_type(:any)
     end

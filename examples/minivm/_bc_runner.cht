@@ -2631,6 +2631,28 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     pv = applyNative(fnId, cArgs);
                     IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                     sp += 1;
+                ELSE_IF isBCFn?(fnVal) THEN
+                    MATCH fnVal START
+                        Value.BCFn AS bcfn ->
+                            -- BC_CALL semantics inline: save frame, copy args
+                            -- (skip fnVal at sp-argc-1) into slots, jump.
+                            callRetIps.append(ip);
+                            callRetSps.append(sp - argc - 1);
+                            FOR bci IN (0_i64 ..< 256) DO
+                                callSavedSlots.append(COPY slots[bci]);
+                            END
+                            frameWkMarks.append(weakOwnedFlat.length());
+                            FOR bci IN (0_i64 ..< argc) DO
+                                slots[bci] = COPY stack[(sp - argc) + bci];
+                            END
+                            sp -= argc + 1;
+                            ip = bcfn.bcFnIp;,
+                        DEFAULT ->
+                            sp -= argc + 1;
+                            pv = Value.Nil;
+                            IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                            sp += 1;
+                    END
                 ELSE_IF isLambda?(fnVal) THEN
                     MATCH fnVal START
                         Value.Lambda AS lam ->
@@ -3348,6 +3370,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         END,
                     DEFAULT -> pv = COPY wkRs;
                 END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            98 -> -- MAKE_BC_FN [ip] [argc]: push Value.BCFn{ip,argc} so the
+                  -- function can be passed as a value or stored in a slot.
+                  -- The CALL handler dispatches BCFn through inline BC_CALL
+                  -- semantics; no separate name lookup needed.
+                bcFnIp = ops[ip]; ip += 1;
+                bcFnArgc = ops[ip]; ip += 1;
+                pv = Value.BCFn{ bcFnIp: bcFnIp, bcFnArgc: bcFnArgc };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             DEFAULT ->
