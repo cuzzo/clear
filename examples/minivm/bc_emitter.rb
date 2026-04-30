@@ -3418,8 +3418,11 @@ class BcEmitter
       # propagate the error sentinel via BC_RET. This mirrors Zig's
       # `try fn()` short-circuit and is what makes `valid = u s> failable`
       # actually exit the function on failure rather than letting the
-      # error sentinel get bound to `valid` and ignored.
-      if node.try_wrap && @in_helper_fn
+      # error sentinel get bound to `valid` and ignored. Skip when the
+      # callee's return type is not an error union (can_fail can come
+      # from StackGuard / @reentrant prologue and shouldn't propagate
+      # the call result as a Value.Error).
+      if node.try_wrap && @in_helper_fn && callee_returns_error?(helper_callee)
         emit_op(STORE_SLOT, alloc_slot("__try_call_res", :any))
         emit_op(LOAD_SLOT, @slots["__try_call_res"])
         emit_op(IS_ERR)
@@ -3531,7 +3534,6 @@ class BcEmitter
   #      last clause_body is the DEFAULT; otherwise BC_RET the error.
   #   4. If not error: BC_RET that value.
   def compile_catch_wrapper(node)
-    STDERR.puts "DBG compile_catch_wrapper meta=#{(node.clause_meta || []).map { |m| m.inspect[0..120] }.inspect}" if ENV["BC_TRACE_SNAP"]
     code = node.code.to_s
     inner_call = code[/return\s+(\w+)\s*\(\s*([^)]*)\)\s*catch/, 1]
     inner_args = code[/return\s+\w+\s*\(\s*([^)]*)\)\s*catch/, 1]
@@ -3803,7 +3805,6 @@ class BcEmitter
     # preserved across calls), letting the outer CATCH wrapper read it.
     if method == "captureSnapshot" && node.receiver.is_a?(MIR::Ident) &&
        node.receiver.name.to_s == "rt" && node.args.length >= 2
-      STDERR.puts "DBG captureSnapshot args=#{node.args.map(&:class)}" if ENV["BC_TRACE_SNAP"]
       addr = node.args[1]
       val_node = addr.is_a?(MIR::AddressOf) ? addr.expr : addr
       compile_expr_to_value(val_node); pop_type
@@ -5336,6 +5337,23 @@ class BcEmitter
 
   def has_slot?(name)
     @islots.key?(name) || @fslots.key?(name) || @slots.key?(name)
+  end
+
+  # Does the callee's signature return an error union (`!T` or
+  # `anyerror!T`)? Used by compile_call_expr to decide whether to emit
+  # auto-try (BC_RET on Value.Error). Without this, can_fail can fire
+  # for non-failable callees (StackGuard / @reentrant prologues), and
+  # auto-try would incorrectly treat their valid return value as an
+  # error to propagate.
+  def callee_returns_error?(name)
+    sig = @result.fn_sigs&.dig(name) ||
+          @result.fn_sigs&.dig(name.to_sym) ||
+          @result.fn_sigs&.dig(name.to_s)
+    return false unless sig
+    rt = sig.return_type
+    return false if rt.nil?
+    rt_s = rt.to_s
+    rt_s.start_with?("!") || rt_s.include?("CheatError") || rt_s.include?("anyerror")
   end
 
   # Emit code to evaluate a small print-template subexpression (a slot
