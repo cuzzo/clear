@@ -4168,6 +4168,19 @@ class BcEmitter
       if t == :i64
         emit_op(INT_TO_F64); @type_stack[-1] = :f64
       end
+    when :as
+      # `@as(TargetType, expr)` — coerce the residency of the typed-stack
+      # value to match the target type. Without this, `Conditional`
+      # branches that disagree (e.g. a Cast(Lit(0), "f64", :as) vs a
+      # f64 division) leave the value on the wrong stack and the slot
+      # store reads garbage.
+      target = node.target_type.to_s
+      t = peek_type
+      if (target == "f64" || target.end_with?(".f64")) && t == :i64
+        emit_op(INT_TO_F64); @type_stack[-1] = :f64
+      elsif (target == "i64" || target.end_with?(".i64")) && t == :f64
+        emit_op(F64_TO_INT); @type_stack[-1] = :i64
+      end
     end
   end
 
