@@ -1135,6 +1135,33 @@ class PipelineHost
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
       nil
 
+    if bc_target?
+      iter = if range_chain[:source].is_a?(AST::RangeLit)
+               start_mir = visit_mir(range_chain[:source].start)
+               end_mir   = visit_mir(range_chain[:source].finish)
+               end_expr  = range_chain[:source].inclusive ?
+                 MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
+               MIR::IterRange.new(start_mir, end_expr)
+             elsif range_chain[:source].is_a?(AST::Identifier)
+               visit_mir(range_chain[:source])
+             else
+               nil
+             end
+      if iter
+        return MIR::BlockExpr.new(label, [
+          *p[:outer_stmts],
+          MIR::Let.new("idx_result",
+            MIR::StructInit.new(nil, [{name: "alloc", value: MIR::AllocatorRef.new(:heap)}]),
+            true, map_type, nil),
+          MIR::ForStmt.new(iter, p[:initial_capture], [
+            *p[:stage_stmts],
+            *build_index_gop_body(expr_mir, :heap, item_var)
+          ], nil),
+          MIR::BreakStmt.new(label, MIR::Ident.new("idx_result"))
+        ])
+      end
+    end
+
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts],
       MIR::Let.new("idx_result",
