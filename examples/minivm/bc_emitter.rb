@@ -785,6 +785,7 @@ class BcEmitter
         # The VM has no Arc/lock indirection — alias and source share storage.
         # The source is named in stdlib_def[:borrows].
         sources = (mir_node.stdlib_def && mir_node.stdlib_def[:borrows]) || []
+        STDERR.puts "DBG with_block code:\n#{mir_node.code}\nsources=#{sources.inspect}\n----" if ENV["BC_TRACE_WITH"]
         # First pattern: Arc unwrap via .ctrl.data.*
         mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|
           alias_to_source(alias_name, src_name)
@@ -797,8 +798,21 @@ class BcEmitter
         # mapping `var __sort_guard_N: @TypeOf(SOURCE.method())`, which we
         # parse first to recover guard→source.
         guard_to_src = {}
-        mir_node.code.to_s.scan(/var\s+(__\w+_guard_\d+)\s*:\s*@TypeOf\(([\w]+)\./).each do |g, s|
-          guard_to_src[g] = s
+        # Capture source from `@TypeOf(SOURCE.method())`. The source can be
+        # a plain Ident (`a.acquire`), an Arc unwrap (`a.ctrl.data.acquire`),
+        # or a BG-context field (`__ctx_N.a.acquire`). Pull the first
+        # identifier after `(` (or, when prefixed with `__ctx_N.`, the second)
+        # so BG-body sort guards resolve to the capture's outer name (which
+        # has a slot in the BG body — bc_emitter strips `__ctx_N.` prefixes
+        # in compile_ident).
+        mir_node.code.to_s.scan(/var\s+(__\w+_guard_\d+)\s*:\s*@TypeOf\(([\w.]+)\./).each do |g, expr|
+          parts = expr.split(".")
+          src = if parts[0]&.start_with?("__ctx_") || parts[0] == "ctx" || parts[0] == "__rt"
+                  parts[1] || parts[0]
+                else
+                  parts[0]
+                end
+          guard_to_src[g] = src
         end
         # Iterate `const NAME = __GUARD.get();` and resolve via guard_to_src
         # when available, otherwise fall back to ordered borrows[].
