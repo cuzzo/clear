@@ -1314,6 +1314,30 @@ class PipelineHost
     if lhs_type&.pool?
       source_mir = visit_mir(list_node)
       body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
+      # BC backend models pools as plain lists with Nil holes for removed
+      # slots. Iterate by index, skip Nil entries (alive check), and
+      # write back the mutated item to support field-mutation semantics.
+      if bc_target? && list_node.is_a?(AST::Identifier)
+        @each_idx_counter = (@each_idx_counter || 0) + 1
+        idx_name = "__each_i_#{@each_idx_counter}"
+        src_ident = MIR::Ident.new(list_node.name.to_s)
+        return MIR::ForStmt.new(
+          MIR::IterRange.new(MIR::Lit.new("0"), MIR::ListLength.new(src_ident)),
+          idx_name,
+          [
+            MIR::Let.new("__each_item",
+              MIR::IndexGet.new(src_ident, MIR::Ident.new(idx_name)),
+              true, nil, nil),
+            MIR::IfStmt.new(
+              MIR::BinOp.new("==", MIR::Ident.new("__each_item"), MIR::Lit.new("nil")),
+              [MIR::ContinueStmt.new(nil)], nil),
+            *body_mir,
+            MIR::Set.new(
+              MIR::IndexGet.new(src_ident, MIR::Ident.new(idx_name)),
+              MIR::Ident.new("__each_item"))
+          ],
+          nil)
+      end
       return MIR::ScopeBlock.new([
         MIR::Let.new("__each_src", MIR::UnaryOp.new("&", source_mir), false, nil, nil),
         MIR::ForStmt.new(
@@ -1348,6 +1372,37 @@ class PipelineHost
     if lhs_type&.list_collection? || lhs_type&.fixed_soa?
       source_mir = visit_mir(list_node)
       body_mir = visit_pipeline_body_mir(each_op.body, placeholder: "__each_item")
+      # BC backend: in Zig, `for (items.items) |*item|` gives a pointer
+      # so field-writes propagate. The BC ForStmt iterates by-value, so
+      # field mutations on __each_item never reach the underlying list.
+      # Lower to an index loop with an explicit writeback when the source
+      # is a known list-bound Identifier (the common case: `xs s> EACH`).
+      # BC backend: in Zig, `for (items.items) |*item|` gives a pointer
+      # so field-writes propagate. The BC ForStmt iterates by-value, so
+      # field mutations on __each_item never reach the underlying list.
+      # Lower to an index loop with an explicit writeback when the source
+      # is a known list-bound Identifier (the common case: `xs s> EACH`).
+      # Use the original Identifier as the in-place target so the writeback
+      # actually updates the user's binding (a fresh __each_src copy
+      # wouldn't propagate the mutation back to `xs`).
+      if bc_target? && list_node.is_a?(AST::Identifier)
+        @each_idx_counter = (@each_idx_counter || 0) + 1
+        idx_name = "__each_i_#{@each_idx_counter}"
+        src_ident = MIR::Ident.new(list_node.name.to_s)
+        return MIR::ForStmt.new(
+          MIR::IterRange.new(MIR::Lit.new("0"), MIR::ListLength.new(src_ident)),
+          idx_name,
+          [
+            MIR::Let.new("__each_item",
+              MIR::IndexGet.new(src_ident, MIR::Ident.new(idx_name)),
+              true, nil, nil),
+            *body_mir,
+            MIR::Set.new(
+              MIR::IndexGet.new(src_ident, MIR::Ident.new(idx_name)),
+              MIR::Ident.new("__each_item"))
+          ],
+          nil)
+      end
       return MIR::ScopeBlock.new([
         MIR::Let.new("__each_src", source_mir, false, nil, nil),
         MIR::Let.new("__each_items",

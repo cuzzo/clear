@@ -4832,7 +4832,8 @@ class BcEmitter
     when :i64 then emit_op(I_TO_VAL)
     when :f64 then emit_op(F_TO_VAL)
     end
-    emit_op(LT); emit_op(JUMP_IF_FALSE)
+    # Inclusive range (..=): var <= end. Exclusive (..<): var < end.
+    emit_op(node.inclusive ? LTE : LT); emit_op(JUMP_IF_FALSE)
     jump_exit = @ops.length; emit_op(0)
     node.body.each do |s|
       compile_ast_stmt(s)
@@ -5560,6 +5561,9 @@ class BcEmitter
   # ================================================================
 
   def emit_op(op, *args)
+    if ENV["BC_TRACE_OPS"]
+      STDERR.puts "  emit_op #{op} #{args.inspect} (ip=#{@ops.length})"
+    end
     @ops << op; args.each { |a| @ops << a }
   end
 
