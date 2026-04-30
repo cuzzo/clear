@@ -1774,6 +1774,15 @@ class MIRLowering
 
     # Bounded stream: ~T[N] - emit BoundedStream struct with Promise items
     if ti.respond_to?(:bounded_stream?) && ti.bounded_stream?
+      # BC backend: there's no Promise/BoundedStream runtime; with the
+      # synchronous BG_SPAWN the items are already concrete values, so
+      # treat the literal as a plain list. NEXT on the bound slot pops
+      # the head via LIST_POP_FRONT (same as BG STREAM materialization).
+      if @target == :bc
+        items_mir_bc = node.items.map { |i| lower(i) }
+        return MIR::MakeList.new("anytype", items_mir_bc, :frame)
+      end
+
       @stream_lit_counter ||= 0
       s_id = @stream_lit_counter
       @stream_lit_counter += 1

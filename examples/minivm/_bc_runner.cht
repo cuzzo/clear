@@ -3216,9 +3216,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 running = FALSE;,
             82 -> -- BG_SPAWN [entry_ip] [argc]: spawn a fiber running exec!
                   -- from entry_ip with argc captures. Synchronous recursive
-                  -- exec! (semantics correct, not concurrent). The pushed
-                  -- Pair holds the resolved value directly so AWAIT can
-                  -- unwrap it.
+                  -- exec! (semantics correct, not concurrent). The result
+                  -- is pushed directly; AWAIT is identity on non-Pair so
+                  -- existing NEXT-on-future code paths still work.
                 bgEntry = ops[ip]; ip += 1;
                 bgArgc  = ops[ip]; ip += 1;
                 MUTABLE bgCaps: Value[]@list = List[];
@@ -3226,10 +3226,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                bgResult = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
-                pv = Value.Pair{
-                    pairCar: Value{ Symbol: COPY "__future__" },
-                    pairCdr: COPY bgResult };
+                pv = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             83 -> -- AWAIT: pop Pair("__future__", result) and push the
