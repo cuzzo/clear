@@ -791,11 +791,22 @@ class BcEmitter
         end
         # Second pattern: locked guard.get() — alias source is in borrows[].
         # Each `const NAME = __VAR_guard_N.get();` introduces NAME aliased to
-        # the corresponding borrows entry (1:1, in order).
-        guard_aliases = mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*__\w+_guard_\d+\.get\(\)/).flatten
-        guard_aliases.each_with_index do |alias_name, i|
-          src_name = sources[i] || sources.last
+        # the corresponding borrows entry. For un-sorted guards (single
+        # EXCLUSIVE), the index into borrows[] matches. For sorted guards
+        # (2+ EXCLUSIVE captures), the guard_decls preamble carries the
+        # mapping `var __sort_guard_N: @TypeOf(SOURCE.method())`, which we
+        # parse first to recover guard→source.
+        guard_to_src = {}
+        mir_node.code.to_s.scan(/var\s+(__\w+_guard_\d+)\s*:\s*@TypeOf\(([\w]+)\./).each do |g, s|
+          guard_to_src[g] = s
+        end
+        # Iterate `const NAME = __GUARD.get();` and resolve via guard_to_src
+        # when available, otherwise fall back to ordered borrows[].
+        i = 0
+        mir_node.code.to_s.scan(/const\s+(\w+)\s*=\s*(__\w+_guard_\d+)\.get\(\)/).each do |alias_name, guard_name|
+          src_name = guard_to_src[guard_name] || sources[i] || sources.last
           alias_to_source(alias_name, src_name) if src_name
+          i += 1
         end
         # Third pattern: plain WITH BORROWED / RESTRICT — emits Zig-side
         #   const ref = greeting;       (immutable borrow)
