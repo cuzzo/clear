@@ -3427,6 +3427,26 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         },
                     DEFAULT -> PASS;
                 END,
+            107 -> -- LIST_POP_FRONT [slot_idx]: read list at slot, pop head,
+                   -- store tail back into slot, push head (or Nil if empty).
+                   -- Used by NEXT on materialized BG STREAM lists.
+                lpfSlot = ops[ip]; ip += 1;
+                lpfList = COPY slots[lpfSlot];
+                pv = Value.Nil;
+                MATCH lpfList START
+                    Value.List AS lpfElems ->
+                        IF lpfElems.length() > 0 THEN
+                            pv = COPY lpfElems[0];
+                            MUTABLE lpfTail: Value[]@list = List[];
+                            FOR lpfI IN (1_i64 ..< lpfElems.length()) DO
+                                lpfTail.append(COPY lpfElems[lpfI]);
+                            END
+                            slots[lpfSlot] = Value{ List: lpfTail };
+                        END,
+                    DEFAULT -> PASS;
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
             DEFAULT ->
                 running = FALSE;
         END

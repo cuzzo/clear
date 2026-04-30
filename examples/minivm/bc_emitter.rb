@@ -86,6 +86,11 @@ class BcEmitter
   BOX_NEW      = 104
   BOX_LOAD     = 105
   BOX_STORE    = 106
+  # LIST_POP_FRONT [slot_idx]: pop the head of a list slot. The list is
+  # mutated to remove its first element; the head (or Nil if empty) is
+  # pushed onto the value stack. Used for BG STREAM / NEXT materialization
+  # so successive NEXT calls see the slot's tail.
+  LIST_POP_FRONT = 107
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -1005,11 +1010,23 @@ class BcEmitter
     # holders of the cell-id see the update. When boxing, preserve the
     # inner expression's struct hint as the slot's effective type so
     # field-access dispatch (find_field_index) still scopes by struct.
+    # Skip the override when the annotation already pinned the slot to
+    # a collection kind (:map / :set) — those routes (MAP_GET / MAP_PUT,
+    # set ops) need :map / :set, not the synthesized struct name of the
+    # HashMap zig type.
     @boxed_slots ||= Set.new
     if val_type == :boxed
       @boxed_slots << name
       val_type = :any
-      effective_type = pre_box_type if pre_box_type
+      collection_pin = effective_type == :map || effective_type == :set
+      effective_type = pre_box_type if pre_box_type && !collection_pin
+    end
+    # Mark stream-materialized slots so NEXT pops from the slot's list.
+    # The BlockExpr produced by lower_bg_stream_block is a list-init +
+    # body (yields) + break(local). Detect it by label prefix.
+    @stream_slots ||= Set.new
+    if node.init.is_a?(MIR::BlockExpr) && node.init.label&.to_s&.start_with?("__sg")
+      @stream_slots << name
     end
     alloc_slot(name, effective_type)
     # Pass val_type (where the value actually lives), not effective_type
@@ -3593,12 +3610,41 @@ class BcEmitter
       return
     end
 
-    # NEXT on a promise (future-like value). Emit AWAIT opcode which
-    # unwraps a Pair(Symbol("__future__"), result) to the held result;
-    # identity on non-future values.
+    # NEXT on a promise (future-like value) OR on a stream-as-list
+    # produced by lower_bg_stream_block. For receivers that are list
+    # slots (synthesized __sg<id>_local stream materializations), use
+    # LIST_POP_FRONT to pop the head and update the slot's tail in
+    # place. AWAIT is identity on non-future, non-list values, so the
+    # existing path stays correct for everything else.
     if method == "next" && node.args.empty?
+      if node.receiver.is_a?(MIR::Ident)
+        rname = node.receiver.name.to_s
+        if has_slot?(rname) && (rname.start_with?("__sg") || @stream_slots&.include?(rname))
+          emit_op(LIST_POP_FRONT, @slots[rname])
+          push_type(:any)
+          return
+        end
+      end
       compile_expr(node.receiver); pop_type
       emit_op(AWAIT)
+      push_type(:any)
+      return
+    end
+
+    # YIELD x for the BC stream materialization: __sg<id>_local.push(x)
+    # appends to the underlying list. The receiver is the synthesized
+    # stream-local list slot; "push" maps to list-push (which returns a
+    # new list), then we store the rebuilt list back into the slot so
+    # subsequent yields accumulate.
+    if method == "push" && node.args.length == 1 &&
+       node.receiver.is_a?(MIR::Ident) && node.receiver.name.to_s.start_with?("__sg") &&
+       has_slot?(node.receiver.name.to_s)
+      rname = node.receiver.name.to_s
+      emit_op(LOAD_SLOT, @slots[rname])
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+      emit_op(STORE_SLOT, @slots[rname])
+      emit_op(LOAD_CONST, add_const(nil))
       push_type(:any)
       return
     end
@@ -3730,6 +3776,11 @@ class BcEmitter
     # surrounding BlockExpr then populates it via .put() calls.
     if zig_type.start_with?("CheatLib.StringMap") ||
        zig_type.start_with?("CheatLib.NumericMap") ||
+       zig_type.start_with?("CheatLib.PartitionedStringMap") ||
+       zig_type.start_with?("CheatLib.ShardedStringMap") ||
+       zig_type.start_with?("CheatLib.PartitionedNumericMap") ||
+       zig_type.start_with?("CheatLib.StripedNumericMap") ||
+       zig_type.start_with?("CheatLib.MutexShardedStringMap") ||
        zig_type.start_with?("CheatLib.Set")
       emit_op(MAP_NEW)
       push_type(:map)

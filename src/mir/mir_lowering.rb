@@ -2663,6 +2663,27 @@ class MIRLowering
     blk_label = "__sg#{id}"
     local_stream = "__sg#{id}_local"
 
+    # BC backend: there are no real coroutines, so model the stream as
+    # an eager List materialization. Run the body inline; YIELD becomes
+    # `__sg<id>_local.push(x)` which we rewrite to list-append in the
+    # bc_emitter, and NEXT pops the head of the list. This works for all
+    # finite streams (the only kind a synchronous VM can support).
+    if @target == :bc && !is_inf
+      prev_stream_local = @current_stream_local
+      prev_stream_is_inf = @current_stream_is_inf
+      @current_stream_local = local_stream
+      @current_stream_is_inf = is_inf
+      run_body = node.body.map { |expr| lower(expr) }
+      @current_stream_local = prev_stream_local
+      @current_stream_is_inf = prev_stream_is_inf
+
+      return MIR::BlockExpr.new(blk_label, [
+        MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, "anytype", nil),
+        *run_body,
+        MIR::BreakStmt.new(blk_label, MIR::Ident.new(local_stream))
+      ])
+    end
+
     analysis = node.capture_analysis
     captured = analysis&.captures || {}
     rt_name = @rt_name
