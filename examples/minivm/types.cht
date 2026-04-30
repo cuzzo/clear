@@ -20,6 +20,7 @@ UNION Value {
     TypedI64Arr: Int64[],
     TypedF64Arr: Float64[],
     MapRef: Id<Env>,
+    Weak: Int64,
 }
 
 -- Pure helpers
@@ -155,7 +156,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.EnvRef -> RETURN "#<envref>";,
         Value.Tco -> RETURN "#<tco>";,
         Value.Error AS e -> RETURN "#<error:" + e.errKind + ":" + e.errMsg + ">";,
-        Value.MapRef -> RETURN "#<map>";
+        Value.MapRef -> RETURN "#<map>";,
+        Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";
     END
     RETURN "";
 END

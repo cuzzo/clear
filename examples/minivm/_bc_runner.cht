@@ -2503,10 +2503,20 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE callRetIps: Int64[]@list = List[];
     MUTABLE callRetSps: Int64[]@list = List[];
     MUTABLE callSavedSlots: Value[]@list = List[];
-    -- Spawned-fiber promises. BG_SPAWN appends a BG-spawned ~Value here and
-    -- pushes Pair("__future__", Int64Val(index)) onto the value stack;
-    -- AWAIT looks up the index, calls NEXT, and uses the result.
-    MUTABLE futures: ~Value[]@list = [];
+    -- BG_SPAWN runs the inner exec! synchronously and pushes the result
+    -- in a Pair("__future__", result); AWAIT unwraps. Real fiber
+    -- spawning is gated on @local/@shared:locked indirection (Task #29)
+    -- so cross-fiber mutations are visible.
+    -- Weak-ref side tables. WEAK_NEW snapshots a Value into weakCells,
+    -- marks weakAlive[idx]=TRUE, registers the idx with the current
+    -- frame via weakOwnedFlat. BC_RET marks every idx allocated since
+    -- frameWkMarks.last() as dead, so weak refs created in a callee
+    -- become invalid when the callee returns -- matching Zig's drop-on-
+    -- frame-exit for @multiowned bindings.
+    MUTABLE weakCells: Value[]@list = List[];
+    MUTABLE weakAlive: Bool[]@list = List[];
+    MUTABLE weakOwnedFlat: Int64[]@list = List[];
+    MUTABLE frameWkMarks: Int64[]@list = List[];
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -3107,6 +3117,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 callRetSps.append(sp - bcCallArgc);
                 -- Save current slots (must match SLOT_COUNT=256 above)
                 FOR bci IN (0_i64 ..< 256) DO callSavedSlots.append(COPY slots[bci]); END
+                -- Mark Weak-cell ownership boundary; BC_RET will drop
+                -- cells allocated at indexes >= this mark.
+                frameWkMarks.append(weakOwnedFlat.length());
                 -- Move args into slots 0..argc-1
                 FOR bci IN (0_i64 ..< bcCallArgc) DO
                     slots[bci] = COPY stack[(sp - bcCallArgc) + bci];
@@ -3115,6 +3128,16 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 ip = bcCallIp;,
             78 -> -- BC_RET: pop return value, restore frame, push return value
                 sp -= 1; bcRetVal = COPY stack[sp];
+                -- Mark Weak cells allocated during this frame as dead.
+                wkMarkLo = frameWkMarks[frameWkMarks.length() - 1];
+                FOR wkDi IN (wkMarkLo ..< weakOwnedFlat.length()) DO
+                    weakAlive[weakOwnedFlat[wkDi]] = FALSE;
+                END
+                wkDropCount = weakOwnedFlat.length() - wkMarkLo;
+                FOR wkDe IN (0_i64 ..< wkDropCount) DO
+                    weakOwnedFlat.remove(wkMarkLo);
+                END
+                frameWkMarks.remove(frameWkMarks.length() - 1);
                 -- Restore slots (stride must match BC_CALL above)
                 savedBase = (callSavedSlots.length() - 256);
                 FOR bci IN (0_i64 ..< 256) DO slots[bci] = COPY callSavedSlots[savedBase + bci]; END
@@ -3131,6 +3154,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             79 -> -- BC_RET_VOID: restore frame, push Value.Nil so callers
                   -- can uniformly POP the return value (the caller emits
                   -- POP after every BC_CALL regardless of return type).
+                wkMarkLoV = frameWkMarks[frameWkMarks.length() - 1];
+                FOR wkDiV IN (wkMarkLoV ..< weakOwnedFlat.length()) DO
+                    weakAlive[weakOwnedFlat[wkDiV]] = FALSE;
+                END
+                wkDropCountV = weakOwnedFlat.length() - wkMarkLoV;
+                FOR wkDeV IN (0_i64 ..< wkDropCountV) DO
+                    weakOwnedFlat.remove(wkMarkLoV);
+                END
+                frameWkMarks.remove(frameWkMarks.length() - 1);
                 -- Restore slots (stride must match BC_CALL above)
                 savedBaseV = (callSavedSlots.length() - 256);
                 FOR bci IN (0_i64 ..< 256) DO slots[bci] = COPY callSavedSlots[savedBaseV + bci]; END
@@ -3161,9 +3193,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 fiberReturned = TRUE;
                 running = FALSE;,
             82 -> -- BG_SPAWN [entry_ip] [argc]: spawn a fiber running exec!
-                  -- from entry_ip with argc captures. Phase 2: real BG
-                  -- block. The promise is stored in `futures`; the pushed
-                  -- Pair holds its index for later AWAIT.
+                  -- from entry_ip with argc captures. Synchronous recursive
+                  -- exec! (semantics correct, not concurrent). The pushed
+                  -- Pair holds the resolved value directly so AWAIT can
+                  -- unwrap it.
                 bgEntry = ops[ip]; ip += 1;
                 bgArgc  = ops[ip]; ip += 1;
                 MUTABLE bgCaps: Value[]@list = List[];
@@ -3171,32 +3204,17 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                bgFutIdx = futures.length();
-                bgEntryCap: Int64 = bgEntry;
-                bgEnvCap: Id<Env> = COPY curEnv;
-                futures.append(BG {
-                    exec!(ops, consts, bgEnvCap, pool, bgEntryCap, bgCaps)
-                });
+                bgResult = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
                 pv = Value.Pair{
                     pairCar: Value{ Symbol: COPY "__future__" },
-                    pairCdr: Value{ Int64Val: bgFutIdx } };
+                    pairCdr: COPY bgResult };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            83 -> -- AWAIT: pop Pair("__future__", Int64Val(idx)); look up
-                  -- the future, NEXT it, push the result. Identity on
-                  -- non-future values (tolerate AWAIT on a resolved value).
+            83 -> -- AWAIT: pop Pair("__future__", result) and push the
+                  -- held result. Identity on non-future values.
                 sp -= 1; awaitVal = COPY stack[sp];
                 MATCH awaitVal START
-                    Value.Pair AS awfp ->
-                        MATCH awfp.pairCdr START
-                            Value.Int64Val AS awIdx ->
-                                IF awIdx >= 0 && awIdx < futures.length() THEN
-                                    pv = NEXT futures[awIdx];
-                                ELSE
-                                    pv = COPY awfp.pairCdr;
-                                END,
-                            DEFAULT -> pv = COPY awfp.pairCdr;
-                        END,
+                    Value.Pair AS fp -> pv = COPY fp.pairCdr;,
                     DEFAULT -> pv = COPY awaitVal;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
@@ -3304,6 +3322,32 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     DEFAULT -> pv = Value.Nil;
                 END
                 pv = Value{ List: mapValList };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            96 -> -- WEAK_NEW: pop value V, snapshot into a weak cell, push
+                  -- Value.Weak{idx}. Cell is registered with current frame
+                  -- so BC_RET marks it dead. Implements LINK x.
+                sp -= 1; wkVal = COPY stack[sp];
+                wkIdxNew = weakCells.length();
+                weakCells.append(wkVal);
+                weakAlive.append(TRUE);
+                weakOwnedFlat.append(wkIdxNew);
+                pv = Value{ Weak: wkIdxNew };
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            97 -> -- WEAK_RESOLVE: pop Value.Weak{idx}; if alive, push the
+                  -- cell value, else Nil. Identity on non-Weak values so
+                  -- RESOLVE on a value that wasn't LINK'd is a passthrough.
+                sp -= 1; wkRs = COPY stack[sp];
+                MATCH wkRs START
+                    Value.Weak AS wkRsIdx ->
+                        IF weakAlive[wkRsIdx] THEN
+                            pv = COPY weakCells[wkRsIdx];
+                        ELSE
+                            pv = Value.Nil;
+                        END,
+                    DEFAULT -> pv = COPY wkRs;
+                END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             DEFAULT ->

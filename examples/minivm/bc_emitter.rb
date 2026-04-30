@@ -67,6 +67,12 @@ class BcEmitter
   # MAP_VALUES: pop map, push List of Value (the map's values in iteration
   # order). Used by HashMap.values() in BC mode.
   MAP_VALUES = 95
+  # Weak-ref opcodes for LINK / RESOLVE. WEAK_NEW snapshots a value into
+  # a frame-owned cell and pushes Value.Weak{idx}; WEAK_RESOLVE returns
+  # the cell value or Nil if dropped. BC_RET marks every cell allocated
+  # during the exiting frame as dead.
+  WEAK_NEW     = 96
+  WEAK_RESOLVE = 97
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -1757,8 +1763,28 @@ class BcEmitter
       emit_op(LOAD_SLOT, @slots[tmp])
       @ops[end_patch] = @ops.length
       push_type(:any)
-    when MIR::RcRetain, MIR::RcDowngrade, MIR::WeakUpgrade
-      compile_expr(node.source)  # RC ops are no-op in VM; forward the inner value
+    when MIR::RcRetain
+      compile_expr(node.source)  # retain: no real refcount in VM
+    when MIR::RcDowngrade
+      # LINK x: snapshot the inner value into a frame-owned weak cell.
+      # The cell is invalidated when the frame that performed the LINK
+      # returns (BC_RET marks frame-owned weak idxes dead), so a Weak
+      # returned from a function gets dropped as soon as the function
+      # exits -- matching the Zig backend's strong-ref-drop semantics.
+      compile_expr(node.source); pop_type
+      ensure_value_stack
+      emit_op(WEAK_NEW)
+      push_type(:any)
+      return
+    when MIR::WeakUpgrade
+      # RESOLVE w: pop the Weak; if the cell is alive, push its snapshot,
+      # else push Nil. Identity on non-Weak values so RESOLVE on a
+      # never-LINK'd value passes through.
+      compile_expr(node.source); pop_type
+      ensure_value_stack
+      emit_op(WEAK_RESOLVE)
+      push_type(:any)
+      return
     when MIR::FreeSlice
       # VM is GC'd; no explicit free. Evaluate for side effects only.
       compile_expr_to_value(node.slice); pop_type
