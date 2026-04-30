@@ -1023,9 +1023,14 @@ class BcEmitter
     end
     # Mark stream-materialized slots so NEXT pops from the slot's list.
     # The BlockExpr produced by lower_bg_stream_block is a list-init +
-    # body (yields) + break(local). Detect it by label prefix.
+    # body (yields) + break(local). Detect it by label prefix. Also
+    # mark bounded streams (~T[N] = [...]) and dynamic streams (~T[]),
+    # which are concrete lists in BC mode but still need NEXT to pop.
     @stream_slots ||= Set.new
     if node.init.is_a?(MIR::BlockExpr) && node.init.label&.to_s&.start_with?("__sg")
+      @stream_slots << name
+    end
+    if node.init.is_a?(MIR::MakeList) && node.init.elem_type.to_s == "__bc_stream__"
       @stream_slots << name
     end
     alloc_slot(name, effective_type)

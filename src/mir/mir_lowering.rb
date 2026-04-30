@@ -1778,9 +1778,11 @@ class MIRLowering
       # synchronous BG_SPAWN the items are already concrete values, so
       # treat the literal as a plain list. NEXT on the bound slot pops
       # the head via LIST_POP_FRONT (same as BG STREAM materialization).
+      # The "__bc_stream__" sentinel elem_type lets the emitter mark
+      # the binding's slot as a stream so NEXT routes via LIST_POP_FRONT.
       if @target == :bc
         items_mir_bc = node.items.map { |i| lower(i) }
-        return MIR::MakeList.new("anytype", items_mir_bc, :frame)
+        return MIR::MakeList.new("__bc_stream__", items_mir_bc, :frame)
       end
 
       @stream_lit_counter ||= 0
