@@ -3851,16 +3851,16 @@ class MIRLowering
         MIR::MethodCall.new(target, "get", [index], false)
       end
     elsif ti&.pool?
-      # BC backend: emit a structural MIR::InlineBc tagged :pool_method so
-      # bc_emitter's compile_inline_bc :get dispatch routes through list-ref.
-      # The Zig backend keeps the MIR::MethodCall (lowered to {target}.get(index)).
-      if @target == :bc
-        elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
-        elem_name = elem_t.respond_to?(:resolved) ? elem_t.resolved.to_s : elem_t.to_s
-        return MIR::InlineBc.new(:get, [target, index],
-                                 { tag: :pool_method, elem: elem_name })
-      end
-      MIR::MethodCall.new(target, "get", [index], false)
+      # Both backends consume MIR::InlineBc(:get, [target, index], POOL_METHODS["get"]).
+      # BC dispatches via compile_inline_bc :get on tag == :pool_method
+      # (-> list-ref). Zig emits {0}.get({1}) from stdlib_def[:zig]. The
+      # `elem` field carries the element type name so bc_emitter can
+      # stamp the capture slot's struct hint when this gets bound via
+      # `IF pool[id] AS env`.
+      elem_t = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type
+      elem_name = elem_t.respond_to?(:resolved) ? elem_t.resolved.to_s : elem_t.to_s
+      pool_get_def = POOL_METHODS["get"].merge(elem: elem_name)
+      return MIR::InlineBc.new(:get, [target, index], pool_get_def)
     elsif ti&.set_collection?
       # @set[item]: membership check — returns ?T (item if present, null otherwise)
       elem_zig = (ti.is_a?(Type) ? ti : Type.new(ti)).element_type.zig_type
