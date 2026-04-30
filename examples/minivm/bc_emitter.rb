@@ -226,6 +226,17 @@ class BcEmitter
     end
 
     fns = program.items.select { |i| i.is_a?(MIR::FnDef) }
+
+    # Collect nested FnDefs (worker callbacks emitted inside MIR::StructDef
+    # by the bounded-stream concurrent lowering, etc.). Each appears as
+    # a method on a containing StructDef. Register them as top-level
+    # helpers under the qualified name `<StructName>.<method>` so call
+    # sites that reference `Ctx.apply` resolve correctly. The walk
+    # descends through all program items + their bodies, so nested
+    # StructDefs in BlockExprs are caught.
+    nested_fns = collect_nested_fn_defs(program.items)
+    fns.concat(nested_fns)
+
     helpers = fns.reject { |f| MAIN_NAMES.include?(f.name.to_s) }
     mains   = fns.select { |f| MAIN_NAMES.include?(f.name.to_s) }
 
@@ -248,6 +259,11 @@ class BcEmitter
     # all helpers have been laid out.
     @helper_fn_names = Set.new(helpers.map { |h| h.name.to_s })
     @deferred_bc_calls = []
+    # Synthesized worker callbacks register under qualified names; track
+    # them too so the deferred BC_CALL machinery can resolve forward
+    # references into the call-site dispatch (e.g., the bounded-concurrent
+    # InlineBc that BC_CALLs Ctx.apply).
+    nested_fns.each { |h| @helper_fn_names << h.name.to_s }
 
     # Emit helper bodies before main so call sites can patch fixed IPs.
     # Jump over the helper region into main; patch the jump target after
@@ -314,6 +330,61 @@ class BcEmitter
     end
   end
 
+  # Recursively find MIR::FnDef nodes nested inside MIR::StructDef.methods
+  # somewhere in the program. Each is renamed to the qualified
+  # `<StructName>.<method>` form (matching how the lowering references
+  # them at call sites). Returns an array of MIR::FnDef nodes ready to
+  # be appended to the helper-fn list.
+  def collect_nested_fn_defs(items)
+    out = []
+    seen = Set.new   # Avoid revisiting the same struct/fn (Struct.== is by value)
+    visit = lambda do |node|
+      return unless node
+      return if seen.include?(node.object_id)
+      seen << node.object_id
+      case node
+      when MIR::StructDef
+        # Only the bounded-concurrent lowering uses the StructDef-with-method
+        # pattern for synthesized worker callbacks. Other StructDefs (e.g.
+        # the @indirect cleanup helpers in mir_lowering, or generic union
+        # variants) may carry methods that aren't VM-compileable. Restrict
+        # collection to the known-good prefix to avoid trying to compile
+        # incidentally-named nested FnDefs.
+        if node.name.to_s.start_with?("__BoundedConcurrentCtx")
+          # Register field names so compile_field_get's find_field_index
+          # can resolve `ctx.<field>` in the worker body. The synthesized
+          # struct has no AST counterpart, so it isn't in @result.struct_schemas.
+          if node.respond_to?(:fields) && node.fields
+            field_names = node.fields.map { |f| f.respond_to?(:name) ? f.name.to_s : f.to_s }
+            @struct_fields[node.name.to_s] ||= field_names
+          end
+          (node.methods || []).each do |m|
+            next unless m.is_a?(MIR::FnDef)
+            qname = "#{node.name}.#{m.name}"
+            renamed = MIR::FnDef.new(qname, m.params, m.ret_type, m.body,
+                                      m.visibility, m.can_fail, m.comptime_params)
+            out << renamed
+            (m.body || []).each { |x| visit.call(x) }
+          end
+        end
+      end
+      # Recurse through every field of every Struct (uniformly), since
+      # nested FnDefs / StructDefs can appear anywhere in the MIR tree
+      # (Let.init expressions, BlockExpr bodies, IfStmt branches, etc.).
+      if node.is_a?(Struct)
+        node.members.each do |m|
+          next if [:token, :location].include?(m)
+          v = node[m]
+          if v.is_a?(Array) then v.each { |x| visit.call(x) }
+          elsif v.is_a?(Struct) then visit.call(v)
+          end
+        end
+      end
+    end
+    items.each { |item| visit.call(item) }
+    out
+  end
+
   MAIN_NAMES = %w[main clearMain cheatMain].freeze
 
   def process_fn_def(mir_fn)
@@ -351,6 +422,65 @@ class BcEmitter
     nil
   end
 
+  # Compile a synthesized helper FnDef whose body is pure MIR (no AST
+  # counterpart). Used for nested worker callbacks emitted by
+  # PipelineHost#lower_concurrent_bounded_* (and similar lowerings):
+  # the lowering builds a MIR::FnDef inside a MIR::StructDef.methods,
+  # the bc_emitter registers it under "<StructName>.<method>" as a
+  # helper, and the InlineBc dispatch at the call site BC_CALLs it.
+  def compile_synthesized_helper_fn_mir(mir_fn)
+    name = mir_fn.name.to_s
+    saved = {
+      slots: @slots, islots: @islots, fslots: @fslots,
+      slot_types: @slot_types, mutables: @mutables,
+      next_slot: @next_slot, next_islot: @next_islot, next_fslot: @next_fslot,
+      type_stack: @type_stack,
+      boxed_slots: @boxed_slots, stream_slots: @stream_slots,
+      in_helper_fn: @in_helper_fn, helper_fn_returned: @helper_fn_returned,
+    }
+    @slots = {}; @islots = {}; @fslots = {}
+    @slot_types = {}; @mutables = Set.new
+    @next_slot = 0; @next_islot = 0; @next_fslot = 0
+    @type_stack = []
+    @boxed_slots = Set.new; @stream_slots = Set.new
+    @in_helper_fn = true
+    @helper_fn_returned = false
+
+    @fn_start_ips[name] = @ops.length
+    @fn_arity ||= {}
+    @fn_arity[name] = (mir_fn.params || []).reject { |p|
+      pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
+      pname == "rt" || pname == "_rt" || pname =~ /\A__rt_bg\d+\z/
+    }.length
+
+    # Allocate param slots in declaration order. Synthesized worker
+    # callbacks have params (rt, raw_ctx, item) -- callers (the
+    # InlineBc dispatch) push exactly this many values per BC_CALL.
+    (mir_fn.params || []).each do |p|
+      pname = p.respond_to?(:name) ? p.name.to_s : p.to_s
+      alloc_slot(pname, :any)
+    end
+
+    # Compile the MIR body without AST pairing. Filter out synthetic
+    # nodes (Suppress, FrameSave/Restore, etc.) the same way compile_main
+    # does -- they're Zig-only scaffolding the VM doesn't model.
+    semantic_mir_nodes(mir_fn.body || []).each do |stmt|
+      compile_stmt(stmt, nil)
+      t = pop_type
+      emit_op(POP) unless t == :i64 || t == :f64 || t == :bool || t == :void
+    end
+
+    emit_op(BC_RET_VOID) unless @helper_fn_returned
+
+    @slots = saved[:slots]; @islots = saved[:islots]; @fslots = saved[:fslots]
+    @slot_types = saved[:slot_types]; @mutables = saved[:mutables]
+    @next_slot = saved[:next_slot]; @next_islot = saved[:next_islot]
+    @next_fslot = saved[:next_fslot]; @type_stack = saved[:type_stack]
+    @boxed_slots = saved[:boxed_slots]; @stream_slots = saved[:stream_slots]
+    @in_helper_fn = saved[:in_helper_fn]
+    @helper_fn_returned = saved[:helper_fn_returned]
+  end
+
   # Compile a non-main helper function into the shared op stream, isolated
   # from main's slot tables. Records @fn_start_ips[name] so call sites can
   # emit BC_CALL with a fixed target IP.
@@ -369,7 +499,12 @@ class BcEmitter
     # generic at runtime will fail later with a clear error.
     ast_fn = mir_fn.instance_variable_get(:@ast_fn) if mir_fn.respond_to?(:instance_variable_get)
     ast_fn ||= lookup_ast_fn(name)
+    # Synthesized workers (e.g. "__BoundedConcurrentCtx1.apply" emitted
+    # by lower_concurrent_bounded_*) have no AST counterpart -- their
+    # MIR body is fully constructed by the lowering. Compile MIR-only
+    # so call sites that BC_CALL them by qualified name resolve.
     if ast_fn.nil?
+      return compile_synthesized_helper_fn_mir(mir_fn) if name.include?(".")
       return
     end
     # User-defined generic functions like `FN identity<T>(x: T) RETURNS T`
@@ -432,7 +567,7 @@ class BcEmitter
     # the right body. Detect that case by checking if the AST shape pairs.
     if name.start_with?("__") && name.end_with?("_body")
       # Allow it through; the MIR body shape should pair with the AST.
-    elsif name.start_with?("__")
+    elsif name.start_with?("__") && !name.include?(".")
       return
     end
 
@@ -707,9 +842,20 @@ class BcEmitter
     case mir_node
     when MIR::Let
       if mir_node.init.is_a?(MIR::InlineZig) || mir_node.init.is_a?(MIR::RawZig)
-        raise Unimplemented, "InlineZig/RawZig init not supported in VM path"
+        # Recognized InlineZig reasons (e.g. bounded_concurrent_ctx_cast)
+        # are dispatched in compile_expr's InlineZig handler, which raises
+        # for unrecognized reasons. Letting these flow through compile_let
+        # is what enables structural shapes like the bounded-concurrent
+        # ctx cast to bind to a slot.
+        if mir_node.init.is_a?(MIR::InlineZig) &&
+           mir_node.init.reason.to_s == "bounded_concurrent_ctx_cast"
+          compile_let(mir_node)
+        else
+          raise Unimplemented, "InlineZig/RawZig init not supported in VM path"
+        end
+      else
+        compile_let(mir_node)
       end
-      compile_let(mir_node)
     when MIR::Set
       compile_set(mir_node)
     when MIR::ReassignWithCleanup
@@ -882,6 +1028,28 @@ class BcEmitter
         # The VM has no Arc/lock indirection — alias and source share storage.
         # The source is named in stdlib_def[:borrows].
         sources = (mir_node.stdlib_def && mir_node.stdlib_def[:borrows]) || []
+
+        # Prefetch captured-field sources. When this WITH runs inside a
+        # synthesized worker (bounded concurrent / DO / BG), the lock target
+        # is rooted at `ctx.FIELD.*` rather than a local Ident — the
+        # capture rewrite folded the original name into a ctx field path.
+        # The borrows[] entry still names the original variable (e.g. `total`),
+        # but no slot of that name exists in the worker frame.
+        # Detect this and load `ctx.FIELD` into a slot named after the
+        # borrows entry so alias_to_source below resolves correctly.
+        # The field holds the same Box as the original (AddressOf is
+        # identity in BC), so writes through the alias propagate.
+        if has_slot?("ctx")
+          mir_node.code.to_s.scan(/var\s+__(\w+)_guard_\d+\s*=\s*ctx\.(\w+)\.\*/).each do |borrow_name, field_name|
+            next if has_slot?(borrow_name)
+            fg = MIR::FieldGet.new(MIR::Ident.new("ctx"), field_name)
+            compile_expr_to_value(fg); pop_type
+            alloc_slot(borrow_name, :any)
+            emit_op(STORE_SLOT, @slots[borrow_name]); emit_op(POP)
+            @slot_types[borrow_name] = :any
+            (@boxed_slots ||= Set.new) << borrow_name
+          end
+        end
         # First pattern: Arc unwrap via .ctrl.data.*
         mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|
           alias_to_source(alias_name, src_name)
@@ -985,6 +1153,12 @@ class BcEmitter
       # effects and drop the result.
       compile_expr(mir_node); t = pop_type
       emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      push_type(:void)
+    when MIR::StructDef, MIR::FnDef
+      # Nested type/fn defs (e.g. the worker callback emitted by the
+      # bounded-stream concurrent lowering). The compiler's pre-walk
+      # collects nested FnDefs and registers them as helpers under
+      # qualified names; nothing to emit at the body-stmt position.
       push_type(:void)
     else
       if ast_node
@@ -2170,6 +2344,16 @@ class BcEmitter
     when MIR::IfOptional
       compile_if_optional(node)
     when MIR::AddressOf
+      # AddressOf of a boxed slot must NOT auto-deref. Capturing into a
+      # struct field (e.g. ctx struct with `total: &total`) needs the
+      # underlying Box cell-id so the field shares storage with the
+      # source. Without this, BOX_LOAD would dereference and the field
+      # would hold a copy of the inner value, breaking write-back across
+      # the captured reference.
+      if node.expr.is_a?(MIR::Ident) && @boxed_slots&.include?(node.expr.name.to_s)
+        emit_op(LOAD_SLOT, @slots[node.expr.name.to_s])
+        push_type(:any); return
+      end
       compile_expr(node.expr)  # VM has no pointers
     when MIR::Deref
       compile_expr(node.expr)  # VM has no pointers
@@ -2258,6 +2442,17 @@ class BcEmitter
           emit_op(LOAD_SLOT, @slots[ident])
         else
           emit_op(LOAD_NAME, add_const(ident))
+        end
+        push_type(:any); return
+      when "bounded_concurrent_ctx_cast"
+        # Worker callback context cast: the Zig backend casts the
+        # opaque raw_ctx pointer back to *Ctx. The VM passes the ctx
+        # value directly through the call slot, so the cast is identity --
+        # just load the raw_ctx slot.
+        if has_slot?("raw_ctx")
+          emit_op(LOAD_SLOT, @slots["raw_ctx"])
+        else
+          emit_op(LOAD_CONST, add_const(nil))
         end
         push_type(:any); return
       end
@@ -2635,6 +2830,153 @@ class BcEmitter
     eql:      "==",  strEql:   "==",  symbolEql: "==",
     :"eql?" => "==",
   }.freeze
+
+  # Compile a bounded-stream concurrent op (SELECT / WHERE / EACH).
+  # Sequential simulation in the VM. The args layout matches
+  # PipelineHost#lower_concurrent_bounded_*; the fn-ref / items_ptr /
+  # ctx_addr positions differ per op:
+  #   SELECT(11): [item_t, result_t, N, Ctx.apply, alloc, rt, items_ptr,
+  #               workers, parallel, task_cfg, &ctx]
+  #   WHERE(10):  [item_t,           N, Ctx.apply, alloc, rt, items_ptr,
+  #               workers, parallel, task_cfg, &ctx]
+  #   EACH(9):    [item_t,           N, Ctx.apply,        rt, items_ptr,
+  #               workers, parallel, task_cfg, &ctx]
+  def compile_concurrent_bounded(node)
+    op = node.op
+    case op
+    when :concurrentBoundedSelect
+      fn_ref, items_ptr, ctx_addr = node.args[3], node.args[6], node.args[10]
+    when :concurrentBoundedWhere
+      fn_ref, items_ptr, ctx_addr = node.args[2], node.args[5], node.args[9]
+    when :concurrentBoundedEach
+      fn_ref, items_ptr, ctx_addr = node.args[2], node.args[4], node.args[8]
+    else
+      raise "compile_concurrent_bounded: unexpected op #{op.inspect}"
+    end
+
+    # Resolve the worker fn name (qualified, e.g. "Ctx.apply").
+    fn_name = fn_ref.is_a?(MIR::Ident) ? fn_ref.name.to_s : nil
+    raise "compile_concurrent_bounded: missing fn ref" unless fn_name
+    fn_ip = @fn_start_ips[fn_name]
+    raise "compile_concurrent_bounded: helper fn #{fn_name.inspect} not registered" unless fn_ip
+
+    # Unwrap items_ptr to the underlying source. AddressOf is identity
+    # in BC, FieldGet(stream, "items") -- the bounded stream IS the list
+    # in BC, so the field access is a no-op too.
+    src = items_ptr
+    src = src.expr if src.is_a?(MIR::AddressOf)
+    src = src.object if src.is_a?(MIR::FieldGet) && src.field.to_s == "items"
+
+    # Result-list bookkeeping (SELECT and WHERE only).
+    @bcc_counter = (@bcc_counter || 0) + 1
+    id = @bcc_counter
+    res_name = "__bcc_res#{id}"
+    iter_name = "__bcc_i#{id}"
+    item_name = "__bcc_item#{id}"
+    cv_name   = "__bcc_cv#{id}"
+    src_name  = "__bcc_src#{id}"
+    ctx_name  = "__bcc_ctx#{id}"
+
+    # Stash items_ptr source to a slot.
+    compile_expr_to_value(src); pop_type
+    alloc_slot(src_name, :any)
+    emit_op(STORE_SLOT, @slots[src_name]); emit_op(POP)
+
+    # Stash ctx (AddressOf wraps the real ctx Value).
+    if ctx_addr
+      ctx_expr = ctx_addr.is_a?(MIR::AddressOf) ? ctx_addr.expr : ctx_addr
+      compile_expr_to_value(ctx_expr); pop_type
+    else
+      emit_op(LOAD_CONST, add_const(nil))
+    end
+    alloc_slot(ctx_name, :any)
+    emit_op(STORE_SLOT, @slots[ctx_name]); emit_op(POP)
+
+    # Allocate result list (SELECT / WHERE only).
+    needs_result = (op != :concurrentBoundedEach)
+    if needs_result
+      emit_op(NATIVE_CALL, NATIVES["list"], 0)
+      alloc_slot(res_name, :any)
+      emit_op(STORE_SLOT, @slots[res_name]); emit_op(POP)
+    end
+
+    # FOR i in 0..src.length(): item = src[i]; cv = Ctx.apply(rt, ctx, item)
+    # Emit the loop manually so we can BC_CALL the worker by IP.
+    alloc_slot(iter_name, :i64)
+    alloc_slot(item_name, :any)
+    alloc_slot(cv_name, :any) if needs_result
+
+    # i = 0
+    emit_op(LOAD_CONST_I64, add_const([:i64, 0]))
+    emit_op(STORE_ISLOT, @islots[iter_name])
+
+    loop_start = @ops.length
+    # while (i < src.length())
+    emit_op(LOAD_ISLOT, @islots[iter_name])
+    emit_op(LOAD_SLOT,  @slots[src_name])
+    emit_op(NATIVE_CALL, NATIVES["count"], 1)
+    emit_op(VAL_TO_I64)
+    emit_op(LT_I64)
+    emit_op(JUMP_IF_FALSE_I)
+    exit_patch = @ops.length; emit_op(0)
+
+    # item = src[i]
+    emit_op(LOAD_SLOT, @slots[src_name])
+    emit_op(LOAD_ISLOT, @islots[iter_name])
+    emit_op(I_TO_VAL)
+    emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+    emit_op(STORE_SLOT, @slots[item_name]); emit_op(POP)
+
+    # call worker(rt, ctx, item) -- captures don't go through the BC
+    # arg list (they're already in slots in the worker's frame). The
+    # worker's params are (rt, raw_ctx, item) -> 3 args.
+    emit_op(LOAD_CONST, add_const(nil))             # rt placeholder (VM ignores)
+    emit_op(LOAD_SLOT, @slots[ctx_name])            # ctx
+    emit_op(LOAD_SLOT, @slots[item_name])           # item
+    emit_op(BC_CALL, fn_ip, 3)
+
+    case op
+    when :concurrentBoundedSelect
+      # cv = result; res.append(cv)
+      emit_op(STORE_SLOT, @slots[cv_name]); emit_op(POP)
+      emit_op(LOAD_SLOT, @slots[res_name])
+      emit_op(LOAD_SLOT, @slots[cv_name])
+      emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+      emit_op(STORE_SLOT, @slots[res_name]); emit_op(POP)
+    when :concurrentBoundedWhere
+      # cv = bool; if cv: res.append(item)
+      emit_op(STORE_SLOT, @slots[cv_name]); emit_op(POP)
+      emit_op(LOAD_SLOT, @slots[cv_name])
+      emit_op(JUMP_IF_FALSE)
+      skip_patch = @ops.length; emit_op(0)
+      emit_op(LOAD_SLOT, @slots[res_name])
+      emit_op(LOAD_SLOT, @slots[item_name])
+      emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+      emit_op(STORE_SLOT, @slots[res_name]); emit_op(POP)
+      @ops[skip_patch] = @ops.length
+    when :concurrentBoundedEach
+      # Discard worker's result; the body's side effects are what matter.
+      emit_op(POP)
+    end
+
+    # i += 1
+    emit_op(LOAD_ISLOT, @islots[iter_name])
+    emit_op(LOAD_CONST_I64, add_const([:i64, 1]))
+    emit_op(ADD_I64)
+    emit_op(STORE_ISLOT, @islots[iter_name])
+    emit_op(JUMP); emit_op(loop_start)
+
+    @ops[exit_patch] = @ops.length
+
+    # Final result on stack
+    if needs_result
+      emit_op(LOAD_SLOT, @slots[res_name])
+      push_type(:any)
+    else
+      emit_op(LOAD_CONST, add_const(nil))
+      push_type(:any)
+    end
+  end
 
   # Compile a sharded HashMap put. The VM has no shard routing -- treat
   # all variants (routed, shard-direct, sharded receiver) the same:
@@ -3073,6 +3415,19 @@ class BcEmitter
       compile_expr_to_value(node.args[0]); pop_type
       emit_op(IS_ERR)
       push_type(:bool); return
+    when :concurrentBoundedSelect, :concurrentBoundedWhere, :concurrentBoundedEach
+      # Bounded-stream concurrent: sequential simulation in the VM.
+      # The args order matches build_bounded_concurrent_callback +
+      # lower_concurrent_bounded_*, where args[3] is the worker fn
+      # reference (Ctx.apply Ident), args[6] is items_ptr (&stream.items),
+      # and args[10] is &ctx_var. Iterate items (each is a promise; in
+      # BC the bounded stream materialized as a plain Value.List, so
+      # NEXT == identity), and BC_CALL the worker per item with
+      # (rt, ctx, item). For SELECT, append the result to a new list;
+      # for WHERE, gate-append the source item by the bool result;
+      # for EACH, discard the result.
+      compile_concurrent_bounded(node)
+      return
     when :file_open
       # File::open(path) -- path-as-handle in the VM. Wraps readFile in
       # a value the auto-injected close (kind=:resource MIR::Cleanup)

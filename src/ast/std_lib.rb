@@ -1003,14 +1003,17 @@ BUILTIN_OPS = {
   needsCleanup: { zig: "CheatLib.needsCleanup({0})", bc: true, borrows: :all },
   concurrentBoundedSelect: {
     zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    bc: true,
     allocates: true
   },
   concurrentBoundedWhere: {
     zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})",
+    bc: true,
     allocates: true
   },
   concurrentBoundedEach: {
     zig: "try CheatLib.concurrentBoundedEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
+    bc: true,
     borrows: :all
   },
 }.freeze
