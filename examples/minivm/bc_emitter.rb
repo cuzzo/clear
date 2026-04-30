@@ -4088,6 +4088,15 @@ class BcEmitter
     # Wrapper<T>{value}), find_field_index returns whichever is registered
     # first, which mis-routes `kv.value` to index 0 (kv.key).
     base = struct_base_name(zig_type)
+    # Anon struct (zig_type nil/empty, e.g. JOIN's `{left, right}` result).
+    # Register a synthesized schema keyed on the field name signature so
+    # later field accesses against the slot can resolve `.left` / `.right`
+    # to indices via find_field_index. Same signature reuses the same key.
+    if base.nil? && node.fields.all? { |f| f.is_a?(Hash) && f[:name] }
+      sig = node.fields.map { |f| f[:name].to_s }.join("__")
+      base = "__anon_#{sig}"
+      @struct_fields[base] ||= node.fields.map { |f| f[:name].to_s }
+    end
     schema_names = base ? (@struct_fields[base] || []) : []
     # If the literal omits fields that have schema-level defaults, the Zig
     # backend fills them silently. Match that here so `Config{}` (all
