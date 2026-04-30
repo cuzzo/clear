@@ -1883,6 +1883,24 @@ class PipelineHost
     capture_name = p[:initial_capture]
 
     label          = next_pipe_label
+    # BC backend's bc_emitter uses a flat per-function slot table, so two
+    # folds in the same function reusing __fold_acc would land on the
+    # same slot with whichever residency was assigned first (e.g.
+    # AVERAGE allocates an f64 fslot, then ANY's :bool tries to STORE
+    # through @slots and reads back stale f64). Suffix the names with
+    # the pipeline label so each fold has its own slot.
+    if bc_target?
+      sfx = "_#{label.sub('__pblk', 'b')}"
+      fold_acc   = "__fold_acc#{sfx}"
+      fold_cnt   = "__fold_cnt#{sfx}"
+      fold_sum   = "__fold_sum#{sfx}"
+      fold_val   = "__fold_val#{sfx}"
+      fold_found = "__fold_found#{sfx}"
+      fold_result = "__fold_result#{sfx}"
+    else
+      fold_acc, fold_cnt, fold_sum, fold_val, fold_found, fold_result =
+        "__fold_acc", "__fold_cnt", "__fold_sum", "__fold_val", "__fold_found", "__fold_result"
+    end
     acc_init_stmts = []   # accumulator var declarations (before while)
     loop_acc_stmts = []   # accumulator update stmts (inside while, after stages)
     post_loop_stmts = []  # post-loop checks (panic for MIN/MAX on empty)
@@ -1891,103 +1909,103 @@ class PipelineHost
     case fold_op
     when AST::CountOp
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
-      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("0"), true, "i64", nil)
+      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("0"), true, "i64", nil)
       loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
-        MIR::Set.new(MIR::Ident.new("__fold_acc"),
-          MIR::BinOp.new("+", MIR::Ident.new("__fold_acc"), MIR::Lit.new("1")))
+        MIR::Set.new(MIR::Ident.new(fold_acc),
+          MIR::BinOp.new("+", MIR::Ident.new(fold_acc), MIR::Lit.new("1")))
       ], nil)
-      result_expr = MIR::Ident.new("__fold_acc")
+      result_expr = MIR::Ident.new(fold_acc)
 
     when AST::SumOp
       acc_zig  = transpile_type(smooth_node.full_type.to_s)  # already upsized by pipe_analysis
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
-      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("0"), true, acc_zig, nil)
-      loop_acc_stmts << MIR::Set.new(MIR::Ident.new("__fold_acc"),
-        MIR::BinOp.new("+", MIR::Ident.new("__fold_acc"), expr_mir))
-      result_expr = MIR::Ident.new("__fold_acc")
+      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("0"), true, acc_zig, nil)
+      loop_acc_stmts << MIR::Set.new(MIR::Ident.new(fold_acc),
+        MIR::BinOp.new("+", MIR::Ident.new(fold_acc), expr_mir))
+      result_expr = MIR::Ident.new(fold_acc)
 
     when AST::AverageOp
       expr_f64 = numeric_fold_expr_f64(fold_op.expression, item_var)
-      acc_init_stmts << MIR::Let.new("__fold_sum", MIR::Lit.new("0"), true, "f64", nil)
-      acc_init_stmts << MIR::Let.new("__fold_cnt", MIR::Lit.new("0"), true, "i64", nil)
-      loop_acc_stmts << MIR::Set.new(MIR::Ident.new("__fold_sum"),
-        MIR::BinOp.new("+", MIR::Ident.new("__fold_sum"), expr_f64))
-      loop_acc_stmts << MIR::Set.new(MIR::Ident.new("__fold_cnt"),
-        MIR::BinOp.new("+", MIR::Ident.new("__fold_cnt"), MIR::Lit.new("1")))
+      acc_init_stmts << MIR::Let.new(fold_sum, MIR::Lit.new("0"), true, "f64", nil)
+      acc_init_stmts << MIR::Let.new(fold_cnt, MIR::Lit.new("0"), true, "i64", nil)
+      loop_acc_stmts << MIR::Set.new(MIR::Ident.new(fold_sum),
+        MIR::BinOp.new("+", MIR::Ident.new(fold_sum), expr_f64))
+      loop_acc_stmts << MIR::Set.new(MIR::Ident.new(fold_cnt),
+        MIR::BinOp.new("+", MIR::Ident.new(fold_cnt), MIR::Lit.new("1")))
       result_expr = MIR::Conditional.new(
-        MIR::BinOp.new("==", MIR::Ident.new("__fold_cnt"), MIR::Lit.new("0")),
+        MIR::BinOp.new("==", MIR::Ident.new(fold_cnt), MIR::Lit.new("0")),
         MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
-        MIR::BinOp.new("/", MIR::Ident.new("__fold_sum"),
-          MIR::Cast.new(MIR::Cast.new(MIR::Ident.new("__fold_cnt"), nil, :floatFromInt), "f64", :as)))
+        MIR::BinOp.new("/", MIR::Ident.new(fold_sum),
+          MIR::Cast.new(MIR::Cast.new(MIR::Ident.new(fold_cnt), nil, :floatFromInt), "f64", :as)))
 
     when AST::MinOp
       expr_sym = smooth_node.full_type.resolved  # exact type set by pipe_analysis
       acc_zig  = transpile_type(smooth_node.full_type.to_s)
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
-      acc_init_stmts << MIR::Let.new("__fold_acc",
+      acc_init_stmts << MIR::Let.new(fold_acc,
         MIR::TypeSentinel.new(:max, acc_zig), true, acc_zig, nil)
-      acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
-      loop_acc_stmts << MIR::Let.new("__fold_val", expr_mir, false, nil, nil)
+      acc_init_stmts << MIR::Let.new(fold_found, MIR::Lit.new("false"), true, nil, nil)
+      loop_acc_stmts << MIR::Let.new(fold_val, expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
-        MIR::BinOp.new("<", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
-        [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
-         MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true"))], nil)
+        MIR::BinOp.new("<", MIR::Ident.new(fold_val), MIR::Ident.new(fold_acc)),
+        [MIR::Set.new(MIR::Ident.new(fold_acc), MIR::Ident.new(fold_val)),
+         MIR::Set.new(MIR::Ident.new(fold_found), MIR::Lit.new("true"))], nil)
       post_loop_stmts << MIR::IfStmt.new(
-        MIR::UnaryOp.new("!", MIR::Ident.new("__fold_found")),
+        MIR::UnaryOp.new("!", MIR::Ident.new(fold_found)),
         [MIR::Panic.new("MIN applied to empty sequence")], nil)
-      result_expr = MIR::Ident.new("__fold_acc")
+      result_expr = MIR::Ident.new(fold_acc)
 
     when AST::MaxOp
       expr_sym = smooth_node.full_type.resolved  # exact type set by pipe_analysis
       acc_zig  = transpile_type(smooth_node.full_type.to_s)
       expr_mir = numeric_fold_expr_typed(fold_op.expression, item_var, acc_zig)
-      acc_init_stmts << MIR::Let.new("__fold_acc",
+      acc_init_stmts << MIR::Let.new(fold_acc,
         MIR::TypeSentinel.new(:min, acc_zig), true, acc_zig, nil)
-      acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
-      loop_acc_stmts << MIR::Let.new("__fold_val", expr_mir, false, nil, nil)
+      acc_init_stmts << MIR::Let.new(fold_found, MIR::Lit.new("false"), true, nil, nil)
+      loop_acc_stmts << MIR::Let.new(fold_val, expr_mir, false, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(
-        MIR::BinOp.new(">", MIR::Ident.new("__fold_val"), MIR::Ident.new("__fold_acc")),
-        [MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Ident.new("__fold_val")),
-         MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true"))], nil)
+        MIR::BinOp.new(">", MIR::Ident.new(fold_val), MIR::Ident.new(fold_acc)),
+        [MIR::Set.new(MIR::Ident.new(fold_acc), MIR::Ident.new(fold_val)),
+         MIR::Set.new(MIR::Ident.new(fold_found), MIR::Lit.new("true"))], nil)
       post_loop_stmts << MIR::IfStmt.new(
-        MIR::UnaryOp.new("!", MIR::Ident.new("__fold_found")),
+        MIR::UnaryOp.new("!", MIR::Ident.new(fold_found)),
         [MIR::Panic.new("MAX applied to empty sequence")], nil)
-      result_expr = MIR::Ident.new("__fold_acc")
+      result_expr = MIR::Ident.new(fold_acc)
 
     when AST::AnyOp
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
-      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("false"), true, nil, nil)
+      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
-        MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Lit.new("true")),
+        MIR::Set.new(MIR::Ident.new(fold_acc), MIR::Lit.new("true")),
         MIR::BreakStmt.new(nil, nil)
       ], nil)
-      result_expr = MIR::Ident.new("__fold_acc")
+      result_expr = MIR::Ident.new(fold_acc)
 
     when AST::AllOp
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
-      acc_init_stmts << MIR::Let.new("__fold_acc", MIR::Lit.new("true"), true, nil, nil)
+      acc_init_stmts << MIR::Let.new(fold_acc, MIR::Lit.new("true"), true, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(MIR::UnaryOp.new("!", pred_mir), [
-        MIR::Set.new(MIR::Ident.new("__fold_acc"), MIR::Lit.new("false")),
+        MIR::Set.new(MIR::Ident.new(fold_acc), MIR::Lit.new("false")),
         MIR::BreakStmt.new(nil, nil)
       ], nil)
-      result_expr = MIR::Ident.new("__fold_acc")
+      result_expr = MIR::Ident.new(fold_acc)
 
     when AST::FindOp
       # Element type after stages: derive from smooth_node.full_type (?ElemType)
       result_ft = Type.new(smooth_node.full_type)
       find_zig  = result_ft.optional? ? transpile_type(result_ft.wrapped_type.resolved.to_s) : elem_zig
       pred_mir = with_pipeline_context(placeholder: item_var) { visit_mir(fold_op.expression) }
-      acc_init_stmts << MIR::Let.new("__fold_result",
+      acc_init_stmts << MIR::Let.new(fold_result,
         MIR::Undef.new(nil), true, find_zig, nil)
-      acc_init_stmts << MIR::Let.new("__fold_found", MIR::Lit.new("false"), true, nil, nil)
+      acc_init_stmts << MIR::Let.new(fold_found, MIR::Lit.new("false"), true, nil, nil)
       loop_acc_stmts << MIR::IfStmt.new(pred_mir, [
-        MIR::Set.new(MIR::Ident.new("__fold_result"), MIR::Ident.new(item_var)),
-        MIR::Set.new(MIR::Ident.new("__fold_found"), MIR::Lit.new("true")),
+        MIR::Set.new(MIR::Ident.new(fold_result), MIR::Ident.new(item_var)),
+        MIR::Set.new(MIR::Ident.new(fold_found), MIR::Lit.new("true")),
         MIR::BreakStmt.new(nil, nil)
       ], nil)
       result_expr = MIR::Conditional.new(
-        MIR::Ident.new("__fold_found"),
-        MIR::Cast.new(MIR::Ident.new("__fold_result"), "?#{find_zig}", :as),
+        MIR::Ident.new(fold_found),
+        MIR::Cast.new(MIR::Ident.new(fold_result), "?#{find_zig}", :as),
         MIR::Lit.new("null"))
     end
 
