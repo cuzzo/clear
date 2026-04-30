@@ -1552,13 +1552,37 @@ class PipelineHost
     inner_zig  = inner_name ? pipe_binding_zig_name(inner_name) : "__bc_inner"
     label      = next_pipe_label
 
+    # BC backend's bc_emitter has a flat per-function slot table, so two
+    # binding chains in the same function reusing __bc_acc would land on
+    # the same slot with whichever residency was assigned first (e.g.
+    # SUM allocates an f64 fslot, then ANY's :bool tries to STORE through
+    # @slots and reads back stale f64). Suffix per pipeline so each chain
+    # has its own slot. Mirrors the lower_range_fold suffix scheme.
+    names = if bc_target?
+      sfx = "_#{label.sub('__pblk', 'b')}"
+      {
+        src:    "__bc_src#{sfx}",
+        unn:    "__bc_unn#{sfx}",
+        acc:    "__bc_acc#{sfx}",
+        sum:    "__bc_sum#{sfx}",
+        cnt:    "__bc_cnt#{sfx}",
+        val:    "__bc_val#{sfx}",
+        result: "__bc_result#{sfx}",
+        found:  "__bc_found#{sfx}",
+      }
+    else
+      { src: "__bc_src", unn: "__bc_unn", acc: "__bc_acc",
+        sum: "__bc_sum", cnt: "__bc_cnt", val: "__bc_val",
+        result: "__bc_result", found: "__bc_found" }
+    end
+
     with_named_binding(outer_name, outer_zig) do
       source_mir = visit_mir(chain[:source])
       unnest_mir = visit_mir(chain[:unnest_expr])  # @u already in @named_bindings
 
       inner_block = lambda do
         acc_init, loop_body, post_inner, result_expr = lower_binding_fold(
-          chain[:fold], chain[:stages], inner_zig, smooth_node)
+          chain[:fold], chain[:stages], inner_zig, smooth_node, names)
 
         # When inner_name is nil the capture is the generated __bc_inner which
         # the fold expression may not reference (e.g. ALL @u.discount > 0.0).
@@ -1575,21 +1599,21 @@ class PipelineHost
         end
 
         inner_loop = MIR::ForStmt.new(
-          MIR::ItemsAccess.new(MIR::Ident.new("__bc_unn"), true),
+          MIR::ItemsAccess.new(MIR::Ident.new(names[:unn]), true),
           inner_zig, loop_body, nil)
 
         outer_loop = MIR::ForStmt.new(
-          MIR::ItemsAccess.new(MIR::Ident.new("__bc_src"), true),
+          MIR::ItemsAccess.new(MIR::Ident.new(names[:src]), true),
           outer_zig,
           [
-            MIR::Let.new("__bc_unn", unnest_mir, false, nil, nil),
+            MIR::Let.new(names[:unn], unnest_mir, false, nil, nil),
             inner_loop,
             *post_inner
           ],
           nil)
 
         MIR::BlockExpr.new(label, [
-          MIR::Let.new("__bc_src", source_mir, false, nil, nil),
+          MIR::Let.new(names[:src], source_mir, false, nil, nil),
           *acc_init,
           outer_loop,
           MIR::BreakStmt.new(label, result_expr)
@@ -1609,91 +1633,96 @@ class PipelineHost
   # Returns [init_stmts, loop_body_stmts, post_inner_stmts, result_expr].
   # post_inner_stmts are placed in the OUTER loop after the inner for-loop.
   # placeholder is the Zig inner loop var name. smooth_node is the outer SMOOTH node.
-  def lower_binding_fold(fold, stages, placeholder, smooth_node = nil)
+  # names: hash of bc-suffixed binding names (acc, sum, cnt, val, result, found).
+  def lower_binding_fold(fold, stages, placeholder, smooth_node = nil, names = nil)
+    names ||= { acc: "__bc_acc", sum: "__bc_sum", cnt: "__bc_cnt",
+                val: "__bc_val", result: "__bc_result", found: "__bc_found" }
+    acc_n, sum_n, cnt_n, val_n, result_n, found_n =
+      names[:acc], names[:sum], names[:cnt], names[:val], names[:result], names[:found]
     case fold
     when AST::SumOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init   = [MIR::Let.new("__bc_acc", MIR::Lit.new("0"), true, "f64", nil)]
-      accum  = [MIR::Set.new(MIR::Ident.new("__bc_acc"),
-                  MIR::BinOp.new("+", MIR::Ident.new("__bc_acc"), expr))]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new("__bc_acc")]
+      init   = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, "f64", nil)]
+      accum  = [MIR::Set.new(MIR::Ident.new(acc_n),
+                  MIR::BinOp.new("+", MIR::Ident.new(acc_n), expr))]
+      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
 
     when AST::CountOp
       pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new("__bc_acc", MIR::Lit.new("0"), true, "i64", nil)]
-      accum = [MIR::IfStmt.new(pred, [MIR::Set.new(MIR::Ident.new("__bc_acc"),
-                 MIR::BinOp.new("+", MIR::Ident.new("__bc_acc"), MIR::Lit.new("1")))], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new("__bc_acc")]
+      init  = [MIR::Let.new(acc_n, MIR::Lit.new("0"), true, "i64", nil)]
+      accum = [MIR::IfStmt.new(pred, [MIR::Set.new(MIR::Ident.new(acc_n),
+                 MIR::BinOp.new("+", MIR::Ident.new(acc_n), MIR::Lit.new("1")))], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
 
     when AST::AverageOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
       # Use f64 for count to avoid @floatFromInt in the division (same as the
       # non-binding-chain AVERAGE code path in PipelineGenerator).
-      init = [MIR::Let.new("__bc_sum", MIR::Lit.new("0"), true, "f64", nil),
-              MIR::Let.new("__bc_cnt", MIR::Lit.new("0.0"), true, "f64", nil)]
-      accum = [MIR::Set.new(MIR::Ident.new("__bc_sum"),
-                 MIR::BinOp.new("+", MIR::Ident.new("__bc_sum"), expr)),
-               MIR::Set.new(MIR::Ident.new("__bc_cnt"),
-                 MIR::BinOp.new("+", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("1.0")))]
+      init = [MIR::Let.new(sum_n, MIR::Lit.new("0"), true, "f64", nil),
+              MIR::Let.new(cnt_n, MIR::Lit.new("0.0"), true, "f64", nil)]
+      accum = [MIR::Set.new(MIR::Ident.new(sum_n),
+                 MIR::BinOp.new("+", MIR::Ident.new(sum_n), expr)),
+               MIR::Set.new(MIR::Ident.new(cnt_n),
+                 MIR::BinOp.new("+", MIR::Ident.new(cnt_n), MIR::Lit.new("1.0")))]
       result = MIR::Conditional.new(
-        MIR::BinOp.new("==", MIR::Ident.new("__bc_cnt"), MIR::Lit.new("0.0")),
+        MIR::BinOp.new("==", MIR::Ident.new(cnt_n), MIR::Lit.new("0.0")),
         MIR::Cast.new(MIR::Lit.new("0"), "f64", :as),
-        MIR::BinOp.new("/", MIR::Ident.new("__bc_sum"), MIR::Ident.new("__bc_cnt")))
+        MIR::BinOp.new("/", MIR::Ident.new(sum_n), MIR::Ident.new(cnt_n)))
       [init, bc_wrap_stages(stages, placeholder, accum), [], result]
 
     when AST::MinOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new("__bc_acc",
+      init  = [MIR::Let.new(acc_n,
                  MIR::TypeSentinel.new(:max, "f64"), true, "f64", nil)]
-      accum = [MIR::Let.new("__bc_val", expr, false, nil, nil),
+      accum = [MIR::Let.new(val_n, expr, false, nil, nil),
                MIR::IfStmt.new(
-                 MIR::BinOp.new("<", MIR::Ident.new("__bc_val"), MIR::Ident.new("__bc_acc")),
-                 [MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Ident.new("__bc_val"))], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new("__bc_acc")]
+                 MIR::BinOp.new("<", MIR::Ident.new(val_n), MIR::Ident.new(acc_n)),
+                 [MIR::Set.new(MIR::Ident.new(acc_n), MIR::Ident.new(val_n))], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
 
     when AST::MaxOp
       expr = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new("__bc_acc",
+      init  = [MIR::Let.new(acc_n,
                  MIR::TypeSentinel.new(:min, "f64"), true, "f64", nil)]
-      accum = [MIR::Let.new("__bc_val", expr, false, nil, nil),
+      accum = [MIR::Let.new(val_n, expr, false, nil, nil),
                MIR::IfStmt.new(
-                 MIR::BinOp.new(">", MIR::Ident.new("__bc_val"), MIR::Ident.new("__bc_acc")),
-                 [MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Ident.new("__bc_val"))], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new("__bc_acc")]
+                 MIR::BinOp.new(">", MIR::Ident.new(val_n), MIR::Ident.new(acc_n)),
+                 [MIR::Set.new(MIR::Ident.new(acc_n), MIR::Ident.new(val_n))], nil)]
+      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
 
     when AST::AnyOp
       pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new("__bc_acc", MIR::Lit.new("false"), true, nil, nil)]
+      init  = [MIR::Let.new(acc_n, MIR::Lit.new("false"), true, nil, nil)]
       accum = [MIR::IfStmt.new(pred, [
-                 MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Lit.new("true")),
+                 MIR::Set.new(MIR::Ident.new(acc_n), MIR::Lit.new("true")),
                  MIR::BreakStmt.new(nil, nil)], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new("__bc_acc")]
+      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
 
     when AST::AllOp
       pred  = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init  = [MIR::Let.new("__bc_acc", MIR::Lit.new("true"), true, nil, nil)]
+      init  = [MIR::Let.new(acc_n, MIR::Lit.new("true"), true, nil, nil)]
       accum = [MIR::IfStmt.new(MIR::UnaryOp.new("!", pred), [
-                 MIR::Set.new(MIR::Ident.new("__bc_acc"), MIR::Lit.new("false")),
+                 MIR::Set.new(MIR::Ident.new(acc_n), MIR::Lit.new("false")),
                  MIR::BreakStmt.new(nil, nil)], nil)]
-      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new("__bc_acc")]
+      [init, bc_wrap_stages(stages, placeholder, accum), [], MIR::Ident.new(acc_n)]
 
     when AST::FindOp
       # Result type is ?InnerElemType; derive from smooth_node.full_type.
       result_ft = Type.new(smooth_node.full_type)
       find_zig  = result_ft.optional? ? transpile_type(result_ft.wrapped_type.resolved.to_s) : placeholder
       pred = with_pipeline_context(placeholder: placeholder) { visit_mir(fold.expression) }
-      init = [MIR::Let.new("__bc_result", MIR::Undef.new(nil), true, find_zig, nil),
-              MIR::Let.new("__bc_found", MIR::Lit.new("false"), true, nil, nil)]
+      init = [MIR::Let.new(result_n, MIR::Undef.new(nil), true, find_zig, nil),
+              MIR::Let.new(found_n, MIR::Lit.new("false"), true, nil, nil)]
       accum = [MIR::IfStmt.new(pred, [
-                 MIR::Set.new(MIR::Ident.new("__bc_result"), MIR::Ident.new(placeholder)),
-                 MIR::Set.new(MIR::Ident.new("__bc_found"), MIR::Lit.new("true")),
+                 MIR::Set.new(MIR::Ident.new(result_n), MIR::Ident.new(placeholder)),
+                 MIR::Set.new(MIR::Ident.new(found_n), MIR::Lit.new("true")),
                  MIR::BreakStmt.new(nil, nil)
                ], nil)]
       # After the inner loop, break the outer loop too so the first match wins.
-      post_inner = [MIR::IfStmt.new(MIR::Ident.new("__bc_found"), [MIR::BreakStmt.new(nil, nil)], nil)]
+      post_inner = [MIR::IfStmt.new(MIR::Ident.new(found_n), [MIR::BreakStmt.new(nil, nil)], nil)]
       result = MIR::Conditional.new(
-        MIR::Ident.new("__bc_found"),
-        MIR::Cast.new(MIR::Ident.new("__bc_result"), "?#{find_zig}", :as),
+        MIR::Ident.new(found_n),
+        MIR::Cast.new(MIR::Ident.new(result_n), "?#{find_zig}", :as),
         MIR::Lit.new("null"))
       [init, bc_wrap_stages(stages, placeholder, accum), post_inner, result]
 
