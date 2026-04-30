@@ -39,7 +39,6 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
  - [ ] HashMap string interning
  - [ ] @sorted for lists, sets, hashmaps.
- - [ ] Automated Property-based Testing for declarative concurrency constructs pt 1.
 
 Milestone: *Basic* SQL/CLEAR database
 
@@ -54,7 +53,7 @@ Milestone: *Basic* SQL/CLEAR database
  - [ ] Ability to write custom Control Plane strategies
  - [ ] Control Plane Capability Migration -> live shift contented workloads
  - [ ] VM supports entire language, gradual typing.
- - [ ] Automated Property-based Testing for declarative concurrency constructs pt 2.
+ - [ ] Automated Property-based Testing for declarative concurrency constructs pt 1.
 
 Milestone: CLEAR-DB with native queries and hot-reload
 
