@@ -1305,9 +1305,17 @@ class PipelineHost
     end
 
     # Finite stream source (direct range or variable-backed ~T[]): zero-allocation
-    # pull iteration via .next().
+    # pull iteration via .next(). The BC backend has no LazyRange / .next()
+    # protocol; it iterates ranges via IterRange instead, so a plain RangeLit
+    # without fusible stages falls through to the structural ForStmt path
+    # below. With stages we still go through lower_each_range so the
+    # fusion pipeline (SELECT/WHERE/LIMIT/...) can be expressed; the BC
+    # emitter handles the resulting next() loop by materializing the range.
     range_chain = unwrap_range_chain(list_node)
-    return lower_each_range(range_chain[:source], range_chain[:stages], each_op) if range_chain
+    is_bc = (@lowering.instance_variable_get(:@target) == :bc)
+    if range_chain && !(is_bc && list_node.is_a?(AST::RangeLit) && range_chain[:stages].empty?)
+      return lower_each_range(range_chain[:source], range_chain[:stages], each_op)
+    end
 
     # Non-SOA list collection or fixed_soa: iterate items
     if lhs_type&.list_collection? || lhs_type&.fixed_soa?
@@ -1765,7 +1773,6 @@ class PipelineHost
     item_var        = p[:item_var]
     initial_capture = p[:initial_capture]
     item_used       = p[:item_used]
-    range_next      = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
 
     body_mir = visit_pipeline_body_mir(each_op.body, placeholder: item_var)
 
@@ -1782,6 +1789,20 @@ class PipelineHost
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
       nil
 
+    # BC backend: there's no LazyRange / .next() protocol; iterate ranges
+    # via IterRange and let stage_stmts (BreakStmt for TAKE_WHILE/LIMIT,
+    # ContinueStmt for WHERE/SKIP) drive the same fusion shape inside
+    # a ForStmt instead of a WhileStmt-with-capture.
+    if bc_target? && range_lit.is_a?(AST::RangeLit)
+      iter, cap = bc_for_iter_range(range_lit, capture_name == "_" ? "_" : initial_capture)
+      return MIR::ScopeBlock.new([
+        *p[:outer_stmts],
+        MIR::ForStmt.new(iter, cap, [*p[:stage_stmts], *body_mir], nil)
+      ])
+    end
+
+    range_next = MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), p[:next_method], [], true)
+
     MIR::ScopeBlock.new([
       *([p[:range_let]].compact), *p[:outer_stmts],
       *([defer_deinit].compact),
@@ -1789,6 +1810,23 @@ class PipelineHost
         [*p[:stage_stmts], *body_mir],
         capture_name, nil, nil, nil)
     ])
+  end
+
+  # When the BC backend would otherwise emit `while (range.next()) |x| { ... }`,
+  # rewrite the loop as a structural ForStmt+IterRange so the existing FOR
+  # opcode path drives iteration. The fusion stage_stmts (BreakStmt for
+  # TAKE_WHILE/LIMIT, ContinueStmt for WHERE/SKIP) compose cleanly inside
+  # a ForStmt, so semantics are preserved.
+  def bc_for_iter_range(range_lit, capture_name)
+    start_mir = visit_mir(range_lit.start)
+    end_mir   = visit_mir(range_lit.finish)
+    end_expr  = range_lit.inclusive ?
+      MIR::BinOp.new("+", end_mir, MIR::Lit.new("1")) : end_mir
+    [MIR::IterRange.new(start_mir, end_expr), capture_name]
+  end
+
+  def bc_target?
+    @lowering.instance_variable_get(:@target) == :bc
   end
 
   # Emit a single fused accumulating while loop for range s> stages s> fold.
@@ -1919,6 +1957,17 @@ class PipelineHost
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
       nil
 
+    if bc_target? && range_lit.is_a?(AST::RangeLit)
+      iter, cap = bc_for_iter_range(range_lit, capture_name)
+      return MIR::BlockExpr.new(label, [
+        *p[:outer_stmts], *acc_init_stmts,
+        MIR::ForStmt.new(iter, cap,
+          [*p[:stage_stmts], *loop_acc_stmts], nil),
+        *post_loop_stmts,
+        MIR::BreakStmt.new(label, result_expr)
+      ])
+    end
+
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts], *acc_init_stmts,
       *([defer_deinit].compact),
@@ -1948,6 +1997,17 @@ class PipelineHost
     defer_deinit = source_ti&.bounded_stream? ?
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
       nil
+
+    if bc_target? && range_lit.is_a?(AST::RangeLit)
+      iter, cap = bc_for_iter_range(range_lit, p[:initial_capture])
+      return MIR::BlockExpr.new(label, [
+        *p[:outer_stmts],
+        MIR::Let.new("acc", init_mir, true, acc_zig, nil),
+        MIR::ForStmt.new(iter, cap,
+          [*p[:stage_stmts], MIR::Set.new(MIR::Ident.new("acc"), expr_mir)], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("acc"))
+      ])
+    end
 
     MIR::BlockExpr.new(label, [
       *([p[:range_let]].compact), *p[:outer_stmts],
