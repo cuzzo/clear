@@ -320,6 +320,38 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         maxVal = toInt(getNum(evaled[1]));
         RETURN Value{ Number: toFloat(randomInt(maxVal)) };
     END
+    -- File resource (path-as-handle): 112=fileOpen, 113=fileCreate,
+    -- 114=fileReadAll, 115=fileWrite. The VM doesn't track file
+    -- descriptors; File::open just stashes the path inside a Str so
+    -- fileReadAll / fileWrite can extract it later. The auto-injected
+    -- close from MIR::Cleanup (kind=:resource) is a no-op on Str.
+    IF id == 112 THEN
+        path = getStr(evaled[1]);
+        RETURN Value{ Str: COPY path };
+    END
+    IF id == 113 THEN
+        path = getStr(evaled[1]);
+        -- Truncate-on-create: write empty content so the file exists
+        -- and is empty, matching File::create semantics. fileWrite
+        -- (114) re-truncates each call too, but pre-truncating means
+        -- File::create followed by no fileWrite leaves an empty file.
+        writeFile(path, "");
+        RETURN Value{ Str: COPY path };
+    END
+    IF id == 114 THEN
+        path = getStr(evaled[1]);
+        content = readFile(path) OR "";
+        IF content == "" THEN
+            RETURN Value.Error{ errMsg: "fileReadAll failed", errKind: "NotFound", errType: "" };
+        END
+        RETURN Value{ Str: COPY content };
+    END
+    IF id == 115 THEN
+        path = getStr(evaled[1]);
+        content = getStr(evaled[2]);
+        writeFile(path, content);
+        RETURN Value.Nil;
+    END
     -- File I/O: 45=readFile, 46=writeFile, 47=shell
     IF id == 45 THEN
         path = getStr(evaled[1]);
@@ -3505,13 +3537,24 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             113 -> -- SPLIT_STREAM_NEW: pop a Value.List, allocate a fresh
                    -- buffer Env in the pool whose vars["b"] holds the list,
-                   -- push Value.SplitStream{bufId, cursor=0}.
+                   -- push Value.SplitStream{bufId, cursor=0}. pool is
+                   -- @shared:locked here -- direct method calls on the
+                   -- Arc<Locked<Pool>> wrapper aren't valid; unwrap via
+                   -- WITH EXCLUSIVE.
                 sp -= 1; ssnBuf = COPY stack[sp];
-                ssnEnvId = pool.insert(Env{ vars: {} });
-                IF pool[ssnEnvId] AS ssnEnv THEN
-                    ssnEnv.vars["b"] = COPY ssnBuf;
+                MUTABLE ssnEnvIdHolder: ?Id<Env> = NIL;
+                WITH EXCLUSIVE pool AS p {
+                    ssnEnvId = p.insert(Env{ vars: {} });
+                    IF p[ssnEnvId] AS ssnEnv THEN
+                        ssnEnv.vars["b"] = COPY ssnBuf;
+                    END
+                    ssnEnvIdHolder = ssnEnvId;
+                }
+                IF ssnEnvIdHolder AS ssnEid THEN
+                    pv = Value.SplitStream{ splitBufId: ssnEid, splitCursor: 0_i64 };
+                ELSE
+                    pv = Value.Nil;
                 END
-                pv = Value.SplitStream{ splitBufId: ssnEnvId, splitCursor: 0_i64 };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
             114 -> -- SPLIT_STREAM_NEXT [slot_idx]: read the slot's SplitStream
@@ -3522,20 +3565,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value.Nil;
                 MATCH ssxHandle START
                     Value.SplitStream AS ssxH ->
-                        IF pool[ssxH.splitBufId] AS ssxBufEnv THEN
-                            ssxBuf = ssxBufEnv.vars["b"] OR Value.Nil;
-                            MATCH ssxBuf START
-                                Value.List AS ssxElems ->
-                                    IF ssxH.splitCursor < ssxElems.length() THEN
-                                        pv = COPY ssxElems[ssxH.splitCursor];
-                                        slots[ssxSlot] = Value.SplitStream{
-                                            splitBufId: ssxH.splitBufId,
-                                            splitCursor: ssxH.splitCursor + 1
-                                        };
-                                    END,
-                                DEFAULT -> PASS;
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[ssxH.splitBufId] AS ssxBufEnv THEN
+                                ssxBuf = ssxBufEnv.vars["b"] OR Value.Nil;
+                                MATCH ssxBuf START
+                                    Value.List AS ssxElems ->
+                                        IF ssxH.splitCursor < ssxElems.length() THEN
+                                            pv = COPY ssxElems[ssxH.splitCursor];
+                                            slots[ssxSlot] = Value.SplitStream{
+                                                splitBufId: ssxH.splitBufId,
+                                                splitCursor: ssxH.splitCursor + 1
+                                            };
+                                        END,
+                                    DEFAULT -> PASS;
+                                END
                             END
-                        END,
+                        },
                     DEFAULT -> PASS;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END

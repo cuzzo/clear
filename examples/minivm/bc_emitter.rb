@@ -133,6 +133,11 @@ class BcEmitter
     "list-pop" => 107, "iota" => 108, "slice" => 109, "slice-from" => 110,
     "pool-live-count" => 111,
     "intMin" => 111,
+    # File resource natives (path-as-handle; the VM has no fd lifecycle).
+    # File::open / File::create return Value.Str(path), and fileReadAll /
+    # fileWrite extract the path and dispatch to readFile / writeFile.
+    "fileOpen" => 112, "fileCreate" => 113,
+    "fileReadAll" => 114, "fileWrite" => 115,
     "string-append" => 26, "string-length" => 27, "substring" => 28,
     "string-ref" => 29, "number->string" => 30, "string->number" => 31,
     "string?" => 32, "charAt" => 29,
@@ -3068,6 +3073,26 @@ class BcEmitter
       compile_expr_to_value(node.args[0]); pop_type
       emit_op(IS_ERR)
       push_type(:bool); return
+    when :file_open
+      # File::open(path) -- path-as-handle in the VM. Wraps readFile in
+      # a value the auto-injected close (kind=:resource MIR::Cleanup)
+      # can no-op safely (Value.Str ignores close).
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["fileOpen"], 1)
+      push_type(:any); return
+    when :file_create
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["fileCreate"], 1)
+      push_type(:any); return
+    when :file_read_all
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["fileReadAll"], 1)
+      push_type(:any); return
+    when :file_write
+      compile_expr_to_value(node.args[0]); pop_type
+      compile_expr_to_value(node.args[1]); pop_type
+      emit_op(NATIVE_CALL, NATIVES["fileWrite"], 2)
+      push_type(:any); return
     when :max, :min
       compile_expr_to_value(node.args[0]); pop_type
       compile_expr_to_value(node.args[1]); pop_type
@@ -3630,7 +3655,10 @@ class BcEmitter
         @ops[ok_patch] = @ops.length
         emit_op(LOAD_SLOT, @slots["__try_call_res"])
       end
-      push_type(:any)
+      # Propagate :split_stream when the callee's return type is a
+      # split stream so compile_let can stamp the destination slot
+      # (otherwise NEXT on the binding falls through to AWAIT).
+      push_type(callee_returns_split_stream?(helper_callee) ? :split_stream : :any)
       return
     end
 
@@ -4043,6 +4071,11 @@ class BcEmitter
     if method == "next" && node.args.empty?
       if node.receiver.is_a?(MIR::Ident)
         rname = node.receiver.name.to_s
+        # BG capture rewrites identifiers to `__ctx_N.<name>` so the body
+        # accesses the context-struct field. The VM compiles BG bodies
+        # inline with captures in slots 0..N-1, so strip the prefix to
+        # reach the underlying name.
+        rname = $1 if rname =~ /\A__ctx_\d+\.(.*)\z/
         # Split stream: SPLIT_STREAM_NEXT advances the cursor in the
         # slot's SplitStream value (writeback) and pushes buf[cursor]
         # or Nil. Each handle's cursor is independent.
@@ -4051,6 +4084,7 @@ class BcEmitter
           push_type(:any)
           return
         end
+
         if has_slot?(rname) && (rname.start_with?("__sg") || @stream_slots&.include?(rname))
           emit_op(LIST_POP_FRONT, @slots[rname])
           push_type(:any)
@@ -5600,6 +5634,21 @@ class BcEmitter
         compile_expr_to_value(a)
       end
     end
+  end
+
+  # Does the callee's signature return a split stream (~T[]@split)?
+  # Used by compile_call_expr to push :split_stream so compile_let
+  # stamps the destination slot, making NEXT-on-binding route through
+  # SPLIT_STREAM_NEXT instead of AWAIT (which is identity).
+  def callee_returns_split_stream?(name)
+    sig = @result.fn_sigs&.dig(name) ||
+          @result.fn_sigs&.dig(name.to_sym) ||
+          @result.fn_sigs&.dig(name.to_s)
+    return false unless sig
+    rt = sig.return_type
+    return false if rt.nil?
+    rt_t = rt.is_a?(Type) ? rt : (Type.new(rt) rescue nil)
+    rt_t&.respond_to?(:split_open_stream?) && rt_t.split_open_stream?
   end
 
   # Does the callee's signature return an error union (`!T` or

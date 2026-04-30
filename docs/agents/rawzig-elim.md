@@ -96,35 +96,46 @@ Cluster A is genuinely complete: no RawZig remains for sharded ops,
 both backends consume the same MIR for the entire pipeline (outer
 loop + shard lookup + per-iteration put/get).
 
-### Cluster B: File / TCP resources (3 UNIMPL)
+### Cluster B: File / TCP resources -- DONE for File RAII
 
-Tests: 60_file_resource, 62_file_write, 63_resource_return.
+Tests passing: 60_file_resource, 62_file_write, 63_resource_return.
 
-**What it does:** `File.open(path)` returns a resource that
-auto-closes on scope exit (RAII). Writes / reads happen through
-the resource handle.
+Approach: instead of inventing a new `MIR::ResourceOpen` node, the
+existing `MIR::InlineBc` carrier was extended. `File::open` /
+`File::create` schemas now opt in via `bc: true, bc_op: :file_open`
+(or `:file_create`); `fileReadAll` / `fileWrite` likewise. The
+lower_static_call path produces `MIR::InlineBc(op, args, stdlib_def)`
+when `stdlib_def[:bc]` is set so both backends consume the same
+node:
 
-**What it looks like now:** `MIR::InlineZig` wraps `std.fs.cwd().openFile`
-and friends; close-on-defer is part of the RawZig template.
+- Zig emits via `emit_inline_bc_as_zig` from `stdlib_def[:zig]`
+  ("try CheatLib.fileOpen({0})", etc.) -- byte-identical output to
+  the previous InlineZig path.
+- BC dispatches by op symbol in `compile_inline_bc`. The VM models
+  files as path-as-handle (Value.Str(path) since fd lifecycle is
+  irrelevant in single-fiber sequential execution); fileReadAll
+  reroutes through the existing readFile native.
 
-**Why this matters for correctness:** RAII close on error path. If
-`fileRead` errors, the file must still close. Currently the close
-is hardcoded in the template; if the template forgets `errdefer`, a
-file descriptor leaks.
+The auto-close (kind=:resource MIR::Cleanup) emitted by the
+annotator's resource-tracking still pairs with the resource Let.
+For Zig, the Cleanup emits `defer name.close()`. For BC, the
+Cleanup is a no-op on Value.Str (no fd to close, GC reclaims).
 
-**Structural MIR target:**
-```ruby
-MIR::ResourceOpen.new(kind: :file, args: [...], cleanup_method: "close")
-# Pairs with automatic MIR::Cleanup at scope exit
-```
+What this gains the checker: resource constructors now go through
+a registered stdlib_def with allocates / can_fail / borrows flags
+visible at the MIR node. INV-2 (every alloc has a cleanup path)
+fires when `lower_static_call`'s Let path doesn't pair the
+ResourceOpen with a `MIR::Cleanup` -- the resource Let always
+emits one in the existing path, so the invariant is enforced.
 
-The checker validates: every `ResourceOpen` has a matching
-`MIR::Cleanup` on every path (success and error).
+`lower_method_call` now picks `stdlib_def[:bc_op]` over the AST
+method name when present, decoupling the BC dispatch key from
+CLEAR's surface naming (e.g. `fileReadAll` -> `:file_read_all`).
 
-VM side needs file natives (`fopen`, `fread`, `fwrite`, `fclose`)
-and `MIR::ResourceOpen` -> `RESOURCE_NEW` opcode.
-
-**Effort:** Medium. Plus VM file natives.
+TCP resources (TCPServer, TCPClient) follow the same pattern but
+have no failing test today since their connect/listen requires
+real socket setup the VM doesn't model. Schema entries can adopt
+`bc:` flags + new VM natives later when needed.
 
 ### Cluster C: Stream-source CONCURRENT (4 UNIMPL)
 

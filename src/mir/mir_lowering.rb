@@ -1452,8 +1452,11 @@ class MIRLowering
     # Target :bc with a bc-opted-in stdlib_def: emit MIR::InlineBc carrying the
     # method/function name + unlowered MIR args. bc_emitter dispatches via
     # compile_inline_bc. Done before Zig-specific pattern rewrites below.
+    # When the entry has an explicit :bc_op, prefer it over the AST name so
+    # the BC dispatch key is decoupled from CLEAR's surface naming
+    # (e.g. fileReadAll -> :file_read_all).
     if @target == :bc && node.matched_stdlib_def&.dig(:bc)
-      op_name = node.name.to_s.to_sym
+      op_name = node.matched_stdlib_def[:bc_op] || node.name.to_s.to_sym
       return MIR::InlineBc.new(op_name, mir_args, node.matched_stdlib_def)
     end
 
@@ -2846,6 +2849,16 @@ class MIRLowering
   end
 
   def lower_static_call(node)
+    # Structural MIR::InlineBc when the matched stdlib_def opts in via
+    # bc:true. Both backends consume the same node: Zig emits via
+    # emit_inline_bc_as_zig (substituting {0}, {1}, ... from stdlib_def[:zig]),
+    # BC dispatches by op symbol in compile_inline_bc.
+    if node.matched_stdlib_def&.dig(:bc)
+      mir_args = node.args.map { |a| hoist_alloc(lower(a), a) }
+      return MIR::InlineBc.new(node.matched_stdlib_def[:bc_op],
+                                mir_args, node.matched_stdlib_def)
+    end
+
     pattern = node.zig_pattern.dup
     # Hoist any heap-allocating args to named Lets via hoist_alloc so the
     # checker can verify their cleanup. Non-allocating args (and frame allocs)

@@ -172,12 +172,18 @@ private
     current_scope.declare_type(:Range, {"start" => :Float64, "end" => :Float64})
 
     # Built-in File resource type
+    # bc/bc_op marks the static methods as VM-dispatchable so the lowering
+    # produces a structural MIR::InlineBc that both backends consume. The
+    # close_zig template carries to the resource's MIR::Cleanup unchanged
+    # (Zig defers it; BC ignores -- the VM has no fd-style close).
     current_scope.declare_type(:File, {
       kind: :resource,
       close_zig: "{0}.close()",
       static_methods: {
-        "open"   => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})", can_fail: true },
-        "create" => { args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})", can_fail: true }
+        "open"   => { args: [:String], return: :File, zig: "try CheatLib.fileOpen({0})",
+                       bc: true, bc_op: :file_open, can_fail: true },
+        "create" => { args: [:String], return: :File, zig: "try CheatLib.fileCreate({0})",
+                       bc: true, bc_op: :file_create, can_fail: true }
       }
     })
 
