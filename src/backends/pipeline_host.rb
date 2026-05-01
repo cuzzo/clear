@@ -431,7 +431,7 @@ class PipelineHost
       [build_mat_pool(lhs_type), "pipe_items"]
     elsif (lhs_type&.list_collection? || lhs_type&.fixed_soa?) && lhs_type&.soa? && !bc_mode
       [build_mat_soa_list(lhs_type), "pipe_items"]
-    elsif lhs_type&.list_collection? && lhs_type&.sharded?
+    elsif lhs_type&.list_collection? && lhs_type&.sharded? && !bc_mode
       [build_mat_sharded_list(lhs_type), "pipe_items"]
     elsif lhs_type&.set_collection?
       [build_mat_set(lhs_type), "pipe_items"]
@@ -1266,13 +1266,10 @@ class PipelineHost
     lhs_type = list_node.type_info
 
     # Sharded pools/lists need fibers on the Zig backend (one per shard) --
-    # stay on the string path there. For BC we can short-circuit sharded
-    # POOLs (the underlying pool is a single Value.List and methods already
-    # work via POOL_METHODS), but sharded @list uses a different shape
-    # (multiple shard-lists fed by append) that the regular pool/list
-    # iteration below doesn't know about. Keep sharded lists on the
-    # legacy path (UNIMPL) until they get structural support.
-    return nil if lhs_type&.sharded? && !(bc_target? && lhs_type&.pool?)
+    # stay on the string path there. For BC the sharded structure is
+    # flattened to a Value.List at runtime, so the regular per-item
+    # ForStmt path below works for both sharded pools and sharded lists.
+    return nil if lhs_type&.sharded? && !bc_target?
 
     # In BC mode the VM has no SoA layout, so the field-slice optimization
     # has no benefit. Skip the SoaFieldAccess emission and let the regular
