@@ -387,7 +387,15 @@ class PipelineHost
     when AST::UnnestOp  then lower_unnest(lhs, rhs, node)
     when AST::ReduceOp  then lower_reduce(lhs, rhs, node)
     when AST::WindowOp       then lower_window(lhs, rhs, node)
-    when AST::BatchWindowOp  then nil  # handled by string path (transpile_batch_window)
+    when AST::BatchWindowOp
+      # Zig keeps the legacy template (battle-tested, has time-based
+      # semantics via CheatLib.BatchWindow). BC has no equivalent runtime
+      # type, so route to a structural slice-based lowering on BC only.
+      if @lowering.instance_variable_get(:@target) == :bc
+        lower_batch_window(lhs, rhs, node)
+      else
+        nil
+      end
     when AST::OrderByOp      then lower_order_by(lhs, rhs, node)
     when AST::IndexOp   then lower_index(lhs, rhs.expression, node)
     when AST::JoinOp    then lower_join(lhs, rhs, node)
@@ -1042,6 +1050,95 @@ class PipelineHost
                 nil, nil)
             ], nil)
         ]),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ]
+    end
+  end
+
+  # WINDOW(size: N [, time: 'Xs']) batch/tumbling window:
+  # accumulate items into a batch, fire `expr(batch)` whenever the
+  # batch reaches `size`, and flush a final partial batch at end.
+  # Time-only / size+time semantics: the BC backend is synchronous, so
+  # there is no time-based mid-stream flush; the final flush captures
+  # any accumulated tail. Tests using time-only windows (e.g. test 7
+  # of 243_batch_window) rely on the final flush for a single batch.
+  def lower_batch_window(list_node, bw_node, smooth_node)
+    expr_type_str = (bw_node.expression.full_type || bw_node.expression.resolved_type).to_s
+    res_zig = transpile_type(expr_type_str)
+
+    lhs_type = list_node.type_info
+    elem_type = if lhs_type&.open_stream? || lhs_type&.dynamic_stream?
+      (lhs_type.open_stream? ? lhs_type.open_stream_element_type : lhs_type.tense_type.element_type).resolved
+    elsif lhs_type&.inf_stream?
+      lhs_type.inf_stream_element_type.resolved
+    elsif lhs_type&.bounded_stream?
+      lhs_type.stream_element_type.resolved
+    else
+      lhs_type.element_type.resolved
+    end
+    elem_zig = transpile_type(elem_type.to_s)
+    alloc = pipeline_alloc(smooth_node)
+
+    # Keep size as i64 for the in-loop counter comparison; cast to
+    # usize only at the @intCast wrapper if a Zig caller needs it.
+    size_mir = bw_node.options["size"] ? visit_mir(bw_node.options["size"]) : MIR::Lit.new("0")
+
+    placeholder_var = "__bw_batch"
+    expr_mir = with_pipeline_context(placeholder: placeholder_var) {
+      visit_mir(bw_node.expression)
+    }
+
+    # BC-only structural lowering: walk an offset into the materialized
+    # `pipe_items` list and on each step, slice [offset, offset+size]
+    # into the placeholder, run the user expr, append the result.
+    # In BC, the lower_pipeline_block materialization path produces a
+    # Value.List for all source shapes (lists, ranges, BG STREAM via
+    # eager materialization), so slicing works uniformly.
+    lower_pipeline_block(list_node) do |items, label|
+      [
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
+        MIR::Let.new("__bw_size", size_mir, false, "i64", nil),
+        MIR::Let.new("__bw_total",
+          MIR::Cast.new(
+            MIR::FieldGet.new(MIR::Ident.new(items), "len"),
+            "i64", :intCast),
+          false, "i64", nil),
+        # If size <= 0 (time-only), treat the whole list as one batch by
+        # bumping size to total. The final-flush logic isn't needed: the
+        # while loop emits the single full batch.
+        MIR::Let.new("__bw_step",
+          MIR::Conditional.new(
+            MIR::BinOp.new(">", MIR::Ident.new("__bw_size"), MIR::Lit.new("0")),
+            MIR::Ident.new("__bw_size"),
+            MIR::Ident.new("__bw_total")),
+          false, "i64", nil),
+        MIR::Let.new("__bw_offset", MIR::Lit.new("0"), true, "i64", nil),
+        MIR::WhileStmt.new(
+          MIR::BinOp.new("<", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_total")),
+          [
+            MIR::Let.new("__bw_end",
+              MIR::Conditional.new(
+                MIR::BinOp.new("<",
+                  MIR::BinOp.new("+", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_step")),
+                  MIR::Ident.new("__bw_total")),
+                MIR::BinOp.new("+", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_step")),
+                MIR::Ident.new("__bw_total")),
+              false, "i64", nil),
+            MIR::Let.new(placeholder_var,
+              MIR::SliceExpr.new(MIR::Ident.new(items),
+                MIR::Cast.new(MIR::Ident.new("__bw_offset"), "usize", :intCast),
+                MIR::Cast.new(MIR::Ident.new("__bw_end"), "usize", :intCast),
+                nil),
+              false, nil, nil),
+            MIR::Let.new("__bw_val", expr_mir, false, nil, nil),
+            MIR::ExprStmt.new(MIR::MethodCall.new(
+              MIR::Ident.new("res_list"), "append",
+              [MIR::AllocatorRef.new(alloc), MIR::Ident.new("__bw_val")],
+              true), nil),
+            MIR::Set.new(MIR::Ident.new("__bw_offset"),
+              MIR::Ident.new("__bw_end")),
+          ], nil, nil, nil, nil),
         MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
       ]
     end
