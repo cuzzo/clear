@@ -2664,6 +2664,17 @@ class PipelineHost
     end
   end
 
+  # The Zig-side `workers: usize` parameter requires a usize value, but the
+  # raw worker-count expression is i64 (CheatLib.threadCount returns i64;
+  # CLEAR's Number lowers to i64). Wrap with @intCast at the call site only
+  # -- the default-capacity expression interpolates the raw form to keep
+  # comptime-int simplification (e.g. `c < 2 * 4`) working in Zig.
+  def bounded_concurrent_worker_count_for_call_mir(conc_op)
+    raw = bounded_concurrent_worker_count_mir(conc_op)
+    raw_zig = @lowering.send(:emit_expr, raw)
+    MIR::InlineZig.new("@intCast(#{raw_zig})", "bounded_workers_usize")
+  end
+
   def bounded_concurrent_parallel_mir(conc_op)
     if (par = conc_op.options["parallel"])
       visit_mir(par)
@@ -2756,7 +2767,7 @@ class PipelineHost
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
       items_ptr,
-      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -2783,7 +2794,7 @@ class PipelineHost
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
       items_ptr,
-      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -2809,7 +2820,7 @@ class PipelineHost
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Ident.new("rt"),
       items_ptr,
-      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -2883,7 +2894,7 @@ class PipelineHost
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
       src_ptr,
-      n_workers_mir,
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       cap_mir,
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
@@ -2917,7 +2928,7 @@ class PipelineHost
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
       src_ptr,
-      n_workers_mir,
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       cap_mir,
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
@@ -2951,7 +2962,7 @@ class PipelineHost
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
       src_ptr,
-      n_workers_mir,
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       cap_mir,
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
@@ -2998,7 +3009,7 @@ class PipelineHost
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
-      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3024,7 +3035,7 @@ class PipelineHost
       MIR::MethodCall.new(MIR::Ident.new("rt"), "heapAlloc", [], false),
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
-      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3049,7 +3060,7 @@ class PipelineHost
       MIR::Ident.new("#{cb[:ctx_name]}.apply"),
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
-      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3123,7 +3134,7 @@ class PipelineHost
       # The legacy `pipe_items` is a `[]const T`; @constCast strips the
       # const so the in-place helper can write through the slice.
       MIR::InlineZig.new("@constCast(pipe_items)", "list_each_inplace_mut_items"),
-      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_worker_count_for_call_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
