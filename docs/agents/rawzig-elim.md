@@ -9,8 +9,8 @@ transfer all sit outside its reach.
 
 ## Status
 
-VM coverage as of 2026-04-30: **278 / 294 supportable passing (94%)**.
-The remaining 7 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
+VM coverage as of 2026-05-01: **281 / 294 supportable passing (95%)**.
+The remaining 4 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
 or runtime features the VM doesn't implement.
 
 ## What we already did (BC short-circuits, not unifications)
@@ -137,10 +137,11 @@ have no failing test today since their connect/listen requires
 real socket setup the VM doesn't model. Schema entries can adopt
 `bc:` flags + new VM natives later when needed.
 
-### Cluster C: Stream-source CONCURRENT -- DONE for Zig backend
+### Cluster C: Stream-source CONCURRENT -- DONE for both backends
 
-Tests passing on Zig: 240_concurrent_stream_pipelines,
-241_open_stream_pipelines, 242_concurrent_capacity, 243_batch_window.
+Tests passing on Zig and BC: 240_concurrent_stream_pipelines,
+241_open_stream_pipelines, 242_concurrent_capacity. (243_batch_window
+still UNIMPL on BC via a separate batch_window RawZig.)
 
 **What it does:** `~T[]` (dynamic stream) and `~T[INF]` (inf stream)
 sources passed through `s> CONCURRENT SELECT/WHERE/EACH`.
@@ -167,22 +168,24 @@ sources passed through `s> CONCURRENT SELECT/WHERE/EACH`.
    `stream_concurrent_element_type`, `stream_concurrent_source_setup_mir`,
    `stream_concurrent_capacity_mir`.
 
-4. `lower_concurrent` dispatch routes Zig-backend stream
-   SELECT/WHERE/EACH through the structural path. BC continues
-   falling through to the legacy RawZig fallback (still UNIMPL on
-   BC -- see remaining work below).
+4. `lower_concurrent` dispatch routes stream SELECT/WHERE/EACH through
+   the structural path on both backends.
+
+5. BC: `bc: true` flags on concurrentStream\* + `compile_concurrent_stream`
+   in bc_emitter sequentially simulates. Pulls items via
+   LIST_POP_FRONT (or SPLIT_STREAM_NEXT for split-stream slots) and
+   BC_CALLs the worker per item. workers/parallel/capacity/task_cfg/is_inf
+   are all Zig-only knobs that BC ignores. The
+   eager-materialization path for BG STREAM was also extended to cover
+   ~T[INF] generators (line 2707 of mir_lowering.rb): truly infinite
+   generators are still unsupportable, but most workloads use finite
+   self-closing generators (`WHILE i <= 8 DO YIELD i; ...`).
 
 **What this gains the checker:** the worker callback is now visible
 as a normal MIR `FnDef` body; capture promotion, allocator pairing,
 and ownership transfer are all visible to the standard MIR invariants.
-The opaque RawZig blob for the Zig path is gone.
-
-**Remaining BC work:** tests 240/241/242/243 stay UNIMPL on BC. The
-VM has no fiber scheduler / channel runtime, so the structural call
-to `concurrentStreamSelect` has no `bc: true` dispatch. A future
-commit can either model `BC_FIBER_SPAWN` + a queue-style channel,
-or sequentially simulate (feeder produces full list, workers
-sequentially walk it).
+The opaque RawZig blob for the Zig path is gone, and BC consumes the
+same structural MIR.
 
 ### Cluster D: List-source CONCURRENT -- DONE for SELECT/WHERE (Zig)
 
@@ -333,8 +336,7 @@ DONE:
 2. **Cluster A (Sharded ops)**
 3. **Cluster B (File RAII)**
 4. **Cluster G (bounded stream concurrent)**
-5. **Cluster C (stream-source CONCURRENT)** -- Zig backend done; BC
-   still UNIMPL pending fiber/channel runtime work.
+5. **Cluster C (stream-source CONCURRENT)** -- both backends.
 6. **Cluster D (list-source CONCURRENT)** -- SELECT and WHERE done
    on Zig; EACH and BIND_VAR cases still on legacy.
 
@@ -345,9 +347,7 @@ Remaining:
    directly. Without this, tests like 81 stay on the legacy template.
 8. **Cluster D BIND_VAR** -- `list AS @u s>` in CONCURRENT needs the
    `@u` capture rewrite to flow into the structural worker callback.
-9. **Cluster C BC half** -- model fiber/channel runtime in BC, or
-   sequentially simulate (feeder builds the full list first, workers
-   walk it sequentially). Either path unblocks tests 240/241/242/243
-   on BC.
-10. **Clusters E, F** (thread pinning, promise list/range) --
-    mechanical; do as cleanup.
+9. **Cluster F (promise list / range streams)** -- 219, 224 still
+   UNIMPL via InlineZig in init position.
+10. **Cluster E (thread pinning)** + **batch_window** (243) -- mechanical
+    InlineZig/RawZig replacements.
