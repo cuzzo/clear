@@ -187,54 +187,62 @@ and ownership transfer are all visible to the standard MIR invariants.
 The opaque RawZig blob for the Zig path is gone, and BC consumes the
 same structural MIR.
 
-### Cluster D: List-source CONCURRENT -- DONE for SELECT/WHERE (Zig)
+### Cluster D: List-source CONCURRENT -- DONE on Zig
 
-Tests passing on Zig: 210_concurrent_pipeline, 211_concurrent_binding,
-230_sharded_values_inline_no_leak, plus existing SELECT/WHERE list
-tests. EACH on lists stays on the legacy path (see below).
+Tests passing on Zig: 81_concurrent_each, 210_concurrent_pipeline,
+211_concurrent_binding, 230_sharded_values_inline_no_leak.
 
 **What changed:**
 
-1. Added three runtime helpers in `zig/lib/streams.zig`:
-   `concurrentListSelect`, `concurrentListWhere`, `concurrentListEach`.
-   Each takes `items: []const T` directly (no feeder, no channel)
-   and lets workers race on an atomic index. Mirrors the bounded
-   helpers but without the `.next()` Promise indirection.
+1. Added four runtime helpers in `zig/lib/streams.zig`:
+   `concurrentListSelect`, `concurrentListWhere`, `concurrentListEach`,
+   `concurrentListEachInPlace`. The first three take `items: []const T`
+   and pass `T` to the body. `concurrentListEachInPlace` takes
+   `items: []T` (mutable) and passes `*T` so the body can update each
+   element through the pointer. All four use a persistent worker pool
+   racing on an atomic index against the slice length -- no feeder,
+   no channel.
 
-2. Added `CheatLib.concurrentListSelect/Where/Each` thin wrappers in
-   `zig/runtime/runtime-header.zig` pinning WaitGroup, spawn fns,
-   and per-T cleanup.
+2. Added `CheatLib.concurrentListSelect/Where/Each/EachInPlace` thin
+   wrappers in `zig/runtime/runtime-header.zig` pinning WaitGroup,
+   spawn fns, and per-T cleanup.
 
 3. Replaced the inline RawZig blobs in
-   `pipeline_generator#transpile_concurrent_select/where` with
-   structural MIR in
-   `pipeline_host#lower_concurrent_list_select/where`. The worker
-   callback reuses `build_bounded_concurrent_callback` -- the shape
-   is identical to bounded streams except the source type. The
-   shape-adapting `pipe_items` materialization (sharded pool / SoA /
-   pool / sharded list) still goes through `build_pipe_items_block`
-   as an `MIR::InlineZig` prelude; only the worker-pool boilerplate
-   was migrated structurally.
+   `pipeline_generator#transpile_concurrent_select/where/each` with
+   structural MIR in `pipeline_host#lower_concurrent_list_select/where/each`
+   (plus `lower_concurrent_list_each_in_place`). The worker callback
+   reuses `build_bounded_concurrent_callback` (or
+   `build_bounded_concurrent_callback_pointer` for the in-place
+   variant) -- the shape is identical to bounded streams except the
+   source type. The shape-adapting `pipe_items` materialization
+   (sharded pool / SoA / pool / sharded list) still goes through
+   `build_pipe_items_block` as an `MIR::InlineZig` prelude; only
+   the worker-pool boilerplate was migrated structurally.
 
-4. Dispatch in `lower_concurrent` routes Zig-backend list SELECT
-   and WHERE (when not `BIND_VAR`) to the new lowering. EACH stays
-   on the legacy path.
+4. EACH dispatch picks the in-place helper when the body directly
+   mutates `_` (e.g. `_.field = X` or `_[i] = X`). The detection walks
+   the AST recursively for `AST::Assignment` whose target is rooted
+   at `Identifier("_")`. Non-mutating bodies use the by-value helper.
 
-**EACH still on legacy:** Tests like 81_concurrent_each have bodies
-that directly mutate items (`_.value = X`). The legacy template
-emits `items: []T` (mutable slice) plus `@constCast(items)` and
-substitutes `_` for `ctx.items[idx]` so the mutation lands on the
-shared slice. The bounded-callback shape passes items by value
-(`__item: T`), so direct mutation of `__item` doesn't compile. A
-future commit can add a separate `concurrentListEachInPlace` helper
-that takes `items: []T` and passes `*T` to the body, then the
-dispatch picks it for mutating bodies.
+5. `list AS @u s> CONCURRENT SELECT @u.field` is also structural: the
+   dispatch unwraps the BIND_VAR(source, @u) shape and registers `@u`
+   as a named pipeline binding resolving to `__item` for the duration
+   of the callback body lowering. The existing `with_named_binding`
+   machinery handles the substitution.
 
-**Remaining BIND_VAR path:** `list AS @u s> CONCURRENT SELECT @u.field`
-still uses the legacy template. `@concurrent_outer_binding` rewrites
-the binding name into Zig field-access fragments inside the worker;
-porting that to structural MIR needs a small additional capture-rewrite
-pass. Defer until needed.
+6. `transpile-tests/gen.rb` was updated to detect `concurrentList` /
+   `concurrentStream` / `concurrentBounded` in the transpiled body
+   (in addition to the existing WaitGroup string detection) so
+   all-tests.zig boots the scheduler when needed. Without this,
+   the structural calls would crash in submitSpawn at test runtime.
+
+**What this gains the checker:** the worker callback is now visible
+as a normal MIR `FnDef` body for SELECT/WHERE/EACH (both by-value and
+in-place). Capture promotion, allocator pairing, and ownership
+transfer for the worker body are all visible to the standard MIR
+invariants. Only `pipe_items` materialization (which is shape adaptation,
+not a worker-pool concern) still rides on InlineZig, and that's
+gated by the existing checker rules for inline blocks.
 
 ### Cluster E: Thread pinning (1 UNIMPL)
 
@@ -337,17 +345,12 @@ DONE:
 3. **Cluster B (File RAII)**
 4. **Cluster G (bounded stream concurrent)**
 5. **Cluster C (stream-source CONCURRENT)** -- both backends.
-6. **Cluster D (list-source CONCURRENT)** -- SELECT and WHERE done
-   on Zig; EACH and BIND_VAR cases still on legacy.
+6. **Cluster D (list-source CONCURRENT)** -- both backends. Includes
+   SELECT, WHERE, EACH (by-value + in-place mutation), and the
+   `list AS @u s>` BIND_VAR pattern.
 
 Remaining:
-7. **Cluster D EACH (in-place mutation)** -- add a
-   `concurrentListEachInPlace` helper that passes `*T` to the body,
-   plus dispatch logic that picks it when the body mutates `_`
-   directly. Without this, tests like 81 stay on the legacy template.
-8. **Cluster D BIND_VAR** -- `list AS @u s>` in CONCURRENT needs the
-   `@u` capture rewrite to flow into the structural worker callback.
-9. **Cluster F (promise list / range streams)** -- 219, 224 still
+7. **Cluster F (promise list / range streams)** -- 219, 224 still
    UNIMPL via InlineZig in init position.
-10. **Cluster E (thread pinning)** + **batch_window** (243) -- mechanical
-    InlineZig/RawZig replacements.
+8. **Cluster E (thread pinning)** + **batch_window** (243) -- mechanical
+   InlineZig/RawZig replacements.
