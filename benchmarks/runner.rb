@@ -128,7 +128,11 @@ def run_bench(dir)
         code_lines = []
         src.each_line { |l| (l.match?(/^\s*--/) ? comment_lines : code_lines) << l }
         code_text = code_lines.join
-        subs.each { |old, new_val| code_text.sub!(old.strip, new_val.strip) }
+        # gsub!, not sub!: the same iteration count usually appears in BOTH
+        # the producer loop and the consumer loop (e.g. spawn N futures /
+        # await N futures), and replacing only the first leaves the
+        # consumer indexing past the producer's reduced length.
+        subs.each { |old, new_val| code_text.gsub!(old.strip, new_val.strip) }
         patched = comment_lines.join + code_text
         build_src = "/tmp/bench_leak_#{File.basename(dir)}.cht"
         File.write(build_src, patched)
