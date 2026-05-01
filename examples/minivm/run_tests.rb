@@ -150,6 +150,10 @@ def run_historical_test(path)
     [:panic, "out of memory"]
   elsif clean.strip.empty?
     [:timeout, nil]
+  elsif clean.lines.all? { |l| l.strip.empty? || l.match?(/\A\[(Warning|Note|Info)\]/) || l.match?(/\A\[\d+m\[(Warning|Note|Info)\]/) }
+    # Output is just compile-time warnings/notes (no actual runner
+    # output). The runner was killed before printing anything.
+    [:timeout, nil]
   elsif clean.include?("error:") || clean.include?("Error")
     msg = clean.lines.find { |l| l.include?("error") || l.include?("Error") }&.strip
     [:error, msg&.slice(0, 120)]
