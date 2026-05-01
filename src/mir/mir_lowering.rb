@@ -2430,15 +2430,10 @@ class MIRLowering
 
     rt_name = @rt_name
 
-    # Strategies and site_info come from BgCaptureClassifier (one writer,
-    # all consumers read). The previous flow re-walked the BG body via
-    # collect_bg_capture_site_info, classified per-capture into
-    # node.capture_strategies, and refreshed each Type from the live
-    # SymbolEntry via the refreshed_capture_type lambda. All three steps
-    # are now done once in the annotator (Pass 1 walk for site_info +
-    # captures, BgCaptureClassifier post propagate_caller_sync! for
-    # strategies + derived sets). lower_bg_block reads.
-    node.capture_strategies = analysis&.strategies || {}
+    # Strategies + site_info come from BgCaptureClassifier (one writer,
+    # all consumers read). lower_bg_block reads from
+    # analysis.strategies directly -- enforce_bg_capture_strategies!
+    # below picks up the same field.
     enforce_bg_capture_strategies!(node, captured)
 
     # Build capture fields. The captured value's actual Zig type after
@@ -2612,8 +2607,8 @@ class MIRLowering
   # producing silent UAFs. Users must write GIVE / COPY / CLONE inside
   # the BG body to transfer ownership, or wrap the container in
   # @shared:locked / @multiowned for shared access.
-  def enforce_bg_capture_strategies!(node, captured)
-    refused = (node.capture_strategies || {}).select do |_name, strat|
+  def enforce_bg_capture_strategies!(node, _captured)
+    refused = (node.capture_analysis&.strategies || {}).select do |_name, strat|
       strat.is_a?(CaptureStrategy::Refuse)
     end
     return if refused.empty?

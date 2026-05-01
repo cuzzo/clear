@@ -304,6 +304,20 @@ Out of scope for this plan, but should be tracked separately:
 - **Lines added**: ~120 (new `BgCaptureClassifier` + extended
   `CaptureAnalysis` struct + `AST.each_bg_block` helper)
 - **Net**: -130 lines.
+
+**Actual measured (after landing phases 1-7):**
+- Phase 1-3 (infrastructure): +200 lines, -2 lines (net +198)
+- Phase 4-7 (consumers + walker deletion): +156 lines, -320 lines (net -164)
+- Combined: +356 lines, -322 lines (**net +34 lines**)
+- The estimate was -130; actual was +34. The deviation is because
+  the consolidated `AST.each_bg_block` plus its `each_bg_block_in_stmt`
+  twin is ~70 lines (vs the ~30 estimated for "one helper") --
+  the per-stmt vs recursive split required an explicit second method
+  rather than a `recurse:` flag (the flag-version still descended
+  into control flow, which broke SuppressCleanup callers).
+- The win isn't in the line count -- it's in the structural invariant:
+  every read of "is this name moved by a BG?" goes through
+  `bg.capture_analysis.move_mark_names`. Walker drift is impossible.
 - **Walker count over BG bodies**: 4 → 1 (`analyze_fiber_captures`).
 - **Sources of "name X is moved" truth**: 3 → 1 (`move_mark_names`).
 - **Failure modes eliminated**:
