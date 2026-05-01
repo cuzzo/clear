@@ -40,6 +40,15 @@ class PipelineHost
     "__pipe_#{clear_name.delete_prefix('@')}"
   end
 
+  # Conditional version of with_named_binding: registers the binding only
+  # if a name is provided, otherwise just calls the block. Used at the
+  # CONCURRENT lowering site where `list AS @u s> ...` provides a name
+  # but plain `list s> ...` does not.
+  def with_optional_named_binding(clear_name, zig_var, &blk)
+    return blk.call if clear_name.nil?
+    with_named_binding(clear_name, zig_var, &blk)
+  end
+
   # Register a named pipeline binding for the duration of a block.
   # Saves and restores previous value so nested bindings stack correctly.
   def with_named_binding(clear_name, zig_var, &blk)
@@ -2241,26 +2250,40 @@ class PipelineHost
     end
 
     # List-source CONCURRENT (Zig backend only -- BC handles lists via
-    # the BC short-circuit above). Skip the AS @u binding case and any
-    # source needing the @concurrent_outer_binding rewrite path -- that
-    # flow runs through the legacy template below until the binding
-    # semantics are also structural.
+    # the BC short-circuit above). `list AS @u s> CONCURRENT ...` is
+    # supported: extract the binding name and run the callback body
+    # lowering with `@u` registered to resolve to `__item`.
     if @lowering.instance_variable_get(:@target) != :bc
       lhs_node = smooth_node.left
-      if lhs_ti && lhs_ti.list_collection? && !(lhs_node.is_a?(AST::BinaryOp) && lhs_node.op == :BIND_VAR)
+      bind_name = nil
+      real_lhs = lhs_node
+      if lhs_node.is_a?(AST::BinaryOp) && lhs_node.op == :BIND_VAR
+        bind_name = lhs_node.right.name
+        real_lhs = lhs_node.left
+      end
+      real_lhs_ti = real_lhs.type_info
+      if real_lhs_ti && real_lhs_ti.list_collection?
         case conc_op.op
         when AST::SelectOp
-          return lower_concurrent_list_select(lhs_node, conc_op, conc_op.op)
+          return with_optional_named_binding(bind_name, "__item") {
+            lower_concurrent_list_select(real_lhs, conc_op, conc_op.op)
+          }
         when AST::WhereOp
-          return lower_concurrent_list_where(lhs_node, conc_op, conc_op.op)
+          return with_optional_named_binding(bind_name, "__item") {
+            lower_concurrent_list_where(real_lhs, conc_op, conc_op.op)
+          }
         when AST::EachOp
           # If the body directly mutates `_` (e.g. `_.field = X` or
           # `_[i] = X`), use the in-place helper that passes `*T` to
           # the worker. Otherwise the by-value callback is fine.
           if each_body_mutates_placeholder?(conc_op.op.body)
-            return lower_concurrent_list_each_in_place(lhs_node, conc_op, conc_op.op)
+            return with_optional_named_binding(bind_name, "__item") {
+              lower_concurrent_list_each_in_place(real_lhs, conc_op, conc_op.op)
+            }
           else
-            return lower_concurrent_list_each(lhs_node, conc_op, conc_op.op)
+            return with_optional_named_binding(bind_name, "__item") {
+              lower_concurrent_list_each(real_lhs, conc_op, conc_op.op)
+            }
           end
         end
       end
