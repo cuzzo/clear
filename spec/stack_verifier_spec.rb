@@ -1,6 +1,6 @@
 require "rspec"
 require "tmpdir"
-require_relative "../src/mir/stack_verifier"
+require_relative "../src/tools/stack_verifier"
 require_relative "../src/backends/transpiler"
 
 RSpec.describe StackVerifier do

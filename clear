@@ -628,7 +628,7 @@ when 'build'
 
   # Post-build stack verification and exact sizing
   if stack_check && File.exist?(output_path) && File.read(source).scan(/REQUIRE\s+"pkg:([^"]+)"/).empty?
-    require_relative 'src/mir/stack_verifier'
+    require_relative 'src/tools/stack_verifier'
     require_relative 'src/backends/transpiler'
 
     begin
@@ -1648,7 +1648,7 @@ when 'fix'
   end
 
 when 'fmt', 'format'
-  require_relative 'src/backends/formatter'
+  require_relative 'src/tools/formatter'
 
   args = ARGV[1..] || []
   check_only = false
