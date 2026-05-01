@@ -48,6 +48,7 @@ Milestone: *Basic* SQL/CLEAR database
  - [ ] Full Infinite Stream support
  - [ ] Stream Join (declarative, basic)
  - [ ] Bare Atomics
+ - [ ] Generic Observables
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
  - [ ] Actors as an ownership capability
