@@ -9,8 +9,8 @@ transfer all sit outside its reach.
 
 ## Status
 
-VM coverage as of 2026-05-01: **282 / 294 supportable passing (95%)**.
-The remaining 3 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
+VM coverage as of 2026-05-01: **284 / 294 supportable passing (96%)**.
+The remaining 1 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
 or runtime features the VM doesn't implement.
 
 ## What we already did (BC short-circuits, not unifications)
@@ -274,25 +274,25 @@ through the structural ForStmt + per-item lowering path on BC, the
 same as plain lists. The legacy per-shard fiber template stays on
 the Zig path (where real fibers exist).
 
-### Cluster F: Promise list / range streams (2 UNIMPL)
+### Cluster F: Promise list / range streams -- DONE on BC
 
-Tests: 219_next_promise_list, 224_range_streams.
+Tests passing: 219_next_promise_list, 224_range_streams.
 
-**What it does:** `NEXT promise.list` iterates a list of promises;
-range streams produce numeric ranges as a stream type.
+**What changed:**
 
-**What it looks like now:** `MIR::InlineZig` for each variant.
+1. `lower_next_expr` short-circuits the InlineZig "next_promise_list"
+   emission on BC (`@target == :bc`). Synchronous BG_SPAWN means the
+   promise list is already a Value.List of resolved values, so
+   NEXT-all is identity -- return the source MIR directly.
 
-**Why this matters for correctness:** Low. Stream construction; no
-ownership transfer beyond the standard list/iterator allocation.
+2. `toList` stdlib_def opts in via `bc: true, bc_op: :to_list`. BC
+   dispatches to identity since the range is already materialized as
+   Value.List via NATIVE_CALL "iota" in `compile_expr`'s RangeLit
+   branch.
 
-**Structural MIR target:**
-```ruby
-MIR::PromiseListIter.new(list)
-MIR::RangeStream.new(start, end, step, inclusive:)
-```
-
-**Effort:** Small. Mostly mechanical.
+3. `compile_let` tags slots whose init is `MIR::RangeLit` as
+   `@stream_slots`. NEXT against the slot routes through
+   LIST_POP_FRONT instead of AWAIT.
 
 ### Cluster G: Bounded stream concurrent -- DONE
 
@@ -358,8 +358,7 @@ DONE:
    SELECT, WHERE, EACH (by-value + in-place mutation), and the
    `list AS @u s>` BIND_VAR pattern.
 7. **Cluster E (thread pinning + sharded list pipeline ops)** -- BC.
+8. **Cluster F (promise list / range streams)** -- BC.
 
 Remaining:
-8. **Cluster F (promise list / range streams)** -- 219, 224 still
-   UNIMPL via InlineZig in init position.
 9. **batch_window (243)** -- separate RawZig in expression position.
