@@ -2462,11 +2462,15 @@ class MIRLowering
     bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "bg")
     caps = FiberCtxBuilder.build(analysis,
                                  body_access_prefix: "__ctx_#{id}",
-                                 promoted_names: promoted_names)
+                                 promoted_names: promoted_names,
+                                 fresh_heap_alloc: alloc_var,
+                                 fresh_heap_id: id)
 
     capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n        ")
     capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
                      caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
+    fresh_heap_decls = caps.specs.filter_map(&:dupe_decl_zig).join("\n        ")
+    fresh_heap_cleanups = caps.specs.filter_map(&:body_cleanup_zig).join("\n                    ")
 
     # Flatten ThenChain + lower body
     flat_steps = []
@@ -2566,8 +2570,10 @@ class MIRLowering
         "defer #{capture_close_zig[name].gsub('{0}', "__ctx_#{id}.#{name}")};"
       end
     }.join("\n                    ")
+    capture_frees = [capture_frees, fresh_heap_cleanups].reject(&:empty?).join("\n                    ")
 
     promoted_decls = fiber_promoted_decls_zig(promoted_names, alloc_var)
+    promoted_decls = [promoted_decls, fresh_heap_decls].reject(&:empty?).join("\n        ")
 
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
     pin_mode = node.respond_to?(:pinned) ? node.pinned : nil

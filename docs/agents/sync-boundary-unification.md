@@ -187,7 +187,7 @@ title) listing the 5 questions and the single answer-source for each.
 - Body lowering itself — each construct still drives its own MIR
   generation. The builder is about the *boundary*, not the body.
 
-## Status today (after Phases 1 + 3)
+## Status today (after Phases 1 + 2 + 3)
 
 - ✓ Capture analysis unified (BgCaptureClassifier)
 - ✓ Live storage/sync threading unified (with_fiber_capture_map +
@@ -200,6 +200,17 @@ title) listing the 5 questions and the single answer-source for each.
   own their site-specific control fields (Promise.inner+alloc /
   WaitGroup / stream_inner+alloc / nothing) and their runtime spawn
   APIs; the *capture* concern is one function.
+- ✓ FreshHeapCopy wiring (Phase 2 / Gap A): when a capture's strategy
+  is `CaptureStrategy::FreshHeapCopy` (user wrote `COPY x` inside
+  the body), `FiberCtxBuilder` returns a `dupe_decl_zig` (pre-spawn
+  `try CheatLib.dupeValue` + errdefer cleanup) and a
+  `body_cleanup_zig` (`defer CheatLib.cleanup` on the duped ctx
+  field). `lower_bg_block` injects both into the emitted Zig.
+  Works today for plain structs / strings; collections-with-deinit
+  (ArrayList / HashMap / Pool) still fall through `dupeValue`'s
+  shallow path -- that is the language-level COPY @list bug 258
+  and is out of scope for this builder. Test:
+  `transpile-tests/281_bg_body_copy_struct.cht`.
 - ✓ `Scope#initialize_copy` deep-copy contract documented + helper
   extracted (Phase 3 / Option A): `Scope.live_param_syms(fn)` is the
   canonical way to refresh a SymbolEntry cache against the live
@@ -207,7 +218,6 @@ title) listing the 5 questions and the single answer-source for each.
   `Scope#initialize_copy` and `SymbolEntry` carry the contract in
   doc-form so a future pass that mutates storage / sync sees the rule
   before adding a new dual-SymbolEntry bug.
-- ✗ FreshHeapCopy marker_plan unwired (Phase 2)
 
 The most critical gap is now CLOSED: a value crossing a sync
 boundary uses one capture analysis, one strategy classifier, one

@@ -1,0 +1,34 @@
+-- BG body COPY of a captured plain struct.
+--
+-- Exercises FiberCtxBuilder's FreshHeapCopy wiring (Phase 2 / Gap A
+-- of docs/agents/sync-boundary-unification.md). When the user writes
+-- `COPY p` inside a BG body where `p` is captured from outer scope,
+-- the strategy classifier returns FreshHeapCopy and the BG capture
+-- init heap-dupes `p` so the fiber owns its own copy:
+--
+--   const __fc_<id>_p = try CheatLib.dupeValue(@TypeOf(p), p, alloc);
+--   errdefer CheatLib.cleanup(@TypeOf(__fc_<id>_p), alloc, &__fc_<id>_p);
+--   ...
+--   __bg<id>_ctx.* = .{ ..., .p = __fc_<id>_p };
+--   ... inside run fn:
+--   defer CheatLib.cleanup(@TypeOf(ctx.p), ctx.alloc, &ctx.p);
+--
+-- Plain structs (no string/heap fields, no deinit) round-trip through
+-- CheatLib.dupeValue's comptime walk over fields. COPY of @list (which
+-- has deinit) is the language-level bug 258 and remains unsupported
+-- until dupeValue handles ArrayList correctly.
+
+STRUCT Point { x: Int64, y: Int64 }
+
+FN sumPoint(pt: Point) RETURNS Int64 ->
+    RETURN pt.x + pt.y;
+END
+
+FN main() RETURNS Void ->
+    p = Point { x: 10_i64, y: 20_i64 };
+    pr: ~Int64 = BG {
+        sumPoint(COPY p);
+    };
+    r = NEXT pr;
+    ASSERT r == 30_i64, "BG body COPY of captured struct yields snapshot";
+END
