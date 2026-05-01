@@ -90,13 +90,22 @@ module BgCaptureClassifier
     # CaptureStrategy classification: e2 promotes bare-reference captures
     # too, since `items.append(2.0)` inside a BG body mutates the shared
     # backing and needs heap allocation regardless of GIVE/COPY intent).
+    #
+    # Stream cursors (@split open streams, plain open streams) ALSO need
+    # heap promotion when captured by a BG that runs asynchronously --
+    # the cursor struct is otherwise frame-allocated and the spawning
+    # frame may rewind before the fiber has finished consuming. See
+    # benchmarks/concurrent/08_pubsub for the regression that motivated
+    # adding split_open_stream? / open_stream? to this predicate.
     a.heap_promote_names = a.captures.each_with_object(Set.new) do |(name, type_obj), set|
       sym = a.capture_symbols&.dig(name)
       t = resolve_capture_type(type_obj, sym)
       next unless t
       next if t.needs_pointer_passing?
-      next unless t.collection? && !t.numeric_map?
-      set << name
+      promote = (t.collection? && !t.numeric_map?) ||
+                t.split_open_stream? ||
+                t.open_stream?
+      set << name if promote
     end
 
     # move_mark_names: explicit user-written GIVE intent (or its
