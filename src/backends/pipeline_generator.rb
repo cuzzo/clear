@@ -1024,19 +1024,6 @@ module PipelineGenerator
   # Phase 4: Numeric Aggregation Operators
   # =========================================================
 
-  # Returns the Zig accumulator type for a SUM/MIN/MAX expression.
-  # for_sum=true upsizes small ints to i64/u64 to avoid overflow.
-  def agg_zig_type(resolved_sym, for_sum: false)
-    case resolved_sym
-    when :Float32                              then "f32"
-    when :Int8, :Int16, :Int32                 then for_sum ? "i64" : transpile_type(resolved_sym)
-    when :Int64                                then "i64"
-    when :UInt8, :Byte, :UInt16, :UInt32       then for_sum ? "u64" : transpile_type(resolved_sym)
-    when :UInt64                               then "u64"
-    else                                            "f64"
-    end
-  end
-
   # Returns [min_sentinel, max_sentinel] for a given Zig numeric type.
   # min_sentinel is the initial value for a MIN accumulator (highest possible).
   # max_sentinel is the initial value for a MAX accumulator (lowest possible).

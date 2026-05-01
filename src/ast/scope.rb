@@ -119,16 +119,6 @@ class Scope
     @types.key?(name)
   end
 
-  def get_size(name)
-    entry = @locals[name]
-    entry ? entry.size : nil
-  end
-
-  def resolve_reg(name)
-    entry = @locals[name]
-    entry ? entry.reg : nil
-  end
-
   # Returns a Type carrying the variable's base type plus storage-derived capabilities.
   def resolve_full_type(name)
     entry = @locals[name]
@@ -190,11 +180,6 @@ class Scope
     @locals[name]&.capabilities&.include?(:RESTRICT)
   end
 
-  def is_on_heap?(name)
-    entry = @locals[name]
-    entry ? [:heap, :multiowned, :shared].include?(entry.storage) : false
-  end
-
   # Mark a variable as read (used as an r-value in user code).
   def mark_read(name)
     entry = @locals[name]
@@ -229,28 +214,6 @@ class Scope
     path
   end
 
-  def register_dependency(owner_name, dependent_name)
-    return unless @locals.key?(owner_name) # Only track local vars
-
-    @dependencies[owner_name] ||= []
-    @dependencies[owner_name] << dependent_name
-  end
-
-  def invalidate_dependents(owner_name)
-    return unless @dependencies[owner_name]
-
-    # Mark every view watching this owner as DEAD
-    @dependencies[owner_name].each do |view_name|
-      if @locals[view_name]
-        @locals[view_name].valid = false
-        @locals[view_name].invalid_reason = "The owner '#{owner_name}' was modified (resized or rebound), invalidating this view."
-      end
-    end
-
-    # Clear the list (the views are dead, no need to track them anymore)
-    @dependencies[owner_name] = []
-  end
-
   def check_validity!(name)
     entry = @locals[name]
     return unless entry
@@ -260,27 +223,6 @@ class Scope
     end
   end
 
-  def invalidate_size(name)
-    if @locals[name]
-      @locals[name].size = nil
-    end
-  end
-
-  def is_boxed?(name)
-    entry = @locals[name]
-    false  # :boxed is unused — legacy stub
-  end
-
-  def narrow_type(name, new_type)
-    return unless @locals[name]
-    current_type = @locals[name].type
-    if current_type == :Any
-      @locals[name].type = new_type
-      return true
-    end
-    # Simplified narrowing logic
-    return false
-  end
 end
 
 # Helper module for scope stack management.

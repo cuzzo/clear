@@ -362,30 +362,6 @@ class MIRLowering
     prefix_lowered + pending + suffix_lowered + [MIR::BreakStmt.new(label, result_mir)]
   end
 
-  def statement_node?(node)
-    node.is_a?(AST::VarDecl) || node.is_a?(AST::BindExpr) ||
-    node.is_a?(AST::Assignment) ||
-    node.is_a?(AST::IfStatement) || node.is_a?(AST::WhileLoop) ||
-    node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach) ||
-    node.is_a?(AST::MatchStatement) || node.is_a?(AST::ReturnNode) ||
-    node.is_a?(AST::BreakNode) || node.is_a?(AST::ContinueNode) ||
-    node.is_a?(AST::WithBlock) || node.is_a?(AST::BgBlock) ||
-    node.is_a?(AST::BgStreamBlock) || node.is_a?(AST::DoBlock) ||
-    node.is_a?(AST::FunctionDef) || node.is_a?(AST::StructDef) ||
-    node.is_a?(AST::EnumDef) || node.is_a?(AST::UnionDef) ||
-    node.is_a?(AST::TestBlock) || node.is_a?(AST::RequireNode) ||
-    node.is_a?(AST::ExternFnDecl) || node.is_a?(AST::ExternStructDecl) ||
-    node.is_a?(AST::StubDecl) || node.is_a?(AST::PassStmt) ||
-    node.is_a?(AST::ThrowNode) || node.is_a?(AST::DieNode) ||
-    node.is_a?(AST::Raise) || node.is_a?(AST::AssertRaises) ||
-    node.is_a?(AST::BenchmarkStmt) || node.is_a?(AST::SmashStmt) ||
-    node.is_a?(AST::ProfileStmt) ||
-    node.is_a?(MIR::Drop) || node.is_a?(MIR::Promote) ||
-    node.is_a?(MIR::SuppressCleanup) || node.is_a?(MIR::Alloc) ||
-    node.is_a?(MIR::Return) || node.is_a?(MIR::ReassignCleanup) ||
-    node.is_a?(MIR::FieldCleanup)
-  end
-
   # Lower a full program into MIR::Program with standard imports + footer.
   def lower_program(node, use_c_allocator: false, needs_safety: false, use_debug_allocator: false)
     @use_debug_allocator = use_debug_allocator
@@ -858,21 +834,6 @@ class MIRLowering
     end
   end
 
-  # Quick inline emit for struct defs used as union helpers.
-  # (Dead code -- real emission is via MIREmitter#emit_struct_def.)
-  def emit_struct_def_inline(sdef)
-    fields = sdef.fields.map { |f| "    #{f.name}: #{f.zig_type}," }.join("\n")
-    methods = (sdef.methods || []).map { |m|
-      m.is_a?(MIR::RawZig) ? "\n    #{m.code}" : ""
-    }.join
-    "const #{sdef.name} = struct {\n#{fields}#{methods}\n};"
-  end
-
-  def emit_union_inline(udef)
-    fields = udef.variants.map { |v| "    #{v[:name]}: #{v[:zig_type]}," }.join("\n")
-    "const #{udef.name} = union(enum) {\n#{fields}\n};"
-  end
-
   def lower_extern_fn(node)
     mod = node.from_module
     if @emitted_extern_modules.add?(mod)
@@ -910,19 +871,6 @@ class MIRLowering
         MIR::FieldDef.new(name.to_s, zig_t, nil)
       }
       MIR::StructDef.new(node.name, fields, nil, nil)
-    end
-  end
-
-  # Minimal emit for combining multi-node results.
-  def emit_item(node)
-    case node
-    when MIR::RawZig then node.code
-    when MIR::TypeAlias then "const #{node.name} = #{node.target};"
-    when MIR::Import
-      base = "@import(\"#{node.module_path}\")"
-      base = "#{base}.#{node.member}" if node.member
-      "const #{node.alias_name} = #{base};"
-    else node.to_s
     end
   end
 
@@ -1580,36 +1528,6 @@ class MIRLowering
     end
     iz
   end
-
-  def resolve_intrinsic_alloc(alloc_sym, node)
-    case alloc_sym
-    when :heap  then "#{@rt_name}.heapAlloc()"
-    when :frame then "#{@rt_name}.frameAlloc()"
-    when :node_storage
-      storage = node.respond_to?(:storage) ? node.storage : nil
-      storage == :heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
-    when :receiver_storage
-      ti = if node.is_a?(AST::MethodCall)
-        node.object.type_info rescue nil
-      else
-        node.args&.first&.type_info rescue nil
-      end
-      ti = ti.is_a?(Type) ? ti : (Type.new(ti) rescue nil) if ti
-      needs_heap = ti&.needs_heap_backing?
-      needs_heap ||= (node.respond_to?(:storage) && node.storage == :heap)
-      needs_heap ||= if node.is_a?(AST::MethodCall)
-        node.object.respond_to?(:storage) && node.object.storage == :heap
-      elsif node.respond_to?(:mutates_receiver) && node.mutates_receiver
-        node.args&.first&.respond_to?(:storage) && node.args.first.storage == :heap
-      end
-      needs_heap ? "#{@rt_name}.heapAlloc()" : "#{@rt_name}.frameAlloc()"
-    when :cleanup
-      "#{@rt_name}.cleanupAlloc()"
-    else
-      "#{@rt_name}.frameAlloc()"
-    end
-  end
-
 
   def lower_extern_call(node)
     return lower_extern_direct_call(node) if node.respond_to?(:extern_effects) && node.extern_effects&.dig(:safe)

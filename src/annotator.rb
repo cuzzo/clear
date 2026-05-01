@@ -4392,20 +4392,6 @@ private
     end
   end
 
-  # Find the first :unbounded callee in the call chain (for error messages).
-  def find_unbounded_callee(call_names)
-    visited = Set.new
-    queue = call_names.to_a.dup
-    until queue.empty?
-      name = queue.shift
-      next if visited.include?(name)
-      visited << name
-      return name if @fn_nodes[name]&.stack_tier == :unbounded
-      (@call_graph[name] || []).each { |c| queue << c }
-    end
-    nil
-  end
-
   # ── Ownership Graph Operations ─────────────────────────────────
 
   # Determine which allocator cleanup should use for this binding.

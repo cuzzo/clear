@@ -16,20 +16,6 @@
 # ownership analysis. Mixed into SemanticAnnotator via `include`.
 
 module FixableHelper
-  # Location of the variable NAME inside a VarDecl/BindExpr. For a
-  # `MUTABLE x = ...` declaration the node's token points at `MUTABLE`,
-  # so the name starts 8 columns later ("MUTABLE " is 7 letters + 1
-  # space). For an `x = ...` bind the token IS the name.
-  def var_name_span(reg, name, file: nil)
-    tok = reg.respond_to?(:token) ? reg.token : nil
-    return nil unless tok
-    col = tok.column
-    if reg.respond_to?(:mutable) && reg.mutable && tok.respond_to?(:value) && tok.value == 'MUTABLE'
-      col += 'MUTABLE '.length
-    end
-    Span.new(file: file, line: tok.line, col: col, length: name.length)
-  end
-
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
   def emit_mutable_unused_finding!(reg, name)

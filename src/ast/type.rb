@@ -636,43 +636,6 @@ class Type
     list_collection? || (map? && !numeric_map?) || string?
   end
 
-  # Generate the Zig promotion code for this type.
-  # Collections are promoted in-place; strings are duped to a new binding.
-  # +alloc_expr+ is used for string dupe (e.g., "rt.heapAlloc()" or "__bg0_alloc").
-  # Returns nil if no promotion is needed.
-  def escape_promote_code(var_name, rt_name, alloc_expr: nil)
-    if list_collection?
-      elem_zig = element_type&.zig_type || "u8"
-      "try CheatLib.promoteList(#{elem_zig}, #{rt_name}, &#{var_name});"
-    elsif map? && !numeric_map?
-      # StringMap wrapper already uses heapAlloc for all operations (put dupes keys,
-      # grows backing via self.alloc). No promotion needed — just ensure alloc is set.
-      "#{var_name}.alloc = #{rt_name}.heapAlloc();"
-    elsif string?
-      alloc = alloc_expr || "#{rt_name}.heapAlloc()"
-      "try #{alloc}.dupe(u8, #{var_name})"
-    end
-  end
-
-  # Generate the Zig defer cleanup code for heap-promoted collection data.
-  # Used by callers that receive promoted collection fields in returned structs.
-  # Conservative: also handles dynamic slices (T[]) which may have been promoted
-  # from @list — the free is a no-op if data is arena-managed, but prevents leaks
-  # if data was heap-promoted.
-  def escape_cleanup_code(var_name)
-    if list_collection?
-      "defer #{var_name}.deinit(rt.heapAlloc());\n"
-    elsif map? && !numeric_map?
-      "defer #{var_name}.deinit(rt.heapAlloc(), rt.heapAlloc());\n"
-    elsif string?
-      "defer rt.heapAlloc().free(#{var_name});\n"
-    elsif array? && !fixed?
-      # Dynamic slice from promoted @list — free the heap-allocated buffer.
-      # Only called when heap_promoted guard is active (callee confirmed promotion).
-      "defer rt.heapAlloc().free(#{var_name});\n"
-    end
-  end
-
   RESOURCE_TYPES = Set[:File, :TCPClient, :TCPServer].freeze
 
   # Canonical mapping from CLEAR type symbols to Zig type strings.
@@ -1768,16 +1731,6 @@ module TypeHelper
       else
         error!(node, "Integer literal (#{val}) overflows #{t} (range #{min}..#{max})")
       end
-    end
-  end
-
-  def throw_assign_mismatch_error!(node, source_type, target_type)
-    source = to_type(source_type)
-    target = to_type(target_type)
-    if target.array_overflow?(source)
-      error!(node, :FIXED_ARRAY_SIZE_MISMATCH, target.capacity, source.resolved)
-    else
-      error!(node, "Type Mismatch: Cannot assign #{source.resolved} to #{node.type}")
     end
   end
 
