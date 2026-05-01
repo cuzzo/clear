@@ -1,4 +1,5 @@
 require_relative "capture_strategy"
+require_relative "../ast/scope"
 
 # BgCaptureClassifier
 # ===================
@@ -34,18 +35,15 @@ module BgCaptureClassifier
   def self.classify_all!(fn_nodes)
     fn_nodes.each do |_name, fn|
       next unless fn&.body
-      # Build a name -> live SymbolEntry map of THIS function's
-      # parameters. propagate_caller_sync! mutates these entries
-      # in place; child scopes (e.g. inside a CONCURRENT EACH body)
-      # deep-copy the entries on scope entry, so the per-capture
-      # SymbolEntry recorded by analyze_fiber_captures may be a stale
-      # copy. Re-resolving captures against the live param entry here
-      # eliminates the dual-SymbolEntry divergence flagged in
-      # docs/agents/bg-fibers-postmortem.md and fixes
+      # `Scope.live_param_syms` returns the {name => live SymbolEntry}
+      # map -- the entries that `propagate_caller_sync!` mutates in
+      # place. `analyze_fiber_captures` recorded references off
+      # nested scopes that `Scope.dup` deep-copied; refreshing
+      # against the live entries before we read sync/storage closes
+      # the dual-SymbolEntry divergence flagged in
+      # docs/agents/sync-boundary-unification.md (Gap C) and fixes
       # transpile-tests/257_concurrent_capture_lockable_param.cht.
-      live_param_syms = (fn.respond_to?(:params) ? (fn.params || []) : []).each_with_object({}) do |p, h|
-        h[p[:name].to_s] = p[:symbol] if p[:symbol]
-      end
+      live_param_syms = Scope.live_param_syms(fn)
       AST.each_capture_analysis(fn.body) { |a| classify_one!(a, live_param_syms) }
     end
   end

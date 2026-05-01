@@ -30,6 +30,36 @@ class Scope
     @locals[name] = entry
   end
 
+  # Deep-copy contract (read before adding a pass that mutates SymbolEntry):
+  #
+  # `Scope.dup` deep-copies every entry in @locals. This is intentional --
+  # nested scopes mutate scope-local fields like `live`, `moved`,
+  # `borrowed_alias`, `valid` independently of the parent. Without the
+  # deep copy, an `if`/`with`/`bg` body would scribble its borrow state
+  # back onto the function-level entry, and ownership analysis would
+  # blow up.
+  #
+  # The cost: storage / sync / type changes that happen AFTER the body
+  # has been visited (notably `EscapeAnalysis.propagate_caller_sync!`,
+  # which mutates `param[:symbol]`) do NOT propagate to the deep-copied
+  # entries inside nested scopes. A pass that reads `node.symbol.storage`
+  # off an Identifier inside a nested scope sees the pre-propagation
+  # value.
+  #
+  # The rule for any post-annotation pass that needs a param's CURRENT
+  # storage / sync:
+  #
+  #   * mutate `param[:symbol]` (the function-level entry)
+  #   * read against `Scope.live_param_syms(fn)` to refresh stale
+  #     references
+  #
+  # See `BgCaptureClassifier.classify_one!` for the canonical example
+  # (refreshes `capture_analysis.capture_symbols` against the live param
+  # entries before reading sync/storage). See
+  # `docs/agents/sync-boundary-unification.md` Gap C for the full
+  # rationale and alternative options (B: shared boxed entries, C:
+  # split scope-local vs global fields). Option A (this contract +
+  # helper) is the current choice.
   def initialize_copy(original)
     super
 
@@ -53,6 +83,24 @@ class Scope
 
     # 3. Types are usually static definitions, so a shallow copy is fine
     @types = original.instance_variable_get(:@types).dup
+  end
+
+  # Build a {param_name => live SymbolEntry} map from a FunctionDef.
+  #
+  # The "live" entry is the one stored on `param[:symbol]` -- the entry
+  # that lives at the function scope and that `propagate_caller_sync!`
+  # mutates in place. Any pass that has a `capture_symbols` (or similar)
+  # cache of SymbolEntry references collected during annotation should
+  # refresh those references through this helper before querying
+  # storage / sync, otherwise it sees the pre-propagation snapshot
+  # captured by `Scope.dup`.
+  #
+  # See the deep-copy contract on `Scope#initialize_copy` for why.
+  def self.live_param_syms(fn)
+    return {} unless fn&.respond_to?(:params)
+    (fn.params || []).each_with_object({}) do |p, h|
+      h[p[:name].to_s] = p[:symbol] if p[:symbol]
+    end
   end
 
   def declare_type(name, schema)

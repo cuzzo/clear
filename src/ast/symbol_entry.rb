@@ -1,6 +1,21 @@
 # Typed scope entry for Scope.locals.
 # Each entry tracks a variable/function binding with its type, storage, and metadata.
 # Back-references its owning Scope via `scope` for state operations.
+#
+# Mutation contract (read before adding a post-annotation mutator):
+#
+# Most fields are scope-local (live, moved, borrowed_alias, valid, read,
+# non_escaping). Mutating them on a nested-scope copy is correct.
+#
+# Storage-axis fields (storage, sync, type, capabilities) are
+# function-global. After annotation, `Scope.dup` has produced one entry
+# per nested scope that captured the binding. Any pass that mutates a
+# storage-axis field on a parameter (e.g.
+# `EscapeAnalysis.propagate_caller_sync!`) MUST mutate
+# `param[:symbol]` (the function-level entry), and any consumer that
+# reads from a captured SymbolEntry reference must refresh through
+# `Scope.live_param_syms(fn)` first. See the doc comment on
+# `Scope#initialize_copy` for the full rationale.
 class SymbolEntry
   attr_accessor :reg, :type, :mutable, :storage, :sync, :rebindable,
                 :size, :capabilities, :valid,

@@ -187,7 +187,7 @@ title) listing the 5 questions and the single answer-source for each.
 - Body lowering itself — each construct still drives its own MIR
   generation. The builder is about the *boundary*, not the body.
 
-## Status today (after Phase 1)
+## Status today (after Phases 1 + 3)
 
 - ✓ Capture analysis unified (BgCaptureClassifier)
 - ✓ Live storage/sync threading unified (with_fiber_capture_map +
@@ -200,9 +200,14 @@ title) listing the 5 questions and the single answer-source for each.
   own their site-specific control fields (Promise.inner+alloc /
   WaitGroup / stream_inner+alloc / nothing) and their runtime spawn
   APIs; the *capture* concern is one function.
+- ✓ `Scope#initialize_copy` deep-copy contract documented + helper
+  extracted (Phase 3 / Option A): `Scope.live_param_syms(fn)` is the
+  canonical way to refresh a SymbolEntry cache against the live
+  function-level entries that `propagate_caller_sync!` mutates.
+  `Scope#initialize_copy` and `SymbolEntry` carry the contract in
+  doc-form so a future pass that mutates storage / sync sees the rule
+  before adding a new dual-SymbolEntry bug.
 - ✗ FreshHeapCopy marker_plan unwired (Phase 2)
-- Workaround in place for `Scope#initialize_copy` deep-copy (Phase 3
-  optional)
 
 The most critical gap is now CLOSED: a value crossing a sync
 boundary uses one capture analysis, one strategy classifier, one
