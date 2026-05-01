@@ -22,7 +22,7 @@ END
 -- The caller should eval it, format with prStr, and re-call with the result string.
 
 FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     -- If we have an inspect result from the caller, write it before resuming polling

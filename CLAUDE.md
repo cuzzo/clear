@@ -382,7 +382,7 @@ Sigils chain: `pool: Env[N]@pool:shared:locked` means a Pool of Env, wrapped in 
 
 **REQUIRES clause** constrains a parameter's sync family without committing to a specific implementation:
 ```clear
-FN incr!(MUTABLE c: Counter) REQUIRES c: LOCKABLE -> ...
+FN incr!(MUTABLE c: Counter) REQUIRES c: LOCKED -> ...
 ```
 The function body uses `WITH EXCLUSIVE c { ... }` and works whether the caller passes `@locked` or `@writeLocked`. Callers without sync (i.e., `@local`) are rejected at the call site.
 
@@ -400,7 +400,7 @@ END
 - **P3.5** "compile-time reentrant lock" detection (forbids recursive lock acquire on the same binding without `@reentrant` annotation, which the runtime upgrades to a re-entrant lock).
 
 **Cross-module sync propagation** has three sources of truth, in priority order:
-1. **REQUIRES-seed** (`function_analysis.rb`): when `REQUIRES p: LOCKABLE`, seed `entry.sync = :locked` on the param at decl time. Ensures `WITH p` lowers to lock acquire even when caller info is unavailable (e.g., types.cht annotated standalone).
+1. **REQUIRES-seed** (`function_analysis.rb`): when `REQUIRES p: LOCKED`, seed `entry.sync = :locked` on the param at decl time. Ensures `WITH p` lowers to lock acquire even when caller info is unavailable (e.g., types.cht annotated standalone).
 2. **Caller propagation** (`propagate_caller_sync!`): transitive flow from caller binding into callee param. Uses `collect_callsites_deep` (deep AST walker) so call-sites inside expressions are seen.
 3. **Storage axis fallback** (`escape_analysis.rb`): if `entry.type.shared?` or `multiowned?`, treat as `:shared` / `:multiowned` storage even when no caller stamp exists.
 

@@ -1192,7 +1192,7 @@ class Parser
   # starts a new group.
   #
   # Returns: { param_name_string => Set[Symbol] }
-  REQUIRES_VALID_FAMILIES = %w[LOCKABLE VERSIONED ACTOR LOCK_FREE].to_set.freeze
+  REQUIRES_VALID_FAMILIES = %w[LOCKED VERSIONED ACTOR LOCK_FREE].to_set.freeze
 
   def parse_requires_clause
     requires_hash = {}

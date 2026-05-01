@@ -1,5 +1,5 @@
 -- Repro: BG block inside a function that received an @shared:locked
--- argument via REQUIRES LOCKABLE. The param is `anytype` from the
+-- argument via REQUIRES LOCKED. The param is `anytype` from the
 -- caller's POV, and the actual deduced runtime type is *Arc(Locked(T)).
 -- The BG capture codegen used to compute the field type from the
 -- nominal parameter type (without Arc), producing a Zig type-mismatch
@@ -11,7 +11,7 @@
 STRUCT Counter { value: Int64 }
 
 FN spawnBumper(c: Counter) RETURNS Int64
-  REQUIRES c: LOCKABLE
+  REQUIRES c: LOCKED
 ->
     bgFut: ~Int64 = BG {
         WITH EXCLUSIVE c AS inner {

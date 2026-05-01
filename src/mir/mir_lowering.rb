@@ -5612,10 +5612,10 @@ class MIRLowering
   # with_cap_sync_storage) read post-`propagate_caller_sync!` state, not
   # the AST-snapshot state that var_node.symbol may carry. Without this,
   # a `WITH EXCLUSIVE c` inside a CONCURRENT/BG/DO callback that captures
-  # c (received via REQUIRES LOCKABLE) emits the polymorphic `c.*` deref
+  # c (received via REQUIRES LOCKED) emits the polymorphic `c.*` deref
   # path instead of the direct `c.ctrl.data.*` Arc-unwrap, and the Zig
   # compile fails with "cannot dereference non-pointer type Arc(...)".
-  # See transpile-tests/257_concurrent_capture_lockable_param.cht.
+  # See transpile-tests/257_concurrent_capture_locked_param.cht.
   def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
     prev_map = @do_capture_map || {}
     prev_syms = @current_fiber_capture_symbols || {}

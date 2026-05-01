@@ -423,7 +423,7 @@ module AST
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
     attr_accessor :requires      # P2: REQUIRES clause — { param_name => Set[Family] } or nil
-                                 #     Family symbols: :LOCKABLE, :VERSIONED, :ACTOR, :LOCK_FREE
+                                 #     Family symbols: :LOCKED, :VERSIONED, :ACTOR, :LOCK_FREE
     attr_accessor :effect_set    # P3: projected EffectSet (yield/alloc_heap/io/fail)
                                  #     view over fn.effects + fn.can_fail
     attr_accessor :inferred_effects  # alias of effect_set; used by formatter

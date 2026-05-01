@@ -575,7 +575,7 @@ class Formatter::Emitter
   #
   #     FN name(p1: T, p2: T)
   #      RETURNS R
-  #      REQUIRES x: LOCKABLE
+  #      REQUIRES x: LOCKED
   #     ->
   #
   # The `->` lands at FN-level (column 0) on its own line. Body indent
@@ -676,7 +676,7 @@ class Formatter::Emitter
           return nil if depth == 0
         end
         # `,` is permitted at depth 0 — REQUIRES clauses use it
-        # (`REQUIRES x, y: LOCKABLE`). The arrow only ever appears as
+        # (`REQUIRES x, y: LOCKED`). The arrow only ever appears as
         # the FN-body opener at top level, so a comma can't be confused
         # for it.
       elsif t.type == :OP && t.raw == '->' && depth == 0

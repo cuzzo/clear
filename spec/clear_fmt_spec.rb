@@ -272,7 +272,7 @@ RSpec.describe "./clear fmt", :integration do
         STRUCT Counter { value: Int64 }
 
         FN bumpIt(c: Counter) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
             WITH EXCLUSIVE c AS inner {
                 inner.value = inner.value + 1;
@@ -284,7 +284,7 @@ RSpec.describe "./clear fmt", :integration do
       CLEAR
       path = write("metawrap.cht", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
-      expect(out).to include("FN bumpIt(c: Counter)\n RETURNS Void\n REQUIRES c: LOCKABLE\n->\n")
+      expect(out).to include("FN bumpIt(c: Counter)\n RETURNS Void\n REQUIRES c: LOCKED\n->\n")
       expect(out).to include("FN main() RETURNS Void ->")
     end
 
@@ -293,14 +293,14 @@ RSpec.describe "./clear fmt", :integration do
         STRUCT Account { balance: Int64 }
 
         FN transact(x: Account, y: Account, amount: Int64, audit: Bool) RETURNS Bool
-          REQUIRES x, y: LOCKABLE
+          REQUIRES x, y: LOCKED
         ->
           RETURN TRUE;
         END
       CLEAR
       path = write("metawrap_params.cht", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
-      expect(out).to include("FN transact(x: Account, y: Account, amount: Int64, audit: Bool)\n RETURNS Bool\n REQUIRES x, y: LOCKABLE\n->\n")
+      expect(out).to include("FN transact(x: Account, y: Account, amount: Int64, audit: Bool)\n RETURNS Bool\n REQUIRES x, y: LOCKED\n->\n")
     end
 
     it "is idempotent across two format passes" do
@@ -308,7 +308,7 @@ RSpec.describe "./clear fmt", :integration do
         STRUCT Counter { value: Int64 }
 
         FN bumpIt(c: Counter) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
             WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
         END

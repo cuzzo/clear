@@ -1,12 +1,12 @@
 -- Repro: CONCURRENT EACH callback captures an `@shared:locked` value
--- that arrived via a `REQUIRES LOCKABLE` parameter. Two distinct
+-- that arrived via a `REQUIRES LOCKED` parameter. Two distinct
 -- compiler bugs combine here; the first is fixed in this branch but
 -- the second still fails the test.
 --
 -- Bug 1 (FIXED): pipeline_host.build_bounded_concurrent_callback
 -- declared the ctx field as `*const T` (or `*T` for mutable) and
 -- initialized with `&name`, using the parameter's nominal Type for T.
--- For an `@shared:locked` value propagated via REQUIRES LOCKABLE the
+-- For an `@shared:locked` value propagated via REQUIRES LOCKED the
 -- actual deduced type includes an Arc wrapper the nominal computation
 -- didn't see -- same shape as the BG bug fixed in 04062213. Migrated
 -- to the `@TypeOf(name)` pattern that BG and DO share.
@@ -33,7 +33,7 @@
 STRUCT Acc { count: Int64 }
 
 FN doIt(c: Acc) RETURNS Void
-  REQUIRES c: LOCKABLE
+  REQUIRES c: LOCKED
 ->
     MUTABLE items: Int64[]@list = [];
     items.append(1_i64);

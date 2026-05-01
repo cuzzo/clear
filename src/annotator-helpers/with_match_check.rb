@@ -32,26 +32,26 @@ module WithMatchCheck
 
         # P2.7: compatibility shim. Pre-Phase-2 source that uses WITH on a
         # parameter without declaring REQUIRES is auto-upgraded to
-        # `REQUIRES <pname>: LOCKABLE`. A deprecation note surfaces so the
+        # `REQUIRES <pname>: LOCKED`. A deprecation note surfaces so the
         # migration is visible. The shim will be removed in a future release.
         if warn_handler
           warn_handler.call(node,
             "WITH at line #{node.token&.line} uses parameter '#{pname}' " \
             "without a REQUIRES clause. Auto-inferring " \
-            "'REQUIRES #{pname}: LOCKABLE' for this release. " \
+            "'REQUIRES #{pname}: LOCKED' for this release. " \
             "Add the clause explicitly to silence this warning; the shim " \
             "will be removed in a future release.")
-          requires_map[pname] = Set[:LOCKABLE]
+          requires_map[pname] = Set[:LOCKED]
           # Also stamp on fn.requires so downstream readers (P2.6 call-site
           # check, FunctionSignature) see the inferred clause.
           fn.requires ||= {}
-          fn.requires[pname] = Set[:LOCKABLE]
+          fn.requires[pname] = Set[:LOCKED]
         else
           error_handler.call(node,
             "WITH at line #{node.token&.line} uses parameter '#{pname}', " \
             "but '#{pname}' is not constrained by REQUIRES. " \
             "Add a REQUIRES clause naming the families this function supports:\n" \
-            "    REQUIRES #{pname}: LOCKABLE\n" \
+            "    REQUIRES #{pname}: LOCKED\n" \
             "REQUIRES is mandatory whenever WITH is used on a parameter — " \
             "capability flow stops here.")
         end
@@ -142,14 +142,14 @@ module WithMatchCheck
   end
 
   # Map a SymbolEntry's sync to the family name it belongs to.
-  # Currently LOCKABLE is the only implemented family; other families are
+  # Currently LOCKED is the only implemented family; other families are
   # reserved for future phases.
-  LOCKABLE_SYNCS = %i[locked write_locked always_mutable].to_set.freeze
+  LOCKED_SYNCS = %i[locked write_locked always_mutable].to_set.freeze
 
   def self.family_of_arg(arg)
     sym = arg.respond_to?(:symbol) ? arg.symbol : nil
     return nil unless sym
-    return :LOCKABLE if LOCKABLE_SYNCS.include?(sym.sync)
+    return :LOCKED if LOCKED_SYNCS.include?(sym.sync)
     nil
   end
 end

@@ -42,7 +42,7 @@ module BgCaptureClassifier
       # against the live entries before we read sync/storage closes
       # the dual-SymbolEntry divergence flagged in
       # docs/agents/sync-boundary-unification.md (Gap C) and fixes
-      # transpile-tests/257_concurrent_capture_lockable_param.cht.
+      # transpile-tests/257_concurrent_capture_locked_param.cht.
       live_param_syms = Scope.live_param_syms(fn)
       AST.each_capture_analysis(fn.body) { |a| classify_one!(a, live_param_syms) }
     end
@@ -57,7 +57,7 @@ module BgCaptureClassifier
     # Refresh capture_symbols against the live function-param entries
     # (which propagate_caller_sync! mutates in place). Without this,
     # captures into a fiber-like body inside a function with REQUIRES
-    # LOCKABLE see a deep-copied stale entry whose storage is still
+    # LOCKED see a deep-copied stale entry whose storage is still
     # :stack instead of the propagated :shared.
     if a.capture_symbols
       a.capture_symbols.each do |name, _entry|

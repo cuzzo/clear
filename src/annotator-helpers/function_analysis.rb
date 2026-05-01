@@ -550,7 +550,7 @@ module FunctionAnalysis
       #   1. Explicit :sync on the signature param (cross-module form).
       #   2. The param's declared type's sync (legacy direct-annotation).
       #   3. The function's REQUIRES clause — if the param is constrained
-      #      to a sync family (LOCKABLE, etc.), seed a default sync that
+      #      to a sync family (LOCKED, etc.), seed a default sync that
       #      satisfies the deferred WITH validation. This unblocks the
       #      cross-module case where propagate_caller_sync! can't see
       #      callers (e.g., a helper in a REQUIRE'd file). The actual
@@ -564,7 +564,7 @@ module FunctionAnalysis
         param_sync = param[:type].sync
       elsif node.respond_to?(:requires) && node.requires
         families = node.requires[param[:name].to_s]
-        if families && families.include?(:LOCKABLE)
+        if families && families.include?(:LOCKED)
           param_sync = :locked
         end
       end

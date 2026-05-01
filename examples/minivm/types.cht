@@ -196,7 +196,7 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
 END
 
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     MUTABLE recurseTo: ?Id<Env> = NIL;

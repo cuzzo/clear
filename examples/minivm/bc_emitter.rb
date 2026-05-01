@@ -627,13 +627,13 @@ class BcEmitter
       next if pname == "rt"
       base_name = pname.start_with?("_m_") ? pname[3..] : pname
       alloc_slot(pname, ast_param_types[base_name] || :any)
-      # REQUIRES p: LOCKABLE — caller passed a Boxed cell-id; mark the
+      # REQUIRES p: LOCKED — caller passed a Boxed cell-id; mark the
       # param as boxed so reads/writes through this slot deref via
       # BOX_LOAD / BOX_STORE just like a local @local / @shared:locked
       # binding. BOX_LOAD is a passthrough on non-Boxed values, so this
       # is safe even when callers pass plain values.
       param_requires = requires_clauses[base_name.to_sym] || requires_clauses[base_name]
-      if param_requires.is_a?(Set) && param_requires.include?(:LOCKABLE)
+      if param_requires.is_a?(Set) && param_requires.include?(:LOCKED)
         @boxed_slots << pname
       end
     end
@@ -6187,7 +6187,7 @@ class BcEmitter
 
   # Compile call-site args to a helper FN. Mirrors `args.each { |a|
   # compile_expr_to_value(a) }` but suppresses BOX_LOAD for args that
-  # land in a `REQUIRES p: LOCKABLE` param. That param-side handling
+  # land in a `REQUIRES p: LOCKED` param. That param-side handling
   # in compile_helper_def already marks the slot @boxed_slots, so reads
   # through the param auto-deref. Without the call-side mirror, we'd
   # debox the @shared:locked Boxed cell-id in the caller, then re-pass
@@ -6202,13 +6202,13 @@ class BcEmitter
     real_params = sig_params.reject { |p| (p.is_a?(Hash) ? p[:name] : nil).to_s == "rt" }
 
     args.each_with_index do |a, i|
-      lockable = false
+      locked = false
       if (p = real_params[i])
         pname = (p.is_a?(Hash) ? p[:name] : nil).to_s
         rset = requires[pname.to_sym] || requires[pname]
-        lockable = rset.is_a?(Set) && rset.include?(:LOCKABLE)
+        locked = rset.is_a?(Set) && rset.include?(:LOCKED)
       end
-      if lockable && a.is_a?(MIR::Ident) &&
+      if locked && a.is_a?(MIR::Ident) &&
          @boxed_slots&.include?(a.name.to_s) && @slots[a.name.to_s]
         emit_op(LOAD_SLOT, @slots[a.name.to_s])
         push_type(:any)

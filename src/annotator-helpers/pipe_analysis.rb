@@ -1266,7 +1266,7 @@ module PipeAnalysis
         # a pointer; outer c is Arc(Locked(T)) by value). Run the
         # capture analysis so list-source CONCURRENT EACH goes through
         # the same capture machinery as bounded/stream and BG/DO.
-        # Repro: transpile-tests/257_concurrent_capture_lockable_param.cht.
+        # Repro: transpile-tests/257_concurrent_capture_locked_param.cht.
         with_new_scope(current_scope) do
           item_type = node.left.type_info.element_type.resolved
           current_scope.declare("_", nil, item_type, true, false, nil, :stack)

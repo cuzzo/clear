@@ -352,7 +352,7 @@ module CapabilityHelper
                        # the BG body was visited (params receiving @shared:locked from
                        # callers). mir_lowering reads the entry's CURRENT sync/storage
                        # to overlay onto the cached type, which fixes the BG ctx field
-                       # type-mismatch repro'd by transpile-tests/253_bg_capture_lockable_param.cht.
+                       # type-mismatch repro'd by transpile-tests/253_bg_capture_locked_param.cht.
     :close_patterns,   # Hash<name => close_zig_string> for resource cleanup
     :pointer_captures, # Set<name> - captures needing *T pointer passing
     :string_captures,  # Set<name> - string captures needing defer free in fiber

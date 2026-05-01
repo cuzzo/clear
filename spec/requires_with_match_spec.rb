@@ -29,27 +29,27 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
 
   describe "REQUIRES parsing" do
     it "parses a single-family REQUIRES" do
-      ast = parse("FN bumpIt(c: Counter) RETURNS Void REQUIRES c: LOCKABLE -> END")
-      expect(ast.statements.first.requires).to eq("c" => Set[:LOCKABLE])
+      ast = parse("FN bumpIt(c: Counter) RETURNS Void REQUIRES c: LOCKED -> END")
+      expect(ast.statements.first.requires).to eq("c" => Set[:LOCKED])
     end
 
     it "parses a multi-family disjunction" do
-      ast = parse("FN bumpIt(c: Counter) RETURNS Void REQUIRES c: LOCKABLE | VERSIONED -> END")
-      expect(ast.statements.first.requires).to eq("c" => Set[:LOCKABLE, :VERSIONED])
+      ast = parse("FN bumpIt(c: Counter) RETURNS Void REQUIRES c: LOCKED | VERSIONED -> END")
+      expect(ast.statements.first.requires).to eq("c" => Set[:LOCKED, :VERSIONED])
     end
 
     it "parses a grouped param-list (one disjunction shared)" do
-      ast = parse("FN transact(x: A, y: B) RETURNS Void REQUIRES x, y: LOCKABLE -> END")
+      ast = parse("FN transact(x: A, y: B) RETURNS Void REQUIRES x, y: LOCKED -> END")
       expect(ast.statements.first.requires).to eq(
-        "x" => Set[:LOCKABLE],
-        "y" => Set[:LOCKABLE]
+        "x" => Set[:LOCKED],
+        "y" => Set[:LOCKED]
       )
     end
 
     it "parses multiple groups separated by ','" do
-      ast = parse("FN mixed(x: A, y: B) RETURNS Void REQUIRES x: LOCKABLE, y: VERSIONED -> END")
+      ast = parse("FN mixed(x: A, y: B) RETURNS Void REQUIRES x: LOCKED, y: VERSIONED -> END")
       expect(ast.statements.first.requires).to eq(
-        "x" => Set[:LOCKABLE],
+        "x" => Set[:LOCKED],
         "y" => Set[:VERSIONED]
       )
     end
@@ -67,7 +67,7 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
     it "parses a single-family WITH (no MATCH wrapper) — sugar form" do
       src = <<~CHT
         FN bumpIt(c: Counter) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
           WITH EXCLUSIVE c AS inner { x = inner.value; }
         END
@@ -81,10 +81,10 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
     it "parses a multi-family WITH MATCH with WHEN arms" do
       src = <<~CHT
         FN transact(x: A, y: B) RETURNS Bool
-          REQUIRES x, y: LOCKABLE | VERSIONED
+          REQUIRES x, y: LOCKED | VERSIONED
         ->
           WITH x AS a, y AS b MATCH
-            WHEN LOCKABLE -> { z = 1; }
+            WHEN LOCKED -> { z = 1; }
             WHEN VERSIONED -> { w = 2; }
           END
         END
@@ -93,16 +93,16 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
       with_block = ast.statements.first.body.first
       expect(with_block.arms).not_to be_nil
       expect(with_block.arms.length).to eq(2)
-      expect(with_block.arms.map { |a| a[:family] }).to eq([:LOCKABLE, :VERSIONED])
+      expect(with_block.arms.map { |a| a[:family] }).to eq([:LOCKED, :VERSIONED])
     end
 
     it "parses per-arm ON clauses" do
       src = <<~CHT
         FN transact(x: A) RETURNS Void
-          REQUIRES x: LOCKABLE | VERSIONED
+          REQUIRES x: LOCKED | VERSIONED
         ->
           WITH x AS a MATCH
-            WHEN LOCKABLE
+            WHEN LOCKED
               -> { z = 1; }
               ON LockTimeout EXIT "timed out"
             WHEN VERSIONED
@@ -119,7 +119,7 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
     it "rejects WITH MATCH with no WHEN arms" do
       src = <<~CHT
         FN bad(x: A) RETURNS Void
-          REQUIRES x: LOCKABLE
+          REQUIRES x: LOCKED
         ->
           WITH EXCLUSIVE x AS a MATCH END
         END
@@ -135,10 +135,10 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
         FN transact(x: Counter, y: Counter) RETURNS Bool
-          REQUIRES x, y: LOCKABLE | VERSIONED
+          REQUIRES x, y: LOCKED | VERSIONED
         ->
           WITH EXCLUSIVE x AS a, EXCLUSIVE y AS b MATCH
-            WHEN LOCKABLE -> { z = 1; }
+            WHEN LOCKED -> { z = 1; }
           END
           RETURN TRUE;
         END
@@ -150,10 +150,10 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
         FN bumpIt(c: Counter) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
           WITH EXCLUSIVE c AS inner MATCH
-            WHEN LOCKABLE -> { x = inner.value; }
+            WHEN LOCKED -> { x = inner.value; }
             WHEN VERSIONED -> { x = inner.value; }
           END
         END
@@ -183,14 +183,14 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
         ensure
           $stderr = orig
         end
-        # Verify the shim populated fn.requires with LOCKABLE.
+        # Verify the shim populated fn.requires with LOCKED.
         ast = parse(src)
         ann = SemanticAnnotator.new
         $stderr = StringIO.new
         ann.annotate!(ast)
         $stderr = orig
         bump_fn = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "bumpIt" }
-        expect(bump_fn.requires).to eq("c" => Set[:LOCKABLE])
+        expect(bump_fn.requires).to eq("c" => Set[:LOCKED])
       }.not_to raise_error
     end
   end
@@ -198,11 +198,11 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
   # ── Call-site family check (P2.6) ───────────────────────────────────────
 
   describe "P2.6: call-site family check" do
-    it "errors when caller passes bare arg to LOCKABLE-required param" do
+    it "errors when caller passes bare arg to LOCKED-required param" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
         FN bumpIt(c: Counter) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
           WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
         END
@@ -212,14 +212,14 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
         END
       CHT
       expect { annotate(src) }.to raise_error(CompilerError,
-        /Call to 'bumpIt' requires parameter 'c' to be bound under one of: LOCKABLE/)
+        /Call to 'bumpIt' requires parameter 'c' to be bound under one of: LOCKED/)
     end
 
-    it "accepts a caller binding in the LOCKABLE family" do
+    it "accepts a caller binding in the LOCKED family" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
         FN bumpIt(c: Counter) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
           WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
         END

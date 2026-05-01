@@ -739,7 +739,7 @@ END
 -- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
 FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     MUTABLE recurseTo: ?Id<Env> = NIL;
@@ -844,7 +844,7 @@ FN getTcoAst(v: Value) RETURNS Value ->
 END
 
 FN getTcoEnv!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
 ->
     MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoEnv;, DEFAULT ->
         WITH EXCLUSIVE pool AS p {
@@ -879,7 +879,7 @@ FN getErrType(v: Value) RETURNS String ->
 END
 
 FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
 ->
     MATCH catchExpr START
         Value.List AS catchItems ->
@@ -909,7 +909,7 @@ END
 
 -- resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
 FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     MATCH v START
@@ -925,7 +925,7 @@ END
 -- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
 FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     MATCH TAKES ast START
@@ -952,7 +952,7 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
 END
 
 FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     MUTABLE result: Value = evalOnce!(GIVE ast, envId, pool);
@@ -967,7 +967,7 @@ FN eval!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURN
 END
 
 FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
@@ -2080,7 +2080,7 @@ END
 -- runTest: tokenize + parse + eval
 
 FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     tokenizeToEnv!(penv, input);
@@ -2093,7 +2093,7 @@ END
 -- Returns the root env Id.
 
 FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
 ->
     WITH EXCLUSIVE pool AS p {
         rootId: Id<Env> = p.insert(Env{ vars: {} });
@@ -2246,7 +2246,7 @@ STRUCT Frame {
 -- Bytecode loader: reads ops and consts from files written by Ruby compiler
 
 FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[]
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
 ->
     raw = readFile(path) OR RAISE;
     -- Split on commas using the interpreter's split function
@@ -2264,7 +2264,7 @@ FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[]
 END
 
 FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Value[]
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
 ->
     raw = readFile(path) OR RAISE;
     MUTABLE consts: Value[]@list = List[];
@@ -2303,7 +2303,7 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Valu
 END
 
 FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
 ->
     IF line == "N" THEN RETURN Value.Nil; END
     IF startsWith?(line, "I:") THEN
@@ -2363,7 +2363,7 @@ END
 -- Caller reads them from pool[envId] after the call.
 
 FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     MUTABLE ops: Value[]@list = List[];
@@ -2509,7 +2509,7 @@ END
 
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool,
          entryIp: Int64, initCaps: Value[]) RETURNS Value
-  REQUIRES pool: LOCKABLE
+  REQUIRES pool: LOCKED
   @reentrant
 ->
     MUTABLE stack: Value[]@list = List[];

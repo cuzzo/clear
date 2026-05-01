@@ -86,7 +86,7 @@ RSpec.describe "P3 effect inference + correctness checks" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
         FN bump(c: Counter, p: ~Int64) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
           WITH EXCLUSIVE c AS x {
             v = NEXT p;
@@ -101,7 +101,7 @@ RSpec.describe "P3 effect inference + correctness checks" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
         FN bump(c: Counter, p: ~Int64) RETURNS Void
-          REQUIRES c: LOCKABLE
+          REQUIRES c: LOCKED
         ->
           v = NEXT p;
           WITH EXCLUSIVE c AS x { x.value = x.value + v; }
@@ -128,7 +128,7 @@ RSpec.describe "P3 effect inference + correctness checks" do
       src = <<~CHT
         STRUCT Counter { value: Int64 }
         FN nested(a: Counter, b: Counter) RETURNS Void
-          REQUIRES a, b: LOCKABLE
+          REQUIRES a, b: LOCKED
         ->
           WITH EXCLUSIVE a AS ai {
             WITH EXCLUSIVE b AS bi { bi.value = ai.value + bi.value; }
