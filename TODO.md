@@ -1,6 +1,6 @@
 # CLEAR TODO
 
-## v0.1 (Target = May 1)
+## v0.1 (Target = May 5)
 
  - [x] FREEZE + profiling support (detect cache miss problems due to pointer chase, that *might* be solved with FREEZE)
  - [x] Profiling support to auto-detect fast producer / slow consumer (when to add back pressure)
@@ -15,6 +15,7 @@
  - [x] `./clear fix`
  - [x] Binding metadata for capabilities + `REQUIRES` for overloaded syncronization strategies.
  - [ ] COPY/CLONE/SPLIT overloading
+ - [ ] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
