@@ -1,0 +1,81 @@
+-- Test: RETURN f(g!()) where the return type is a raw slice T[].
+--
+-- This is structurally deeper than 255/256: those were single-classifier
+-- bugs (BinaryOp falling through to raw `==`; stdlib templates substituting
+-- raw text without arg coercion). Bug 208 is a chain of inconsistencies
+-- across the slice/ArrayList boundary, plus an HPT escape-analysis gap.
+--
+-- The chain:
+--
+--   1. `RETURNS T[]` renders inconsistently in zig_type. Param positions
+--      get `[]T` (slice); return positions get `std.ArrayListUnmanaged(T)`
+--      (ArrayList). Same CLEAR type, two Zig forms. (See
+--      Type#compute_zig_type, the `dynamic? && !is_param && !is_field`
+--      branch in src/ast/type.rb.)
+--   2. ArrayList -> slice coercion at `RETURN list;` is undefined.
+--      `.items` aliases the buffer (subsequent ArrayList deinit dangles
+--      it); `toOwnedSlice` transfers ownership but no caller knows it
+--      owns the buffer.
+--   3. The receiver of a slice-returning call needs `:heap_slice`
+--      cleanup, but classify_heap_provenance only fires when
+--      `ti.heap_provenance?` is true -- which depends on the callee
+--      having `return_provenance = :heap` set BEFORE the caller is
+--      visited (a function-visit-order coupling that's only stable for
+--      strings today).
+--   4. `is_pointer = heap? || (frame? && struct?)` adds a `*` prefix to
+--      heap-provenance arrays, producing `*[]T` in zig_type -- never the
+--      desired form.
+--   5. `build_drop_entry!` and `hoist_cleanup_entry` for slice-shaped
+--      types call `ti.zig_type` without `is_param: true`, so they get
+--      the ArrayList form back from (1) and emit
+--      `CheatLib.cleanup(std.ArrayListUnmanaged(T), ...)` against a
+--      `[]T` value -- type mismatch.
+--   6. The HPT temp's `defer` fires AFTER passThrough's return value is
+--      computed but BEFORE the function returns it: classic UAF on the
+--      slice header. Suppressing the defer requires escape analysis to
+--      track that the temp's contents flowed into the caller's return
+--      through an opaque function call -- which today is only done for
+--      direct Identifier returns (lower_return's MIR::Cleanup ->
+--      ErrCleanup conversion).
+--
+-- The architectural fix: `RETURNS T[]` is heap-owned-by-caller, period.
+-- This requires touching all six points above, plus probably a mode on
+-- function returns ("transfers ownership of heap buffer" vs "borrows
+-- caller's buffer") or a syntactic distinction (like CLEAR's @list vs
+-- bare `[]`).
+--
+-- Until then this test is left disabled. Bugs 255 and 256 (its peers in
+-- the original disabled-trio audit) ARE re-enabled in this commit -- they
+-- were single-classifier issues with localized fail-closed fixes
+-- (lower_binary_op Refuse, stdlib arg coercion at the call boundary).
+-- Bug 208 needs the slice/ArrayList architectural decision before the
+-- fail-closed Refuse pattern can be applied to slice returns.
+
+UNION Value { Nil, Str: String }
+
+FN makeItems!() RETURNS Value[] ->
+    MUTABLE list: Value[]@list = List[];
+    list.append(Value{ Str: COPY "hello" });
+    list.append(Value{ Str: COPY "world" });
+    RETURN list;
+END
+
+-- Non-TAKES: copies the slice header. After HPT cleanup frees the original
+-- buffer, the copy is dangling.
+FN passThrough(items: Value[]) RETURNS Value[] -> RETURN items; END
+
+FN wrapAndReturn!() RETURNS Value[] -> RETURN passThrough(makeItems!()); END
+
+FN main() RETURNS Void ->
+    result = wrapAndReturn!();
+    ASSERT result.length() == 2, "two items survive HPT cleanup";
+    MATCH result[0] START
+        Value.Str AS s -> ASSERT s == "hello", "first item string survives";,
+        DEFAULT -> ASSERT FALSE, "expected Str variant at index 0";
+    END
+    MATCH result[1] START
+        Value.Str AS s -> ASSERT s == "world", "second item string survives";,
+        DEFAULT -> ASSERT FALSE, "expected Str variant at index 1";
+    END
+    print("208: hpt return slice no leak PASSED");
+END

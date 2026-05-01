@@ -151,7 +151,7 @@ STD_LIB = {
         end
         Type.new(:"#{elem_t.resolved}[]", collection: :list)
       },
-      zig: "try ({0}).toList(rt.heapAlloc())",
+      zig: "try ({0}).toList({rt}.heapAlloc())",
       bc: true, bc_op: :to_list,
       allocates: true,
       alloc: :heap,
@@ -521,7 +521,7 @@ STD_LIB = {
   "framePeakBytes" => {
     args: [],
     return: :Int64,
-    zig: "@as(i64, @intCast(rt.framePeakBytes()))",
+    zig: "@as(i64, @intCast({rt}.framePeakBytes()))",
     bc: true,
   },
 
@@ -556,7 +556,7 @@ STD_LIB = {
   "sleep" => {
     args: [:Int64],
     return: :Void,
-    zig: "rt.sleep(@intCast(@as(u64, @bitCast({0}))))",
+    zig: "{rt}.sleep(@intCast(@as(u64, @bitCast({0}))))",
     bc: true,
     needs_rt: true,
   },

@@ -504,6 +504,32 @@ class MIRLowering
     end
   end
 
+  # Wrap a stdlib arg's emitted Zig in `@as(<declared_zig_type>, ...)` so the
+  # template body can rely on a concrete type instead of comptime_int /
+  # anytype. Bug 256 (`sleep(1)` -> `@bitCast(1)`) was caused by templates
+  # consuming raw text that happened to be a comptime literal; coercing
+  # at the boundary closes that whole class.
+  #
+  # `@as(T, x)` is a no-op when x is already T, so this is free for
+  # already-typed args. We skip when the spec doesn't have a usable
+  # declared type (Hash without :type, generic :Any, slice/collection
+  # symbols whose Zig form is a runtime value rather than a literal-coercion
+  # target).
+  def coerce_stdlib_arg(arg_zig, spec)
+    type_sym = spec.is_a?(Hash) ? spec[:type] : spec
+    return arg_zig unless type_sym
+    return arg_zig if type_sym == :Any
+    # Numeric and Bool primitives are the cases templates consume as values
+    # and where comptime_int / untyped slips through. String and collection
+    # types are passed through Zig's existing slice / struct coercion and
+    # don't need (and sometimes don't accept) an explicit `@as`.
+    return arg_zig unless [:Int64, :Float64, :Int32, :Int16, :Int8,
+                            :UInt64, :UInt32, :UInt16, :UInt8, :Bool].include?(type_sym)
+    zig_t = Type.new(type_sym).zig_type rescue nil
+    return arg_zig unless zig_t
+    "@as(#{zig_t}, #{arg_zig})"
+  end
+
   # Resolve a registry alloc symbol (:heap, :frame, :receiver_storage, :node_storage)
   # to a concrete :heap/:frame symbol. Used by InlineZig allocs field.
   def resolve_alloc_sym(alloc_sym, receiver_type = nil, target_node = nil, node = nil)
@@ -1500,6 +1526,30 @@ class MIRLowering
 
     # Emit all args to Zig strings
     args_zig = mir_args.map { |a| emit_expr(a) }
+
+    # Coerce each arg to its declared type at the boundary. This makes the
+    # template rely on typed args instead of hoping Zig figures out a
+    # comptime_int / unknown-typed RHS. Bug 256 (`sleep(1)` -> `@bitCast(1)`
+    # rejected because comptime_int has no bit width) is the canonical
+    # example: with `@as(i64, 1)` wrapping the literal at the boundary,
+    # the existing `@bitCast` in the template just works.
+    #
+    # Coercion is a no-op when the arg is already the declared type, so
+    # non-literal args pay nothing. We skip it for `:Any` (anytype) and
+    # for arg specs without a concrete declared type (Hash forms whose
+    # `:type` is missing or :Any).
+    stdlib_args = node.matched_stdlib_def&.dig(:args)
+    if stdlib_args.is_a?(Array)
+      args_zig = args_zig.each_with_index.map do |arg_zig, i|
+        coerce_stdlib_arg(arg_zig, stdlib_args[i])
+      end
+    end
+
+    # Resolve {rt} to the in-scope runtime variable. Inside a BG / DO /
+    # CONCURRENT body the runtime is renamed (e.g. `__rt_bg0`) and the
+    # template's literal `rt` would refer to a different scope's binding
+    # that Zig rejects with "'rt' not accessible from inner function".
+    pattern = pattern.gsub("{rt}", @rt_name) if pattern.include?("{rt}")
 
     # Resolve {key_zig} and {val_zig} from receiver type (numeric/sharded maps)
     if pattern.include?("{key_zig}") || pattern.include?("{val_zig}")
@@ -3457,10 +3507,77 @@ class MIRLowering
       end
     end
 
+    # Union value compared to a unit variant: Zig's `==` doesn't work on
+    # tagged unions, so we lower to `std.meta.activeTag(<v>) == .<Variant>`.
+    # This is the only EQ shape we structurally accept on unions; comparing
+    # two arbitrary union values is ambiguous (which payload field counts?)
+    # and Refuse below points users at MATCH, which CLEAR already supports.
+    if %i[EQ NEQ].include?(node.op)
+      lhs_uv = unit_variant_access(node.left)
+      rhs_uv = unit_variant_access(node.right)
+      if lhs_uv && !rhs_uv
+        op_str = node.op == :EQ ? "==" : "!="
+        tag_call = MIR::Call.new("std.meta.activeTag", [right], false)
+        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{lhs_uv[1]}"))
+      elsif rhs_uv && !lhs_uv
+        op_str = node.op == :EQ ? "==" : "!="
+        tag_call = MIR::Call.new("std.meta.activeTag", [left], false)
+        return MIR::BinOp.new(op_str, tag_call, MIR::Lit.new(".#{rhs_uv[1]}"))
+      end
+    end
+
+    # Refuse: any EQ/NEQ where either side is a union/struct value that
+    # Zig's `==` doesn't accept. Falling through to `MIR::BinOp("==", ...)`
+    # would emit a Zig error the user can't easily map back to their
+    # CLEAR source. Raise a CLEAR-level diagnostic instead, naming the
+    # type and pointing at MATCH (the canonical CLEAR pattern for
+    # discriminating tagged values).
+    if %i[EQ NEQ].include?(node.op)
+      left_ti = node.left.type_info
+      right_ti = node.right.type_info
+      left_resolved = left_ti.is_a?(Type) ? left_ti.resolved : (left_ti && Type.new(left_ti.to_s).resolved)
+      right_resolved = right_ti.is_a?(Type) ? right_ti.resolved : (right_ti && Type.new(right_ti.to_s).resolved)
+      union_lhs = left_resolved && @union_schemas&.key?(left_resolved)
+      union_rhs = right_resolved && @union_schemas&.key?(right_resolved)
+      if union_lhs || union_rhs
+        type_name = union_lhs ? left_resolved : right_resolved
+        raise "BinaryOp #{node.op} on union '#{type_name}': Zig `==` does not " \
+              "work on tagged unions. Either compare against a unit variant " \
+              "(e.g. `s == #{type_name}.Variant`) -- which lowers to " \
+              "std.meta.activeTag(s) == .Variant -- or use a MATCH expression " \
+              "to discriminate the active variant.\n" \
+              "(See transpile-tests/255_union_equality.cht.)"
+      end
+    end
+
     # Standard operators
     op_str = ZigTypeMapper::ZIG_OPS[node.op]
     raise "MIRLowering: unknown binary op #{node.op}" unless op_str
     MIR::BinOp.new(op_str, left, right)
+  end
+
+  # Returns [union_type_name, variant_name] when `node` is a unit-variant
+  # access on a known union (e.g. `Status.Active` -> [:Status, "Active"]),
+  # otherwise nil. Used by lower_binary_op to lower
+  # `union_value == Type.Variant` to std.meta.activeTag.
+  def unit_variant_access(node)
+    return nil unless node.is_a?(AST::GetField)
+    return nil unless node.target.is_a?(AST::Identifier)
+    type_name = node.target.name.to_sym
+    schema = @union_schemas&.dig(type_name)
+    return nil unless schema
+    var_data = schema[node.field]
+    return nil unless schema.key?(node.field)
+    # Unit variants have nil / Symbol / Type variant data. Inline-struct
+    # variants are Hashes with :kind => :inline_struct; payload variants
+    # like `Idle: Int64` are Symbols/Types -- both could appear at this
+    # AST shape, but only the no-payload `.Active` form binds with a
+    # bare GetField. Inline-struct construction goes through StructLit;
+    # payload variant construction goes through MethodCall. Bare
+    # GetField on a payload-having variant is invalid CLEAR (annotator
+    # would have raised).
+    return nil if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
+    [type_name, node.field]
   end
 
   # ================================================================
@@ -5252,6 +5369,7 @@ class MIRLowering
         end
       end
     end
+
 
     # Tail call optimization: convert self-recursive return to @call(.always_tail, ...)
     # Disabled in debug mode (stage2 Zig backend doesn't support always_tail reliably)
