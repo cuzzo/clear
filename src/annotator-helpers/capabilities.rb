@@ -357,6 +357,20 @@ module CapabilityHelper
     :pointer_captures, # Set<name> - captures needing *T pointer passing
     :string_captures,  # Set<name> - string captures needing defer free in fiber
     :resource_captures, # Set<name> - resource captures needing move suppression
+    # ── Phase 2: site_info collected during the same single walk.
+    # Names the user wrapped in GIVE/MOVE (moved) and COPY/CLONE (copied)
+    # at the BG capture site. Replaces the separate Pass-4 walk in
+    # mir_lowering.collect_bg_capture_site_info. Authority: this walk.
+    :site_moved,       # Set<name> -- user wrote GIVE x at BG site
+    :site_copied,      # Set<name> -- user wrote COPY/CLONE x at BG site
+    # ── Phase 3: derived facts produced by BgCaptureClassifier (after
+    # propagate_caller_sync! has finalized SymbolEntry stamps).
+    # Authority: BgCaptureClassifier.classify_one!. Every downstream
+    # consumer reads these instead of re-walking the BG body.
+    :strategies,        # Hash<name => CaptureStrategy::*>
+    :heap_promote_names,# Set<name> -- needs heap promotion at decl
+    :move_mark_names,   # Set<name> -- needs MIR::SuppressCleanup at outer scope
+    :alloc_mark_entries,# Hash<name => alloc_sym> -- FreshHeapCopy markers
     keyword_init: true
   ) do
     def pin_reason; has_sharded ? :sharded : :shared; end
@@ -371,7 +385,9 @@ module CapabilityHelper
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
       captures: {}, capture_symbols: {}, close_patterns: {},
-      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
+      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new,
+      site_moved: Set.new, site_copied: Set.new,
+      strategies: nil, heap_promote_names: nil, move_mark_names: nil, alloc_mark_entries: nil
     )
     _unified_capture_walk(body_exprs, Set.new, result, is_parallel)
     result
@@ -409,7 +425,9 @@ module CapabilityHelper
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
       captures: {}, capture_symbols: {}, close_patterns: {},
-      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
+      pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new,
+      site_moved: Set.new, site_copied: Set.new,
+      strategies: nil, heap_promote_names: nil, move_mark_names: nil, alloc_mark_entries: nil
     )
     _unified_capture_walk(body, locally_bound, result, false)
     result.has_outer_ref
@@ -428,6 +446,31 @@ module CapabilityHelper
       end
       if (node.is_a?(AST::ForRange) || node.is_a?(AST::ForEach)) && node.var_name.is_a?(String)
         locally_bound = locally_bound | Set[node.var_name]
+      end
+
+      # Site-info collection (Phase 2): every MoveNode/CopyNode/CloneNode
+      # wrapping a captured outer-scope Identifier is the user's GIVE/COPY/
+      # CLONE intent at the BG site. Recorded ONCE here so downstream
+      # passes don't re-walk the body. The capture tracker (lines below)
+      # uses `result.captures.key?(name)` — but at first-encounter time
+      # the capture might not be registered yet. We don't gate on that;
+      # we record every wrapped outer-scope Identifier and let the
+      # classifier filter against the eventual captures dict.
+      if node.is_a?(AST::MoveNode) && node.value.is_a?(AST::Identifier)
+        nm = node.value.name.to_s
+        result.site_moved << nm unless locally_bound.include?(nm)
+      end
+      if (node.is_a?(AST::CopyNode) || node.is_a?(AST::CloneNode)) && node.value.is_a?(AST::Identifier)
+        nm = node.value.name.to_s
+        result.site_copied << nm unless locally_bound.include?(nm)
+      end
+      # Phase 3 (was_moved CopyNode wrapper produced by ensure_owned_value!):
+      # function_analysis.rb stamps was_moved=true on a CopyNode wrapper that
+      # encodes the user's GIVE intent for type adaptation. Treat as moved.
+      if node.is_a?(AST::CopyNode) && node.respond_to?(:was_moved) && node.was_moved &&
+         node.value.is_a?(AST::Identifier)
+        nm = node.value.name.to_s
+        result.site_moved << nm unless locally_bound.include?(nm)
       end
 
       if node.is_a?(AST::Identifier)

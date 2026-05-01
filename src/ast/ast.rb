@@ -42,6 +42,46 @@ module AST
     end
   end
 
+  # Yield every BgBlock / BgStreamBlock reachable from `body` -- including
+  # those nested in expression positions (VarDecl.value, FuncCall.args,
+  # MethodCall.object/args, ReturnNode.value) which walk_body does not
+  # descend into. The single source of truth for "find BG blocks";
+  # replaces the parallel walkers in escape_analysis (e2_each_bg),
+  # mir_pass (each_bg_in_stmt), and elsewhere.
+  def self.each_bg_block(body, &block)
+    walk_body(body) do |node|
+      yield node if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
+      case node
+      when VarDecl, BindExpr, Assignment
+        _expr_each_bg_block(node.value, &block) if node.respond_to?(:value)
+      when FuncCall
+        node.args&.each { |a| _expr_each_bg_block(a, &block) }
+      when MethodCall
+        _expr_each_bg_block(node.object, &block)
+        node.args&.each { |a| _expr_each_bg_block(a, &block) }
+      when ReturnNode
+        _expr_each_bg_block(node.value, &block) if node.respond_to?(:value)
+      end
+    end
+  end
+
+  def self._expr_each_bg_block(expr, &block)
+    return unless expr
+    case expr
+    when BgBlock, BgStreamBlock
+      yield expr
+      # Recurse into the BG body so nested BG-in-expression-position
+      # also gets yielded (walk_body would only see the body's
+      # statements, not their expression sub-trees).
+      each_bg_block(expr.body, &block)
+    when FuncCall
+      expr.args&.each { |a| _expr_each_bg_block(a, &block) }
+    when MethodCall
+      _expr_each_bg_block(expr.object, &block)
+      expr.args&.each { |a| _expr_each_bg_block(a, &block) }
+    end
+  end
+
   module Locatable
     def line; token.line; end
     def column; token.column; end

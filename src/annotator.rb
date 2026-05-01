@@ -9,6 +9,7 @@ require_relative "annotator-helpers/function_analysis"
 require_relative "annotator-helpers/pipe_analysis"
 require_relative "mir/ownership_graph"
 require_relative "mir/escape_analysis"
+require_relative "mir/bg_capture_classifier"
 require_relative "mir/effect_inference"
 require_relative "mir/concurrency_checks"
 require_relative "annotator-helpers/generic_analysis"
@@ -104,6 +105,15 @@ class SemanticAnnotator
     # Then re-check the WITH validations that we deferred during the body
     # walk; any param whose entry.sync is still nil is a genuine error.
     EscapeAnalysis.propagate_caller_sync!(@fn_nodes)
+    # Single authority for BG capture-strategy facts. Runs AFTER
+    # propagate_caller_sync! (so SymbolEntry stamps are final) and
+    # BEFORE the downstream passes that need to know which captures
+    # are MoveInto / FreshHeapCopy / RcClone / ByValue. Stamps the
+    # results on each BgBlock.capture_analysis so EscapeAnalysis,
+    # OwnershipDataflow, MIRPass, and mir_lowering can READ instead
+    # of each re-deriving with their own walker (the divergence class
+    # of bug fixed in 378036a0 / 1522e534).
+    BgCaptureClassifier.classify_all!(@fn_nodes)
     # P3.2: infer per-function effects (yield/alloc_heap/io/fail) and
     # propagate transitively through the call graph.
     EffectInference.analyze!(@fn_nodes)
