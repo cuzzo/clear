@@ -114,6 +114,14 @@ class BcEmitter
   SPLIT_STREAM_NEW   = 113
   SPLIT_STREAM_NEXT  = 114
   SPLIT_STREAM_CLONE = 115
+  # Per-resource locks for user-program @shared:locked. The user's value
+  # is a Box (Value.Boxed: Id<Env>); the per-Box "locked" state lives in
+  # pool[id].vars["__locked"]. LOCK_ACQUIRE spins (yielding via sleep(1))
+  # until the slot's __locked field is Nil, then sets it to TrueVal. If
+  # the spin exceeds the timeout, push a Value.Error with kind="Transient"
+  # and errType="LockTimeout". LOCK_RELEASE clears the field.
+  LOCK_ACQUIRE       = 116  # [slot_idx] [timeout_ms_idx]
+  LOCK_RELEASE       = 117  # [slot_idx]
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -961,13 +969,25 @@ class BcEmitter
       # to its source so in-block mutations (`c.value = c.value + 1`) are
       # visible after the WITH (Zig backend does this via guard pointer
       # aliasing; VM uses by-value slots).
-      inner = semantic_mir_nodes(mir_node.body)
+      #
+      # @with_lock_releases tracks slot names that the with_block_bindings
+      # handler emitted LOCK_ACQUIRE for; we LOCK_RELEASE them here on
+      # scope exit. Without this, lock state would leak across BG fibers.
       @with_aliases ||= {}
+      @with_lock_releases ||= []
       saved_keys = @with_aliases.keys
+      saved_releases = @with_lock_releases.length
+      inner = semantic_mir_nodes(mir_node.body)
       inner.each { |n| compile_stmt(n, nil) }
       new_aliases = @with_aliases.keys - saved_keys
       new_aliases.each { |a| alias_writeback(a) }
       new_aliases.each { |a| @with_aliases.delete(a) }
+      # Release locks acquired during this scope, in reverse order
+      # (mirrors `defer` discipline).
+      while @with_lock_releases.length > saved_releases
+        rel_slot_name = @with_lock_releases.pop
+        emit_op(LOCK_RELEASE, @slots[rel_slot_name]) if has_slot?(rel_slot_name)
+      end
     when MIR::Pipeline
       # See compile_expr's MIR::Pipeline branch.
       compile_stmt(mir_node.inner, nil)
@@ -1049,6 +1069,36 @@ class BcEmitter
             @slot_types[borrow_name] = :any
             (@boxed_slots ||= Set.new) << borrow_name
           end
+        end
+
+        # LOCK_ACQUIRE: for each `var __X_guard_N = SRC<...>.acquire()`
+        # in the InlineZig (and `.write()` for write-locked, etc.), emit
+        # a real LOCK_ACQUIRE op against the SRC slot. The matching
+        # LOCK_RELEASE is emitted by the enclosing ScopeBlock handler
+        # on scope exit. Default timeout: 100ms (matches Zig debug
+        # builds; release uses 30s but 100ms is what tests like 263
+        # depend on).
+        @with_lock_releases ||= []
+        # Default timeout: 100ms (matches Zig debug-build behavior;
+        # release uses 30s but tests like 263 depend on the shorter
+        # debug-style window).
+        lock_timeout_ms = 100
+        # Source slot extraction: BG capture-rewrites identifiers to
+        # `__ctx_N.NAME` so the body accesses the context-struct field;
+        # the bc_emitter strips that prefix in compile_ident, so the
+        # "post-strip" name is the slot. Strip here too. The Arc
+        # unwrap (`.ctrl.data.*`) and lock-acquire (`.acquire()` etc.)
+        # tail is the part after. The `__acq_N_X: { if (...)` prefix
+        # appears for fallible (`acquireOrErr`) acquires used by ON
+        # clauses; skip past it before matching.
+        mir_node.code.to_s.scan(/var\s+__\w+_guard_\d+\s*=\s*(?:__acq_\d+_\w+:\s*\{\s*if\s*\()?(?:__ctx_\d+\.)?(\w+)(?:\.[\w\.\*]+)?\.(?:acquire|write|read|acquireOrErr|writeOrErr|readOrErr)\(\)/).each do |src_match|
+          src_slot = src_match[0]
+          next unless has_slot?(src_slot)
+          # Skip when the matched name is `ctx` -- that's a bounded
+          # concurrent worker's ctx struct, not a user @shared:locked.
+          next if src_slot == "ctx"
+          emit_op(LOCK_ACQUIRE, @slots[src_slot], lock_timeout_ms)
+          @with_lock_releases << src_slot
         end
         # First pattern: Arc unwrap via .ctrl.data.*
         mir_node.code.to_s.scan(/const\s+(__\w+_unwrap)\s*=\s*(\w+)\.ctrl\.data\.\*/).each do |alias_name, src_name|

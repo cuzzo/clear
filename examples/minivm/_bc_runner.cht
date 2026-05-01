@@ -3630,6 +3630,67 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
+            116 -> -- LOCK_ACQUIRE [slot_idx] [timeout_ms]: per-resource
+                   -- lock on slots[slot_idx]. The slot holds a Value.Boxed
+                   -- (envId); the lock state lives in pool[envId].vars["__locked"].
+                   -- Spin via cooperative sleep(1) until the field is Nil,
+                   -- then set TrueVal. On timeout, push Value.Error with
+                   -- kind=Transient, errType=LockTimeout (the user's
+                   -- ON LockTimeout clause maps via IS_ERR + kind checks).
+                lockSlot = ops[ip]; ip += 1;
+                lockTimeoutMs = ops[ip]; ip += 1;
+                lockBoxVal = COPY slots[lockSlot];
+                MUTABLE lockEnvIdHolder: ?Id<Env> = NIL;
+                MATCH lockBoxVal START
+                    Value.Boxed AS bid -> lockEnvIdHolder = bid;,
+                    DEFAULT -> PASS;
+                END
+                IF lockEnvIdHolder AS lockEid THEN
+                    MUTABLE acquired = FALSE;
+                    MUTABLE timedOut = FALSE;
+                    MUTABLE waited: Int64 = 0;
+                    WHILE NOT acquired DO
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[lockEid] AS lenv THEN
+                                IF (lenv.vars["__locked"] OR Value.Nil) == Value.Nil THEN
+                                    lenv.vars["__locked"] = Value.TrueVal;
+                                    acquired = TRUE;
+                                END
+                            END
+                        }
+                        IF NOT acquired THEN
+                            sleep(1);
+                            waited = waited + 1;
+                            IF waited >= lockTimeoutMs THEN
+                                timedOut = TRUE;
+                                acquired = TRUE;
+                            END
+                        END
+                    END
+                    IF timedOut THEN
+                        pv = Value.Error{
+                            errMsg: "lock acquire timeout",
+                            errKind: "Transient",
+                            errType: "LockTimeout"
+                        };
+                        IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                        sp += 1;
+                    END
+                END,
+            117 -> -- LOCK_RELEASE [slot_idx]: clear the per-resource lock
+                   -- on the Box held in slots[slot_idx]. Idempotent when
+                   -- the slot isn't a Box (e.g., acquire-failed paths).
+                relSlot = ops[ip]; ip += 1;
+                relBoxVal = COPY slots[relSlot];
+                MATCH relBoxVal START
+                    Value.Boxed AS rid ->
+                        WITH EXCLUSIVE pool AS p {
+                            IF p[rid] AS renv THEN
+                                renv.vars["__locked"] = Value.Nil;
+                            END
+                        },
+                    DEFAULT -> PASS;
+                END,
             DEFAULT ->
                 running = FALSE;
         END
