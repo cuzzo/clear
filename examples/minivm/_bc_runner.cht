@@ -404,25 +404,31 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 36 THEN
         -- list-push: return new list with element appended (preserves typed arrays)
         MATCH evaled[1] START
-            -- In-place append: MATCH AS gives a reference into evaled[1],
-            -- which is the function's local copy of the popped Value.
-            -- Mutating srcInts/srcFloats/srcItems updates the underlying
-            -- @list in place (O(1) amortized) rather than copying every
-            -- element (O(N)). The wrapper Value.{TypedI64Arr,...} we
-            -- return shares the same underlying storage, so the caller's
-            -- store-back operation is logically a no-op for the data
-            -- (only the Value union tag is touched). This is what
-            -- distinguishes the bytecode VM's stress-test performance
-            -- from the previous functional copy-then-append pattern.
+            -- The TypedI64Arr/TypedF64Arr variant payloads are slices
+            -- ([]i64, []f64), which don't have .append(). The List
+            -- variant is also stored as a slice once wrapped. Build a
+            -- fresh @list, copy elements over, append, and wrap.
             Value.TypedI64Arr AS srcInts ->
-                srcInts.append(getInt(evaled[2]));
-                RETURN Value{ TypedI64Arr: srcInts };,
+                MUTABLE newInts: Int64[]@list = List[];
+                FOR li IN (0_i64 ..< srcInts.length()) DO
+                    newInts.append(srcInts[li]);
+                END
+                newInts.append(getInt(evaled[2]));
+                RETURN Value{ TypedI64Arr: newInts };,
             Value.TypedF64Arr AS srcFloats ->
-                srcFloats.append(getNum(evaled[2]));
-                RETURN Value{ TypedF64Arr: srcFloats };,
+                MUTABLE newFloats: Float64[]@list = List[];
+                FOR li IN (0_i64 ..< srcFloats.length()) DO
+                    newFloats.append(srcFloats[li]);
+                END
+                newFloats.append(getNum(evaled[2]));
+                RETURN Value{ TypedF64Arr: newFloats };,
             Value.List AS srcItems ->
-                srcItems.append(COPY evaled[2]);
-                RETURN Value{ List: srcItems };,
+                MUTABLE newItems: Value[]@list = List[];
+                FOR li IN (0_i64 ..< srcItems.length()) DO
+                    newItems.append(COPY srcItems[li]);
+                END
+                newItems.append(COPY evaled[2]);
+                RETURN Value{ List: newItems };,
             DEFAULT ->
                 MUTABLE singleItem: Value[]@list = List[];
                 singleItem.append(COPY evaled[2]);
@@ -3647,18 +3653,28 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     MUTABLE acquired = FALSE;
                     MUTABLE timedOut = FALSE;
                     MUTABLE waited: Int64 = 0;
-                    WHILE NOT acquired DO
+                    WHILE !acquired DO
                         WITH EXCLUSIVE pool AS p {
                             IF p[lockEid] AS lenv THEN
-                                IF (lenv.vars["__locked"] OR Value.Nil) == Value.Nil THEN
+                                MUTABLE isUnlocked = FALSE;
+                                IF lenv.vars["__locked"] AS lockVal THEN
+                                    MATCH lockVal START
+                                        Value.Nil -> isUnlocked = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                ELSE
+                                    isUnlocked = TRUE;
+                                END
+                                IF isUnlocked THEN
                                     lenv.vars["__locked"] = Value.TrueVal;
                                     acquired = TRUE;
                                 END
                             END
                         }
-                        IF NOT acquired THEN
-                            sleep(1);
-                            waited = waited + 1;
+                        IF !acquired THEN
+                            sleepArg: Int64 = 1_i64;
+                            sleep(sleepArg);
+                            waited = waited + 1_i64;
                             IF waited >= lockTimeoutMs THEN
                                 timedOut = TRUE;
                                 acquired = TRUE;
