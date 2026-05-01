@@ -27,7 +27,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Observable aggregations for streaming pipelines (@shared aggregate results)
  - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
- - [ ] Atomics (in progress)
+ - [ ] ARC Atomics (in progress)
  - [ ] Typed Holes
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
@@ -47,6 +47,7 @@ Milestone: *Basic* SQL/CLEAR database
 
  - [ ] Full Infinite Stream support
  - [ ] Stream Join (declarative, basic)
+ - [ ] Bare Atomics
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
  - [ ] Actors as an ownership capability
