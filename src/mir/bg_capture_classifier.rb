@@ -59,9 +59,26 @@ module BgCaptureClassifier
     end
 
     a.strategies = strategies
-    a.heap_promote_names = strategies.each_with_object(Set.new) { |(n, s), set|
-      set << n if heap_promote_for?(s)
-    }
+
+    # heap_promote_names: any captured @list / @set / non-numeric-map that
+    # is NOT pointer-passing. Mirrors the predicate the old
+    # EscapeAnalysis.e2_bg_capture_names used (which is broader than the
+    # CaptureStrategy classification: e2 promotes bare-reference captures
+    # too, since `items.append(2.0)` inside a BG body mutates the shared
+    # backing and needs heap allocation regardless of GIVE/COPY intent).
+    a.heap_promote_names = a.captures.each_with_object(Set.new) do |(name, type_obj), set|
+      sym = a.capture_symbols&.dig(name)
+      t = resolve_capture_type(type_obj, sym)
+      next unless t
+      next if t.needs_pointer_passing?
+      next unless t.collection? && !t.numeric_map?
+      set << name
+    end
+
+    # move_mark_names: explicit user-written GIVE intent (or its
+    # type-adapted CopyNode-with-was_moved equivalent). Drives
+    # MIR::SuppressCleanup emission and OwnershipDataflow's
+    # "consumed by BG" marking. One source of truth for both.
     a.move_mark_names = strategies.each_with_object(Set.new) { |(n, s), set|
       set << n if s.is_a?(CaptureStrategy::MoveInto)
     }
@@ -88,18 +105,4 @@ module BgCaptureClassifier
     base
   end
 
-  # The set of strategies that imply the capture's source binding must be
-  # heap-allocated at the declaration site (so the iteration's per-iter
-  # frame rewind doesn't free the backing while the spawned fiber holds
-  # a pointer into it). Mirrors the existing
-  # EscapeAnalysis.e2_bg_capture_names predicate; the classifier reads
-  # from strategies instead of re-walking BG bodies.
-  def self.heap_promote_for?(strategy)
-    case strategy
-    when CaptureStrategy::MoveInto, CaptureStrategy::FreshHeapCopy
-      true
-    else
-      false
-    end
-  end
 end

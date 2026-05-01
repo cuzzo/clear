@@ -42,43 +42,99 @@ module AST
     end
   end
 
-  # Yield every BgBlock / BgStreamBlock reachable from `body` -- including
-  # those nested in expression positions (VarDecl.value, FuncCall.args,
-  # MethodCall.object/args, ReturnNode.value) which walk_body does not
-  # descend into. The single source of truth for "find BG blocks";
-  # replaces the parallel walkers in escape_analysis (e2_each_bg),
-  # mir_pass (each_bg_in_stmt), and elsewhere.
+  # Yield every BgBlock / BgStreamBlock reachable from `body`, including
+  # nested ones inside control flow (WHILE/MATCH/IF/FOR/WITH/DO),
+  # expression positions (VarDecl.value, FuncCall.args), and inside
+  # other BG bodies. Use this when classifying every BG in a function.
+  # The single source of truth replacing the parallel walkers in
+  # escape_analysis (e2_each_bg) and elsewhere.
   def self.each_bg_block(body, &block)
-    walk_body(body) do |node|
-      yield node if node.is_a?(BgBlock) || node.is_a?(BgStreamBlock)
-      case node
-      when VarDecl, BindExpr, Assignment
-        _expr_each_bg_block(node.value, &block) if node.respond_to?(:value)
-      when FuncCall
-        node.args&.each { |a| _expr_each_bg_block(a, &block) }
-      when MethodCall
-        _expr_each_bg_block(node.object, &block)
-        node.args&.each { |a| _expr_each_bg_block(a, &block) }
-      when ReturnNode
-        _expr_each_bg_block(node.value, &block) if node.respond_to?(:value)
-      end
+    return unless body
+    nodes = body.is_a?(Array) ? body : [body]
+    nodes.each { |n| _bg_visit_recursive(n, &block) }
+  end
+
+  def self._bg_visit_recursive(node, &block)
+    case node
+    when BgBlock, BgStreamBlock
+      yield node
+      each_bg_block(node.body, &block)
+    when IfStatement
+      each_bg_block(node.then_branch, &block)
+      each_bg_block(node.else_branch, &block)
+    when MatchStatement
+      (node.cases || []).each { |c| each_bg_block(c[:body], &block) }
+      each_bg_block(node.default_case, &block) if node.default_case
+    when WhileLoop, WhileBindLoop
+      each_bg_block(node.do_branch, &block)
+    when ForRange, ForEach
+      each_bg_block(node.body, &block)
+    when WithBlock
+      each_bg_block(node.body, &block)
+    when DoBlock
+      (node.branches || []).each { |b| each_bg_block(b[:body], &block) }
+    when FunctionDef
+      each_bg_block(node.body, &block)
+    when VarDecl, BindExpr, Assignment
+      _expr_each_bg_block_recursive(node.value, &block) if node.respond_to?(:value)
+    when FuncCall
+      node.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
+    when MethodCall
+      _expr_each_bg_block_recursive(node.object, &block)
+      node.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
+    when ReturnNode
+      _expr_each_bg_block_recursive(node.value, &block) if node.respond_to?(:value)
     end
   end
 
-  def self._expr_each_bg_block(expr, &block)
+  def self._expr_each_bg_block_recursive(expr, &block)
     return unless expr
     case expr
     when BgBlock, BgStreamBlock
       yield expr
-      # Recurse into the BG body so nested BG-in-expression-position
-      # also gets yielded (walk_body would only see the body's
-      # statements, not their expression sub-trees).
       each_bg_block(expr.body, &block)
     when FuncCall
-      expr.args&.each { |a| _expr_each_bg_block(a, &block) }
+      expr.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
     when MethodCall
-      _expr_each_bg_block(expr.object, &block)
-      expr.args&.each { |a| _expr_each_bg_block(a, &block) }
+      _expr_each_bg_block_recursive(expr.object, &block)
+      expr.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
+    end
+  end
+
+  # Yield ONLY the BgBlocks directly embedded in `stmt`'s expression
+  # positions -- does NOT descend into nested control-flow branches OR
+  # into the bodies of BGs found here. Use when emitting per-stmt MIR
+  # markers (MIR::SuppressCleanup, MIR::Promote): nested control flow
+  # gets its own transform_body call which handles its BGs separately;
+  # nested BGs capture from their parent BG body's scope, not this
+  # stmt's scope.
+  def self.each_bg_block_in_stmt(stmt, &block)
+    case stmt
+    when BgBlock, BgStreamBlock
+      yield stmt
+    when VarDecl, BindExpr, Assignment
+      _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
+    when FuncCall
+      stmt.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
+    when MethodCall
+      _expr_each_bg_block_shallow(stmt.object, &block)
+      stmt.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
+    when ReturnNode
+      _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
+    end
+  end
+
+  def self._expr_each_bg_block_shallow(expr, &block)
+    return unless expr
+    case expr
+    when BgBlock, BgStreamBlock
+      yield expr
+      # Stop here -- do not descend into BG body.
+    when FuncCall
+      expr.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
+    when MethodCall
+      _expr_each_bg_block_shallow(expr.object, &block)
+      expr.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
     end
   end
 

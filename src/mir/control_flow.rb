@@ -763,30 +763,18 @@ class OwnershipDataflow
   # Walks the BG body looking for `GIVE capture` (MoveNode wrapping an
   # Identifier whose name is in the BG's capture set). Each such GIVE
   # transfers ownership of the outer binding into the fiber. COPY/CLONE
-  # do not consume — those paths deep-copy / rc-clone instead (handled
-  # by walk_expr_skip_copy refusing to recurse into CopyNode).
+  # do not consume — those paths deep-copy / rc-clone instead.
+  #
+  # Reads `bg.capture_analysis.move_mark_names` (computed once by
+  # BgCaptureClassifier in the annotator). Previously this re-walked
+  # the BG body via walk_expr_skip_copy + a dataflow-private MoveNode/
+  # was_moved-CopyNode detector that drifted from the parallel
+  # implementation in MIRPass._walk_expr_for_give (the 378036a0 class
+  # of bug). Now there is one writer and three readers (this method,
+  # MIRPass.insert_bg_give_suppress!, EscapeAnalysis), all reading the
+  # same field.
   def collect_bg_body_gives(bg_node)
-    capture_names = (bg_node.capture_analysis&.captures || {}).keys.map(&:to_s).to_set
-    return [] if capture_names.empty?
-    moves = []
-    AST.walk_body(bg_node.body) do |stmt|
-      walk_expr_skip_copy(stmt) do |sub|
-        # Direct GIVE x: MoveNode(Identifier).
-        if sub.is_a?(AST::MoveNode) && sub.value.is_a?(AST::Identifier)
-          moves << sub.value.name.to_s if capture_names.include?(sub.value.name.to_s)
-          next
-        end
-        # GIVE x to a TAKES param of an adapted type (e.g. @list arg to a
-        # slice param) -- function_analysis.rb wraps the user's MoveNode
-        # in a CopyNode for the type adaptation but stamps was_moved=true
-        # on the wrapper. The user's GIVE intent lives on that flag.
-        if sub.is_a?(AST::CopyNode) && sub.respond_to?(:was_moved) && sub.was_moved &&
-           sub.value.is_a?(AST::Identifier)
-          moves << sub.value.name.to_s if capture_names.include?(sub.value.name.to_s)
-        end
-      end
-    end
-    moves.uniq
+    bg_node.capture_analysis&.move_mark_names&.to_a || []
   end
 
   # Returns true if this identifier's type is Copy (no move on assignment).
@@ -846,22 +834,12 @@ class OwnershipDataflow
 
   # Like walk_expr but does NOT recurse into CopyNode. CopyNode wraps
   # was_moved identifiers for implicit copies -- the source is NOT consumed.
-  #
-  # Exception: when the user explicitly wrote GIVE inside a CopyNode
-  # (which happens when ensure_owned_value! wraps a user's MoveNode for
-  # type adaptation -- e.g. GIVE bgCaps to a param expecting Value[]),
-  # the move IS real. Yield the inner MoveNode so the dataflow sees the
-  # consumption. Without this, BG fibers can't transfer @list ownership
-  # because the type-adapter CopyNode hides the user's GIVE.
   def walk_expr_skip_copy(node, &block)
     return unless node
     yield node
     case node
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      if node.is_a?(AST::CopyNode) && node.value.is_a?(AST::MoveNode)
-        walk_expr_skip_copy(node.value, &block)
-      end
-      # Otherwise: COPY/FREEZE does not consume the source.
+      # Do not recurse: COPY/FREEZE does not consume the source.
     when AST::BinaryOp
       walk_expr_skip_copy(node.left, &block)
       walk_expr_skip_copy(node.right, &block)

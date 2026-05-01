@@ -2425,53 +2425,20 @@ class MIRLowering
 
     analysis = node.capture_analysis
     captured = analysis&.captures || {}
-    capture_symbols = analysis&.capture_symbols || {}
     capture_close_zig = analysis&.close_patterns || {}
     pointer_captures = analysis&.pointer_captures || Set.new
-    resource_captures = analysis&.resource_captures || Set.new
-
-    # Refresh each capture's Type from the live SymbolEntry, since
-    # EscapeAnalysis.propagate_caller_sync! stamps sync/storage on
-    # parameter entries AFTER analyze_fiber_captures snapshotted
-    # node.type_info. Without this overlay, params that received
-    # @shared:locked from a caller produce a BG ctx field declared
-    # *Locked(T) while the actual value is Arc(Locked(T)) -- Zig
-    # rejects the .name = name init. See transpile-tests/253_bg_capture_lockable_param.cht.
-    refreshed_capture_type = ->(name, type_obj) {
-      next nil unless type_obj
-      base = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)
-      sym = capture_symbols[name]
-      next base unless sym
-      case sym.storage
-      when :multiowned then base.ownership = :multiowned unless base.ownership && base.ownership != :affine
-      when :shared     then base.ownership = :shared     unless base.ownership && base.ownership != :affine
-      end
-      base.sync = sym.sync if sym.sync && !base.sync
-      base
-    }
 
     rt_name = @rt_name
 
-    # CaptureStrategy classification. Populates site_info from the BG
-    # body's AST — any captured name wrapped in GIVE / MOVE becomes
-    # MoveInto; wrapped in COPY / CLONE becomes FreshHeapCopy. Bare
-    # references (no wrapper) are classified by type: primitives and
-    # Rc/Arc pass through; heap-backed (@list / @pool / @map / slice
-    # borrow) become Refuse — and we raise a CLEAR-level diagnostic,
-    # refusing to lower the program at all. This closes the
-    # dangling-pointer gap documented in docs/agents/vm-bugs.md by
-    # using the SAME ownership rules as everywhere else (GIVE to a
-    # TAKES param, COPY/CLONE for deep-copy) rather than a parallel
-    # analysis.
-    site_info = collect_bg_capture_site_info(node.body, captured.keys)
-    node.capture_strategies = captured.each_with_object({}) do |(name, type_obj), h|
-      t = refreshed_capture_type.call(name, type_obj)
-      next unless t
-      h[name] = CaptureStrategy.classify(
-        name: name, type: t, site_info: site_info, rt_name: rt_name,
-        is_resource: resource_captures.include?(name),
-      )
-    end
+    # Strategies and site_info come from BgCaptureClassifier (one writer,
+    # all consumers read). The previous flow re-walked the BG body via
+    # collect_bg_capture_site_info, classified per-capture into
+    # node.capture_strategies, and refreshed each Type from the live
+    # SymbolEntry via the refreshed_capture_type lambda. All three steps
+    # are now done once in the annotator (Pass 1 walk for site_info +
+    # captures, BgCaptureClassifier post propagate_caller_sync! for
+    # strategies + derived sets). lower_bg_block reads.
+    node.capture_strategies = analysis&.strategies || {}
     enforce_bg_capture_strategies!(node, captured)
 
     # Build capture fields. The captured value's actual Zig type after
@@ -2637,43 +2604,6 @@ class MIRLowering
       }
     ZIG
     MIR::BgBlock.new(bg_code, captured, run_body || [])
-  end
-
-  # Walk the BG body's AST to find captured names referenced via GIVE /
-  # MOVE (→ moved_names) or COPY / CLONE (→ copied_names). Uses AST
-  # nodes, not MIR — the information is already present from the
-  # parser; we just read it.
-  def collect_bg_capture_site_info(body_stmts, capture_names)
-    capture_set = capture_names.to_set
-    moved = Set.new
-    copied = Set.new
-    walker = lambda do |node|
-      case node
-      when AST::MoveNode  # GIVE x / MOVE x
-        if node.value.is_a?(AST::Identifier) && capture_set.include?(node.value.name.to_s)
-          moved << node.value.name.to_s
-        end
-        walker.call(node.value)
-      when AST::CopyNode  # COPY x
-        if node.value.is_a?(AST::Identifier) && capture_set.include?(node.value.name.to_s)
-          copied << node.value.name.to_s
-        end
-        walker.call(node.value)
-      when AST::CloneNode  # CLONE x (equivalent to deep-copy here)
-        if node.value.is_a?(AST::Identifier) && capture_set.include?(node.value.name.to_s)
-          copied << node.value.name.to_s
-        end
-        walker.call(node.value)
-      else
-        if node.is_a?(Array)
-          node.each { |n| walker.call(n) }
-        elsif node.respond_to?(:members) && node.class.name&.start_with?("AST::")
-          node.members.each { |m| walker.call(node[m]) }
-        end
-      end
-    end
-    body_stmts.each { |stmt| walker.call(stmt) }
-    CaptureStrategy::CaptureSiteInfo.new(copied, moved)
   end
 
   # Raise a CLEAR-level diagnostic if any capture classifies as Refuse.

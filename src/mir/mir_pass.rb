@@ -166,7 +166,7 @@ class MIRPass
   def walk_for_bg_captures(stmts, bindings)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
-      each_bg_in_stmt(stmt) do |bg|
+      AST.each_bg_block_in_stmt(stmt) do |bg|
         resource_captures = bg.capture_analysis&.resource_captures
         next unless resource_captures&.any?
         resource_captures.each do |name|
@@ -229,7 +229,7 @@ class MIRPass
 
       # BG scope-exit promotion: annotate BgBlocks with what their exit value needs.
       # Must run after recurse_branches! so the BgBlock body is already transformed.
-      each_bg_in_stmt(stmt) do |bg|
+      AST.each_bg_block_in_stmt(stmt) do |bg|
         if bg.is_a?(AST::BgBlock)
           annotate_bg_exit_promote!(bg)
         elsif bg.is_a?(AST::BgStreamBlock)
@@ -343,103 +343,27 @@ class MIRPass
   # Find all BG/stream blocks reachable from a statement. Walks into expression
   # positions: direct values (VarDecl, BindExpr, Assignment), MethodCall args,
   # FuncCall args. Yields each BgBlock/BgStreamBlock found.
-  def each_bg_in_stmt(stmt, &block)
-    case stmt
-    when AST::BgBlock, AST::BgStreamBlock
-      yield stmt
-    when AST::VarDecl, AST::BindExpr, AST::Assignment
-      _walk_expr_for_bg(stmt.value, &block)
-    when AST::FuncCall
-      stmt.args&.each { |a| _walk_expr_for_bg(a, &block) }
-    when AST::MethodCall
-      stmt.args&.each { |a| _walk_expr_for_bg(a, &block) }
-    end
-  end
-
-  def _walk_expr_for_bg(expr, &block)
-    return unless expr
-    case expr
-    when AST::BgBlock, AST::BgStreamBlock
-      yield expr
-    when AST::FuncCall
-      expr.args&.each { |a| _walk_expr_for_bg(a, &block) }
-    when AST::MethodCall
-      _walk_expr_for_bg(expr.object, &block)
-      expr.args&.each { |a| _walk_expr_for_bg(a, &block) }
-    end
-  end
-
   # Insert MIR::SuppressCleanup for outer bindings consumed by `GIVE x`
   # inside a BG body. Mirrors insert_bg_resource_suppress! — the fiber
   # takes ownership, so the outer scope's defer must be guarded.
+  #
+  # Reads `bg.capture_analysis.move_mark_names` (computed once by
+  # BgCaptureClassifier in the annotator). Previously this re-walked
+  # every BG body via `collect_bg_body_give_names` / `_walk_expr_for_give`
+  # — a parallel implementation that drifted from
+  # OwnershipDataflow.collect_bg_body_gives (the 378036a0 class of bug).
   def insert_bg_give_suppress!(result, stmt, bindings)
-    each_bg_in_stmt(stmt) do |bg|
-      next unless bg.body
-      captures = (bg.capture_analysis&.captures || {}).keys.map(&:to_s).to_set
-      next if captures.empty?
-      gives = collect_bg_body_give_names(bg.body, captures)
-      gives.each do |name|
+    # Shallow walk: SuppressCleanup is emitted in this stmt's scope and
+    # only affects names in `bindings` (this scope's locals). Nested BG
+    # blocks capture from THEIR parent BG body's scope, not from here --
+    # their SuppressCleanup gets emitted by the recursive transform_body
+    # call when it processes the inner BG's body.
+    AST.each_bg_block_in_stmt(stmt) do |bg|
+      bg.capture_analysis&.move_mark_names&.each do |name|
         entry = bindings&.dig(name)
         next if entry && !entry[:needs_cleanup]
         result << MIR::SuppressCleanup.new(stmt.token, name)
       end
-    end
-  end
-
-  # Walk a BG body looking for `GIVE capture` — MoveNode wrapping an
-  # Identifier whose name is in the capture set.
-  def collect_bg_body_give_names(body, capture_names)
-    out = []
-    AST.walk_body(body) do |node|
-      _walk_expr_for_give(node, capture_names, out)
-    end
-    out.uniq
-  end
-
-  def _walk_expr_for_give(node, capture_names, out)
-    return unless node
-    case node
-    when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      # GIVE x to a TAKES param of an adapted type (e.g. @list arg to a
-      # slice param) -- function_analysis.rb wraps the user's MoveNode
-      # in a CopyNode for the type adaptation but stamps was_moved=true
-      # on the wrapper. The user's GIVE intent lives on that flag.
-      if node.is_a?(AST::CopyNode) && node.respond_to?(:was_moved) && node.was_moved &&
-         node.value.is_a?(AST::Identifier) && capture_names.include?(node.value.name.to_s)
-        out << node.value.name.to_s
-      end
-      # Otherwise: COPY / CLONE do not consume the source.
-    when AST::MoveNode
-      if node.value.is_a?(AST::Identifier) && capture_names.include?(node.value.name.to_s)
-        out << node.value.name.to_s
-      else
-        _walk_expr_for_give(node.value, capture_names, out)
-      end
-    when AST::BinaryOp
-      _walk_expr_for_give(node.left, capture_names, out)
-      _walk_expr_for_give(node.right, capture_names, out)
-    when AST::UnaryOp
-      _walk_expr_for_give(node.right, capture_names, out)
-    when AST::FuncCall
-      node.args&.each { |a| _walk_expr_for_give(a, capture_names, out) }
-    when AST::MethodCall
-      _walk_expr_for_give(node.object, capture_names, out)
-      node.args&.each { |a| _walk_expr_for_give(a, capture_names, out) }
-    when AST::GetField
-      _walk_expr_for_give(node.target, capture_names, out)
-    when AST::GetIndex
-      _walk_expr_for_give(node.target, capture_names, out)
-      _walk_expr_for_give(node.index, capture_names, out)
-    when AST::StructLit
-      node.fields&.each_value { |v| _walk_expr_for_give(v, capture_names, out) }
-    when AST::ListLit
-      node.items&.each { |i| _walk_expr_for_give(i, capture_names, out) }
-    when AST::VarDecl, AST::BindExpr, AST::Assignment
-      _walk_expr_for_give(node.value, capture_names, out)
-    when AST::ReturnNode
-      _walk_expr_for_give(node.value, capture_names, out)
-    when AST::CapabilityWrap
-      _walk_expr_for_give(node.value, capture_names, out)
     end
   end
 
@@ -452,7 +376,8 @@ class MIRPass
   # BG block captures a resource — even for inner-scope variables that
   # don't appear in the function-level bindings hash.
   def insert_bg_resource_suppress!(result, stmt, bindings)
-    each_bg_in_stmt(stmt) do |bg|
+    # Shallow walk: same reason as insert_bg_give_suppress! above.
+    AST.each_bg_block_in_stmt(stmt) do |bg|
       resource_captures = bg.capture_analysis&.resource_captures
       next unless resource_captures&.any?
       resource_captures.each do |name|
@@ -473,7 +398,7 @@ class MIRPass
     return false unless stmts.is_a?(Array)
     stmts.any? do |stmt|
       found = false
-      each_bg_in_stmt(stmt) do |bg|
+      AST.each_bg_block(stmt) do |bg|
         captured = bg.capture_analysis&.captures
         next unless captured&.any?
         found = true if captured.any? do |name, type_obj|
@@ -496,7 +421,7 @@ class MIRPass
   def annotate_bg_exits_in_body!(stmts)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
-      each_bg_in_stmt(stmt) { |bg| annotate_bg_exit_promote!(bg) if bg.is_a?(AST::BgBlock) }
+      AST.each_bg_block_in_stmt(stmt) { |bg| annotate_bg_exit_promote!(bg) if bg.is_a?(AST::BgBlock) }
       # Recurse into control-flow branches.
       case stmt
       when AST::IfStatement
@@ -590,7 +515,10 @@ class MIRPass
   # Lists get :list strategy (in-place promoteList). Strings get :bg_string
   # strategy (transpiler emits dupe inside the BG block where the allocator is available).
   def insert_bg_escape_promote!(result, stmt)
-    each_bg_in_stmt(stmt) do |bg|
+    # Shallow walk: MIR::Promote is emitted in this scope. Nested BG
+    # captures from inner scope; their own Promote is emitted by the
+    # recursive transform_body call on the inner BG body.
+    AST.each_bg_block_in_stmt(stmt) do |bg|
       captured = bg.capture_analysis&.captures
       next unless captured&.any?
       captured.each do |name, type_obj|
