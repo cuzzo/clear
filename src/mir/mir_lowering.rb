@@ -2499,27 +2499,34 @@ class MIRLowering
                                                     capture_symbols: caps.capture_symbols,
                                                     rt_override: bg_rt) do
       body_mir = []
-      sc = pre_steps.filter_map { |step|
+      sc = pre_steps.flat_map { |step|
         mir = lower(step[:expr])
         step_pending = flush_pending
-        code = emit_expr(mir)
         body_mir.concat(step_pending)
-        body_mir << (step[:binding] ? MIR::Let.new(step[:binding], mir, false, nil, nil) : mir)
-        # AllocMark and other verification-only nodes emit nil -- skip them.
-        next nil if code.nil?
-        pending_code = step_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }.join("\n            ")
-        parts = []
-        parts << pending_code unless pending_code.empty?
-        parts << if step[:binding]
-          "const #{step[:binding]} = #{code};"
-        elsif code.strip.end_with?(";") || code.strip.end_with?("}")
-          code
-        else
-          expr_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type : :Void
-          is_void_step = expr_type.nil? || expr_type == :Void || (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
-          is_void_step ? "#{code};" : "_ = #{code};"
+
+        # `lower_var_decl` may return [AllocMark, Let, Cleanup] when the
+        # binding needs cleanup (e.g. `snapshot = COPY items` inside a
+        # BG body). Each element is its own MIR statement; AllocMark /
+        # Cleanup are checker-visible markers that emit no code.
+        mir_nodes = mir.is_a?(Array) ? mir.compact : [mir]
+        step[:binding] ? body_mir << MIR::Let.new(step[:binding], mir_nodes.last, false, nil, nil) : body_mir.concat(mir_nodes)
+
+        pending_code = step_pending.filter_map { |p| c = emit_expr(p); (c.nil? || c.empty?) ? nil : c }
+        emit_lines = mir_nodes.filter_map.with_index do |m, i|
+          code = emit_expr(m)
+          # AllocMark and other verification-only nodes emit nil -- skip them.
+          next nil if code.nil?
+          if step[:binding] && i == mir_nodes.size - 1
+            "const #{step[:binding]} = #{code};"
+          elsif code.strip.end_with?(";") || code.strip.end_with?("}")
+            code
+          else
+            expr_type = step[:expr].respond_to?(:full_type) ? step[:expr].full_type : :Void
+            is_void_step = expr_type.nil? || expr_type == :Void || (expr_type.respond_to?(:to_s) && Type.new(expr_type).zig_type == "void")
+            is_void_step ? "#{code};" : "_ = #{code};"
+          end
         end
-        parts.join("\n            ")
+        pending_code + emit_lines
       }.join("\n            ")
 
       last_is_assign = last_step && last_step[:expr].is_a?(AST::Assignment)

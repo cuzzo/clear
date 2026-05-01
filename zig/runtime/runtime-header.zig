@@ -2590,6 +2590,30 @@ pub const CheatLib = struct {
             return result;
         }
 
+        // ArrayList: allocate a fresh buffer of the same length and deep-copy
+        // each item (recursively if the element type needs cleanup, byte-copy
+        // otherwise). Without this branch, dupeValue used to fall through to
+        // `return value` for any type with a deinit method -- the caller got
+        // a shallow ArrayList header pointing at the original's buffer, and
+        // freeing one would dangling-pointer the other (the COPY @list bug
+        // 258). Uses T's own initCapacity / appendAssumeCapacity so it works
+        // for any std.ArrayListUnmanaged-shaped struct (the same shape
+        // isArrayList accepts).
+        if (comptime isArrayList(T)) {
+            const ElemT = comptime arrayListElemType(T).?;
+            var result = try T.initCapacity(alloc, value.items.len);
+            errdefer result.deinit(alloc);
+            if (comptime needsCleanup(ElemT)) {
+                for (value.items) |elem| {
+                    const duped = try dupeValue(ElemT, elem, alloc);
+                    result.appendAssumeCapacity(duped);
+                }
+            } else {
+                result.appendSliceAssumeCapacity(value.items);
+            }
+            return result;
+        }
+
         return value;
     }
 

@@ -1,31 +1,36 @@
--- Repro: BG body uses COPY on a captured outer-scope value. The
--- CaptureStrategy.classify path returns FreshHeapCopy for this case
--- (intent: fresh heap-copy at ctx-init time so the fiber owns its
--- own copy and the outer cleanup is independent), but FreshHeapCopy's
--- marker_plan ([:alloc_mark, ctx_init_name, alloc_sym], [:cleanup,
--- ctx_init_name, alloc_sym]) is computed and never emitted. Worse,
--- the `COPY x` expression INSIDE the BG body fails to lower at all:
+-- Repro for the residual `snapshot = COPY items` body-binding case.
+-- Bug 258 itself (CheatLib.dupeValue shallow-copying ArrayList) is
+-- FIXED -- see transpile-tests/282_bg_body_copy_list.cht for the
+-- working case (`sumAll(COPY items)` form: COPY at function-call
+-- argument position).
 --
---   MIREmitter: unknown node type Array (RuntimeError)
---   from src/mir/mir_emitter.rb:149
---
--- So FreshHeapCopy is doubly dead: the strategy is classified
--- correctly but neither the marker emission nor the body-side COPY
--- lowering is wired. Any user reaching this path either gets the
--- crash above (lowering failure) or, hypothetically once the
--- lowering crash is fixed, a UAF (heap copy not actually performed).
+-- The residual issue is in `lower_var_decl`: the list_collection
+-- branch unconditionally emits `ContainerInit(:list_empty)` for the
+-- declaration's init, ignoring the RHS. So `snapshot = COPY items`
+-- lowers as `var snapshot = .empty;` instead of using the COPY
+-- expression's value. The COPY itself (now a slice via lower_copy's
+-- :list_shallow strategy) is dropped on the floor; the body then
+-- indexes into an empty ArrayList and crashes with `index 0, len 0`.
 --
 -- Fix path:
--- 1. lower_bg_block (or a body-statement lowering hook) handles
---    COPY of a captured @list: emit the deep-copy at ctx-init time
---    via FreshHeapCopy.marker_plan. Body becomes a read of the
---    pre-copied ctx field.
--- 2. The MIRChecker verifies the AllocMark/Cleanup pair from
---    marker_plan via INV-1/INV-2.
+-- 1. `lower_var_decl` list_collection branch: lower the RHS when it
+--    is a CopyNode/CloneNode (mirroring the existing FuncCall /
+--    MethodCall / NextExpr handling).
+-- 2. Either:
+--    a. Add a new DeepCopy strategy `:list_full` that emits
+--       `try CheatLib.dupeValue(@TypeOf(src), src, alloc)` and returns
+--       an ArrayList. `lower_copy` for `list_collection?` sources uses
+--       this strategy; existing :list_shallow stays for slice sources.
+--    b. OR have the list_collection branch emit `dupeValue` directly
+--       around the CopyNode's inner expression.
 --
--- Until then this test crashes the lowering. Re-enable when COPY of
--- captured @list (or struct) inside a BG body lowers and runs
--- correctly.
+-- Until then this test crashes at runtime. Re-enable when the
+-- list_collection lower_var_decl + lower_copy paths are wired
+-- end-to-end.
+
+-- Originally classified as bug 258. Bug 258 in `dupeValue` is fixed.
+-- This residual is bug 258b / "lower_var_decl ignores RHS for
+-- list_collection types".
 
 FN main() RETURNS Void ->
     items: Int64[]@list = [];
