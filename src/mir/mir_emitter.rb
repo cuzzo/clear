@@ -848,7 +848,8 @@ class MIREmitter
 
   def emit_block_expr(node)
     body = emit_body(node.body)
-    "#{node.label}: {\n#{body}\n}"
+    label_prefix = node.label ? "#{node.label}: " : ""
+    "#{label_prefix}{\n#{body}\n}"
   end
 
   def emit_concat(node)

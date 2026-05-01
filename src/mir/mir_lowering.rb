@@ -1216,27 +1216,8 @@ class MIRLowering
   # ================================================================
 
   def lower_func_call(node)
-    # Stub interception: replace stubbed function calls with stub behavior
-    stub_info = (@active_stubs || {})[node.name]
-    if stub_info
-      case stub_info[:kind]
-      when :returns
-        return MIR::Ident.new(stub_info[:var])
-      when :with
-        args_mir = node.args.map { |a| lower(a) }
-        return MIR::Call.new(stub_info[:var], args_mir, false)
-      when :captures, :sequence
-        # TEST-INFRA: stub call args are discarded (stub ignores values); no allocation escapes.
-        args_zig = node.args.map { |a| emit_expr(lower(a)) }
-        stub_code = if stub_info[:kind] == :captures
-          "{ #{stub_info[:var]} += 1; }"
-        else
-          "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
-        end
-        iz = MIR::InlineZig.new(stub_code, "stub_call")
-        iz.stdlib_def = { borrows: :all }
-        return iz
-      end
+    if (intercept = stub_intercept_for(node.name, nil, node.args))
+      return intercept
     end
 
     # Intrinsic pattern: already resolved by annotator
@@ -1308,6 +1289,12 @@ class MIRLowering
   end
 
   def lower_method_call(node)
+    # Stub interception: a UFCS call `x.query(args)` lowers to `query(x, args)`,
+    # so STUB query intercepts must apply here too.
+    if (intercept = stub_intercept_for(node.name, node.object, node.args))
+      return intercept
+    end
+
     # Intrinsic pattern: already resolved by annotator
     if node.zig_pattern
       return lower_safe_nav_method_call(node) if node.object.is_a?(AST::OptionalUnwrap)
@@ -2939,6 +2926,64 @@ class MIRLowering
     iz = MIR::InlineZig.new(ar_code, "assert_raises")
     iz.stdlib_def = { allocates: false, borrows: :all }
     iz
+  end
+
+  # Build the MIR replacement for a stubbed call site, or nil if `fn_name`
+  # is not currently stubbed. Shared between FuncCall (`receiver` is nil)
+  # and UFCS MethodCall (`receiver` is the object). Pure MIR composition
+  # -- no InlineZig escape hatch -- so the checker can see what's going
+  # on. Locals that would otherwise become "unused" after stub
+  # replacement get an explicit MIR::Suppress (`_ = &name;`).
+  def stub_intercept_for(fn_name, receiver, args)
+    stub_info = (@active_stubs || {})[fn_name]
+    return nil unless stub_info
+
+    call_inputs = [receiver, *args].compact
+    suppress_names = call_inputs.flat_map { |n| stub_local_idents(n) }.uniq
+    suppress_stmts = suppress_names.map { |nm| MIR::Suppress.new(nm) }
+
+    @stub_label_counter ||= 0
+    @stub_label_counter += 1
+    counter = @stub_label_counter
+
+    case stub_info[:kind]
+    when :returns
+      return MIR::Ident.new(stub_info[:var]) if suppress_stmts.empty?
+      label = "__stub_ret_#{counter}"
+      MIR::BlockExpr.new(label, suppress_stmts +
+        [MIR::BreakStmt.new(label, MIR::Ident.new(stub_info[:var]))])
+
+    when :captures
+      cnt = MIR::Ident.new(stub_info[:var])
+      inc = MIR::Set.new(cnt, MIR::BinOp.new("+", cnt, MIR::Lit.new("1")), false)
+      # Void block: no label needed because nothing breaks to it.
+      MIR::BlockExpr.new(nil, suppress_stmts + [inc])
+
+    when :sequence
+      label = "__stub_seq_#{counter}"
+      seq = MIR::Ident.new("#{stub_info[:var]}_seq")
+      idx = MIR::Ident.new("#{stub_info[:var]}_idx")
+      si  = "__stub_si_#{counter}"
+      MIR::BlockExpr.new(label, suppress_stmts + [
+        MIR::Let.new(si, idx, false, "usize", nil),
+        MIR::Set.new(idx, MIR::BinOp.new("+", idx, MIR::Lit.new("1")), false),
+        MIR::BreakStmt.new(label, MIR::IndexGet.new(seq, MIR::Ident.new(si))),
+      ])
+
+    when :with
+      args_mir = call_inputs.map { |a| lower(a) }
+      MIR::Call.new(stub_info[:var], args_mir, false)
+    end
+  end
+
+  # Names of local Identifiers reachable from a call-input AST node that
+  # need MIR::Suppress in a stub replacement (otherwise Zig flags them as
+  # unused). Only top-level Identifiers count -- nested expressions
+  # (FieldGet, FuncCall, literals, ...) are evaluated implicitly.
+  def stub_local_idents(node)
+    return [] unless node.is_a?(AST::Identifier)
+    name = node.name
+    name.is_a?(String) ? [name] : []
   end
 
   def lower_stub_decl(node)
