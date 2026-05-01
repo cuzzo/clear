@@ -9,8 +9,8 @@ transfer all sit outside its reach.
 
 ## Status
 
-VM coverage as of 2026-05-01: **281 / 294 supportable passing (95%)**.
-The remaining 4 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
+VM coverage as of 2026-05-01: **282 / 294 supportable passing (95%)**.
+The remaining 3 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
 or runtime features the VM doesn't implement.
 
 ## What we already did (BC short-circuits, not unifications)
@@ -244,26 +244,35 @@ invariants. Only `pipe_items` materialization (which is shape adaptation,
 not a worker-pool concern) still rides on InlineZig, and that's
 gated by the existing checker rules for inline blocks.
 
-### Cluster E: Thread pinning (1 UNIMPL)
+### Cluster E: Thread pinning -- DONE on BC
 
-Test: 67_thread_pinning.
+Test passing: 67_thread_pinning.
 
-**What it does:** `pin` operator that hints worker affinity to a
-specific thread.
+**What it does:** Multiple things bundled in this test, despite the
+"thread pinning" label:
+- `DO { @pinned -> noop() }` — the `@pinned` DO branch hint.
+- `pool s> SUM/COUNT/ANY/ALL/MIN/MAX/...` — pool pipeline operators.
+- `slist: Float64[]@list:sharded(N) s> SUM/COUNT/EACH/...` — sharded
+  list pipeline operators.
 
-**What it looks like now:** `MIR::RawZig` calling `rt.getSched().pin`.
+**What changed:** The actual blocker on BC wasn't `@pinned` itself
+(DO branch dispatch already handled it via `lower_concurrent_bc`);
+it was the sharded-list pipeline path. The legacy template emits
+per-shard fibers (one fiber iterating each `pipe_src_list.shards[i].items`).
+In BC the sharded structure is flattened to a Value.List at runtime,
+so per-shard iteration is meaningless and the structural lowering
+referenced `pipe_src_list.shards[i].items` against a slot whose
+value is just a flat list.
 
-**Why this matters for correctness:** Low. No ownership semantics,
-purely a performance hint.
+`build_pipe_items_mir` now skips `build_mat_sharded_list` in BC mode
+(falls through to the plain ItemsAccess path); `lower_each` no
+longer bails with `nil` for sharded lists in BC mode. Both changes
+let the regular ForStmt path iterate the flat list directly.
 
-**Structural MIR target:**
-```ruby
-MIR::ThreadPin.new(target_fiber, cpu_idx)
-```
-
-Mechanical translation; no checker semantics.
-
-**Effort:** Tiny.
+**What this gains the checker:** sharded list pipeline ops now go
+through the structural ForStmt + per-item lowering path on BC, the
+same as plain lists. The legacy per-shard fiber template stays on
+the Zig path (where real fibers exist).
 
 ### Cluster F: Promise list / range streams (2 UNIMPL)
 
@@ -348,9 +357,9 @@ DONE:
 6. **Cluster D (list-source CONCURRENT)** -- both backends. Includes
    SELECT, WHERE, EACH (by-value + in-place mutation), and the
    `list AS @u s>` BIND_VAR pattern.
+7. **Cluster E (thread pinning + sharded list pipeline ops)** -- BC.
 
 Remaining:
-7. **Cluster F (promise list / range streams)** -- 219, 224 still
+8. **Cluster F (promise list / range streams)** -- 219, 224 still
    UNIMPL via InlineZig in init position.
-8. **Cluster E (thread pinning)** + **batch_window** (243) -- mechanical
-   InlineZig/RawZig replacements.
+9. **batch_window (243)** -- separate RawZig in expression position.
