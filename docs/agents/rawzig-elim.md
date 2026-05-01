@@ -184,66 +184,54 @@ commit can either model `BC_FIBER_SPAWN` + a queue-style channel,
 or sequentially simulate (feeder produces full list, workers
 sequentially walk it).
 
-### Cluster D: Concurrent pipeline (Zig-side) -- the big one
+### Cluster D: List-source CONCURRENT -- DONE for SELECT/WHERE (Zig)
 
-Tests: list-source ones already pass via BC short-circuit; Zig still
-emits RawZig. No standalone test gating.
+Tests passing on Zig: 210_concurrent_pipeline, 211_concurrent_binding,
+230_sharded_values_inline_no_leak, plus existing SELECT/WHERE list
+tests. EACH on lists stays on the legacy path (see below).
 
-**What it does:** `s> CONCURRENT(workers: K) SELECT f(_)` spawns K
-worker fibers, partitions the input, channels intermediate results
-back, joins. Captures from outer scope flow through a context struct.
+**What changed:**
 
-**What it looks like now:** `MIR::RawZig` blob in
-`pipeline_generator.rb` (~5000 lines across `transpile_concurrent_*`
-methods). Each variant builds: a context struct definition with
-capture fields, a worker fn body that reads from an input channel,
-the spawn loop, the result-collection loop.
+1. Added three runtime helpers in `zig/lib/streams.zig`:
+   `concurrentListSelect`, `concurrentListWhere`, `concurrentListEach`.
+   Each takes `items: []const T` directly (no feeder, no channel)
+   and lets workers race on an atomic index. Mirrors the bounded
+   helpers but without the `.next()` Promise indirection.
 
-**Why this matters for correctness:** the largest checker blind
-spot in the codebase. Three latent bug classes:
+2. Added `CheatLib.concurrentListSelect/Where/Each` thin wrappers in
+   `zig/runtime/runtime-header.zig` pinning WaitGroup, spawn fns,
+   and per-T cleanup.
 
-1. **Capture UAF:** an outer `frame`-allocated value captured into
-   a worker fiber that outlives the frame. The lowering is supposed
-   to promote frame -> heap before BG, but the template carries the
-   logic; checker doesn't validate.
+3. Replaced the inline RawZig blobs in
+   `pipeline_generator#transpile_concurrent_select/where` with
+   structural MIR in
+   `pipeline_host#lower_concurrent_list_select/where`. The worker
+   callback reuses `build_bounded_concurrent_callback` -- the shape
+   is identical to bounded streams except the source type. The
+   shape-adapting `pipe_items` materialization (sharded pool / SoA /
+   pool / sharded list) still goes through `build_pipe_items_block`
+   as an `MIR::InlineZig` prelude; only the worker-pool boilerplate
+   was migrated structurally.
 
-2. **Allocation leaks:** the worker body allocates intermediate
-   values. If the channel's drain path on early-exit folds (FIND /
-   ANY / FIRST) doesn't free unconsumed entries, leak.
+4. Dispatch in `lower_concurrent` routes Zig-backend list SELECT
+   and WHERE (when not `BIND_VAR`) to the new lowering. EACH stays
+   on the legacy path.
 
-3. **Channel cleanup:** error paths must drain and free pending
-   items. A regression in the template silently leaks per item.
+**EACH still on legacy:** Tests like 81_concurrent_each have bodies
+that directly mutate items (`_.value = X`). The legacy template
+emits `items: []T` (mutable slice) plus `@constCast(items)` and
+substitutes `_` for `ctx.items[idx]` so the mutation lands on the
+shared slice. The bounded-callback shape passes items by value
+(`__item: T`), so direct mutation of `__item` doesn't compile. A
+future commit can add a separate `concurrentListEachInPlace` helper
+that takes `items: []T` and passes `*T` to the body, then the
+dispatch picks it for mutating bodies.
 
-**Structural MIR target:**
-```ruby
-MIR::FiberSpawn.new(
-  captures:    [{name:, type:, alloc: :heap}],   # promotion list
-  body_fn:     MIR::FnDef,                       # worker callback
-  alloc:       :heap,
-)
-MIR::Channel.new(elem_type:, capacity:, alloc:)
-MIR::ChannelSend.new(channel, value, takes: bool)
-MIR::ChannelRecv.new(channel)                    # returns ?T
-MIR::ChannelDrain.new(channel)                   # cleanup unconsumed
-```
-
-The checker validates per-call site:
-- Every captured frame value has a `Promote` to heap before the
-  spawn (INV-5).
-- Every `Channel` has a paired `ChannelDrain` on every exit path
-  (INV-2).
-- Every `ChannelSend(takes: true)` has a corresponding `MoveMark`
-  on the source (INV-4).
-
-**Effort:** Large. ~1-2 weeks. Multiple commits. Replaces ~5000
-lines of `transpile_concurrent_*` in pipeline_generator.rb. Both
-backends consume the structural MIR; Zig emitter generates the
-fiber-spawn boilerplate; BC emitter falls back to sequential
-simulation.
-
-This is the highest-correctness-payoff RawZig in the codebase,
-because the bug surface is largest and the templates are most
-brittle.
+**Remaining BIND_VAR path:** `list AS @u s> CONCURRENT SELECT @u.field`
+still uses the legacy template. `@concurrent_outer_binding` rewrites
+the binding name into Zig field-access fragments inside the worker;
+porting that to structural MIR needs a small additional capture-rewrite
+pass. Defer until needed.
 
 ### Cluster E: Thread pinning (1 UNIMPL)
 
@@ -347,20 +335,19 @@ DONE:
 4. **Cluster G (bounded stream concurrent)**
 5. **Cluster C (stream-source CONCURRENT)** -- Zig backend done; BC
    still UNIMPL pending fiber/channel runtime work.
+6. **Cluster D (list-source CONCURRENT)** -- SELECT and WHERE done
+   on Zig; EACH and BIND_VAR cases still on legacy.
 
 Remaining:
-6. **Cluster D (List-source CONCURRENT, Zig-side)** -- largest payoff
-   but largest effort. The list-source CONCURRENT path
-   (`transpile_concurrent_select/where/each` for plain lists, not
-   streams) still emits RawZig on Zig. The bounded-stream and
-   stream-source migrations established the structural pattern
-   (`build_bounded_concurrent_callback` + `concurrent*Select/Where/Each`
-   helpers), so this should now be a smaller incremental migration:
-   wire list sources through the same callback shape, with `items`
-   exposed as a slice rather than a stream.
-7. **Cluster C BC half** -- model fiber/channel runtime in BC, or
+7. **Cluster D EACH (in-place mutation)** -- add a
+   `concurrentListEachInPlace` helper that passes `*T` to the body,
+   plus dispatch logic that picks it when the body mutates `_`
+   directly. Without this, tests like 81 stay on the legacy template.
+8. **Cluster D BIND_VAR** -- `list AS @u s>` in CONCURRENT needs the
+   `@u` capture rewrite to flow into the structural worker callback.
+9. **Cluster C BC half** -- model fiber/channel runtime in BC, or
    sequentially simulate (feeder builds the full list first, workers
    walk it sequentially). Either path unblocks tests 240/241/242/243
    on BC.
-8. **Clusters E, F** (thread pinning, promise list/range) --
-   mechanical; do as cleanup.
+10. **Clusters E, F** (thread pinning, promise list/range) --
+    mechanical; do as cleanup.
