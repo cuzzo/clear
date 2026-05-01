@@ -3691,6 +3691,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         },
                     DEFAULT -> PASS;
                 END,
+            118 -> -- SLEEP_MS: pop ms from istack, yield the current
+                   -- fiber for that many milliseconds. Cooperative
+                   -- yield point that lets other BG fibers progress.
+                isp -= 1; sleepMs = istack[isp];
+                sleep(sleepMs);,
             DEFAULT ->
                 running = FALSE;
         END

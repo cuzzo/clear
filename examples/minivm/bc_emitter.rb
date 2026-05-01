@@ -122,6 +122,10 @@ class BcEmitter
   # and errType="LockTimeout". LOCK_RELEASE clears the field.
   LOCK_ACQUIRE       = 116  # [slot_idx] [timeout_ms_idx]
   LOCK_RELEASE       = 117  # [slot_idx]
+  # SLEEP yields the current fiber for ms (popped from istack as i64).
+  # The previous "no-op sleep" approach prevented contention from
+  # observable interleavings; this enables real cooperative scheduling.
+  SLEEP_MS           = 118
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -3599,8 +3603,13 @@ class BcEmitter
       compile_expr_to_value(node.args[0]); pop_type
       emit_op(NATIVE_CALL, NATIVES["fileSize"], 1); push_type(:any); return
     when :sleep
-      # Evaluate arg for side-effects; VM is single-threaded so sleep is a no-op.
-      compile_expr_to_value(node.args[0]); pop_type; emit_op(POP)
+      # Real sleep: yield the current fiber for ms (popped from istack).
+      # Cooperative yield point — lets sibling BG fibers progress, which
+      # is required for lock contention semantics (test 263 holder body
+      # uses sleep(300) so the waiter's LOCK_ACQUIRE times out at 100ms).
+      compile_expr_to_value(node.args[0]); pop_type
+      emit_op(VAL_TO_I64)
+      emit_op(SLEEP_MS)
       emit_op(LOAD_CONST, add_const(nil)); push_type(:any); return
     when :split_stream_new
       # Wrap a materialized BG STREAM list as Value.SplitStream{bufId, 0}.
