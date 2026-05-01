@@ -1,0 +1,40 @@
+-- Regression: `nodes[k] OR Node{ label: "?" }` against an HashMap<Node>
+-- where the fallback's struct literal has a heap-allocated string field.
+-- HashMap.get returns Optional<Node>, so the OR branch is `orelse`, not
+-- `catch` (no error union). The lowering's early-path "dupe inside the
+-- failure handler" guard only fired for error_union; the optional case
+-- fell through, eagerly hoisted the "?" dupe outside the orelse with
+-- errdefer-only cleanup, and leaked it on the primary path (which is
+-- the common case when the key is present).
+--
+-- Reproduces in examples/graphdb/graph.cht's `neighbors!` FOR-loop.
+-- Each iteration's `nodes[targetId] OR Node{ label: "?" }` leaked a
+-- 1-byte allocation when the key was present (which it always was, in
+-- graphdb's test data).
+--
+-- This test exercises ONLY the primary path. The fallback-taken-then-
+-- result-leaks scenario is a separate, deeper issue (CleanupClassifier
+-- does not register OR_RESCUE results for cleanup, so when the fallback
+-- IS taken the heap-duped fields leak too) -- not covered here.
+
+STRUCT Node { label: String }
+
+FN main() RETURNS Void ->
+    MUTABLE nodes: HashMap<Node> = {};
+    nodes["a"] = Node{ label: "Alice" };
+    nodes["b"] = Node{ label: "Bob" };
+
+    -- Primary path: keys are present, fallback's "?" must NOT allocate.
+    -- Loop forces the lowering to emit the dupe in a context where any
+    -- per-iteration allocation accumulates (the original graphdb shape).
+    MUTABLE found_count: Int64 = 0;
+    FOR i IN (0_i64 ..< 100) DO
+        found_a = nodes["a"] OR Node{ label: "?" };
+        IF found_a.label == "Alice" THEN found_count = found_count + 1; END
+        found_b = nodes["b"] OR Node{ label: "?" };
+        IF found_b.label == "Bob" THEN found_count = found_count + 1; END
+    END
+    ASSERT found_count == 200, "primary path returns lookup value";
+
+    print("283: or fallback optional struct lit PASSED");
+END

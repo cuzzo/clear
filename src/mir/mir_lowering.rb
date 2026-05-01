@@ -3752,10 +3752,16 @@ class MIRLowering
 
     # Early path: OR fallback struct with string fields.
     # Detect BEFORE calling lower(node.right) so hoist_alloc never fires for
-    # CopyNode-wrapped string literals. Outer-scope errdefer temps from hoist_alloc
-    # are never cleaned up on the success path (the catch block never runs), causing
-    # a leak — especially inside BG fibers where errdefer fires only on fiber error.
-    if is_error && node.right.is_a?(AST::StructLit)
+    # CopyNode-wrapped string literals. Outer-scope errdefer temps from
+    # hoist_alloc are never cleaned up on the success path (the catch /
+    # orelse block never runs), causing a leak. Applies to BOTH:
+    #   * error_union: `risky() OR Node{ label: "?" }`  -> Zig `catch`
+    #   * optional:    `nodes[k] OR Node{ label: "?" }` -> Zig `orelse`
+    # Pre-fix the optional case eagerly hoisted `dupe("?")` outside the
+    # orelse and leaked it whenever the key was present (the common
+    # case). See transpile-tests/283_or_optional_struct_lit_no_leak.cht.
+    is_optional = !is_error && t_left&.optional?
+    if (is_error || is_optional) && node.right.is_a?(AST::StructLit)
       ret_type = node.right.full_type
       ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
       resolved = ret_type&.resolved
@@ -3772,7 +3778,7 @@ class MIRLowering
         # Build struct init without CopyNode-triggered hoist_alloc: unwrap
         # CopyNode-wrapped rodata string literals to raw literals so lower()
         # returns MIR::Lit instead of MIR::DeepCopy (which would trigger hoist_alloc).
-        # The inline dupe() inside the catch block handles heap promotion.
+        # The inline dupe() inside the failure-handler block handles heap promotion.
         fields_zig = node.right.fields.map { |k, v|
           v_lit = if v.is_a?(AST::CopyNode) && v.value.is_a?(AST::Literal) &&
                      v.value.type_info&.string? && v.value.type_info&.rodata?
@@ -3795,8 +3801,9 @@ class MIRLowering
             "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch |__dupe_err| { #{frees} return __dupe_err; };"
           end
         }.join(" ")
+        keyword = is_error ? "catch" : "orelse"
         iz = MIR::InlineZig.new(
-          "(#{left_raw} catch __fb: { var __fb: #{type_name} = #{right_zig}; #{promos} break :__fb __fb; })",
+          "(#{left_raw} #{keyword} __fb: { var __fb: #{type_name} = #{right_zig}; #{promos} break :__fb __fb; })",
           "or_fallback_dupe"
         )
         iz.stdlib_def = { allocates: true }
