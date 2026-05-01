@@ -25,10 +25,10 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Re-entrant Thunks (to avoid unbounded recursive growth, auto insert max_depth, auto-insert co-operative yields)
  - [x] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
  - [x] Observable aggregations for streaming pipelines (@shared aggregate results)
+ - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
- - [ ] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
+ - [ ] Atomics (in progress)
  - [ ] Typed Holes
- - [ ] Atomics
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
  - [ ] STRICT mode compilation
