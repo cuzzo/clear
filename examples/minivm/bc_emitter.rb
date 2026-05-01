@@ -1336,6 +1336,14 @@ class BcEmitter
     if node.init.is_a?(MIR::MakeList) && node.init.elem_type.to_s == "__bc_stream__"
       @stream_slots << name
     end
+    # Range-init slot: NEXT consumes head via LIST_POP_FRONT just like
+    # the other stream shapes. The range itself materializes as
+    # Value.List in compile_expr's RangeLit branch, so the slot holds
+    # a regular list at runtime; tagging it as a stream-slot routes
+    # NEXT through LIST_POP_FRONT instead of AWAIT.
+    if node.init.is_a?(MIR::RangeLit)
+      @stream_slots << name
+    end
     alloc_slot(name, effective_type)
     # Pass val_type (where the value actually lives), not effective_type
     # (where the slot lives). emit_store does the cross-stack coercion
@@ -3580,6 +3588,15 @@ class BcEmitter
       # so workers/parallel/capacity/task_cfg/is_inf are all ignored.
       compile_concurrent_stream(node)
       return
+    when :to_list
+      # Range/stream/list .toList() in BC: identity. Ranges already
+      # materialize as Value.List via NATIVE_CALL "iota" in compile_expr's
+      # MIR::RangeLit branch, and other shapes (BG STREAM, dynamic stream
+      # ~T[], promise list ~T[]@list) are also Value.List in BC. The Zig
+      # backend uses CheatLib.{Range,IntRange}.toList() to allocate; BC
+      # has no equivalent struct, so the receiver is the result.
+      compile_expr_to_value(node.args[0]); pop_type
+      push_type(:any); return
     when :file_open
       # File::open(path) -- path-as-handle in the VM. Wraps readFile in
       # a value the auto-injected close (kind=:resource MIR::Cleanup)

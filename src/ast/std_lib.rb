@@ -152,6 +152,7 @@ STD_LIB = {
         Type.new(:"#{elem_t.resolved}[]", collection: :list)
       },
       zig: "try ({0}).toList(rt.heapAlloc())",
+      bc: true, bc_op: :to_list,
       allocates: true,
       alloc: :heap,
       is_method: true,
