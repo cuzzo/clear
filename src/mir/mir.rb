@@ -845,7 +845,7 @@ module MIR
   # Phase 1: inner carries old-path MIR (RawZig or MIR tree); all other fields nil.
   # Future phases: source_type, stages, sink, sink_alloc encode streaming structure.
   #
-  # ast_node:    original s> BinaryOp AST node (needed by future pipeline_emitter)
+  # ast_node:    original s> BinaryOp AST node
   # inner:       pre-computed MIR from existing paths (Phase 1), nil in Phase 2+
   # source_type: :range/:slice/:list/:pool/:sharded/:inf_stream (Phase 2+)
   # stages:      Array of stage descriptors (Phase 3+)

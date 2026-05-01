@@ -12,6 +12,7 @@ group :development do
   gem 'reek', require: false
   gem 'flog', require: false
   gem 'flay', require: false
+  gem 'debride', require: false
   gem 'simplecov', require: false
 end
 

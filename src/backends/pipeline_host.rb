@@ -27,13 +27,10 @@ class PipelineHost
     @soa_rewrite_active = false
     @soa_each_mode = false
     @soa_needed_fields = Set.new
-    @transpiler_context_stack = []
     @mir_mode = false
     # Named pipeline bindings: "@u" -> "__pipe_u" (persist across stages, cleared per-chain)
     @named_bindings = {}
   end
-
-  def current_tp_ctx; @transpiler_context_stack.last; end
 
   # Compute the Zig variable name for a CLEAR named pipeline binding.
   # "@u" -> "__pipe_u", "@order" -> "__pipe_order"

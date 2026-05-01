@@ -134,6 +134,14 @@ Standalone tools (don't need the full pipeline):
 bundle exec reek src/             # smells per file
 bundle exec flog src/ --all -m    # methods sorted by complexity
 bundle exec flay src/ --mass 50   # mass-50+ duplicate code blocks
+
+# Dead code: methods/classes never referenced anywhere. ALWAYS pass
+# every directory that requires src/ -- omitting one causes false
+# positives. examples/minivm uses bc_emitter.rb (active VM path); it
+# pulls in compiler internals that nothing else does. transpile-tests
+# also drives src/ (via gen.rb). bc_compiler will eventually move to
+# src/backends, at which point the examples/ entry can be dropped.
+bundle exec debride src/ examples/minivm/ transpile-tests/
 ```
 
 Disable coverage for fast iteration: `COVERAGE=0 bundle exec prspec spec/`.
