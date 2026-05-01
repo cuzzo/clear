@@ -2474,24 +2474,28 @@ class MIRLowering
     end
     enforce_bg_capture_strategies!(node, captured)
 
-    # Build capture fields. Use is_field: true so dynamic arrays (Int64[])
-    # render as slices (`[]i64`) instead of ArrayListUnmanaged — the
-    # captured value at the call-site is a slice, and the ctx struct field
-    # has to match or Zig rejects the `.name = name` init.
-    capture_fields = captured.map { |name, type_obj|
-      t = refreshed_capture_type.call(name, type_obj)
-      zig_t = t ? t.zig_type(is_field: true) : "anyopaque"
-      pointer_captures.include?(name) ? "#{name}: *#{zig_t}," : "#{name}: #{zig_t},"
-    }.join("\n        ")
-
-    # String captures annotated directly on BgBlock.capture_string_dupes
+    # Build capture fields. The captured value's actual Zig type after
+    # monomorphization depends on the caller's binding (e.g. an `anytype`
+    # collection param is `*Arc(Locked(T))` when the caller passes
+    # @shared:locked, but `*Locked(T)` when affine). The Type-object-based
+    # zig_type computation can disagree with the deduced type on:
+    #   - the Arc/Rc layer (caller-passed @shared/@multiowned vs
+    #     param's nominal type)
+    #   - the outer pointer (collection params already arrive as *T but
+    #     pointer_captures used to add another *)
+    # Use Zig's `@TypeOf(name)` to take the actual deduced type at the
+    # capture site, and `.name = name` (no &) so we never silently take
+    # an address that doubles up the pointer.
     bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "bg")
+
+    capture_fields = captured.map { |name, _type_obj|
+      next "#{name}: []const u8," if promoted_names[name]
+      "#{name}: @TypeOf(#{name}),"
+    }.join("\n        ")
 
     capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
       captured.map { |name, _|
-        if pointer_captures.include?(name)
-          ".#{name} = &#{name}"
-        elsif promoted_names[name]
+        if promoted_names[name]
           ".#{name} = #{promoted_names[name]}"
         else
           ".#{name} = #{name}"

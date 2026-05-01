@@ -1575,6 +1575,7 @@ RSpec.describe MIRLowering do
       captures_hash = { "x" => :Int64 }
       analysis = OpenStruct.new(
         captures: captures_hash,
+        capture_symbols: {},
         close_patterns: {},
         pointer_captures: Set.new(["x"]),
         resource_captures: Set.new
@@ -1585,8 +1586,11 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include("x: *")
-      expect(zig).to include(".x = &x")
+      # Use @TypeOf(name) for the field type and direct init -- the captured
+      # local's actual deduced Zig type is the source of truth (handles Arc
+      # wrapping and already-pointer collection params correctly).
+      expect(zig).to include("x: @TypeOf(x)")
+      expect(zig).to include(".x = x")
     end
 
     it "lowers pinned BgBlock with submitSpawn" do

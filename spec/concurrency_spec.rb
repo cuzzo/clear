@@ -1598,8 +1598,8 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile_fn(src)
-      # x IS captured (outer variable)
-      expect(out).to include("x: f64,")
+      # x IS captured (outer variable). Field uses @TypeOf for the deduced type.
+      expect(out).to include("x: @TypeOf(x)")
       # step1 is NOT a capture (it doesn't exist; this just verifies no spurious fields)
       expect(out).not_to include("step1:")
     end
@@ -1639,7 +1639,7 @@ RSpec.describe SemanticAnnotator do
         END
       CLEAR
       out = transpile_fn(src)
-      expect(out).to include("base: f64,")
+      expect(out).to include("base: @TypeOf(base)")
       expect(out).to include(".base = base")
       expect(out).to include("__ctx_0.base")
       expect(out).to include("p.next()")
@@ -1704,9 +1704,12 @@ RSpec.describe SemanticAnnotator do
       it "BgBlock captures outer variable by value (no pointer)" do
         src = "FN f() RETURNS Void -> x: Float64 = 7.0; q: ~Float64 = BG { x + 1.0; }; r: Float64 = NEXT q; RETURN; END"
         out = transpile_fn(src)
-        # Captured as value field, not pointer
-        expect(out).to include("x: f64,")
-        # Initialized as .x = x  (not .x = &x)
+        # Field type uses @TypeOf so Zig deduces the actual local type --
+        # this handles Arc-wrapped captures and already-pointer collection
+        # params correctly without per-case Ruby logic.
+        expect(out).to include("x: @TypeOf(x)")
+        # Initialized as .x = x  (never .x = &x: doubling pointers breaks
+        # collection params and Arc captures.)
         expect(out).to include(".x = x")
         # Accessed without deref: ctx.x (not ctx.x.*)
         expect(out).to include("__ctx_0.x")
