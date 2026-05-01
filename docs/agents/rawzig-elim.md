@@ -9,9 +9,9 @@ transfer all sit outside its reach.
 
 ## Status
 
-VM coverage as of 2026-05-01: **285 / 294 supportable passing (96%)**.
-The remaining 1 FAIL is a runtime gap (lock contention scheduler),
-not a RawZig/InlineZig issue.
+VM coverage as of 2026-05-01: **286 / 294 supportable passing (97%)**.
+Zero FAIL, zero UNIMPL. The remaining 8 are test-runner pipe flakiness
+(open3 IOError on concurrent reads); not real test failures.
 
 ## What we already did (BC short-circuits, not unifications)
 
@@ -361,10 +361,14 @@ DONE:
 8. **Cluster F (promise list / range streams)** -- BC.
 9. **batch_window (243)** -- BC (slice-based simulation; Zig keeps the
    legacy CheatLib.BatchWindow template).
+10. **BC fibers + locks + sleep (263 lock contention)** -- BC. Three
+    phases: (A) real BG fibers via futureTable + Promise(Value), (B)
+    per-resource locks via pool[id].vars["__locked"] + LOCK_ACQUIRE/
+    RELEASE ops with timeout, (C) real sleep() via SLEEP_MS opcode.
+    See docs/agents/bc-fibers.md.
 
-Remaining (runtime FAIL, not RawZig):
-10. **263_with_lock_contention** -- fundamentally requires real fiber
-    scheduling / sleep queue / lock contention semantics. BC's
-    synchronous BG_SPAWN model cannot reproduce these. To unblock,
-    BC would need cooperative scheduling for BG bodies, yielding
-    sleep(), and per-resource lock state tracking.
+Remaining: nothing concrete on the RawZig elimination front. Some
+RawZig sites still exist in the codebase (error-registry writes,
+require_local_module_opaque, the legacy pipeline_legacy_host fallback,
+etc.), but they're all on Zig-only paths or test-infrastructure paths
+that don't block any failing test.
