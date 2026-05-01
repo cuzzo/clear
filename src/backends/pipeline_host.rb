@@ -2253,13 +2253,15 @@ class PipelineHost
           return lower_concurrent_list_select(lhs_node, conc_op, conc_op.op)
         when AST::WhereOp
           return lower_concurrent_list_where(lhs_node, conc_op, conc_op.op)
-        # EachOp on lists stays on the legacy path: tests like 81
-        # expect direct in-place mutation of items (`_.value = X`),
-        # which needs the worker to see a *mutable* pointer to the
-        # slice element. The bounded-callback shape passes items by
-        # value and so can't support that mutation pattern. A future
-        # migration can add a separate `concurrentListEachInPlace`
-        # helper that takes `items: []T` and passes `*T` to the body.
+        when AST::EachOp
+          # If the body directly mutates `_` (e.g. `_.field = X` or
+          # `_[i] = X`), use the in-place helper that passes `*T` to
+          # the worker. Otherwise the by-value callback is fine.
+          if each_body_mutates_placeholder?(conc_op.op.body)
+            return lower_concurrent_list_each_in_place(lhs_node, conc_op, conc_op.op)
+          else
+            return lower_concurrent_list_each(lhs_node, conc_op, conc_op.op)
+          end
         end
       end
     end
@@ -2946,6 +2948,133 @@ class PipelineHost
       cb[:ctx_let],
       MIR::ExprStmt.new(call, false),
     ])
+  end
+
+  # Scan an EACH body for direct mutation of `_` (e.g. `_.field = X` or
+  # `_[i] = X`). When present, the worker callback must take `*T` not
+  # `T` so the mutation lands on the shared slice, not a value copy.
+  # Walks AST::Assignment.name chains rooted at Identifier("_").
+  def each_body_mutates_placeholder?(body_stmts)
+    body_stmts.any? { |stmt| assignment_targets_placeholder?(stmt) }
+  end
+
+  def assignment_targets_placeholder?(node)
+    return false unless node
+    if node.is_a?(AST::Assignment)
+      return target_rooted_at_placeholder?(node.name)
+    end
+    if node.is_a?(Struct)
+      node.members.any? do |m|
+        next false if [:token, :location].include?(m)
+        v = node[m]
+        if v.is_a?(Array) then v.any? { |x| assignment_targets_placeholder?(x) }
+        elsif v.is_a?(Struct) then assignment_targets_placeholder?(v)
+        else false
+        end
+      end
+    else
+      false
+    end
+  end
+
+  def target_rooted_at_placeholder?(target)
+    cur = target
+    while cur
+      case cur
+      when AST::Identifier
+        return cur.name == "_"
+      when AST::GetField
+        cur = cur.target
+      when AST::GetIndex
+        cur = cur.target
+      else
+        return false
+      end
+    end
+    false
+  end
+
+  # In-place EACH variant: items is a *mutable* slice and each worker
+  # invocation receives `*T` so the body can update the slice element
+  # via field/index assignment. Used when the body has a direct
+  # `_.field = X` or `_[i] = X` mutation.
+  def lower_concurrent_list_each_in_place(lhs, conc_op, inner)
+    item_t = Type.new(lhs.type_info.element_type.resolved)
+    cb = build_bounded_concurrent_callback_pointer(conc_op, item_t)
+    setup_iz = list_concurrent_source_setup_iz(lhs)
+
+    call = @lowering.send(:emit_builtin, :concurrentListEachInPlace, [
+      MIR::Ident.new(item_t.zig_type),
+      MIR::Ident.new("#{cb[:ctx_name]}.apply"),
+      MIR::Ident.new("rt"),
+      # The legacy `pipe_items` is a `[]const T`; @constCast strips the
+      # const so the in-place helper can write through the slice.
+      MIR::InlineZig.new("@constCast(pipe_items)", "list_each_inplace_mut_items"),
+      bounded_concurrent_worker_count_mir(conc_op),
+      bounded_concurrent_parallel_mir(conc_op),
+      bounded_concurrent_task_cfg_mir(conc_op),
+      MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
+    ])
+
+    MIR::ScopeBlock.new([
+      setup_iz,
+      cb[:ctx_def],
+      cb[:ctx_let],
+      MIR::ExprStmt.new(call, false),
+    ])
+  end
+
+  # Variant of build_bounded_concurrent_callback for in-place EACH:
+  # `__item` is `*T` (mutable pointer) so `_.field = X` lands on the
+  # slice element. Otherwise identical to the by-value callback.
+  def build_bounded_concurrent_callback_pointer(conc_op, item_type)
+    @bounded_conc_counter ||= 0
+    id = (@bounded_conc_counter += 1)
+    ctx_name = "__BoundedConcurrentCtx#{id}"
+    analysis = conc_op.capture_analysis
+    captures = analysis&.captures || {}
+
+    fields = captures.map do |name, type_obj|
+      zig_t = Type.new(type_obj).zig_type
+      mutable = @lowering.instance_variable_get(:@scope_stack)&.last&.is_mutable?(name)
+      ptr_t = mutable ? "*#{zig_t}" : "*const #{zig_t}"
+      MIR::FieldDef.new(name, ptr_t, nil)
+    end
+
+    raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
+    item_zig_ptr = "*#{Type.new(item_type).zig_type}"
+    params = [
+      MIR::Param.new("__rt", "*Runtime"),
+      raw_ctx,
+      MIR::Param.new("__item", item_zig_ptr),
+    ]
+
+    body = [MIR::Suppress.new("__rt")]
+    capture_map = {}
+    unless captures.empty?
+      ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
+      body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
+      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}.*"] }
+    else
+      body << MIR::Suppress.new("raw_ctx")
+    end
+
+    lowered_body = with_pipeline_context(placeholder: "__item") do
+      with_fiber_capture_map(capture_map, rt_override: "__rt") do
+        [*visit_pipeline_body_mir(conc_op.op.body, placeholder: "__item"), MIR::ReturnStmt.new(nil)]
+      end
+    end
+    body.concat(lowered_body)
+
+    fn = MIR::FnDef.new("apply", params, "void", body, nil, true, nil)
+    ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
+    ctx_init = MIR::StructInit.new(ctx_name, captures.keys.map { |name|
+      { name: name, value: MIR::AddressOf.new(MIR::Ident.new(name)) }
+    })
+    ctx_var = "__bounded_conc_ctx_#{id}"
+    ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
+
+    { id: id, ctx_name: ctx_name, ctx_def: ctx_def, ctx_var: ctx_var, ctx_let: ctx_let }
   end
 
   # String entry point for SMOOTH pipeline nodes from MIRLowering.

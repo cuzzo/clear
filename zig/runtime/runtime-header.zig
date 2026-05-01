@@ -356,6 +356,32 @@ pub const CheatLib = struct {
         );
     }
 
+    pub fn concurrentListEachInPlace(
+        comptime T: type,
+        comptime eachFn: fn (*Runtime, ?*anyopaque, *T) anyerror!void,
+        rt: *Runtime,
+        items: []T,
+        workers: usize,
+        parallel: bool,
+        task_cfg: fp.TaskConfig,
+        user_ctx: ?*anyopaque,
+    ) !void {
+        return streams.concurrentListEachInPlace(
+            fp.WaitGroup, T, eachFn,
+            struct {
+                fn localSpawn(sched: *fp.Scheduler, user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.localSpawn,
+            struct {
+                fn parallelSpawn(user_fn: TaskFn, args: ?*anyopaque, config: fp.TaskConfig) !void {
+                    try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
+                }
+            }.parallelSpawn,
+            rt, items, workers, parallel, task_cfg, user_ctx
+        );
+    }
+
     pub const File = struct {
         fd: std.posix.fd_t,
 

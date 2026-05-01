@@ -1043,4 +1043,8 @@ BUILTIN_OPS = {
     zig: "try CheatLib.concurrentListEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})",
     borrows: :all
   },
+  concurrentListEachInPlace: {
+    zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})",
+    borrows: :all
+  },
 }.freeze

@@ -1336,3 +1336,74 @@ pub fn concurrentListEach(
     const err_int = err_code.load(.seq_cst);
     if (err_int != 0) return @errorFromInt(err_int);
 }
+
+// In-place variant of concurrentListEach: items is a *mutable* slice
+// and the body fn receives `*T` so it can update each element through
+// the pointer. Used for `[]T s> CONCURRENT EACH { _.field = X; }` where
+// the body directly mutates each item.
+pub fn concurrentListEachInPlace(
+    comptime WaitGroupT: type,
+    comptime T: type,
+    comptime eachFn: anytype,
+    comptime localSpawnFn: anytype,
+    comptime parallelSpawnFn: anytype,
+    rt: anytype,
+    items: []T,
+    workers: usize,
+    parallel: bool,
+    task_cfg: anytype,
+    user_ctx: ?*anyopaque,
+) !void {
+    const RuntimeT = @TypeOf(rt.*);
+
+    var err_code = std.atomic.Value(u16).init(0);
+    var next_idx = std.atomic.Value(usize).init(0);
+    var wg = WaitGroupT.init(rt.getSched());
+
+    const Worker = struct {
+        wg: *WaitGroupT,
+        items: []T,
+        next_idx: *std.atomic.Value(usize),
+        err_code: *std.atomic.Value(u16),
+        user_ctx: ?*anyopaque,
+
+        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+            const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
+            const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+            defer ctx.wg.done();
+            while (true) {
+                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
+                if (idx >= ctx.items.len) break;
+                const item_ptr = &ctx.items[idx];
+                eachFn(worker_rt, ctx.user_ctx, item_ptr) catch |err| {
+                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                    continue;
+                };
+                worker_rt.checkYield();
+            }
+        }
+    };
+
+    var worker_ctxs: [64]Worker = undefined;
+    const actual_workers = @min(if (workers == 0) @as(usize, 1) else workers, @as(usize, 64));
+    if (actual_workers == 0) return;
+    wg.add(actual_workers);
+    for (0..actual_workers) |i| {
+        worker_ctxs[i] = .{
+            .wg = &wg,
+            .items = items,
+            .next_idx = &next_idx,
+            .err_code = &err_code,
+            .user_ctx = user_ctx,
+        };
+        if (parallel) {
+            try parallelSpawnFn(@ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        } else {
+            try localSpawnFn(wg.sched, @ptrCast(&Worker.run), &worker_ctxs[i], task_cfg);
+        }
+    }
+    wg.wait();
+
+    const err_int = err_code.load(.seq_cst);
+    if (err_int != 0) return @errorFromInt(err_int);
+}

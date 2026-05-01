@@ -46,12 +46,18 @@ class TestGenerator
     preamble = preamble_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
     transpiled_body = body_items.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
-    # Detect if test uses DO/BG blocks, TCP resources, or sharded EACH
+    # Detect if test uses DO/BG blocks, TCP resources, sharded EACH,
+    # or any of the CONCURRENT runtime helpers. The structural list
+    # / stream / bounded helpers all spawn worker fibers internally;
+    # without scheduler boot they crash in submitSpawn.
     needs_scheduler = cheat_code.include?("DO {") || cheat_code.include?("BG {") ||
                       cheat_code.include?("BG STREAM {") ||
                       cheat_code.include?("TCPServer") || cheat_code.include?("TCPClient") ||
                       cheat_code.include?("@pinned") ||
-                      transpiled_body.include?("WaitGroup")
+                      transpiled_body.include?("WaitGroup") ||
+                      transpiled_body.include?("concurrentList") ||
+                      transpiled_body.include?("concurrentStream") ||
+                      transpiled_body.include?("concurrentBounded")
 
     execution_block = if needs_scheduler
       <<~ZIG
