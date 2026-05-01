@@ -3278,9 +3278,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                bgFut: ~Value = BG {
-                    exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
-                };
+                -- NOTE: real fibers via BG { exec!(...) } don't compile yet
+                -- (auto-pin fails to unwrap @shared:locked pool). Run the
+                -- callee synchronously and stash its result in futureTable
+                -- so AWAIT still works the same way.
+                bgSyncRet = exec!(ops, consts, curEnv, pool, bgEntry, GIVE bgCaps);
+                bgFut: ~Value = BG { COPY bgSyncRet; };
                 bgFid = futureTable.length();
                 futureTable.append(bgFut);
                 pv = Value.Pair{
