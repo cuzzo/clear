@@ -1589,11 +1589,13 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      # Use @TypeOf(name) for the field type and direct init -- the captured
-      # local's actual deduced Zig type is the source of truth (handles Arc
-      # wrapping and already-pointer collection params correctly).
-      expect(zig).to include("x: @TypeOf(x)")
-      expect(zig).to include(".x = x")
+      # Pointer captures (HashMap, @pool, @sharded:locked, ...) flow as
+      # `*T` into the fiber context so writes inside the fiber land on
+      # the outer instance. Without this the fiber operates on a value
+      # copy and per-shard locks become independent mutexes -- writes
+      # never appear to outer readers (regressed examples/graphdb).
+      expect(zig).to include("x: *@TypeOf(x)")
+      expect(zig).to include(".x = &x")
     end
 
     it "lowers pinned BgBlock with submitSpawn" do

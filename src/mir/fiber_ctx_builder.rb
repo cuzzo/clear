@@ -101,6 +101,7 @@ module FiberCtxBuilder
                  fresh_heap_alloc: nil, fresh_heap_id: 0)
     captured = analysis&.captures || {}
     strategies = analysis&.strategies || {}
+    pointer_captures = analysis&.pointer_captures || Set.new
     specs = captured.map do |name, _type_obj|
       strat = strategies[name]
       if promoted_names[name]
@@ -116,6 +117,15 @@ module FiberCtxBuilder
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
         CaptureSpec.new(name, "@TypeOf(#{name})", dupe_var,
                         MIR::Ident.new(dupe_var), dupe_decl, body_cleanup)
+      elsif pointer_captures.include?(name)
+        # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).
+        # Capture by pointer so writes inside the fiber body land on the
+        # outer instance, not on a copied struct (which would carry its
+        # own per-shard locks and a dead StringHashMap backing array).
+        # Mirrors the call-site `&name` / `&self` convention these
+        # collections already use for FN params.
+        CaptureSpec.new(name, "*@TypeOf(#{name})", "&#{name}",
+                        MIR::AddressOf.new(MIR::Ident.new(name)), nil, nil)
       else
         CaptureSpec.new(name, "@TypeOf(#{name})", name,
                         MIR::Ident.new(name), nil, nil)
