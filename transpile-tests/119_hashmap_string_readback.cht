@@ -4,7 +4,7 @@ UNION Value { Nil, Str: String }
 
 FN readStrDirect!(MUTABLE map: HashMap<Value>) RETURNS String ->
     val = map["t0"] OR Value.Nil;
-    MATCH val START
+    PARTIAL MATCH val START
         Value.Str AS s -> RETURN s;,
         DEFAULT -> RETURN "";
     END

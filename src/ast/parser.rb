@@ -99,6 +99,10 @@ class Parser
   stmt(:KEYWORD, 'BG')   { parse_bg_block }
   stmt(:KEYWORD, 'YIELD') { parse_yield_expr }
   stmt(:KEYWORD, 'MATCH') { parse_match_statement }
+  stmt(:KEYWORD, 'PARTIAL') do
+    consume(:KEYWORD, 'PARTIAL')
+    parse_match_statement(partial: true)
+  end
   stmt(:KEYWORD, 'PASS') do
     tok = consume(:KEYWORD, 'PASS')
     match!(:CHAR, ';')  # optional semicolon — PASS may appear bare before a ','
@@ -109,6 +113,10 @@ class Parser
   # IF and MATCH as expressions: x = IF cond THEN a ELSE b END
   primary(:KEYWORD, 'IF')    { parse_if_expr }
   primary(:KEYWORD, 'MATCH') { parse_match_expr }
+  primary(:KEYWORD, 'PARTIAL') do
+    consume(:KEYWORD, 'PARTIAL')
+    parse_match_expr(partial: true)
+  end
 
   # Primaries
   primary(:NUMBER) { parse_literal(:NUMBER, :stack) }
@@ -1600,10 +1608,9 @@ class Parser
   end
 
   # Expression-position MATCH: each arm body is a single expression (no semicolons).
-  def parse_match_expr
+  def parse_match_expr(partial: false)
     tok = consume(:KEYWORD, 'MATCH')
     takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
-    exhaustive = match?(:KEYWORD, 'IFF') && consume(:KEYWORD, 'IFF')
     expr = parse_expression
     consume(:KEYWORD, 'START')
 
@@ -1647,7 +1654,7 @@ class Parser
     end
 
     consume(:KEYWORD, 'END')
-    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !!exhaustive, !!takes)
+    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !partial, !!takes)
   end
 
   # FOR var IN (start ..= end) DO body END   — range iteration
@@ -1685,10 +1692,9 @@ class Parser
     end
   end
 
-  def parse_match_statement
+  def parse_match_statement(partial: false)
     tok = consume(:KEYWORD, 'MATCH')
     takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
-    exhaustive = match?(:KEYWORD, 'IFF') && consume(:KEYWORD, 'IFF')
     expr = parse_expression
     consume(:KEYWORD, 'START')
 
@@ -1737,7 +1743,7 @@ class Parser
     end
 
     consume(:KEYWORD, 'END')
-    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !!exhaustive, !!takes)
+    AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !partial, !!takes)
   end
 
   def parse_struct_pattern

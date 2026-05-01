@@ -7,7 +7,7 @@ UNION Value { Nil, Str: String, Number: Float64 }
 -- COPY s creates a new heap allocation for the string bytes, independent of v.
 -- v can be freed after getStr returns without dangling the returned string.
 FN getStr(v: Value) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Str AS s -> RETURN COPY s;,
         DEFAULT -> RETURN COPY "nil";
     END

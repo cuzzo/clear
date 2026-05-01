@@ -26,7 +26,7 @@ FN pick(kind: Int64) RETURNS Val ->
 END
 
 FN getNum(v: Val) RETURNS Float64 ->
-    MATCH v START
+    PARTIAL MATCH v START
         Val.Num AS n -> RETURN n;,
         DEFAULT -> RETURN 0.0;
     END

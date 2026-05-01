@@ -1,4 +1,4 @@
--- Test: MATCH destructuring with field binding.
+-- Test: PARTIAL MATCH destructuring with field binding.
 --
 -- { x, y } syntax in struct patterns binds fields to local variables.
 -- Works for both plain struct matching and union variant destructuring.
@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
     -- Test 1: Struct pattern with binding (extract fields by name)
     p = Point{ x: 3, y: 4 };
     MUTABLE sum: Int64 = 0;
-    MATCH p START
+    PARTIAL MATCH p START
         { x, y } -> sum = x + y;
     END
     ASSERT sum == 7, "struct destructure binding";
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
     -- Test 2: Struct pattern mixing bind and match value
     p2 = Point{ x: 10, y: 20 };
     MUTABLE matched: Int64 = 0;
-    MATCH p2 START
+    PARTIAL MATCH p2 START
         { x: 10, y } -> matched = y;,
         DEFAULT -> matched = -1;
     END
@@ -39,7 +39,7 @@ FN main() RETURNS Void ->
     -- Test 3: Union variant destructuring
     s = makeRect(5, 12);
     MUTABLE area: Int64 = 0;
-    MATCH s START
+    PARTIAL MATCH s START
         Shape.Circle AS r -> area = 0;,
         Shape.Rect{ x, y } -> area = x * y;
     END
@@ -48,7 +48,7 @@ FN main() RETURNS Void ->
     -- Test 4: Union variant with AS still works alongside destructure
     s2 = makeCircle(3.14);
     MUTABLE radius: Float64 = 0.0;
-    MATCH s2 START
+    PARTIAL MATCH s2 START
         Shape.Circle AS r -> radius = r;,
         Shape.Rect{ x, y } -> radius = 0.0;
     END
@@ -57,7 +57,7 @@ FN main() RETURNS Void ->
     -- Test 5: WHEN guard with field access (alternative to guard patterns)
     p3 = Point{ x: 15, y: 25 };
     MUTABLE guarded: Int64 = 0;
-    MATCH p3 START
+    PARTIAL MATCH p3 START
         WHEN p3.x >= 10 && p3.y >= 20 -> guarded = p3.x + p3.y;,
         DEFAULT -> guarded = -1;
     END
@@ -66,7 +66,7 @@ FN main() RETURNS Void ->
     -- Test 6: WHEN guard as fallthrough after struct pattern
     p4 = Point{ x: 5, y: 99 };
     MUTABLE result: Int64 = 0;
-    MATCH p4 START
+    PARTIAL MATCH p4 START
         { x: 10, y } -> result = y;,
         WHEN p4.x < 10 -> result = p4.x * 100;,
         DEFAULT -> result = -1;

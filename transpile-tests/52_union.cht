@@ -3,7 +3,7 @@ UNION Result { Ok: Float64, Err: Float64, Empty }
 
 FN area(s: Shape) RETURNS Float64 ->
   MUTABLE a = 0.0;
-  MATCH s START
+  PARTIAL MATCH s START
     Shape.Circle    -> a = 3.14;,
     Shape.Rectangle -> a = 4.0;,
     Shape.Point     -> a = 0.0;
@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
   -- Payload variant (StructLit syntax — same as structs)
   c: Shape = Shape{ Circle: 5.0 };
   MUTABLE result = 0.0;
-  MATCH c START
+  PARTIAL MATCH c START
     Shape.Circle    -> result = 1.0;,
     Shape.Rectangle -> result = 2.0;,
     Shape.Point     -> result = 3.0;
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
   -- Result-style union (Ok path)
   r: Result = Result{ Ok: 42.0 };
   MUTABLE got = 0.0;
-  MATCH r START
+  PARTIAL MATCH r START
     Result.Ok    -> got = 1.0;,
     Result.Err   -> got = 2.0;,
     Result.Empty -> got = 3.0;
@@ -40,7 +40,7 @@ FN main() RETURNS Void ->
   -- Result-style union (Err path)
   e: Result = Result{ Err: 99.0 };
   MUTABLE got2 = 0.0;
-  MATCH e START
+  PARTIAL MATCH e START
     Result.Ok  -> got2 = 1.0;,
     Result.Err -> got2 = 2.0;,
     DEFAULT    -> got2 = 0.0;

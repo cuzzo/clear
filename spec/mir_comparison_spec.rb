@@ -326,7 +326,7 @@ RSpec.describe "MIR pipeline comparison" do
         ENUM Color { Red, Blue, Green }
         FN main() RETURNS Void ->
           c: Color = Color.Red;
-          MATCH c START
+          PARTIAL MATCH c START
             Color.Red -> x = 1;,
             Color.Blue -> x = 2;,
             DEFAULT -> x = 0;
@@ -587,7 +587,7 @@ RSpec.describe "MIR pipeline comparison" do
         ENUM Dir { N, S, E, W }
         FN main() RETURNS Void ->
           d: Dir = Dir.N;
-          MATCH d START Dir.N -> ASSERT TRUE, "ok";, DEFAULT -> ASSERT FALSE, "bad"; END
+          PARTIAL MATCH d START Dir.N -> ASSERT TRUE, "ok";, DEFAULT -> ASSERT FALSE, "bad"; END
           RETURN;
         END
       CLEAR

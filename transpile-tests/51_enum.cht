@@ -17,24 +17,24 @@ FN main() RETURNS Void ->
   d2 = mirror(d);
   ASSERT d == d2, "Enum: pass-through round-trip";
 
-  -- MATCH on enum
+  -- PARTIAL MATCH on enum
   MUTABLE result = 0_i64;
-  MATCH d START
+  PARTIAL MATCH d START
     Direction.North -> result = 1_i64;,
     Direction.South -> result = 2_i64;,
     Direction.East  -> result = 3_i64;,
     DEFAULT -> result = 99_i64;
   END
-  ASSERT result == 1, "Enum: MATCH should hit North case";
+  ASSERT result == 1, "Enum: PARTIAL MATCH should hit North case";
 
   -- Default branch fires for unmatched variant
   d3: Direction = Direction.West;
   MUTABLE result2 = 0_i64;
-  MATCH d3 START
+  PARTIAL MATCH d3 START
     Direction.North -> result2 = 1_i64;,
     DEFAULT -> result2 = 99_i64;
   END
-  ASSERT result2 == 99, "Enum: MATCH default fires for West";
+  ASSERT result2 == 99, "Enum: PARTIAL MATCH default fires for West";
 
   -- Second independent enum type
   s: Status = Status.Active;

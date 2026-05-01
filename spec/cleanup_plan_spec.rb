@@ -53,7 +53,7 @@ RSpec.describe CleanupClassifier do
           UNION Value { Nil, Str: String }
           FN test!(MUTABLE map: HashMap<Value>) RETURNS String ->
               val = map["t0"] OR Value.Nil;
-              MATCH val START
+              PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
                   DEFAULT -> RETURN "";
               END
@@ -206,7 +206,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "eval!")
           UNION Value { Nil, Num: Float64, List: Value[] }
           FN eval!(TAKES ast: Value) RETURNS Value ->
-              MATCH ast START
+              PARTIAL MATCH ast START
                   Value.List AS items -> RETURN Value.Nil;,
                   DEFAULT -> RETURN Value.Nil;
               END
@@ -228,7 +228,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "eval!")
           UNION Value { Nil, Num: Float64, List: Value[] }
           FN eval!(TAKES ast: Value) RETURNS Value ->
-              MATCH TAKES ast START
+              PARTIAL MATCH TAKES ast START
                   Value.List AS items -> RETURN Value.Nil;,
                   DEFAULT -> RETURN Value.Nil;
               END
@@ -256,7 +256,7 @@ RSpec.describe CleanupClassifier do
         cleanup_for(<<~CLEAR, "test!")
           UNION Value { Nil, Num: Float64 }
           FN test!(TAKES v: Value) RETURNS Void ->
-              MATCH v START
+              PARTIAL MATCH v START
                   Value.Num AS n -> RETURN;,
                   DEFAULT -> RETURN;
               END
@@ -694,7 +694,7 @@ RSpec.describe CleanupClassifier do
         FN main() RETURNS Void ->
             d = makeNested();
             d2 = COPY d;
-            MATCH d2 START
+            PARTIAL MATCH d2 START
                 Data.Nested AS n -> print(n.label);,
                 DEFAULT -> print("wrong");
             END

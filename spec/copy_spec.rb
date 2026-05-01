@@ -91,7 +91,7 @@ RSpec.describe "COPY keyword" do
     src = <<~CLEAR
       UNION Val { Nil, Box { data: Val @indirect, id: Int64 } }
       FN rebuild(TAKES v: Val) RETURNS Val ->
-          MATCH TAKES v START
+          PARTIAL MATCH TAKES v START
               Val.Box AS b ->
                   RETURN Val.Box{ data: b.data, id: b.id };,
               DEFAULT -> RETURN Val.Nil;

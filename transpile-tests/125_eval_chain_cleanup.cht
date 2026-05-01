@@ -12,7 +12,7 @@ FN makeAst() RETURNS Value ->
 END
 
 FN eval!(TAKES ast: Value) RETURNS Value @reentrant ->
-    MATCH TAKES ast START
+    PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym -> RETURN Value.Nil;,
         Value.List AS items -> RETURN evalList!(items);,
         Value.Number AS n -> RETURN Value{ Number: n };,

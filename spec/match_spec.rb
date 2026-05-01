@@ -27,7 +27,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           MUTABLE x = 2;
-          MATCH x START
+          PARTIAL MATCH x START
             1 -> x = 10;,
             2 -> x = 20;,
             DEFAULT -> x = 99;
@@ -45,7 +45,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           MUTABLE x = 0;
-          MATCH x START
+          PARTIAL MATCH x START
             1 -> x = 1;,
             2 -> x = 2;
           END
@@ -61,7 +61,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           MUTABLE x = 42;
-          MATCH x START
+          PARTIAL MATCH x START
             "hello" -> x = 0;
           END
         FLUX
@@ -76,7 +76,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           MUTABLE x = 7;
-          MATCH x START
+          PARTIAL MATCH x START
             1 -> x = 1;,
             WHEN x MOD 2 == 0 -> x = 0;,
             DEFAULT -> x = 99;
@@ -94,7 +94,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           MUTABLE x = 7;
-          MATCH x START
+          PARTIAL MATCH x START
             WHEN x + 1 -> x = 0;
           END
         FLUX
@@ -111,7 +111,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           MUTABLE x = 1;
-          MATCH x START
+          PARTIAL MATCH x START
             1 -> PASS;,
             DEFAULT -> x = 99;
           END
@@ -128,7 +128,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           MUTABLE x = 1;
-          MATCH x START
+          PARTIAL MATCH x START
             1 -> PASS,
             DEFAULT -> x = 99;
           END
@@ -148,7 +148,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Point { x: Float64, y: Float64 }
           p = Point{ x: 10.0, y: 5.0 };
           MUTABLE result = 0;
-          MATCH p START
+          PARTIAL MATCH p START
             {x: 10.0, ...} -> result = 1;,
             {x: 20.0, ...} -> result = 2;,
             DEFAULT -> result = 3;
@@ -168,7 +168,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Point { x: Float64, y: Float64, z: Float64 }
           p = Point{ x: 1.0, y: 99.0, z: 3.0 };
           MUTABLE result = 0;
-          MATCH p START
+          PARTIAL MATCH p START
             {x: 1.0, y: _, z: 3.0} -> result = 42;,
             DEFAULT -> result = 0;
           END
@@ -187,7 +187,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Msg { code: Float64 }
           MUTABLE x = 0;
           m = Msg{ code: 5.0 };
-          MATCH m START
+          PARTIAL MATCH m START
             {code: 5.0, ...} -> x = 1;,
             {code: 10.0, ...} -> x = 2;,
             DEFAULT -> x = 3;
@@ -204,7 +204,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           x = 42;
-          MATCH x START
+          PARTIAL MATCH x START
             {value: 42, ...} -> PASS;
           END
         FLUX
@@ -221,7 +221,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Point { x: Float64, y: Float64 }
           p = Point{ x: 1, y: 2 };
           MUTABLE result = 0;
-          MATCH p START
+          PARTIAL MATCH p START
             {z: 99, ...} -> result = 1;
           END
         FLUX
@@ -238,7 +238,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Point { x: Float64, y: Float64 }
           p = Point{ x: 1, y: 2 };
           MUTABLE result = 0;
-          MATCH p START
+          PARTIAL MATCH p START
             {x: "hello", ...} -> result = 1;
           END
         FLUX
@@ -260,7 +260,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
-              MATCH d START
+              PARTIAL MATCH d START
                 Dir.North -> n = 1_i64;,
                 Dir.South -> n = 2_i64;
               END
@@ -276,7 +276,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
-              MATCH r START
+              PARTIAL MATCH r START
                 Result.Ok -> n = 1_i64;
               END
             END
@@ -291,7 +291,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               c: Color = Color.Red;
               MUTABLE n = 0_i64;
-              MATCH c START
+              PARTIAL MATCH c START
                 Color.Red -> n = 1_i64;,
                 DEFAULT   -> n = 99_i64;
               END
@@ -307,7 +307,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               b: Bit = Bit.Zero;
               MUTABLE n = 0_i64;
-              MATCH b START
+              PARTIAL MATCH b START
                 Bit.Zero -> n = 0_i64;,
                 WHEN n == 0 -> n = 99_i64;
               END
@@ -318,17 +318,17 @@ RSpec.describe SemanticAnnotator do
     end
 
     # --------------------------------------------------
-    # MATCH IFF: exhaustiveness enforced
+    # MATCH: exhaustiveness enforced
     # --------------------------------------------------
-    context "MATCH IFF enum exhaustiveness" do
-      it "accepts a fully exhaustive MATCH IFF on an enum" do
+    context "MATCH enum exhaustiveness" do
+      it "accepts a fully exhaustive MATCH on an enum" do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South, East, West }
             FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
-              MATCH IFF d START
+              MATCH d START
                 Dir.North -> n = 1_i64;,
                 Dir.South -> n = 2_i64;,
                 Dir.East  -> n = 3_i64;,
@@ -339,30 +339,30 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "raises an error when MATCH IFF on enum is non-exhaustive" do
+      it "raises an error when MATCH on enum is non-exhaustive" do
         expect {
           run(<<~CLEAR)
             ENUM Dir { North, South, East, West }
             FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
-              MATCH IFF d START
+              MATCH d START
                 Dir.North -> n = 1_i64;,
                 Dir.South -> n = 2_i64;
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH IFF on enum 'Dir' is non-exhaustive: missing variants: East, West/)
+        }.to raise_error(CompilerError, /MATCH on enum 'Dir' is non-exhaustive: missing variants: East, West/)
       end
 
-      it "raises an error when MATCH IFF has a DEFAULT branch" do
+      it "raises an error when MATCH has a DEFAULT branch" do
         expect {
           run(<<~CLEAR)
             ENUM Color { Red, Green, Blue }
             FN main() RETURNS Void ->
               c: Color = Color.Red;
               MUTABLE n = 0_i64;
-              MATCH IFF c START
+              MATCH c START
                 Color.Red   -> n = 1_i64;,
                 Color.Green -> n = 2_i64;,
                 Color.Blue  -> n = 3_i64;,
@@ -370,50 +370,50 @@ RSpec.describe SemanticAnnotator do
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH IFF cannot have a DEFAULT branch/)
+        }.to raise_error(CompilerError, /MATCH cannot have a DEFAULT branch/)
       end
 
-      it "raises an error when MATCH IFF contains a WHEN guard" do
+      it "raises an error when MATCH contains a WHEN guard" do
         expect {
           run(<<~CLEAR)
             ENUM Bit { Zero, One }
             FN main() RETURNS Void ->
               b: Bit = Bit.Zero;
               MUTABLE n = 0_i64;
-              MATCH IFF b START
+              MATCH b START
                 Bit.Zero    -> n = 0_i64;,
                 WHEN n == 0 -> n = 99_i64;
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH IFF cannot contain WHEN guards/)
+        }.to raise_error(CompilerError, /MATCH cannot contain WHEN guards/)
       end
 
-      it "raises an error when MATCH IFF subject is not an enum or union" do
+      it "raises an error when MATCH subject is not an enum or union" do
         expect {
           run(<<~CLEAR)
             FN main() RETURNS Void ->
               x = 42_i64;
               MUTABLE n = 0_i64;
-              MATCH IFF x START
+              MATCH x START
                 1_i64 -> n = 1_i64;,
                 2_i64 -> n = 2_i64;
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH IFF requires an enum or union type/)
+        }.to raise_error(CompilerError, /MATCH requires an enum or union type/)
       end
     end
 
-    context "MATCH IFF union exhaustiveness" do
-      it "accepts a fully exhaustive MATCH IFF on a union" do
+    context "MATCH union exhaustiveness" do
+      it "accepts a fully exhaustive MATCH on a union" do
         expect {
           run(<<~CLEAR)
             UNION Shape { Circle: Float64, Point }
             FN main() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
-              MATCH IFF s START
+              MATCH s START
                 Shape.Circle -> n = 1_i64;,
                 Shape.Point  -> n = 2_i64;
               END
@@ -422,29 +422,29 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "raises an error when MATCH IFF on union is non-exhaustive" do
+      it "raises an error when MATCH on union is non-exhaustive" do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Float64, Err: Float64, Empty }
             FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
-              MATCH IFF r START
+              MATCH r START
                 Result.Ok -> n = 1_i64;
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH IFF on union 'Result' is non-exhaustive: missing variants: Empty, Err/)
+        }.to raise_error(CompilerError, /MATCH on union 'Result' is non-exhaustive: missing variants: Empty, Err/)
       end
 
-      it "accepts a partial union MATCH (not IFF) with DEFAULT" do
+      it "accepts a PARTIAL MATCH on a union with DEFAULT" do
         expect {
           run(<<~CLEAR)
             UNION Result { Ok: Float64, Err: Float64 }
             FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1 };
               MUTABLE n = 0_i64;
-              MATCH r START
+              PARTIAL MATCH r START
                 Result.Ok -> n = 1_i64;,
                 DEFAULT   -> n = 99_i64;
               END
@@ -453,14 +453,14 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "accepts exhaustive MATCH IFF on a generic union" do
+      it "accepts exhaustive MATCH on a generic union" do
         expect {
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
             FN main() RETURNS Void ->
               opt = Option<Float64>{ Some: 1.0 };
               MUTABLE n = 0.0;
-              MATCH IFF opt START
+              MATCH opt START
                 Option.Some -> n = 1.0;,
                 Option.None -> n = 2.0;
               END
@@ -469,19 +469,19 @@ RSpec.describe SemanticAnnotator do
         }.not_to raise_error
       end
 
-      it "raises an error for non-exhaustive MATCH IFF on generic union" do
+      it "raises an error for non-exhaustive MATCH on generic union" do
         expect {
           run(<<~CLEAR)
             UNION Option<T> { Some: T, None }
             FN main() RETURNS Void ->
               opt = Option<Float64>{ Some: 1.0 };
               MUTABLE n = 0.0;
-              MATCH IFF opt START
+              MATCH opt START
                 Option.Some -> n = 1.0;
               END
             END
           CLEAR
-        }.to raise_error(CompilerError, /MATCH IFF on union 'Option' is non-exhaustive: missing variants: None/)
+        }.to raise_error(CompilerError, /MATCH on union 'Option' is non-exhaustive: missing variants: None/)
       end
     end
 
@@ -496,7 +496,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               s: Shape = Shape{ Circle: 5.0 };
               MUTABLE a = 0.0;
-              MATCH s START
+              PARTIAL MATCH s START
                 Shape.Circle AS r -> a = r;,
                 Shape.Point       -> a = 0.0;
               END
@@ -511,7 +511,7 @@ RSpec.describe SemanticAnnotator do
           FN main() RETURNS Void ->
             r: Result = Result{ Ok: 42.0 };
             MUTABLE got = 0.0;
-            MATCH r START
+            PARTIAL MATCH r START
               Result.Ok    AS v -> got = v;,
               Result.Err   AS e -> got = e;,
               Result.Empty      -> got = 0.0;
@@ -530,7 +530,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               m: Maybe = Maybe.None;
               MUTABLE n = 0.0;
-              MATCH m START
+              PARTIAL MATCH m START
                 Maybe.Some AS x -> n = x;,
                 Maybe.None AS y -> n = 0.0;
               END
@@ -546,7 +546,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
-              MATCH d START
+              PARTIAL MATCH d START
                 Dir.North AS x -> n = 1_i64;,
                 Dir.South      -> n = 2_i64;
               END
@@ -562,7 +562,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               opt = Option<Float64>{ Some: 3.14 };
               MUTABLE got = 0.0;
-              MATCH opt START
+              PARTIAL MATCH opt START
                 Option.Some AS x -> got = x;,
                 Option.None      -> got = -1.0;
               END
@@ -580,7 +580,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               r: Result = Result{ Ok: 1.0 };
               MUTABLE n = 0.0;
-              MATCH r START
+              PARTIAL MATCH r START
                 Result.Ok  AS v -> need_str(v);,
                 Result.Err AS e -> n = e;
               END
@@ -591,7 +591,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     # --------------------------------------------------
-    # Zig code generation for AS capture and MATCH IFF
+    # Zig code generation for AS capture and MATCH
     # --------------------------------------------------
     context "Zig code generation" do
       def transpile(src)
@@ -604,7 +604,7 @@ RSpec.describe SemanticAnnotator do
           FN main() RETURNS Void ->
             s: Shape = Shape{ Circle: 2.0 };
             MUTABLE a = 0.0;
-            MATCH IFF s START
+            PARTIAL MATCH s START
               Shape.Circle AS r -> a = r;,
               Shape.Point       -> a = 0.0;
             END
@@ -614,13 +614,13 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("const r = s.Circle;")
       end
 
-      it "emits == comparison (not activeTag) for enum MATCH IFF" do
+      it "emits == comparison (not activeTag) for enum MATCH" do
         out = transpile(<<~CLEAR)
           ENUM Dir { North, South }
           FN main() RETURNS Void ->
             d: Dir = Dir.North;
             MUTABLE n = 0_i64;
-            MATCH IFF d START
+            PARTIAL MATCH d START
               Dir.North -> n = 1_i64;,
               Dir.South -> n = 2_i64;
             END
@@ -632,13 +632,13 @@ RSpec.describe SemanticAnnotator do
         expect(out).not_to include("activeTag")
       end
 
-      it "emits payload capture for generic union MATCH IFF" do
+      it "emits payload capture for generic union MATCH" do
         out = transpile(<<~CLEAR)
           UNION Option<T> { Some: T, None }
           FN main() RETURNS Void ->
             opt = Option<Float64>{ Some: 7.0 };
             MUTABLE got = 0.0;
-            MATCH IFF opt START
+            PARTIAL MATCH opt START
               Option.Some AS x -> got = x;,
               Option.None      -> got = -1.0;
             END
@@ -648,19 +648,19 @@ RSpec.describe SemanticAnnotator do
         expect(out).to include("const x = opt.Some;")
       end
 
-      it "MATCH IFF and MATCH produce identical Zig output for the same exhaustive case" do
+      it "MATCH and MATCH produce identical Zig output for the same exhaustive case" do
         src_iff = <<~CLEAR
           UNION Shape { Circle: Float64, Point }
           FN main() RETURNS Void ->
             s: Shape = Shape.Point;
             MUTABLE n = 0_i64;
-            MATCH IFF s START
+            PARTIAL MATCH s START
               Shape.Circle -> n = 1_i64;,
               Shape.Point  -> n = 2_i64;
             END
           END
         CLEAR
-        src_plain = src_iff.sub("MATCH IFF", "MATCH")
+        src_plain = src_iff.sub("MATCH", "MATCH")
         expect(transpile(src_iff)).to eq(transpile(src_plain))
       end
     end

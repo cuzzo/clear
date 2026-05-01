@@ -3,7 +3,7 @@ STRUCT Point { x: Float64, y: Float64, z: Float64 }
 FN main() RETURNS Void ->
   -- PASS no-op test
   MUTABLE tag = 0;
-  MATCH tag START
+  PARTIAL MATCH tag START
     1 -> PASS;,
     DEFAULT -> tag = 99;
   END
@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
   -- Partial match with ...
   p1 = Point{ x: 10, y: 5, z: 3 };
   MUTABLE r1 = 0;
-  MATCH p1 START
+  PARTIAL MATCH p1 START
     {x: 10, ...} -> r1 = 1;,
     {x: 20, ...} -> r1 = 2;,
     DEFAULT -> r1 = 3;
@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
   -- Wildcard field with _
   p2 = Point{ x: 1, y: 99, z: 3 };
   MUTABLE r2 = 0;
-  MATCH p2 START
+  PARTIAL MATCH p2 START
     {x: 1, y: _, z: 3} -> r2 = 42;,
     DEFAULT -> r2 = 0;
   END
@@ -31,7 +31,7 @@ FN main() RETURNS Void ->
   -- Multi-field condition (no ...)
   p3 = Point{ x: 5, y: 5, z: 5 };
   MUTABLE r3 = 0;
-  MATCH p3 START
+  PARTIAL MATCH p3 START
     {x: 5, y: 5} -> r3 = 7;,
     DEFAULT -> r3 = 0;
   END
@@ -40,7 +40,7 @@ FN main() RETURNS Void ->
   -- DEFAULT fires when no struct case matches
   p4 = Point{ x: 0, y: 0, z: 0 };
   MUTABLE r4 = 0;
-  MATCH p4 START
+  PARTIAL MATCH p4 START
     {x: 10, ...} -> r4 = 1;,
     DEFAULT -> r4 = 99;
   END

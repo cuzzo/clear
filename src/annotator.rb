@@ -1281,22 +1281,38 @@ private
     end
     node.case_drops = all_drops
 
-    # Exhaustiveness check — only enforced for MATCH IFF.
+    # Exhaustiveness check — enforced for plain MATCH (the default).
+    # PARTIAL MATCH bypasses these checks and allows DEFAULT, WHEN, and
+    # non-enum/union subjects.
     if node.exhaustive
-      # MATCH IFF requires an enum or union subject.
+      # MATCH requires an enum or union subject. Non-discriminated types
+      # (Int64, String, ...) can never be statically exhaustive; the user
+      # must opt in to PARTIAL MATCH.
       unless is_enum || is_union
         type_label = expr_t.resolved
-        error!(node, "MATCH IFF requires an enum or union type, got '#{type_label}'.")
+        error!(node,
+          "MATCH requires an enum or union type, got '#{type_label}'. " \
+          "Use `PARTIAL MATCH` to match on non-discriminated types " \
+          "(WHEN guards, ranges, etc. require PARTIAL).")
       end
 
-      # MATCH IFF forbids DEFAULT (defeats exhaustiveness).
+      # MATCH forbids DEFAULT — the whole point of an exhaustive MATCH is
+      # that every variant is explicitly named. If you want a fallback,
+      # write `PARTIAL MATCH`.
       if node.default_case
-        error!(node, "MATCH IFF cannot have a DEFAULT branch — every variant must be handled explicitly.")
+        error!(node,
+          "MATCH cannot have a DEFAULT branch — every variant must be " \
+          "handled explicitly. If you want a catch-all, change to " \
+          "`PARTIAL MATCH` (which permits DEFAULT and WHEN guards).")
       end
 
-      # MATCH IFF forbids WHEN guards (arbitrary conditions break static exhaustiveness).
+      # MATCH forbids WHEN guards — they're runtime conditions that break
+      # static exhaustiveness. Use `PARTIAL MATCH` for guard-style cases.
       if node.cases.any? { |c| c[:kind] == :when }
-        error!(node, "MATCH IFF cannot contain WHEN guards — every variant must be handled by an exact case.")
+        error!(node,
+          "MATCH cannot contain WHEN guards — every variant must be " \
+          "handled by an exact case. Use `PARTIAL MATCH` if you need " \
+          "WHEN guards.")
       end
 
       # Every variant must appear exactly once.
@@ -1313,7 +1329,11 @@ private
       missing = all_variants - covered
       unless missing.empty?
         type_label2 = is_enum ? "enum" : "union"
-        error!(node, "MATCH IFF on #{type_label2} '#{type_name}' is non-exhaustive: missing variants: #{missing.sort.join(', ')}")
+        error!(node,
+          "MATCH on #{type_label2} '#{type_name}' is non-exhaustive: " \
+          "missing variants: #{missing.sort.join(', ')}. " \
+          "Either add cases for the missing variants, or change to " \
+          "`PARTIAL MATCH` to allow non-exhaustive matching.")
       end
     end
 
@@ -4104,9 +4124,16 @@ private
       end
     end
 
-    # Must have DEFAULT or be exhaustive (MATCH IFF)
-    unless default_type || match_node.exhaustive
-      error!(match_node, "MATCH expression requires a DEFAULT branch (or MATCH IFF for exhaustive enum/union matching)")
+    # PARTIAL MATCH expressions must have a DEFAULT branch -- without
+    # one a non-exhaustive match leaves the result undefined for missing
+    # variants. Plain MATCH is exhaustive by construction (annotator
+    # already verified all variants are covered) so the implicit return
+    # value is always defined.
+    if !default_type && !match_node.exhaustive
+      error!(match_node,
+        "PARTIAL MATCH used in expression position requires a DEFAULT " \
+        "branch. Either add a DEFAULT case, or change to `MATCH` " \
+        "(which forces every variant to have an exact case).")
     end
 
     all_types = case_types.compact

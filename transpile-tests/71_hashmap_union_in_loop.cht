@@ -22,9 +22,9 @@ FN main() RETURNS Void ->
     v1 = map["k1"] OR Value.Nil;
     v2 = map["k2"] OR Value.Nil;
 
-    MATCH v0 START Value.Str AS s -> ASSERT s == "alpha", "k0 == alpha";, DEFAULT -> ASSERT FALSE, "k0 missing"; END
-    MATCH v1 START Value.Str AS s -> ASSERT s == "beta", "k1 == beta";, DEFAULT -> ASSERT FALSE, "k1 missing"; END
-    MATCH v2 START Value.Str AS s -> ASSERT s == "gamma", "k2 == gamma";, DEFAULT -> ASSERT FALSE, "k2 missing"; END
+    PARTIAL MATCH v0 START Value.Str AS s -> ASSERT s == "alpha", "k0 == alpha";, DEFAULT -> ASSERT FALSE, "k0 missing"; END
+    PARTIAL MATCH v1 START Value.Str AS s -> ASSERT s == "beta", "k1 == beta";, DEFAULT -> ASSERT FALSE, "k1 missing"; END
+    PARTIAL MATCH v2 START Value.Str AS s -> ASSERT s == "gamma", "k2 == gamma";, DEFAULT -> ASSERT FALSE, "k2 missing"; END
 
     RETURN;
 END

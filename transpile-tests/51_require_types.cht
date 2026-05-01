@@ -14,14 +14,14 @@ FN main() RETURNS Void ->
 
     -- Use imported UNION type
     ok = Result{ Ok: 42.0 };
-    MATCH ok START
+    PARTIAL MATCH ok START
         Result.Ok AS val -> ASSERT val == 42.0, "Result.Ok should be 42.0";,
         Result.Err -> ASSERT FALSE, "should not be Err";,
     END
 
     -- Use imported ENUM type
     c = Color.Red;
-    MATCH c START
+    PARTIAL MATCH c START
         Color.Red -> ASSERT TRUE, "color is red";,
         Color.Green -> ASSERT FALSE, "not green";,
         Color.Blue -> ASSERT FALSE, "not blue";,

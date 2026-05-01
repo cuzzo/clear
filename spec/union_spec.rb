@@ -196,7 +196,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
-              MATCH s START
+              PARTIAL MATCH s START
                 Shape.Circle -> n = 1_i64;,
                 Shape.Point  -> n = 2_i64;
               END
@@ -213,7 +213,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               s: Shape = Shape.Point;
               MUTABLE n = 0_i64;
-              MATCH s START
+              PARTIAL MATCH s START
                 Color.Red -> n = 1_i64;
               END
             END
@@ -315,7 +315,7 @@ RSpec.describe SemanticAnnotator do
           FN main() RETURNS Void ->
             s: Shape = Shape.Point;
             MUTABLE n = 0_i64;
-            MATCH s START
+            PARTIAL MATCH s START
               Shape.Circle -> n = 1_i64;,
               Shape.Point  -> n = 2_i64;
             END
@@ -505,13 +505,13 @@ RSpec.describe SemanticAnnotator do
 
       # MATCH integration
       describe "MATCH integration" do
-        it "MATCH IFF accepts inline struct union without error" do
+        it "MATCH accepts inline struct union without error" do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Float64 }, Point }
               FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
-                MATCH IFF c START
+                PARTIAL MATCH c START
                   Shape.Circle -> 1;,
                   Shape.Point  -> 2;
                 END
@@ -520,13 +520,13 @@ RSpec.describe SemanticAnnotator do
           }.not_to raise_error
         end
 
-        it "MATCH IFF enforces exhaustiveness over inline struct variants" do
+        it "MATCH enforces exhaustiveness over inline struct variants" do
           expect {
             run(<<~CLEAR)
               UNION Shape { Circle { radius: Float64 }, Point }
               FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
-                MATCH IFF c START
+                MATCH c START
                   Shape.Circle -> 1;
                 END
               END
@@ -540,7 +540,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               c: Shape = Shape.Circle{ radius: 5.0 };
               MUTABLE got = 0.0;
-              MATCH c START
+              PARTIAL MATCH c START
                 Shape.Circle AS ci -> got = ci.radius;,
                 DEFAULT            -> got = -1.0;
               END
@@ -556,7 +556,7 @@ RSpec.describe SemanticAnnotator do
               FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
                 MUTABLE got = 0.0;
-                MATCH c START
+                PARTIAL MATCH c START
                   Shape.Circle AS ci -> got = ci.radius;,
                   DEFAULT            -> got = -1.0;
                 END
@@ -572,7 +572,7 @@ RSpec.describe SemanticAnnotator do
               FN main() RETURNS Void ->
                 c: Shape = Shape.Circle{ radius: 5.0 };
                 MUTABLE got = 0.0;
-                MATCH c START
+                PARTIAL MATCH c START
                   Shape.Circle AS ci -> got = ci.diameter;,
                   DEFAULT            -> got = -1.0;
                 END
@@ -644,7 +644,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               c: Shape = Shape.Circle{ radius: 5.0 };
               MUTABLE got = 0.0;
-              MATCH c START
+              PARTIAL MATCH c START
                 Shape.Circle AS ci -> got = ci.radius;,
                 DEFAULT            -> got = -1.0;
               END
