@@ -404,27 +404,25 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 36 THEN
         -- list-push: return new list with element appended (preserves typed arrays)
         MATCH evaled[1] START
+            -- In-place append: MATCH AS gives a reference into evaled[1],
+            -- which is the function's local copy of the popped Value.
+            -- Mutating srcInts/srcFloats/srcItems updates the underlying
+            -- @list in place (O(1) amortized) rather than copying every
+            -- element (O(N)). The wrapper Value.{TypedI64Arr,...} we
+            -- return shares the same underlying storage, so the caller's
+            -- store-back operation is logically a no-op for the data
+            -- (only the Value union tag is touched). This is what
+            -- distinguishes the bytecode VM's stress-test performance
+            -- from the previous functional copy-then-append pattern.
             Value.TypedI64Arr AS srcInts ->
-                MUTABLE newInts: Int64[]@list = List[];
-                FOR li IN (0_i64 ..< srcInts.length()) DO
-                    newInts.append(srcInts[li]);
-                END
-                newInts.append(getInt(evaled[2]));
-                RETURN Value{ TypedI64Arr: newInts };,
+                srcInts.append(getInt(evaled[2]));
+                RETURN Value{ TypedI64Arr: srcInts };,
             Value.TypedF64Arr AS srcFloats ->
-                MUTABLE newFloats: Float64[]@list = List[];
-                FOR li IN (0_i64 ..< srcFloats.length()) DO
-                    newFloats.append(srcFloats[li]);
-                END
-                newFloats.append(getNum(evaled[2]));
-                RETURN Value{ TypedF64Arr: newFloats };,
+                srcFloats.append(getNum(evaled[2]));
+                RETURN Value{ TypedF64Arr: srcFloats };,
             Value.List AS srcItems ->
-                MUTABLE newItems: Value[]@list = List[];
-                FOR li IN (0_i64 ..< srcItems.length()) DO
-                    newItems.append(COPY srcItems[li]);
-                END
-                newItems.append(COPY evaled[2]);
-                RETURN Value{ List: newItems };,
+                srcItems.append(COPY evaled[2]);
+                RETURN Value{ List: srcItems };,
             DEFAULT ->
                 MUTABLE singleItem: Value[]@list = List[];
                 singleItem.append(COPY evaled[2]);
