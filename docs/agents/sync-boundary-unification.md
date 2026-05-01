@@ -187,13 +187,19 @@ title) listing the 5 questions and the single answer-source for each.
 - Body lowering itself — each construct still drives its own MIR
   generation. The builder is about the *boundary*, not the body.
 
-## Status today (after Bug 257 fix)
+## Status today (after Phase 1)
 
 - ✓ Capture analysis unified (BgCaptureClassifier)
 - ✓ Live storage/sync threading unified (with_fiber_capture_map +
   capture_symbols + with_cap_sync_storage)
 - ✓ Field/init/access pattern unified (`@TypeOf`/`.name = name`/`ctx.name`)
-- ✗ Ctx-struct emission still 4 places (Phase 1)
+- ✓ Ctx-struct capture emission unified (`FiberCtxBuilder.build`):
+  one builder feeds `lower_bg_block`, `lower_bg_stream_block`,
+  `lower_do_block`, and pipeline_host's
+  `build_bounded_concurrent_callback{,_pointer}`. The four sites still
+  own their site-specific control fields (Promise.inner+alloc /
+  WaitGroup / stream_inner+alloc / nothing) and their runtime spawn
+  APIs; the *capture* concern is one function.
 - ✗ FreshHeapCopy marker_plan unwired (Phase 2)
 - Workaround in place for `Scope#initialize_copy` deep-copy (Phase 3
   optional)

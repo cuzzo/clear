@@ -11,6 +11,7 @@
 
 require_relative "mir"
 require_relative "capture_strategy"
+require_relative "fiber_ctx_builder"
 require_relative "../ast/ast"
 require_relative "../ast/type"
 require_relative "../ast/error_registry"
@@ -2359,26 +2360,22 @@ class MIRLowering
       ctx_type = "__DoBranchCtx#{id}_#{i}"
       ctx_var = "__do#{id}_ctx#{i}"
       analysis = branch[:capture_analysis]
-      captured = analysis&.captures || {}
       pinned = branch[:pinned]
 
-      # Same field/init/access pattern as lower_bg_block: @TypeOf(name)
-      # for the field type lets Zig deduce the correct
-      # post-monomorphization type (handles Arc-wrapped captures and
-      # already-pointer collection params correctly without compiler-
-      # side type math). Init is `.name = name` (no `&`), body
-      # references go through `ctx.name` (no deref).
-      capture_fields = captured.map { |name, _type_obj|
-        "#{name}: @TypeOf(#{name}),"
-      }.join("\n    ")
+      # Capture handling delegated to FiberCtxBuilder -- same builder
+      # BG/BG STREAM/CONCURRENT use. DO branches need no string promotes
+      # (no fiber_string_promotes call) and use "ctx" as the body access
+      # prefix (no per-id suffix).
+      caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx")
 
+      capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n    ")
       capture_inits = ([".wg = &#{wg_var}"] +
-        captured.map { |name, _| ".#{name} = #{name}" }).join(", ")
+        caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
 
       # Lower branch body to MIR nodes (for checker visibility) and emit Zig code.
       branch_mir = nil
-      body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h,
-                                         capture_symbols: analysis&.capture_symbols,
+      body_code = with_fiber_capture_map(caps.capture_map,
+                                         capture_symbols: caps.capture_symbols,
                                          rt_override: "__rt") do
         body_stmts = branch[:body].map { |e| lower(e) }
         branch_mir = body_stmts
@@ -2458,33 +2455,18 @@ class MIRLowering
     # below picks up the same field.
     enforce_bg_capture_strategies!(node, captured)
 
-    # Build capture fields. The captured value's actual Zig type after
-    # monomorphization depends on the caller's binding (e.g. an `anytype`
-    # collection param is `*Arc(Locked(T))` when the caller passes
-    # @shared:locked, but `*Locked(T)` when affine). The Type-object-based
-    # zig_type computation can disagree with the deduced type on:
-    #   - the Arc/Rc layer (caller-passed @shared/@multiowned vs
-    #     param's nominal type)
-    #   - the outer pointer (collection params already arrive as *T but
-    #     pointer_captures used to add another *)
-    # Use Zig's `@TypeOf(name)` to take the actual deduced type at the
-    # capture site, and `.name = name` (no &) so we never silently take
-    # an address that doubles up the pointer.
+    # Capture handling delegated to FiberCtxBuilder -- the same builder
+    # DO branches and pipeline_host CONCURRENT callbacks call. Only the
+    # site-specific control fields (Promise.inner / alloc) and the
+    # body access prefix (__ctx_<id> for BG) are added here.
     bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "bg")
+    caps = FiberCtxBuilder.build(analysis,
+                                 body_access_prefix: "__ctx_#{id}",
+                                 promoted_names: promoted_names)
 
-    capture_fields = captured.map { |name, _type_obj|
-      next "#{name}: []const u8," if promoted_names[name]
-      "#{name}: @TypeOf(#{name}),"
-    }.join("\n        ")
-
+    capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n        ")
     capture_inits = ([".inner = #{promise_var}.inner", ".alloc = #{alloc_var}"] +
-      captured.map { |name, _|
-        if promoted_names[name]
-          ".#{name} = #{promoted_names[name]}"
-        else
-          ".#{name} = #{name}"
-        end
-      }).join(", ")
+                     caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
 
     # Flatten ThenChain + lower body
     flat_steps = []
@@ -2499,7 +2481,6 @@ class MIRLowering
     pre_steps = flat_steps
 
     # Rewrite captured variable references and rt inside the fiber body
-    bg_capture_map = captured.map { |name, _| [name, "__ctx_#{id}.#{name}"] }.to_h
     prev_bg_ptr_caps = @current_bg_pointer_captures
     @current_bg_pointer_captures = pointer_captures
     # Lower the fiber body to MIR nodes (for checker visibility) and build Zig strings.
@@ -2510,8 +2491,8 @@ class MIRLowering
     run_body = nil
     prev_fiber_pending = @pending_stmts
     @pending_stmts = []
-    stmt_code, result_line = with_fiber_capture_map(bg_capture_map,
-                                                    capture_symbols: analysis&.capture_symbols,
+    stmt_code, result_line = with_fiber_capture_map(caps.capture_map,
+                                                    capture_symbols: caps.capture_symbols,
                                                     rt_override: bg_rt) do
       body_mir = []
       sc = pre_steps.filter_map { |step|
@@ -2707,21 +2688,19 @@ class MIRLowering
     end
 
     analysis = node.capture_analysis
-    captured = analysis&.captures || {}
     rt_name = @rt_name
 
-    # String captures annotated directly on BgStreamBlock.capture_string_dupes
+    # Capture handling delegated to FiberCtxBuilder -- same builder
+    # BG/DO/CONCURRENT use. BG STREAM's site-specific extras are the
+    # control fields (stream_inner / alloc) and "ctx" body prefix.
     bg_string_promotes, promoted_names = fiber_string_promotes(node, id, "sg")
+    caps = FiberCtxBuilder.build(analysis,
+                                 body_access_prefix: "ctx",
+                                 promoted_names: promoted_names)
 
-    capture_fields = captured.map { |name, type_obj|
-      zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
-      "#{name}: #{zig_t},"
-    }.join("\n        ")
-
+    capture_fields = caps.specs.map { |s| "#{s.name}: #{s.field_type_zig}," }.join("\n        ")
     capture_inits = ([".stream_inner = #{stream_var}.inner", ".alloc = #{alloc_var}"] +
-      captured.map { |name, _|
-        promoted_names[name] ? ".#{name} = #{promoted_names[name]}" : ".#{name} = #{name}"
-      }).join(", ")
+                     caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
 
     # Save/restore stream context for YieldExpr
     prev_stream_local = @current_stream_local
@@ -2729,11 +2708,10 @@ class MIRLowering
     @current_stream_local = local_stream
     @current_stream_is_inf = is_inf
 
-    stream_capture_map = captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
     # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
     stream_run_body = nil
-    body_code = with_fiber_capture_map(stream_capture_map,
-                                       capture_symbols: analysis&.capture_symbols,
+    body_code = with_fiber_capture_map(caps.capture_map,
+                                       capture_symbols: caps.capture_symbols,
                                        rt_override: "__rt") do
       body_mir = node.body.map { |expr| lower(expr) }
       stream_run_body = body_mir
@@ -2781,7 +2759,7 @@ class MIRLowering
           break :#{blk_label} #{stream_var};
       }
     ZIG
-    MIR::BgBlock.new(sg_code, captured, stream_run_body || [])
+    MIR::BgBlock.new(sg_code, analysis&.captures || {}, stream_run_body || [])
   end
 
   def lower_yield(node)

@@ -1,6 +1,7 @@
 require "set"
 require_relative "./pipeline_generator"
 require_relative "./zig_type_mapper"
+require_relative "../mir/fiber_ctx_builder"
 
 # Lightweight host for PipelineGenerator that routes sub-expression
 # transpilation through MIRLowering + MIREmitter instead of the old
@@ -2684,20 +2685,14 @@ class PipelineHost
     id = (@bounded_conc_counter += 1)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     analysis = conc_op.capture_analysis
-    captures = analysis&.captures || {}
 
-    # Same field/init/access pattern as lower_bg_block + lower_do_block
-    # (commit 04062213 + the BG-DO unification): @TypeOf(name) for the
-    # field type lets Zig deduce the correct post-monomorphization
-    # type, handling Arc-wrapped captures (@shared:locked propagated
-    # via REQUIRES LOCKABLE) and already-pointer collection params
-    # without compiler-side type math. Init is `.name = name` (no `&`),
-    # body references `ctx.name` (no deref). Replaces the previous
-    # `*const T` + `&name` + `ctx.name.*` triplet that broke for
-    # `@shared:locked` captures (transpile-tests/257).
-    fields = captures.keys.map do |name|
-      MIR::FieldDef.new(name, "@TypeOf(#{name})", nil)
-    end
+    # Capture handling delegated to FiberCtxBuilder -- same builder
+    # BG/BG STREAM/DO use. CONCURRENT pipeline callbacks render the
+    # specs as MIR::FieldDef/MIR::StructInit (instead of Zig templates)
+    # because pipeline_host produces MIR nodes directly.
+    caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx")
+
+    fields = caps.specs.map { |s| MIR::FieldDef.new(s.name, s.field_type_zig, nil) }
 
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
     params = [
@@ -2707,17 +2702,15 @@ class PipelineHost
     ]
 
     body = [MIR::Suppress.new("__rt")]
-    capture_map = {}
-    unless captures.empty?
+    if caps.specs.empty?
+      body << MIR::Suppress.new("raw_ctx")
+    else
       ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
       body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
-      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}"] }
-    else
-      body << MIR::Suppress.new("raw_ctx")
     end
 
     lowered_body = with_pipeline_context(placeholder: "__item") do
-      with_fiber_capture_map(capture_map, capture_symbols: analysis&.capture_symbols, rt_override: "__rt") do
+      with_fiber_capture_map(caps.capture_map, capture_symbols: caps.capture_symbols, rt_override: "__rt") do
         case body_kind
         when :expr
           [MIR::ReturnStmt.new(visit_mir(conc_op.op.expression))]
@@ -2732,8 +2725,8 @@ class PipelineHost
 
     fn = MIR::FnDef.new("apply", params, Type.new(return_type).zig_type, body, nil, true, nil)
     ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
-    ctx_init = MIR::StructInit.new(ctx_name, captures.keys.map { |name|
-      { name: name, value: MIR::Ident.new(name) }
+    ctx_init = MIR::StructInit.new(ctx_name, caps.specs.map { |s|
+      { name: s.name, value: s.init_value_mir }
     })
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
@@ -3155,15 +3148,14 @@ class PipelineHost
     id = (@bounded_conc_counter += 1)
     ctx_name = "__BoundedConcurrentCtx#{id}"
     analysis = conc_op.capture_analysis
-    captures = analysis&.captures || {}
 
-    # @TypeOf(name) field, .name = name init, ctx.name access -- same
-    # pattern as build_bounded_concurrent_callback above; the `_pointer`
-    # suffix refers only to how `__item` is passed (mutable pointer
-    # for in-place mutation), not how captures are stored.
-    fields = captures.keys.map do |name|
-      MIR::FieldDef.new(name, "@TypeOf(#{name})", nil)
-    end
+    # Capture handling delegated to FiberCtxBuilder -- same builder
+    # BG/BG STREAM/DO/CONCURRENT-by-value use. The `_pointer` suffix
+    # only refers to how `__item` is passed (mutable pointer for
+    # in-place mutation), not how captures are stored.
+    caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx")
+
+    fields = caps.specs.map { |s| MIR::FieldDef.new(s.name, s.field_type_zig, nil) }
 
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
     item_zig_ptr = "*#{Type.new(item_type).zig_type}"
@@ -3174,17 +3166,15 @@ class PipelineHost
     ]
 
     body = [MIR::Suppress.new("__rt")]
-    capture_map = {}
-    unless captures.empty?
+    if caps.specs.empty?
+      body << MIR::Suppress.new("raw_ctx")
+    else
       ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
       body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
-      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}"] }
-    else
-      body << MIR::Suppress.new("raw_ctx")
     end
 
     lowered_body = with_pipeline_context(placeholder: "__item") do
-      with_fiber_capture_map(capture_map, capture_symbols: analysis&.capture_symbols, rt_override: "__rt") do
+      with_fiber_capture_map(caps.capture_map, capture_symbols: caps.capture_symbols, rt_override: "__rt") do
         [*visit_pipeline_body_mir(conc_op.op.body, placeholder: "__item"), MIR::ReturnStmt.new(nil)]
       end
     end
@@ -3192,8 +3182,8 @@ class PipelineHost
 
     fn = MIR::FnDef.new("apply", params, "void", body, nil, true, nil)
     ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
-    ctx_init = MIR::StructInit.new(ctx_name, captures.keys.map { |name|
-      { name: name, value: MIR::Ident.new(name) }
+    ctx_init = MIR::StructInit.new(ctx_name, caps.specs.map { |s|
+      { name: s.name, value: s.init_value_mir }
     })
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
