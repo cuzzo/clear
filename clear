@@ -14,6 +14,12 @@ require 'digest'
 require 'set'
 require 'json'
 
+# Coverage bootstrap MUST run before any src/ require so SimpleCov can
+# instrument every file the subcommand loads. No-op unless COVERAGE=1.
+# See spec/coverage_bootstrap.rb.
+require_relative 'spec/coverage_bootstrap'
+CoverageBootstrap.start('clear-cli')
+
 # Resolve paths relative to this script (works from any directory)
 CLEAR_ROOT = File.expand_path('..', __FILE__)
 ZIG_DIR    = File.join(CLEAR_ROOT, 'zig')

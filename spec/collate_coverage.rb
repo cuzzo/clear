@@ -1,17 +1,27 @@
 #!/usr/bin/env ruby
-# Merge per-worker coverage entries (RSpec-w1-..., RSpec-w2-..., etc.)
-# from coverage/.resultset.json into a single "RSpec" entry, then
-# overwrite the file. RubyCritic's coverage analyser reads only
-# `results.first` from the resultset (vendor/.../analysers/coverage.rb:16),
-# so without this collation it sees only the parent's empty
-# "RSpec" entry and reports 0% coverage for every file even though
-# SimpleCov itself measured ~75%.
+# Merge multi-source coverage entries (RSpec-w1-..., transpile-tests-...,
+# clear-cli-..., etc.) from coverage/.resultset.json into a single
+# "RSpec" entry that RubyCritic's coverage analyser can read.
+#
+# Why: RubyCritic reads `results.first` from the resultset
+# (vendor/.../analysers/coverage.rb:16). With multiple entries it sees
+# only one slice. Without this collation the simple_cov_index report
+# shows partial coverage for the first entry only.
+#
+# How: SimpleCov's own ResultMerger.merge_results does the per-line
+# arithmetic (handling never_lines, branch coverage, etc.) correctly.
+# A hand-rolled "max hits per line" merge gets relevant_lines wrong
+# because some entries trace files they didn't actually load (zero
+# hits but inflated relevant counts), which my merge counted as
+# uncovered when SimpleCov drops them.
 #
 # Usage:
-#   bundle exec prspec spec/
-#   bundle exec ruby spec/collate_coverage.rb
-#   bundle exec rubycritic src/ --no-browser
+#   bundle exec prspec spec/                                # spec coverage
+#   COVERAGE=1 bundle exec ruby ./clear test transpile-tests/  # integration
+#   bundle exec ruby spec/collate_coverage.rb               # collate -> RSpec
+#   bundle exec rubycritic src/ --no-browser                # consume
 
+require "simplecov"
 require "json"
 
 resultset_path = File.expand_path("../coverage/.resultset.json", __dir__)
@@ -20,68 +30,30 @@ unless File.exist?(resultset_path)
   exit 1
 end
 
-resultset = JSON.parse(File.read(resultset_path))
-
-# Merge: for every file in any entry, take the per-line MAX hit count
-# across all entries. nil + integer = integer; nil + nil = nil (line
-# wasn't executable in any run).
-merged_lines = {}
-merged_branches = {}
-latest_timestamp = 0
-
-resultset.each do |_command_name, data|
-  next unless data.is_a?(Hash)
-  ts = data["timestamp"].to_i
-  latest_timestamp = ts if ts > latest_timestamp
-
-  (data["coverage"] || {}).each do |filename, file_data|
-    lines = file_data["lines"] || []
-    if (existing = merged_lines[filename])
-      lines.each_with_index do |hit, i|
-        cur = existing[i]
-        existing[i] = if hit.nil? && cur.nil?
-                        nil
-                      elsif hit.nil?
-                        cur
-                      elsif cur.nil?
-                        hit
-                      else
-                        cur + hit
-                      end
-      end
-    else
-      merged_lines[filename] = lines.dup
-    end
-
-    branches = file_data["branches"]
-    if branches
-      merged_branches[filename] ||= {}
-      branches.each do |branch_id, conds|
-        existing = merged_branches[filename][branch_id] || {}
-        merged = existing.merge(conds) { |_, a, b| a.to_i + b.to_i }
-        merged_branches[filename][branch_id] = merged
-      end
-    end
-  end
+# SimpleCov needs an active config (filters, root) for ResultMerger to
+# do its arithmetic. Calling SimpleCov.start would register an at_exit
+# that writes a fresh empty "RSpec" entry over our work; instead just
+# configure without starting.
+SimpleCov.configure do
+  enable_coverage :branch
+  add_filter "/spec/"
+  add_filter "/transpile-tests/"
+  add_filter "/vendor/"
+  add_filter "/examples/"
+  add_filter "/benchmarks/"
 end
 
-# Build the new resultset: ONE entry, "RSpec".
-collated_coverage = {}
-merged_lines.each do |filename, lines|
-  entry = { "lines" => lines }
-  entry["branches"] = merged_branches[filename] if merged_branches[filename]
-  collated_coverage[filename] = entry
-end
+original_keys = JSON.parse(File.read(resultset_path)).keys
+merged = SimpleCov::ResultMerger.merge_results(resultset_path, ignore_timeout: true)
+abort "merge produced nothing" unless merged
 
-File.write(resultset_path, JSON.pretty_generate(
-  "RSpec" => {
-    "coverage" => collated_coverage,
-    "timestamp" => latest_timestamp,
-  }
-))
+# Persist back as a single "RSpec" entry. SimpleCov::Result#to_hash
+# already returns the right shape ({ command_name => { coverage:, timestamp: } });
+# we rename the command to "RSpec" so RubyCritic's `results.first` always
+# points at the merged data regardless of which entry was lexically first.
+hash_form = merged.to_hash
+_, payload = hash_form.first
+File.write(resultset_path, JSON.pretty_generate("RSpec" => payload))
 
-# Report what we did so the user can confirm coverage didn't drop.
-total = merged_lines.values.flat_map { |l| l.compact }
-hit = total.count { |h| h > 0 }
-pct = total.empty? ? 0 : hit * 100.0 / total.size
-puts "Collated #{resultset.size} entries (#{merged_lines.size} files) -> single 'RSpec' (%.1f%% line coverage)" % pct
+puts "Collated #{original_keys.size} entries (#{payload['coverage'].size} files) -> single 'RSpec' " \
+     "(%.2f%% line coverage)" % merged.covered_percent

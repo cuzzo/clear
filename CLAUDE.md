@@ -91,6 +91,53 @@ ruby benchmarks/runner.rb --cores=2 benchmarks/concurrent/09_kvstore/ # Control 
 
 See `benchmarks/README.md` for the full benchmark index and details.
 
+## Code Quality / Coverage Reports
+
+Three measurements: line + branch coverage (SimpleCov), per-method
+complexity (Flog), code smells (Reek), and structural duplication
+(Flay) -- all aggregated by RubyCritic. Run after meaningful
+changes to track tech-debt drift.
+
+```bash
+# 1. Spec coverage. SimpleCov is auto-wired via spec/spec_helper.rb;
+#    parallel_rspec workers each write a unique resultset entry.
+bundle exec prspec spec/
+
+# 2. Integration coverage. transpile-tests/gen.rb and the `clear` CLI
+#    both load src/ as a separate Ruby process tree -- spec_helper
+#    isn't loaded, so they need COVERAGE=1 to opt in. Each entry point
+#    writes its own resultset entry (transpile-tests-PID, clear-cli-PID).
+COVERAGE=1 ./clear test transpile-tests/
+
+# 3. Collate all entries (RSpec workers + transpile-tests + clear-cli)
+#    into a single "RSpec" entry so RubyCritic can read it -- RubyCritic
+#    only consumes results.first from .resultset.json. SimpleCov's own
+#    ResultMerger does the per-line arithmetic so percentages match
+#    what SimpleCov reports.
+bundle exec ruby spec/collate_coverage.rb
+
+# 4. Generate the RubyCritic report. Skip --no-browser if you want it
+#    to open the HTML directly.
+bundle exec rubycritic src/ --no-browser --format html --path tmp/rubycritic
+open tmp/rubycritic/overview.html
+```
+
+For just the spec-side coverage (faster, skips transpile-tests):
+```bash
+bundle exec prspec spec/                   # writes coverage/.resultset.json
+bundle exec ruby spec/collate_coverage.rb  # merges parallel workers
+bundle exec rubycritic src/ --no-browser
+```
+
+Standalone tools (don't need the full pipeline):
+```bash
+bundle exec reek src/             # smells per file
+bundle exec flog src/ --all -m    # methods sorted by complexity
+bundle exec flay src/ --mass 50   # mass-50+ duplicate code blocks
+```
+
+Disable coverage for fast iteration: `COVERAGE=0 bundle exec prspec spec/`.
+
 ## Profiling
 
 When debugging performance issues, use `clear profile` and `clear doctor`:
