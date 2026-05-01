@@ -1018,14 +1018,17 @@ BUILTIN_OPS = {
   },
   concurrentStreamSelect: {
     zig: "try CheatLib.concurrentStreamSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
+    bc: true,
     allocates: true
   },
   concurrentStreamWhere: {
     zig: "try CheatLib.concurrentStreamWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    bc: true,
     allocates: true
   },
   concurrentStreamEach: {
     zig: "try CheatLib.concurrentStreamEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    bc: true,
     borrows: :all
   },
   concurrentListSelect: {

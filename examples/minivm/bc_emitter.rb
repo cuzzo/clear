@@ -2978,6 +2978,150 @@ class BcEmitter
     end
   end
 
+  # Compile a stream-source concurrent op (SELECT / WHERE / EACH).
+  # Sequential simulation: pull items from the source via .next() and
+  # BC_CALL the worker per item. The args layout matches
+  # PipelineHost#lower_concurrent_stream_*; the fn-ref / src_ptr /
+  # ctx_addr positions differ per op:
+  #   SELECT(12): [T, R, fn_ref, is_inf, alloc, rt, src_ptr, workers,
+  #                capacity, parallel, task_cfg, ctx_addr]
+  #   WHERE(11):  [T,    fn_ref, is_inf, alloc, rt, src_ptr, workers,
+  #                capacity, parallel, task_cfg, ctx_addr]
+  #   EACH(11):   [T,    fn_ref, is_inf, alloc, rt, src_ptr, workers,
+  #                capacity, parallel, task_cfg, ctx_addr]
+  # For the BC, alloc/rt/workers/capacity/parallel/task_cfg/is_inf are
+  # all Zig-only knobs (no real concurrency). The .next() dispatch in
+  # compile_method_call already handles the slot-kind cases (split
+  # stream / materialized list / promise).
+  def compile_concurrent_stream(node)
+    op = node.op
+    case op
+    when :concurrentStreamSelect
+      fn_ref, src_ptr, ctx_addr = node.args[2], node.args[6], node.args[11]
+    when :concurrentStreamWhere
+      fn_ref, src_ptr, ctx_addr = node.args[1], node.args[5], node.args[10]
+    when :concurrentStreamEach
+      fn_ref, src_ptr, ctx_addr = node.args[1], node.args[5], node.args[10]
+    else
+      raise "compile_concurrent_stream: unexpected op #{op.inspect}"
+    end
+
+    fn_name = fn_ref.is_a?(MIR::Ident) ? fn_ref.name.to_s : nil
+    raise "compile_concurrent_stream: missing fn ref" unless fn_name
+    fn_ip = @fn_start_ips[fn_name]
+    raise "compile_concurrent_stream: helper fn #{fn_name.inspect} not registered" unless fn_ip
+
+    # Unwrap src_ptr (AddressOf is identity in BC).
+    src = src_ptr
+    src = src.expr if src.is_a?(MIR::AddressOf)
+
+    @bcs_counter = (@bcs_counter || 0) + 1
+    id = @bcs_counter
+    res_name  = "__bcs_res#{id}"
+    item_name = "__bcs_item#{id}"
+    cv_name   = "__bcs_cv#{id}"
+    ctx_name  = "__bcs_ctx#{id}"
+    src_name  = "__bcs_src#{id}"
+
+    # Materialize src into a slot so LIST_POP_FRONT has a stable target.
+    # If src is already an Ident with a slot, reuse it (consumption is
+    # destructive but the source isn't read again after the pipeline).
+    src_slot_name = if src.is_a?(MIR::Ident) && has_slot?(src.name.to_s)
+                      src.name.to_s
+                    else
+                      compile_expr_to_value(src); pop_type
+                      alloc_slot(src_name, :any)
+                      emit_op(STORE_SLOT, @slots[src_name]); emit_op(POP)
+                      src_name
+                    end
+
+    # Stash ctx (AddressOf wraps the real ctx Value).
+    if ctx_addr
+      ctx_expr = ctx_addr.is_a?(MIR::AddressOf) ? ctx_addr.expr : ctx_addr
+      compile_expr_to_value(ctx_expr); pop_type
+    else
+      emit_op(LOAD_CONST, add_const(nil))
+    end
+    alloc_slot(ctx_name, :any)
+    emit_op(STORE_SLOT, @slots[ctx_name]); emit_op(POP)
+
+    # Allocate result list (SELECT/WHERE only).
+    needs_result = (op != :concurrentStreamEach)
+    if needs_result
+      emit_op(NATIVE_CALL, NATIVES["list"], 0)
+      alloc_slot(res_name, :any)
+      emit_op(STORE_SLOT, @slots[res_name]); emit_op(POP)
+    end
+
+    alloc_slot(item_name, :any)
+    alloc_slot(cv_name, :any) if needs_result
+
+    # Loop:
+    #   item = LIST_POP_FRONT(src);  (or SPLIT_STREAM_NEXT for split-stream)
+    #   if item == nil break;
+    #   call worker(rt, ctx, item);
+    #   ... per-op accumulation ...
+    loop_start = @ops.length
+
+    # Pull next item from source slot. LIST_POP_FRONT consumes the head
+    # of a Value.List (pushing tail back to slot); pushes Value.Nil when
+    # the list is empty. SplitStream slots use SPLIT_STREAM_NEXT instead.
+    if @split_stream_slots&.include?(src_slot_name)
+      emit_op(SPLIT_STREAM_NEXT, @slots[src_slot_name])
+    else
+      emit_op(LIST_POP_FRONT, @slots[src_slot_name])
+    end
+    emit_op(STORE_SLOT, @slots[item_name]); emit_op(POP)
+
+    # if item == nil { break }
+    # JUMP_IF_FALSE jumps when the bool result is false. Push
+    # `item != nil` and JUMP_IF_FALSE -> exit when it IS nil.
+    emit_op(LOAD_SLOT, @slots[item_name])
+    emit_op(LOAD_CONST, add_const(nil))
+    emit_op(EQ)         # true if item == nil
+    emit_op(NOT)        # true if item != nil
+    emit_op(JUMP_IF_FALSE)
+    exit_patch = @ops.length; emit_op(0)
+
+    # call worker(rt, ctx, item) -- worker fn arity is 3.
+    emit_op(LOAD_CONST, add_const(nil))     # rt placeholder (VM ignores)
+    emit_op(LOAD_SLOT, @slots[ctx_name])    # ctx
+    emit_op(LOAD_SLOT, @slots[item_name])   # item
+    emit_op(BC_CALL, fn_ip, 3)
+
+    case op
+    when :concurrentStreamSelect
+      emit_op(STORE_SLOT, @slots[cv_name]); emit_op(POP)
+      emit_op(LOAD_SLOT, @slots[res_name])
+      emit_op(LOAD_SLOT, @slots[cv_name])
+      emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+      emit_op(STORE_SLOT, @slots[res_name]); emit_op(POP)
+    when :concurrentStreamWhere
+      emit_op(STORE_SLOT, @slots[cv_name]); emit_op(POP)
+      emit_op(LOAD_SLOT, @slots[cv_name])
+      emit_op(JUMP_IF_FALSE)
+      skip_patch = @ops.length; emit_op(0)
+      emit_op(LOAD_SLOT, @slots[res_name])
+      emit_op(LOAD_SLOT, @slots[item_name])
+      emit_op(NATIVE_CALL, NATIVES["list-push"], 2)
+      emit_op(STORE_SLOT, @slots[res_name]); emit_op(POP)
+      @ops[skip_patch] = @ops.length
+    when :concurrentStreamEach
+      emit_op(POP)
+    end
+
+    emit_op(JUMP); emit_op(loop_start)
+    @ops[exit_patch] = @ops.length
+
+    if needs_result
+      emit_op(LOAD_SLOT, @slots[res_name])
+      push_type(:any)
+    else
+      emit_op(LOAD_CONST, add_const(nil))
+      push_type(:any)
+    end
+  end
+
   # Compile a sharded HashMap put. The VM has no shard routing -- treat
   # all variants (routed, shard-direct, sharded receiver) the same:
   # MAP_PUT against the underlying MapRef. shard_idx / shard_key /
@@ -3427,6 +3571,14 @@ class BcEmitter
       # for WHERE, gate-append the source item by the bool result;
       # for EACH, discard the result.
       compile_concurrent_bounded(node)
+      return
+    when :concurrentStreamSelect, :concurrentStreamWhere, :concurrentStreamEach
+      # Stream-source concurrent: sequential simulation. Pulls items via
+      # .next() (slot-kind dispatched: SPLIT_STREAM_NEXT / LIST_POP_FRONT
+      # / AWAIT) and BC_CALLs the worker per item. The Zig path uses a
+      # feeder fiber + BoundedChannel + N workers; the VM has no fibers,
+      # so workers/parallel/capacity/task_cfg/is_inf are all ignored.
+      compile_concurrent_stream(node)
       return
     when :file_open
       # File::open(path) -- path-as-handle in the VM. Wraps readFile in

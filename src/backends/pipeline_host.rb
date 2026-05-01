@@ -2224,28 +2224,28 @@ class PipelineHost
     end
 
     # Dynamic / infinite / open stream sources: structural lowering for
-    # the Zig backend. BC has no fiber/channel runtime for stream pipelines,
-    # so it still falls through to the legacy RawZig path (which BC then
-    # rejects -- tests 240/241/242/243 stay UNIMPL until BC grows the
-    # infrastructure).
-    if @lowering.instance_variable_get(:@target) != :bc
-      lhs_ti = smooth_node.left.type_info
-      stream_lhs = lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.open_stream? || lhs_ti.inf_stream?)
-      if stream_lhs
-        case conc_op.op
-        when AST::SelectOp
-          return lower_concurrent_stream_select(smooth_node.left, conc_op, conc_op.op)
-        when AST::WhereOp
-          return lower_concurrent_stream_where(smooth_node.left, conc_op, conc_op.op)
-        when AST::EachOp
-          return lower_concurrent_stream_each(smooth_node.left, conc_op, conc_op.op)
-        end
+    # both backends. The MIR call routes to CheatLib.concurrentStreamSelect
+    # (Zig: real feeder + worker fibers via BoundedChannel) or to
+    # compile_concurrent_stream (BC: sequential simulation via .next()).
+    lhs_ti = smooth_node.left.type_info
+    stream_lhs = lhs_ti && (lhs_ti.dynamic_stream? || lhs_ti.open_stream? || lhs_ti.inf_stream?)
+    if stream_lhs
+      case conc_op.op
+      when AST::SelectOp
+        return lower_concurrent_stream_select(smooth_node.left, conc_op, conc_op.op)
+      when AST::WhereOp
+        return lower_concurrent_stream_where(smooth_node.left, conc_op, conc_op.op)
+      when AST::EachOp
+        return lower_concurrent_stream_each(smooth_node.left, conc_op, conc_op.op)
       end
+    end
 
-      # List-source CONCURRENT (Zig backend). Skip the AS @u binding case
-      # and any source needing the @concurrent_outer_binding rewrite path
-      # -- that flow runs through the legacy template below until the
-      # binding semantics are also structural.
+    # List-source CONCURRENT (Zig backend only -- BC handles lists via
+    # the BC short-circuit above). Skip the AS @u binding case and any
+    # source needing the @concurrent_outer_binding rewrite path -- that
+    # flow runs through the legacy template below until the binding
+    # semantics are also structural.
+    if @lowering.instance_variable_get(:@target) != :bc
       lhs_node = smooth_node.left
       if lhs_ti && lhs_ti.list_collection? && !(lhs_node.is_a?(AST::BinaryOp) && lhs_node.op == :BIND_VAR)
         case conc_op.op

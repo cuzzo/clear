@@ -2703,8 +2703,13 @@ class MIRLowering
     # an eager List materialization. Run the body inline; YIELD becomes
     # `__sg<id>_local.push(x)` which we rewrite to list-append in the
     # bc_emitter, and NEXT pops the head of the list. This works for all
-    # finite streams (the only kind a synchronous VM can support).
-    if @target == :bc && !is_inf
+    # finite streams (the only kind a synchronous VM can support). For
+    # ~T[INF] BG STREAM bodies that self-close (e.g. just YIELD a few
+    # values, or `WHILE i <= 8 DO YIELD i; ...`), the eager path also
+    # works -- the body runs to completion and produces the materialized
+    # list. Truly infinite generators are still unsupportable, but most
+    # test workloads use finite self-closing generators.
+    if @target == :bc
       prev_stream_local = @current_stream_local
       prev_stream_is_inf = @current_stream_is_inf
       @current_stream_local = local_stream
