@@ -113,46 +113,75 @@ turned up the following compile/runtime regressions. All confirmed to
 reproduce on master (verified via `git stash` against the formatter WIP).
 None are caused by the LOCKED rename or the MATCH/PARTIAL MATCH split.
 
-### Compile/transpile failures
+### FIXED in 2026-05-01 sweep
 
-#### `concurrent/05_backpressure` — `concurrentStreamEach` worker count: i64 vs usize
+- `concurrent/05_backpressure` -- 42d4ef64 (cast `i64` worker count to
+  `usize` at the bounded-stream concurrent call sites; default-
+  capacity expression keeps the raw form so comptime-int simplification
+  isn't broken).
+- `concurrent/06_dynamic_spawn` -- 1044f0ba (runner.rb's `@leak` text
+  substitution used `sub!` which only replaced the first occurrence;
+  the consumer loop's iter count stayed at the original size and
+  indexed past the producer's reduced array. `gsub!` fixes it).
+- `concurrent/08_pubsub` -- 49a9052c (BgCaptureClassifier now also
+  heap-promotes `split_open_stream?` and `open_stream?` cursors when
+  captured by a BG that runs asynchronously; the cursor would
+  otherwise live on the spawning frame and dangle when the loop
+  rewinds).
+- `concurrent/14_nested_lock` (compile only) -- 9a77c1e0 (post-join
+  verification was rewritten to snapshot per-account Arc handles
+  before iterating, so the per-account WITH isn't lexically nested
+  under WITH bank; the worker hot path was already lint-clean via
+  the multi-resource WITH form). See "Remaining" below for the
+  runtime-side issue still present at high concurrency.
 
-```
-._clear_tmp_bench.zig:122:124: error: expected type 'usize', found 'i64'
-try CheatLib.concurrentStreamEach(i64, ..., CheatLib.threadCount(), @intCast(64), false, ..., &__bounded_conc_ctx_1);
-```
+### Remaining
 
-`CheatLib.threadCount()` returns `i64` from CLEAR's number type but the
-`workers: usize` parameter on `concurrentStreamEach` (runtime-header.zig:243)
-needs an unsigned cast. The other numeric arg in the same call already gets
-`@intCast(...)`, so this is a missing intCast on `threadCount()` in the
-stdlib lowering.
-
-#### `concurrent/08_pubsub` — FRAME_NO_REWIND in clearMain
-
-```
-[FRAME_NO_REWIND] clearMain::clearMain -- loop body frame-allocates but has no restoreLoopMark defer
-```
-
-MIR validation rejects the lowered body. Either the loop body's per-iteration
-mark/rewind insertion is missed, or the loop is being incorrectly classified
-as not needing rewind. Fix candidate: `src/mir/mir_lowering.rb` loop-body
-rewind insertion path.
-
-#### `concurrent/14_nested_lock` — false-positive "naked nested WITH" deadlock lint
+#### `concurrent/09_kvstore` -- runtime slab allocator segfault under high concurrency
 
 ```
-[Compiler Error] Naked nested WITH on a different binding (acct) while bank is held -- symmetric callers may deadlock.
-Use the multi-resource form for safe ordering:
-    WITH EXCLUSIVE bank, acct AS (i_bank, i_acct) { ... } (Line 68)
+Segmentation fault at address 0x10000
+runtime/slab-alloc.zig:167:38 in createFromDepot
+                slab.free_head = node.next;
+                                     ^
+runtime/scheduler.zig:531:58 in drainChannels
+                        const stack_mem = self.allocStack(effective_size) catch continue;
 ```
 
-Either the bench is intentionally exercising the lint (in which case it
-needs an `@allow_naked_nested_with` annotation or similar opt-in), or the
-detector is too aggressive for this access pattern. `concurrency_checks.rb:87`
-in `check_naked_nested_with!`.
+- Reproduces on the leak-mode build (`@leak: n = 1000000 -> n = 1000`)
+  with `CLEAR_THREADS=$(nproc)`, fails in the SET workload's fiber
+  spawn path.
+- With `CLEAR_THREADS=1` the bench runs to completion (verified=yes),
+  pointing at a slab/depot concurrency issue, not a logic bug.
+- Under `--safe` (LLVM ReleaseSafe), the segfault is replaced by a
+  CLEAR-level `ASSERTION FAILED: GET hits must equal key count` --
+  some SETs aren't visible to the GET phase, suggesting a separate
+  visibility/race issue on the sharded HashMap on top of the slab
+  bug.
+- Investigation belongs in the runtime
+  (`zig/runtime/slab-alloc.zig` + `zig/runtime/fiber-memory.zig`),
+  not in the compiler frontend.
 
-#### `examples/testing/stub_ufcs.cht` — unused local constant on stub helper
+#### `concurrent/14_nested_lock` -- runtime LockCycle false positive at high concurrency
+
+After the lint fix, the bench compiles cleanly and runs cleanly with
+1-2 workers (verifies balance 64000 = 64000). With `CLEAR_THREADS=$(nproc)`
+the runtime parking-lot deadlock detector fires:
+
+```
+LOCK CYCLE: fiber waiting on lock transitively held by itself via 1 hop(s)
+panic: Locked.acquire: error.LockCycle
+```
+
+The bench's worker hot path uses the multi-resource form
+(`WITH EXCLUSIVE loAcct AS la, EXCLUSIVE hiAcct AS ha`) with index-
+ordered acquisition, which is the documented deadlock-free pattern.
+Likely either the runtime cycle detector is over-reporting under the
+multi-resource acquire path, or the multi-resource lowering isn't
+pinning the inner-acquire order. Triage in `zig/lib/parking-lot.zig`
+(detectCycle) and the multi-resource WITH lowering.
+
+#### `examples/testing/stub_ufcs.cht` -- unused local constant on stub helper
 
 ```
 ._clear_tmp_stub_ufcs.zig:62:7: error: unused local constant
@@ -162,20 +191,6 @@ const __stub_query = "mock result";
 The stub-helper synthesized constant is captured in the stub fn but the
 generated helper doesn't reference it. Likely a stub-generation bug in
 `src/annotator-helpers/stub_helpers.rb` or wherever stub helpers are emitted.
-
-### Runtime crashes (build clean, abort during execution)
-
-#### `concurrent/06_dynamic_spawn` — exit 134
-
-Builds cleanly under `./clear build --debug-allocator` but aborts at
-runtime. No leaks reported before abort. Likely a `@local` / pin / spawn
-bug in the same family as benchmark 11 (`atomic_contention`).
-
-#### `concurrent/09_kvstore` — exit 134
-
-Same shape as 06: clean build, runtime abort, no leaks. Worth checking
-whether shared-pool capture or cross-scheduler `@local` access is the
-trigger.
 
 ### Example regressions
 
