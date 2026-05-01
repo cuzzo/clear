@@ -1,1 +1,2 @@
 --tag ~integration
+--require spec_helper

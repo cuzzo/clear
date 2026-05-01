@@ -1,5 +1,7 @@
 vendor
 .byebug_history
+coverage/
+tmp/rubycritic/
 examples/*.fluxc
 examples/**/_*
 !examples/minivm/_bc_runner.cht
