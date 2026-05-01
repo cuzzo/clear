@@ -33,10 +33,6 @@ RSpec.describe "P3 effect inference + correctness checks" do
       expect(EffectSet.new([:yield, :fail])).to eq(EffectSet.new([:fail, :yield]))
     end
 
-    it "renders deterministically" do
-      eff = EffectSet.new([:fail, :yield, :alloc_heap])
-      expect(eff.to_signature).to eq("! yield ! alloc(heap) ! fail")
-    end
   end
 
   # ── EffectInference (P3.2) ──────────────────────────────────────────────

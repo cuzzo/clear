@@ -2,8 +2,7 @@
 BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :error, keyword_init: true)
 
 class Type
-  attr_reader :raw, :name, :generic_args, :capacity, :value_type_raw
-  attr_accessor :mutability, :lifetime_constraint
+  attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
   attr_accessor :sync        # nil (default), :locked, :write_locked
   attr_accessor :lock_rank   # nil (default) or Integer — @locked(rank: N) / @writeLocked(rank: N)
@@ -13,7 +12,7 @@ class Type
   attr_accessor :elem_ownership # Element-level ownership: T@shared[] = Array<Arc<T>>
   attr_accessor :elem_sync      # Element-level sync: T@locked[] = Array<Locked<T>>
   attr_accessor :link_source    # :shared or :multiowned — tracks which strong ref @link was created from
-  attr_accessor :is_resource    # true when this type has resource cleanup (File, TCPClient, etc.)
+  attr_writer :is_resource      # set by annotator; read internally as @is_resource in #resource?
 
   # Unified provenance: where was this data allocated?
   #   :rodata — string literal in binary, valid forever, never freed
@@ -22,10 +21,6 @@ class Type
   #   :borrow — borrowed reference, caller owns data, no cleanup needed
   #   nil     — stack (primitives, small structs); no allocation needed
   attr_accessor :provenance
-
-  # Enum constants for clarity
-  LOCATIONS = [:stack, :frame, :heap, :multiowned, :shared]
-  OWNERSHIP = [:unique, :borrowed, :shared, :static]
 
   # String type constants
   STRING_TYPE = :String
@@ -159,8 +154,6 @@ class Type
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
       @raw                = other.instance_variable_get(:@raw)
-      @mutability         = false
-      @lifetime_constraint = nil
       @ownership          = other.ownership
       @sync               = other.sync
       @collection         = other.instance_variable_get(:@collection)
@@ -189,10 +182,6 @@ class Type
     else
       @raw = raw_input
       parse_raw_input
-
-      # Defaults
-      @mutability = false
-      @lifetime_constraint = nil # nil means local scope
     end
 
     # Capability fields — set after parse/copy so they can override.
@@ -253,10 +242,6 @@ class Type
   # Backward API: Deprecate
   def base_type
     resolved.to_s.sub(/\[.*\]$/, "").to_sym
-  end
-
-  def container?
-    array? || map?
   end
 
   def primitive?
@@ -340,20 +325,8 @@ class Type
     INT_TYPES.include?(resolved)
   end
 
-  def signed_int?
-    SIGNED_INT_TYPES.include?(resolved)
-  end
-
-  def unsigned_int?
-    UNSIGNED_INT_TYPES.include?(resolved)
-  end
-
   def float?
     FLOAT_TYPES.include?(resolved)
-  end
-
-  def boolean?
-    resolved == :Bool
   end
 
   def byte?
@@ -438,22 +411,6 @@ class Type
     end
   end
 
-  # Computed cleanup_alloc: derived from provenance. No longer a stored field.
-  def cleanup_alloc
-    case @provenance
-    when :heap, :frame then @provenance
-    else nil
-    end
-  end
-
-  # Setter: writes provenance. :none (legacy borrow sentinel) maps to :borrow.
-  def cleanup_alloc=(value)
-    case value
-    when :heap, :frame then @provenance = value
-    when :none         then @provenance = :borrow
-    end
-  end
-
   # location is provenance (kept as alias for backward-compat callers).
   def location
     @provenance
@@ -491,10 +448,6 @@ class Type
     @sync == :local
   end
 
-  def always_mutable?
-    @sync == :always_mutable
-  end
-
   def raw?
     @sync == :raw
   end
@@ -507,9 +460,6 @@ class Type
   def any_sync?
     !@sync.nil? && @sync != :raw && @sync != :symbol
   end
-
-  # Backwards compat alias used in a few places
-  alias any_locked? any_sync?
 
   # Group 1 vs Group 2 separation: return a copy of this type with the
   # synchronization/ownership wrappers stripped, preserving only the data
@@ -537,10 +487,6 @@ class Type
     bare.provenance = nil
     bare.instance_variable_set(:@zig_type_cache, nil)
     bare
-  end
-
-  def has_capabilities?
-    @ownership != :affine || any_sync?
   end
 
   def any_rc?
@@ -1149,15 +1095,6 @@ class Type
     t = node.respond_to?(:type_info) ? (node.type_info rescue nil) : node
     return nil unless t
     t.is_a?(Type) ? t : (Type.new(t) rescue nil)
-  end
-
-  # location= setter: writes provenance. Kept for backward compat with callers.
-  def location=(value)
-    @zig_type_cache = nil
-    case value
-    when :heap, :frame, :rodata then @provenance = value
-    when :stack then @provenance = nil  # stack = no provenance
-    end
   end
 
   def ownership=(value)

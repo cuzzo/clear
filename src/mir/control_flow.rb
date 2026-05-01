@@ -787,11 +787,6 @@ class OwnershipDataflow
     ti.primitive? || ti.string? || ti.any? || ti.void? || ti.any_rc?
   end
 
-  # Returns true if this identifier's type is non-Copy (move semantics).
-  def non_copy_type?(ident)
-    !copy_type?(ident)
-  end
-
   def walk_expr(node, &block)
     return unless node
     yield node

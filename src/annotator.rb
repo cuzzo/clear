@@ -3855,11 +3855,6 @@ private
     end
   end
 
-  def get_type_slot_size(type_input)
-    type_obj = type_input.is_a?(Type) ? type_input : Type.new(type_input)
-    type_obj.slot_size { |name| lookup_type_schema(name) }
-  end
-
   def get_root_object(node)
     curr = node
     while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
@@ -4475,10 +4470,6 @@ private
   def og_drop(name)      = @og.drop(name)
   def og_push_scope      = (@og_scope_depth += 1)
   def og_pop_scope       = (@og_scope_depth -= 1)
-
-  def og_merge(snapshot)
-    @og.merge(snapshot) if snapshot
-  end
 
   def classify_og_kind(type_info, sync: nil)
     return :affine unless type_info

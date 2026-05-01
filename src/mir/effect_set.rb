@@ -53,10 +53,6 @@ class EffectSet
     EffectSet.new(@effects | other.effects)
   end
 
-  def subtract(other)
-    EffectSet.new(@effects - other.effects)
-  end
-
   def ==(other)
     other.is_a?(EffectSet) && @effects == other.effects
   end
@@ -66,15 +62,8 @@ class EffectSet
     @effects.hash
   end
 
-  # Human-readable summary used by the formatter (P4.2). Effects are
-  # rendered in a stable order so signatures are deterministic.
+  # Effects are rendered in a stable order so signatures are deterministic.
   EFFECT_ORDER = %i[yield alloc_heap io fail].freeze
-
-  def to_signature
-    parts = EFFECT_ORDER.select { |e| @effects.include?(e) }
-    return "" if parts.empty?
-    parts.map { |e| "! #{render(e)}" }.join(" ")
-  end
 
   def to_a
     EFFECT_ORDER.select { |e| @effects.include?(e) }
@@ -84,13 +73,4 @@ class EffectSet
     "EffectSet(#{to_a.join(', ')})"
   end
   alias inspect to_s
-
-  private
-
-  def render(effect)
-    case effect
-    when :alloc_heap then "alloc(heap)"
-    else effect.to_s
-    end
-  end
 end

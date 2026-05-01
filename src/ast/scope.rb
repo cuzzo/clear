@@ -115,10 +115,6 @@ class Scope
     entry ? entry[:schema] : nil
   end
 
-  def is_known_type?(name)
-    @types.key?(name)
-  end
-
   # Returns a Type carrying the variable's base type plus storage-derived capabilities.
   def resolve_full_type(name)
     entry = @locals[name]
@@ -272,9 +268,5 @@ module ScopeHelper
     @scope_stack.pop
   end
 
-  def is_global_scope?(scope)
-    # Assuming the first scope in the stack is global
-    scope == @scope_stack.first
-  end
 end
 

@@ -2065,7 +2065,6 @@ RSpec.describe SemanticAnnotator do
         decl = ast.statements.first
         ti = decl.type_info
         expect(ti.provenance).to eq(:borrow)
-        expect(ti.cleanup_alloc).to be_nil
       end
 
       it "sets provenance to :borrow" do

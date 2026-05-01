@@ -28,14 +28,6 @@ class Span
     @length = length
   end
 
-  # Build a span covering `length` characters starting at the token's
-  # location. Defaults to the token's own textual length.
-  def self.from_token(file, token, length: nil)
-    raw = token.respond_to?(:value) ? token.value : nil
-    len = length || (raw.is_a?(String) ? raw.length : 1)
-    new(file: file, line: token.line, col: token.column, length: len)
-  end
-
   # End line / column — useful for LSP-style range diagnostics. For a
   # single-line span these equal `line` / `col + length`. For multi-line
   # replacements (e.g., inserting a block), callers can subclass or pass

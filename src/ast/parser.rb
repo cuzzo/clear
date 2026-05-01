@@ -2422,11 +2422,6 @@ class Parser
     result
   end
 
-  # Backwards-compatible wrapper (returns shard_count only).
-  def parse_sharded_modifier_if_present!(cap_tok)
-    parse_collection_modifiers!(cap_tok)[:shard_count]
-  end
-
   # All recognized capability tokens.
   CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @indirect @link @raw @symbol @list @pool @set @soa @sharded].freeze
 

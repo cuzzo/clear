@@ -29,13 +29,6 @@ RSpec.describe Type, "provenance" do
     expect(t.provenance_alloc).to eq(:heap)
   end
 
-  it "cleanup_alloc= sets provenance and provenance_alloc returns it" do
-    t = Type.new(:String)
-    t.cleanup_alloc = :heap
-    expect(t.provenance).to eq(:heap)
-    expect(t.provenance_alloc).to eq(:heap)
-  end
-
   it "provenance_alloc returns nil for rodata" do
     t = Type.new(:String)
     t.provenance = :rodata

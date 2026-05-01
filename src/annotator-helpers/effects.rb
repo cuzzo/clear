@@ -299,13 +299,6 @@ module EffectTracker
     max
   end
 
-  # --- Queries (for future use by #HOT / STRICT mode) ---
-
-  def effects_for(fn_name)
-    node = @fn_nodes[fn_name]
-    node&.effects
-  end
-
   # --- TIGHT loop validation ---
 
   # Deep validation for TIGHT loops: walks the full AST subtree looking for
