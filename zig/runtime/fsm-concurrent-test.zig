@@ -33,7 +33,7 @@ const Marker = struct {
 
     fn bind(self: *Marker, id: u32) void {
         self.id = id;
-        self.task = fsm.FsmTask.init(&Marker.never, self);
+        self.task = fsm.FsmTask.init(&Marker.never);
     }
 
     fn never(_: *fsm.FsmTask) fsm.YieldReason {

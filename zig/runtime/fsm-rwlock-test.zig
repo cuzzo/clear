@@ -112,7 +112,7 @@ test "R1: uncontended FSM write acquire/release" {
     var rw: pl.ParkingRwLock = .{};
     var counter: u64 = 0;
     var w = WriteFsm{ .task = undefined, .rw = &rw, .counter = &counter, .sched = &sched };
-    w.task = fsm.FsmTask.init(&WriteFsm.doResume, &w);
+    w.task = fsm.FsmTask.init(&WriteFsm.doResume);
 
     sched.enqueueFsm(&w.task);
     sched.drainFsmQueue();
@@ -141,7 +141,7 @@ test "R2: multiple FSM readers hold concurrently" {
     defer alloc.free(readers);
     for (readers) |*r| {
         r.* = .{ .task = undefined, .rw = &rw, .counter = &counter, .sched = &sched };
-        r.task = fsm.FsmTask.init(&ReadFsm.doResume, r);
+        r.task = fsm.FsmTask.init(&ReadFsm.doResume);
         sched.enqueueFsm(&r.task);
     }
     // All N readers should acquire on the fast path (no writer holds).
@@ -174,7 +174,7 @@ test "R3: FSM writer blocks FSM readers; write release wakes all readers" {
     defer alloc.free(readers);
     for (readers) |*r| {
         r.* = .{ .task = undefined, .rw = &rw, .counter = &counter, .sched = &sched };
-        r.task = fsm.FsmTask.init(&ReadFsm.doResume, r);
+        r.task = fsm.FsmTask.init(&ReadFsm.doResume);
         sched.enqueueFsm(&r.task);
     }
 
@@ -256,7 +256,7 @@ test "R5: mixed FSM + stackful write contention" {
             // FSM writers
             for (self.fsms) |*f| {
                 f.* = .{ .task = undefined, .rw = self.rw, .counter = self.counter, .sched = self.sched };
-                f.task = fsm.FsmTask.init(&WriteFsm.doResume, f);
+                f.task = fsm.FsmTask.init(&WriteFsm.doResume);
                 self.sched.enqueueFsm(&f.task);
             }
         }
@@ -314,7 +314,7 @@ test "R6: FSM write re-entrancy returns lock_error.Deadlock" {
 
     var rw: pl.ParkingRwLock = .{};
     var s = Reentrant{ .task = undefined, .rw = &rw, .sched = &sched };
-    s.task = fsm.FsmTask.init(&Reentrant.doResume, &s);
+    s.task = fsm.FsmTask.init(&Reentrant.doResume);
     sched.enqueueFsm(&s.task);
     sched.drainFsmQueue();
     try std.testing.expect(s.got_deadlock);
@@ -365,7 +365,7 @@ test "R7: FSM write wait timeout surfaces lock_error.LockTimeout" {
     try rw.lock(); // never released
 
     var s = WriteTimeout{ .task = undefined, .rw = &rw, .sched = &sched };
-    s.task = fsm.FsmTask.init(&WriteTimeout.doResume, &s);
+    s.task = fsm.FsmTask.init(&WriteTimeout.doResume);
     sched.enqueueFsm(&s.task);
     sched.drainFsmQueue();
     try std.testing.expectEqual(fsm.FsmStatus.Blocked, s.task.status);

@@ -49,7 +49,7 @@ test "S1: FsmRunQueue.tryStealFrom transfers ~half of victim's tasks" {
 
     for (tasks) |*c| {
         c.* = .{ .task = undefined };
-        c.task = fsm.FsmTask.init(&Counter.doResume, c);
+        c.task = fsm.FsmTask.init(&Counter.doResume);
         sched_a.enqueueFsm(&c.task);
     }
 
@@ -80,7 +80,7 @@ test "S2: stolen tasks complete correctly when dispatched by the stealer" {
     defer alloc.free(tasks);
     for (tasks) |*c| {
         c.* = .{ .task = undefined };
-        c.task = fsm.FsmTask.init(&Counter.doResume, c);
+        c.task = fsm.FsmTask.init(&Counter.doResume);
         sched_a.enqueueFsm(&c.task);
     }
 
@@ -113,7 +113,7 @@ test "S3: FSM queue is structurally distinct from stackful ready_queue" {
     defer sched.deinit();
 
     var c: Counter = .{ .task = undefined };
-    c.task = fsm.FsmTask.init(&Counter.doResume, &c);
+    c.task = fsm.FsmTask.init(&Counter.doResume);
     sched.enqueueFsm(&c.task);
 
     // Enqueuing an FSM must not appear in the stackful queue.

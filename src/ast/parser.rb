@@ -289,14 +289,20 @@ class Parser
   # Supports `:` join: expr @shared:locked, expr @locked:multiowned (order-independent).
   # Three orthogonal dimensions:
   #   ownership: :multiowned | :shared         (who keeps it alive)
-  #   sync:      :locked | :write_locked | :local  (how it's synchronized)
+  #   sync:      :locked | :write_locked | :local | :versioned  (how it's synchronized)
   #   layout:    :indirect                      (where it lives — heap pointer)
+  # `:versioned` is MVCC (Shared(T) atomic-pointer COW + EBR). Composes with
+  # `:shared` (Arc<Shared(T)>); does NOT compose with the lock sigils
+  # (`:locked` / `:write_locked` / `:always_mutable`) -- mixing locks with
+  # the lock-free path is a type error. Enforced by parse_cap_join's
+  # one-per-dimension rule plus annotator-side combo validation.
   CAP_SIGIL_ATTRS = {
     '@multiowned'     => { dim: :ownership, val: :multiowned  },
     '@shared'         => { dim: :ownership, val: :shared      },
     '@locked'         => { dim: :sync,      val: :locked      },
     '@writeLocked'    => { dim: :sync,      val: :write_locked },
     '@local'          => { dim: :sync,      val: :local       },
+    '@versioned'      => { dim: :sync,      val: :versioned    },
     '@indirect'       => { dim: :layout,    val: :indirect    },
     '@alwaysMutable'  => { dim: :sync,      val: :always_mutable },
   }.freeze
@@ -340,6 +346,12 @@ class Parser
   end
 
   suffix(:VAR_ID, '@alwaysMutable') do |lhs|
+    token = consume(:VAR_ID)
+    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+  end
+
+  suffix(:VAR_ID, '@versioned') do |lhs|
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -1333,7 +1345,7 @@ class Parser
   #
   # NOTE: this lives ALONGSIDE master's `parse_requires_clause` (above).
   # Both REQUIRES grammars currently coexist; master's handles capability
-  # families (LOCKABLE / VERSIONED / ACTOR / LOCK_FREE) with a comma-list,
+  # families (LOCKED / VERSIONED / ACTOR / LOCK_FREE) with a comma-list,
   # this one handles the reentrancy constraint NON_REENTRANT with one
   # keyword per clause. Unifying them is a follow-up cleanup.
   def parse_requires_clauses(fn_name)
@@ -2649,7 +2661,7 @@ class Parser
   end
 
   # All recognized capability tokens.
-  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @versioned @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
   # Returns nil if no capability token is present, or a Hash:
@@ -2702,6 +2714,9 @@ class Parser
     when "@local"
       error!(token, "Duplicate sync") if result[:sync]
       result[:sync] = :local
+    when "@versioned"
+      error!(token, "Duplicate sync") if result[:sync]
+      result[:sync] = :versioned
     when "@raw"
       error!(token, "Duplicate sync") if result[:sync]
       result[:sync] = :raw
@@ -2755,6 +2770,15 @@ class Parser
     # to participate in the comma-separated capability grammar.
     if match?(:KEYWORD, 'VIEW') || match?(:KEYWORD, 'MATERIALIZED')
       return parse_view_block(with_token)
+    end
+
+    # MVCC L4: `WITH SNAPSHOT a AS [MUTABLE] alias [, SNAPSHOT b AS
+    # [MUTABLE] alias ...] { body } [ON Conflict ...]`. Routed
+    # before the generic capability-list parser since SNAPSHOT
+    # requires its own list shape (each cell prefixed by SNAPSHOT
+    # rather than a single capability sigil for the whole list).
+    if match?(:KEYWORD, 'SNAPSHOT')
+      return parse_snapshot_block(with_token)
     end
 
     # Optional deadlock-escape modifier: one of POSSIBLE_DEADLOCK /
@@ -2831,6 +2855,68 @@ class Parser
         token: escape_tok,
       }
     end
+    node
+  end
+
+  # MVCC L4. Grammar:
+  #
+  #   WITH SNAPSHOT <var> AS <alias> { <body> }
+  #     -- single read (immutable view).
+  #
+  #   WITH SNAPSHOT <var> AS MUTABLE <alias> { <body> }
+  #     ON Conflict [RETRY(N) THEN] <action>
+  #     -- single transaction (mutable view).
+  #
+  #   WITH SNAPSHOT a AS [MUTABLE] va, SNAPSHOT b AS [MUTABLE] vb
+  #     [, ...]
+  #   { <body> } [ON Conflict ...]
+  #     -- multi-cell. Mixed read + mutable. ON Conflict required if
+  #     any AS MUTABLE; the runtime sorts cell pointers by address
+  #     (no deadlock) and commits via `Shared.updateMulti`.
+  #
+  # The capability list on the resulting `AST::WithBlock` contains
+  # one entry per SNAPSHOT cell with `capability: :SNAPSHOT`; the
+  # `snapshot_mode` accessor on the node is `:read` if every cell
+  # is read-only, `:transaction` if any cell is MUTABLE. Annotator-
+  # side validation (L5) enforces ON Conflict presence when
+  # `snapshot_mode == :transaction`.
+  def parse_snapshot_block(with_token)
+    capabilities = []
+    any_mutable = false
+    loop do
+      snapshot_tok = consume(:KEYWORD, 'SNAPSHOT')
+      var_node = parse_var_id
+      consume(:KEYWORD, 'AS')
+      alias_mutable = false
+      alias_mutable = true if match!(:KEYWORD, 'MUTABLE')
+      alias_name = consume(:VAR_ID).value
+
+      capabilities << {
+        capability: :SNAPSHOT,
+        var_node: var_node,
+        alias: alias_name,
+        alias_mutable: alias_mutable,
+        snapshot_token: snapshot_tok,
+      }
+      any_mutable ||= alias_mutable
+
+      break unless match!(:CHAR, ',')
+    end
+
+    consume(:CHAR, '{')
+    body = parse_block_body(['}'])
+    consume(:CHAR, '}')
+
+    # Optional `ON Conflict ...` handler. Reuses the same generic
+    # `parse_lock_error_clause` path so `RETRY(N) THEN` and the
+    # action-list grammar match exactly. Conflict is registered as
+    # a type in `error_registry.rb`, so the bare TYPE_ID selector
+    # path accepts it without further changes.
+    clause = parse_lock_error_clause
+
+    node = AST::WithBlock.new(with_token, capabilities, body)
+    node.snapshot_mode = any_mutable ? :transaction : :read
+    node.lock_error_clause = clause
     node
   end
 
@@ -3020,7 +3106,7 @@ class Parser
       attrs = CAP_SIGIL_ATTRS[normalized]
       unless attrs
         error!(current, "Unknown capability sigil '#{current.value}'. " \
-                        "Expected @multiowned, @shared, @locked, @writeLocked, @local, or @indirect")
+                        "Expected @multiowned, @shared, @locked, @writeLocked, @local, @versioned, or @indirect")
       end
       next_tok = consume(:VAR_ID)
       apply_cap_dim!(next_tok, attrs, dims)

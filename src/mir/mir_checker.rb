@@ -292,6 +292,10 @@ class MIRChecker
     when MIR::DoBlock      then node.branch_bodies&.each { |b| walk_mir(b, &block) }
     when MIR::CatchWrapper then node.clause_bodies&.each { |b| walk_mir(b, &block) }
     when MIR::Pipeline     then walk_mir_node(node.inner, &block)
+    when MIR::SnapshotRead         then walk_mir(node.body, &block)
+    when MIR::SnapshotTransaction  then walk_mir(node.body, &block)
+    when MIR::SnapshotMultiTxn     then walk_mir(node.body, &block)
+    when MIR::WithMatchDispatch    then node.arms&.each { |a| walk_mir(a[:body], &block) }
     end
   end
 
@@ -523,6 +527,10 @@ class MIRChecker
       when MIR::IfChain
         stmt.branches&.each { |b| check_loop_rewind!(b[:body]) }
         check_loop_rewind!(stmt.default_body)
+      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+        check_loop_rewind!(stmt.body)
+      when MIR::WithMatchDispatch
+        stmt.arms&.each { |a| check_loop_rewind!(a[:body]) }
       end
     end
   end
@@ -548,6 +556,10 @@ class MIRChecker
       when MIR::IfChain
         (s.branches&.any? { |b| body_has_loop_restore?(b[:body]) }) ||
           body_has_loop_restore?(s.default_body)
+      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+        body_has_loop_restore?(s.body)
+      when MIR::WithMatchDispatch
+        s.arms&.any? { |a| body_has_loop_restore?(a[:body]) }
       # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops checked independently
       else
         false
@@ -580,6 +592,10 @@ class MIRChecker
       when MIR::IfChain
         (s.branches&.any? { |b| body_has_frame_alloc?(b[:body]) }) ||
           body_has_frame_alloc?(s.default_body)
+      when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+        body_has_frame_alloc?(s.body)
+      when MIR::WithMatchDispatch
+        s.arms&.any? { |a| body_has_frame_alloc?(a[:body]) }
       # MIR::WhileStmt, MIR::ForStmt: stop -- nested loops are checked independently
       # MIR::BgBlock, MIR::LambdaExpr: stop -- separate fiber/function frame scopes
       else
@@ -684,6 +700,10 @@ class MIRChecker
       check_stmts_for_unhoisted(node.default_body)
     when MIR::DeferStmt    then check_stmt_for_unhoisted(node.body)
     when MIR::ErrDeferStmt then check_stmt_for_unhoisted(node.body)
+    when MIR::SnapshotRead, MIR::SnapshotTransaction, MIR::SnapshotMultiTxn
+      check_stmts_for_unhoisted(node.body)
+    when MIR::WithMatchDispatch
+      node.arms&.each { |a| check_stmts_for_unhoisted(a[:body]) }
     when MIR::FnDef
       check_stmts_for_unhoisted(node.body)
     end

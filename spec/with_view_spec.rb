@@ -122,8 +122,8 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
 
     # Phase 2 cleanup: WITH VIEW / WITH MATERIALIZED VIEW are reads
     # on an `@observable` source, NOT lock acquisitions. The pre-
-    # Phase-2 LOCKABLE compatibility shim must NOT fire on them.
-    it "does NOT auto-infer 'REQUIRES p: LOCKABLE' on WITH VIEW" do
+    # Phase-2 LOCKED compatibility shim must NOT fire on them.
+    it "does NOT auto-infer 'REQUIRES p: LOCKED' on WITH VIEW" do
       src = <<~F
         FN viewer(running: ~Float64@observable) RETURNS ~Float64@observable ->
             WITH VIEW running AS s {
@@ -140,10 +140,10 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       ensure
         $stderr = orig_stderr
       end
-      expect(stderr_capture.string).not_to match(/Auto-inferring.*LOCKABLE/)
+      expect(stderr_capture.string).not_to match(/Auto-inferring.*LOCKED/)
     end
 
-    it "does NOT auto-infer 'REQUIRES p: LOCKABLE' on WITH MATERIALIZED VIEW" do
+    it "does NOT auto-infer 'REQUIRES p: LOCKED' on WITH MATERIALIZED VIEW" do
       src = <<~F
         FN viewer(running: ~Float64) RETURNS ~Float64 ->
             WITH MATERIALIZED VIEW running AS s {
@@ -160,7 +160,7 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       ensure
         $stderr = orig_stderr
       end
-      expect(stderr_capture.string).not_to match(/Auto-inferring.*LOCKABLE/)
+      expect(stderr_capture.string).not_to match(/Auto-inferring.*LOCKED/)
     end
   end
 end

@@ -16,7 +16,9 @@ const compat = @import("../lib/compat.zig");
 // when the flag is false.
 const rt_profile = @import("runtime-header.zig");
 const fp_mod = @import("fiber-profile.zig");
-const EbrContext = @import("../lib/ebr.zig").EbrContext;
+const ebr_mod = @import("../lib/ebr.zig");
+const EbrContext = ebr_mod.EbrContext;
+const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
 fn milliTimestamp() i64 {
@@ -272,6 +274,15 @@ pub const Scheduler = struct {
     main_ctx: Context,
     current_task: ?*Task,
 
+    // True while drainFsmQueue is dispatching an FSM resumeFn inline on
+    // the worker stack. checkYield()/coopYield() inspect this so they
+    // do NOT perform a stackful context switch (current_task points at
+    // a different stackful task than the FSM body that's actually
+    // executing -- yielding here would corrupt the wrong stack). FSM
+    // tasks suspend cooperatively by returning .Yielded from resumeFn,
+    // not via coopYield, so this is a clean no-op for the FSM caller.
+    in_fsm_dispatch: bool = false,
+
     // -------------------------------------------------------------------------
     // PERFORMANCE NOTE: ATOMIC SCALABILITY & CACHE LINE SAFETY
     // -------------------------------------------------------------------------
@@ -382,6 +393,7 @@ pub const Scheduler = struct {
         const queues = .{ &self.fiber_pool, &self.sleeping_queue };
         inline for (queues) |q| {
             for (q.items) |task| {
+                self.releaseTaskEbr(task);
                 if (task.base.stack.memory.len > 0) {
                      self.freeStack(task.base.stack.memory);
                 }
@@ -413,6 +425,7 @@ pub const Scheduler = struct {
              // Access raw slot directly
              const task_opt = self.ready_queue.getBuffer()[i & self.ready_queue.getMask()].load(.monotonic);
              if (task_opt) |task| {
+                 self.releaseTaskEbr(task);
                  self.freeStack(task.base.stack.memory);
                  self.allocator.destroy(task.base);
                  self.task_slab.destroy(task);
@@ -420,6 +433,7 @@ pub const Scheduler = struct {
         }
         self.ready_queue.deinit();
         for (self.pinned_queue.items) |task| {
+            self.releaseTaskEbr(task);
             self.freeStack(task.base.stack.memory);
             self.allocator.destroy(task.base);
             self.task_slab.destroy(task);
@@ -445,6 +459,59 @@ pub const Scheduler = struct {
         // here. Deinit walks the partial / full slab lists and frees
         // their memory back to the general allocator.
         self.task_slab.deinit();
+    }
+
+    /// Allocate + register a per-task ThreadLocalEbr from the heap.
+    /// Used by both stackful Task spawn (drainChannels.Spawn) and FSM
+    /// task spawn (CheatHeader.allocFsmTaskRuntime). Caller owns the
+    /// returned slot until releaseEbrSlot is called.
+    pub fn allocEbrSlot(self: *Scheduler) !*ThreadLocalEbr {
+        const ebr_ptr = try self.allocator.create(ThreadLocalEbr);
+        errdefer self.allocator.destroy(ebr_ptr);
+        ebr_ptr.* = .{ .context = self.global_ebr };
+        try self.global_ebr.register(self.allocator, ebr_ptr);
+        return ebr_ptr;
+    }
+
+    /// Unregister + deinit + free a ThreadLocalEbr previously allocated
+    /// by allocEbrSlot. Shared by releaseTaskEbr (stackful) and
+    /// releaseFsmTaskEbr (FSM).
+    pub fn releaseEbrSlot(self: *Scheduler, ebr: *ThreadLocalEbr) void {
+        self.global_ebr.unregister(ebr);
+        ebr.deinit(self.allocator);
+        self.allocator.destroy(ebr);
+    }
+
+    /// Unregister + free a task's heap-allocated ThreadLocalEbr if any.
+    /// Used both by the .Finished path during normal task completion AND
+    /// by deinit() to clean up tasks left behind in fiber_pool /
+    /// sleeping_queue / ready_queue / pinned_queue at shutdown.
+    /// Public so test runners with their own .Finished handling
+    /// (stream-test, steal-hammer-test) can call this before destroy.
+    pub fn releaseTaskEbr(self: *Scheduler, task: *Task) void {
+        if (task.ebr_slot) |e| {
+            self.releaseEbrSlot(e);
+            task.ebr_slot = null;
+        }
+    }
+
+    /// FSM analog of releaseTaskEbr. The FSM allocator helper
+    /// (CheatHeader.allocFsmTaskRuntime) heap-allocates a per-task
+    /// ThreadLocalEbr + Runtime and stashes the pointers as opaques on
+    /// the FsmTask. drainFsmQueue's .Done branch invokes this BEFORE
+    /// destroy_fn, so that even if destroy_fn frees the ctx struct (and
+    /// with it the FsmTask body), the per-task Runtime + ebr_slot are
+    /// cleanly torn down first.
+    pub fn releaseFsmTaskEbr(self: *Scheduler, task: *fsm_mod.FsmTask) void {
+        if (task.task_runtime) |rt_ptr| {
+            rt_ptr.deinit();
+            self.allocator.destroy(rt_ptr);
+            task.task_runtime = null;
+        }
+        if (task.ebr_slot) |ebr_ptr| {
+            self.releaseEbrSlot(ebr_ptr);
+            task.ebr_slot = null;
+        }
     }
 
     // ------------------------------------------------------------
@@ -728,6 +795,16 @@ pub const Scheduler = struct {
                             if (rt_profile.CLEAR_PROFILE) {
                                 t.spawn_ns = fp_mod.nowNs();
                             }
+                            // Allocate + register a per-task ThreadLocalEbr on
+                            // the OS thread stack. Doing this here (instead of
+                            // inside entryWrapper) keeps EbrContext.register's
+                            // deep allocator path off the small fiber stack.
+                            t.ebr_slot = self.allocEbrSlot() catch {
+                                self.freeStack(stack_mem);
+                                self.allocator.destroy(fiber_ptr);
+                                self.allocator.destroy(t);
+                                continue;
+                            };
                             break :blk t;
                         };
                         task.context = msg.args;
@@ -961,6 +1038,10 @@ pub const Scheduler = struct {
                                 break;
                             }
                         }
+                        // Unregister + free the per-task ThreadLocalEbr
+                        // (deinit drains limbo into the global orphans list
+                        // so reclaim() can free them once safe).
+                        self.releaseTaskEbr(task);
                         self.freeStack(task.base.stack.memory);
                         self.allocator.destroy(task.base);
                         self.task_slab.destroy(task);
@@ -1154,6 +1235,11 @@ pub const Scheduler = struct {
     /// across all yielders (without this, Chase-Lev's LIFO owner-pop would
     /// let a single yielded task monopolize the batch).
     pub fn drainFsmQueue(self: *Scheduler) void {
+        // Mark the dispatch window so coopYield()/checkYield() called
+        // from inside an FSM resumeFn becomes a no-op. See the comment
+        // on the field declaration for why this is necessary.
+        self.in_fsm_dispatch = true;
+        defer self.in_fsm_dispatch = false;
         const snapshot = @min(self.fsm_ready_queue.len(), FSM_DRAIN_BATCH);
         var i: usize = 0;
         while (i < snapshot) : (i += 1) {
@@ -1165,6 +1251,11 @@ pub const Scheduler = struct {
                         fp_mod.recordFiberExit(task.spawn_ns, fp_mod.nowNs());
                     }
                     _ = self.active_tasks.fetchSub(1, .monotonic);
+                    // Per-task Runtime + ebr_slot teardown MUST happen
+                    // before destroy_fn (destroy_fn frees the ctx struct
+                    // that contains the FsmTask, so reading task fields
+                    // after that is UAF).
+                    self.releaseFsmTaskEbr(task);
                     // State struct is owned by the caller; the FSM emit
                     // synthesizes a destroy_fn that frees it. We invoke
                     // it here -- AFTER dispatchOnce has finished writing
@@ -1209,6 +1300,13 @@ pub const Scheduler = struct {
     }
 
     pub noinline fn coopYield(self: *Scheduler) void {
+        // FSM tasks dispatched by drainFsmQueue run inline on the worker
+        // stack. They are NOT stackful tasks; getCurrent() returns the
+        // most-recent stackful task (or null), and task.base.yield()
+        // would corrupt that stack rather than suspending the FSM. FSMs
+        // yield cooperatively by returning .Yielded from resumeFn -- so
+        // the right thing to do here is nothing.
+        if (self.in_fsm_dispatch) return;
         if (self.hasWork()) {
             const task = self.getCurrent();
             task.status.store(.Ready, .release);

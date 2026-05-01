@@ -1,0 +1,694 @@
+-- Read-heavy benchmark: @shared:writeLocked (RwLock) vs @shared:versioned (MVCC).
+--
+-- Workload: 32 reader fibers each do reads_per reads of a Counter struct,
+-- plus 4 writer fibers each doing writes_per increments. With the bench
+-- runner (CLEAR_THREADS=N), readers fan out across N OS threads; on a 32-core host
+-- the 32 readers can saturate parallelism.
+--
+-- @shared:writeLocked = Arc<RwLock<Counter>>. Multiple readers can hold the
+-- read lock concurrently; writers acquire exclusive. Each writer drains all
+-- readers behind it (writer-preferring fairness in the parking-lot impl).
+--
+-- @shared:versioned = Arc<Versioned<Counter>>. Readers do an acquire-load of
+-- the cell pointer + EBR pin (one mfence on x86 after the Jan 2026 enter()
+-- relax). Writers run an update() closure that publishes a new version via
+-- CAS and retires the old via EBR for deferred-free.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    reads_per:  Int64 = 100000_i64;
+    writes_per: Int64 = 1000_i64;
+    total_reads: Int64 = 32_i64 * reads_per;
+
+    -- ───── Variant A: @shared:writeLocked (RwLock) ─────
+    MUTABLE c_rw = Counter{ value: 0_i64 } @shared:writeLocked;
+
+    t0_rw = timestampMs();
+    r1: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r2: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r3: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r4: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r5: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r6: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r7: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r8: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r9: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r10: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r11: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r12: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r13: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r14: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r15: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r16: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r17: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r18: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r19: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r20: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r21: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r22: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r23: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r24: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r25: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r26: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r27: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r28: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r29: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r30: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r31: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    r32: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH c_rw AS v { s = s + v.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    wrw1: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH EXCLUSIVE c_rw AS inner { inner.value = inner.value + 1_i64; }
+        i = i + 1_i64;
+    END
+};
+    wrw2: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH EXCLUSIVE c_rw AS inner { inner.value = inner.value + 1_i64; }
+        i = i + 1_i64;
+    END
+};
+    wrw3: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH EXCLUSIVE c_rw AS inner { inner.value = inner.value + 1_i64; }
+        i = i + 1_i64;
+    END
+};
+    wrw4: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH EXCLUSIVE c_rw AS inner { inner.value = inner.value + 1_i64; }
+        i = i + 1_i64;
+    END
+};
+s_rw = (NEXT r1) + (NEXT r2) + (NEXT r3) + (NEXT r4) + (NEXT r5) + (NEXT r6) + (NEXT r7) + (NEXT r8) + (NEXT r9) + (NEXT r10) + (NEXT r11) + (NEXT r12) + (NEXT r13) + (NEXT r14) + (NEXT r15) + (NEXT r16) + (NEXT r17) + (NEXT r18) + (NEXT r19) + (NEXT r20) + (NEXT r21) + (NEXT r22) + (NEXT r23) + (NEXT r24) + (NEXT r25) + (NEXT r26) + (NEXT r27) + (NEXT r28) + (NEXT r29) + (NEXT r30) + (NEXT r31) + (NEXT r32);
+NEXT wrw1;
+    NEXT wrw2;
+    NEXT wrw3;
+    NEXT wrw4;
+t1_rw = timestampMs();
+elapsed_rw_ms = t1_rw - t0_rw;
+
+-- ───── Variant B: @shared:versioned (MVCC) ─────
+MUTABLE c_v = Counter{ value: 0_i64 } @shared:versioned;
+
+t0_v = timestampMs();
+    v1: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v2: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v3: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v4: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v5: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v6: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v7: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v8: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v9: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v10: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v11: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v12: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v13: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v14: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v15: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v16: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v17: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v18: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v19: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v20: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v21: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v22: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v23: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v24: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v25: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v26: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v27: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v28: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v29: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v30: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v31: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    v32: ~Int64 = BG { @parallel ->
+    MUTABLE s: Int64 = 0_i64;
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < reads_per DO
+        WITH SNAPSHOT c_v AS view { s = s + view.value; }
+        i = i + 1_i64;
+    END
+    s;
+};
+    wv1: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        i = i + 1_i64;
+    END
+};
+    wv2: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        i = i + 1_i64;
+    END
+};
+    wv3: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        i = i + 1_i64;
+    END
+};
+    wv4: ~Void = BG { @parallel ->
+    MUTABLE i: Int64 = 0_i64;
+    WHILE i < writes_per DO
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        i = i + 1_i64;
+    END
+};
+    s_v = (NEXT v1) + (NEXT v2) + (NEXT v3) + (NEXT v4) + (NEXT v5) + (NEXT v6) + (NEXT v7) + (NEXT v8) + (NEXT v9) + (NEXT v10) + (NEXT v11) + (NEXT v12) + (NEXT v13) + (NEXT v14) + (NEXT v15) + (NEXT v16) + (NEXT v17) + (NEXT v18) + (NEXT v19) + (NEXT v20) + (NEXT v21) + (NEXT v22) + (NEXT v23) + (NEXT v24) + (NEXT v25) + (NEXT v26) + (NEXT v27) + (NEXT v28) + (NEXT v29) + (NEXT v30) + (NEXT v31) + (NEXT v32);
+    NEXT wv1;
+    NEXT wv2;
+    NEXT wv3;
+    NEXT wv4;
+    t1_v = timestampMs();
+    elapsed_v_ms = t1_v - t0_v;
+
+    rw_ops_per_sec = (total_reads * 1000_i64) / elapsed_rw_ms;
+    v_ops_per_sec  = (total_reads * 1000_i64) / elapsed_v_ms;
+    speedup_x100 = (elapsed_rw_ms * 100_i64) / elapsed_v_ms;
+
+    print("\n=== Read-heavy: 32 readers x ${reads_per.toString()} reads + 4 writers x ${writes_per.toString()} writes ===\n");
+    print("BENCH_INFO: RwLock  ${elapsed_rw_ms.toString()} ms  (${rw_ops_per_sec.toString()} reads/sec)\n");
+    print("BENCH_INFO: MVCC    ${elapsed_v_ms.toString()} ms  (${v_ops_per_sec.toString()} reads/sec)\n");
+    print("BENCH_INFO: MVCC speedup vs RwLock: ${speedup_x100.toString()}/100 x\n");
+
+    ASSERT s_rw >= 0_i64, "rwlock sum sanity";
+    ASSERT s_v  >= 0_i64, "mvcc sum sanity";
+
+    print("BENCH_RESULT: ${elapsed_v_ms.toString()} ms\n");
+    RETURN;
+END

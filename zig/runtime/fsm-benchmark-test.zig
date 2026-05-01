@@ -95,7 +95,7 @@ fn runFsmBatched(alloc: std.mem.Allocator, resume_fn: fsm.ResumeFn, label: []con
     while (batch < N_BATCHES) : (batch += 1) {
         for (states) |*s| {
             s.* = .{ .task = undefined };
-            s.task = fsm.FsmTask.init(resume_fn, s);
+            s.task = fsm.FsmTask.init(resume_fn);
             sched.enqueueFsm(&s.task);
         }
         var iters: u32 = 0;
@@ -249,7 +249,7 @@ fn runCrossSpawnFsm(alloc: std.mem.Allocator) !u64 {
     const t0 = compat.nanoTimestamp();
     for (states) |*s| {
         s.* = .{ .task = undefined };
-        s.task = fsm.FsmTask.init(&FsmState.doResumeEmpty, s);
+        s.task = fsm.FsmTask.init(&FsmState.doResumeEmpty);
         try target.submitFsmSpawn(&s.task);
     }
     target.drainChannels();
@@ -303,7 +303,7 @@ fn runStealBaseline(alloc: std.mem.Allocator) !u64 {
     const t0 = compat.nanoTimestamp();
     for (states) |*s| {
         s.* = .{ .task = undefined };
-        s.task = fsm.FsmTask.init(&FsmState.doResumeCompute, s);
+        s.task = fsm.FsmTask.init(&FsmState.doResumeCompute);
         sched.enqueueFsm(&s.task);
     }
     var iters: u32 = 0;
@@ -333,7 +333,7 @@ fn runStealWithSibling(alloc: std.mem.Allocator) !u64 {
     const t0 = compat.nanoTimestamp();
     for (states) |*s| {
         s.* = .{ .task = undefined };
-        s.task = fsm.FsmTask.init(&FsmState.doResumeCompute, s);
+        s.task = fsm.FsmTask.init(&FsmState.doResumeCompute);
         a.enqueueFsm(&s.task);
     }
 

@@ -68,7 +68,7 @@ test "F1: FSM queue cannot hog — drain is bounded per iteration" {
 
     for (tasks) |*c| {
         c.* = .{ .task = undefined, .remaining = 0 };
-        c.task = fsm.FsmTask.init(&Counter.doResume, c);
+        c.task = fsm.FsmTask.init(&Counter.doResume);
         sched.enqueueFsm(&c.task);
     }
 
@@ -112,7 +112,7 @@ test "F2: Yielded FSMs cannot monopolize a batch — every yielder advances once
 
     for (tasks) |*c| {
         c.* = .{ .task = undefined, .remaining = YIELDS };
-        c.task = fsm.FsmTask.init(&Counter.doResume, c);
+        c.task = fsm.FsmTask.init(&Counter.doResume);
         sched.enqueueFsm(&c.task);
     }
 
@@ -157,7 +157,7 @@ test "F1b: stackful dispatch is reachable even with a large FSM queue" {
     defer alloc.free(tasks);
     for (tasks) |*c| {
         c.* = .{ .task = undefined, .remaining = 0 };
-        c.task = fsm.FsmTask.init(&Counter.doResume, c);
+        c.task = fsm.FsmTask.init(&Counter.doResume);
         sched.enqueueFsm(&c.task);
     }
 

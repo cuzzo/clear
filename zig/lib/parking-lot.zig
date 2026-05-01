@@ -1230,13 +1230,37 @@ pub const ParkingRwLock = struct {
         const prev = self.state.fetchAdd(1, .acquire);
         if ((prev & NON_READER_BITS) == 0) {
             if (rt_profile.CLEAR_PROFILE) {
-                self.hold_start_ns = lock_profile.now();
-                lock_profile.recordAcquire(@intFromPtr(self), 0, false);
+                lock_profile.recordReadAcquire(@intFromPtr(self), 0, false);
             }
             return .Acquired;
         }
         // Conflict: undo the optimistic increment, then register as a reader waiter.
-        _ = self.state.fetchSub(1, .release);
+        //
+        // Critical: if our undo restores state to "0 readers + HAS_WAITERS
+        // + no writer", we MUST call wakeNext. Otherwise a queued writer
+        // can deadlock: a concurrent unlock saw our transient +1 in state
+        // and skipped its wake (wakeNext for a write waiter returns when
+        // READER_MASK != 0); if we don't wake here, no future op will,
+        // since there are no holders left to release. This mirrors
+        // lockShared's stackful undo logic. Missing this call is a
+        // deterministic lost-wakeup race witnessed by
+        // fsm-rwlock-hammer-test.zig.
+        //
+        // The WRITE_LOCKED == 0 guard is critical: if the writer still
+        // holds when we undo, calling wakeNext could grant a reader at
+        // queue head (the .Read branch of wakeNext does fetchAdd
+        // unconditionally — its callers are expected to know WRITE_LOCKED
+        // is clear). The writer's eventual unlock will trigger the wake
+        // for us.
+        const prev_undo = self.state.fetchSub(1, .release);
+        if ((prev_undo & READER_MASK) == 1
+            and (prev_undo & HAS_WAITERS_BIT) != 0
+            and (prev_undo & WRITE_LOCKED_BIT) == 0)
+        {
+            self.spinAcquireQueue();
+            self.wakeNext();
+            self.spinReleaseQueue();
+        }
 
         self.spinAcquireQueue();
         // Re-check: maybe lock cleared and no writer waiters in the queue.
@@ -1250,8 +1274,7 @@ pub const ParkingRwLock = struct {
                 _ = self.state.fetchAdd(1, .acquire);
                 self.spinReleaseQueue();
                 if (rt_profile.CLEAR_PROFILE) {
-                    self.hold_start_ns = lock_profile.now();
-                    lock_profile.recordAcquire(@intFromPtr(self), 0, true);
+                    lock_profile.recordReadAcquire(@intFromPtr(self), 0, true);
                 }
                 return .Acquired;
             }
@@ -1281,15 +1304,31 @@ pub const ParkingRwLock = struct {
     pub fn lockShared(self: *ParkingRwLock) LockError!void {
         // Fast path: optimistic fetchAdd. Conflict → undo and slow path.
         const prev = self.state.fetchAdd(1, .acquire);
-        if ((prev & NON_READER_BITS) == 0) return; // no writer, no waiters → got it
+        if ((prev & NON_READER_BITS) == 0) {
+            if (rt_profile.CLEAR_PROFILE) {
+                lock_profile.recordReadAcquire(@intFromPtr(self), 0, false);
+            }
+            return; // no writer, no waiters → got it
+        }
         // Conflict: undo our increment.
         // Critical: if our undo restores state to "0 readers + HAS_WAITERS",
         // we must call wakeNext. Otherwise a queued writer can deadlock --
         // the actual last reader's unlockShared saw our transient +1 and
         // skipped its wake; if we don't wake here, no future op will, since
         // state has no holders to release.
+        // The WRITE_LOCKED == 0 guard mirrors the FSM fix in fb0576b9:
+        // wakeNext's .Read branch does fetchAdd(1) UNCONDITIONALLY (its
+        // callers are expected to know WRITE_LOCKED is clear). If we
+        // call wakeNext here while a writer still holds, we'd grant a
+        // queued reader a phantom slot -- the reader wakes thinking it
+        // has the read lock and races with the writer's mutation.
+        // The writer's eventual unlock will fire the wake when it
+        // releases, so skipping here loses no progress.
         const prev_undo = self.state.fetchSub(1, .release);
-        if ((prev_undo & READER_MASK) == 1 and (prev_undo & HAS_WAITERS_BIT) != 0) {
+        if ((prev_undo & READER_MASK) == 1
+            and (prev_undo & HAS_WAITERS_BIT) != 0
+            and (prev_undo & WRITE_LOCKED_BIT) == 0)
+        {
             self.spinAcquireQueue();
             self.wakeNext();
             self.spinReleaseQueue();
@@ -1299,6 +1338,7 @@ pub const ParkingRwLock = struct {
 
     fn lockSharedSlow(self: *ParkingRwLock) LockError!void {
         const sched_opt = getScheduler();
+        const wait_start: u64 = if (rt_profile.CLEAR_PROFILE) lock_profile.now() else 0;
 
         if (sched_opt == null) {
             // Test-then-fetchAdd. fetchAdd thrashes the cache line on every
@@ -1315,7 +1355,13 @@ pub const ParkingRwLock = struct {
                     continue;
                 }
                 const prev = self.state.fetchAdd(1, .acquire);
-                if ((prev & NON_READER_BITS) == 0) return;
+                if ((prev & NON_READER_BITS) == 0) {
+                    if (rt_profile.CLEAR_PROFILE) {
+                        const acquired_at = lock_profile.now();
+                        lock_profile.recordReadAcquire(@intFromPtr(self), acquired_at - wait_start, true);
+                    }
+                    return;
+                }
                 _ = self.state.fetchSub(1, .release);
             }
         }
@@ -1332,12 +1378,18 @@ pub const ParkingRwLock = struct {
             const prev = self.state.fetchAdd(1, .acquire);
             if ((prev & NON_READER_BITS) == 0) {
                 self.spinReleaseQueue();
+                if (rt_profile.CLEAR_PROFILE) {
+                    const acquired_at = lock_profile.now();
+                    lock_profile.recordReadAcquire(@intFromPtr(self), acquired_at - wait_start, true);
+                }
                 return;
             }
             // Same wake-on-undo logic as the fast path. We already hold
-            // queue_spin so we can call wakeNext directly.
+            // queue_spin so we can call wakeNext directly. Guard with
+            // WRITE_LOCKED_BIT == 0 (mirrors the fast-path guard) so we
+            // never wake a reader while a writer still holds the lock.
             const prev_undo = self.state.fetchSub(1, .release);
-            if ((prev_undo & READER_MASK) == 1 and (prev_undo & HAS_WAITERS_BIT) != 0) {
+            if ((prev_undo & READER_MASK) == 1 and (prev_undo & HAS_WAITERS_BIT) != 0 and (prev_undo & WRITE_LOCKED_BIT) == 0) {
                 self.wakeNext();
                 // wakeNext may have drained everyone we'd queue behind. If
                 // state is now grantable for us, take it; otherwise fall
@@ -1345,6 +1397,10 @@ pub const ParkingRwLock = struct {
                 const prev_retry = self.state.fetchAdd(1, .acquire);
                 if ((prev_retry & NON_READER_BITS) == 0) {
                     self.spinReleaseQueue();
+                    if (rt_profile.CLEAR_PROFILE) {
+                        const acquired_at = lock_profile.now();
+                        lock_profile.recordReadAcquire(@intFromPtr(self), acquired_at - wait_start, true);
+                    }
                     return;
                 }
                 _ = self.state.fetchSub(1, .release);
@@ -1403,6 +1459,10 @@ pub const ParkingRwLock = struct {
             return error.LockTimeout;
         }
         // Ownership (reader slot) was already incremented by wakeNext.
+        if (rt_profile.CLEAR_PROFILE) {
+            const acquired_at = lock_profile.now();
+            lock_profile.recordReadAcquire(@intFromPtr(self), acquired_at - wait_start, true);
+        }
     }
 
     pub fn unlockShared(self: *ParkingRwLock) void {
@@ -1443,6 +1503,14 @@ pub const ParkingRwLock = struct {
                         break; // CAS succeeded
                     }
                     const w = self.waiters.pop().?;
+                    // Profile: granting a parked writer = a contended
+                    // acquire. Stackful writers' lockSlow re-records on
+                    // resume, but FSM writers don't re-enter
+                    // tryWriteLockForFsm after the wake -- this is their
+                    // only acquire site.
+                    if (rt_profile.CLEAR_PROFILE and w.isFsm()) {
+                        lock_profile.recordAcquire(@intFromPtr(self), 0, true);
+                    }
                     if (w.isFsm()) {
                         const ft: *fp.FsmTask = @ptrCast(@alignCast(w.fsm_task.?));
                         self.fsm_write_owner.store(ft, .release);
@@ -1472,6 +1540,12 @@ pub const ParkingRwLock = struct {
                     // stays set; we'll fix it up after the drain.
                     _ = self.state.fetchAdd(1, .acquire);
                     const r = self.waiters.pop().?;
+                    // Profile: granting a parked reader = a contended
+                    // read acquire. Stackful readers' lockSharedSlow
+                    // re-records on resume; FSM readers do not.
+                    if (rt_profile.CLEAR_PROFILE and r.isFsm()) {
+                        lock_profile.recordReadAcquire(@intFromPtr(self), 0, true);
+                    }
                     if (r.isFsm()) {
                         const ft: *fp.FsmTask = @ptrCast(@alignCast(r.fsm_task.?));
                         ft.lock_waiter = null;

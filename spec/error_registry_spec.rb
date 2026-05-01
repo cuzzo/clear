@@ -54,8 +54,15 @@ RSpec.describe AST do
       expect(entry[:id]).to eq(AST::ERROR_NAME_MAX_DEPTH_EXCEEDED)
     end
 
-    it "user types start at id 6 (after stdlib + UnexpectedRecursion + MaxDepthExceeded)" do
-      expect(AST::ERROR_NAME_USER_FIRST).to eq(6)
+    it "seeds Conflict as Transient with stable id 6 (MVCC optimistic-write contention)" do
+      entry = AST::ERROR_TYPES[:Conflict]
+      expect(entry[:kind]).to eq(:Transient)
+      expect(entry[:zig_name]).to eq("Conflict")
+      expect(entry[:id]).to eq(AST::ERROR_NAME_CONFLICT)
+    end
+
+    it "user types start at id 7 (after the seven stdlib types)" do
+      expect(AST::ERROR_NAME_USER_FIRST).to eq(7)
     end
   end
 
@@ -147,14 +154,14 @@ RSpec.describe AST do
       expect(entries).to include([:Deadlock, 3])
     end
 
-    it "includes user types at >=6 sorted by id" do
+    it "includes user types at >=7 sorted by id" do
       AST.register_type!(:UserA, :Input)
       AST.register_type!(:UserB, :Input)
       entries = AST.enum_entries
       ids = entries.map(&:last)
       expect(ids).to eq(ids.sort)
-      expect(entries).to include([:UserA, 6])
-      expect(entries).to include([:UserB, 7])
+      expect(entries).to include([:UserA, 7])
+      expect(entries).to include([:UserB, 8])
     end
   end
 
@@ -208,8 +215,8 @@ RSpec.describe AST do
   end
 
   describe ".types_for_kind" do
-    it "expands :Transient to the two retryable lock types" do
-      expect(AST.types_for_kind(:Transient).to_set).to eq(Set[:LockTimeout, :LockCycle])
+    it "expands :Transient to the retryable types (lock + MVCC contention)" do
+      expect(AST.types_for_kind(:Transient).to_set).to eq(Set[:LockTimeout, :LockCycle, :Conflict])
     end
 
     it "expands :System to include Deadlock" do

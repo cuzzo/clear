@@ -1,0 +1,33 @@
+REQUIRE "types.cht"
+
+FN vecSetSlot(v: Value, idx: Int64, newVal: Value) RETURNS Value ->
+    PARTIAL MATCH v START
+        Value.Vector AS elems ->
+            MUTABLE vsNew: Value[]@list = List[];
+            FOR vsi IN (0_i64 ..< elems.length()) DO
+                IF vsi == idx THEN vsNew.append(COPY newVal);
+                ELSE vsNew.append(COPY elems[vsi]); END
+            END
+            RETURN Value{ Vector: vsNew };,
+        DEFAULT -> RETURN COPY v;
+    END
+    RETURN COPY v;
+END
+
+FN vecRef(v: Value, idx: Int64) RETURNS Value ->
+    PARTIAL MATCH v START
+        Value.Vector AS elems -> RETURN COPY elems[idx];,
+        DEFAULT -> RETURN Value.Nil;
+    END
+    RETURN Value.Nil;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE velems: Value[]@list = List[];
+    velems.append(Value{ Int64Val: 100 });
+    vec = Value{ Vector: velems };
+    updated = vecSetSlot(vec, 0, Value{ Int64Val: 999 });
+    result = vecRef(updated, 0);
+    print(prStr(result, TRUE));
+    RETURN;
+END

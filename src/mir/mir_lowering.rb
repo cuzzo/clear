@@ -668,7 +668,7 @@ class MIRLowering
       end
     when :list, :list_with_elem_cleanup, :string_map, :numeric_map, :set, :fixed_soa
       ti&.zig_type
-    when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable,
+    when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable, :versioned,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
       Type.new((ti&.resolved || :Any).to_s).zig_type
     when :rc
@@ -2090,6 +2090,14 @@ class MIRLowering
   end
 
   def lower_with_block(node)
+    # MVCC L7.1: WITH MATCH (multi-arm) form. The arms list is stamped
+    # by the parser; per-arm codegen (comptime if-else dispatch via
+    # @hasField/@hasDecl, per-arm Arc-unwrap, per-arm mutability) lands
+    # in L7.2 - L7.4 (#261, #262, #263). For now this is a dispatch
+    # seam: single-arm WITH (arms == nil) flows through the existing
+    # path unchanged; multi-arm WITH routes to a placeholder that
+    # panics at runtime so silent no-ops are impossible.
+    return lower_with_match_block(node) if node.arms
     rt_name = @rt_name
     bindings = []
     # Structured representation of any fallible-acquire clause(s) for the
@@ -2243,6 +2251,30 @@ class MIRLowering
         else
           bindings << "const #{safe_alias} = #{source_zig}.view();\n#{coop_yield}\n_ = &#{safe_alias};"
         end
+      when :SNAPSHOT
+        # MVCC L6: lower `WITH SNAPSHOT cell AS [MUTABLE] alias { body }`.
+        # Read-only single cell -> `cell.read(rt)` + Guard release.
+        # Any MUTABLE cell -> entire WITH is a transaction; the
+        #   post-loop `emit_snapshot_mutable_call` covers all cells
+        #   via `update()` (single) or `versionedUpdateMulti(...)`
+        #   (multi). Skip per-cell binding for the whole WITH so the
+        #   read-only cells in a mixed WITH don't emit a redundant
+        #   `.read()` alongside the txn.
+        # Multi-cell read-only -> N independent `.read()` calls.
+        any_mutable = (node.capabilities || []).any? { |c| c[:capability] == :SNAPSHOT && c[:alias_mutable] }
+        next if any_mutable # handled in the mutable-snapshot block below
+        source_zig = emit_expr(lower(cap[:var_node]))
+        safe_alias = zig_safe_name(alias_name)
+        guard_var = "__#{var_name}_snap_#{node.object_id.abs}"
+        # Shape-agnostic unwrap so the same emit works for *Versioned,
+        # *Arc<Versioned>, and Arc<Versioned> by value (the BG-capture
+        # case). Reuses the L7.4 helper (mirrors L7.3's WithMatchInner
+        # at the value level). The MIR::SnapshotRead node carries the
+        # structured fields; mir_emitter.rb renders them. Pre-migration
+        # this was an InlineZig blob -- the heap-allocated read Guard
+        # was invisible to the checker (INV-12 violation).
+        unwrap = with_match_unwrap_value(source_zig)
+        bindings << MIR::SnapshotRead.new(unwrap, rt_name, safe_alias, guard_var, nil)
       when :MATERIALIZED_VIEW
         # Observables Phase 2.7. Owned snapshot — the runtime
         # backing's `.materialize(allocator)` performs an explicit
@@ -2300,11 +2332,35 @@ class MIRLowering
       end
     end
 
-    body_stmts = lower_body(node.body)
+    # MVCC L6.2 / L6.3: lower SNAPSHOT-mutable into a single
+    # `update()` (one cell) or `versionedUpdateMulti(...)` (multi-cell)
+    # call whose closure body is the user's WITH body. The body is
+    # lowered + emitted-as-Zig-text inline, then placed inside the
+    # closure. After this, body_stmts is empty -- the body is owned
+    # by the update call, not by the WITH scope.
+    mutable_snap_caps = (node.capabilities || []).select { |c|
+      c[:capability] == :SNAPSHOT && c[:alias_mutable]
+    }
+    if mutable_snap_caps.any?
+      bindings << emit_snapshot_mutable_call(node, with_label)
+      body_stmts = []
+    else
+      body_stmts = lower_body(node.body)
+    end
     @locked_unwrap_map = prev_locked
     @rc_unwrap_map = prev_rc
 
-    all_bindings = bindings.reject(&:empty?).join("\n")
+    # Bindings is mixed: legacy WITH paths (EXCLUSIVE / BORROWED /
+    # RESTRICT / multiowned / shared) push String entries that get
+    # joined into one InlineZig blob; MVCC paths push structured MIR
+    # nodes (MIR::SnapshotRead, MIR::SnapshotTransaction, etc.) that
+    # the checker walks directly. Split + emit accordingly. Eventually
+    # the legacy paths should also migrate off InlineZig (their patterns
+    # are simpler than MVCC's so they're less urgent), but the MVCC
+    # entries are not aggregated into the InlineZig blob.
+    string_bindings = bindings.select { |b| b.is_a?(String) }.reject(&:empty?)
+    mir_bindings    = bindings.reject { |b| b.is_a?(String) }
+    all_bindings = string_bindings.join("\n")
     borrows = (node.capabilities || []).filter_map { |c|
       vn = c[:var_node]
       vn.respond_to?(:name) ? vn.name.to_s : nil
@@ -2317,6 +2373,7 @@ class MIRLowering
       bindings_iz.stdlib_def = sd
       stmts << bindings_iz
     end
+    stmts.concat(mir_bindings)
     stmts.concat(body_stmts)
     with_label ? MIR::BlockExpr.new(with_label, stmts) : MIR::ScopeBlock.new(stmts)
   end
@@ -2345,6 +2402,118 @@ class MIRLowering
       desc[:exit_msg_mir] = lower(clause[:message])
     end
     desc
+  end
+
+
+  # MVCC L7.2/L7.3: WITH MATCH (multi-arm form) lowering. Emits a
+  # comptime if-else chain that probes the bound variable's wrapper
+  # type via @hasField/@hasDecl. Zig elides the not-taken branches at
+  # compile time so the same fn body works for callers passing any of
+  # the families declared in REQUIRES.
+  #
+  # Family probes (L7.2):
+  #   :VERSIONED  -> @hasDecl(<inner_type>, "Inner")
+  #                  Versioned(T) re-exports `pub const Inner = T`;
+  #                  Locked(T) and bare T do not.
+  #   :LOCKED   -> @hasField(<inner_type>, "mutex")
+  #                  Locked(T) has a `mutex` field; bare T doesn't.
+  #   :LOCAL      -> else branch (no probe; runtime fallback).
+  #
+  # L7.3 Arc-unwrap: each probe is wrapped in a comptime Arc-unwrap
+  # so it works for both bare callers (`@versioned`, `@locked`,
+  # `@local`) and Arc-wrapped callers (`@shared:versioned`,
+  # `@shared:locked`). The Arc(T) struct has a `ctrl: *ArcControlBlock`
+  # field; ArcControlBlock has `data: *T`. So `<var>.ctrl.data.*`
+  # yields the inner T for Arc-wrapped, and the not-taken branch is
+  # elided when `<var>.*` doesn't have `ctrl`.
+  #
+  # Open gaps closed by L7.4/L7.5:
+  #   - Per-arm body emission uses the SAME alias binding for every
+  #     arm (resolved by acquire_capability!'s polymorphic-fallback
+  #     rule). Bodies aren't yet family-specialized: L7.4 (#263) will
+  #     visit each arm under its own family-resolved capability.
+  #   - L7.5 (#264) adds end-to-end transpile-tests.
+
+  # Per-family probe for WITH MATCH dispatch. Routes through the
+  # comptime helper `CheatLib.WithMatchInner` (runtime-header.zig)
+  # which peels off an outer pointer and an outer Arc-wrapper to
+  # reach the cell type. The same probe then matches whether the
+  # caller's binding is `@versioned`, `@shared:versioned`, `@locked`,
+  # or `@shared:locked` -- the parameter shape (pointer-to-T vs
+  # value-Arc(T)) is invisible to the probe.
+  #
+  # Recognized families today: LOCKED, VERSIONED. ACTOR and LOCK_FREE
+  # are parser-reserved but have no probe yet (raise on use). See
+  # WithMatchCheck.LOCKED_SYNCS / VERSIONED_SYNCS for the inverse
+  # mapping that classifies a binding's family at the call site.
+  def with_match_probe_for_family(family, zig_var)
+    inner_t = "CheatLib.WithMatchInner(@TypeOf(#{zig_var}))"
+    case family
+    when :VERSIONED then "@hasDecl(#{inner_t}, \"Inner\")"
+    when :LOCKED  then "@hasField(#{inner_t}, \"mutex\")"
+    else
+      raise "WITH MATCH: no probe for family #{family.inspect} (only " \
+            ":VERSIONED and :LOCKED are wired today)"
+    end
+  end
+
+  # MVCC L7.4: comptime expression that resolves to a `*Inner` value
+  # pointer regardless of param shape. Mirrors `WithMatchInner` (which
+  # gives the *type*) but at the *value* level. Inside each comptime
+  # if-else arm only one path is alive, so the not-taken branches'
+  # invalid expressions (`<var>.ctrl.data` for non-Arc, `&<var>` for
+  # by-ref) are elided.
+  def with_match_unwrap_value(zig_var)
+    is_ptr  = "@typeInfo(@TypeOf(#{zig_var})) == .pointer"
+    inner_t = "@typeInfo(@TypeOf(#{zig_var})).pointer.child"
+    "(if (comptime #{is_ptr}) " \
+      "(if (comptime @hasField(#{inner_t}, \"ctrl\")) #{zig_var}.ctrl.data else #{zig_var}) " \
+    "else " \
+      "(if (comptime @hasField(@TypeOf(#{zig_var}), \"ctrl\")) #{zig_var}.ctrl.data else &#{zig_var}))"
+  end
+
+  # Per-arm prelude that binds the user's alias (`va` in
+  # `WITH c AS va MATCH`) to a `*Inner` for this arm's family.
+  # Both VERSIONED and LOCKED arms produce `const <alias>: *T = ...`
+  # so the body's `<alias>.field` access lowers identically across
+  # families. The Guard's `defer release()` handles teardown.
+  def with_match_arm_prelude(family, zig_var, alias_name, node)
+    safe_alias = zig_safe_name(alias_name)
+    unwrap = with_match_unwrap_value(zig_var)
+    guard_var = "__#{alias_name}_match_#{node.object_id.abs}"
+    case family
+    when :VERSIONED
+      <<~ZIG.rstrip
+        var #{guard_var} = #{unwrap}.read(#{@rt_name});
+        defer #{guard_var}.release();
+        const #{safe_alias} = #{guard_var}.get();
+        _ = &#{safe_alias};
+      ZIG
+    when :LOCKED
+      <<~ZIG.rstrip
+        var #{guard_var} = #{unwrap}.acquire();
+        defer #{guard_var}.release();
+        const #{safe_alias} = #{guard_var}.get();
+        _ = &#{safe_alias};
+      ZIG
+    end
+  end
+
+  def lower_with_match_block(node)
+    cap = node.capabilities.first
+    var_name = with_cap_var_name(cap[:var_node])
+    zig_var  = with_cap_zig_target(cap[:var_node], var_name)
+    alias_name = cap[:alias] || var_name
+
+    arms_meta = node.arms.map { |arm|
+      {
+        family:      arm[:family],
+        probe:       with_match_probe_for_family(arm[:family], zig_var),
+        prelude_zig: with_match_arm_prelude(arm[:family], zig_var, alias_name, node),
+        body:        lower_body(arm[:body]),
+      }
+    }
+    MIR::ScopeBlock.new([MIR::WithMatchDispatch.new(zig_var, arms_meta)])
   end
 
   # Emit the acquire-or-catch binding for a fallible lock under a
@@ -2410,6 +2579,151 @@ class MIRLowering
       const #{alias_name} = #{guard_var}.get();
       _ = &#{alias_name};
     ZIG
+  end
+
+  # MVCC L6.2/L6.3: emit a single `Versioned.update` (one cell) or
+  # `versionedUpdateMulti` (multi-cell) call whose closure runs the
+  # WITH body. The user's `ON Conflict <action>` becomes a `catch`
+  # arm that translates `error.UpdateRetriesExhausted` -> the
+  # configured action (RAISE / PASS / EXIT / `-> { }`).
+  #
+  # Single-cell shape:
+  #   cell.update(rt, alloc, struct {
+  #     fn run(va: *T) void { <body_zig> }
+  #   }.run, .{}) catch |__err| switch (__err) {
+  #     error.UpdateRetriesExhausted => { <conflict_action> },
+  #     else => return __err,
+  #   };
+  #
+  # Multi-cell shape:
+  #   CheatLib.versionedUpdateMulti(.{a, b, ...}, rt, alloc, struct {
+  #     fn run(views: anytype) anyerror!void {
+  #       const va = views[0]; _ = &va;
+  #       const vb = views[1]; _ = &vb;
+  #       <body_zig>
+  #     }
+  #   }.run, .{}) catch |__err| switch (__err) {
+  #     error.UpdateRetriesExhausted => { <conflict_action> },
+  #     else => return __err,
+  #   };
+  # Returns a structured MIR node (MIR::SnapshotTransaction or
+  # MIR::SnapshotMultiTxn) instead of an InlineZig blob. The body
+  # MIR statements are passed through directly to mir_emitter so the
+  # checker can walk them. Pre-migration this concatenated everything
+  # into one big InlineZig string (#268), making the heap allocation
+  # in Versioned.update opaque to MIRChecker (INV-12 violation).
+  def emit_snapshot_mutable_call(node, with_label)
+    snap_caps = node.capabilities || []
+    body_mir = lower_body(node.body)
+    conflict_action = emit_conflict_action_zig(node.lock_error_clause, with_label, node)
+    # MVCC L8-followup: ON Conflict RETRY(N) THEN <action>. The runtime's
+    # Versioned.update / updateMulti already retries up to
+    # MAX_UPDATE_RETRIES (versioned.zig top of file; 10_000 by default,
+    # overridable via `pub const CLEAR_MVCC_MAX_UPDATE_RETRIES` at root)
+    # on inner CAS contention. The user's RETRY(N) wraps the whole call
+    # in an OUTER retry loop -- when the inner budget exhausts and
+    # surfaces `error.UpdateRetriesExhausted`, the outer loop tries N
+    # more times before running THEN.
+    retries = node.lock_error_clause&.dig(:retries)
+    alloc_zig = "#{@rt_name}.heapAlloc()"
+
+    if snap_caps.length == 1
+      cap = snap_caps.first
+      var_node   = cap[:var_node]
+      var_name   = with_cap_var_name(var_node)
+      alias_name = cap[:alias] || var_name
+      safe_alias = zig_safe_name(alias_name)
+      source_zig = emit_expr(lower(var_node))
+      # Shape-agnostic Arc-unwrap so the same emit works for *Versioned,
+      # *Arc<Versioned>, and Arc<Versioned> by value (the BG-capture
+      # case). Mirrors the read-mode SNAPSHOT path.
+      source_unwrap = with_match_unwrap_value(source_zig)
+      st = cap[:resolved_type].is_a?(Type) ? cap[:resolved_type] : Type.new(cap[:resolved_type])
+      bare_t_zig = st.bare_data_type.zig_type
+      MIR::SnapshotTransaction.new(
+        source_unwrap, @rt_name, alloc_zig, safe_alias, bare_t_zig,
+        body_mir, conflict_action, retries, with_label,
+      )
+    else
+      cells_tuple = ".{ " + snap_caps.map { |c| emit_expr(lower(c[:var_node])) }.join(", ") + " }"
+      alias_decls = snap_caps.each_with_index.map { |c, i|
+        var_node   = c[:var_node]
+        var_name   = with_cap_var_name(var_node)
+        alias_name = c[:alias] || var_name
+        safe_alias = zig_safe_name(alias_name)
+        "const #{safe_alias} = views[#{i}]; _ = &#{safe_alias};"
+      }.join("\n            ")
+      MIR::SnapshotMultiTxn.new(
+        cells_tuple, @rt_name, alloc_zig, alias_decls,
+        body_mir, conflict_action, retries, with_label,
+      )
+    end
+  end
+
+  # Wrap a `Versioned.update[Multi]` call expression with the user's
+  # ON Conflict handler (and the RETRY(N) THEN outer-retry shape when
+  # `retries` is set). When retries==nil, emits a plain catch-switch.
+  # When retries==N, emits a counted while-loop that retries up to N
+  # times before running the THEN action.
+  def wrap_with_conflict_handler(core_call, conflict_action, retries, node)
+    if retries
+      retry_label = "__snap_retry_#{node.object_id.abs}"
+      # The conflict_action ALWAYS terminates control flow:
+      #   RAISE / EXIT -> return error.CheatError
+      #   PASS         -> break :__with_<id>
+      #   -> { stmts } -> body + break :__with_<id>
+      # So the action itself exits the retry loop -- no trailing break needed.
+      <<~ZIG.rstrip
+        {
+            var __retry: usize = 0;
+            #{retry_label}: while (true) : (__retry += 1) {
+                if (#{core_call}) |_| {
+                    break :#{retry_label};
+                } else |__err| switch (__err) {
+                    error.UpdateRetriesExhausted => {
+                        if (__retry + 1 < #{retries}) continue;
+                        #{conflict_action}
+                    },
+                    else => return __err,
+                }
+            }
+        }
+      ZIG
+    else
+      <<~ZIG.rstrip
+        #{core_call} catch |__err| switch (__err) {
+            error.UpdateRetriesExhausted => { #{conflict_action} },
+            else => return __err,
+        };
+      ZIG
+    end
+  end
+
+  # MVCC L6.2: emit the Zig statements for the user's `ON Conflict
+  # <action>` clause. Mirrors `emit_lock_action_zig` but uses
+  # `ErrorName.Conflict` (kind :Transient) as the error label. RETRY
+  # semantics for SNAPSHOT-transactions are NOT honored here -- the
+  # runtime already retries up to versioned.MAX_UPDATE_RETRIES; once
+  # that budget exhausts we surface `Conflict` and run the user action.
+  # `nil` clause shouldn't happen for a SNAPSHOT-mutable WITH (L5
+  # rejects), but defensively rethrow as Conflict if it does.
+  def emit_conflict_action_zig(clause, with_label, with_node)
+    line = with_node.token&.line.to_s
+    return %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.Conflict), "MVCC commit conflict", #{line});\nreturn error.CheatError;) unless clause
+    case clause[:action]
+    when :raise
+      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.Conflict), "MVCC commit conflict", #{line});\nreturn error.CheatError;)
+    when :exit
+      msg_zig = emit_expr(lower(clause[:message]))
+      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.Conflict), #{msg_zig}, #{line});\nreturn error.CheatError;)
+    when :pass
+      "break :#{with_label};"
+    when :block
+      body_zig = emit_stmts_zig(lower_body(clause[:body]))
+      "#{body_zig}\nbreak :#{with_label};"
+    else
+      raise "Internal: unknown Conflict action #{clause[:action]}"
+    end
   end
 
   # Zig statements for the matched-selector action. Must terminate: return
@@ -4605,11 +4919,13 @@ class MIRLowering
               when :locked then "lockedCreate"
               when :write_locked then "rwLockedCreate"
               when :always_mutable then "refCellCreate"
+              when :versioned then "versionedCreate"
               end
     sync_type = case node.sync
                 when :locked then "CheatLib.Locked(#{zig_base})"
                 when :write_locked then "CheatLib.RwLocked(#{zig_base})"
                 when :always_mutable then "CheatLib.RefCell(#{zig_base})"
+                when :versioned then "CheatLib.Versioned(#{zig_base})"
                 end
     own_fn = case node.ownership
              when :shared then "arcCreate"
@@ -4682,11 +4998,13 @@ class MIRLowering
               when :locked         then "lockedCreate"
               when :write_locked   then "rwLockedCreate"
               when :always_mutable then "refCellCreate"
+              when :versioned      then "versionedCreate"
               end
     sync_t  = case ft.sync
               when :locked         then "CheatLib.Locked(#{bare_zig_t})"
               when :write_locked   then "CheatLib.RwLocked(#{bare_zig_t})"
               when :always_mutable then "CheatLib.RefCell(#{bare_zig_t})"
+              when :versioned      then "CheatLib.Versioned(#{bare_zig_t})"
               end
     own_fn  = case ft.ownership
               when :shared      then "arcCreate"

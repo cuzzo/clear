@@ -32,12 +32,12 @@ const Tracker = struct {
 
     fn init() Tracker {
         var t: Tracker = .{ .task = undefined };
-        t.task = fsm.FsmTask.init(&Tracker.doResume, &t);
+        t.task = fsm.FsmTask.init(&Tracker.doResume);
         return t;
     }
 
     fn bind(self: *Tracker) void {
-        self.task = fsm.FsmTask.init(&Tracker.doResume, self);
+        self.task = fsm.FsmTask.init(&Tracker.doResume);
     }
 };
 

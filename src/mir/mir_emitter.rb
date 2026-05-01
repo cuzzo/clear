@@ -98,6 +98,11 @@ class MIREmitter
     when MIR::MakeList         then emit_make_list(node)
     when MIR::FrameSave        then emit_frame_save(node)
     when MIR::FrameRestore     then emit_frame_restore(node)
+    # --- MVCC SNAPSHOT / WITH MATCH (structured, MIR-checker-visible) ---
+    when MIR::SnapshotRead         then emit_snapshot_read(node)
+    when MIR::SnapshotTransaction  then emit_snapshot_transaction(node)
+    when MIR::SnapshotMultiTxn     then emit_snapshot_multi_txn(node)
+    when MIR::WithMatchDispatch    then emit_with_match_dispatch(node)
     # --- Verification-only (no codegen) ---
     when MIR::AllocMark, MIR::ReturnMark, MIR::ReassignMark, MIR::FieldCleanupMark
       nil
@@ -232,6 +237,113 @@ class MIREmitter
       end
     end
     code
+  end
+
+  # --- MVCC SNAPSHOT / WITH MATCH emitters ---
+  #
+  # These render structured nodes 1:1 to the same Zig text we used to
+  # emit via InlineZig blobs in mir_lowering, but the construct is now
+  # MIR-checker-visible. Pre-migration these were inline string blobs
+  # that hid heap allocations from the checker (INV-12 violation).
+
+  # `WITH SNAPSHOT cell AS view { body }` (read mode):
+  #   var <guard> = <unwrap>.read(<rt>);
+  #   defer <guard>.release();
+  #   const <alias> = <guard>.get();
+  #   _ = &<alias>;
+  #   <body>
+  def emit_snapshot_read(node)
+    body = emit_body(node.body || [])
+    parts = [
+      "var #{node.guard_var} = #{node.cell_unwrap}.read(#{node.rt});",
+      "defer #{node.guard_var}.release();",
+      "const #{node.alias_zig} = #{node.guard_var}.get();",
+      "_ = &#{node.alias_zig};",
+    ]
+    parts << body unless body.empty?
+    parts.join("\n")
+  end
+
+  # `WITH SNAPSHOT cell AS MUTABLE va { body } ON Conflict <action>`:
+  #   <unwrap>.update(<rt>, <alloc>, struct {
+  #       fn run(<alias>: *<bare_t>) void {
+  #           _ = &<alias>;
+  #           <body>
+  #       }
+  #   }.run, .{}) catch |err| switch (err) { ... };
+  # Wraps in a counted retry loop when retries != nil.
+  def emit_snapshot_transaction(node)
+    body_zig = emit_body(node.body || [])
+    core = <<~ZIG.rstrip
+      #{node.cell_unwrap}.update(#{node.rt}, #{node.alloc}, struct {
+          fn run(#{node.alias_zig}: *#{node.bare_t_zig}) void {
+              _ = &#{node.alias_zig};
+              #{body_zig}
+          }
+      }.run, .{})
+    ZIG
+    wrap_conflict_handler(core, node.conflict_action, node.retries)
+  end
+
+  # `WITH SNAPSHOT a AS MUTABLE va, b AS MUTABLE vb, ... { body }`:
+  # Multi-cell atomic transaction via versionedUpdateMulti.
+  def emit_snapshot_multi_txn(node)
+    body_zig = emit_body(node.body || [])
+    core = <<~ZIG.rstrip
+      CheatLib.versionedUpdateMulti(#{node.cells_tuple}, #{node.rt}, #{node.alloc}, struct {
+          fn run(views: anytype) anyerror!void {
+              #{node.alias_decls}
+              #{body_zig}
+          }
+      }.run, .{})
+    ZIG
+    wrap_conflict_handler(core, node.conflict_action, node.retries)
+  end
+
+  # `WITH cell AS va MATCH WHEN F1 -> {...} WHEN F2 -> {...} END`:
+  # comptime if-else chain, one branch per family. The `unreachable`
+  # else is added by the lowering (WithMatchCheck enforces arm
+  # exhaustiveness); we emit exactly what mir_lowering passed in.
+  def emit_with_match_dispatch(node)
+    arm_strs = node.arms.each_with_index.map { |arm, i|
+      head = i.zero? ? "if (comptime #{arm[:probe]})" : "else if (comptime #{arm[:probe]})"
+      body_zig = emit_body(arm[:body] || [])
+      prelude = arm[:prelude_zig].to_s
+      inner = prelude.empty? ? body_zig : "#{prelude}\n#{body_zig}"
+      "#{head} {\n    #{inner}\n}"
+    }
+    chain = arm_strs.join(" ") + " else { unreachable; }"
+    "#{chain}\n_ = &#{node.cell_zig};"
+  end
+
+  # Helper: wrap a Versioned.update[Multi] call expression with the
+  # ON Conflict handler (and optional RETRY(N) outer-retry shape).
+  def wrap_conflict_handler(core_call, conflict_action, retries)
+    if retries
+      <<~ZIG.rstrip
+        {
+            var __retry: usize = 0;
+            __snap_retry: while (true) : (__retry += 1) {
+                if (#{core_call}) |_| {
+                    break :__snap_retry;
+                } else |__err| switch (__err) {
+                    error.UpdateRetriesExhausted => {
+                        if (__retry + 1 < #{retries}) continue;
+                        #{conflict_action}
+                    },
+                    else => return __err,
+                }
+            }
+        }
+      ZIG
+    else
+      <<~ZIG.rstrip
+        #{core_call} catch |__err| switch (__err) {
+            error.UpdateRetriesExhausted => { #{conflict_action} },
+            else => return __err,
+        };
+      ZIG
+    end
   end
 
   # --- Top-level emitters ---
@@ -628,6 +740,13 @@ class MIREmitter
 
     when :always_mutable
       guarded_defer(name, "CheatLib.refCellDestroy(#{zig_type}, #{alloc}, #{name})", g, errdefer:)
+
+    when :versioned
+      # MVCC L6: tear down a *Versioned(T) cell. EBR-retire the live
+      # ptr then destroy the outer struct. `rt` is the conventionally-
+      # named runtime in the emitted Zig (matching `:heap_struct_plain`
+      # above which also uses bare `rt`).
+      guarded_defer(name, "CheatLib.versionedDestroy(#{zig_type}, rt, #{alloc}, #{name})", g, errdefer:)
 
     when :heap_string, :takes_string
       guarded_defer(name, "#{alloc}.free(#{name})", g, errdefer:)

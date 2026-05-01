@@ -4,7 +4,7 @@ BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :e
 class Type
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
-  attr_accessor :sync        # nil (default), :locked, :write_locked
+  attr_accessor :sync        # nil (default), :locked, :write_locked, :versioned, :always_mutable, :local, :raw, :symbol
   attr_accessor :lock_rank   # nil (default) or Integer — @locked(rank: N) / @writeLocked(rank: N)
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N) / HashMap:sharded(N))
@@ -449,6 +449,14 @@ class Type
 
   def write_locked?
     @sync == :write_locked
+  end
+
+  # MVCC: T@versioned -> Shared(T) (atomic-pointer COW + EBR).
+  # Readers see consistent snapshots via `WITH SNAPSHOT x AS y`;
+  # writers do optimistic update via `WITH SNAPSHOT x AS MUTABLE y`
+  # with `ON Conflict ...` for the retries-exhausted case.
+  def versioned?
+    @sync == :versioned
   end
 
   def local?
@@ -1736,6 +1744,7 @@ class Type
         inner_zig = "CheatLib.Locked(#{inner_zig})"   if @sync == :locked
         inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
         inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
+        inner_zig = "CheatLib.Versioned(#{inner_zig})" if @sync == :versioned
       end
 
       case @ownership

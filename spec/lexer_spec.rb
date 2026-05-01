@@ -37,6 +37,15 @@ RSpec.describe Lexer do
       expect_token(tokens[2], :VAR_ID, "if", 1, 7)
     end
 
+    it "tokenizes SNAPSHOT as a keyword (used by `WITH SNAPSHOT x AS y`)" do
+      tokens = Lexer.new("WITH SNAPSHOT x AS y").tokenize
+      expect_token(tokens[0], :KEYWORD, "WITH", 1, 1)
+      expect_token(tokens[1], :KEYWORD, "SNAPSHOT", 1, 6)
+      expect_token(tokens[2], :VAR_ID,  "x", 1, 15)
+      expect_token(tokens[3], :KEYWORD, "AS", 1, 17)
+      expect_token(tokens[4], :VAR_ID,  "y", 1, 20)
+    end
+
     it "handles whitespace and newlines correctly" do
       source = <<~CODE
         x

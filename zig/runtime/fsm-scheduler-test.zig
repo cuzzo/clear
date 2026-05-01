@@ -36,7 +36,7 @@ const DoneAfterN = struct {
     }
 
     fn bind(self: *DoneAfterN) void {
-        self.task = fsm.FsmTask.init(&DoneAfterN.doResume, self);
+        self.task = fsm.FsmTask.init(&DoneAfterN.doResume);
     }
 };
 
@@ -148,7 +148,7 @@ test "WaitForIO parks task; manual wake via enqueueFsm resumes" {
         }
     };
     var s: IoTask = .{ .task = undefined };
-    s.task = fsm.FsmTask.init(&IoTask.doResume, &s);
+    s.task = fsm.FsmTask.init(&IoTask.doResume);
 
     sched.enqueueFsm(&s.task);
     sched.drainFsmQueue();

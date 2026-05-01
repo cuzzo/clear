@@ -74,7 +74,7 @@ fn setupBody(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
     // stackful under an unbounded drain.
     for (setup.fsm_pool) |*f| {
         f.* = .{ .task = undefined, .counter = setup.fsm_counter };
-        f.task = fsm.FsmTask.init(&FsmCounter.doResume, f);
+        f.task = fsm.FsmTask.init(&FsmCounter.doResume);
         setup.sched.enqueueFsm(&f.task);
     }
 
@@ -185,7 +185,7 @@ test "end-to-end fairness: stackful-first + FSM burst still progresses" {
             // Then FSM burst.
             for (self.fsm_pool) |*f| {
                 f.* = .{ .task = undefined, .counter = self.fsm_counter };
-                f.task = fsm.FsmTask.init(&FsmCounter.doResume, f);
+                f.task = fsm.FsmTask.init(&FsmCounter.doResume);
                 self.sched.enqueueFsm(&f.task);
             }
         }

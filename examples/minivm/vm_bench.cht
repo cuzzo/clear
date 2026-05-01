@@ -1,0 +1,13 @@
+FN main() RETURNS Void ->
+    MUTABLE sum = 0_i64;
+    MUTABLE outer = 0_i64;
+    WHILE outer < 100 DO
+        MUTABLE i = 0_i64;
+        WHILE i < 10000 DO
+            IF i MOD 2 == 0 THEN sum = sum + i; END
+            i = i + 1_i64;
+        END
+        outer = outer + 1_i64;
+    END
+    ASSERT sum == 2499500000, "sum check";
+END

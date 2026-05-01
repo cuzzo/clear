@@ -104,7 +104,7 @@ test "FSM-NEXT: consumer awaits producer via WaitGroup, gets result + 1" {
     consumer_inner.wg.add(1);
 
     var producer: ProducerState = .{ .task = undefined, .inner = &producer_inner };
-    producer.task = FsmTask.init(&ProducerState.resumeFn, &producer);
+    producer.task = FsmTask.init(&ProducerState.resumeFn);
 
     var consumer: ConsumerState = .{
         .task = undefined,
@@ -114,7 +114,7 @@ test "FSM-NEXT: consumer awaits producer via WaitGroup, gets result + 1" {
         .child_inner = undefined,
         .producer = &producer,
     };
-    consumer.task = FsmTask.init(&ConsumerState.resumeFn, &consumer);
+    consumer.task = FsmTask.init(&ConsumerState.resumeFn);
 
     sched.enqueueFsm(&consumer.task);
 
@@ -152,7 +152,7 @@ test "FSM-NEXT: count==0 inline path when producer wins the race" {
     consumer_inner.wg.add(1);
 
     var producer: ProducerState = .{ .task = undefined, .inner = &producer_inner };
-    producer.task = FsmTask.init(&ProducerState.resumeFn, &producer);
+    producer.task = FsmTask.init(&ProducerState.resumeFn);
 
     // Run producer to completion FIRST.
     _ = fsm_mod.dispatchOnce(&producer.task);
@@ -167,7 +167,7 @@ test "FSM-NEXT: count==0 inline path when producer wins the race" {
         .child_inner = undefined,
         .producer = &producer,
     };
-    consumer.task = FsmTask.init(&ConsumerState.resumeFn, &consumer);
+    consumer.task = FsmTask.init(&ConsumerState.resumeFn);
 
     // Single dispatch: step 0 spawns (no-op for already-Finished
     // producer), registerFsmWaiter sees count==0 and returns false,
@@ -204,7 +204,7 @@ test "WaitGroup.registerFsmWaiter: returns false when count is already 0" {
     // will enqueue it on the FSM ready queue but we don't drain.
     dummy_task = FsmTask.init(&struct {
         fn r(_: *FsmTask) YieldReason { return .{ .Done = {} }; }
-    }.r, undefined);
+    }.r);
     wg.done();
     try std.testing.expect(wg.waiting_fsm == null);
     try std.testing.expect(wg.waiting_task == null);

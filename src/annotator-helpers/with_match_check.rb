@@ -25,7 +25,7 @@ module WithMatchCheck
       next unless node.is_a?(AST::WithBlock)
       # Observables: WITH VIEW / WITH MATERIALIZED VIEW are reads on
       # an `@observable` source -- not lock acquisitions -- so the
-      # LOCKABLE auto-shim must NOT fire here. The shim's purpose is
+      # LOCKED auto-shim must NOT fire here. The shim's purpose is
       # to bridge pre-Phase-2 lock-using code; observable view blocks
       # are unrelated.
       next if node.view_kind
@@ -148,14 +148,17 @@ module WithMatchCheck
   end
 
   # Map a SymbolEntry's sync to the family name it belongs to.
-  # Currently LOCKED is the only implemented family; other families are
-  # reserved for future phases.
-  LOCKED_SYNCS = %i[locked write_locked always_mutable].to_set.freeze
+  # LOCKED    = mutex / rwlock / refcell -- the lock-based path.
+  # VERSIONED = MVCC Versioned(T) -- the lock-free path.
+  # ACTOR / LOCK_FREE remain reserved for future phases.
+  LOCKED_SYNCS    = %i[locked write_locked always_mutable].to_set.freeze
+  VERSIONED_SYNCS = %i[versioned].to_set.freeze
 
   def self.family_of_arg(arg)
     sym = arg.respond_to?(:symbol) ? arg.symbol : nil
     return nil unless sym
-    return :LOCKED if LOCKED_SYNCS.include?(sym.sync)
+    return :LOCKED    if LOCKED_SYNCS.include?(sym.sync)
+    return :VERSIONED if VERSIONED_SYNCS.include?(sym.sync)
     nil
   end
 end

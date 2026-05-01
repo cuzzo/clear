@@ -564,8 +564,16 @@ module FunctionAnalysis
         param_sync = param[:type].sync
       elsif node.respond_to?(:requires) && node.requires
         families = node.requires[param[:name].to_s]
-        if families && families.include?(:LOCKED)
-          param_sync = :locked
+        if families
+          # Polymorphic LOCKED | VERSIONED falls through to LOCKED's
+          # seed (the WITH MATCH x WHEN @versioned ... WHEN @locked
+          # arm-check overrides per-arm anyway, so any pinned-default
+          # is informational only).
+          if families.include?(:LOCKED)
+            param_sync = :locked
+          elsif families.include?(:VERSIONED)
+            param_sync = :versioned
+          end
         end
       end
       current_scope.declare(

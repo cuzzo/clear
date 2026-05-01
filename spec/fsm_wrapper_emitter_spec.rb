@@ -206,7 +206,7 @@ RSpec.describe FsmWrapperEmitter do
       expect(out).to include("__bg0_ctx.* = .{")
       expect(out).to include(".rt = rt,")
       expect(out).to include(".inner = __bg0_promise.inner,")
-      expect(out).to include("__bg0_ctx.task = CheatHeader.FsmTask.init(&__BgCtx0.resumeFn, __bg0_ctx);")
+      expect(out).to include("__bg0_ctx.task = CheatHeader.FsmTask.init(&__BgCtx0.resumeFn);")
       expect(out).to include("try CheatHeader.spawnFsmBest(&__bg0_ctx.task);")
       expect(out).to include("break :__bg0 __bg0_promise;")
     end

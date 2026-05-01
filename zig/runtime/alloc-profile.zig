@@ -7,7 +7,14 @@
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
 
-const MAX_SITES = 1024;
+// Profile-table size; shared default with lock-profile / mvcc-profile.
+// `clear profile --profile-max=N` injects the override into the
+// transpiled root via `CLEAR_PROFILE_MAX_TABLE_ENTRIES`. See
+// mvcc-profile.zig for the full comment block.
+pub const MAX_SITES: usize = if (@hasDecl(@import("root"), "CLEAR_PROFILE_MAX_TABLE_ENTRIES"))
+    @import("root").CLEAR_PROFILE_MAX_TABLE_ENTRIES
+else
+    1024;
 
 const Site = struct {
     addr: usize = 0,
@@ -19,6 +26,11 @@ const Site = struct {
 
 var sites: [MAX_SITES]Site = [_]Site{.{}} ** MAX_SITES;
 var total_allocs: u64 = 0;
+
+// Counts findSlot() calls that hit the saturated table. Surfaced
+// in the dump as a `# WARNING:` header so doctor can advise the
+// user to bump --profile-max=N. See mvcc-profile.zig for rationale.
+var dropped_samples: u64 = 0;
 
 fn findSlot(addr: usize) ?*Site {
     const hash = addr *% 0x9E3779B97F4A7C15; // fibonacci hash
@@ -32,7 +44,8 @@ fn findSlot(addr: usize) ?*Site {
         }
         idx = (idx + 1) & (MAX_SITES - 1);
     }
-    return null; // table full
+    dropped_samples += 1;
+    return null; // table saturated -- bump CLEAR_PROFILE_MAX_TABLE_ENTRIES
 }
 
 var total_bytes: u64 = 0;
@@ -73,6 +86,12 @@ pub fn dump() void {
     compat.writeAllFd(fd, "# alloc-profile v1\n") catch return;
     const hdr = std.fmt.bufPrint(&buf, "# total_allocs: {d}\n", .{total_allocs}) catch return;
     compat.writeAllFd(fd, hdr) catch return;
+    if (dropped_samples > 0) {
+        const warn = std.fmt.bufPrint(&buf,
+            "# WARNING: {d} samples dropped (cap={d}; rebuild with `clear profile --profile-max=N`)\n",
+            .{ dropped_samples, MAX_SITES }) catch return;
+        compat.writeAllFd(fd, warn) catch return;
+    }
     compat.writeAllFd(fd, "# addr alloc_count alloc_bytes free_count free_bytes live_bytes\n") catch return;
 
     for (&sites) |*site| {

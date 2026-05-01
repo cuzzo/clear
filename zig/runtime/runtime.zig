@@ -86,6 +86,7 @@ pub const ErrorName_LockCycle: u32 = 2;
 pub const ErrorName_Deadlock: u32 = 3;
 pub const ErrorName_UnexpectedRecursion: u32 = 4;
 pub const ErrorName_MaxDepthExceeded: u32 = 5;
+pub const ErrorName_Conflict: u32 = 6;
 
 pub const ErrorContext = struct {
     kind: ErrorKind = .Unknown,
@@ -135,10 +136,12 @@ pub fn zigErrorToKind(err: anyerror) ErrorKind {
     if (std.mem.eql(u8, name, "UnexpectedRecursion")) return .System;
     if (std.mem.eql(u8, name, "MaxDepthExceeded")) return .System;
     // Transient: temporary, retryable. Covers lock acquisition timeouts,
-    // AB/BA lock cycles (one party backing off resolves them), and network
-    // transients.
+    // AB/BA lock cycles (one party backing off resolves them), MVCC
+    // optimistic-write conflicts (writer can retry the whole txn), and
+    // network transients.
     if (std.mem.eql(u8, name, "LockTimeout")) return .Transient;
     if (std.mem.eql(u8, name, "LockCycle")) return .Transient;
+    if (std.mem.eql(u8, name, "Conflict")) return .Transient;
     if (std.mem.eql(u8, name, "Timeout")) return .Transient;
     if (std.mem.eql(u8, name, "ConnectionTimedOut")) return .Transient;
     if (std.mem.eql(u8, name, "WouldBlock")) return .Transient;
@@ -175,12 +178,24 @@ pub fn zigErrorToName(err: anyerror) u32 {
     if (std.mem.eql(u8, name, "Deadlock"))            return ErrorName_Deadlock;
     if (std.mem.eql(u8, name, "UnexpectedRecursion")) return ErrorName_UnexpectedRecursion;
     if (std.mem.eql(u8, name, "MaxDepthExceeded"))    return ErrorName_MaxDepthExceeded;
+    if (std.mem.eql(u8, name, "UpdateRetriesExhausted")) return ErrorName_Conflict;
     return ErrorName_None;
 }
 
 pub const Runtime = struct {
     // Control
-    ebr: ThreadLocalEbr,  // This probably needs to be global...
+    // Pointer (not by-value) so the same memory can be registered with
+    // EbrContext from a deeper or shallower call site than where rt was
+    // constructed. By-value rt.ebr would force registration to happen on
+    // the same stack as construction; on small fiber stacks that is the
+    // entryWrapper, where the testing.allocator's deep append() chain
+    // overflows 12 KB Standard stacks. Heap-allocating the ebr lets the
+    // scheduler register it on its own (large) OS thread stack.
+    ebr: *ThreadLocalEbr,
+    /// True when rt.ebr was heap-allocated by Runtime.init/initFromSlice.
+    /// rt.deinit destroys it. False when ebr was supplied externally
+    /// (via initFromSliceWithEbr) — caller owns lifecycle.
+    owns_ebr: bool,
     owns_frame_memory: bool,
     // For green fibers, how long until this DIES? (0 = No timeout - deal with it)
     deadline: i64 = 0,
@@ -224,15 +239,35 @@ pub const Runtime = struct {
         heap_allocator: std.mem.Allocator,
         timeout_ms: u64
     ) !Runtime {
-        const local_ebr = ThreadLocalEbr{ .context = global_ctx, .limbo_list = .empty };
+        // Heap-allocate the ebr so it has a stable address independent
+        // of where rt itself lives. owns_ebr=true so deinit cleans up.
+        const ebr_ptr = try heap_allocator.create(ThreadLocalEbr);
+        ebr_ptr.* = .{ .context = global_ctx, .limbo_list = .empty };
 
+        var rt = try initFromSliceWithEbr(slice, ebr_ptr, heap_allocator, timeout_ms);
+        rt.owns_ebr = true;
+        return rt;
+    }
+
+    /// Initialize a Runtime with a caller-supplied ThreadLocalEbr. Used
+    /// by the scheduler so it can register the ebr with EbrContext on
+    /// the OS thread stack (deep allocator path), then hand the same
+    /// stable pointer to the fiber via entryWrapper. rt.deinit will NOT
+    /// destroy the ebr — caller is responsible for its lifecycle.
+    pub fn initFromSliceWithEbr(
+        slice: []u8,
+        ebr: *ThreadLocalEbr,
+        heap_allocator: std.mem.Allocator,
+        timeout_ms: u64
+    ) !Runtime {
         var deadline: i64 = 0;
         if (timeout_ms > 0) {
             deadline = milliTimestamp() + @as(i64, @intCast(timeout_ms));
         }
 
         return Runtime{
-            .ebr = local_ebr,
+            .ebr = ebr,
+            .owns_ebr = false,
             .owns_frame_memory = false, // DO NOT FREE THIS in deinit.
             .deadline = deadline,
             .frame_allocator = undefined,
@@ -243,7 +278,10 @@ pub const Runtime = struct {
 
     pub fn deinit(self: *Runtime) void {
         self.overflow_arena.deinit();
-        self.ebr.deinit(self.heap_allocator);
+        if (self.owns_ebr) {
+            self.ebr.deinit(self.heap_allocator);
+            self.heap_allocator.destroy(self.ebr);
+        }
 
         // IMPORTANT: Only free frame IF WE OWN IT!
         if (self.owns_frame_memory) {
@@ -572,9 +610,13 @@ pub const Runtime = struct {
         else
             full_stack_memory[0..0]; // empty slice - arena will use heap lazily
 
-        var rt = Runtime.initFromSlice(
+        // Use the ThreadLocalEbr the scheduler pre-allocated and
+        // registered with EbrContext on its OS thread stack. Doing the
+        // EbrContext.register() here would overflow Standard fiber
+        // stacks (testing.allocator's append chain costs ~2-3 KB).
+        var rt = Runtime.initFromSliceWithEbr(
             frame_slice,
-            sched.global_ebr,
+            task.ebr_slot.?,
             sched.allocator,
             task.config.timeout_ms
         ) catch unreachable;
@@ -602,6 +644,7 @@ pub const Runtime = struct {
 
 
         // 5. Cleanup & Yield
+        // ebr unregister + destroy happens in scheduler's .Finished handler.
         // When we yield here, we go back to Scheduler.run loop.
         rt.deinit();  // must manually de-init
         task.status.store(.Finished, .release);

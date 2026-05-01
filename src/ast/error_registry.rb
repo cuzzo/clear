@@ -29,7 +29,8 @@ module AST
   ERROR_NAME_DEADLOCK             = 3
   ERROR_NAME_UNEXPECTED_RECURSION = 4
   ERROR_NAME_MAX_DEPTH_EXCEEDED   = 5
-  ERROR_NAME_USER_FIRST           = 6
+  ERROR_NAME_CONFLICT             = 6
+  ERROR_NAME_USER_FIRST           = 7
 
   # Mutable registry. Seeded with the five stdlib types and extended
   # by the annotator on first use. Hash shape:
@@ -46,6 +47,7 @@ module AST
     Deadlock:            { kind: :System,    zig_name: "Deadlock",            id: ERROR_NAME_DEADLOCK,             first_site: nil },
     UnexpectedRecursion: { kind: :System,    zig_name: "UnexpectedRecursion", id: ERROR_NAME_UNEXPECTED_RECURSION, first_site: nil },
     MaxDepthExceeded:    { kind: :System,    zig_name: "MaxDepthExceeded",    id: ERROR_NAME_MAX_DEPTH_EXCEEDED,   first_site: nil },
+    Conflict:            { kind: :Transient, zig_name: "Conflict",            id: ERROR_NAME_CONFLICT,             first_site: nil },
   }
 
   # Counter for the next user-type id. Reset on a per-program basis via

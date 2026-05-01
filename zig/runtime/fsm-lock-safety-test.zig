@@ -57,7 +57,7 @@ test "FSM safety: re-entrant acquire returns lock_error.Deadlock" {
 
     var mutex: pl.ParkingMutex = .{};
     var s = Reentrant{ .task = undefined, .mutex = &mutex, .sched = &sched };
-    s.task = fsm.FsmTask.init(&Reentrant.doResume, &s);
+    s.task = fsm.FsmTask.init(&Reentrant.doResume);
     sched.enqueueFsm(&s.task);
     sched.drainFsmQueue();
 
@@ -155,9 +155,9 @@ test "FSM safety: pure-FSM cycle A->L2->B->L1->A detected" {
     var parked = std.atomic.Value(bool).init(false);
 
     var a = CycleA{ .task = undefined, .l1 = &l1, .l2 = &l2, .other_parked = &parked, .sched = &sched };
-    a.task = fsm.FsmTask.init(&CycleA.doResume, &a);
+    a.task = fsm.FsmTask.init(&CycleA.doResume);
     var b = CycleB{ .task = undefined, .l1 = &l1, .l2 = &l2, .parked = &parked, .sched = &sched };
-    b.task = fsm.FsmTask.init(&CycleB.doResume, &b);
+    b.task = fsm.FsmTask.init(&CycleB.doResume);
 
     // Drive A through step 0: acquires L1, yields.
     sched.enqueueFsm(&a.task);
@@ -221,7 +221,7 @@ test "FSM safety: lock wait timeout surfaces lock_error.LockTimeout" {
     try std.testing.expect(mutex.tryLock());
 
     var s = Timeout{ .task = undefined, .mutex = &mutex, .sched = &sched };
-    s.task = fsm.FsmTask.init(&Timeout.doResume, &s);
+    s.task = fsm.FsmTask.init(&Timeout.doResume);
     sched.enqueueFsm(&s.task);
     sched.drainFsmQueue();
     try std.testing.expectEqual(fsm.FsmStatus.Blocked, s.task.status);

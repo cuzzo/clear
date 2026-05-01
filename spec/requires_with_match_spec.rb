@@ -132,12 +132,15 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
 
   describe "P2.4: REQUIRES↔WHEN exhaustiveness" do
     it "errors when a WHEN arm is missing for a declared family" do
+      # Single-cell form: multi-cell WITH MATCH is rejected at the
+      # G1 check (lower_with_match_block emits prelude for first cap
+      # only); the exhaustiveness check happens in a separate pass.
       src = <<~CHT
         STRUCT Counter { value: Int64 }
-        FN transact(x: Counter, y: Counter) RETURNS Bool
-          REQUIRES x, y: LOCKED | VERSIONED
+        FN transact(x: Counter) RETURNS Bool
+          REQUIRES x: LOCKED | VERSIONED
         ->
-          WITH EXCLUSIVE x AS a, EXCLUSIVE y AS b MATCH
+          WITH EXCLUSIVE x AS a MATCH
             WHEN LOCKED -> { z = 1; }
           END
           RETURN TRUE;

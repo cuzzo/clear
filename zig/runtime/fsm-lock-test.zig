@@ -79,7 +79,7 @@ const LockingFsm = struct {
             .counter = counter,
             .sched = sched,
         };
-        x.task = fsm.FsmTask.init(&LockingFsm.doResume, &x);
+        x.task = fsm.FsmTask.init(&LockingFsm.doResume);
         return x;
     }
 };
@@ -103,7 +103,7 @@ test "FSM mutex: uncontended tryLockForFsm acquires on fast path" {
     var mutex: pl.ParkingMutex = .{};
     var counter: u64 = 0;
     var f = LockingFsm.init(&mutex, &counter, &sched);
-    f.task = fsm.FsmTask.init(&LockingFsm.doResume, &f);
+    f.task = fsm.FsmTask.init(&LockingFsm.doResume);
 
     sched.enqueueFsm(&f.task);
     sched.drainFsmQueue();
@@ -135,7 +135,7 @@ test "FSM mutex: contended FSM parks, wakes on release" {
     try std.testing.expect(mutex.tryLock());
 
     var f = LockingFsm.init(&mutex, &counter, &sched);
-    f.task = fsm.FsmTask.init(&LockingFsm.doResume, &f);
+    f.task = fsm.FsmTask.init(&LockingFsm.doResume);
     sched.enqueueFsm(&f.task);
 
     // First drain: FSM finds lock held, registers as waiter, returns
@@ -200,7 +200,7 @@ const SetupMixed = struct {
         );
         for (self.fsms) |*f| {
             f.* = LockingFsm.init(self.mutex, self.counter, self.sched);
-            f.task = fsm.FsmTask.init(&LockingFsm.doResume, f);
+            f.task = fsm.FsmTask.init(&LockingFsm.doResume);
             self.sched.enqueueFsm(&f.task);
         }
     }
@@ -283,7 +283,7 @@ test "FSM mutex: 64 FSMs contend, counter equals N" {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
             for (self.fsms_slice) |*f| {
                 f.* = LockingFsm.init(self.mutex_ptr, self.counter_ptr, self.sched_ptr);
-                f.task = fsm.FsmTask.init(&LockingFsm.doResume, f);
+                f.task = fsm.FsmTask.init(&LockingFsm.doResume);
                 self.sched_ptr.enqueueFsm(&f.task);
             }
         }

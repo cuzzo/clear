@@ -760,6 +760,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
             switch (task.status.load(.acquire)) {
                 .Finished => {
                     _ = sched.active_tasks.fetchSub(1, .monotonic);
+                    sched.releaseTaskEbr(task);
                     sched.stack_pool.free(task.base.stack.memory);
                     sched.allocator.destroy(task.base);
                     sched.task_slab.destroy(task);

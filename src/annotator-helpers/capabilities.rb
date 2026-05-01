@@ -166,6 +166,20 @@ module CapabilityHelper
         error!(node, "WITH MATERIALIZED VIEW requires a `~T` (tense) source, got #{t.resolved} for '#{name}'.")
       end
 
+    when :SNAPSHOT
+      # MVCC L5: source MUST be `T@versioned` (sync == :versioned).
+      # The alias projects the bare inner T (Group 2 strip); MUTABLE
+      # alias means the body can mutate the new version that
+      # `Shared.update[Multi]` will publish on commit.
+      syn = cap_var_sync(var_node)
+      unless syn == :versioned
+        name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+        actual = syn ? "@#{syn}" : (cap_var_storage(var_node) ? "@#{cap_var_storage(var_node)}" : "plain")
+        error!(node, "WITH SNAPSHOT requires a @versioned variable. " \
+                     "'#{name}' is #{actual}, not @versioned. Declare the binding as " \
+                     "`T@versioned` or `T@shared:versioned` for an MVCC cell.")
+      end
+
     when :multiowned
       unless cap_var_storage(var_node) == :multiowned
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
@@ -235,11 +249,12 @@ module CapabilityHelper
       cap[:capability] = case
                          when syn == :locked            then :EXCLUSIVE
                          when syn == :write_locked      then :write_locked_read
+                         when syn == :versioned         then :SNAPSHOT
                          when storage == :multiowned    then :multiowned
                          when storage == :shared        then :shared
                          else
                            name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-                           error!(node, "WITH #{name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, or another capability type")
+                           error!(node, "WITH #{name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, @versioned, or another capability type")
                            :unknown
                          end
     end
@@ -373,6 +388,30 @@ module CapabilityHelper
         sym.borrowed_alias = true
       end
       og_declare(alias_name, nil, bind_type_sym)
+    elsif cap[:capability] == :SNAPSHOT
+      # MVCC L5. The alias holds the inner T of a `T@versioned` cell --
+      # for a read-only SNAPSHOT, this is a borrow into the
+      # currently-published version (kept alive by EBR for the duration
+      # of the WITH); for a MUTABLE SNAPSHOT it is a fresh copy that
+      # `Shared.update[Multi]` will publish on commit.
+      #
+      # Either way, the alias is `non_escaping` + `borrowed_alias` --
+      # escape would either pin EBR unboundedly (read) or detach a
+      # half-committed value from the txn boundary (mutable). Every
+      # escape vector (RETURN, struct/union/collection store, BG/DO
+      # capture, GIVE, COPY-to-non-temp, pipeline-binding crossing the
+      # WITH) is rejected by the existing non_escaping checks at the
+      # use site.
+      source_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name)
+      st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
+      inner_type = st.versioned? ? st.bare_data_type : st
+      alias_name = cap[:alias] || var_name
+      is_mutable = !!cap[:alias_mutable]
+      current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
+      sym = current_scope.locals[alias_name]
+      sym.non_escaping  = true
+      sym.borrowed_alias = true
+      og_declare(alias_name, nil, inner_type)
     elsif cap[:capability] == :BORROWED
       # BORROWED guarantees the aliased data is stable for the borrow duration.
       # @shared/@locked/@multiowned types can be concurrently written — the
@@ -665,6 +704,31 @@ module CapabilityHelper
           _unified_capture_walk([clause[:message]], locally_bound, result, is_parallel) if clause[:message]
           _unified_capture_walk(clause[:body], locally_bound, result, is_parallel) if clause[:body].is_a?(Array)
         end
+
+        # WITH-block aliases (the AS-bound names) are declared inside the
+        # WITH scope -- references to them in the body are NOT outer
+        # captures, even though their underlying SymbolEntry has
+        # borrowed_alias=true. Without this, capturing an
+        # @shared:versioned cell into a `BG { WITH SNAPSHOT c AS view
+        # ... }` is wrongly rejected: the walker sees `view` in the body,
+        # resolves it through node.symbol to the borrowed_alias=true
+        # SymbolEntry, and flags the BG as capturing a WITH-scoped
+        # binding. Add alias names + per-arm aliases to locally_bound for
+        # the recursive walk into body / arms below.
+        with_locally_bound = locally_bound
+        (node.capabilities || []).each do |cap|
+          a = cap[:alias]
+          with_locally_bound = with_locally_bound | Set[a] if a.is_a?(String)
+        end
+        if node.body.is_a?(Array)
+          _unified_capture_walk(node.body, with_locally_bound, result, is_parallel)
+        end
+        node.arms&.each do |arm|
+          _unified_capture_walk(arm[:body], with_locally_bound, result, is_parallel) if arm[:body].is_a?(Array)
+        end
+        # Skip the generic-member descent below -- we just walked the
+        # body / arms with the augmented locally_bound set.
+        next
       end
 
       # Don't recurse into nested BG/DO blocks — they have their own capture scope.

@@ -56,9 +56,17 @@ var g_sched: fp.Scheduler = undefined;
 var harness: *LoomHarness = undefined;
 
 const ScheduleMode = union(enum) {
+    // `std.Random` stores a pointer to the underlying state (`*Xoshiro256`)
+    // captured at .random() time. We must NOT cache a `std.Random` value
+    // in the harness: initPrng returns LoomHarness by value, the caller
+    // copies it into a local `var h`, and a cached `random.ptr` would
+    // dangle to initPrng's stack frame. Build a fresh wrapper from
+    // `&p.rng` at every pickThread call instead. The bug was masked by
+    // a coincidental memory layout until the MVCC commit added an
+    // `ebr_slot` field to Task — the resulting layout shift exposed
+    // the dangling pointer as a livelock under exhaustive interleaving.
     prng: struct {
         rng: std.Random.DefaultPrng,
-        random: std.Random,
     },
     exhaustive: struct {
         schedule: []const u8,
@@ -91,13 +99,10 @@ const LoomHarness = struct {
     }
 
     fn initPrng(allocator: std.mem.Allocator, seed: u64) LoomHarness {
-        const rng = std.Random.DefaultPrng.init(seed);
-        var h = LoomHarness{
-            .mode = .{ .prng = .{ .rng = rng, .random = undefined } },
+        return .{
+            .mode = .{ .prng = .{ .rng = std.Random.DefaultPrng.init(seed) } },
             .allocator = allocator,
         };
-        h.mode.prng.random = h.mode.prng.rng.random();
-        return h;
     }
 
     fn deinit(self: *LoomHarness) void {
@@ -136,7 +141,7 @@ const LoomHarness = struct {
         }
         if (active_count == 0) return 0;
         switch (self.mode) {
-            .prng => |*p| return active_ids[p.random.intRangeLessThan(usize, 0, active_count)],
+            .prng => |*p| return active_ids[p.rng.random().intRangeLessThan(usize, 0, active_count)],
             .exhaustive => |*e| {
                 const choice = if (e.pos < e.schedule.len)
                     e.schedule[e.pos] % @as(u8, @intCast(active_count))
@@ -167,6 +172,29 @@ const LoomHarness = struct {
                 if (self.parked[i] and self.stub_tasks[i].status.load(.monotonic) == .Ready) {
                     self.parked[i] = false;
                     self.stub_tasks[i].in_inbox.store(false, .release);
+                }
+            }
+            // Cleanup of stale `g_sched.lock_waiters` entries. The
+            // scheduler's normal scanLockWaiters would do this on its
+            // own run loop, but VOPR/loom drives the harness directly
+            // (no sched.run()), so we must mimic the cleanup pass here.
+            // Stale entries from a previously-woken park leak across
+            // iterations; if a task subsequently parks AGAIN (sets
+            // status=.Blocked), the parked-detection block below would
+            // see the stale entry and mark it parked BEFORE the task's
+            // current registerLockWaiter completes — leaving it stuck
+            // mid-lockSlow, holding queue_spin, and producing a lost
+            // wake on whichever lock its peers are then trying to
+            // acquire. Remove any entry whose waiting_for_lock == null
+            // (post-wake) before the parked check runs.
+            {
+                var i: usize = 0;
+                while (i < g_sched.lock_waiters.items.len) {
+                    if (g_sched.lock_waiters.items[i].waiting_for_lock.load(.monotonic) == null) {
+                        _ = g_sched.lock_waiters.swapRemove(i);
+                    } else {
+                        i += 1;
+                    }
                 }
             }
 
@@ -242,6 +270,13 @@ const LoomHarness = struct {
                 "    g_rw.queue_spin={d}\n",
                 .{g_rw.queue_spin.load(.monotonic)},
             );
+            for (0..VOPR_LOCKS) |li| {
+                const ls = g_vopr_locks[li].state.load(.monotonic);
+                std.debug.print(
+                    "    g_vopr_locks[{d}] @{*}: state=0x{x}, queue_spin={d}, waiters_empty={}, waiters.head={?*}\n",
+                    .{ li, &g_vopr_locks[li], ls, g_vopr_locks[li].queue_spin.load(.monotonic), g_vopr_locks[li].waiters.isEmpty(), g_vopr_locks[li].waiters.head },
+                );
+            }
             const va = @import("vopr-atomic.zig");
             std.debug.print(
                 "    sim ops total={d}, cmpxchg ok={d} fail={d}\n",
@@ -313,8 +348,7 @@ fn entryFiber0() callconv(.c) void {
     g_counter += 1;
     g_mutex.unlock();
     harness.done[0] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entryFiber1() callconv(.c) void {
@@ -322,8 +356,7 @@ fn entryFiber1() callconv(.c) void {
     g_counter += 1;
     g_mutex.unlock();
     harness.done[1] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -471,8 +504,7 @@ fn entryRace3c() callconv(.c) void {
     g_counter += 1;
     g_mutex.unlock();
     harness.done[2] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 pub fn testMutexThreeFiberRaces() !void {
@@ -573,8 +605,7 @@ fn lostWakeBody(comptime slot: usize) void {
         g_mutex.unlock();
     }
     harness.done[slot] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entryLostWake0() callconv(.c) void { lostWakeBody(0); }
@@ -670,6 +701,18 @@ var g_writer_counter: usize = 0;
 // Per-reader observed snapshots. -1 means "not observed yet" at test start.
 var g_reader_observed: [MAX_THREADS]i64 = [_]i64{-1} ** MAX_THREADS;
 
+// Transient-invariant violation count. Closes Gaps 2 + 3 (FSM RwLock
+// lost-wakeup / stackful slow-path WRITE_LOCKED guard). The bug shape
+// for both fixes was: a reader's wake-on-undo path could grant the
+// read lock while a writer still held it (WRITE_LOCKED_BIT set). A
+// reader observing isWriteLocked() == true *while holding the read
+// lock itself* is the exact transient signature. The existing
+// `rwCheckInvariants` is a final-state check (after all fibers
+// finish), which doesn't catch a transient mis-grant that gets
+// resolved before test end. This counter is incremented from inside
+// the read critical section; non-zero == lost-wakeup-style bug.
+var g_transient_write_lock_observed: usize = 0;
+
 // `slot` is the harness slot index. Each entry function hardcodes its slot so
 // `harness.done[slot]` matches the actual harness position.
 fn rwWork(comptime slot: usize, comptime is_writer: bool) void {
@@ -679,12 +722,18 @@ fn rwWork(comptime slot: usize, comptime is_writer: bool) void {
         g_rw.unlock();
     } else {
         g_rw.lockShared() catch unreachable;
+        // Transient invariant: a reader holding the read lock must
+        // never observe write_locked == true. If it does, the wake-
+        // on-undo (fast or slow path) granted us the lock while a
+        // writer still held it -- the exact bug fixed by the
+        // WRITE_LOCKED_BIT guards in tryReadLockForFsm and
+        // lockSharedSlow.
+        if (g_rw.isWriteLocked()) g_transient_write_lock_observed += 1;
         g_reader_observed[slot] = @as(i64, @intCast(g_writer_counter));
         g_rw.unlockShared();
     }
     harness.done[slot] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entryRwWriterAt0() callconv(.c) void { rwWork(0, true); }
@@ -696,11 +745,14 @@ fn rwReset() void {
     g_rw = .{};
     g_writer_counter = 0;
     g_reader_observed = [_]i64{-1} ** MAX_THREADS;
+    g_transient_write_lock_observed = 0;
 }
 
 // Expected final state: exactly `expected_writers` increments, the lock
-// is fully released, no stray bits in `state`, and each reader's
-// observation is in [0, expected_writers].
+// is fully released, no stray bits in `state`, each reader's observation
+// is in [0, expected_writers], and no reader ever observed
+// write_locked == true while holding the read lock (transient
+// WRITE_LOCKED guard invariant).
 fn rwCheckInvariants(expected_writers: usize, reader_slots: []const usize) bool {
     if (g_writer_counter != expected_writers) return false;
     if (g_rw.isWriteLocked()) return false;
@@ -712,6 +764,7 @@ fn rwCheckInvariants(expected_writers: usize, reader_slots: []const usize) bool 
     // exits with stale HAS_WAITERS uncleared, or reader count not
     // restored after a fetchAdd/fetchSub undo race.
     if (g_rw.state.load(.monotonic) != 0) return false;
+    if (g_transient_write_lock_observed != 0) return false;
     for (reader_slots) |s| {
         const obs = g_reader_observed[s];
         if (obs < 0) return false;
@@ -812,8 +865,8 @@ pub fn testRwlockWriterReader() !void {
 
         if (!rwCheckInvariants(1, &.{1})) {
             std.debug.print(
-                "\nINVARIANT FAIL sched {d}: writer_counter={d} reader_obs={d} write_locked={} readers={d}\n",
-                .{ sched_idx, g_writer_counter, g_reader_observed[1], g_rw.isWriteLocked(), g_rw.readerCount() },
+                "\nINVARIANT FAIL sched {d}: writer_counter={d} reader_obs={d} write_locked={} readers={d} transient_violations={d}\n",
+                .{ sched_idx, g_writer_counter, g_reader_observed[1], g_rw.isWriteLocked(), g_rw.readerCount(), g_transient_write_lock_observed },
             );
             failures += 1;
         }
@@ -864,8 +917,8 @@ pub fn testRwlockTwoReadersWriter() !void {
 
         if (!rwCheckInvariants(1, &.{ 1, 2 })) {
             std.debug.print(
-                "\nPRNG FAIL seed {d}: writer_counter={d} r1={d} r2={d} write_locked={} readers={d} waiters_empty={}\n",
-                .{ seed, g_writer_counter, g_reader_observed[1], g_reader_observed[2], g_rw.isWriteLocked(), g_rw.readerCount(), g_rw.waiters.isEmpty() },
+                "\nPRNG FAIL seed {d}: writer_counter={d} r1={d} r2={d} write_locked={} readers={d} waiters_empty={} transient_violations={d}\n",
+                .{ seed, g_writer_counter, g_reader_observed[1], g_reader_observed[2], g_rw.isWriteLocked(), g_rw.readerCount(), g_rw.waiters.isEmpty(), g_transient_write_lock_observed },
             );
             failures += 1;
         }
@@ -1094,8 +1147,7 @@ fn entrySelfCycle() callconv(.c) void {
     };
     g_mtx_x.unlock();
     harness.done[0] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 pub fn testCycleSelf() !void {
@@ -1170,8 +1222,7 @@ fn entry2HopA() callconv(.c) void {
     };
     g_mtx_x.unlock();
     harness.done[0] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entry2HopB() callconv(.c) void {
@@ -1185,8 +1236,7 @@ fn entry2HopB() callconv(.c) void {
     };
     g_mtx_y.unlock();
     harness.done[1] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 pub fn testCycle2Hop() !void {
@@ -1297,8 +1347,7 @@ fn entry3HopA() callconv(.c) void {
     };
     g_mtx_x.unlock();
     harness.done[0] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entry3HopB() callconv(.c) void {
@@ -1316,8 +1365,7 @@ fn entry3HopB() callconv(.c) void {
     };
     g_mtx_y.unlock();
     harness.done[1] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entry3HopC() callconv(.c) void {
@@ -1331,8 +1379,7 @@ fn entry3HopC() callconv(.c) void {
     };
     g_mtx_z.unlock();
     harness.done[2] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 pub fn testCycle3Hop() !void {
@@ -1440,8 +1487,7 @@ fn entryReadTermA() callconv(.c) void {
     while (!g_b_holds_y) fc.__fiber.?.yield();
     g_rw.unlockShared();
     harness.done[0] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entryReadTermB() callconv(.c) void {
@@ -1452,8 +1498,7 @@ fn entryReadTermB() callconv(.c) void {
     // detection side, which doesn't fire here because there's no cycle.
     // The invariant is just that no false Deadlock/LockCycle occurs.
     harness.done[1] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 pub fn testCycleReadTerminator() !void {
@@ -1604,8 +1649,13 @@ fn voprAddrOrderedBody(comptime slot: usize) void {
         g_vopr_locks[lo].unlock();
     }
     harness.done[slot] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    // Loop on yield instead of `unreachable`: in ReleaseFast, falling off
+    // the end of a fiber's entry function pops uninitialized stack memory
+    // as the next return address and (under the right layout) bounces
+    // execution back to the entry — silently restarting the body and
+    // breaking the harness's done-tracking. Loop here so the fiber is
+    // safe to context-switch to but never re-runs the body.
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entryVopr0() callconv(.c) void { voprAddrOrderedBody(0); }
@@ -1745,8 +1795,7 @@ fn entryTimeoutParker() callconv(.c) void {
     }
 
     harness.done[0] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 fn entryTimeoutScanner() callconv(.c) void {
@@ -1773,8 +1822,7 @@ fn entryTimeoutScanner() callconv(.c) void {
     _ = t.seq.fetchAdd(1, .release);
 
     harness.done[1] = true;
-    fc.__fiber.?.yield();
-    unreachable;
+    while (true) fc.__fiber.?.yield();
 }
 
 pub fn testTimeoutAtomicCoverage() !void {

@@ -193,7 +193,7 @@ def build_metadata_path(output)
   File.join(File.dirname(output), ".#{File.basename(output)}.clear-build.json")
 end
 
-def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil, use_debug_allocator: false)
+def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, profile:, use_c_allocator:, default_stack:, strict_test:, exact_tiers:, main_tier: nil, use_debug_allocator: false, profile_max: nil)
   {
     "source" => File.expand_path(source),
     "output" => File.expand_path(output),
@@ -201,6 +201,7 @@ def build_signature(source:, output:, opt_level:, extra_flags:, module_mode:, pr
     "extra_flags" => Array(extra_flags),
     "module_mode" => module_mode,
     "profile" => profile,
+    "profile_max" => profile_max,
     "use_c_allocator" => use_c_allocator,
     "use_debug_allocator" => use_debug_allocator,
     "default_stack" => default_stack,
@@ -352,7 +353,7 @@ end
 # -------------------------------------------------------------------------
 # Build: transpile + compile
 # -------------------------------------------------------------------------
-def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil)
+def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mode: false, default_stack: nil, profile: false, profile_max: nil, strict_test: false, force: false, exact_tiers: nil, use_c_allocator: false, use_debug_allocator: false, main_tier: nil)
   error "File not found: #{source}" unless File.exist?(source)
   source = File.expand_path(source)
   source_dir = File.dirname(source)
@@ -367,6 +368,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     extra_flags: extra_flags,
     module_mode: module_mode,
     profile: profile,
+    profile_max: profile_max,
     use_c_allocator: use_c_allocator,
     use_debug_allocator: use_debug_allocator,
     default_stack: default_stack,
@@ -432,6 +434,14 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
   # with zero overhead in production builds.
   if profile
     zig_code = "pub const CLEAR_PROFILE = true;\n" + zig_code
+    if profile_max
+      # Bump the open-addressed profile-table size for users with
+      # > 1024 distinct alloc sites / lock instances / @versioned
+      # cells. Picked up by alloc-profile / lock-profile /
+      # mvcc-profile via @hasDecl(@import("root"), ...). Must be
+      # power-of-two; the runtime tables index via `& (N-1)`.
+      zig_code = "pub const CLEAR_PROFILE_MAX_TABLE_ENTRIES: usize = #{profile_max};\n" + zig_code
+    end
   end
   # When packages are present, rewrite package @import("name") to @import("name.zig")
   # so all files live as file-path imports (avoids Zig module system complexity).
@@ -1009,8 +1019,26 @@ when 'profile'
     run_args = []
   end
 
+  # --profile-max=N: bump the open-addressed profile-table size from
+  # the default 1024 to N. The runtime tables (alloc-profile,
+  # lock-profile, mvcc-profile) all share this cap; saturated samples
+  # are reported in the dump as a `# WARNING:` line. N must be a
+  # power of two (the tables index via `& (N-1)`).
+  profile_max = nil
+  clear_args = clear_args.reject do |arg|
+    if arg =~ /\A--profile-max=(\d+)\z/
+      profile_max = $1.to_i
+      unless profile_max > 0 && (profile_max & (profile_max - 1)) == 0
+        error "--profile-max=#{profile_max} must be a positive power of two (e.g. 1024, 4096, 16384)"
+      end
+      true
+    else
+      false
+    end
+  end
+
   source = clear_args.first
-  error "Usage: clear profile <file.cht> [-- args...]" unless source
+  error "Usage: clear profile <file.cht> [--profile-max=N] [-- args...]" unless source
 
   source = File.expand_path(source)
   base_name = File.basename(source, '.cht')
@@ -1024,8 +1052,9 @@ when 'profile'
 
   # Build ReleaseFast with profiling enabled. Debug symbols retained (-fno-strip)
   # for addr2line resolution.
-  do_build(source, output: output, opt_level: 'ReleaseFast', profile: true)
-  puts "Built: #{output} (ReleaseFast + alloc profiling)"
+  do_build(source, output: output, opt_level: 'ReleaseFast', profile: true, profile_max: profile_max)
+  build_note = profile_max ? " + alloc profiling, profile_max=#{profile_max}" : " + alloc profiling"
+  puts "Built: #{output} (ReleaseFast#{build_note})"
 
   # Copy the CLEAR source alongside the transpiled.zig so `clear doctor`
   # can show source snippets next to hot-line attributions.
@@ -1040,11 +1069,13 @@ when 'profile'
   channel_file = File.join(profile_dir, 'channels.txt')
   fiber_file   = File.join(profile_dir, 'fibers.txt')
   lock_file    = File.join(profile_dir, 'locks.txt')
+  mvcc_file    = File.join(profile_dir, 'mvcc.txt')
   env_parts = [
     "CLEAR_ALLOC_PROFILE=#{alloc_file}",
     "CLEAR_CHANNEL_PROFILE=#{channel_file}",
     "CLEAR_FIBER_PROFILE=#{fiber_file}",
     "CLEAR_LOCK_PROFILE=#{lock_file}",
+    "CLEAR_MVCC_PROFILE=#{mvcc_file}",
   ]
   env_parts << "CLEAR_THREADS=#{ENV['CLEAR_THREADS']}" if ENV['CLEAR_THREADS']
   target_env = env_parts.join(' ')
@@ -1077,495 +1108,11 @@ when 'profile'
   end
   puts "  Syscalls: #{strace_file}" if File.exist?(strace_file)
   puts "  Counters: #{perf_stat_file}" if File.exist?(perf_stat_file)
+  puts "  MVCC:     #{mvcc_file}" if File.exist?(mvcc_file)
 
 when 'doctor'
-  profile_dir = ARGV[1]
-  error "Usage: clear doctor <profile-dir>" unless profile_dir && Dir.exist?(profile_dir)
-
-  alloc_file = File.join(profile_dir, 'alloc.txt')
-  perf_data  = File.join(profile_dir, 'perf.data')
-
-  # Find the binary (same dir as profile, minus .profile/ suffix)
-  binary = profile_dir.chomp('/').sub(/\.profile$/, '')
-  binary = nil unless File.exist?(binary.to_s)
-
-  # ── Heap Profile ──
-  if File.exist?(alloc_file)
-    lines = File.readlines(alloc_file).reject { |l| l.start_with?('#') || l.strip.empty? }
-    total_line = File.readlines(alloc_file).find { |l| l.include?('total_allocs') }
-    total = total_line ? total_line.scan(/\d+/).last.to_i : 0
-
-    sites = lines.map do |line|
-      parts = line.strip.split
-      next nil if parts.size < 6
-      addr = parts[0]
-      { addr: addr, allocs: parts[1].to_i, bytes: parts[2].to_i,
-        frees: parts[3].to_i, free_bytes: parts[4].to_i, live: parts[5].to_i }
-    end.compact.sort_by { |s| -s[:bytes] }
-
-    # Resolve addresses to source via addr2line
-    if binary
-      resolved = {}
-      addrs = sites.map { |s| s[:addr] }
-      # Batch addr2line call
-      raw = IO.popen(['addr2line', '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)
-      lines_out = raw.split("\n")
-      addrs.each_with_index do |addr, i|
-        func = lines_out[i * 2]&.strip || "?"
-        file = lines_out[i * 2 + 1]&.strip || "?"
-        # Map Zig source to CLEAR: use saved transpiled.zig for CLR:N lookup
-        clear_line = nil
-        zig_source = File.join(profile_dir, 'transpiled.zig')
-        if file =~ /:(\d+)/ && File.exist?(zig_source)
-          zig_line = $1.to_i
-          zig_lines = @_zig_lines ||= File.readlines(zig_source)
-          (zig_line - 1).downto(0) do |li|
-            break if li < 0 || li >= zig_lines.size
-            if zig_lines[li] =~ %r{// CLR:(\d+)}
-              clear_line = $1.to_i
-              break
-            end
-          end
-        end
-        # Clean up function names: strip Zig mangling
-        func = func.sub(/.*\./, '').sub(/__anon_\d+/, '')
-        resolved[addr] = { func: func, file: file, clear_line: clear_line }
-      end
-    end
-
-    puts "=== Allocation Profile (#{total.to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,')} allocs) ==="
-    puts ""
-    puts "Top sites by bytes:"
-    sites.first(10).each_with_index do |s, i|
-      r = resolved&.dig(s[:addr])
-      func = r ? r[:func] : s[:addr]
-      loc = if r&.dig(:clear_line) then "(line #{r[:clear_line]})"
-            elsif r then "(#{r[:file].split('/').last})"
-            else "" end
-      avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
-      kb = s[:bytes] / 1024.0
-      leak = if s[:frees] == 0 && s[:allocs] > 0 && avg >= 16
-               # rcCreate alloc tracking: frees always 0 (rcRelease uses different
-               # return address so it doesn't decrement this site's counter).
-               "  (heap rc)"
-             elsif s[:frees] == 0 && s[:allocs] > 0
-               # Frame-arena (smartAlloc): frees==0 is normal — rewind frees in bulk.
-               "  (arena)"
-             elsif s[:frees] > 0 && s[:frees] < s[:allocs]
-               "  ** LEAK ** (#{s[:allocs] - s[:frees]} unfreed)"
-             else
-               ""
-             end
-      if kb >= 1.0
-        puts "  #{i + 1}. %-25s %6.1f KB  (%s allocs, %d bytes avg)%s" % [
-          "#{func} #{loc}", kb, s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
-      else
-        puts "  #{i + 1}. %-25s %6d B   (%s allocs, %d bytes avg)%s" % [
-          "#{func} #{loc}", s[:bytes], s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
-      end
-    end
-    arena_count  = sites.first(10).count { |s| s[:frees] == 0 && s[:allocs] > 0 && (s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0) < 16 }
-    heap_rc_count = sites.first(10).count { |s| s[:frees] == 0 && s[:allocs] > 0 && (s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0) >= 16 }
-    leak_count   = sites.first(10).count { |s| s[:frees] > 0 && s[:frees] < s[:allocs] }
-    if arena_count > 0 && leak_count == 0
-      puts "  (arena) = frame-arena allocation, freed in bulk by rewind (not a leak)"
-    end
-    if heap_rc_count > 0
-      puts "  (heap rc) = @multiowned RC allocation tracked by rcCreate"
-    end
-    puts ""
-  else
-    puts "No heap profile found at #{alloc_file}"
-  end
-
-  # ── CPU Profile ──
-  if File.exist?(perf_data)
-    puts "=== CPU Profile ==="
-    puts ""
-    report = `perf report -i #{perf_data} --stdio --no-children 2>/dev/null`
-    top = report.lines.select { |l| l =~ /^\s+\d+\.\d+%/ }.first(10)
-    if top.any?
-      top.each { |l| puts "  #{l.strip}" }
-    else
-      puts "  (no samples collected - program may have run too briefly)"
-    end
-    puts ""
-
-    # ── CLEAR Source Hot Lines ──
-    # Attributes perf samples to CLEAR source lines by (a) asking perf
-    # for srcline-sorted samples against the transpiled Zig, (b)
-    # mapping each Zig line back to its CLEAR source line via the
-    # `// CLR:N` comments the transpiler emits. Pipeline stages (lines
-    # containing `s>`) are called out explicitly — they're the most
-    # common perf "why is this slow" question.
-    zig_source = File.join(profile_dir, 'transpiled.zig')
-    clear_source = File.join(profile_dir, 'source.cht')
-    if File.exist?(zig_source) && File.exist?(perf_data)
-      zig_to_clear = {}
-      current_clear = nil
-      File.readlines(zig_source).each_with_index do |line, idx|
-        if line =~ %r{// CLR:(\d+)}
-          current_clear = $1.to_i
-        end
-        zig_to_clear[idx + 1] = current_clear if current_clear
-      end
-
-      srcline_out = `perf report -i #{perf_data} --stdio --no-children -g none --sort=srcline 2>/dev/null`
-      clear_samples = Hash.new(0.0)
-      # The running binary's debug info points perf at the original temp
-      # Zig file (`._clear_tmp_<name>.zig` or `<basename>.zig`), not the
-      # profile-dir copy. Match any Zig filename that isn't a known
-      # runtime/stdlib file.
-      runtime_zigs = %w[
-        runtime.zig slab-alloc.zig parking-lot.zig Allocator.zig
-        compiler_rt.zig array_list.zig format.zig fmt.zig io.zig
-        start.zig mem.zig math.zig std.zig
-      ].to_set
-      srcline_out.each_line do |line|
-        next unless line =~ /^\s*(\d+\.\d+)%.*?(\S+\.zig):(\d+)/
-        pct = $1.to_f
-        file = File.basename($2)
-        zig_line = $3.to_i
-        next if runtime_zigs.include?(file)
-        clear_line = zig_to_clear[zig_line]
-        clear_samples[clear_line] += pct if clear_line
-      end
-
-      if clear_samples.any?
-        puts "=== CLEAR Source Hot Lines ==="
-        puts ""
-        source_lines = File.exist?(clear_source) ? File.readlines(clear_source) : []
-        top = clear_samples.sort_by { |_, pct| -pct }.first(10)
-        top.each do |line_no, pct|
-          snippet = source_lines[line_no - 1]&.rstrip || ''
-          # Detect `s>` as a standalone token. Avoid matching identifiers
-          # that happen to contain the substring.
-          pipeline = snippet =~ /(^|[\s(;])s>/ ? ' [pipeline stage]' : ''
-          trimmed = snippet.lstrip[0, 64]
-          puts "  %5.1f%%  line %-4d  %s%s" % [pct, line_no, trimmed, pipeline]
-        end
-        puts ""
-      end
-    end
-  end
-
-  # ── Channel Saturation ──
-  # Each BoundedChannel records pushes, pops, push_blocked, pop_blocked,
-  # max_depth, capacity (comptime-gated in the runtime). Ratios reveal
-  # fast-producer-slow-consumer (producer blocks often + max_depth at
-  # capacity) or slow-producer-fast-consumer (consumer blocks often +
-  # max_depth nowhere near capacity).
-  channel_file = File.join(profile_dir, 'channels.txt')
-  if File.exist?(channel_file)
-    rows = File.readlines(channel_file).reject { |l| l.start_with?('#') || l.strip.empty? }
-    channels = rows.map do |l|
-      f = l.split
-      next nil if f.size < 7
-      {
-        id: f[0].to_i, pushes: f[1].to_i, pops: f[2].to_i,
-        push_blocked: f[3].to_i, pop_blocked: f[4].to_i,
-        max_depth: f[5].to_i, capacity: f[6].to_i,
-      }
-    end.compact.reject { |c| c[:pushes] == 0 && c[:pops] == 0 }
-
-    if channels.any?
-      puts "=== Channel Saturation ==="
-      puts ""
-      printf "  %-4s %10s %10s %10s %10s %8s  %s\n",
-             "id", "pushes", "pops", "pblk", "cblk", "depth/cap", "diagnosis"
-      channels.each do |c|
-        cap = c[:capacity]
-        ratio = cap > 0 ? (c[:max_depth].to_f / cap * 100).round : 0
-        push_blk_pct = c[:pushes] > 0 ? (c[:push_blocked].to_f / c[:pushes] * 100).round : 0
-        pop_blk_pct  = c[:pops]   > 0 ? (c[:pop_blocked].to_f  / c[:pops]   * 100).round : 0
-        diagnosis =
-          if push_blk_pct >= 20 && ratio >= 80
-            "slow consumer (producer blocked #{push_blk_pct}%, max depth #{ratio}%)"
-          elsif pop_blk_pct >= 20 && ratio < 50
-            "slow producer (consumer blocked #{pop_blk_pct}%, max depth #{ratio}%)"
-          elsif push_blk_pct >= 20 || pop_blk_pct >= 20
-            "backpressure (push #{push_blk_pct}% / pop #{pop_blk_pct}%)"
-          else
-            "balanced"
-          end
-        printf "  %-4d %10d %10d %10d %10d %7d%% %s\n",
-               c[:id], c[:pushes], c[:pops], c[:push_blocked], c[:pop_blocked], ratio, diagnosis
-      end
-      puts ""
-    end
-  end
-
-  # ── Fibers & Workstealing Balance ──
-  # Parses `.profile/fibers.txt`: fiber-lifetime summary + per-scheduler
-  # fibers-run counter. Diagnoses micro-fiber overhead (fibers dominated
-  # by sub-10us setup cost) and scheduler imbalance (one scheduler doing
-  # most of the work while others are idle).
-  fiber_file = File.join(profile_dir, 'fibers.txt')
-  if File.exist?(fiber_file)
-    totals = {}
-    sched_rows = []
-    in_sched = false
-    File.readlines(fiber_file).each do |l|
-      s = l.strip
-      next if s.empty? || s.start_with?('#') && !s.include?('per-scheduler')
-      if s.include?('per-scheduler')
-        in_sched = true
-        next
-      end
-      if in_sched
-        f = s.split
-        next if f.size < 2
-        sched_rows << { idx: f[0].to_i, runs: f[1].to_i } if f[0] =~ /\A\d+\z/
-      else
-        if s =~ /\A(\w+):\s*(\d+)/
-          totals[$1] = $2.to_i
-        end
-      end
-    end
-
-    if totals['total_fibers'] && totals['total_fibers'] > 0
-      total = totals['total_fibers']
-      short = totals['short_fibers_under_1ms'] || 0
-      vshort = totals['vshort_fibers_under_10us'] || 0
-      total_ns = totals['total_lifetime_ns'] || 0
-      max_ns = totals['max_lifetime_ns'] || 0
-      avg_ns = total > 0 ? total_ns / total : 0
-      short_pct  = total > 0 ? (short.to_f / total * 100).round : 0
-      vshort_pct = total > 0 ? (vshort.to_f / total * 100).round : 0
-
-      puts "=== Fibers ==="
-      puts ""
-      puts "  total:   #{total}"
-      puts "  average: #{(avg_ns / 1000.0).round(1)} us"
-      puts "  max:     #{(max_ns / 1000.0).round(1)} us"
-      puts "  < 1ms:   #{short} (#{short_pct}%)"
-      puts "  < 10us:  #{vshort} (#{vshort_pct}%)"
-      if vshort_pct >= 50 && total >= 50
-        puts ""
-        puts "  *** #{vshort_pct}% of fibers finished in under 10us. Setup cost"
-        puts "      likely dominates work. Consider inlining, batching, or"
-        puts "      a pool of long-lived workers instead of per-item BG."
-      end
-      puts ""
-    end
-
-    if sched_rows.any?
-      puts "=== Workstealing Balance ==="
-      puts ""
-      total_runs = sched_rows.sum { |r| r[:runs] }
-      max_runs   = sched_rows.map { |r| r[:runs] }.max || 0
-      sched_rows.each do |r|
-        pct = total_runs > 0 ? (r[:runs].to_f / total_runs * 100).round : 0
-        bar = '█' * (pct * 40 / 100.0).round
-        puts "  sched #{r[:idx]}: %6d  %3d%% %s" % [r[:runs], pct, bar]
-      end
-      imbalance_pct = total_runs > 0 ? (max_runs.to_f / total_runs * 100).round : 0
-      if sched_rows.length >= 2 && imbalance_pct >= 80
-        puts ""
-        puts "  *** Scheduler imbalance: one scheduler ran #{imbalance_pct}%"
-        puts "      of all fibers. Other schedulers were idle. BG spawn"
-        puts "      policy may be routing too aggressively to a single target."
-      end
-      puts ""
-    end
-  end
-
-  # ── Lock Hold & Contention ──
-  # Per-mutex stats from ParkingMutex + ParkingRwLock (write path).
-  # Each row = one unique lock instance. Diagnoses:
-  #   - high contention  (contended_acquires / acquires > 20%)
-  #   - long critical sections (avg hold > 1ms)
-  #   - hot lock (>10k acquires; recommends finer-grained locking)
-  lock_prof = File.join(profile_dir, 'locks.txt')
-  if File.exist?(lock_prof)
-    rows = File.readlines(lock_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
-    locks = rows.map do |l|
-      f = l.split
-      next nil if f.size < 7
-      {
-        addr: f[0], acquires: f[1].to_i, contended: f[2].to_i,
-        total_wait_ns: f[3].to_i, max_wait_ns: f[4].to_i,
-        total_hold_ns: f[5].to_i, max_hold_ns: f[6].to_i,
-      }
-    end.compact.reject { |c| c[:acquires] == 0 }.sort_by { |c| -c[:total_hold_ns] }
-
-    if locks.any?
-      puts "=== Lock Hold & Contention ==="
-      puts ""
-      printf "  %-12s %8s %6s %12s %10s %12s %10s  %s\n",
-             "addr", "acqs", "cont%", "avg_hold", "max_hold", "avg_wait", "max_wait", "diagnosis"
-      locks.first(10).each do |l|
-        cont_pct = l[:acquires] > 0 ? (l[:contended].to_f / l[:acquires] * 100).round : 0
-        avg_hold = l[:acquires] > 0 ? l[:total_hold_ns] / l[:acquires] : 0
-        avg_wait = l[:acquires] > 0 ? l[:total_wait_ns] / l[:acquires] : 0
-
-        diagnosis =
-          if cont_pct >= 20 && avg_hold > 1_000_000
-            "hot lock + long hold — break up the critical section"
-          elsif cont_pct >= 20
-            "contended — consider @mvcc or finer-grained locking"
-          elsif avg_hold > 1_000_000
-            "long critical section (#{(avg_hold / 1_000_000.0).round(1)}ms avg)"
-          elsif l[:acquires] >= 100_000
-            "hot lock (very frequent; low overhead but possible bottleneck)"
-          else
-            "ok"
-          end
-
-        printf "  %-12s %8d %5d%% %10.1fus %8.1fus %10.1fus %8.1fus  %s\n",
-               l[:addr], l[:acquires], cont_pct,
-               avg_hold / 1000.0, l[:max_hold_ns] / 1000.0,
-               avg_wait / 1000.0, l[:max_wait_ns] / 1000.0,
-               diagnosis
-      end
-      puts ""
-    end
-  end
-
-  # ── Syscalls ──
-  strace_file = File.join(profile_dir, 'syscalls.txt')
-  if File.exist?(strace_file)
-    puts "=== Syscalls ==="
-    puts ""
-    lines = File.readlines(strace_file).select { |l| l =~ /^\s+[\d.]+\s+[\d.]+/ }
-    lines.first(10).each { |l| puts "  #{l.rstrip}" }
-    total = File.readlines(strace_file).find { |l| l.include?('total') }
-    puts "  #{total.rstrip}" if total
-    puts ""
-  end
-
-  # ── Hardware Counters ──
-  perf_stat_file = File.join(profile_dir, 'perf-stat.txt')
-  hw = {}        # event_name -> integer count (unsupported events absent)
-  llc_miss_rate = nil
-
-  if File.exist?(perf_stat_file)
-    puts "=== Hardware Counters ==="
-    puts ""
-    File.readlines(perf_stat_file).each do |l|
-      next if l.strip.empty? || l.start_with?('#') || l.start_with?('Performance')
-      puts "  #{l.rstrip}" if l =~ /\d/
-      next if l.include?('<not supported>')
-      # Parse: "    1,234,567      event-name:u     # comment"
-      m = l.match(/^\s*([\d,]+)\s+([\w:-]+)/)
-      next unless m
-      hw[m[2].sub(/:u?$/, '')] = m[1].gsub(',', '').to_i
-    end
-
-    # Derived metrics
-    cycles       = hw['cycles']
-    instructions = hw['instructions']
-    branches     = hw['branches']
-    branch_miss  = hw['branch-misses']
-    # cache-references / cache-misses are the LLC-level events on x86
-    # (LLC-loads / LLC-load-misses unsupported on most VMs/laptops)
-    llc_loads    = hw['LLC-loads']    || hw['cache-references']
-    llc_misses   = hw['LLC-load-misses'] || hw['cache-misses']
-
-    ipc = (cycles && instructions && cycles > 0) ?
-            (instructions.to_f / cycles).round(2) : nil
-    llc_miss_rate = (llc_loads && llc_misses && llc_loads > 0) ?
-                      (llc_misses.to_f / llc_loads * 100).round(1) : nil
-    branch_miss_pct = (branches && branch_miss && branches > 0) ?
-                        (branch_miss.to_f / branches * 100).round(1) : nil
-
-    puts ""
-    puts "  Analysis:"
-    if ipc
-      ipc_note = ipc < 1.0 ? " (low — memory or branch bound)" :
-                 ipc >= 2.0 ? " (good — compute bound)" : ""
-      puts "    IPC: #{ipc}#{ipc_note}"
-    end
-    if llc_miss_rate
-      llc_note = llc_miss_rate > 20 ? " *** HIGH — working set exceeds cache" :
-                 llc_miss_rate > 10 ? " (moderate)" : " (low)"
-      puts "    LLC miss rate: #{llc_miss_rate}%#{llc_note}"
-    end
-    if branch_miss_pct
-      branch_note = branch_miss_pct > 5 ? " *** HIGH — unpredictable control flow" : ""
-      puts "    Branch miss rate: #{branch_miss_pct}%#{branch_note}"
-    end
-    puts ""
-  end
-
-  # ── FREEZE Recommendation ──
-  # Fires when: high LLC miss rate + many small scattered heap allocations
-  # (the signature of individually malloc'd tree/list nodes).
-  STRING_OPS = %w[concat charAtCodepoint intToString floatToString smartAlloc].freeze
-  FREEZE_LLC_THRESHOLD  = 20   # % LLC miss rate to consider high
-  FREEZE_MIN_ALLOCS     = 5_000
-  FREEZE_MIN_AVG_BYTES  = 16   # below this = arena string/int bytes, not struct nodes
-  FREEZE_MAX_AVG_BYTES  = 512
-
-  if llc_miss_rate && llc_miss_rate >= FREEZE_LLC_THRESHOLD && sites&.any?
-    candidates = sites.select do |s|
-      avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
-      r   = resolved&.dig(s[:addr])
-      fn  = r ? r[:func] : ''
-      s[:allocs] >= FREEZE_MIN_ALLOCS &&
-        avg >= FREEZE_MIN_AVG_BYTES && avg <= FREEZE_MAX_AVG_BYTES &&
-        STRING_OPS.none? { |op| fn.include?(op) }
-    end.sort_by { |s| -s[:bytes] }
-
-    # For RC alloc sites that resolve to entryWrapper (inlined in ReleaseFast),
-    # scan the transpiled.zig for rcCreate call sites to find CLEAR source lines.
-    rc_clear_lines = []
-    zig_source = File.join(profile_dir, 'transpiled.zig')
-    if File.exist?(zig_source)
-      zig_lines = File.readlines(zig_source)
-      zig_lines.each_with_index do |line, li|
-        next unless line.include?('rcCreate')
-        (li - 1).downto(0) do |ci|
-          break if ci < 0
-          if zig_lines[ci] =~ %r{// CLR:(\d+)}
-            rc_clear_lines << $1.to_i
-            break
-          end
-        end
-      end
-      rc_clear_lines.uniq!
-    end
-
-    if candidates.any?
-      puts "=== FREEZE Opportunity ==="
-      puts ""
-      puts "  LLC cache miss rate is #{llc_miss_rate}% (high). Detected scattered"
-      puts "  node-level heap allocations — likely pointer-chasing through"
-      puts "  individually malloc'd structs."
-      puts ""
-      puts "  Candidates (many small allocs from same site):"
-      candidates.first(5).each do |s|
-        r   = resolved&.dig(s[:addr])
-        # In ReleaseFast builds, RC alloc sites inline into entryWrapper.
-        # Fall back to transpiled.zig rcCreate line scan for CLEAR location.
-        loc = if r&.dig(:clear_line)
-                "line #{r[:clear_line]}"
-              elsif r && r[:func] != 'entryWrapper' && !r[:func].empty?
-                r[:func]
-              elsif rc_clear_lines.any?
-                "line #{rc_clear_lines.first}"
-              else
-                s[:addr]
-              end
-        avg  = s[:bytes] / s[:allocs]
-        mb   = s[:bytes] / (1024.0 * 1024.0)
-        puts "    %-32s  %s allocs × %d bytes avg  (%.1f MB)" % [
-          loc,
-          s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'),
-          avg, mb
-        ]
-      end
-      puts ""
-      puts "  If these nodes form a tree or acyclic graph, FREEZE can pack"
-      puts "  them into a single contiguous allocation, eliminating pointer-"
-      puts "  chasing cache misses. Measured speedup: 3-5x for working sets"
-      puts "  larger than L3 cache."
-      puts ""
-      puts "  Zig:         const frozen = try freeze(T, alloc, root_ptr);"
-      puts "  CLEAR:       frozen = FREEZE expr"
-      puts ""
-    end
-  end
+  require_relative 'src/doctor'
+  Doctor.run(ARGV[1])
 
 when 'fix'
   require_relative 'src/ast/lexer'

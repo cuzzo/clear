@@ -486,11 +486,22 @@ module FsmWrapperEmitter
     parts << "    #{s.ctx_var}.* = .{"
     parts << indent_block(s.ctx_init_zig, 8)
     parts << "    };"
-    parts << "    #{s.ctx_var}.task = CheatHeader.FsmTask.init(&#{s.ctx_type}.resumeFn, #{s.ctx_var});"
+    parts << "    #{s.ctx_var}.task = CheatHeader.FsmTask.init(&#{s.ctx_type}.resumeFn);"
     # Wire the destroy callback so the scheduler frees ctx after
     # dispatchOnce finishes writing task.status (the resume fn no
     # longer destroys ctx inline -- closes a UAF window).
     parts << "    #{s.ctx_var}.task.destroy_fn = &#{s.ctx_type}.destroyTask;"
+    # Allocate a per-task Runtime backed by a per-task ThreadLocalEbr.
+    # The scheduler frees both on .Done (Scheduler.releaseFsmTaskEbr).
+    # Without this, FSM ctxs would share the spawning fiber's rt -- and
+    # when distributed across worker schedulers via spawnFsmBest, calls
+    # to rt.ebr.enter()/.exit()/.retire() would touch a non-thread-safe
+    # ThreadLocalEbr from a foreign OS thread, corrupting the limbo
+    # list and aborting in glibc's malloc with `realloc(): invalid old
+    # size` on the next allocation. See zig/runtime/versioned-fiber-
+    # stress-test.zig::"FSM Versioned: 4 BG-FSM writers via
+    # spawnFsmBest with per-task rt -- bench-17 fix verifier".
+    parts << "    #{s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(&#{s.ctx_var}.task, #{s.rt_name});"
     parts << "    #{s.spawn_call_zig}"
     parts << "    break :#{blk_label} #{s.promise_var};"
     parts.join("\n")

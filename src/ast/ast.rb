@@ -502,6 +502,7 @@ module AST
     attr_accessor :can_fail      # computed by compute_can_fail! post-pass; nil = not yet computed
     attr_accessor :uses_heap     # true when body allocates from heap (rt.heapAlloc)
     attr_accessor :uses_alloc    # true when body calls stdlib fns that use rt.frameAlloc (e.g. append)
+    attr_accessor :uses_rt       # true when body references rt without allocating (e.g. Versioned.read for EBR pin)
     attr_accessor :return_provenance # :rodata, :frame, :heap — provenance of the return value
     attr_accessor :effects       # Set of effect symbols, computed by EffectTracker post-pass
     attr_accessor :snapshot_types # Set of pipeline input types that could be snapshots (for CATCH)
@@ -698,6 +699,14 @@ module AST
     # ~T@observable) or :materialized_view (owned snapshot on any ~T
     # aggregate). nil for traditional capability blocks.
     attr_accessor :view_kind
+    # MVCC L4: :read for `WITH SNAPSHOT a AS y { ... }` (one or more
+    # immutable cell views), :transaction for `WITH SNAPSHOT a AS
+    # MUTABLE va, ... { ... } ON Conflict ...` (one or more mutable
+    # cell views, ON Conflict required). nil for traditional
+    # capability blocks. Each capability entry carries `:alias_mutable`
+    # already; `snapshot_mode` is the rolled-up classification used by
+    # downstream passes.
+    attr_accessor :snapshot_mode
   end
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
@@ -1068,7 +1077,7 @@ module AST
     '!*' => :CHECK_MUL,
   }
 
-  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW]
+  CAPABILITIES = [:RESTRICT, :EXCLUSIVE, :BORROWED, :VIEW, :MATERIALIZED_VIEW, :SNAPSHOT]
 end
 
 # ==========================================

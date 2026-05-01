@@ -149,7 +149,7 @@ fn executeStep(world: *World, kind: StepKind, rng: std.Random) !void {
             if (world.yieldy.items.len + world.blockers.items.len >= MAX_TASKS) return;
             const y = try alloc.create(Yieldy);
             y.* = .{ .task = undefined, .yields_remaining = rng.uintLessThan(u8, 4) };
-            y.task = fsm.FsmTask.init(&Yieldy.doResume, y);
+            y.task = fsm.FsmTask.init(&Yieldy.doResume);
             try world.yieldy.append(alloc, y);
             world.sched.enqueueFsm(&y.task);
         },
@@ -157,7 +157,7 @@ fn executeStep(world: *World, kind: StepKind, rng: std.Random) !void {
             if (world.yieldy.items.len + world.blockers.items.len >= MAX_TASKS) return;
             const b = try alloc.create(IoBlocker);
             b.* = .{ .task = undefined };
-            b.task = fsm.FsmTask.init(&IoBlocker.doResume, b);
+            b.task = fsm.FsmTask.init(&IoBlocker.doResume);
             try world.blockers.append(alloc, b);
             world.sched.enqueueFsm(&b.task);
         },
@@ -270,7 +270,7 @@ test "FSM VOPR: enqueue -> drain round-trip preserves active_tasks" {
 
     for (tasks) |*y| {
         y.* = .{ .task = undefined, .yields_remaining = 0 };
-        y.task = fsm.FsmTask.init(&Yieldy.doResume, y);
+        y.task = fsm.FsmTask.init(&Yieldy.doResume);
         sched.enqueueFsm(&y.task);
     }
     try std.testing.expectEqual(@as(u64, N), sched.active_tasks.load(.monotonic));

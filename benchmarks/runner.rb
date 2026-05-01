@@ -35,18 +35,29 @@ end
 #   run multiple variants (warmup, reference runs, etc.) to declare exactly which
 #   number the runner should record. Benchmarks without BENCH_RESULT fall back to
 #   wall time (backward compatible).
+#
+#   BENCH_INFO: <line> -- printed by the runner alongside the timing summary.
+#   Use for per-bench context (e.g. RwLock vs MVCC ratios in scenario benches)
+#   that the runner would otherwise discard. Captured from the LAST run only,
+#   so put fixed-shape information lines here, not per-run noise.
 def measure_min(command, runs = 5, timeout: RUN_TIMEOUT)
-  times = runs.times.filter_map do
+  best_time = nil
+  best_info = []
+  runs.times do
     output = ""
     t = Benchmark.measure { output = `timeout #{timeout}s sh -c "#{command.gsub('"', '\\"')} 2>&1"` }.real
     next unless $?.success?
-    if output =~ /BENCH_RESULT:\s*(\d+(?:\.\d+)?)\s*ms/
-      $1.to_f / 1000.0
-    else
-      t
+    measured = if output =~ /BENCH_RESULT:\s*(\d+(?:\.\d+)?)\s*ms/
+                 $1.to_f / 1000.0
+               else
+                 t
+               end
+    if best_time.nil? || measured < best_time
+      best_time = measured
+      best_info = output.scan(/^BENCH_INFO:\s*(.+)$/).flatten
     end
   end
-  times.empty? ? nil : times.min
+  [best_time, best_info]
 end
 
 # -------------------------------------------------------------------------
@@ -242,22 +253,27 @@ def run_bench(dir)
     return
   end
 
+  bench_info = []  # BENCH_INFO: lines surfaced from any bench
+
   if has_c && File.exist?("#{dir}/bench_c")
     puts "Running C baseline (best of #{runs}, scale=#{scale})..."
-    results[:c] = measure_min("BENCH_SCALE=#{scale} ./#{dir}/bench_c", runs, timeout: bto || RUN_TIMEOUT)
+    results[:c], info = measure_min("BENCH_SCALE=#{scale} ./#{dir}/bench_c", runs, timeout: bto || RUN_TIMEOUT)
+    bench_info += info
   end
 
   if has_rust && File.exist?("#{dir}/bench_rust")
     puts "Running Rust baseline (best of #{runs}, scale=#{scale})..."
     # Rust benchmarks using Tokio can be configured with TOKIO_WORKER_THREADS
     cores = ENV['BENCH_CORES'] || `nproc 2>/dev/null`.strip
-    results[:rust] = measure_min("BENCH_SCALE=#{scale} TOKIO_WORKER_THREADS=#{cores} ./#{dir}/bench_rust", runs, timeout: bto || RUN_TIMEOUT)
+    results[:rust], info = measure_min("BENCH_SCALE=#{scale} TOKIO_WORKER_THREADS=#{cores} ./#{dir}/bench_rust", runs, timeout: bto || RUN_TIMEOUT)
+    bench_info += info
   end
 
   if has_go && File.exist?("#{dir}/bench_go")
     puts "Running Go baseline (best of #{runs}, scale=#{scale})..."
     cores = ENV['BENCH_CORES'] || `nproc 2>/dev/null`.strip
-    results[:go] = measure_min("BENCH_SCALE=#{scale} GOMAXPROCS=#{cores} ./#{dir}/bench_go", runs, timeout: bto || RUN_TIMEOUT)
+    results[:go], info = measure_min("BENCH_SCALE=#{scale} GOMAXPROCS=#{cores} ./#{dir}/bench_go", runs, timeout: bto || RUN_TIMEOUT)
+    bench_info += info
   end
 
   if has_clear
@@ -271,14 +287,20 @@ def run_bench(dir)
     # Use jemalloc for CLEAR benchmarks if available. CLEAR's runtime uses
     # std.heap.c_allocator (libc malloc); jemalloc provides per-thread arenas
     # with less fragmentation and better multi-threaded scaling.
-    jemalloc_lib = Dir.glob("/lib/x86_64-linux-gnu/libjemalloc.so*").first ||
+    # A NO_JEMALLOC marker file in the bench dir disables the preload --
+    # use it for benches that hit a jemalloc-specific bug (e.g. EBR retire
+    # under writer contention exposes an arena issue).
+    jemalloc_disabled = File.exist?("#{dir}/NO_JEMALLOC")
+    jemalloc_lib = jemalloc_disabled ? nil : (
+                   Dir.glob("/lib/x86_64-linux-gnu/libjemalloc.so*").first ||
                    Dir.glob("/usr/lib/libjemalloc.so*").first ||
-                   Dir.glob("/usr/local/lib/libjemalloc.so*").first
+                   Dir.glob("/usr/local/lib/libjemalloc.so*").first)
     jemalloc_preload = jemalloc_lib ? "LD_PRELOAD=#{jemalloc_lib} " : ""
-    jemalloc_note = jemalloc_lib ? ", jemalloc" : ""
+    jemalloc_note = jemalloc_lib ? ", jemalloc" : (jemalloc_disabled ? ", jemalloc disabled" : "")
 
     puts "Running CLEAR (best of #{runs}, CLEAR_THREADS=#{threads}#{jemalloc_note}, scale=#{scale})..."
-    results[:clear] = measure_min("#{jemalloc_preload}BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs, timeout: bto || RUN_TIMEOUT)
+    results[:clear], info = measure_min("#{jemalloc_preload}BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} ./#{dir}/bench_clear", runs, timeout: bto || RUN_TIMEOUT)
+    bench_info += info
   end
 
   # 6. Capture peak RSS for each lang via /usr/bin/time
@@ -327,6 +349,8 @@ def run_bench(dir)
     ratio = ((peak_rss[:clear].to_f / peak_rss[:c]) * 100).round(1)
     puts "CLEAR RSS / C RSS:     #{ratio}%"
   end
+
+  bench_info.uniq.each { |line| puts line }
 end
 
 # -------------------------------------------------------------------------

@@ -56,7 +56,7 @@ fn threadBody(state: *ThreadState) void {
     // each yielding Y times.
     for (state.workers) |*w| {
         w.* = .{ .task = undefined, .yields_remaining = YIELDS_PER_TASK };
-        w.task = fsm.FsmTask.init(&Worker.doResume, w);
+        w.task = fsm.FsmTask.init(&Worker.doResume);
         state.sched.enqueueFsm(&w.task);
     }
     var iters: u32 = 0;
@@ -136,7 +136,7 @@ test "FSM race: SPSC submitFsmSpawn producer + consumer coordination" {
     defer alloc.free(workers);
     for (workers) |*w| {
         w.* = .{ .task = undefined, .yields_remaining = 0 };
-        w.task = fsm.FsmTask.init(&Worker.doResume, w);
+        w.task = fsm.FsmTask.init(&Worker.doResume);
     }
 
     var producer_done = std.atomic.Value(bool).init(false);
@@ -199,7 +199,7 @@ test "FSM race: concurrent scheduler threads, global completion count balances" 
         fn go(sch: *fp.Scheduler, ws: []Worker) void {
             for (ws) |*w| {
                 w.* = .{ .task = undefined, .yields_remaining = 1 };
-                w.task = fsm.FsmTask.init(&Worker.doResume, w);
+                w.task = fsm.FsmTask.init(&Worker.doResume);
                 sch.enqueueFsm(&w.task);
             }
             var it: u32 = 0;

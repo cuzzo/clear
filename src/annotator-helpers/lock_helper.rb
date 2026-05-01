@@ -345,11 +345,20 @@ module LockHelper
     clause  = node.lock_error_clause
     return unless clause
 
-    possible = Set.new
-    possible << :LockTimeout
-    site[:cap_types].each do |t|
-      possible << :LockCycle if types_in_cycle.include?(t)
-      possible << :Deadlock  if types_with_self.include?(t)
+    # MVCC L5: SNAPSHOT-transaction blocks have a different possibility
+    # set -- the only error commit can surface is `Conflict` (mapped from
+    # `error.UpdateRetriesExhausted`). LockTimeout / LockCycle / Deadlock
+    # do not apply because the lock-free CAS path doesn't acquire a
+    # mutex.
+    if node.snapshot_mode == :transaction
+      possible = Set.new([:Conflict])
+    else
+      possible = Set.new
+      possible << :LockTimeout
+      site[:cap_types].each do |t|
+        possible << :LockCycle if types_in_cycle.include?(t)
+        possible << :Deadlock  if types_with_self.include?(t)
+      end
     end
 
     clause[:selectors].each do |sel|

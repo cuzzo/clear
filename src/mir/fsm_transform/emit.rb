@@ -888,9 +888,14 @@ module FsmTransform
       alloc_expr_zig = is_local_pin ?
         "#{ctx[:rt_name]}.getSched().allocator" : "#{ctx[:rt_name]}.heapAlloc()"
 
+      # `.rt = undefined` here is rebound by render_spawn_setup AFTER
+      # task init. We allocate a per-task Runtime backed by a per-task
+      # ThreadLocalEbr so EBR ops in the body never touch the spawning
+      # fiber's slot from a foreign worker thread (bench-17 heap
+      # corruption: realloc(): invalid old size, fixed by per-task rt).
       ctx_init_zig = [
         ".task = undefined,",
-        ".rt = #{ctx[:rt_name]},",
+        ".rt = undefined,",
         ".inner = #{ctx[:promise_var]}.inner,",
         ".alloc = #{ctx[:alloc_var]},",
         lowering.capture_inits_fsm(ctx[:capture_inits]),

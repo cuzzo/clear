@@ -461,21 +461,21 @@ fn runVoprAlloc(seed: u64, max_ticks: u64, allocator: std.mem.Allocator) !void {
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     var seed_start: u64 = 0;
     var seed_count: u64 = 100_000;
     const max_ticks: u64 = 2_000;
 
-    // Parse CLI args
-    var args = std.process.args();
-    _ = args.skip(); // program name
-    while (args.next()) |arg| {
+    // Parse CLI args (Zig 0.16: iterate via init.args.iterate()).
+    var arg_iter = init.args.iterate();
+    _ = arg_iter.skip(); // program name
+    while (arg_iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--seeds")) {
-            if (args.next()) |val| {
+            if (arg_iter.next()) |val| {
                 seed_count = std.fmt.parseInt(u64, val, 10) catch 1_000_000;
             }
         } else if (std.mem.eql(u8, arg, "--start")) {
-            if (args.next()) |val| {
+            if (arg_iter.next()) |val| {
                 seed_start = std.fmt.parseInt(u64, val, 10) catch 0;
             }
         }

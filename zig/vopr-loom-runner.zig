@@ -9,11 +9,13 @@
 // in queues.zig / scheduler.zig / parking-lot.zig (`@import("root")`)
 // resolves to SimAtomic when this binary runs.
 
+const std = @import("std");
+
 pub const SimAtomic = @import("runtime/vopr-atomic.zig").SimAtomic;
 pub const SimRing = @import("runtime/vopr-ring.zig").SimRing;
 
 const vl = @import("runtime/vopr-loom.zig");
 
-pub fn main() !void {
-    return vl.main();
+pub fn main(init: std.process.Init.Minimal) !void {
+    return vl.main(init);
 }

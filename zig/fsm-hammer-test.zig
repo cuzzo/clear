@@ -74,7 +74,7 @@ test "FSM hammer: 10000 tasks each running 100 yields complete with correct sums
 
     for (tasks) |*t| {
         t.* = .{ .task = undefined, .target = TARGET };
-        t.task = fsm.FsmTask.init(&SumTo.doResume, t);
+        t.task = fsm.FsmTask.init(&SumTo.doResume);
         sched.enqueueFsm(&t.task);
     }
 
@@ -129,7 +129,7 @@ test "FSM hammer: time-boxed stress with mixed task lengths" {
         for (tasks) |*t| {
             const target: u32 = @intCast(1 + rng.uintLessThan(u32, 64));
             t.* = .{ .task = undefined, .target = target };
-            t.task = fsm.FsmTask.init(&SumTo.doResume, t);
+            t.task = fsm.FsmTask.init(&SumTo.doResume);
             expected_batch_sum += SumTo.expectedSum(target);
             sched.enqueueFsm(&t.task);
         }
@@ -196,7 +196,7 @@ test "FSM hammer: WaitForIO park/wake cycle under load" {
 
     for (tasks, 0..) |*t, i| {
         t.* = .{ .task = undefined };
-        t.task = fsm.FsmTask.init(&IoTask.doResume, t);
+        t.task = fsm.FsmTask.init(&IoTask.doResume);
         _ = i;
         sched.enqueueFsm(&t.task);
     }

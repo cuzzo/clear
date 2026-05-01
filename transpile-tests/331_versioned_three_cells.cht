@@ -1,0 +1,23 @@
+-- MVCC L8: three-cell WITH SNAPSHOT MUTABLE.
+-- The runtime's address-sort + tagged-pointer commit handles N cells
+-- transparently; the compiler does not pick an order.
+
+STRUCT Slot { v: Int64 }
+
+FN main() RETURNS Void ->
+    a = Slot{ v: 1 } @versioned;
+    b = Slot{ v: 2 } @versioned;
+    c = Slot{ v: 3 } @versioned;
+
+    WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb, SNAPSHOT c AS MUTABLE vc {
+        va.v = va.v * 10;
+        vb.v = vb.v * 10;
+        vc.v = vc.v * 10;
+    } ON Conflict RAISE
+
+    WITH SNAPSHOT a AS view { ASSERT view.v == 10, "three-cell a"; }
+    WITH SNAPSHOT b AS view { ASSERT view.v == 20, "three-cell b"; }
+    WITH SNAPSHOT c AS view { ASSERT view.v == 30, "three-cell c"; }
+
+    RETURN;
+END

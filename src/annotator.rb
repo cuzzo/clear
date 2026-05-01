@@ -705,6 +705,7 @@ private
     node.uses_frame = (ctx.frame_count > 0)
     node.uses_heap  = (ctx.heap_count > 0)
     node.uses_alloc = (ctx.alloc_count > 0)
+    node.uses_rt    = ctx.needs_rt
     node.stack_vars_bytes = ctx.stack_vars_bytes
     # Seed for compute_can_fail! post-pass: direct failure sources.
     ret_type_obj = signature.respond_to?(:return_type) ? signature.return_type : (signature.is_a?(Hash) ? signature[:return]&.dig(:type) : nil)
@@ -2346,6 +2347,41 @@ private
     if node.type_info&.observable?
       node.symbol.non_escaping = true
     end
+    # MVCC L5-followup (D4): bare `T@versioned` (no Group-1 sigil) is
+    # legal but unusual -- a single-owner MVCC cell can't be reached
+    # from another thread, so the lock-free path's value is moot.
+    # `T@shared:versioned` (Arc<Versioned>) is the typical shape.
+    # T3: upgrade from a bare [Note] to a [Fixable] with an auto-fix
+    # that splices `@shared:` in front of `@versioned`. Preserves the
+    # Versioned semantics while enabling cross-thread sharing -- the
+    # most likely intent if the user reached for `@versioned` at all.
+    # Users who genuinely want a local cell can ignore the fix and
+    # remove the sigil manually.
+    if node.type_info&.versioned? && node.type_info&.ownership == :affine
+      cap_tok = node.value.is_a?(AST::CapabilityWrap) ? node.value.token : nil
+      fixes = []
+      if cap_tok && cap_tok.respond_to?(:line) && cap_tok.respond_to?(:column) &&
+         cap_tok.respond_to?(:value) && cap_tok.value.to_s == "@versioned"
+        fixes << Fix.new(
+          description: "Upgrade `@versioned` to `@shared:versioned` for cross-thread sharing.",
+          confidence: :auto,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: cap_tok.line, col: cap_tok.column, length: "@versioned".length),
+            replacement: "@shared:versioned",
+          )],
+        )
+      end
+      msg = "Bare `@versioned` on '#{node.name}' is unusual: a single-owner " \
+            "MVCC cell isn't reachable from another thread, so the lock-free " \
+            "commit path has no concurrent benefit. Use `@shared:versioned` " \
+            "for cross-thread sharing, or remove `@versioned` if the cell is " \
+            "truly local."
+      if fixes.any?
+        fixable!(node, message: msg, category: :lint, level: :warning, fixes: fixes)
+      else
+        note!(node, msg)
+      end
+    end
     classify_ownership!(node.symbol)
     og_declare(node.name, node, node.type_info || final_type)
     register_container_borrow!(node)
@@ -3674,6 +3710,47 @@ private
   def visit_WithBlock(node)
     @with_block_depth = (@with_block_depth || 0) + 1
 
+    # MVCC L7.4 followup (T2 + G1): reject WITH MATCH shapes that
+    # would silently miscompile.
+    #
+    # T2: `WITH c AS MUTABLE va MATCH ... WHEN VERSIONED -> { va.field = X }`
+    # writes through the read-snapshot Guard — the write goes into a
+    # frozen pointer that's about to be replaced and never commits. The
+    # LOCKED arm works (Guard.get() returns *T into the live cell), so
+    # the bug only fires for the VERSIONED arm at runtime. Reject up
+    # front and direct the user to `WITH SNAPSHOT cell AS MUTABLE va
+    # { ... } ON Conflict ...` for transactional mutation.
+    #
+    # G1: multi-cell WITH MATCH (`WITH c1 AS a1, c2 AS a2 MATCH`) is
+    # parser-allowed but lower_with_match_block emits prelude for
+    # `node.capabilities.first` only — secondary aliases are undefined
+    # in arm bodies. Reject until codegen is extended.
+    if node.arms
+      has_versioned_arm = node.arms.any? { |arm| arm[:family] == :VERSIONED }
+      mut_cap = node.capabilities.find { |c| c[:alias_mutable] }
+      if has_versioned_arm && mut_cap
+        error!(node,
+          "WITH MATCH with `AS MUTABLE` and a VERSIONED arm is not " \
+          "supported: writes through a Versioned read-snapshot don't " \
+          "commit (silent data loss in the VERSIONED arm; only the " \
+          "LOCKED arm would mutate the live cell). For transactional " \
+          "mutation on a versioned cell use:\n" \
+          "    WITH SNAPSHOT #{mut_cap[:var_node].respond_to?(:name) ? mut_cap[:var_node].name : 'cell'} AS MUTABLE va " \
+          "{ ... } ON Conflict <action>\n" \
+          "and keep WITH MATCH for read-side polymorphism.")
+      end
+      if node.capabilities.length > 1
+        names = node.capabilities.map { |c|
+          c[:var_node].respond_to?(:name) ? c[:var_node].name : "<expr>"
+        }.join(", ")
+        error!(node,
+          "WITH MATCH with multiple cells (#{names}) is not yet " \
+          "supported: lower_with_match_block emits the per-arm prelude " \
+          "for the first capability only. Split into separate WITH " \
+          "MATCH blocks (one per cell) until multi-cell dispatch lands.")
+      end
+    end
+
     # 1. Validate each capability's variable exists and resolve its type
     expanded_capabilities = []
     node.capabilities.each do |cap|
@@ -3727,10 +3804,50 @@ private
     # Escape checking is handled by the non_escaping flag on SymbolEntry —
     # every escape site (ensure_owned_value!, handle_assign_move, RETURN)
     # checks this flag automatically.
+    #
+    # MVCC L5-followup (D1): mark the body as a SNAPSHOT-transaction
+    # context so record_effect() captures any SUSPENDS-family effects
+    # the body produces. After the body visit, raise if any landed.
+    is_snapshot_txn_body = (node.snapshot_mode == :transaction)
+    if is_snapshot_txn_body
+      @inside_snapshot_txn = (@inside_snapshot_txn || 0) + 1
+      prev_violations = @snapshot_txn_violations
+      @snapshot_txn_violations = []
+    end
     with_new_scope(current_scope) do
       expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
       visit_stmts(node.body)
+      # MVCC L7.2: WITH MATCH per-arm body annotation. Each arm's body
+      # is visited in its own nested scope under the SAME alias binding
+      # resolved by the polymorphic-fallback in acquire_capability!
+      # (see function_analysis.rb: LOCKED | VERSIONED -> :locked).
+      # Per-arm capability resolution + family-specific binding lands
+      # in L7.3/L7.4 (#262, #263); for now this gets arm bodies type-
+      # stamped enough that lower_with_match_block can lower them into
+      # the comptime if-else dispatch (L7.2 mir_lowering side).
+      if node.arms
+        node.arms.each do |arm|
+          with_new_scope(current_scope) do
+            visit_stmts(arm[:body])
+            finalize_scope(node)
+          end
+        end
+      end
       finalize_scope(node)
+    end
+    if is_snapshot_txn_body
+      txn_violations = @snapshot_txn_violations || []
+      @inside_snapshot_txn -= 1
+      @snapshot_txn_violations = prev_violations
+      unless txn_violations.empty?
+        kinds = txn_violations.map { |v| EffectTracker.display(v[:effect]) }.uniq.join(", ")
+        error!(node,
+          "WITH SNAPSHOT ... AS MUTABLE body must be pure for atomicity, " \
+          "but the body has #{kinds} effect(s). Yielding the fiber breaks " \
+          "the EBR pin and atomicity guarantees; IO can't be rolled back " \
+          "if the transaction aborts. Move the impure work outside the " \
+          "transaction (read state via WITH SNAPSHOT, do IO, then commit).")
+      end
     end
 
     # Release borrows after the WITH block exits
@@ -3751,6 +3868,25 @@ private
     @held_lock_types = prev_held_types
 
     validate_lock_error_clause!(node, expanded_capabilities)
+    # MVCC: SNAPSHOT-transaction bodies lower to
+    # `Versioned.update[Multi](rt, alloc, ...)` (heap-allocates a new
+    # version + retires the old via EBR), and a WITH MATCH with a
+    # VERSIONED arm lowers to `Versioned.read(rt)` (lock-free, no
+    # alloc, but rt is needed for the EBR pin). Both flavors require
+    # `rt: *Runtime` threaded through the enclosing fn's signature.
+    # Set `needs_rt` directly so compute_needs_rt! picks it up;
+    # heap_count is reserved for actual heap allocations (T1 cleanup --
+    # earlier code abused heap_count as a needs_rt sentinel).
+    if current_fn_ctx
+      versioned_arm = node.arms&.any? { |arm| arm[:family] == :VERSIONED }
+      # MVCC: any WITH SNAPSHOT lowers to `Versioned.read(rt)` (read mode)
+      # or `Versioned.update[Multi](rt, ...)` (transaction mode). Both
+      # need rt threaded through the enclosing fn. Plus a WITH MATCH with
+      # a VERSIONED arm uses Versioned.read(rt) inside the arm's prelude.
+      if node.snapshot_mode == :read || node.snapshot_mode == :transaction || versioned_arm
+        current_fn_ctx.needs_rt = true
+      end
+    end
     # Queue this WITH for the post-pass handler-reachability check. Running
     # it here (during annotation) is too early — cycle information isn't
     # known until compute_lock_cycles! has propagated through @call_graph.
@@ -3772,12 +3908,35 @@ private
   # Symbols matched by the clause are stamped onto clause[:matched_types];
   # unmatched types bubble up as their registry kind at codegen time.
   LOCK_POSSIBLE_TYPES = %i[LockTimeout LockCycle Deadlock].freeze
+  # MVCC L5: the only error a `Shared.update[Multi]` commit can surface
+  # to user code (other than allocator errors which propagate as panics)
+  # is `Conflict` -- the bridge for `error.UpdateRetriesExhausted`. A
+  # `WITH SNAPSHOT ... AS MUTABLE` block must handle it explicitly,
+  # mirroring how `WITH @locked` requires `ON LockCycle` when a cycle
+  # is reachable.
+  SNAPSHOT_POSSIBLE_TYPES = %i[Conflict].freeze
 
   def validate_lock_error_clause!(node, expanded_capabilities)
     clause = node.lock_error_clause
+    is_snapshot_txn = node.snapshot_mode == :transaction
+
+    # MVCC L5: SNAPSHOT-transaction REQUIRES an ON Conflict handler.
+    # Mirrors the LockCycle-required-when-cycle-reachable contract.
+    if is_snapshot_txn && clause.nil?
+      error!(node,
+             "WITH SNAPSHOT ... AS MUTABLE requires an ON Conflict handler. " \
+             "Optimistic CAS commit can fail under contention; CLEAR forces " \
+             "explicit handling. Add e.g. `ON Conflict RAISE`, " \
+             "`ON Conflict RETRY(N) THEN PASS`, or `ON Conflict -> { ... }`.")
+    end
+
     return unless clause
 
-    has_fallible = expanded_capabilities.any? { |c|
+    # SNAPSHOT-read should not carry a Conflict handler -- pure reads
+    # cannot fail. Accept silently for now (parser already restricts the
+    # syntax shape); a future polish pass could note the dead clause.
+
+    has_fallible = is_snapshot_txn || expanded_capabilities.any? { |c|
       c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
     }
     unless has_fallible
@@ -3786,7 +3945,7 @@ private
                    "The declared capabilities never produce a lock-acquire error.")
     end
 
-    resolve_error_selectors!(node, clause)
+    resolve_error_selectors!(node, clause, is_snapshot_txn)
 
     case clause[:action]
     when :exit
@@ -3802,8 +3961,8 @@ private
   #   2. Every :type selector names a known error type (AST::ERROR_TYPES).
   #   3. Retry selectors resolve to Transient types only.
   #   4. The matched set intersects the block's possible error set.
-  def resolve_error_selectors!(node, clause)
-    possible = LOCK_POSSIBLE_TYPES
+  def resolve_error_selectors!(node, clause, is_snapshot_txn = false)
+    possible = is_snapshot_txn ? SNAPSHOT_POSSIBLE_TYPES : LOCK_POSSIBLE_TYPES
     matched  = []
 
     clause[:selectors].each do |sel|

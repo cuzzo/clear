@@ -22,6 +22,7 @@
 //   - FSM <-> stackful await interop (handled by promise wake path)
 
 const std = @import("std");
+const ebr_mod = @import("../lib/ebr.zig");
 
 // -----------------------------------------------------------------------------
 // Status
@@ -82,14 +83,14 @@ pub const ResumeFn = *const fn (*FsmTask) YieldReason;
 // FsmTask
 // -----------------------------------------------------------------------------
 //
-// Type-erased handle to a state machine. The state pointer is opaque; the
-// resume fn knows how to cast it to the concrete state type.
+// Type-erased handle to a state machine. Recovery from `*FsmTask` to the
+// owning ctx struct is via `@fieldParentPtr("task", t)` — Zig resolves the
+// offset at comptime, so the ctx struct can place `task` at any field
+// position. The codegen and runtime tests place it at offset 0 by
+// convention (predictable layout for debuggers, the offset-0 subtraction
+// is elided), but recovery is correct at any offset.
 //
-// Preferred allocation shape: user embeds FsmTask as the first field of their
-// state struct so state_ptr = &user_state.task and a downcast via @fieldParentPtr
-// recovers the state with no extra pointer hop.
-//
-// Size: ~48 bytes on 64-bit. Compare to Task (~160 B) + Fiber + stack (2 KB).
+// Size: ~40 bytes on 64-bit. Compare to Task (~160 B) + Fiber + stack (2 KB).
 
 /// Error surfaced by a parking-lot lock op on an FSM. Stored on
 /// `FsmTask.lock_error` and observed by the resume fn on next dispatch.
@@ -104,8 +105,6 @@ pub const FsmLockError = enum(u8) {
 pub const FsmTask = struct {
     /// Invoked by the scheduler to make progress on this task.
     resume_fn: ResumeFn,
-    /// Opaque pointer to the user state struct. Meaning known only to resume_fn.
-    state_ptr: *anyopaque,
     /// Current status.
     status: FsmStatus = .Ready,
     /// Profile-only: spawn timestamp in ns.
@@ -154,8 +153,31 @@ pub const FsmTask = struct {
     /// and stores its pointer here at spawn time.
     destroy_fn: ?*const fn (*FsmTask) void = null,
 
-    pub fn init(resume_fn: ResumeFn, state_ptr: *anyopaque) FsmTask {
-        return .{ .resume_fn = resume_fn, .state_ptr = state_ptr };
+    /// Per-task ThreadLocalEbr slot.
+    ///
+    /// FSM tasks dispatched via spawnFsmBest can run on ANY scheduler
+    /// thread. If the task body calls into the EBR primitives (read,
+    /// update, retire) using a Runtime captured at spawn time, those
+    /// calls would touch the spawning thread's ThreadLocalEbr from a
+    /// foreign OS thread -- corrupting the non-thread-safe limbo
+    /// list. To prevent that, every FSM task gets its own ebr_slot,
+    /// registered with the global EbrContext, owned by the slot's
+    /// Runtime (see task_runtime), and freed on .Done dispatch.
+    ebr_slot: ?*ebr_mod.ThreadLocalEbr = null,
+
+    /// Per-task Runtime. Heap-allocated alongside ebr_slot at spawn
+    /// time and freed by the scheduler on .Done. The codegen binds
+    /// the FSM ctx's `rt` field to this pointer BEFORE spawning so
+    /// all EBR ops in the body route through the per-task slot.
+    /// Lazy-imports runtime.zig in the field type so the
+    /// runtime.zig -> scheduler.zig -> fsm.zig -> runtime.zig cycle
+    /// resolves: only the pointer-to-Runtime is needed here, not the
+    /// full Runtime layout, which Zig handles for cyclic pointer-only
+    /// types.
+    task_runtime: ?*@import("runtime.zig").Runtime = null,
+
+    pub fn init(resume_fn: ResumeFn) FsmTask {
+        return .{ .resume_fn = resume_fn };
     }
 };
 
@@ -397,7 +419,7 @@ test "FsmTask: trivial single-state task completes" {
         }
     };
     var s: State = .{ .task = undefined, .seen = 0 };
-    s.task = FsmTask.init(&State.doResume, &s);
+    s.task = FsmTask.init(&State.doResume);
 
     const reason = dispatchOnce(&s.task);
     try testing.expect(reason == .Done);
@@ -433,7 +455,7 @@ test "FsmTask: multi-step state machine advances per resume" {
         }
     };
     var s: State = .{ .task = undefined };
-    s.task = FsmTask.init(&State.doResume, &s);
+    s.task = FsmTask.init(&State.doResume);
 
     try testing.expect(dispatchOnce(&s.task) == .Yielded);
     try testing.expectEqual(FsmStatus.Ready, s.task.status);
@@ -468,7 +490,7 @@ test "FsmTask: WaitForIO sets Blocked and stashes waiter" {
         }
     };
     var s: State = .{ .task = undefined };
-    s.task = FsmTask.init(&State.doResume, &s);
+    s.task = FsmTask.init(&State.doResume);
 
     const reason = dispatchOnce(&s.task);
     try testing.expect(reason == .WaitForIO);
@@ -485,7 +507,7 @@ test "FsmTask: WaitForIO sets Blocked and stashes waiter" {
 }
 
 test "FsmIoWaiter: encode/decode round-trips with FSM marker" {
-    var dummy_task: FsmTask = .{ .resume_fn = undefined, .state_ptr = undefined };
+    var dummy_task: FsmTask = .{ .resume_fn = undefined };
     var waiter = FsmIoWaiter.init(&dummy_task);
     const ud = waiter.encode();
 
@@ -495,7 +517,7 @@ test "FsmIoWaiter: encode/decode round-trips with FSM marker" {
 }
 
 test "FsmIoWaiter: marker distinguishes FSM from stackful IoWaiter" {
-    var dummy_task: FsmTask = .{ .resume_fn = undefined, .state_ptr = undefined };
+    var dummy_task: FsmTask = .{ .resume_fn = undefined };
     var fsm_waiter = FsmIoWaiter.init(&dummy_task);
     const fsm_ud = fsm_waiter.encode();
 
@@ -523,7 +545,7 @@ test "dispatchOnce: Yielded reuses task across many iterations" {
         }
     };
     var s: State = .{ .task = undefined, .remaining = 100 };
-    s.task = FsmTask.init(&State.doResume, &s);
+    s.task = FsmTask.init(&State.doResume);
 
     var loops: u32 = 0;
     while (true) {

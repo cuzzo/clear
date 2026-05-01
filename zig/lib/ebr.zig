@@ -1,6 +1,16 @@
 const std = @import("std");
 const compat = @import("compat.zig");
 
+// Comptime atomic type selection: SimAtomic in Loom mode, real
+// std.atomic.Value otherwise. When the root module exports
+// `SimAtomic`, every load/store/cmpxchg becomes a deterministic
+// yield point. Mirrors the pattern used by queues.zig +
+// scheduler.zig + shared-memory.zig.
+pub const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 // EBR
 pub const RetiredPtr = struct {
     ptr: *anyopaque,
@@ -27,7 +37,7 @@ pub const RetiredPtr = struct {
 
 pub const EbrContext = struct {
     // The Global Clock (0, 1, 2...)
-    global_epoch: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    global_epoch: Atomic(u32) = Atomic(u32).init(0),
 
     // A registry so the memory reclaimer can find all active threads
     registry_lock: compat.Mutex = .{},
@@ -65,10 +75,27 @@ pub const EbrContext = struct {
         }
     }
 
+    /// Move a dying thread's pending limbo into the global orphans
+    /// list. M2: pre-filter items already past the safe threshold and
+    /// free them immediately, so a steady churn of short-lived
+    /// threads under heavy reclaim pressure can't grow `orphans`
+    /// unboundedly. Items still inside the grace window go to
+    /// `orphans` for `reclaim()` to pick up later.
     pub fn dumpTrash(self: *EbrContext, allocator: std.mem.Allocator, trash: []RetiredPtr) !void {
         self.registry_lock.lock();
         defer self.registry_lock.unlock();
-        try self.orphans.appendSlice(allocator, trash);
+
+        const global_epoch = self.global_epoch.load(.seq_cst);
+        const safe_threshold = if (global_epoch > 1) global_epoch - 1 else 0;
+
+        for (trash) |item| {
+            if (item.epoch < safe_threshold) {
+                // Already past the grace window -- free directly.
+                item.deinit_fn(allocator, item.ptr);
+            } else {
+                try self.orphans.append(allocator, item);
+            }
+        }
     }
 
     // You can call this periodically (e.g., every 1000 updates, or on a timer).
@@ -116,10 +143,10 @@ pub const ThreadLocalEbr = struct {
     limbo_list: std.ArrayListUnmanaged(RetiredPtr) = .empty,
 
     // local_epoch: "The time I saw when I started reading"
-    local_epoch: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    local_epoch: Atomic(u32) = Atomic(u32).init(0),
 
     // is_active: "I am currently holding a pointer inside a critical section"
-    is_active: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    is_active: Atomic(bool) = Atomic(bool).init(false),
 
     // link to the global world
     context: *EbrContext,
@@ -164,19 +191,49 @@ pub const ThreadLocalEbr = struct {
         }
     }
 
-    // Signal that we are starting a read
+    // Signal that we are starting a read.
+    //
+    // Memory-ordering rationale (3 seq_cst -> 1 seq_cst + 2 relaxed):
+    //
+    // The protocol requires reclaim to observe (is_active=true,
+    // local_epoch=G) atomically when iterating the registry, so it can
+    // either bail (mismatch) or advance safely. We get that with a
+    // release-store on is_active: any thread that does an acquire-load
+    // of is_active and sees `true` is guaranteed to see all prior
+    // writes by this thread, including the local_epoch store -- even
+    // if local_epoch was stored .relaxed/.monotonic. The seq_cst on
+    // is_active.store doubles as the StoreLoad fence the reader needs
+    // before its first data load (cell pointer), so reclaim cannot
+    // observe is_active=false after this returns. The local_epoch
+    // store can therefore be .monotonic; the global_epoch load can
+    // be .acquire (only the .seq_cst total order through is_active
+    // matters for safety, not the global_epoch.load itself -- the
+    // worst case is a stale read pinning at a too-low epoch, which
+    // makes reclaim conservative, never unsafe).
+    //
+    // This drops one full mfence per enter() on x86 (was 2 xchg/mfence,
+    // now 1) and is the dominant cost in tight read loops like the
+    // bench-17 200K-read fiber.
     pub fn enter(self: *ThreadLocalEbr) void {
-        // 1. Mark active
+        const global = self.context.global_epoch.load(.acquire);
+        self.local_epoch.store(global, .monotonic);
+        // The .seq_cst here is doing two jobs:
+        //   (1) StoreLoad fence so subsequent data loads cannot be
+        //       reordered before the pin publish.
+        //   (2) release-store so the .monotonic local_epoch above
+        //       is visible to any thread that acquire-loads is_active
+        //       and sees true.
         self.is_active.store(true, .seq_cst);
-
-        // 2. Snap to global time
-        // We must load global AFTER marking active to ensure we don't miss an epoch change.
-        const global = self.context.global_epoch.load(.seq_cst);
-        self.local_epoch.store(global, .seq_cst);
     }
 
-    // Signal that we are done
+    // Signal that we are done.
+    //
+    // .release (not .seq_cst) is sufficient: we need LoadStore
+    // ordering so prior data loads cannot be reordered after the
+    // exit publish. Release-store provides that. We do NOT need
+    // StoreLoad (no further loads in this thread depend on reclaim
+    // observing is_active=false promptly).
     pub fn exit(self: *ThreadLocalEbr) void {
-        self.is_active.store(false, .seq_cst);
+        self.is_active.store(false, .release);
     }
 };

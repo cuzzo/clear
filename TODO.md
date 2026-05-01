@@ -76,6 +76,8 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Demand-based processes - don't spin up the max allowed threads unless there's demand (in progress)
  - [ ] HashMap string interning
  - [ ] @sorted for lists, sets, hashmaps.
+ - [ ] Automated Property-based Testing for declarative concurrency constructs pt 1.
+ - [ ] Slab-allocate FSM tasks. Today the codegen emits `__bgN_alloc.create(__BgCtxN)` (direct GPA / c_allocator); the per-task `Runtime` and `ThreadLocalEbr` added by `allocFsmTaskRuntime` are also direct heap allocs. Hot-path BG-FSM spawn does 3 mallocs + 1 EBR-registry insert per task. Mirror the stackful fiber slab (`fiber_pool` in scheduler.zig) for FSM ctxs sized in tiers (Small/Std/Large by capture-set size), and pool the per-task Runtime + ebr_slot alongside.
 
 Milestone: *Basic* SQL/CLEAR database
 

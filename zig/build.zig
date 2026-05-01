@@ -212,6 +212,14 @@ pub fn build(b: *std.Build) void {
         .{ .path = "vopr-loom-test.zig", .tsan = false },
         .{ .path = "vopr-test.zig", .tsan = true },
         .{ .path = "yield-test.zig", .tsan = true },
+        // MVCC: Versioned(T) tests + lock hammers
+        .{ .path = "fsm-rwlock-hammer-test.zig", .tsan = true },
+        .{ .path = "parking-rwlock-fiber-hammer-test.zig", .tsan = true },
+        .{ .path = "versioned-test.zig", .tsan = true },
+        .{ .path = "versioned-stress-test.zig", .tsan = true },
+        .{ .path = "versioned-loom-test.zig", .tsan = false },
+        .{ .path = "versioned-vopr-test.zig", .tsan = true },
+        .{ .path = "versioned-fiber-stress-test.zig", .tsan = true },
 
         // Single-threaded / pure logic — debug build only
         .{ .path = "arena-fuzz-test.zig" },
@@ -434,6 +442,7 @@ pub fn build(b: *std.Build) void {
         "queues-benchmark-test.zig",
         "scheduler-benchmark-test.zig",
         "parking-lot-benchmark-test.zig",
+        "versioned-benchmark-test.zig",
         "experimental/freeze_bench.zig",
     };
 
@@ -533,7 +542,12 @@ pub fn build(b: *std.Build) void {
     const vopr_exe = b.addExecutable(.{
         .name = "vopr",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("runtime/vopr.zig"),
+            // Wrapper at zig/ root re-exports runtime/vopr.zig's main.
+            // Required so the module's path (zig/) covers both runtime/
+            // and lib/ -- runtime files use relative ../lib/ imports
+            // and would otherwise fail "import outside module path".
+            // Mirrors the unit-test shim pattern (vopr-test.zig).
+            .root_source_file = b.path("vopr.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         }),
@@ -560,6 +574,9 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         }),
     });
+    // Loom needs the fiber switch + onRoot assembly because it actually
+    // runs scheduler/fiber code (unlike VOPR which simulates the queue
+    // alone and never calls switchContext).
     loom_exe.root_module.addAssemblyFile(switch_s);
     loom_exe.root_module.addAssemblyFile(onroot_s);
     loom_exe.root_module.link_libc = true;
@@ -597,13 +614,48 @@ pub fn build(b: *std.Build) void {
     loom_step.dependOn(&run_pl_loom.step);
 
     // -------------------------------------------------------------------------
+    // VERSIONED-EXHAUST -- Deterministic MVCC retry-exhaustion check
+    // -------------------------------------------------------------------------
+    // Builds zig/versioned-exhaust.zig as a standalone exe whose root
+    // declares `pub const CLEAR_MVCC_MAX_UPDATE_RETRIES = 50`. The
+    // runtime's `@hasDecl(@import("root"), ...)` reads this and lowers
+    // the inner CAS retry cap from 10K to 50, so 8 contending writers
+    // deterministically hit `error.UpdateRetriesExhausted` -- closing
+    // the test gap that the stochastic stress test in
+    // versioned-stress-test.zig left open. Folded into the `hammer`
+    // step alongside the other concurrent stress tests.
+    const versioned_exhaust_step = b.step("versioned-exhaust", "Run deterministic MVCC retry-exhaustion check");
+    const versioned_exhaust_exe = b.addExecutable(.{
+        .name = "versioned-exhaust",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("versioned-exhaust.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    versioned_exhaust_exe.root_module.addAssemblyFile(switch_s);
+    versioned_exhaust_exe.root_module.addAssemblyFile(onroot_s);
+    versioned_exhaust_exe.root_module.link_libc = true;
+    const run_versioned_exhaust = b.addRunArtifact(versioned_exhaust_exe);
+    run_versioned_exhaust.has_side_effects = true;
+    versioned_exhaust_step.dependOn(&run_versioned_exhaust.step);
+    hammer_step.dependOn(&run_versioned_exhaust.step);
+
+    // -------------------------------------------------------------------------
     // STATIC LIBRARY (cheat-runtime)
     // -------------------------------------------------------------------------
+    // The library's root is the wrapper at zig/cheat_runtime.zig (which
+    // re-exports runtime/runtime-header.zig). Rooting at zig/ -- not
+    // runtime/ -- means the module's path covers both runtime/ and lib/,
+    // so runtime files' relative `../lib/...` imports resolve. Mirrors
+    // the vopr/loom pattern (see comments at vopr_step / loom_step
+    // above). Without the wrapper, every relative import to lib/ fails
+    // with "import of file outside module path".
     const lib = b.addLibrary(.{
         .linkage = .static,
         .name = "cheat-runtime",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("runtime/runtime-header.zig"),
+            .root_source_file = b.path("cheat_runtime.zig"),
             .target = target,
             .optimize = optimize,
         }),

@@ -88,6 +88,15 @@ module EffectTracker
     return unless current_fn_ctx&.name
     effect = promote_suspends_for_current_context(effect)
     @fn_direct_effects[current_fn_ctx.name]&.add(effect)
+    # MVCC L5-followup (D1): a SNAPSHOT-transaction body must be pure
+    # for atomicity -- yielding the fiber breaks EBR pin guarantees,
+    # and IO can't be rolled back if the transaction aborts. Track
+    # SUSPENDS effects recorded while @inside_snapshot_txn is set so
+    # the WITH-block visitor can raise once the body is complete.
+    if @inside_snapshot_txn && @inside_snapshot_txn > 0 && SUSPENDS_FAMILY.include?(effect)
+      @snapshot_txn_violations ||= []
+      @snapshot_txn_violations << { effect: effect, fn: current_fn_ctx.name }
+    end
   end
 
   # Promote a bare SUSPENDS to SUSPENDS_LOOP / SUSPENDS_CONDITIONAL based
@@ -222,7 +231,7 @@ module EffectTracker
       # `rt.checkYield()` injected at entry by mir_lowering, so they
       # need rt threaded.
       yield_uses_rt = recursion_yield_needed?(fn_node)
-      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
+      needs_rt[name] = fn_node.uses_frame || fn_node.uses_heap || fn_node.uses_alloc || fn_node.uses_rt || heap_return || (@fn_has_fnptr[name] == true) || has_takes_heap || has_catch || has_raise || thunk_uses_rt || yield_uses_rt || name == "main"
     end
 
     # Seed imported (cross-module) functions: if a callee is not a local function
@@ -806,6 +815,21 @@ module EffectTracker
         # Don't descend into nested function definitions.
       when AST::Raise, AST::OrRaise
         found[0] = true
+      when AST::WithBlock
+        # MVCC: SNAPSHOT-transactions emit `Versioned.update[Multi](...)
+        # catch |__err| switch (__err) { ..., else => return __err }`,
+        # so the fn body has a raise path regardless of the user's
+        # ON Conflict action. Detect structurally rather than via
+        # heap_count proxy (T1 cleanup).
+        found[0] = true if n.snapshot_mode == :transaction
+        # WITH with a fallible lock-error clause (RAISE / EXIT) also
+        # routes through `return error.CheatError`. PASS / block-action
+        # exit via `break :__with_<id>` and don't raise.
+        if n.lock_error_clause && [:raise, :exit].include?(n.lock_error_clause[:action])
+          found[0] = true
+        end
+        n.body&.each { |stmt| traverse.call(stmt) } unless found[0]
+        n.arms&.each { |arm| arm[:body]&.each { |stmt| traverse.call(stmt) } } unless found[0]
       else
         n.each_pair { |_, v| traverse.call(v) } if n.respond_to?(:each_pair)
       end

@@ -1,0 +1,65 @@
+-- MVCC L7.3 / B1+B2 followup: shape-agnostic WITH MATCH dispatch.
+-- Pins the four caller shapes that the L7.3 Arc-unwrap helper must
+-- handle uniformly, plus a fifth (single-VERSIONED REQUIRES) that
+-- B2 unblocked at the annotator.
+--   - bare @versioned        -> *Versioned(T) param shape
+--   - @shared:versioned      -> Arc(Versioned(T)) by value
+--                               (cleanup goes through arcDeinitInner;
+--                                B1 added the @hasDecl(T,"Inner") branch
+--                                that routes to Versioned.deinitSync
+--                                instead of the old (allocator, allocator)
+--                                3-arg dispatch that mis-typed against
+--                                Versioned.deinit's (*Runtime, Allocator).)
+--   - bare @locked           -> *Locked(T)
+--   - @shared:locked         -> Arc(Locked(T)) by value
+-- Plus: REQUIRES c: VERSIONED on its own (single-family helper, no
+-- LOCKED polymorphism). Pre-B2 this crashed in acquire_capability!
+-- with "cannot infer capability" because the case-table had no
+-- :versioned branch.
+
+STRUCT Counter { value: Int64 }
+
+-- Polymorphic helper: same body works for VERSIONED and LOCKED
+-- callers via the L7.2/L7.3/L7.4 comptime if-else dispatch.
+FN read_poly!(MUTABLE c: Counter) RETURNS Int64
+  REQUIRES c: VERSIONED | LOCKED
+->
+    MUTABLE result: Int64 = 0;
+    WITH c AS va MATCH
+        WHEN VERSIONED -> { result = va.value; }
+        WHEN LOCKED  -> { result = va.value; }
+    END
+    RETURN result;
+END
+
+-- Single-family VERSIONED helper. Pre-B2 this didn't compile.
+FN read_v!(MUTABLE c: Counter) RETURNS Int64
+  REQUIRES c: VERSIONED
+->
+    MUTABLE result: Int64 = 0;
+    WITH c AS va MATCH
+        WHEN VERSIONED -> { result = va.value; }
+    END
+    RETURN result;
+END
+
+FN main() RETURNS Void ->
+    -- All four shapes through the polymorphic helper.
+    MUTABLE c1 = Counter{ value: 11 } @versioned;
+    ASSERT read_poly!(c1) == 11, "bare @versioned";
+
+    MUTABLE c2 = Counter{ value: 22 } @shared:versioned;
+    ASSERT read_poly!(c2) == 22, "@shared:versioned (B1 cleanup path)";
+
+    MUTABLE c3 = Counter{ value: 33 } @locked;
+    ASSERT read_poly!(c3) == 33, "bare @locked";
+
+    MUTABLE c4 = Counter{ value: 44 } @shared:locked;
+    ASSERT read_poly!(c4) == 44, "@shared:locked";
+
+    -- Single-family helper.
+    MUTABLE c5 = Counter{ value: 55 } @versioned;
+    ASSERT read_v!(c5) == 55, "single-family VERSIONED (B2 path)";
+
+    RETURN;
+END

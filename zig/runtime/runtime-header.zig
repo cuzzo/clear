@@ -710,6 +710,43 @@ pub const CheatLib = struct {
     pub const deinitList = DataStructures.deinitList;
     pub const deinitSet = DataStructures.deinitSet;
     pub const Locked = DataStructures.Locked;
+    /// Multi-Version Concurrency Control (MVCC) cell: atomic-pointer
+    /// COW + EBR reclamation. Backs `T@versioned` (and
+    /// `T@shared:versioned` -> `Arc(Versioned(T))`). Readers acquire a
+    /// Guard via `read()`; writers swap a new version via `update()`
+    /// with a bounded CAS retry loop that surfaces
+    /// `error.UpdateRetriesExhausted` (mapped to CLEAR's `Conflict`
+    /// at the runtime bridge). Named `Versioned` (not `Shared`) to
+    /// disambiguate from CLEAR's `@shared` capability (Arc-based
+    /// ownership wrapper).
+    pub const Versioned = @import("versioned.zig").Versioned;
+    /// Allocate `*Versioned(T)` on the heap, init it with `data`,
+    /// return the heap pointer. Mirrors `lockedCreate` for
+    /// `T@versioned`. The generated CLEAR codegen calls this for
+    /// `c = ... @versioned;`.
+    pub fn versionedCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*@import("versioned.zig").Versioned(T) {
+        const VersionedT = @import("versioned.zig").Versioned(T);
+        const ptr = try alloc.create(VersionedT);
+        ptr.* = try VersionedT.init(alloc, data);
+        return ptr;
+    }
+    /// Tear down a `*Versioned(T)` cell created by `versionedCreate`.
+    /// Retires the live inner pointer via EBR (deferred-free until
+    /// every active epoch drains -- safe even if a reader still holds
+    /// a Guard) and destroys the outer Versioned struct. Best-effort:
+    /// an OOM in `retire` would leak, which is acceptable on a
+    /// teardown path.
+    pub fn versionedDestroy(comptime T: type, rt: *Runtime, alloc: std.mem.Allocator, cell: *@import("versioned.zig").Versioned(T)) void {
+        cell.deinit(rt, alloc) catch {};
+        alloc.destroy(cell);
+    }
+    /// Atomic multi-cell transaction over a tuple of `*Versioned(T_i)`
+    /// (cells may have heterogeneous T). Sorts cells by address,
+    /// installs tagged-pointer "soft locks" in order, runs the user
+    /// transaction body against mutable views, then publishes all
+    /// new pointers atomically. Used to lower CLEAR's
+    /// `WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb`.
+    pub const versionedUpdateMulti = @import("versioned.zig").updateMulti;
     pub const RefCell = DataStructures.RefCell;
     pub const refCellCreate = DataStructures.refCellCreate;
     pub const refCellDestroy = DataStructures.refCellDestroy;
@@ -1962,11 +1999,11 @@ pub const CheatLib = struct {
         rt.wireAllocator();
 
         // IMPORTANT: Register this thread with the global context now that `rt` is stable on the frame.
-        try global_ctx.register(allocator, &rt.ebr);
+        try global_ctx.register(allocator, rt.ebr);
 
         // This runs FIRST (before deinit): Remove from global registry
         // so the GC doesn't try to look at our dead frame.
-        defer global_ctx.unregister(&rt.ebr);
+        defer global_ctx.unregister(rt.ebr);
 
         // 2. MAGIC: Call the user function
         // We assume your worker functions always take 'rt' as the first argument.
@@ -2160,6 +2197,32 @@ pub const CheatLib = struct {
         };
     }
 
+    /// MVCC L7.3: comptime resolver used by WITH MATCH per-arm dispatch.
+    /// Given the param type seen at the call site, peel off any
+    /// outer pointer (`*T` -> T) and then any outer Arc-wrapper
+    /// (`Arc(X)` -> X) to reach the underlying cell type. Used so the
+    /// per-family probes (`@hasDecl(_, "Inner")` for Versioned,
+    /// `@hasField(_, "mutex")` for Locked) work uniformly across:
+    ///   - bare `*Versioned(T)` / `*Locked(T)` (versionedCreate /
+    ///     lockedCreate return *T, so the param arrives as *T),
+    ///   - `Arc(Versioned(T))` / `Arc(Locked(T))` by value (Arc is
+    ///     a small handle, passed without pointer indirection).
+    /// All branches are comptime-elided when not taken so the
+    /// expression is well-typed for every shape.
+    pub fn WithMatchInner(comptime ValT: type) type {
+        const Underlying = if (@typeInfo(ValT) == .pointer)
+            @typeInfo(ValT).pointer.child
+        else
+            ValT;
+        if (@hasField(Underlying, "ctrl")) {
+            const CtrlPtr = std.meta.fieldInfo(Underlying, .ctrl).type;
+            const Ctrl = @typeInfo(CtrlPtr).pointer.child;
+            const DataPtr = std.meta.fieldInfo(Ctrl, .data).type;
+            return @typeInfo(DataPtr).pointer.child;
+        }
+        return Underlying;
+    }
+
     pub fn arcCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !Arc(T) {
         const ctrl = try alloc.create(ArcControlBlock(T));
         const data_ptr = try alloc.create(T);
@@ -2210,6 +2273,14 @@ pub const CheatLib = struct {
                     ptr.data.deinit();
                 }
             }
+        } else if (@hasDecl(T, "Inner") and @hasDecl(T, "deinitSync")) {
+            // B1 fix (2026-04-30): Arc(Versioned(T)). Versioned re-exports
+            // `Inner` (the wrapped T) and provides `deinitSync(allocator)`
+            // for arc-cleanup contexts that lack a *Runtime. The 3-arg
+            // `deinit(*Runtime, Allocator)` below would mis-pass
+            // (Allocator, Allocator) here -- this branch routes around
+            // that. See versioned.zig: deinitSync for the safety argument.
+            ptr.deinitSync(a);
         } else if (@hasDecl(T, "deinit")) {
             const deinit_fn = @typeInfo(@TypeOf(T.deinit)).@"fn";
             if (deinit_fn.params.len == 3) {
@@ -3285,6 +3356,53 @@ pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, con
 /// pointer must outlive the scheduler run.
 pub fn spawnFsmOn(target: *fp.Scheduler, fsm_task: *fp.FsmTask) !void {
     try target.submitFsmSpawn(fsm_task);
+}
+
+/// Allocate a per-FSM-task Runtime + ThreadLocalEbr.
+///
+/// FSM tasks dispatched via spawnFsmBest can run on any scheduler thread.
+/// If they share the spawning fiber's Runtime, EBR enter/exit/retire calls
+/// in the body would touch the spawning thread's ThreadLocalEbr from a
+/// foreign OS thread -- corrupting the non-thread-safe limbo list and
+/// surfacing later as `realloc(): invalid old size` from glibc.
+///
+/// The fix: every FSM task gets its own Runtime backed by its own
+/// ThreadLocalEbr slot (registered with the EbrContext), so all EBR
+/// operations in the body route through a slot dedicated to that task.
+///
+/// Lifecycle: this fn allocates ebr_slot + Runtime, registers the slot
+/// with EbrContext, and stashes both pointers on `task.ebr_slot` /
+/// `task.task_runtime`. The scheduler frees them in `releaseFsmTaskEbr`
+/// after the task reaches .Done.
+///
+/// Caller MUST invoke this BEFORE submitting the task (spawnFsmBest /
+/// submitFsmSpawn). The CLEAR codegen does:
+///   1. ctx.* = .{ .task = undefined, .rt = undefined, ... };
+///   2. ctx.task = FsmTask.init(...);
+///   3. ctx.task.destroy_fn = ...;
+///   4. const __task_rt = try CheatHeader.allocFsmTaskRuntime(&ctx.task, parent_rt);
+///   5. ctx.rt = __task_rt;
+///   6. try CheatHeader.spawnFsmBest(&ctx.task);
+pub fn allocFsmTaskRuntime(fsm_task: *fp.FsmTask, parent_rt: *Runtime) !*Runtime {
+    const allocator = parent_rt.heap_allocator;
+    const sched = parent_rt.getSched();
+
+    const ebr_ptr = try sched.allocEbrSlot();
+    errdefer sched.releaseEbrSlot(ebr_ptr);
+
+    const rt_ptr = try allocator.create(Runtime);
+    errdefer allocator.destroy(rt_ptr);
+    // Build a minimal Runtime backed by ebr_ptr. No frame slice -- the FSM
+    // body uses its own ctx for state; if it calls frameAlloc via a deep
+    // path, that lands in the lazy-heap arena (initFromSliceWithEbr with
+    // an empty frame slice). The codegen does NOT rely on the per-task
+    // Runtime owning frame memory; only its ebr matters for MVCC ops.
+    rt_ptr.* = try Runtime.initFromSliceWithEbr(&[_]u8{}, ebr_ptr, allocator, 0);
+    rt_ptr.wireAllocator();
+
+    fsm_task.ebr_slot = ebr_ptr;
+    fsm_task.task_runtime = rt_ptr;
+    return rt_ptr;
 }
 
 /// Module-level spawnFsmBest: distribute an FSM task to the least-loaded

@@ -91,9 +91,12 @@ var harness: *LoomHarness = undefined;
 
 const ScheduleMode = union(enum) {
     /// PRNG-driven: random thread selection at each yield point.
+    /// `std.Random` stores a pointer to the underlying `*Xoshiro256`,
+    /// so do NOT cache it as a struct field — initPrng/resetPrng
+    /// would dangle it across the by-value return / struct copy.
+    /// Build a fresh wrapper from `&p.rng` at every pickThread call.
     prng: struct {
         rng: std.Random.DefaultPrng,
-        random: std.Random,
     },
     /// Exhaustive: schedule[step] picks the thread for each yield point.
     /// When schedule is exhausted, round-robin the remaining active threads.
@@ -125,14 +128,12 @@ const LoomHarness = struct {
     fn initPrng(allocator: std.mem.Allocator, seed: u64) !LoomHarness {
         const q = try allocator.create(RunQueue);
         q.* = RunQueue.initWithAllocator(allocator) catch unreachable;
-        const rng = std.Random.DefaultPrng.init(seed);
         var h = LoomHarness{
             .queue = q,
             .allocator = allocator,
-            .mode = .{ .prng = .{ .rng = rng, .random = undefined } },
+            .mode = .{ .prng = .{ .rng = std.Random.DefaultPrng.init(seed) } },
             .stacks = [_][]u8{&.{}} ** MAX_THREADS,
         };
-        h.mode.prng.random = h.mode.prng.rng.random();
         for (&h.results) |*row| for (row) |*slot| {
             slot.* = null;
         };
@@ -218,7 +219,7 @@ const LoomHarness = struct {
 
         switch (self.mode) {
             .prng => |*p| {
-                const pick = p.random.intRangeLessThan(usize, 0, active_count);
+                const pick = p.rng.random().intRangeLessThan(usize, 0, active_count);
                 return active_ids[pick];
             },
             .exhaustive => |*e| {
@@ -286,8 +287,7 @@ const LoomHarness = struct {
 
     fn resetPrng(self: *LoomHarness, seed: u64) void {
         clearState(self);
-        self.mode = .{ .prng = .{ .rng = std.Random.DefaultPrng.init(seed), .random = undefined } };
-        self.mode.prng.random = self.mode.prng.rng.random();
+        self.mode = .{ .prng = .{ .rng = std.Random.DefaultPrng.init(seed) } };
     }
 
     fn resetExhaustive(self: *LoomHarness, schedule: []const u8) void {
@@ -606,31 +606,24 @@ fn entryEpollWakeThenPop() callconv(.c) void {
 // Epoll integration: scenarios
 // -----------------------------------------------------------------------
 
-/// Scenario 7: Epoll wake vs pop.
-/// Thread A (waker): CAS Blocked->Ready + push (epoll wakeup path)
-/// Thread B (popper): pop() from the queue
-/// Task 0 starts Blocked (not in queue). Task 1 starts in queue.
-/// The waker produces task 0 into the queue; the popper consumes.
-/// Invariant: no task appears twice, popped + queue <= 2.
-fn scenarioEpollWakeVsPop(h: *LoomHarness) !void {
-    const blocked_task = h.initStubTask(0, false);
-    blocked_task.status.store(.Blocked, .release);
-    const ready_task = h.initStubTask(1, false);
-    h.queue.push(std.heap.c_allocator, ready_task) catch unreachable;
-
-    try h.createThread(0, @intFromPtr(&entryEpollWake));
-    try h.createThread(1, @intFromPtr(&entryEpollPop));
-    try h.run();
-    // Only thread 1 (popper) records consumed results.
-    // Thread 0 (waker) is a producer -- no results.
-    try checkNoDuplicates(h);
-    const popped = countResults(h);
-    const in_queue = h.queue.len();
-    // 2 tasks total (task 0 Blocked + task 1 in queue). Waker may or may
-    // not have pushed task 0 (CAS could succeed). Popper may or may not
-    // have popped. But consumed + remaining can't exceed 2.
-    if (popped + in_queue > 2) return LoomError.TaskDuplicated;
-}
+// Scenario 7: REMOVED -- modeled an invalid concurrency pattern.
+// The original scenario ran `entryEpollWake` (CAS + push) on one thread
+// concurrent with `entryEpollPop` (pop) on another, both targeting the
+// same RunQueue. RunQueue is Chase-Lev: single-owner push and pop are
+// serialized on one thread; only steal is concurrent across threads.
+// In production, the epoll wakeup path (`Scheduler.wakeTaskFromIo` ->
+// `enqueueTask`) and the dispatch loop's `pop` always run on the SAME
+// owner thread, so push/pop are not concurrent.
+//
+// SimAtomic's split-yield model exposed a state (b=0, t=1, between
+// the popper's CAS-success and its bottom-restore) that pushers
+// shouldn't observe in production. With b-t treated as unsigned,
+// `b -% t > arr.mask` evaluated to ~4B, sending push into grow's
+// reseeding loop with t > b -- which iterates 2^32 times before
+// wrapping back to b. Tripped the 10K MAX_STEPS in schedule 255.
+//
+// Coverage for the same CAS-exclusivity property is preserved by
+// `scenarioEpollWakeVsSteal` (push + steal is a valid race).
 
 /// Scenario 8: Epoll wake vs steal.
 /// Thread A (waker): CAS Blocked->Ready + push
@@ -766,26 +759,15 @@ fn entryPollWakeTask1() callconv(.c) void {
 // io_uring completion-based scenarios
 // -----------------------------------------------------------------------
 
-/// Scenario 11: IoWaiter completion vs pop.
-/// Thread A: IoWaiter CQE completes (store Ready + push, no CAS)
-/// Thread B: pop() from the queue
-/// Task 0 starts Blocked (waiting on RECV/READ CQE). Task 1 starts in queue.
-/// Thread A pushes task 0 unconditionally. Thread B pops.
-/// Invariant: no duplicates, popped + queue <= 2.
-fn scenarioIoWaiterVsPop(h: *LoomHarness) !void {
-    const blocked_task = h.initStubTask(0, false);
-    blocked_task.status.store(.Blocked, .release);
-    const ready_task = h.initStubTask(1, false);
-    h.queue.push(std.heap.c_allocator, ready_task) catch unreachable;
-
-    try h.createThread(0, @intFromPtr(&entryIoWaiterComplete));
-    try h.createThread(1, @intFromPtr(&entryEpollPop));
-    try h.run();
-    try checkNoDuplicates(h);
-    const popped = countResults(h);
-    const in_queue = h.queue.len();
-    if (popped + in_queue > 2) return LoomError.TaskDuplicated;
-}
+// Scenario 11: REMOVED -- same modeling defect as Scenario 7
+// (`scenarioEpollWakeVsPop` above). IoWaiter completion runs on the
+// owner scheduler thread (the one that submitted the SQE and reads
+// CQEs); the dispatch loop's `pop` runs on the same thread. They
+// are not concurrent. The Chase-Lev RunQueue tolerates single-owner
+// push/pop and concurrent steal, but not concurrent push/pop --
+// which is what this scenario incorrectly modeled.
+//
+// `scenarioIoWaiterVsSteal` covers the valid push-vs-steal race.
 
 /// Scenario 12: IoWaiter completion vs steal.
 /// Thread A: IoWaiter CQE completes (store Ready + push)
@@ -823,30 +805,16 @@ fn scenarioIoWaiterPopVsSteal(h: *LoomHarness) !void {
     if (results + in_queue > 1) return LoomError.TaskDuplicated;
 }
 
-/// Scenario 15: Mixed CQE dispatch -- IoWaiter + poll wake concurrently.
-/// Thread A: IoWaiter completes task 0 (store Ready + push)
-/// Thread B: poll-wake completes task 1 (CAS Blocked->Ready + push)
-/// Both push to the same queue concurrently. A third task (task 2) sits
-/// in the queue as a sentinel.
-/// Invariant: 3 tasks total (task 0 + task 1 + task 2), no duplicates.
-fn scenarioMixedCqeDispatch(h: *LoomHarness) !void {
-    const io_task = h.initStubTask(0, false);
-    io_task.status.store(.Blocked, .release);
-    const poll_task = h.initStubTask(1, false);
-    poll_task.status.store(.Blocked, .release);
-    const sentinel = h.initStubTask(2, false);
-    h.queue.push(std.heap.c_allocator, sentinel) catch unreachable;
-
-    try h.createThread(0, @intFromPtr(&entryIoWaiterCompleteTask0));
-    try h.createThread(1, @intFromPtr(&entryPollWakeTask1));
-    try h.run();
-
-    const in_queue = h.queue.len();
-    // Both tasks should be pushed (IoWaiter always, poll CAS succeeds since Blocked).
-    // Plus the sentinel already in queue = 3 total.
-    if (in_queue < 3) return LoomError.TaskLost;
-    if (in_queue > 3) return LoomError.TaskDuplicated;
-}
+// Scenario 15: REMOVED -- modeled two threads concurrently pushing to
+// the same RunQueue (IoWaiter + poll-wake). RunQueue is Chase-Lev:
+// push is owner-only, so concurrent push from two threads is not a
+// valid usage pattern. In production, both wakeup paths
+// (`Scheduler.wakeTaskFromIo` for IoWaiter, the poll/epoll handler
+// for socket readiness) run on the same owner thread sequentially.
+//
+// Coverage for the CAS-exclusivity property of the poll-wake path is
+// preserved by `scenarioDoubleEpollFire` (two concurrent CAS Blocked->
+// Ready on the same task, neither pushes).
 
 // -----------------------------------------------------------------------
 // Exhaustive driver -- enumerate all 2-thread interleavings
@@ -941,12 +909,6 @@ test "loom: exhaustive all-pinned queue" {
 //   entryEpollWake2:       1 CAS + 4 push ops = 5 ops
 //   entryEpollWakeThenPop: 1 CAS + 4 push + 7 pop = 12 ops
 
-test "loom: exhaustive epoll wake vs pop" {
-    // wake=5 ops, pop=7 ops. C(12,5)=792. Depth 12 = 4096 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioEpollWakeVsPop, "epoll_wake_vs_pop", 12);
-    std.debug.print("  epoll_wake_vs_pop: {d} interleavings OK\n", .{count});
-}
-
 test "loom: exhaustive epoll wake vs steal" {
     // wake=5 ops, steal=4 ops. C(9,4)=126. Depth 10 = 1024 schedules.
     const count = try runExhaustiveN(std.testing.allocator, &scenarioEpollWakeVsSteal, "epoll_wake_vs_steal", 10);
@@ -974,12 +936,6 @@ test "loom: exhaustive epoll wake-pop vs steal" {
 //   entryIoWaiterCompleteTask0:   1 store + 4 push = 5 ops
 //   entryPollWakeTask1:           1 CAS + 4 push = 5 ops
 
-test "loom: exhaustive io_uring IoWaiter vs pop" {
-    // IoWaiter=5 ops, pop=7 ops. C(12,5)=792. Depth 12 = 4096 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterVsPop, "iowaiter_vs_pop", 12);
-    std.debug.print("  iowaiter_vs_pop: {d} interleavings OK\n", .{count});
-}
-
 test "loom: exhaustive io_uring IoWaiter vs steal" {
     // IoWaiter=5 ops, steal=4 ops. C(9,4)=126. Depth 10 = 1024 schedules.
     const count = try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterVsSteal, "iowaiter_vs_steal", 10);
@@ -990,12 +946,6 @@ test "loom: exhaustive io_uring IoWaiter pop vs steal" {
     // IoWaiter+pop=12 ops, steal=4 ops. C(16,4)=1820. Depth 14 = 16384 schedules.
     const count = try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterPopVsSteal, "iowaiter_pop_vs_steal", 14);
     std.debug.print("  iowaiter_pop_vs_steal: {d} interleavings OK\n", .{count});
-}
-
-test "loom: exhaustive io_uring mixed CQE dispatch" {
-    // IoWaiter=5 ops, poll_wake=5 ops. C(10,5)=252. Depth 10 = 1024 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioMixedCqeDispatch, "mixed_cqe_dispatch", 10);
-    std.debug.print("  mixed_cqe_dispatch: {d} interleavings OK\n", .{count});
 }
 
 test "loom: queue wraparound" {
@@ -1312,11 +1262,9 @@ fn runSeed(allocator: std.mem.Allocator, seed: u64) !void {
         .{ .name = "push_during_steal", .func = &scenarioPushDuringSteal },
         .{ .name = "aggressive_pinned", .func = &scenarioAggressivePinned },
         .{ .name = "all_pinned", .func = &scenarioAllPinned },
-        .{ .name = "epoll_wake_vs_pop", .func = &scenarioEpollWakeVsPop },
         .{ .name = "epoll_wake_vs_steal", .func = &scenarioEpollWakeVsSteal },
         .{ .name = "double_epoll_fire", .func = &scenarioDoubleEpollFire },
         .{ .name = "epoll_wake_pop_vs_steal", .func = &scenarioEpollWakePopVsSteal },
-        .{ .name = "iowaiter_vs_pop", .func = &scenarioIoWaiterVsPop },
         .{ .name = "iowaiter_vs_steal", .func = &scenarioIoWaiterVsSteal },
         .{ .name = "iowaiter_pop_vs_steal", .func = &scenarioIoWaiterPopVsSteal },
         // See exhaustive list below for why mixed_cqe_dispatch is excluded.
@@ -1333,15 +1281,23 @@ fn runSeed(allocator: std.mem.Allocator, seed: u64) !void {
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init.Minimal) !void {
     const allocator = std.heap.c_allocator;
 
-    // CLI flag parsing was removed during the Zig 0.16 process.args API
-    // migration — this binary is only invoked by `zig build loom` (no
-    // args) or directly with defaults. If you need `--seeds` / `--start`
-    // again, port to std.process.Args.Iterator.initAllocator.
-    const seed_start: u64 = 0;
-    const seed_count: u64 = 100_000;
+    var seed_start: u64 = 0;
+    var seed_count: u64 = 100_000;
+
+    var args = init.args.iterate();
+    _ = args.skip();
+    while (args.next()) |arg| {
+        if (std.mem.eql(u8, arg, "--seeds")) {
+            if (args.next()) |val|
+                seed_count = std.fmt.parseInt(u64, val, 10) catch 100_000;
+        } else if (std.mem.eql(u8, arg, "--start")) {
+            if (args.next()) |val|
+                seed_start = std.fmt.parseInt(u64, val, 10) catch 0;
+        }
+    }
 
     // SimRing I/O lifecycle tests (requires SimRing as root, not available in zig test)
     std.debug.print("SimRing I/O lifecycle:\n", .{});
@@ -1361,11 +1317,9 @@ pub fn main() !void {
         .{ .name = "push_during_steal", .func = &scenarioPushDuringSteal },
         .{ .name = "aggressive_pinned", .func = &scenarioAggressivePinned },
         .{ .name = "all_pinned", .func = &scenarioAllPinned },
-        .{ .name = "epoll_wake_vs_pop", .func = &scenarioEpollWakeVsPop },
         .{ .name = "epoll_wake_vs_steal", .func = &scenarioEpollWakeVsSteal },
         .{ .name = "double_epoll_fire", .func = &scenarioDoubleEpollFire },
         .{ .name = "epoll_wake_pop_vs_steal", .func = &scenarioEpollWakePopVsSteal },
-        .{ .name = "iowaiter_vs_pop", .func = &scenarioIoWaiterVsPop },
         .{ .name = "iowaiter_vs_steal", .func = &scenarioIoWaiterVsSteal },
         .{ .name = "iowaiter_pop_vs_steal", .func = &scenarioIoWaiterPopVsSteal },
         // mixed_cqe_dispatch races two concurrent owner-side pushes against

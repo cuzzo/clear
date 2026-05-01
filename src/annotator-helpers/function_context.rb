@@ -4,6 +4,7 @@
 class FunctionContext
   attr_accessor :name, :return_type, :lifetime, :type_params,
                 :frame_count, :heap_count, :alloc_count,
+                :needs_rt,  # explicit "fn body references rt" flag (independent of allocation counters)
                 :loop_depth, :conditional_depth, :returns,
                 :stack_vars_bytes  # accumulated bytes for stack-local variables
 
@@ -15,6 +16,7 @@ class FunctionContext
     @frame_count = 0
     @heap_count = 0
     @alloc_count = 0
+    @needs_rt = false
     @loop_depth = 0
     @conditional_depth = 0
     @returns = []

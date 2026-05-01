@@ -1,5 +1,7 @@
 const std = @import("std");
 const fc = @import("fiber-core.zig");
+const ebr_mod = @import("../lib/ebr.zig");
+const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 
 const Fiber = fc.Fiber;
 const StackSize = fc.StackSize;
@@ -452,6 +454,14 @@ pub const Task = struct {
     /// timeout, the scheduler decrements this counter (writers_waiting)
     /// so future readers are not permanently blocked by a phantom writer.
     lock_counter_ptr: ?*u32 = null,
+
+    /// Heap-allocated ThreadLocalEbr (registered with EbrContext).
+    /// Allocated by the scheduler in drainChannels.Spawn on the OS thread
+    /// stack so that EbrContext.register's deep allocator path doesn't
+    /// run inside the fiber (which would overflow Standard 12 KB stacks).
+    /// Unregistered + freed by the scheduler in run() when task finishes.
+    /// entryWrapper hands this pointer to Runtime.initFromSliceWithEbr.
+    ebr_slot: ?*ThreadLocalEbr = null,
 };
 
 pub const LOCK_KIND_NONE: u8 = 0;

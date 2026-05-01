@@ -128,7 +128,7 @@ const LoomHarness = struct {
     fn initStubs(self: *LoomHarness, n: usize) void {
         std.debug.assert(n <= MAX_RESULTS);
         for (self.stub_tasks[0..n], 0..) |*t, i| {
-            t.* = FsmTask.init(&dummyResume, t);
+            t.* = FsmTask.init(&dummyResume);
             _ = i;
         }
     }

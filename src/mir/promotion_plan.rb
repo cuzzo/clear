@@ -718,12 +718,13 @@ module CleanupClassifier
     return entry(:locked) if sync == :locked
     return entry(:write_locked) if sync == :write_locked
     return entry(:always_mutable) if sync == :always_mutable
+    return entry(:versioned) if sync == :versioned
     nil
   end
 
   private_class_method def self.classify_heap_provenance(ti, node, schema_lookup, sync = nil)
     return nil unless ti.heap_provenance?
-    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable
+    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     return nil if ti.collection?
 
     return entry(:heap_string) if ti.string?
@@ -760,7 +761,7 @@ module CleanupClassifier
   private_class_method def self.classify_heap_struct_plain(ti, node, schema_lookup, sync = nil)
     storage = node.respond_to?(:storage) ? node.storage : nil
     return nil unless storage == :heap
-    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable
+    return nil if ti.any_rc? || ti.link? || sync == :locked || sync == :write_locked || sync == :always_mutable || sync == :versioned
     # Primitives (f64, i64, Bool, Byte) are stack values -- never need heap cleanup
     # even if storage was incorrectly set to :heap by upstream passes.
     return nil if ti.primitive?

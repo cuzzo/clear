@@ -1,0 +1,13 @@
+FN fib(n: Int64) RETURNS Int64 @reentrant ->
+    IF n <= 1 -> RETURN n;
+    RETURN fib(n - 1) + fib(n - 2);
+END
+
+FN main() RETURNS Void ->
+    t0 = timestampMs();
+    r = fib(25_i64);
+    elapsed = timestampMs() - t0;
+    print("fib(25) = ${r.toString()}");
+    print("BENCH_RESULT: ${elapsed.toString()} ms");
+    RETURN;
+END

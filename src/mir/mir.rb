@@ -1087,6 +1087,100 @@ module MIR
   end
 
   # ================================================================
+  # MVCC Snapshot Nodes (structured -- no InlineZig escape hatch)
+  # ================================================================
+  #
+  # These replace what used to be hand-emitted InlineZig blobs in
+  # mir_lowering.rb's :SNAPSHOT branch + emit_snapshot_mutable_call +
+  # lower_with_match_block. The emitter (mir_emitter.rb) maps each
+  # structured node 1:1 to the same Zig text we used to generate, BUT
+  # the construct is now visible to MIRChecker. Specifically:
+  #
+  # - SnapshotTransaction's heap allocation (Versioned.update's new
+  #   version) is now under structured MIR -- the checker can pair the
+  #   AllocMark with the EBR-retire Cleanup that runs inside
+  #   Versioned.update. Pre-migration this allocation lived inside an
+  #   InlineZig string and was invisible to the checker (INV-12 violation).
+  #
+  # - SnapshotRead's Guard pin/release becomes a structured pair the
+  #   checker can verify (matching defer-release on every exit path).
+  #
+  # - WithMatchDispatch carries a list of MIR-lowered arm bodies, not
+  #   pre-emitted Zig strings. The checker walks each arm body with
+  #   the rest of the MIR.
+
+  # SNAPSHOT-read: `WITH SNAPSHOT cell AS view { body }` for a
+  # Versioned cell in read mode. Lowers to:
+  #   var <guard_var> = <cell_unwrap>.read(<rt>);
+  #   defer <guard_var>.release();
+  #   const <alias> = <guard_var>.get();
+  # followed by the body. The unwrap_expr handles the comptime
+  # pointer + Arc shape dispatch (see L7.3 / L7.4).
+  #
+  # cell_unwrap : Zig expression resolving to *Versioned(T)
+  # rt          : Zig expression for *Runtime
+  # alias_zig   : Zig identifier for the user's alias (e.g. "view")
+  # guard_var   : internal Zig name for the Guard local
+  SnapshotRead = Struct.new(:cell_unwrap, :rt, :alias_zig, :guard_var, :body) do
+    include Stmt
+    def stmt?; true; end
+  end
+
+  # SNAPSHOT-mutable single-cell: `WITH SNAPSHOT cell AS MUTABLE va
+  # { body } ON Conflict <action>` for a Versioned cell in transaction
+  # mode. Lowers to a `Versioned.update(rt, alloc, fn(va: *T) ...)`
+  # call wrapped in catch+switch for ON Conflict handling.
+  #
+  # cell_unwrap     : Zig expr resolving to *Versioned(T)
+  # rt              : Zig expr for *Runtime
+  # alloc           : Zig expr for the allocator (rt.heapAlloc())
+  # alias_zig       : Zig identifier for the user's MUTABLE alias
+  # bare_t_zig      : Zig type string for the inner T
+  # body            : Array of MIR statements -- the user's transaction body
+  # conflict_action : Zig text for the ON Conflict handler body
+  # retries         : nil or integer N for RETRY(N) THEN <action>
+  # with_label      : nil or string for the labeled block exit (PASS/block actions)
+  SnapshotTransaction = Struct.new(
+    :cell_unwrap, :rt, :alloc, :alias_zig, :bare_t_zig,
+    :body, :conflict_action, :retries, :with_label
+  ) do
+    include Stmt
+    def stmt?; true; end
+  end
+
+  # SNAPSHOT-mutable multi-cell: `WITH SNAPSHOT a AS MUTABLE va, b AS
+  # MUTABLE vb, ... { body } ON Conflict <action>`. Lowers to
+  # `CheatLib.versionedUpdateMulti(.{cells...}, rt, alloc, fn(views) ...)`
+  # which sorts the cells by address (deadlock-free), tags the soft
+  # locks, runs the body once, and publishes all new versions
+  # atomically.
+  #
+  # cells_tuple  : Zig text for `.{ unwrap1, unwrap2, ... }`
+  # rt, alloc    : as above
+  # alias_decls  : Zig text declaring per-arg aliases from `views[i]`
+  # body         : Array of MIR statements
+  # conflict_action, retries, with_label : as above
+  SnapshotMultiTxn = Struct.new(
+    :cells_tuple, :rt, :alloc, :alias_decls,
+    :body, :conflict_action, :retries, :with_label
+  ) do
+    include Stmt
+    def stmt?; true; end
+  end
+
+  # WITH MATCH dispatch: `WITH cell AS va MATCH WHEN F1 -> {...} WHEN
+  # F2 -> {...} END`. Lowers to a comptime `if (@hasField/@hasDecl)`
+  # chain, one branch per family, each branch containing the matching
+  # arm's lowered body.
+  #
+  # cell_zig : Zig expression for the bound variable (param shape preserved)
+  # arms     : Array of { family:, probe:, prelude_zig:, body: [MIR stmts] }
+  WithMatchDispatch = Struct.new(:cell_zig, :arms) do
+    include Stmt
+    def stmt?; true; end
+  end
+
+  # ================================================================
   # Verification-Only Nodes (no codegen, for MIRChecker)
   # ================================================================
 

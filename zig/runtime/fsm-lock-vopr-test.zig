@@ -93,7 +93,7 @@ const Setup = struct {
                     .counter = self.counter,
                     .sched = self.sched,
                 };
-                self.fsms[fsm_i].task = fsm.FsmTask.init(&LockFsm.doResume, &self.fsms[fsm_i]);
+                self.fsms[fsm_i].task = fsm.FsmTask.init(&LockFsm.doResume);
                 self.sched.enqueueFsm(&self.fsms[fsm_i].task);
                 fsm_i += 1;
             } else if (kind == 1 and sk_i < self.n_stackful) {
@@ -116,7 +116,7 @@ const Setup = struct {
                 .counter = self.counter,
                 .sched = self.sched,
             };
-            self.fsms[fsm_i].task = fsm.FsmTask.init(&LockFsm.doResume, &self.fsms[fsm_i]);
+            self.fsms[fsm_i].task = fsm.FsmTask.init(&LockFsm.doResume);
             self.sched.enqueueFsm(&self.fsms[fsm_i].task);
         }
         while (sk_i < self.n_stackful) : (sk_i += 1) {
