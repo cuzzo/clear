@@ -2995,7 +2995,7 @@ class BcEmitter
     emit_op(LOAD_CONST, add_const(nil))             # rt placeholder (VM ignores)
     emit_op(LOAD_SLOT, @slots[ctx_name])            # ctx
     emit_op(LOAD_SLOT, @slots[item_name])           # item
-    emit_op(BC_CALL, fn_ip, 3)
+    emit_op(BC_CALL, fn_ip, 3, @next_slot)
 
     case op
     when :concurrentBoundedSelect
@@ -3149,7 +3149,7 @@ class BcEmitter
     emit_op(LOAD_CONST, add_const(nil))     # rt placeholder (VM ignores)
     emit_op(LOAD_SLOT, @slots[ctx_name])    # ctx
     emit_op(LOAD_SLOT, @slots[item_name])   # item
-    emit_op(BC_CALL, fn_ip, 3)
+    emit_op(BC_CALL, fn_ip, 3, @next_slot)
 
     case op
     when :concurrentStreamSelect
@@ -4214,9 +4214,9 @@ class BcEmitter
     if @fn_start_ips.key?(helper_callee) || forward
       compile_helper_args(helper_callee, args)
       if forward
-        emit_op(BC_CALL); @deferred_bc_calls << [@ops.length, helper_callee]; emit_op(0); emit_op(args.length)
+        emit_op(BC_CALL); @deferred_bc_calls << [@ops.length, helper_callee]; emit_op(0); emit_op(args.length); emit_op(@next_slot)
       else
-        emit_op(BC_CALL, @fn_start_ips[helper_callee], args.length)
+        emit_op(BC_CALL, @fn_start_ips[helper_callee], args.length, @next_slot)
       end
       # Auto-try propagation: when the MIR call is marked try_wrap (the
       # callee can_fail), and we're inside a helper, check IS_ERR and
@@ -4361,7 +4361,7 @@ class BcEmitter
     # push only the user args.
     user_args = arg_names.reject { |n| n == "rt" }
     user_args.each { |name| emit_load_any(name) }
-    emit_op(BC_CALL, @fn_start_ips[inner_call], user_args.length)
+    emit_op(BC_CALL, @fn_start_ips[inner_call], user_args.length, @next_slot)
     push_type(:any)
     # Stash result in a temp so we can peek IS_ERR without losing it.
     @catch_tmp_counter ||= 0; @catch_tmp_counter += 1

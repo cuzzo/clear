@@ -2543,6 +2543,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     -- Call frame stack for BC_CALL/BC_RET helper function calls
     MUTABLE callRetIps: Int64[]@list = List[];
     MUTABLE callRetSps: Int64[]@list = List[];
+    MUTABLE callRetSlotCounts: Int64[]@list = List[];
     MUTABLE callSavedSlots: Value[]@list = List[];
     -- BG_SPAWN runs the inner exec! synchronously and pushes the result
     -- in a Pair("__future__", result); AWAIT unwraps. Real fiber
@@ -2684,8 +2685,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         Value.BCFn AS bcfn ->
                             -- BC_CALL semantics inline: save frame, copy args
                             -- (skip fnVal at sp-argc-1) into slots, jump.
+                            -- BCFn dispatch doesn't know caller's slot count
+                            -- here -- save the worst case (256). BC_RET
+                            -- reads it back from callRetSlotCounts.
                             callRetIps.append(ip);
                             callRetSps.append(sp - argc - 1);
+                            callRetSlotCounts.append(256_i64);
                             FOR bci IN (0_i64 ..< 256) DO
                                 callSavedSlots.append(COPY slots[bci]);
                             END
@@ -3179,14 +3184,21 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value{ List: setTlList };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            77 -> -- BC_CALL [target_ip, argc]: save frame, copy args to slots, jump
+            77 -> -- BC_CALL [target_ip, argc, caller_slot_count]: save
+                  -- frame, copy args to slots, jump. caller_slot_count
+                  -- is the caller's @next_slot at emit time -- saving
+                  -- only that many slots (instead of the full 256)
+                  -- avoids quadratic-in-call-depth COPY work for
+                  -- functions that use few slots (e.g. recursive fib).
                 bcCallIp = ops[ip]; ip += 1;
                 bcCallArgc = ops[ip]; ip += 1;
-                -- Save return address and sp-before-args
+                bcCallSlotN = ops[ip]; ip += 1;
+                -- Save return address, sp-before-args, and slot count
                 callRetIps.append(ip);
                 callRetSps.append(sp - bcCallArgc);
-                -- Save current slots (must match SLOT_COUNT=256 above)
-                FOR bci IN (0_i64 ..< 256) DO callSavedSlots.append(COPY slots[bci]); END
+                callRetSlotCounts.append(bcCallSlotN);
+                -- Save only the slots the caller actually uses.
+                FOR bci IN (0_i64 ..< bcCallSlotN) DO callSavedSlots.append(COPY slots[bci]); END
                 -- Mark Weak-cell ownership boundary; BC_RET will drop
                 -- cells allocated at indexes >= this mark.
                 frameWkMarks.append(weakOwnedFlat.length());
@@ -3205,18 +3217,20 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 wkDropCount = weakOwnedFlat.length() - wkMarkLo;
                 FOR wkDe IN (0_i64 ..< wkDropCount) DO
-                    weakOwnedFlat.remove(wkMarkLo);
+                    weakOwnedFlat.pop();
                 END
-                frameWkMarks.remove(frameWkMarks.length() - 1);
-                -- Restore slots (stride must match BC_CALL above)
-                savedBase = (callSavedSlots.length() - 256);
-                FOR bci IN (0_i64 ..< 256) DO slots[bci] = COPY callSavedSlots[savedBase + bci]; END
-                FOR bci IN (0_i64 ..< 256) DO callSavedSlots.remove(savedBase); END
+                frameWkMarks.pop();
+                -- Restore slots (count was pushed at BC_CALL time)
+                bcRetSlotN = callRetSlotCounts[callRetSlotCounts.length() - 1];
+                callRetSlotCounts.pop();
+                savedBase = (callSavedSlots.length() - bcRetSlotN);
+                FOR bci IN (0_i64 ..< bcRetSlotN) DO slots[bci] = COPY callSavedSlots[savedBase + bci]; END
+                FOR bci IN (0_i64 ..< bcRetSlotN) DO callSavedSlots.pop(); END
                 -- Restore ip and sp
                 retSp = callRetSps[callRetSps.length() - 1];
-                callRetSps.remove(callRetSps.length() - 1);
+                callRetSps.pop();
                 ip = callRetIps[callRetIps.length() - 1];
-                callRetIps.remove(callRetIps.length() - 1);
+                callRetIps.pop();
                 sp = retSp;
                 -- Push return value
                 IF sp >= stack.length() THEN stack.append(bcRetVal); ELSE stack[sp] = bcRetVal; END
@@ -3230,18 +3244,20 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 wkDropCountV = weakOwnedFlat.length() - wkMarkLoV;
                 FOR wkDeV IN (0_i64 ..< wkDropCountV) DO
-                    weakOwnedFlat.remove(wkMarkLoV);
+                    weakOwnedFlat.pop();
                 END
-                frameWkMarks.remove(frameWkMarks.length() - 1);
-                -- Restore slots (stride must match BC_CALL above)
-                savedBaseV = (callSavedSlots.length() - 256);
-                FOR bci IN (0_i64 ..< 256) DO slots[bci] = COPY callSavedSlots[savedBaseV + bci]; END
-                FOR bci IN (0_i64 ..< 256) DO callSavedSlots.remove(savedBaseV); END
+                frameWkMarks.pop();
+                -- Restore slots (count was pushed at BC_CALL time)
+                bcRetSlotNV = callRetSlotCounts[callRetSlotCounts.length() - 1];
+                callRetSlotCounts.pop();
+                savedBaseV = (callSavedSlots.length() - bcRetSlotNV);
+                FOR bci IN (0_i64 ..< bcRetSlotNV) DO slots[bci] = COPY callSavedSlots[savedBaseV + bci]; END
+                FOR bci IN (0_i64 ..< bcRetSlotNV) DO callSavedSlots.pop(); END
                 -- Restore ip and sp
                 retSpV = callRetSps[callRetSps.length() - 1];
-                callRetSps.remove(callRetSps.length() - 1);
+                callRetSps.pop();
                 ip = callRetIps[callRetIps.length() - 1];
-                callRetIps.remove(callRetIps.length() - 1);
+                callRetIps.pop();
                 sp = retSpV;
                 IF sp >= stack.length() THEN stack.append(Value.Nil); ELSE stack[sp] = Value.Nil; END
                 sp += 1;,
