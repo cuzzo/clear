@@ -2554,6 +2554,13 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE weakAlive: Bool[]@list = List[];
     MUTABLE weakOwnedFlat: Int64[]@list = List[];
     MUTABLE frameWkMarks: Int64[]@list = List[];
+    -- Real BG fiber tracking. BG_SPAWN appends the spawned fiber's
+    -- Promise to futureTable and pushes Value.Pair("__future__", id)
+    -- onto the value stack. AWAIT (op 83) reads the id, looks up the
+    -- Promise, and NEXTs it (blocking until the fiber completes).
+    -- Each exec! call has its own table -- spawned fibers can recurse
+    -- into exec! and each call has its own bookkeeping.
+    MUTABLE futureTable: ~Value[]@list = List[];
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -3251,11 +3258,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 fiberReturned = TRUE;
                 running = FALSE;,
-            82 -> -- BG_SPAWN [entry_ip] [argc]: spawn a fiber running exec!
-                  -- from entry_ip with argc captures. Synchronous recursive
-                  -- exec! (semantics correct, not concurrent). The result
-                  -- is pushed directly; AWAIT is identity on non-Pair so
-                  -- existing NEXT-on-future code paths still work.
+            82 -> -- BG_SPAWN [entry_ip] [argc]: spawn a real BG fiber that
+                  -- runs exec! from entry_ip with argc captures. The fiber
+                  -- runs concurrently with the caller's exec! loop on the
+                  -- same scheduler; pool's @shared:locked discipline
+                  -- propagates cross-fiber mutations safely.
+                  --
+                  -- The promise is stashed in futureTable; the value-stack
+                  -- entry is Value.Pair("__future__", Int64Val(id)). AWAIT
+                  -- (op 83) looks up the promise by id and NEXTs it.
                 bgEntry = ops[ip]; ip += 1;
                 bgArgc  = ops[ip]; ip += 1;
                 MUTABLE bgCaps: Value[]@list = List[];
@@ -3263,14 +3274,34 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                pv = exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
+                bgFut: ~Value = BG {
+                    exec!(ops, consts, curEnv, pool, bgEntry, bgCaps);
+                };
+                bgFid = futureTable.length();
+                futureTable.append(bgFut);
+                pv = Value.Pair{
+                    pairCar: Value{ Symbol: "__future__" },
+                    pairCdr: Value{ Int64Val: bgFid }
+                };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            83 -> -- AWAIT: pop Pair("__future__", result) and push the
-                  -- held result. Identity on non-future values.
+            83 -> -- AWAIT: pop Pair("__future__", id) and NEXT the
+                  -- underlying BG fiber stashed in futureTable[id].
+                  -- Identity on non-Pair values (legacy callers).
                 sp -= 1; awaitVal = COPY stack[sp];
                 MATCH awaitVal START
-                    Value.Pair AS fp -> pv = COPY fp.pairCdr;,
+                    Value.Pair AS fp ->
+                        pcar = COPY fp.pairCar;
+                        IF getStr(pcar) == "__future__" THEN
+                            fid = getInt(fp.pairCdr);
+                            IF fid >= 0_i64 && fid < futureTable.length() THEN
+                                pv = NEXT futureTable[fid];
+                            ELSE
+                                pv = COPY fp.pairCdr;
+                            END
+                        ELSE
+                            pv = COPY fp.pairCdr;
+                        END,
                     DEFAULT -> pv = COPY awaitVal;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
