@@ -2425,9 +2425,30 @@ class MIRLowering
 
     analysis = node.capture_analysis
     captured = analysis&.captures || {}
+    capture_symbols = analysis&.capture_symbols || {}
     capture_close_zig = analysis&.close_patterns || {}
     pointer_captures = analysis&.pointer_captures || Set.new
     resource_captures = analysis&.resource_captures || Set.new
+
+    # Refresh each capture's Type from the live SymbolEntry, since
+    # EscapeAnalysis.propagate_caller_sync! stamps sync/storage on
+    # parameter entries AFTER analyze_fiber_captures snapshotted
+    # node.type_info. Without this overlay, params that received
+    # @shared:locked from a caller produce a BG ctx field declared
+    # *Locked(T) while the actual value is Arc(Locked(T)) -- Zig
+    # rejects the .name = name init. See transpile-tests/253_bg_capture_lockable_param.cht.
+    refreshed_capture_type = ->(name, type_obj) {
+      next nil unless type_obj
+      base = type_obj.is_a?(Type) ? Type.new(type_obj) : Type.new(type_obj)
+      sym = capture_symbols[name]
+      next base unless sym
+      case sym.storage
+      when :multiowned then base.ownership = :multiowned unless base.ownership && base.ownership != :affine
+      when :shared     then base.ownership = :shared     unless base.ownership && base.ownership != :affine
+      end
+      base.sync = sym.sync if sym.sync && !base.sync
+      base
+    }
 
     rt_name = @rt_name
 
@@ -2444,7 +2465,7 @@ class MIRLowering
     # analysis.
     site_info = collect_bg_capture_site_info(node.body, captured.keys)
     node.capture_strategies = captured.each_with_object({}) do |(name, type_obj), h|
-      t = type_obj ? Type.new(type_obj) : nil
+      t = refreshed_capture_type.call(name, type_obj)
       next unless t
       h[name] = CaptureStrategy.classify(
         name: name, type: t, site_info: site_info, rt_name: rt_name,
@@ -2458,7 +2479,7 @@ class MIRLowering
     # captured value at the call-site is a slice, and the ctx struct field
     # has to match or Zig rejects the `.name = name` init.
     capture_fields = captured.map { |name, type_obj|
-      t = type_obj ? Type.new(type_obj) : nil
+      t = refreshed_capture_type.call(name, type_obj)
       zig_t = t ? t.zig_type(is_field: true) : "anyopaque"
       pointer_captures.include?(name) ? "#{name}: *#{zig_t}," : "#{name}: #{zig_t},"
     }.join("\n        ")

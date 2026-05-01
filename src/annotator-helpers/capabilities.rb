@@ -347,6 +347,12 @@ module CapabilityHelper
     :has_outer_ref,    # references any outer-scope variable
     :has_non_escaping_capture, # captures a non_escaping (BORROWED/RESTRICT) binding -- UAF risk
     :captures,         # Hash<name => type_obj> for code generation
+    :capture_symbols,  # Hash<name => SymbolEntry> -- live entry for late re-resolution
+                       # of sync/storage stamps that propagate_caller_sync! adds AFTER
+                       # the BG body was visited (params receiving @shared:locked from
+                       # callers). mir_lowering reads the entry's CURRENT sync/storage
+                       # to overlay onto the cached type, which fixes the BG ctx field
+                       # type-mismatch repro'd by transpile-tests/253_bg_capture_lockable_param.cht.
     :close_patterns,   # Hash<name => close_zig_string> for resource cleanup
     :pointer_captures, # Set<name> - captures needing *T pointer passing
     :string_captures,  # Set<name> - string captures needing defer free in fiber
@@ -364,7 +370,7 @@ module CapabilityHelper
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
-      captures: {}, close_patterns: {},
+      captures: {}, capture_symbols: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
     _unified_capture_walk(body_exprs, Set.new, result, is_parallel)
@@ -402,7 +408,7 @@ module CapabilityHelper
       has_local: false, has_rc: false, has_shared: false,
       has_sharded: false, has_affine_locked: false, has_outer_ref: false,
       has_non_escaping_capture: false,
-      captures: {}, close_patterns: {},
+      captures: {}, capture_symbols: {}, close_patterns: {},
       pointer_captures: Set.new, string_captures: Set.new, resource_captures: Set.new
     )
     _unified_capture_walk(body, locally_bound, result, false)
@@ -441,6 +447,10 @@ module CapabilityHelper
           # Use the AST node's type_info (matches transpiler's walk_do_identifiers).
           unless result.captures.key?(name)
             result.captures[name] = node.type_info
+            # Record the live SymbolEntry so mir_lowering can re-resolve the
+            # capture's actual type after EscapeAnalysis.propagate_caller_sync!
+            # has stamped sync/storage on params (which happens AFTER this walk).
+            result.capture_symbols[name] = info
 
             # Pre-compute per-capture metadata for transpiler.
             t = node.type_info.is_a?(Type) ? node.type_info : (node.type_info ? Type.new(node.type_info) : nil)
@@ -499,6 +509,9 @@ module CapabilityHelper
           next unless info
           result.has_outer_ref = true
           result.captures[name] ||= var_node.type_info
+          # Also record the live SymbolEntry so mir_lowering can re-resolve
+          # types after EscapeAnalysis.propagate_caller_sync! stamps params.
+          result.capture_symbols[name] ||= info
           if info.close_zig
             result.close_patterns[name] ||= info.close_zig
           end

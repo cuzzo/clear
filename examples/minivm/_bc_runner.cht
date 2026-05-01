@@ -3294,10 +3294,14 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                -- NOTE: real fibers via BG { exec!(...) } don't compile yet
-                -- (auto-pin fails to unwrap @shared:locked pool). Run the
-                -- callee synchronously and stash its result in futureTable
-                -- so AWAIT still works the same way.
+                -- NOTE: real fibers via BG { exec!(...) } need a deeper fix.
+                -- The Counter/struct case (transpile-tests/253) IS fixed by the
+                -- capture_symbols refresh in mir_lowering, but exec!'s pool
+                -- captures hit a separate issue: the SymbolEntry seen during
+                -- analyze_fiber_captures has a different object identity than
+                -- the one propagate_caller_sync! mutates, so the sync/storage
+                -- propagation never reaches the BG site. Until that's tracked
+                -- down, run the callee synchronously and stash its result.
                 bgSyncRet = exec!(ops, consts, curEnv, pool, bgEntry, GIVE bgCaps);
                 bgFut: ~Value = BG { COPY bgSyncRet; };
                 bgFid = futureTable.length();
