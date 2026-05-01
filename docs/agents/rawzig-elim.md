@@ -9,9 +9,9 @@ transfer all sit outside its reach.
 
 ## Status
 
-VM coverage as of 2026-05-01: **284 / 294 supportable passing (96%)**.
-The remaining 1 UNIMPL + 1 FAIL trace to RawZig/InlineZig templates
-or runtime features the VM doesn't implement.
+VM coverage as of 2026-05-01: **285 / 294 supportable passing (96%)**.
+The remaining 1 FAIL is a runtime gap (lock contention scheduler),
+not a RawZig/InlineZig issue.
 
 ## What we already did (BC short-circuits, not unifications)
 
@@ -359,6 +359,12 @@ DONE:
    `list AS @u s>` BIND_VAR pattern.
 7. **Cluster E (thread pinning + sharded list pipeline ops)** -- BC.
 8. **Cluster F (promise list / range streams)** -- BC.
+9. **batch_window (243)** -- BC (slice-based simulation; Zig keeps the
+   legacy CheatLib.BatchWindow template).
 
-Remaining:
-9. **batch_window (243)** -- separate RawZig in expression position.
+Remaining (runtime FAIL, not RawZig):
+10. **263_with_lock_contention** -- fundamentally requires real fiber
+    scheduling / sleep queue / lock contention semantics. BC's
+    synchronous BG_SPAWN model cannot reproduce these. To unblock,
+    BC would need cooperative scheduling for BG bodies, yielding
+    sleep(), and per-resource lock state tracking.
