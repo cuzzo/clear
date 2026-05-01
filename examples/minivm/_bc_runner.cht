@@ -2565,12 +2565,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     -- Promise, and NEXTs it (blocking until the fiber completes).
     -- Each exec! call has its own table -- spawned fibers can recurse
     -- into exec! and each call has its own bookkeeping.
-    -- Sync-fallback BG: store the resolved value directly. When real
-    -- fibers are wired, switch back to ~Value[]@list and call NEXT in
-    -- AWAIT. Storing Value directly avoids the bgSyncRet UAF where the
-    -- local's defer cleanup frees the captured Str slice before the
-    -- BG body runs.
-    MUTABLE futureTable: Value[]@list = List[];
+    MUTABLE futureTable: ~Value[]@list = List[];
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -3299,22 +3294,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                -- Real fibers via BG { exec!(...) } compile and the AWAIT
-                -- side now correctly unwraps promise(__future__, id) (was
-                -- silently falling through to the bgFid Int64Val because
-                -- the Symbol marker was checked via getStr instead of
-                -- getSymName). However, capturing bgCaps across the
-                -- async boundary still loses data: bgCaps is a
-                -- Value[]@list local to this MATCH iteration; even with
-                -- the escape-analysis fix that promotes it to heapAlloc,
-                -- the per-iteration `defer cleanup(&bgCaps)` still frees
-                -- the heap backing before the spawned fiber consumes it.
-                -- Suppressing that defer needs MIR::SuppressCleanup wired
-                -- through CaptureStrategy.MoveInto's marker_plan, which
-                -- isn't done yet. Until then, run the callee synchronously.
-                bgSyncRet = exec!(ops, consts, curEnv, pool, bgEntry, GIVE bgCaps);
+                bgFut: ~Value = BG {
+                    exec!(COPY ops, COPY consts, curEnv, pool, bgEntry, GIVE bgCaps);
+                };
                 bgFid = futureTable.length();
-                futureTable.append(COPY bgSyncRet);
+                futureTable.append(bgFut);
                 pv = Value.Pair{
                     pairCar: Value{ Symbol: "__future__" },
                     pairCdr: Value{ Int64Val: bgFid }
@@ -3336,7 +3320,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         IF getSymName(pcar) == "__future__" THEN
                             fid = getInt(fp.pairCdr);
                             IF fid >= 0_i64 && fid < futureTable.length() THEN
-                                pv = COPY futureTable[fid];
+                                pv = NEXT futureTable[fid];
                             ELSE
                                 pv = COPY fp.pairCdr;
                             END

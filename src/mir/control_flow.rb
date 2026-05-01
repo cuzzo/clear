@@ -771,8 +771,19 @@ class OwnershipDataflow
     moves = []
     AST.walk_body(bg_node.body) do |stmt|
       walk_expr_skip_copy(stmt) do |sub|
-        next unless sub.is_a?(AST::MoveNode) && sub.value.is_a?(AST::Identifier)
-        moves << sub.value.name.to_s if capture_names.include?(sub.value.name.to_s)
+        # Direct GIVE x: MoveNode(Identifier).
+        if sub.is_a?(AST::MoveNode) && sub.value.is_a?(AST::Identifier)
+          moves << sub.value.name.to_s if capture_names.include?(sub.value.name.to_s)
+          next
+        end
+        # GIVE x to a TAKES param of an adapted type (e.g. @list arg to a
+        # slice param) -- function_analysis.rb wraps the user's MoveNode
+        # in a CopyNode for the type adaptation but stamps was_moved=true
+        # on the wrapper. The user's GIVE intent lives on that flag.
+        if sub.is_a?(AST::CopyNode) && sub.respond_to?(:was_moved) && sub.was_moved &&
+           sub.value.is_a?(AST::Identifier)
+          moves << sub.value.name.to_s if capture_names.include?(sub.value.name.to_s)
+        end
       end
     end
     moves.uniq
@@ -835,12 +846,22 @@ class OwnershipDataflow
 
   # Like walk_expr but does NOT recurse into CopyNode. CopyNode wraps
   # was_moved identifiers for implicit copies -- the source is NOT consumed.
+  #
+  # Exception: when the user explicitly wrote GIVE inside a CopyNode
+  # (which happens when ensure_owned_value! wraps a user's MoveNode for
+  # type adaptation -- e.g. GIVE bgCaps to a param expecting Value[]),
+  # the move IS real. Yield the inner MoveNode so the dataflow sees the
+  # consumption. Without this, BG fibers can't transfer @list ownership
+  # because the type-adapter CopyNode hides the user's GIVE.
   def walk_expr_skip_copy(node, &block)
     return unless node
     yield node
     case node
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      # Do not recurse: COPY/FREEZE does not consume the source.
+      if node.is_a?(AST::CopyNode) && node.value.is_a?(AST::MoveNode)
+        walk_expr_skip_copy(node.value, &block)
+      end
+      # Otherwise: COPY/FREEZE does not consume the source.
     when AST::BinaryOp
       walk_expr_skip_copy(node.left, &block)
       walk_expr_skip_copy(node.right, &block)

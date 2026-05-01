@@ -400,7 +400,15 @@ class MIRPass
     return unless node
     case node
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
-      # COPY / CLONE do not consume the source.
+      # GIVE x to a TAKES param of an adapted type (e.g. @list arg to a
+      # slice param) -- function_analysis.rb wraps the user's MoveNode
+      # in a CopyNode for the type adaptation but stamps was_moved=true
+      # on the wrapper. The user's GIVE intent lives on that flag.
+      if node.is_a?(AST::CopyNode) && node.respond_to?(:was_moved) && node.was_moved &&
+         node.value.is_a?(AST::Identifier) && capture_names.include?(node.value.name.to_s)
+        out << node.value.name.to_s
+      end
+      # Otherwise: COPY / CLONE do not consume the source.
     when AST::MoveNode
       if node.value.is_a?(AST::Identifier) && capture_names.include?(node.value.name.to_s)
         out << node.value.name.to_s
