@@ -697,6 +697,8 @@ class MIREmitter
       "}"
     when :passthrough
       src
+    when :full_value
+      "try CheatLib.dupeValue(@TypeOf(#{src}), #{src}, #{alloc})"
     else
       raise "MIREmitter#emit_deep_copy: unhandled strategy :#{node.strategy}"
     end

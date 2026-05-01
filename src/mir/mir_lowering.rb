@@ -4349,6 +4349,17 @@ class MIRLowering
         lower_next_expr(rhs_unwrapped, decl_alloc)
       elsif rhs_unwrapped.is_a?(AST::FuncCall) || rhs_unwrapped.is_a?(AST::MethodCall)
         lower(node.value)
+      elsif (rhs_unwrapped.is_a?(AST::CopyNode) || rhs_unwrapped.is_a?(AST::CloneNode)) &&
+            rhs_unwrapped.value.respond_to?(:type_info) &&
+            rhs_unwrapped.value.type_info.is_a?(Type) &&
+            rhs_unwrapped.value.type_info.list_collection?
+        # `let dest: T[]@list = COPY src;` where src is also @list.
+        # The default lower_copy path returns a slice (via :list_shallow +
+        # ItemsAccess), which doesn't match the @list destination. Use
+        # CheatLib.dupeValue (which now handles ArrayList post bug 258 fix)
+        # to produce a fresh ArrayList that the list_collection cleanup
+        # can deinit independently.
+        MIR::DeepCopy.new(lower(rhs_unwrapped.value), nil, nil, :full_value, decl_alloc)
       elsif ft.capacity.is_a?(Integer) && ft.capacity > 0
         inner = MIR::ContainerInit.new(bare_zig, :list_capacity, decl_alloc, ft.capacity)
         has_caps ? compose_capability_wrap(inner, bare_zig, ft, decl_alloc) : inner

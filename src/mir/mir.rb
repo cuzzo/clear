@@ -467,6 +467,10 @@ module MIR
   #   :union       -> try CheatLib.dupeUnionValue(T, source, alloc)
   #   :list_shallow -> blk: { alloc + memcpy }
   #   :list_deep    -> blk: { alloc + per-element dupeUnionValue }
+  #   :full_value  -> try CheatLib.dupeValue(@TypeOf(source), source, alloc)
+  #                   (Used when the destination type matches source: ArrayList ->
+  #                    ArrayList, struct -> struct. Comptime branches in
+  #                    dupeValue dispatch to the right deep-copy.)
   #   :passthrough  -> source (no copy needed, value type)
   # alloc: Symbol (:heap, :frame, :cleanup) resolved via rt, OR a MIR
   # expression node (e.g. Ident("alloc")) used directly as the allocator.
