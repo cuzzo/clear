@@ -34,12 +34,15 @@ module BgCaptureClassifier
   def self.classify_all!(fn_nodes)
     fn_nodes.each do |_name, fn|
       next unless fn&.body
-      AST.each_bg_block(fn.body) { |bg| classify_one!(bg) }
+      AST.each_capture_analysis(fn.body) { |a| classify_one!(a) }
     end
   end
 
-  def self.classify_one!(bg)
-    a = bg.capture_analysis
+  # `a` is a CaptureAnalysis instance. Source can be BgBlock,
+  # BgStreamBlock, DoBlock branch (Hash with :capture_analysis key),
+  # or ConcurrentOp -- all use the same analysis machinery and now
+  # share strategy classification.
+  def self.classify_one!(a)
     return unless a && a.captures
 
     site_info = CaptureStrategy::CaptureSiteInfo.new(a.site_copied || Set.new,

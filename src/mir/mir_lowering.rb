@@ -2348,16 +2348,22 @@ class MIRLowering
       captured = analysis&.captures || {}
       pinned = branch[:pinned]
 
-      capture_fields = captured.map { |name, type_obj|
-        zig_t = type_obj ? Type.new(type_obj).zig_type : "anyopaque"
-        "#{name}: *const #{zig_t},"
+      # Same field/init/access pattern as lower_bg_block: @TypeOf(name)
+      # for the field type lets Zig deduce the correct
+      # post-monomorphization type (handles Arc-wrapped captures and
+      # already-pointer collection params correctly without compiler-
+      # side type math). Init is `.name = name` (no `&`), body
+      # references go through `ctx.name` (no deref).
+      capture_fields = captured.map { |name, _type_obj|
+        "#{name}: @TypeOf(#{name}),"
       }.join("\n    ")
 
-      capture_inits = ([".wg = &#{wg_var}"] + captured.map { |name, _| ".#{name} = &#{name}" }).join(", ")
+      capture_inits = ([".wg = &#{wg_var}"] +
+        captured.map { |name, _| ".#{name} = #{name}" }).join(", ")
 
       # Lower branch body to MIR nodes (for checker visibility) and emit Zig code.
       branch_mir = nil
-      body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}.*"] }.to_h, rt_override: "__rt") do
+      body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h, rt_override: "__rt") do
         body_stmts = branch[:body].map { |e| lower(e) }
         branch_mir = body_stmts
         body_stmts.map { |mir|

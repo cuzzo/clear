@@ -1527,8 +1527,11 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      expect(zig).to include("x: *const")
-      expect(zig).to include(".x = &x")
+      # Same pattern as BG: @TypeOf for the field type, direct value
+      # init, no deref in body. Replaces the previous *const T + &name
+      # + ctx.x.* triplet that diverged from BG codegen.
+      expect(zig).to include("x: @TypeOf(x)")
+      expect(zig).to include(".x = x")
     end
 
     it "lowers DoBlock with stack tier" do

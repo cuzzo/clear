@@ -138,6 +138,50 @@ module AST
     end
   end
 
+  # Yield every CaptureAnalysis instance reachable from `body`. A
+  # CaptureAnalysis is attached to any "fiber-like context" -- BG block,
+  # BgStream block, DO block branch, or ConcurrentOp (CONCURRENT
+  # SELECT/WHERE/EACH/etc.). All four use the same `analyze_fiber_captures`
+  # machinery; this single walker lets BgCaptureClassifier process every
+  # one with one pass per function. Replaces the per-source-type
+  # iteration that used to live in lower_bg_block, lower_do_block, and
+  # the pipeline_host concurrent lowerings.
+  def self.each_capture_analysis(body, &block)
+    each_bg_block(body) do |bg|
+      yield bg.capture_analysis if bg.capture_analysis
+    end
+    walk_body(body) do |node|
+      if node.is_a?(DoBlock)
+        node.branches&.each do |b|
+          yield b[:capture_analysis] if b[:capture_analysis]
+        end
+      end
+      _expr_each_concurrent_capture(node, &block)
+    end
+  end
+
+  def self._expr_each_concurrent_capture(node, &block)
+    case node
+    when ConcurrentOp
+      yield node.capture_analysis if node.capture_analysis
+    when BinaryOp
+      # `x s> CONCURRENT EACH { ... }` parses as BinaryOp(op=:SMOOTH);
+      # the ConcurrentOp lives on .right. (Other binary ops can also
+      # contain ConcurrentOps in either side via nested expressions.)
+      _expr_each_concurrent_capture(node.left, &block) if node.respond_to?(:left)
+      _expr_each_concurrent_capture(node.right, &block) if node.respond_to?(:right)
+    when VarDecl, BindExpr, Assignment
+      _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
+    when ReturnNode
+      _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
+    when FuncCall
+      node.args&.each { |a| _expr_each_concurrent_capture(a, &block) }
+    when MethodCall
+      _expr_each_concurrent_capture(node.object, &block)
+      node.args&.each { |a| _expr_each_concurrent_capture(a, &block) }
+    end
+  end
+
   module Locatable
     def line; token.line; end
     def column; token.column; end
