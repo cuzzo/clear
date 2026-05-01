@@ -34,7 +34,19 @@ module BgCaptureClassifier
   def self.classify_all!(fn_nodes)
     fn_nodes.each do |_name, fn|
       next unless fn&.body
-      AST.each_capture_analysis(fn.body) { |a| classify_one!(a) }
+      # Build a name -> live SymbolEntry map of THIS function's
+      # parameters. propagate_caller_sync! mutates these entries
+      # in place; child scopes (e.g. inside a CONCURRENT EACH body)
+      # deep-copy the entries on scope entry, so the per-capture
+      # SymbolEntry recorded by analyze_fiber_captures may be a stale
+      # copy. Re-resolving captures against the live param entry here
+      # eliminates the dual-SymbolEntry divergence flagged in
+      # docs/agents/bg-fibers-postmortem.md and fixes
+      # transpile-tests/257_concurrent_capture_lockable_param.cht.
+      live_param_syms = (fn.respond_to?(:params) ? (fn.params || []) : []).each_with_object({}) do |p, h|
+        h[p[:name].to_s] = p[:symbol] if p[:symbol]
+      end
+      AST.each_capture_analysis(fn.body) { |a| classify_one!(a, live_param_syms) }
     end
   end
 
@@ -42,8 +54,19 @@ module BgCaptureClassifier
   # BgStreamBlock, DoBlock branch (Hash with :capture_analysis key),
   # or ConcurrentOp -- all use the same analysis machinery and now
   # share strategy classification.
-  def self.classify_one!(a)
+  def self.classify_one!(a, live_param_syms = {})
     return unless a && a.captures
+    # Refresh capture_symbols against the live function-param entries
+    # (which propagate_caller_sync! mutates in place). Without this,
+    # captures into a fiber-like body inside a function with REQUIRES
+    # LOCKABLE see a deep-copied stale entry whose storage is still
+    # :stack instead of the propagated :shared.
+    if a.capture_symbols
+      a.capture_symbols.each do |name, _entry|
+        live = live_param_syms[name]
+        a.capture_symbols[name] = live if live
+      end
+    end
 
     site_info = CaptureStrategy::CaptureSiteInfo.new(a.site_copied || Set.new,
                                                      a.site_moved  || Set.new)

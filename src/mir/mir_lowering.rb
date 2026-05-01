@@ -1970,6 +1970,16 @@ class MIRLowering
   # Identifier → from the symbol entry (post-propagation).
   # GetField   → from the field's declared type (carries @sync/@ownership
   #              from the struct field declaration).
+  #
+  # Inside a fiber-like callback (BG/BG STREAM/DO/CONCURRENT), prefer
+  # the LIVE SymbolEntry from @current_fiber_capture_symbols. The AST
+  # node's var_node.symbol can carry a stale snapshot of sync/storage;
+  # the live entry was refreshed by EscapeAnalysis.propagate_caller_sync!
+  # and recorded into capture_analysis.capture_symbols by
+  # _unified_capture_walk. This is what makes WITH EXCLUSIVE c inside a
+  # CONCURRENT EACH callback take the direct c.ctrl.data.* Arc-unwrap
+  # path (storage = :shared) instead of the polymorphic c.* path that
+  # only works for non-Arc parameters.
   def with_cap_sync_storage(var_node)
     if var_node.is_a?(AST::GetField) && var_node.full_type.is_a?(Type)
       ft = var_node.full_type
@@ -1980,6 +1990,10 @@ class MIRLowering
                 else nil
                 end
       return [sync, storage]
+    end
+    if var_node.is_a?(AST::Identifier) &&
+       (live = @current_fiber_capture_symbols&.dig(var_node.name))
+      return [live.sync, live.storage]
     end
     sym = var_node.respond_to?(:symbol) ? var_node.symbol : nil
     [sym&.sync, sym&.storage]
@@ -2363,7 +2377,9 @@ class MIRLowering
 
       # Lower branch body to MIR nodes (for checker visibility) and emit Zig code.
       branch_mir = nil
-      body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h, rt_override: "__rt") do
+      body_code = with_fiber_capture_map(captured.map { |name, _| [name, "ctx.#{name}"] }.to_h,
+                                         capture_symbols: analysis&.capture_symbols,
+                                         rt_override: "__rt") do
         body_stmts = branch[:body].map { |e| lower(e) }
         branch_mir = body_stmts
         body_stmts.map { |mir|
@@ -2494,7 +2510,9 @@ class MIRLowering
     run_body = nil
     prev_fiber_pending = @pending_stmts
     @pending_stmts = []
-    stmt_code, result_line = with_fiber_capture_map(bg_capture_map, rt_override: bg_rt) do
+    stmt_code, result_line = with_fiber_capture_map(bg_capture_map,
+                                                    capture_symbols: analysis&.capture_symbols,
+                                                    rt_override: bg_rt) do
       body_mir = []
       sc = pre_steps.filter_map { |step|
         mir = lower(step[:expr])
@@ -2714,7 +2732,9 @@ class MIRLowering
     stream_capture_map = captured.map { |name, _| [name, "ctx.#{name}"] }.to_h
     # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
     stream_run_body = nil
-    body_code = with_fiber_capture_map(stream_capture_map, rt_override: "__rt") do
+    body_code = with_fiber_capture_map(stream_capture_map,
+                                       capture_symbols: analysis&.capture_symbols,
+                                       rt_override: "__rt") do
       body_mir = node.body.map { |expr| lower(expr) }
       stream_run_body = body_mir
       body_mir.map { |mir|
@@ -5547,13 +5567,27 @@ class MIRLowering
 
   # Temporarily installs a fiber capture map and rt alias, runs the block, then restores.
   # Used by DoBlock, BgBlock, and PipelineHost (for concurrent pipeline operators).
-  def with_fiber_capture_map(new_entries, rt_override: "__rt", &blk)
+  #
+  # `capture_symbols` (optional Hash<name => SymbolEntry>) carries the LIVE
+  # SymbolEntry for each captured name so body-lowering passes that need
+  # current sync/storage (e.g. WITH EXCLUSIVE's Arc-vs-bare dispatch in
+  # with_cap_sync_storage) read post-`propagate_caller_sync!` state, not
+  # the AST-snapshot state that var_node.symbol may carry. Without this,
+  # a `WITH EXCLUSIVE c` inside a CONCURRENT/BG/DO callback that captures
+  # c (received via REQUIRES LOCKABLE) emits the polymorphic `c.*` deref
+  # path instead of the direct `c.ctrl.data.*` Arc-unwrap, and the Zig
+  # compile fails with "cannot dereference non-pointer type Arc(...)".
+  # See transpile-tests/257_concurrent_capture_lockable_param.cht.
+  def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
     prev_map = @do_capture_map || {}
+    prev_syms = @current_fiber_capture_symbols || {}
     prev_rt  = @rt_name
     @do_capture_map = prev_map.merge(new_entries)
+    @current_fiber_capture_symbols = prev_syms.merge(capture_symbols || {})
     @rt_name = rt_override
     result = blk.call
     @do_capture_map = prev_map
+    @current_fiber_capture_symbols = prev_syms
     @rt_name = prev_rt
     result
   end

@@ -64,8 +64,8 @@ class PipelineHost
   end
 
   # Delegate fiber capture map management to MIRLowering
-  def with_fiber_capture_map(new_entries, rt_override: "__rt", &blk)
-    @lowering.with_fiber_capture_map(new_entries, rt_override: rt_override, &blk)
+  def with_fiber_capture_map(new_entries, capture_symbols: nil, rt_override: "__rt", &blk)
+    @lowering.with_fiber_capture_map(new_entries, capture_symbols: capture_symbols, rt_override: rt_override, &blk)
   end
 
   # Delegate task_config_zig to MIRLowering (used by CONCURRENT pipeline operators)
@@ -2717,7 +2717,7 @@ class PipelineHost
     end
 
     lowered_body = with_pipeline_context(placeholder: "__item") do
-      with_fiber_capture_map(capture_map, rt_override: "__rt") do
+      with_fiber_capture_map(capture_map, capture_symbols: analysis&.capture_symbols, rt_override: "__rt") do
         case body_kind
         when :expr
           [MIR::ReturnStmt.new(visit_mir(conc_op.op.expression))]
@@ -3184,7 +3184,7 @@ class PipelineHost
     end
 
     lowered_body = with_pipeline_context(placeholder: "__item") do
-      with_fiber_capture_map(capture_map, rt_override: "__rt") do
+      with_fiber_capture_map(capture_map, capture_symbols: analysis&.capture_symbols, rt_override: "__rt") do
         [*visit_pipeline_body_mir(conc_op.op.body, placeholder: "__item"), MIR::ReturnStmt.new(nil)]
       end
     end

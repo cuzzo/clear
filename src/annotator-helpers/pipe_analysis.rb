@@ -1256,6 +1256,22 @@ module PipeAnalysis
         else
           analyze_each_op(proxy)
         end
+        # List-source CONCURRENT EACH lowers via build_bounded_concurrent_callback
+        # which reads conc.capture_analysis. The non-concurrent
+        # analyze_each_op above doesn't set it -- without explicit
+        # capture analysis, the callback's ctx struct is empty and the
+        # body's outer-scope references depend on Zig's
+        # struct-method-can-see-outer-scope feature, which breaks for
+        # Arc-wrapped captures (WITH EXCLUSIVE c emits c.* deref expecting
+        # a pointer; outer c is Arc(Locked(T)) by value). Run the
+        # capture analysis so list-source CONCURRENT EACH goes through
+        # the same capture machinery as bounded/stream and BG/DO.
+        # Repro: transpile-tests/257_concurrent_capture_lockable_param.cht.
+        with_new_scope(current_scope) do
+          item_type = node.left.type_info.element_type.resolved
+          current_scope.declare("_", nil, item_type, true, false, nil, :stack)
+          conc.capture_analysis = analyze_fiber_captures(conc.op.body, is_parallel: false)
+        end
       end
     when AST::SumOp
       analyze_sum_op(proxy)
