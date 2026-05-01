@@ -131,8 +131,23 @@ if $PROGRAM_NAME == __FILE__
       # newline bytes, which a naive line-split would corrupt.
       File.write(bc_ops_file, bc_emitter.serialize_ops_blob)
       File.write(bc_consts_file, bc_emitter.serialize_consts_blob)
-      output, _status = Open3.capture2e(bc_runner_path)
-      print output
+      # Stream the runner's combined stdout/stderr live. The previous
+      # Open3.capture2e buffered everything in-process; when an outer
+      # `timeout` killed the runner mid-output, capture2e's reader
+      # thread surfaced an IOError ("stream closed in another thread")
+      # that masked the real test result. Streaming via popen2e lets
+      # us print whatever the runner produced before the kill, and
+      # tolerate the EOF/IOError on the closed pipe gracefully.
+      Open3.popen2e(bc_runner_path) do |stdin, stdout_err, wait_thr|
+        stdin.close
+        begin
+          stdout_err.each_line { |l| print l }
+        rescue IOError
+          # Pipe closed (timeout-kill mid-stream). The output already
+          # printed up to this point is what the runner emitted.
+        end
+        wait_thr.value rescue nil
+      end
     ensure
       unless ENV["BC_KEEP"]
         File.delete(bc_ops_file)    if File.exist?(bc_ops_file)
