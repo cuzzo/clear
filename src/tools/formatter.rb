@@ -298,7 +298,22 @@ class Formatter::Emitter
       body = raw[0...m.begin(0)]
     end
 
-    if body.include?('.')
+    has_decimal = body.include?('.')
+
+    # Strip the default-type suffixes:
+    #   * integer literals default to i64, so `42_i64` -> `42`
+    #   * decimal literals default to f64, so `1.0_f64` -> `1.0`
+    # Other suffixes (i32, u8, f32, ...) are kept -- they encode a
+    # non-default type that the suffix is the only way to express.
+    # `1_f64` (integer with float suffix) is NOT stripped: dropping it
+    # would silently change the type to i64.
+    if suffix == '_i64' && !has_decimal
+      suffix = ''
+    elsif suffix == '_f64' && has_decimal
+      suffix = ''
+    end
+
+    if has_decimal
       int_part, frac_part = body.split('.', 2)
       int_digits  = int_part.tr('_', '')
       frac_digits = frac_part.tr('_', '')
