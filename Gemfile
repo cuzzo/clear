@@ -6,5 +6,12 @@ group :development do
   gem 'byebug', '~> 12.0'
   gem 'rspec'
   gem 'parallel_rspec'
+
+  # Static analysis / quality
+  gem 'rubycritic', require: false
+  gem 'reek', require: false
+  gem 'flog', require: false
+  gem 'flay', require: false
+  gem 'simplecov', require: false
 end
 
