@@ -2889,7 +2889,16 @@ class MIRLowering
 
       (when_block.tests || []).each do |test_that|
         full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
+        # Scope @current_bindings to the synthesized test wrapper so
+        # lower_var_decl finds the cleanup entry MIRPass classified for
+        # locals declared inside the TEST THAT body (heap-allocated
+        # struct fields like `x = Client{ host: "..." }` would otherwise
+        # leak: their MIR::Drop never gets emitted).
+        prev_bindings = @current_bindings
+        synth_fn = test_that.synthetic_fn if test_that.respond_to?(:synthetic_fn)
+        @current_bindings = (synth_fn&.cleanup_bindings) || {}
         body_mir = lower_body(test_that.body)
+        @current_bindings = prev_bindings
         body = [preamble_iz.call] + stub_mir + setup_mir + when_setup_mir + body_mir
         tests << MIR::TestDef.new(full_name, body)
       end
@@ -2979,11 +2988,19 @@ class MIRLowering
   # Names of local Identifiers reachable from a call-input AST node that
   # need MIR::Suppress in a stub replacement (otherwise Zig flags them as
   # unused). Only top-level Identifiers count -- nested expressions
-  # (FieldGet, FuncCall, literals, ...) are evaluated implicitly.
+  # (FieldGet, FuncCall, literals, ...) are evaluated implicitly. Routes
+  # through @decl_zig_name_map / @fn_name_rename_map so suppressed names
+  # match the actual Zig var (cleanup-classification may suffix-rename
+  # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
   def stub_local_idents(node)
     return [] unless node.is_a?(AST::Identifier)
     name = node.name
-    name.is_a?(String) ? [name] : []
+    return [] unless name.is_a?(String)
+    decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+    renamed = (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) ||
+              (@fn_name_rename_map && @fn_name_rename_map[name]) ||
+              name
+    [renamed]
   end
 
   def lower_stub_decl(node)

@@ -855,7 +855,15 @@ module AST
   WhenBlock = Struct.new(:token, :description, :setup, :tests, :benchmarks) { include Locatable }
 
   # TEST THAT "description" DO body... END
-  TestThat = Struct.new(:token, :description, :body) { include Locatable }
+  TestThat = Struct.new(:token, :description, :body) do
+    include Locatable
+    attr_accessor :synthetic_fn # AST::FunctionDef wrapper synthesized by
+                                # CompilerFrontend.synthesize_test_body_wrappers!
+                                # so MIRPass treats the test body the same as
+                                # a regular FN body. mir_lowering reads
+                                # synthetic_fn.cleanup_bindings to scope its
+                                # @current_bindings while walking the body.
+  end
 
   # ASSERT_RAISES Kind, expr  OR  ASSERT_RAISES Kind, ErrorName, expr
   AssertRaises = Struct.new(:token, :kind, :error_name, :expression) { include Locatable }
