@@ -1,0 +1,41 @@
+-- Repro: BG body uses COPY on a captured outer-scope value. The
+-- CaptureStrategy.classify path returns FreshHeapCopy for this case
+-- (intent: fresh heap-copy at ctx-init time so the fiber owns its
+-- own copy and the outer cleanup is independent), but FreshHeapCopy's
+-- marker_plan ([:alloc_mark, ctx_init_name, alloc_sym], [:cleanup,
+-- ctx_init_name, alloc_sym]) is computed and never emitted. Worse,
+-- the `COPY x` expression INSIDE the BG body fails to lower at all:
+--
+--   MIREmitter: unknown node type Array (RuntimeError)
+--   from src/mir/mir_emitter.rb:149
+--
+-- So FreshHeapCopy is doubly dead: the strategy is classified
+-- correctly but neither the marker emission nor the body-side COPY
+-- lowering is wired. Any user reaching this path either gets the
+-- crash above (lowering failure) or, hypothetically once the
+-- lowering crash is fixed, a UAF (heap copy not actually performed).
+--
+-- Fix path:
+-- 1. lower_bg_block (or a body-statement lowering hook) handles
+--    COPY of a captured @list: emit the deep-copy at ctx-init time
+--    via FreshHeapCopy.marker_plan. Body becomes a read of the
+--    pre-copied ctx field.
+-- 2. The MIRChecker verifies the AllocMark/Cleanup pair from
+--    marker_plan via INV-1/INV-2.
+--
+-- Until then this test crashes the lowering. Re-enable when COPY of
+-- captured @list (or struct) inside a BG body lowers and runs
+-- correctly.
+
+FN main() RETURNS Void ->
+    items: Int64[]@list = [];
+    items.append(10_i64);
+    items.append(20_i64);
+    items.append(30_i64);
+    p: ~Int64 = BG {
+        snapshot = COPY items;
+        snapshot[0_i64] + snapshot[1_i64] + snapshot[2_i64];
+    };
+    r = NEXT p;
+    ASSERT r == 60_i64, "BG body COPY of captured @list snapshots correctly";
+END

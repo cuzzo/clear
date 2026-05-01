@@ -24,10 +24,12 @@ runs all 7 BG transpile-tests correctly:
 
 Suite remains: 342/342 transpile-tests, 2583/0 specs, 0 leaks.
 
-Two latent compiler/stdlib bugs remain, with disabled-test repros:
+Four latent compiler/stdlib bugs remain, with disabled-test repros:
 
 - `transpile-tests/255_union_equality.cht.disabled` — `IF s == Status.Active` on a payload-bearing union compiles to Zig that fails.
 - `transpile-tests/256_sleep_int_literal.cht.disabled` — `sleep(1)` compiles to Zig that rejects `@bitCast` on `comptime_int`.
+- `transpile-tests/257_concurrent_capture_lockable_param.cht.disabled` — CONCURRENT EACH callback inside a `REQUIRES LOCKABLE` function captures the locked param + uses `WITH EXCLUSIVE`. Two distinct bugs combine: (Bug 1, FIXED) pipeline_host's `*const T` + `&name` ctx pattern; (Bug 2, OPEN) WITH EXCLUSIVE's polymorphic `c.*` deref expects c to be a pointer, but inside the callback c is captured by value. Suspected dual-SymbolEntry root cause (storage not propagated to `:shared` at WITH-lowering codegen time inside the CONCURRENT body).
+- `transpile-tests/258_bg_body_copy_capture.cht.disabled` — `BG { snapshot = COPY items; ... }` for a captured `@list`. CaptureStrategy returns FreshHeapCopy for this, but neither the strategy's `marker_plan` (`[:alloc_mark, ...] + [:cleanup, ...]`) nor the body-side COPY lowering is wired. The body's COPY currently crashes at MIREmitter (`unknown node type Array`); even once lowering succeeds, the heap copy still wouldn't be emitted, producing a silent UAF.
 
 ## Catalog of bugs fixed
 

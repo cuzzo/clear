@@ -2686,11 +2686,17 @@ class PipelineHost
     analysis = conc_op.capture_analysis
     captures = analysis&.captures || {}
 
-    fields = captures.map do |name, type_obj|
-      zig_t = Type.new(type_obj).zig_type
-      mutable = @lowering.instance_variable_get(:@scope_stack)&.last&.is_mutable?(name)
-      ptr_t = mutable ? "*#{zig_t}" : "*const #{zig_t}"
-      MIR::FieldDef.new(name, ptr_t, nil)
+    # Same field/init/access pattern as lower_bg_block + lower_do_block
+    # (commit 04062213 + the BG-DO unification): @TypeOf(name) for the
+    # field type lets Zig deduce the correct post-monomorphization
+    # type, handling Arc-wrapped captures (@shared:locked propagated
+    # via REQUIRES LOCKABLE) and already-pointer collection params
+    # without compiler-side type math. Init is `.name = name` (no `&`),
+    # body references `ctx.name` (no deref). Replaces the previous
+    # `*const T` + `&name` + `ctx.name.*` triplet that broke for
+    # `@shared:locked` captures (transpile-tests/257).
+    fields = captures.keys.map do |name|
+      MIR::FieldDef.new(name, "@TypeOf(#{name})", nil)
     end
 
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
@@ -2705,7 +2711,7 @@ class PipelineHost
     unless captures.empty?
       ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
       body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
-      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}.*"] }
+      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}"] }
     else
       body << MIR::Suppress.new("raw_ctx")
     end
@@ -2727,7 +2733,7 @@ class PipelineHost
     fn = MIR::FnDef.new("apply", params, Type.new(return_type).zig_type, body, nil, true, nil)
     ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
     ctx_init = MIR::StructInit.new(ctx_name, captures.keys.map { |name|
-      { name: name, value: MIR::AddressOf.new(MIR::Ident.new(name)) }
+      { name: name, value: MIR::Ident.new(name) }
     })
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
@@ -3151,11 +3157,12 @@ class PipelineHost
     analysis = conc_op.capture_analysis
     captures = analysis&.captures || {}
 
-    fields = captures.map do |name, type_obj|
-      zig_t = Type.new(type_obj).zig_type
-      mutable = @lowering.instance_variable_get(:@scope_stack)&.last&.is_mutable?(name)
-      ptr_t = mutable ? "*#{zig_t}" : "*const #{zig_t}"
-      MIR::FieldDef.new(name, ptr_t, nil)
+    # @TypeOf(name) field, .name = name init, ctx.name access -- same
+    # pattern as build_bounded_concurrent_callback above; the `_pointer`
+    # suffix refers only to how `__item` is passed (mutable pointer
+    # for in-place mutation), not how captures are stored.
+    fields = captures.keys.map do |name|
+      MIR::FieldDef.new(name, "@TypeOf(#{name})", nil)
     end
 
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
@@ -3171,7 +3178,7 @@ class PipelineHost
     unless captures.empty?
       ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
       body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
-      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}.*"] }
+      capture_map = captures.keys.to_h { |name| [name, "ctx.#{name}"] }
     else
       body << MIR::Suppress.new("raw_ctx")
     end
@@ -3186,7 +3193,7 @@ class PipelineHost
     fn = MIR::FnDef.new("apply", params, "void", body, nil, true, nil)
     ctx_def = MIR::StructDef.new(ctx_name, fields, [fn], nil)
     ctx_init = MIR::StructInit.new(ctx_name, captures.keys.map { |name|
-      { name: name, value: MIR::AddressOf.new(MIR::Ident.new(name)) }
+      { name: name, value: MIR::Ident.new(name) }
     })
     ctx_var = "__bounded_conc_ctx_#{id}"
     ctx_let = MIR::Let.new(ctx_var, ctx_init, true, nil, "_ = &#{ctx_var};")
