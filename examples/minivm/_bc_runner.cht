@@ -2565,7 +2565,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     -- Promise, and NEXTs it (blocking until the fiber completes).
     -- Each exec! call has its own table -- spawned fibers can recurse
     -- into exec! and each call has its own bookkeeping.
-    MUTABLE futureTable: ~Value[]@list = List[];
+    -- Sync-fallback BG: store the resolved value directly. When real
+    -- fibers are wired, switch back to ~Value[]@list and call NEXT in
+    -- AWAIT. Storing Value directly avoids the bgSyncRet UAF where the
+    -- local's defer cleanup frees the captured Str slice before the
+    -- BG body runs.
+    MUTABLE futureTable: Value[]@list = List[];
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -3294,17 +3299,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     bgCaps.append(COPY stack[sp - bgArgc + bi]);
                 END
                 sp -= bgArgc;
-                -- The type-mismatch blocker is now fixed (BG capture fields
-                -- use @TypeOf -- transpile-tests/254 passes). bc_runner builds
-                -- with real fibers, but enabling the recursive `exec!` BG body
-                -- regresses simple BG tests (test 58 ASSERTs fail). The fiber
-                -- semantics for FIBER_RET / AWAIT crossing real-fiber + bytecode
-                -- boundaries needs a separate investigation. Keep the synchronous
-                -- fallback until that's tracked down.
+                -- Real fibers via BG { exec!(...) } compile and the AWAIT
+                -- side now correctly unwraps promise(__future__, id) (was
+                -- silently falling through to the bgFid Int64Val because
+                -- the Symbol marker was checked via getStr instead of
+                -- getSymName). However, capturing bgCaps across the
+                -- async boundary still loses data: bgCaps is a
+                -- Value[]@list local to this MATCH iteration; even with
+                -- the escape-analysis fix that promotes it to heapAlloc,
+                -- the per-iteration `defer cleanup(&bgCaps)` still frees
+                -- the heap backing before the spawned fiber consumes it.
+                -- Suppressing that defer needs MIR::SuppressCleanup wired
+                -- through CaptureStrategy.MoveInto's marker_plan, which
+                -- isn't done yet. Until then, run the callee synchronously.
                 bgSyncRet = exec!(ops, consts, curEnv, pool, bgEntry, GIVE bgCaps);
-                bgFut: ~Value = BG { COPY bgSyncRet; };
                 bgFid = futureTable.length();
-                futureTable.append(bgFut);
+                futureTable.append(COPY bgSyncRet);
                 pv = Value.Pair{
                     pairCar: Value{ Symbol: "__future__" },
                     pairCdr: Value{ Int64Val: bgFid }
@@ -3318,10 +3328,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 MATCH awaitVal START
                     Value.Pair AS fp ->
                         pcar = COPY fp.pairCar;
-                        IF getStr(pcar) == "__future__" THEN
+                        -- The marker is constructed as Value{ Symbol: "__future__" }
+                        -- in BG_SPAWN -- read it via getSymName, not getStr.
+                        -- (getStr returns "" for non-Str variants, so the old
+                        -- check silently fell through and AWAIT returned the
+                        -- bgFid Int64Val instead of the fiber's result.)
+                        IF getSymName(pcar) == "__future__" THEN
                             fid = getInt(fp.pairCdr);
                             IF fid >= 0_i64 && fid < futureTable.length() THEN
-                                pv = NEXT futureTable[fid];
+                                pv = COPY futureTable[fid];
                             ELSE
                                 pv = COPY fp.pairCdr;
                             END

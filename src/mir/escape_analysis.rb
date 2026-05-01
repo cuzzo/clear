@@ -441,17 +441,47 @@ module EscapeAnalysis
   end
 
   # Walk a top-level statement for embedded BG/BgStream blocks.
+  # Recurses into control flow (WHILE/FOR/IF/MATCH/WITH/DO) so a BG
+  # block nested arbitrarily deep is still seen by the escape pass.
+  # Without the recursive arms, BG-captured @list/etc. inside a loop
+  # body weren't getting heap-promoted, so their frame backing was
+  # rewound at the end of the iteration and the spawned fiber read
+  # stale memory. This was the root cause that prevented
+  # _bc_runner.cht's exec! BG_SPAWN handler from running its captured
+  # bytecode args correctly.
   private_class_method def self.e2_each_bg(stmt, &blk)
     case stmt
     when AST::BgBlock, AST::BgStreamBlock
       yield stmt
+      # The BG body itself can contain more BG blocks (nested fibers).
+      stmt.body&.each { |s| e2_each_bg(s, &blk) }
     when AST::VarDecl, AST::BindExpr, AST::Assignment
       e2_walk_expr_bg(stmt.value, &blk)
     when AST::FuncCall
       stmt.args&.each { |a| e2_walk_expr_bg(a, &blk) }
     when AST::MethodCall
       stmt.args&.each { |a| e2_walk_expr_bg(a, &blk) }
+    when AST::IfStatement
+      e2_each_block(stmt.then_branch, &blk)
+      e2_each_block(stmt.else_branch, &blk)
+    when AST::WhileLoop, AST::WhileBindLoop
+      e2_each_block(stmt.do_branch, &blk)
+    when AST::ForRange, AST::ForEach
+      e2_each_block(stmt.body, &blk)
+    when AST::WithBlock
+      e2_each_block(stmt.body, &blk)
+    when AST::MatchStatement
+      (stmt.cases || []).each { |c| e2_each_block(c[:body], &blk) }
+      e2_each_block(stmt.default_case, &blk) if stmt.default_case
+    when AST::DoBlock
+      (stmt.branches || []).each { |b| e2_each_block(b[:body], &blk) }
     end
+  end
+
+  private_class_method def self.e2_each_block(body, &blk)
+    return unless body
+    nodes = body.is_a?(Array) ? body : [body]
+    nodes.each { |n| e2_each_bg(n, &blk) }
   end
 
   private_class_method def self.e2_walk_expr_bg(expr, &blk)
