@@ -77,11 +77,18 @@ if $PROGRAM_NAME == __FILE__
     end
     build_args << "--optimized" if optimized
     build_args.concat([bc_runner_src, "-o", bc_runner_path])
-    if debug_alloc
-      # Surface compile errors when wiring the new flag through the build.
-      system("#{project_root}/clear", *build_args)
-    else
-      system("#{project_root}/clear", *build_args, [:out, :err] => File::NULL)
+    # Always surface stderr -- silently redirecting it to /dev/null
+    # is what hid Phase A/B/C's broken _bc_runner.cht source for
+    # months: the build kept failing and the cached binary kept
+    # serving stale tests, so the new BG/lock/sleep code was never
+    # actually exercised. Stdout is suppressed (it's just Zig's
+    # progress noise), stderr is shown.
+    system("#{project_root}/clear", *build_args, out: File::NULL)
+    unless $?.success?
+      $stderr.puts
+      $stderr.puts "Failed to rebuild bc_runner from #{bc_runner_src}."
+      $stderr.puts "(See errors above. Fix the source and re-run.)"
+      exit 1
     end
   end
 
