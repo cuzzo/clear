@@ -78,10 +78,6 @@ In CLEAR, you can handle all synchronization methods with a single function:
 
 ```ruby clear illustrative
 FN transact(x: Account@shared, y: Account@shared, amount: Float64) RETURNS !Bool ->
-  parsed = parseData() 
-  validated = validateData(parsed)
-  -- ...
-
   WITH
     POLYMORPHIC x AS a,
     POLYMORPHIC y AS b {
