@@ -51,10 +51,10 @@ test "CheatArena: Optimized Fuzz Test" {
     var arena = CheatArena.init(std.testing.allocator, &[_]u8{});
     defer arena.deinit();
 
-    var allocations = std.ArrayListUnmanaged(Allocation){};
+    var allocations = std.ArrayListUnmanaged(Allocation).empty;
     defer allocations.deinit(std.testing.allocator);
 
-    var scopes = std.ArrayList(Scope){};
+    var scopes = std.ArrayList(Scope).empty;
     defer scopes.deinit(std.testing.allocator);
 
     std.debug.print("\n[Fuzz] Running {d} iterations with optimized checks...\n", .{ITERATIONS});

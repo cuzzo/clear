@@ -51,6 +51,9 @@ fn t1Reader(_: usize) void {
             .Xl => {
                 _ = t1_bad_reads.fetchAdd(1, .monotonic);
             },
+            .Huge => {
+                _ = t1_bad_reads.fetchAdd(1, .monotonic);
+            },
         }
     }
 }

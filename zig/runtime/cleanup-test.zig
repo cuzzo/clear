@@ -49,7 +49,7 @@ test "cleanup: Str variant frees heap-allocated string" {
 
 test "cleanup: Array variant frees backing buffer" {
     const alloc = std.testing.allocator;
-    var list = std.ArrayListUnmanaged(TestValue){};
+    var list = std.ArrayListUnmanaged(TestValue).empty;
     try list.append(alloc, TestValue{ .Num = 1.0 });
     try list.append(alloc, TestValue{ .Num = 2.0 });
     try list.append(alloc, TestValue{ .Num = 3.0 });
@@ -72,7 +72,7 @@ test "cleanup: Map variant frees keys and backing" {
 
 test "cleanup: nested Array with heap Str elements" {
     const alloc = std.testing.allocator;
-    var list = std.ArrayListUnmanaged(TestValue){};
+    var list = std.ArrayListUnmanaged(TestValue).empty;
 
     // Add a heap-allocated string element
     const s = try alloc.dupe(u8, "heap string");
@@ -90,7 +90,7 @@ test "cleanup: Map with nested Array values" {
     var map = CheatLib.StringMap(TestValue){ .alloc = alloc };
 
     // Create a nested array value
-    var inner_list = std.ArrayListUnmanaged(TestValue){};
+    var inner_list = std.ArrayListUnmanaged(TestValue).empty;
     try inner_list.append(alloc, TestValue{ .Num = 1.0 });
     try inner_list.append(alloc, TestValue{ .Num = 2.0 });
 
@@ -116,7 +116,11 @@ test "promote: Str variant dupes to heap" {
     defer ctx.rt.deinit();
     defer ctx.ebr.deinit(std.heap.page_allocator);
 
-    var val = TestValue{ .Str = "frame string" };
+    // promote() only dupes strings whose pointer falls within the frame
+    // arena's static_block — string literals (.rodata) are left alone.
+    // Allocate via frameAlloc so promote actually escapes it to heap.
+    const frame_str = try ctx.rt.frameAlloc().dupe(u8, "frame string");
+    var val = TestValue{ .Str = frame_str };
     try CheatLib.promote(TestValue, &ctx.rt, &val);
     // After promote, val.Str should be a heap-duped copy
     try std.testing.expectEqualStrings("frame string", val.Str);
@@ -131,8 +135,10 @@ test "promote: Array of Str elements dupes strings to heap" {
     defer ctx.rt.deinit();
     defer ctx.ebr.deinit(std.heap.page_allocator);
 
-    var list = std.ArrayListUnmanaged(TestValue){};
-    try list.append(ctx.rt.frameAlloc(), TestValue{ .Str = "hello" });
+    var list = std.ArrayListUnmanaged(TestValue).empty;
+    // Frame-allocate so promote will escape to heap (literals are no-ops).
+    const hello = try ctx.rt.frameAlloc().dupe(u8, "hello");
+    try list.append(ctx.rt.frameAlloc(), TestValue{ .Str = hello });
     try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 42.0 });
 
     var val = TestValue{ .Array = list };
@@ -155,7 +161,7 @@ test "promote: nested Map inside Array" {
     var inner_map = CheatLib.StringMap(TestValue){ .alloc = heap };
     try inner_map.put(heap, heap, "key", TestValue{ .Num = 99.0 });
 
-    var list = std.ArrayListUnmanaged(TestValue){};
+    var list = std.ArrayListUnmanaged(TestValue).empty;
     try list.append(ctx.rt.frameAlloc(), TestValue{ .Map = inner_map });
     try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 1.0 });
 
@@ -180,7 +186,7 @@ test "full cycle: promote then cleanup Array of mixed values" {
     defer rt.deinit();
     rt.wireAllocator();
 
-    var list = std.ArrayListUnmanaged(TestValue){};
+    var list = std.ArrayListUnmanaged(TestValue).empty;
     try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
     try list.append(rt.frameAlloc(), TestValue{ .Null = {} });
 
@@ -202,7 +208,7 @@ test "cleanup: ArrayList of unions frees element slice variants" {
     rt.wireAllocator();
 
     // Build an ArrayList of TestValue, each containing a List slice.
-    var results = std.ArrayListUnmanaged(TestValue){};
+    var results = std.ArrayListUnmanaged(TestValue).empty;
     for (0..3) |i| {
         // Create a List variant with a heap slice
         const slice = try alloc.alloc(TestValue, 2);
@@ -274,7 +280,7 @@ test "cleanup: List variant ([]T slice) is freed by cleanup" {
     rt.wireAllocator();
 
     // Build a List variant: ArrayList promoted to heap slice.
-    var list = std.ArrayListUnmanaged(TestValue){};
+    var list = std.ArrayListUnmanaged(TestValue).empty;
     try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
     try list.append(rt.frameAlloc(), TestValue{ .Num = 2.0 });
     try CheatLib.promoteList(TestValue, &rt, &list);
@@ -290,7 +296,7 @@ test "promote: Array variant promotes backing" {
     defer ctx.rt.deinit();
     defer ctx.ebr.deinit(std.heap.page_allocator);
 
-    var list = std.ArrayListUnmanaged(TestValue){};
+    var list = std.ArrayListUnmanaged(TestValue).empty;
     try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 1.0 });
     try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 2.0 });
 
@@ -676,15 +682,17 @@ test "cleanupAlloc: mixed-provenance strings in union list" {
     // strings. cleanupAlloc handles both by checking pointer provenance.
     const alloc = std.testing.allocator;
     var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(alloc);
     var arena_buf: [16384]u8 = undefined;
     var rt = try Runtime.initFromSlice(&arena_buf, &ebr, alloc, 0);
+    defer rt.deinit();
     rt.wireAllocator();
 
     const frame = rt.frameAlloc();
     const safe = rt.cleanupAlloc();
 
     // Build an ArrayList with mixed-provenance TestValue.Str elements.
-    var items = std.ArrayListUnmanaged(TestValue){};
+    var items = std.ArrayListUnmanaged(TestValue).empty;
 
     // Element 1: heap-allocated string (from COPY)
     const heap_str = try alloc.dupe(u8, "heap-owned");
