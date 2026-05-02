@@ -100,6 +100,7 @@ Further, you can restrict the type of shared objects you allow, if you explictly
 
 In this example, AtomicPtrs (@shared:atomic) do not support multi-object consistency, and are automatically dropped from the list of allowed synchronization strategies.
 
+See the [Capabilities Guide](docs/shared-capabilities.md) for more details.
 
 ### The Finite State Machine Advantage
 
