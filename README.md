@@ -72,6 +72,34 @@ users
 BG { @micro:arena -> foo() }
 ```
 
+### Polymorphic Syncronization
+
+In CLEAR, you can handle all synchronization methods with a single function:
+
+```ruby clear illustrative
+FN transact(x: Account@shared, y: Account@shared, amount: Float64) RETURNS !Bool ->
+  parsed = parseData() 
+  validated = validateData(parsed)
+  -- ...
+
+  WITH
+    POLYMORPHIC x AS a,
+    POLYMORPHIC y AS b {
+      IF a.balance < amount -> RAISE Input, TransactionFailure, "Balance too low";
+
+      a.balance -= amount;
+      b.balance += amount;
+  }
+END
+```
+
+This may raise eyebrows if you come from Zig or Rust.  In STRICT mode, you must handle all synchronization failures inline.
+
+However, CLEAR has a sane policy for handling synchronization failures for prototyping when compiling in non-STRICT mode (default).  You can also set your own policy to overide the system defaults, or compile in STRICT mode where failure methods must be handled inline.
+
+Further, you can restrict the type of shared objects you allow, if you explictly do not want your function to have certain effects, like BLOCKING or LATENCY.
+
+
 ### The Finite State Machine Advantage
 
 Because CLEAR's concurrency is declarative, the compiler has total visibility into the lifecycle of your tasks. In Go, every Goroutine requires allocating a continuous stack (often 2KB+), which means 1 million idle connections consumes gigabytes of RAM.
