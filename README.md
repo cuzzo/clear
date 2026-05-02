@@ -105,7 +105,7 @@ See the [Capabilities Guide](docs/shared-capabilities.md) for more details.
 
 ### The Finite State Machine Advantage
 
-Because CLEAR's concurrency and memory lifetimes are declarative, the compiler has total visibility into the lifecycle of your tasks. In Go, every Goroutine requires allocating a continuous stack (2KB+, often 8KB+ for web requests) and maintaining a garbage collector, which means 1 million idle connections consume gigabytes of RAM.
+Because CLEAR's concurrency and memory lifetimes are declarative, the compiler has total visibility into the lifecycle of your tasks. In Go, every Goroutine requires allocating a continuous stack (2KB+, often 8KB+ for web requests) and maintaining a garbage collector, which means 1 million idle connections consume gigabytes of RAM, which means extra cache misses, write barries, and Garbage Collection Jitter.
 
 In CLEAR, the compiler lowers the vast majority of concurrent tasks into Finite State Machines (FSMs) rather than stack-allocated fibers. Some functions that use FFI or are re-entrant may prefer to use stacks explicitly, though *CAN* be lowered to FSMs.
 
