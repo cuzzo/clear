@@ -1,6 +1,15 @@
 -- @leak: n = 1000000 -> n = 1000
 -- KV Store Benchmark — CLEAR (HashMap@shared:sharded(128):locked, DashMap)
 --
+-- WARNING: DO NOT RUN IN DEBUG MODE.
+--   The BG worker call chain (string concat + intToString + sharded HashMap put
+--   with locking) exceeds the 12 KB usable stack of a Standard (16 KB) fiber
+--   when compiled in Debug (no inlining, no register allocation). Without
+--   __morestack guard pages, the overflow silently corrupts the next stack in
+--   the slab and segfaults the depot freelist. Use --safe or --optimized.
+--   If you must run debug-instrumented (e.g. for leak detection), force the
+--   BG blocks to @xl (256 KB) to avoid the smash.
+--
 -- Uses @shared:sharded(128):locked — Arc-wrapped lock-striped HashMap.
 -- Each of 8 shards has its own RwLock: readers are concurrent within a shard,
 -- writers are exclusive per-shard. No WITH blocks needed — methods handle
