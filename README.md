@@ -50,7 +50,8 @@ END
 
 * SQL solved the problem of writing code once, and it constantly improving as the engine improves.
 * Go proved the engine/run-time being added into the language can be fantastic.
-* Rust proved that Affine Ownership can manage memory without a garbage collector simply (it's borrow checker is what gives it a bad reputation for being complicated, not Affine Ownership in general).
+* Rust proved that Affine Ownership can manage memory without a garbage collector simply.
+  * Rust's borrow checker is what gives it a bad reputation for being complicated, not Affine Ownership in general.
 
 CLEAR attempts to merge the best of Rust, Go, and SQL to build the language of the future: one that can constantly leverage new and better architectures and run your code as fast as possible without you having to tell it *HOW* to do that exactly - like SQL code.
 
