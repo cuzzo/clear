@@ -419,8 +419,33 @@ pub const ParkingMutex = struct {
             }
         }
 
-        // Park. Set HAS_WAITERS_BIT under queue_spin.
-        _ = self.state.fetchOr(STATE_HAS_WAITERS, .release);
+        // Set HAS_WAITERS BEFORE pushing to the queue. The race we close
+        // here: an unlock that runs between the recheck above and our push
+        // to the waiter list. If unlock samples HAS_WAITERS=0 (because we
+        // haven't set it yet), it returns without taking queue_spin and
+        // without waking anyone. Setting HAS_WAITERS first means any
+        // concurrent unlock observes HAS_WAITERS=1 in its fetchAnd and
+        // takes the wake path; once it hits queue_spin it serializes with
+        // us and either pops our node (if we've pushed) or sees an empty
+        // queue + clears the stale HAS_WAITERS.
+        //
+        // After fetchOr, double-check LOCKED. If the lock became free in
+        // the same window, the unlocker might already have decided "no
+        // waiters" and returned. Try to grab the lock ourselves rather
+        // than parking — otherwise we'd park forever (the LOST WAKE bug).
+        const after_or = self.state.fetchOr(STATE_HAS_WAITERS, .acq_rel) | STATE_HAS_WAITERS;
+        if ((after_or & STATE_LOCKED) == 0) {
+            // Lock became free during our setup window. Try to acquire.
+            // Preserve flag bits including HAS_WAITERS (we may still queue,
+            // and a future unlock will clear stale HAS_WAITERS if needed).
+            const target = STATE_LOCKED | @intFromPtr(task)
+                | (after_or & STATE_FLAG_MASK);
+            if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
+                self.spinReleaseQueue();
+                return;
+            }
+            // CAS lost — someone else got it. Fall through to park.
+        }
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
         self.waiters.push(&node);
@@ -651,9 +676,22 @@ pub const ParkingRwLock = struct {
             return;
         }
 
-        // Park in FIFO queue. Set HAS_WAITERS_BIT so unlockers know to
-        // call wakeNext. We OR the bit (idempotent) under queue_spin.
-        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+        // Set HAS_WAITERS_BIT BEFORE pushing. See ParkingMutex.lockSlow for
+        // the full LOST WAKE race explanation. Same fix here: unlock that
+        // races with our park must observe HAS_WAITERS=1 in its fetchAnd
+        // and take the wake path; double-check after fetchOr to grab the
+        // lock if it became free in our setup window.
+        const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
+        if ((after_or & (WRITE_LOCKED_BIT | READER_MASK)) == 0) {
+            // Lock fully free. Try to grab it.
+            const target = WRITE_LOCKED_BIT | (after_or & HAS_WAITERS_BIT);
+            if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
+                self.write_owner.store(task, .release);
+                self.spinReleaseQueue();
+                return;
+            }
+            // CAS lost — fall through to park.
+        }
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
         self.waiters.push(&node);
@@ -787,8 +825,24 @@ pub const ParkingRwLock = struct {
             }
         }
 
-        // Park.
-        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+        // Set HAS_WAITERS_BIT BEFORE pushing. Same LOST WAKE race as the
+        // exclusive path: an unlock that runs between our last state load
+        // and our push must observe HAS_WAITERS=1 in its fetchAdd-undo
+        // path (line ~813) and call wakeNext. If the lock became fully
+        // free in our setup window, try to grab a reader slot ourselves.
+        const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
+        if ((after_or & WRITE_LOCKED_BIT) == 0) {
+            // No writer holds it. Try to add ourselves as a reader.
+            // fetchAdd here is the standard reader-acquire; the acquire
+            // ordering pairs with the writer-unlock release.
+            const prev_retry = self.state.fetchAdd(1, .acquire);
+            if ((prev_retry & WRITE_LOCKED_BIT) == 0) {
+                self.spinReleaseQueue();
+                return;
+            }
+            // Lost the race — undo and park.
+            _ = self.state.fetchSub(1, .release);
+        }
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Read };
         self.waiters.push(&node);
