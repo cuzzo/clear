@@ -414,6 +414,78 @@ module EffectTracker
     end
   end
 
+  # PASS 5a (post-#334): enforce Zig-style fallible-signature discipline.
+  # Every fn whose can_fail is true MUST declare its return type as an
+  # error union (`RETURNS !T`). The user authored the body that raises
+  # or that calls a fallible callee; the signature must reflect that.
+  #
+  # The exempt list:
+  #   - main: always can_fail (entry point) per compute_can_fail!, but
+  #     CLEAR allows `FN main() RETURNS Void -> ...` without `!Void`.
+  #   - extern functions: their fallibility comes from the FFI signature,
+  #     not the body; the !T discipline doesn't apply.
+  #   - constructor / destructor / methods auto-synthesized for unions:
+  #     their signatures are stamped by the annotator; user code can't
+  #     change them.
+  def enforce_fallible_returns!
+    # Post-#335: the rule is implemented but currently a NO-OP (off
+    # behind FALLIBLE_RETURNS_ENFORCE = false). Flipping it to true
+    # turns each "fn can fail but doesn't declare !T" into a hard
+    # compile error. The migration cost is currently ~600 spec
+    # fixtures and an unknown count of transpile-tests / examples /
+    # benchmarks that need `RETURNS T` -> `RETURNS !T` -- too big
+    # to land in one commit. The scaffolding (parser's
+    # `explicit_return_type` stamp, this method, the diagnostic hint
+    # helper) stays in place so the migration can be picked up
+    # incrementally, and the flag flipped once the tree is clean.
+    return unless FALLIBLE_RETURNS_ENFORCE
+
+    @fn_nodes.each do |name, fn_node|
+      next unless fn_node.can_fail
+      next if name == "main"
+      next if fn_node.respond_to?(:extern) && fn_node.extern
+      next if fn_node.respond_to?(:synthesized) && fn_node.synthesized
+
+      # Post-#335: only enforce on EXPLICIT `RETURNS T` clauses. A fn
+      # without `RETURNS` is implicit-Void / inferred and stays exempt
+      # (the user didn't author a non-error type, so there's nothing
+      # to migrate). Stamped at parse time on FunctionDef#explicit_return_type.
+      next unless fn_node.respond_to?(:explicit_return_type) && fn_node.explicit_return_type
+
+      ret = fn_node.return_type
+      next unless ret
+
+      ret_t = ret.is_a?(Type) ? ret : Type.new(ret)
+      next if ret_t.error_union?
+
+      # Find at least one source of fallibility for the diagnostic.
+      hint = fallibility_hint_for(name)
+      error!(fn_node,
+        "Function '#{name}' can fail (#{hint}) but its return type " \
+        "doesn't declare it. Change `RETURNS #{ret_t.resolved}` to " \
+        "`RETURNS !#{ret_t.resolved}` so callers can see the error " \
+        "union and handle it (Zig-style discipline). Add a CATCH at " \
+        "the call site, propagate via `try`, or mark the call's result " \
+        "with `OR <action>`.")
+    end
+  end
+
+  # Set to true to flip the fallible-signature check from a NO-OP into
+  # a hard compile error. See `enforce_fallible_returns!` for the
+  # migration scope.
+  FALLIBLE_RETURNS_ENFORCE = false
+
+  # Best-effort source-of-fallibility hint for the enforce_fallible_returns!
+  # diagnostic. Reports either a direct RAISE (if the fn raises directly)
+  # or names a fallible callee (transitive fallibility).
+  def fallibility_hint_for(name)
+    return "raises directly via RAISE" if @fn_raises_directly[name]
+    callees = @call_graph[name] || []
+    fallible_callee = callees.find { |c| @fn_nodes[c]&.can_fail }
+    return "calls fallible '#{fallible_callee}'" if fallible_callee
+    "transitively"
+  end
+
   # PASS 5b: scan all AST nodes for Identifiers used as fn-type arguments.
   # Any named function referenced as a value must adopt the rt-bearing calling
   # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.
@@ -929,7 +1001,7 @@ module EffectTracker
         # MVCC: SNAPSHOT-transactions emit `Versioned.update[Multi](...)
         # catch |__err| switch (__err) { ..., else => return __err }`,
         # so the fn body has a raise path regardless of the user's
-        # ON Conflict action. Detect structurally rather than via
+        # ON MvccConflict action. Detect structurally rather than via
         # heap_count proxy (T1 cleanup).
         found[0] = true if n.snapshot_mode == :transaction
         # WITH with a fallible lock-error clause (RAISE / EXIT) also

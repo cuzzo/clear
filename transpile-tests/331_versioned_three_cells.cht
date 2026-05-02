@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
         va.v = va.v * 10;
         vb.v = vb.v * 10;
         vc.v = vc.v * 10;
-    } ON Conflict RAISE
+    } ON MvccConflict RAISE
 
     WITH SNAPSHOT a AS view { ASSERT view.v == 10, "three-cell a"; }
     WITH SNAPSHOT b AS view { ASSERT view.v == 20, "three-cell b"; }

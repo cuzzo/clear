@@ -644,28 +644,28 @@ t0_v = timestampMs();
     wv1: ~Void = BG { @parallel ->
     MUTABLE i: Int64 = 0_i64;
     WHILE i < writes_per DO
-        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON MvccConflict RAISE
         i = i + 1_i64;
     END
 };
     wv2: ~Void = BG { @parallel ->
     MUTABLE i: Int64 = 0_i64;
     WHILE i < writes_per DO
-        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON MvccConflict RAISE
         i = i + 1_i64;
     END
 };
     wv3: ~Void = BG { @parallel ->
     MUTABLE i: Int64 = 0_i64;
     WHILE i < writes_per DO
-        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON MvccConflict RAISE
         i = i + 1_i64;
     END
 };
     wv4: ~Void = BG { @parallel ->
     MUTABLE i: Int64 = 0_i64;
     WHILE i < writes_per DO
-        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+        WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON MvccConflict RAISE
         i = i + 1_i64;
     END
 };

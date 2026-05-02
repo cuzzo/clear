@@ -5,10 +5,12 @@ require_relative "../src/ast/ast"
 # AtomicPtr M3.8 -- annotator per-arm conflict-clause validation
 # for `WITH SNAPSHOT ... AS [MUTABLE] alias MATCH ... END`.
 #
-# - VERSIONED arm + MUTABLE: REQUIRES `ON Conflict` (mirrors the
+# - VERSIONED arm + MUTABLE: REQUIRES `ON MvccConflict` (mirrors the
 #   single-cell M5 contract).
-# - ATOMIC arm + MUTABLE: FORBIDS `ON Conflict` (rcu retries until
-#   success; design contract docs/agents/atomicptr.md §6.2).
+# - ATOMIC arm + MUTABLE: FORBIDS conflict handlers (rcu retries until
+#   success; design contract docs/agents/atomicptr.md §6.2). Once
+#   #330 bounds AtomicPtr.update at 256, the right handler will be
+#   `ON AtomicConflict`, but for now no inline handler is permitted.
 # - read-mode SNAPSHOT MATCH (no MUTABLE on any cell): no per-arm
 #   conflict-clause requirement at all (read paths can't fail).
 # - The legacy M2/G1 rejection of "WITH c AS MUTABLE va MATCH ...
@@ -38,35 +40,39 @@ RSpec.describe "WITH SNAPSHOT MATCH annotator validation (M3.8)" do
       CLEAR
     end
 
-    it "accepts VERSIONED arm with ON Conflict + ATOMIC arm without" do
+    it "accepts VERSIONED arm with ON MvccConflict + ATOMIC arm without" do
       arms = <<~ARMS.rstrip
-            WHEN VERSIONED -> { x.port = x.port + 1; } ON Conflict RAISE
+            WHEN VERSIONED -> { x.port = x.port + 1; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { x.port = x.port + 1; }
       ARMS
       expect { annotate(with_arms(arms)) }.not_to raise_error
     end
 
-    it "rejects when the VERSIONED arm is missing ON Conflict" do
+    it "VERSIONED arm without ON MvccConflict falls back to the program SYNC POLICY (#328)" do
+      # True-Sync-Polymorphism (#328): the per-arm `ON MvccConflict`
+      # is no longer mandatory on the VERSIONED arm of a SNAPSHOT
+      # MATCH MUTABLE; the program-level SYNC POLICY (baked-in default
+      # raises) provides the fallback handler. Inline arm-level handler
+      # is still accepted (it would override the policy).
       arms = <<~ARMS.rstrip
             WHEN VERSIONED -> { x.port = x.port + 1; }
             WHEN ATOMIC    -> { x.port = x.port + 1; }
       ARMS
-      expect { annotate(with_arms(arms)) }
-        .to raise_error(/VERSIONED.*MUTABLE.*ON Conflict|MUTABLE.*VERSIONED.*ON Conflict/i)
+      expect { annotate(with_arms(arms)) }.not_to raise_error
     end
 
-    it "rejects when the ATOMIC arm has an ON Conflict (forbidden by rcu contract)" do
+    it "rejects when the ATOMIC arm has a conflict handler (forbidden by rcu contract)" do
       arms = <<~ARMS.rstrip
-            WHEN VERSIONED -> { x.port = x.port + 1; } ON Conflict RAISE
-            WHEN ATOMIC    -> { x.port = x.port + 1; } ON Conflict RAISE
+            WHEN VERSIONED -> { x.port = x.port + 1; } ON MvccConflict RAISE
+            WHEN ATOMIC    -> { x.port = x.port + 1; } ON MvccConflict RAISE
       ARMS
       expect { annotate(with_arms(arms)) }
-        .to raise_error(/ATOMIC.*ON Conflict.*(?:not valid|rcu)/i)
+        .to raise_error(/ATOMIC.*forbids.*conflict|ATOMIC.*rcu/i)
     end
   end
 
   describe "read-mode SNAPSHOT MATCH (no MUTABLE)" do
-    it "accepts read-only arms with no ON Conflict on either arm" do
+    it "accepts read-only arms with no ON MvccConflict on either arm" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }

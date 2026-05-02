@@ -28,7 +28,10 @@
 //!   - Single-cell only. Multi-pointer atomicity is not supported (M3.9
 //!     rejects multi-cell `WITH SNAPSHOT MUTABLE` at parse/annotate);
 //!     this primitive doesn't even expose a multi-CAS API.
-//!   - No `ON Conflict` because rcu retries until success.
+//!   - No conflict-handler today: rcu retries until success. Once
+//!     #330 bounds the loop at 256 attempts, the right handler at the
+//!     CLEAR level will be `ON AtomicConflict`, defaulted by the
+//!     baked-in SYNC POLICY.
 //!   - Memory ordering: seq_cst surfaces (acq_rel / acquire on CAS,
 //!     acquire on read load). v0.3 inherits seq_cst-only from M1
 //!     atomics; relaxation surfaces are deferred.
@@ -49,6 +52,24 @@ pub const Atomic = blk: {
     const root = @import("root");
     break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
 };
+
+// True-Sync-Polymorphism (#330): hard cap on AtomicPtr.update CAS
+// retries before surfacing `error.AtomicConflict` (bridges to CLEAR
+// `AtomicConflict`). 256 is generous because atomic-pointer retry is
+// cheap (one acquire-load + one closure call + one CAS); past 256
+// fresh attempts all losing the publish race signals real contention
+// the caller (or CLEAR's `ON AtomicConflict RETRY(N)` / SYNC POLICY)
+// should handle.
+//
+// Test seam: a test wrapper at zig/ root may declare
+// `pub const CLEAR_ATOMIC_PTR_MAX_UPDATE_RETRIES: usize = N;` to lower
+// the cap so exhaustion fires deterministically under modest concurrency.
+// Production code never declares this, so the default (256) folds to a
+// constant. Mirrors the Versioned pattern.
+pub const MAX_UPDATE_RETRIES: usize = if (@hasDecl(@import("root"), "CLEAR_ATOMIC_PTR_MAX_UPDATE_RETRIES"))
+    @import("root").CLEAR_ATOMIC_PTR_MAX_UPDATE_RETRIES
+else
+    256;
 
 // Comptime helper: accept either `*ThreadLocalEbr` (used directly by
 // unit tests) OR `*Runtime` (the WITH SNAPSHOT lowering passes the
@@ -176,10 +197,19 @@ pub fn AtomicPtr(comptime T: type) type {
         ///     the failure-side load of `actual_old` with the
         ///     winning writer's prior `.release`.
         ///
-        /// UNBOUNDED RETRY (Rust arc-swap rcu semantics) — there is
-        /// no `error.UpdateRetriesExhausted`. The caller's `func`
-        /// must terminate; under contention the only failure mode
-        /// is allocation OOM (`error.OutOfMemory`).
+        /// BOUNDED RETRY (True-Sync-Polymorphism #330): the loop is
+        /// capped at `MAX_UPDATE_RETRIES` (256 by default; tests can
+        /// override via `pub const CLEAR_ATOMIC_PTR_MAX_UPDATE_RETRIES`
+        /// at root). Past the cap, returns `error.AtomicConflict` so
+        /// the caller (or CLEAR's per-WITH `ON AtomicConflict ...` /
+        /// program SYNC POLICY) can surface a real contention failure
+        /// instead of spinning indefinitely.
+        ///
+        /// The cap is generous (256) because atomic-pointer retry is
+        /// cheap -- one acquire-load + one closure call + one CAS --
+        /// versus Versioned commit retry which re-runs a whole
+        /// transaction body. Hitting the cap means contention so
+        /// extreme that 256 fresh attempts all lost the publish race.
         pub fn update(
             self: *Self,
             ebr_or_rt: anytype,
@@ -192,7 +222,8 @@ pub fn AtomicPtr(comptime T: type) type {
             var success = false;
             defer if (!success) allocator.destroy(new_ptr);
 
-            while (true) {
+            var retries: usize = 0;
+            while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
                 const old_ptr = self.ptr.load(.acquire) orelse unreachable;
 
                 // Re-copy + re-mutate into the SAME `new_ptr`. The
@@ -213,6 +244,7 @@ pub fn AtomicPtr(comptime T: type) type {
                 try ebr.retire(allocator, old_ptr);
                 return;
             }
+            return error.AtomicConflict;
         }
 
         /// Lower-level CAS primitive. Tries to publish `new` if the

@@ -88,7 +88,7 @@ RSpec.describe "P3 effect inference + correctness checks" do
         FN bump(c: Counter, p: ~Int64) RETURNS Void
           REQUIRES c: LOCKED
         ->
-          WITH EXCLUSIVE c AS x {
+          WITH POLYMORPHIC EXCLUSIVE c AS x {
             v = NEXT p;
             x.value = x.value + v;
           }
@@ -104,7 +104,7 @@ RSpec.describe "P3 effect inference + correctness checks" do
           REQUIRES c: LOCKED
         ->
           v = NEXT p;
-          WITH EXCLUSIVE c AS x { x.value = x.value + v; }
+          WITH POLYMORPHIC EXCLUSIVE c AS x { x.value = x.value + v; }
         END
 
         FN main() RETURNS Void ->

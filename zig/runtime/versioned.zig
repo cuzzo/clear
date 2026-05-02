@@ -15,23 +15,26 @@ pub const Atomic = blk: {
 };
 
 // Hard cap on update / updateMulti CAS retries before surfacing
-// `error.UpdateRetriesExhausted`. 10,000 is well above any realistic
-// contention window in production; under contention so high that 10K
-// retries don't drain, the caller (or CLEAR's `ON Conflict RETRY(N)
-// THEN ...`) deserves a chance to back off rather than spin
-// indefinitely. The single-cell `update` and the multi-cell
-// `updateMulti` outer-retry loop share this budget intentionally:
-// they're the same shape of "give up and surface to the user" cap.
+// `error.UpdateRetriesExhausted` (bridges to CLEAR `MvccConflict`).
+// True-Sync-Polymorphism (#330) lowers this from the original 10,000
+// to 64. Versioned.update re-runs the WHOLE transaction body on
+// retry (vs. AtomicPtr.update which just re-applies a closure on a
+// fresh allocation), so retry is more expensive here. 64 is the
+// realistic "give-up budget" -- past that, the caller (or CLEAR's
+// `ON MvccConflict RETRY(N) THEN ...` / SYNC POLICY) handles the
+// failure rather than spinning. The single-cell `update` and the
+// multi-cell `updateMulti` outer-retry loop share this budget
+// intentionally: they're the same shape of "give up and surface."
 //
 // Test seam: a test wrapper at zig/ root may declare
 // `pub const CLEAR_MVCC_MAX_UPDATE_RETRIES: usize = N;` to lower the
 // cap so exhaustion fires deterministically under modest concurrency.
-// Production code never declares this, so the default (10_000)
-// folds to a constant. Mirrors the SimAtomic / CLEAR_PROFILE pattern.
+// Production code never declares this, so the default (64) folds to a
+// constant. Mirrors the SimAtomic / CLEAR_PROFILE pattern.
 pub const MAX_UPDATE_RETRIES: usize = if (@hasDecl(@import("root"), "CLEAR_MVCC_MAX_UPDATE_RETRIES"))
     @import("root").CLEAR_MVCC_MAX_UPDATE_RETRIES
 else
-    10_000;
+    64;
 
 // -------------------------------------------------------------------------
 // Concurrency Primitives (Locked<T>)
@@ -270,10 +273,10 @@ pub fn Versioned(comptime T: type) type {
         // H2 (bounded retry): retries are capped at `MAX_UPDATE_RETRIES`
         // (module-level; see top of file) with a spin-pause backoff
         // that grows up to 256 hints per iteration. Past the cap,
-        // returns `error.UpdateRetriesExhausted` so the caller can
-        // choose what to do (retry at a higher layer via CLEAR's
-        // `ON Conflict RETRY(N) THEN ...`, fall back to a lock,
-        // surface to the user, etc).
+        // returns `error.UpdateRetriesExhausted` (bridges to CLEAR
+        // `MvccConflict`) so the caller can choose what to do (retry
+        // at a higher layer via CLEAR's `ON MvccConflict RETRY(N) THEN
+        // ...`, fall back to a lock, surface to the user, etc).
         pub fn update(self: *Self, trt: *Runtime, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) UpdateError!void {
             const new_ptr = try allocator.create(T);
             var success = false;
@@ -366,15 +369,15 @@ pub fn Versioned(comptime T: type) type {
 // pointers, deallocate the new nodes, propagate the error.
 //
 // Errors:
-//   * `error.UpdateRetriesExhausted` -> CLEAR `Conflict`. Fires if we
-//     fail to acquire all N tags within `MAX_UPDATE_RETRIES` outer
+//   * `error.UpdateRetriesExhausted` -> CLEAR `MvccConflict`. Fires if
+//     we fail to acquire all N tags within `MAX_UPDATE_RETRIES` outer
 //     attempts (genuine pathological contention).
 //   * Allocator errors propagate.
 
 /// `updateMulti` returns `anyerror!void` because the user-supplied txn
 /// body can return any error type. The set we ourselves produce is
 /// `Allocator.Error || error{UpdateRetriesExhausted}` -- the latter is
-/// what bridges to CLEAR's `Conflict`. Documented for tests; not
+/// what bridges to CLEAR's `MvccConflict`. Documented for tests; not
 /// enforced as a narrower error union.
 pub const MultiUpdateError = anyerror;
 

@@ -81,7 +81,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         STRUCT Cfg { port: Int64 }
         FN main!() RETURNS Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:versioned;
-          WITH SNAPSHOT c AS MUTABLE a { a.port = a.port + 1; } ON Conflict RAISE
+          WITH SNAPSHOT c AS MUTABLE a { a.port = a.port + 1; } ON MvccConflict RAISE
           RETURN;
         END
       CLEAR
@@ -148,7 +148,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         STRUCT Cfg { host: String, port: Int64 }
         FN swap!() RETURNS Void ->
           MUTABLE c = Cfg{ host: "x", port: 80 } @shared:versioned;
-          WITH SNAPSHOT c AS MUTABLE a { a = Cfg{ host: "y", port: 443 }; } ON Conflict RAISE
+          WITH SNAPSHOT c AS MUTABLE a { a = Cfg{ host: "y", port: 443 }; } ON MvccConflict RAISE
           RETURN;
         END
       CLEAR
@@ -179,7 +179,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
         STRUCT Cfg { port: Int64 }
         FN main!() RETURNS Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:versioned;
-          WITH SNAPSHOT c AS MUTABLE a { a.port = a.port + 1; } ON Conflict RAISE
+          WITH SNAPSHOT c AS MUTABLE a { a.port = a.port + 1; } ON MvccConflict RAISE
           RETURN;
         END
       CLEAR

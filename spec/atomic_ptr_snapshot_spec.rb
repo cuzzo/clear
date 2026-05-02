@@ -4,7 +4,7 @@ require_relative "../src/ast/ast"
 
 # AtomicPtr M3.5 / M3.6 -- WITH SNAPSHOT validation against
 # @indirect:atomic cells. Read mode shares the @versioned surface
-# (M3.5); MUTABLE mode requires NO `ON Conflict` (M3.6, Rust rcu --
+# (M3.5); MUTABLE mode requires NO `ON MvccConflict` (M3.6, Rust rcu --
 # AtomicPtr.update retries until success, no conflict path).
 RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
   def annotate(src)
@@ -43,7 +43,7 @@ RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
   end
 
   describe "MUTABLE mode (M3.6)" do
-    it "accepts WITH SNAPSHOT cell AS MUTABLE x { ... } with NO ON Conflict on @indirect:atomic" do
+    it "accepts WITH SNAPSHOT cell AS MUTABLE x { ... } with NO ON MvccConflict on @indirect:atomic" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
@@ -56,20 +56,24 @@ RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
       }.not_to raise_error
     end
 
-    it "rejects ON Conflict on an @indirect:atomic SNAPSHOT MUTABLE block" do
+    it "rejects ON MvccConflict on an @indirect:atomic SNAPSHOT MUTABLE block" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
           FN main() RETURNS Void ->
             cfg = Counter{ value: 0 } @indirect:atomic;
-            WITH SNAPSHOT cfg AS MUTABLE x { x.value = x.value + 1; } ON Conflict RAISE
+            WITH SNAPSHOT cfg AS MUTABLE x { x.value = x.value + 1; } ON MvccConflict RAISE
             RETURN;
           END
         CLEAR
-      }.to raise_error(/ON Conflict.*isn'?t valid.*@indirect:atomic.*rcu/i)
+      }.to raise_error(/ON MvccConflict.*isn'?t valid.*@indirect:atomic|AtomicConflict.*not.*MvccConflict/i)
     end
 
-    it "still requires ON Conflict on a @versioned SNAPSHOT MUTABLE block" do
+    it "no inline ON MvccConflict: @versioned SNAPSHOT MUTABLE falls back to the program SYNC POLICY (#328)" do
+      # True-Sync-Polymorphism (#328): the inline `ON MvccConflict` is
+      # no longer mandatory on a @versioned SNAPSHOT MUTABLE; the
+      # program SYNC POLICY (baked-in default raises) provides the
+      # fallback handler. Inline is still accepted (M3.6 contract).
       expect {
         annotate(<<~CLEAR)
           STRUCT Counter { value: Int64 }
@@ -79,7 +83,7 @@ RSpec.describe "WITH SNAPSHOT against @indirect:atomic (M3.5 / M3.6)" do
             RETURN;
           END
         CLEAR
-      }.to raise_error(/WITH SNAPSHOT.*MUTABLE requires an ON Conflict/)
+      }.not_to raise_error
     end
   end
 end

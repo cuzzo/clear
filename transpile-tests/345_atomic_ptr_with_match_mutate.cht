@@ -2,7 +2,7 @@
 -- mutate dispatch.
 --
 -- The two families differ on the mutate surface (VERSIONED requires
--- ON Conflict; ATOMIC forbids it), so polymorphic mutate REQUIRES
+-- ON MvccConflict; ATOMIC forbids it), so polymorphic mutate REQUIRES
 -- VERSIONED|ATOMIC must use SNAPSHOT MATCH (M3.11). Each arm uses
 -- its family-specific shape; comptime dispatch picks at the call site.
 
@@ -12,7 +12,7 @@ FN bumpValue!(MUTABLE c: Counter) RETURNS Void
     REQUIRES c: VERSIONED | ATOMIC
 ->
     WITH SNAPSHOT c AS MUTABLE x MATCH
-        WHEN VERSIONED -> { x.value = x.value + 1; } ON Conflict RAISE
+        WHEN VERSIONED -> { x.value = x.value + 1; } ON MvccConflict RAISE
         WHEN ATOMIC    -> { x.value = x.value + 1; }
     END
     RETURN;

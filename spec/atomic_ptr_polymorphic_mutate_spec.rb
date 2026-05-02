@@ -5,12 +5,12 @@ require_relative "../src/ast/ast"
 # AtomicPtr M3.11 -- when a fn declares `REQUIRES c: VERSIONED | ATOMIC`
 # AND the body contains `WITH SNAPSHOT c AS MUTABLE x { ... }` without
 # MATCH, error directing the user to MATCH-dispatch. The two families
-# differ in their ON Conflict requirement (VERSIONED requires it,
+# differ in their ON MvccConflict requirement (VERSIONED requires it,
 # ATOMIC forbids it), so the bare body shape can't be reconciled.
 #
 # Error message (design contract docs/agents/atomicptr.md §6.4):
 #   "Mutate surface differs by family: @versioned bounds retries and
-#    requires `ON Conflict`; @indirect:atomic retries unbounded and
+#    requires `ON MvccConflict`; @indirect:atomic retries unbounded and
 #    forbids it. Dispatch per family with `WITH SNAPSHOT c AS
 #    MUTABLE x MATCH ...`."
 RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
@@ -21,22 +21,16 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
     ast
   end
 
-  describe "rejected: VERSIONED | ATOMIC without MATCH" do
-    it "rejects bare `WITH SNAPSHOT c AS MUTABLE x { ... }` with ON Conflict" do
-      expect {
-        annotate(<<~CLEAR)
-          STRUCT Cfg { port: Int64 }
-          FN bumpPort!(MUTABLE c: Cfg) RETURNS Void
-            REQUIRES c: VERSIONED | ATOMIC
-          ->
-            WITH SNAPSHOT c AS MUTABLE x { x.port = x.port + 1; } ON Conflict RAISE
-            RETURN;
-          END
-        CLEAR
-      }.to raise_error(/Mutate surface differs by family.*WITH SNAPSHOT.*MATCH/im)
-    end
-
-    it "rejects bare `WITH SNAPSHOT c AS MUTABLE x { ... }` without ON Conflict" do
+  describe "accepted [#332]: VERSIONED | ATOMIC bare body (M3.11 rejection removed)" do
+    # The M3.11 rejection forced MATCH whenever REQUIRES admitted both
+    # VERSIONED and ATOMIC, because the two families differed in their
+    # ON Conflict requirement (VERSIONED required it, ATOMIC forbade
+    # it). After #324 split Conflict, #328 added the SYNC POLICY chain,
+    # and #330 bounded AtomicPtr.update + bridged AtomicConflict, both
+    # families now use identical SNAPSHOT MUTABLE syntax. The rejection
+    # is removed -- bare bodies on polymorphic VERSIONED|ATOMIC mutate
+    # are accepted.
+    it "accepts bare `WITH SNAPSHOT c AS MUTABLE x { ... }` without inline handler" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
@@ -47,7 +41,7 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
             RETURN;
           END
         CLEAR
-      }.to raise_error(/Mutate surface differs by family.*WITH SNAPSHOT.*MATCH/im)
+      }.not_to raise_error
     end
   end
 
@@ -60,7 +54,7 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
             REQUIRES c: VERSIONED | ATOMIC
           ->
             WITH SNAPSHOT c AS MUTABLE x MATCH
-              WHEN VERSIONED -> { x.port = x.port + 1; } ON Conflict RAISE
+              WHEN VERSIONED -> { x.port = x.port + 1; } ON MvccConflict RAISE
               WHEN ATOMIC    -> { x.port = x.port + 1; }
             END
             RETURN;
@@ -89,21 +83,21 @@ RSpec.describe "Polymorphic VERSIONED|ATOMIC mutate without MATCH (M3.11)" do
   end
 
   describe "regression: single-family REQUIRES still uses bare body" do
-    it "REQUIRES c: VERSIONED only -- bare body still works (with ON Conflict)" do
+    it "REQUIRES c: VERSIONED only -- bare body still works (with ON MvccConflict)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
           FN bumpV!(MUTABLE c: Cfg) RETURNS Void
             REQUIRES c: VERSIONED
           ->
-            WITH SNAPSHOT c AS MUTABLE x { x.port = x.port + 1; } ON Conflict RAISE
+            WITH SNAPSHOT c AS MUTABLE x { x.port = x.port + 1; } ON MvccConflict RAISE
             RETURN;
           END
         CLEAR
       }.not_to raise_error
     end
 
-    it "REQUIRES c: ATOMIC only -- bare body still works (no ON Conflict)" do
+    it "REQUIRES c: ATOMIC only -- bare body still works (no ON MvccConflict)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }

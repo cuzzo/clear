@@ -38,7 +38,7 @@ FN main() RETURNS Void ->
         WHILE i < 5_i64 DO
             WITH SNAPSHOT c AS MUTABLE va {
                 va.v = va.v + 1_i64;
-            } ON Conflict RAISE
+            } ON MvccConflict RAISE
             i = i + 1_i64;
         END
     };

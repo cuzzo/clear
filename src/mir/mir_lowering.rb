@@ -1336,7 +1336,8 @@ class MIRLowering
     end
 
     # Standard call
-    args_mir = node.args.map { |a|
+    callee_sig = @fn_sigs&.dig(node.name) || @fn_sigs&.dig(node.name.to_s)
+    args_mir = node.args.each_with_index.map { |a, idx|
       # The annotator stamps was_moved when the callee takes ownership of this
       # arg on success (param[:takes] || GIVE). That is the SINGLE source of
       # truth for "callee takes" — the lowering must not re-derive it from
@@ -1356,6 +1357,16 @@ class MIRLowering
         else
           MIR::AddressOf.new(arg)
         end
+      elsif universal_poly_arg_needs_addr?(a, callee_sig, idx)
+        # True-Sync-Polymorphism Gate 3: plain T into a universally-
+        # polymorphic param (REQUIRES = Set[]) is auto-borrowed, so the
+        # callee's `WITH POLYMORPHIC c AS x { x.field = ... }` mutates
+        # the caller's binding instead of a pass-by-value copy. Other
+        # capability shapes (Arc/Rc/*T/Locked/Versioned/...) already
+        # arrive as pointers or as wrappers the helper unwraps, and
+        # are handled by the helper's comptime dispatch -- no &-wrap
+        # needed at the call site.
+        MIR::AddressOf.new(arg)
       else
         arg
       end
@@ -2112,6 +2123,17 @@ class MIRLowering
     # path unchanged; multi-arm WITH routes to a placeholder that
     # panics at runtime so silent no-ops are impossible.
     return lower_with_match_block(node) if node.arms
+
+    # True-Sync-Polymorphism Gate 3: `WITH POLYMORPHIC c AS x { body }`
+    # on a universally-polymorphic parameter (no narrow REQUIRES, or
+    # `Set.new`-stamped) lowers to a single helper call that
+    # comptime-dispatches per family at the actual call site. The
+    # body becomes a no-capture closure `struct { fn run(x: *T) }.run`.
+    # The annotator stamps `node.universal_poly = true` when the
+    # WithBlock satisfies this shape (with_match_check.rb Rule 1).
+    if node.universal_poly && (node.capabilities || []).length == 1
+      return lower_polymorphic_universal(node)
+    end
     rt_name = @rt_name
     bindings = []
     # Structured representation of any fallible-acquire clause(s) for the
@@ -2205,12 +2227,53 @@ class MIRLowering
       when :BORROWED
         # PURE: cap[:var_node] is always an Identifier or field ref; never allocating.
         source_zig = emit_expr(lower(cap[:var_node]))
-        bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
+        # #336: WITH POLYMORPHIC auto-promotes immutable non-sync
+        # bindings to :BORROWED. For poly params (anytype) the alias
+        # needs the comptime unwrap probe so plain T / @local /
+        # @multiowned all bind uniformly to a `*T`-shaped value.
+        is_param = with_cap_is_param?(cap[:var_node])
+        if is_param && (var_sync.nil? || var_sync == :local) &&
+           cap[:var_node].respond_to?(:symbol) && cap[:var_node].symbol &&
+           !cap[:var_node].symbol.mutable
+          aliased_value = with_match_unwrap_value(source_zig)
+          bindings << "const #{zig_safe_name(alias_name)} = #{aliased_value};\n_ = &#{zig_safe_name(alias_name)};"
+        else
+          bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
+        end
       when :RESTRICT
-        if var_sync.nil?
-          # PURE: same as BORROWED; var_node is a simple variable reference.
+        # PURE / no-sync alias: var_sync is nil (plain T / @multiowned)
+        # OR :local (#336: WITH POLYMORPHIC on @local, auto-promoted
+        # from :infer in capabilities.rb). The body lowers to a
+        # direct alias -- no Guard, no Arc unwrap, no snapshot.
+        #
+        # For polymorphic params (anytype), use the comptime
+        # `with_match_unwrap_value` probe so the alias resolves
+        # uniformly per actual binding shape:
+        #   - by-value T            -> `&c`
+        #   - `*T` (already ptr)    -> `c`
+        #   - Arc(T) / *Arc(T)      -> `c.ctrl.data`
+        # The probe always produces a `*T`; binding without `&` keeps
+        # the alias pointer-typed so `x.field = ...` works.
+        #
+        # For non-poly bindings (concrete locals), the legacy emission
+        # is preserved: `const x = &c;` for mutable / `const x = c;`
+        # for read-only.
+        if var_sync.nil? || var_sync == :local
           source_zig = emit_expr(lower(cap[:var_node]))
-          if cap[:alias_mutable]
+          is_param = with_cap_is_param?(cap[:var_node])
+          if is_param
+            # Poly param: comptime probe resolves to `*T` regardless
+            # of caller shape.
+            aliased_value = with_match_unwrap_value(source_zig)
+            bindings << "const #{zig_safe_name(alias_name)} = #{aliased_value};"
+          elsif var_sync == :local
+            # Concrete @local: localCreate returns a `*T` already, so
+            # the alias is the source directly (no extra `&`). Adding
+            # `&` here would produce `*const *T` and break field
+            # access. The body's `x.field = ...` mutation flows back
+            # to the binding through the inherent pointer.
+            bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};"
+          elsif cap[:alias_mutable]
             bindings << "const #{zig_safe_name(alias_name)} = &#{source_zig};"
           else
             bindings << "const #{zig_safe_name(alias_name)} = #{source_zig};\n_ = &#{zig_safe_name(alias_name)};"
@@ -2657,7 +2720,7 @@ class MIRLowering
 
   # MVCC L6.2/L6.3: emit a single `Versioned.update` (one cell) or
   # `versionedUpdateMulti` (multi-cell) call whose closure runs the
-  # WITH body. The user's `ON Conflict <action>` becomes a `catch`
+  # WITH body. The user's `ON MvccConflict <action>` becomes a `catch`
   # arm that translates `error.UpdateRetriesExhausted` -> the
   # configured action (RAISE / PASS / EXIT / `-> { }`).
   #
@@ -2686,18 +2749,42 @@ class MIRLowering
   # checker can walk them. Pre-migration this concatenated everything
   # into one big InlineZig string (#268), making the heap allocation
   # in Versioned.update opaque to MIRChecker (INV-12 violation).
+  def lower_polymorphic_universal(node)
+    cap = node.capabilities.first
+    var_node   = cap[:var_node]
+    var_name   = with_cap_var_name(var_node)
+    alias_name = cap[:alias] || var_name
+    safe_alias = zig_safe_name(alias_name)
+    # Emit the cell raw, with no auto-`.load()` injection. The atomic-
+    # cell read path that visit_Identifier installs (line 4056 in
+    # annotator-helpers/cell access) wraps `@atomic` reads in `.load()`,
+    # which returns a value -- but `polymorphicMutate` needs the cell
+    # OBJECT to dispatch by `@hasDecl`. Set `@atomic_emit_raw` so the
+    # surrounding emit_expr returns the bare ident.
+    prev_raw = @atomic_emit_raw
+    @atomic_emit_raw = true
+    cell_zig = emit_expr(lower(var_node))
+    @atomic_emit_raw = prev_raw
+    # The body's `x` alias is a `*T` -- grab the bare T (post-Arc,
+    # post-sync-wrapper) for the closure signature.
+    resolved   = cap[:resolved_type]
+    rt_obj     = resolved.is_a?(Type) ? resolved : Type.new(resolved)
+    bare_t_zig = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type.zig_type : rt_obj.zig_type
+    body_mir   = lower_body(node.body)
+    MIR::PolymorphicMutate.new(cell_zig, @rt_name, safe_alias, bare_t_zig, body_mir)
+  end
+
   def emit_snapshot_mutable_call(node, with_label)
     snap_caps = node.capabilities || []
     body_mir = lower_body(node.body)
-    conflict_action = emit_conflict_action_zig(node.lock_error_clause, with_label, node)
-    # MVCC L8-followup: ON Conflict RETRY(N) THEN <action>. The runtime's
-    # Versioned.update / updateMulti already retries up to
-    # MAX_UPDATE_RETRIES (versioned.zig top of file; 10_000 by default,
-    # overridable via `pub const CLEAR_MVCC_MAX_UPDATE_RETRIES` at root)
-    # on inner CAS contention. The user's RETRY(N) wraps the whole call
-    # in an OUTER retry loop -- when the inner budget exhausts and
-    # surfaces `error.UpdateRetriesExhausted`, the outer loop tries N
-    # more times before running THEN.
+    # MVCC L8-followup + True-Sync-Polymorphism (#330): ON <Conflict>
+    # RETRY(N) THEN <action>. The runtime's Versioned.update /
+    # AtomicPtr.update already retries up to MAX_UPDATE_RETRIES (64
+    # for Versioned, 256 for AtomicPtr) on inner CAS contention. The
+    # user's RETRY(N) wraps the whole call in an OUTER retry loop --
+    # when the inner budget exhausts and surfaces error.UpdateRetriesExhausted
+    # (Versioned) or error.AtomicConflict (AtomicPtr), the outer loop
+    # tries N more times before running THEN.
     retries = node.lock_error_clause&.dig(:retries)
     alloc_zig = "#{@rt_name}.heapAlloc()"
 
@@ -2714,12 +2801,17 @@ class MIRLowering
       source_unwrap = with_match_unwrap_value(source_zig)
       st = cap[:resolved_type].is_a?(Type) ? cap[:resolved_type] : Type.new(cap[:resolved_type])
       bare_t_zig = st.bare_data_type.zig_type
-      # AtomicPtr M3.6: detect @indirect:atomic so the emitter can
-      # skip the conflict-handler wrap (rcu retries until success;
-      # AtomicPtr.update never returns UpdateRetriesExhausted).
+      # AtomicPtr M3.6 + #330: detect @indirect:atomic so the emitter
+      # picks the right Zig error name (AtomicConflict vs
+      # UpdateRetriesExhausted) and the conflict_action emits the
+      # right ErrorName for the setError call.
       sym = var_node.respond_to?(:symbol) ? var_node.symbol : nil
       is_atomic_ptr = sym && sym.sync == :atomic &&
                       sym.respond_to?(:layout) && sym.layout == :indirect
+      conflict_error = is_atomic_ptr ? :AtomicConflict : :MvccConflict
+      conflict_action = emit_conflict_action_zig(
+        node.lock_error_clause, with_label, node, conflict_error,
+      )
       MIR::SnapshotTransaction.new(
         source_unwrap, @rt_name, alloc_zig, safe_alias, bare_t_zig,
         body_mir, conflict_action, retries, with_label, is_atomic_ptr,
@@ -2733,6 +2825,12 @@ class MIRLowering
         safe_alias = zig_safe_name(alias_name)
         "const #{safe_alias} = views[#{i}]; _ = &#{safe_alias};"
       }.join("\n            ")
+      # Multi-cell SNAPSHOT is Versioned-only -- AtomicPtr multi-cell
+      # is blocked by #333 (no portable multi-pointer CAS). So the
+      # conflict action always uses MvccConflict for this branch.
+      conflict_action = emit_conflict_action_zig(
+        node.lock_error_clause, with_label, node, :MvccConflict,
+      )
       MIR::SnapshotMultiTxn.new(
         cells_tuple, @rt_name, alloc_zig, alias_decls,
         body_mir, conflict_action, retries, with_label,
@@ -2741,7 +2839,7 @@ class MIRLowering
   end
 
   # Wrap a `Versioned.update[Multi]` call expression with the user's
-  # ON Conflict handler (and the RETRY(N) THEN outer-retry shape when
+  # ON MvccConflict handler (and the RETRY(N) THEN outer-retry shape when
   # `retries` is set). When retries==nil, emits a plain catch-switch.
   # When retries==N, emits a counted while-loop that retries up to N
   # times before running the THEN action.
@@ -2779,30 +2877,37 @@ class MIRLowering
     end
   end
 
-  # MVCC L6.2: emit the Zig statements for the user's `ON Conflict
-  # <action>` clause. Mirrors `emit_lock_action_zig` but uses
-  # `ErrorName.Conflict` (kind :Transient) as the error label. RETRY
-  # semantics for SNAPSHOT-transactions are NOT honored here -- the
-  # runtime already retries up to versioned.MAX_UPDATE_RETRIES; once
-  # that budget exhausts we surface `Conflict` and run the user action.
-  # `nil` clause shouldn't happen for a SNAPSHOT-mutable WITH (L5
-  # rejects), but defensively rethrow as Conflict if it does.
-  def emit_conflict_action_zig(clause, with_label, with_node)
+  # MVCC L6.2 + True-Sync-Polymorphism (#324 / #330): emit the Zig
+  # statements for the user's `ON <Conflict> <action>` clause.
+  # Mirrors `emit_lock_action_zig` but uses `ErrorName.<conflict_error>`
+  # (kind :Transient) as the error label. The conflict_error name
+  # picks per cell family: :MvccConflict for @versioned commits,
+  # :AtomicConflict for @indirect:atomic CAS-loop exhaustion (#330).
+  # RETRY semantics for SNAPSHOT-transactions are NOT honored here --
+  # the runtime already retries up to MAX_UPDATE_RETRIES (64 for
+  # Versioned, 256 for AtomicPtr); once that budget exhausts we
+  # surface the conflict and run the user action. `nil` clause
+  # shouldn't happen for a SNAPSHOT-mutable WITH (the policy
+  # synthesis in #328 always provides one), but defensively rethrow
+  # if it does.
+  def emit_conflict_action_zig(clause, with_label, with_node, conflict_error = :MvccConflict)
     line = with_node.token&.line.to_s
-    return %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.Conflict), "MVCC commit conflict", #{line});\nreturn error.CheatError;) unless clause
+    err_name = conflict_error.to_s
+    msg = err_name == "AtomicConflict" ? "atomic CAS retries exhausted" : "MVCC commit conflict"
+    return %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.#{err_name}), "#{msg}", #{line});\nreturn error.CheatError;) unless clause
     case clause[:action]
     when :raise
-      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.Conflict), "MVCC commit conflict", #{line});\nreturn error.CheatError;)
+      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.#{err_name}), "#{msg}", #{line});\nreturn error.CheatError;)
     when :exit
       msg_zig = emit_expr(lower(clause[:message]))
-      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.Conflict), #{msg_zig}, #{line});\nreturn error.CheatError;)
+      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.#{err_name}), #{msg_zig}, #{line});\nreturn error.CheatError;)
     when :pass
       "break :#{with_label};"
     when :block
       body_zig = emit_stmts_zig(lower_body(clause[:body]))
       "#{body_zig}\nbreak :#{with_label};"
     else
-      raise "Internal: unknown Conflict action #{clause[:action]}"
+      raise "Internal: unknown conflict action #{clause[:action]}"
     end
   end
 
@@ -5178,6 +5283,16 @@ class MIRLowering
     is_mutable ||= ft.collection?
     is_mutable ||= ft.resource? || node.resource_close_zig
     is_mutable = false if ft.local?
+    # True-Sync-Polymorphism Gate 3: a plain T binding whose address
+    # is taken at a universally-polymorphic call site needs Zig `var`
+    # storage even when the local-mutation analyzer would otherwise
+    # flip it to `const`. Without this, &binding produces *const T,
+    # which doesn't unify with the body's `*T` parameter and the
+    # mutation never reaches the caller.
+    if node.respond_to?(:symbol) && node.symbol&.respond_to?(:poly_borrow_target) &&
+       node.symbol.poly_borrow_target
+      is_mutable = true
+    end
 
     # Post-dataflow cleanup entry (cleanup_decisions! refinements are correct here).
     # For same-name vars in different scopes, alloc is overridden per-declaration
@@ -5191,9 +5306,17 @@ class MIRLowering
                           ft&.open_stream? || ft&.inf_stream? || (ft&.array? && ft&.dynamic?) ||
                           ft&.heap_provenance? || ft&.resource? || node.resource_close_zig
     forced_var = is_mutable && has_mutable_cleanup
+    # True-Sync-Polymorphism Gate 3: a binding whose address is taken
+    # at a universal-poly call site MUST emit Zig `var` so &binding is
+    # *T (not *const T). The local-mutation analyzer would otherwise
+    # downgrade this to `const` when the binding is only "field-mutated"
+    # via the polymorphic body -- which is invisible to var_mutated.
+    poly_borrow = node.respond_to?(:symbol) && node.symbol &&
+                  node.symbol.respond_to?(:poly_borrow_target) &&
+                  node.symbol.poly_borrow_target == true
     keyword_mutable = if !is_mutable
       false
-    elsif actually_mutated || forced_var
+    elsif actually_mutated || forced_var || poly_borrow
       true
     else
       false
@@ -6328,6 +6451,39 @@ class MIRLowering
     ti = ti.payload_type || ti if ti.error_union?
     return false if ti.heap_provenance?  # already handled by mir_allocates?
     @union_schemas&.key?(ti.resolved)    # user-defined unions may own heap fields
+  end
+
+  # True-Sync-Polymorphism Gate 3: detect a call-site auto-borrow.
+  # The callee has REQUIRES set to Set[] for this param (universal
+  # polymorphism via WITH POLYMORPHIC) and the arg is a plain T
+  # binding -- no @local/@multiowned/@shared/Locked/Versioned/... that
+  # the polymorphicMutate helper would already unwrap to a pointer.
+  # In that case we emit `&arg` so the body's mutation flows back
+  # through the pointer instead of into a local pass-by-value copy.
+  def universal_poly_arg_needs_addr?(arg_node, callee_sig, idx)
+    return false unless callee_sig.is_a?(FunctionSignature)
+    return false unless callee_sig.requires
+    param = callee_sig.params[idx]
+    return false unless param
+    pname = (param[:name] || param["name"]).to_s
+    fams = callee_sig.requires[pname]
+    # Universal poly: REQUIRES key present AND the family-set is empty.
+    return false unless fams && fams.respond_to?(:empty?) && fams.empty?
+    # The arg must be a plain (no-sync, no-Arc, no-pointer) struct
+    # binding so & flips it into *T territory. Identifier lookup gives
+    # us the SymbolEntry; bail if anything's missing.
+    return false unless arg_node.is_a?(AST::Identifier)
+    sym = arg_node.respond_to?(:symbol) ? arg_node.symbol : nil
+    return false unless sym
+    # Skip if the binding is already pointer-shaped or sync-wrapped --
+    # the helper handles those via comptime dispatch.
+    return false if sym.sync || sym.storage == :shared || sym.storage == :multiowned ||
+                    sym.storage == :local || sym.storage == :heap
+    # Only auto-borrow MUTABLE plain T: an immutable plain T can't be
+    # mutated through any path so & buys us nothing (and would be a
+    # pessimization).
+    return false unless sym.respond_to?(:mutable) && sym.mutable
+    true
   end
 
   def callee_needs_rt?(name)

@@ -435,12 +435,25 @@ module AST
     end
   end
 
-  Program      = Struct.new(:token, :statements) { include Locatable }
+  Program      = Struct.new(:token, :statements) do
+    include Locatable
+    # True-Sync-Polymorphism (#325): the resolved program-level
+    # SYNC POLICY (the user-written one if present, else the baked-in
+    # system default). Stamped by SemanticAnnotator.visit_Program after
+    # validation. Lowering (#328) reads this when filling unhandled
+    # WITH error slots.
+    attr_accessor :sync_policy
+  end
   # kind: :local (REQUIRE "file.cht") or :package (REQUIRE "pkg:name")
   RequireNode  = Struct.new(:token, :path, :namespace, :kind) { include Locatable }
   FunctionDef  = Struct.new(:token, :name, :params, :captures, :return_type, :return_lifetime, :body, :catch_clauses, :default_catch, :visibility, :deferred_drops, :uses_frame) do
     include Locatable
     attr_accessor :type_params   # Array of type param name strings, e.g. ["T", "K"], or nil
+    # Post-#335: the user EXPLICITLY wrote a `RETURNS T` clause (vs
+    # implicit-Void / annotator-inferred return). Stamped at parse
+    # time so the fallible-signature check only enforces on user-
+    # authored return types.
+    attr_accessor :explicit_return_type
     attr_accessor :requires      # P2: REQUIRES clause — { param_name => Set[Family] } or nil
                                  #     Family symbols: :LOCKED, :VERSIONED, :ACTOR, :LOCK_FREE
     attr_accessor :effect_set    # P3: projected EffectSet (yield/alloc_heap/io/fail)
@@ -657,6 +670,13 @@ module AST
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
     attr_accessor :arg_families      # Atomics M1.6.5: per-arg Set<Family> for ?-form effect resolution
+    attr_accessor :collapsed_errors  # True-Sync-Polymorphism (#329): Set<Symbol> of errors this
+                                     # specific call site can surface, projected per actual-family of
+                                     # each REQUIRES'd arg. Strictly a subset of the callee fn's full
+                                     # !T error union -- for `tick(myVersioned)` where tick has
+                                     # REQUIRES x: SNAPSHOTTED, this is {:MvccConflict} (not the full
+                                     # {:MvccConflict, :AtomicConflict}). nil for calls that don't
+                                     # touch any REQUIRES'd param's family axis.
     def wildcard?; false end
     def name; self[:name].to_s end
   end
@@ -721,13 +741,31 @@ module AST
     attr_accessor :view_kind
     # MVCC L4: :read for `WITH SNAPSHOT a AS y { ... }` (one or more
     # immutable cell views), :transaction for `WITH SNAPSHOT a AS
-    # MUTABLE va, ... { ... } ON Conflict ...` (one or more mutable
-    # cell views, ON Conflict required). nil for traditional
+    # MUTABLE va, ... { ... } ON MvccConflict ...` (one or more mutable
+    # cell views, ON MvccConflict required). nil for traditional
     # capability blocks. Each capability entry carries `:alias_mutable`
     # already; `snapshot_mode` is the rolled-up classification used by
     # downstream passes.
     attr_accessor :snapshot_mode
+    # True-Sync-Polymorphism step 1: `WITH POLYMORPHIC ...` opts into
+    # the polymorphic comptime-dispatch lowering. The annotator enforces
+    # that POLYMORPHIC is required iff the binding's REQUIRES admits
+    # more than one storage axis (and rejected otherwise).
+    attr_accessor :polymorphic
+    # True-Sync-Polymorphism Gate 3: stamped by the annotator on a
+    # WITH POLYMORPHIC whose bound parameter has no narrow REQUIRES
+    # (universal polymorphism — admits every sync family). The
+    # lowering routes such a block to MIR::PolymorphicMutate, which
+    # comptime-dispatches per the caller's actual sync family.
+    attr_accessor :universal_poly
   end
+
+  # True-Sync-Polymorphism step 1: top-level `SYNC POLICY START ... END`
+  # block. The handlers list is the same shape as `WithBlock#lock_error_clause`
+  # (an array of those clauses, since a SYNC POLICY may declare multiple).
+  # Validation (single-instance, main-file-only, completeness, inline-only
+  # error guard for Deadlock/LockCycle) lives in the annotator (#325).
+  SyncPolicyDecl = Struct.new(:token, :handlers) { include Locatable }
 
   SelectOp     = Struct.new(:token, :expression) { include Locatable }
   WhereOp      = Struct.new(:token, :expression) { include Locatable }

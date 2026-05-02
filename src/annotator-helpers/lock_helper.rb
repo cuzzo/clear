@@ -345,13 +345,22 @@ module LockHelper
     clause  = node.lock_error_clause
     return unless clause
 
-    # MVCC L5: SNAPSHOT-transaction blocks have a different possibility
-    # set -- the only error commit can surface is `Conflict` (mapped from
-    # `error.UpdateRetriesExhausted`). LockTimeout / LockCycle / Deadlock
-    # do not apply because the lock-free CAS path doesn't acquire a
-    # mutex.
+    # MVCC L5 + True-Sync-Polymorphism (#324 / #330):
+    # SNAPSHOT-transaction blocks have a per-cell-family possibility
+    # set:
+    #   @versioned       -> {MvccConflict}    (Versioned.update bounded retry)
+    #   @indirect:atomic -> {AtomicConflict}  (AtomicPtr.update bounded retry)
+    # LockTimeout / LockCycle / Deadlock never apply because the
+    # lock-free CAS paths don't acquire a mutex. The cell-family
+    # check mirrors the dispatch in
+    # SemanticAnnotator#validate_lock_error_clause!.
     if node.snapshot_mode == :transaction
-      possible = Set.new([:Conflict])
+      has_atomic_ptr = (node.capabilities || []).any? { |c|
+        next false unless c[:capability] == :SNAPSHOT
+        sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
+        sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
+      }
+      possible = Set.new([has_atomic_ptr ? :AtomicConflict : :MvccConflict])
     else
       possible = Set.new
       possible << :LockTimeout

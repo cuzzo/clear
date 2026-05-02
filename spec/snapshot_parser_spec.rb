@@ -8,12 +8,12 @@ require_relative "../src/ast/ast"
 #
 # Verifies the parser accepts the four shapes:
 #   - single read:        WITH SNAPSHOT a AS y { ... }
-#   - single transaction: WITH SNAPSHOT a AS MUTABLE va { ... } ON Conflict ...
+#   - single transaction: WITH SNAPSHOT a AS MUTABLE va { ... } ON MvccConflict ...
 #   - multi-cell read:    WITH SNAPSHOT a AS ya, SNAPSHOT b AS yb { ... }
-#   - multi-cell mixed:   WITH SNAPSHOT a AS ya, SNAPSHOT b AS MUTABLE vb { ... } ON Conflict ...
+#   - multi-cell mixed:   WITH SNAPSHOT a AS ya, SNAPSHOT b AS MUTABLE vb { ... } ON MvccConflict ...
 #
-# Also verifies the ON Conflict RETRY(N) THEN clause path. Annotator-
-# level checks (ON Conflict required when MUTABLE; non-escape; impure-
+# Also verifies the ON MvccConflict RETRY(N) THEN clause path. Annotator-
+# level checks (ON MvccConflict required when MUTABLE; non-escape; impure-
 # block) come in L5 and are NOT exercised here.
 RSpec.describe "WITH SNAPSHOT parser" do
   def parse_block(src)
@@ -52,26 +52,26 @@ RSpec.describe "WITH SNAPSHOT parser" do
   end
 
   describe "single-cell transaction (MUTABLE)" do
-    it "parses `WITH SNAPSHOT a AS MUTABLE va { ... } ON Conflict RAISE`" do
-      node = parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON Conflict RAISE")
+    it "parses `WITH SNAPSHOT a AS MUTABLE va { ... } ON MvccConflict RAISE`" do
+      node = parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON MvccConflict RAISE")
       expect(node.snapshot_mode).to eq(:transaction)
       cap = node.capabilities.first
       expect(cap[:alias]).to eq("va")
       expect(cap[:alias_mutable]).to be true
       expect(node.lock_error_clause).not_to be_nil
-      expect(node.lock_error_clause[:selectors].first[:name]).to eq(:Conflict)
+      expect(node.lock_error_clause[:selectors].first[:name]).to eq(:MvccConflict)
     end
 
-    it "parses ON Conflict RETRY(3) THEN PASS" do
-      node = parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON Conflict RETRY(3) THEN PASS")
+    it "parses ON MvccConflict RETRY(3) THEN PASS" do
+      node = parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON MvccConflict RETRY(3) THEN PASS")
       expect(node.lock_error_clause[:retries]).to eq(3)
       expect(node.lock_error_clause[:action]).to eq(:pass)
     end
 
-    it "parses ON Conflict with -> { ... } block action" do
+    it "parses ON MvccConflict with -> { ... } block action" do
       node = parse_block(<<~CLEAR)
         WITH SNAPSHOT a AS MUTABLE va { va.x = 1; }
-          ON Conflict -> { y = 0; }
+          ON MvccConflict -> { y = 0; }
       CLEAR
       expect(node.lock_error_clause).not_to be_nil
       expect(node.lock_error_clause[:action]).to eq(:block)
@@ -79,7 +79,7 @@ RSpec.describe "WITH SNAPSHOT parser" do
 
     it "RETRY(0) is rejected (RETRY(N) requires N > 0)" do
       expect {
-        parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON Conflict RETRY(0) THEN PASS")
+        parse_block("WITH SNAPSHOT a AS MUTABLE va { va.x = 1; } ON MvccConflict RETRY(0) THEN PASS")
       }.to raise_error(/RETRY\(N\) requires N > 0/)
     end
   end
@@ -95,11 +95,11 @@ RSpec.describe "WITH SNAPSHOT parser" do
       expect(node.capabilities.map { |c| c[:alias_mutable] }).to eq([false, false])
     end
 
-    it "parses two mutable SNAPSHOTs (ON Conflict required at L5)" do
+    it "parses two mutable SNAPSHOTs (ON MvccConflict required at L5)" do
       node = parse_block(<<~CLEAR)
         WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
           va.x = 1; vb.y = 2;
-        } ON Conflict RAISE
+        } ON MvccConflict RAISE
       CLEAR
       expect(node.snapshot_mode).to eq(:transaction)
       expect(node.capabilities.size).to eq(2)
@@ -109,7 +109,7 @@ RSpec.describe "WITH SNAPSHOT parser" do
     it "parses mixed read + mutable -> snapshot_mode :transaction" do
       node = parse_block(<<~CLEAR)
         WITH SNAPSHOT a AS ya, SNAPSHOT b AS MUTABLE vb { ya.x = 1; vb.y = 2; }
-          ON Conflict RAISE
+          ON MvccConflict RAISE
       CLEAR
       expect(node.snapshot_mode).to eq(:transaction)
       cells = node.capabilities
@@ -121,7 +121,7 @@ RSpec.describe "WITH SNAPSHOT parser" do
       node = parse_block(<<~CLEAR)
         WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb, SNAPSHOT c AS MUTABLE vc {
           va.x = 1; vb.y = 2; vc.z = 3;
-        } ON Conflict RAISE
+        } ON MvccConflict RAISE
       CLEAR
       expect(node.capabilities.size).to eq(3)
       expect(node.capabilities.map { |c| c[:alias] }).to eq(%w[va vb vc])

@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
     cfg = Config{ host: "localhost", port: 8080 } @indirect:atomic;
 
     -- Read-mode WITH SNAPSHOT — Arc-bumped (via EBR pin) snapshot for
-    -- the duration of the block. No ON Conflict (read paths can't fail).
+    -- the duration of the block. No conflict handler (read paths can't fail).
     WITH SNAPSHOT cfg AS c {
         ASSERT c.port == 8080, "snapshot.port: expected 8080";
     }

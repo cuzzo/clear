@@ -81,7 +81,7 @@ FN main() RETURNS Void ->
         v_writers.append(BG { @parallel ->
             MUTABLE i: Int64 = 0_i64;
             WHILE i < writes_per DO
-                WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON Conflict RAISE
+                WITH SNAPSHOT c_v AS MUTABLE va { va.value = va.value + 1_i64; } ON MvccConflict RAISE
                 i = i + 1_i64;
             END
         });

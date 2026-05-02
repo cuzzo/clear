@@ -1,0 +1,27 @@
+-- True-Sync-Polymorphism (#328): SYNC POLICY policy-chain fallback.
+-- A `WITH SNAPSHOT MUTABLE` block on a @versioned cell with NO
+-- inline `ON MvccConflict` handler compiles successfully -- the
+-- program SYNC POLICY (the baked-in default in this case) provides
+-- the handler. Single-threaded so MvccConflict never actually fires;
+-- this pins the lowering shape.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS Void ->
+    c = Counter{ value: 0 } @versioned;
+
+    -- No inline `ON MvccConflict` -- the policy's `RAISE` default
+    -- applies. In a contention-free single-threaded run, the commit
+    -- always succeeds on the first attempt, so the handler is
+    -- never reached.
+    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; }
+    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; }
+    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; }
+
+    -- Verify the cumulative effect.
+    WITH SNAPSHOT c AS view {
+        ASSERT view.value == 3, "policy-default fallback: expected 3 after three increments";
+    }
+
+    RETURN;
+END

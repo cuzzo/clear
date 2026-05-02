@@ -462,7 +462,7 @@ class Type
   # MVCC: T@versioned -> Shared(T) (atomic-pointer COW + EBR).
   # Readers see consistent snapshots via `WITH SNAPSHOT x AS y`;
   # writers do optimistic update via `WITH SNAPSHOT x AS MUTABLE y`
-  # with `ON Conflict ...` for the retries-exhausted case.
+  # with `ON MvccConflict ...` for the retries-exhausted case.
   def versioned?
     @sync == :versioned
   end

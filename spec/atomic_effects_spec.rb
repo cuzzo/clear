@@ -275,7 +275,7 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
       es = fn.effect_set
       expect(es).not_to be_nil
       expect(es.include?(:contention)).to eq(true)
-      expect(es.include?(:"blocking?")).to eq(true)
+      expect(es.include?(:blocks_maybe)).to eq(true)
       expect(es.include?(:blocking)).to eq(false)
     end
 
@@ -292,8 +292,8 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
       es = fn.effect_set
       expect(es.include?(:contention)).to eq(true)
       expect(es.include?(:blocking)).to eq(true)
-      expect(es.include?(:"contention?")).to eq(false)
-      expect(es.include?(:"blocking?")).to eq(false)
+      expect(es.include?(:contends_maybe)).to eq(false)
+      expect(es.include?(:blocks_maybe)).to eq(false)
     end
   end
 
@@ -318,14 +318,17 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
       expect(WithMatchCheck.family_of_arg_set(arg)).to eq(Set[:ATOMIC, :LOCKED])
     end
 
-    it "returns an empty Set for a sync-less binding" do
+    it "returns Set[:LOCAL] for a sync-less binding (#336)" do
+      # Pre-#336 this returned an empty set; now non-sync bindings
+      # are in the LOCAL family.
       sym = Object.new
       def sym.sync; nil; end
+      def sym.storage; nil; end
       def sym.sync_families; nil; end
       arg = Object.new
       arg.define_singleton_method(:symbol) { sym }
       arg.define_singleton_method(:respond_to?) { |m| m == :symbol || super(m) }
-      expect(WithMatchCheck.family_of_arg_set(arg)).to eq(Set.new)
+      expect(WithMatchCheck.family_of_arg_set(arg)).to eq(Set[:LOCAL])
     end
   end
 end

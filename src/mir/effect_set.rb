@@ -23,7 +23,17 @@ require 'set'
 # EffectSet is intentionally tiny and stateless. Pass instances by value;
 # operations return new sets. Same value, same set — `==` works.
 class EffectSet
-  KNOWN = %i[yield alloc_heap io fail contention blocking contention? blocking?].to_set.freeze
+  # True-Sync-Polymorphism (#327): the ?-form contention/blocking
+  # effects are now spelled `contends_maybe` / `blocks_maybe` for
+  # readability. The legacy spellings (`contention?`, `blocking?`)
+  # are accepted as aliases for backward compatibility but are not
+  # produced by the inferer anymore.
+  KNOWN = %i[
+    yield alloc_heap io fail
+    contention blocking
+    contends_maybe blocks_maybe
+    contention? blocking?
+  ].to_set.freeze
 
   attr_reader :effects
 
@@ -64,7 +74,11 @@ class EffectSet
 
   # Human-readable summary used by the formatter (P4.2). Effects are
   # rendered in a stable order so signatures are deterministic.
-  EFFECT_ORDER = %i[yield alloc_heap io fail contention contention? blocking blocking?].freeze
+  EFFECT_ORDER = %i[
+    yield alloc_heap io fail
+    contention contends_maybe contention?
+    blocking blocks_maybe blocking?
+  ].freeze
 
   def to_a
     EFFECT_ORDER.select { |e| @effects.include?(e) }

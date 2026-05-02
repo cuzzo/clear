@@ -1127,13 +1127,15 @@ module MIR
   end
 
   # SNAPSHOT-mutable single-cell: `WITH SNAPSHOT cell AS MUTABLE va
-  # { body } [ON Conflict <action>]` for a @versioned (MVCC) or
+  # { body } [ON MvccConflict <action>]` for a @versioned (MVCC) or
   # @indirect:atomic (AtomicPtr M3.6) cell in transaction mode.
   # Versioned: lowers to `Versioned.update(rt, alloc, fn(va: *T) ...)`
-  # wrapped in catch+switch for ON Conflict handling.
+  # wrapped in catch+switch for ON MvccConflict handling.
   # AtomicPtr (is_atomic_ptr=true): lowers to
   # `AtomicPtr.update(rt, alloc, fn(va: *T) ...)` with NO conflict
-  # handler -- rcu retries until success (Rust arc-swap rcu).
+  # handler today -- rcu retries until success. Once #330 bounds the
+  # AtomicPtr.update loop at 256 the right handler will be
+  # `ON AtomicConflict`.
   #
   # cell_unwrap     : Zig expr resolving to *Versioned(T) or *AtomicPtr(T)
   # rt              : Zig expr for *Runtime
@@ -1141,7 +1143,7 @@ module MIR
   # alias_zig       : Zig identifier for the user's MUTABLE alias
   # bare_t_zig      : Zig type string for the inner T
   # body            : Array of MIR statements -- the user's transaction body
-  # conflict_action : Zig text for the ON Conflict handler body (nil for atomic-ptr)
+  # conflict_action : Zig text for the ON MvccConflict handler body (nil for atomic-ptr)
   # retries         : nil or integer N for RETRY(N) THEN <action> (nil for atomic-ptr)
   # with_label      : nil or string for the labeled block exit (PASS/block actions)
   # is_atomic_ptr   : true when the cell's sync is :atomic + layout :indirect.
@@ -1155,7 +1157,7 @@ module MIR
   end
 
   # SNAPSHOT-mutable multi-cell: `WITH SNAPSHOT a AS MUTABLE va, b AS
-  # MUTABLE vb, ... { body } ON Conflict <action>`. Lowers to
+  # MUTABLE vb, ... { body } ON MvccConflict <action>`. Lowers to
   # `CheatLib.versionedUpdateMulti(.{cells...}, rt, alloc, fn(views) ...)`
   # which sorts the cells by address (deadlock-free), tags the soft
   # locks, runs the body once, and publishes all new versions
@@ -1169,6 +1171,31 @@ module MIR
   SnapshotMultiTxn = Struct.new(
     :cells_tuple, :rt, :alloc, :alias_decls,
     :body, :conflict_action, :retries, :with_label
+  ) do
+    include Stmt
+    def stmt?; true; end
+  end
+
+  # True-Sync-Polymorphism Gate 3: `WITH POLYMORPHIC c AS x { body }`
+  # on a parameter with no narrow REQUIRES (universal polymorphism).
+  # Lowers to a single `CheatLib.polymorphicMutate(cell, rt, fn, .{})`
+  # call. The runtime helper comptime-dispatches by the post-Arc
+  # inner type:
+  #   - has `.update`  -> Versioned / AtomicPtr (CAS retry write)
+  #   - has `.write`   -> RwLocked
+  #   - has `.acquire` -> Locked
+  #   - else           -> plain `*T` (direct call)
+  # The body is emitted as a no-capture `struct { fn run(x: *T) void
+  # { ... } }.run` so it can ride the closure-style write paths.
+  #
+  # cell_zig    : Zig expression for the bound binding (no Arc-unwrap;
+  #               the helper does that comptime-internally).
+  # rt          : runtime variable name in scope.
+  # alias_zig   : the user's alias inside the body (e.g. "x").
+  # bare_t_zig  : the Zig type of the success branch (e.g. "Counter").
+  # body        : Array of MIR statements forming the WITH body.
+  PolymorphicMutate = Struct.new(
+    :cell_zig, :rt, :alias_zig, :bare_t_zig, :body
   ) do
     include Stmt
     def stmt?; true; end

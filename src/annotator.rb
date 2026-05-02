@@ -125,6 +125,7 @@ class SemanticAnnotator
     # parallel, multi-program test harness) doesn't leak in. Stdlib
     # types are preserved.
     AST.reset_user_types!
+    @program = node  # #327: WithMatchCheck reads node.sync_policy below.
     visit(node)
     # P1.7: now that all bodies are annotated and arg.symbol is wired at
     # every call site, propagate caller sync into callee param entries.
@@ -150,7 +151,13 @@ class SemanticAnnotator
     }
     # P2.4 / P2.5 / P2.7 first: validates per-fn REQUIRES ↔ WITH and
     # auto-fills `fn.requires` for legacy code via the deprecation shim.
-    @fn_nodes.each_value { |fn| WithMatchCheck.check_function!(fn, err, warn_handler: warn) }
+    # #327: pass the program-level SYNC POLICY handlers so the
+    # polymorphic-warning surface knows what's already covered.
+    policy_handlers = @program&.sync_policy
+    @fn_nodes.each_value { |fn|
+      WithMatchCheck.check_function!(fn, err, warn_handler: warn,
+                                     policy_handlers: policy_handlers)
+    }
     # Re-stamp signatures so call-site checks below see any shim-inferred
     # REQUIRES clauses.
     @fn_nodes.each do |name, fn|
@@ -310,6 +317,13 @@ private
     # token.
     seed_error_types_from_raises!(node)
 
+    # PASS 2.95: True-Sync-Polymorphism (#325). Validate any
+    # `SYNC POLICY START ... END` block (single-instance, main-file-only,
+    # completeness, inline-only-error guard). Stamps node.sync_policy
+    # with the resolved policy (user-written or baked-in default) so
+    # later passes can read a single source of truth.
+    validate_and_resolve_sync_policy!(node)
+
     # PASS 3: Analyze Logic
     # Visit all statements in order.
     # - VarDecls will be registered here (linear scoping).
@@ -358,6 +372,14 @@ private
     # PASS 5: Compute needs_rt and can_fail for every function via call-graph fixed-point.
     compute_needs_rt!
     compute_can_fail!
+
+    # PASS 5a (post-#334): enforce Zig-style fallible-signature discipline.
+    # Every fn whose call-graph fixed-point determined `can_fail = true`
+    # must declare its return type as an error union (`RETURNS !T`).
+    # The check runs AFTER compute_can_fail! so transitive fallibility
+    # is captured -- a fn that calls a fallible callee inherits the
+    # requirement.
+    enforce_fallible_returns!
 
     # PASS 5b: Functions referenced as fn-type values must match the fn-pointer calling
     # convention (*Runtime, params) !return. Mark them needs_rt=true so their signatures
@@ -773,6 +795,184 @@ private
       next unless stmt.is_a?(AST::FunctionDef)
       seed_body.call(stmt.body)
       seed_body.call(stmt.catch_clauses&.map { |c| c[:body] }&.flatten || [])
+    end
+  end
+
+  # True-Sync-Polymorphism (#325). The set of errors a SYNC POLICY
+  # block must handle. Deadlock and LockCycle are deliberately absent
+  # -- those are inline-only (the user must handle them at the WITH
+  # site, never via a default policy).
+  SYNC_POLICY_REQUIRED_ERRORS = %i[LockTimeout MvccConflict AtomicConflict].freeze
+  # Errors that may NEVER appear in a SYNC POLICY block.
+  SYNC_POLICY_INLINE_ONLY_ERRORS = %i[Deadlock LockCycle].freeze
+  # The baked-in default applied when the user writes no SYNC POLICY.
+  # Synthesized as a hash matching the parser's lock_error_clause
+  # shape so the resolver can use it interchangeably.
+  def baked_in_default_sync_policy
+    [
+      { selectors: [{ form: :type, name: :LockTimeout, token: nil }],
+        retries: 3, action: :raise, token: nil },
+      { selectors: [{ form: :type, name: :MvccConflict, token: nil }],
+        retries: nil, action: :raise, token: nil },
+      { selectors: [{ form: :type, name: :AtomicConflict, token: nil }],
+        retries: nil, action: :raise, token: nil },
+    ]
+  end
+
+  # Walk the program statements; reject more than one SyncPolicyDecl,
+  # require an `FN main` when one is present, validate the body, and
+  # stamp `program_node.sync_policy` with the resolved handlers (the
+  # user's if present, else the baked-in default).
+  def validate_and_resolve_sync_policy!(program_node)
+    decls = program_node.statements.select { |s| s.is_a?(AST::SyncPolicyDecl) }
+
+    if decls.size > 1
+      error!(decls[1],
+        "Only one SYNC POLICY block is allowed per program. " \
+        "The first one was declared earlier in this file.")
+    end
+
+    if decls.empty?
+      program_node.sync_policy = baked_in_default_sync_policy
+      return
+    end
+
+    decl = decls.first
+    has_main = program_node.statements.any? { |s|
+      s.is_a?(AST::FunctionDef) && s.name == "main"
+    }
+    unless has_main
+      error!(decl,
+        "SYNC POLICY may only be declared in the file containing `FN main`. " \
+        "Move the policy to the program's main file, or remove it here.")
+    end
+
+    validate_sync_policy_body!(decl)
+    program_node.sync_policy = decl.handlers
+  end
+
+  # Per-handler-block validation: every selector must name a type the
+  # SYNC POLICY is allowed to handle (LockTimeout, MvccConflict,
+  # AtomicConflict); Deadlock / LockCycle are explicitly forbidden;
+  # the union of named errors must cover the required set exactly.
+  def validate_sync_policy_body!(decl)
+    seen = []
+    (decl.handlers || []).each do |clause|
+      (clause[:selectors] || []).each do |sel|
+        next unless sel[:form] == :type
+        name = sel[:name]
+        if SYNC_POLICY_INLINE_ONLY_ERRORS.include?(name)
+          error!(sel[:token] || decl,
+            "`#{name}` must be handled in-line — SYNC POLICY defaults are not " \
+            "allowed for this error. Remove it from the policy and add an " \
+            "`ON #{name} ...` handler at the WITH site (use " \
+            "`WITH POLYMORPHIC POSSIBLE_#{name == :Deadlock ? "DEADLOCK" : "LOCK_CYCLE"} ...` " \
+            "if the static cycle check needs to be opted out).")
+        end
+        unless SYNC_POLICY_REQUIRED_ERRORS.include?(name)
+          error!(sel[:token] || decl,
+            "`#{name}` is not a valid SYNC POLICY error. " \
+            "SYNC POLICY only handles: #{SYNC_POLICY_REQUIRED_ERRORS.join(', ')}.")
+        end
+        seen << name
+      end
+      # Kind selectors (e.g. `ON Transient ...`) inside SYNC POLICY are
+      # not supported -- the policy must name each error explicitly so
+      # completeness is checkable. Sugar like `RETRY(N) THEN <action>`
+      # desugars to `ON Transient ...` at parse time, which would land
+      # here with form==:kind.
+      (clause[:selectors] || []).each do |sel|
+        next unless sel[:form] == :kind
+        error!(sel[:token] || decl,
+          "SYNC POLICY handlers must name a specific error type, not a kind. " \
+          "`ON #{sel[:name]} ...` (and the `RETRY(N) THEN` sugar that desugars " \
+          "to `ON Transient ...`) is rejected here. Use `ON LockTimeout ...`, " \
+          "`ON MvccConflict ...`, or `ON AtomicConflict ...` explicitly.")
+      end
+    end
+
+    seen_set = seen.to_set
+    missing = SYNC_POLICY_REQUIRED_ERRORS.reject { |e| seen_set.include?(e) }
+    unless missing.empty?
+      error!(decl,
+        "SYNC POLICY must handle every required error " \
+        "(#{SYNC_POLICY_REQUIRED_ERRORS.join(', ')}). " \
+        "Missing: #{missing.join(', ')}.")
+    end
+  end
+
+  # True-Sync-Polymorphism (#329): project the callee fn's full !T
+  # error union down to only the errors this specific call site can
+  # surface, given the actual-family set of each REQUIRES'd arg.
+  # Returns a Set<Symbol> of error type names (e.g., :MvccConflict).
+  #
+  # Mechanism: for each parameter constrained by REQUIRES, find the
+  # actual arg's family SET at the call site (via family_of_arg_set,
+  # which returns the disjunction for polymorphic params and a
+  # singleton for concrete bindings; SNAPSHOTTED is expanded to
+  # {VERSIONED, ATOMIC}). For each family in the set, look up its
+  # storage axes (FAMILY_AXES) and project each axis's error set
+  # (AXIS_ERRORS). The union over all REQUIRES'd args is the
+  # collapsed error set at this call site.
+  #
+  # Forwarding: when a polymorphic fn `a` (REQUIRES b: VERSIONED)
+  # forwards `b` to a broader `c` (REQUIRES b: SNAPSHOTTED), the
+  # inner call's collapsed_errors reflects `a`'s narrower constraint
+  # ({:MvccConflict}, NOT the full {:MvccConflict, :AtomicConflict}).
+  # Concrete bindings narrow further to a single axis.
+  def collapse_errors_for_call(sig, args)
+    require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
+    collapsed = Set.new
+    sig.requires.each do |param_name, _families|
+      idx = sig.params.find_index { |p| p[:name].to_s == param_name }
+      next unless idx
+      arg = args[idx]
+      next unless arg
+      families = WithMatchCheck.family_of_arg_set(arg)
+      next if families.nil? || families.empty?
+      families.each do |fam|
+        axes = WithMatchCheck::FAMILY_AXES[fam] || Set.new
+        axes.each do |axis|
+          (WithMatchCheck::AXIS_ERRORS[axis] || Set.new).each { |e| collapsed << e }
+        end
+      end
+    end
+    collapsed
+  end
+
+  # True-Sync-Polymorphism (#328): policy chain — for a WITH that
+  # didn't get a per-WITH `ON <Error> ...` handler, look up the
+  # matching handler in the program-level SYNC POLICY and synthesize
+  # a clause shape compatible with the existing emit pipeline. The
+  # baked-in default is always stamped on `Program#sync_policy`, so
+  # this returns a non-nil clause for any of the three policy errors
+  # (LockTimeout / MvccConflict / AtomicConflict). Returns nil only
+  # for inline-only errors (Deadlock / LockCycle), which by design
+  # never have a policy-level handler.
+  def synthesize_clause_from_policy(error_name)
+    handlers = @program&.sync_policy
+    return nil unless handlers
+    handlers.find { |h|
+      (h[:selectors] || []).any? { |s|
+        s[:form] == :type && s[:name] == error_name
+      }
+    }
+  end
+
+  # PASS 3 visitor: SyncPolicyDecl is validated up front in
+  # validate_and_resolve_sync_policy! (PASS 2.95), so the PASS 3
+  # walk is a no-op. This visitor exists so the AST walker doesn't
+  # silently skip the node. The action bodies for `:block`-action
+  # handlers (`ON X -> { stmts }`) ARE visited here so types in
+  # those bodies get annotated.
+  def visit_SyncPolicyDecl(node)
+    (node.handlers || []).each do |clause|
+      case clause[:action]
+      when :exit
+        visit(clause[:message]) if clause[:message]
+      when :block
+        visit_stmts(clause[:body]) if clause[:body]
+      end
     end
   end
 
@@ -1813,8 +2013,15 @@ private
     # Handle optional return node for Void functions.
     expected = current_fn_ctx&.return_type
     if node.value.nil?
-      # If the function expects a value but we return nothing -> ERROR
-      if expected && expected != :Void && expected != :Any
+      # If the function expects a value but we return nothing -> ERROR.
+      # `!Void` (error union over Void) accepts a plain `RETURN;` because
+      # the success arm is Void; the wrap is implicit at lowering time.
+      expected_void_compatible = expected.nil? ||
+                                 expected == :Void || expected == :Any ||
+                                 (expected.respond_to?(:error_union?) && expected.error_union? &&
+                                  expected.respond_to?(:payload_type) &&
+                                  (expected.payload_type == :Void || expected.payload_type.nil?))
+      if expected && !expected_void_compatible
         error!(node, "Function expects return type #{expected}, got Void")
       end
 
@@ -2026,6 +2233,16 @@ private
       node.arg_families = arg_family_sets
       record_call_arg_families(node.name, arg_family_sets) if current_fn_ctx&.name
 
+      # True-Sync-Polymorphism (#329): collapse the callee's !T error
+      # union to only the errors the actually-passed bindings can
+      # surface. Per design: if `tick` has REQUIRES x: SNAPSHOTTED
+      # (admits {MvccConflict, AtomicConflict}) and the caller passes
+      # `@versioned`, this call site sees only {:MvccConflict}.
+      sig = @scope_stack.first.locals[node.name]&.type if node.name.is_a?(String)
+      if sig.is_a?(FunctionSignature) && sig.requires && !sig.requires.empty?
+        node.collapsed_errors = collapse_errors_for_call(sig, node.args)
+      end
+
       # Atomics M1.7: stamp atomic_borrow on Identifier args whose binding
       # is sync == :atomic. The MIR-lowering's load wrap (`c.ctrl.data
       # .load()`) is suppressed for these so the callee receives the cell
@@ -2037,6 +2254,11 @@ private
           arg.atomic_borrow = true if arg.respond_to?(:atomic_borrow=)
         end
       end
+
+      # True-Sync-Polymorphism Gate 3 plain-T auto-borrow stamping
+      # lives in WithMatchCheck.check_call_sites! (runs after
+      # universal-poly REQUIRES is finalized) so we don't need to
+      # duplicate it here.
     end
 
     # Phase 2: when this call happens inside a held WITH scope and targets
@@ -3901,7 +4123,7 @@ private
     # LOCKED arm works (Guard.get() returns *T into the live cell), so
     # the bug only fires for the VERSIONED arm at runtime. Reject up
     # front and direct the user to `WITH SNAPSHOT cell AS MUTABLE va
-    # { ... } ON Conflict ...` for transactional mutation.
+    # { ... } ON MvccConflict ...` for transactional mutation.
     #
     # AtomicPtr M3.7/M3.8 carve-out: SNAPSHOT MATCH bypasses this
     # rejection because each arm dispatches to `Versioned.update`
@@ -3925,7 +4147,7 @@ private
           "LOCKED arm would mutate the live cell). For transactional " \
           "mutation on a versioned cell use:\n" \
           "    WITH SNAPSHOT #{mut_cap[:var_node].respond_to?(:name) ? mut_cap[:var_node].name : 'cell'} AS MUTABLE va " \
-          "{ ... } ON Conflict <action>\n" \
+          "{ ... } ON MvccConflict <action>\n" \
           "and keep WITH MATCH for read-side polymorphism.")
       end
       if node.capabilities.length > 1
@@ -4123,8 +4345,7 @@ private
     @held_locks = prev_held
     @held_lock_types = prev_held_types
 
-    validate_no_multi_cell_atomic_ptr!(node)
-    validate_polymorphic_mutate_uses_match!(node)
+    validate_no_multi_object_atomic!(node)
     validate_lock_error_clause!(node, expanded_capabilities)
     # MVCC: SNAPSHOT-transaction bodies lower to
     # `Versioned.update[Multi](rt, alloc, ...)` (heap-allocates a new
@@ -4143,6 +4364,31 @@ private
       # a VERSIONED arm uses Versioned.read(rt) inside the arm's prelude.
       if node.snapshot_mode == :read || node.snapshot_mode == :transaction || versioned_arm
         current_fn_ctx.needs_rt = true
+      end
+      # True-Sync-Polymorphism Gate 3: a `WITH POLYMORPHIC` block whose
+      # bound binding is a parameter with no narrow REQUIRES becomes
+      # universally polymorphic and lowers to `polymorphicMutate(c, rt,
+      # ...)`. The helper threads rt into Versioned/AtomicPtr
+      # `.update(rt, alloc, ...)` paths, so the enclosing fn must carry
+      # rt -- even when the surface body looks lock-free.
+      # Detection at visit time: WITH POLYMORPHIC + the bound binding
+      # is a param + the function's REQUIRES (so far) doesn't list this
+      # param. The annotator's polymorphic-iff rule (in check_function!)
+      # will later re-confirm and stamp `node.universal_poly` so the
+      # lowering can route to the new MIR node; but we set rt/fail here
+      # because compute_needs_rt! runs before check_function!.
+      if node.polymorphic && (node.capabilities || []).length == 1
+        bound_var = node.capabilities.first[:var_node]
+        bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
+        bound_sym  = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
+        is_param   = bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
+        fn_node    = @fn_nodes[current_fn_ctx&.name]
+        has_req    = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
+                     fn_node.requires.key?(bound_name)
+        if is_param && !has_req
+          current_fn_ctx.needs_rt = true
+          fn_node.can_fail = true if fn_node.respond_to?(:can_fail=)
+        end
       end
     end
     # Queue this WITH for the post-pass handler-reachability check. Running
@@ -4166,13 +4412,15 @@ private
   # Symbols matched by the clause are stamped onto clause[:matched_types];
   # unmatched types bubble up as their registry kind at codegen time.
   LOCK_POSSIBLE_TYPES = %i[LockTimeout LockCycle Deadlock].freeze
-  # MVCC L5: the only error a `Shared.update[Multi]` commit can surface
-  # to user code (other than allocator errors which propagate as panics)
-  # is `Conflict` -- the bridge for `error.UpdateRetriesExhausted`. A
-  # `WITH SNAPSHOT ... AS MUTABLE` block must handle it explicitly,
-  # mirroring how `WITH @locked` requires `ON LockCycle` when a cycle
-  # is reachable.
-  SNAPSHOT_POSSIBLE_TYPES = %i[Conflict].freeze
+  # MVCC L5 + True-Sync-Polymorphism (#324 / #330): the errors a
+  # SNAPSHOT MUTABLE commit can surface depend on the cell family.
+  # @versioned -> MvccConflict (Versioned.update bounded retry).
+  # @indirect:atomic -> AtomicConflict (AtomicPtr.update bounded
+  # retry, #330 = 256 CAS losses). The dispatch picks per cell at
+  # validate_lock_error_clause! time; SNAPSHOT_POSSIBLE_TYPES is the
+  # union over both for the resolve_error_selectors! reachability
+  # check.
+  SNAPSHOT_POSSIBLE_TYPES = %i[MvccConflict AtomicConflict].freeze
 
   def validate_lock_error_clause!(node, expanded_capabilities)
     clause = node.lock_error_clause
@@ -4180,7 +4428,7 @@ private
 
     # AtomicPtr M3.8: SNAPSHOT MATCH MUTABLE has per-arm conflict
     # contracts. The trailing `node.lock_error_clause` is nil
-    # (arms own their own ON Conflict clauses); validate each arm
+    # (arms own their own ON MvccConflict clauses); validate each arm
     # against its family's rule and short-circuit before the
     # single-arm checks below.
     if node.arms && is_snapshot_txn
@@ -4188,11 +4436,13 @@ private
       return
     end
 
-    # AtomicPtr M3.6: split the SNAPSHOT-transaction ON Conflict
-    # contract by family. Versioned (MVCC) transactions REQUIRE the
-    # handler -- bounded retry, Conflict on exhaustion. AtomicPtr
-    # (Rust rcu) FORBIDS the handler -- unbounded retry, no conflict
-    # path to handle. The split only matters when ANY cell in this
+    # AtomicPtr M3.6 + True-Sync-Polymorphism (#324): split the
+    # SNAPSHOT-transaction conflict-handler contract by family.
+    # Versioned (MVCC) transactions REQUIRE the handler -- bounded
+    # retry, MvccConflict on exhaustion. AtomicPtr (Rust rcu) FORBIDS
+    # the handler today -- unbounded retry, no conflict path to handle
+    # (#330 will bound this and surface AtomicConflict, but that's a
+    # future task). The split only matters when ANY cell in this
     # WITH is @indirect:atomic; mixed cells trip the multi-cell
     # rejection in M3.9.
     snap_caps = node.capabilities || []
@@ -4202,27 +4452,47 @@ private
       sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
     }
 
-    # MVCC L5: SNAPSHOT-transaction REQUIRES an ON Conflict handler.
-    # Mirrors the LockCycle-required-when-cycle-reachable contract.
-    # AtomicPtr M3.6 carve-out: skip the requirement when every cell
-    # is @indirect:atomic -- the rcu loop has no conflict.
-    if is_snapshot_txn && clause.nil? && !has_atomic_ptr
-      error!(node,
-             "WITH SNAPSHOT ... AS MUTABLE requires an ON Conflict handler. " \
-             "Optimistic CAS commit can fail under contention; CLEAR forces " \
-             "explicit handling. Add e.g. `ON Conflict RAISE`, " \
-             "`ON Conflict RETRY(N) THEN PASS`, or `ON Conflict -> { ... }`.")
+    # MVCC L5 + True-Sync-Polymorphism (#328): SNAPSHOT-transaction
+    # without a per-WITH conflict handler now falls back to the
+    # program-level SYNC POLICY (the baked-in default is always
+    # stamped when no user policy exists, so this can't fail in
+    # practice). The synthesized clause is stamped on
+    # node.lock_error_clause so the lowering takes the catch path
+    # uniformly. The error type comes from the cell family:
+    # @versioned -> MvccConflict; @indirect:atomic -> AtomicConflict
+    # (#330 bounded the AtomicPtr.update loop at 256 and surfaced
+    # error.AtomicConflict on exhaustion).
+    if is_snapshot_txn && clause.nil?
+      target_error = has_atomic_ptr ? :AtomicConflict : :MvccConflict
+      synth = synthesize_clause_from_policy(target_error)
+      if synth
+        node.lock_error_clause = synth
+        clause = synth
+      else
+        error!(node,
+               "WITH SNAPSHOT ... AS MUTABLE has no `ON #{target_error}` " \
+               "handler and the SYNC POLICY does not provide one. " \
+               "Either add `ON #{target_error} ...` at this WITH, or extend " \
+               "the program SYNC POLICY (a complete policy is mandatory).")
+      end
     end
 
-    # AtomicPtr M3.6: ON Conflict on an @indirect:atomic SNAPSHOT
-    # MUTABLE block is meaningless -- AtomicPtr.update retries until
-    # success (Rust rcu semantics; design contract in
-    # docs/agents/atomicptr.md §6.2). Reject explicitly.
+    # AtomicPtr M3.6 + True-Sync-Polymorphism (#330): an @indirect:atomic
+    # SNAPSHOT MUTABLE block now CAN raise AtomicConflict (after
+    # MAX_UPDATE_RETRIES = 256 CAS losses). An inline conflict handler
+    # is permitted iff its selector is `AtomicConflict` (not
+    # `MvccConflict`, which can't fire from atomic-pointer commit).
     if has_atomic_ptr && clause
-      error!(node,
-        "`ON Conflict` isn't valid on `@indirect:atomic`. Atomic CAS " \
-        "retries until success (Rust `rcu` semantics); there's no " \
-        "conflict path to handle. Drop the trailing `ON Conflict` clause.")
+      bad_selector = (clause[:selectors] || []).find { |s|
+        s[:form] == :type && s[:name] == :MvccConflict
+      }
+      if bad_selector
+        error!(node,
+          "`ON MvccConflict` isn't valid on `@indirect:atomic`. " \
+          "AtomicPtr.update raises `AtomicConflict` (after 256 CAS " \
+          "losses), not `MvccConflict`. Use `ON AtomicConflict ...` " \
+          "instead, or drop the handler to fall back to the SYNC POLICY.")
+      end
     end
 
     return unless clause
@@ -4250,44 +4520,16 @@ private
     end
   end
 
-  # AtomicPtr M3.11: when a fn declares `REQUIRES <param>: VERSIONED |
-  # ATOMIC` and the body contains a bare `WITH SNAPSHOT <param> AS
-  # MUTABLE x { ... }` (single body, no MATCH), error directing the
-  # user to MATCH-dispatch. The two families differ in their ON
-  # Conflict requirement (VERSIONED requires it, ATOMIC forbids it),
-  # so a bare body shape can't satisfy both. Per design contract
-  # docs/agents/atomicptr.md §6.4.
-  #
-  # Read-mode SNAPSHOT (no MUTABLE on any cell) is fine without MATCH
-  # -- read paths can't fail in EITHER family, so the same body works
-  # uniformly. Single-family REQUIRES (just VERSIONED, just ATOMIC)
-  # is also fine -- the bare body matches that family's contract
-  # (M3.6 already handles the ATOMIC-only path; M5 the VERSIONED-only).
-  def validate_polymorphic_mutate_uses_match!(node)
-    return unless node.snapshot_mode == :transaction
-    return if node.arms  # MATCH form already handled by M3.8
-    snap_caps = (node.capabilities || []).select { |c| c[:capability] == :SNAPSHOT }
-    snap_caps.each do |cap|
-      sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
-      next unless sym
-      fams = sym.respond_to?(:sync_families) ? sym.sync_families : nil
-      next unless fams.is_a?(Set) && fams.size > 1
-      # The reject only triggers when the polymorphic disjunction
-      # includes BOTH VERSIONED and ATOMIC -- those are the two
-      # surfaces that differ in `ON Conflict` requirement. Other
-      # multi-family combinations (e.g., LOCKED | VERSIONED) hit
-      # different rejections at the WITH SNAPSHOT cell-validation
-      # stage; this check is specifically the M3.11 split.
-      next unless fams.include?(:VERSIONED) && fams.include?(:ATOMIC)
-      var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : "cell"
-      error!(node,
-        "Mutate surface differs by family: `@versioned` bounds retries " \
-        "and requires `ON Conflict`; `@indirect:atomic` retries unbounded " \
-        "and forbids it. Dispatch per family with `WITH SNAPSHOT #{var_name} " \
-        "AS MUTABLE x MATCH WHEN VERSIONED -> { ... } ON Conflict ... " \
-        "WHEN ATOMIC -> { ... } END`.")
-    end
-  end
+  # AtomicPtr M3.11 [REMOVED #332]: this rule rejected bare
+  # `WITH SNAPSHOT <param> AS MUTABLE x { ... }` on a polymorphic
+  # `REQUIRES c: VERSIONED | ATOMIC` parameter, forcing the user to
+  # use MATCH dispatch because the two families differed in their
+  # ON Conflict requirement (VERSIONED required it, ATOMIC forbade
+  # it). After #324 split Conflict into Mvcc/AtomicConflict, #328
+  # added the SYNC POLICY chain (no inline handler required), and
+  # #330 bounded AtomicPtr.update + bridged AtomicConflict, both
+  # families now use identical SNAPSHOT MUTABLE syntax. The rule's
+  # premise is gone, so it no longer fires.
 
   # AtomicPtr M3.10: reject `cfg.field = ...` (or `cfg.field += 1`,
   # etc) when `cfg` is `@indirect:atomic`. The AtomicPtr cell
@@ -4329,71 +4571,131 @@ private
     "<field>"
   end
 
-  # AtomicPtr M3.9: reject multi-cell `WITH SNAPSHOT` when ANY cell
-  # is `@indirect:atomic`. AtomicPtr has no portable hardware multi-
-  # pointer CAS primitive (and software MCAS is out of scope for
-  # v0.3); per-cell atomic CAS gives no atomicity ACROSS cells.
-  # MVCC's `Shared.updateMulti` works because of sorted-pointer
-  # locking + commit-or-rollback machinery that AtomicPtr doesn't
-  # have. The rejection covers both single-arm SNAPSHOT and SNAPSHOT
-  # MATCH (any ATOMIC arm in a multi-cell MATCH triggers the same
-  # error).
+  # AtomicPtr M3.9 + True-Sync-Polymorphism (#333): reject any
+  # multi-binding WITH where one or more sync-constrained cells
+  # could be `@atomic` / `@indirect:atomic` at runtime. Atomic ops
+  # are per-cell; CLEAR has no portable multi-pointer atomic
+  # primitive and software MCAS is out of scope, so multi-cell
+  # atomic gives no atomicity ACROSS cells (readers can see states
+  # nobody ever published, writers cannot commit-or-rollback).
   #
-  # Read-only multi-cell with @indirect:atomic is also rejected --
-  # per-cell atomic loads aren't cross-cell consistent (the reader
-  # can see a state nobody ever published). The error directs the
-  # user to @shared:versioned for cross-cell snapshot reads.
-  def validate_no_multi_cell_atomic_ptr!(node)
-    snap_caps = (node.capabilities || []).select { |c| c[:capability] == :SNAPSHOT }
-    return if snap_caps.size <= 1
+  # Covers all multi-binding WITH forms (plain, POLYMORPHIC, SNAPSHOT,
+  # SNAPSHOT MATCH). Sync-only: BORROWED / RESTRICT / VIEW /
+  # MATERIALIZED VIEW capabilities don't count toward the multi-binding
+  # threshold (they don't synchronize).
+  #
+  # Atomic is admitted when:
+  #   - a binding has concrete sync `:atomic` (primitive or indirect:atomic).
+  #   - a polymorphic param's REQUIRES disjunction includes `:ATOMIC`
+  #     literally, or `:SNAPSHOTTED` (which expands to {VERSIONED, ATOMIC}).
+  # The fix: narrow REQUIRES to a non-ATOMIC family
+  # (e.g. `LOCKED | VERSIONED`), or refactor to single-cell WITHs.
+  def validate_no_multi_object_atomic!(node)
+    caps = (node.capabilities || []).select { |c| sync_constrained_cap?(c) }
+    return if caps.size < 2
 
-    has_atomic_ptr_cell = snap_caps.any? { |c|
-      sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
-      sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
-    }
-    has_atomic_arm = (node.arms || []).any? { |arm| arm[:family] == :ATOMIC }
+    arm_admits_atomic = (node.arms || []).any? { |arm| arm[:family] == :ATOMIC }
+    offender = caps.find { |c| cap_admits_atomic?(c) }
+    return unless offender || arm_admits_atomic
 
-    return unless has_atomic_ptr_cell || has_atomic_arm
+    var_name = if offender
+      offender[:var_node].respond_to?(:name) ? offender[:var_node].name : "<expr>"
+    else
+      "this WITH"
+    end
 
     error!(node,
-      "`@indirect:atomic` cannot guarantee multi-object consistency. " \
-      "If you need multi-object consistency use `@shared:versioned` " \
-      "or `@shared:locked`.")
+      "Multi-object WITH cannot admit ATOMIC: `#{var_name}` " \
+      "is (or could be) `@atomic` / `@indirect:atomic`, which gives no " \
+      "atomicity across cells. Either narrow the binding's REQUIRES to a " \
+      "non-ATOMIC family (e.g. `LOCKED | VERSIONED`, or just `VERSIONED` " \
+      "for cross-cell MVCC transactions), or refactor to single-cell " \
+      "WITH blocks. Per design contract docs/agents/atomicptr.md §4 + " \
+      "docs/agents/true-synchronization-polymorphism.md.")
   end
 
-  # AtomicPtr M3.8: per-arm ON Conflict validation for SNAPSHOT
-  # MATCH MUTABLE blocks. The two families have opposite contracts:
-  #   - VERSIONED arm: REQUIRES at least one ON Conflict clause
-  #     (mirrors the single-arm M5 contract; Versioned.update can
-  #     surface UpdateRetriesExhausted -> Conflict).
-  #   - ATOMIC arm: FORBIDS ON Conflict (rcu retries until success;
-  #     AtomicPtr.update never returns Conflict -- matches Rust
-  #     arc-swap rcu, design contract docs/agents/atomicptr.md §6.2).
+  # True-Sync-Polymorphism (#333): a capability is "sync-constrained"
+  # when its WITH binding actually synchronizes against a cell at
+  # runtime. BORROWED / RESTRICT / VIEW / MATERIALIZED VIEW are pure
+  # borrows or observable reads -- they don't acquire a lock or pin a
+  # snapshot. EXCLUSIVE / SNAPSHOT / ATOMIC and inferred capabilities
+  # whose var_node has a sync axis at the symbol level all count.
+  def sync_constrained_cap?(cap)
+    case cap[:capability]
+    when :BORROWED, :RESTRICT, :VIEW, :MATERIALIZED_VIEW, :multiowned, :shared
+      false
+    when :EXCLUSIVE, :write_locked_read, :SNAPSHOT, :ATOMIC
+      true
+    when :infer
+      # Inferred from the var_node's actual sync (if any).
+      sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
+      return false unless sym
+      !sym.sync.nil? || (sym.respond_to?(:sync_families) && sym.sync_families && !sym.sync_families.empty?)
+    else
+      false
+    end
+  end
+
+  # True-Sync-Polymorphism (#333): does this capability's binding
+  # potentially run as `:atomic` at runtime? Two paths:
+  #   - concrete sync `:atomic` (covers primitive @atomic and
+  #     indirect:atomic via sym.layout == :indirect, both flagged
+  #     by sym.sync == :atomic);
+  #   - polymorphic REQUIRES disjunction admitting :ATOMIC or
+  #     :SNAPSHOTTED (which expands to {VERSIONED, ATOMIC}).
+  def cap_admits_atomic?(cap)
+    sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
+    return false unless sym
+    return true if sym.sync == :atomic
+    fams = sym.respond_to?(:sync_families) ? sym.sync_families : nil
+    return false unless fams.is_a?(Set)
+    expanded = WithMatchCheck.expand_snapshotted(fams)
+    expanded.include?(:ATOMIC)
+  end
+
+  # AtomicPtr M3.8 + True-Sync-Polymorphism (#324): per-arm conflict-
+  # handler validation for SNAPSHOT MATCH MUTABLE blocks. The two
+  # families have opposite contracts:
+  #   - VERSIONED arm: REQUIRES at least one `ON MvccConflict` clause
+  #     (mirrors the single-arm M5 contract; Versioned.update bounds
+  #     retries and surfaces UpdateRetriesExhausted -> MvccConflict).
+  #   - ATOMIC arm: FORBIDS conflict handlers (today rcu retries
+  #     until success; once #330 bounds AtomicPtr.update at 256 the
+  #     right handler will be `ON AtomicConflict`, not `ON
+  #     MvccConflict` -- but for now no handler is permitted).
   # Read-mode SNAPSHOT MATCH (no MUTABLE) skips this entirely --
-  # read paths can't fail, so neither arm needs / accepts ON Conflict.
+  # read paths can't fail, so neither arm needs / accepts a handler.
   def validate_snapshot_match_arms!(node)
     (node.arms || []).each do |arm|
       clauses = arm[:lock_error_clauses] || []
       case arm[:family]
       when :VERSIONED
+        # True-Sync-Polymorphism (#328): VERSIONED arm without a
+        # per-arm conflict handler falls back to the program SYNC
+        # POLICY (always stamped, so this can't fail in practice).
         if clauses.empty?
-          error!(node,
-            "WITH SNAPSHOT ... AS MUTABLE MATCH: VERSIONED arm requires " \
-            "an `ON Conflict` handler (Versioned.update bounds retries " \
-            "and surfaces Conflict on exhaustion). Add e.g. " \
-            "`WHEN VERSIONED -> { ... } ON Conflict RAISE`.")
+          synth = synthesize_clause_from_policy(:MvccConflict)
+          if synth
+            arm[:lock_error_clauses] = [synth]
+          else
+            error!(node,
+              "WITH SNAPSHOT ... AS MUTABLE MATCH: VERSIONED arm has no " \
+              "`ON MvccConflict` handler and the SYNC POLICY does not " \
+              "provide one. Either add `WHEN VERSIONED -> { ... } " \
+              "ON MvccConflict ...`, or extend the program SYNC POLICY.")
+          end
         end
       when :ATOMIC
         unless clauses.empty?
           error!(node,
             "WITH SNAPSHOT ... AS MUTABLE MATCH: ATOMIC arm forbids " \
-            "`ON Conflict` (AtomicPtr.update retries until success -- " \
+            "conflict handlers (AtomicPtr.update retries until success -- " \
             "Rust `rcu` semantics; there's no conflict path to handle). " \
-            "Drop the trailing `ON Conflict` from the ATOMIC arm.")
+            "Drop the trailing handler clause from the ATOMIC arm.")
         end
       end
     end
-    # Visit per-arm ON Conflict action bodies so types are
+    # Visit per-arm ON MvccConflict action bodies so types are
     # annotated. Mirrors the single-arm pass at the bottom of
     # validate_lock_error_clause!.
     (node.arms || []).each do |arm|

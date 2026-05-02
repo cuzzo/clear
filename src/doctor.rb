@@ -466,8 +466,12 @@ module Doctor
       puts "  Migration: change `@shared:writeLocked` -> `@shared:versioned`"
       puts "  on the binding. Read sites: replace `WITH x AS v { ... }` with"
       puts "  `WITH SNAPSHOT x AS v { ... }`. Write sites become"
-      puts "  `WITH SNAPSHOT x AS MUTABLE v { ... } ON Conflict RAISE` (or"
-      puts "  RETRY(N) THEN ...). See docs/mvcc.md."
+      puts "  `WITH SNAPSHOT x AS MUTABLE v { ... }` -- the inline"
+      puts "  `ON MvccConflict ...` is optional (the program SYNC POLICY's"
+      puts "  default RAISE applies otherwise). For polymorphic helpers,"
+      puts "  prefer `REQUIRES x: SNAPSHOTTED` (umbrella for @versioned"
+      puts "  and @indirect:atomic) over the narrower `VERSIONED`. See"
+      puts "  docs/mvcc.md and docs/agents/true-synchronization-polymorphism.md."
     end
 
     # Atomics M1.9 / M1.10: when the profile flagged any write-heavy
@@ -544,7 +548,8 @@ module Doctor
     puts "  `@indirect:atomic` removes the lock entirely: readers do an"
     puts "  acquire-load + EBR pin (lock-free, parallel-scaling); the"
     puts "  writer's whole-T publish becomes a CAS-loop (Rust arc-swap"
-    puts "  rcu semantics — unbounded retry, no Conflict surface)."
+    puts "  rcu semantics — bounded internal retry, AtomicConflict on"
+    puts "  cap exhaustion; usually defaulted via SYNC POLICY)."
     puts ""
     puts "  Eligible bindings (run `clear fix` to apply once you're"
     puts "  ready; the rewrite touches the declaration AND every WITH"
@@ -560,7 +565,8 @@ module Doctor
       puts "      #{c[:n_uses]} eligible WITH site(s); whole-struct or read-only body"
       puts "      → migrate to `#{c[:name]} = #{c[:struct_name]}{...} @indirect:atomic;`"
       puts "         and rewrite WITH EXCLUSIVE -> WITH SNAPSHOT (read) /"
-      puts "         WITH SNAPSHOT MUTABLE (whole-struct replace; no ON Conflict)"
+      puts "         WITH SNAPSHOT MUTABLE (whole-struct replace; AtomicConflict"
+      puts "         is defaulted by SYNC POLICY -- no inline handler needed)"
     end
   end
 
@@ -694,8 +700,9 @@ module Doctor
       puts "  (or `@shared:locked` for simple mutex semantics). Read sites:"
       puts "  replace `WITH SNAPSHOT x AS v { ... }` with `WITH x AS v"
       puts "  { ... }`. Write sites: replace `WITH SNAPSHOT x AS MUTABLE v"
-      puts "  { ... } ON Conflict RAISE` with `WITH EXCLUSIVE x AS v"
-      puts "  { ... }`. See docs/mvcc.md."
+      puts "  { ... }` (the inline `ON MvccConflict` is optional under"
+      puts "  the SYNC POLICY default) with `WITH EXCLUSIVE x AS v { ... }`."
+      puts "  See docs/mvcc.md."
     end
 
     # AtomicPtr M3.16: when an MVCC cell only does single-cell
@@ -730,7 +737,8 @@ module Doctor
     puts "  WITH SNAPSHOT MUTABLE bodies that are whole-struct replace."
     puts "  Switching to `@indirect:atomic` skips MVCC's bounded-retry +"
     puts "  EBR-pin-on-update overhead: same lock-free read path, plus a"
-    puts "  rcu-style unbounded-retry update (no Conflict surface)."
+    puts "  rcu-style retry update (bounded internally; AtomicConflict on"
+    puts "  cap exhaustion, defaulted by SYNC POLICY)."
     puts ""
     puts "  Eligible bindings:"
     puts ""
@@ -741,7 +749,8 @@ module Doctor
       puts "      #{c[:n_uses]} eligible WITH SNAPSHOT site(s); whole-struct or read-only"
       puts "      → migrate to `#{c[:name]} = #{c[:struct_name]}{...} @indirect:atomic;`"
       puts "         WITH SNAPSHOT (read) stays the same shape;"
-      puts "         WITH SNAPSHOT MUTABLE drops the trailing `ON Conflict`"
+      puts "         WITH SNAPSHOT MUTABLE drops the trailing `ON MvccConflict`"
+      puts "         (AtomicConflict is defaulted by SYNC POLICY)"
     end
   end
 

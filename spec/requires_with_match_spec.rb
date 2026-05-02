@@ -207,7 +207,7 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
         FN bumpIt(c: Counter) RETURNS Void
           REQUIRES c: LOCKED
         ->
-          WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
+          WITH POLYMORPHIC EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
         END
         FN main() RETURNS Void ->
           c = Counter{ value: 0 };
@@ -224,7 +224,7 @@ RSpec.describe "P2 grammar: REQUIRES + WITH MATCH" do
         FN bumpIt(c: Counter) RETURNS Void
           REQUIRES c: LOCKED
         ->
-          WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
+          WITH POLYMORPHIC EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
         END
         FN main() RETURNS Void ->
           c = Counter{ value: 0 } @shared:locked;

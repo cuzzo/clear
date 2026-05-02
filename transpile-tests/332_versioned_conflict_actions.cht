@@ -1,4 +1,4 @@
--- MVCC L8: ON Conflict action variants (RAISE / PASS / `-> { ... }` / EXIT).
+-- MVCC L8: ON MvccConflict action variants (RAISE / PASS / `-> { ... }` / EXIT).
 -- All four shapes are accepted by the parser (L4) and emitted by the
 -- codegen (L6.2). RAISE in single-thread won't fire (no contention),
 -- but the catch arm is wired and compiles.
@@ -10,16 +10,16 @@ FN main() RETURNS Void ->
     c2 = Counter{ value: 0 } @versioned;
     c3 = Counter{ value: 0 } @versioned;
 
-    -- ON Conflict RAISE (return error.CheatError on conflict).
-    WITH SNAPSHOT c1 AS MUTABLE va { va.value = 1; } ON Conflict RAISE
+    -- ON MvccConflict RAISE (return error.CheatError on conflict).
+    WITH SNAPSHOT c1 AS MUTABLE va { va.value = 1; } ON MvccConflict RAISE
 
-    -- ON Conflict PASS (break out of WITH; continue execution).
-    WITH SNAPSHOT c2 AS MUTABLE va { va.value = 2; } ON Conflict PASS
+    -- ON MvccConflict PASS (break out of WITH; continue execution).
+    WITH SNAPSHOT c2 AS MUTABLE va { va.value = 2; } ON MvccConflict PASS
 
-    -- ON Conflict -> { stmts } (block action; runs body then continues).
+    -- ON MvccConflict -> { stmts } (block action; runs body then continues).
     MUTABLE handler_ran = FALSE;
     WITH SNAPSHOT c3 AS MUTABLE va { va.value = 3; }
-      ON Conflict -> { handler_ran = TRUE; }
+      ON MvccConflict -> { handler_ran = TRUE; }
 
     -- All three commits succeed in the single-thread case.
     WITH SNAPSHOT c1 AS view { ASSERT view.value == 1, "RAISE c1"; }

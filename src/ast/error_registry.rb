@@ -29,8 +29,16 @@ module AST
   ERROR_NAME_DEADLOCK             = 3
   ERROR_NAME_UNEXPECTED_RECURSION = 4
   ERROR_NAME_MAX_DEPTH_EXCEEDED   = 5
-  ERROR_NAME_CONFLICT             = 6
-  ERROR_NAME_USER_FIRST           = 7
+  # True-Sync-Polymorphism (#324): the legacy `Conflict` is split into
+  # `MvccConflict` (versioned commit retry exhausted) and
+  # `AtomicConflict` (atomic CAS retry exhausted). MvccConflict
+  # inherits the legacy id=6 because it's the closest semantic
+  # successor (the same bridging path: error.UpdateRetriesExhausted ->
+  # MvccConflict). AtomicConflict is brand-new at id=7. Internal caps
+  # land in #330 (atomic_ptr 256, versioned 64).
+  ERROR_NAME_MVCC_CONFLICT        = 6
+  ERROR_NAME_ATOMIC_CONFLICT      = 7
+  ERROR_NAME_USER_FIRST           = 8
 
   # Mutable registry. Seeded with the five stdlib types and extended
   # by the annotator on first use. Hash shape:
@@ -47,7 +55,8 @@ module AST
     Deadlock:            { kind: :System,    zig_name: "Deadlock",            id: ERROR_NAME_DEADLOCK,             first_site: nil },
     UnexpectedRecursion: { kind: :System,    zig_name: "UnexpectedRecursion", id: ERROR_NAME_UNEXPECTED_RECURSION, first_site: nil },
     MaxDepthExceeded:    { kind: :System,    zig_name: "MaxDepthExceeded",    id: ERROR_NAME_MAX_DEPTH_EXCEEDED,   first_site: nil },
-    Conflict:            { kind: :Transient, zig_name: "Conflict",            id: ERROR_NAME_CONFLICT,             first_site: nil },
+    MvccConflict:        { kind: :Transient, zig_name: "MvccConflict",        id: ERROR_NAME_MVCC_CONFLICT,        first_site: nil },
+    AtomicConflict:      { kind: :Transient, zig_name: "AtomicConflict",      id: ERROR_NAME_ATOMIC_CONFLICT,      first_site: nil },
   }
 
   # Counter for the next user-type id. Reset on a per-program basis via

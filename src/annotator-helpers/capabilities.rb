@@ -303,6 +303,31 @@ module CapabilityHelper
                          # WITH body (or per-arm prelude) binds the alias to
                          # the cell ref directly so atomic ops can be invoked.
                          when syn == :atomic            then :ATOMIC
+                         # #336: WITH POLYMORPHIC on a non-sync binding
+                         # (@local / @multiowned / plain T -- syn is nil
+                         # or :local; storage is :local / :multiowned /
+                         # :stack). Auto-promote to a no-op alias so
+                         # the body can read (and, when the binding is
+                         # mutable, write) through `*T`. Mutable bindings
+                         # land on :RESTRICT with alias_mutable=true;
+                         # immutable bindings land on :BORROWED. The
+                         # lowering's :RESTRICT-no-sync / :BORROWED
+                         # branches emit `const x = &c;` (or the
+                         # comptime probe for poly params) -- no Guard,
+                         # no Arc unwrap, no snapshot.
+                         when (node.respond_to?(:polymorphic) && node.polymorphic) &&
+                              (syn.nil? || syn == :local) &&
+                              (storage.nil? || storage == :local ||
+                               storage == :multiowned || storage == :stack ||
+                               storage == :heap)
+                           is_mut = var_node.respond_to?(:symbol) &&
+                                    var_node.symbol&.mutable
+                           if is_mut
+                             cap[:alias_mutable] = true
+                             :RESTRICT
+                           else
+                             :BORROWED
+                           end
                          when storage == :multiowned    then :multiowned
                          when storage == :shared        then :shared
                          else

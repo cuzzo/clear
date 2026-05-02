@@ -54,15 +54,26 @@ RSpec.describe AST do
       expect(entry[:id]).to eq(AST::ERROR_NAME_MAX_DEPTH_EXCEEDED)
     end
 
-    it "seeds Conflict as Transient with stable id 6 (MVCC optimistic-write contention)" do
-      entry = AST::ERROR_TYPES[:Conflict]
+    it "seeds MvccConflict as Transient with stable id 6 (MVCC optimistic-write retry exhausted)" do
+      entry = AST::ERROR_TYPES[:MvccConflict]
       expect(entry[:kind]).to eq(:Transient)
-      expect(entry[:zig_name]).to eq("Conflict")
-      expect(entry[:id]).to eq(AST::ERROR_NAME_CONFLICT)
+      expect(entry[:zig_name]).to eq("MvccConflict")
+      expect(entry[:id]).to eq(AST::ERROR_NAME_MVCC_CONFLICT)
     end
 
-    it "user types start at id 7 (after the seven stdlib types)" do
-      expect(AST::ERROR_NAME_USER_FIRST).to eq(7)
+    it "seeds AtomicConflict as Transient with stable id 7 (atomic CAS retry exhausted; bound lands in #330)" do
+      entry = AST::ERROR_TYPES[:AtomicConflict]
+      expect(entry[:kind]).to eq(:Transient)
+      expect(entry[:zig_name]).to eq("AtomicConflict")
+      expect(entry[:id]).to eq(AST::ERROR_NAME_ATOMIC_CONFLICT)
+    end
+
+    it "the legacy Conflict symbol is no longer registered (split into MvccConflict + AtomicConflict)" do
+      expect(AST::ERROR_TYPES.key?(:Conflict)).to be false
+    end
+
+    it "user types start at id 8 (after the eight stdlib types)" do
+      expect(AST::ERROR_NAME_USER_FIRST).to eq(8)
     end
   end
 
@@ -131,7 +142,7 @@ RSpec.describe AST do
       expect(AST.error_type?(:LockTimeout)).to be true
     end
 
-    it "rewinds the next user id so subsequent user types start at 4" do
+    it "rewinds the next user id so subsequent user types start at 8" do
       AST.register_type!(:UserA, :Input)
       AST.reset_user_types!
       AST.register_type!(:UserB, :Input)
@@ -154,14 +165,14 @@ RSpec.describe AST do
       expect(entries).to include([:Deadlock, 3])
     end
 
-    it "includes user types at >=7 sorted by id" do
+    it "includes user types at >=8 sorted by id" do
       AST.register_type!(:UserA, :Input)
       AST.register_type!(:UserB, :Input)
       entries = AST.enum_entries
       ids = entries.map(&:last)
       expect(ids).to eq(ids.sort)
-      expect(entries).to include([:UserA, 7])
-      expect(entries).to include([:UserB, 8])
+      expect(entries).to include([:UserA, 8])
+      expect(entries).to include([:UserB, 9])
     end
   end
 
@@ -215,8 +226,8 @@ RSpec.describe AST do
   end
 
   describe ".types_for_kind" do
-    it "expands :Transient to the retryable types (lock + MVCC contention)" do
-      expect(AST.types_for_kind(:Transient).to_set).to eq(Set[:LockTimeout, :LockCycle, :Conflict])
+    it "expands :Transient to the retryable types (lock + MVCC + Atomic contention)" do
+      expect(AST.types_for_kind(:Transient).to_set).to eq(Set[:LockTimeout, :LockCycle, :MvccConflict, :AtomicConflict])
     end
 
     it "expands :System to include Deadlock" do

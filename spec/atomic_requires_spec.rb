@@ -83,13 +83,18 @@ RSpec.describe "Atomics M1.4: REQUIRES c: ATOMIC" do
       expect(WithMatchCheck.family_of_arg(arg)).to eq(:VERSIONED)
     end
 
-    it "returns nil for a sync-less binding" do
+    it "returns :LOCAL for a sync-less binding (#336)" do
+      # Pre-#336 this returned nil; now non-sync bindings are
+      # classified into the LOCAL family (admits @local /
+      # @multiowned / plain T) so they can be passed to
+      # `REQUIRES c: LOCAL` parameters.
       sym = Object.new
       def sym.sync; nil; end
+      def sym.storage; nil; end
       arg = Object.new
       arg.define_singleton_method(:symbol) { sym }
       arg.define_singleton_method(:respond_to?) { |m| m == :symbol || super(m) }
-      expect(WithMatchCheck.family_of_arg(arg)).to be_nil
+      expect(WithMatchCheck.family_of_arg(arg)).to eq(:LOCAL)
     end
   end
 end

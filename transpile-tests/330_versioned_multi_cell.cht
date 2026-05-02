@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
     WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
         va.balance = va.balance - 25;
         vb.balance = vb.balance + 25;
-    } ON Conflict RAISE
+    } ON MvccConflict RAISE
 
     WITH SNAPSHOT a AS view_a { ASSERT view_a.balance == 75, "forward: a"; }
     WITH SNAPSHOT b AS view_b { ASSERT view_b.balance == 225, "forward: b"; }
@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
     WITH SNAPSHOT b AS MUTABLE vb, SNAPSHOT a AS MUTABLE va {
         vb.balance = vb.balance - 25;
         va.balance = va.balance + 25;
-    } ON Conflict RAISE
+    } ON MvccConflict RAISE
 
     WITH SNAPSHOT a AS view_a { ASSERT view_a.balance == 100, "reverse: a"; }
     WITH SNAPSHOT b AS view_b { ASSERT view_b.balance == 200, "reverse: b"; }

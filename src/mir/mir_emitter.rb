@@ -102,6 +102,7 @@ class MIREmitter
     when MIR::SnapshotRead         then emit_snapshot_read(node)
     when MIR::SnapshotTransaction  then emit_snapshot_transaction(node)
     when MIR::SnapshotMultiTxn     then emit_snapshot_multi_txn(node)
+    when MIR::PolymorphicMutate    then emit_polymorphic_mutate(node)
     when MIR::WithMatchDispatch    then emit_with_match_dispatch(node)
     # --- Verification-only (no codegen) ---
     when MIR::AllocMark, MIR::ReturnMark, MIR::ReassignMark, MIR::FieldCleanupMark
@@ -264,7 +265,7 @@ class MIREmitter
     parts.join("\n")
   end
 
-  # `WITH SNAPSHOT cell AS MUTABLE va { body } [ON Conflict <action>]`:
+  # `WITH SNAPSHOT cell AS MUTABLE va { body } [ON MvccConflict <action>]`:
   #   <unwrap>.update(<rt>, <alloc>, struct {
   #       fn run(<alias>: *<bare_t>) void {
   #           _ = &<alias>;
@@ -278,6 +279,22 @@ class MIREmitter
   # UpdateRetriesExhausted -- it retries until success (Rust rcu).
   # Just call with `try` so the only path back to the caller is
   # OOM (which the user can't usefully handle inline anyway).
+  # True-Sync-Polymorphism Gate 3: emit `polymorphicMutate(cell, rt, fn, .{})`
+  # for `WITH POLYMORPHIC c AS x { body }` on a universally-polymorphic
+  # parameter (no narrow REQUIRES). The runtime helper comptime-dispatches
+  # to the right family-specific path; the body is a no-capture closure.
+  def emit_polymorphic_mutate(node)
+    body_zig = emit_body(node.body || [])
+    <<~ZIG.rstrip
+      try CheatLib.polymorphicMutate(#{node.cell_zig}, #{node.rt}, struct {
+          fn run(#{node.alias_zig}: *#{node.bare_t_zig}) void {
+              _ = &#{node.alias_zig};
+              #{body_zig}
+          }
+      }.run, .{});
+    ZIG
+  end
+
   def emit_snapshot_transaction(node)
     body_zig = emit_body(node.body || [])
     core = <<~ZIG.rstrip
@@ -288,11 +305,15 @@ class MIREmitter
           }
       }.run, .{})
     ZIG
-    if node.is_atomic_ptr
-      "try #{core};"
-    else
-      wrap_conflict_handler(core, node.conflict_action, node.retries)
-    end
+    # True-Sync-Polymorphism (#330): both Versioned.update and
+    # AtomicPtr.update now surface a Zig error when their bounded
+    # retry budget is exhausted. The error name differs per family:
+    # Versioned -> error.UpdateRetriesExhausted (legacy bridge to
+    # MvccConflict); AtomicPtr -> error.AtomicConflict (introduced
+    # by this milestone). Both go through the same wrap_conflict_handler
+    # so the catch-and-action shape is uniform.
+    zig_error_name = node.is_atomic_ptr ? "AtomicConflict" : "UpdateRetriesExhausted"
+    wrap_conflict_handler(core, node.conflict_action, node.retries, zig_error_name)
   end
 
   # `WITH SNAPSHOT a AS MUTABLE va, b AS MUTABLE vb, ... { body }`:
@@ -326,9 +347,13 @@ class MIREmitter
     "#{chain}\n_ = &#{node.cell_zig};"
   end
 
-  # Helper: wrap a Versioned.update[Multi] call expression with the
-  # ON Conflict handler (and optional RETRY(N) outer-retry shape).
-  def wrap_conflict_handler(core_call, conflict_action, retries)
+  # Helper: wrap a Versioned.update[Multi] / AtomicPtr.update call
+  # expression with the conflict handler (and optional RETRY(N)
+  # outer-retry shape). True-Sync-Polymorphism (#330) parameterizes
+  # the Zig error name so the same wrapper works for both families:
+  # `UpdateRetriesExhausted` (Versioned bridge to MvccConflict) and
+  # `AtomicConflict` (AtomicPtr bridge to AtomicConflict).
+  def wrap_conflict_handler(core_call, conflict_action, retries, zig_error_name = "UpdateRetriesExhausted")
     if retries
       <<~ZIG.rstrip
         {
@@ -337,7 +362,7 @@ class MIREmitter
                 if (#{core_call}) |_| {
                     break :__snap_retry;
                 } else |__err| switch (__err) {
-                    error.UpdateRetriesExhausted => {
+                    error.#{zig_error_name} => {
                         if (__retry + 1 < #{retries}) continue;
                         #{conflict_action}
                     },
@@ -349,7 +374,7 @@ class MIREmitter
     else
       <<~ZIG.rstrip
         #{core_call} catch |__err| switch (__err) {
-            error.UpdateRetriesExhausted => { #{conflict_action} },
+            error.#{zig_error_name} => { #{conflict_action} },
             else => return __err,
         };
       ZIG
@@ -1017,11 +1042,18 @@ class MIREmitter
 
   def emit_cast(node)
     inner = emit(node.expr)
+    # `@as(!T, ...)` and `@as(!?T, ...)` parse as `@as(boolean_not, ...)`
+    # in expression context. Force type interpretation by prefixing with
+    # `anyerror`. (Same workaround as Promise(anyerror!T) in type.rb's
+    # tense path; the inferred error set folds into anyerror at the
+    # call site.)
+    target_t = node.target_type
+    target_t = "anyerror#{target_t}" if target_t&.start_with?("!")
     case node.method
     when :as
-      "@as(#{node.target_type}, #{inner})"
+      "@as(#{target_t}, #{inner})"
     when :intCast
-      node.target_type ? "@as(#{node.target_type}, @intCast(#{inner}))" : "@intCast(#{inner})"
+      target_t ? "@as(#{target_t}, @intCast(#{inner}))" : "@intCast(#{inner})"
     when :floatCast
       "@floatCast(#{inner})"
     when :ptrCast

@@ -6,11 +6,11 @@ require_relative "../src/ast/ast"
 # AtomicPtr M3.7 -- parser support for `WITH SNAPSHOT cell AS [MUTABLE]
 # alias MATCH ... END`. Polymorphic VERSIONED | ATOMIC fns dispatch
 # per-family because the mutate surfaces differ (Versioned requires
-# `ON Conflict`, AtomicPtr forbids it).
+# `ON MvccConflict`, AtomicPtr forbids it).
 #
 # Grammar mirrors the generic `WITH ... MATCH` path: SNAPSHOT / AS /
 # MUTABLE / alias / cell-list stay OUTSIDE the MATCH; per-arm bodies
-# and per-arm trailing ON Conflict clauses live inside the arms.
+# and per-arm trailing ON MvccConflict clauses live inside the arms.
 RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
   def parse(src)
     tokens = Lexer.new(src).tokenize
@@ -19,11 +19,11 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
   end
 
   describe "single-cell SNAPSHOT MATCH" do
-    it "parses VERSIONED + ATOMIC arms with per-arm ON Conflict on the VERSIONED arm" do
+    it "parses VERSIONED + ATOMIC arms with per-arm ON MvccConflict on the VERSIONED arm" do
       src = <<~CLEAR
         FN bumpPort!(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
-            WHEN VERSIONED -> { x.port = x.port + 1; } ON Conflict RAISE
+            WHEN VERSIONED -> { x.port = x.port + 1; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { x.port = x.port + 1; }
           END
           RETURN;
@@ -38,11 +38,11 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       expect(with_block.arms[1][:family]).to eq(:ATOMIC)
     end
 
-    it "VERSIONED arm preserves the ON Conflict clause" do
+    it "VERSIONED arm preserves the ON MvccConflict clause" do
       src = <<~CLEAR
         FN f!(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
-            WHEN VERSIONED -> { _ = x.port; } ON Conflict RAISE
+            WHEN VERSIONED -> { _ = x.port; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { _ = x.port; }
           END
           RETURN;
@@ -54,11 +54,11 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       expect(versioned_arm[:lock_error_clauses]).not_to be_empty
     end
 
-    it "ATOMIC arm has NO ON Conflict clause" do
+    it "ATOMIC arm has NO ON MvccConflict clause" do
       src = <<~CLEAR
         FN f!(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
-            WHEN VERSIONED -> { _ = x.port; } ON Conflict RAISE
+            WHEN VERSIONED -> { _ = x.port; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { _ = x.port; }
           END
           RETURN;
@@ -74,7 +74,7 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       src = <<~CLEAR
         FN f!(MUTABLE c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS MUTABLE x MATCH
-            WHEN VERSIONED -> { _ = x.port; } ON Conflict RAISE
+            WHEN VERSIONED -> { _ = x.port; } ON MvccConflict RAISE
             WHEN ATOMIC    -> { _ = x.port; }
           END
           RETURN;
@@ -135,10 +135,10 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
   end
 
   describe "non-MATCH path is unaffected" do
-    it "parses single-cell SNAPSHOT (no MATCH) with ON Conflict trailing the body" do
+    it "parses single-cell SNAPSHOT (no MATCH) with ON MvccConflict trailing the body" do
       src = <<~CLEAR
         FN f!(MUTABLE c: Cfg) RETURNS Void ->
-          WITH SNAPSHOT c AS MUTABLE x { _ = x.port; } ON Conflict RAISE
+          WITH SNAPSHOT c AS MUTABLE x { _ = x.port; } ON MvccConflict RAISE
           RETURN;
         END
       CLEAR
@@ -149,7 +149,7 @@ RSpec.describe "WITH SNAPSHOT MATCH parser (M3.7)" do
       expect(with_block.lock_error_clause).not_to be_nil
     end
 
-    it "parses single-cell SNAPSHOT read mode (no MATCH, no ON Conflict)" do
+    it "parses single-cell SNAPSHOT read mode (no MATCH, no ON MvccConflict)" do
       src = <<~CLEAR
         FN f(c: Cfg) RETURNS Void ->
           WITH SNAPSHOT c AS x { _ = x.port; }

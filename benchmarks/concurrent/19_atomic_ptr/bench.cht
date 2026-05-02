@@ -101,7 +101,7 @@ FN main() RETURNS Void ->
             WITH SNAPSHOT c_v AS MUTABLE v {
                 v.a = v.a + 1_i64;
                 v.b = (v.a) * 2_i64;
-            } ON Conflict RAISE
+            } ON MvccConflict RAISE
             k = k + 1_i64;
         END
     };

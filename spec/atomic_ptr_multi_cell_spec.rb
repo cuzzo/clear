@@ -34,7 +34,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
               va.v = va.v + 1;
               vb.v = vb.v + 1;
-            } ON Conflict RAISE
+            } ON MvccConflict RAISE
             RETURN;
           END
         CLEAR
@@ -51,11 +51,11 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
             WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
               va.v = va.v + 1;
               vb.v = vb.v + 1;
-            } ON Conflict RAISE
+            } ON MvccConflict RAISE
             RETURN;
           END
         CLEAR
-      }.to raise_error(/@indirect:atomic.\s*cannot guarantee multi-object consistency.*@shared:versioned.*@shared:locked/im)
+      }.to raise_error(/Multi-object WITH cannot admit ATOMIC.*atomicity across cells/im)
     end
 
     it "rejects multi-cell SNAPSHOT (read-only) when ANY cell is @indirect:atomic" do
@@ -76,7 +76,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
             RETURN;
           END
         CLEAR
-      }.to raise_error(/@indirect:atomic.\s*cannot guarantee multi-object consistency/i)
+      }.to raise_error(/Multi-object WITH cannot admit ATOMIC/i)
     end
 
     it "rejects multi-cell SNAPSHOT when ALL cells are @indirect:atomic" do
@@ -93,7 +93,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
             RETURN;
           END
         CLEAR
-      }.to raise_error(/@indirect:atomic.\s*cannot guarantee multi-object consistency/i)
+      }.to raise_error(/Multi-object WITH cannot admit ATOMIC/i)
     end
   end
 
@@ -117,7 +117,7 @@ RSpec.describe "Multi-cell `WITH SNAPSHOT` with @indirect:atomic (M3.9)" do
           STRUCT C { v: Int64 }
           FN one!() RETURNS Void ->
             a = C{ v: 0 } @versioned;
-            WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; } ON Conflict RAISE
+            WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; } ON MvccConflict RAISE
             RETURN;
           END
         CLEAR

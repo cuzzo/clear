@@ -13,7 +13,8 @@
 //!     publish + retire intermediate snapshots).
 //!   - cmpxchg memory-ordering wired correctly (acquire on load,
 //!     release on CAS success-path, acquire on failure-path).
-//!   - rcu-style update is unbounded — completes after N CAS-fail
+//!   - rcu-style update is bounded at MAX_UPDATE_RETRIES (256;
+//!     #330) — completes after N CAS-fail
 //!     iterations driven by hand without ever returning an error.
 //!   - Retire callbacks fire eventually under reclaimLocal pressure;
 //!     no leak survives ctx.deinit (DebugAllocator catches).
@@ -262,12 +263,13 @@ test "AtomicPtr: compareAndPublish fails on stale expected, leaves cell unchange
     try testing.expectEqual(@as(i64, 100), g.get().*);
 }
 
-test "AtomicPtr: rcu-update is unbounded — completes a long retry-driven sequence" {
-    // Single-threaded, so no real CAS contention; this validates the
-    // update loop doesn't artificially bound itself. Run 10K update
-    // calls back-to-back, each driven by user-fn that increments by 1.
-    // No `error.UpdateRetriesExhausted` may surface (this primitive
-    // doesn't define one — see docs/agents/atomicptr.md §4.2).
+test "AtomicPtr: rcu-update completes a long retry-driven sequence (within 256 cap)" {
+    // Single-threaded, so no real CAS contention; each update call
+    // succeeds on its first CAS attempt. Run 10K update calls
+    // back-to-back, each driven by a user-fn that increments by 1.
+    // True-Sync-Polymorphism (#330) bounded the inner CAS loop at
+    // MAX_UPDATE_RETRIES = 256 -- but with no contention the cap
+    // is never approached, so no `error.AtomicConflict` surfaces.
     var ctx = EbrContext{};
     defer ctx.deinit(testing.allocator);
 
@@ -298,4 +300,51 @@ test "AtomicPtr: rcu-update is unbounded — completes a long retry-driven seque
     var g = cell.read(&tle);
     defer g.release();
     try testing.expectEqual(@as(i64, 10_000), g.get().*);
+}
+
+// Holds references to a cell + EBR context so a closure can publish
+// a competing snapshot during AtomicPtr.update, defeating the outer
+// CAS race deterministically. Used by the bounded-retry test below.
+const Racer = struct {
+    cell_ref: *AtomicPtr(i64),
+    tle_ref: *ThreadLocalEbr,
+};
+
+fn racingMutator(p: *i64, r: Racer) void {
+    p.* += 1;
+    // Publish a fresh interloper value so the outer CAS in update()
+    // sees a stale "expected" pointer and loses the race.
+    const interloper = testing.allocator.create(i64) catch return;
+    interloper.* = -1;
+    const old = r.cell_ref.ptr.swap(interloper, .acq_rel) orelse return;
+    r.tle_ref.retire(testing.allocator, old) catch {};
+}
+
+test "AtomicPtr: bounded retry surfaces error.AtomicConflict when cap is exhausted (#330)" {
+    // Pin the new bounded-retry contract: under sustained CAS
+    // contention that defeats every retry, the loop returns
+    // `error.AtomicConflict` (the bridge to CLEAR's AtomicConflict).
+    // racingMutator publishes a fresh side-channel value on every
+    // call, so each inner CAS attempt sees a stale expected pointer
+    // and loses its race -- exhausting the 256-attempt budget.
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var tle = try newTle(&ctx, testing.allocator);
+    defer ctx.unregister(&tle);
+    defer tle.deinit(testing.allocator);
+
+    var cell = try AtomicPtr(i64).init(testing.allocator, 0);
+    defer {
+        cell.deinit(&tle, testing.allocator) catch unreachable;
+        var d: usize = 0;
+        while (d < 6) : (d += 1) {
+            tle.reclaimLocal(testing.allocator);
+            ctx.reclaim(testing.allocator);
+        }
+    }
+
+    const racer: Racer = .{ .cell_ref = &cell, .tle_ref = &tle };
+    const result = cell.update(&tle, testing.allocator, racingMutator, .{racer});
+    try testing.expectError(error.AtomicConflict, result);
 }

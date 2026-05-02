@@ -79,7 +79,12 @@ class SymbolEntry
                 :lifetime,       # Atomics M2.1: nil | :current_scope | { source: SymbolEntry }
                 :borrowed_alias, # true only for BORROWED/RESTRICT aliases — fiber capture is stack-UAF
                 :sync_families,  # Set of families when bound by REQUIRES disjunction (ATOMICS M1.6.5)
-                :layout          # AtomicPtr M3.1: nil | :indirect — heap-pinned cell with stable address
+                :layout,         # AtomicPtr M3.1: nil | :indirect — heap-pinned cell with stable address
+                :poly_borrow_target  # True-Sync-Polymorphism Gate 3: this binding has its address taken
+                                     # at a universally-polymorphic call site. Forces the var_decl
+                                     # to emit `var` (mutable Zig storage) so &binding yields *T, not
+                                     # *const T -- otherwise the polymorphic body's mutation can't
+                                     # write through to the caller's binding.
 
   # Atomics M2.1: backward-compat alias for `lifetime == :current_scope`.
   # Pre-existing callers (capabilities.rb's WITH-alias declarations,

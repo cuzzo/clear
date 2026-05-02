@@ -34,14 +34,17 @@ module EffectInference
                           raw&.include?(EffectTracker::EXTERN)
     eff << :fail       if fn.respond_to?(:can_fail) && fn.can_fail
 
-    # Atomics M1.6.5: project the contention / blocking axis. Concrete
-    # effects from atomic / versioned / locked use sites; ?-form when
-    # the binding's REQUIRES is polymorphic across lock-free /
-    # lock-based families.
-    eff << :contention  if raw&.include?(EffectTracker::CONTENTION)
-    eff << :blocking    if raw&.include?(EffectTracker::BLOCKING)
-    eff << :"contention?" if raw&.include?(EffectTracker::CONTENTION_MAYBE)
-    eff << :"blocking?"   if raw&.include?(EffectTracker::BLOCKING_MAYBE)
+    # Atomics M1.6.5 + True-Sync-Polymorphism (#327): project the
+    # contention / blocking axis. Concrete effects from atomic /
+    # versioned / locked use sites; ?-form (`contends_maybe`,
+    # `blocks_maybe`) when the binding's REQUIRES is polymorphic
+    # across lock-free / lock-based families. The ?-form names are
+    # spelled `<axis>_maybe` so they read like English rather than as
+    # punctuated metasyntax.
+    eff << :contention      if raw&.include?(EffectTracker::CONTENTION)
+    eff << :blocking        if raw&.include?(EffectTracker::BLOCKING)
+    eff << :contends_maybe  if raw&.include?(EffectTracker::CONTENTION_MAYBE)
+    eff << :blocks_maybe    if raw&.include?(EffectTracker::BLOCKING_MAYBE)
 
     EffectSet.new(eff)
   end

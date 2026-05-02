@@ -95,6 +95,7 @@ class Parser
   stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
   stmt(:KEYWORD, 'WITH') { parse_with_capability }
+  stmt(:KEYWORD, 'SYNC') { parse_sync_policy_block }
   stmt(:KEYWORD, 'DO')   { parse_do_block }
   stmt(:KEYWORD, 'BG')   { parse_bg_block }
   stmt(:KEYWORD, 'YIELD') { parse_yield_expr }
@@ -862,7 +863,8 @@ class Parser
     end
 
     params = parse_argument_list
-    return_type = match!(:KEYWORD, 'RETURNS') ? parse_type_annotation : nil
+    explicit_return = match!(:KEYWORD, 'RETURNS')
+    return_type = explicit_return ? parse_type_annotation : nil
 
     # Optional: EFFECTS :alloc:frame, :alloc:heap, :safe — declare side effects.
     # :alloc:frame → inject rt.frameAlloc() for Alloc-typed parameters
@@ -1121,6 +1123,7 @@ class Parser
     return_type = nil
     return_type_token = nil
     return_lifetime_token = nil
+    explicit_return = match?(:KEYWORD, 'RETURNS')  # peek for the post-#335 stamp
     if match!(:KEYWORD, 'RETURNS')
       if match?(:CHAR, '(')
         # Multi-binding form: collect VAR_IDs separated by ',' or
@@ -1301,6 +1304,7 @@ class Parser
     consume(:KEYWORD, 'END')
     node = AST::FunctionDef.new(fn_token, name, params, captures, return_type, return_lifetime, body,
       catch_block ? catch_block.catch_clauses : [], catch_block ? catch_block.default_body : nil, visibility)
+    node.explicit_return_type = explicit_return  # post-#335: enforce-fallible-returns gate
     node.type_params = type_params unless type_params.empty?
     node.reentrant = reentrant
     node.tail_call = tail_call
@@ -1326,7 +1330,16 @@ class Parser
   # starts a new group.
   #
   # Returns: { param_name_string => Set[Symbol] }
-  REQUIRES_VALID_FAMILIES = %w[LOCKED VERSIONED ATOMIC ACTOR LOCK_FREE].to_set.freeze
+  # True-Sync-Polymorphism (#326 / #336): family table for REQUIRES.
+  #   - LOCKED: mutex / rwlock (admits @locked, @writeLocked).
+  #   - SNAPSHOTTED: retry-style umbrella (admits @versioned, @atomic).
+  #   - VERSIONED / ATOMIC: escape hatches that forbid the other.
+  #   - LOCAL (#336): non-sync umbrella (admits @local, @multiowned, plain T).
+  #     A WITH POLYMORPHIC body on a LOCAL-typed param lowers to direct
+  #     field access -- no lock, no Arc unwrap, no snapshot. Lets a
+  #     single transaction fn accept every supported binding kind.
+  #   - ACTOR / LOCK_FREE are out of scope for this milestone.
+  REQUIRES_VALID_FAMILIES = %w[LOCKED SNAPSHOTTED VERSIONED ATOMIC LOCAL ACTOR LOCK_FREE].to_set.freeze
   # Reentrancy constraints (Thunk Phase 1.2) live alongside capability
   # families in the same `REQUIRES` grammar slot. The parse_requires_clause
   # parser routes them into the NON_REENTRANT-only `requires_clauses` hash
@@ -2860,6 +2873,17 @@ class Parser
       return parse_snapshot_block(with_token)
     end
 
+    # True-Sync-Polymorphism step 1: optional POLYMORPHIC marker
+    # immediately after WITH. Indicates the binding is a polymorphic
+    # param (REQUIRES with admissible-set > 1) and the body should be
+    # lowered via comptime @hasDecl dispatch across all admissible
+    # families. Annotator (#326) enforces the polymorphic-iff-rule.
+    polymorphic = false
+    if match?(:KEYWORD, 'POLYMORPHIC')
+      consume(:KEYWORD, 'POLYMORPHIC')
+      polymorphic = true
+    end
+
     # Optional deadlock-escape modifier: one of POSSIBLE_DEADLOCK /
     # POSSIBLE_LOCK_CYCLE, immediately after WITH. Acts as a per-block
     # opt-out from the static nested-lock checks; code still emits a
@@ -2912,6 +2936,7 @@ class Parser
       consume(:KEYWORD, 'END')
       node = AST::WithBlock.new(with_token, capabilities, [])
       node.arms = arms
+      node.polymorphic = polymorphic
       if escape_tok
         node.deadlock_escape = {
           kind: escape_tok.value == 'POSSIBLE_DEADLOCK' ? :deadlock : :lock_cycle,
@@ -2928,6 +2953,7 @@ class Parser
 
     node = AST::WithBlock.new(with_token, capabilities, body)
     node.lock_error_clause = parse_lock_error_clause
+    node.polymorphic = polymorphic
     if escape_tok
       node.deadlock_escape = {
         kind: escape_tok.value == 'POSSIBLE_DEADLOCK' ? :deadlock : :lock_cycle,
@@ -3102,6 +3128,32 @@ class Parser
     end
 
     arms
+  end
+
+  # True-Sync-Polymorphism step 1: top-level `SYNC POLICY START ... END`.
+  # Body is one-or-more error-handler clauses (same shape as per-WITH `ON`
+  # handlers, parsed by `parse_lock_error_clause`). Validation lives in
+  # the annotator (#325): single-instance, main-file-only, must handle
+  # exactly { LockTimeout, MvccConflict, AtomicConflict }, and must NOT
+  # handle Deadlock or LockCycle (those are inline-only — see #325 for
+  # the error message).
+  def parse_sync_policy_block
+    sync_tok = consume(:KEYWORD, 'SYNC')
+    consume(:KEYWORD, 'POLICY')
+    consume(:KEYWORD, 'START')
+
+    handlers = []
+    while match?(:KEYWORD, 'ON') || match?(:KEYWORD, 'RETRY')
+      clause = parse_lock_error_clause
+      handlers << clause if clause
+    end
+
+    if handlers.empty?
+      error!(current, "SYNC POLICY block must contain at least one ON / RETRY handler.")
+    end
+
+    consume(:KEYWORD, 'END')
+    AST::SyncPolicyDecl.new(sync_tok, handlers)
   end
 
   # Parse an optional error-handling clause following a WITH block's `}`:

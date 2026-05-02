@@ -1,23 +1,19 @@
--- AtomicPtr M3.13: WITH SNAPSHOT MATCH read mode -- per-arm
--- dispatch on a polymorphic param.
---
--- Polymorphic `REQUIRES c: VERSIONED | ATOMIC` fn whose body
--- uses WITH SNAPSHOT MATCH. The caller passes a concrete
--- @indirect:atomic cell; comptime dispatch picks the ATOMIC arm.
--- Verifies the parser+annotator+lowering wiring for the M3.7+M3.8
--- read-mode SNAPSHOT MATCH path.
+-- AtomicPtr M3.13 + True-Sync-Polymorphism (#332): polymorphic
+-- read-mode SNAPSHOT on a `REQUIRES c: VERSIONED | ATOMIC` parameter.
+-- After #324/#328/#330 unified the SNAPSHOT shape across both
+-- families (Versioned.read for @versioned, AtomicPtr.read for
+-- @indirect:atomic; both return a Guard the body reads via field
+-- access), the body is uniform and per-arm MATCH dispatch is no
+-- longer required.
 
 STRUCT Cfg { port: Int64 }
 
 FN dump(c: Cfg) RETURNS Void
     REQUIRES c: VERSIONED | ATOMIC
 ->
-    -- Read-mode SNAPSHOT MATCH. Both arms read the same field;
-    -- comptime dispatch picks the right family per call site.
-    WITH SNAPSHOT c AS x MATCH
-        WHEN VERSIONED -> { ASSERT x.port == 8080, "versioned arm: expected 8080"; }
-        WHEN ATOMIC    -> { ASSERT x.port == 8080, "atomic arm: expected 8080"; }
-    END
+    -- Read-mode SNAPSHOT. The lowering's comptime probe selects
+    -- Versioned.read or AtomicPtr.read per actual cell type.
+    WITH SNAPSHOT c AS x { ASSERT x.port == 8080, "snapshot read: expected 8080"; }
     RETURN;
 END
 

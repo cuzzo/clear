@@ -1,6 +1,6 @@
 -- MVCC L8: WITH SNAPSHOT MUTABLE on a @versioned cell.
 -- Single-cell transaction commits via Versioned.update + EBR retire.
--- ON Conflict RAISE handles the (unreachable in single-thread) commit conflict.
+-- ON MvccConflict RAISE handles the (unreachable in single-thread) commit conflict.
 
 STRUCT Counter { value: Int64 }
 
@@ -8,9 +8,9 @@ FN main() RETURNS Void ->
     c = Counter{ value: 0 } @versioned;
 
     -- Three sequential transactions, each commits without contention.
-    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; } ON Conflict RAISE
-    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; } ON Conflict RAISE
-    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; } ON Conflict RAISE
+    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; } ON MvccConflict RAISE
+    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; } ON MvccConflict RAISE
+    WITH SNAPSHOT c AS MUTABLE va { va.value = va.value + 1; } ON MvccConflict RAISE
 
     -- Verify the cumulative effect.
     WITH SNAPSHOT c AS view {

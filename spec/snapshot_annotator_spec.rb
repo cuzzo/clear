@@ -10,8 +10,8 @@ require_relative "../src/annotator"
 # Covers:
 #   - source must be `T@versioned`.
 #   - alias is non_escaping; every escape vector is rejected.
-#   - ON Conflict required when any cell is MUTABLE (transaction).
-#   - ON Conflict accepts `RAISE`, `RETRY(N) THEN <action>`, etc.
+#   - ON MvccConflict required when any cell is MUTABLE (transaction).
+#   - ON MvccConflict accepts `RAISE`, `RETRY(N) THEN <action>`, etc.
 RSpec.describe "WITH SNAPSHOT annotator validation" do
   def run(src)
     tokens = Lexer.new(src).tokenize
@@ -74,7 +74,7 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @versioned;
-        WITH SNAPSHOT c AS MUTABLE va { va.v = 5; } ON Conflict RAISE
+        WITH SNAPSHOT c AS MUTABLE va { va.v = 5; } ON MvccConflict RAISE
       CLEAR
       expect { run(src) }.not_to raise_error
     end
@@ -89,44 +89,48 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
     end
   end
 
-  describe "ON Conflict requirement (D2/D3)" do
-    it "requires ON Conflict when AS MUTABLE" do
+  describe "ON MvccConflict policy fallback (D2/D3 + #328)" do
+    it "no inline ON MvccConflict: falls back to the program SYNC POLICY (baked-in default raises)" do
+      # True-Sync-Polymorphism (#328): the per-WITH `ON MvccConflict`
+      # is no longer mandatory -- the program-level SYNC POLICY (the
+      # baked-in default if no user policy) provides the fallback
+      # handler. The inline form is still accepted (next test).
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @versioned;
         WITH SNAPSHOT c AS MUTABLE va { va.v = 5; }
       CLEAR
-      expect { run(src) }.to raise_error(/AS MUTABLE requires an ON Conflict handler/i)
+      expect { run(src) }.not_to raise_error
     end
 
-    it "accepts ON Conflict RAISE" do
+    it "accepts ON MvccConflict RAISE" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @versioned;
-        WITH SNAPSHOT c AS MUTABLE va { va.v = 5; } ON Conflict RAISE
+        WITH SNAPSHOT c AS MUTABLE va { va.v = 5; } ON MvccConflict RAISE
       CLEAR
       expect { run(src) }.not_to raise_error
     end
 
-    it "accepts ON Conflict RETRY(3) THEN PASS (D3)" do
+    it "accepts ON MvccConflict RETRY(3) THEN PASS (D3)" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @versioned;
-        WITH SNAPSHOT c AS MUTABLE va { va.v = 5; } ON Conflict RETRY(3) THEN PASS
+        WITH SNAPSHOT c AS MUTABLE va { va.v = 5; } ON MvccConflict RETRY(3) THEN PASS
       CLEAR
       expect { run(src) }.not_to raise_error
     end
 
-    it "rejects ON Conflict on a non-fallible cap (lock-style fallible only)" do
+    it "rejects ON MvccConflict on a non-fallible cap (lock-style fallible only)" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         MUTABLE c = C{ v: 0 } @multiowned;
-        WITH c { } ON Conflict RAISE
+        WITH c { } ON MvccConflict RAISE
       CLEAR
       expect { run(src) }.to raise_error(/never produce a lock-acquire error/i)
     end
 
-    it "ON Conflict not required for read-only SNAPSHOT" do
+    it "ON MvccConflict not required for read-only SNAPSHOT" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
         c = C{ v: 0 } @versioned;
@@ -135,8 +139,8 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
       expect { run(src) }.not_to raise_error
     end
 
-    it "rejects RETRY targeting a non-Transient kind (Conflict is Transient, so this is only via wrong selector)" do
-      # This is a regression / behavior pin: Conflict IS Transient, so
+    it "rejects RETRY targeting a non-Transient kind (MvccConflict is Transient, so this is only via wrong selector)" do
+      # This is a regression / behavior pin: MvccConflict IS Transient, so
       # RETRY(N) is allowed. Just verify the path doesn't false-positive.
       src = <<~CLEAR
         STRUCT C { v: Int64 }

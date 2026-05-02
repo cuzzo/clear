@@ -644,12 +644,25 @@ module FunctionAnalysis
           # to LOCKED's seed (the WITH MATCH x WHEN @versioned ...
           # WHEN @locked / WHEN @atomic arm-check overrides per-arm
           # anyway, so any pinned-default is informational only).
+          # True-Sync-Polymorphism (#326): SNAPSHOTTED is the umbrella
+          # family for {@versioned, @atomic}; seed :versioned so the
+          # WITH SNAPSHOT body validation accepts a polymorphic param.
+          # The actual caller-supplied sync overrides via P1.4
+          # propagation when callers are visible.
           if families.include?(:LOCKED)
             param_sync = :locked
           elsif families.include?(:VERSIONED)
             param_sync = :versioned
           elsif families.include?(:ATOMIC)
             param_sync = :atomic
+          elsif families.include?(:SNAPSHOTTED)
+            param_sync = :versioned
+          elsif families.include?(:LOCAL)
+            # #336: LOCAL admits @local / @multiowned / plain T. Seed
+            # `:local` so the deferred WITH POLYMORPHIC validation
+            # accepts the param; the actual caller-supplied storage
+            # axis flows in via P1.4 propagation.
+            param_sync = :local
           end
         end
       end

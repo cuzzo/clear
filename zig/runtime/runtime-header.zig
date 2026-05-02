@@ -715,7 +715,7 @@ pub const CheatLib = struct {
     /// `T@shared:versioned` -> `Arc(Versioned(T))`). Readers acquire a
     /// Guard via `read()`; writers swap a new version via `update()`
     /// with a bounded CAS retry loop that surfaces
-    /// `error.UpdateRetriesExhausted` (mapped to CLEAR's `Conflict`
+    /// `error.UpdateRetriesExhausted` (mapped to CLEAR's `MvccConflict`
     /// at the runtime bridge). Named `Versioned` (not `Shared`) to
     /// disambiguate from CLEAR's `@shared` capability (Arc-based
     /// ownership wrapper).
@@ -2532,6 +2532,83 @@ pub const CheatLib = struct {
         const info = @typeInfo(T);
         if (info != .@"struct") return false;
         return @hasField(T, "lock") and @hasField(T, "data") and !@hasField(T, "mutex");
+    }
+
+    /// True-Sync-Polymorphism Gate 3 — comptime-dispatched mutate that
+    /// admits every sync family CLEAR supports through one call site.
+    /// Used by `WITH POLYMORPHIC c AS x { body }` when the parameter has
+    /// no narrow REQUIRES (universal polymorphism).
+    ///
+    /// Caller provides:
+    ///   - cell: the binding (Counter / Arc(Locked(Counter)) / ...).
+    ///     Pointer-typed forms (e.g. *Counter from @local) are passed
+    ///     through; value-typed forms get an `&cell` address-of inside.
+    ///   - rt:   runtime pointer (needed by Versioned / AtomicPtr update).
+    ///   - body: a struct fn `fn run(x: *T, ...args) void` (or `!void`)
+    ///     that mutates *x. Lifted out of the WITH body by the lowering
+    ///     so the closure is a no-capture standalone function.
+    ///   - args: tuple of additional captures (currently unused; reserved
+    ///     for future bodies that need outer-local writes via `*r_out`).
+    ///
+    /// Dispatch (comptime; only one branch survives per call site):
+    ///   - has `update` -> Versioned / AtomicPtr (CAS-retry write)
+    ///   - has `write`  -> RwLocked (write-side acquire)
+    ///   - has `acquire` -> Locked (mutex acquire)
+    ///   - else         -> plain `*T` (direct call)
+    pub fn polymorphicMutate(
+        cell_ptr_or_val: anytype,
+        rt: *Runtime,
+        comptime body: anytype,
+        args: anytype,
+    ) !void {
+        const T = @TypeOf(cell_ptr_or_val);
+        // Comptime arc-unwrap. End state: `inner` is a `*Inner` where
+        // Inner is the post-Arc payload (Locked / Versioned / AtomicPtr
+        // / plain T). The Arc shape stores `data: *T` already, so for
+        // an Arc-wrapped param we forward `cell.ctrl.data` directly --
+        // taking another `&` would yield `**T` which @hasDecl can't
+        // probe.
+        if (comptime @typeInfo(T) == .pointer) {
+            const Child = @typeInfo(T).pointer.child;
+            if (comptime @hasField(Child, "ctrl")) {
+                return polymorphicMutateInner(cell_ptr_or_val.ctrl.data, rt, body, args);
+            }
+            return polymorphicMutateInner(cell_ptr_or_val, rt, body, args);
+        }
+        if (comptime @hasField(T, "ctrl")) {
+            return polymorphicMutateInner(cell_ptr_or_val.ctrl.data, rt, body, args);
+        }
+        // Plain T by value: take address of the formal parameter copy.
+        // Mutation through this pointer affects only the local copy --
+        // pass-by-value plain T cannot flow updates back to the caller.
+        return polymorphicMutateInner(&cell_ptr_or_val, rt, body, args);
+    }
+
+    /// Inner half of polymorphicMutate -- takes a *Inner directly so
+    /// the outer wrapper's comptime arc-unwrap can compose naturally
+    /// without duplicating the dispatch in every branch.
+    inline fn polymorphicMutateInner(
+        inner: anytype,
+        rt: *Runtime,
+        comptime body: anytype,
+        args: anytype,
+    ) !void {
+        const Inner = @TypeOf(inner.*);
+        if (comptime @hasDecl(Inner, "update")) {
+            // Versioned or AtomicPtr -- both expose the same shape:
+            //   `.update(rt, alloc, comptime fn, args)`.
+            try inner.update(rt, rt.heapAlloc(), body, args);
+        } else if (comptime @hasDecl(Inner, "write")) {
+            var g = inner.write();
+            defer g.release();
+            @call(.auto, body, .{g.get()} ++ args);
+        } else if (comptime @hasDecl(Inner, "acquire")) {
+            var g = inner.acquire();
+            defer g.release();
+            @call(.auto, body, .{g.get()} ++ args);
+        } else {
+            @call(.auto, body, .{inner} ++ args);
+        }
     }
 
     /// Unified comptime cleanup for any CLEAR type.
