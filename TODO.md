@@ -15,7 +15,7 @@
  - [x] `./clear fix`
  - [x] Binding metadata for capabilities + `REQUIRES` for overloaded syncronization strategies.
  - [ ] COPY/CLONE/SPLIT overloading
- - [ ] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
+ - [x] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
  - [ ] Continuous Integration
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
@@ -27,8 +27,8 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] IMMUTABLE Stream Observables (only the stream can mutate the underlying data)
  - [x] Observable aggregations for streaming pipelines (@shared aggregate results)
  - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
+ - [x] Atomics
  - [ ] Zig 0.16.0 style streaming IO (in progress)
- - [ ] ARC Atomics (in progress)
  - [ ] Typed Holes
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
@@ -48,7 +48,6 @@ Milestone: *Basic* SQL/CLEAR database
 
  - [ ] Full Infinite Stream support
  - [ ] Stream Join (declarative, basic)
- - [ ] Bare Atomics
  - [ ] Generic Observables
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
