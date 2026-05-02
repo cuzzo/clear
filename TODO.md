@@ -79,6 +79,7 @@ Vision is clear: Gradual Typing (Ruby/Python) -> Typed (Rust) -> STRICT Typed (H
  - [ ] Improved fiber fault tolerence
  - [ ] Nearly complete automated Property-based Testing for declarative concurrency constructs
 
+Milestone: CLEAR compiler is self-hosted
 
 ## v0.5
 
