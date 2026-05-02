@@ -373,6 +373,11 @@ module AST
         vt = value.type_object
         t.ownership = vt.ownership if vt.respond_to?(:ownership) && vt.ownership && vt.ownership != :affine
         t.sync      = vt.sync      if vt.respond_to?(:sync) && vt.sync
+        # AtomicPtr M3.5: carry the :layout axis (e.g. :indirect from
+        # @indirect:atomic on the VALUE) into the binding's full_type
+        # so visit_VarDecl's `node.type_info&.layout` -> SymbolEntry
+        # propagation lands. Mirrors the sync line above.
+        t.layout    = vt.layout    if vt.respond_to?(:layout) && vt.layout
       end
 
       self.full_type = t
@@ -531,6 +536,16 @@ module AST
     attr_accessor :auto_lock  # set by annotator when target is @locked/@writeLocked (inline guard)
     attr_accessor :field_pre_cleanup  # stamped by MIRPass: { zig_type:, alloc: } for field overwrite cleanup
     attr_accessor :container_promote_zig_type  # stamped by MIRPass: Zig type string when indexed store needs frame-to-heap promote
+    # Atomics M1.5: stamped by parser when `target += rhs` etc. desugars
+    # into `target = target op rhs`. The annotator reads this to decide
+    # whether the target's @atomic sync should rewrite the assignment to
+    # an atomic_fetch_<op> instead of load+op+store.
+    attr_accessor :compound_op
+    # Atomics M1.5: stamped by annotator when target is @shared:atomic.
+    # MIR-lowering reads this to emit MethodCall(cell, op, args) instead
+    # of plain Set. One of: :store, :fetchAdd, :fetchSub, :fetchAnd,
+    # :fetchOr, :fetchXor.
+    attr_accessor :auto_atomic_op
   end
   # Keywordless bind: `x = val` or `x: Type = val`. Annotator sets mode to :decl or :assign.
   BindExpr     = Struct.new(:token, :name, :type, :value) do
@@ -538,6 +553,9 @@ module AST
     attr_accessor :mode
     attr_accessor :reassign_cleanup  # stamped by MIRPass: { kind:, alloc: } for reassignment pre-cleanup
     attr_accessor :mir_binding_entry  # stamped by CleanupClassifier: per-node cleanup entry (avoids same-name collision)
+    # Atomics M1.5: see Assignment#compound_op / #auto_atomic_op.
+    attr_accessor :compound_op
+    attr_accessor :auto_atomic_op
   end
   BinaryOp     = Struct.new(:token, :left, :op, :right) do
     include Locatable
@@ -572,6 +590,7 @@ module AST
     include Locatable
     attr_accessor :fn_ref           # true when the identifier refers to a named function used as a value
     attr_accessor :heap_dupe_result # true when this identifier's value must be heap-duped at use site
+    attr_accessor :atomic_borrow    # Atomics M1.7: true when sync=:atomic ident is in fn-arg position (skip load wrap)
     def wildcard?; false end
     def name; self[:name].to_s end
   end
@@ -637,6 +656,7 @@ module AST
     attr_accessor :fn_var_call       # true when calling a fn-type variable (not a named function)
     attr_accessor :pipe_lhs           # original LHS AST node when rewritten from pipeline (for CATCH snapshot)
     attr_accessor :heap_dupe_result  # true when result must be heap-duped (frame string escaping to outer container)
+    attr_accessor :arg_families      # Atomics M1.6.5: per-arg Set<Family> for ?-form effect resolution
     def wildcard?; false end
     def name; self[:name].to_s end
   end

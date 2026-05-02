@@ -98,6 +98,22 @@ module CapabilityHelper
     nil
   end
 
+  # AtomicPtr M3.5: read the :layout axis (`:indirect` for
+  # `@indirect:atomic`) off either the SymbolEntry (canonical) or the
+  # node's full_type (fallback when symbol isn't bound yet, e.g.
+  # GetField paths). Mirrors cap_var_sync / cap_var_storage.
+  def cap_var_layout(var_node)
+    if var_node.respond_to?(:symbol) && var_node.symbol &&
+       var_node.symbol.respond_to?(:layout)
+      sym_layout = var_node.symbol.layout
+      return sym_layout if sym_layout
+    end
+    if var_node.respond_to?(:full_type) && var_node.full_type.is_a?(Type)
+      return var_node.full_type.layout
+    end
+    nil
+  end
+
   # Validate that a capability type is legal for the given variable.
   def validate_capability(node, capability_type, var_node)
     var_type = var_node.full_type
@@ -167,17 +183,31 @@ module CapabilityHelper
       end
 
     when :SNAPSHOT
-      # MVCC L5: source MUST be `T@versioned` (sync == :versioned).
-      # The alias projects the bare inner T (Group 2 strip); MUTABLE
-      # alias means the body can mutate the new version that
-      # `Shared.update[Multi]` will publish on commit.
+      # MVCC L5: source MUST be `T@versioned` (sync == :versioned)
+      # OR (AtomicPtr M3.5) `T@indirect:atomic` (sync == :atomic AND
+      # layout == :indirect). Both share the WITH SNAPSHOT surface --
+      # read returns a Guard, MUTABLE wraps the body in an
+      # update/CAS-loop. Per-cap dispatch happens at lowering time
+      # (mir_lowering's `:SNAPSHOT` branch) and via the with_match_
+      # unwrap helper at zig-emit time.
       syn = cap_var_sync(var_node)
-      unless syn == :versioned
+      lay = cap_var_layout(var_node)
+      atomic_ptr_ok = syn == :atomic && lay == :indirect
+      unless syn == :versioned || atomic_ptr_ok
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-        actual = syn ? "@#{syn}" : (cap_var_storage(var_node) ? "@#{cap_var_storage(var_node)}" : "plain")
-        error!(node, "WITH SNAPSHOT requires a @versioned variable. " \
-                     "'#{name}' is #{actual}, not @versioned. Declare the binding as " \
-                     "`T@versioned` or `T@shared:versioned` for an MVCC cell.")
+        actual = if syn && lay == :indirect
+          "@#{lay}:#{syn}"
+        elsif syn
+          "@#{syn}"
+        elsif cap_var_storage(var_node)
+          "@#{cap_var_storage(var_node)}"
+        else
+          "plain"
+        end
+        error!(node, "WITH SNAPSHOT requires a @versioned or @indirect:atomic " \
+                     "variable. '#{name}' is #{actual}. Declare the binding as " \
+                     "`T@versioned` / `T@shared:versioned` for an MVCC cell, " \
+                     "or `T@indirect:atomic` for a lock-free atomic-pointer cell.")
       end
 
     when :multiowned
@@ -190,6 +220,24 @@ module CapabilityHelper
       unless cap_var_storage(var_node) == :shared
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
         error!(node, "WITH #{name}: expected a @shared variable")
+      end
+
+    when :ATOMIC
+      # Atomics M1.7: source MUST be sync == :atomic (either a concrete
+      # @shared:atomic local, or a param seeded by REQUIRES c: ATOMIC).
+      # Polymorphic params may have entry.sync nil at this stage; defer.
+      syn = cap_var_sync(var_node)
+      unless syn == :atomic
+        if var_node.respond_to?(:symbol) && var_node.symbol&.is_param && syn.nil?
+          @deferred_with_validations << {
+            node: node, var_node: var_node, capability: :ATOMIC
+          }
+        else
+          name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+          actual = syn ? "@#{syn}" : (cap_var_storage(var_node) ? "@#{cap_var_storage(var_node)}" : "plain")
+          error!(node, "WITH ATOMIC requires an @shared:atomic variable. " \
+                       "'#{name}' is #{actual}, not @shared:atomic.")
+        end
       end
 
     else
@@ -250,19 +298,46 @@ module CapabilityHelper
                          when syn == :locked            then :EXCLUSIVE
                          when syn == :write_locked      then :write_locked_read
                          when syn == :versioned         then :SNAPSHOT
+                         # Atomics M1.7: @shared:atomic / REQUIRES c: ATOMIC
+                         # bindings get a non-blocking ATOMIC capability. The
+                         # WITH body (or per-arm prelude) binds the alias to
+                         # the cell ref directly so atomic ops can be invoked.
+                         when syn == :atomic            then :ATOMIC
                          when storage == :multiowned    then :multiowned
                          when storage == :shared        then :shared
                          else
                            name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-                           error!(node, "WITH #{name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, @versioned, or another capability type")
+                           error!(node, "WITH #{name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, @versioned, @shared:atomic, or another capability type")
                            :unknown
                          end
     end
 
     validate_capability(node, cap[:capability], var_node)
 
-    # Effect tracking: EXCLUSIVE access acquires a mutex — may block the fiber.
-    record_effect(EffectTracker::BLOCKING) if cap[:capability] == :EXCLUSIVE
+    # Effect tracking: lock-based caps may block the fiber AND contend on
+    # the lock's cache line. Lock-free SNAPSHOT (MVCC read) just contends
+    # on the version pointer — no parking. Atomic ops are stamped at
+    # their use sites (visit_Identifier read, visit_BindExpr atomic store /
+    # fetchAdd) since atomic primitives don't go through WITH.
+    #
+    # Atomics M1.6.5: for WITH MATCH (polymorphic) form, defer effect
+    # recording to per-arm tracking so the family-specific prelude effects
+    # (BLOCKING for LOCKED, none for ATOMIC, CONTENTION-only for
+    # VERSIONED) collapse correctly into concrete + ?-form. The outer
+    # cap.capability defaults to :EXCLUSIVE here only because the seeded
+    # param sync resolves to LOCKED — but the actual runtime path
+    # depends on which arm fires.
+    if node.respond_to?(:arms) && node.arms
+      # WITH MATCH form: per-arm recording in visit_WithBlock handles it.
+    else
+      case cap[:capability]
+      when :EXCLUSIVE, :write_locked_read
+        record_effect(EffectTracker::BLOCKING)
+        record_effect(EffectTracker::CONTENTION)
+      when :SNAPSHOT
+        record_effect(EffectTracker::CONTENTION)
+      end
+    end
 
     # Capability audit: mark variable as mutated if EXCLUSIVE access is used.
     if cap[:capability] == :EXCLUSIVE && var_node.is_a?(AST::Identifier)
@@ -404,7 +479,15 @@ module CapabilityHelper
       # use site.
       source_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name)
       st = source_type.is_a?(Type) ? source_type : Type.new(source_type)
-      inner_type = st.versioned? ? st.bare_data_type : st
+      # Strip Group-1 sigils so the alias's `.type` is the bare inner T.
+      # The alias's SymbolEntry already keeps sync/layout=nil (declare
+      # call below passes neither), but type-side downstream paths
+      # (resolve_type / full_type readers) shouldn't see leftover
+      # @versioned / @indirect:atomic flags on the alias's Type.
+      strip = st.versioned? ||
+              (st.respond_to?(:atomic?) && st.atomic? &&
+               st.respond_to?(:indirect?) && st.indirect?)
+      inner_type = strip ? st.bare_data_type : st
       alias_name = cap[:alias] || var_name
       is_mutable = !!cap[:alias_mutable]
       current_scope.declare(alias_name, nil, inner_type, is_mutable, false, nil, :stack)
@@ -596,15 +679,21 @@ module CapabilityHelper
 
           # Collect capture for code generation (type_info + close pattern).
           # Use the AST node's type_info (matches transpiler's walk_do_identifiers).
+          # Atomics M1.7: for sync == :atomic bindings, the use-site type_info
+          # has been narrowed to the bare inner T (load semantics) — but the
+          # BG ctx needs the FULL Arc(Atomic(T)) shape so the captured cell
+          # ref stays the same identity across fibers. Fall back to the
+          # SymbolEntry's type when sync == :atomic.
           unless result.captures.key?(name)
-            result.captures[name] = node.type_info
+            cap_type = info.sync == :atomic ? info.type : node.type_info
+            result.captures[name] = cap_type
             # Record the live SymbolEntry so mir_lowering can re-resolve the
             # capture's actual type after EscapeAnalysis.propagate_caller_sync!
             # has stamped sync/storage on params (which happens AFTER this walk).
             result.capture_symbols[name] = info
 
             # Pre-compute per-capture metadata for transpiler.
-            t = node.type_info.is_a?(Type) ? node.type_info : (node.type_info ? Type.new(node.type_info) : nil)
+            t = cap_type.is_a?(Type) ? cap_type : (cap_type ? Type.new(cap_type) : nil)
             result.pointer_captures << name if t&.needs_pointer_passing?
             result.string_captures << name if t&.string?
             result.resource_captures << name if t&.resource? || info.close_zig
@@ -636,7 +725,14 @@ module CapabilityHelper
           # Non-shared striped maps (@sharded(N):locked without @shared) MUST be pinned
           # because the map is affine-owned and concurrent access without Arc is unsafe.
           is_dashmap = ti.is_a?(Type) && ti.striped? && (ti.shared? || ti.multiowned?)
-          unless is_dashmap
+          # Atomics M1.8: @shared:atomic is self-synchronizing too — every
+          # access goes through hardware atomic ops on the shared cache
+          # line. Pinning would defeat the point (cross-thread parallel
+          # increments are the whole reason to pick @shared:atomic over
+          # @local). Skip has_shared so the BG stays eligible for work
+          # stealing across schedulers.
+          is_atomic = info.sync == :atomic
+          unless is_dashmap || is_atomic
             result.has_shared  = true if info.sync == :locked || info.sync == :write_locked || info.sync == :local
             result.has_shared  = true if info.storage == :shared || info.storage == :multiowned
             # Affine @locked: not backed by Arc, needs spawnPinned for scheduler affinity

@@ -43,7 +43,13 @@ pub const CellStats = struct {
                                 // doctor can compute total COW bytes without
                                 // needing the comptime T at consumption time.
     reads: u64 = 0,             // successful read() calls
-    commits: u64 = 0,           // successful update() commits
+    commits: u64 = 0,           // successful update() commits (single-cell)
+    multi_commits: u64 = 0,     // successful updateMulti() commits where
+                                // this cell participated. AtomicPtr M3.16
+                                // doctor signal: if commits > 0 AND
+                                // multi_commits == 0, the cell only does
+                                // single-cell whole-struct commits and is
+                                // upgrade-eligible to @indirect:atomic.
     retries: u64 = 0,           // CAS failures inside update() (excludes the
                                 // final success). Per-update retry counts add
                                 // here: 0 for fast-path-success, N for
@@ -97,6 +103,19 @@ pub inline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, committe
     }
 }
 
+/// AtomicPtr M3.16: record a successful `updateMulti()` commit
+/// touching this cell. The cell's `multi_commits` increments
+/// per participating cell; the doctor uses
+/// `multi_commits == 0 && commits > 0` as the gate for the
+/// "upgrade @shared:versioned -> @indirect:atomic" suggestion
+/// (multi-cell commits forbid the upgrade because AtomicPtr has
+/// no multi-pointer CAS).
+pub inline fn recordMultiCommit(addr: usize, struct_size: u32) void {
+    if (findSlot(addr, struct_size)) |s| {
+        s.multi_commits += 1;
+    }
+}
+
 pub fn dumpToEnvFile() void {
     const path_ptr = std.c.getenv("CLEAR_MVCC_PROFILE") orelse return;
     const fd = compat.createFileTruncate(path_ptr) catch return;
@@ -111,15 +130,15 @@ pub fn dumpToEnvFile() void {
         _ = compat.writeAllFd(fd, warn) catch return;
     }
     _ = compat.writeAllFd(fd,
-        "# addr\tstruct_size\treads\tcommits\tretries\tupdate_failures\n")
+        "# addr\tstruct_size\treads\tcommits\tretries\tupdate_failures\tmulti_commits\n")
     catch return;
 
     for (&stats) |*s| {
         if (s.addr == 0) continue;
-        if (s.reads == 0 and s.commits == 0 and s.update_failures == 0) continue;
+        if (s.reads == 0 and s.commits == 0 and s.update_failures == 0 and s.multi_commits == 0) continue;
         const line = std.fmt.bufPrint(&buf,
-            "0x{x}\t{d}\t{d}\t{d}\t{d}\t{d}\n",
-            .{ s.addr, s.struct_size, s.reads, s.commits, s.retries, s.update_failures })
+            "0x{x}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n",
+            .{ s.addr, s.struct_size, s.reads, s.commits, s.retries, s.update_failures, s.multi_commits })
         catch continue;
         _ = compat.writeAllFd(fd, line) catch return;
     }

@@ -1,0 +1,20 @@
+-- AtomicPtr M3.13 follow-up (review item E): escape via RETURN.
+-- Verifies @indirect:atomic survives a fn-return boundary -- the
+-- M3.12 lifetime exemption (Arc-managed cells can escape) plus the
+-- caller-side cleanup of the received cell. If cleanup classification
+-- is wrong for received-via-return cells, this test surfaces a leak.
+
+STRUCT Cfg { v: Int64 }
+
+FN make() RETURNS Cfg@indirect:atomic ->
+    cfg = Cfg{ v: 42 } @indirect:atomic;
+    RETURN cfg;
+END
+
+FN main() RETURNS Void ->
+    cfg = make();
+    WITH SNAPSHOT cfg AS c {
+        ASSERT c.v == 42, "escaped cell read: expected 42";
+    }
+    RETURN;
+END

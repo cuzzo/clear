@@ -149,16 +149,36 @@ module WithMatchCheck
 
   # Map a SymbolEntry's sync to the family name it belongs to.
   # LOCKED    = mutex / rwlock / refcell -- the lock-based path.
-  # VERSIONED = MVCC Versioned(T) -- the lock-free path.
+  # VERSIONED = MVCC Versioned(T) -- the lock-free snapshot path.
+  # ATOMIC    = single-cell Atomic(T) -- the lock-free single-cell path.
   # ACTOR / LOCK_FREE remain reserved for future phases.
   LOCKED_SYNCS    = %i[locked write_locked always_mutable].to_set.freeze
   VERSIONED_SYNCS = %i[versioned].to_set.freeze
+  ATOMIC_SYNCS    = %i[atomic].to_set.freeze
 
   def self.family_of_arg(arg)
     sym = arg.respond_to?(:symbol) ? arg.symbol : nil
     return nil unless sym
     return :LOCKED    if LOCKED_SYNCS.include?(sym.sync)
     return :VERSIONED if VERSIONED_SYNCS.include?(sym.sync)
+    return :ATOMIC    if ATOMIC_SYNCS.include?(sym.sync)
     nil
+  end
+
+  # Atomics M1.6.5: return the SET of families an arg's binding could be in.
+  # For a concrete @shared:atomic / :locked / :versioned binding, returns a
+  # singleton set ({:ATOMIC} / {:LOCKED} / {:VERSIONED}).
+  # For a parameter constrained by a multi-family REQUIRES disjunction
+  # (REQUIRES p: ATOMIC | LOCKED), returns the disjunction Set so call-site
+  # effect resolution can keep ?-form alive when the polymorphism propagates.
+  # Returns an empty Set when the arg has no sync attribute (no contention).
+  def self.family_of_arg_set(arg)
+    sym = arg.respond_to?(:symbol) ? arg.symbol : nil
+    return Set.new unless sym
+    if sym.sync_families && sym.sync_families.size > 1
+      return sym.sync_families
+    end
+    fam = family_of_arg(arg)
+    fam ? Set[fam] : Set.new
   end
 end

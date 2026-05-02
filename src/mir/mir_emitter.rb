@@ -264,7 +264,7 @@ class MIREmitter
     parts.join("\n")
   end
 
-  # `WITH SNAPSHOT cell AS MUTABLE va { body } ON Conflict <action>`:
+  # `WITH SNAPSHOT cell AS MUTABLE va { body } [ON Conflict <action>]`:
   #   <unwrap>.update(<rt>, <alloc>, struct {
   #       fn run(<alias>: *<bare_t>) void {
   #           _ = &<alias>;
@@ -272,6 +272,12 @@ class MIREmitter
   #       }
   #   }.run, .{}) catch |err| switch (err) { ... };
   # Wraps in a counted retry loop when retries != nil.
+  #
+  # AtomicPtr M3.6: when node.is_atomic_ptr is set, skip the
+  # conflict-handler wrap entirely. AtomicPtr.update never returns
+  # UpdateRetriesExhausted -- it retries until success (Rust rcu).
+  # Just call with `try` so the only path back to the caller is
+  # OOM (which the user can't usefully handle inline anyway).
   def emit_snapshot_transaction(node)
     body_zig = emit_body(node.body || [])
     core = <<~ZIG.rstrip
@@ -282,7 +288,11 @@ class MIREmitter
           }
       }.run, .{})
     ZIG
-    wrap_conflict_handler(core, node.conflict_action, node.retries)
+    if node.is_atomic_ptr
+      "try #{core};"
+    else
+      wrap_conflict_handler(core, node.conflict_action, node.retries)
+    end
   end
 
   # `WITH SNAPSHOT a AS MUTABLE va, b AS MUTABLE vb, ... { body }`:
@@ -752,6 +762,15 @@ class MIREmitter
       guarded_defer(name, "#{alloc}.free(#{name})", g, errdefer:)
 
     when :heap_slice, :heap_union, :heap_struct
+      guarded_cleanup(name, zig_type, alloc, g, errdefer:)
+
+    when :atomic_ptr
+      # AtomicPtr M3 / review item J: same cleanup shape as :heap_struct
+      # (CheatLib.cleanup with the binding's *AtomicPtr(T) zig_type),
+      # but routed through a dedicated kind so the entry hash doesn't
+      # carry the unused rc_variant/rc_release_func fields. The
+      # runtime cleanup() shim dispatches via @hasDecl(child,
+      # "compareAndPublish") and recursively cleans the inner *T.
       guarded_cleanup(name, zig_type, alloc, g, errdefer:)
 
     when :struct_with_cleanup_fields, :struct_rc, :non_copy_union

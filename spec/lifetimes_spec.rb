@@ -38,7 +38,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "parses annotation properly" do
-        expect(func_def.return_lifetime.name).to eq("n")
+        expect(func_def.return_lifetime.first.name).to eq("n")
         expect(result).to eq(:Float64)
       end
     end
@@ -93,7 +93,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "parses successfully" do
-        expect(func_def.return_lifetime.name).to eq("f")
+        expect(func_def.return_lifetime.first.name).to eq("f")
         expect(result).to eq(:Bar)
       end
     end
@@ -154,7 +154,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "succeeds" do
-        expect(func_def.return_lifetime.name).to eq("f")
+        expect(func_def.return_lifetime.first.name).to eq("f")
         expect(result).to eq(:Void)
       end
     end
@@ -179,7 +179,7 @@ RSpec.describe SemanticAnnotator do
       }
 
       it "succeeds" do
-        expect(func_def.return_lifetime.name).to eq("f")
+        expect(func_def.return_lifetime.first.name).to eq("f")
         expect(result).to eq(:Void)
       end
     end

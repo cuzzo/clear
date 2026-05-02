@@ -1127,22 +1127,28 @@ module MIR
   end
 
   # SNAPSHOT-mutable single-cell: `WITH SNAPSHOT cell AS MUTABLE va
-  # { body } ON Conflict <action>` for a Versioned cell in transaction
-  # mode. Lowers to a `Versioned.update(rt, alloc, fn(va: *T) ...)`
-  # call wrapped in catch+switch for ON Conflict handling.
+  # { body } [ON Conflict <action>]` for a @versioned (MVCC) or
+  # @indirect:atomic (AtomicPtr M3.6) cell in transaction mode.
+  # Versioned: lowers to `Versioned.update(rt, alloc, fn(va: *T) ...)`
+  # wrapped in catch+switch for ON Conflict handling.
+  # AtomicPtr (is_atomic_ptr=true): lowers to
+  # `AtomicPtr.update(rt, alloc, fn(va: *T) ...)` with NO conflict
+  # handler -- rcu retries until success (Rust arc-swap rcu).
   #
-  # cell_unwrap     : Zig expr resolving to *Versioned(T)
+  # cell_unwrap     : Zig expr resolving to *Versioned(T) or *AtomicPtr(T)
   # rt              : Zig expr for *Runtime
   # alloc           : Zig expr for the allocator (rt.heapAlloc())
   # alias_zig       : Zig identifier for the user's MUTABLE alias
   # bare_t_zig      : Zig type string for the inner T
   # body            : Array of MIR statements -- the user's transaction body
-  # conflict_action : Zig text for the ON Conflict handler body
-  # retries         : nil or integer N for RETRY(N) THEN <action>
+  # conflict_action : Zig text for the ON Conflict handler body (nil for atomic-ptr)
+  # retries         : nil or integer N for RETRY(N) THEN <action> (nil for atomic-ptr)
   # with_label      : nil or string for the labeled block exit (PASS/block actions)
+  # is_atomic_ptr   : true when the cell's sync is :atomic + layout :indirect.
+  #                   Routes the emitter to the no-conflict-handler shape.
   SnapshotTransaction = Struct.new(
     :cell_unwrap, :rt, :alloc, :alias_zig, :bare_t_zig,
-    :body, :conflict_action, :retries, :with_label
+    :body, :conflict_action, :retries, :with_label, :is_atomic_ptr
   ) do
     include Stmt
     def stmt?; true; end

@@ -1,0 +1,13 @@
+[package]
+name = "bench_atomic_ptr"
+version = "0.1.0"
+edition = "2021"
+
+# Keep the output binary named bench_rust so runner.rb finds it
+# in target/release/ without any special-casing.
+[[bin]]
+name = "bench_rust"
+path = "bench.rs"
+
+[dependencies]
+arc-swap = "1"

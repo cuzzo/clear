@@ -29,6 +29,18 @@ module EffectTracker
   YIELD        = :YIELD
   IO           = :IO
 
+  # Atomics M1.6.5: contention / blocking axis for sync capabilities.
+  # CONTENTION fires on any use of an @shared:atomic / @shared:versioned /
+  # @shared:locked binding (cache-coherence pressure or CAS retry).
+  # BLOCKING fires only when the caller's binding is lock-based (mutex
+  # acquire can park the fiber). MAYBE variants fire when a polymorphic
+  # REQUIRES disjunction crosses the lock-free / lock-based line:
+  # the call site must check the arg's family to know which concrete
+  # effect actually applies.
+  CONTENTION       = :CONTENTION
+  CONTENTION_MAYBE = :CONTENTION_MAYBE
+  BLOCKING_MAYBE   = :BLOCKING_MAYBE
+
   # SUSPENDS family — fiber may suspend (IO, NEXT, YIELD, lock wait).
   # The three variants form an orthogonal set: a function may hold any
   # subset. Display form uses colon syntax (SUSPENDS:LOOP).
@@ -53,6 +65,7 @@ module EffectTracker
     HEAP, BLOCKING, REENTRANT, LOOP_UNBOUND, EXTERN,
     YIELD, IO,
     SUSPENDS, SUSPENDS_CONDITIONAL, SUSPENDS_LOOP,
+    CONTENTION, CONTENTION_MAYBE, BLOCKING_MAYBE,
   ].freeze
 
   # Display format: :SUSPENDS_LOOP -> "SUSPENDS:LOOP".
@@ -74,6 +87,13 @@ module EffectTracker
     # scanning. Used by compute_effects! to promote SUSPENDS → SUSPENDS_LOOP
     # or SUSPENDS_CONDITIONAL when the call site sits in that context.
     @call_site_context = Hash.new { |h, k| h[k] = {} }
+    # Atomics M1.6.5: per-(caller, callee) list of arg-family sets, one
+    # entry per call site. Used by compute_effects! to resolve callee
+    # ?-form effects (CONTENTION_MAYBE / BLOCKING_MAYBE) into concrete
+    # CONTENTION / BLOCKING (or to drop them) based on what families the
+    # caller actually passes. Each entry is an Array<Set<Symbol>> matching
+    # the call's positional args.
+    @call_site_arg_families = Hash.new { |h, k| h[k] = Hash.new { |hh, kk| hh[kk] = [] } }
   end
 
   # Called at the start of visit_FunctionDef to prepare a fresh effect set.
@@ -135,6 +155,16 @@ module EffectTracker
     }
   end
 
+  # Atomics M1.6.5: record the per-arg family Sets at this call site.
+  # `arg_family_sets` is an Array of Set<Symbol> in positional order (same
+  # length as node.args). compute_effects! reads this to resolve callee
+  # CONTENTION_MAYBE / BLOCKING_MAYBE into concrete effects when the
+  # families are concrete, or keeps them MAYBE when polymorphism propagates.
+  def record_call_arg_families(callee_name, arg_family_sets)
+    return unless current_fn_ctx&.name
+    @call_site_arg_families[current_fn_ctx.name][callee_name] << arg_family_sets
+  end
+
   # --- Phase 2: Transitive propagation ---
 
   # Fixed-point propagation through @call_graph.
@@ -163,7 +193,8 @@ module EffectTracker
     end
 
     # Propagate: if foo calls bar, foo inherits bar's effects
-    # (with context promotion for SUSPENDS family).
+    # (with context promotion for SUSPENDS family, plus Atomics M1.6.5
+    # ?-form resolution from per-call-site arg families).
     changed = true
     while changed
       changed = false
@@ -174,7 +205,10 @@ module EffectTracker
           next unless callee_effs
           before = current.size
           site_ctx = @call_site_context[fn_name][callee]
-          inherit_effects_from_callee(current, callee_effs, site_ctx)
+          resolved_callee = resolve_maybe_effects(
+            callee_effs, fn_name, callee
+          )
+          inherit_effects_from_callee(current, resolved_callee, site_ctx)
           changed = true if current.size > before
         end
       end
@@ -184,6 +218,82 @@ module EffectTracker
     @fn_nodes.each do |name, fn_node|
       fn_node.effects = (resolved[name] || Set.new).freeze
     end
+  end
+
+  # Atomics M1.6.5: resolve callee's ?-form effects (CONTENTION_MAYBE,
+  # BLOCKING_MAYBE) into concrete effects (CONTENTION, BLOCKING) when the
+  # caller's call sites pin the family. Returns a new Set or the original
+  # callee_set if no resolution applies.
+  #
+  # Resolution rules, aggregated across ALL call sites of `callee` from `caller`:
+  #   - any concrete LOCKED arg          -> BLOCKING_MAYBE upgrades to BLOCKING
+  #                                           (and CONTENTION_MAYBE upgrades to CONTENTION)
+  #   - any concrete sync arg (LOCKED,
+  #     ATOMIC, or VERSIONED)              -> CONTENTION_MAYBE upgrades to CONTENTION
+  #   - all call sites pass concrete       -> ?-form is fully resolved (drop MAYBE)
+  #     non-LOCKED args                     for BLOCKING_MAYBE; CONTENTION_MAYBE
+  #                                           also resolves (to CONTENTION if any
+  #                                           sync arg, else dropped if all nil)
+  #   - any call site has a polymorphic    -> keep MAYBE form (caller still
+  #     arg (sync_families.size > 1)          depends on caller's caller)
+  #   - no concrete call-site info         -> conservatively keep MAYBE
+  #
+  # Effects orthogonal to the contention axis pass through unchanged.
+  def resolve_maybe_effects(callee_set, caller_name, callee_name)
+    has_block_maybe = callee_set.include?(BLOCKING_MAYBE)
+    has_cont_maybe  = callee_set.include?(CONTENTION_MAYBE)
+    return callee_set unless has_block_maybe || has_cont_maybe
+
+    call_sites = @call_site_arg_families[caller_name][callee_name]
+    return callee_set if call_sites.empty?
+
+    any_concrete_lockable = false
+    any_concrete_sync     = false
+    any_polymorphic_arg   = false
+
+    call_sites.each do |arg_family_sets|
+      arg_family_sets.each do |fam_set|
+        next if fam_set.nil? || fam_set.empty?
+        if fam_set.size > 1
+          any_polymorphic_arg = true
+          any_concrete_lockable = true if fam_set.include?(:LOCKED)
+          any_concrete_sync     = true
+        else
+          fam = fam_set.first
+          any_concrete_lockable = true if fam == :LOCKED
+          any_concrete_sync     = true if [:LOCKED, :ATOMIC, :VERSIONED].include?(fam)
+        end
+      end
+    end
+
+    result = callee_set.dup
+
+    if has_block_maybe
+      if any_concrete_lockable && !any_polymorphic_arg
+        result.add(BLOCKING)
+        result.delete(BLOCKING_MAYBE)
+      elsif !any_concrete_lockable && !any_polymorphic_arg && any_concrete_sync
+        # All call sites pin to concrete lock-free families: BLOCKING is impossible.
+        result.delete(BLOCKING_MAYBE)
+      elsif any_polymorphic_arg
+        # Caller's own param is polymorphic; ?-form propagates upward.
+        # No-op (keep BLOCKING_MAYBE).
+      end
+    end
+
+    if has_cont_maybe
+      if any_concrete_sync && !any_polymorphic_arg
+        result.add(CONTENTION)
+        result.delete(CONTENTION_MAYBE)
+      elsif any_polymorphic_arg
+        # No-op (keep CONTENTION_MAYBE).
+      else
+        # No concrete sync at any call site (all args nil family) -> drop.
+        result.delete(CONTENTION_MAYBE)
+      end
+    end
+
+    result
   end
 
   # Merge callee's effects into caller, applying context-sensitive

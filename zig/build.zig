@@ -220,6 +220,9 @@ pub fn build(b: *std.Build) void {
         .{ .path = "versioned-loom-test.zig", .tsan = false },
         .{ .path = "versioned-vopr-test.zig", .tsan = true },
         .{ .path = "versioned-fiber-stress-test.zig", .tsan = true },
+        // Atomics v0.2 / v0.3
+        .{ .path = "atomic-ptr-loom-test.zig", .tsan = false },
+        .{ .path = "atomic-ptr-stress-test.zig", .tsan = true },
 
         // Single-threaded / pure logic — debug build only
         .{ .path = "arena-fuzz-test.zig" },

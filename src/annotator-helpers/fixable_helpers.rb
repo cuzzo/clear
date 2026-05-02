@@ -454,4 +454,46 @@ module FixableHelper
       )]
     )
   end
+
+  # Atomics M2.8: a M2.6 lifetime error fired (escape via store /
+  # field-assign / RETURN) AND the offending source binding's sync
+  # axis is `:atomic`. Build a Fix that swaps `@shared:atomic` to
+  # `@shared:locked` at the source's declaration line so `clear fix`
+  # has a concrete edit to surface; the `:interactive` confidence
+  # forces the user to review (the migration is more involved than
+  # a sigil swap -- `@shared:locked` typically requires a STRUCT
+  # wrap around the primitive). Returns nil when source isn't
+  # atomic or the decl line text isn't locatable; the caller then
+  # falls back to the plain `error!` path.
+  def build_atomic_escape_migration_fix(source_sym, source_name)
+    return nil unless source_sym && source_sym.respond_to?(:sync) && source_sym.sync == :atomic
+    return nil unless @source_code
+    reg = source_sym.respond_to?(:reg) ? source_sym.reg : nil
+    return nil unless reg && reg.respond_to?(:token) && reg.token
+    line_num = reg.token.line
+    return nil unless line_num
+    src_line = @source_code.lines[line_num - 1] || ''
+    # The sigil chain is order-independent: `@shared:atomic` and
+    # `@atomic:shared` parse to the same Type. Match either form.
+    match = src_line.match(/@(?:shared:atomic|atomic:shared)/)
+    return nil unless match
+    start_col = match.begin(0) + 1   # 1-based column
+
+    Fix.new(
+      description: "Migrate '#{source_name}' from `@shared:atomic` to " \
+                   "`@shared:locked` so its lifetime can outlive the " \
+                   "declaring scope. NOTE: `@shared:locked` typically " \
+                   "needs a STRUCT wrap around the primitive (e.g. " \
+                   "`STRUCT Counter { v: Int64 }; c = Counter{v: 0} " \
+                   "@shared:locked`); read/write sites become " \
+                   "`WITH EXCLUSIVE c AS a { ... }`. Alternatively, " \
+                   "wait for v0.3 atomic struct fields, which lift " \
+                   "this escape restriction without the Arc cost.",
+      confidence: :interactive,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: line_num, col: start_col, length: match[0].length),
+        replacement: '@shared:locked'
+      )]
+    )
+  end
 end

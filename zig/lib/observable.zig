@@ -31,6 +31,7 @@ pub const AtomicInt32 = atomic.AtomicInt32;
 pub const AtomicUint32 = atomic.AtomicUint32;
 pub const AtomicFloat64 = atomic.AtomicFloat64;
 pub const AtomicFloat32 = atomic.AtomicFloat32;
+pub const AtomicBool = atomic.AtomicBool;
 
 /// Pick the right primitive for a comptime numeric `T`.
 fn AtomicFor(comptime T: type) type {

@@ -456,28 +456,106 @@ module FunctionAnalysis
       error!(arg_node, "Lifetime Error: Cannot pass '#{arg_node.name}' as mutable argument because it is currently RESTRICTed.")
     end
 
-    lifetime = signature.dig(:return, :lifetime)
-    return true if lifetime.nil?
+    # Atomics M2.4 / M2.5: signature[:return][:lifetime] is now an
+    # Array of dotted-path strings (or [:wildcard]) instead of a
+    # single string. Empty array = no lifetime annotation.
+    lifetime_paths = signature.dig(:return, :lifetime) || []
+    lifetime_paths = [lifetime_paths] unless lifetime_paths.is_a?(Array)
+    return true if lifetime_paths.empty?
 
     borrow_type = param[:mutable] ? :mutable : :immutable
     return true if current_scope.is_immutable?(arg_node.name) || current_scope.is_restricted?(arg_node.name)
 
-    base_path = signature.dig(:return, :lifetime).split(".").first
-    return true if param[:name] != base_path
+    # If `param` is named in the lifetime sources (any of the multi-
+    # binding entries), the caller is borrowing through that param's
+    # lifetime; reject if the borrow is mutable but not RESTRICTed.
+    # Wildcard accepts every param implicitly.
+    base_paths = lifetime_paths.flat_map do |p|
+      next [:wildcard] if p == :wildcard
+      [p.to_s.split(".").first]
+    end
+    return true unless base_paths.include?(:wildcard) || base_paths.include?(param[:name])
 
     error!(arg_node, "Lifetime Error: param `#{param[:name]}` is mutable, must be RESTRICTed before it can be borrowed.")
   end
 
-  # TODO: Still only supports simple lifetimes, partially arrays
-  # TODO: Need to support wildcard and OR lifetimes
+  # Atomics M2.4 / M2.5: validate `RETURNS <lifetime>:T`.
+  #
+  # `node.return_lifetime` shapes:
+  #   nil                    -- no lifetime
+  #   :wildcard              -- `RETURNS *:T` (lazy)
+  #   Array<AST::Identifier|GetField>
+  #                          -- `RETURNS foo:T` (one element) or
+  #                             `RETURNS (a b c):T` (multi)
   def verify_lifetime!(node)
-    return true if node.return_lifetime.nil?
+    rl = node.return_lifetime
+    return true if rl.nil?
 
-    # 1. Parse the path (Reuse the robust logic you just verified)
-    # This gives you [:f, :b]
-    path = get_path_to_root(node.return_lifetime)
+    # Wildcard: warn (linter will replace with explicit list); accept.
+    if rl == :wildcard
+      note!(node,
+        "Function '#{node.name}' uses wildcard return lifetime " \
+        "`RETURNS *:T`. Every parameter is conservatively folded into " \
+        "the source set. Consider replacing with the explicit list of " \
+        "parameters whose lifetimes the return value actually depends " \
+        "on; `clear fix` (lint) will offer the rewrite once the audit " \
+        "matrix lands.")
+      return true
+    end
 
-    # 2. Check the Root Parameter
+    # Multi- (or single-) binding: every entry must resolve to a
+    # parameter and (for nested field paths) a real field chain.
+    sources = rl.is_a?(Array) ? rl : [rl]
+    sources.each do |source|
+      verify_lifetime_source!(node, source)
+    end
+
+    # Atomics M2.7: a `REQUIRES x: ATOMIC | <non-atomic>` with a
+    # `RETURNS x:T` lifetime can't be safely emitted -- the runtime
+    # layout differs per family (bare `*Atomic(T)` vs `Arc(Locked
+    # (T))`), so a single returned future would have two different
+    # lifetime stories at the call site. Reject the combination at
+    # the declaration site so the user picks one family or splits
+    # into two fns.
+    verify_no_mixed_atomic_returned_lifetime!(node, sources)
+    true
+  end
+
+  # Atomics M2.7: when the fn declares `RETURNS <param>:T` (the
+  # returned value's lifetime is tied to <param>) AND the param's
+  # REQUIRES disjunction mixes ATOMIC with a non-atomic family,
+  # error. The returned value's runtime layout depends on which
+  # family the caller passes, but the source-tracking (M2.3 +
+  # M2.6) treats every concrete family the same way -- so the
+  # mixed declaration is ambiguous in a way the lifetime checker
+  # can't model. Force the user to split into separate fns or pick
+  # one family.
+  def verify_no_mixed_atomic_returned_lifetime!(node, sources)
+    requires_map = node.respond_to?(:requires) ? (node.requires || {}) : {}
+    return if requires_map.empty?
+
+    sources.each do |source|
+      path = get_path_to_root(source)
+      next unless path
+      root_name = path.first.to_s
+      families = requires_map[root_name]
+      next unless families.is_a?(Set) && families.size > 1
+      next unless families.include?(:ATOMIC)
+      others = families - Set[:ATOMIC]
+      error!(node,
+        "Lifetime Error: function '#{node.name}' declares `RETURNS " \
+        "#{root_name}:T` AND `REQUIRES #{root_name}: ATOMIC | #{others.to_a.join(' | ')}`. " \
+        "The returned value's lifetime model differs by family: ATOMIC " \
+        "is a bare pointer to a scope-bounded cell (M2.2), while " \
+        "#{others.to_a.join(' / ')} is reference-counted via Arc. The " \
+        "compiler can't pick one lifetime story at the declaration site. " \
+        "Either split into two functions (one per family) or drop the " \
+        "ATOMIC family from REQUIRES.")
+    end
+  end
+
+  def verify_lifetime_source!(node, source_node)
+    path = get_path_to_root(source_node)
     root_param_name = path.first.to_s
     param = node.params.find { |p| p[:name] == root_param_name }
 
@@ -493,8 +571,7 @@ module FunctionAnalysis
       field_name = field_sym.to_s
 
       # Stop if we hit an Array index wildcard (we can't verify types past a dynamic index easily yet)
-      break if field_sym == :* # Look up the definition (e.g. { index: :Float64 })
-      # You added this method to Scope earlier!
+      break if field_sym == :*
       schema = current_scope.resolve_type_definition(current_type_name)
 
       if schema.nil?
@@ -511,8 +588,6 @@ module FunctionAnalysis
       # Advance to the next type name (Type objects carry the resolved name)
       current_type_name = next_type.is_a?(Type) ? next_type.resolved : next_type.to_sym
     end
-
-    return true
   end
 
   def declare_and_verify_params(node)
@@ -565,20 +640,34 @@ module FunctionAnalysis
       elsif node.respond_to?(:requires) && node.requires
         families = node.requires[param[:name].to_s]
         if families
-          # Polymorphic LOCKED | VERSIONED falls through to LOCKED's
-          # seed (the WITH MATCH x WHEN @versioned ... WHEN @locked
-          # arm-check overrides per-arm anyway, so any pinned-default
-          # is informational only).
+          # Polymorphic LOCKED | VERSIONED | ATOMIC falls through
+          # to LOCKED's seed (the WITH MATCH x WHEN @versioned ...
+          # WHEN @locked / WHEN @atomic arm-check overrides per-arm
+          # anyway, so any pinned-default is informational only).
           if families.include?(:LOCKED)
             param_sync = :locked
           elsif families.include?(:VERSIONED)
             param_sync = :versioned
+          elsif families.include?(:ATOMIC)
+            param_sync = :atomic
           end
         end
       end
+      # AtomicPtr M3.11: when REQUIRES includes ATOMIC AND the param's
+      # type is a struct (not a primitive), the implicit cap is
+      # `@indirect:atomic` (the struct case). Seed `:layout = :indirect`
+      # so WITH SNAPSHOT's cap_var_layout check accepts the cell --
+      # parallel to the param_sync seed above. Primitives (Int64 /
+      # Float64 / Bool) keep layout=nil because their @atomic surface
+      # is the bare-cell @shared:atomic form, not AtomicPtr.
+      param_layout = nil
+      if param_sync == :atomic
+        param_t = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type])
+        param_layout = :indirect if param_t.respond_to?(:struct?) && param_t.struct?
+      end
       current_scope.declare(
         param[:name], nil, param[:type], param[:mutable], false, nil, :stack,
-        Set.new, [], sync: param_sync
+        Set.new, [], sync: param_sync, layout: param_layout
       )
       # Stash the SymbolEntry on the param hash so the transitive sync
       # propagation pass (P1.4) and downstream code can find it without
@@ -587,6 +676,12 @@ module FunctionAnalysis
       # Mark as a parameter so deferred WITH validation (P1.7) can
       # distinguish it from local bindings.
       param[:symbol].is_param = true
+      # Atomics M1.6.5: stamp sync_families from the REQUIRES disjunction so
+      # call-site effect resolution can detect polymorphic bindings (size > 1).
+      if node.respond_to?(:requires) && node.requires
+        fams = node.requires[param[:name].to_s]
+        param[:symbol].sync_families = fams if fams.is_a?(Set) && !fams.empty?
+      end
       # TAKES parameters own the data — force :affine so cleanup is emitted.
       current_scope.locals[param[:name]].takes = true if param[:takes]
       classify_ownership!(current_scope.locals[param[:name]])
@@ -692,9 +787,12 @@ module FunctionAnalysis
       return true if schema.is_a?(Hash) && (schema[:kind] == :union || schema[:kind] == :enum)
     end
 
-    lifetime_path = current_fn_ctx&.lifetime
+    # Atomics M2.5: lifetime is now an Array of dotted-path strings
+    # (or [:wildcard] for `RETURNS *:T`). Empty array == no lifetime.
+    lifetime_paths = current_fn_ctx&.lifetime || []
     type_info = node.type_object
-    has_lifetime = !lifetime_path.nil?
+    has_lifetime = !lifetime_paths.empty?
+    is_wildcard = lifetime_paths == [:wildcard]
     schema_resolver = ->(t) { lookup_type_schema(t) rescue nil }
     is_copyable = (type_info&.copyable?(schema_resolver) || type_info&.implicitly_copyable?(schema_resolver))
     fn_type_params = current_fn_ctx&.type_params || []
@@ -709,22 +807,37 @@ module FunctionAnalysis
     end
 
     return true unless has_lifetime
+    # Wildcard accepts any return-derivation path -- the diagnostic at
+    # the declaration site already warned about it.
+    return true if is_wildcard
 
     # Lifetime path validation applies to direct field/index access only.
     # Borrowed variables need source-tracing (future work).
     return true if node.is_a?(AST::Identifier)
 
-    lifetime_path = lifetime_path.split(".").map(&:to_sym)
     actual_path = get_path_to_root(node)
     if actual_path.nil?
-      error!("Lifetime Error: Lifetime '#{lifetime_path}' specified on return, but returned value is not associated.")
+      error!("Lifetime Error: Lifetime '#{lifetime_paths.join(', ')}' specified on return, but returned value is not associated.")
     end
 
-    if actual_path[0...lifetime_path.size] != lifetime_path
+    # Multi-source semantics: returned value derives from EXACTLY one
+    # of the declared sources (it cannot simultaneously originate from
+    # two distinct parameters). Accept iff `actual_path` has any
+    # declared source as its prefix; reject with a clear "expected one
+    # of: ..." diagnostic when none match.
+    matched = lifetime_paths.any? do |p|
+      lifetime_syms = p.split(".").map(&:to_sym)
+      actual_path[0...lifetime_syms.size] == lifetime_syms
+    end
+
+    unless matched
+      sources_msg = lifetime_paths.size == 1 ?
+        "derived from: #{lifetime_paths.first}" :
+        "derived from one of: #{lifetime_paths.join(' | ')}"
       error!(
         node,
         "Lifetime Error:\n" \
-        "  Expected return derived from: #{lifetime_path.join('.')}\n" \
+        "  Expected return #{sources_msg}\n" \
         "  Actual return derived from:   #{actual_path.join('.')}"
       )
     end

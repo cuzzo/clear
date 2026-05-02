@@ -50,6 +50,12 @@ pub fn AtomicInt(comptime T: type) type {
         pub inline fn fetchAnd(self: *Self, mask: T) T {
             return self.value.fetchAnd(mask, .monotonic);
         }
+        pub inline fn fetchXor(self: *Self, mask: T) T {
+            return self.value.fetchXor(mask, .monotonic);
+        }
+        pub inline fn exchange(self: *Self, new: T) T {
+            return self.value.swap(new, .acq_rel);
+        }
         pub inline fn fetchMax(self: *Self, v: T) void {
             var current = self.value.load(.acquire);
             while (true) {
@@ -104,6 +110,11 @@ pub fn AtomicFloat(comptime T: type) type {
         }
         pub inline fn store(self: *Self, v: T) void {
             self.value.store(@bitCast(v), .release);
+        }
+        pub inline fn exchange(self: *Self, new: T) T {
+            const n_bits: Backing = @bitCast(new);
+            const old_bits = self.value.swap(n_bits, .acq_rel);
+            return @bitCast(old_bits);
         }
         pub inline fn fetchAdd(self: *Self, delta: T) T {
             var current_bits = self.value.load(.acquire);
@@ -168,6 +179,58 @@ pub const AtomicUint32 = AtomicInt(u32);
 pub const AtomicFloat64 = AtomicFloat(f64);
 pub const AtomicFloat32 = AtomicFloat(f32);
 
+/// Unified comptime selector for the right primitive wrapper based on T.
+/// This is what CLEAR's `T@shared:atomic` lowers to: `Atomic(T)` resolves
+/// to AtomicInt(T) for ints, AtomicFloat(T) for floats, AtomicBool for bool.
+/// Any other T is a compile error -- the v0.2 atomic surface is intentionally
+/// limited to the three primitive families the runtime supports.
+pub fn Atomic(comptime T: type) type {
+    if (T == bool) return AtomicBool;
+    return switch (@typeInfo(T)) {
+        .int, .comptime_int => AtomicInt(T),
+        .float => AtomicFloat(T),
+        else => @compileError("Atomic: T must be an integer, float, or bool"),
+    };
+}
+
+/// Atomic Bool. Backed by u8; load/store/exchange/CAS. No
+/// arithmetic — booleans don't have +/- semantics.
+pub const AtomicBool = struct {
+    value: std.atomic.Value(u8) align(64) = .{ .raw = 0 },
+
+    const Self = @This();
+
+    pub inline fn load(self: *const Self) bool {
+        return self.value.load(.acquire) != 0;
+    }
+    pub inline fn loadRelaxed(self: *const Self) bool {
+        return self.value.load(.monotonic) != 0;
+    }
+    pub inline fn store(self: *Self, v: bool) void {
+        self.value.store(@intFromBool(v), .release);
+    }
+    pub inline fn exchange(self: *Self, new: bool) bool {
+        return self.value.swap(@intFromBool(new), .acq_rel) != 0;
+    }
+    pub inline fn cmpxchgStrong(self: *Self, expected: bool, new: bool) ?bool {
+        const e: u8 = @intFromBool(expected);
+        const n: u8 = @intFromBool(new);
+        const result = self.value.cmpxchgStrong(e, n, .release, .acquire);
+        if (result) |actual| return actual != 0;
+        return null;
+    }
+    pub inline fn cmpxchgWeak(self: *Self, expected: bool, new: bool) ?bool {
+        const e: u8 = @intFromBool(expected);
+        const n: u8 = @intFromBool(new);
+        const result = self.value.cmpxchgWeak(e, n, .release, .acquire);
+        if (result) |actual| return actual != 0;
+        return null;
+    }
+    pub inline fn init(initial: bool) Self {
+        return .{ .value = .{ .raw = @intFromBool(initial) } };
+    }
+};
+
 // =============================================================
 // Tests
 // =============================================================
@@ -230,4 +293,45 @@ test "alignment: aliases are 64-byte aligned" {
     try std.testing.expectEqual(@as(usize, 64), @alignOf(AtomicInt64));
     try std.testing.expectEqual(@as(usize, 64), @alignOf(AtomicFloat64));
     try std.testing.expectEqual(@as(usize, 64), @alignOf(AtomicUint64));
+    try std.testing.expectEqual(@as(usize, 64), @alignOf(AtomicBool));
+}
+
+test "AtomicInt64: fetchXor" {
+    var a = AtomicInt64.init(0b1100);
+    _ = a.fetchXor(0b1010);
+    try std.testing.expectEqual(@as(i64, 0b0110), a.load());
+}
+
+test "AtomicInt64: exchange returns old value" {
+    var a = AtomicInt64.init(42);
+    const old = a.exchange(100);
+    try std.testing.expectEqual(@as(i64, 42), old);
+    try std.testing.expectEqual(@as(i64, 100), a.load());
+}
+
+test "AtomicFloat64: exchange returns old value" {
+    var a = AtomicFloat64.init(1.5);
+    const old = a.exchange(7.25);
+    try std.testing.expectEqual(@as(f64, 1.5), old);
+    try std.testing.expectEqual(@as(f64, 7.25), a.load());
+}
+
+test "AtomicBool: load/store/exchange round trip" {
+    var b = AtomicBool.init(false);
+    try std.testing.expectEqual(false, b.load());
+    b.store(true);
+    try std.testing.expectEqual(true, b.load());
+    const old = b.exchange(false);
+    try std.testing.expectEqual(true, old);
+    try std.testing.expectEqual(false, b.load());
+}
+
+test "AtomicBool: cmpxchg success and failure paths" {
+    var b = AtomicBool.init(false);
+    // success: expected matches
+    try std.testing.expectEqual(@as(?bool, null), b.cmpxchgStrong(false, true));
+    try std.testing.expectEqual(true, b.load());
+    // failure: expected mismatches; returns the actual value
+    try std.testing.expectEqual(@as(?bool, true), b.cmpxchgStrong(false, false));
+    try std.testing.expectEqual(true, b.load());
 }

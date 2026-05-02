@@ -1,0 +1,26 @@
+-- AtomicPtr M3.5: WITH SNAPSHOT read mode for @indirect:atomic.
+-- Verifies the compiler lowers `WITH SNAPSHOT cell AS x { ... }`
+-- on an @indirect:atomic struct cell to AtomicPtr.read(rt) -> Guard
+-- with cleanup at scope exit.
+
+STRUCT Config {
+    host: String,
+    port: Int64,
+}
+
+FN main() RETURNS Void ->
+    cfg = Config{ host: "localhost", port: 8080 } @indirect:atomic;
+
+    -- Read-mode WITH SNAPSHOT — Arc-bumped (via EBR pin) snapshot for
+    -- the duration of the block. No ON Conflict (read paths can't fail).
+    WITH SNAPSHOT cfg AS c {
+        ASSERT c.port == 8080, "snapshot.port: expected 8080";
+    }
+
+    -- Multiple sequential reads (each independent EBR pin/release).
+    WITH SNAPSHOT cfg AS c {
+        ASSERT c.port == 8080, "second snapshot.port: still 8080";
+    }
+
+    RETURN;
+END

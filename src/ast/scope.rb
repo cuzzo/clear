@@ -3,6 +3,7 @@ require_relative "./symbol_entry"
 
 class Scope
   attr_accessor :locals, :dependencies, :owned_names
+  attr_accessor :depth   # Atomics M2.6: stack depth at scope creation; 0 for root
   attr_reader   :types
 
   def initialize
@@ -10,9 +11,10 @@ class Scope
     @dependencies = {}
     @types = {}
     @owned_names = Set.new  # Variables declared in THIS scope (not inherited from parent)
+    @depth = 0
   end
 
-  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, resource: nil, close_zig: nil)
+  def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
       reg: reg,
@@ -20,6 +22,7 @@ class Scope
       mutable: is_mutable,
       storage: storage,
       sync: sync,
+      layout: layout,
       rebindable: is_rebindable,
       size: size || 0,
       capabilities: capabilities,
@@ -27,6 +30,10 @@ class Scope
       close_zig: close_zig,
     )
     entry.scope = self
+    # Atomics M2.6: stamp the binding's declaring depth so the escape
+    # checker can compare lifetimes ("source's depth must be <= dest's
+    # depth" -- nested-or-equal-scope = OK).
+    entry.scope_depth = @depth
     @locals[name] = entry
   end
 
@@ -263,6 +270,11 @@ module ScopeHelper
 
   def with_new_scope(scope = nil)
     new_scope = scope.nil? ? Scope.new : scope.dup
+    # Atomics M2.6: stamp depth on the freshly pushed scope so
+    # `Scope#declare` can stamp `entry.scope_depth` for lifetime
+    # comparisons. Root scope keeps depth 0; each `with_new_scope`
+    # nest increases the depth by one.
+    new_scope.depth = @scope_stack.size
     @scope_stack.push(new_scope)
     yield
     @scope_stack.pop

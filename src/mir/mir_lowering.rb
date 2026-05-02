@@ -671,7 +671,7 @@ class MIRLowering
     when :heap_union, :heap_struct, :locked, :write_locked, :always_mutable, :versioned,
          :struct_with_cleanup_fields, :struct_rc, :non_copy_union, :takes_union
       Type.new((ti&.resolved || :Any).to_s).zig_type
-    when :rc
+    when :rc, :atomic_ptr
       ti&.zig_type
     end
 
@@ -959,6 +959,7 @@ class MIRLowering
     mutable_scalar_params = (node.params || []).select { |p|
       p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
     }.map { |p| p[:name] }.to_set
+    @current_fn_mutable_scalar_params = mutable_scalar_params
 
     # Collection params: already passed by pointer, skip & at recursive call sites
     @current_fn_collection_params = (node.params || []).select { |p|
@@ -975,9 +976,22 @@ class MIRLowering
       p_type_sym = param[:type].is_a?(Type) ? param[:type].resolved : param[:type]
       p_type_obj = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
       is_user_struct = @struct_schemas&.key?(p_type_sym)
+      # Atomics M1.7: a primitive @shared:atomic param (REQUIRES c: ATOMIC
+      # or REQUIRES c: ATOMIC | ...) needs `anytype` so the comptime probe
+      # in WITH MATCH can resolve to the correct path. Without this, the
+      # signature is concrete `*CheatLib.Atomic(i64)`, which forces the
+      # caller to pre-load (and the auto-rewrite emits `bump(c.ctrl.data
+      # .load())` — passes a value, not the cell). Same logic applies for
+      # polymorphic REQUIRES that includes ATOMIC; the SymbolEntry's
+      # sync/sync_families captures both cases.
+      sym = param[:symbol]
+      atomic_sync = sym && (sym.sync == :atomic ||
+                            (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
       zig_t = if is_user_struct
         "anytype"
       elsif p_type_obj.collection?
+        "anytype"
+      elsif atomic_sync
         "anytype"
       else
         transpile_type(param[:type], is_param: true)
@@ -2446,14 +2460,42 @@ class MIRLowering
   # are parser-reserved but have no probe yet (raise on use). See
   # WithMatchCheck.LOCKED_SYNCS / VERSIONED_SYNCS for the inverse
   # mapping that classifies a binding's family at the call site.
-  def with_match_probe_for_family(family, zig_var)
+  def with_match_probe_for_family(family, zig_var, node = nil)
     inner_t = "CheatLib.WithMatchInner(@TypeOf(#{zig_var}))"
+    snapshot = node.respond_to?(:snapshot_mode) && node.snapshot_mode
     case family
-    when :VERSIONED then "@hasDecl(#{inner_t}, \"Inner\")"
-    when :LOCKED  then "@hasField(#{inner_t}, \"mutex\")"
+    # Versioned and AtomicPtr both expose `pub const Inner = T`, so a
+    # bare `@hasDecl(..., "Inner")` probe would match AtomicPtr too.
+    # That's harmless in non-SNAPSHOT WITH MATCH (Versioned/AtomicPtr
+    # never appear in those polymorphic call sites today) but
+    # silently miscompiles in SNAPSHOT MATCH where AtomicPtr cells
+    # are first-class. Tighten with `!@hasDecl(..., "compareAndPublish")`
+    # which is unique to AtomicPtr -- routes AtomicPtr cells to the
+    # ATOMIC arm in SNAPSHOT MATCH.
+    when :VERSIONED
+      if snapshot
+        "(@hasDecl(#{inner_t}, \"Inner\") and !@hasDecl(#{inner_t}, \"compareAndPublish\"))"
+      else
+        "@hasDecl(#{inner_t}, \"Inner\")"
+      end
+    when :LOCKED then "@hasField(#{inner_t}, \"mutex\")"
+    # Atomics M1.6: AtomicInt(T) / AtomicFloat(T) / AtomicBool all
+    # expose `cmpxchgStrong` (Locked/Versioned do not). Unique +
+    # comptime-resolved at zero runtime cost.
+    # AtomicPtr M3: AtomicPtr(T) exposes `compareAndPublish` (unique).
+    # In SNAPSHOT MATCH the cell is always AtomicPtr (primitive
+    # @atomic doesn't support SNAPSHOT) so probe by compareAndPublish.
+    # In non-SNAPSHOT WITH MATCH the cell is always primitive, probe
+    # by cmpxchgStrong.
+    when :ATOMIC
+      if snapshot
+        "@hasDecl(#{inner_t}, \"compareAndPublish\")"
+      else
+        "@hasDecl(#{inner_t}, \"cmpxchgStrong\")"
+      end
     else
       raise "WITH MATCH: no probe for family #{family.inspect} (only " \
-            ":VERSIONED and :LOCKED are wired today)"
+            ":VERSIONED, :LOCKED, :ATOMIC are wired today)"
     end
   end
 
@@ -2496,6 +2538,38 @@ class MIRLowering
         const #{safe_alias} = #{guard_var}.get();
         _ = &#{safe_alias};
       ZIG
+    # Atomics M1.6: atomic primitives have no Guard / acquire / release.
+    # The alias binds directly to the cell pointer so the body can call
+    # atomic ops on it (e.g. `alias.fetchAdd(1)`). Note: M1 doesn't
+    # auto-rewrite `alias += 1` inside the WHEN ATOMIC arm body to
+    # fetchAdd; users in the arm must call atomic methods explicitly.
+    # The auto-rewrite for direct (non-MATCH) `c += 1` on an
+    # @shared:atomic binding still works (M1.5).
+    #
+    # AtomicPtr M3: in SNAPSHOT MATCH context the cell is an
+    # AtomicPtr, so the alias binds via Guard.read (mirrors the
+    # VERSIONED arm). The body sees `*T` (bare struct) and can do
+    # `alias.field` reads. Mutate semantics for SNAPSHOT MATCH
+    # MUTABLE on AtomicPtr land here too (alias = Guard.get()'s
+    # *T) -- not strictly correct for the publish path, but it
+    # matches what the existing VERSIONED MUTABLE arm does too
+    # (writes through the snapshot). Proper publish-via-CAS for
+    # SNAPSHOT MATCH MUTABLE arms is a separate larger lowering
+    # change; tracked in atomicptr-review.md.
+    when :ATOMIC
+      if node.respond_to?(:snapshot_mode) && node.snapshot_mode
+        <<~ZIG.rstrip
+          var #{guard_var} = #{unwrap}.read(#{@rt_name});
+          defer #{guard_var}.release();
+          const #{safe_alias} = #{guard_var}.get();
+          _ = &#{safe_alias};
+        ZIG
+      else
+        <<~ZIG.rstrip
+          const #{safe_alias} = #{unwrap};
+          _ = &#{safe_alias};
+        ZIG
+      end
     end
   end
 
@@ -2508,7 +2582,7 @@ class MIRLowering
     arms_meta = node.arms.map { |arm|
       {
         family:      arm[:family],
-        probe:       with_match_probe_for_family(arm[:family], zig_var),
+        probe:       with_match_probe_for_family(arm[:family], zig_var, node),
         prelude_zig: with_match_arm_prelude(arm[:family], zig_var, alias_name, node),
         body:        lower_body(arm[:body]),
       }
@@ -2640,9 +2714,15 @@ class MIRLowering
       source_unwrap = with_match_unwrap_value(source_zig)
       st = cap[:resolved_type].is_a?(Type) ? cap[:resolved_type] : Type.new(cap[:resolved_type])
       bare_t_zig = st.bare_data_type.zig_type
+      # AtomicPtr M3.6: detect @indirect:atomic so the emitter can
+      # skip the conflict-handler wrap (rcu retries until success;
+      # AtomicPtr.update never returns UpdateRetriesExhausted).
+      sym = var_node.respond_to?(:symbol) ? var_node.symbol : nil
+      is_atomic_ptr = sym && sym.sync == :atomic &&
+                      sym.respond_to?(:layout) && sym.layout == :indirect
       MIR::SnapshotTransaction.new(
         source_unwrap, @rt_name, alloc_zig, safe_alias, bare_t_zig,
-        body_mir, conflict_action, retries, with_label,
+        body_mir, conflict_action, retries, with_label, is_atomic_ptr,
       )
     else
       cells_tuple = ".{ " + snap_caps.map { |c| emit_expr(lower(c[:var_node])) }.join(", ") + " }"
@@ -4004,10 +4084,55 @@ class MIRLowering
     zig_name = (@decl_zig_name_map && decl_node && @decl_zig_name_map[decl_node.object_id]) ||
                zig_safe_name(node.name)
     ident = MIR::Ident.new(zig_name)
+
+    # Atomics M1.5: a read of an `@shared:atomic` binding lowers to an
+    # atomic load. M1 layout is `Arc(Atomic(T))`, so we dereference
+    # through `.ctrl.data` to reach the inner Atomic primitive. M2 will
+    # drop the Arc and this becomes `c.load()` directly.
+    #
+    # Skipped when @atomic_emit_raw is set -- the auto_atomic compound
+    # rewrite path needs the raw cell reference (without a load wrapping)
+    # to invoke `fetchAdd` / `store` etc. on the same cell.
+    #
+    # Atomics M1.7: also skipped when the annotator stamped atomic_borrow
+    # on the node (fn-arg position whose param expects ATOMIC). The
+    # caller passes the cell ref so the callee body can dispatch via
+    # @hasDecl probes per family. The callee's anytype param accepts
+    # whichever shape lands.
+    if node.respond_to?(:symbol) && node.symbol&.sync == :atomic && !@atomic_emit_raw
+      if node.respond_to?(:atomic_borrow) && node.atomic_borrow
+        return ident
+      end
+      # AtomicPtr M3.5: @indirect:atomic uses the WITH SNAPSHOT
+      # surface (read returns a Guard via cell.read(rt), MUTABLE
+      # body wraps in cell.update(rt, ..., closure)). The bare
+      # identifier reference IS the cell pointer; the WITH wrapper
+      # adds the .read() call. Skip the auto-`.load()` path here --
+      # AtomicPtr has no `.load()` method (the bare Atomic(T) does;
+      # AtomicPtr(T) doesn't).
+      if node.symbol&.layout == :indirect
+        return ident
+      end
+      # Atomics M2.2: bare Atomic(T) — call .load() directly on the
+      # binding. M1's `.ctrl.data.load()` indirection is gone since
+      # there's no Arc wrap.
+      return MIR::MethodCall.new(ident, "load", [], false)
+    end
+
     # Loop-carry string: identifier was marked for heap dupe at the use site
     # (frame string being assigned to a heap-carry outer variable).
     return MIR::DupeSlice.new(ident, :heap) if node.respond_to?(:heap_dupe_result) && node.heap_dupe_result
     ident
+  end
+
+  # Helper for the atomic auto-rewrite path: lower an Identifier without
+  # the `c.load()` wrap, so we can build `c.fetchAdd(...)` etc.
+  # Atomics M2.2: with the Arc dropped, the cell IS the binding.
+  def lower_atomic_cell_ref(name_node)
+    @atomic_emit_raw = true
+    ident_mir = lower(name_node)
+    @atomic_emit_raw = false
+    ident_mir
   end
 
   def lower_unary_op(node)
@@ -4915,21 +5040,35 @@ class MIRLowering
     zig_base = transpile_type(base_type)
     alloc = :heap
 
+    # AtomicPtr M3.5: @indirect:atomic on a STRUCT lowers to
+    # `atomicPtrCreate` -> `*CheatLib.AtomicPtr(T)`, distinct from the
+    # primitive @atomic path which uses `atomicCreate` -> `*Atomic(T)`.
+    # Both share the bare-pointer ownership (no outer Arc/Rc wrap).
+    is_atomic_ptr = node.sync == :atomic && node.layout == :indirect
     sync_fn = case node.sync
               when :locked then "lockedCreate"
               when :write_locked then "rwLockedCreate"
               when :always_mutable then "refCellCreate"
               when :versioned then "versionedCreate"
+              when :atomic then (is_atomic_ptr ? "atomicPtrCreate" : "atomicCreate")
               end
     sync_type = case node.sync
                 when :locked then "CheatLib.Locked(#{zig_base})"
                 when :write_locked then "CheatLib.RwLocked(#{zig_base})"
                 when :always_mutable then "CheatLib.RefCell(#{zig_base})"
                 when :versioned then "CheatLib.Versioned(#{zig_base})"
+                when :atomic then (is_atomic_ptr ? "CheatLib.AtomicPtr(#{zig_base})" : "CheatLib.Atomic(#{zig_base})")
                 end
+    # Atomics M2.2: @shared:atomic drops the Arc wrap. The Atomic
+    # cell IS thread-safe; Arc was only there for lifetime extension,
+    # and M2.3's BG-handle lifetime stamp + M2.6's escape audit make
+    # pointer-capture safe without an outer refcount.
+    # AtomicPtr M3.5 inherits the same drop -- the AtomicPtr cell
+    # internally owns an Arc-managed payload, so an outer Arc would
+    # double-wrap.
     own_fn = case node.ownership
-             when :shared then "arcCreate"
-             when :multiowned then "rcCreate"
+             when :shared then (node.sync == :atomic ? nil : "arcCreate")
+             when :multiowned then (node.sync == :atomic ? nil : "rcCreate")
              end
 
     strategy = if node.sync == :local || (node.layout == :indirect && !node.sync && !node.ownership)
@@ -4994,21 +5133,31 @@ class MIRLowering
   #
   # Returns the wrapped MIR node (typically MIR::CapWrap).
   def compose_capability_wrap(inner_mir, bare_zig_t, ft, alloc)
+    # AtomicPtr M3.5: see lower_cap_wrap above. Same is_atomic_ptr
+    # branch -- @indirect:atomic wraps via atomicPtrCreate, primitive
+    # @atomic wraps via atomicCreate.
+    is_atomic_ptr = ft.sync == :atomic && ft.layout == :indirect
     sync_fn = case ft.sync
               when :locked         then "lockedCreate"
               when :write_locked   then "rwLockedCreate"
               when :always_mutable then "refCellCreate"
               when :versioned      then "versionedCreate"
+              when :atomic         then (is_atomic_ptr ? "atomicPtrCreate" : "atomicCreate")
               end
     sync_t  = case ft.sync
               when :locked         then "CheatLib.Locked(#{bare_zig_t})"
               when :write_locked   then "CheatLib.RwLocked(#{bare_zig_t})"
               when :always_mutable then "CheatLib.RefCell(#{bare_zig_t})"
               when :versioned      then "CheatLib.Versioned(#{bare_zig_t})"
+              when :atomic         then (is_atomic_ptr ? "CheatLib.AtomicPtr(#{bare_zig_t})" : "CheatLib.Atomic(#{bare_zig_t})")
               end
+    # Atomics M2.2: same Arc-drop rule as in lower_cap_wrap. `@shared:
+    # atomic` / `@multiowned:atomic` produce a bare Atomic(T); the
+    # ownership-wrap step is skipped because pointer-capture on a
+    # scope-bounded atomic is now safe (M2.3 + M2.6).
     own_fn  = case ft.ownership
-              when :shared      then "arcCreate"
-              when :multiowned  then "rcCreate"
+              when :shared      then (ft.sync == :atomic ? nil : "arcCreate")
+              when :multiowned  then (ft.sync == :atomic ? nil : "rcCreate")
               end
 
     if sync_fn && own_fn
@@ -5226,6 +5375,15 @@ class MIRLowering
       end
       result
     else
+      # Atomics M1.5: when the annotator stamped auto_atomic_op, emit a
+      # method call on the atomic cell instead of a plain Set. Bypasses
+      # the regular value-lowering for compound forms (the desugared
+      # `c = c + n` would otherwise emit a load+store race; the auto-
+      # atomic path emits `c.fetchAdd(n)` directly).
+      if node.auto_atomic_op
+        return lower_atomic_assignment(node)
+      end
+
       safe = zig_safe_name(node.name)
       # Resolve through the line-suffix rename map so reassignments (e.g.
       # kResult = resolveTco(...)) and their cleanup guards reference the
@@ -5244,6 +5402,54 @@ class MIRLowering
         MIR::Set.new(MIR::Ident.new(mapped || safe), value)
       end
     end
+  end
+
+  # Atomics M1.5: emit `cell.<op>(arg)` for an @shared:atomic assignment.
+  # The annotator stamped `auto_atomic_op` based on shape:
+  #   `c = v`       (compound_op nil)        -> :store    -> cell.store(v)
+  #   `c += n`      (compound_op :ADD)       -> :fetchAdd -> cell.fetchAdd(n)
+  #   `c -= n`      (compound_op :SUB)       -> :fetchSub -> cell.fetchSub(n)
+  #
+  # `cell` is the M1 Arc-unwrap (`c.ctrl.data`); M2 will collapse that to
+  # plain `c` once the layout drops the Arc. The compound forms grab the
+  # operand from the desugared BinaryOp's right side (parser desugared
+  # `c += n` to `c = c + n`, so node.value.right is `n`). The plain
+  # form passes node.value as-is.
+  def lower_atomic_assignment(node)
+    op_name = node.auto_atomic_op.to_s
+    target_name = node.name.is_a?(String) ? node.name : node.name.name
+    safe = zig_safe_name(target_name)
+    safe = @fn_name_rename_map[safe] if @fn_name_rename_map&.key?(safe)
+    # Atomics M1.7: a mutable scalar param (`MUTABLE c: Int64` w/ REQUIRES
+    # c: ATOMIC) is renamed to `_m_c` in the Zig signature and the prologue
+    # shadows it as `var c = _m_c;` only when the body REFERENCES `c` in
+    # an Identifier. A bare-write (`c = v`) doesn't qualify, so the shadow
+    # may be absent. Resolve through the param mangling explicitly.
+    if @current_fn_mutable_scalar_params&.include?(target_name)
+      safe = "_m_#{target_name}"
+    end
+    mapped = @do_capture_map && @do_capture_map[target_name]
+    target_ident = MIR::Ident.new(mapped || safe)
+    # Atomics M2.2: bare Atomic(T) — call the method directly. M1's
+    # `.ctrl.data.fetchAdd(...)` indirection is gone since there's no
+    # Arc wrap. Zig auto-derefs `*Atomic(T)` so this works for both
+    # value-bound atomics and pointer-captured atomics inside BG.
+    cell = target_ident
+
+    arg_ast = if node.compound_op
+                # Desugared form: node.value is BinaryOp(target, op, rhs).
+                # Pull the rhs (the original `n` from `c += n`).
+                node.value.right
+              else
+                node.value
+              end
+    arg = lower(arg_ast)
+    method_call = MIR::MethodCall.new(cell, op_name, [arg], false)
+    # `store` returns void; the fetch_* ops return the old value that
+    # Zig requires us to consume. We discard since CLEAR's `c += n`
+    # statement form ignores the result.
+    discard = node.auto_atomic_op != :store
+    MIR::ExprStmt.new(method_call, discard)
   end
 
   def lower_assignment(node)

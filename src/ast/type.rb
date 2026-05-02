@@ -4,7 +4,8 @@ BinaryOpResult = Struct.new(:type, :left_coercion, :right_coercion, :storage, :e
 class Type
   attr_reader :raw, :name, :generic_args, :capacity
   attr_accessor :ownership   # :affine (default), :multiowned (Rc), :shared (Arc), :split (shared replay stream)
-  attr_accessor :sync        # nil (default), :locked, :write_locked, :versioned, :always_mutable, :local, :raw, :symbol
+  attr_accessor :sync        # nil (default), :locked, :write_locked, :versioned, :atomic, :always_mutable, :local, :raw, :symbol
+  attr_accessor :layout      # nil (default), :indirect — heap-pinned cell with stable address (e.g., @indirect:atomic = AtomicPtr(T))
   attr_accessor :lock_rank   # nil (default) or Integer — @locked(rank: N) / @writeLocked(rank: N)
   attr_accessor :collection  # nil (default), :list (explicit heap list), :pool (generational pool)
   attr_accessor :shard_count  # nil (no sharding) or Integer >= 2 (@pool:sharded(N) / @list:sharded(N) / HashMap:sharded(N))
@@ -152,13 +153,14 @@ class Type
 
   public
 
-  def initialize(raw_input, ownership: nil, sync: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil) # stripe_count kept for backwards compat (ignored)
+  def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil) # stripe_count kept for backwards compat (ignored)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
       @raw                = other.instance_variable_get(:@raw)
       @ownership          = other.ownership
       @sync               = other.sync
+      @layout             = other.layout
       @collection         = other.instance_variable_get(:@collection)
       @shard_count        = other.instance_variable_get(:@shard_count)
       @soa                = other.instance_variable_get(:@soa)
@@ -193,9 +195,15 @@ class Type
     @provenance = location if location && location != :stack
     @ownership = ownership if ownership
     @sync      = sync      if sync
+    @layout    = layout    if layout
     # Sync types need a stable heap address.
     # :raw and :symbol are data-access modes, not locks — they don't force heap provenance.
     @provenance = :heap if @sync && @sync != :raw && @sync != :symbol && @ownership == :affine
+    # `:indirect` layout is the explicit "heap-pinned cell with a stable
+    # address" form (used by @indirect:atomic = AtomicPtr(T)). Force heap
+    # provenance even without an active sync, mirroring the @indirect
+    # CapabilityWrap branch in the annotator (annotator.rb:3517).
+    @provenance = :heap if @layout == :indirect
     # Symbol strings live in static read-only memory — always rodata, never heap/frame.
     @provenance = :rodata if @sync == :symbol
     # Pool collection always lives on the heap (owns internal slot array).
@@ -459,6 +467,18 @@ class Type
     @sync == :versioned
   end
 
+  # Atomic single-cell: T@atomic -> Atomic(T) (lock-free CPU-atomic
+  # load/store/CAS/fetch_*). v0.2 surface limited to Int64, Float64,
+  # Bool primitives. Composes with @shared (Arc<Atomic(T)>) in M1;
+  # M2 will drop the Arc and tie the lifetime to declaring scope.
+  def indirect?
+    @layout == :indirect
+  end
+
+  def atomic?
+    @sync == :atomic
+  end
+
   def local?
     @sync == :local
   end
@@ -491,6 +511,7 @@ class Type
     bare = Type.new(self)
     bare.ownership = :affine
     bare.sync      = nil
+    bare.layout    = nil
     bare.instance_variable_set(:@elem_ownership, nil)
     bare.instance_variable_set(:@elem_sync, nil)
     # Provenance was set by sync/ownership wrappers (Type#initialize
@@ -1745,6 +1766,35 @@ class Type
         inner_zig = "CheatLib.RwLocked(#{inner_zig})" if @sync == :write_locked
         inner_zig = "CheatLib.RefCell(#{inner_zig})"   if @sync == :always_mutable
         inner_zig = "CheatLib.Versioned(#{inner_zig})" if @sync == :versioned
+        # AtomicPtr M3.1: `@indirect:atomic` (struct case) wraps in
+        # AtomicPtr(T), not bare Atomic(T). The cell is an atomic
+        # pointer to a refcounted heap-allocated T -- single-CAS
+        # publish at the pointer level, Arc-managed payload lifetime.
+        # Distinct from primitive @atomic (single CAS-able machine
+        # word, no indirection) -- see the @sync == :atomic branch
+        # below.
+        if @sync == :atomic && @layout == :indirect
+          inner_zig = "CheatLib.AtomicPtr(#{inner_zig})"
+        elsif @sync == :atomic
+          inner_zig = "CheatLib.Atomic(#{inner_zig})"
+        end
+      end
+
+      # Atomics M2.2: drop the Arc / Rc wrap for `@shared:atomic` /
+      # `@multiowned:atomic`. The atomic cell itself is heap-allocated
+      # by `atomicCreate` (returns `*Atomic(T)`) and the binding holds
+      # the bare pointer; Zig auto-derefs so `c.load()` / `c.fetchAdd
+      # (...)` work on either a pointer or a value receiver. M2.3's
+      # BG-handle lifetime stamp + M2.6's escape audit make pointer-
+      # capture safe without an outer refcount, so the Arc is now
+      # redundant. `@multiowned:atomic` is still parser-rejected (Rc
+      # isn't thread-safe), but the guard here is symmetric.
+      #
+      # M3.1: `@indirect:atomic` (with or without explicit @shared)
+      # uses the same bare-pointer layout -- the AtomicPtr cell is
+      # heap-allocated and the binding holds the bare pointer.
+      if @sync == :atomic && (@ownership == :shared || @ownership == :multiowned || @layout == :indirect)
+        return "*#{inner_zig}"
       end
 
       case @ownership

@@ -720,6 +720,45 @@ pub const CheatLib = struct {
     /// disambiguate from CLEAR's `@shared` capability (Arc-based
     /// ownership wrapper).
     pub const Versioned = @import("versioned.zig").Versioned;
+    /// `T@shared:atomic` lowers to `CheatLib.Atomic(T)` (= AtomicInt(T)
+    /// / AtomicFloat(T) / AtomicBool from lib/atomic.zig). Single-cell
+    /// lock-free primitive; load/store/exchange/cmpxchg/fetch_*. The
+    /// composed `@shared:atomic` form additionally Arc-wraps it for M1.
+    /// M2 drops the Arc and ties the cell's lifetime to its declaring
+    /// scope (bare Atomic(T)). See docs/agents/atomics.md.
+    pub const Atomic = @import("../lib/atomic.zig").Atomic;
+    /// Allocate `*Atomic(T)` on the heap, init it with `data`, return
+    /// the heap pointer. Mirrors `versionedCreate` for `T@shared:atomic`.
+    /// The generated CLEAR codegen calls this for `c = ... @shared:atomic`.
+    pub fn atomicCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*@import("../lib/atomic.zig").Atomic(T) {
+        const AT = @import("../lib/atomic.zig").Atomic(T);
+        const ptr = try alloc.create(AT);
+        ptr.* = AT.init(data);
+        return ptr;
+    }
+
+    /// AtomicPtr M3.5 -- allocate `*AtomicPtr(T)` on the heap, init
+    /// it by publishing an initial heap-allocated `T` snapshot,
+    /// return the cell pointer. Mirrors `atomicCreate` for the
+    /// struct case (`T@indirect:atomic`). The cell publishes whole-T
+    /// snapshots via atomic pointer swap (lock-free Rust arc-swap
+    /// rcu semantics). The CLEAR codegen calls this for
+    /// `c = ... @indirect:atomic`.
+    pub const AtomicPtr = @import("../lib/atomic_ptr.zig").AtomicPtr;
+    pub fn atomicPtrCreate(comptime T: type, alloc: std.mem.Allocator, data: T) !*@import("../lib/atomic_ptr.zig").AtomicPtr(T) {
+        const APT = @import("../lib/atomic_ptr.zig").AtomicPtr(T);
+        const cell = try alloc.create(APT);
+        cell.* = try APT.init(alloc, data);
+        return cell;
+    }
+    /// AtomicPtr M3.5 -- tear down a `*AtomicPtr(T)` cell. Retires
+    /// the currently-published `*T` via EBR (deferred-free until
+    /// every active epoch drains -- safe even if a reader is in the
+    /// middle of `read()`) and destroys the cell struct.
+    pub fn atomicPtrDestroy(comptime T: type, rt: *Runtime, alloc: std.mem.Allocator, cell: *@import("../lib/atomic_ptr.zig").AtomicPtr(T)) void {
+        cell.deinit(rt, alloc) catch {};
+        alloc.destroy(cell);
+    }
     /// Allocate `*Versioned(T)` on the heap, init it with `data`,
     /// return the heap pointer. Mirrors `lockedCreate` for
     /// `T@versioned`. The generated CLEAR codegen calls this for
@@ -2512,6 +2551,59 @@ pub const CheatLib = struct {
         // 1. Ref-counted types: Rc(U), Arc(U), WeakRc(U), WeakArc(U)
         if (comptime refInnerType(T) != null) {
             releaseOne(T, alloc, ptr.*);
+            return;
+        }
+
+        // Atomics M2.2: bare pointer-to-Atomic(U). After dropping the
+        // Arc wrap from `@shared:atomic`, the binding holds a heap-
+        // allocated `*Atomic(U)` returned by atomicCreate. Cleanup
+        // is just `alloc.destroy(ptr.*)`. Detected at comptime via
+        // the pointer-to-struct-with-`cmpxchgStrong`-decl shape; the
+        // three Atomic primitives (AtomicInt / AtomicFloat /
+        // AtomicBool) all expose that.
+        if (comptime blk: {
+            const ti = @typeInfo(T);
+            if (ti != .pointer or ti.pointer.size != .one) break :blk false;
+            const child = ti.pointer.child;
+            if (@typeInfo(child) != .@"struct") break :blk false;
+            break :blk @hasDecl(child, "cmpxchgStrong");
+        }) {
+            alloc.destroy(ptr.*);
+            return;
+        }
+
+        // AtomicPtr M3.5: pointer-to-AtomicPtr(U) cell. The cell owns
+        // the currently-published `*U` (allocated by atomicPtrCreate /
+        // updates via Self.update); cleanup must (a) recursively
+        // clean the inner U's owned heap fields (strings, slices,
+        // nested unions, ...) via the same generic `cleanup()` shim,
+        // (b) destroy the inner *U, (c) destroy the AtomicPtr cell.
+        //
+        // The runtime EBR retire path (`AtomicPtr.deinit`) needs a
+        // `*ThreadLocalEbr` to defer the inner free; cleanup() runs
+        // without one (no `rt` argument), so we use the sync
+        // teardown path: by the time scope-end cleanup fires, every
+        // reader's WITH SNAPSHOT alias has released its Guard
+        // (CLEAR's non_escaping checker guarantees no Guard
+        // outlives its WITH), so the sync `destroy` is safe.
+        if (comptime blk: {
+            const ti = @typeInfo(T);
+            if (ti != .pointer or ti.pointer.size != .one) break :blk false;
+            const child = ti.pointer.child;
+            if (@typeInfo(child) != .@"struct") break :blk false;
+            break :blk @hasDecl(child, "compareAndPublish");
+        }) {
+            const Cell = @typeInfo(T).pointer.child;
+            const InnerT = Cell.Inner;
+            // Swap to null so we own the inner pointer; cleanup
+            // recursively (handles String fields and nested heaps)
+            // before destroying.
+            const inner_ptr = ptr.*.ptr.swap(null, .acq_rel);
+            if (inner_ptr) |ip| {
+                cleanup(InnerT, alloc, ip);
+                alloc.destroy(ip);
+            }
+            alloc.destroy(ptr.*);
             return;
         }
 

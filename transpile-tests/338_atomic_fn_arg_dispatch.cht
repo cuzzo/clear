@@ -1,0 +1,41 @@
+-- Atomics M1.7: passing an @shared:atomic primitive across a fn boundary.
+-- Verifies the call site emits `bump(c)` (cell ref) instead of
+-- `bump(c.ctrl.data.load())` (loaded value), and the callee's `c += n`
+-- inside the body resolves to fetchAdd on the same cell.
+
+FN bump!(MUTABLE c: Int64, n: Int64) RETURNS Void REQUIRES c: ATOMIC ->
+    c += n;
+    RETURN;
+END
+
+FN swap!(MUTABLE c: Int64, v: Int64) RETURNS Void REQUIRES c: ATOMIC ->
+    c = v;
+    RETURN;
+END
+
+FN read!(MUTABLE c: Int64) RETURNS Int64 REQUIRES c: ATOMIC ->
+    -- Reading the atomic param inside the body still produces a load.
+    -- Compound op on the param would emit fetchAdd — here we just read.
+    RETURN c;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE c: Int64 = 0 @shared:atomic;
+
+    -- Call across fn boundary: cell is passed, fetchAdd on the same cell.
+    bump!(c, 5_i64);
+    ASSERT c == 5, "after bump(5): expected 5";
+
+    bump!(c, 7_i64);
+    ASSERT c == 12, "after bump(7): expected 12";
+
+    -- store() via plain assignment.
+    swap!(c, 100_i64);
+    ASSERT c == 100, "after swap(100): expected 100";
+
+    -- Read across fn boundary still loads correctly.
+    v = read!(c);
+    ASSERT v == 100, "read(c): expected 100";
+
+    RETURN;
+END

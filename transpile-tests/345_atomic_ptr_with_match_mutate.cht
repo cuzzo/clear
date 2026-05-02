@@ -1,0 +1,30 @@
+-- AtomicPtr M3.13: WITH SNAPSHOT MATCH MUTABLE -- polymorphic
+-- mutate dispatch.
+--
+-- The two families differ on the mutate surface (VERSIONED requires
+-- ON Conflict; ATOMIC forbids it), so polymorphic mutate REQUIRES
+-- VERSIONED|ATOMIC must use SNAPSHOT MATCH (M3.11). Each arm uses
+-- its family-specific shape; comptime dispatch picks at the call site.
+
+STRUCT Counter { value: Int64 }
+
+FN bumpValue!(MUTABLE c: Counter) RETURNS Void
+    REQUIRES c: VERSIONED | ATOMIC
+->
+    WITH SNAPSHOT c AS MUTABLE x MATCH
+        WHEN VERSIONED -> { x.value = x.value + 1; } ON Conflict RAISE
+        WHEN ATOMIC    -> { x.value = x.value + 1; }
+    END
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE cfg = Counter{ value: 0 } @indirect:atomic;
+    bumpValue!(cfg);
+    bumpValue!(cfg);
+    bumpValue!(cfg);
+    WITH SNAPSHOT cfg AS c {
+        ASSERT c.value == 3, "expected 3 after 3 bumps";
+    }
+    RETURN;
+END

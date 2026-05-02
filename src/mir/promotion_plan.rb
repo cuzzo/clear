@@ -597,12 +597,29 @@ module CleanupClassifier
       classify_resource(ti, node) ||
       classify_collection(ti, schema_lookup) ||
       classify_array_struct_strings(ti, node, schema_lookup) ||
+      classify_atomic_ptr(ti) ||
       classify_rc_or_link(ti, schema_lookup) ||
       classify_sync(ti, sync) ||
       classify_heap_provenance(ti, node, schema_lookup, sync) ||
       classify_heap_struct_plain(ti, node, schema_lookup, sync) ||
       classify_struct_cleanup_fields(ti, node, schema_lookup) ||
       classify_non_copy_union(ti, schema_lookup)
+  end
+
+  # AtomicPtr M3 / review item J: dedicated cleanup kind for
+  # `@indirect:atomic` cells. Without this branch the binding
+  # falls into classify_rc_or_link (because M3.5 auto-promotes
+  # ownership=:shared, making any_rc? true) and gets a `:rc`
+  # entry whose rc_variant / rc_release_func fields are unused
+  # for atomic-ptr -- the actual cleanup is dispatched in the
+  # runtime cleanup() shim via @hasDecl(child, "compareAndPublish").
+  # Routing here avoids the misnomer and the unused entry fields.
+  # Fires BEFORE classify_rc_or_link so atomic-ptr beats the
+  # generic shared-Arc path.
+  private_class_method def self.classify_atomic_ptr(ti)
+    return nil unless ti.respond_to?(:atomic?) && ti.atomic?
+    return nil unless ti.respond_to?(:indirect?) && ti.indirect?
+    entry(:atomic_ptr, alloc: :heap)
   end
 
   # ── Individual classifiers ───────────────────────────────────────

@@ -543,6 +543,14 @@ pub fn updateMulti(
             const T = @TypeOf(cells[i].*).Inner;
             const old_node: *T = @ptrFromInt(snap_addrs[i]);
             try trt.ebr.retire(allocator, old_node);
+            // AtomicPtr M3.16: record per-cell that THIS commit was
+            // multi-cell. The doctor uses `multi_commits > 0` to
+            // disqualify the cell from the @shared:versioned ->
+            // @indirect:atomic upgrade suggestion (AtomicPtr has no
+            // multi-pointer CAS primitive).
+            if (rt_profile.CLEAR_PROFILE) {
+                mvcc_profile.recordMultiCommit(@intFromPtr(cells[i]), @sizeOf(T));
+            }
         }
         return;
     }

@@ -289,13 +289,15 @@ class Parser
   # Supports `:` join: expr @shared:locked, expr @locked:multiowned (order-independent).
   # Three orthogonal dimensions:
   #   ownership: :multiowned | :shared         (who keeps it alive)
-  #   sync:      :locked | :write_locked | :local | :versioned  (how it's synchronized)
+  #   sync:      :locked | :write_locked | :local | :versioned | :atomic  (how it's synchronized)
   #   layout:    :indirect                      (where it lives — heap pointer)
-  # `:versioned` is MVCC (Shared(T) atomic-pointer COW + EBR). Composes with
-  # `:shared` (Arc<Shared(T)>); does NOT compose with the lock sigils
-  # (`:locked` / `:write_locked` / `:always_mutable`) -- mixing locks with
-  # the lock-free path is a type error. Enforced by parse_cap_join's
-  # one-per-dimension rule plus annotator-side combo validation.
+  # `:versioned` is MVCC (Versioned(T) atomic-pointer COW + EBR). `:atomic` is
+  # a single-cell lock-free primitive (Atomic(T) on Int64/Float64/Bool). Both
+  # compose with `:shared` (Arc<Versioned(T)> / [M1] Arc<Atomic(T)>); neither
+  # composes with the lock sigils (`:locked` / `:write_locked` /
+  # `:always_mutable`) -- mixing locks with a lock-free path is a type error.
+  # Enforced by parse_cap_join's one-per-dimension rule plus annotator-side
+  # combo validation.
   CAP_SIGIL_ATTRS = {
     '@multiowned'     => { dim: :ownership, val: :multiowned  },
     '@shared'         => { dim: :ownership, val: :shared      },
@@ -303,6 +305,7 @@ class Parser
     '@writeLocked'    => { dim: :sync,      val: :write_locked },
     '@local'          => { dim: :sync,      val: :local       },
     '@versioned'      => { dim: :sync,      val: :versioned    },
+    '@atomic'         => { dim: :sync,      val: :atomic      },
     '@indirect'       => { dim: :layout,    val: :indirect    },
     '@alwaysMutable'  => { dim: :sync,      val: :always_mutable },
   }.freeze
@@ -352,6 +355,12 @@ class Parser
   end
 
   suffix(:VAR_ID, '@versioned') do |lhs|
+    token = consume(:VAR_ID)
+    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
+  end
+
+  suffix(:VAR_ID, '@atomic') do |lhs|
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -618,9 +627,16 @@ class Parser
       desugared_value = AST::BinaryOp.new(op_token, deep_clone_node(target), op_sym, rhs)
 
       if target.is_a?(AST::Identifier)
-        return AST::BindExpr.new(target_token, target.name, nil, desugared_value)
+        bind = AST::BindExpr.new(target_token, target.name, nil, desugared_value)
+        # Atomics M1.5: tag the desugared form so the annotator can
+        # detect "this came from a compound op" and rewrite to an
+        # atomic fetch_<op> when target is @shared:atomic.
+        bind.compound_op = op_sym
+        return bind
       else
-        return AST::Assignment.new(target_token, target, desugared_value)
+        asgn = AST::Assignment.new(target_token, target, desugared_value)
+        asgn.compound_op = op_sym
+        return asgn
       end
     end
 
@@ -1083,12 +1099,52 @@ class Parser
       captures = parse_argument_list()
     end
 
-    # 3. Parse optional RETURNS
+    # 3. Parse optional RETURNS [<lifetime>:] <type>
+    #
+    # Lifetime forms (Atomics M2.4):
+    #   - omitted              -- no lifetime constraint on the return
+    #   - `foo:T`              -- single-source: returned value's lifetime
+    #                              is bound to param `foo`. Stored as a
+    #                              one-element Array of Identifier.
+    #   - `(foo bar baz):T`    -- multi-source: returned value's lifetime
+    #                              is the intersection of every named
+    #                              binding's lifetime. Names are space-
+    #                              and/or comma-separated inside the parens.
+    #                              Stored as a multi-element Array.
+    #   - `*:T`                -- wildcard / lazy: every parameter's
+    #                              lifetime is conservatively folded into
+    #                              the source set. Stored as the symbol
+    #                              `:wildcard`. The annotator emits a
+    #                              warning at this binding so `clear fix`
+    #                              (M1.x linter follow-up) can offer to
+    #                              replace it with the explicit list.
     return_type = nil
     return_type_token = nil
+    return_lifetime_token = nil
     if match!(:KEYWORD, 'RETURNS')
-      if current.type == :VAR_ID
-        return_lifetime = parse_var_id
+      if match?(:CHAR, '(')
+        # Multi-binding form: collect VAR_IDs separated by ',' or
+        # whitespace until ')'. The lexer skips whitespace, so a
+        # space-separated list parses as a sequence of bare VAR_IDs.
+        return_lifetime_token = consume(:CHAR, '(')
+        names = []
+        while !match?(:CHAR, ')')
+          names << parse_var_id
+          # Allow optional commas between names; they're sugar.
+          match!(:CHAR, ',')
+        end
+        consume(:CHAR, ')')
+        consume(:CHAR, ':')
+        return_lifetime = names
+      elsif match?(:CHAR, '*')
+        return_lifetime_token = consume(:CHAR, '*')
+        consume(:CHAR, ':')
+        return_lifetime = :wildcard
+      elsif current.type == :VAR_ID
+        # Backward-compat single-binding form. Wrap in a one-element
+        # Array so downstream code uniformly iterates a list.
+        return_lifetime_token = current
+        return_lifetime = [parse_var_id]
         consume(:CHAR, ':')
       end
 
@@ -1270,7 +1326,7 @@ class Parser
   # starts a new group.
   #
   # Returns: { param_name_string => Set[Symbol] }
-  REQUIRES_VALID_FAMILIES = %w[LOCKED VERSIONED ACTOR LOCK_FREE].to_set.freeze
+  REQUIRES_VALID_FAMILIES = %w[LOCKED VERSIONED ATOMIC ACTOR LOCK_FREE].to_set.freeze
   # Reentrancy constraints (Thunk Phase 1.2) live alongside capability
   # families in the same `REQUIRES` grammar slot. The parse_requires_clause
   # parser routes them into the NON_REENTRANT-only `requires_clauses` hash
@@ -2538,12 +2594,32 @@ class Parser
 
     # @indirect on non-array types (union fields) only sets @last_indirect_consumed
     # (signals union field parser). The Type itself is not heap-boxed.
-    is_indirect = false if is_indirect && !inner.start_with?("[")
+    #
+    # AtomicPtr M3.2 carve-out: @indirect:atomic on a non-array IS
+    # the AtomicPtr surface and DOES propagate to Type as
+    # layout=:indirect (lowers to *CheatLib.AtomicPtr(T)). The
+    # union-field strip only fires when @indirect appears alone
+    # (or paired with a sync that wants the union-field semantics --
+    # currently none, so atomic is the sole carve-out).
+    is_indirect = false if is_indirect && !inner.start_with?("[") && sync != :atomic
 
     base_sym = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{base}#{inner}".to_sym
 
     loc = is_heap ? :heap : (is_indirect ? :heap : nil)
-    t = Type.new(base_sym, ownership: ownership, sync: sync, location: loc, collection: collection, shard_count: shard_count, observable: observable)
+    layout = is_indirect ? :indirect : nil
+    # AtomicPtr M3.5: `@indirect:atomic` implies `@shared` (Arc-managed
+    # cell; design contract docs/agents/atomicptr.md §3). The
+    # CapabilityWrap path auto-promotes in visit_CapabilityWrap; mirror
+    # the same for type-annotation positions (fn return types, param
+    # types, struct-field types) so cleanup classification (any_rc?
+    # path) lands on the same :rc kind whether the user writes
+    # `cfg = Cfg{...} @indirect:atomic` (CapabilityWrap) or
+    # `cfg: Cfg@indirect:atomic = ...` / `RETURNS Cfg@indirect:atomic`
+    # (parse_type_annotation).
+    if sync == :atomic && layout == :indirect && ownership.nil?
+      ownership = :shared
+    end
+    t = Type.new(base_sym, ownership: ownership, sync: sync, layout: layout, location: loc, collection: collection, shard_count: shard_count, observable: observable)
     t.soa = true if is_soa
     t.elem_ownership = elem_ownership if elem_ownership
     t.elem_sync = elem_sync if elem_sync
@@ -2661,7 +2737,7 @@ class Parser
   end
 
   # All recognized capability tokens.
-  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @versioned @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
+  CAPABILITY_TOKENS = %w[@multiowned @shared @split @locked @writeLocked @local @versioned @atomic @indirect @link @raw @symbol @list @pool @set @soa @sharded @observable].freeze
 
   # Unified capability parser. Parses an optional @cap or @cap:chain sequence.
   # Returns nil if no capability token is present, or a Hash:
@@ -2717,6 +2793,9 @@ class Parser
     when "@versioned"
       error!(token, "Duplicate sync") if result[:sync]
       result[:sync] = :versioned
+    when "@atomic"
+      error!(token, "Duplicate sync") if result[:sync]
+      result[:sync] = :atomic
     when "@raw"
       error!(token, "Duplicate sync") if result[:sync]
       result[:sync] = :raw
@@ -2724,7 +2803,7 @@ class Parser
       error!(token, "Duplicate sync") if result[:sync]
       result[:sync] = :symbol
     when "@indirect"
-      error!(token, "Duplicate indirect") if result[:is_indirect]
+      error!(token, "Duplicate layout") if result[:is_indirect]
       @last_indirect_consumed = true
       result[:is_indirect] = true
     when "@soa"
@@ -2901,6 +2980,23 @@ class Parser
       any_mutable ||= alias_mutable
 
       break unless match!(:CHAR, ',')
+    end
+
+    # AtomicPtr M3.7: per-family dispatch via `MATCH ... END` after the
+    # cell list. Polymorphic `REQUIRES x: VERSIONED | ATOMIC` mutate
+    # surfaces differ (one requires `ON Conflict`, the other forbids
+    # it), so the user picks per family. Mirrors the generic
+    # `WITH ... MATCH` path (parser.rb:2882-2896): SNAPSHOT, AS,
+    # MUTABLE, alias, and the cell list stay OUTSIDE the MATCH;
+    # per-arm bodies + per-arm trailing ON Conflict clauses live
+    # inside, parsed by `parse_with_match_arms`.
+    if match!(:KEYWORD, 'MATCH')
+      arms = parse_with_match_arms
+      consume(:KEYWORD, 'END')
+      node = AST::WithBlock.new(with_token, capabilities, [])
+      node.arms = arms
+      node.snapshot_mode = any_mutable ? :transaction : :read
+      return node
     end
 
     consume(:CHAR, '{')
@@ -3106,7 +3202,7 @@ class Parser
       attrs = CAP_SIGIL_ATTRS[normalized]
       unless attrs
         error!(current, "Unknown capability sigil '#{current.value}'. " \
-                        "Expected @multiowned, @shared, @locked, @writeLocked, @local, @versioned, or @indirect")
+                        "Expected @multiowned, @shared, @locked, @writeLocked, @local, @versioned, @atomic, or @indirect")
       end
       next_tok = consume(:VAR_ID)
       apply_cap_dim!(next_tok, attrs, dims)

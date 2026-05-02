@@ -117,6 +117,7 @@ transpile-tests/[0-9]*
 !transpile-tests/[0-9]*.zig
 !transpile-tests/[0-9]*.disabled
 !transpile-tests/[0-9]*.cht.disabled
+!transpile-tests/[0-9]*/
 
 # Catch-all
 **/*.profile/

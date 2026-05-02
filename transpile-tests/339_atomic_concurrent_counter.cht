@@ -1,0 +1,27 @@
+-- Atomics M1.7: cross-fiber correctness — 4 BGs each bumping 1000 times.
+-- Without atomics this would lose updates (load+add+store race). With
+-- @shared:atomic + fetchAdd, the count is exactly 4000.
+
+FN bump_loop!(MUTABLE c: Int64, n: Int64) RETURNS Void REQUIRES c: ATOMIC ->
+    MUTABLE i: Int64 = 0;
+    WHILE i < n DO
+        c += 1;
+        i = i + 1;
+    END
+    RETURN;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE c: Int64 = 0 @shared:atomic;
+    bg1: ~Void = BG { bump_loop!(c, 1000_i64); };
+    bg2: ~Void = BG { bump_loop!(c, 1000_i64); };
+    bg3: ~Void = BG { bump_loop!(c, 1000_i64); };
+    bg4: ~Void = BG { bump_loop!(c, 1000_i64); };
+    NEXT bg1;
+    NEXT bg2;
+    NEXT bg3;
+    NEXT bg4;
+    final = c;
+    ASSERT final == 4000, "expected 4000 after 4*1000 bumps (no lost updates)";
+    RETURN;
+END

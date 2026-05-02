@@ -23,7 +23,7 @@ require 'set'
 # EffectSet is intentionally tiny and stateless. Pass instances by value;
 # operations return new sets. Same value, same set — `==` works.
 class EffectSet
-  KNOWN = %i[yield alloc_heap io fail].to_set.freeze
+  KNOWN = %i[yield alloc_heap io fail contention blocking contention? blocking?].to_set.freeze
 
   attr_reader :effects
 
@@ -62,8 +62,9 @@ class EffectSet
     @effects.hash
   end
 
-  # Effects are rendered in a stable order so signatures are deterministic.
-  EFFECT_ORDER = %i[yield alloc_heap io fail].freeze
+  # Human-readable summary used by the formatter (P4.2). Effects are
+  # rendered in a stable order so signatures are deterministic.
+  EFFECT_ORDER = %i[yield alloc_heap io fail contention contention? blocking blocking?].freeze
 
   def to_a
     EFFECT_ORDER.select { |e| @effects.include?(e) }

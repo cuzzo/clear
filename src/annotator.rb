@@ -576,11 +576,11 @@ private
     # 1. Setup metadata
     is_implicit_return = node.return_type.nil?
     declared_return = node.return_type || :Any
-    lifetime_path = get_lifetime_path(node)
+    lifetime_paths = get_lifetime_paths(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
     @function_context_stack.push(FunctionContext.new(
       name: node.name, return_type: declared_return,
-      lifetime: lifetime_path, type_params: fn_type_params
+      lifetime: lifetime_paths, type_params: fn_type_params
     ))
 
     # 2. Validation & Lifetime
@@ -604,7 +604,7 @@ private
         default: p[:default], mutable: p[:mutable], takes: p[:takes],
         sync: (p[:type].is_a?(Type) && p[:type].any_sync?) ? p[:type].sync : nil
       }},
-      return_type: declared_return, return_lifetime: lifetime_path,
+      return_type: declared_return, return_lifetime: lifetime_paths,
       visibility: node.visibility,
       type_params: fn_type_params.any? ? fn_type_params : nil,
       reentrant: node.reentrant == :reentrant
@@ -1850,6 +1850,7 @@ private
 
     # 1. Lifetime Tracking
     verify_return(node.value)
+    verify_tied_return!(node)
 
     actual = node.value.resolved_type
     expected = current_fn_ctx.return_type
@@ -1860,6 +1861,17 @@ private
       vti = node.value.type_info
       if vti && !vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
         node.value.was_moved = true
+      end
+      # Atomics M2.6: a `RETURN <ident>` where the value is a future
+      # (~T) consumes the promise -- the caller now owns it. Mark the
+      # binding as moved in the OG so the existing finalize_scope
+      # "promise must be consumed" check (annotator.rb:4765) sees the
+      # consumption. Without this, ANY function that returns a `~T`
+      # binding errors at scope-end before the return-lifetime check
+      # gets a chance to run. Mirrors NEXT's `og_set_moved` (line ~4388).
+      vt = vti.is_a?(Type) ? vti : (vti ? Type.new(vti) : nil)
+      if vt&.future?
+        og_set_moved(node.value.name)
       end
     end
 
@@ -2001,6 +2013,31 @@ private
     # A call sitting inside a loop promotes the callee's SUSPENDS effects
     # to SUSPENDS_LOOP; likewise for conditional.
     record_call_site(node.name) if node.name.is_a?(String)
+
+    # Atomics M1.6.5: stamp per-arg family on the FuncCall so the
+    # transitive-effect propagation can resolve callee ?-form effects
+    # (CONTENTION_MAYBE / BLOCKING_MAYBE) to concrete or null based on
+    # what the caller actually passes. family_of_arg_set returns a Set of
+    # families: size 1 = concrete; size > 1 = polymorphic param (REQUIRES
+    # disjunction); empty Set = no sync attribute on the arg.
+    if node.args && !node.args.empty? && node.name.is_a?(String)
+      require_relative 'annotator-helpers/with_match_check' unless defined?(WithMatchCheck)
+      arg_family_sets = node.args.map { |a| WithMatchCheck.family_of_arg_set(a) }
+      node.arg_families = arg_family_sets
+      record_call_arg_families(node.name, arg_family_sets) if current_fn_ctx&.name
+
+      # Atomics M1.7: stamp atomic_borrow on Identifier args whose binding
+      # is sync == :atomic. The MIR-lowering's load wrap (`c.ctrl.data
+      # .load()`) is suppressed for these so the callee receives the cell
+      # ref and can dispatch through @hasDecl(...) probes per family.
+      node.args.each do |arg|
+        next unless arg.is_a?(AST::Identifier)
+        sym = arg.respond_to?(:symbol) ? arg.symbol : nil
+        if sym&.sync == :atomic
+          arg.atomic_borrow = true if arg.respond_to?(:atomic_borrow=)
+        end
+      end
+    end
 
     # Phase 2: when this call happens inside a held WITH scope and targets
     # a user-defined function, record a held->callee site so the post-pass
@@ -2150,6 +2187,8 @@ private
     promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
     promote_to_expr_match!(node, node.value) if node.value.is_a?(AST::MatchStatement)
     finalize_decl_node!(node, node.mutable)
+    # Atomics M2.3: tie BG-handle lifetimes (see visit_BindExpr).
+    stamp_bg_handle_lifetime!(node) if node.value.is_a?(AST::BgBlock) || node.value.is_a?(AST::BgStreamBlock)
   end
 
   # Shared declaration body used by visit_VarDecl and the declaration path of
@@ -2307,6 +2346,7 @@ private
     Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
 
     node_sync = node.type_info&.sync
+    node_layout = node.type_info&.layout
     # Preserve collection metadata (e.g. :set from DISTINCT) in scope so
     # resolve_full_type returns the correct dispatch_key for method lookup.
     # Do NOT store the full node.type_info — it embeds ownership/sync from
@@ -2323,6 +2363,7 @@ private
       node.name, node, scope_type, mutable_flag, false, node.slot_size, storage,
       Set.new, [],
       sync: node_sync,
+      layout: node_layout,
       resource: is_resource,
       close_zig: resource_close
     )
@@ -2418,6 +2459,11 @@ private
         node.symbol.non_escaping   = true
         node.symbol.borrowed_alias = true
       end
+      # Atomics M2.3: a BG handle inherits the lifetime of the atomics
+      # and lifetime-bounded borrows it captures. The handle cannot
+      # outlive the shortest-lived source. M2.5's escape checker reads
+      # `symbol.lifetime` to validate RETURN / store / queue-push sites.
+      stamp_bg_handle_lifetime!(node) if node.value.is_a?(AST::BgBlock) || node.value.is_a?(AST::BgStreamBlock)
 
     elsif scope.is_immutable?(node.name)
       emit_immutable_assignment_error!(node, scope)
@@ -2435,6 +2481,31 @@ private
 
       mark_var_mutated(node.name)
       og_set_live(node.name)
+
+      # Atomics M1.5: rewrite assignment to an @shared:atomic binding into
+      # an atomic op call. Plain `c = v` becomes `c.store(v)`. Compound
+      # forms (parser already desugared `c += 1` to `c = c + 1` and tagged
+      # compound_op = :ADD) become `c.fetchAdd(1)` so the read-modify-write
+      # is actually atomic instead of a load+add+store race.
+      target_sync = scope.locals[node.name]&.sync
+      if target_sync == :atomic
+        op = case node.compound_op
+             when nil  then :store
+             when :ADD then :fetchAdd
+             when :SUB then :fetchSub
+             when :MUL, :DIV
+               error!(node, "Atomic primitives do not support `#{node.compound_op == :MUL ? "*=" : "/="}`. " \
+                            "Atomic ops are limited to load / store / fetch_add / fetch_sub. " \
+                            "For more complex updates, use compareAndSwap or switch to @shared:locked.")
+               nil
+             else
+               error!(node, "Compound op #{node.compound_op} is not supported on @shared:atomic targets.")
+               nil
+             end
+        node.auto_atomic_op = op if op
+        # Atomics M1.6.5: atomic store / fetch_op contends on the cell line.
+        record_effect(EffectTracker::CONTENTION)
+      end
     end
   end
 
@@ -2469,6 +2540,21 @@ private
       sig = raw_type.raw
       node.full_type = Type.new({ params: sig[:params], return: sig[:return], fn_type: true, reentrant: sig[:reentrant] == true })
       node.fn_ref = true
+    elsif raw_type.is_a?(Type) && raw_type.atomic?
+      # Atomics M1.5: a read of an `@shared:atomic` binding produces
+      # the bare inner value (load semantics). Type-system-wise the
+      # binding shows as the inner T at use sites — the Arc/Atomic
+      # wrappers are an implementation detail. The MIR-lowering emits
+      # the actual atomic load via lower_identifier's :atomic check.
+      # The symbol's stored sync (:atomic) is preserved for the
+      # assignment-target side, which still needs to detect it.
+      # Note: passing an @shared:atomic identifier as a fn arg whose
+      # param has REQUIRES c: ATOMIC currently load-then-passes the
+      # value, not the cell — full call-site dispatch lands in M1.7.
+      node.full_type = Type.new(raw_type.raw)
+      # Atomics M1.6.5: atomic load -> :CONTENTION (cache-coherence
+      # pressure on the cell line). No :BLOCKING — atomics never park.
+      record_effect(EffectTracker::CONTENTION)
     else
       node.full_type = raw_type
     end
@@ -2572,6 +2658,11 @@ private
     visit(node.value)
 
     verify_unrestricted!(node)
+    # Atomics M2.6: a tied-lifetime value flowing into a destination
+    # whose declaring scope is OUTSIDE every source's scope is a
+    # cross-scope escape. Fires on `a.field = bg` (where `a` outlives
+    # the source) and `arr[i] = bg` (where `arr` outlives).
+    verify_tied_assignment!(node)
 
     target = node.name
     case target
@@ -2655,6 +2746,21 @@ private
   def visit_assignment_field(field_node, assignment_node)
     # 1. Analyze field access
     visit(field_node)
+
+    # AtomicPtr M3.10: bare `cfg.field = ...` on an `@indirect:atomic`
+    # binding is invalid -- the AtomicPtr cell publishes whole-T
+    # snapshots via atomic pointer swap, not per-field writes. Only
+    # the WITH SNAPSHOT MUTABLE alias (a regular *T pointer to a
+    # clone the runtime CAS-publishes at scope exit) accepts field
+    # assignments. The alias's SymbolEntry is declared without
+    # sync/layout so it falls through this check; the original cell
+    # binding has sync==:atomic + layout==:indirect.
+    #
+    # Error message MUST distinguish from primitive @shared:atomic
+    # (which uses direct ops `c += 1` because the cell fits in a
+    # single CAS-able machine word). Per design contract
+    # docs/agents/atomicptr.md §6.1.
+    reject_bare_atomic_ptr_mutation!(field_node, assignment_node)
 
     # 1b. Flag mutable access through list indexing in the target chain.
     mark_chain_needs_mut_ref!(field_node)
@@ -3428,15 +3534,91 @@ private
     # Primitive types (Int64, Number, Bool, Byte, Float64) cannot have capabilities.
     # Wrapping a primitive in @local/@locked/@shared creates a heap pointer to a
     # value you can't meaningfully dereference.  Wrap in a STRUCT instead.
-    if ti.primitive? && (node.ownership || node.sync || node.layout)
+    #
+    # Exception: @shared:atomic IS the primitive-as-cell case — the whole point
+    # of an atomic primitive is the bare-cell form (Int64@shared:atomic =
+    # AtomicInt64). The annotator validates that @atomic is only applied to
+    # types the runtime supports (Int64, Float64, Bool, sized variants); other
+    # primitives error.
+    is_atomic_primitive = node.sync == :atomic && node.layout != :indirect
+
+    # AtomicPtr M3.4: `@indirect:atomic` is the STRUCT-as-AtomicPtr form
+    # (lowers to *CheatLib.AtomicPtr(T)). Reject on primitives -- the
+    # primitive case already has `@shared:atomic` (M1) and there is no
+    # win in indirect-wrapping a 1-machine-word value. Carve this check
+    # out BEFORE the generic primitive-cap rejection so the user gets a
+    # message that names the right migration path.
+    if ti.primitive? && node.sync == :atomic && node.layout == :indirect
+      error!(node,
+        "@indirect:atomic is for STRUCTS. For primitive type #{base_type}, " \
+        "use `@shared:atomic` (the v0.2 primitive-as-cell form). The atomic " \
+        "primitive already fits in a single CAS-able machine word; @indirect " \
+        "would add a pointless heap indirection.")
+    end
+
+    if ti.primitive? && (node.ownership || node.sync || node.layout) && !is_atomic_primitive
       cap_name = node.sync || node.ownership || node.layout
       error!(node, "Capability @#{cap_name} cannot be applied to primitive type #{base_type}. " \
                    "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
     end
 
+    # AtomicPtr M3.4: `@atomic` alone on a STRUCT is invalid; the struct
+    # case requires `@indirect:atomic` (atomic pointer swap publishes a
+    # whole-T snapshot, not a single-word fetch_add). Distinct from
+    # primitive `@shared:atomic`, which uses direct ops on a CAS-sized
+    # cell. Catch BEFORE downstream emission tries to lower
+    # `*CheatLib.Atomic(SomeStruct)`, which has no defined backing.
+    if !ti.primitive? && node.sync == :atomic && node.layout != :indirect
+      error!(node,
+        "@atomic on a STRUCT requires @indirect (publishes whole-T snapshots " \
+        "via atomic pointer swap). Use `#{base_type}{...} @indirect:atomic` " \
+        "instead. (For primitive cells like `Int64@shared:atomic`, atomic " \
+        "alone is correct -- those fit in a single CAS-able machine word.)")
+    end
+
+    # AtomicPtr M3.4: `@local:indirect:atomic` and `@multiowned:indirect:atomic`
+    # combinations are disallowed -- atomic without cross-thread visibility
+    # is pointless (@local), and Rc isn't thread-safe (@multiowned). The
+    # implicit `@shared` (Arc) that `@indirect:atomic` provides under the
+    # hood is the only valid ownership for the AtomicPtr cell.
+    if node.sync == :atomic && node.layout == :indirect
+      if node.ownership == :local
+        error!(node,
+          "@local:indirect:atomic is disallowed -- atomic without cross-thread " \
+          "visibility is pointless. Drop @local; @indirect:atomic implies " \
+          "cross-thread sharing.")
+      elsif node.ownership == :multiowned
+        error!(node,
+          "@multiowned:indirect:atomic is disallowed -- Rc isn't thread-safe " \
+          "(non-atomic refcount), so it can't back a cross-thread atomic-ptr " \
+          "cell. Drop @multiowned; @indirect:atomic uses Arc internally for " \
+          "the published-value lifetime.")
+      end
+    end
+
     ti.ownership = node.ownership if node.ownership
     ti.sync      = node.sync      if node.sync
     ti.lock_rank = node.lock_rank if node.lock_rank
+    # AtomicPtr M3.1: stamp the :layout axis on Type. Until M3.1, the
+    # only consumer of @indirect was the @indirect:atomic combination
+    # (-> *CheatLib.AtomicPtr(T) in zig_type), so all earlier @indirect
+    # uses just collapsed to provenance=:heap. Keep that fallback for
+    # cases where layout isn't paired with a sync or ownership cap.
+    ti.layout    = node.layout    if node.layout
+    # AtomicPtr M3.5: `@indirect:atomic` implies `@shared` (the design
+    # contract in docs/agents/atomicptr.md §3 -- "the user writes
+    # `@indirect:atomic`. The compiler infers `:shared` because escaping
+    # the declaring scope is the whole point of atomic-ptr"). Promote
+    # the ownership axis here so downstream cleanup classification (the
+    # :rc kind in promotion_plan picks up `*AtomicPtr(T)` for the
+    # cleanup zig_type) and lifetime audit (M2.6 treats `:shared` cells
+    # as Arc-escapable) match the design intent. The `:multiowned` /
+    # `:local` cases are already rejected upstream (M3.4 errors), so
+    # this only fires when the user wrote bare `@indirect:atomic` with
+    # no explicit ownership.
+    if node.sync == :atomic && node.layout == :indirect && !node.ownership
+      ti.ownership = :shared
+    end
     # @indirect forces heap location (same as @local, but different intent).
     ti.provenance = :heap           if node.layout == :indirect
 
@@ -3721,11 +3903,18 @@ private
     # front and direct the user to `WITH SNAPSHOT cell AS MUTABLE va
     # { ... } ON Conflict ...` for transactional mutation.
     #
+    # AtomicPtr M3.7/M3.8 carve-out: SNAPSHOT MATCH bypasses this
+    # rejection because each arm dispatches to `Versioned.update`
+    # (VERSIONED) or `AtomicPtr.update` (ATOMIC), which DO commit
+    # transactionally. The legacy guard only applied to generic
+    # WITH MATCH (no SNAPSHOT prefix), where the VERSIONED arm
+    # would write through a read-snapshot Guard.
+    #
     # G1: multi-cell WITH MATCH (`WITH c1 AS a1, c2 AS a2 MATCH`) is
     # parser-allowed but lower_with_match_block emits prelude for
     # `node.capabilities.first` only — secondary aliases are undefined
     # in arm bodies. Reject until codegen is extended.
-    if node.arms
+    if node.arms && node.snapshot_mode.nil?
       has_versioned_arm = node.arms.any? { |arm| arm[:family] == :VERSIONED }
       mut_cap = node.capabilities.find { |c| c[:alias_mutable] }
       if has_versioned_arm && mut_cap
@@ -3770,14 +3959,23 @@ private
     # for the global cycle-detection pass. Edges from an opted-out WITH
     # (POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE) are marked opted_out and
     # excluded from the cycle graph.
+    #
+    # Atomics M1.6.5: for WITH MATCH form, BLOCKING/SUSPENDS are recorded
+    # per-arm (only the LOCKED arm prelude blocks). Lock-cycle edges
+    # are still emitted at the outer level — the static analysis is
+    # conservative and treats any LOCKED-eligible call as potentially
+    # acquiring a lock.
     fn_name_for_lock = current_fn_ctx&.name || "<top>"
     held_entries_now = @held_lock_types || []
+    is_match_form = !node.arms.nil?
     expanded_capabilities.each do |cap|
       next unless cap[:capability] == :EXCLUSIVE || cap[:capability] == :write_locked_read
       record_with_acquire!(fn_name_for_lock, cap, held_entries_now, node.deadlock_escape)
-      # Exclusive lock acquisition may suspend the fiber on contention.
-      record_effect(EffectTracker::BLOCKING)
-      record_effect(EffectTracker::SUSPENDS)
+      unless is_match_form
+        # Exclusive lock acquisition may suspend the fiber on contention.
+        record_effect(EffectTracker::BLOCKING)
+        record_effect(EffectTracker::SUSPENDS)
+      end
     end
 
     # Track which variable names / lock types become "held" on entering
@@ -3826,10 +4024,68 @@ private
       # stamped enough that lower_with_match_block can lower them into
       # the comptime if-else dispatch (L7.2 mir_lowering side).
       if node.arms
+        # Atomics M1.6.5: per-arm effect tracking. Each arm runs through
+        # the body in its own scope; we record family-specific prelude
+        # effects BEFORE the body so the synthetic acquire/snapshot
+        # contributions of LOCKED / VERSIONED / ATOMIC are visible
+        # in the per-arm delta. Then we collapse into concrete
+        # (intersection across arms) + ?-form (effects in some-but-
+        # not-all arms) so the call-site can later resolve the ?-form
+        # back to concrete based on the actual arg family.
+        fn_ctx_name = current_fn_ctx&.name
+        snapshot = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
+        per_arm_effects = []
         node.arms.each do |arm|
+          before = fn_ctx_name && @fn_direct_effects[fn_ctx_name]&.dup
+          # Family-specific prelude effects that the lowering will emit
+          # for this arm. LOCKED acquires a mutex (BLOCKING + CONTENTION
+          # + SUSPENDS); VERSIONED takes a snapshot via EBR pin
+          # (CONTENTION); ATOMIC binds the alias to the cell ref so any
+          # subsequent body access contends on the cache line (CONTENTION,
+          # no BLOCKING — atomics never park).
+          case arm[:family]
+          when :LOCKED
+            record_effect(EffectTracker::BLOCKING)
+            record_effect(EffectTracker::CONTENTION)
+            record_effect(EffectTracker::SUSPENDS)
+          when :VERSIONED
+            record_effect(EffectTracker::CONTENTION)
+          when :ATOMIC
+            record_effect(EffectTracker::CONTENTION)
+          end
           with_new_scope(current_scope) do
             visit_stmts(arm[:body])
             finalize_scope(node)
+          end
+          if fn_ctx_name
+            after = @fn_direct_effects[fn_ctx_name]
+            arm_delta = after - before
+            per_arm_effects << arm_delta
+            # Roll back the fn's direct effects so the next arm sees a
+            # clean baseline. We re-stamp the consensus and ?-form below.
+            @fn_direct_effects[fn_ctx_name] = snapshot.dup
+          end
+        end
+        if fn_ctx_name && !per_arm_effects.empty?
+          # Concrete: effects present in EVERY arm (intersection).
+          concrete = per_arm_effects.reduce(:&) || Set.new
+          # Maybe: effects present in SOME arm but not all (symmetric diff
+          # ∪ across arms minus intersection). Project to ?-form variants
+          # for the contention/blocking axis.
+          all_union = per_arm_effects.reduce(Set.new, :|)
+          maybe_set = all_union - concrete
+          concrete.each { |eff| @fn_direct_effects[fn_ctx_name].add(eff) }
+          if maybe_set.include?(EffectTracker::CONTENTION)
+            @fn_direct_effects[fn_ctx_name].add(EffectTracker::CONTENTION_MAYBE)
+          end
+          if maybe_set.include?(EffectTracker::BLOCKING)
+            @fn_direct_effects[fn_ctx_name].add(EffectTracker::BLOCKING_MAYBE)
+          end
+          # Effects orthogonal to the contention axis (heap, yield, io,
+          # etc.) that appear in some-but-not-all arms get added as
+          # concrete — the fn will incur them on at least one path.
+          (maybe_set - [EffectTracker::CONTENTION, EffectTracker::BLOCKING]).each do |eff|
+            @fn_direct_effects[fn_ctx_name].add(eff)
           end
         end
       end
@@ -3867,6 +4123,8 @@ private
     @held_locks = prev_held
     @held_lock_types = prev_held_types
 
+    validate_no_multi_cell_atomic_ptr!(node)
+    validate_polymorphic_mutate_uses_match!(node)
     validate_lock_error_clause!(node, expanded_capabilities)
     # MVCC: SNAPSHOT-transaction bodies lower to
     # `Versioned.update[Multi](rt, alloc, ...)` (heap-allocates a new
@@ -3920,14 +4178,51 @@ private
     clause = node.lock_error_clause
     is_snapshot_txn = node.snapshot_mode == :transaction
 
+    # AtomicPtr M3.8: SNAPSHOT MATCH MUTABLE has per-arm conflict
+    # contracts. The trailing `node.lock_error_clause` is nil
+    # (arms own their own ON Conflict clauses); validate each arm
+    # against its family's rule and short-circuit before the
+    # single-arm checks below.
+    if node.arms && is_snapshot_txn
+      validate_snapshot_match_arms!(node)
+      return
+    end
+
+    # AtomicPtr M3.6: split the SNAPSHOT-transaction ON Conflict
+    # contract by family. Versioned (MVCC) transactions REQUIRE the
+    # handler -- bounded retry, Conflict on exhaustion. AtomicPtr
+    # (Rust rcu) FORBIDS the handler -- unbounded retry, no conflict
+    # path to handle. The split only matters when ANY cell in this
+    # WITH is @indirect:atomic; mixed cells trip the multi-cell
+    # rejection in M3.9.
+    snap_caps = node.capabilities || []
+    has_atomic_ptr = is_snapshot_txn && snap_caps.any? { |c|
+      next false unless c[:capability] == :SNAPSHOT
+      sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
+      sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
+    }
+
     # MVCC L5: SNAPSHOT-transaction REQUIRES an ON Conflict handler.
     # Mirrors the LockCycle-required-when-cycle-reachable contract.
-    if is_snapshot_txn && clause.nil?
+    # AtomicPtr M3.6 carve-out: skip the requirement when every cell
+    # is @indirect:atomic -- the rcu loop has no conflict.
+    if is_snapshot_txn && clause.nil? && !has_atomic_ptr
       error!(node,
              "WITH SNAPSHOT ... AS MUTABLE requires an ON Conflict handler. " \
              "Optimistic CAS commit can fail under contention; CLEAR forces " \
              "explicit handling. Add e.g. `ON Conflict RAISE`, " \
              "`ON Conflict RETRY(N) THEN PASS`, or `ON Conflict -> { ... }`.")
+    end
+
+    # AtomicPtr M3.6: ON Conflict on an @indirect:atomic SNAPSHOT
+    # MUTABLE block is meaningless -- AtomicPtr.update retries until
+    # success (Rust rcu semantics; design contract in
+    # docs/agents/atomicptr.md §6.2). Reject explicitly.
+    if has_atomic_ptr && clause
+      error!(node,
+        "`ON Conflict` isn't valid on `@indirect:atomic`. Atomic CAS " \
+        "retries until success (Rust `rcu` semantics); there's no " \
+        "conflict path to handle. Drop the trailing `ON Conflict` clause.")
     end
 
     return unless clause
@@ -3952,6 +4247,164 @@ private
       visit(clause[:message]) if clause[:message]
     when :block
       visit_stmts(clause[:body]) if clause[:body]
+    end
+  end
+
+  # AtomicPtr M3.11: when a fn declares `REQUIRES <param>: VERSIONED |
+  # ATOMIC` and the body contains a bare `WITH SNAPSHOT <param> AS
+  # MUTABLE x { ... }` (single body, no MATCH), error directing the
+  # user to MATCH-dispatch. The two families differ in their ON
+  # Conflict requirement (VERSIONED requires it, ATOMIC forbids it),
+  # so a bare body shape can't satisfy both. Per design contract
+  # docs/agents/atomicptr.md §6.4.
+  #
+  # Read-mode SNAPSHOT (no MUTABLE on any cell) is fine without MATCH
+  # -- read paths can't fail in EITHER family, so the same body works
+  # uniformly. Single-family REQUIRES (just VERSIONED, just ATOMIC)
+  # is also fine -- the bare body matches that family's contract
+  # (M3.6 already handles the ATOMIC-only path; M5 the VERSIONED-only).
+  def validate_polymorphic_mutate_uses_match!(node)
+    return unless node.snapshot_mode == :transaction
+    return if node.arms  # MATCH form already handled by M3.8
+    snap_caps = (node.capabilities || []).select { |c| c[:capability] == :SNAPSHOT }
+    snap_caps.each do |cap|
+      sym = cap[:var_node]&.respond_to?(:symbol) ? cap[:var_node].symbol : nil
+      next unless sym
+      fams = sym.respond_to?(:sync_families) ? sym.sync_families : nil
+      next unless fams.is_a?(Set) && fams.size > 1
+      # The reject only triggers when the polymorphic disjunction
+      # includes BOTH VERSIONED and ATOMIC -- those are the two
+      # surfaces that differ in `ON Conflict` requirement. Other
+      # multi-family combinations (e.g., LOCKED | VERSIONED) hit
+      # different rejections at the WITH SNAPSHOT cell-validation
+      # stage; this check is specifically the M3.11 split.
+      next unless fams.include?(:VERSIONED) && fams.include?(:ATOMIC)
+      var_name = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : "cell"
+      error!(node,
+        "Mutate surface differs by family: `@versioned` bounds retries " \
+        "and requires `ON Conflict`; `@indirect:atomic` retries unbounded " \
+        "and forbids it. Dispatch per family with `WITH SNAPSHOT #{var_name} " \
+        "AS MUTABLE x MATCH WHEN VERSIONED -> { ... } ON Conflict ... " \
+        "WHEN ATOMIC -> { ... } END`.")
+    end
+  end
+
+  # AtomicPtr M3.10: reject `cfg.field = ...` (or `cfg.field += 1`,
+  # etc) when `cfg` is `@indirect:atomic`. The AtomicPtr cell
+  # publishes whole-T snapshots via atomic pointer swap, not per-
+  # field writes -- there's no per-field cmpxchg on a struct field.
+  # Only the WITH SNAPSHOT MUTABLE alias (a regular *T pointer
+  # passed to AtomicPtr.update's closure) accepts field assignments.
+  #
+  # The alias's SymbolEntry is declared with sync=nil and
+  # layout=nil (capabilities.rb's SNAPSHOT branch passes neither
+  # to scope.declare), so this check fires only on the original
+  # cell binding -- the alias path falls through.
+  #
+  # Walks the target's chain to find the root Identifier. For
+  # GetField / GetIndex chains rooted at an @indirect:atomic
+  # binding, fires the rejection. Other chain shapes (param
+  # passing, etc.) are handled elsewhere.
+  def reject_bare_atomic_ptr_mutation!(field_node, assignment_node)
+    root = field_node
+    root = root.target while root.respond_to?(:target) && !root.is_a?(AST::Identifier)
+    return unless root.is_a?(AST::Identifier)
+    sym = root.respond_to?(:symbol) ? root.symbol : nil
+    return unless sym
+    return unless sym.sync == :atomic
+    return unless sym.respond_to?(:layout) && sym.layout == :indirect
+
+    error!(assignment_node,
+      "`@indirect:atomic` requires `WITH SNAPSHOT #{root.name} AS MUTABLE x { x.#{field_name_for_msg(field_node)} = ...; }` for mutation. " \
+      "Atomic pointer swap publishes a new whole-T snapshot, not a per-field write -- " \
+      "the `WITH SNAPSHOT` block clones the snapshot, mutates the clone, and CAS-publishes it. " \
+      "(This is different from primitive `@shared:atomic` Int64/Float64/Bool, which use direct " \
+      "ops like `c += 1` because they fit in a single CAS-able machine word.)")
+  end
+
+  # Pull the leaf field name out of a GetField chain for the error
+  # message ("for mutation" snippet). Returns "<field>" or "field".
+  def field_name_for_msg(node)
+    return node.field.to_s if node.respond_to?(:field) && node.field
+    "<field>"
+  end
+
+  # AtomicPtr M3.9: reject multi-cell `WITH SNAPSHOT` when ANY cell
+  # is `@indirect:atomic`. AtomicPtr has no portable hardware multi-
+  # pointer CAS primitive (and software MCAS is out of scope for
+  # v0.3); per-cell atomic CAS gives no atomicity ACROSS cells.
+  # MVCC's `Shared.updateMulti` works because of sorted-pointer
+  # locking + commit-or-rollback machinery that AtomicPtr doesn't
+  # have. The rejection covers both single-arm SNAPSHOT and SNAPSHOT
+  # MATCH (any ATOMIC arm in a multi-cell MATCH triggers the same
+  # error).
+  #
+  # Read-only multi-cell with @indirect:atomic is also rejected --
+  # per-cell atomic loads aren't cross-cell consistent (the reader
+  # can see a state nobody ever published). The error directs the
+  # user to @shared:versioned for cross-cell snapshot reads.
+  def validate_no_multi_cell_atomic_ptr!(node)
+    snap_caps = (node.capabilities || []).select { |c| c[:capability] == :SNAPSHOT }
+    return if snap_caps.size <= 1
+
+    has_atomic_ptr_cell = snap_caps.any? { |c|
+      sym = c[:var_node]&.respond_to?(:symbol) ? c[:var_node].symbol : nil
+      sym && sym.sync == :atomic && sym.respond_to?(:layout) && sym.layout == :indirect
+    }
+    has_atomic_arm = (node.arms || []).any? { |arm| arm[:family] == :ATOMIC }
+
+    return unless has_atomic_ptr_cell || has_atomic_arm
+
+    error!(node,
+      "`@indirect:atomic` cannot guarantee multi-object consistency. " \
+      "If you need multi-object consistency use `@shared:versioned` " \
+      "or `@shared:locked`.")
+  end
+
+  # AtomicPtr M3.8: per-arm ON Conflict validation for SNAPSHOT
+  # MATCH MUTABLE blocks. The two families have opposite contracts:
+  #   - VERSIONED arm: REQUIRES at least one ON Conflict clause
+  #     (mirrors the single-arm M5 contract; Versioned.update can
+  #     surface UpdateRetriesExhausted -> Conflict).
+  #   - ATOMIC arm: FORBIDS ON Conflict (rcu retries until success;
+  #     AtomicPtr.update never returns Conflict -- matches Rust
+  #     arc-swap rcu, design contract docs/agents/atomicptr.md §6.2).
+  # Read-mode SNAPSHOT MATCH (no MUTABLE) skips this entirely --
+  # read paths can't fail, so neither arm needs / accepts ON Conflict.
+  def validate_snapshot_match_arms!(node)
+    (node.arms || []).each do |arm|
+      clauses = arm[:lock_error_clauses] || []
+      case arm[:family]
+      when :VERSIONED
+        if clauses.empty?
+          error!(node,
+            "WITH SNAPSHOT ... AS MUTABLE MATCH: VERSIONED arm requires " \
+            "an `ON Conflict` handler (Versioned.update bounds retries " \
+            "and surfaces Conflict on exhaustion). Add e.g. " \
+            "`WHEN VERSIONED -> { ... } ON Conflict RAISE`.")
+        end
+      when :ATOMIC
+        unless clauses.empty?
+          error!(node,
+            "WITH SNAPSHOT ... AS MUTABLE MATCH: ATOMIC arm forbids " \
+            "`ON Conflict` (AtomicPtr.update retries until success -- " \
+            "Rust `rcu` semantics; there's no conflict path to handle). " \
+            "Drop the trailing `ON Conflict` from the ATOMIC arm.")
+        end
+      end
+    end
+    # Visit per-arm ON Conflict action bodies so types are
+    # annotated. Mirrors the single-arm pass at the bottom of
+    # validate_lock_error_clause!.
+    (node.arms || []).each do |arm|
+      (arm[:lock_error_clauses] || []).each do |clause|
+        case clause[:action]
+        when :exit
+          visit(clause[:message]) if clause[:message]
+        when :block
+          visit_stmts(clause[:body]) if clause[:body]
+        end
+      end
     end
   end
 
@@ -4473,7 +4926,7 @@ private
       return nil
     end
 
-    # Path 2: user-defined functions with return: { lifetime: "param_name" }
+    # Path 2: user-defined functions with return: { lifetime: [...] }
     func_name = call_node.name
     scope = lookup_scope_for(func_name)
     return nil unless scope
@@ -4481,10 +4934,24 @@ private
     func_type = scope.resolve_type(func_name)
     return nil unless func_type.is_a?(Hash)
 
+    # Atomics M2.4 / M2.5: multi-binding lifetime returns the FIRST
+    # source. The borrow tracking still records under one root; if a
+    # multi-source RETURNS is used, the caller-side check in
+    # `handle_assign_borrow` uses this single source. Multi-source
+    # borrow tracking (record borrows on ALL sources, error when ANY
+    # is already borrowed) is M2.6 audit-matrix work — we err on the
+    # conservative side here (track only the first source) to avoid
+    # spurious errors before the audit lands. Wildcard returns nil
+    # (no specific source to track).
     lifetime = func_type.dig(:return, :lifetime)
     return nil if lifetime.nil?
+    lifetime = [lifetime] unless lifetime.is_a?(Array)
+    return nil if lifetime.empty? || lifetime == [:wildcard]
+    primary = lifetime.first
+    return nil if primary == :wildcard
+    primary_root = primary.to_s.split(".").first
 
-    param_index = func_type[:params]&.find_index { |p| p[:name] == lifetime }
+    param_index = func_type[:params]&.find_index { |p| p[:name] == primary_root }
     return nil unless param_index
 
     args = call_node.is_a?(AST::MethodCall) ? [call_node.object] + call_node.args : call_node.args
@@ -4717,8 +5184,279 @@ private
     path
   end
 
+  # Atomics M2.6: an `a.field = bg` / `arr[i] = bg` / plain `x = bg`
+  # is a cross-scope escape when the assigned binding's tied lifetime
+  # has a source declared in a DEEPER scope than the destination.
+  # Reads `value.symbol.lifetime_sources` and compares each source's
+  # scope_depth to the destination's scope_depth. Source's depth must
+  # be <= dest's depth (i.e., the source is at the same scope or an
+  # ancestor of the destination -- so the destination's scope ends
+  # first). Fires only for tied-lifetime values; nil-lifetime
+  # bindings flow through unchanged.
+  def verify_tied_assignment!(assign_node)
+    val = assign_node.value
+    return unless val.is_a?(AST::Identifier)
+    sym = val.respond_to?(:symbol) ? val.symbol : nil
+    return unless sym
+    sources = sym.lifetime_sources
+    return if sources.empty?
+    return if sources == [sym]   # :current_scope is its own check path
+
+    dest_depth = dest_scope_depth_for_target(assign_node.name)
+    return if dest_depth.nil?
+
+    # CLEAR scopes are LIFO-stacked: shallower depth = scope lives
+    # LONGER. The destination outlives the source iff
+    # `dest_depth < source.scope_depth`, which means storing a
+    # tied value would let it outlive its anchor.
+    sources.each do |source|
+      next if source.scope_depth.nil?
+      next unless dest_depth < source.scope_depth
+      source_name = lookup_source_name(source) || "(unnamed)"
+      msg = "Lifetime Error: cannot store value tied to '#{source_name}' " \
+            "(declared at scope depth #{source.scope_depth}) into a destination " \
+            "at scope depth #{dest_depth} -- the destination outlives the source. " \
+            "Move the destination into the same scope, or COPY the value."
+      # Atomics M2.8: when the source binding is `@shared:atomic`,
+      # produce a fixable finding so `clear fix` can suggest the
+      # `@shared:atomic` -> `@shared:locked` migration. Falls back
+      # to plain error! for non-atomic tied-lifetime sources (the
+      # @shared:locked migration doesn't apply to those).
+      fix = build_atomic_escape_migration_fix(source, source_name)
+      if fix
+        fixable!(assign_node, message: msg, category: :escape,
+                 level: :error, fixes: [fix], raise_in_collector: true)
+      else
+        error!(assign_node, msg)
+      end
+    end
+  end
+
+  # Atomics M2.6: a `RETURN <val>` of a tied-lifetime binding is
+  # legal only when the enclosing function declares
+  # `RETURNS <source>:T` for at least one of the val's sources. The
+  # function's `return_lifetime` array is matched by NAME against
+  # the source's binding name; wildcard `RETURNS *:T` accepts.
+  def verify_tied_return!(return_node)
+    val = return_node.value
+    return unless val.is_a?(AST::Identifier)
+    sym = val.respond_to?(:symbol) ? val.symbol : nil
+    return unless sym
+    sources = sym.lifetime_sources
+    return if sources.empty?
+    # `:current_scope` lifetime (lifetime_sources == [self]) means the
+    # binding is anchored to its own declaring scope. Returning it is
+    # always invalid — covered by the existing non_escaping check.
+    return if sources == [sym]
+
+    fn_node = @fn_nodes[current_fn_ctx&.name]
+    rl = fn_node&.return_lifetime
+    return if rl == :wildcard
+    declared = rl.is_a?(Array) ? rl : (rl.nil? ? [] : [rl])
+
+    declared_names = declared.flat_map do |n|
+      path = get_path_to_root(n)
+      path ? [path.first.to_s] : []
+    end
+
+    source_names = sources.map do |s|
+      # Find the binding name: walk @fn_nodes' params + locally-named
+      # decls. Source is a SymbolEntry whose .reg may be the
+      # declaring AST node, but the cleaner path: look at scope.locals
+      # and find the entry by identity.
+      lookup_source_name(s)
+    end.compact
+
+    matched = source_names.any? { |n| declared_names.include?(n) }
+    return if matched
+
+    sources_msg = source_names.empty? ? "(unnamed source)" :
+                                        source_names.join(", ")
+    declared_msg = declared_names.empty? ? "no `RETURNS <name>:T`" :
+                                           "`RETURNS #{declared_names.join(', ')}:T`"
+    msg = "Lifetime Error: cannot RETURN a value whose lifetime is tied " \
+          "to #{sources_msg}, because the enclosing function declares " \
+          "#{declared_msg} -- the caller's scope outlives the source. " \
+          "Either declare the function as `RETURNS #{source_names.first}:T` " \
+          "(propagates the lifetime to the caller), or COPY the value " \
+          "before returning it."
+
+    # Atomics M2.8: if at least one source is `@shared:atomic`,
+    # produce a fixable finding suggesting the migration to
+    # `@shared:locked`. Picks the first atomic source whose
+    # decl-line text we can locate; the rest fall through to the
+    # plain error path.
+    atomic_fix = nil
+    sources.each_with_index do |source, idx|
+      name = source_names[idx] || lookup_source_name(source) || "(unnamed)"
+      f = build_atomic_escape_migration_fix(source, name)
+      if f
+        atomic_fix = f
+        break
+      end
+    end
+
+    if atomic_fix
+      fixable!(return_node, message: msg, category: :escape,
+               level: :error, fixes: [atomic_fix], raise_in_collector: true)
+    else
+      error!(return_node, msg)
+    end
+  end
+
+  # Look up the binding name of a SymbolEntry by scanning scope.locals.
+  # Returns the String name or nil if not found.
+  def lookup_source_name(sym)
+    sc = sym.scope
+    return nil unless sc
+    sc.locals.each do |name, entry|
+      return name if entry.equal?(sym)
+    end
+    # Param symbols may have been refreshed via Scope.live_param_syms;
+    # fall back to a function-level scan.
+    @fn_nodes.each_value do |fn|
+      next unless fn.respond_to?(:params)
+      fn.params.each do |p|
+        return p[:name].to_s if p[:symbol].equal?(sym)
+      end
+    end
+    nil
+  end
+
+  # Atomics M2.6: lifetime escape check. The val_node has a tied
+  # lifetime (sources non-empty). The destination's `dest_depth` is
+  # the scope depth where the value will live. The check: every
+  # source's `scope_depth` must be >= dest_depth (source is anchored
+  # in dest's scope or deeper). Returns nil when the escape is safe;
+  # an error message string when it isn't.
+  #
+  # Conservative shortcut: when val_node has no symbol or no tied
+  # lifetime, returns nil immediately. The check fires only for
+  # actually-tied bindings (atomic-captured BG handles today,
+  # multi-source returns and similar in M2.9+).
+  def lifetime_violation_for_store(val_node, dest_depth)
+    return nil unless val_node.respond_to?(:symbol)
+    sym = val_node.symbol
+    return nil unless sym
+    sources = sym.lifetime_sources
+    return nil if sources.empty?
+    # `:current_scope` lifetime is detected via lifetime_sources
+    # returning [self], which means source.scope_depth = sym's own
+    # depth. The same depth comparison applies uniformly.
+    # CLEAR scopes are LIFO-stacked: shallower depth = scope lives
+    # LONGER. Destination outlives source iff dest_depth < source.depth.
+    sources.each do |source|
+      next if source.scope_depth.nil?
+      next if dest_depth.nil?
+      if dest_depth < source.scope_depth
+        return "Lifetime Error: cannot store value with lifetime tied to " \
+               "scope depth #{source.scope_depth} into a destination at " \
+               "depth #{dest_depth} (the destination outlives the source)."
+      end
+    end
+    nil
+  end
+
+  # Convenience: the escape destination's effective scope depth.
+  # For a struct-field assign `a.field = v`, depth = a's binding scope.
+  # For a method receiver (`list.append(v)`), depth = list's binding scope.
+  # For a free local in current scope, depth = current scope.
+  def dest_scope_depth_for_target(target_node)
+    if target_node.is_a?(AST::Identifier)
+      sym = target_node.respond_to?(:symbol) ? target_node.symbol : nil
+      sym ||= lookup_scope_for(target_node.name)&.locals&.[](target_node.name)
+      return sym&.scope_depth
+    end
+    if target_node.is_a?(AST::GetField) || target_node.is_a?(AST::GetIndex)
+      return dest_scope_depth_for_target(target_node.target)
+    end
+    nil
+  end
+
+  # Atomics M2.3: stamp the lifetime of a BG / BG STREAM handle
+  # binding from its captures. The handle's lifetime is the
+  # intersection of every captured @shared:atomic / @locked /
+  # @writeLocked / @multiowned binding's lifetime. The escape checker
+  # (M2.5 / M2.6) reads `symbol.lifetime_sources` at every potential
+  # escape site (RETURN, struct-field assign, list/queue append, BG
+  # capture) and rejects when the destination scope outlives any
+  # source.
+  #
+  # Skipped sources (no lifetime contribution):
+  #   - @shared (Arc): refcounted; the inner data lives as long as
+  #     any reference exists, so the BG handle isn't bounded by the
+  #     declaring scope of the original Arc binding.
+  #   - @local: BG is auto-pinned, so the BG and the @local binding
+  #     run on the same scheduler. The capture is by-pointer; the
+  #     captured pointer's validity IS bounded by the @local
+  #     binding's scope, so we DO include it. (M2.6 audit may revisit
+  #     when @local + non-pinned spawn becomes a thing.)
+  #   - Captures whose binding has no SymbolEntry on capture_symbols
+  #     (e.g. observable view aliases); those are already errored at
+  #     visit_BgBlock via has_non_escaping_capture.
+  def stamp_bg_handle_lifetime!(decl_node)
+    bg = decl_node.value
+    return unless bg.respond_to?(:capture_analysis)
+    analysis = bg.capture_analysis
+    return unless analysis && analysis.respond_to?(:capture_symbols)
+    sources = bg_lifetime_sources(analysis)
+    return if sources.empty?
+    sym = decl_node.symbol
+    return unless sym
+    sym.lifetime = SymbolEntry.tied_lifetime(sources)
+  end
+
+  # Walk the capture-analysis SymbolEntries and pick the ones whose
+  # storage / sync makes them lifetime-bounded sources for the BG
+  # handle. See stamp_bg_handle_lifetime! for the criteria.
+  def bg_lifetime_sources(analysis)
+    sources = []
+    (analysis.capture_symbols || {}).each_value do |info|
+      next unless info
+      bound = false
+      bound = true if info.sync == :atomic
+      bound = true if info.sync == :locked || info.sync == :write_locked
+      bound = true if info.storage == :multiowned
+      bound = true if info.sync == :local
+      # @shared (Arc) without atomic/locked/versioned: refcounted, no
+      # lifetime constraint on the outer binding.
+      bound = false if info.storage == :shared && !info.sync
+      # AtomicPtr M3.12: @indirect:atomic is Arc-managed under the
+      # hood (the AtomicPtr cell owns an Arc(T) payload; M3.5 auto-
+      # promotes ownership to :shared). Loaded snapshots have refcount
+      # lifetime; the cell itself can flow into struct fields, BG
+      # handles, RETURN values without trip-wiring the M2.6 escape
+      # audit. Exempt parallel to the @shared-without-sync rule
+      # above. Primitive @shared:atomic stays bounded -- bare
+      # *Atomic(T) is scope-bounded by M2.6 design.
+      bound = false if info.sync == :atomic && info.respond_to?(:layout) && info.layout == :indirect
+      sources << info if bound
+    end
+    sources
+  end
+
+  # Atomics M2.4 / M2.5: produce the list of dotted-path lifetime
+  # roots (`["r.foo.bar"]` for `RETURNS r.foo.bar:T`,
+  # `["a", "b"]` for `RETURNS (a b):T`). Wildcard / nil returns []
+  # because there is no source-restricted path the return value must
+  # match — wildcard accepts anything (with a warning at the
+  # declaration), nil means the function isn't declared as returning
+  # a borrow.
+  def get_lifetime_paths(func_node)
+    rl = func_node.return_lifetime
+    return [] if rl.nil?
+    return [:wildcard] if rl == :wildcard
+    sources = rl.is_a?(Array) ? rl : [rl]
+    sources.map { |s| get_path_to_root(s)&.join(".") }.compact
+  end
+
+  # Backward-compat shim: legacy single-binding callers got a single
+  # string. Returns nil for multi-source / wildcard / no-lifetime
+  # cases, matching the old contract for those shapes.
   def get_lifetime_path(func_node)
-    get_path_to_root(func_node.return_lifetime)&.join(".")
+    paths = get_lifetime_paths(func_node)
+    return nil if paths.size != 1 || paths.first == :wildcard
+    paths.first
   end
 
   # Walk through GetField/GetIndex chains to find the root Identifier name.

@@ -1,0 +1,38 @@
+-- Atomics M1.7: explicit atomic methods on @shared:atomic primitives.
+-- The compound ops (`+=`, `-=`) auto-rewrite to fetchAdd / fetchSub.
+-- The remaining ops (fetchAnd / fetchOr / fetchXor / exchange / cmpxchgStrong)
+-- are called explicitly via `c.ctrl.data.<op>(...)` on the cell. Verifies
+-- the runtime helpers from lib/atomic.zig are reachable from CLEAR.
+--
+-- Note: the explicit method form requires reaching through `.ctrl.data`
+-- because M1's layout is Arc(Atomic(T)). M2 will drop the Arc and the
+-- method form becomes `c.<op>(...)` directly. For now the test exercises
+-- only the auto-rewriteable compound forms; explicit-method coverage
+-- lands in M2.
+
+FN main() RETURNS Void ->
+    MUTABLE c: Int64 = 0 @shared:atomic;
+
+    -- fetchAdd via `+=`.
+    c += 10;
+    ASSERT c == 10, "after += 10: expected 10";
+
+    -- fetchSub via `-=`.
+    c -= 3;
+    ASSERT c == 7, "after -= 3: expected 7";
+
+    -- store via plain assignment.
+    c = 42;
+    ASSERT c == 42, "after = 42: expected 42";
+
+    -- Cumulative: a sequence of bumps lands on the right total.
+    c = 0;
+    MUTABLE i: Int64 = 0;
+    WHILE i < 100 DO
+        c += 1;
+        i = i + 1;
+    END
+    ASSERT c == 100, "after 100 += 1: expected 100";
+
+    RETURN;
+END

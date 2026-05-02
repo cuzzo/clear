@@ -1,0 +1,161 @@
+-- AtomicPtr (M3) benchmark: producer-consumer config swap.
+--
+-- Workload: 1 writer fiber publishes a Counter snapshot every iteration;
+-- N reader fibers each do reads_per WITH SNAPSHOT reads and verify the
+-- structural invariant `b == a * 2`. Same body shape across THREE cell
+-- families:
+--
+--   Variant A (RwLock baseline): @shared:writeLocked
+--     Readers acquire-shared, snapshot the struct, release. Multiple
+--     readers concurrent; writer blocks all readers behind it
+--     (writer-preferring fairness in parking-lot).
+--
+--   Variant B (MVCC baseline):   @shared:versioned
+--     Readers acquire-load + EBR pin (one mfence), deref *T directly.
+--     Writer publishes via CAS-loop COW (Versioned.update) and retires
+--     old via EBR. Parity-or-better with arc-swap on the read path,
+--     bounded retry on the write path.
+--
+--   Variant C (M3 / arc-swap-style): @indirect:atomic
+--     Readers atomic-load the published *T + EBR pin, deref directly.
+--     Writer rcu-loop (AtomicPtr.update): clone -> mutate -> CAS, retry
+--     until success (Rust arc-swap semantics; unbounded retries, no
+--     Conflict).
+--
+-- Expected on a contended host: AtomicPtr matches MVCC on read latency,
+-- both significantly faster than RwLock on consumer-side scaling under
+-- writer pressure. AtomicPtr's CAS-and-retry-until-success is the same
+-- ballpark as Versioned.update (which retries up to MAX_UPDATE_RETRIES
+-- before surfacing Conflict; the inner retry loop is identical shape).
+
+STRUCT Counter { a: Int64, b: Int64 }
+
+FN main() RETURNS Void ->
+    n_readers:  Int64 = 16_i64;
+    reads_per:  Int64 = 50000_i64;
+    writes:     Int64 = 5000_i64;
+
+    -- ───── Variant A: @shared:writeLocked (RwLock) ─────
+    MUTABLE c_rw = Counter{ a: 0_i64, b: 0_i64 } @shared:writeLocked;
+
+    t0_rw = timestampMs();
+    MUTABLE rfutures_rw: ~Int64[]@list = [];
+    FOR i IN (0_i64 ..< n_readers) DO
+        rfutures_rw.append(BG { @parallel ->
+            MUTABLE s: Int64 = 0_i64;
+            MUTABLE j: Int64 = 0_i64;
+            MUTABLE viol: Int64 = 0_i64;
+            WHILE j < reads_per DO
+                WITH c_rw AS v {
+                    s = s + v.a;
+                    IF v.b != v.a * 2_i64 THEN viol = viol + 1_i64; END
+                }
+                j = j + 1_i64;
+            END
+            viol;
+        });
+    END
+
+    w_rw: ~Void = BG { @parallel ->
+        MUTABLE k: Int64 = 0_i64;
+        WHILE k < writes DO
+            WITH EXCLUSIVE c_rw AS v {
+                v.a = v.a + 1_i64;
+                v.b = (v.a) * 2_i64;
+            }
+            k = k + 1_i64;
+        END
+    };
+
+    NEXT w_rw;
+    MUTABLE total_viol_rw: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< n_readers) DO
+        total_viol_rw = total_viol_rw + NEXT rfutures_rw[i];
+    END
+    elapsed_rw = timestampMs() - t0_rw;
+
+    -- ───── Variant B: @shared:versioned (MVCC) ─────
+    MUTABLE c_v = Counter{ a: 0_i64, b: 0_i64 } @shared:versioned;
+
+    t0_v = timestampMs();
+    MUTABLE rfutures_v: ~Int64[]@list = [];
+    FOR i IN (0_i64 ..< n_readers) DO
+        rfutures_v.append(BG { @parallel ->
+            MUTABLE s: Int64 = 0_i64;
+            MUTABLE j: Int64 = 0_i64;
+            MUTABLE viol: Int64 = 0_i64;
+            WHILE j < reads_per DO
+                WITH SNAPSHOT c_v AS v {
+                    s = s + v.a;
+                    IF v.b != v.a * 2_i64 THEN viol = viol + 1_i64; END
+                }
+                j = j + 1_i64;
+            END
+            viol;
+        });
+    END
+
+    w_v: ~Void = BG { @parallel ->
+        MUTABLE k: Int64 = 0_i64;
+        WHILE k < writes DO
+            WITH SNAPSHOT c_v AS MUTABLE v {
+                v.a = v.a + 1_i64;
+                v.b = (v.a) * 2_i64;
+            } ON Conflict RAISE
+            k = k + 1_i64;
+        END
+    };
+
+    NEXT w_v;
+    MUTABLE total_viol_v: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< n_readers) DO
+        total_viol_v = total_viol_v + NEXT rfutures_v[i];
+    END
+    elapsed_v = timestampMs() - t0_v;
+
+    -- ───── Variant C: @indirect:atomic (M3 AtomicPtr) ─────
+    MUTABLE c_ap = Counter{ a: 0_i64, b: 0_i64 } @indirect:atomic;
+
+    t0_ap = timestampMs();
+    MUTABLE rfutures_ap: ~Int64[]@list = [];
+    FOR i IN (0_i64 ..< n_readers) DO
+        rfutures_ap.append(BG { @parallel ->
+            MUTABLE s: Int64 = 0_i64;
+            MUTABLE j: Int64 = 0_i64;
+            MUTABLE viol: Int64 = 0_i64;
+            WHILE j < reads_per DO
+                WITH SNAPSHOT c_ap AS v {
+                    s = s + v.a;
+                    IF v.b != v.a * 2_i64 THEN viol = viol + 1_i64; END
+                }
+                j = j + 1_i64;
+            END
+            viol;
+        });
+    END
+
+    w_ap: ~Void = BG { @parallel ->
+        MUTABLE k: Int64 = 0_i64;
+        WHILE k < writes DO
+            WITH SNAPSHOT c_ap AS MUTABLE v {
+                v.a = v.a + 1_i64;
+                v.b = (v.a) * 2_i64;
+            }
+            k = k + 1_i64;
+        END
+    };
+
+    NEXT w_ap;
+    MUTABLE total_viol_ap: Int64 = 0_i64;
+    FOR i IN (0_i64 ..< n_readers) DO
+        total_viol_ap = total_viol_ap + NEXT rfutures_ap[i];
+    END
+    elapsed_ap = timestampMs() - t0_ap;
+
+    -- ───── Report ─────
+    print("RwLock     :  " + elapsed_rw.toString() + " ms (violations: " + total_viol_rw.toString() + ")");
+    print("MVCC       :  " + elapsed_v.toString()  + " ms (violations: " + total_viol_v.toString()  + ")");
+    print("AtomicPtr  :  " + elapsed_ap.toString() + " ms (violations: " + total_viol_ap.toString() + ")");
+    print("BENCH_RESULT: " + elapsed_ap.toString() + " ms");
+    RETURN;
+END

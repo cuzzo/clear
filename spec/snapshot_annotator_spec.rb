@@ -47,7 +47,7 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
         c = C{ v: 0 };
         WITH SNAPSHOT c AS view { x = view.v; }
       CLEAR
-      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned variable/i)
+      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic variable/i)
     end
 
     it "rejects `WITH SNAPSHOT` on a @locked variable" do
@@ -56,7 +56,7 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
         c = C{ v: 0 } @locked;
         WITH SNAPSHOT c AS view { x = view.v; }
       CLEAR
-      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned variable/i)
+      expect { run(src) }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic variable/i)
     end
   end
 
