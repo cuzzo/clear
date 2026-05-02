@@ -2,59 +2,37 @@
 
 ## Segfaults
 
-### Benchmark 10: concurrent_search (crashes every run)
+### ~~Benchmark 02: concurrent_search~~ — FIXED (2026-05-02 triage)
 
-Three compiler bugs, all in the compiler:
+The 3 cited bugs were resolved by infrastructure changes since this
+section was written:
 
-1. **`insert_bg_escape_promote!` misses BG blocks inside MethodCalls** (`src/control_flow.rb:987-1005`)
-   - Only recognizes BG at bare statement or direct assignment positions
-   - Misses BG nested in `futures.append(BG { ... })` - never inserts `MIR::Promote(:bg_string)`
-   - Result: `filepath` (frame-allocated string interpolation) is stored into BG context without dupe
-   - Frame arena rewinds at loop end, fiber holds dangling pointer
+1. ~~`insert_bg_escape_promote!` misses BG-in-MethodCall~~ — fixed.
+   `AST.each_bg_block_in_stmt` (`src/ast/ast.rb:111-125`) now descends
+   into `MethodCall` and `FuncCall` args.
+2. ~~`string_captures` frees `.rodata` literals~~ — fixed (downstream
+   consumer removed). The set itself is dead-but-harmless metadata in
+   `capabilities.rb:501`.
+3. ~~Frame-arena UAF from loop rewind~~ — fixed via
+   `BgBlock.capture_string_dupes` (`mir_pass.rb:544-546` →
+   `mir_lowering.rb:3357-3368`); the dupe runs at the spawn site
+   BEFORE the loop frame restore.
 
-2. **`string_captures` frees comptime string literals** (`src/capabilities.rb:338`)
-   - `result.string_captures << name if t&.string?` marks ALL string captures for `defer alloc.free()`
-   - Includes `needle = "the"` which lives in `.rodata` - never allocated by any allocator
-   - Direct crash: `alloc.free()` on a `.rodata` address triggers "Invalid free" in GPA
+**Verified:** 18+ runs across default / `--optimized` / `--safe` build
+modes at `THREADS=2/8/$(nproc)`, all clean.
 
-3. **Frame-arena use-after-free from loop rewind** (`src/alloc.rb`)
-   - Loop body allocates `filepath` via `rt.frameAlloc()` (string interpolation)
-   - `restoreLoopMark` rewinds at iteration end, but BG context already holds the raw slice
-   - Even if Bug 1 were fixed, the dupe must happen BEFORE the loop mark restore
+### ~~Benchmark 03: atomic_contention~~ — FIXED (2026-05-02 triage)
 
-Generated Zig showing all three bugs:
-```zig
-// filepath on frame arena (Bug 3: rewound at loop end)
-const filepath = try std.mem.concat(rt.frameAlloc(), u8, &.{ data_dir, "/", file, "" });
-// stored into BG context WITHOUT dupe (Bug 1: no bg_string promote)
-__bg0_ctx.* = .{ .filepath = filepath, .needle = needle };
-// freed even though it's .rodata (Bug 2: string literal freed)
-defer __ctx_0.alloc.free(__ctx_0.needle);
-```
+`spawnPinned`'s round-robin distribution is still in
+`runtime-header.zig:3379-3398`, but BG blocks that capture `@local`
+resources now lower to `rt.getSched().submitSpawn(...)` (current
+scheduler) instead of `CheatHeader.spawnPinned(...)`
+(`mir_lowering.rb:3349`). The compiler emits the user-visible note
+`"BG block auto-pinned — captures @local resource (same-scheduler
+affinity)"` for the auto-pin case.
 
-### Benchmark 11: atomic_contention (intermittent, ~60% crash rate at THREADS=2)
-
-**`spawnPinned` distributes `@local` fibers across multiple OS threads** (`zig/runtime-header.zig:4078-4093`)
-
-- Benchmark uses `@local` on a Counter struct (bare pointer, no Mutex)
-- Compiler correctly auto-pins the BG blocks
-- But `spawnPinned` round-robins fibers across ALL schedulers:
-  ```zig
-  const idx = fp.global_registry.next.fetchAdd(1, .monotonic) % n;
-  ```
-- With THREADS=2: half the fibers go to scheduler 0, half to scheduler 1
-- Both sets do non-atomic read-modify-write on the same `*Counter` - undefined behavior
-- "Pinned" only prevents work-stealing, does NOT constrain to same scheduler
-
-Evidence:
-- THREADS=1: 20/20 correct, zero crashes
-- THREADS=2: ~26/30 crashes (segfault, GPE, use-after-free sentinel 0xaa)
-- Safe build: GPA detects double-free from corrupted pointers
-
-Fix: `spawnPinned` for `@local` must submit to the CALLER's scheduler, not round-robin:
-```zig
-try fp.active_scheduler.submitSpawn(...);  // not global round-robin
-```
+**Verified:** 25+ runs at `THREADS=2/4/8/16/32`, Counter consistently
+`10240000` (no torn writes, no crashes).
 
 ### Benchmark 16: pubsub (intermittent, ~20% crash rate)
 
@@ -95,11 +73,11 @@ Not investigated yet. Likely fiber stack overhead (32 workers x 64KB = 2MB minim
 
 ## Summary by Root Cause
 
-| Root Cause | Affected | Type | Fix Location |
-|-----------|----------|------|-------------|
-| `insert_bg_escape_promote!` misses nested BG blocks | 10 | segfault | `src/control_flow.rb` |
-| `string_captures` frees .rodata literals | 10 | segfault | `src/capabilities.rb` |
-| `spawnPinned` round-robins `@local` fibers | 11, possibly 16 | segfault | `zig/runtime-header.zig` |
+| Root Cause | Affected | Type | Status |
+|-----------|----------|------|--------|
+| ~~`insert_bg_escape_promote!` misses nested BG blocks~~ | 02 | segfault | FIXED — walker descends into MethodCall args |
+| ~~`string_captures` frees .rodata literals~~ | 02 | segfault | FIXED — consumer removed |
+| ~~`spawnPinned` round-robins `@local` fibers~~ | 03, possibly 16 | segfault | FIXED — `pin_mode :local` lowers to `rt.getSched().submitSpawn` |
 | Frame arena ArrayList growth waste | 19 | memory | fundamental arena limitation |
 | Two-phase SHARD pattern materializes all keys | 19 | memory | benchmark design |
 | Shard `put()` vs `putDirect()` key leaks | 19 | memory | compiler codegen |

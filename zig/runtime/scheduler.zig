@@ -234,7 +234,13 @@ pub const Scheduler = struct {
     // long-running legitimate waits don't spuriously time out; 100ms in
     // Debug builds so WITH ... ON <selector> clauses are actually
     // exercised by tests under contention.
-    lock_timeout_ms: i64 = if (builtin.mode == .Debug) 100 else 30_000,
+    // Default lock-acquire timeout (per-WAIT, not per-program). Debug
+    // mode used to be 100ms to surface hangs quickly during development,
+    // but high-concurrency benchmarks (14_nested_lock at THREADS=$(nproc))
+    // genuinely sit on contended mutexes longer than that and false-fail.
+    // 5s in Debug is still much shorter than Release's 30s and catches
+    // real bugs without strangling realistic workloads.
+    lock_timeout_ms: i64 = if (builtin.mode == .Debug) 5_000 else 30_000,
 
     /// Stable index assigned at registration (0..N-1).  Used by
     /// PartitionedStringMap to determine shard ownership.

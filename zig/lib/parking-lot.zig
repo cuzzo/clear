@@ -104,6 +104,20 @@ inline fn getScheduler() ?*fp.Scheduler {
 // resolvable by one party backing off). Depth-limited to 64 to guard
 // against corrupted state. Read locks store null in waiting_for_lock_owner
 // and act as chain terminators.
+// Walk the owner chain from `owner` looking for `waiter`. If found,
+// return error.Deadlock when the owner is the waiter (depth 0,
+// self-cyclic, always a user bug) or error.LockCycle when the cycle
+// is multi-hop (AB/BA, resolvable by one party backing off).
+// Depth-limited to 64 to guard against corrupted state. Read locks
+// store null in waiting_for_lock_owner and act as chain terminators.
+//
+// Best-effort under TOCTOU: per-Task fields are atomic with paired
+// release/acquire ordering (see queues.zig for park/wake store order),
+// but a chain walk across N Tasks isn't a single atomic snapshot.
+// 14_nested_lock at THREADS>=4 with a strict-address-ordered workload
+// can still trigger a false-positive panic from a stale-but-consistent
+// chain observation -- documented in benchmarks/tofix.md as the
+// remaining structural fix needed (likely a packed atomic state).
 fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!void {
     var current = owner;
     var depth: usize = 0;
@@ -124,7 +138,12 @@ fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!voi
             return error.LockCycle;
         }
         if (depth >= 64) break;
-        current = holder.waiting_for_lock_owner;
+        // Pair an .acquire load on `waiting_for_lock` with the .release
+        // store the holder did when parking. If `lock` is null, the
+        // holder isn't actually parked -- chain ends regardless of the
+        // owner field (which may still hold a stale pre-wake pointer).
+        if (holder.waiting_for_lock.load(.acquire) == null) break;
+        current = holder.waiting_for_lock_owner.load(.acquire);
     }
 }
 
@@ -324,20 +343,27 @@ pub const ParkingMutex = struct {
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
         self.waiters.push(&node);
+        // Park-side ordering: owner FIRST, then lock with .release. Cycle
+        // detection on another core does an .acquire load of `lock`; if
+        // it sees a non-null lock, it is guaranteed (release/acquire pair)
+        // to also see the matching owner store.
+        task.waiting_for_lock_owner.store(current_owner, .release);
         task.waiting_for_lock.store(self, .release);
         task.waiting_for_lock_list = &self.waiters;
         task.lock_waiter_node = &node;
-        task.waiting_for_lock_owner = current_owner;
         task.status.store(.Blocked, .release);
         self.spinReleaseQueue();
 
         sched.registerLockWaiter(task);
         task.base.yield();
 
+        // Wake-side ordering: lock FIRST, then owner -- mirror image of
+        // park. A reader that observes lock == null will not follow a
+        // stale owner link.
         task.waiting_for_lock.store(null, .release);
+        task.waiting_for_lock_owner.store(null, .release);
         task.waiting_for_lock_list = null;
         task.lock_waiter_node = null;
-        task.waiting_for_lock_owner = null;
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;
@@ -377,10 +403,13 @@ pub const ParkingMutex = struct {
                 const new_state: u64 = STATE_LOCKED | sleeper_bit | more_bit
                     | @intFromPtr(w.task);
                 self.state.store(new_state, .release);
-                w.task.waiting_for_lock_owner = null;
+                // Wake-side ordering: lock cleared FIRST (with .release)
+                // so a concurrent detectCycle reader sees lock==null and
+                // does not chase a stale waiting_for_lock_owner.
+                w.task.waiting_for_lock.store(null, .release);
+                w.task.waiting_for_lock_owner.store(null, .release);
                 w.task.waiting_for_lock_list = null;
                 w.task.lock_waiter_node = null;
-                w.task.waiting_for_lock.store(null, .release);
                 const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                 sched.submitResume(w.task);
                 self.spinReleaseQueue();
@@ -538,20 +567,22 @@ pub const ParkingRwLock = struct {
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
         self.waiters.push(&node);
+        // Park-side ordering: owner FIRST, then lock with .release.
+        task.waiting_for_lock_owner.store(current_write_owner, .release);
         task.waiting_for_lock.store(self, .release);
         task.waiting_for_lock_list = &self.waiters;
         task.lock_waiter_node = &node;
-        task.waiting_for_lock_owner = current_write_owner;
         task.status.store(.Blocked, .release);
         self.spinReleaseQueue();
 
         sched.registerLockWaiter(task);
         task.base.yield();
 
+        // Wake-side ordering: lock FIRST, then owner.
         task.waiting_for_lock.store(null, .release);
+        task.waiting_for_lock_owner.store(null, .release);
         task.waiting_for_lock_list = null;
         task.lock_waiter_node = null;
-        task.waiting_for_lock_owner = null;
 
         if (task.lock_timed_out) {
             task.lock_timed_out = false;
@@ -733,10 +764,11 @@ pub const ParkingRwLock = struct {
                     }
                     const w = self.waiters.pop().?;
                     self.write_owner.store(w.task, .release);
-                    w.task.waiting_for_lock_owner = null;
+                    // Wake-side ordering: lock cleared FIRST.
+                    w.task.waiting_for_lock.store(null, .release);
+                    w.task.waiting_for_lock_owner.store(null, .release);
                     w.task.waiting_for_lock_list = null;
                     w.task.lock_waiter_node = null;
-                    w.task.waiting_for_lock.store(null, .release);
                     const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                     sched.submitResume(w.task);
                     return; // grant one writer per wakeNext

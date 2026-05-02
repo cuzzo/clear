@@ -372,7 +372,22 @@ pub const Task = struct {
     // Set to the exclusive owner of the lock this task is blocked on.
     // Used by cycle detection: follow the chain task -> owner -> owner -> ...
     // Null when not blocked or blocked on a read lock (no single owner).
-    waiting_for_lock_owner: ?*Task = null,
+    //
+    // Atomic because cross-thread cycle-detection reads this field while
+    // unlock() / park() write it on a different core. Plain *Task lets a
+    // reader observe a torn / stale value: the unlock writes
+    //     owner = null  (plain store)
+    //     lock  = null  (atomic .release store)
+    // and a reader on another core can see lock != null with owner = null
+    // (or vice-versa) until cache coherency settles. Park() has the
+    // mirror-image issue (lock set before owner), so detectCycle could
+    // follow a stale `owner == waiter` link when the holder has been
+    // woken but not yet re-scheduled, and false-positive LockCycle.
+    // Repro: 14_nested_lock at THREADS=4. Atomic semantics + ordered
+    // park (owner-then-lock with .release) + ordered unlock (lock-then-
+    // owner with .release) lets the reader pair an .acquire on lock with
+    // the most-recent owner write.
+    waiting_for_lock_owner: std.atomic.Value(?*Task) = std.atomic.Value(?*Task).init(null),
     // Set by ParkingRwLock when parking as a write-lock waiter. On timeout,
     // the scheduler decrements this counter (writers_waiting) so future readers
     // are not permanently blocked by a phantom writer count.
