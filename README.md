@@ -98,6 +98,8 @@ However, CLEAR has a sane policy for handling synchronization failures for proto
 
 Further, you can restrict the type of shared objects you allow, if you explictly do not want your function to have certain effects, like BLOCKING or LATENCY.
 
+In this example, AtomicPtrs (@shared:atomic) do not support multi-object consistency, and are automatically be dropped from the list of allowed synchronization strategies.
+
 
 ### The Finite State Machine Advantage
 
