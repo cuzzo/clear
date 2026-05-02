@@ -51,7 +51,7 @@ Milestone: *Basic* SQL/CLEAR database
  - [ ] Generic Observables
  - [ ] Implement lock-free ringbuffer as a syncronization capability (with backpressure)
  - [ ] ARM support
- - [ ] Actors as an ownership capability
+ - [ ] Shared Actors as an ownership capability (not distributed, that comes v0.4 -> these are MSFT Orleans style)
  - [ ] copyOnWrite
  - [ ] Ability to write custom Control Plane strategies
  - [ ] Control Plane Capability Migration -> live shift contented workloads
