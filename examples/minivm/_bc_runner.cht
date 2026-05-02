@@ -2566,6 +2566,18 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     -- Each exec! call has its own table -- spawned fibers can recurse
     -- into exec! and each call has its own bookkeeping.
     MUTABLE futureTable: ~Value[]@list = List[];
+    -- Memoize resolved Promise values: `~T@shared` semantics in CLEAR
+    -- guarantee multi-NEXT idempotence, but BC stores plain `Promise(T)`
+    -- handles in futureTable. Promise.next() destroys its heap-allocated
+    -- Inner on the first call (zig/lib/data-structures.zig:505); a
+    -- second next() on the same handle reads `inner.wg.wait()` from
+    -- freed memory (UAF, then double-free of Inner on the second
+    -- destroy). DebugAllocator catches both -- the BC test runner
+    -- surfaces it as `free(): double free detected in tcache 2`.
+    -- Cache the resolved Value here so AWAIT (and the inf-stream drain
+    -- loop) can short-circuit on repeat consumption. Keyed by the
+    -- futureTable index as a string (HashMap<Int64> isn't a thing).
+    MUTABLE futureResolved: HashMap<Value> = {};
     -- Channel envIds + future indices for producer-fiber streams
     -- (~T[INF] BG STREAM). STREAM_SPAWN populates; the exec! shutdown
     -- loop closes each channel + drains the matching future so the
@@ -3335,7 +3347,13 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         IF getSymName(pcar) == "__future__" THEN
                             fid = getInt(fp.pairCdr);
                             IF fid >= 0_i64 && fid < futureTable.length() THEN
-                                pv = NEXT futureTable[fid];
+                                fkey = fid.toString();
+                                IF futureResolved[fkey] AS cached THEN
+                                    pv = COPY cached;
+                                ELSE
+                                    pv = NEXT futureTable[fid];
+                                    futureResolved[fkey] = COPY pv;
+                                END
                             ELSE
                                 pv = COPY fp.pairCdr;
                             END
@@ -3356,7 +3374,14 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                                     IF getSymName(aliCar) == "__future__" THEN
                                         aliFid = getInt(aliP.pairCdr);
                                         IF aliFid >= 0_i64 && aliFid < futureTable.length() THEN
-                                            awaitedList.append(NEXT futureTable[aliFid]);
+                                            aliKey = aliFid.toString();
+                                            IF futureResolved[aliKey] AS aliCached THEN
+                                                awaitedList.append(COPY aliCached);
+                                            ELSE
+                                                aliRes = NEXT futureTable[aliFid];
+                                                futureResolved[aliKey] = COPY aliRes;
+                                                awaitedList.append(COPY aliRes);
+                                            END
                                         ELSE
                                             awaitedList.append(COPY aliP.pairCdr);
                                         END
