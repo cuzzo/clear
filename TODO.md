@@ -20,7 +20,7 @@
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
-## v0.2 (Target = July 15)
+## v0.1.5 (Target = May 30)
 
  - [x] Finite State Machines
  - [x] Re-entrant Thunks (to avoid unbounded recursive growth, auto insert max_depth, auto-insert co-operative yields)
@@ -28,6 +28,9 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Observable aggregations for streaming pipelines (@shared aggregate results)
  - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
  - [x] Atomics
+ - [ ] True Synchronization Polymorphism
+
+ ## v0.2 (Target = July 15)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
  - [ ] Typed Holes
  - [ ] Cancelable fibers
