@@ -103,7 +103,7 @@ In this example, AtomicPtrs (@shared:atomic) do not support multi-object consist
 
 ### The Finite State Machine Advantage
 
-Because CLEAR's concurrency is declarative, the compiler has total visibility into the lifecycle of your tasks. In Go, every Goroutine requires allocating a continuous stack (often 2KB+), which means 1 million idle connections consumes gigabytes of RAM.
+Because CLEAR's concurrency is declarative, the compiler has total visibility into the lifecycle of your tasks. In Go, every Goroutine requires allocating a continuous stack (2KB+, often 8KB+ for web requests), which means 1 million idle connections consumes gigabytes of RAM.
 
 In CLEAR, the compiler lowers the vast majority of concurrent tasks (anything that isn't strictly reentrant) into Finite State Machines rather than stack-allocated fibers. This allows CLEAR to handle millions of concurrent operations with the memory footprint of Rust/Tokio's async/await, but with the developer ergonomics of Go's blocking syntax.
 
