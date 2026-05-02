@@ -150,6 +150,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "io-pressure-test.zig", .tsan = true },
         .{ .path = "iouring-test.zig", .tsan = true },
         .{ .path = "net-steal-hammer-test.zig", .tsan = true },
+        .{ .path = "parking-lot-cycle-test.zig", .tsan = true },
         .{ .path = "parking-lot-hammer-test.zig", .tsan = true },
         .{ .path = "parking-lot-loom-test.zig", .tsan = true },
         .{ .path = "parking-lot-test.zig", .tsan = true },
