@@ -97,9 +97,9 @@ This may raise eyebrows if you come from Zig or Rust.  In STRICT mode, you must 
 
 To support rapid prototyping, CLEAR has a sane policy for handling synchronization failures when compiling in non-STRICT mode (default).  You can also set your own policy to overide the system defaults, or compile in STRICT mode where failure methods must be handled inline.
 
-Further, you can restrict the type of shared objects you allow, if you explictly do not want your function to have certain effects, like BLOCKING or LATENCY.
+Further, you can restrict the type of shared objects you allow, if you explictly do not want your function to have certain effects, like `BLOCKING` or `LATENCY`.
 
-In this example, AtomicPtrs (@shared:atomic) do not support multi-object consistency, and are automatically dropped from the list of allowed synchronization strategies.
+In this example, AtomicPtrs (`@shared:atomic`) do not support multi-object consistency, and are automatically dropped from the list of allowed synchronization strategies.
 
 See the [Capabilities Guide](docs/shared-capabilities.md) for more details.
 
