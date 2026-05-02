@@ -468,6 +468,12 @@ module AST
     attr_accessor :storage        # :heap when carry-var concat promoted to heap (stamped by Phase 1.5c)
     attr_accessor :or_fallback_dupe  # true when OR_RESCUE fallback struct needs string-field heap dupe
     attr_accessor :paren_bind     # true when this :BIND_VAR was wrapped in parens: (expr AS name)
+    # Lazy positions: fields whose lowering must NOT leak @pending_stmts to
+    # outer scope. The lowering's `descend` helper consults this and wraps
+    # the field's emission in MIR::BlockExpr when the field actually emitted
+    # any pending allocs. OR_RESCUE's right side is the fallback expression;
+    # its allocations must only run when the orelse short-circuits to it.
+    def lazy_fields = (op == :OR_RESCUE ? [:right] : [])
   end
   UnaryOp      = Struct.new(:token, :op, :right) { include Locatable }
   Identifier   = Struct.new(:token, :name) do

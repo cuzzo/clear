@@ -60,6 +60,38 @@ class MIRLowering
     stmts
   end
 
+  # Lower a sub-expression in a scope where its @pending_stmts must NOT
+  # leak to outer scope. Yields to the caller (which calls lower); captures
+  # any pending allocs emitted during the block; if any, wraps the result
+  # in a MIR::BlockExpr that contains those pending stmts. Restores outer
+  # @pending_stmts. Used at "lazy" positions (orelse fallback, fiber body)
+  # so that allocations done while lowering a may-not-execute sub-expression
+  # only execute when the sub-expression actually runs.
+  def lower_scoped
+    prev = @pending_stmts
+    @pending_stmts = []
+    result = yield
+    scoped = @pending_stmts
+    @pending_stmts = prev
+    return result if scoped.empty?
+    @block_expr_counter += 1
+    label = "__lazy_#{@block_expr_counter}"
+    MIR::BlockExpr.new(label, scoped + [MIR::BreakStmt.new(label, result)])
+  end
+
+  # Lower `parent.<field>` and apply lower_scoped iff parent declares the
+  # field as lazy via AST::Node#lazy_fields. Single entry point so callers
+  # never write the save/restore pattern by hand. New lazy positions are
+  # added by adding a `lazy_fields` method to the relevant AST class.
+  def descend(parent, field)
+    child = parent.send(field)
+    if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
+      lower_scoped { lower(child) }
+    else
+      lower(child)
+    end
+  end
+
   # Returns true when an MIR expression node performs a HEAP allocation.
   # Used by hoist_alloc to decide whether to hoist to a named Let.
   #
@@ -3748,63 +3780,15 @@ class MIRLowering
       return left
     end
 
-    # Default: expr OR fallback -> error union catch or optional orelse
-
-    # Early path: OR fallback struct with string fields.
-    # Detect BEFORE calling lower(node.right) so hoist_alloc never fires for
-    # CopyNode-wrapped string literals. Outer-scope errdefer temps from hoist_alloc
-    # are never cleaned up on the success path (the catch block never runs), causing
-    # a leak — especially inside BG fibers where errdefer fires only on fiber error.
-    if is_error && node.right.is_a?(AST::StructLit)
-      ret_type = node.right.full_type
-      ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
-      resolved = ret_type&.resolved
-      schema = @struct_schemas&.dig(resolved)
-      string_fields = schema&.filter_map do |fname, fdef|
-        next if fname.is_a?(Symbol)
-        ft = (fdef.is_a?(Hash) ? fdef[:type] : fdef)
-        ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-        fname if ft.string?
-      end || []
-      if string_fields.any?
-        rt_name = @rt_name
-        left_raw = emit_expr(strip_try(left))
-        # Build struct init without CopyNode-triggered hoist_alloc: unwrap
-        # CopyNode-wrapped rodata string literals to raw literals so lower()
-        # returns MIR::Lit instead of MIR::DeepCopy (which would trigger hoist_alloc).
-        # The inline dupe() inside the catch block handles heap promotion.
-        fields_zig = node.right.fields.map { |k, v|
-          v_lit = if v.is_a?(AST::CopyNode) && v.value.is_a?(AST::Literal) &&
-                     v.value.type_info&.string? && v.value.type_info&.rodata?
-            v.value
-          else
-            v
-          end
-          ".#{k} = #{emit_expr(lower(v_lit))}"
-        }.join(", ")
-        type_name = node.right.name.to_s
-        right_zig = ".{ #{fields_zig} }"
-        # Dupe each string field with proper cleanup on partial failure:
-        # - First field: `try dupe(...)` — propagates OOM, no prior state to clean up.
-        # - Each subsequent field: catch, free all previously-duped fields, re-return error.
-        promos = string_fields.each_with_index.map { |f, i|
-          if i == 0
-            "__fb.#{f} = try #{rt_name}.heapAlloc().dupe(u8, __fb.#{f});"
-          else
-            frees = string_fields[0...i].map { |prev| "#{rt_name}.heapAlloc().free(__fb.#{prev});" }.join(" ")
-            "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch |__dupe_err| { #{frees} return __dupe_err; };"
-          end
-        }.join(" ")
-        iz = MIR::InlineZig.new(
-          "(#{left_raw} catch __fb: { var __fb: #{type_name} = #{right_zig}; #{promos} break :__fb __fb; })",
-          "or_fallback_dupe"
-        )
-        iz.stdlib_def = { allocates: true }
-        return iz
-      end
-    end
-
-    right = lower(node.right)
+    # Default: expr OR fallback -> error union catch or optional orelse.
+    # The fallback is evaluated lazily (only when left short-circuits to it),
+    # so any allocations done while lowering it must NOT escape to outer
+    # @pending_stmts. AST::BinaryOp#lazy_fields declares :right as lazy when
+    # op == :OR_RESCUE; descend() consults that and wraps the right side in
+    # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
+    # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
+    # block, only when actually entered.
+    right = descend(node, :right)
 
     if is_error
       return MIR::TryCatch.new(strip_try(left), right, nil)
