@@ -608,6 +608,24 @@ when 'build'
       # Catches double-free and use-after-free with stack traces.
       use_debug_allocator = true
       i += 1
+    when '--tsan'
+      # ThreadSanitizer — requires LLVM backend + optimization. Forces
+      # ReleaseSafe + LLVM (stage2 doesn't support TSan instrumentation).
+      opt_level = 'ReleaseSafe'
+      extra_flags = ['-fsanitize-thread']
+      i += 1
+    when '--asan'
+      # UndefinedBehaviorSanitizer (closest Zig has to ASan). Catches OOB,
+      # null deref, alignment errors. Requires LLVM backend + ReleaseSafe.
+      opt_level = 'ReleaseSafe'
+      extra_flags = ['-fsanitize-c=full']
+      i += 1
+    when '--debug-llvm'
+      # Debug optimization but with LLVM backend (vs default stage2). Useful
+      # for isolating stage2 codegen bugs from runtime logic bugs.
+      opt_level = 'Debug'
+      extra_flags = []
+      i += 1
     else
       remaining << args[i]
       i += 1
