@@ -1,7 +1,7 @@
 -- Test: heap-promoted string temporaries passed to functions.
 -- Verifies no double-free or use-after-free.
 
-FN buildStr(name: String) RETURNS String ->
+FN buildStr(name: String) RETURNS !String ->
     RETURN "Hello, " + name + "!";
 END
 

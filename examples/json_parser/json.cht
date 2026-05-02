@@ -25,7 +25,7 @@ UNION JsonValue {
 -- Printer (for test output)
 -- =========================================================================
 
-FN jsonToString(v: JsonValue) RETURNS String EFFECTS REENTRANT ->
+FN jsonToString(v: JsonValue) RETURNS !String EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         JsonValue.Null -> RETURN "null";,
         JsonValue.JBool AS b -> IF b THEN RETURN "true"; END RETURN "false";,
@@ -49,7 +49,7 @@ END
 -- Parser: returns JsonValue. Position communicated via penv["__jp"].
 -- =========================================================================
 
-FN skipWhitespace(json: String, pos: Int64) RETURNS Int64 ->
+FN skipWhitespace(json: String, pos: Int64) RETURNS !Int64 ->
     MUTABLE p: Int64 = pos;
     WHILE p < json.length() DO
         c = charAt(json, p);
@@ -62,7 +62,7 @@ FN skipWhitespace(json: String, pos: Int64) RETURNS Int64 ->
     RETURN p;
 END
 
-FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS String ->
+FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS !String ->
     -- pos points at the opening "
     MUTABLE p: Int64 = pos + 1;
     MUTABLE result = "";
@@ -92,7 +92,7 @@ FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS 
     RETURN result;
 END
 
-FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: Int64) RETURNS JsonValue EFFECTS REENTRANT ->
+FN parseValue!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>, depth: Int64) RETURNS !JsonValue EFFECTS REENTRANT ->
     MUTABLE p = skipWhitespace(json, pos);
 
     IF p >= json.length() THEN
@@ -216,7 +216,7 @@ END
 -- jsonGet: traverse object by dot-separated path
 -- =========================================================================
 
-FN jsonGet!(MUTABLE v: JsonValue, key: String) RETURNS JsonValue ->
+FN jsonGet!(MUTABLE v: JsonValue, key: String) RETURNS !JsonValue ->
     PARTIAL MATCH v START
         JsonValue.JObj AS map ->
             raw = map[key] OR JsonValue.Null;

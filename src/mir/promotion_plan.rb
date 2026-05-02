@@ -35,6 +35,14 @@ module PromotionClassifier
     ret_type_sym = fn_node.return_type
     return {} unless ret_type_sym
     ret_type = ret_type_sym.is_a?(Type) ? ret_type_sym : Type.new(ret_type_sym)
+    # Unwrap `!T` so the union/struct schema lookup below (and string?/Void
+    # short-circuits) sees the underlying type. Post-#338, `RETURNS !Val`
+    # is common; without this unwrap, schema_lookup(:!Val) misses the
+    # registered :Val schema and the promote path never fires, leaving
+    # frame-allocated union variant fields dangling at the caller.
+    if ret_type.error_union? && ret_type.payload_type
+      ret_type = ret_type.payload_type
+    end
     return {} if ret_type.resolved == :Void
     return {} if ret_type.string?
 

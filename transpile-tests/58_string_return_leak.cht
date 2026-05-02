@@ -1,7 +1,7 @@
 -- Memory leak test: functions that return strings built from concat
 -- must not leak heap memory. The caller's frame should own the result.
 
-FN buildGreeting(name: String) RETURNS String ->
+FN buildGreeting(name: String) RETURNS !String ->
     RETURN "Hello, " + name + "!";
 END
 

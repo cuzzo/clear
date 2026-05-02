@@ -39,7 +39,7 @@ RSpec.describe "COPY keyword" do
   it "allows storing COPY of borrowed parameter into HashMap" do
     src = <<~CLEAR
       UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
-      FN test!(v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+      FN test!(v: Value, MUTABLE map: HashMap<Value>) RETURNS !Void ->
           owned = COPY v;
           map["key"] = owned;
           RETURN;
@@ -54,7 +54,7 @@ RSpec.describe "COPY keyword" do
   it "allows storing COPY of borrowed slice into union variant" do
     src = <<~CLEAR
       UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
-      FN test(items: Value[]) RETURNS Value ->
+      FN test(items: Value[]) RETURNS !Value ->
           ownedItems = COPY items;
           RETURN Value.Lambda{ params: ownedItems, body: Value{ Num: 0.0 }, id: 1 };
       END
@@ -69,7 +69,7 @@ RSpec.describe "COPY keyword" do
     src = <<~CLEAR
       STRUCT Env { x: Int64 }
       UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
-      FN test!(v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+      FN test!(v: Value, MUTABLE pool: Env[10]@pool) RETURNS !Value ->
           pool.insert(Env{ x: 1 });
           owned = COPY v;
           RETURN owned;

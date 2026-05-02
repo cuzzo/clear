@@ -50,7 +50,7 @@ RSpec.describe StringConcatRewriter do
   describe "4-part concat flattens correctly" do
     it "flattens a + b + c + d into StringConcat([a, b, c, d])" do
       ast = rewrite(<<~CLEAR)
-        FN greet(name: String) RETURNS String ->
+        FN greet(name: String) RETURNS !String ->
             RETURN "Hello, " + name + "! " + "Welcome.";
         END
         FN main() RETURNS Void -> PASS END

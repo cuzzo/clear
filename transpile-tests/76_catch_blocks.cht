@@ -12,7 +12,7 @@ FN riskyOp(mode: String) RETURNS !String ->
 END
 
 -- Function with CATCH blocks
-FN handleWithCatch(mode: String) RETURNS String ->
+FN handleWithCatch(mode: String) RETURNS !String ->
     result = riskyOp(mode) OR RAISE;
     RETURN result;
 

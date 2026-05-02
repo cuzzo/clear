@@ -13,7 +13,7 @@ STRUCT Node {
 STRUCT TreeStats { insertCount: Int64, searchCount: Int64 }
 STRUCT ResultSet { keys: Int64[]@list, count: Int64 }
 
-FN makeResultSet(count: Int64) RETURNS ResultSet @multiowned ->
+FN makeResultSet(count: Int64) RETURNS !ResultSet @multiowned ->
     MUTABLE ks: Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < count DO
@@ -23,7 +23,7 @@ FN makeResultSet(count: Int64) RETURNS ResultSet @multiowned ->
     RETURN ResultSet{ keys: ks, count: count } @multiowned;
 END
 
-FN childKey(parentIdx: Int64, pos: Int64) RETURNS String ->
+FN childKey(parentIdx: Int64, pos: Int64) RETURNS !String ->
     RETURN "${parentIdx.toString()}:${pos.toString()}";
 END
 
@@ -36,7 +36,7 @@ FN findKeyIndex(keys: Int64[]@list, key: Int64) RETURNS Int64 ->
     RETURN i;
 END
 
-FN scanWithFilter(keys: Int64[]@list, filter: FN(Int64) -> Bool) RETURNS Int64 ->
+FN scanWithFilter(keys: Int64[]@list, filter: FN(Int64) -> Bool) RETURNS !Int64 ->
     MUTABLE count: Int64 = 0;
     MUTABLE i: Int64 = 0;
     WHILE i < keys.length() DO

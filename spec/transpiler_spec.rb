@@ -67,7 +67,7 @@ RSpec.describe ZigTranspiler do
         c21: Chunk5, c22: Chunk5, c23: Chunk5, c24: Chunk5, c25: Chunk5,
         c26: Chunk5
       }
-      FN buildList() RETURNS Float64[]@list ->
+      FN buildList() RETURNS !Float64[]@list ->
         zero: Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
         big: BigS = BigS{
           c1: zero, c2: zero, c3: zero, c4: zero, c5: zero,
@@ -109,7 +109,7 @@ RSpec.describe ZigTranspiler do
   # ===========================================================================
   describe "String HashMap escape promotion" do
     let(:map_return_src) { <<~CLEAR }
-      FN buildMap() RETURNS HashMap<Int64> ->
+      FN buildMap() RETURNS !HashMap<Int64> ->
         MUTABLE m: HashMap<Int64> = {};
         m["x"] = 1_i64;
         m["y"] = 2_i64;
@@ -244,7 +244,7 @@ RSpec.describe ZigTranspiler do
     # in Pass 2. This test will pass when LoopFrameAnalysis sets them correctly.
     it "Phase 2: emits saveLoopMark in SHARD producer when key expression allocates from frame" do
       src = <<~CLEAR
-        FN makeKey(n: Int64) RETURNS String ->
+        FN makeKey(n: Int64) RETURNS !String ->
             RETURN "k:${toString(n)}";
         END
 
@@ -263,7 +263,7 @@ RSpec.describe ZigTranspiler do
 
     it "emits putDirect in SHARD worker body (not generic put)" do
       src = <<~CLEAR
-        FN makeKey(n: Int64) RETURNS String ->
+        FN makeKey(n: Int64) RETURNS !String ->
             RETURN "k:${toString(n)}";
         END
 
@@ -285,7 +285,7 @@ RSpec.describe ZigTranspiler do
 
     it "emits getDirect in SHARD worker body (not generic get)" do
       src = <<~CLEAR
-        FN makeKey(n: Int64) RETURNS String ->
+        FN makeKey(n: Int64) RETURNS !String ->
             RETURN "k:${toString(n)}";
         END
 
@@ -633,7 +633,7 @@ RSpec.describe ZigTranspiler do
   describe "HashMap param double-& fix" do
     it "does not double-wrap HashMap params with & in recursive calls" do
       src = <<~CLEAR
-        FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS Int64 @reentrant ->
+        FN update!(key: String, MUTABLE env: HashMap<Int64>, depth: Int64) RETURNS !Int64 @reentrant ->
             env[key] = depth;
             IF depth > 0 THEN RETURN update!(key, env, depth - 1); END
             RETURN depth;
@@ -690,7 +690,7 @@ RSpec.describe ZigTranspiler do
     it "implicit-copies @list in struct field (heap buffer via CopyNode)" do
       src = <<~CLEAR
         STRUCT Pair { items: Int64[], count: Int64 }
-        FN build() RETURNS Pair ->
+        FN build() RETURNS !Pair ->
             MUTABLE vals: Int64[]@list = List[];
             vals.append(1_i64);
             vals.append(2_i64);
@@ -708,7 +708,7 @@ RSpec.describe ZigTranspiler do
     it "suppresses defer deinit for escaped @list in struct return" do
       src = <<~CLEAR
         STRUCT Pair { items: Int64[], count: Int64 }
-        FN build() RETURNS Pair ->
+        FN build() RETURNS !Pair ->
             MUTABLE vals: Int64[]@list = List[];
             vals.append(1_i64);
             RETURN Pair{ items: vals, count: 1 };
@@ -728,7 +728,7 @@ RSpec.describe ZigTranspiler do
   describe "function-level frame mark" do
     it "emits saveFrameMark for uses_alloc function returning Void" do
       src = <<~CLEAR
-        FN f(s: String) RETURNS Void ->
+        FN f(s: String) RETURNS !Void ->
           parts = split(s, ",");
           RETURN;
         END
@@ -743,7 +743,7 @@ RSpec.describe ZigTranspiler do
 
     it "skips frame mark for frame-string-returning function (result in caller's frame region)" do
       src = <<~CLEAR
-        FN f(s: String) RETURNS String ->
+        FN f(s: String) RETURNS !String ->
           parts = split(s, ",");
           RETURN s;
         END
@@ -764,7 +764,7 @@ RSpec.describe ZigTranspiler do
     it "emits saveFrameMark for function returning an ENUM value (value type)" do
       src = <<~CLEAR
         ENUM Status { Ok, Err }
-        FN check(s: String) RETURNS Status ->
+        FN check(s: String) RETURNS !Status ->
           parts = split(s, ",");
           RETURN Status.Ok;
         END
@@ -787,7 +787,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
-        FN test!(MUTABLE pool: Env[10]@pool, MUTABLE map: HashMap<Value>) RETURNS Void ->
+        FN test!(MUTABLE pool: Env[10]@pool, MUTABLE map: HashMap<Value>) RETURNS !Void ->
             pool.insert(Env{ x: 1 });
             val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
             map["key"] = val;
@@ -804,7 +804,7 @@ RSpec.describe ZigTranspiler do
     it "does not suppress val cleanup when map assignment deep-copies the value" do
       src = <<~CLEAR
         UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
-        FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+        FN test!(MUTABLE map: HashMap<Value>) RETURNS !Void ->
             val = Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };
             map["key"] = val;
             RETURN;
@@ -822,7 +822,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
-        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS !Value ->
             pool.insert(Env{ x: 1 });
             PARTIAL MATCH v START
                 Value.Lambda AS lam -> RETURN Value.Nil;,
@@ -840,7 +840,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
-        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS !Value ->
             pool.insert(Env{ x: 1 });
             PARTIAL MATCH TAKES v START
                 Value.Lambda AS lam -> RETURN Value.Nil;,
@@ -858,7 +858,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         STRUCT Env { x: Int64 }
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
-        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+        FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS !Value ->
             pool.insert(Env{ x: 1 });
             PARTIAL MATCH v START
                 Value.Num AS n -> RETURN Value{ Num: n };,
@@ -873,7 +873,7 @@ RSpec.describe ZigTranspiler do
     end
     it "heap-dupes string literal value in HashMap assignment" do
       src = <<~CLEAR
-        FN test!(MUTABLE map: HashMap<String>) RETURNS Void ->
+        FN test!(MUTABLE map: HashMap<String>) RETURNS !Void ->
             map["key"] = "hello";
             RETURN;
         END
@@ -887,7 +887,7 @@ RSpec.describe ZigTranspiler do
     it "heap-dupes string literal inside union value in HashMap assignment" do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
-        FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+        FN test!(MUTABLE map: HashMap<Value>) RETURNS !Void ->
             map["key"] = Value{ Str: "world" };
             RETURN;
         END
@@ -899,7 +899,7 @@ RSpec.describe ZigTranspiler do
     it "MATCH AS on non-Copy variant emits cleanup on binding (auto-TAKES)" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
-        FN test!() RETURNS Void ->
+        FN test!() RETURNS !Void ->
             result = Value{ Num: 1.0 };
             PARTIAL MATCH result START
                 Value.List AS items -> RETURN;,
@@ -916,7 +916,7 @@ RSpec.describe ZigTranspiler do
     it "MATCH TAKES emits cleanup on AS binding" do
       src = <<~CLEAR
         UNION Value { Num: Float64, List: Value[] }
-        FN test!() RETURNS Void ->
+        FN test!() RETURNS !Void ->
             result = Value{ Num: 1.0 };
             PARTIAL MATCH TAKES result START
                 Value.List AS items -> RETURN;,
@@ -935,7 +935,7 @@ RSpec.describe ZigTranspiler do
     it "emits cleanup of old value before overwriting non-Copy union" do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
-        FN makeStr(s: String) RETURNS Value -> RETURN Value{ Str: COPY s }; END
+        FN makeStr(s: String) RETURNS !Value -> RETURN Value{ Str: COPY s }; END
         FN main() RETURNS Void ->
             MUTABLE result = makeStr("hello");
             result = makeStr("world");
@@ -950,7 +950,7 @@ RSpec.describe ZigTranspiler do
   describe "Heap-promoted temporary from function call gets cleanup" do
     it "emits cleanup for heap string temporary passed to print" do
       src = <<~CLEAR
-        FN makeStr() RETURNS String -> RETURN COPY "hello"; END
+        FN makeStr() RETURNS !String -> RETURN COPY "hello"; END
         FN main() RETURNS Void ->
             print(makeStr());
             RETURN;
@@ -1037,7 +1037,7 @@ RSpec.describe ZigTranspiler do
     it "stores directly without __hpt wrapper" do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
-        FN makeValue() RETURNS Value -> RETURN Value{ Str: COPY "hello" }; END
+        FN makeValue() RETURNS !Value -> RETURN Value{ Str: COPY "hello" }; END
         FN main() RETURNS Void ->
             MUTABLE map: HashMap<Value> = {};
             map["key"] = makeValue();
@@ -1054,8 +1054,8 @@ RSpec.describe ZigTranspiler do
     it "returns directly from heap_promoted function without __hpt wrapper" do
       src = <<~CLEAR
         UNION Value { Nil, Str: String }
-        FN makeValue() RETURNS Value -> RETURN Value{ Str: COPY "hello" }; END
-        FN wrapper() RETURNS Value -> RETURN makeValue(); END
+        FN makeValue() RETURNS !Value -> RETURN Value{ Str: COPY "hello" }; END
+        FN wrapper() RETURNS !Value -> RETURN makeValue(); END
         FN main() RETURNS Void ->
             v = wrapper();
             RETURN;
@@ -1110,7 +1110,7 @@ RSpec.describe ZigTranspiler do
     it "emits cleanup for heap string returned by TAKES function" do
       src = <<~CLEAR
         UNION Value { Nil, Symbol: String, List: Value[] }
-        FN consume!(TAKES v: Value) RETURNS String ->
+        FN consume!(TAKES v: Value) RETURNS !String ->
             PARTIAL MATCH TAKES v START
                 Value.Symbol AS s -> RETURN COPY s;,
                 DEFAULT -> RETURN "other";
@@ -1256,7 +1256,7 @@ RSpec.describe ZigTranspiler do
           Tco { tcoAst: String @indirect, tcoEnv: Id<Env> }
         }
 
-        FN getEnvId!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS Id<Env> ->
+        FN getEnvId!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS !Id<Env> ->
           PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoEnv = COPY tco.tcoEnv;
@@ -1286,7 +1286,7 @@ RSpec.describe ZigTranspiler do
           RETURN ast;
         END
 
-        FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS String @reentrant ->
+        FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS !String @reentrant ->
           PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoAst = COPY tco.tcoAst;
@@ -1481,7 +1481,7 @@ RSpec.describe ZigTranspiler do
   describe "INV-1/INV-5: always-escaped collections are heap from start" do
     it "allocates always-escaped list on heap (no promoteList)" do
       src = <<~CLEAR
-        FN build!() RETURNS Float64[] ->
+        FN build!() RETURNS !Float64[] ->
             MUTABLE vals: Float64[]@list = List[];
             append(vals, 1.0);
             RETURN vals;
@@ -1495,7 +1495,7 @@ RSpec.describe ZigTranspiler do
 
     it "uses heap allocator for always-escaped map" do
       src = <<~CLEAR
-        FN buildMap!() RETURNS HashMap<Int64> ->
+        FN buildMap!() RETURNS !HashMap<Int64> ->
             MUTABLE m: HashMap<Int64> = {};
             m["x"] = 1_i64;
             RETURN m;
@@ -1548,9 +1548,9 @@ RSpec.describe ZigTranspiler do
       # Use a named binding so makeStr!'s result is properly cleaned up
       # (inline `transform!(makeStr!())` would leak the temp string -- ERRDEFER_LEAK).
       src = <<~CLEAR
-        FN makeStr!() RETURNS String -> RETURN COPY "hi"; END
-        FN transform!(s: String) RETURNS String -> RETURN COPY s; END
-        FN caller!() RETURNS String ->
+        FN makeStr!() RETURNS !String -> RETURN COPY "hi"; END
+        FN transform!(s: String) RETURNS !String -> RETURN COPY s; END
+        FN caller!() RETURNS !String ->
             s = makeStr!();
             RETURN transform!(s);
         END
@@ -1596,7 +1596,7 @@ RSpec.describe ZigTranspiler do
   describe "pipeline on slice parameter" do
     it "does not emit .items on a slice parameter in WHERE pipeline" do
       src = <<~CLEAR
-        FN filterSum(data: Float64[]) RETURNS Float64 ->
+        FN filterSum(data: Float64[]) RETURNS !Float64 ->
             RETURN data s> WHERE _ > 5.0 s> SUM _;
         END
         FN main() RETURNS Void ->
@@ -1635,7 +1635,7 @@ RSpec.describe ZigTranspiler do
   describe "variable-backed finite stream pipelines" do
     it "lowers SELECT/WHERE/EACH over ~T[] variables through .next(), not .items" do
       src = <<~CLEAR
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 5;
             MUTABLE acc: Int64 = 0;
             s s> SELECT _ * 2 s> WHERE _ > 3 s> EACH {
@@ -1652,7 +1652,7 @@ RSpec.describe ZigTranspiler do
 
     it "lowers TAKE_WHILE and SKIP over ~T[] variables through the fused .next() loop" do
       src = <<~CLEAR
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 8;
             MUTABLE acc: Int64 = 0;
             s s> SKIP 2 s> TAKE_WHILE _ < 6 s> EACH {
@@ -1676,7 +1676,7 @@ RSpec.describe ZigTranspiler do
   describe "concurrent bounded stream pipelines" do
     it "lowers CONCURRENT SELECT on ~T[N] through the bounded helper call, not materialization" do
       src = <<~CLEAR
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             s: ~Int64[3] = [BG { 1; }, BG { 2; }, BG { 3; }];
             vals = s s> CONCURRENT(workers: 2) SELECT _ * 2;
             RETURN;
@@ -1691,7 +1691,7 @@ RSpec.describe ZigTranspiler do
 
     it "lowers CONCURRENT WHERE on ~T[N] through the bounded helper call" do
       src = <<~CLEAR
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             s: ~Int64[4] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }];
             vals = s s> CONCURRENT(workers: 2) WHERE _ > 2;
             RETURN;
@@ -1706,7 +1706,7 @@ RSpec.describe ZigTranspiler do
 
     it "lowers CONCURRENT EACH on ~T[N] through the bounded helper call" do
       src = <<~CLEAR
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             MUTABLE total: Int64@shared:locked = 0;
             s: ~Int64[2] = [BG { 10; }, BG { 20; }];
             s s> CONCURRENT(workers: 2) EACH {
@@ -1789,7 +1789,7 @@ RSpec.describe ZigTranspiler do
   describe "SHARD pipeline variable suppression" do
     it "does not emit pointless _ = var discard for used variables" do
       src = <<~CLEAR
-        FN makeKey(seed: Int64) RETURNS String ->
+        FN makeKey(seed: Int64) RETURNS !String ->
             RETURN toString(seed);
         END
         FN main() RETURNS Void ->

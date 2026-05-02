@@ -192,6 +192,51 @@ module FunctionAnalysis
         # don't corrupt the function signature's shared Type object.
         rt = func_type.return_type
         node.full_type = rt.is_a?(Type) ? Type.new(rt) : rt
+        # Auto-propagate (CLEAR's error-handling default): the call's
+        # *expression-level* type is the SUCCESS branch -- a binding
+        # `h = call()` sees `T`, not `!T`. The error union flows
+        # implicitly through the enclosing fn's `!T` return signature
+        # (the codegen's try-wrap performs the unwrap). Per
+        # docs/agents/error-handling.md: "the compiler handles error
+        # propagation for you by default."
+        # The original `!T` is stashed on `error_union_type` so
+        # OR-RESCUE handlers (which read the LHS's union to pick
+        # `catch`/`orelse`) can still see the un-stripped form.
+        if node.full_type.is_a?(Type) && node.full_type.respond_to?(:error_union?) &&
+           node.full_type.error_union?
+          node.error_union_type = node.full_type if node.respond_to?(:error_union_type=)
+          outer = node.full_type
+          inner = outer.payload_type
+          # The parser stamps storage/ownership/sync/layout on the
+          # OUTER error union (e.g. `!Node @multiowned` -> outer.ownership
+          # = :multiowned, payload = bare `Node`). Carry those over so
+          # the binding's type_info still classifies as multiowned/
+          # shared/heap/etc -- otherwise field-access lowering for `n.id`
+          # misses the `.ctrl.data` unwrap.
+          if inner.is_a?(Type)
+            inner = Type.new(inner)
+            if outer.respond_to?(:ownership) && outer.ownership && outer.ownership != :affine &&
+               inner.respond_to?(:ownership=) && (inner.ownership.nil? || inner.ownership == :affine)
+              inner.ownership = outer.ownership
+            end
+            if outer.respond_to?(:provenance) && outer.provenance &&
+               inner.respond_to?(:provenance) && inner.provenance.nil? &&
+               inner.respond_to?(:provenance=)
+              inner.provenance = outer.provenance
+            end
+            if outer.respond_to?(:sync) && outer.sync &&
+               inner.respond_to?(:sync) && inner.sync.nil? &&
+               inner.respond_to?(:sync=)
+              inner.sync = outer.sync
+            end
+            if outer.respond_to?(:layout) && outer.layout &&
+               inner.respond_to?(:layout) && inner.layout.nil? &&
+               inner.respond_to?(:layout=)
+              inner.layout = outer.layout
+            end
+          end
+          node.full_type = inner
+        end
       end
 
 

@@ -5,7 +5,7 @@
 UNION Data { Empty, Text: String }
 
 -- AS case: n takes ownership, d2 cleanup suppressed
-FN testAs() RETURNS Void ->
+FN testAs() RETURNS !Void ->
     d = Data{ Text: "hello" };
     d2 = COPY d;
     PARTIAL MATCH d2 START
@@ -15,7 +15,7 @@ FN testAs() RETURNS Void ->
 END
 
 -- DEFAULT case: d2 has heap data (Text), cleanup must fire for d2
-FN testDefault() RETURNS Void ->
+FN testDefault() RETURNS !Void ->
     d = Data{ Text: "world" };
     d2 = COPY d;
     PARTIAL MATCH d2 START

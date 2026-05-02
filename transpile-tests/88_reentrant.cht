@@ -15,12 +15,12 @@ END
 -- Fn-pointer call: must be @reentrant or @nonReentrant.
 -- Using @nonReentrant here because apply itself is not designed to recur.
 -- By default the cb param blocks @reentrant functions.
-FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
   RETURN cb(x);
 END
 
 -- applyReentrant explicitly opts in to accepting @reentrant callbacks.
-FN applyReentrant(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+FN applyReentrant(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
   RETURN cb(x);
 END
 

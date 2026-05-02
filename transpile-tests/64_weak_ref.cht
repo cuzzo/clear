@@ -3,7 +3,7 @@
 STRUCT Node { value: Int64 }
 
 -- Test 1: @multiowned weak ref (WeakRc)
-FN test_multiowned() RETURNS Void ->
+FN test_multiowned() RETURNS !Void ->
     x = Node{ value: 42 } @multiowned;
     w = LINK x;
 
@@ -14,7 +14,7 @@ FN test_multiowned() RETURNS Void ->
 END
 
 -- Test 2: @shared weak ref (WeakArc)
-FN test_shared() RETURNS Void ->
+FN test_shared() RETURNS !Void ->
     x = Node{ value: 10 } @shared;
     w = LINK x;
 
@@ -29,7 +29,7 @@ STRUCT Edge {
     target: Node@link
 }
 
-FN test_link_in_struct() RETURNS Void ->
+FN test_link_in_struct() RETURNS !Void ->
     n = Node{ value: 99 } @multiowned;
     e = Edge{ target: LINK n };
 
@@ -40,7 +40,7 @@ FN test_link_in_struct() RETURNS Void ->
 END
 
 -- Test 4: multiple weak refs to the same node
-FN test_multiple_links() RETURNS Void ->
+FN test_multiple_links() RETURNS !Void ->
     n = Node{ value: 7 } @multiowned;
     w1 = LINK n;
     w2 = LINK n;
@@ -54,12 +54,12 @@ FN test_multiple_links() RETURNS Void ->
 END
 
 -- Test 5: field access on resolved ?T@multiowned (safe nav)
-FN makeDeadWeakNode() RETURNS Node@link ->
+FN makeDeadWeakNode() RETURNS !Node@link ->
     n = Node{ value: 999 } @multiowned;
     RETURN LINK n;
 END
 
-FN test_safe_field_access() RETURNS Void ->
+FN test_safe_field_access() RETURNS !Void ->
     -- Strong ref alive: resolved?.field returns the field value
     n = Node{ value: 42 } @multiowned;
     w = LINK n;
@@ -77,7 +77,7 @@ FN test_safe_field_access() RETURNS Void ->
 END
 
 -- Test 6: IF RESOLVE x AS y optional binding
-FN test_if_resolve_bind() RETURNS Void ->
+FN test_if_resolve_bind() RETURNS !Void ->
     x = Node{ value: 100 } @multiowned;
     w = LINK x;
 

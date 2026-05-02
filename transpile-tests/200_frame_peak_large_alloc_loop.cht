@@ -3,7 +3,7 @@
 -- (simulating readFile + parseJsonArraySum), then rewinds.
 -- Verifies frame arena stays bounded regardless of iteration count.
 
-FN parseData(content: String) RETURNS Int64 ->
+FN parseData(content: String) RETURNS !Int64 ->
     -- Simulate JSON parsing: scan content and compute a value.
     -- Allocates intermediate strings from the frame.
     MUTABLE sum = 0_i64;
@@ -19,7 +19,7 @@ FN parseData(content: String) RETURNS Int64 ->
     RETURN sum;
 END
 
-FN buildLargePayload(id: Int64) RETURNS String ->
+FN buildLargePayload(id: Int64) RETURNS !String ->
     -- Simulate generateJson or readFile: build a ~6KB string.
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= 200) -> parts.append(id.toString() + ":" + i.toString());

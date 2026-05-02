@@ -130,7 +130,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS Void
+          FN tx!(MUTABLE x: C, MUTABLE y: C) RETURNS !Void
             REQUIRES x, y: VERSIONED
           ->
             WITH SNAPSHOT x AS MUTABLE xa, SNAPSHOT y AS MUTABLE ya {
@@ -166,7 +166,7 @@ RSpec.describe "Multi-object WITH cannot admit ATOMIC (#333)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN one!() RETURNS Void ->
+          FN one!() RETURNS !Void ->
             a = C{ v: 0 } @indirect:atomic;
             WITH SNAPSHOT a AS MUTABLE va { va.v = va.v + 1; }
             RETURN;

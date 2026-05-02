@@ -159,7 +159,7 @@ RSpec.describe "Parser: REQUIRES NON_REENTRANT clause" do
 
   it "parses a single `REQUIRES f: NON_REENTRANT` clause" do
     ast = parse(<<~CLEAR)
-      FN map(items: Int64[], f: FN(Int64) -> Int64) RETURNS Int64[]
+      FN map(items: Int64[], f: FN(Int64) -> Int64) RETURNS !Int64[]
         REQUIRES f: NON_REENTRANT ->
         RETURN items;
       END

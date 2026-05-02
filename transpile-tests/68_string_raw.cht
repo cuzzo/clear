@@ -17,7 +17,7 @@ FN test_raw_methods() RETURNS Void ->
     RETURN;
 END
 
-FN test_raw_operations() RETURNS Void ->
+FN test_raw_operations() RETURNS !Void ->
     buf: String@raw = "abc";
     ASSERT indexOf(buf, "b") == 1_i64, "indexOf on raw";
 

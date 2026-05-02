@@ -11,7 +11,7 @@ UNION Value {
     List: Value[],
 }
 
-FN prStr(v: Value) RETURNS String ->
+FN prStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.Number AS n -> RETURN n.toString();,

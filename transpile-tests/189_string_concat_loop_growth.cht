@@ -6,7 +6,7 @@
 -- each iteration adds ~5000 bytes -> ~500 KB of unreclaimable frame memory.
 -- With proper loop mark, the frame should stay bounded.
 
-FN buildResponse(n: Int64) RETURNS String ->
+FN buildResponse(n: Int64) RETURNS !String ->
     MUTABLE resp = "";
     FOR i IN (1_i64 ..= n) DO
         resp = resp + ":OK\r\n";

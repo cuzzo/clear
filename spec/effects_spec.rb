@@ -168,7 +168,7 @@ RSpec.describe "Effect Tracking" do
   describe "transitive propagation" do
     it "propagates HEAP through call graph" do
       effs = effects_of(<<~CLEAR)
-        FN allocates() RETURNS Void ->
+        FN allocates() RETURNS !Void ->
           MUTABLE items = List[];
           RETURN;
         END
@@ -185,7 +185,7 @@ RSpec.describe "Effect Tracking" do
       effs = effects_of(<<~CLEAR)
         STRUCT Counter { value: Int64 }
 
-        FN lock_it(c: Counter) RETURNS Void ->
+        FN lock_it(c: Counter) RETURNS !Void ->
           d = c @locked;
           WITH EXCLUSIVE d AS inner { inner.value; }
           RETURN;
@@ -395,7 +395,7 @@ RSpec.describe "Effect Tracking" do
   describe "SUSPENDS propagation through call graph" do
     it "linear caller inherits callee's plain SUSPENDS" do
       effs = effects_of(<<~CLEAR)
-        FN load() RETURNS String ->
+        FN load() RETURNS !String ->
           RETURN readFile("foo.txt");
         END
 
@@ -411,7 +411,7 @@ RSpec.describe "Effect Tracking" do
 
     it "caller calling a SUSPENDS fn inside a loop gets SUSPENDS:LOOP" do
       effs = effects_of(<<~CLEAR)
-        FN load() RETURNS String ->
+        FN load() RETURNS !String ->
           RETURN readFile("foo.txt");
         END
 
@@ -427,7 +427,7 @@ RSpec.describe "Effect Tracking" do
 
     it "caller calling a SUSPENDS fn inside IF gets SUSPENDS:CONDITIONAL" do
       effs = effects_of(<<~CLEAR)
-        FN load() RETURNS String ->
+        FN load() RETURNS !String ->
           RETURN readFile("foo.txt");
         END
 
@@ -447,7 +447,7 @@ RSpec.describe "Effect Tracking" do
       # If 'process' has SUSPENDS:LOOP internally, any caller that calls it
       # linearly must still see SUSPENDS:LOOP — loop-ness is intrinsic to callee.
       effs = effects_of(<<~CLEAR)
-        FN process() RETURNS Void ->
+        FN process() RETURNS !Void ->
           FOR i IN (0 ..< 3) DO
             x = readFile("foo.txt");
           END
@@ -464,7 +464,7 @@ RSpec.describe "Effect Tracking" do
 
     it "loop-wrapping a SUSPENDS:CONDITIONAL fn yields both LOOP and CONDITIONAL" do
       effs = effects_of(<<~CLEAR)
-        FN maybe_load() RETURNS Void ->
+        FN maybe_load() RETURNS !Void ->
           MUTABLE gate = 1;
           IF gate > 0 THEN
             x = readFile("foo.txt");
@@ -485,11 +485,11 @@ RSpec.describe "Effect Tracking" do
 
     it "multi-level propagation keeps worst-case LOOP tag" do
       effs = effects_of(<<~CLEAR)
-        FN inner() RETURNS String ->
+        FN inner() RETURNS !String ->
           RETURN readFile("foo.txt");
         END
 
-        FN middle() RETURNS Void ->
+        FN middle() RETURNS !Void ->
           FOR i IN (0 ..< 3) DO
             x = inner();
           END
@@ -506,11 +506,11 @@ RSpec.describe "Effect Tracking" do
 
     it "propagates across pure wrapper functions" do
       effs = effects_of(<<~CLEAR)
-        FN inner() RETURNS String ->
+        FN inner() RETURNS !String ->
           RETURN readFile("foo.txt");
         END
 
-        FN wrap() RETURNS String ->
+        FN wrap() RETURNS !String ->
           RETURN inner();
         END
 

@@ -8,7 +8,7 @@ UNION Val {
     Pair { car: String, cdr: String }
 }
 
-FN makeStr!(a: String, b: String) RETURNS Val ->
+FN makeStr!(a: String, b: String) RETURNS !Val ->
     RETURN Val{ Str: a + b };
 END
 

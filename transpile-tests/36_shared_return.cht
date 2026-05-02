@@ -3,7 +3,7 @@ STRUCT Node { id: Int64 }
 -- A function that creates a shared Node and returns it.
 -- On return, the local Arc is retained (count 1->2) then the local defer
 -- releases it (count 2->1), so the caller receives count = 1.
-FN makeNode(id_val: Int64) RETURNS Node @shared ->
+FN makeNode(id_val: Int64) RETURNS !Node @shared ->
     n = Node{ id: id_val } @shared;
     RETURN n;
 END

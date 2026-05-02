@@ -3,19 +3,19 @@
 -- on return, reclaiming all intermediate allocations while preserving the result.
 
 -- Pattern 1: Simple string concat return
-FN greet(name: String) RETURNS String ->
+FN greet(name: String) RETURNS !String ->
     RETURN "Hello, " + name + "!";
 END
 
 -- Pattern 2: Loop builds intermediates, returns final string
-FN buildCsv(n: Int64) RETURNS String ->
+FN buildCsv(n: Int64) RETURNS !String ->
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
     RETURN join(parts, ",");
 END
 
 -- Pattern 3: Multiple early returns (IF/ELSE_IF chain)
-FN classify(n: Int64) RETURNS String ->
+FN classify(n: Int64) RETURNS !String ->
     IF n < 0 THEN
         RETURN "negative:" + n.toString();
     ELSE_IF n == 0 THEN
@@ -28,7 +28,7 @@ FN classify(n: Int64) RETURNS String ->
 END
 
 -- Pattern 4: String-returning function called in loop (the bench 24 pattern)
-FN formatItem(id: Int64) RETURNS String ->
+FN formatItem(id: Int64) RETURNS !String ->
     sz = ((id * 7 + 13) MOD 97) + 3;
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());

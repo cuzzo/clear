@@ -393,7 +393,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           UNION Val { Nil, Name: String }
 
-          FN first(items: Val[]) RETURNS Val ->
+          FN first(items: Val[]) RETURNS !Val ->
             elem = COPY items[0];
             RETURN elem;
           END

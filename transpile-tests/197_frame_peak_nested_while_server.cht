@@ -3,7 +3,7 @@
 -- MUTABLE resp string concat in inner loop with function calls per command.
 -- This pattern matches the bench 24 json_api handleClient structure.
 
-FN processCommand(cmd: String) RETURNS String ->
+FN processCommand(cmd: String) RETURNS !String ->
     -- Simulate work: build a large list, join, return a summary
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= 50) -> parts.append(i.toString());

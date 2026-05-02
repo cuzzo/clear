@@ -89,7 +89,7 @@ RSpec.describe UseAfterMoveChecker do
 
     it "return of owned value" do
       expect_no_error(<<~CLEAR)
-        FN makeList() RETURNS Int64[] ->
+        FN makeList() RETURNS !Int64[] ->
           MUTABLE items: Int64[]@list = List[];
           items.append(1_i64);
           RETURN items;
@@ -269,7 +269,7 @@ RSpec.describe UseAfterMoveChecker do
   describe "promotion as ownership transfer" do
     it "direct return of collection marks source as moved" do
       df = analyze_state(<<~CLEAR, "makeList")
-        FN makeList() RETURNS Int64[] ->
+        FN makeList() RETURNS !Int64[] ->
           MUTABLE items: Int64[]@list = List[];
           items.append(1_i64);
           RETURN items;
@@ -282,7 +282,7 @@ RSpec.describe UseAfterMoveChecker do
     it "struct literal return copies fields (CopyNode), source stays owned" do
       df = analyze_state(<<~CLEAR, "wrap")
         STRUCT Wrapper { data: Int64[] }
-        FN wrap() RETURNS %Wrapper ->
+        FN wrap() RETURNS !%Wrapper ->
           MUTABLE items: Int64[]@list = List[];
           items.append(1_i64);
           RETURN Wrapper{ data: items };
@@ -295,7 +295,7 @@ RSpec.describe UseAfterMoveChecker do
 
     it "return preserves allocator info on moved OwnerEntry" do
       df = analyze_state(<<~CLEAR, "makeList")
-        FN makeList() RETURNS Int64[] ->
+        FN makeList() RETURNS !Int64[] ->
           MUTABLE items: Int64[]@list = List[];
           items.append(1_i64);
           RETURN items;

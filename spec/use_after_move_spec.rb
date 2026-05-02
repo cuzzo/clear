@@ -204,7 +204,7 @@ RSpec.describe "Use-after-move detection" do
   it "allows single use of non-Copy value" do
     expect_no_error(<<~CLEAR)
       UNION Value { Num: Float64, List: Int64[] }
-      FN makeList() RETURNS Value ->
+      FN makeList() RETURNS !Value ->
           MUTABLE items: Int64[]@list = List[];
           items.append(1_i64);
           RETURN Value{ List: items };

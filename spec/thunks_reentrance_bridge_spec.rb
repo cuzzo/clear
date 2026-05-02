@@ -142,7 +142,7 @@ RSpec.describe "ReentranceBridge" do
     it "accepts a clause that names a real parameter" do
       expect {
         annotated(<<~CLEAR)
-          FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS Int64
+          FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
             REQUIRES f: NON_REENTRANT ->
             RETURN f(x);
           END

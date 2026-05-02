@@ -407,7 +407,7 @@ RSpec.describe SemanticAnnotator do
     context "TAKES parameter (owned)" do
       let(:code) {
         preamble + <<~CLEAR
-          FN test!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+          FN test!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS !Void ->
               map["key"] = v;
               RETURN;
           END
@@ -422,7 +422,7 @@ RSpec.describe SemanticAnnotator do
     context "TAKES MUTABLE parameter (owned + mutable)" do
       let(:code) {
         preamble + <<~CLEAR
-          FN test!(TAKES MUTABLE v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+          FN test!(TAKES MUTABLE v: Value, MUTABLE map: HashMap<Value>) RETURNS !Void ->
               map["key"] = v;
               RETURN;
           END
@@ -484,7 +484,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
-          FN test!(MUTABLE map: HashMap<Value>) RETURNS Void ->
+          FN test!(MUTABLE map: HashMap<Value>) RETURNS !Void ->
               v = Value.Nil;
               map["key"] = v;
               RETURN;
@@ -519,7 +519,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
-          FN test!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
+          FN test!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS !Void ->
               map["key"] = v;
               RETURN;
           END
@@ -609,7 +609,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
-          FN test!(MUTABLE list: Value[]@list) RETURNS Void ->
+          FN test!(MUTABLE list: Value[]@list) RETURNS !Void ->
               list.append(Value.Nil);
               f = list[0];
               RETURN;
@@ -667,7 +667,7 @@ RSpec.describe SemanticAnnotator do
           FN consume!(TAKES n: Int64) RETURNS Void ->
               RETURN;
           END
-          FN test!() RETURNS Void ->
+          FN test!() RETURNS !Void ->
               MUTABLE list: Int64[]@list = List[];
               list.append(1_i64);
               consume!(list[0]);
@@ -728,7 +728,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN test!(s: String, MUTABLE map: HashMap<Value>) RETURNS Void ->
+          FN test!(s: String, MUTABLE map: HashMap<Value>) RETURNS !Void ->
               map["key"] = Value{ Str: COPY s };
               RETURN;
           END
@@ -769,7 +769,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: HashMap<Value>) RETURNS String ->
+          FN test!(MUTABLE map: HashMap<Value>) RETURNS !String ->
               val = map["t0"] OR Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
@@ -794,7 +794,7 @@ RSpec.describe SemanticAnnotator do
           FN makeVal() RETURNS Value ->
               RETURN Value.Nil;
           END
-          FN test() RETURNS Void ->
+          FN test() RETURNS !Void ->
               val = makeVal();
               RETURN;
           END
@@ -817,7 +817,7 @@ RSpec.describe SemanticAnnotator do
           FN consume!(TAKES v: Value) RETURNS Void ->
               RETURN;
           END
-          FN caller() RETURNS Void ->
+          FN caller() RETURNS !Void ->
               x = Value{ Str: COPY "hello" };
               consume!(x);
               RETURN;

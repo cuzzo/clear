@@ -366,7 +366,7 @@ RSpec.describe SemanticAnnotator do
         FN isPositive(n: Int64) RETURNS Bool ->
           RETURN n > 0;
         END
-        FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+        FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool ->
           RETURN cb(n);
         END
       CLEAR
@@ -382,7 +382,7 @@ RSpec.describe SemanticAnnotator do
             FN isPositive(n: Int64) RETURNS Bool ->
               RETURN n > 0;
             END
-            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool @nonReentrant ->
+            FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool @nonReentrant ->
               RETURN cb(n);
             END
             result: Bool = apply(isPositive, 5);
@@ -436,7 +436,7 @@ RSpec.describe SemanticAnnotator do
           FN isPositive(n: Int64) RETURNS Bool ->
             RETURN n > 0;
           END
-          FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool @nonReentrant ->
             RETURN cb(n);
           END
           FN main() RETURNS Void ->
@@ -486,7 +486,7 @@ RSpec.describe SemanticAnnotator do
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
           result: Int64 = apply(double, 5);
@@ -505,7 +505,7 @@ RSpec.describe SemanticAnnotator do
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
           result: Int64 = apply(fib, 5);
@@ -518,7 +518,7 @@ RSpec.describe SemanticAnnotator do
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
           result: Int64 = apply(double, 5);
@@ -533,7 +533,7 @@ RSpec.describe SemanticAnnotator do
     describe "parser" do
       it "parses @reentrant on a fn-type param annotation" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
         CLEAR
@@ -545,7 +545,7 @@ RSpec.describe SemanticAnnotator do
 
       it "leaves reentrant false on a plain fn-type param annotation" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
         CLEAR
@@ -566,7 +566,7 @@ RSpec.describe SemanticAnnotator do
             IF n <= 1 THEN RETURN n; END
             RETURN fib(n - 1) + fib(n - 2);
           END
-          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
           result: Int64 = apply(fib, 5);
@@ -582,7 +582,7 @@ RSpec.describe SemanticAnnotator do
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
           result: Int64 = apply(double, 5);

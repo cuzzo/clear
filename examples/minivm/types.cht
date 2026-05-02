@@ -56,7 +56,7 @@ FN isTruthy?(v: Value) RETURNS Bool ->
     RETURN TRUE;
 END
 
-FN getSymName(v: Value) RETURNS String ->
+FN getSymName(v: Value) RETURNS !String ->
     PARTIAL MATCH v START Value.Symbol AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
@@ -84,7 +84,7 @@ FN isInt64?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
-FN getStr(v: Value) RETURNS String ->
+FN getStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START Value.Str AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
@@ -94,7 +94,7 @@ END
 -- share the env-backed string-keyed storage. Stringification is round-trip
 -- stable for integers and is unique for finite floats, so semantics match
 -- the Zig-side numericMapGet/Put.
-FN keyAsStr(v: Value) RETURNS String ->
+FN keyAsStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Str AS s         -> RETURN "" + s;,
         Value.Int64Val AS i    -> RETURN i.toString();,
@@ -141,7 +141,7 @@ FN isBoxed?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
-FN prStr(v: Value, readably: Bool) RETURNS String EFFECTS REENTRANT ->
+FN prStr(v: Value, readably: Bool) RETURNS !String EFFECTS REENTRANT ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.TrueVal -> RETURN "true";,
@@ -201,7 +201,7 @@ FN prStr(v: Value, readably: Bool) RETURNS String EFFECTS REENTRANT ->
     RETURN "";
 END
 
-FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
+FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS !Value
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
 ->

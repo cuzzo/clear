@@ -38,7 +38,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT User { name: String }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE items: User[]@list = [];
               RETURN;
             END
@@ -49,7 +49,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves User[]@list full_type to a list_collection? Type" do
         tree = run(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE items: User[]@list = [];
             RETURN;
           END
@@ -68,7 +68,7 @@ RSpec.describe SemanticAnnotator do
       it "emits ArrayListUnmanaged Zig code for @list (same as plain dynamic array)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE items: User[]@list = [];
             RETURN;
           END
@@ -85,7 +85,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT User { name: String, score: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE pool: User[100]@pool = [];
               RETURN;
             END
@@ -96,7 +96,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves User[100]@pool full_type to a pool? Type" do
         tree = run(<<~CLEAR)
           STRUCT User { name: String, score: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             RETURN;
           END
@@ -115,7 +115,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.Pool Zig type for @pool declarations" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             RETURN;
           END
@@ -126,7 +126,7 @@ RSpec.describe SemanticAnnotator do
       it "emits plain defer pool.deinit when pool is never moved" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             RETURN;
           END
@@ -144,7 +144,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT User { name: String }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE pool: User[100]@pool = [];
               id: Id<User> = pool.insert(User{ name: "alice" });
               RETURN;
@@ -156,7 +156,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves Id<User> to a generic_instance Type with base :Id" do
         tree = run(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id: Id<User> = pool.insert(User{ name: "alice" });
             RETURN;
@@ -181,7 +181,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves pool.insert return type as Id<ElemType>" do
         tree = run(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id = pool.insert(User{ name: "bob" });
             RETURN;
@@ -195,7 +195,7 @@ RSpec.describe SemanticAnnotator do
       it "emits try pool.insert(rt.heapAlloc(), ...) in Zig" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id = pool.insert(User{ name: "bob" });
             RETURN;
@@ -239,7 +239,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves pool.get return type as ?ElemType (optional)" do
         tree = run(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id = pool.insert(User{ name: "alice" });
             result = pool.get(id);
@@ -254,7 +254,7 @@ RSpec.describe SemanticAnnotator do
       it "emits pool.get(id) without try in Zig" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id = pool.insert(User{ name: "alice" });
             result = pool.get(id);
@@ -286,7 +286,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves pool.remove return type as Void" do
         tree = run(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id = pool.insert(User{ name: "alice" });
             pool.remove(id);
@@ -301,7 +301,7 @@ RSpec.describe SemanticAnnotator do
       it "emits pool.remove(id) in Zig" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id = pool.insert(User{ name: "alice" });
             pool.remove(id);
@@ -350,7 +350,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.Pool init, defer deinit, insert, get, and remove" do
         out = transpile_fn(<<~CLEAR)
           STRUCT User { name: String }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: User[100]@pool = [];
             id = pool.insert(User{ name: "alice" });
             result = pool.get(id);
@@ -369,11 +369,11 @@ RSpec.describe SemanticAnnotator do
       it "passes @pool parameter as pointer (&pool) not by value (.items)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Item { val: Int64 }
-          FN setup!(MUTABLE pool: Item[100]@pool) RETURNS Void ->
+          FN setup!(MUTABLE pool: Item[100]@pool) RETURNS !Void ->
             pool.insert(Item{ val: 1 });
             RETURN;
           END
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: Item[100]@pool = [];
             setup!(pool);
             RETURN;
@@ -401,7 +401,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves pool.length() to Int64" do
         ast = run(<<~CLEAR)
           STRUCT Item { v: Int64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: Item[10]@pool = [];
             n: Int64 = pool.length();
             RETURN;
@@ -443,7 +443,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves set.length() to Int64" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE s: String[]@set = [];
               s.insert("a");
               n: Int64 = s.length();
@@ -497,7 +497,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves contains?(list, item) for @list" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE list: Int64[]@list = List[];
               list.append(1);
               found: Bool = contains?(list, 1);
@@ -540,7 +540,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Item { v: Int64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE pool: Item[10]@pool = [];
               id = pool.insert(Item{ v: 1 });
               found: Bool = pool.contains?(id);
@@ -571,7 +571,7 @@ RSpec.describe SemanticAnnotator do
       it "compiles FOR...IN on a String[]@set" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE s: String[]@set = [];
               s.insert("a");
               s.insert("b");
@@ -605,7 +605,7 @@ RSpec.describe SemanticAnnotator do
     describe "@set[item] membership check" do
       it "returns ?T for @set[item] lookup" do
         ast = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE s: Int64[]@set = [];
             s.insert(1);
             val = s[1];

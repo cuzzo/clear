@@ -14,7 +14,7 @@
 
 STRUCT Counter { value: Int64 }
 
-FN napFor(ms: Int64) RETURNS Void ->
+FN napFor(ms: Int64) RETURNS !Void ->
     sleep(ms);
     RETURN;
 END

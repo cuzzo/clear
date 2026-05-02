@@ -2,7 +2,7 @@
 -- Each iteration allocates strings (frame arena) that should be reclaimed
 -- on function return. If frame memory grows unboundedly, this will OOM.
 
-FN buildString(n: Int64) RETURNS String ->
+FN buildString(n: Int64) RETURNS !String ->
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= 10) -> parts.append(i.toString());
     RETURN join(parts, ",");

@@ -2,7 +2,7 @@
 -- The function's preserveAndRewind ensures returned strings are in the
 -- caller's frame. The loop mark reclaims intermediates each iteration.
 
-FN greet(name: String) RETURNS String ->
+FN greet(name: String) RETURNS !String ->
     RETURN "Hello, " + name + "!";
 END
 

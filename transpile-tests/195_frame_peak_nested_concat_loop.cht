@@ -2,7 +2,7 @@
 -- Pattern: s = a + b + c creates two frame-arena allocations per iteration.
 -- Tests that all intermediate concat results are reclaimed per iteration.
 
-FN formatLine(n: Int64) RETURNS String ->
+FN formatLine(n: Int64) RETURNS !String ->
     RETURN "[" + n.toString() + "] " + "item";
 END
 

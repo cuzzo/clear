@@ -61,7 +61,7 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN main!() RETURNS Void ->
+          FN main!() RETURNS !Void ->
             MUTABLE cfg = Cfg{ port: 8080 } @indirect:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x {
               x.port = 9090;
@@ -76,7 +76,7 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT Cfg { port: Int64 }
-          FN main!() RETURNS Void ->
+          FN main!() RETURNS !Void ->
             MUTABLE cfg = Cfg{ port: 8080 } @indirect:atomic;
             WITH SNAPSHOT cfg AS MUTABLE x {
               x.port = x.port + 1;
@@ -92,7 +92,7 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
     it "accepts `c += 1` on Int64@shared:atomic (M1 primitive surface)" do
       expect {
         annotate(<<~CLEAR)
-          FN main!() RETURNS Void ->
+          FN main!() RETURNS !Void ->
             MUTABLE c: Int64 = 0 @shared:atomic;
             c += 1;
             RETURN;
@@ -104,7 +104,7 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
     it "accepts `c = 5` on Int64@shared:atomic (atomic store)" do
       expect {
         annotate(<<~CLEAR)
-          FN main!() RETURNS Void ->
+          FN main!() RETURNS !Void ->
             MUTABLE c: Int64 = 0 @shared:atomic;
             c = 5;
             RETURN;

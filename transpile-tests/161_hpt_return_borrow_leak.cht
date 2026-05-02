@@ -8,7 +8,7 @@ UNION Val {
     Lambda { params: Val[], body: Val @indirect, envId: Int64 }
 }
 
-FN getStr(v: Val) RETURNS String ->
+FN getStr(v: Val) RETURNS !String ->
     PARTIAL MATCH v START
         Val.Str AS s -> RETURN COPY s;,
         DEFAULT -> RETURN COPY "nil";
@@ -16,19 +16,19 @@ FN getStr(v: Val) RETURNS String ->
     RETURN COPY "nil";
 END
 
-FN makeLambda!() RETURNS Val ->
+FN makeLambda!() RETURNS !Val ->
     MUTABLE params: Val[]@list = List[];
     params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };
 END
 
-FN extractStr!(v: Val) RETURNS String ->
+FN extractStr!(v: Val) RETURNS !String ->
     RETURN getStr(v);
 END
 
 -- Named binding ensures makeLambda!()'s cleanup is a regular defer, not errdefer.
 -- getStr copies the extracted string, so it survives when v is freed.
-FN safeReturn!() RETURNS String ->
+FN safeReturn!() RETURNS !String ->
     v = makeLambda!();
     RETURN extractStr!(v);
 END

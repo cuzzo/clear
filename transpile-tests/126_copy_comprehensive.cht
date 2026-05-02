@@ -32,6 +32,6 @@ FN main() RETURNS Void ->
     RETURN;
 END
 
-FN makeStr(s: String) RETURNS Value ->
+FN makeStr(s: String) RETURNS !Value ->
     RETURN Value{ Str: COPY s };
 END

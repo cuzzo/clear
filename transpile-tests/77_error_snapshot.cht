@@ -9,7 +9,7 @@ FN validateUser(u: User) RETURNS !User ->
     RETURN u;
 END
 
-FN processUser(u: User) RETURNS String ->
+FN processUser(u: User) RETURNS !String ->
     valid = u s> validateUser;
     RETURN valid.name;
 

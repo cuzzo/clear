@@ -15,7 +15,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
     it "flags @shared:writeLocked struct with whole-struct replace inside WITH EXCLUSIVE" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN swap!() RETURNS Void ->
+        FN swap!() RETURNS !Void ->
           MUTABLE c = Cfg{ host: "x", port: 80 } @shared:writeLocked;
           WITH EXCLUSIVE c AS a { a = Cfg{ host: "y", port: 443 }; }
           RETURN;
@@ -36,7 +36,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
       # combines this with profile contention to decide.
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN check() RETURNS Void ->
+        FN check() RETURNS !Void ->
           c = Cfg{ host: "x", port: 80 } @shared:locked;
           WITH EXCLUSIVE c AS a { _ = a.host; }
           WITH EXCLUSIVE c AS a { _ = a.port; }
@@ -50,7 +50,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
     it "counts multiple eligible WITH bodies on the same binding" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN main!() RETURNS Void ->
+        FN main!() RETURNS !Void ->
           MUTABLE c = Cfg{ host: "x", port: 80 } @shared:writeLocked;
           WITH EXCLUSIVE c AS a { a = Cfg{ host: "y", port: 443 }; }
           WITH EXCLUSIVE c AS a { a = Cfg{ host: "z", port: 8080 }; }
@@ -67,7 +67,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
     it "does not flag bindings with field-level mutation (stay-put @shared:locked)" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { port: Int64 }
-        FN main!() RETURNS Void ->
+        FN main!() RETURNS !Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:writeLocked;
           WITH EXCLUSIVE c AS a { a.port = a.port + 1; }
           RETURN;
@@ -79,7 +79,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
     it "does not flag @shared:versioned bindings (already lock-free; M3.16 handles upgrade)" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { port: Int64 }
-        FN main!() RETURNS Void ->
+        FN main!() RETURNS !Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:versioned;
           WITH SNAPSHOT c AS MUTABLE a { a.port = a.port + 1; } ON MvccConflict RAISE
           RETURN;
@@ -107,7 +107,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
           WITH EXCLUSIVE c AS a { a.port = a.port + 1; }
           RETURN;
         END
-        FN main!() RETURNS Void ->
+        FN main!() RETURNS !Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:writeLocked;
           sink!(c);
           RETURN;
@@ -122,7 +122,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { port: Int64 }
         STRUCT Other { port: Int64 }
-        FN main!() RETURNS Void ->
+        FN main!() RETURNS !Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:writeLocked;
           WITH EXCLUSIVE c AS a { a = Cfg{ port: 100 }; }
           RETURN;
@@ -146,7 +146,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
     it "flags @shared:versioned struct with whole-struct replace inside WITH SNAPSHOT MUTABLE" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN swap!() RETURNS Void ->
+        FN swap!() RETURNS !Void ->
           MUTABLE c = Cfg{ host: "x", port: 80 } @shared:versioned;
           WITH SNAPSHOT c AS MUTABLE a { a = Cfg{ host: "y", port: 443 }; } ON MvccConflict RAISE
           RETURN;
@@ -164,7 +164,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
     it "flags @shared:versioned with read-only WITH SNAPSHOT bodies (read-mostly fit)" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { host: String, port: Int64 }
-        FN check() RETURNS Void ->
+        FN check() RETURNS !Void ->
           c = Cfg{ host: "x", port: 80 } @shared:versioned;
           WITH SNAPSHOT c AS a { _ = a.host; }
           RETURN;
@@ -177,7 +177,7 @@ RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
     it "does not flag @shared:versioned with field-level mutation in WITH SNAPSHOT MUTABLE" do
       cs = candidates(<<~CLEAR)
         STRUCT Cfg { port: Int64 }
-        FN main!() RETURNS Void ->
+        FN main!() RETURNS !Void ->
           MUTABLE c = Cfg{ port: 80 } @shared:versioned;
           WITH SNAPSHOT c AS MUTABLE a { a.port = a.port + 1; } ON MvccConflict RAISE
           RETURN;

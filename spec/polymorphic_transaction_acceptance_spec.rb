@@ -342,7 +342,7 @@ RSpec.describe "Polymorphic transaction function — acceptance" do
     it "REQUIRES c: VERSIONED + caller passes @shared:locked → call-site error" do
       src = <<~CLEAR
         STRUCT C { v: Int64 }
-        FN bump!(MUTABLE c: C) RETURNS Void
+        FN bump!(MUTABLE c: C) RETURNS !Void
           REQUIRES c: VERSIONED
         ->
           WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; } ON MvccConflict RAISE

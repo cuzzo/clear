@@ -3,7 +3,7 @@
 
 UNION Value { Nil, Symbol: String, Number: Float64, List: Value[] }
 
-FN makeAst() RETURNS Value ->
+FN makeAst() RETURNS !Value ->
     MUTABLE items: Value[]@list = List[];
     items.append(Value{ Symbol: COPY "+" });
     items.append(Value{ Number: 1.0 });
@@ -11,7 +11,7 @@ FN makeAst() RETURNS Value ->
     RETURN Value{ List: items };
 END
 
-FN eval!(TAKES ast: Value) RETURNS Value @reentrant ->
+FN eval!(TAKES ast: Value) RETURNS !Value @reentrant ->
     PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym -> RETURN Value.Nil;,
         Value.List AS items -> RETURN evalList!(items);,
@@ -21,7 +21,7 @@ FN eval!(TAKES ast: Value) RETURNS Value @reentrant ->
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[]) RETURNS Value @reentrant ->
+FN evalList!(TAKES items: Value[]) RETURNS !Value @reentrant ->
     MUTABLE evaled: Value[]@list = List[];
     FOR ei IN (0_i64 ..< items.length()) DO
         evaled.append(eval!(COPY items[ei]));

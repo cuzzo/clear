@@ -764,8 +764,17 @@ private
       end
 
       # CATCH wrappers heap-dupe all string returns (both success and catch paths).
+      # Post-#338: a fallible String fn declares `RETURNS !String`; the outer
+      # Type isn't string?-true (the error union is), so unwrap the payload
+      # before classifying.
       ret_type = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
-      if ret_type.string?
+      bare_ret = if ret_type.respond_to?(:error_union?) && ret_type.error_union? &&
+                    ret_type.respond_to?(:payload_type)
+                   ret_type.payload_type || ret_type
+                 else
+                   ret_type
+                 end
+      if bare_ret.string?
         node.return_provenance = :heap
       end
     end
@@ -3629,7 +3638,17 @@ private
     visit(node.right)
 
 
-    t_left_type = node.left.type_info
+    # If the LHS is a fallible call, the auto-propagate strip moved the
+    # `!T` from `full_type` (which is now the success T) to
+    # `error_union_type`. OR-RESCUE needs the original `!T` to decide
+    # whether to emit `catch fallback` (error union) or `orelse fallback`
+    # (optional). Prefer the saved union if present.
+    t_left_type = if node.left.respond_to?(:error_union_type) && node.left.error_union_type
+                    eu = node.left.error_union_type
+                    eu.is_a?(Type) ? eu : Type.new(eu)
+                  else
+                    node.left.type_info
+                  end
     t_right_type = node.right.type_info
 
     # Handle OR EXIT "msg": set error context + propagate (same as OR RAISE for types)
@@ -4887,6 +4906,17 @@ private
       if (expr.is_a?(AST::BindExpr) || expr.is_a?(AST::VarDecl)) && expr.name.is_a?(String)
         locally_bound << expr.name
       end
+    end
+    # Strip leading `!` from the body's last-expression type: a BG fiber
+    # catches its body's errors internally and surfaces them via the
+    # Promise's join boundary, not via the surface success type. So
+    # `BG { napFor(50); }` (where napFor is `!Void`) is `~Void`, not
+    # `~!Void` -- the latter would force callers to write `~!Void[]@list`
+    # and break the Zig codegen, which expects `Promise(T)` where `T`
+    # is the success type.
+    last_type_str = last_type.to_s
+    if last_type_str.start_with?('!')
+      last_type = last_type_str[1..].to_sym
     end
     node.full_type = :"~#{last_type}"
 

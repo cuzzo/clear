@@ -677,6 +677,12 @@ module AST
                                      # REQUIRES x: SNAPSHOTTED, this is {:MvccConflict} (not the full
                                      # {:MvccConflict, :AtomicConflict}). nil for calls that don't
                                      # touch any REQUIRES'd param's family axis.
+    attr_accessor :error_union_type  # CLEAR's auto-propagate (post-#338): when the callee
+                                     # returns `!T`, `full_type` is stripped to the success
+                                     # type `T` (so `x = call()` makes x of type T). The
+                                     # original `!T` is stashed here for OR-RESCUE consumers
+                                     # that need to know whether to emit `catch fallback`
+                                     # (error union) or `orelse fallback` (optional).
     def wildcard?; false end
     def name; self[:name].to_s end
   end

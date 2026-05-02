@@ -2,7 +2,7 @@ STRUCT Node { value: Int64 }
 STRUCT Container { node: %Node, id: Int64 }
 
 -- Create container with heap-allocated node
-FN makeContainer(v: Int64) RETURNS Container ->
+FN makeContainer(v: Int64) RETURNS !Container ->
     n: %Node = Node{ value: v };
     c = Container{ node: n, id: 1 };
     RETURN c;

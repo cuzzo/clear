@@ -73,7 +73,7 @@ RSpec.describe "Provenance annotation" do
     it "caller binding has :heap provenance" do
       ast, _ = annotate(<<~CLEAR)
         STRUCT Holder { items: Int64[], label: String }
-        FN build() RETURNS Holder ->
+        FN build() RETURNS !Holder ->
             MUTABLE vals: Int64[]@list = [];
             vals.append(1_i64);
             RETURN Holder{ items: vals, label: "test" };
@@ -97,7 +97,7 @@ RSpec.describe "Provenance annotation" do
     it "marks function with return_provenance :heap" do
       ast, _ = annotate(<<~CLEAR)
         FN riskyOp(x: String) RETURNS !String -> RETURN "ok"; END
-        FN handle(x: String) RETURNS String ->
+        FN handle(x: String) RETURNS !String ->
             r = riskyOp(x) OR RAISE;
             RETURN r;
         CATCH Transient

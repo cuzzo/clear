@@ -11,7 +11,7 @@ FN heavyCompute(n: Int64) RETURNS Int64 ->
     RETURN x;
 END
 
-FN benchFiber(n: Int64, count: Int64) RETURNS Int64 ->
+FN benchFiber(n: Int64, count: Int64) RETURNS !Int64 ->
     MUTABLE tasks: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < count DO
@@ -28,7 +28,7 @@ FN benchFiber(n: Int64, count: Int64) RETURNS Int64 ->
     RETURN total;
 END
 
-FN benchService(n: Int64, count: Int64) RETURNS Int64 ->
+FN benchService(n: Int64, count: Int64) RETURNS !Int64 ->
     MUTABLE tasks: ~Int64[]@list = [];
     MUTABLE i: Int64 = 0;
     WHILE i < count DO

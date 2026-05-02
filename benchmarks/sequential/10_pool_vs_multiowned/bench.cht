@@ -10,7 +10,7 @@
 
 STRUCT Entity { x: Int64, y: Int64, health: Int64 }
 
-FN benchPool(n: Int64) RETURNS Int64 ->
+FN benchPool(n: Int64) RETURNS !Int64 ->
     MUTABLE pool: Entity[5000000]@pool = [];
 
     FOR i IN (0_i64 ..< n) DO
@@ -24,7 +24,7 @@ FN benchPool(n: Int64) RETURNS Int64 ->
     RETURN sum;
 END
 
-FN benchList(n: Int64) RETURNS Int64 ->
+FN benchList(n: Int64) RETURNS !Int64 ->
     -- Pre-allocate capacity to match C (malloc N*sizeof) and Go (make([]T, 0, N))
     MUTABLE items: Entity[5000000]@list = [];
 

@@ -22,7 +22,7 @@ FN heavyCompute(seed: Int64, n: Int64) RETURNS Int64 ->
     RETURN x MOD 1000000000;
 END
 
-FN handleClient!(client: TCPClient) RETURNS Void ->
+FN handleClient!(client: TCPClient) RETURNS !Void ->
     MUTABLE running: Bool = TRUE;
     WHILE running DO
         data: String@raw = tcpRead(client);

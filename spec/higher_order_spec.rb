@@ -462,7 +462,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE sp: Score[100]@pool:sharded(4) = [];
               RETURN;
             END
@@ -473,7 +473,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves Score[100]@pool:sharded(4) full_type to a sharded pool? Type" do
         tree = run(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE sp: Score[100]@pool:sharded(4) = [];
             RETURN;
           END
@@ -487,7 +487,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.ShardedPool Zig type for @pool:sharded(4)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE sp: Score[100]@pool:sharded(4) = [];
             RETURN;
           END
@@ -498,7 +498,7 @@ RSpec.describe SemanticAnnotator do
       it "emits plain defer sp.deinit when sharded pool is never moved" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE sp: Score[100]@pool:sharded(4) = [];
             RETURN;
           END
@@ -509,13 +509,13 @@ RSpec.describe SemanticAnnotator do
 
       it "raises for @pool:sharded(1) — shard count must be >= 2" do
         expect {
-          run('FN f() RETURNS Void -> MUTABLE sp: Float64[100]@pool:sharded(1) = []; RETURN; END')
+          run('FN f() RETURNS !Void -> MUTABLE sp: Float64[100]@pool:sharded(1) = []; RETURN; END')
         }.to raise_error(SourceError, /requires N >= 2/)
       end
 
       it "raises for @pool:sharded on a non-array type" do
         expect {
-          run('FN f() RETURNS Void -> x: Float64@pool:sharded(2) = 1; RETURN; END')
+          run('FN f() RETURNS !Void -> x: Float64@pool:sharded(2) = 1; RETURN; END')
         }.to raise_error(SourceError, /@pool requires an array type/)
       end
 
@@ -523,7 +523,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE sp: Score[100]@pool:sharded(4) = [];
               id = sp.insert(Score{ value: 1.0 });
               result = sp.get(id);
@@ -538,7 +538,7 @@ RSpec.describe SemanticAnnotator do
       it "emits ShardedPool insert/get/remove/length Zig calls" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE sp: Score[100]@pool:sharded(4) = [];
             id = sp.insert(Score{ value: 1.0 });
             result = sp.get(id);
@@ -562,7 +562,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE sl: Score[]@list:sharded(2) = [];
               RETURN;
             END
@@ -573,7 +573,7 @@ RSpec.describe SemanticAnnotator do
       it "resolves Score[]@list:sharded(2) to a sharded list_collection? Type" do
         tree = run(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE sl: Score[]@list:sharded(2) = [];
             RETURN;
           END
@@ -587,7 +587,7 @@ RSpec.describe SemanticAnnotator do
       it "emits CheatLib.ShardedList Zig type for @list:sharded(2)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE sl: Score[]@list:sharded(2) = [];
             RETURN;
           END
@@ -597,13 +597,13 @@ RSpec.describe SemanticAnnotator do
 
       it "raises for @list:sharded(1) — shard count must be >= 2" do
         expect {
-          run('FN f() RETURNS Void -> MUTABLE sl: Float64[]@list:sharded(1) = []; RETURN; END')
+          run('FN f() RETURNS !Void -> MUTABLE sl: Float64[]@list:sharded(1) = []; RETURN; END')
         }.to raise_error(SourceError, /requires N >= 2/)
       end
 
       it "raises for @list:sharded on a non-array type" do
         expect {
-          run('FN f() RETURNS Void -> x: Float64@list:sharded(2) = 1; RETURN; END')
+          run('FN f() RETURNS !Void -> x: Float64@list:sharded(2) = 1; RETURN; END')
         }.to raise_error(SourceError, /@list requires an array type/)
       end
     end
@@ -616,7 +616,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               items: Score[] = [];
               items s> EACH { _.value = 0.0; };
               RETURN;
@@ -629,7 +629,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE items: Score[]@list = [];
               items s> EACH { _.value = 0.0; };
               RETURN;
@@ -642,7 +642,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE pool: Score[100]@pool = [];
               pool s> EACH { _.value = 0.0; };
               RETURN;
@@ -655,7 +655,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE sp: Score[100]@pool:sharded(4) = [];
               sp s> EACH { _.value = 0.0; };
               RETURN;
@@ -667,7 +667,7 @@ RSpec.describe SemanticAnnotator do
       it "raises a clear error when EACH is applied to a non-collection" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 42.0;
               x s> EACH { _ = 0.0; };
               RETURN;
@@ -679,7 +679,7 @@ RSpec.describe SemanticAnnotator do
       it "emits a sequential for loop for EACH on plain arrays" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             items: Score[] = [];
             items s> EACH { _.value = 0.0; };
             RETURN;
@@ -692,7 +692,7 @@ RSpec.describe SemanticAnnotator do
       it "emits pool slot scan for EACH on @pool" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: Score[100]@pool = [];
             pool s> EACH { _.value = 0.0; };
             RETURN;
@@ -705,7 +705,7 @@ RSpec.describe SemanticAnnotator do
       it "emits N parallel fiber structs for EACH on @pool:sharded(4)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE sp: Score[100]@pool:sharded(4) = [];
             sp s> EACH { _.value = 0.0; };
             RETURN;
@@ -722,7 +722,7 @@ RSpec.describe SemanticAnnotator do
       it "uses __it in Zig output (Zig reserves _ as discard identifier)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             items: Score[] = [];
             items s> EACH { _.value = 0.0; };
             RETURN;
@@ -735,7 +735,7 @@ RSpec.describe SemanticAnnotator do
       it "EACH on array emits mutable pointer iteration (|*__it|)" do
         out = transpile_fn(<<~CLEAR)
           STRUCT Score { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             items: Score[] = [];
             items s> EACH { _.value = 0.0; };
             RETURN;
@@ -748,19 +748,19 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap@sharded(N) (sharded hash map)" do
       it "accepts HashMap<Int64>@sharded(2) as a valid type annotation" do
         expect {
-          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END")
+          run("FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END")
         }.not_to raise_error
       end
 
       it "generates ShardedStringMap Zig type" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.PartitionedStringMap(i64, 2)")
       end
 
       it "emits .put() for index assignment on sharded map" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@sharded(2) = {};
               m["key"] = 42_i64;
               RETURN;
@@ -772,7 +772,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .get() for index access on sharded map" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@sharded(2) = {};
               m["key"] = 42_i64;
               v = m["key"] OR 0;
@@ -785,7 +785,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .count() for count method on sharded map" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@sharded(2) = {};
               n: Int64 = m.count();
               RETURN;
@@ -799,19 +799,19 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap@sharded(N):locked (lock-striped hash map via composition)" do
       it "accepts HashMap<Int64>@sharded(4):locked as a valid type annotation" do
         expect {
-          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END")
+          run("FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END")
         }.not_to raise_error
       end
 
       it "generates MutexShardedStringMap (Mutex) Zig type from @sharded:locked" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(4):locked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.MutexShardedStringMap(i64, 4)")
       end
 
       it "emits .put() for index assignment" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@sharded(4):locked = {};
               m["key"] = 42_i64;
               RETURN;
@@ -823,7 +823,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .get() for index access" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@sharded(4):locked = {};
               m["key"] = 42_i64;
               v = m["key"] OR 0;
@@ -835,14 +835,14 @@ RSpec.describe SemanticAnnotator do
       end
 
       it "plain :sharded(4) without @locked generates PartitionedStringMap (shared-nothing)" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4) = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(4) = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.PartitionedStringMap(i64, 4)")
         expect(zig).not_to include("Striped")
       end
 
       it "supports @writeLocked for read-heavy workloads" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(4):writeLocked = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.ShardedStringMap(i64, 4)")
       end
@@ -851,30 +851,30 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap@shared:sharded(N):writeLocked (DashMap — Arc-wrapped lock-striped map)" do
       it "accepts @shared:sharded(N):writeLocked as a valid type annotation" do
         expect {
-          run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END")
+          run("FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END")
         }.not_to raise_error
       end
 
       it "generates Arc-wrapped ShardedStringMap via arcCreate" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("arcCreate(CheatLib.ShardedStringMap(i64, 4)")
       end
 
       it "generates Arc-wrapped MutexShardedStringMap for @shared:sharded(N):locked" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):locked = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):locked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("arcCreate(CheatLib.MutexShardedStringMap(i64, 4)")
       end
 
       it "emits arcCreate for initialization" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("arcCreate(CheatLib.ShardedStringMap(i64, 4)")
       end
 
       it "emits cleanup for shared sharded map" do
-        code = "FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
+        code = "FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {}; RETURN; END"
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include("CheatLib.cleanup(")
         expect(zig).to include("rt.heapAlloc()")
@@ -882,7 +882,7 @@ RSpec.describe SemanticAnnotator do
 
       it "auto-derefs Arc for index read (.get)" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
               m["key"] = 42_i64;
               v = m["key"] OR 0;
@@ -895,7 +895,7 @@ RSpec.describe SemanticAnnotator do
 
       it "auto-derefs Arc for index write (.put)" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
               m["key"] = 42_i64;
               RETURN;
@@ -907,7 +907,7 @@ RSpec.describe SemanticAnnotator do
 
       it "auto-derefs Arc for .count()" do
         code = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64>@shared:sharded(4):writeLocked = {};
               n: Int64 = m.count();
               RETURN;
@@ -926,7 +926,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts Entity[100]@pool:soa as a valid type annotation" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
       CLEAR
       expect { run(code) }.not_to raise_error
     end
@@ -934,7 +934,7 @@ RSpec.describe SemanticAnnotator do
     it "generates SoaPool Zig type" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.SoaPool(Entity)")
@@ -944,7 +944,7 @@ RSpec.describe SemanticAnnotator do
     it "plain @pool still generates Pool (not SoaPool)" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64 }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.Pool(Entity)")
@@ -954,7 +954,7 @@ RSpec.describe SemanticAnnotator do
     it "emits defer deinit for @pool:soa" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE pool: Entity[100]@pool:soa = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("pool.deinit(")
@@ -967,7 +967,7 @@ RSpec.describe SemanticAnnotator do
   describe "Collection constructor sugar" do
     it "List[] with lazy inference narrows type on append" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE items = List[];
           append(items, 42_i64);
           RETURN;
@@ -980,7 +980,7 @@ RSpec.describe SemanticAnnotator do
     it "List[] used in pipeline before append raises helpful error" do
       code = <<~CLEAR
         STRUCT Score { value: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE items = List[];
           total = items s> SUM _.value;
           RETURN;
@@ -992,7 +992,7 @@ RSpec.describe SemanticAnnotator do
 
     it "old syntax T[]@list still works" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Void -> MUTABLE items: Int64[]@list = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: Int64[]@list = []; RETURN; END
       CLEAR
       expect(zig).to include("ArrayListUnmanaged(i64)")
     end
@@ -1005,7 +1005,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts Entity[]@list:soa as a valid type annotation" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
       CLEAR
       expect { run(code) }.not_to raise_error
     end
@@ -1013,7 +1013,7 @@ RSpec.describe SemanticAnnotator do
     it "generates SoaList Zig type" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: Entity[]@list:soa = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("CheatLib.SoaList(Entity)")
@@ -1022,7 +1022,7 @@ RSpec.describe SemanticAnnotator do
     it "uses field-slice iteration for SUM (no alive check)" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS Float64 ->
+        FN f() RETURNS !Float64 ->
           MUTABLE items: Entity[]@list:soa = [];
           total = items s> SUM _.health;
           RETURN total;
@@ -1038,7 +1038,7 @@ RSpec.describe SemanticAnnotator do
     it "plain @list still generates ArrayListUnmanaged (not SoaList)" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64 }
-        FN f() RETURNS Void -> MUTABLE items: Entity[]@list = []; RETURN; END
+        FN f() RETURNS !Void -> MUTABLE items: Entity[]@list = []; RETURN; END
       CLEAR
       zig = ZigTranspiler.new.transpile(code)
       expect(zig).to include("ArrayListUnmanaged(Entity)")
@@ -1054,7 +1054,7 @@ RSpec.describe SemanticAnnotator do
       code = <<~CLEAR
         STRUCT Vec2 { x: Float64, y: Float64 }
         EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE pool: Vec2[100]@pool:soa = [];
           process_vecs(pool);
           RETURN;
@@ -1067,7 +1067,7 @@ RSpec.describe SemanticAnnotator do
       code = <<~CLEAR
         STRUCT Vec2 { x: Float64, y: Float64 }
         EXTERN FN process_vecs(data: Vec2) RETURNS Void FROM "native";
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE items: Vec2[]@list:soa = [];
           process_vecs(items);
           RETURN;
@@ -1080,7 +1080,7 @@ RSpec.describe SemanticAnnotator do
       code = <<~CLEAR
         STRUCT Vec2 { x: Float64, y: Float64 }
         EXTERN FN process_vec(data: Vec2) RETURNS Void FROM "native";
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           v = Vec2{ x: 1.0, y: 2.0 };
           process_vec(v);
           RETURN;
@@ -1095,17 +1095,17 @@ RSpec.describe SemanticAnnotator do
   # ===========================================================================
   describe "Capability validation" do
     it "rejects @locked:writeLocked (conflicting sync — caught by parser)" do
-      code = "FN f() RETURNS Void -> MUTABLE x = 1.0 @locked:writeLocked; RETURN; END"
+      code = "FN f() RETURNS !Void -> MUTABLE x = 1.0 @locked:writeLocked; RETURN; END"
       expect { run(code) }.to raise_error(/Duplicate sync|Conflicting sync/i)
     end
 
     it "rejects @shared:multiowned (conflicting ownership — caught by parser)" do
-      code = "STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 1 } @shared:multiowned; RETURN; END"
+      code = "STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 1 } @shared:multiowned; RETURN; END"
       expect { run(code) }.to raise_error(/Duplicate ownership|Conflicting ownership/i)
     end
 
     it "allows valid combinations (@shared:locked)" do
-      code = "STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 1 } @shared:locked; RETURN; END"
+      code = "STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 1 } @shared:locked; RETURN; END"
       expect { run(code) }.not_to raise_error
     end
   end
@@ -1126,7 +1126,7 @@ RSpec.describe SemanticAnnotator do
     it "warns when pipeline accesses < 50% of fields on a large struct (SUM)" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
           total = entities s> SUM _.x;
           RETURN;
@@ -1141,7 +1141,7 @@ RSpec.describe SemanticAnnotator do
     it "warns for EACH accessing few fields" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
           entities s> EACH { _.x = _.x + _.vx; };
           RETURN;
@@ -1156,7 +1156,7 @@ RSpec.describe SemanticAnnotator do
     it "does NOT warn for small structs (< 4 fields)" do
       code = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64, z: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE pts: Point[] = [];
           total = pts s> SUM _.x;
           RETURN;
@@ -1170,7 +1170,7 @@ RSpec.describe SemanticAnnotator do
     it "does NOT warn when >= 50% of fields are accessed" do
       code = <<~CLEAR
         STRUCT Stats { a: Float64, b: Float64, c: Float64, d: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE data: Stats[] = [];
           data s> EACH { _.a = _.a + _.b; };
           RETURN;
@@ -1184,7 +1184,7 @@ RSpec.describe SemanticAnnotator do
     it "does NOT warn when most fields are accessed" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
           entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; _.health = _.health - 1.0; };
           RETURN;
@@ -1197,7 +1197,7 @@ RSpec.describe SemanticAnnotator do
 
     it "does NOT warn for non-struct element types" do
       code = <<~CLEAR
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE nums: Float64[] = [];
           total = nums s> SUM _;
           RETURN;
@@ -1211,7 +1211,7 @@ RSpec.describe SemanticAnnotator do
     it "warns for WHERE accessing few fields" do
       code = <<~CLEAR
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
           alive = entities s> WHERE _.health > 0;
           RETURN;
@@ -1230,7 +1230,7 @@ RSpec.describe SemanticAnnotator do
   describe "TAKE_WHILE" do
     it "returns same element type as input" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
             result = data s> TAKE_WHILE _ < 5.0;
         END
@@ -1242,7 +1242,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-Bool predicate" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               data: Float64[] = [1.0];
               result = data s> TAKE_WHILE _ + 1.0;
           END
@@ -1253,7 +1253,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-list input" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               result = x s> TAKE_WHILE _ < 5.0;
           END
@@ -1268,7 +1268,7 @@ RSpec.describe SemanticAnnotator do
   describe "WINDOW" do
     it "result type is expression-type[]" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
             result = data s> WINDOW(2) _.length();
         END
@@ -1280,7 +1280,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-numeric size" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               data: Float64[] = [1.0];
               result = data s> WINDOW("bad") _.length();
           END
@@ -1291,7 +1291,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-list input" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               result = x s> WINDOW(2) _.length();
           END
@@ -1306,7 +1306,7 @@ RSpec.describe SemanticAnnotator do
   describe "WINDOW(size:, time:)" do
     it "size-only: result type is expression-type[]" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             data: Int64[] = [1, 2, 3, 4, 5];
             result = data s> WINDOW(size: 3) _.length();
         END
@@ -1317,7 +1317,7 @@ RSpec.describe SemanticAnnotator do
 
     it "time-only: result type is expression-type[]" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             data: Int64[] = [1, 2, 3];
             result = data s> WINDOW(time: "500ms") _.length();
         END
@@ -1328,7 +1328,7 @@ RSpec.describe SemanticAnnotator do
 
     it "size + time: both named params accepted" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             data: Int64[] = [1, 2, 3];
             result = data s> WINDOW(size: 2, time: "1s") _.length();
         END
@@ -1340,7 +1340,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects when neither size nor time is provided" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
               result = data s> WINDOW(size: 3) _.length();
               result2 = data s> WINDOW(size: 0) _.length();
@@ -1352,7 +1352,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects unknown option key" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
               result = data s> WINDOW(bad_key: 3) _.length();
           END
@@ -1363,7 +1363,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-numeric size" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
               result = data s> WINDOW(size: "bad") _.length();
           END
@@ -1374,7 +1374,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects invalid time format" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
               result = data s> WINDOW(time: "5x") _.length();
           END
@@ -1385,7 +1385,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-string time" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
               result = data s> WINDOW(time: 500) _.length();
           END
@@ -1395,7 +1395,7 @@ RSpec.describe SemanticAnnotator do
 
     it "accepts open stream source (~?T[])" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             gen: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
             result = gen s> WINDOW(size: 2) _.length();
         END
@@ -1406,7 +1406,7 @@ RSpec.describe SemanticAnnotator do
 
     it "accepts inf stream source (~T[INF])" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             gen: ~Int64[INF] = BG STREAM { YIELD 1; YIELD 2; };
             result = gen s> WINDOW(size: 2) _.length();
         END
@@ -1424,7 +1424,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         STRUCT A { id: Int64 }
         STRUCT B { id: Int64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             as: A[] = [A{ id: 1 }];
             bs: B[] = [B{ id: 1 }];
             result = as s> JOIN(bs) %(a, b) -> a.id == b.id;
@@ -1439,7 +1439,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         run(<<~CLEAR)
           STRUCT A { id: Int64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               as: A[] = [A{ id: 1 }];
               b: Int64 = 1;
               result = as s> JOIN(b) %(a, b2) -> TRUE;
@@ -1453,7 +1453,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           STRUCT A { id: Int64 }
           STRUCT B { id: Int64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               as: A[] = [A{ id: 1 }];
               bs: B[] = [B{ id: 1 }];
               result = as s> JOIN(bs) %(x) -> TRUE;
@@ -1469,7 +1469,7 @@ RSpec.describe SemanticAnnotator do
   describe "TAP" do
     it "result type is the input collection type (passthrough)" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
             result = data s> TAP { _ + 0.0; };
         END
@@ -1480,7 +1480,7 @@ RSpec.describe SemanticAnnotator do
 
     it "can be chained before an aggregate" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Float64 ->
+        FN f() RETURNS !Float64 ->
             data: Float64[] = [1.0, 2.0];
             total = data s> TAP { _ + 0.0; } s> SUM _;
             RETURN total;
@@ -1493,7 +1493,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-list input" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               result = x s> TAP { _ + 0.0; };
           END
@@ -1503,7 +1503,7 @@ RSpec.describe SemanticAnnotator do
 
     it "generates a for loop over the collection elements" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Float64 ->
+        FN f() RETURNS !Float64 ->
             data: Float64[] = [1.0, 2.0];
             total = data s> TAP { _ + 0.0; } s> SUM _;
             RETURN total;
@@ -1519,7 +1519,7 @@ RSpec.describe SemanticAnnotator do
   describe "SKIP" do
     it "result type matches the input element type" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
             rest = data s> SKIP 1_i64;
         END
@@ -1531,7 +1531,7 @@ RSpec.describe SemanticAnnotator do
     it "preserves element type for struct collections" do
       tree = run(<<~CLEAR)
         STRUCT Item { value: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             items: Item[] = [Item{ value: 1.0 }];
             rest = items s> SKIP 1_i64;
         END
@@ -1544,7 +1544,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-list input" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               result = x s> SKIP 1_i64;
           END
@@ -1554,7 +1554,7 @@ RSpec.describe SemanticAnnotator do
 
     it "can be chained with other operators" do
       tree = run(<<~CLEAR)
-        FN f() RETURNS Float64 ->
+        FN f() RETURNS !Float64 ->
             data: Float64[] = [1.0, 2.0, 3.0];
             total = data s> SKIP 1_i64 s> SUM _;
             RETURN total;
@@ -1579,7 +1579,7 @@ RSpec.describe SemanticAnnotator do
     describe "FIND predicate operator" do
       it "infers ?Float64 for a FIND on Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
             result = nums s> FIND _ > 2.0;
             RETURN;
@@ -1593,7 +1593,7 @@ RSpec.describe SemanticAnnotator do
       it "infers ?Item for a FIND on a struct array" do
         tree = run(<<~CLEAR)
           STRUCT Item { x: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             items: Item[] = [];
             result = items s> FIND _.x > 0.0;
             RETURN;
@@ -1607,7 +1607,7 @@ RSpec.describe SemanticAnnotator do
       it "raises a clear error when FIND is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> FIND _ > 0.0;
               RETURN;
@@ -1619,7 +1619,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when FIND predicate does not evaluate to Bool" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> FIND _;
               RETURN;
@@ -1630,7 +1630,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a result variable initialized to null for FIND in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
             result = nums s> FIND _ > 1.0;
             RETURN;
@@ -1643,7 +1643,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a for loop with break on match for FIND" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> FIND _ > 0.5;
             RETURN;
@@ -1660,7 +1660,7 @@ RSpec.describe SemanticAnnotator do
     describe "ANY predicate operator" do
       it "infers Bool for ANY on a Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
             result = nums s> ANY _ > 1.0;
             RETURN;
@@ -1674,7 +1674,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when ANY is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> ANY _ > 0.0;
               RETURN;
@@ -1686,7 +1686,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when ANY predicate does not evaluate to Bool" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> ANY _;
               RETURN;
@@ -1697,7 +1697,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a bool accumulator and short-circuit break in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> ANY _ > 0.0;
             RETURN;
@@ -1709,7 +1709,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a for loop over collection items" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> ANY _ > 0.0;
             RETURN;
@@ -1726,7 +1726,7 @@ RSpec.describe SemanticAnnotator do
     describe "ALL predicate operator" do
       it "infers Bool for ALL on a Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
             result = nums s> ALL _ > 0.0;
             RETURN;
@@ -1740,7 +1740,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when ALL is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> ALL _ > 0.0;
               RETURN;
@@ -1752,7 +1752,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when ALL predicate does not evaluate to Bool" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> ALL _;
               RETURN;
@@ -1763,7 +1763,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a bool accumulator initialized to true and negated short-circuit in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> ALL _ > 0.0;
             RETURN;
@@ -1776,7 +1776,7 @@ RSpec.describe SemanticAnnotator do
 
       it "vacuous truth: accumulator starts as true (correct for empty list)" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [];
             result = nums s> ALL _ > 0.0;
             RETURN;
@@ -1793,7 +1793,7 @@ RSpec.describe SemanticAnnotator do
     describe "COUNT predicate operator" do
       it "infers Int64 for COUNT on a Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
             result = nums s> COUNT _ > 1.0;
             RETURN;
@@ -1807,7 +1807,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when COUNT is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> COUNT _ > 0.0;
               RETURN;
@@ -1819,7 +1819,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when COUNT predicate does not evaluate to Bool" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> COUNT _;
               RETURN;
@@ -1830,7 +1830,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a counter accumulator and increment in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
             result = nums s> COUNT _ > 1.0;
             RETURN;
@@ -1842,7 +1842,7 @@ RSpec.describe SemanticAnnotator do
 
       it "wraps the predicate in an if condition in the loop" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> COUNT _ > 0.0;
             RETURN;
@@ -1860,7 +1860,7 @@ RSpec.describe SemanticAnnotator do
       it "allows COUNT after WHERE (chained pipeline)" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0, 3.0, 4.0];
               filtered: Float64[] = nums s> WHERE _ > 2.0;
               n: Int64 = filtered s> COUNT _ > 3.0;
@@ -1874,7 +1874,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT User { active: Bool }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               users: User[] = [];
               result = users s> ANY _.active == TRUE;
               RETURN;
@@ -1887,7 +1887,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT User { score: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               users: User[] = [];
               result = users s> ALL _.score > 0.0;
               RETURN;
@@ -1899,7 +1899,7 @@ RSpec.describe SemanticAnnotator do
       it "FIND on a struct array infers the optional struct type" do
         tree = run(<<~CLEAR)
           STRUCT User { score: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             users: User[] = [];
             found = users s> FIND _.score > 50.0;
             RETURN;
@@ -1926,7 +1926,7 @@ RSpec.describe SemanticAnnotator do
     describe "SUM aggregation operator" do
       it "infers Float64 for SUM on a Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
             result = nums s> SUM _;
             RETURN;
@@ -1941,7 +1941,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Item { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               items: Item[] = [];
               result = items s> SUM _.value;
               RETURN;
@@ -1953,7 +1953,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when SUM is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> SUM _;
               RETURN;
@@ -1965,7 +1965,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when SUM expression is not numeric" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> SUM _ > 0.0;
               RETURN;
@@ -1978,7 +1978,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Tag { name: String }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               tags: Tag[] = [];
               tags s> SUM _.name;
               RETURN;
@@ -1989,7 +1989,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits __res accumulator and += pattern in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> SUM _;
             RETURN;
@@ -2006,7 +2006,7 @@ RSpec.describe SemanticAnnotator do
     describe "AVERAGE aggregation operator" do
       it "infers Float64 for AVERAGE on a Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
             result = nums s> AVERAGE _;
             RETURN;
@@ -2020,7 +2020,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when AVERAGE is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> AVERAGE _;
               RETURN;
@@ -2032,7 +2032,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when AVERAGE expression is not numeric" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> AVERAGE _ > 0.0;
               RETURN;
@@ -2043,7 +2043,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits sum/cnt accumulators and division in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> AVERAGE _;
             RETURN;
@@ -2056,7 +2056,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits sum/cnt division for empty list in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [];
             result = nums s> AVERAGE _;
             RETURN;
@@ -2072,7 +2072,7 @@ RSpec.describe SemanticAnnotator do
     describe "MIN aggregation operator" do
       it "infers Float64 for MIN on a Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
             result = nums s> MIN _;
             RETURN;
@@ -2086,7 +2086,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when MIN is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> MIN _;
               RETURN;
@@ -2098,7 +2098,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when MIN expression is not numeric" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> MIN _ > 0.0;
               RETURN;
@@ -2111,7 +2111,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Tag { name: String }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               tags: Tag[] = [];
               tags s> MIN _.name;
               RETURN;
@@ -2122,7 +2122,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits found-flag pattern with less-than guard for MIN in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> MIN _;
             RETURN;
@@ -2135,7 +2135,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits assert guard for MIN on empty list in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> MIN _;
             RETURN;
@@ -2152,7 +2152,7 @@ RSpec.describe SemanticAnnotator do
     describe "MAX aggregation operator" do
       it "infers Float64 for MAX on a Float64[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
             result = nums s> MAX _;
             RETURN;
@@ -2166,7 +2166,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when MAX is applied to a non-array" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               x: Float64 = 1.0;
               x s> MAX _;
               RETURN;
@@ -2178,7 +2178,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when MAX expression is not numeric" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
               nums s> MAX _ > 0.0;
               RETURN;
@@ -2189,7 +2189,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits found-flag pattern with greater-than guard for MAX in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> MAX _;
             RETURN;
@@ -2202,7 +2202,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits assert guard for MAX on empty list in Zig" do
         out = transpile_fn(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
             result = nums s> MAX _;
             RETURN;
@@ -2220,7 +2220,7 @@ RSpec.describe SemanticAnnotator do
       it "allows SUM after WHERE" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0, 3.0, 4.0];
               filtered: Float64[] = nums s> WHERE _ > 2.0;
               total = filtered s> SUM _;
@@ -2233,7 +2233,7 @@ RSpec.describe SemanticAnnotator do
       it "allows MIN after WHERE" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0, 3.0];
               filtered: Float64[] = nums s> WHERE _ > 1.0;
               minimum = filtered s> MIN _;
@@ -2247,7 +2247,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               scores: Score[] = [];
               avg = scores s> AVERAGE _.value;
               RETURN;
@@ -2260,7 +2260,7 @@ RSpec.describe SemanticAnnotator do
         expect {
           run(<<~CLEAR)
             STRUCT Score { value: Float64 }
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               scores: Score[] = [];
               result = scores s> MAX _.value;
               RETURN;
@@ -2272,7 +2272,7 @@ RSpec.describe SemanticAnnotator do
       it "SUM result can be used in further arithmetic" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0];
               total = nums s> SUM _;
               doubled = total * 2.0;
@@ -2444,7 +2444,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE slist: Item[]@list:sharded(2) = [];
             result = slist s> WHERE _.value > 0.0;
             RETURN;
@@ -2660,7 +2660,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE pool: Item[100]@pool = [];
             found = pool s> FIND _.value == 10.0;
             RETURN;

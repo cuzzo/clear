@@ -18,7 +18,7 @@
 
 -- Iterative Lomuto quicksort over a plain slice.
 -- The `!` suffix marks a function with MUTABLE parameters (CLEAR convention).
-FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS Void ->
+FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
   -- Pre-allocate stacks: log2(1M) < 20; 48 entries is safe.
   -- Using @list so both stacks live in the frame arena; trivially freed on exit.
   MUTABLE lo_stk: Int64[]@list = [];

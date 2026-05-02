@@ -2,13 +2,13 @@
 -- Verifies file I/O works on standard (16KB) fiber stacks
 -- after posix-based writeFile/readFile rewrite.
 
-FN buildList(n: Int64) RETURNS String ->
+FN buildList(n: Int64) RETURNS !String ->
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
     RETURN join(parts, ",");
 END
 
-FN doWork() RETURNS Void ->
+FN doWork() RETURNS !Void ->
     MUTABLE i: Int64 = 1;
     WHILE i <= 10 DO
         result = buildList(i * 5_i64);

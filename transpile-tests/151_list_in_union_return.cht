@@ -14,11 +14,11 @@ UNION Val {
     Pair: Pair
 }
 
-FN makeStr!(prefix: String, suffix: String) RETURNS String ->
+FN makeStr!(prefix: String, suffix: String) RETURNS !String ->
     RETURN prefix + suffix;
 END
 
-FN buildList!() RETURNS Val ->
+FN buildList!() RETURNS !Val ->
     MUTABLE items: Val[]@list = List[];
     -- Use dynamically built strings (frame-arena allocated, not rodata)
     items.append(Val{ Str: makeStr!("hel", "lo") });

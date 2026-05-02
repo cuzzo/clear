@@ -1,4 +1,4 @@
-FN pick(kind: Int64) RETURNS Int64 ->
+FN pick(kind: Int64) RETURNS !Int64 ->
     IF kind == 1 THEN
         MUTABLE items: Int64[]@list = [];
         items.append(1_i64);

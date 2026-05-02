@@ -484,7 +484,9 @@ class MIREmitter
     tmp = "__new_#{node.name}"
     val = emit(node.value)
     alloc = alloc_zig(node.alloc)
-    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(#{node.zig_type}, #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
+    zt = node.zig_type
+    zt = zt[1..] if zt.start_with?("!")
+    "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(#{zt}, #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
   end
 
   def emit_if_stmt(node)
@@ -693,7 +695,13 @@ class MIREmitter
     name = node.name
     g = !errdefer && entry[:has_moved_guard]
     zig_type = entry[:zig_type] || "UNKNOWN"
+    # Cleanup operates on the storage (success) type. After the
+    # `RETURNS !T` migration the annotator may stamp a binding with
+    # `!T`, but the Zig variable holds `T` post-`try`. Strip a leading
+    # `!` so the type argument matches the variable's actual type.
+    zig_type = zig_type[1..] if zig_type.start_with?("!")
     elem_zig = entry[:elem_zig_type] || "UNKNOWN"
+    elem_zig = elem_zig[1..] if elem_zig.start_with?("!")
     # via_pointer: true when the binding is already *T (e.g. needs_pointer_passing?
     # TAKES params). Skip the & wrappers and use .* / direct access.
     vp = entry[:via_pointer]
@@ -1205,6 +1213,11 @@ class MIREmitter
   def guarded_cleanup(name, zig_type, alloc, guarded, errdefer: false, via_pointer: false)
     kw = errdefer ? "errdefer" : "defer"
     arg = via_pointer ? name : "&#{name}"
+    # Cleanup operates on the storage type, not the error-union type.
+    # If the binding came from a fallible call (`MUTABLE x = fn()`
+    # where fn is `!T`), the annotator stamps `x` as `!T`, but the
+    # Zig variable holds `T` post-`try`. Strip a leading `!`.
+    zig_type = zig_type[1..] if zig_type.start_with?("!")
     if guarded
       guarded_defer(name, "CheatLib.cleanup(#{zig_type}, #{alloc}, #{arg})", true, errdefer:)
     else

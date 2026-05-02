@@ -10,7 +10,7 @@
 
 STRUCT Counter { value: Int64 }
 
-FN spawnBumper(c: Counter) RETURNS Int64
+FN spawnBumper(c: Counter) RETURNS !Int64
   REQUIRES c: LOCKED
 ->
     bgFut: ~Int64 = BG {

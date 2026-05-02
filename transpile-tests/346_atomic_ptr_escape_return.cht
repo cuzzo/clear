@@ -6,7 +6,7 @@
 
 STRUCT Cfg { v: Int64 }
 
-FN make() RETURNS Cfg@indirect:atomic ->
+FN make() RETURNS !Cfg@indirect:atomic ->
     cfg = Cfg{ v: 42 } @indirect:atomic;
     RETURN cfg;
 END

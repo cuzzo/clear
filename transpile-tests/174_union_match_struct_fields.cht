@@ -8,11 +8,11 @@ UNION Value {
     Error { errMsg: String, errKind: String },
 }
 
-FN handleCatch!(msg: String, kind: String) RETURNS Value ->
+FN handleCatch!(msg: String, kind: String) RETURNS !Value ->
     RETURN Value.Wrapped{ inner: "caught:" + msg + ":" + kind };
 END
 
-FN tryEval!(TAKES input: Value) RETURNS Value ->
+FN tryEval!(TAKES input: Value) RETURNS !Value ->
     PARTIAL MATCH input START
         Value.Error AS e ->
             RETURN handleCatch!(e.errMsg, e.errKind);,
@@ -21,7 +21,7 @@ FN tryEval!(TAKES input: Value) RETURNS Value ->
     RETURN Value.Nil;
 END
 
-FN prStr(v: Value) RETURNS String ->
+FN prStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.Str AS s -> RETURN s;,

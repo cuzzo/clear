@@ -10,7 +10,7 @@
 -- The stackful `sleep` template uses `rt.` directly; inside a BG run
 -- fn the runtime is renamed `__rt_bgN`. Wrap it in a plain FN so the
 -- compiler trampolines through needs_rt for the @xl case.
-FN napFor(ms: Int64) RETURNS Void -> sleep(ms); RETURN; END
+FN napFor(ms: Int64) RETURNS !Void -> sleep(ms); RETURN; END
 
 FN main() RETURNS Void ->
   -- 1. Single FSM that sleeps then returns.

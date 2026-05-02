@@ -8,12 +8,12 @@ UNION Val {
 }
 
 -- Case 1: simple union constructor with frame string
-FN makeStr!(a: String, b: String) RETURNS Val ->
+FN makeStr!(a: String, b: String) RETURNS !Val ->
     RETURN Val{ Str: a + b };
 END
 
 -- Case 2: inline struct variant with frame strings
-FN makePair!(a: String, b: String) RETURNS Val ->
+FN makePair!(a: String, b: String) RETURNS !Val ->
     RETURN Val.Pair{ car: a + b, cdr: b + a };
 END
 

@@ -33,7 +33,7 @@ FN isError?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
-FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String) RETURNS Value ->
+FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String) RETURNS !Value ->
     PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: 0 };,
@@ -42,7 +42,7 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String) RETURNS Value
     RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
 END
 
-FN eval!(TAKES ast: Value) RETURNS Value @reentrant ->
+FN eval!(TAKES ast: Value) RETURNS !Value @reentrant ->
     PARTIAL MATCH TAKES ast START
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.List AS listItems ->
@@ -58,7 +58,7 @@ FN eval!(TAKES ast: Value) RETURNS Value @reentrant ->
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[]) RETURNS Value @reentrant ->
+FN evalList!(TAKES items: Value[]) RETURNS !Value @reentrant ->
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
@@ -81,7 +81,7 @@ FN evalList!(TAKES items: Value[]) RETURNS Value @reentrant ->
     RETURN Value.Nil;
 END
 
-FN prStr(v: Value, readably: Bool) RETURNS String ->
+FN prStr(v: Value, readably: Bool) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,

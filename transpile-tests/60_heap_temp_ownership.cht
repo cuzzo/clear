@@ -2,7 +2,7 @@
 -- Strings live in the caller's frame arena (no heap dupe on return).
 -- GPA leak detection catches any missed cleanup.
 
-FN buildGreeting(name: String) RETURNS String ->
+FN buildGreeting(name: String) RETURNS !String ->
     RETURN "Hello, " + name + "!";
 END
 

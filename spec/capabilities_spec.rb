@@ -397,7 +397,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         run(<<~CLEAR)
           STRUCT Cfg { val: Int64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               cfg = Cfg{ val: 1 } @alwaysMutable;
               cfg.val = 2;
               RETURN;
@@ -409,7 +409,7 @@ RSpec.describe SemanticAnnotator do
     it "generates RefCell Zig type" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         STRUCT Cfg { val: Int64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             cfg = Cfg{ val: 1 } @alwaysMutable;
             RETURN;
         END
@@ -421,7 +421,7 @@ RSpec.describe SemanticAnnotator do
       expect {
         run(<<~CLEAR)
           STRUCT Cfg { val: Int64 }
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
               cfg = Cfg{ val: 1 };
               cfg.val = 2;
               RETURN;
@@ -848,34 +848,34 @@ RSpec.describe SemanticAnnotator do
 
     context "valid cross-dimension combinations" do
       it "@local:indirect parses and compiles" do
-        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @local:indirect; RETURN; END"
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @local:indirect; RETURN; END"
         expect { run(code) }.not_to raise_error
       end
 
       it "@indirect:local (reversed order) parses and compiles" do
-        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @indirect:local; RETURN; END"
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @indirect:local; RETURN; END"
         expect { run(code) }.not_to raise_error
       end
 
       it "@shared:locked (ownership + sync) parses and compiles" do
-        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @shared:locked; RETURN; END"
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @shared:locked; RETURN; END"
         expect { run(code) }.not_to raise_error
       end
     end
 
     context "invalid same-dimension duplicates" do
       it "@locked:writeLocked (duplicate sync) raises parser error" do
-        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @locked:writeLocked; RETURN; END"
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @locked:writeLocked; RETURN; END"
         expect { run(code) }.to raise_error(ParserError, /Duplicate sync/)
       end
 
       it "@shared:multiowned (duplicate ownership) raises parser error" do
-        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @shared:multiowned; RETURN; END"
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @shared:multiowned; RETURN; END"
         expect { run(code) }.to raise_error(ParserError, /Duplicate ownership/)
       end
 
       it "@local:locked (duplicate sync) raises parser error" do
-        code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @local:locked; RETURN; END"
+        code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @local:locked; RETURN; END"
         expect { run(code) }.to raise_error(ParserError, /Duplicate sync/)
       end
     end
@@ -885,7 +885,7 @@ RSpec.describe SemanticAnnotator do
     let(:counter_struct) { "STRUCT Counter { value: Int64 }\n" }
 
     it "warns about Ghost Lock: @locked but never WITH EXCLUSIVE" do
-      code = counter_struct + "FN f() RETURNS Void -> c = Counter{ value: 0 } @locked; RETURN; END"
+      code = counter_struct + "FN f() RETURNS !Void -> c = Counter{ value: 0 } @locked; RETURN; END"
       expect {
         ZigTranspiler.new.transpile(code)
       }.to output(/Variable 'c' is @locked but never mutated/).to_stderr
@@ -894,7 +894,7 @@ RSpec.describe SemanticAnnotator do
     it "warns about Isolated Share: @shared but never @parallel" do
       code = counter_struct + <<~FLUX
         FN useC(c: Counter) RETURNS Void -> RETURN; END
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             c = Counter{ value: 0 } @shared;
             p: ~Void = BG { useC(c); };
             NEXT p;
@@ -909,7 +909,7 @@ RSpec.describe SemanticAnnotator do
     it "warns about Unnecessary Local: @local never captured in BG" do
       code = counter_struct + <<~FLUX
         FN useC(c: Counter) RETURNS Void -> RETURN; END
-        FN f() RETURNS Void -> c = Counter{ value: 0 } @local; useC(c); RETURN; END
+        FN f() RETURNS !Void -> c = Counter{ value: 0 } @local; useC(c); RETURN; END
       FLUX
       expect {
         ZigTranspiler.new.transpile(code)
@@ -918,7 +918,7 @@ RSpec.describe SemanticAnnotator do
 
     it "does NOT warn when @locked is properly used with WITH EXCLUSIVE" do
       code = counter_struct + <<~FLUX
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             c = Counter{ value: 0 } @locked;
             WITH EXCLUSIVE c AS inner { inner.value = 1; }
             RETURN;
@@ -931,7 +931,7 @@ RSpec.describe SemanticAnnotator do
 
     it "does NOT warn when @local is captured in BG" do
       code = counter_struct + <<~FLUX
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             MUTABLE c = Counter{ value: 0 } @local;
             p: ~Void = BG { c.value = c.value + 1; };
             NEXT p;
@@ -1010,7 +1010,7 @@ RSpec.describe SemanticAnnotator do
         # Calling through a fn-type parameter is safe — the caller explicitly controls
         # what function is passed; any self-recursion is visible at the call site.
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 ->
             RETURN cb(x);
           END
         CLEAR
@@ -1019,7 +1019,7 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts a fn-pointer-calling function marked @nonReentrant" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
         CLEAR
@@ -1028,7 +1028,7 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts a fn-pointer-calling function marked @reentrant" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @reentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @reentrant ->
             RETURN cb(x);
           END
         CLEAR
@@ -1040,7 +1040,7 @@ RSpec.describe SemanticAnnotator do
           FN double(x: Int64) RETURNS Int64 ->
             RETURN x * 2;
           END
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
           FN main() RETURNS Void ->
@@ -1055,7 +1055,7 @@ RSpec.describe SemanticAnnotator do
 
       it "transpiles @nonReentrant with safety import" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
           FN main() RETURNS Void ->
@@ -1112,11 +1112,11 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts mutually recursive functions when both are marked @nonReentrant" do
         code = <<~CLEAR
-          FN isEven(n: Int64) RETURNS Bool @nonReentrant ->
+          FN isEven(n: Int64) RETURNS !Bool @nonReentrant ->
             IF n == 0 THEN RETURN TRUE; END
             RETURN isOdd(n - 1);
           END
-          FN isOdd(n: Int64) RETURNS Bool @nonReentrant ->
+          FN isOdd(n: Int64) RETURNS !Bool @nonReentrant ->
             IF n == 0 THEN RETURN FALSE; END
             RETURN isEven(n - 1);
           END
@@ -1130,7 +1130,7 @@ RSpec.describe SemanticAnnotator do
           FN helper(x: Int64) RETURNS Int64 ->
             RETURN x + 1;
           END
-          FN foo(x: Int64) RETURNS Int64 ->
+          FN foo(x: Int64) RETURNS !Int64 ->
             RETURN helper(x);
           END
           FN bar(x: Int64) RETURNS Int64 ->
@@ -1158,7 +1158,7 @@ RSpec.describe SemanticAnnotator do
 
       it "parses @nonReentrant on FunctionDef with RETURNS" do
         code = <<~CLEAR
-          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS Int64 @nonReentrant ->
+          FN apply(cb: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 @nonReentrant ->
             RETURN cb(x);
           END
         CLEAR
@@ -1187,61 +1187,61 @@ RSpec.describe SemanticAnnotator do
   describe "capability syntax enforcement" do
     it "capabilities must start with @" do
       expect {
-        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared:locked; RETURN; END")
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 0 } @shared:locked; RETURN; END")
       }.not_to raise_error
     end
 
     it "rejects two separate @ capabilities without : join" do
       expect {
-        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared @locked; RETURN; END")
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 0 } @shared @locked; RETURN; END")
       }.to raise_error(/Cannot use two separate @ capabilities.*Join with ':'/)
     end
 
     it "rejects @locked @shared (two separate @)" do
       expect {
-        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @locked @shared; RETURN; END")
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 0 } @locked @shared; RETURN; END")
       }.to raise_error(/Cannot use two separate @ capabilities/)
     end
 
     it "accepts @shared:locked (joined with :)" do
       expect {
-        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared:locked; RETURN; END")
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 0 } @shared:locked; RETURN; END")
       }.not_to raise_error
     end
 
     it "accepts @locked:shared (reversed order, joined with :)" do
       expect {
-        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @locked:shared; RETURN; END")
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 0 } @locked:shared; RETURN; END")
       }.not_to raise_error
     end
 
     it "rejects duplicate sync: @locked:writeLocked" do
       expect {
-        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @locked:writeLocked; RETURN; END")
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 0 } @locked:writeLocked; RETURN; END")
       }.to raise_error(/Duplicate sync capability/)
     end
 
     it "rejects duplicate ownership: @shared:multiowned" do
       expect {
-        run("STRUCT S { v: Int64 }\nFN f() RETURNS Void -> x = S{ v: 0 } @shared:multiowned; RETURN; END")
+        run("STRUCT S { v: Int64 }\nFN f() RETURNS !Void -> x = S{ v: 0 } @shared:multiowned; RETURN; END")
       }.to raise_error(/Duplicate ownership capability/)
     end
 
     it "HashMap@sharded(N):locked is valid syntax" do
       expect {
-        run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2):locked = {}; RETURN; END")
+        run("FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(2):locked = {}; RETURN; END")
       }.not_to raise_error
     end
 
     it "HashMap@sharded(N) without :locked is valid (lock-elided)" do
       expect {
-        run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END")
+        run("FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>@sharded(2) = {}; RETURN; END")
       }.not_to raise_error
     end
 
     it "rejects old HashMap:sharded syntax (capabilities must start with @)" do
       expect {
-        run("FN f() RETURNS Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END")
+        run("FN f() RETURNS !Void -> MUTABLE m: HashMap<Int64>:sharded(2) = {}; RETURN; END")
       }.to raise_error(ParserError)
     end
   end
@@ -1564,25 +1564,25 @@ RSpec.describe SemanticAnnotator do
         STRUCT A { x: Int64 }
         STRUCT B { y: Int64 }
 
-        FN useB() RETURNS Void ->
+        FN useB() RETURNS !Void ->
           local_b = B{ y: 0 } @locked;
           WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
           RETURN;
         END
 
-        FN useA() RETURNS Void ->
+        FN useA() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH EXCLUSIVE local_a AS aa { aa.x = aa.x + 1; }
           RETURN;
         END
 
-        FN ab() RETURNS Void ->
+        FN ab() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH EXCLUSIVE local_a AS aa { useB(); }
           RETURN;
         END
 
-        FN ba() RETURNS Void ->
+        FN ba() RETURNS !Void ->
           local_b = B{ y: 0 } @locked;
           WITH EXCLUSIVE local_b AS bb { useA(); }
           RETURN;
@@ -1598,13 +1598,13 @@ RSpec.describe SemanticAnnotator do
         STRUCT A { x: Int64 }
         STRUCT B { y: Int64 }
 
-        FN useB() RETURNS Void ->
+        FN useB() RETURNS !Void ->
           local_b = B{ y: 0 } @locked;
           WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
           RETURN;
         END
 
-        FN ab() RETURNS Void ->
+        FN ab() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH EXCLUSIVE local_a AS aa { useB(); }
           RETURN;
@@ -1619,13 +1619,13 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         STRUCT C { v: Int64 }
 
-        FN useC() RETURNS Void ->
+        FN useC() RETURNS !Void ->
           other_c = C{ v: 0 } @locked;
           WITH EXCLUSIVE other_c AS cc { cc.v = cc.v + 1; }
           RETURN;
         END
 
-        FN holder() RETURNS Void ->
+        FN holder() RETURNS !Void ->
           my_c = C{ v: 0 } @locked;
           WITH EXCLUSIVE my_c AS cc { useC(); }
           RETURN;
@@ -1641,25 +1641,25 @@ RSpec.describe SemanticAnnotator do
         STRUCT A { x: Int64 }
         STRUCT B { y: Int64 }
 
-        FN useB() RETURNS Void ->
+        FN useB() RETURNS !Void ->
           local_b = B{ y: 0 } @locked;
           WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
           RETURN;
         END
 
-        FN useA() RETURNS Void ->
+        FN useA() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH EXCLUSIVE local_a AS aa { aa.x = aa.x + 1; }
           RETURN;
         END
 
-        FN ab() RETURNS Void ->
+        FN ab() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_a AS aa { useB(); }
           RETURN;
         END
 
-        FN ba() RETURNS Void ->
+        FN ba() RETURNS !Void ->
           local_b = B{ y: 0 } @locked;
           WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_b AS bb { useA(); }
           RETURN;
@@ -1676,7 +1676,7 @@ RSpec.describe SemanticAnnotator do
 
         FN pure() RETURNS Int64 -> RETURN 42; END
 
-        FN holder() RETURNS Void ->
+        FN holder() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH EXCLUSIVE local_a AS aa { aa.x = pure(); }
           RETURN;
@@ -1692,7 +1692,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT A { x: Int64 }
         STRUCT B { y: Int64 }
 
-        FN cycleInOne() RETURNS Void ->
+        FN cycleInOne() RETURNS !Void ->
           a1 = A{ x: 0 } @locked;
           b1 = B{ y: 0 } @locked;
           WITH EXCLUSIVE a1 AS aa { WITH EXCLUSIVE b1 AS bb { bb.y = aa.x; } }
@@ -1748,19 +1748,19 @@ RSpec.describe SemanticAnnotator do
         STRUCT A { x: Int64 }
         STRUCT B { y: Int64 }
 
-        FN useB() RETURNS Void ->
+        FN useB() RETURNS !Void ->
           local_b = B{ y: 0 } @locked;
           WITH EXCLUSIVE local_b AS bb { bb.y = bb.y + 1; }
           RETURN;
         END
 
-        FN useA() RETURNS Void ->
+        FN useA() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH EXCLUSIVE local_a AS aa { aa.x = aa.x + 1; }
           RETURN;
         END
 
-        FN ab() RETURNS Void ->
+        FN ab() RETURNS !Void ->
           local_a = A{ x: 0 } @locked;
           WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_a AS aa {
             useB();
@@ -1768,7 +1768,7 @@ RSpec.describe SemanticAnnotator do
           RETURN;
         END
 
-        FN ba() RETURNS Void ->
+        FN ba() RETURNS !Void ->
           local_b = B{ y: 0 } @locked;
           WITH POSSIBLE_LOCK_CYCLE EXCLUSIVE local_b AS bb { useA(); }
           RETURN;
@@ -2124,7 +2124,7 @@ RSpec.describe SemanticAnnotator do
   describe "CATCH grammar — kind-only form" do
     it "accepts CATCH Kind" do
       src = <<~FLUX
-        FN go(mode: Int64) RETURNS Int64 ->
+        FN go(mode: Int64) RETURNS !Int64 ->
           IF mode == 0 THEN RAISE Input, "bad"; END
           RETURN 1;
         CATCH Input
@@ -2153,7 +2153,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts CATCH Kind WITH(Type) for a type registered at a prior RAISE" do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, ParseError, "bad"; END
-        FN b() RETURNS Int64 ->
+        FN b() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input WITH(ParseError)
@@ -2165,7 +2165,7 @@ RSpec.describe SemanticAnnotator do
 
     it "accepts CATCH Kind WITH(Type) when the RAISE appears LATER in source (pre-pass seeding)" do
       src = <<~FLUX
-        FN b() RETURNS Int64 ->
+        FN b() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input WITH(LateType)
@@ -2183,7 +2183,7 @@ RSpec.describe SemanticAnnotator do
       # CATCH without kind-compat contortions.
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, MyErr, "bad"; END
-        FN b() RETURNS Int64 ->
+        FN b() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH NotFound WITH(MyErr)
@@ -2222,7 +2222,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, ParseErr,   "p"; END
         FN b() RETURNS !Void -> RAISE Input, InvalidJson, "j"; END
-        FN c() RETURNS Int64 ->
+        FN c() RETURNS !Int64 ->
           a() OR RAISE;
           b() OR RAISE;
           RETURN 1;
@@ -2237,7 +2237,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input,    Ok,   "p"; END
         FN b() RETURNS !Void -> RAISE NotFound, Miss, "m"; END
-        FN c() RETURNS Int64 ->
+        FN c() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input WITH(Ok, Miss)
@@ -2252,7 +2252,7 @@ RSpec.describe SemanticAnnotator do
         FN a() RETURNS !Void -> RAISE Input, A, "a"; END
         FN b() RETURNS !Void -> RAISE Input, B, "b"; END
         FN c() RETURNS !Void -> RAISE Input, C, "c"; END
-        FN handler() RETURNS Int64 ->
+        FN handler() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input WITH(A, B, C)
@@ -2267,7 +2267,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts CATCH Type when Type is registered by a RAISE in the same program" do
       src = <<~FLUX
         FN fail() RETURNS !Void -> RAISE Input, DirectErr, "bad"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           fail() OR RAISE;
           RETURN 1;
         CATCH DirectErr
@@ -2280,7 +2280,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts CATCH Type for a stdlib-registered type" do
       src = <<~FLUX
         FN maybeTimeout() RETURNS !Void -> RAISE Transient, LockTimeout, "slow"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           maybeTimeout() OR RAISE;
           RETURN 1;
         CATCH LockTimeout
@@ -2306,7 +2306,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN failInput() RETURNS !Void -> RAISE Input, "b"; END
         FN failNF()    RETURNS !Void -> RAISE NotFound, "b"; END
-        FN go(mode: Int64) RETURNS Int64 ->
+        FN go(mode: Int64) RETURNS !Int64 ->
           IF mode == 1 THEN failInput() OR RAISE; END
           IF mode == 2 THEN failNF()    OR RAISE; END
           RETURN 1;
@@ -2321,7 +2321,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, A, "a"; END
         FN b() RETURNS !Void -> RAISE Input, B, "b"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH A, B
@@ -2337,7 +2337,7 @@ RSpec.describe SemanticAnnotator do
       # lives in its own scope.
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE NotFound, MissingItem, "m"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input, MissingItem
@@ -2362,7 +2362,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts CATCH Kind WITH(\"some message\") as a pure message match" do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, "bad header"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input WITH("bad header")
@@ -2375,7 +2375,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts CATCH Kind WITH(Type, \"message\") mixed filter" do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, ParseErr, "bad"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input WITH(ParseErr, "bad header")
@@ -2388,7 +2388,7 @@ RSpec.describe SemanticAnnotator do
     it "accepts CATCH Type WITH(\"msg\") — direct type + message filter" do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input, MyErr, "nope"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH MyErr WITH("nope")
@@ -2413,7 +2413,7 @@ RSpec.describe SemanticAnnotator do
     def outer_wrap(inner)
       <<~FLUX
         FN fail() RETURNS !Int64 -> RAISE Input, OrigErr, "original"; RETURN 0; END
-        FN try_fail() RETURNS Int64 ->
+        FN try_fail() RETURNS !Int64 ->
           v: Int64 = fail() #{inner};
           RETURN v;
         CATCH Input
@@ -2491,7 +2491,7 @@ RSpec.describe SemanticAnnotator do
       src = <<~FLUX
         FN a() RETURNS !Void -> RAISE Input,    Bad,     "b"; END
         FN b() RETURNS !Void -> RAISE Transient, Flaky,  "f"; END
-        FN go() RETURNS Int64 ->
+        FN go() RETURNS !Int64 ->
           a() OR RAISE;
           RETURN 1;
         CATCH Input WITH(Bad)

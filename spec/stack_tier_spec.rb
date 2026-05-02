@@ -35,7 +35,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "assigns :standard to functions that use heap" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS %Point ->
+        FN make() RETURNS !%Point ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
@@ -62,11 +62,11 @@ RSpec.describe "Stack Tier Recommendations" do
     it "assigns :standard to functions calling heap-using functions" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS %Point ->
+        FN make() RETURNS !%Point ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
-        FN use() RETURNS Float64 ->
+        FN use() RETURNS !Float64 ->
             p = make();
             RETURN p.x;
         END
@@ -107,7 +107,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "does not count frame-allocated variables" do
       src = <<~CLEAR
         STRUCT Big { a: Float64[200] }
-        FN test() RETURNS Float64 ->
+        FN test() RETURNS !Float64 ->
             b = Big{ a: [0.0] };
             RETURN b.a[0];
         END
@@ -151,11 +151,11 @@ RSpec.describe "Stack Tier Recommendations" do
     it "promotes micro to standard when function needs runtime" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS %Point ->
+        FN make() RETURNS !%Point ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
-        FN caller() RETURNS Float64 ->
+        FN caller() RETURNS !Float64 ->
             p = make();
             RETURN p.x;
         END
@@ -207,11 +207,11 @@ RSpec.describe "Stack Tier Recommendations" do
     it "errors when user picks @micro for a function that needs @standard" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS %Point ->
+        FN make() RETURNS !%Point ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
-        FN use() RETURNS Float64 ->
+        FN use() RETURNS !Float64 ->
             p = make();
             RETURN p.x;
         END
@@ -226,11 +226,11 @@ RSpec.describe "Stack Tier Recommendations" do
     it "rejects @micro:canSmash with the same not-yet-supported error" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS %Point ->
+        FN make() RETURNS !%Point ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END
-        FN use() RETURNS Float64 ->
+        FN use() RETURNS !Float64 ->
             p = make();
             RETURN p.x;
         END
@@ -245,7 +245,7 @@ RSpec.describe "Stack Tier Recommendations" do
     it "does not error for auto-sized (no user override) calls" do
       src = <<~CLEAR
         STRUCT Point { x: Float64, y: Float64 }
-        FN make() RETURNS %Point ->
+        FN make() RETURNS !%Point ->
             p = Point{ x: 1.0, y: 2.0 };
             RETURN p;
         END

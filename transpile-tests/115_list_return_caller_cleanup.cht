@@ -8,14 +8,14 @@ FN makeNum(n: Float64) RETURNS Value ->
     RETURN Value{ Num: n };
 END
 
-FN makeInner() RETURNS Value ->
+FN makeInner() RETURNS !Value ->
     MUTABLE inner: Value[]@list = List[];
     inner.append(makeNum(1.0));
     inner.append(makeNum(2.0));
     RETURN Value{ List: inner };
 END
 
-FN makeOuter() RETURNS Value ->
+FN makeOuter() RETURNS !Value ->
     MUTABLE items: Value[]@list = List[];
     items.append(makeInner());
     items.append(makeInner());

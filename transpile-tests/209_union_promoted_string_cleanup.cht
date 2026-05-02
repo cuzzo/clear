@@ -1,6 +1,6 @@
 UNION Val { Nil, Str: String }
 
-FN makeVal(label: String) RETURNS Val ->
+FN makeVal(label: String) RETURNS !Val ->
     RETURN Val{ Str: label + "!" };
 END
 

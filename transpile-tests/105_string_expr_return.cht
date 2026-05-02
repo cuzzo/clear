@@ -3,13 +3,13 @@
 -- Functions that return a string expression directly (not via a named variable)
 -- must also promote the frame-allocated result to heap.
 
-FN greet(first: String, last: String) RETURNS String ->
+FN greet(first: String, last: String) RETURNS !String ->
     -- Build strings that force frame allocation, then return an expression.
     full = first + " " + last;
     RETURN "Hello " + full;
 END
 
-FN formatNum(label: String, n: Int64) RETURNS String ->
+FN formatNum(label: String, n: Int64) RETURNS !String ->
     -- toString() forces frame usage; return expression uses concat.
     num = n.toString();
     RETURN label + ": " + num;

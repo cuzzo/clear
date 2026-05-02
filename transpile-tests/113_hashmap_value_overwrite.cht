@@ -4,7 +4,7 @@
 -- The StringMap should free the old value if it's heap-owned.
 -- This mirrors the scheme interpreter pattern where env bindings are overwritten.
 
-FN makeList(n: Int64) RETURNS Int64[] ->
+FN makeList(n: Int64) RETURNS !Int64[] ->
     MUTABLE items: Int64[]@list = List[];
     items.append(n);
     items.append(n + 1_i64);

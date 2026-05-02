@@ -508,6 +508,13 @@ module EscapeAnalysis
     return Set.new if carry_names.empty?
     ret_t = fn.return_type
     ret_t = ret_t.is_a?(Type) ? ret_t : (Type.new(ret_t) rescue nil)
+    # Unwrap `!T` so `RETURNS !String` correctly matches the carry-string
+    # path. Without this, fns with the post-#338 fallible signature don't
+    # get fn.heap_carry_return = true, which leaves callers without a
+    # cleanup defer for the heap-allocated returned string.
+    if ret_t&.error_union? && ret_t.payload_type
+      ret_t = ret_t.payload_type
+    end
     return Set.new unless ret_t&.string?
     result = Set.new
     AST.walk_body(fn.body) do |node|

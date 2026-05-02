@@ -3,7 +3,7 @@ STRUCT Node { id: Int64 }
 -- MOVE in a return transfers the local Rc handle to the caller without retain.
 -- The local defer is suppressed (a_moved = true), so ref count stays at 1.
 -- The caller receives count = 1 and is responsible for cleanup.
-FN makeNode(id_val: Int64) RETURNS Node @multiowned ->
+FN makeNode(id_val: Int64) RETURNS !Node @multiowned ->
     n = Node{ id: id_val } @multiowned;
     RETURN MOVE n;
 END

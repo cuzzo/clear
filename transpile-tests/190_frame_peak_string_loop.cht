@@ -2,7 +2,7 @@
 -- Each iteration's old string value is reclaimed via loopPreserveAndRewind.
 -- Peak frame usage should stay bounded regardless of iteration count.
 
-FN buildResponse(n: Int64) RETURNS String ->
+FN buildResponse(n: Int64) RETURNS !String ->
     MUTABLE resp = "";
     FOR i IN (1_i64 ..= n) DO
         resp = resp + ":OK\r\n";

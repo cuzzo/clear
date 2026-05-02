@@ -1,6 +1,6 @@
 STRUCT Node { v: Int64 }
 
-FN makeLockedNode(n: Node) RETURNS Node @locked ->
+FN makeLockedNode(n: Node) RETURNS !Node @locked ->
     locked = Node{ v: n.v } @locked;
     RETURN locked;
 END

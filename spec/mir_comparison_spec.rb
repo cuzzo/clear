@@ -427,7 +427,7 @@ RSpec.describe "MIR pipeline comparison" do
 
     it "lowers function with string return using alloc (frame string, no mark needed)" do
       src = <<~CLEAR
-        FN getName() RETURNS String ->
+        FN getName() RETURNS !String ->
           s = toString(42);
           RETURN s;
         END

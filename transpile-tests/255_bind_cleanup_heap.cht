@@ -6,13 +6,13 @@
 
 STRUCT Container { vals: Int64[8]@list }
 
-FN make_container(n: Int64) RETURNS Container ->
+FN make_container(n: Int64) RETURNS !Container ->
     MUTABLE vals: Int64[8]@list = List[];
     vals.append(n);
     RETURN Container{ vals: vals };
 END
 
-FN make_optional_container(n: Int64) RETURNS ?Container ->
+FN make_optional_container(n: Int64) RETURNS !?Container ->
     MUTABLE vals: Int64[8]@list = List[];
     vals.append(n);
     RETURN Container{ vals: vals };
@@ -21,7 +21,7 @@ END
 -- Test 1: WHILE pop() AS v where v is a struct with a list field.
 -- Each iteration, v.vals is a heap-allocated list that must be freed.
 -- Without fix: v.vals leaks on every iteration.
-FN test_while_pop_heap_capture() RETURNS Void ->
+FN test_while_pop_heap_capture() RETURNS !Void ->
     MUTABLE pool: Container[4]@list = [];
     MUTABLE c1 = make_container(10);
     pool.append(GIVE c1);
@@ -41,7 +41,7 @@ END
 -- Test 2: IF call() AS v where v is a struct with a list field.
 -- v.vals must be freed at end of the then-block.
 -- Without fix: v.vals leaks.
-FN test_if_bind_heap_capture() RETURNS Void ->
+FN test_if_bind_heap_capture() RETURNS !Void ->
     MUTABLE got_it: Bool = FALSE;
     IF make_optional_container(42) AS c THEN
         ASSERT c.vals.length() == 1_i64, "IF bind capture should have 1 element";

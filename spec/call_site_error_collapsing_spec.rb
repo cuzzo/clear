@@ -39,7 +39,7 @@ RSpec.describe "Call-site error collapsing (#329)" do
     it "passing @versioned to REQUIRES SNAPSHOTTED → {MvccConflict}" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
-        FN tick!(MUTABLE c: C) RETURNS Void
+        FN tick!(MUTABLE c: C) RETURNS !Void
           REQUIRES c: SNAPSHOTTED
         ->
           WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; }
@@ -58,7 +58,7 @@ RSpec.describe "Call-site error collapsing (#329)" do
     it "passing @indirect:atomic to REQUIRES SNAPSHOTTED → {AtomicConflict}" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
-        FN tick!(MUTABLE c: C) RETURNS Void
+        FN tick!(MUTABLE c: C) RETURNS !Void
           REQUIRES c: SNAPSHOTTED
         ->
           WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; }
@@ -104,14 +104,14 @@ RSpec.describe "Call-site error collapsing (#329)" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
 
-        FN c!(MUTABLE x: C) RETURNS Void
+        FN c!(MUTABLE x: C) RETURNS !Void
           REQUIRES x: SNAPSHOTTED
         ->
           WITH SNAPSHOT x AS MUTABLE xa { xa.v = xa.v + 1; }
           RETURN;
         END
 
-        FN a!(MUTABLE b: C) RETURNS Void
+        FN a!(MUTABLE b: C) RETURNS !Void
           REQUIRES b: VERSIONED
         ->
           c!(b);
@@ -142,14 +142,14 @@ RSpec.describe "Call-site error collapsing (#329)" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
 
-        FN c!(MUTABLE x: C) RETURNS Void
+        FN c!(MUTABLE x: C) RETURNS !Void
           REQUIRES x: SNAPSHOTTED
         ->
           WITH SNAPSHOT x AS MUTABLE xa { xa.v = xa.v + 1; }
           RETURN;
         END
 
-        FN a!(MUTABLE b: C) RETURNS Void
+        FN a!(MUTABLE b: C) RETURNS !Void
           REQUIRES b: ATOMIC
         ->
           c!(b);
@@ -172,14 +172,14 @@ RSpec.describe "Call-site error collapsing (#329)" do
       ast = annotate(<<~CLEAR)
         STRUCT C { v: Int64 }
 
-        FN c!(MUTABLE x: C) RETURNS Void
+        FN c!(MUTABLE x: C) RETURNS !Void
           REQUIRES x: SNAPSHOTTED
         ->
           WITH SNAPSHOT x AS MUTABLE xa { xa.v = xa.v + 1; }
           RETURN;
         END
 
-        FN a!(MUTABLE b: C) RETURNS Void
+        FN a!(MUTABLE b: C) RETURNS !Void
           REQUIRES b: SNAPSHOTTED
         ->
           c!(b);

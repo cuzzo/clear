@@ -3,7 +3,7 @@
 
 STRUCT Point { x: Int64, y: Int64 }
 
-FN testSimple() RETURNS Void ->
+FN testSimple() RETURNS !Void ->
     p = Point{ x: 3, y: 4 } @multiowned;
     frozen = FREEZE p;
     print(frozen.x);

@@ -21,7 +21,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
   describe "direct binding of promoted list return" do
     let(:zig) do
       transpile(<<~CLEAR)
-        FN makeList() RETURNS Int64[] ->
+        FN makeList() RETURNS !Int64[] ->
             MUTABLE items: Int64[]@list = List[];
             items.append(1_i64);
             RETURN items;
@@ -52,7 +52,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
     let(:zig) do
       transpile(<<~CLEAR)
         UNION Value { Num: Float64, Text: String }
-        FN makeValue(s: String) RETURNS Value ->
+        FN makeValue(s: String) RETURNS !Value ->
             label = s + "!";
             RETURN Value{ Text: COPY label };
         END
@@ -76,7 +76,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
   describe "promoted return bound inside IF branch" do
     let(:zig) do
       transpile(<<~CLEAR)
-        FN makeList() RETURNS Int64[] ->
+        FN makeList() RETURNS !Int64[] ->
             MUTABLE items: Int64[]@list = List[];
             items.append(1_i64);
             RETURN items;
@@ -109,7 +109,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
             IF u.name == "" THEN RAISE Input; END
             RETURN u;
         END
-        FN process(u: User) RETURNS String ->
+        FN process(u: User) RETURNS !String ->
             validUser = u s> checkUser;
             RETURN validUser.name;
         CATCH Input

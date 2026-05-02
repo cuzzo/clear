@@ -25,7 +25,7 @@ STRUCT SearchResult { file_idx: Int64, count: Int64 }
 
 -- Search a batch of files concurrently. Returns heap-promoted count list.
 -- Isolating the promise list here prevents per-iteration frame rewind in main.
-FN search_batch!(files: String[], start: Int64, end: Int64, data_dir: String, needle: String) RETURNS Int64[] ->
+FN search_batch!(files: String[], start: Int64, end: Int64, data_dir: String, needle: String) RETURNS !Int64[] ->
     MUTABLE futures: ~Int64[]@list = [];
     FOR i IN (start ..< end) DO
         filepath = "${data_dir}/${files[i]}";

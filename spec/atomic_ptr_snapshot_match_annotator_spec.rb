@@ -29,7 +29,7 @@ RSpec.describe "WITH SNAPSHOT MATCH annotator validation (M3.8)" do
     def with_arms(arms)
       <<~CLEAR
         STRUCT Cfg { port: Int64 }
-        FN bumpPort!(MUTABLE c: Cfg) RETURNS Void
+        FN bumpPort!(MUTABLE c: Cfg) RETURNS !Void
           REQUIRES c: VERSIONED | ATOMIC
         ->
           WITH SNAPSHOT c AS MUTABLE x MATCH

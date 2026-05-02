@@ -16,7 +16,7 @@ FN getStr(v: Val) RETURNS String ->
     RETURN "nil";
 END
 
-FN makeLambda!() RETURNS Val ->
+FN makeLambda!() RETURNS !Val ->
     MUTABLE params: Val[]@list = List[];
     params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };

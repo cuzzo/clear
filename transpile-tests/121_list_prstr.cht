@@ -8,7 +8,7 @@ FN getNum(v: Value) RETURNS Float64 ->
     RETURN 0.0;
 END
 
-FN prStr(v: Value) RETURNS String @reentrant ->
+FN prStr(v: Value) RETURNS !String @reentrant ->
     PARTIAL MATCH v START
         Value.Number AS n ->
             RETURN toInt(n).toString();,
@@ -24,7 +24,7 @@ FN prStr(v: Value) RETURNS String @reentrant ->
     RETURN "?";
 END
 
-FN applyNative(name: String, evaled: Value[]) RETURNS Value ->
+FN applyNative(name: String, evaled: Value[]) RETURNS !Value ->
     IF name == "list" THEN
         MUTABLE litems: Value[]@list = List[];
         FOR li IN (0_i64 ..< evaled.length()) DO
@@ -35,7 +35,7 @@ FN applyNative(name: String, evaled: Value[]) RETURNS Value ->
     RETURN Value.Nil;
 END
 
-FN evalList!(TAKES items: Value[]) RETURNS Value ->
+FN evalList!(TAKES items: Value[]) RETURNS !Value ->
     MUTABLE evaled: Value[]@list = List[];
     FOR ei IN (0_i64 ..< items.length()) DO
         evaled.append(COPY items[ei]);

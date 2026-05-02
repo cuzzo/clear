@@ -39,7 +39,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     let(:src) { <<~CHT }
       FN consume(xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
-      FN runit(ops: Int64[]) RETURNS Int64 ->
+      FN runit(ops: Int64[]) RETURNS !Int64 ->
           p: ~Int64 = BG { consume(COPY ops); };
           RETURN NEXT p;
       END
@@ -62,7 +62,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     let(:src) { <<~CHT }
       FN work(xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
-      FN runit() RETURNS Int64 ->
+      FN runit() RETURNS !Int64 ->
           MUTABLE lst: Int64[]@list = List[];
           lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
           slice: Int64[] = lst;
@@ -97,7 +97,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
           RETURN 0_i64;
       END
 
-      FN runit() RETURNS Int64 ->
+      FN runit() RETURNS !Int64 ->
           MUTABLE xsList: V[]@list = List[];
           xsList.append(V{ IntV: 42 });
           xsSlice: V[] = xsList;
@@ -134,7 +134,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
           RETURN 0_i64;
       END
 
-      FN runit() RETURNS Int64 ->
+      FN runit() RETURNS !Int64 ->
           MUTABLE xs: V[]@list = List[];
           xs.append(V{ IntV: 1 });
           vec: V = COPY V{ Vec: xs };
@@ -165,7 +165,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
     let(:src) { <<~CHT }
       FN consume!(TAKES xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
 
-      FN runit() RETURNS Int64 ->
+      FN runit() RETURNS !Int64 ->
           MUTABLE lst: Int64[]@list = List[];
           lst.append(1_i64); lst.append(2_i64); lst.append(3_i64);
           p: ~Int64 = BG { consume!(GIVE lst); };

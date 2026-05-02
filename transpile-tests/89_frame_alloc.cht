@@ -24,7 +24,7 @@ FN first_a(s: BigS) RETURNS Float64 ->
   RETURN s.c1.a;
 END
 
-FN test_frame_struct() RETURNS Void ->
+FN test_frame_struct() RETURNS !Void ->
   zero:  Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
   first: Chunk5 = Chunk5{ a: 7.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 };
 

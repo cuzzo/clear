@@ -2,7 +2,7 @@
 -- Pattern from bench 24 generateJson: parts list + element strings must be freed
 -- on function return, not heap-leaked. Repeated calls must stay O(1) frame/heap.
 
-FN buildCsv(n: Int64) RETURNS String ->
+FN buildCsv(n: Int64) RETURNS !String ->
     MUTABLE parts: String[]@list = [];
     FOR i IN (1_i64 ..= n) -> parts.append(i.toString());
     RETURN join(parts, ",");

@@ -7,7 +7,7 @@ UNION Val {
     Num: Float64
 }
 
-FN copySlice!(src: Val[]) RETURNS Val ->
+FN copySlice!(src: Val[]) RETURNS !Val ->
     copied: Val[] = COPY src;
     RETURN COPY copied[0];
 END

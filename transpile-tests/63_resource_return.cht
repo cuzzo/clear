@@ -1,7 +1,7 @@
 -- Test: Returning a File resource (RAII regression test)
 -- The file should NOT be closed when returned.
 
-FN openFile(path: String) RETURNS File ->
+FN openFile(path: String) RETURNS !File ->
     f = File::open(path);
     RETURN f;
 END

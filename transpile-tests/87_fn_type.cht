@@ -8,7 +8,7 @@ FN isPositive(n: Int64) RETURNS Bool ->
   RETURN n > 0;
 END
 
-FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS Bool ->
+FN apply(cb: FN(Int64) -> Bool, n: Int64) RETURNS !Bool ->
   RETURN cb(n);
 END
 

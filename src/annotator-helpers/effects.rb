@@ -429,7 +429,7 @@ module EffectTracker
   #     change them.
   def enforce_fallible_returns!
     # Post-#335: the rule is implemented but currently a NO-OP (off
-    # behind FALLIBLE_RETURNS_ENFORCE = false). Flipping it to true
+    # behind FALLIBLE_RETURNS_ENFORCE = true). Flipping it to true
     # turns each "fn can fail but doesn't declare !T" into a hard
     # compile error. The migration cost is currently ~600 spec
     # fixtures and an unknown count of transpile-tests / examples /
@@ -446,6 +446,21 @@ module EffectTracker
       next if fn_node.respond_to?(:extern) && fn_node.extern
       next if fn_node.respond_to?(:synthesized) && fn_node.synthesized
 
+      # A fn that absorbs its errors locally via CATCH (or a
+      # DEFAULT catch-all) doesn't propagate, so the surface
+      # signature doesn't need `!T`. compute_can_fail! treats every
+      # body-level RAISE / frame alloc as `can_fail = true` regardless
+      # of whether a CATCH downstream consumes it; we don't want to
+      # force `!T` for a fn whose contract is "I handle my own errors."
+      # The codegen will reject any propagation that escapes an
+      # incomplete CATCH, so an over-permissive skip here only loses
+      # the early diagnostic, not a safety guarantee.
+      has_catch = fn_node.respond_to?(:catch_clauses) &&
+                  fn_node.catch_clauses.is_a?(Array) &&
+                  fn_node.catch_clauses.any?
+      has_default = fn_node.respond_to?(:default_catch) && fn_node.default_catch
+      next if has_catch || has_default
+
       # Post-#335: only enforce on EXPLICIT `RETURNS T` clauses. A fn
       # without `RETURNS` is implicit-Void / inferred and stays exempt
       # (the user didn't author a non-error type, so there's nothing
@@ -457,23 +472,47 @@ module EffectTracker
 
       ret_t = ret.is_a?(Type) ? ret : Type.new(ret)
       next if ret_t.error_union?
+      # Promise/tense returns (`~T`, `counter:~T`) carry errors through
+      # the BG fiber's join boundary, not through the surface signature.
+      # `!~T` is a parse error (parser reads `~` first, then `!`), and
+      # the `!` would belong AFTER the `~` if anywhere. Skip — the
+      # promise itself is the fallibility surface.
+      next if ret_t.respond_to?(:tense?) && ret_t.tense?
 
       # Find at least one source of fallibility for the diagnostic.
       hint = fallibility_hint_for(name)
-      error!(fn_node,
-        "Function '#{name}' can fail (#{hint}) but its return type " \
-        "doesn't declare it. Change `RETURNS #{ret_t.resolved}` to " \
-        "`RETURNS !#{ret_t.resolved}` so callers can see the error " \
-        "union and handle it (Zig-style discipline). Add a CATCH at " \
-        "the call site, propagate via `try`, or mark the call's result " \
-        "with `OR <action>`.")
+      message = "Function '#{name}' can fail (#{hint}) but its return type " \
+                "doesn't declare it. Change `RETURNS #{ret_t.resolved}` to " \
+                "`RETURNS !#{ret_t.resolved}` so callers can see the error " \
+                "union and handle it (Zig-style discipline). Add a CATCH at " \
+                "the call site, propagate via `try`, or mark the call's result " \
+                "with `OR <action>`."
+
+      # Auto-fix: insert `!` immediately before the return-type token.
+      # The token's column points at the start of the type identifier;
+      # a zero-length `!` insert at that column produces `RETURNS !T`.
+      tok = fn_node.respond_to?(:return_type_token) ? fn_node.return_type_token : nil
+      if tok
+        fixes = [Fix.new(
+          description: "Add `!` to the return type to declare the error union " \
+                       "(Zig-style fallible signature).",
+          confidence: :auto,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+            replacement: '!',
+          )],
+        )]
+        fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
+      else
+        error!(fn_node, message)
+      end
     end
   end
 
   # Set to true to flip the fallible-signature check from a NO-OP into
   # a hard compile error. See `enforce_fallible_returns!` for the
   # migration scope.
-  FALLIBLE_RETURNS_ENFORCE = false
+  FALLIBLE_RETURNS_ENFORCE = true
 
   # Best-effort source-of-fallibility hint for the enforce_fallible_returns!
   # diagnostic. Reports either a direct RAISE (if the fn raises directly)

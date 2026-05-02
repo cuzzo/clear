@@ -1,7 +1,7 @@
 -- Line parsing: iterate chars, extract lines, dispatch commands.
 -- This mirrors the server's protocol parsing logic.
 
-FN parseLine(data: String) RETURNS String ->
+FN parseLine(data: String) RETURNS !String ->
     MUTABLE result = "";
     MUTABLE pos: Int64 = 0;
 

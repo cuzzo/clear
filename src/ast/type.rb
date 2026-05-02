@@ -1714,7 +1714,42 @@ class Type
 
     # 1. Handle Error Union: !T -> !zig_type
     if error_union?
-      inner_zig = payload_type.zig_type(is_param: is_param, is_field: is_field)
+      # The parser stamps storage decorators (heap/frame, ownership
+      # like @multiowned/@shared, sync, layout) on the OUTER
+      # error-union Type, but `payload_type` is built from the bare
+      # base symbol -- so a `RETURNS !%User` payload is `User` (no
+      # heap), and `RETURNS !Node @multiowned` payload is `Node` (no
+      # ownership). Propagate the outer's storage hints so the
+      # payload renders as `*User`, `CheatLib.Rc(Node)`,
+      # `CheatLib.Arc(Node)`, etc. -- matching what the body actually
+      # returns and what zig_type would produce for the bare type.
+      pt = payload_type
+      if pt
+        # Make a copy so we don't mutate the cached payload Type.
+        pt = Type.new(pt) if pt.is_a?(Type)
+        if heap? && pt.respond_to?(:provenance) && pt.provenance != :heap &&
+           pt.respond_to?(:provenance=)
+          pt.provenance = :heap
+        end
+        # Generic ownership propagation: any non-default outer
+        # ownership (multiowned / shared / link / ...) flows to the
+        # payload so the inner zig_type renders the right wrapper
+        # (Rc / Arc / WeakRc / ...).
+        if respond_to?(:ownership) && ownership && ownership != :affine &&
+           pt.respond_to?(:ownership) && (pt.ownership.nil? || pt.ownership == :affine) &&
+           pt.respond_to?(:ownership=)
+          pt.ownership = ownership
+        end
+        if respond_to?(:sync) && sync && pt.respond_to?(:sync) && pt.sync.nil? &&
+           pt.respond_to?(:sync=)
+          pt.sync = sync
+        end
+        if respond_to?(:layout) && layout && pt.respond_to?(:layout) && pt.layout.nil? &&
+           pt.respond_to?(:layout=)
+          pt.layout = layout
+        end
+      end
+      inner_zig = pt.zig_type(is_param: is_param, is_field: is_field)
       return "!#{inner_zig}"
     end
 
@@ -1947,6 +1982,14 @@ module TypeHelper
       -node.right.value
     else
       return
+    end
+    # Unwrap an error union so `RETURN 256` against `RETURNS !Byte`
+    # range-checks against the underlying `Byte`. Post-#338, fallible
+    # int returns are stamped `!Int8`/`!Byte`/etc; the range checker's
+    # INT_TYPE_MAX lookup happens on the bare type symbol.
+    if effective_type.respond_to?(:error_union?) && effective_type.error_union? &&
+       effective_type.respond_to?(:payload_type)
+      effective_type = effective_type.payload_type
     end
     t = effective_type.respond_to?(:resolved) ? effective_type.resolved : effective_type&.to_sym
     max = Type::INT_TYPE_MAX[t]

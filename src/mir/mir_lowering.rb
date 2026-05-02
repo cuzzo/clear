@@ -1010,7 +1010,21 @@ class MIRLowering
     # Build return type string. The error prefix is baked into the string,
     # so can_fail on MIR::FnDef is always false (emitter would double it).
     return_type_str = if fn_can_fail
-      if final_type.start_with?("!")
+      # If the user already declared `RETURNS !T`, `final_type` already
+      # carries the error union (post-#338 migration the canonical
+      # form is `anyerror!T`, but bare `!T` is also accepted). Don't
+      # double-prefix.
+      if final_type.include?("anyerror!") || final_type.include?("error{")
+        final_type
+      elsif node.reentrant == :reentrant && final_type.start_with?("!")
+        # Reentrant / mutually-recursive fns must carry `anyerror!T`
+        # rather than the bare `!T`. Zig's inferred-error-set
+        # convergence fails for cycles where two `!T` fns call each
+        # other (`'eval' uses inferred error set of function
+        # 'evalList' here -> dependency loop`). The `anyerror`
+        # prefix makes the error set concrete and breaks the loop.
+        "anyerror#{final_type}"
+      elsif final_type.start_with?("!")
         final_type
       elsif node.reentrant == :reentrant
         "anyerror!#{final_type}"
@@ -1043,9 +1057,20 @@ class MIRLowering
                          end
     uses_frame_or_alloc = has_frame_bindings || node.uses_alloc
     ret_type_obj = node.return_type.is_a?(Type) ? node.return_type : Type.new(node.return_type || :Void)
-    returns_value_type = ret_type_obj.void? || ret_type_obj.primitive? || ret_type_obj.resource? ||
-                         @enum_schemas&.key?(ret_type_obj.resolved) ||
-                         @union_schemas&.key?(ret_type_obj.resolved)
+    # Unwrap `!T` so the value-type / string-return classification
+    # below sees the underlying type. Post-#338, `RETURNS !Void` /
+    # `RETURNS !Status` etc. are common; without this unwrap,
+    # `void?` / `enum_schemas[resolved]` miss and `saveFrameMark` is
+    # never emitted in the prologue.
+    bare_ret = if ret_type_obj.respond_to?(:error_union?) && ret_type_obj.error_union? &&
+                  ret_type_obj.respond_to?(:payload_type)
+                 ret_type_obj.payload_type || ret_type_obj
+               else
+                 ret_type_obj
+               end
+    returns_value_type = bare_ret.void? || bare_ret.primitive? || bare_ret.resource? ||
+                         @enum_schemas&.key?(bare_ret.resolved) ||
+                         @union_schemas&.key?(bare_ret.resolved)
     returns_string = ret_type_obj.string? || (ret_type_obj.error_union? && ret_type_obj.payload_type&.string?)
     has_promotion = node.has_promotion
 
@@ -1157,7 +1182,16 @@ class MIRLowering
     if has_catch
       # Emit inner/outer function pair
       inner_name = "__#{node.name}_body"
-      inner_ret = fn_can_fail ? "anyerror!#{final_type}" : "!#{final_type}"
+      already_error_union = final_type.start_with?("!") ||
+                            final_type.include?("anyerror!") ||
+                            final_type.include?("error{")
+      inner_ret = if already_error_union
+                    final_type
+                  elsif fn_can_fail
+                    "anyerror!#{final_type}"
+                  else
+                    "!#{final_type}"
+                  end
 
       inner_fn = MIR::FnDef.new(inner_name, params_mir, inner_ret,
                                  prologue + body_mir, :private, false, comptime_params)
@@ -1843,7 +1877,11 @@ class MIRLowering
 
     ret = sig.respond_to?(:return_type) ? (sig.return_type || :Void) : (sig[:return]&.fetch(:type, nil) || :Void)
     ret_zig = ret.is_a?(Type) ? ret.zig_type : transpile_type(ret)
-    ret_str = ret_zig.start_with?("!") ? ret_zig : "anyerror!#{ret_zig}"
+    ret_str = if ret_zig.start_with?("!") || ret_zig.include?("anyerror!") || ret_zig.include?("error{")
+                ret_zig
+              else
+                "anyerror!#{ret_zig}"
+              end
 
     # Build body: suppressions + return expr
     body_mir = []
@@ -4604,7 +4642,15 @@ class MIRLowering
 
   def lower_or_rescue(node)
     t_left = node.left.respond_to?(:full_type) && node.left.full_type ? Type.new(node.left.full_type) : nil
-    is_error = (t_left&.error_union?) || (node.left.respond_to?(:can_fail) && node.left.can_fail)
+    # CLEAR's auto-propagate strips `!T` from a fallible call's
+    # full_type (so `x = call()` is x: T at the binding level). The
+    # original `!T` is stashed on `error_union_type`. OR-RESCUE needs
+    # to honor that to keep emitting `catch fallback` (error union)
+    # rather than `orelse fallback` (optional).
+    has_eu = node.left.respond_to?(:error_union_type) && node.left.error_union_type
+    is_error = (t_left&.error_union?) ||
+               (node.left.respond_to?(:can_fail) && node.left.can_fail) ||
+               has_eu
 
     left = lower(node.left)
 

@@ -224,7 +224,7 @@ RSpec.describe SemanticAnnotator do
       context "Fixed Array to Dynamic Array (Slice/View)" do
         let(:code) {
           <<~FLUX
-            FN get_list() RETURNS Float64[] ->
+            FN get_list() RETURNS !Float64[] ->
               -- [1, 2, 3] is Float64[3] (Fixed)
               RETURN [1, 2, 3];
             END
@@ -234,7 +234,9 @@ RSpec.describe SemanticAnnotator do
           func_def = ast.statements.first
           return_node = func_def.body.last
 
-          expect(return_node.value.coerced_type).to eq(:"Float64[]")
+          # Post-#338: the body raises (frame allocation can fail), so the
+          # fn's auto-derived return type is `!Float64[]`, not `Float64[]`.
+          expect(return_node.value.coerced_type).to eq(:"!Float64[]")
         end
       end
     end
@@ -696,7 +698,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~FLUX
           STRUCT Node { keys: Int64[]@list, vals: String[]@list }
           STRUCT DB { nodes: Node[]@list }
-          FN addKey!(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS Void ->
+          FN addKey!(MUTABLE db: DB, idx: Int64, key: Int64) RETURNS !Void ->
               db.nodes[idx].keys.append(key);
           END
         FLUX
@@ -706,7 +708,7 @@ RSpec.describe SemanticAnnotator do
       it "flags needs_mut_ref on GetIndex for mutating intrinsic" do
         code = <<~FLUX
           STRUCT Node { keys: Int64[]@list }
-          FN addKey!(MUTABLE nodes: Node[]@list, idx: Int64, key: Int64) RETURNS Void ->
+          FN addKey!(MUTABLE nodes: Node[]@list, idx: Int64, key: Int64) RETURNS !Void ->
               nodes[idx].keys.append(key);
           END
         FLUX
@@ -740,7 +742,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits CheatLib.cleanup before field reassignment of list type" do
         src = <<~FLUX
-          FN test() RETURNS Void ->
+          FN test() RETURNS !Void ->
             STRUCT Node { vals: String[]@list }
             MUTABLE nodes: Node[]@list = [];
             nodes.append(Node{ vals: [] });
@@ -1493,7 +1495,7 @@ RSpec.describe SemanticAnnotator do
     context "WhileLoop mark_per_iter" do
       it "marks loop as safe for per-iter frame marks when list is loop-local" do
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
               MUTABLE vals: Float64[]@list = [];
@@ -1515,7 +1517,7 @@ RSpec.describe SemanticAnnotator do
         # Per-iteration rewind is wrong here -- it would corrupt the accumulation.
         # (This was the bench 06 pattern that was incorrectly heap-promoted before.)
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE all: Float64[]@list = [];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
@@ -1536,7 +1538,7 @@ RSpec.describe SemanticAnnotator do
         # Per-iteration rewind would corrupt the stored string data -- mark_per_iter must be false.
         # The string data accumulates in the function frame, freed when keys goes out of scope.
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE keys: String[]@list = List[];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
@@ -1556,7 +1558,7 @@ RSpec.describe SemanticAnnotator do
         # keys.append("b:" + toString(i)): same reasoning as above -- the concat result
         # is stored in keys, must not be rewound. mark_per_iter must be false.
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE keys: String[]@list = List[];
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
@@ -1579,7 +1581,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           STRUCT BigS { #{fields} }
           FN makeBig() RETURNS BigS -> RETURN BigS{ #{(1..130).map { |i| "f#{i}: 0.0" }.join(", ")} }; END
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE result = makeBig();
             MUTABLE i = 0_i64;
             WHILE i < 10 DO
@@ -1599,7 +1601,7 @@ RSpec.describe SemanticAnnotator do
     context "ForRange mark_per_iter" do
       it "marks FOR range loop as per-iter when list is loop-local" do
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             FOR i IN (0_i64 ..< 5) DO
               MUTABLE parts: String[]@list = [];
               parts.append(i.toString());
@@ -1615,7 +1617,7 @@ RSpec.describe SemanticAnnotator do
 
       it "does NOT mark FOR range loop when appending to outer list" do
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE all: String[]@list = [];
             FOR i IN (0_i64 ..< 5) DO
               all.append(i.toString());
@@ -1633,7 +1635,7 @@ RSpec.describe SemanticAnnotator do
     context "ForEach mark_per_iter" do
       it "marks FOR..IN (ForEach) as per-iter when list is loop-local" do
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE items: Int64[] = [1_i64, 2_i64];
             FOR item IN items DO
               MUTABLE parts: String[]@list = [];
@@ -1650,7 +1652,7 @@ RSpec.describe SemanticAnnotator do
 
       it "does NOT mark FOR..IN (ForEach) when appending to outer list" do
         src = <<~CLEAR
-          FN foo() RETURNS Void ->
+          FN foo() RETURNS !Void ->
             MUTABLE items: Int64[] = [1_i64, 2_i64];
             MUTABLE all: String[]@list = [];
             FOR item IN items DO
@@ -1669,7 +1671,7 @@ RSpec.describe SemanticAnnotator do
     context "Escape marking for returned collections" do
       it "sets return_provenance on function returning @list (via MIRPass)" do
         src = <<~CLEAR
-          FN buildList() RETURNS Float64[]@list ->
+          FN buildList() RETURNS !Float64[]@list ->
             MUTABLE vals: Float64[]@list = [];
             append(vals, 1.0);
             RETURN vals;
@@ -1685,7 +1687,7 @@ RSpec.describe SemanticAnnotator do
       it "sets return_provenance when returning union with implicit-copied @list field" do
         src = <<~CLEAR
           UNION Value { Nil, List: Value[] }
-          FN makeList() RETURNS Value ->
+          FN makeList() RETURNS !Value ->
               MUTABLE items: Value[]@list = List[];
               items.append(Value.Nil);
               RETURN Value{ List: items };
@@ -1717,7 +1719,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           UNION Value { Nil, Str: String }
           STRUCT Pair { a: Value, b: Value }
-          FN f(v: Value) RETURNS Void ->
+          FN f(v: Value) RETURNS !Void ->
               p = Pair{ a: v, b: Value.Nil };
               RETURN;
           END
@@ -1800,7 +1802,7 @@ RSpec.describe SemanticAnnotator do
         END
 
         -- "Method" to convert Float64 to List: to_list(n)
-        FN to_list(n: Float64) RETURNS Float64[] ->
+        FN to_list(n: Float64) RETURNS !Float64[] ->
           RETURN [n];
         END
       FLUX
@@ -1839,6 +1841,10 @@ RSpec.describe SemanticAnnotator do
 
         it "resolves chains by propagating types" do
           expect { ast }.not_to raise_error
+          # Post-#338: to_list is fallible (frame alloc), but auto-propagate
+          # strips the leading `!` from a call's expression type so the chain
+          # binds `res: Float64[]`. The error union flows implicitly through
+          # the enclosing fn (or to_list's caller), not into the binding.
           expect(result).to eq(:"Float64[]")  # to_list returns dynamic array, always of size 1
         end
       end
@@ -2215,7 +2221,7 @@ RSpec.describe SemanticAnnotator do
         expect_escape("x")
         run_mir_escape(<<~FLUX)
           STRUCT Config { id: Float64 }
-          FN create() RETURNS %Config ->
+          FN create() RETURNS !%Config ->
             x = Config { id: 1 };
             RETURN x; -- x must be on heap to survive return
           END
@@ -2225,7 +2231,7 @@ RSpec.describe SemanticAnnotator do
       it "uses heap_struct_plain cleanup for promoted plain struct (no heap fields)" do
         ast = run_mir_escape(<<~FLUX)
           STRUCT Config { id: Float64 }
-          FN create() RETURNS %Config ->
+          FN create() RETURNS !%Config ->
             x = Config { id: 1 };
             RETURN x;
           END
@@ -2237,7 +2243,7 @@ RSpec.describe SemanticAnnotator do
       it "uses heap_struct cleanup for promoted struct with String field (no field leak)" do
         ast = run_mir_escape(<<~FLUX)
           STRUCT Person { name: String, age: Float64 }
-          FN make() RETURNS %Person ->
+          FN make() RETURNS !%Person ->
             p = Person { name: "alice", age: 30 };
             RETURN p;
           END
@@ -2356,7 +2362,7 @@ RSpec.describe SemanticAnnotator do
         # Even though Config is a struct, %Config is a pointer (8 bytes).
         # Pointers fit in registers.
         code = preamble + <<~FLUX
-          FN make_heap() RETURNS %Config ->
+          FN make_heap() RETURNS !%Config ->
             c = %Config{id:1};
             RETURN c;
           END
@@ -2507,7 +2513,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "PUB FN" do
-      let(:code) { "PUB FN foo() RETURNS Float64 -> RETURN 1; END" }
+      let(:code) { "PUB FN foo() RETURNS !Float64 -> RETURN 1; END" }
 
       it "sets :pub visibility on the FunctionDef node" do
         expect(ast.statements.first.visibility).to eq(:pub)
@@ -2521,7 +2527,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "PRIVATE FN" do
-      let(:code) { "PRIVATE FN foo() RETURNS Float64 -> RETURN 1; END" }
+      let(:code) { "PRIVATE FN foo() RETURNS !Float64 -> RETURN 1; END" }
 
       it "sets :private visibility on the FunctionDef node" do
         expect(ast.statements.first.visibility).to eq(:private)
@@ -2535,7 +2541,7 @@ RSpec.describe SemanticAnnotator do
     end
 
     context "FN (no modifier)" do
-      let(:code) { "FN foo() RETURNS Float64 -> RETURN 1; END" }
+      let(:code) { "FN foo() RETURNS !Float64 -> RETURN 1; END" }
 
       it "defaults to :package visibility on the FunctionDef node" do
         expect(ast.statements.first.visibility).to eq(:package)
@@ -2612,7 +2618,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             RETURN add(1, 2);
           END
         FLUX
@@ -2642,7 +2648,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             RETURN multiply(3, 4);
           END
         FLUX
@@ -2658,7 +2664,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             RETURN secret(1);
           END
         FLUX
@@ -2676,7 +2682,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht" AS myLib;
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             RETURN greet();
           END
         FLUX
@@ -2735,7 +2741,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             p = makePoint(1, 2);
             RETURN p.x;
           END
@@ -2756,7 +2762,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             r = Result{ Ok: 42.0 };
             PARTIAL MATCH r START
               Result.Ok AS val -> RETURN val;,
@@ -2780,7 +2786,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Bool ->
+          FN caller() RETURNS !Bool ->
             c = Color.Red;
             RETURN c == Color.Red;
           END
@@ -2802,7 +2808,7 @@ RSpec.describe SemanticAnnotator do
       let(:main) {
         <<~FLUX
           REQUIRE "helper.cht";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             s = Secret{ code: 42.0 };
             RETURN s.code;
           END
@@ -2831,7 +2837,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             RETURN native_add(1, 2);
           END
         CLEAR
@@ -2879,7 +2885,7 @@ RSpec.describe SemanticAnnotator do
         <<~CLEAR
           EXTERN FN native_add(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
           EXTERN FN native_multiply(a: Float64, b: Float64) RETURNS Float64 FROM "native_math";
-          FN caller() RETURNS Float64 ->
+          FN caller() RETURNS !Float64 ->
             RETURN native_add(native_multiply(2, 3), 1);
           END
         CLEAR
@@ -2904,7 +2910,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~CLEAR
           EXTERN FN native_log(val: Float64) FROM "native_io";
-          FN caller() RETURNS Void ->
+          FN caller() RETURNS !Void ->
             native_log(42);
           END
         CLEAR
@@ -3474,7 +3480,7 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap#count" do
       it "resolves count() return type as Int64" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             n = m.count();
             RETURN;
@@ -3487,7 +3493,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits CheatLib.mapCount in Zig" do
         out = transpile_map(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             n = m.count();
             RETURN;
@@ -3499,7 +3505,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when count receives arguments" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64> = {};
               m.count(42);
               RETURN;
@@ -3512,7 +3518,7 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap#contains" do
       it "resolves contains?() return type as Bool" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             found = m.contains?("x");
             RETURN;
@@ -3525,7 +3531,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits CheatLib.mapContains in Zig" do
         out = transpile_map(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             found = m.contains?("x");
             RETURN;
@@ -3537,7 +3543,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when contains receives no arguments" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64> = {};
               m.contains?();
               RETURN;
@@ -3549,7 +3555,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when contains key is not a String" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64> = {};
               m.contains?(42);
               RETURN;
@@ -3562,7 +3568,7 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap#delete" do
       it "resolves delete() return type as Void" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             m.delete("x");
             RETURN;
@@ -3575,7 +3581,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits CheatLib.mapDelete in Zig" do
         out = transpile_map(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             m.delete("x");
             RETURN;
@@ -3587,7 +3593,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when delete receives no arguments" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64> = {};
               m.delete();
               RETURN;
@@ -3600,7 +3606,7 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap#keys" do
       it "resolves keys() return type as String[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             ks = m.keys();
             RETURN;
@@ -3613,7 +3619,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits CheatLib.mapKeys in Zig" do
         out = transpile_map(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             ks = m.keys();
             RETURN;
@@ -3625,7 +3631,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when keys receives arguments" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64> = {};
               m.keys("x");
               RETURN;
@@ -3638,7 +3644,7 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap#values" do
       it "resolves values() return type as V[]" do
         tree = run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             vs = m.values();
             RETURN;
@@ -3651,7 +3657,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits CheatLib.mapValues in Zig" do
         out = transpile_map(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             vs = m.values();
             RETURN;
@@ -3663,7 +3669,7 @@ RSpec.describe SemanticAnnotator do
       it "raises when values receives arguments" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64> = {};
               m.values(1);
               RETURN;
@@ -3676,7 +3682,7 @@ RSpec.describe SemanticAnnotator do
     describe "HashMap literal with initial values" do
       it "emits a Zig block with mapPut calls for populated literals" do
         out = transpile_map(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m = {"a": 1_i64, "b": 2_i64};
             RETURN;
           END
@@ -3688,7 +3694,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits zero-init for empty string-keyed map literals" do
         out = transpile_map(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE m: HashMap<Int64> = {};
             RETURN;
           END
@@ -3702,7 +3708,7 @@ RSpec.describe SemanticAnnotator do
       it "raises a helpful error for unknown map methods" do
         expect {
           run(<<~CLEAR)
-            FN f() RETURNS Void ->
+            FN f() RETURNS !Void ->
               MUTABLE m: HashMap<Int64> = {};
               m.frobnicate();
               RETURN;
@@ -3732,7 +3738,7 @@ RSpec.describe SemanticAnnotator do
       chunk_init = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
       big_fields = (1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")
       <<~CLEAR
-        FN make_big() RETURNS Void ->
+        FN make_big() RETURNS !Void ->
           s: BigS = BigS{ #{big_fields} };
           _ = s.c1.a;
         END
@@ -3843,7 +3849,7 @@ RSpec.describe SemanticAnnotator do
       chunk_init = "Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 }"
       big_fields = (1..26).map { |i| "c#{i}: #{chunk_init}" }.join(", ")
       outside_code = preamble + <<~CLEAR
-        FN outside() RETURNS Void ->
+        FN outside() RETURNS !Void ->
           s = BigS{ #{big_fields} };
           _ = first_a(s);
         END
@@ -3865,7 +3871,7 @@ RSpec.describe SemanticAnnotator do
         FN consume(s: BigS) RETURNS Float64 ->
           RETURN s.c1.a;
         END
-        FN caller() RETURNS Float64 ->
+        FN caller() RETURNS !Float64 ->
           s: BigS = #{big_init};
           RETURN consume(s);
         END
@@ -3890,7 +3896,7 @@ RSpec.describe SemanticAnnotator do
       <<~CLEAR
         STRUCT Chunk5 { #{chunk_fields} }
         STRUCT BigS   { #{big_fields}   }
-        FN make() RETURNS BigS ->
+        FN make() RETURNS !BigS ->
           s: BigS = #{big_init};
           RETURN s;
         END
@@ -3963,7 +3969,7 @@ RSpec.describe SemanticAnnotator do
   describe "FOR range loop" do
     it "transpiles inclusive FOR loop (..=)" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Int64 ->
+        FN f() RETURNS !Int64 ->
           MUTABLE sum: Int64 = 0;
           FOR i IN (1_i64..=5_i64) DO
             sum += i;
@@ -3977,7 +3983,7 @@ RSpec.describe SemanticAnnotator do
 
     it "transpiles exclusive FOR loop (..<)" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Int64 ->
+        FN f() RETURNS !Int64 ->
           MUTABLE sum: Int64 = 0;
           FOR i IN (0_i64..<5_i64) DO
             sum += i;
@@ -3991,7 +3997,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-Int64 range bounds" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             FOR i IN (1.0..=10.0) DO
               RETURN;
             END
@@ -4004,7 +4010,7 @@ RSpec.describe SemanticAnnotator do
     it "loop variable is immutable" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             FOR i IN (0_i64..<10_i64) DO
               i = 5_i64;
             END
@@ -4016,7 +4022,7 @@ RSpec.describe SemanticAnnotator do
 
     it "loop variable is visible in body" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Int64 ->
+        FN f() RETURNS !Int64 ->
           MUTABLE sum: Int64 = 0;
           FOR i IN (0_i64..<3_i64) DO
             sum += i;
@@ -4029,7 +4035,7 @@ RSpec.describe SemanticAnnotator do
 
     it "iterates over a fixed array" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Int64 ->
+        FN f() RETURNS !Int64 ->
           items: Int64[3] = [1_i64, 2_i64, 3_i64];
           MUTABLE sum: Int64 = 0;
           FOR x IN items DO
@@ -4043,7 +4049,7 @@ RSpec.describe SemanticAnnotator do
 
     it "iterates over a list" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
           MUTABLE nums: Int64[]@list = [];
           nums.append(1_i64);
           MUTABLE sum: Int64 = 0;
@@ -4059,7 +4065,7 @@ RSpec.describe SemanticAnnotator do
     it "rejects non-collection FOR IN" do
       expect {
         run(<<~CLEAR)
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             x: Int64 = 5_i64;
             FOR i IN x DO
               RETURN;
@@ -4072,7 +4078,7 @@ RSpec.describe SemanticAnnotator do
 
     it "supports ..<=  (legacy inclusive syntax)" do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
-        FN f() RETURNS Int64 ->
+        FN f() RETURNS !Int64 ->
           MUTABLE sum: Int64 = 0;
           FOR i IN (1_i64..<=5_i64) DO
             sum += i;
@@ -4121,61 +4127,61 @@ RSpec.describe SemanticAnnotator do
 
     context "decimal literals in declarations" do
       it "accepts value within Byte range" do
-        expect { transpile("FN f() RETURNS Void -> x: Byte = 255; RETURN; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Void -> x: Byte = 255; RETURN; END") }.not_to raise_error
       end
 
       it "rejects value exceeding Byte range" do
-        expect { transpile("FN f() RETURNS Void -> x: Byte = 256; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x: Byte = 256; RETURN; END") }
           .to raise_error(/overflow/i)
       end
 
       it "accepts value within Int8 range" do
-        expect { transpile("FN f() RETURNS Void -> x: Int8 = 127; RETURN; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Void -> x: Int8 = 127; RETURN; END") }.not_to raise_error
       end
 
       it "rejects value exceeding Int8 range" do
-        expect { transpile("FN f() RETURNS Void -> x: Int8 = 128; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x: Int8 = 128; RETURN; END") }
           .to raise_error(/overflow/i)
       end
 
       it "accepts value within UInt32 range" do
-        expect { transpile("FN f() RETURNS Void -> x: UInt32 = 4294967295; RETURN; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Void -> x: UInt32 = 4294967295; RETURN; END") }.not_to raise_error
       end
 
       it "rejects value exceeding UInt32 range" do
-        expect { transpile("FN f() RETURNS Void -> x: UInt32 = 4294967296; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x: UInt32 = 4294967296; RETURN; END") }
           .to raise_error(/overflow/i)
       end
 
       it "accepts Int64 max" do
-        expect { transpile("FN f() RETURNS Void -> x: Int64 = 9223372036854775807; RETURN; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Void -> x: Int64 = 9223372036854775807; RETURN; END") }.not_to raise_error
       end
     end
 
     context "decimal literals in function calls" do
       it "accepts Byte argument within range" do
-        src = "FN f(x: Byte) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(255); RETURN; END"
+        src = "FN f(x: Byte) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(255); RETURN; END"
         expect { transpile(src) }.not_to raise_error
       end
 
       it "rejects Byte argument out of range" do
-        src = "FN f(x: Byte) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(256); RETURN; END"
+        src = "FN f(x: Byte) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(256); RETURN; END"
         expect { transpile(src) }.to raise_error(/overflow/i)
       end
 
       it "rejects Int16 argument out of range" do
-        src = "FN f(x: Int16) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(32768); RETURN; END"
+        src = "FN f(x: Int16) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(32768); RETURN; END"
         expect { transpile(src) }.to raise_error(/overflow/i)
       end
     end
 
     context "decimal literals in return statements" do
       it "accepts return within range" do
-        expect { transpile("FN f() RETURNS Byte -> RETURN 255; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Byte -> RETURN 255; END") }.not_to raise_error
       end
 
       it "rejects return out of range" do
-        expect { transpile("FN f() RETURNS Byte -> RETURN 256; END") }
+        expect { transpile("FN f() RETURNS !Byte -> RETURN 256; END") }
           .to raise_error(/overflow/i)
       end
     end
@@ -4184,33 +4190,33 @@ RSpec.describe SemanticAnnotator do
 
     context "prefixed literals default to Byte" do
       it "accepts 0xFF (=255) where Byte expected" do
-        expect { transpile("FN f() RETURNS Void -> x: Byte = 0xFF; RETURN; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Void -> x: Byte = 0xFF; RETURN; END") }.not_to raise_error
       end
 
       it "rejects 0x100 (=256) where Byte is the default" do
-        expect { transpile("FN f() RETURNS Void -> x = 0x100; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x = 0x100; RETURN; END") }
           .to raise_error(/overflow/i)
       end
 
       it "rejects 0o755 (=493) in Byte-typed declaration" do
-        expect { transpile("FN f() RETURNS Void -> x: Byte = 0o755; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x: Byte = 0o755; RETURN; END") }
           .to raise_error(/overflow/i)
       end
     end
 
     context "prefixed literals coerce to wider types" do
       it "accepts 0o755 where UInt32 expected" do
-        src = "FN f(x: UInt32) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(0o755); RETURN; END"
+        src = "FN f(x: UInt32) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(0o755); RETURN; END"
         expect { transpile(src) }.not_to raise_error
       end
 
       it "accepts 0xFF where UInt32 expected" do
-        src = "FN f(x: UInt32) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(0xFF); RETURN; END"
+        src = "FN f(x: UInt32) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(0xFF); RETURN; END"
         expect { transpile(src) }.not_to raise_error
       end
 
       it "rejects 0x1FFFFFFFF (>u32 max) where UInt32 expected" do
-        src = "FN f(x: UInt32) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(0x1FFFFFFFF); RETURN; END"
+        src = "FN f(x: UInt32) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(0x1FFFFFFFF); RETURN; END"
         expect { transpile(src) }.to raise_error(/overflow/i)
       end
     end
@@ -4219,48 +4225,48 @@ RSpec.describe SemanticAnnotator do
 
     context "negated literals in declarations" do
       it "accepts -128 where Int8 expected (minimum)" do
-        expect { transpile("FN f() RETURNS Void -> x: Int8 = -128; RETURN; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Void -> x: Int8 = -128; RETURN; END") }.not_to raise_error
       end
 
       it "rejects -129 where Int8 expected" do
-        expect { transpile("FN f() RETURNS Void -> x: Int8 = -129; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x: Int8 = -129; RETURN; END") }
           .to raise_error(/overflow/i)
       end
 
       it "accepts -32768 where Int16 expected (minimum)" do
-        expect { transpile("FN f() RETURNS Void -> x: Int16 = -32768; RETURN; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Void -> x: Int16 = -32768; RETURN; END") }.not_to raise_error
       end
 
       it "rejects -32769 where Int16 expected" do
-        expect { transpile("FN f() RETURNS Void -> x: Int16 = -32769; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x: Int16 = -32769; RETURN; END") }
           .to raise_error(/overflow/i)
       end
 
       it "rejects negative value where unsigned type expected" do
-        expect { transpile("FN f() RETURNS Void -> x: UInt32 = -1; RETURN; END") }
+        expect { transpile("FN f() RETURNS !Void -> x: UInt32 = -1; RETURN; END") }
           .to raise_error(/overflow/i)
       end
     end
 
     context "negated literals in function calls" do
       it "accepts -128 as Int8 argument" do
-        src = "FN f(x: Int8) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(-128); RETURN; END"
+        src = "FN f(x: Int8) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(-128); RETURN; END"
         expect { transpile(src) }.not_to raise_error
       end
 
       it "rejects -129 as Int8 argument" do
-        src = "FN f(x: Int8) RETURNS Void -> RETURN; END\nFN main() RETURNS Void -> f(-129); RETURN; END"
+        src = "FN f(x: Int8) RETURNS !Void -> RETURN; END\nFN main() RETURNS Void -> f(-129); RETURN; END"
         expect { transpile(src) }.to raise_error(/overflow/i)
       end
     end
 
     context "negated literals in return statements" do
       it "accepts -128 returned as Int8" do
-        expect { transpile("FN f() RETURNS Int8 -> RETURN -128; END") }.not_to raise_error
+        expect { transpile("FN f() RETURNS !Int8 -> RETURN -128; END") }.not_to raise_error
       end
 
       it "rejects -129 returned as Int8" do
-        expect { transpile("FN f() RETURNS Int8 -> RETURN -129; END") }
+        expect { transpile("FN f() RETURNS !Int8 -> RETURN -129; END") }
           .to raise_error(/overflow/i)
       end
     end
@@ -4288,13 +4294,13 @@ RSpec.describe SemanticAnnotator do
 
   describe "String interpolation" do
     it "annotates interpolated string without error and produces String type" do
-      src = 'FN f() RETURNS Void -> name = "World"; greeting: String = "Hello, ${name}!"; RETURN; END'
+      src = 'FN f() RETURNS !Void -> name = "World"; greeting: String = "Hello, ${name}!"; RETURN; END'
       expect { run(src) }.not_to raise_error
     end
 
     it "annotates without error when interpolating expressions" do
       src = <<~CLEAR
-        FN f(x: Int64) RETURNS String ->
+        FN f(x: Int64) RETURNS !String ->
           RETURN "value: \${x.toString()}";
         END
       CLEAR
@@ -4303,7 +4309,7 @@ RSpec.describe SemanticAnnotator do
 
     it "emits Zig concat for interpolated string" do
       src = <<~CLEAR
-        FN f(name: String) RETURNS String ->
+        FN f(name: String) RETURNS !String ->
           result = "Hello, \${name}!";
           RETURN result;
         END
@@ -4331,7 +4337,7 @@ RSpec.describe SemanticAnnotator do
 
     it "allows WHILE AS when the method receiver is MUTABLE" do
       src = <<~CHT
-        FN test() RETURNS Void ->
+        FN test() RETURNS !Void ->
           MUTABLE items: Int64[5]@list = [];
           items.append(1_i64);
           WHILE items.pop() AS v DO
@@ -4346,7 +4352,7 @@ RSpec.describe SemanticAnnotator do
     it "allows WHILE RESOLVE AS (ResolveNode, not a MethodCall)" do
       src = <<~CHT
         STRUCT Node { val: Int64 }
-        FN test() RETURNS Void ->
+        FN test() RETURNS !Void ->
           live = Node{ val: 42 } @multiowned;
           w = LINK live;
           WHILE RESOLVE w AS node DO

@@ -12,7 +12,7 @@ FN heavyCompute(seed: Int64, n: Int64) RETURNS Int64 ->
     RETURN x MOD 1000000000;
 END
 
-FN handleData(data: String) RETURNS String ->
+FN handleData(data: String) RETURNS !String ->
     MUTABLE resp = "";
     MUTABLE pos: Int64 = 0;
     WHILE pos < data.length() DO

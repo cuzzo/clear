@@ -168,7 +168,7 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
             RETURN;
         END
 
-        FN caller() RETURNS Void ->
+        FN caller() RETURNS !Void ->
             MUTABLE c = Counter{ value: 0 } @locked;
             bump!(c);
             RETURN;
@@ -209,18 +209,18 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
   describe "transitive propagation" do
     it "propagates :CONTENTION through a call chain" do
       effs = effects_of(<<~CLEAR, "outer")
-        FN bump() RETURNS Void ->
+        FN bump() RETURNS !Void ->
             MUTABLE c: Int64 = 0 @shared:atomic;
             c += 1;
             RETURN;
         END
 
-        FN middle() RETURNS Void ->
+        FN middle() RETURNS !Void ->
             bump();
             RETURN;
         END
 
-        FN outer() RETURNS Void ->
+        FN outer() RETURNS !Void ->
             middle();
             RETURN;
         END
@@ -234,18 +234,18 @@ RSpec.describe "Atomics M1.6.5: contention/blocking effect axis" do
     it "propagates :BLOCKING through a call chain" do
       effs = effects_of(<<~CLEAR, "outer")
         STRUCT Counter { value: Int64 }
-        FN locked_op() RETURNS Void ->
+        FN locked_op() RETURNS !Void ->
             c = Counter{ value: 0 } @locked;
             WITH EXCLUSIVE c AS inner { inner.value; }
             RETURN;
         END
 
-        FN middle() RETURNS Void ->
+        FN middle() RETURNS !Void ->
             locked_op();
             RETURN;
         END
 
-        FN outer() RETURNS Void ->
+        FN outer() RETURNS !Void ->
             middle();
             RETURN;
         END

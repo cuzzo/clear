@@ -10,7 +10,7 @@ UNION Val {
     Box: Int64 @indirect,
 }
 
-FN transform(v: Val) RETURNS Val ->
+FN transform(v: Val) RETURNS !Val ->
     PARTIAL MATCH v START
         Val.Box AS n -> RETURN Val{ Box: n * 2 };,
         DEFAULT -> RETURN Val.Nil;

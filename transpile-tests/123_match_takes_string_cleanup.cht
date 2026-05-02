@@ -4,11 +4,11 @@
 
 UNION Value { Nil, Number: Float64, Symbol: String, List: Value[] }
 
-FN makeSymbol() RETURNS Value ->
+FN makeSymbol() RETURNS !Value ->
     RETURN Value{ Symbol: COPY "hello" };
 END
 
-FN consume!(TAKES v: Value) RETURNS String ->
+FN consume!(TAKES v: Value) RETURNS !String ->
     PARTIAL MATCH TAKES v START
         Value.Symbol AS s -> RETURN COPY s;,
         Value.List AS items -> RETURN "list";,

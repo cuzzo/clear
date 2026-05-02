@@ -4,7 +4,7 @@
 -- Tests: Pipeline chains, CONCURRENT operators, SHARD pipeline,
 -- aggregation operators on real data.
 
-FN generateReadings(n: Int64, seed: Int64) RETURNS Float64[]@list ->
+FN generateReadings(n: Int64, seed: Int64) RETURNS !Float64[]@list ->
     MUTABLE readings: Float64[]@list = [];
     MUTABLE state: Int64 = seed;
     FOR i IN (0_i64 ..< n) DO

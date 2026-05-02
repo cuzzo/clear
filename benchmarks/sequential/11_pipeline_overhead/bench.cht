@@ -28,7 +28,7 @@
 --   which LLVM can vectorize. A nested-if with intermediate variable (the
 --   "natural" form) blocks LLVM vectorization and gives 962ms instead of 338ms.
 
-FN buildData(n: Int64) RETURNS Float64[]@list ->
+FN buildData(n: Int64) RETURNS !Float64[]@list ->
     MUTABLE data: Float64[]@list = [];
     data.reserve(n); -- TODO: replace with Float64[n]@list once T[expr]@list supports runtime capacity
 
@@ -69,7 +69,7 @@ FN fusedLoop(data: Float64[]) RETURNS Float64 ->
     RETURN sum;
 END
 
-FN chainedPipeline(data: Float64[]) RETURNS Float64 ->
+FN chainedPipeline(data: Float64[]) RETURNS !Float64 ->
     RETURN data s> WHERE _ > 500.0 s> SELECT _ * _ s> SUM _;
 END
 
@@ -88,7 +88,7 @@ FN longFusedLoop(data: Float64[]) RETURNS Float64 ->
     RETURN sum;
 END
 
-FN longChainedPipeline(data: Float64[]) RETURNS Float64 ->
+FN longChainedPipeline(data: Float64[]) RETURNS !Float64 ->
     RETURN data s> WHERE _ > 200.0 s> SELECT _ * 2.0 s> WHERE _ < 1500.0 s> SUM _;
 END
 

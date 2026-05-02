@@ -1442,7 +1442,15 @@ module PipeAnalysis
       modifier = inner_expr.right
       if modifier.is_a?(AST::OrPrune) || modifier.is_a?(AST::OrRaise)
         inner_fn_type = inner_expr.left.type_info
-        unless inner_fn_type&.error_union?
+        # CLEAR's auto-propagate strips `!T` from a fallible call's
+        # full_type (saving the union on `error_union_type`). The
+        # OR PRUNE / OR RAISE validators must honor that fallback so
+        # `f() OR PRUNE` (where f is `!T`) doesn't false-positive
+        # as "got T (not !T)".
+        is_error_union = inner_fn_type&.error_union? ||
+                         (inner_expr.left.respond_to?(:error_union_type) &&
+                          inner_expr.left.error_union_type)
+        unless is_error_union
           mod_name = modifier.is_a?(AST::OrPrune) ? "OR PRUNE" : "OR RAISE"
           error!(modifier, "#{mod_name} requires the expression to return an error union (!T), but got #{inner_expr.left.resolved_type}")
         end

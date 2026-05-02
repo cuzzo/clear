@@ -19,7 +19,7 @@ STRUCT Report {
 
 -- Build a report: sum values from a delimited string.
 -- Exercises: string ops (split, toInt), frame allocation, struct return.
-FN buildReport(name: String, data: String) RETURNS Report ->
+FN buildReport(name: String, data: String) RETURNS !Report ->
     parts = split(data, ",");
     MUTABLE sum: Int64 = 0;
     FOR i IN (0_i64 ..< parts.length()) DO

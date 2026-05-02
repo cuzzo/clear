@@ -40,7 +40,7 @@ RSpec.describe "P3 effect inference + correctness checks" do
   describe "EffectInference" do
     it "stamps :yield on functions that BG or NEXT" do
       src = <<~CHT
-        FN spawnAndWait() RETURNS Int64 ->
+        FN spawnAndWait() RETURNS !Int64 ->
           p: ~Int64 = BG { 1; };
           x = NEXT p;
           RETURN x;
@@ -64,12 +64,12 @@ RSpec.describe "P3 effect inference + correctness checks" do
 
     it "propagates effects transitively" do
       src = <<~CHT
-        FN inner() RETURNS Int64 ->
+        FN inner() RETURNS !Int64 ->
           p: ~Int64 = BG { 1; };
           RETURN NEXT p;
         END
 
-        FN outer() RETURNS Int64 ->
+        FN outer() RETURNS !Int64 ->
           RETURN inner();
         END
       CHT

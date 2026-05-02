@@ -72,7 +72,7 @@ RSpec.describe "TAKES auto-move" do
   it "RETURN fn(TAKES arg) eliminates cleanup when always moved" do
     zig = transpile(<<~CLEAR)
       UNION Value { Num: Float64, List: Int64[] }
-      FN makeValue() RETURNS Value ->
+      FN makeValue() RETURNS !Value ->
           MUTABLE items: Int64[]@list = List[];
           items.append(1_i64);
           RETURN Value{ List: items };

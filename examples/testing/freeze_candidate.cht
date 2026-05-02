@@ -19,7 +19,7 @@ STRUCT Doc {
     tag:    String
 }
 
-FN buildDoc(seed: Int64) RETURNS Doc @multiowned ->
+FN buildDoc(seed: Int64) RETURNS !Doc @multiowned ->
     RETURN Doc{
         title: "doc_title_" + seed.toString(),
         body:  "body_content_" + (seed * 13).toString() + "_suffix",

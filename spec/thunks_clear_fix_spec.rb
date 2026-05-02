@@ -108,7 +108,7 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
   describe "unconstrained FN-typed parameter fix (Phase 2)" do
     it "warns and offers two fixes: NON_REENTRANT (auto) and EFFECTS REENTRANT (interactive)" do
       fs = findings(<<~CLEAR)
-        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS Int64 ->
+        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 ->
           RETURN f(x);
         END
         FN main() RETURNS Void -> RETURN; END
@@ -122,7 +122,7 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
 
     it "first fix adds REQUIRES NON_REENTRANT (auto, default for `clear fix --yes`)" do
       fs = findings(<<~CLEAR)
-        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS Int64 ->
+        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 ->
           RETURN f(x);
         END
         FN main() RETURNS Void -> RETURN; END
@@ -136,7 +136,7 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
 
     it "second fix adds EFFECTS REENTRANT to the enclosing function (interactive)" do
       fs = findings(<<~CLEAR)
-        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS Int64 ->
+        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 ->
           RETURN f(x);
         END
         FN main() RETURNS Void -> RETURN; END
@@ -150,7 +150,7 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
 
     it "skips parameters with @reentrant on the type (caller opted in)" do
       fs = findings(<<~CLEAR)
-        FN applyReentrant(f: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS Int64
+        FN applyReentrant(f: FN(Int64) -> Int64 @reentrant, x: Int64) RETURNS !Int64
           EFFECTS REENTRANT ->
           RETURN f(x);
         END
@@ -162,7 +162,7 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
 
     it "skips entirely when the enclosing function declares EFFECTS REENTRANT" do
       fs = findings(<<~CLEAR)
-        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS Int64
+        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
           EFFECTS REENTRANT ->
           RETURN f(x);
         END
@@ -189,7 +189,7 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
 
     it "skips parameters that already have a REQUIRES clause" do
       fs = findings(<<~CLEAR)
-        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS Int64
+        FN apply(f: FN(Int64) -> Int64, x: Int64) RETURNS !Int64
           REQUIRES f: NON_REENTRANT ->
           RETURN f(x);
         END
@@ -201,7 +201,7 @@ RSpec.describe "ReentranceBridge clear-fix migration" do
 
     it "groups multiple unconstrained params into one finding with a chained replacement" do
       fs = findings(<<~CLEAR)
-        FN both(f: FN(Int64) -> Int64, g: FN(Int64) -> Int64, x: Int64) RETURNS Int64 ->
+        FN both(f: FN(Int64) -> Int64, g: FN(Int64) -> Int64, x: Int64) RETURNS !Int64 ->
           RETURN f(x) + g(x);
         END
         FN main() RETURNS Void -> RETURN; END

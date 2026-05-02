@@ -275,7 +275,7 @@ RSpec.describe LoopFrameAnalysis do
       # last = makePrefix(i): the loop has mark_per_iter=true (tmp forces it).
       # Phase 1.5c promotes last's declaration to heap so it survives the rewind.
       ast = run_mir(<<~CLEAR)
-        FN makePrefix(i: Int64) RETURNS String ->
+        FN makePrefix(i: Int64) RETURNS !String ->
           RETURN "entry-" + i.toString();
         END
         FN main() RETURNS Void ->

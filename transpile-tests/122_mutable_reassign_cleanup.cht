@@ -3,7 +3,7 @@
 
 UNION Value { Nil, Str: String, List: Value[] }
 
-FN makeStr(s: String) RETURNS Value ->
+FN makeStr(s: String) RETURNS !Value ->
     RETURN Value{ Str: COPY s };
 END
 

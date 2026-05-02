@@ -3,7 +3,7 @@
 -- We verify by reading the value after post-loop frame allocations overwrite
 -- the arena region where the dangling pointer would have pointed.
 
-FN makePrefix(i: Int64) RETURNS String ->
+FN makePrefix(i: Int64) RETURNS !String ->
     RETURN "entry-" + i.toString();
 END
 

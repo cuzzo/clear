@@ -1,7 +1,7 @@
 -- Test: @set collection type
 
 -- Test 1: basic string set
-FN test_string_set() RETURNS Void ->
+FN test_string_set() RETURNS !Void ->
     MUTABLE s: String[]@set = Set[];
 
     s.insert("hello");
@@ -21,7 +21,7 @@ FN test_string_set() RETURNS Void ->
 END
 
 -- Test 2: numeric set (Int64)
-FN test_numeric_set() RETURNS Void ->
+FN test_numeric_set() RETURNS !Void ->
     MUTABLE ids: Int64[]@set = Set[];
 
     ids.insert(10_i64);
@@ -40,7 +40,7 @@ FN test_numeric_set() RETURNS Void ->
 END
 
 -- Test 3: empty set operations
-FN test_empty_set() RETURNS Void ->
+FN test_empty_set() RETURNS !Void ->
     MUTABLE s: String[]@set = Set[];
 
     ASSERT s.length() == 0_i64, "empty set should have count 0";
@@ -53,7 +53,7 @@ FN test_empty_set() RETURNS Void ->
 END
 
 -- Test 4: set in a loop
-FN test_set_in_loop() RETURNS Void ->
+FN test_set_in_loop() RETURNS !Void ->
     MUTABLE s: Int64[]@set = Set[];
 
     FOR i IN (0_i64 ..< 100_i64) DO

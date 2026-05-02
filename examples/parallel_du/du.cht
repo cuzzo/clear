@@ -7,7 +7,7 @@
 -- Usage: ./du
 -- Compare: du -sb .
 
-FN scanDir(path: String) RETURNS Int64 EFFECTS REENTRANT ->
+FN scanDir(path: String) RETURNS !Int64 EFFECTS REENTRANT ->
     entries = listAll(path);
     MUTABLE total: Int64 = 0;
 

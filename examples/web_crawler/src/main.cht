@@ -22,7 +22,7 @@ STRUCT Page {
 }
 
 -- Extract the <title>...</title> from HTML.
-FN extractTitle(html: String) RETURNS String ->
+FN extractTitle(html: String) RETURNS !String ->
     startTag = indexOf(html, "<title>") OR -1;
     IF startTag >= 0 THEN
         titleStart = startTag + 7;
@@ -41,7 +41,7 @@ FN countLinks(html: String) RETURNS Int64 ->
 END
 
 -- Fetch a page and extract metadata.
-FN fetchPage(baseUrl: String, path: String) RETURNS Page EFFECTS REENTRANT ->
+FN fetchPage(baseUrl: String, path: String) RETURNS !Page EFFECTS REENTRANT ->
     url = baseUrl + path;
     html = httpGet(url);
     title = extractTitle(html);

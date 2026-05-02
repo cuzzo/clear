@@ -1,4 +1,4 @@
-FN doWrite(name: String, content: String) RETURNS Void ->
+FN doWrite(name: String, content: String) RETURNS !Void ->
     writeFile(name, content);
 END
 

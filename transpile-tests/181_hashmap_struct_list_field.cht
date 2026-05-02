@@ -8,7 +8,7 @@ STRUCT Item {
     tags: String[]@list,
 }
 
-FN addItem!(MUTABLE items: HashMap<Item>, key: String, name: String, tag: String) RETURNS Void ->
+FN addItem!(MUTABLE items: HashMap<Item>, key: String, name: String, tag: String) RETURNS !Void ->
     MUTABLE tags: String[]@list = [];
     tags.append(COPY tag);
     items[key] = Item{ name: COPY name, tags: tags };

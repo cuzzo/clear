@@ -7,7 +7,7 @@ UNION Val {
     Pair { car: String, cdr: String }
 }
 
-FN buildAndDiscard!() RETURNS Void ->
+FN buildAndDiscard!() RETURNS !Void ->
     MUTABLE items: Val[]@list = List[];
     items.append(Val{ Str: "hello" });
     items.append(Val{ Str: "world" });

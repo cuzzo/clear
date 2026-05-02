@@ -184,7 +184,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
 
         src = <<~CLEAR
           STRUCT C { v: Int64 }
-          FN bump!(MUTABLE c: C) RETURNS Void
+          FN bump!(MUTABLE c: C) RETURNS !Void
             REQUIRES c: #{req_family}
           ->
             #{with_form}
@@ -207,7 +207,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN bump!(MUTABLE c: C) RETURNS Void
+          FN bump!(MUTABLE c: C) RETURNS !Void
             REQUIRES c: SNAPSHOTTED
           ->
             WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; }
@@ -226,7 +226,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
       expect {
         annotate(<<~CLEAR)
           STRUCT C { v: Int64 }
-          FN bump!(MUTABLE c: C) RETURNS Void
+          FN bump!(MUTABLE c: C) RETURNS !Void
             REQUIRES c: SNAPSHOTTED
           ->
             WITH SNAPSHOT c AS MUTABLE x { x.v = x.v + 1; }

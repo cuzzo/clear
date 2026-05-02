@@ -268,7 +268,7 @@ n = 1000000;
 MUTABLE map: HashMap<String>@sharded(8) = {};
 
 -- Functions: no @sharded needed in parameter types
-FN doWork!(MUTABLE map: HashMap<String>, key: String) RETURNS Void ->
+FN doWork!(MUTABLE map: HashMap<String>, key: String) RETURNS !Void ->
     map[key] = "value";
 END
 

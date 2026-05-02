@@ -38,7 +38,7 @@ RSpec.describe "FSM classifier (Phase A)" do
   describe "fsm_eligible" do
     it "is true for a fn with an IO call (SUSPENDS) and no disqualifying effects" do
       ast = annotate(<<~CLEAR)
-        FN loadIt() RETURNS Void ->
+        FN loadIt() RETURNS !Void ->
           content = readFile("foo.txt");
           RETURN;
         END
@@ -52,7 +52,7 @@ RSpec.describe "FSM classifier (Phase A)" do
 
     it "is false for @reentrant self-recursive fns" do
       ast = annotate(<<~CLEAR)
-        FN countDown(n: Int64) RETURNS Void @reentrant ->
+        FN countDown(n: Int64) RETURNS !Void @reentrant ->
           IF n <= 0 THEN RETURN; END
           _ = readFile("foo.txt");
           countDown(n - 1);
@@ -80,11 +80,11 @@ RSpec.describe "FSM classifier (Phase A)" do
 
     it "is true when SUSPENDS comes from a transitive callee" do
       ast = annotate(<<~CLEAR)
-        FN leaf() RETURNS Void ->
+        FN leaf() RETURNS !Void ->
           _ = readFile("foo.txt");
           RETURN;
         END
-        FN wrapper() RETURNS Void ->
+        FN wrapper() RETURNS !Void ->
           leaf();
           RETURN;
         END
@@ -114,7 +114,7 @@ RSpec.describe "FSM classifier (Phase A)" do
   describe "fsm_suspend_points" do
     it "enumerates IO calls" do
       ast = annotate(<<~CLEAR)
-        FN twoReads() RETURNS Void ->
+        FN twoReads() RETURNS !Void ->
           a = readFile("a.txt");
           b = readFile("b.txt");
           RETURN;
@@ -130,7 +130,7 @@ RSpec.describe "FSM classifier (Phase A)" do
 
     it "enumerates NEXT as a suspend point" do
       ast = annotate(<<~CLEAR)
-        FN awaits() RETURNS Int64 ->
+        FN awaits() RETURNS !Int64 ->
           p: ~Int64 = BG { 42; };
           RETURN NEXT p;
         END
@@ -443,7 +443,7 @@ RSpec.describe "FSM classifier (Phase A)" do
       # the stackful template. Mixed-mode coexistence: the runtime
       # routes both via per-task wake mechanisms, no conflict.
       src = <<~CLEAR
-        FN napFor(ms: Int64) RETURNS Void -> sleep(ms); RETURN; END
+        FN napFor(ms: Int64) RETURNS !Void -> sleep(ms); RETURN; END
         FN main() RETURNS Void ->
           p: ~Int64 = BG { @xl -> napFor(30); 7; };
           _ = NEXT p;

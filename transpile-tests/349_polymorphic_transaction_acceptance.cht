@@ -33,7 +33,7 @@ FN tick_locked!(MUTABLE c: Counter) RETURNS Int64
 END
 
 -- ── VERSIONED (MVCC). Mutate-only; caller reads separately. ──
-FN tick_versioned!(MUTABLE c: Counter) RETURNS Void
+FN tick_versioned!(MUTABLE c: Counter) RETURNS !Void
   REQUIRES c: VERSIONED
 ->
     WITH SNAPSHOT c AS MUTABLE x { x.value = x.value + 1_i64; } ON MvccConflict RAISE
@@ -49,7 +49,7 @@ FN read_versioned(c: Counter) RETURNS Int64
 END
 
 -- ── ATOMIC indirect (AtomicPtr struct cell). Mutate-only. ────
-FN tick_atomic!(MUTABLE c: Counter) RETURNS Void
+FN tick_atomic!(MUTABLE c: Counter) RETURNS !Void
   REQUIRES c: ATOMIC
 ->
     WITH SNAPSHOT c AS MUTABLE x { x.value = x.value + 1_i64; }

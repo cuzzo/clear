@@ -1125,45 +1125,167 @@ when 'fix'
   dry_run       = false
   take_first    = false
   only_set      = nil
+  loop_until_clean = false
+  loop_max      = 20
   paths         = []
 
   args.each do |a|
     case a
     when '--dry-run' then dry_run = true
     when '--yes'     then take_first = true
+    when '--loop'    then loop_until_clean = true; take_first = true  # loop implies --yes
+    when /\A--loop=(\d+)/ then loop_until_clean = true; take_first = true; loop_max = $1.to_i
     when /\A--only=(.+)/ then only_set = $1.split(',').map(&:to_sym).to_set
     when /\A-/       then error "Unknown flag for fix: #{a}"
     else paths << a
     end
   end
 
-  error "Usage: clear fix [--dry-run|--yes|--only=cat1,cat2] <file.cht>..." if paths.empty?
+  error "Usage: clear fix [--dry-run|--yes|--loop[=N]|--only=cat1,cat2] <file.cht|file.rb>..." if paths.empty?
+  error "--loop and --dry-run are mutually exclusive" if loop_until_clean && dry_run
 
-  paths.each do |path|
-    error "No such file: #{path}" unless File.file?(path)
-    source = File.read(path)
-
-    # Run lexer + parser + annotator in collector mode. The parser and
-    # annotator both raise CompilerError / ParserError on unrecoverable
-    # errors; we swallow so the collector's captured findings surface.
+  # Run the compiler in collector mode on a single source string and
+  # return the captured FixableFindings. The parser/annotator may
+  # raise on unrecoverable errors; we swallow so partial findings
+  # still surface.
+  run_compiler_and_drain = lambda do |src|
     FixCollector.enable!
     findings = []
     begin
-      # Rule-based operator-typo scan runs BEFORE the lexer so typos
-      # (|> for s>, => for ->) surface as fixable findings even when
-      # the lexer/parser would otherwise reject the source.
-      SyntaxTypoScanner.scan!(source)
+      SyntaxTypoScanner.scan!(src)
       begin
-        tokens = Lexer.new(source).tokenize
-        ast    = Parser.new(tokens, source).parse
+        tokens = Lexer.new(src).tokenize
+        ast    = Parser.new(tokens, src).parse
         annotator = SemanticAnnotator.new
-        annotator.source_code = source
+        annotator.source_code = src
         annotator.annotate!(ast)
       rescue CompilerError, ParserError
       end
       findings = FixCollector.drain
     ensure
       FixCollector.disable!
+    end
+    findings
+  end
+
+  # Extract `<<~MARKER` / `<<-MARKER` / `<<MARKER` heredocs whose
+  # marker is one of the CLEAR-source markers (CLEAR, FLUX, CHT,
+  # RUBY-but-only-when-the-spec-comment-says-so). Returns an Array
+  # of `{ content:, start_line:, indent: }` describing each heredoc.
+  # The `indent` is the amount of leading whitespace `<<~` strips
+  # from the body — used to translate column offsets when applying
+  # edits back to the .rb file.
+  CLEAR_HEREDOC_MARKERS = %w[CLEAR FLUX CHT].freeze
+  extract_clear_heredocs = lambda do |rb_source|
+    out = []
+    lines = rb_source.lines
+    i = 0
+    while i < lines.length
+      line = lines[i]
+      m = line.match(/<<(~|-)?(#{CLEAR_HEREDOC_MARKERS.join('|')})\b/)
+      if m
+        squiggle = m[1] == '~'
+        marker   = m[2]
+        body_start_idx = i + 1
+        # Find the closing marker line.
+        end_idx = nil
+        (body_start_idx...lines.length).each do |j|
+          if squiggle || m[1] == '-'
+            # Indented end-marker allowed.
+            end_idx = j and break if lines[j] =~ /\A\s*#{marker}\b/
+          else
+            end_idx = j and break if lines[j] =~ /\A#{marker}\b/
+          end
+        end
+        if end_idx
+          body_lines = lines[body_start_idx...end_idx]
+          # Compute strip indent for `<<~`: the common leading whitespace
+          # across non-blank body lines.
+          indent = 0
+          if squiggle
+            non_blank = body_lines.reject { |bl| bl.strip.empty? }
+            unless non_blank.empty?
+              indent = non_blank.map { |bl| bl[/\A[ \t]*/].length }.min || 0
+            end
+          end
+          stripped = body_lines.map { |bl|
+            squiggle && bl.length >= indent ? bl[indent..] : bl
+          }.join
+          out << {
+            content:    stripped,
+            start_line: body_start_idx + 1,  # 1-indexed
+            indent:     indent,
+          }
+          i = end_idx + 1
+        else
+          i += 1
+        end
+      else
+        i += 1
+      end
+    end
+    out
+  end
+
+  # Translate every Edit in a Fix's edits[] from heredoc-local
+  # coordinates to .rb file coordinates.
+  translate_fixes_for_heredoc = lambda do |fixes, hd, rb_path|
+    fixes.map do |fx|
+      translated = fx.edits.map do |e|
+        Edit.new(
+          span: Span.new(
+            file:   rb_path,
+            line:   e.span.line + hd[:start_line] - 1,
+            col:    e.span.col + hd[:indent],
+            length: e.span.length,
+          ),
+          replacement: e.replacement,
+        )
+      end
+      Fix.new(description: fx.description, confidence: fx.confidence, edits: translated)
+    end
+  end
+
+  # Wrap the per-path loop so we can iterate until no more edits apply.
+  # `--loop` runs at most loop_max passes; each pass applies every
+  # auto-fix it finds across all paths, then re-runs from scratch
+  # because earlier fixes can unlock new findings (e.g. a caller
+  # becomes fallible once its callee is migrated to !T).
+  run_one_pass = lambda do
+  pass_applied = 0
+  paths.each do |path|
+    error "No such file: #{path}" unless File.file?(path)
+    source = File.read(path)
+
+    # Per-path: (1) get findings (either from a single .cht compile or
+    # from N heredocs in a .rb file), (2) apply.
+    findings = []
+    if path.end_with?('.rb')
+      heredocs = extract_clear_heredocs.call(source)
+      if heredocs.empty?
+        puts "#{path}: no CLEAR heredocs found"
+        next
+      end
+      heredocs.each do |hd|
+        compile_findings = run_compiler_and_drain.call(hd[:content])
+        compile_findings.each do |f|
+          translated = translate_fixes_for_heredoc.call(f.fixes, hd, path)
+          new_token = if f.token
+                        line = f.token.line + hd[:start_line] - 1
+                        col  = (f.token.respond_to?(:column) ? f.token.column : 0) + hd[:indent]
+                        t = Object.new
+                        t.define_singleton_method(:line)   { line }
+                        t.define_singleton_method(:column) { col }
+                        t
+                      end
+          findings << FixableFinding.new(
+            level: f.level, message: f.message, token: new_token,
+            category: f.category, fixes: translated,
+          )
+        end
+      end
+    else
+      findings = run_compiler_and_drain.call(source)
     end
 
     findings = findings.select { |f| only_set.nil? || only_set.include?(f.category) }
@@ -1220,6 +1342,25 @@ when 'fix'
       applied_count += edits.length
     end
     puts "#{path}: applied #{applied_count} edit(s)"
+    pass_applied += applied_count
+  end
+  pass_applied
+  end  # run_one_pass
+
+  iter = 0
+  loop do
+    iter += 1
+    n = run_one_pass.call
+    break unless loop_until_clean
+    if n.zero?
+      puts "[fix --loop] converged after #{iter} pass(es)"
+      break
+    end
+    if iter >= loop_max
+      puts "[fix --loop] hit loop_max=#{loop_max}; stopping (#{n} edits in last pass)"
+      break
+    end
+    puts "[fix --loop] pass #{iter}: #{n} edit(s); re-running"
   end
 
 when 'fmt', 'format'

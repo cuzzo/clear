@@ -122,7 +122,7 @@ RSpec.describe SemanticAnnotator do
     describe "BgBlock full_type propagation" do
       it "annotates the BgBlock as shared when the declared type is ~T@shared" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 42.0; };
             RETURN;
           END
@@ -138,7 +138,7 @@ RSpec.describe SemanticAnnotator do
 
       it "does not mark a plain ~T BgBlock as shared" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             p: ~Float64 = BG { 1.0; };
             r: Float64 = NEXT p;
             RETURN;
@@ -159,7 +159,7 @@ RSpec.describe SemanticAnnotator do
     describe "visit_NextExpr on shared promises" do
       it "returns the inner type T when NEXT is applied to ~Float64@shared" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 1.0; };
             r: Float64 = NEXT sp;
             RETURN;
@@ -170,7 +170,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows NEXT to be called multiple times on the same shared promise" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 10.0; };
             a: Float64 = NEXT sp;
             b: Float64 = NEXT sp;
@@ -184,7 +184,7 @@ RSpec.describe SemanticAnnotator do
       it "does not mark the shared promise variable as moved after NEXT" do
         # If it were moved, the second NEXT would raise 'Use of moved value'.
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 5.0; };
             x: Float64 = NEXT sp;
             y: Float64 = NEXT sp;
@@ -201,7 +201,7 @@ RSpec.describe SemanticAnnotator do
     describe "Transpiler output" do
       it "emits CheatLib.SharedPromise in the BG block spawn" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 1.0; };
             RETURN;
           END
@@ -212,7 +212,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits var (not const) for shared promise declarations" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 1.0; };
             RETURN;
           END
@@ -223,7 +223,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .next() for NEXT on a shared promise" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 1.0; };
             r: Float64 = NEXT sp;
             RETURN;
@@ -235,7 +235,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .next() twice when NEXT is called twice on the same handle" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 1.0; };
             a: Float64 = NEXT sp;
             b: Float64 = NEXT sp;
@@ -248,7 +248,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits SharedPromise Inner type in the BG context struct" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             sp: ~Float64 @shared = BG { 99.0; };
             RETURN;
           END
@@ -259,7 +259,7 @@ RSpec.describe SemanticAnnotator do
 
       it "plain BG block still emits Promise (not SharedPromise)" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             p: ~Float64 = BG { 1.0; };
             r: Float64 = NEXT p;
             RETURN;
@@ -359,7 +359,7 @@ RSpec.describe SemanticAnnotator do
     describe "visit_ListLit with tense items" do
       it "infers ~Float64[3] when all 3 items are ~Float64 promises" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
             RETURN;
           END
@@ -369,7 +369,7 @@ RSpec.describe SemanticAnnotator do
 
       it "infers ~Float64[1] for a single-element promise list" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[1] = [BG { 42.0; }];
             RETURN;
           END
@@ -394,7 +394,7 @@ RSpec.describe SemanticAnnotator do
     describe "visit_NextExpr on bounded streams" do
       it "returns the element type T when NEXT is applied to ~Float64[3]" do
         src = <<~CLEAR
-          FN f() RETURNS Float64 ->
+          FN f() RETURNS !Float64 ->
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
             r: Float64 = NEXT s;
             RETURN r;
@@ -405,7 +405,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows NEXT to be called multiple times on the same bounded stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[2] = [BG { 10.0; }, BG { 20.0; }];
             a: Float64 = NEXT s;
             b: Float64 = NEXT s;
@@ -418,7 +418,7 @@ RSpec.describe SemanticAnnotator do
       it "does not mark the stream variable as moved after first NEXT" do
         # If the stream were marked :moved, the second NEXT would raise 'Use of moved value'.
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
             a: Float64 = NEXT s;
             b: Float64 = NEXT s;
@@ -449,7 +449,7 @@ RSpec.describe SemanticAnnotator do
         # Build an annotated node with a dynamic tense type manually
         # to simulate someone bypassing the parse_type_annotation guard.
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
@@ -465,7 +465,7 @@ RSpec.describe SemanticAnnotator do
     describe "Transpiler output" do
       it "emits CheatLib.BoundedStream in the variable declaration" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
@@ -476,7 +476,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits var (not const) for bounded stream declarations" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
@@ -487,7 +487,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .next() for NEXT on a bounded stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             a: Float64 = NEXT s;
             b: Float64 = NEXT s;
@@ -500,7 +500,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits pre-declared promise items for bounded stream literal" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[2] = [BG { 10.0; }, BG { 20.0; }];
             RETURN;
           END
@@ -513,7 +513,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits a Promise array in the BoundedStream items field" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[2] = [BG { 1.0; }, BG { 2.0; }];
             RETURN;
           END
@@ -524,7 +524,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits two independent stream labels for two streams in the same function" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s1: ~Float64[1] = [BG { 1.0; }];
             s2: ~Float64[1] = [BG { 2.0; }];
             RETURN;
@@ -537,7 +537,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows CONCURRENT SELECT on a bounded stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
             vals = s s> CONCURRENT(workers: 2) SELECT _ * 2.0;
             RETURN;
@@ -548,7 +548,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows CONCURRENT WHERE on a bounded stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
             vals = s s> CONCURRENT(workers: 2) WHERE _ > 1.5;
             RETURN;
@@ -559,7 +559,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows CONCURRENT EACH on a bounded stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE total: Float64@shared:locked = 0.0;
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
             s s> CONCURRENT(workers: 2) EACH {
@@ -575,7 +575,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows CONCURRENT with explicit capacity on a stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; YIELD 3; };
             vals = s s> CONCURRENT(workers: 2, capacity: 4) SELECT _ * 2;
             RETURN;
@@ -715,7 +715,7 @@ RSpec.describe SemanticAnnotator do
     describe "parser" do
       it "parses ~?Float64[] as a type annotation" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -730,7 +730,7 @@ RSpec.describe SemanticAnnotator do
     describe "BgStreamBlock annotation" do
       it "infers ~?Float64[] type from YIELD Float64" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -744,7 +744,7 @@ RSpec.describe SemanticAnnotator do
 
       it "infers ~?Bool[] from YIELD Bool" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Bool[] = BG STREAM { YIELD TRUE; };
             RETURN;
           END
@@ -792,7 +792,7 @@ RSpec.describe SemanticAnnotator do
     describe "NextExpr on ~?T[]" do
       it "NEXT on ~?Float64[] returns ?Float64" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             v: ?Float64 = NEXT s;
             RETURN;
@@ -807,7 +807,7 @@ RSpec.describe SemanticAnnotator do
 
       it "NEXT on ~?Bool[] returns ?Bool" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Bool[] = BG STREAM { YIELD TRUE; };
             v: ?Bool = NEXT s;
             RETURN;
@@ -827,7 +827,7 @@ RSpec.describe SemanticAnnotator do
     describe "resource cleanup" do
       it "emits plain defer s.deinit() when stream is never moved" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -844,7 +844,7 @@ RSpec.describe SemanticAnnotator do
     describe "transpiler output" do
       it "emits CheatLib.Stream(f64) in the var declaration" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -855,7 +855,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits var (not const) for the stream binding" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -866,7 +866,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits spawnNew in the BG STREAM block" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -877,7 +877,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits push() calls for each YIELD" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; YIELD 2.0; };
             RETURN;
           END
@@ -888,7 +888,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits defer close() inside generator fiber" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -899,7 +899,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .next() for NEXT on open stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             v: ?Float64 = NEXT s;
             RETURN;
@@ -911,7 +911,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits independent labels for two open streams in same function" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s1: ~Float64[?] = BG STREAM { YIELD 1.0; };
             s2: ~Float64[?] = BG STREAM { YIELD 2.0; };
             RETURN;
@@ -974,7 +974,7 @@ RSpec.describe SemanticAnnotator do
     describe "BgStreamBlock annotation" do
       it "propagates @split onto the BG STREAM runtime type" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -989,7 +989,7 @@ RSpec.describe SemanticAnnotator do
     describe "NextExpr on ~?T[]@split" do
       it "NEXT on ~?Float64[]@split returns ?Float64" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
             v: ?Float64 = NEXT s;
             RETURN;
@@ -1006,7 +1006,7 @@ RSpec.describe SemanticAnnotator do
     describe "transpiler output" do
       it "emits CheatLib.SplitStream in the BG STREAM binding" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -1018,7 +1018,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits CheatLib.splitRetain when CLONE is used on a split stream handle" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
             t: ~?Float64[] @split = CLONE s;
             RETURN;
@@ -1042,7 +1042,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows CLONE inside a BG block capture" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] @split = BG STREAM { YIELD 1.0; };
             cloned: ~?Float64[] @split = CLONE s;
             p: ~?Float64 = BG {
@@ -1062,7 +1062,7 @@ RSpec.describe SemanticAnnotator do
         # the lock across NEXT (P3.3 hold-lock-across-yield). The lock
         # was incidental — drop it to keep the CLONE coverage clean.
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Int64[] @split = BG STREAM { YIELD 1; };
             DO {
               (NEXT (CLONE s))?,
@@ -1166,7 +1166,7 @@ RSpec.describe SemanticAnnotator do
     describe "parser" do
       it "parses ~Float64[INF] as a type annotation" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1181,7 +1181,7 @@ RSpec.describe SemanticAnnotator do
     describe "BgStreamBlock annotation with ~T[INF]" do
       it "infers ~Float64[INF] type when declared as ~Float64[INF]" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1195,7 +1195,7 @@ RSpec.describe SemanticAnnotator do
 
       it "infers ~Bool[INF] when YIELD produces Bool" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Bool[INF] = BG STREAM { WHILE TRUE DO YIELD TRUE; END };
             RETURN;
           END
@@ -1214,7 +1214,7 @@ RSpec.describe SemanticAnnotator do
     describe "NextExpr on ~T[INF]" do
       it "NEXT on ~Float64[INF] returns Float64 (not ?Float64)" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             v: Float64 = NEXT s;
             RETURN;
@@ -1229,7 +1229,7 @@ RSpec.describe SemanticAnnotator do
 
       it "NEXT on ~Bool[INF] returns Bool (not ?Bool)" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Bool[INF] = BG STREAM { WHILE TRUE DO YIELD TRUE; END };
             v: Bool = NEXT s;
             RETURN;
@@ -1249,7 +1249,7 @@ RSpec.describe SemanticAnnotator do
     describe "resource cleanup" do
       it "emits plain defer s.deinit() when infinite stream is never moved" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1266,7 +1266,7 @@ RSpec.describe SemanticAnnotator do
     describe "transpiler output" do
       it "emits CheatLib.InfStream(f64) in the var declaration" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1277,7 +1277,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits var (not const) for the stream binding" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1288,7 +1288,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits spawnNew in the BG STREAM block" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1299,7 +1299,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits push() calls for YIELD inside the generator" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1310,7 +1310,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits defer close() for infinite stream generators (signals WaitGroup on error)" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1324,7 +1324,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits .next() for NEXT on infinite stream" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             v: Float64 = NEXT s;
             RETURN;
@@ -1398,7 +1398,7 @@ RSpec.describe SemanticAnnotator do
     describe "native ~T[] finite streams" do
       it "allows bare ~T[] in BindExpr declaration for finite streams" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -1409,7 +1409,7 @@ RSpec.describe SemanticAnnotator do
       it "allows bare ~T[] in VarDecl (MUTABLE declaration) path" do
         # VarDecl path: MUTABLE declarations
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -1429,7 +1429,7 @@ RSpec.describe SemanticAnnotator do
 
       it "still accepts infinite streams as a separate syntax" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -1439,7 +1439,7 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts the new open-stream spelling ~?T[]" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -1449,7 +1449,7 @@ RSpec.describe SemanticAnnotator do
 
       it "still accepts legacy ~T[?] as an alias during migration" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[?] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -1459,7 +1459,7 @@ RSpec.describe SemanticAnnotator do
 
       it "does NOT raise when ~T[INF] is used (valid infinite stream)" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[INF] = BG STREAM { WHILE TRUE DO YIELD 1.0; END };
             RETURN;
           END
@@ -1469,7 +1469,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows variable-backed ~T[] pipelines for fusible EACH chains" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 8;
             MUTABLE acc: Int64 = 0;
             s s> SELECT _ * 2 s> WHERE _ > 3 s> EACH {
@@ -1486,7 +1486,7 @@ RSpec.describe SemanticAnnotator do
         # value -- consume via COLLECT (or carry the `~T@observable`
         # binding annotation if the user wants to read it concurrently).
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 8;
             _ = s s> REDUCE(0_i64) acc + _ s> COLLECT;
             RETURN;
@@ -1497,7 +1497,7 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts LIMIT on variable-backed ~T[]" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Int64[] = 1 ..< 100;
             MUTABLE sum: Int64 = 0;
             s s> LIMIT 3 s> EACH { sum = sum + _; };
@@ -1509,7 +1509,7 @@ RSpec.describe SemanticAnnotator do
 
       it "accepts EACH on BG/open streams as sequential pipeline op" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
             s s> EACH { print(_); };
             RETURN;
@@ -1522,7 +1522,7 @@ RSpec.describe SemanticAnnotator do
         # REDUCE-scalar on a tense stream now produces a `~T@observable`
         # -- consume via COLLECT.
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
             _ = s s> REDUCE(0) acc + _ s> COLLECT;
             RETURN;
@@ -1539,7 +1539,7 @@ RSpec.describe SemanticAnnotator do
         # We verify the message in visit_NextExpr is updated.
         # The declaration guard now fires first, so we test via the message content directly.
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             s: ~Float64[] = BG STREAM { YIELD 1.0; };
             RETURN;
           END
@@ -1631,7 +1631,7 @@ RSpec.describe SemanticAnnotator do
     describe "Annotator" do
       it "accepts MUTABLE futures: ~Int64[]@list = [] without error" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             RETURN;
           END
@@ -1651,7 +1651,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows append(futures, BG { ... }) where futures is a promise list" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             append(futures, BG { 42; });
             RETURN;
@@ -1662,7 +1662,7 @@ RSpec.describe SemanticAnnotator do
 
       it "allows indexing a promise list: futures[0] binds as ~Int64 (consumed via NEXT)" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             append(futures, BG { 42; });
             v: Int64 = NEXT futures[0];
@@ -1674,7 +1674,7 @@ RSpec.describe SemanticAnnotator do
 
       it "NEXT futures[i] returns the element type (Int64)" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             append(futures, BG { 42; });
             v: Int64 = NEXT futures[0];
@@ -1691,7 +1691,7 @@ RSpec.describe SemanticAnnotator do
     describe "Transpiler output" do
       it "emits std.ArrayListUnmanaged(CheatLib.Promise(i64)) in the var declaration" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             RETURN;
           END
@@ -1702,7 +1702,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits var (not const) for promise list declarations" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             RETURN;
           END
@@ -1713,7 +1713,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits defer cleanup for futures list" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             RETURN;
           END
@@ -1724,7 +1724,7 @@ RSpec.describe SemanticAnnotator do
 
       it "emits try futures.append(rt.frameAlloc(), ...) for append" do
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             append(futures, BG { 7; });
             RETURN;
@@ -1739,7 +1739,7 @@ RSpec.describe SemanticAnnotator do
         # dispatch via comptime @hasField). The lowering no longer hard-codes
         # `.items[i]` for @list.
         src = <<~CLEAR
-          FN f() RETURNS Void ->
+          FN f() RETURNS !Void ->
             MUTABLE futures: ~Int64[]@list = [];
             append(futures, BG { 7; });
             v: Int64 = NEXT futures[0];

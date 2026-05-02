@@ -7,7 +7,7 @@
 STRUCT Env { x: Int64 }
 UNION Value { Nil, Num: Float64, Str: String, Lambda { body: Value @indirect, id: Int64 } }
 
-FN captureLambda!(TAKES bodyVal: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
+FN captureLambda!(TAKES bodyVal: Value, MUTABLE pool: Env[10]@pool) RETURNS !Value ->
     pool.insert(Env{ x: 1 });
     RETURN Value.Lambda{ body: bodyVal, id: 1 };
 END

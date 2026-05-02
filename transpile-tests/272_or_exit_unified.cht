@@ -16,7 +16,7 @@
 FN raiseOriginal() RETURNS !Int64 -> RAISE Input, OrigErr, "original"; RETURN 0; END
 
 -- A. pure message replace — should inherit Input + OrigErr.
-FN caseA() RETURNS Int64 ->
+FN caseA() RETURNS !Int64 ->
     v = raiseOriginal() OR EXIT "A_msg";
     RETURN v;
 CATCH Input WITH(OrigErr, "A_msg")
@@ -27,7 +27,7 @@ DEFAULT
 END
 
 -- B. kind-only — clears the type to 0.
-FN caseB() RETURNS Int64 ->
+FN caseB() RETURNS !Int64 ->
     v = raiseOriginal() OR EXIT NotFound;
     RETURN v;
 CATCH NotFound
@@ -38,7 +38,7 @@ DEFAULT
 END
 
 -- C. kind + message, clears type.
-FN caseC() RETURNS Int64 ->
+FN caseC() RETURNS !Int64 ->
     v = raiseOriginal() OR EXIT NotFound, "C_msg";
     RETURN v;
 CATCH NotFound WITH("C_msg")
@@ -48,7 +48,7 @@ DEFAULT
 END
 
 -- D. full kind + type replacement, no message.
-FN caseD() RETURNS Int64 ->
+FN caseD() RETURNS !Int64 ->
     v = raiseOriginal() OR EXIT System, DErr;
     RETURN v;
 CATCH DErr
@@ -58,7 +58,7 @@ DEFAULT
 END
 
 -- E. full override.
-FN caseE() RETURNS Int64 ->
+FN caseE() RETURNS !Int64 ->
     v = raiseOriginal() OR EXIT System, EErr, "E_msg";
     RETURN v;
 CATCH EErr WITH("E_msg")
@@ -68,7 +68,7 @@ DEFAULT
 END
 
 -- F. type-only; kind auto-resolved from the registered FErr -> Input.
-FN caseF() RETURNS Int64 ->
+FN caseF() RETURNS !Int64 ->
     v = raiseOriginal() OR EXIT FErr;
     RETURN v;
 CATCH FErr
@@ -78,7 +78,7 @@ DEFAULT
 END
 
 -- G. type + message; kind auto-resolved.
-FN caseG() RETURNS Int64 ->
+FN caseG() RETURNS !Int64 ->
     v = raiseOriginal() OR EXIT GErr, "G_msg";
     RETURN v;
 CATCH GErr WITH("G_msg")

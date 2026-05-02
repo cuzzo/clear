@@ -29,7 +29,7 @@ RSpec.describe PromotionClassifier do
     let(:plan) do
       plan_for(<<~CLEAR, "build")
         STRUCT Pair { items: Int64[], count: Int64 }
-        FN build() RETURNS Pair ->
+        FN build() RETURNS !Pair ->
             MUTABLE vals: Int64[]@list = List[];
             vals.append(1_i64);
             vals.append(2_i64);
@@ -54,7 +54,7 @@ RSpec.describe PromotionClassifier do
     let(:plan) do
       plan_for(<<~CLEAR, "build")
         STRUCT MapHolder { data: HashMap<Int64>, label: String }
-        FN build() RETURNS MapHolder ->
+        FN build() RETURNS !MapHolder ->
             MUTABLE m: HashMap<Int64> = {};
             m["x"] = 1_i64;
             RETURN MapHolder{ data: m, label: "direct" };
@@ -101,7 +101,7 @@ RSpec.describe PromotionClassifier do
   describe "direct @list return" do
     let(:plan) do
       plan_for(<<~CLEAR, "build")
-        FN build() RETURNS Float64[] ->
+        FN build() RETURNS !Float64[] ->
             MUTABLE vals: Float64[]@list = List[];
             vals.append(1.0);
             RETURN vals;
@@ -127,7 +127,7 @@ RSpec.describe PromotionClassifier do
   describe "direct HashMap return" do
     let(:plan) do
       plan_for(<<~CLEAR, "build")
-        FN build() RETURNS HashMap<Int64> ->
+        FN build() RETURNS !HashMap<Int64> ->
             MUTABLE m: HashMap<Int64> = {};
             m["x"] = 1_i64;
             RETURN m;
@@ -192,7 +192,7 @@ RSpec.describe PromotionClassifier do
     let(:plan) do
       plan_for(<<~CLEAR, "build")
         STRUCT User { name: String, age: Int64 }
-        FN build(first: String, last: String) RETURNS User ->
+        FN build(first: String, last: String) RETURNS !User ->
             name = first + " " + last;
             RETURN User{ name: COPY name, age: 42 };
         END

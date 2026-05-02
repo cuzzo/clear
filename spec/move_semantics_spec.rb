@@ -20,7 +20,7 @@ RSpec.describe "Move semantics for heap-owning types" do
   describe "list.append moves the value" do
     let(:zig) do
       transpile(<<~CLEAR)
-        FN makeMap() RETURNS HashMap<Int64> ->
+        FN makeMap() RETURNS !HashMap<Int64> ->
             MUTABLE m: HashMap<Int64> = {};
             m["a"] = 1_i64;
             RETURN m;
@@ -47,7 +47,7 @@ RSpec.describe "Move semantics for heap-owning types" do
     it "StringMap freeUnionPayload handles slice variants on overwrite" do
       zig = transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
-        FN makeItems() RETURNS Value ->
+        FN makeItems() RETURNS !Value ->
             MUTABLE items: Int64[]@list = List[];
             items.append(1_i64);
             RETURN Value{ Items: items };
@@ -147,7 +147,7 @@ RSpec.describe "Move semantics for heap-owning types" do
     let(:zig) do
       transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
-        FN makeItems() RETURNS Value ->
+        FN makeItems() RETURNS !Value ->
             MUTABLE items: Int64[]@list = List[];
             items.append(1_i64);
             RETURN Value{ Items: items };
@@ -198,7 +198,7 @@ RSpec.describe "Move semantics for heap-owning types" do
     it "generates element-level cleanup for union list" do
       zig = transpile(<<~CLEAR)
         UNION Value { Num: Float64, Items: Int64[] }
-        FN makeItems() RETURNS Value ->
+        FN makeItems() RETURNS !Value ->
             MUTABLE items: Int64[]@list = List[];
             items.append(1_i64);
             RETURN Value{ Items: items };

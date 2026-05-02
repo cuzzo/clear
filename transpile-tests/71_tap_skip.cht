@@ -1,7 +1,7 @@
 -- Test: TAP and SKIP pipeline operators
 
 -- TAP: side-effect observer, passes collection through unchanged
-FN test_tap_passthrough() RETURNS Void ->
+FN test_tap_passthrough() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
@@ -11,7 +11,7 @@ FN test_tap_passthrough() RETURNS Void ->
     RETURN;
 END
 
-FN test_tap_in_chain() RETURNS Void ->
+FN test_tap_in_chain() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
 
@@ -23,7 +23,7 @@ FN test_tap_in_chain() RETURNS Void ->
 END
 
 -- SKIP: skip first N elements, return rest
-FN test_skip_basic() RETURNS Void ->
+FN test_skip_basic() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
@@ -32,7 +32,7 @@ FN test_skip_basic() RETURNS Void ->
     RETURN;
 END
 
-FN test_skip_with_sum() RETURNS Void ->
+FN test_skip_with_sum() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
@@ -42,7 +42,7 @@ FN test_skip_with_sum() RETURNS Void ->
     RETURN;
 END
 
-FN test_skip_all() RETURNS Void ->
+FN test_skip_all() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i));
 
@@ -52,7 +52,7 @@ FN test_skip_all() RETURNS Void ->
     RETURN;
 END
 
-FN test_skip_zero() RETURNS Void ->
+FN test_skip_zero() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i));
 

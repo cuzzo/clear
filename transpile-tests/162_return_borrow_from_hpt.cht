@@ -16,12 +16,12 @@ FN getStr(v: Val) RETURNS String ->
 END
 
 -- Case 1: frame-allocated string promoted to heap via PromotionPlan
-FN makeFromFrame!(a: String, b: String) RETURNS Val ->
+FN makeFromFrame!(a: String, b: String) RETURNS !Val ->
     RETURN Val{ Str: a + b };
 END
 
 -- Case 2: heap-allocated via COPY
-FN makeFromHeap!() RETURNS Val ->
+FN makeFromHeap!() RETURNS !Val ->
     MUTABLE params: Val[]@list = List[];
     params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };

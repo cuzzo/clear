@@ -51,7 +51,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "test!")
           UNION Value { Nil, Str: String }
-          FN test!(MUTABLE map: HashMap<Value>) RETURNS String ->
+          FN test!(MUTABLE map: HashMap<Value>) RETURNS !String ->
               val = map["t0"] OR Value.Nil;
               PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
@@ -74,7 +74,7 @@ RSpec.describe CleanupClassifier do
           FN makeVal() RETURNS Value ->
               RETURN Value.Nil;
           END
-          FN test() RETURNS Void ->
+          FN test() RETURNS !Void ->
               val = makeVal();
               RETURN;
           END
@@ -98,7 +98,7 @@ RSpec.describe CleanupClassifier do
           FN makeData() RETURNS Data ->
               RETURN Data{ Text: "hello" };
           END
-          FN test() RETURNS Void ->
+          FN test() RETURNS !Void ->
               d = makeData();
               d2 = COPY d;
               RETURN;
@@ -320,7 +320,7 @@ RSpec.describe CleanupClassifier do
     context "direct binding of promoted list return" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
-          FN makeList() RETURNS Int64[] ->
+          FN makeList() RETURNS !Int64[] ->
               MUTABLE items: Int64[]@list = List[];
               items.append(1_i64);
               RETURN items;
@@ -343,12 +343,12 @@ RSpec.describe CleanupClassifier do
     context "chained promoted return" do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
-          FN makeList() RETURNS Int64[] ->
+          FN makeList() RETURNS !Int64[] ->
               MUTABLE items: Int64[]@list = List[];
               items.append(1_i64);
               RETURN items;
           END
-          FN wrapper() RETURNS Int64[] ->
+          FN wrapper() RETURNS !Int64[] ->
               RETURN makeList();
           END
           FN main() RETURNS Void ->
@@ -368,7 +368,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "main")
           UNION Value { Num: Float64, Items: Int64[] }
-          FN makeValue() RETURNS Value ->
+          FN makeValue() RETURNS !Value ->
               MUTABLE items: Int64[]@list = List[];
               items.append(1_i64);
               RETURN Value{ Items: items };
@@ -396,7 +396,7 @@ RSpec.describe CleanupClassifier do
       let(:plan) do
         cleanup_for(<<~CLEAR, "test")
           UNION Value { Nil, Str: String }
-          FN test() RETURNS Void ->
+          FN test() RETURNS !Void ->
               v = Value{ Str: COPY "hello" };
               RETURN;
           END
@@ -502,7 +502,7 @@ RSpec.describe CleanupClassifier do
     let(:src) do
       <<~CLEAR
         STRUCT Pair { name: String, value: Float64 }
-        FN f() RETURNS Void ->
+        FN f() RETURNS !Void ->
             s = "hello";
             p = Pair{ name: s, value: 1.0 };
             RETURN;
@@ -523,7 +523,7 @@ RSpec.describe CleanupClassifier do
     let(:src) do
       <<~CLEAR
         STRUCT Pair { name: String, value: Float64 }
-        FN f(s: String) RETURNS Void ->
+        FN f(s: String) RETURNS !Void ->
             p = Pair{ name: COPY s, value: 1.0 };
             RETURN;
         END
@@ -546,7 +546,7 @@ RSpec.describe CleanupClassifier do
         FN riskyOp(mode: String) RETURNS !String ->
             RETURN "ok:" + mode;
         END
-        FN handleWithCatch(mode: String) RETURNS String ->
+        FN handleWithCatch(mode: String) RETURNS !String ->
             result = riskyOp(mode) OR RAISE;
             RETURN result;
         CATCH Transient
@@ -687,7 +687,7 @@ RSpec.describe CleanupClassifier do
     it "keeps cleanup for COPY result after refine_moved_guards" do
       plan = mir_plan_for(<<~CLEAR, "main")
         UNION Data { Empty, Text: String, Nested { label: String, inner: Data @indirect } }
-        FN makeNested() RETURNS Data ->
+        FN makeNested() RETURNS !Data ->
             inner = Data{ Text: "hello" };
             RETURN Data.Nested{ label: "outer", inner: inner };
         END
@@ -761,7 +761,7 @@ RSpec.describe "BG escape promotion for string captures" do
     it "annotates capture_string_dupes on BgBlock for direct BG assignment capturing a string" do
       body = mir_body_for(<<~CLEAR, "test")
         FN greet!(name: String) RETURNS String -> RETURN name; END
-        FN test() RETURNS Void ->
+        FN test() RETURNS !Void ->
             msg = greet!("hello");
             p: ~Void = BG { print(msg); };
             NEXT p;
@@ -774,7 +774,7 @@ RSpec.describe "BG escape promotion for string captures" do
     it "annotates capture_string_dupes on BgBlock inside a MethodCall arg" do
       body = mir_body_for(<<~CLEAR, "test")
         FN greet!(name: String) RETURNS String -> RETURN name; END
-        FN test() RETURNS Void ->
+        FN test() RETURNS !Void ->
             msg = greet!("hello");
             MUTABLE futures: ~Void[]@list = [];
             futures.append(BG { print(msg); });
@@ -789,7 +789,7 @@ RSpec.describe "BG escape promotion for string captures" do
       body = mir_body_for(<<~CLEAR, "test")
         FN greet!(name: String) RETURNS String -> RETURN name; END
         FN consume(p: ~Void) RETURNS Void -> NEXT p; RETURN; END
-        FN test() RETURNS Void ->
+        FN test() RETURNS !Void ->
             msg = greet!("hello");
             consume(BG { print(msg); });
             RETURN;
@@ -800,7 +800,7 @@ RSpec.describe "BG escape promotion for string captures" do
 
     it "does NOT annotate capture_string_dupes for string literals (no frame alloc)" do
       body = mir_body_for(<<~CLEAR, "test")
-        FN test() RETURNS Void ->
+        FN test() RETURNS !Void ->
             p: ~Void = BG { print("hello"); };
             NEXT p;
             RETURN;

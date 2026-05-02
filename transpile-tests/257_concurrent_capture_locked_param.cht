@@ -32,7 +32,7 @@
 
 STRUCT Acc { count: Int64 }
 
-FN doIt(c: Acc) RETURNS Void
+FN doIt(c: Acc) RETURNS !Void
   REQUIRES c: LOCKED
 ->
     MUTABLE items: Int64[]@list = [];

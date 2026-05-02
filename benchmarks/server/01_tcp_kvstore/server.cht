@@ -8,7 +8,7 @@
 -- Test:    redis-cli -p 6390 SET foo bar / GET foo / INCR counter
 -- Bench:   redis-benchmark -p 6390 -t set,get,incr -n 100000 -c 50 -P 16
 
-FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE counters: HashMap<Int64>) RETURNS Void ->
+FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE counters: HashMap<Int64>) RETURNS !Void ->
     MUTABLE running: Bool = TRUE;
     WHILE running DO
         data: String@raw = tcpRead(client);

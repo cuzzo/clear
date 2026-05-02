@@ -2,7 +2,7 @@
 -- A HashMap passed to a function that has saveFrameMark/restoreFrameMark
 -- must retain valid keys after the callee returns.
 
-FN modify!(MUTABLE map: HashMap<Int64>, key: String, val: Int64) RETURNS Void ->
+FN modify!(MUTABLE map: HashMap<Int64>, key: String, val: Int64) RETURNS !Void ->
     map[key] = val;
     RETURN;
 END

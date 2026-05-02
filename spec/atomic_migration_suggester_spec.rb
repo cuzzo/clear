@@ -14,7 +14,7 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
     it "flags @shared:locked single-Int64 counter with `+=`-shaped body" do
       cs = candidates(<<~CLEAR)
         STRUCT Counter { value: Int64 }
-        FN bumpIt() RETURNS Void ->
+        FN bumpIt() RETURNS !Void ->
           c = Counter{ value: 0 } @shared:locked;
           WITH EXCLUSIVE c AS inner { inner.value = inner.value + 1; }
           RETURN;
@@ -34,7 +34,7 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
     it "flags plain @locked with `-=`-shaped body" do
       cs = candidates(<<~CLEAR)
         STRUCT G { v: Int64 }
-        FN dec() RETURNS Void ->
+        FN dec() RETURNS !Void ->
           g = G{ v: 0 } @locked;
           WITH EXCLUSIVE g AS a { a.v = a.v - 5; }
           RETURN;
@@ -47,7 +47,7 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
     it "flags Float64 single-field counter" do
       cs = candidates(<<~CLEAR)
         STRUCT G { gauge: Float64 }
-        FN tick() RETURNS Void ->
+        FN tick() RETURNS !Void ->
           g = G{ gauge: 0.0 } @shared:locked;
           WITH EXCLUSIVE g AS a { a.gauge = a.gauge + 1.5_f64; }
           RETURN;
@@ -60,7 +60,7 @@ RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
     it "flags Bool flag" do
       cs = candidates(<<~CLEAR)
         STRUCT F { flag: Bool }
-        FN setIt() RETURNS Void ->
+        FN setIt() RETURNS !Void ->
           f = F{ flag: FALSE } @shared:locked;
           WITH EXCLUSIVE f AS a { a.flag = TRUE; }
           RETURN;
