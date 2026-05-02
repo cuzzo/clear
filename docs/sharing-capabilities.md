@@ -1,8 +1,132 @@
 # Sharing Capabilities: @local, @multiowned, @shared
 
-CLEAR separates **what data is** (Types) from **how it's accessed** (Capabilities). This guide covers the three reference-counting / sharing capabilities and when to use each.
+CLEAR separates **what data is** (Types) from **how it's accessed** (Gates & Boundaires) from the **strategy it uses** (Capabilities). 
 
-## The Problem
+## Types, Capabilities, and Execution Boundaries
+Rust is not inherently complicated, nor is its type system much more complex than C++'s. The actual friction comes from Rust using a 'God-like' type system forced to handle too many things at once.
+
+CLEAR breaks these into 3 separate components:
+
+ * **Types:** The actual data / memory (User)
+ * **Capabilities:** What you’re allowed to do with that data (User @shared:locked)
+ * **Execution Boundaries:** When you're do things concurrently or in parallel (`BG/DO/CONCURRENT`)
+ * **Synchronization Gates:** Where you explicitly mutate state concurrently (`WITH sharedUser AS user { … }`)
+
+In CLEAR, concurrency is a property of the execution boundary, not the data type. CLEAR requires explicit `WITH` blocks for synchronization. While slightly less ergonomic than Rust for a simple Mutex, this design choice yields key structural dividends:
+
+ * **Zero-Friction Pass-Through:** ~85% of your codebase handles shared data without a single synchronization annotation, making code substantially more maintainable / refactorable to optimize for different synchronization strategies.
+ * **Polymorphic Synchronization:** A single function can gracefully handle any of LOCKED,  SNAPSHOTTED, ACTOR, BUFFERED etc data using a single block of code.
+ * **Pinpoint Cost Visibility:** You know exactly where and when your code blocks, yields, retries and the associated failure methods. Latency costs are isolated to the 15% of functions that actually mutate state, rather than hidden in a type signature 10 levels up the stack.
+
+You do not need to worry about a developer accidentally “sneaking” a slow actor synchronization into a hot loop. The costs are enforced ONLY at the synchronization boundaries (WITH blocks). The compiler will simply reject incompatible synchronization strategies inside hot loops.
+
+```ruby clear illustrative
+FN transact(
+  a: Account@shared, 
+  b: Account@shared,
+  amount: Float64
+) 
+ RETURNS !Bool
+ REQUIRES a, b: LOCKED | SNAPSHOTTED | BUFFERED
+->
+ IF amount <= 0 -> RAISE;
+
+  WITH 
+   POLYMORPHIC a AS acctA,
+   POLYMORPHIC b AS acctB {
+     IF acctA.balance <= amount -> RAISE;
+     acctA.balance -= amount;
+     acctB.balance += amount;
+   }
+   ON LockTimeout ...
+   ON Conflict ...
+   ON QueueFull ...
+  END
+END
+```
+
+There is a user-defined default policy for handling failure methods.  Not every function needs to specify failures:
+
+```ruby clear illustrative
+FN transact(a: Account@shared, b: Account@shared) RETURNS !Bool ->
+  WITH POLYMORPHIC a AS acctA, POLYMORPHIC b AS acctB { ... }
+END
+```
+
+This function will take any shared object: Mutex (`@locked`), RwLock (`@writeLocked`), MVCC (`@versioned`), AtomicPtr (`@atomic`), RingBuffer (`@buffered`), Actor (`@actor`). It will handle failure methods by the user-defined synchronization policy (or the system default):
+
+```ruby clear illustrative
+SYNC POLICY
+  ON MvccConflict RETRY(3) THEN RAISE
+  ON AtomicConflict RETRY(3) THEN RAISE
+  ON LockTimeout RETRY(3) THEN RAISE
+  ON QueueFull BLOCK
+  ON ActorTimeout RAISE
+END
+```
+
+Third-party code / libraries must compile in `STRICT` mode, which requires them to explicitly handle all failure methods.  There is no chance your default sync policy creates spooky-action-at-distance in third party failure handling.
+
+FAQ:
+ * But what about lock acquisition? 
+    * CLEAR automatically sorts locks. It raises errors on deadlock that MUST be handled if possible (regardless of compilation mode), rather than deadlocking.
+ * But what about the Default Policy causing Spooky-Action-at-a-Distance internally? 
+    * Compile in `STRICT` mode where this is not allowed, and then you know all synchronization failure methods are handled locally.
+    * Default synchronization failure policies are meant to be a speed up for prototyping, not something to use in production.
+ * But what about distributed failures?
+    * `@actor` in CLEAR does not imply a distributed actor.
+    * There is `@shared:actor` (single-machine) and `@distributed:actor` (n-machines).
+    * `@distributed` is not interchangeable with `@shared`.
+    * `FN foo(x: T@shared)` does not accept a `@distributed:actor`.
+    * `FN foo(x: T@distributed)` does not accept a `@shared:actor` (it may not exist on the machine!)
+
+NOTE: `@actor` and `@buffered` are in scope for v0.3.  They are not currently available.  `@distrubted` is in scope for v0.4.
+
+### Analogy
+
+Think of `DO/BG/CONCURRENT` blocks as Execution Boundaries, and ownership capabilities (`@shared`) as your Keys to pass the Boundary.  A type without proper ownership cannot pass through an Execution Boundary (that is unsafe).
+
+If you want to do something in parallel (on multiple cores at once), the data must be `@shared`.  If you want to do something concurrently (on a single core at once), the data can be `@shared` OR `@local`.
+
+Similarly, a type with a synchronization capability (`@locked`, `@versioned`, etc) requires crossing a gate for safe access. 
+
+The `WITH` block acts as this gate to safe access as the BG/DO blocks act as the gate to safe boundary crossing.  `WITH` blocks require a type of permission to safely access synchronized data - this gives the reader insight into the cost.
+
+| Ownership (the keys) | Execution Boundaries | Synchronization | Access Gates | Access Permission (cost model) |
+|---|---|---|---|---|
+| @shared (any cores) | BG {} | @locked, @writeLocked | WITH {} | EXCLUSIVE |
+| @local (pinned to a core) | DO {} | @versioned, @atomic | | SNAPSHOT |
+| | CONCURRENT {} | @actor, @buffered | EVENTUAL |
+
+`@multiOwned` is an ownership capability, but it does not grant access through Execution Boundaries.  It allows an object to have multiple aliases (multiple owners - i.e. for a graph), but it does NOT grant permission to cross Execution Boundaries.
+
+### Complexity Reduced?  Or just moved around?
+
+It is a fair critique from Rust or Go that this is nothing new, and arguably more complex.  Rust has a single system to keep track of.  CLEAR has three.  If anything, that’s more complex, not less.
+
+CLEAR thinks it is clearer to break the problem down into steps.  For one, developers not familiar with concurrent code know that anything `@shared` is something concurrent.  In Rust, it is hard to distinguish between `Arc<RwLock<T>>`, `DashMap<T>`, and `Vec<T>`.  Which one is something concurrent, that could have logical race bugs?
+
+Secondly, while this might appear to be unergonomic, the concurrent benchmarks in CLEAR are only ~70% of the code as Rust (much more expressive than non-Rust people probably assume), and ~30% of the code as Go.
+
+Lines of code on its own is a terrible benchmark for complexity. But CLEAR did not attempt to cherry-pick this metric. This is on top of the benefit of having polymorphic synchronization for almost no cost, and the ability to benchmark different strategies almost free.
+
+Thirdly and most crucially, polymorphic synchronization allows your code to be maintainable in a way that is very difficult to achieve in Rust or Go.  `Arc<RwLock<T>>` is viral in Rust.  `T@shared` is not in CLEAR.
+
+ * Step 1) update your with blocks to use POLYMORPHIC access permission.  
+ * Step 2) change your synchronization strategy from @locked to @versioned.  
+ * Step 3) run `clear profile`. 
+ * Step 4) profit.
+
+### CLEAR levels the playing field for non-experts
+
+In Rust or Go, you need to fully understand the implications of your code before you even write and test it.  Unless you are an expert (and even if you are), this is difficult to get right.
+If you get it wrong, it is typically painful to rearchitect your app to do it right. It is also possible after your code continues to grow, you may need to switch again (possibly back to where you started), which can be equally painful.
+
+CLEAR was designed assuming that you cannot get everything right from the get-go, and to make it as easy as possible to experiment and optimize to get it right.  It was designed assuming you want to get there, even if you would have no chance in Rust or Go, because you need to understand things at a deeper level.
+
+CLEAR was designed to act like a high-level language like Ruby, but give you systems level speed.
+
+## Capabilities in Depth
 
 When multiple fibers need to access the same data, CLEAR must answer two questions:
 
