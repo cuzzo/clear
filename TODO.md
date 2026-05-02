@@ -14,7 +14,6 @@
  - [x] `./clear fmt`
  - [x] `./clear fix`
  - [x] Binding metadata for capabilities + `REQUIRES` for overloaded syncronization strategies.
- - [ ] COPY/CLONE/SPLIT overloading
  - [x] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
  - [ ] Continuous Integration
 
@@ -29,6 +28,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
  - [x] Atomics
  - [x] True Synchronization Polymorphism
+ - [ ] COPY/CLONE/SPLIT overloading
 
  ## v0.2 (Target = July 15)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
