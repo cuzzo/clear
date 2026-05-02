@@ -392,4 +392,27 @@ pub const Task = struct {
     // the scheduler decrements this counter (writers_waiting) so future readers
     // are not permanently blocked by a phantom writer count.
     lock_counter_ptr: ?*u32 = null,
+    // Monotonic counter of every park/wake transition affecting the
+    // (waiting_for_lock, waiting_for_lock_kind) pair. detectCycle uses this
+    // to validate per-hop snapshots across an N-hop chain walk: it records
+    // seq per hop, re-reads after the walk, and retries on any change. A
+    // real cycle stops all transitions (parked tasks can't transition), so
+    // seqs stay stable and the walk converges; a transient apparent cycle
+    // has at least one transitioning task whose seq advances → retry.
+    seq: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    // Tag identifying the kind of lock the task is parked on. detectCycle
+    // dispatches on this to look up the lock's CURRENT exclusive owner
+    // (rather than trusting waiting_for_lock_owner, which goes stale: when
+    // ownership transfers, only the woken waiter's owner field gets cleared,
+    // so other queued waiters keep a stale owner pointer).
+    //   0 = not parked
+    //   1 = ParkingMutex (exclusive)
+    //   2 = ParkingRwLock (write/exclusive)
+    //   3 = ParkingRwLock (shared/read) — chain terminator
+    waiting_for_lock_kind: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
 };
+
+pub const LOCK_KIND_NONE: u8 = 0;
+pub const LOCK_KIND_MUTEX: u8 = 1;
+pub const LOCK_KIND_RWLOCK_WRITE: u8 = 2;
+pub const LOCK_KIND_RWLOCK_SHARED: u8 = 3;
