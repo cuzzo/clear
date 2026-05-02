@@ -4649,8 +4649,19 @@ class BcEmitter
     # produced by lower_bg_stream_block. For receivers that are list
     # slots (synthesized __sg<id>_local stream materializations), use
     # LIST_POP_FRONT to pop the head and update the slot's tail in
-    # place. AWAIT is identity on non-future, non-list values, so the
-    # existing path stays correct for everything else.
+    # place. Emit AWAIT after the pop unconditionally: items in bounded
+    # streams (~T[N] = [BG{...}, ...]) are Pair("__future__", id) future
+    # markers that need the spawned fiber's result; items from BG STREAM
+    # YIELDs and from range materializations are concrete values, and
+    # AWAIT is identity on non-Pair receivers, so this is safe for both
+    # shapes. Pre-fix `r0 = NEXT bounded_stream` returned the future-
+    # marker pair instead of the value (regressed 73, 233, 236 + the
+    # bounded-stream concurrent tests via the same path).
+    #
+    # NEXT on any other value (a list slot of futures, a single Pair, a
+    # plain value) goes through AWAIT, which the runner extends to walk
+    # Value.List as well so `NEXT futures` (~T[]@list) awaits each item
+    # and returns a value list.
     if method == "next" && node.args.empty?
       if node.receiver.is_a?(MIR::Ident)
         rname = node.receiver.name.to_s
@@ -4670,6 +4681,7 @@ class BcEmitter
 
         if has_slot?(rname) && (rname.start_with?("__sg") || @stream_slots&.include?(rname))
           emit_op(LIST_POP_FRONT, @slots[rname])
+          emit_op(AWAIT)
           push_type(:any)
           return
         end

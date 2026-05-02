@@ -3305,9 +3305,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            83 -> -- AWAIT: pop Pair("__future__", id) and NEXT the
-                  -- underlying BG fiber stashed in futureTable[id].
-                  -- Identity on non-Pair values (legacy callers).
+            83 -> -- AWAIT: pop the top value and resolve any embedded futures.
+                  -- (a) Pair("__future__", id): NEXT futureTable[id], push value.
+                  -- (b) Value.List: each item that is a future Pair gets awaited;
+                  --     non-future items pass through. The result is a value list,
+                  --     used by `NEXT futures` (~T[]@list await-all).
+                  -- (c) Anything else: identity (legacy non-future callers).
                 sp -= 1; awaitVal = COPY stack[sp];
                 PARTIAL MATCH awaitVal START
                     Value.Pair AS fp ->
@@ -3327,6 +3330,31 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         ELSE
                             pv = COPY fp.pairCdr;
                         END,
+                    Value.List AS lstItems ->
+                        -- Await-all over a list of futures (~T[]@list). For each
+                        -- element, if it's a Pair("__future__", id) marker, look
+                        -- up the future and NEXT it; otherwise keep the element
+                        -- as-is. Returns a Value.List of resolved values.
+                        MUTABLE awaitedList: Value[]@list = List[];
+                        FOR aiAll IN (0_i64 ..< lstItems.length()) DO
+                            aliVal = COPY lstItems[aiAll];
+                            PARTIAL MATCH aliVal START
+                                Value.Pair AS aliP ->
+                                    aliCar = COPY aliP.pairCar;
+                                    IF getSymName(aliCar) == "__future__" THEN
+                                        aliFid = getInt(aliP.pairCdr);
+                                        IF aliFid >= 0_i64 && aliFid < futureTable.length() THEN
+                                            awaitedList.append(NEXT futureTable[aliFid]);
+                                        ELSE
+                                            awaitedList.append(COPY aliP.pairCdr);
+                                        END
+                                    ELSE
+                                        awaitedList.append(COPY aliVal);
+                                    END,
+                                DEFAULT -> awaitedList.append(COPY aliVal);
+                            END
+                        END
+                        pv = Value{ List: awaitedList };,
                     DEFAULT -> pv = COPY awaitVal;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END

@@ -1594,7 +1594,7 @@ RSpec.describe MIRLowering do
       # the outer instance. Without this the fiber operates on a value
       # copy and per-shard locks become independent mutexes -- writes
       # never appear to outer readers (regressed examples/graphdb).
-      expect(zig).to include("x: *@TypeOf(x)")
+      expect(zig).to include("x: @TypeOf(&x)")
       expect(zig).to include(".x = &x")
     end
 

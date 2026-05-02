@@ -2786,11 +2786,13 @@ class MIRLowering
       # decl_alloc from the enclosing VarDecl so the allocator matches the cleanup plan).
       inner = lower(node.expr)
 
-      # In BC the BG runtime is synchronous (BG_SPAWN materializes the
-      # body inline and stores the resolved value), so the promise list
-      # is already a Value.List of results. NEXT-all is identity --
-      # return the source MIR directly.
-      return inner if @target == :bc
+      # In BC the BG runtime spawns real fibers via BG_SPAWN and stashes
+      # their futures in `futureTable`; the list elements are
+      # Pair("__future__", id) markers, not yet-resolved values. Route
+      # through MethodCall("next") so the bc_emitter emits AWAIT, which
+      # the runner extends to walk Value.List (await each item, build
+      # result list).
+      return MIR::MethodCall.new(inner, "next", [], true) if @target == :bc
 
       inner_str = emit_expr(inner)
       elem_zig = promise_type.tense_type.element_type.zig_type

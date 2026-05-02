@@ -120,12 +120,29 @@ module FiberCtxBuilder
       elsif pointer_captures.include?(name)
         # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).
         # Capture by pointer so writes inside the fiber body land on the
-        # outer instance, not on a copied struct (which would carry its
-        # own per-shard locks and a dead StringHashMap backing array).
-        # Mirrors the call-site `&name` / `&self` convention these
-        # collections already use for FN params.
-        CaptureSpec.new(name, "*@TypeOf(#{name})", "&#{name}",
-                        MIR::AddressOf.new(MIR::Ident.new(name)), nil, nil)
+        # outer instance, not on a copied struct.
+        #
+        # Two sub-cases for the binding's existing Zig representation:
+        #   * Function parameter of a `needs_pointer_passing?` type --
+        #     Zig already passes the parameter as a pointer (the
+        #     compiler emits `nodes: anytype` / `pool: *Pool`). Capture
+        #     it by VALUE so the BG context carries the same pointer
+        #     directly; wrapping with `&` would produce a `**T` that
+        #     the body's method calls (`pool.acquire()`) cannot consume.
+        #   * Local declaration -- Zig holds the value inline (e.g.
+        #     `var cNodes = ShardedStringMap{...}`). Capture `&cNodes`
+        #     so writes inside the fiber land on the outer struct, not
+        #     on a copied per-shard-locks instance.
+        # `@TypeOf(&name)` for the field type carries any const-ness
+        # through (parameters are Zig-const, so `&pool` is `*const T`).
+        sym = analysis&.capture_symbols&.dig(name)
+        if sym&.is_param
+          CaptureSpec.new(name, "@TypeOf(#{name})", name,
+                          MIR::Ident.new(name), nil, nil)
+        else
+          CaptureSpec.new(name, "@TypeOf(&#{name})", "&#{name}",
+                          MIR::AddressOf.new(MIR::Ident.new(name)), nil, nil)
+        end
       else
         CaptureSpec.new(name, "@TypeOf(#{name})", name,
                         MIR::Ident.new(name), nil, nil)
