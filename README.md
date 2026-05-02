@@ -201,7 +201,9 @@ ruby benchmarks/runner.rb --cores=4 benchmarks/concurrent/09_kvstore/  # Control
 ### Performance
 
   * On a single core, typically with 0-30% of Perfect C code.
-  * In concurrent throughput and p99 latency, typically competitive with Rust/Tokio and Go. 
+  * In concurrent throughput and p99 latency, typically competitive with Rust/Tokio and Go.
+  * On a per-task basis, CLEAR is competitive with Rust/Tokio for memory consumption: ~50% of Go (or better).
+     * On micro benchmarks, CLEAR often uses *MORE* memory than Go, because the scheduler currently will use 32-cores even if the workload doesn't merrit it.  On micro-benchmarks, CLEAR will underperform in memory consumption until v0.3 or v0.4.
 
 See [benchmarks/README.md](benchmarks/README.md).
 
