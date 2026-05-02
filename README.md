@@ -92,9 +92,9 @@ FN transact(x: Account@shared, y: Account@shared, amount: Float64) RETURNS !Bool
 END
 ```
 
-This may raise eyebrows if you come from Zig or Rust.  In STRICT mode, you must handle all synchronization failures inline.
+This may raise eyebrows if you come from Zig or Rust.  In STRICT mode, you must handle all synchronization failures inline.  All dependencies (imports) *must* compile in STRICT mode.
 
-However, CLEAR has a sane policy for handling synchronization failures for prototyping when compiling in non-STRICT mode (default).  You can also set your own policy to overide the system defaults, or compile in STRICT mode where failure methods must be handled inline.
+To support rapid prototyping, CLEAR has a sane policy for handling synchronization failures when compiling in non-STRICT mode (default).  You can also set your own policy to overide the system defaults, or compile in STRICT mode where failure methods must be handled inline.
 
 Further, you can restrict the type of shared objects you allow, if you explictly do not want your function to have certain effects, like BLOCKING or LATENCY.
 
