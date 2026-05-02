@@ -429,22 +429,29 @@ pub const ParkingMutex = struct {
         // us and either pops our node (if we've pushed) or sees an empty
         // queue + clears the stale HAS_WAITERS.
         //
-        // After fetchOr, double-check LOCKED. If the lock became free in
-        // the same window, the unlocker might already have decided "no
-        // waiters" and returned. Try to grab the lock ourselves rather
-        // than parking — otherwise we'd park forever (the LOST WAKE bug).
+        // After fetchOr, double-check LOCKED. If the lock became free AND
+        // the waiter queue is empty, we can safely grab the lock without
+        // parking. The empty-queue check is critical: if a real waiter is
+        // queued, an in-flight unlock is about to transfer ownership to
+        // them via state.store (line ~493 below). If we acquire here AND
+        // then release queue_spin, that unlock would pop the waiter and
+        // store-overwrite our owner field — both us AND the waiter would
+        // think we own the lock, corrupting the protected data. We hold
+        // queue_spin so no concurrent push can race with isEmpty().
         const after_or = self.state.fetchOr(STATE_HAS_WAITERS, .acq_rel) | STATE_HAS_WAITERS;
-        if ((after_or & STATE_LOCKED) == 0) {
-            // Lock became free during our setup window. Try to acquire.
-            // Preserve flag bits including HAS_WAITERS (we may still queue,
-            // and a future unlock will clear stale HAS_WAITERS if needed).
+        if ((after_or & STATE_LOCKED) == 0 and self.waiters.isEmpty()) {
+            // Lock free + queue empty: safe to acquire. A concurrent unlock
+            // that already passed fetchAnd is now waiting on queue_spin;
+            // when it gets in, it pops the empty queue and hits the
+            // stale-HAS_WAITERS cleanup, which only clears HAS_WAITERS —
+            // never touches LOCKED/owner — so our acquire is preserved.
             const target = STATE_LOCKED | @intFromPtr(task)
-                | (after_or & STATE_FLAG_MASK);
+                | (after_or & STATE_HAS_THREAD_SLEEPER);
             if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
                 self.spinReleaseQueue();
                 return;
             }
-            // CAS lost — someone else got it. Fall through to park.
+            // CAS lost — fall through to park.
         }
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
@@ -506,16 +513,32 @@ pub const ParkingMutex = struct {
 
         if ((prev & STATE_HAS_WAITERS) != 0) {
             self.spinAcquireQueue();
-            const waiter = self.waiters.pop();
-            const more_after = !self.waiters.isEmpty();
-            if (waiter) |w| {
-                // Transfer ownership: rebuild state with LOCKED, owner, and
-                // any preserved flag bits.
-                const sleeper_bit: u64 = prev & STATE_HAS_THREAD_SLEEPER;
+            // Re-read state under spin: a parker may have re-acquired via
+            // the lockSlow double-check-after-fetchOr path while we were
+            // blocked on queue_spin. If so, abort the transfer — that
+            // owner will wake the queue on its own unlock.
+            const cur_state = self.state.load(.acquire);
+            if ((cur_state & STATE_LOCKED) != 0) {
+                self.spinReleaseQueue();
+                return;
+            }
+            // Peek (don't pop yet): we need to atomically transfer ownership
+            // to head waiter. If state changes between our load and store, we
+            // bail without popping so the head stays queued for next unlock.
+            const head = self.waiters.head;
+            if (head) |w| {
+                const more_after = w.next != null;
+                const sleeper_bit: u64 = cur_state & STATE_HAS_THREAD_SLEEPER;
                 const more_bit: u64 = if (more_after) STATE_HAS_WAITERS else 0;
                 const new_state: u64 = STATE_LOCKED | sleeper_bit | more_bit
                     | @intFromPtr(w.task);
-                self.state.store(new_state, .release);
+                if (self.state.cmpxchgStrong(cur_state, new_state, .release, .monotonic) != null) {
+                    // State changed (concurrent fast-path acquire). Bail.
+                    self.spinReleaseQueue();
+                    return;
+                }
+                // Transfer succeeded — now safe to pop and wake.
+                _ = self.waiters.pop();
                 // Wake-side ordering: lock cleared FIRST (with .release)
                 // so a concurrent detectCycle reader sees lock==null and
                 // does not chase a stale waiting_for_lock_owner.
@@ -679,12 +702,12 @@ pub const ParkingRwLock = struct {
         // Set HAS_WAITERS_BIT BEFORE pushing. See ParkingMutex.lockSlow for
         // the full LOST WAKE race explanation. Same fix here: unlock that
         // races with our park must observe HAS_WAITERS=1 in its fetchAnd
-        // and take the wake path; double-check after fetchOr to grab the
-        // lock if it became free in our setup window.
+        // and take the wake path. Only attempt CAS-to-grab when the queue
+        // is empty — an in-flight wakeNext for an existing waiter would
+        // store-overwrite our owner field if we leapfrog them.
         const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
-        if ((after_or & (WRITE_LOCKED_BIT | READER_MASK)) == 0) {
-            // Lock fully free. Try to grab it.
-            const target = WRITE_LOCKED_BIT | (after_or & HAS_WAITERS_BIT);
+        if ((after_or & (WRITE_LOCKED_BIT | READER_MASK)) == 0 and self.waiters.isEmpty()) {
+            const target = WRITE_LOCKED_BIT;
             if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
                 self.write_owner.store(task, .release);
                 self.spinReleaseQueue();
@@ -826,21 +849,21 @@ pub const ParkingRwLock = struct {
         }
 
         // Set HAS_WAITERS_BIT BEFORE pushing. Same LOST WAKE race as the
-        // exclusive path: an unlock that runs between our last state load
-        // and our push must observe HAS_WAITERS=1 in its fetchAdd-undo
-        // path (line ~813) and call wakeNext. If the lock became fully
-        // free in our setup window, try to grab a reader slot ourselves.
+        // exclusive path. For shared acquire, an unlock that runs between
+        // our last state load and our push must observe HAS_WAITERS=1
+        // in its fetchAdd-undo path (line ~813) and call wakeNext.
+        // Only grab a reader slot when no writer holds the lock AND
+        // the queue is empty — leapfrogging a queued writer would
+        // starve them; a queued reader can be safely woken by wakeNext
+        // alongside us.
         const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
-        if ((after_or & WRITE_LOCKED_BIT) == 0) {
-            // No writer holds it. Try to add ourselves as a reader.
-            // fetchAdd here is the standard reader-acquire; the acquire
-            // ordering pairs with the writer-unlock release.
+        if ((after_or & WRITE_LOCKED_BIT) == 0 and self.waiters.isEmpty()) {
             const prev_retry = self.state.fetchAdd(1, .acquire);
             if ((prev_retry & WRITE_LOCKED_BIT) == 0) {
                 self.spinReleaseQueue();
                 return;
             }
-            // Lost the race — undo and park.
+            // Writer arrived between checks — undo and park.
             _ = self.state.fetchSub(1, .release);
         }
 
