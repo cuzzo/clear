@@ -2018,6 +2018,15 @@ class BcEmitter
       @slot_types[idx_cap] = :any
     end
 
+    # When the iter source is a stream slot (bounded `~T[N]` of BG-spawned
+    # futures, BG STREAM materialized list, or range materialization),
+    # auto-await the per-iteration item so pipeline bodies see the
+    # spawned fiber's RESULT, not the future-marker `Pair("__future__",
+    # id)`. AWAIT is identity on non-Pair values, so range/BG STREAM
+    # slots are unaffected; only bounded streams actually need it.
+    iter_is_stream_slot = node.iter.is_a?(MIR::Ident) &&
+                          @stream_slots&.include?(node.iter.name.to_s)
+
     # coll = iter; idx = 0
     compile_expr_to_value(node.iter); pop_type
     emit_op(STORE_SLOT, @slots[coll_name])
@@ -2035,10 +2044,12 @@ class BcEmitter
     emit_op(JUMP_IF_FALSE)
     jump_exit = @ops.length; emit_op(0)
 
-    # capture = coll[idx]
+    # capture = coll[idx] (auto-await for stream slots; AWAIT is identity
+    # on non-Pair, so safe for non-future stream items too)
     emit_op(LOAD_SLOT, @slots[coll_name])
     emit_op(LOAD_SLOT, @slots[idx_name])
     emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+    emit_op(AWAIT) if iter_is_stream_slot
     emit_op(STORE_SLOT, @slots[capture])
     emit_op(POP)
     # optional index capture
@@ -2929,6 +2940,15 @@ class BcEmitter
     src = src.expr if src.is_a?(MIR::AddressOf)
     src = src.object if src.is_a?(MIR::FieldGet) && src.field.to_s == "items"
 
+    # If the unwrapped source is a stream slot (bounded `~T[N]` of
+    # BG-spawned futures, BG STREAM materialized list, or range), the
+    # per-iteration item must be auto-awaited before the worker fn
+    # consumes it. AWAIT is identity on non-Pair items, so stream slots
+    # carrying concrete values are unaffected. Same rule that
+    # `compile_for` applies for sequential pipeline iteration.
+    src_is_stream_slot = src.is_a?(MIR::Ident) &&
+                         @stream_slots&.include?(src.name.to_s)
+
     # Result-list bookkeeping (SELECT and WHERE only).
     @bcc_counter = (@bcc_counter || 0) + 1
     id = @bcc_counter
@@ -2987,6 +3007,7 @@ class BcEmitter
     emit_op(LOAD_ISLOT, @islots[iter_name])
     emit_op(I_TO_VAL)
     emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+    emit_op(AWAIT) if src_is_stream_slot
     emit_op(STORE_SLOT, @slots[item_name]); emit_op(POP)
 
     # call worker(rt, ctx, item) -- captures don't go through the BC
