@@ -77,16 +77,16 @@ BG { @micro:arena -> foo() }
 In CLEAR, you can handle all synchronization methods with a single function:
 
 ```ruby clear illustrative
-FN transact(x: Account@shared, y: Account@shared, amount: Float64) RETURNS !Bool ->
+FN transact(a: Account@shared, b: Account@shared, amount: Float64) RETURNS !Bool ->
   IF amount <= 0 -> RAISE Input, TransactionFailure, "Invalid Amount, must be positive";
 
   WITH
-    POLYMORPHIC x AS a,
-    POLYMORPHIC y AS b {
-      IF a.balance < amount -> RAISE Input, TransactionFailure, "Balance too low";
+    POLYMORPHIC a AS acctA,
+    POLYMORPHIC b AS acctB {
+      IF acctA.balance < amount -> RAISE Input, TransactionFailure, "Balance too low";
 
-      a.balance -= amount;
-      b.balance += amount;
+      acctA.balance -= amount;
+      acctB.balance += amount;
   }
   RETURN True;
 END
