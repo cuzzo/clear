@@ -111,6 +111,8 @@ In CLEAR, the compiler lowers the vast majority of concurrent tasks into Finite 
 
 This allows CLEAR to handle millions of concurrent operations with the memory footprint of Rust/Tokio's async/await, but with the developer ergonomics of Go's blocking syntax.
 
+Stackful tasks do not resize like in Go. Since they are rare, and the stack size is known at runtime (aside from reentrant tasks), in the worst case they undergo Stack Hystersis.  In *very rare* cases this can lead to **very bad** performance spikes.  That's why CLEAR gives you all the tools to never need stackful fibers.
+
 ### Profile Guided Optimization
 
 In CLEAR, the compiler can tell when you're *probably* employing a bad strategy, and changing it is typically just a one-line fix, thanks to Polymorphic Synchronization, rather than a full-app rearchitecture.
