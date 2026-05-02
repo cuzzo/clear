@@ -842,6 +842,35 @@ class PipelineHost
     elem_zig = transpile_type(elem_type)
     alloc = pipeline_alloc(smooth_node)
     count_mir = visit_mir(limit_node.count)
+    # BC + inf-stream source: SliceExpr/ListLength can't talk to
+    # Value.Channel. Drain N items via a ForStmt that pulls from the
+    # channel through STREAM_NEXT (the bc_emitter's compile_for special-
+    # cases @channel_slots) and accumulates into a list. Producer fibers
+    # whose body terminates early push Nil; the for-loop's nil-guard
+    # ends the drain.
+    if bc_target? && list_node.full_type&.inf_stream?
+      label = next_pipe_label
+      source_mir = visit_mir(list_node)
+      @current_pipe_label = label
+      return MIR::BlockExpr.new(label, [
+        MIR::Let.new("__lim_src", source_mir, false, nil, nil),
+        MIR::Let.new("__lim_n", count_mir, false, nil, nil),
+        MIR::Let.new("__lim_res",
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::Let.new("__lim_i", MIR::Lit.new("0_i64"), true, nil, nil),
+        MIR::ForStmt.new(MIR::Ident.new("__lim_src"), "__lim_it", [
+          MIR::IfStmt.new(
+            MIR::BinOp.new(">=", MIR::Ident.new("__lim_i"), MIR::Ident.new("__lim_n")),
+            [MIR::BreakStmt.new(nil, nil)], nil),
+          MIR::ExprStmt.new(MIR::MethodCall.new(
+            MIR::Ident.new("__lim_res"), "append",
+            [MIR::Ident.new("__lim_it")], true), nil),
+          MIR::Set.new(MIR::Ident.new("__lim_i"),
+            MIR::BinOp.new("+", MIR::Ident.new("__lim_i"), MIR::Lit.new("1_i64")), nil),
+        ], nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("__lim_res"))
+      ])
+    end
     lower_pipeline_block(list_node) do |items, label|
       [
         MIR::Let.new("lim_requested",
@@ -927,6 +956,25 @@ class PipelineHost
       defer_deinit = source_ti&.bounded_stream? ?
         MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(p[:source_name]), "deinit", [], false)) :
         nil
+
+      # BC: identifier-backed stream sources go through ForStmt so the
+      # bc_emitter's compile_for routes channels via STREAM_NEXT and
+      # bounded streams via list-ref iteration. Same shape as the
+      # lower_each_range / lower_range_fold inf-stream branch.
+      if bc_target? && range_chain[:source].is_a?(AST::Identifier) &&
+         (source_ti&.dynamic_stream? || source_ti&.bounded_stream? || source_ti&.inf_stream?)
+        return MIR::BlockExpr.new(label, [
+          *p[:outer_stmts],
+          MIR::Let.new("dist_set", MIR::ContainerInit.new(set_zig, :set_empty, nil, nil), true, nil, nil),
+          MIR::ForStmt.new(visit_mir(range_chain[:source]), p[:initial_capture],
+            [*p[:stage_stmts],
+             MIR::Let.new("dist_key", key_expr_mir, false, nil, nil),
+             MIR::ExprStmt.new(MIR::MethodCall.new(
+               MIR::Ident.new("dist_set"), "insert",
+               [MIR::Ident.new("dist_key")], true), nil)], nil),
+          MIR::BreakStmt.new(label, MIR::Ident.new("dist_set"))
+        ])
+      end
 
       return MIR::BlockExpr.new(label, [
         *([p[:range_let]].compact), *p[:outer_stmts],
@@ -1085,6 +1133,73 @@ class PipelineHost
     expr_mir = with_pipeline_context(placeholder: placeholder_var) {
       visit_mir(bw_node.expression)
     }
+
+    # BC + inf-stream identifier source: lower_pipeline_block emits
+    # `pipe_items = ItemsAccess(channel)` which is identity in BC, so
+    # `pipe_items.len` and SliceExpr are nonsensical on a Value.Channel.
+    # Drain the channel into a real list via a ForStmt (compile_for
+    # routes channel slots through STREAM_NEXT), then run the original
+    # batch-window logic on that materialized list. Producer fibers
+    # whose body terminates push Nil so the for-loop exits cleanly;
+    # genuinely-infinite producers stay blocked at the next YIELD until
+    # exec! shutdown closes the channel.
+    if bc_target? && list_node.is_a?(AST::Identifier) &&
+       list_node.type_info&.inf_stream?
+      label = next_pipe_label
+      drain_label = next_pipe_label
+      source_mir = visit_mir(list_node)
+      @current_pipe_label = label
+      return MIR::BlockExpr.new(label, [
+        MIR::Let.new("__bw_drained",
+          MIR::MakeList.new(elem_zig, [], alloc), true, nil, nil),
+        MIR::ForStmt.new(source_mir, "__bw_it", [
+          MIR::ExprStmt.new(MIR::MethodCall.new(
+            MIR::Ident.new("__bw_drained"), "append",
+            [MIR::Ident.new("__bw_it")], true), nil)
+        ], nil),
+        MIR::Let.new("res_list",
+          MIR::MakeList.new(res_zig, [], alloc), true, nil, nil),
+        MIR::Let.new("__bw_size", size_mir, false, "i64", nil),
+        MIR::Let.new("__bw_total",
+          MIR::Cast.new(
+            MIR::FieldGet.new(MIR::Ident.new("__bw_drained"), "len"),
+            "i64", :intCast),
+          false, "i64", nil),
+        MIR::Let.new("__bw_step",
+          MIR::Conditional.new(
+            MIR::BinOp.new(">", MIR::Ident.new("__bw_size"), MIR::Lit.new("0")),
+            MIR::Ident.new("__bw_size"),
+            MIR::Ident.new("__bw_total")),
+          false, "i64", nil),
+        MIR::Let.new("__bw_offset", MIR::Lit.new("0"), true, "i64", nil),
+        MIR::WhileStmt.new(
+          MIR::BinOp.new("<", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_total")),
+          [
+            MIR::Let.new("__bw_end",
+              MIR::Conditional.new(
+                MIR::BinOp.new("<",
+                  MIR::BinOp.new("+", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_step")),
+                  MIR::Ident.new("__bw_total")),
+                MIR::BinOp.new("+", MIR::Ident.new("__bw_offset"), MIR::Ident.new("__bw_step")),
+                MIR::Ident.new("__bw_total")),
+              false, "i64", nil),
+            MIR::Let.new(placeholder_var,
+              MIR::SliceExpr.new(MIR::Ident.new("__bw_drained"),
+                MIR::Cast.new(MIR::Ident.new("__bw_offset"), "usize", :intCast),
+                MIR::Cast.new(MIR::Ident.new("__bw_end"), "usize", :intCast),
+                nil),
+              false, nil, nil),
+            MIR::Let.new("__bw_val", expr_mir, false, nil, nil),
+            MIR::ExprStmt.new(MIR::MethodCall.new(
+              MIR::Ident.new("res_list"), "append",
+              [MIR::Ident.new("__bw_val")],
+              true), nil),
+            MIR::Set.new(MIR::Ident.new("__bw_offset"),
+              MIR::Ident.new("__bw_end")),
+          ], nil, nil, nil, nil),
+        MIR::BreakStmt.new(label, MIR::Ident.new("res_list"))
+      ])
+    end
 
     # BC-only structural lowering: walk an offset into the materialized
     # `pipe_items` list and on each step, slice [offset, offset+size]
@@ -2021,9 +2136,14 @@ class PipelineHost
     # BC backend, variable-backed finite stream (`s: ~T[] = 0..<n; s s> EACH`):
     # the source slot holds the materialized list (RangeLit -> iota in BC), so
     # iterate it as a list instead of going through .next() coroutine semantics.
+    # Same shape applies to inf streams: source slot holds a Value.Channel, and
+    # the bc_emitter's compile_for routes the iteration through STREAM_NEXT
+    # (rendezvous pull, terminating on Nil from a closed channel). Stages like
+    # LIMIT N are encoded in stage_stmts as `if cnt >= N break;` so the loop
+    # bounds itself even on a non-terminating producer.
     if bc_target? && range_lit.is_a?(AST::Identifier)
       ti = range_lit.type_info
-      if ti&.dynamic_stream? || ti&.bounded_stream?
+      if ti&.dynamic_stream? || ti&.bounded_stream? || ti&.inf_stream?
         cap = capture_name == "_" ? "_" : initial_capture
         return MIR::ScopeBlock.new([
           *p[:outer_stmts],
@@ -2218,7 +2338,8 @@ class PipelineHost
       ])
     end
     if bc_target? && range_lit.is_a?(AST::Identifier) &&
-       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream?)
+       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream? ||
+        range_lit.type_info&.inf_stream?)
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts], *acc_init_stmts,
         MIR::ForStmt.new(visit_mir(range_lit), capture_name,
@@ -2269,7 +2390,8 @@ class PipelineHost
       ])
     end
     if bc_target? && range_lit.is_a?(AST::Identifier) &&
-       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream?)
+       (range_lit.type_info&.dynamic_stream? || range_lit.type_info&.bounded_stream? ||
+        range_lit.type_info&.inf_stream?)
       return MIR::BlockExpr.new(label, [
         *p[:outer_stmts],
         MIR::Let.new("acc", init_mir, true, acc_zig, nil),
@@ -2683,6 +2805,26 @@ class PipelineHost
     end
   end
 
+  # Resolve the bare struct name (if any) for a capture symbol, used to
+  # stamp BC pre-decoded slots with `:struct_<Name>`. Returns a String or
+  # nil. SymbolEntry#type may be a Type object, a sigil Symbol like
+  # `:Total`, or a Hash-shape (function types). Only struct-shaped Type
+  # values yield a useful hint.
+  def struct_name_hint_for_sym(sym)
+    return nil unless sym
+    t = sym.type
+    if t.respond_to?(:bare_data_type)
+      bare = t.bare_data_type
+      return bare.to_s if bare && bare.respond_to?(:struct?) && bare.struct?
+    elsif t.is_a?(Symbol)
+      base = t.to_s
+      base = base.sub(/\A[~%@^!]+/, "")
+      return base if !base.empty? && base[0] =~ /[A-Z]/ &&
+                     %w[Int64 Float64 Bool String Void Any Number].none? { |p| p == base }
+    end
+    nil
+  end
+
   def bounded_concurrent_task_cfg_mir(conc_op)
     size_node = conc_op.options["size"]
     MIR::InlineZig.new(task_config_zig(size_node&.name&.downcase&.to_sym), "task_cfg")
@@ -2700,7 +2842,23 @@ class PipelineHost
     # because pipeline_host produces MIR nodes directly.
     caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx")
 
-    fields = caps.specs.map { |s| MIR::FieldDef.new(s.name, s.field_type_zig, nil) }
+    fields = caps.specs.map { |s|
+      fd = MIR::FieldDef.new(s.name, s.field_type_zig, nil)
+      # Stamp @shared:locked / @local / @writeLocked captures as boxed
+      # so the BC worker pre-decode marks the corresponding local slot
+      # as boxed (alias_to_source then propagates the flag onto the
+      # WITH alias `t`, and writes through `t.value = ...` route via
+      # BOX_STORE back to the same envId the outer binding holds).
+      sym = caps.capture_symbols&.dig(s.name)
+      if sym && (sym.sync == :locked || sym.sync == :write_locked || sym.storage == :local)
+        # Stamp the inner struct name (when knowable) so the BC pre-decode
+        # can stamp `:struct_<Name>` on the worker's local slot — without
+        # it, find_field_index for `t.value` walks every struct and may
+        # return the wrong index when multiple structs share a field name.
+        fd.boxed_capture = struct_name_hint_for_sym(sym) || true
+      end
+      fd
+    }
 
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
     params = [
@@ -2715,6 +2873,24 @@ class PipelineHost
     else
       ctx_cast = MIR::InlineZig.new("@as(*@This(), @ptrCast(@alignCast(raw_ctx.?)))", "bounded_concurrent_ctx_cast")
       body << MIR::Let.new("ctx", ctx_cast, false, nil, nil)
+    end
+
+    # In BC mode, also pre-decode each capture into a local Let bound by
+    # the original capture name. The worker body's MIR identifiers are
+    # rewritten to `ctx.<name>` by `with_fiber_capture_map` below, but
+    # auto-lock InlineZig produced by `WITH EXCLUSIVE <name>` carries the
+    # capture name as raw Zig source. The bc_emitter scans that source
+    # for `<name>.acquire()` to emit LOCK_ACQUIRE -- it needs <name> to
+    # resolve to a local slot. Without these Lets the lock acquire is
+    # silently dropped, the worker's mutation runs against an unlocked
+    # local copy, and writes never reach the outer @shared:locked
+    # binding (regressed 228/240/241/242 EACH-with-mutation).
+    if bc_target?
+      caps.specs.each do |spec|
+        body << MIR::Let.new(spec.name,
+          MIR::FieldGet.new(MIR::Ident.new("ctx"), spec.name),
+          true, nil, nil)
+      end
     end
 
     lowered_body = with_pipeline_context(placeholder: "__item") do
@@ -3163,7 +3339,19 @@ class PipelineHost
     # in-place mutation), not how captures are stored.
     caps = FiberCtxBuilder.build(analysis, body_access_prefix: "ctx")
 
-    fields = caps.specs.map { |s| MIR::FieldDef.new(s.name, s.field_type_zig, nil) }
+    fields = caps.specs.map { |s|
+      fd = MIR::FieldDef.new(s.name, s.field_type_zig, nil)
+      # Stamp @shared:locked / @local / @writeLocked captures as boxed
+      # so the BC worker pre-decode marks the corresponding local slot
+      # as boxed (alias_to_source then propagates the flag onto the
+      # WITH alias `t`, and writes through `t.value = ...` route via
+      # BOX_STORE back to the same envId the outer binding holds).
+      sym = caps.capture_symbols&.dig(s.name)
+      if sym && (sym.sync == :locked || sym.sync == :write_locked || sym.storage == :local)
+        fd.boxed_capture = struct_name_hint_for_sym(sym) || true
+      end
+      fd
+    }
 
     raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
     item_zig_ptr = "*#{Type.new(item_type).zig_type}"

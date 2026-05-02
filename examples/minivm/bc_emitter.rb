@@ -126,6 +126,16 @@ class BcEmitter
   # The previous "no-op sleep" approach prevented contention from
   # observable interleavings; this enables real cooperative scheduling.
   SLEEP_MS           = 118
+  # Rendezvous-channel ops for ~T[INF] BG STREAM. STREAM_SPAWN allocates
+  # a channel cell + spawns the producer fiber (channel passed as the
+  # first capture). STREAM_YIELD blocks the producer until the consumer
+  # has emptied the slot (or signals close). STREAM_NEXT blocks the
+  # consumer until the producer has filled the slot. STREAM_CLOSE wakes
+  # both sides so cleanup at scope exit terminates the producer.
+  STREAM_SPAWN       = 119  # [entry_ip] [argc]
+  STREAM_YIELD       = 120  # [chan_slot]
+  STREAM_NEXT        = 121  # [chan_slot]
+  STREAM_CLOSE       = 122  # [chan_slot]
 
   NATIVES = {
     "+" => 1, "-" => 2, "*" => 3, "/" => 4,
@@ -369,6 +379,21 @@ class BcEmitter
           if node.respond_to?(:fields) && node.fields
             field_names = node.fields.map { |f| f.respond_to?(:name) ? f.name.to_s : f.to_s }
             @struct_fields[node.name.to_s] ||= field_names
+            # Capture boxed-capture flags from MIR::FieldDef so the worker's
+            # pre-decoded `Let(name, FieldGet(ctx, name))` slot inherits the
+            # boxedness of its outer @shared:locked / @local / @writeLocked
+            # source (the field's value is the same Boxed envId; the slot
+            # needs the @boxed_slots tag so reads/writes route through
+            # BOX_LOAD/BOX_STORE and propagate to the outer binding).
+            @boxed_capture_fields ||= {}
+            # Map field name → inner struct hint (or `true` when the
+            # capture is boxed but not a struct). compile_let consumes
+            # both: the boxedness flips @boxed_slots; the struct name (if
+            # any) becomes the `:struct_<Name>` slot type so field-access
+            # dispatch scopes correctly.
+            @boxed_capture_fields[node.name.to_s] = node.fields.select { |f|
+              f.respond_to?(:boxed_capture) && f.boxed_capture
+            }.to_h { |f| [f.name.to_s, f.boxed_capture] }
           end
           (node.methods || []).each do |m|
             next unless m.is_a?(MIR::FnDef)
@@ -449,6 +474,7 @@ class BcEmitter
       type_stack: @type_stack,
       boxed_slots: @boxed_slots, stream_slots: @stream_slots,
       in_helper_fn: @in_helper_fn, helper_fn_returned: @helper_fn_returned,
+      current_worker_ctx_struct: @current_worker_ctx_struct,
     }
     @slots = {}; @islots = {}; @fslots = {}
     @slot_types = {}; @mutables = Set.new
@@ -457,6 +483,11 @@ class BcEmitter
     @boxed_slots = Set.new; @stream_slots = Set.new
     @in_helper_fn = true
     @helper_fn_returned = false
+    # Qualified worker names ("__BoundedConcurrentCtx1.apply") tell us the
+    # ctx struct identity so compile_let can consult @boxed_capture_fields
+    # when pre-decoding ctx fields into local slots. Plain helper names
+    # (no dot) carry no ctx struct context.
+    @current_worker_ctx_struct = name.include?(".") ? name.split(".").first : nil
 
     @fn_start_ips[name] = @ops.length
     @fn_arity ||= {}
@@ -491,6 +522,7 @@ class BcEmitter
     @boxed_slots = saved[:boxed_slots]; @stream_slots = saved[:stream_slots]
     @in_helper_fn = saved[:in_helper_fn]
     @helper_fn_returned = saved[:helper_fn_returned]
+    @current_worker_ctx_struct = saved[:current_worker_ctx_struct]
   end
 
   # Compile a non-main helper function into the shared op stream, isolated
@@ -979,8 +1011,10 @@ class BcEmitter
       # scope exit. Without this, lock state would leak across BG fibers.
       @with_aliases ||= {}
       @with_lock_releases ||= []
+      @with_fallible_escapes ||= []
       saved_keys = @with_aliases.keys
       saved_releases = @with_lock_releases.length
+      saved_escapes = @with_fallible_escapes.length
       inner = semantic_mir_nodes(mir_node.body)
       inner.each { |n| compile_stmt(n, nil) }
       new_aliases = @with_aliases.keys - saved_keys
@@ -991,6 +1025,13 @@ class BcEmitter
       while @with_lock_releases.length > saved_releases
         rel_slot_name = @with_lock_releases.pop
         emit_op(LOCK_RELEASE, @slots[rel_slot_name]) if has_slot?(rel_slot_name)
+      end
+      # Patch fallible-acquire escapes (ON / RETRY error path JUMPs) to
+      # land here -- post-LOCK_RELEASE. The error-path JUMP is emitted by
+      # emit_fallible_lock_dispatch and pushed onto @with_fallible_escapes;
+      # the success path falls through naturally to the same point.
+      while @with_fallible_escapes.length > saved_escapes
+        @ops[@with_fallible_escapes.pop] = @ops.length
       end
     when MIR::Pipeline
       # See compile_expr's MIR::Pipeline branch.
@@ -1087,6 +1128,24 @@ class BcEmitter
         # release uses 30s but tests like 263 depend on the shorter
         # debug-style window).
         lock_timeout_ms = 100
+        # Fallible captures (ON / RETRY) supply structured clauses via
+        # stdlib_def[:fallible_clauses]. The bare-acquire regex below
+        # skips these so we don't double-emit LOCK_ACQUIRE; instead the
+        # explicit dispatch (after the regex pass) emits LOCK_ACQUIRE +
+        # IS_ERR + branch + action_mir + retry loop.
+        fallible_clauses = (mir_node.stdlib_def && mir_node.stdlib_def[:fallible_clauses]) || []
+        fallible_var_names = fallible_clauses.map { |c| c[:var_name].to_s }.to_set
+        # Emit fallible-acquire dispatch BEFORE the bare-acquire regex pass
+        # and BEFORE the alias-setup passes. On runtime success path, the
+        # alias bytecode that follows runs as usual; on the error path we
+        # JUMP forward past the body and the LOCK_RELEASE emitted by the
+        # ScopeBlock cleanup, then patch the JUMP at end-of-WITH via
+        # @with_fallible_escapes. ScopeBlock saves/restores the patch list
+        # so nested WITHs don't interfere.
+        @with_fallible_escapes ||= []
+        fallible_clauses.each do |fc|
+          emit_fallible_lock_dispatch(fc, lock_timeout_ms)
+        end
         # Source slot extraction: BG capture-rewrites identifiers to
         # `__ctx_N.NAME` so the body accesses the context-struct field;
         # the bc_emitter strips that prefix in compile_ident, so the
@@ -1095,13 +1154,30 @@ class BcEmitter
         # tail is the part after. The `__acq_N_X: { if (...)` prefix
         # appears for fallible (`acquireOrErr`) acquires used by ON
         # clauses; skip past it before matching.
-        mir_node.code.to_s.scan(/var\s+__\w+_guard_\d+\s*=\s*(?:__acq_\d+_\w+:\s*\{\s*if\s*\()?(?:__ctx_\d+\.)?(\w+)(?:\.[\w\.\*]+)?\.(?:acquire|write|read|acquireOrErr|writeOrErr|readOrErr)\(\)/).each do |src_match|
-          src_slot = src_match[0]
+        mir_node.code.to_s.scan(/var\s+__\w+_guard_\d+\s*=\s*(?:__acq_\d+_\w+:\s*\{\s*if\s*\()?(?:__ctx_\d+\.)?(\w+)(?:\.([\w]+))?(?:\.[\w\.\*]+)?\.(?:acquire|write|read|acquireOrErr|writeOrErr|readOrErr)\(\)/).each do |src_match|
+          src_slot, sub_field = src_match
+          # `ctx.<name>` (CONCURRENT worker capture): the auto-lock guard
+          # source is `ctx.<name>.ctrl.data.*` rather than `<name>` --
+          # `ctx` is the worker's context-struct cast Let, not a real
+          # @shared:locked binding. The actual capture is the next
+          # segment, which the BC build_bounded_concurrent_callback
+          # pre-decodes into a same-named slot. Rewrite src_slot to the
+          # capture name so LOCK_ACQUIRE lands on the right slot.
+          src_slot = sub_field if src_slot == "ctx" && sub_field && has_slot?(sub_field)
           next unless has_slot?(src_slot)
-          # Skip when the matched name is `ctx` -- that's a bounded
-          # concurrent worker's ctx struct, not a user @shared:locked.
+          # Even after the `ctx.<name>` rewrite, `ctx` alone (without a
+          # following capture-named segment) is still the worker's
+          # context value, not a user @shared:locked -- skip it.
           next if src_slot == "ctx"
+          # Skip captures that have a fallible_clauses entry — those are
+          # emitted below with explicit error dispatch, not a bare acquire.
+          next if fallible_var_names.include?(src_slot)
           emit_op(LOCK_ACQUIRE, @slots[src_slot], lock_timeout_ms)
+          # LOCK_ACQUIRE always pushes (TrueVal on success / Value.Error on
+          # timeout). For non-fallible captures we always succeed in
+          # practice (the runtime panics for never-released locks), so
+          # discard the marker to keep the value stack balanced.
+          emit_op(POP)
           @with_lock_releases << src_slot
         end
         # First pattern: Arc unwrap via .ctrl.data.*
@@ -1165,6 +1241,18 @@ class BcEmitter
       # + BG_SPAWN). At stmt position we just evaluate and discard.
       compile_expr(mir_node); t = pop_type
       emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      push_type(:void)
+    when MIR::StreamYield
+      # Producer-side rendezvous push for ~T[INF] BG STREAM. The channel
+      # lives in @current_sg_chan (slot 0 of the producer fiber, set up
+      # by MIR::StreamSpawn's body prologue). STREAM_YIELD pops the
+      # value from the vstack and blocks until the consumer's NEXT has
+      # cleared the slot, or the channel is closed (in which case the
+      # producer is signaled to terminate via a global flag the runtime
+      # interprets at the end of the fiber's exec! loop).
+      raise "MIR::StreamYield outside producer fiber" unless @current_sg_chan
+      compile_expr_to_value(mir_node.value); pop_type
+      emit_op(STREAM_YIELD, @slots[@current_sg_chan])
       push_type(:void)
     when MIR::DoBlock
       # The Zig backend hands each DO branch to fp.run_concurrent for
@@ -1370,6 +1458,30 @@ class BcEmitter
       collection_pin = effective_type == :map || effective_type == :set
       effective_type = pre_box_type if pre_box_type && !collection_pin
     end
+    # Worker pre-decoded capture: `Let(name, FieldGet(ctx, name))` where
+    # the ctx struct's MIR::FieldDef stamped `boxed_capture` (set by
+    # pipeline_host's build_bounded_concurrent_callback for outer bindings
+    # whose source symbol carried sync :locked / :write_locked or storage
+    # :local). The field stores the same Value.Boxed cell-id as the outer
+    # binding; the worker's local slot must be tagged @boxed_slots so
+    # reads auto-deref via BOX_LOAD and writes route through BOX_STORE
+    # back to the shared cell. Without this stamp, `WITH EXCLUSIVE total
+    # AS t { t.value = ... }` writes to the worker's local copy of the
+    # struct snapshot and never propagates to the outer total binding.
+    if @current_worker_ctx_struct && node.init.is_a?(MIR::FieldGet) &&
+       node.init.object.is_a?(MIR::Ident) && node.init.object.name.to_s == "ctx"
+      fname = node.init.field.to_s
+      boxed_hint = @boxed_capture_fields&.dig(@current_worker_ctx_struct, fname)
+      if boxed_hint
+        @boxed_slots << name
+        # Inner struct hint: pin slot type to `:struct_<Name>` so field
+        # accesses (`t.value`) resolve via the correct schema.
+        if boxed_hint.is_a?(String)
+          collection_pin = effective_type == :map || effective_type == :set
+          effective_type = :"struct_#{boxed_hint}" unless collection_pin
+        end
+      end
+    end
     # @split_stream_slots tracks slots holding Value.SplitStream handles.
     # NEXT on these slots emits SPLIT_STREAM_NEXT (cursor advance with
     # writeback) instead of LIST_POP_FRONT.
@@ -1397,6 +1509,15 @@ class BcEmitter
     # NEXT through LIST_POP_FRONT instead of AWAIT.
     if node.init.is_a?(MIR::RangeLit)
       @stream_slots << name
+    end
+    # ~T[INF] BG STREAM: init is MIR::StreamSpawn, slot holds a
+    # Value.Channel handle. Tag the slot so NEXT routes to STREAM_NEXT
+    # (rendezvous pull) and the enclosing fn epilogue emits STREAM_CLOSE
+    # so the producer fiber can exit when the consumer drops the channel.
+    @channel_slots ||= Set.new
+    if node.init.is_a?(MIR::StreamSpawn)
+      @channel_slots << name
+      (@scope_channel_slots ||= []).push(name) if @scope_channel_slots
     end
     alloc_slot(name, effective_type)
     # Pass val_type (where the value actually lives), not effective_type
@@ -1467,6 +1588,14 @@ class BcEmitter
     return :map if raw.start_with?("StringMap") || raw.start_with?("NumericMap")
     return :map if raw.include?("ShardedStringMap") || raw.include?("StripedNumericMap")
     return :set if raw == "Set" || raw.start_with?("Set<") || raw.start_with?("HashSet")
+    # Struct param: stamp `:struct_<Name>` so compile_field_get can resolve
+    # `param.field` to the right field index. Without this, `param.len`
+    # short-circuits to a `count` native call (treating the struct as a
+    # list), and `param.items` collapses to identity. Strip generic args
+    # (`SliceIter<Int64>` → `SliceIter`) so the lookup matches the struct
+    # schema registered without generics.
+    base = raw.sub(/<.*\z/, "").sub(/\A[~%@^!]+/, "")
+    return :"struct_#{base}" if !base.empty? && @struct_fields&.key?(base)
     :any
   end
 
@@ -2026,6 +2155,12 @@ class BcEmitter
     # slots are unaffected; only bounded streams actually need it.
     iter_is_stream_slot = node.iter.is_a?(MIR::Ident) &&
                           @stream_slots&.include?(node.iter.name.to_s)
+    # Channel iteration: ~T[INF] producer-fiber stream. `count` and
+    # `list-ref` don't work on Value.Channel, so iterate via STREAM_NEXT
+    # and break when the producer's terminator (Value.Nil from a closed
+    # channel) shows up. The capture slot holds the rendezvous'd value.
+    iter_is_channel = node.iter.is_a?(MIR::Ident) &&
+                      @channel_slots&.include?(node.iter.name.to_s)
 
     # coll = iter; idx = 0
     compile_expr_to_value(node.iter); pop_type
@@ -2036,22 +2171,37 @@ class BcEmitter
     emit_op(POP)
 
     loop_start = @ops.length
-    # if idx >= len(coll): jump exit
-    emit_op(LOAD_SLOT, @slots[idx_name])
-    emit_op(LOAD_SLOT, @slots[coll_name])
-    emit_op(NATIVE_CALL, NATIVES["count"], 1)
-    emit_op(LT)
-    emit_op(JUMP_IF_FALSE)
-    jump_exit = @ops.length; emit_op(0)
+    if iter_is_channel
+      # Pull next item via STREAM_NEXT (rendezvous with producer fiber).
+      # Producer pushes Nil when the channel is closed (consumer-side
+      # cleanup or exec! shutdown); use that as the loop terminator.
+      chan_slot = @slots[node.iter.name.to_s]
+      emit_op(STREAM_NEXT, chan_slot)
+      emit_op(STORE_SLOT, @slots[capture]); emit_op(POP)
+      # Push `capture != nil` so JUMP_IF_FALSE exits when capture IS nil.
+      emit_op(LOAD_SLOT, @slots[capture])
+      emit_op(LOAD_CONST, add_const(nil))
+      emit_op(EQ); emit_op(NOT)
+      emit_op(JUMP_IF_FALSE)
+      jump_exit = @ops.length; emit_op(0)
+    else
+      # if idx >= len(coll): jump exit
+      emit_op(LOAD_SLOT, @slots[idx_name])
+      emit_op(LOAD_SLOT, @slots[coll_name])
+      emit_op(NATIVE_CALL, NATIVES["count"], 1)
+      emit_op(LT)
+      emit_op(JUMP_IF_FALSE)
+      jump_exit = @ops.length; emit_op(0)
 
-    # capture = coll[idx] (auto-await for stream slots; AWAIT is identity
-    # on non-Pair, so safe for non-future stream items too)
-    emit_op(LOAD_SLOT, @slots[coll_name])
-    emit_op(LOAD_SLOT, @slots[idx_name])
-    emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
-    emit_op(AWAIT) if iter_is_stream_slot
-    emit_op(STORE_SLOT, @slots[capture])
-    emit_op(POP)
+      # capture = coll[idx] (auto-await for stream slots; AWAIT is identity
+      # on non-Pair, so safe for non-future stream items too)
+      emit_op(LOAD_SLOT, @slots[coll_name])
+      emit_op(LOAD_SLOT, @slots[idx_name])
+      emit_op(NATIVE_CALL, NATIVES["list-ref"], 2)
+      emit_op(AWAIT) if iter_is_stream_slot
+      emit_op(STORE_SLOT, @slots[capture])
+      emit_op(POP)
+    end
     # optional index capture
     if node.index_capture
       idx_cap = node.index_capture.to_s.sub(/\A\*/, "")
@@ -2695,6 +2845,87 @@ class BcEmitter
       emit_op(BG_SPAWN, entry_ip, captures.length)
       push_type(:any)
       return
+    when MIR::StreamSpawn
+      # Producer-fiber + rendezvous channel for ~T[INF] BG STREAM. Same
+      # body-emission shape as MIR::BgBlock, with two differences: (1)
+      # the channel handle is prepended as the first capture (slot 0
+      # inside the producer), and (2) the call site emits STREAM_SPAWN
+      # so the runtime allocates the channel + spawns the fiber
+      # atomically. The producer body's MIR::StreamYield handlers read
+      # the channel from slot 0 ("__sg_chan").
+      captures = (node.captures || {}).keys.map(&:to_s)
+      emit_op(JUMP)
+      skip_patch = @ops.length; emit_op(0)
+      entry_ip = @ops.length
+
+      saved_slots    = @slots
+      saved_islots   = @islots
+      saved_fslots   = @fslots
+      saved_types    = @slot_types
+      saved_mutables = @mutables
+      saved_next     = @next_slot
+      saved_nexti    = @next_islot
+      saved_nextf    = @next_fslot
+      saved_stack    = @type_stack
+      saved_chans    = @channel_slots
+      saved_sg_chan  = @current_sg_chan
+      @slots = {}; @islots = {}; @fslots = {}
+      @slot_types = {}; @mutables = Set.new
+      @next_slot = 0; @next_islot = 0; @next_fslot = 0
+      @type_stack = []
+      @channel_slots = Set.new
+      # Slot 0 holds the channel; we record its name so MIR::StreamYield
+      # in the body can locate it without needing a separate parameter.
+      sg_chan_name = "__sg_chan"
+      @slots[sg_chan_name] = 0; @slot_types[sg_chan_name] = :any
+      @channel_slots << sg_chan_name
+      @current_sg_chan = sg_chan_name
+      captures.each_with_index do |cname, idx|
+        @slots[cname] = idx + 1
+        @slot_types[cname] = :any
+      end
+      @next_slot = captures.length + 1
+
+      semantic_mir_nodes(node.body || []).each do |stmt|
+        compile_stmt(stmt, nil); t = pop_type
+        emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      end
+      # Producer never falls off the end naturally (WHILE TRUE), but if
+      # the body terminates we close the channel + return Nil so the
+      # consumer's NEXT eventually sees the close marker.
+      emit_op(STREAM_CLOSE, @slots[sg_chan_name])
+      emit_op(LOAD_CONST, add_const(nil))
+      emit_op(FIBER_RET)
+
+      @slots = saved_slots
+      @islots = saved_islots
+      @fslots = saved_fslots
+      @slot_types = saved_types
+      @mutables = saved_mutables
+      @next_slot = saved_next
+      @next_islot = saved_nexti
+      @next_fslot = saved_nextf
+      @type_stack = saved_stack
+      @channel_slots = saved_chans
+      @current_sg_chan = saved_sg_chan
+      @ops[skip_patch] = @ops.length
+
+      captures.each do |cname|
+        if @islots.key?(cname)
+          emit_op(LOAD_ISLOT, @islots[cname])
+          emit_op(I_TO_VAL)
+        elsif @fslots.key?(cname)
+          emit_op(LOAD_FSLOT, @fslots[cname])
+          emit_op(F_TO_VAL)
+        elsif has_slot?(cname)
+          emit_op(LOAD_SLOT, @slots[cname])
+        else
+          emit_op(LOAD_NAME, add_const(cname))
+        end
+      end
+      emit_op(STREAM_SPAWN, entry_ip, captures.length)
+      push_type(:channel)
+      return
     when NilClass
       cidx = add_const(nil)
       emit_op(LOAD_CONST, cidx)
@@ -3149,7 +3380,12 @@ class BcEmitter
     # Pull next item from source slot. LIST_POP_FRONT consumes the head
     # of a Value.List (pushing tail back to slot); pushes Value.Nil when
     # the list is empty. SplitStream slots use SPLIT_STREAM_NEXT instead.
-    if @split_stream_slots&.include?(src_slot_name)
+    # Channel slots (~T[INF] producer-fiber streams) use STREAM_NEXT to
+    # rendezvous with the producer; consumer terminates the loop on
+    # Value.Nil (returned when the channel is closed and drained).
+    if @channel_slots&.include?(src_slot_name)
+      emit_op(STREAM_NEXT, @slots[src_slot_name])
+    elsif @split_stream_slots&.include?(src_slot_name)
       emit_op(SPLIT_STREAM_NEXT, @slots[src_slot_name])
     else
       emit_op(LIST_POP_FRONT, @slots[src_slot_name])
@@ -4691,6 +4927,16 @@ class BcEmitter
         # inline with captures in slots 0..N-1, so strip the prefix to
         # reach the underlying name.
         rname = $1 if rname =~ /\A__ctx_\d+\.(.*)\z/
+        # Channel slot (~T[INF] BG STREAM): rendezvous pull. STREAM_NEXT
+        # blocks until the producer fiber has placed a value (or closed
+        # the channel). Must be checked BEFORE @split_stream_slots /
+        # @stream_slots since a channel slot is conceptually a stream
+        # too but uses a different mechanism.
+        if has_slot?(rname) && @channel_slots&.include?(rname)
+          emit_op(STREAM_NEXT, @slots[rname])
+          push_type(:any)
+          return
+        end
         # Split stream: SPLIT_STREAM_NEXT advances the cursor in the
         # slot's SplitStream value (writeback) and pushes buf[cursor]
         # or Nil. Each handle's cursor is independent.
@@ -4924,7 +5170,18 @@ class BcEmitter
     else
       node.fields.map { |f| f[:value] }
     end
+    # For synthesized worker-context structs (`__BoundedConcurrentCtxN`),
+    # any field marked `boxed_capture` MUST hold the outer binding's
+    # Value.Boxed cell-id verbatim — NOT the unwrapped inner value. The
+    # default Ident-load path emits BOX_LOAD for boxed slots, which would
+    # snapshot the inner struct into the field and sever the back-channel:
+    # the worker's mutations would land on a copy, never reaching the
+    # outer binding's cell. Use raw LOAD_SLOT here so the field stores the
+    # Boxed value, and the worker's pre-decoded slot inherits it via
+    # @boxed_capture_fields → @boxed_slots dispatch.
+    boxed_field_names = @boxed_capture_fields&.dig(base) || {}
     field_values.each_with_index do |v, idx|
+      fname = schema_names[idx] || node.fields[idx]&.[](:name)&.to_s
       if v.nil?
         # No default and no provided value — emit nil sentinel so vector-ref
         # at least returns something rather than reading past the end.
@@ -4939,6 +5196,11 @@ class BcEmitter
         # AST path which already handles primitive types (Int64/Float64/
         # String/Bool/Nil).
         compile_ast_expr_to_value(v); pop_type
+      elsif fname && boxed_field_names[fname] && v.is_a?(MIR::Ident) &&
+            @boxed_slots&.include?(v.name.to_s) && @slots[v.name.to_s]
+        # Boxed-capture field: load the slot's raw Boxed cell-id without
+        # the auto-deref BOX_LOAD that compile_ident_root emits.
+        emit_op(LOAD_SLOT, @slots[v.name.to_s])
       else
         compile_expr_to_value(v); pop_type
       end
@@ -5359,6 +5621,16 @@ class BcEmitter
     saved_block_types  = @block_break_types
     @block_break_patches = []
     @block_break_types   = []
+    # Fallible-WITH lowers to `MIR::BlockExpr.new(label, [InlineZig, body...])`
+    # when the WITH carries an ON / RETRY clause. Same release/escape
+    # bookkeeping the ScopeBlock branch performs: track LOCK_RELEASE
+    # registrations so the block emits them after the body, and patch the
+    # error-path JUMP from emit_fallible_lock_dispatch to land here so
+    # the BG body's WITH doesn't fall through to ip=0 on timeout.
+    @with_lock_releases ||= []
+    @with_fallible_escapes ||= []
+    saved_releases = @with_lock_releases.length
+    saved_escapes  = @with_fallible_escapes.length
     stmts.each_with_index do |s, i|
       if i < stmts.length - 1
         if s.is_a?(MIR::BreakStmt) && s.value
@@ -5377,6 +5649,18 @@ class BcEmitter
           last_break_type = pop_type
         end
       end
+    end
+    # Release locks acquired during this BlockExpr (fallible WITH lowered
+    # to BlockExpr puts LOCK_RELEASE registrations on @with_lock_releases
+    # via emit_fallible_lock_dispatch). Mirror the ScopeBlock cleanup.
+    while @with_lock_releases.length > saved_releases
+      rel_slot_name = @with_lock_releases.pop
+      emit_op(LOCK_RELEASE, @slots[rel_slot_name]) if has_slot?(rel_slot_name)
+    end
+    # Patch fallible-acquire escapes (ON / RETRY error path JUMPs) to
+    # land here -- past LOCK_RELEASE so the error path skips body+release.
+    while @with_fallible_escapes.length > saved_escapes
+      @ops[@with_fallible_escapes.pop] = @ops.length
     end
     # Patch all nested BreakStmt jumps to land here (after the trailing
     # value already on the stack from the fallthrough path).
@@ -6163,6 +6447,76 @@ class BcEmitter
   # has no indirection, so alias-and-source share storage by copy. The
   # corresponding writeback (alias_writeback) reverses this so mutations
   # to the alias are reflected in the source after the block.
+  # Emit a fallible WITH-EXCLUSIVE acquire dispatch. Wraps LOCK_ACQUIRE
+  # in an error check: success falls through to the body; error runs the
+  # ON / RETRY logic. The JUMP that skips the body on the error path is
+  # pushed onto @with_fallible_escapes for the enclosing ScopeBlock to
+  # patch after LOCK_RELEASE. Action MIR (for `:block`) is compiled
+  # in-place via compile_stmt; `:pass` emits no body before the escape.
+  # `:raise` and `:exit` are not yet wired (would need to construct a
+  # Value.Error and BC_RET out of the enclosing fn).
+  def emit_fallible_lock_dispatch(fc, lock_timeout_ms)
+    var = fc[:var_name].to_s
+    raise "fallible-lock dispatch: no slot for #{var.inspect}" unless has_slot?(var)
+    retries = fc[:retries]
+    retry_slot = nil
+    retry_top = nil
+    if retries
+      @retry_counter ||= 0
+      retry_slot = "__lock_retry_#{@retry_counter += 1}"
+      alloc_slot(retry_slot, :i64)
+      emit_op(LOAD_CONST_I64, add_const([:i64, 0]))
+      emit_op(STORE_ISLOT, @islots[retry_slot])
+      retry_top = @ops.length
+    end
+    emit_op(LOCK_ACQUIRE, @slots[var], lock_timeout_ms)
+    emit_op(IS_ERR)
+    emit_op(JUMP_IF_FALSE)
+    ok_patch = @ops.length; emit_op(0)
+    # Error path: run retry/give-up logic.
+    if retries
+      # if (__retry + 1 < N) { __retry += 1; goto retry_top; } else give-up.
+      emit_op(LOAD_ISLOT, @islots[retry_slot])
+      emit_op(LOAD_CONST_I64, add_const([:i64, 1]))
+      emit_op(ADD_I64)
+      emit_op(LOAD_CONST_I64, add_const([:i64, retries.to_i]))
+      emit_op(LT_I64)
+      emit_op(JUMP_IF_FALSE_I)
+      give_up_patch = @ops.length; emit_op(0)
+        emit_op(LOAD_ISLOT, @islots[retry_slot])
+        emit_op(LOAD_CONST_I64, add_const([:i64, 1]))
+        emit_op(ADD_I64)
+        emit_op(STORE_ISLOT, @islots[retry_slot])
+        emit_op(JUMP, retry_top)
+      @ops[give_up_patch] = @ops.length
+    end
+    # Run the matched action (only reached after retries exhausted, or
+    # immediately when no RETRY was specified).
+    case fc[:action_kind]
+    when :block
+      semantic_mir_nodes(fc[:action_mir] || []).each do |stmt|
+        compile_stmt(stmt, nil)
+        t = pop_type
+        emit_op(POP) unless t == :void || t == :i64 || t == :f64 || t == :bool
+      end
+    when :pass
+      # No-op; fall through to the escape JUMP.
+    when :raise, :exit
+      # Not yet wired in the BC backend. Surface as a plain stack POP so
+      # we don't leave the value stack imbalanced; the test will just fail
+      # the surrounding assertion until proper RAISE/EXIT lowering lands.
+    end
+    # Escape past the body and the LOCK_RELEASE. The ScopeBlock handler
+    # patches this to land after its release loop.
+    emit_op(JUMP)
+    @with_fallible_escapes << @ops.length; emit_op(0)
+    # Success path patches here; the alias bytecode (emitted right after
+    # this dispatch) and the body run as usual, then the ScopeBlock emits
+    # LOCK_RELEASE for the slot we just registered.
+    @ops[ok_patch] = @ops.length
+    @with_lock_releases << var
+  end
+
   def alias_to_source(alias_name, src_name)
     return unless has_slot?(src_name)
     t = if @islots[src_name] then :i64

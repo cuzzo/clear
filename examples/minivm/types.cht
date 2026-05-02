@@ -37,6 +37,11 @@ UNION Value {
     -- SplitStream with the same bufId and current cursor; NEXT reads
     -- buf[cursor] and advances the handle's cursor (writeback to slot).
     SplitStream { splitBufId: Id<Env>, splitCursor: Int64 },
+    -- Rendezvous channel for ~T[INF] BG STREAM: producer fiber YIELDs
+    -- one item, consumer NEXTs. Channel cell vars: "v" holds the in-flight
+    -- value; "has" is TrueVal/FalseVal; "closed" is TrueVal/FalseVal so
+    -- the producer fiber can exit when the consumer drops the channel.
+    Channel: Id<Env>,
 }
 
 -- Pure helpers
@@ -190,7 +195,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";,
         Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";,
         Value.Boxed -> RETURN "#<box>";,
-        Value.SplitStream AS sst -> RETURN "#<split:" + sst.splitCursor.toString() + ">";
+        Value.SplitStream AS sst -> RETURN "#<split:" + sst.splitCursor.toString() + ">";,
+        Value.Channel -> RETURN "#<channel>";
     END
     RETURN "";
 END

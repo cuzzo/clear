@@ -75,6 +75,14 @@ module MIR
   # Zig: name: zig_type [= default]
   FieldDef = Struct.new(:name, :zig_type, :default) do
     include Emittable
+    # Cross-backend capture hint: when this field stores a captured
+    # @shared:locked / @local / @writeLocked binding, the BC backend
+    # needs to know so it can mark the worker's pre-decoded slot as
+    # boxed (so writes through a WITH alias route through BOX_STORE
+    # back to the captured envId). Set by pipeline_host's CONCURRENT
+    # callback builder; consumed by bc_emitter's
+    # `compile_synthesized_helper_fn_mir`.
+    attr_accessor :boxed_capture
   end
 
   # Enum type definition.
@@ -308,6 +316,27 @@ module MIR
   #   Carries the MIR so the checker can see allocations inside the fiber.
   #   Emission still uses code (raw Zig). nil for legacy callers; checker skips.
   BgBlock = Struct.new(:code, :captures, :run_body) do
+    include Stmt
+    def expr?; true; end
+  end
+
+  # BC-only: producer-fiber + rendezvous channel for ~T[INF] BG STREAM.
+  # Lowered when @target == :bc and the stream type is_inf?. The Zig
+  # backend never produces this -- it has its own coroutine-based
+  # StreamGen path. Captures: { name => Type } same shape as BgBlock so
+  # the bc_emitter can reuse the BG-fiber prologue. body: lowered MIR
+  # for the producer body (YieldExpr is already rewritten to MIR::StreamYield
+  # by lower_yield).
+  StreamSpawn = Struct.new(:captures, :body) do
+    include Stmt
+    def expr?; true; end
+  end
+
+  # BC-only: producer-side rendezvous push. Emitted by lower_yield when
+  # the enclosing BG STREAM is is_inf? and @target == :bc. The single
+  # `value` is pushed into the channel; producer fiber blocks until the
+  # consumer's STREAM_NEXT empties the slot.
+  StreamYield = Struct.new(:value) do
     include Stmt
     def expr?; true; end
   end

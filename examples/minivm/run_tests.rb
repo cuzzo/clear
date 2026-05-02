@@ -84,16 +84,6 @@ HISTORICAL_CANDIDATES = %w[
 # separately in coverage reports so the denominator reflects what's actually
 # achievable on the bytecode-VM path.
 VM_UNSUPPORTED = {
-  # Infinite generators (WHILE TRUE + YIELD): VM has no fiber scheduler,
-  # so eager BG STREAM materialization loops forever.
-  "76_inf_stream"                => :infinite_stream,
-  "218_yield_string_stream"      => :infinite_stream,
-  "234_limit_streams"            => :infinite_stream,
-  "235_stream_reduce"            => :infinite_stream,
-  "237_tap_inf_stream"           => :infinite_stream,
-  "238_distinct_streams"         => :infinite_stream,
-  "239_index_inf_stream"         => :infinite_stream,
-
   # File / socket resource tests originally listed as :resource — the
   # File::open / File::create / fileReadAll / fileWrite path now has a
   # syntax-level stub (Task #19). RAII auto-close is still not modeled.
@@ -101,19 +91,14 @@ VM_UNSUPPORTED = {
   "61_tcp_resource"              => :resource,
   "63_struct_resource_close"     => :resource,
 
-  # Other infrastructure-heavy tests:
-  "74_service_benchmark"         => :service_runtime,
-  "185_borrowed_iterator"        => :borrowed_iterator,
-
-  # Narrow numeric types (Int8/Int16/Int32/UInt8..UInt64) and Float32.
-  # The VM's Value union only has Int64Val and Number (f64); there's no
-  # storage variant for smaller widths. The MIR lowering emits @intCast
-  # and similar conversions that have no VM equivalent. Would need either
-  # new Value variants + typed arithmetic, or lowering-time gating.
-  "69_numeric_types"             => :narrow_numeric_types,
-
   # Direct FFI / extern std imports. The VM has no @import machinery.
   "224_extern_std_ffi"           => :extern_ffi,
+
+  # @service vs fiber benchmark — semantically passes (BC treats @service
+  # as a regular BG fiber and the asserts succeed) but the workload is
+  # 4 fibers x 1M wrap-arithmetic iterations x2, which exceeds the 10s
+  # per-test budget. Mark as slow rather than as an unsupported feature.
+  "74_service_benchmark"         => :slow_stress_test,
 
   # Frame-arena / loop-carry stress tests: 10000+ iterations doing
   # repeated allocations to validate the Zig backend's per-iteration

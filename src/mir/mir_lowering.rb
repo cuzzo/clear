@@ -2031,6 +2031,12 @@ class MIRLowering
   def lower_with_block(node)
     rt_name = @rt_name
     bindings = []
+    # Structured representation of any fallible-acquire clause(s) for the
+    # BC backend (Zig backend uses the InlineZig text emitted into
+    # `bindings`). Each entry: { var_name, action_kind, action_mir,
+    # exit_msg_mir, retries, matched_types, bubble_types }. Both backends
+    # see the same node; only BC consumes `:fallible_clauses`.
+    fallible_clauses = []
     clause = node.lock_error_clause
     # Only RAISE/EXIT exit via `return`; PASS and `-> { stmts }` exit by
     # breaking out of this labeled block. Emit the label only when used
@@ -2098,6 +2104,7 @@ class MIRLowering
         err_method   = var_sync == :write_locked ? "writeOrErr" : "acquireOrErr"
         if clause
           bindings << emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, node)
+          fallible_clauses << build_fallible_clause_mir(var_name, alias_name, clause)
         else
           bindings << "var #{guard_var} = #{lock_expr}.#{panic_method}();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
         end
@@ -2108,6 +2115,7 @@ class MIRLowering
         lock_expr = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
         if clause
           bindings << emit_fallible_lock_binding(lock_expr, "readOrErr", guard_var, alias_name, clause, with_label, node)
+          fallible_clauses << build_fallible_clause_mir(var_name, alias_name, clause)
         else
           bindings << "var #{guard_var} = #{lock_expr}.read();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
         end
@@ -2160,11 +2168,39 @@ class MIRLowering
     stmts = []
     unless all_bindings.empty?
       bindings_iz = MIR::InlineZig.new(all_bindings, "with_block_bindings")
-      bindings_iz.stdlib_def = { allocates: false, borrows: borrows }
+      sd = { allocates: false, borrows: borrows }
+      sd[:fallible_clauses] = fallible_clauses unless fallible_clauses.empty?
+      bindings_iz.stdlib_def = sd
       stmts << bindings_iz
     end
     stmts.concat(body_stmts)
     with_label ? MIR::BlockExpr.new(with_label, stmts) : MIR::ScopeBlock.new(stmts)
+  end
+
+  # Structured representation of a fallible-acquire clause for the BC
+  # backend. The Zig backend renders the clause inline as Zig text via
+  # `emit_fallible_lock_binding`; the BC backend can't parse the Zig
+  # block, so it consumes this descriptor instead. `action_mir` is the
+  # already-lowered MIR body (only for `:block`); `exit_msg_mir` is the
+  # lowered message expression (only for `:exit`). `matched_types` and
+  # `bubble_types` are the annotator-resolved selector lists; `retries`
+  # is the RETRY(N) count or nil.
+  def build_fallible_clause_mir(var_name, alias_name, clause)
+    desc = {
+      var_name:      var_name.to_s,
+      alias_name:    alias_name.to_s,
+      action_kind:   clause[:action],
+      retries:       clause[:retries],
+      matched_types: clause[:matched_types] || [],
+      bubble_types:  clause[:bubble_types] || [],
+    }
+    case clause[:action]
+    when :block
+      desc[:action_mir] = lower_body(clause[:body])
+    when :exit
+      desc[:exit_msg_mir] = lower(clause[:message])
+    end
+    desc
   end
 
   # Emit the acquire-or-catch binding for a fallible lock under a
@@ -2658,12 +2694,10 @@ class MIRLowering
     # an eager List materialization. Run the body inline; YIELD becomes
     # `__sg<id>_local.push(x)` which we rewrite to list-append in the
     # bc_emitter, and NEXT pops the head of the list. This works for all
-    # finite streams (the only kind a synchronous VM can support). For
-    # ~T[INF] BG STREAM bodies that self-close (e.g. just YIELD a few
-    # values, or `WHILE i <= 8 DO YIELD i; ...`), the eager path also
-    # works -- the body runs to completion and produces the materialized
-    # list. Truly infinite generators are still unsupportable, but most
-    # test workloads use finite self-closing generators.
+    # finite streams. For ~T[INF] (`WHILE TRUE`-driven generators) the
+    # eager path would loop forever, so we emit a producer-fiber +
+    # rendezvous-channel form (MIR::StreamSpawn / MIR::StreamYield)
+    # that the bc_emitter compiles to STREAM_SPAWN + STREAM_YIELD opcodes.
     if @target == :bc
       prev_stream_local = @current_stream_local
       prev_stream_is_inf = @current_stream_is_inf
@@ -2672,6 +2706,16 @@ class MIRLowering
       run_body = node.body.map { |expr| lower(expr) }
       @current_stream_local = prev_stream_local
       @current_stream_is_inf = prev_stream_is_inf
+
+      if is_inf
+        # Real producer fiber. The captures handed to FiberCtxBuilder
+        # become the fiber's captures; bc_emitter prepends the channel
+        # handle as arg 0 inside STREAM_SPAWN and inside the producer
+        # frame the channel binds to a synthetic slot consumed by
+        # MIR::StreamYield via lower_yield.
+        captures_map = node.capture_analysis&.captures || {}
+        return MIR::StreamSpawn.new(captures_map, run_body)
+      end
 
       block = MIR::BlockExpr.new(blk_label, [
         MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, "anytype", nil),
@@ -2765,6 +2809,13 @@ class MIRLowering
   def lower_yield(node)
     stream_local = @current_stream_local || "__stream_local"
     lowered = lower(node.expr)
+    # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
+    # to the rendezvous-channel STREAM_YIELD opcode. The Zig backend
+    # never reaches this branch (it sets @current_stream_is_inf only for
+    # the materializing path; @target check guards against confusion).
+    if @target == :bc && @current_stream_is_inf
+      return MIR::StreamYield.new(lowered)
+    end
     if node.yield_dupe
       # Frame string: dupe to stream allocator before push so the value outlives
       # the fiber's frame rewind (or loop mark rewind between yields).

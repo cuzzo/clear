@@ -2566,6 +2566,18 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     -- Each exec! call has its own table -- spawned fibers can recurse
     -- into exec! and each call has its own bookkeeping.
     MUTABLE futureTable: ~Value[]@list = List[];
+    -- Channel envIds + future indices for producer-fiber streams
+    -- (~T[INF] BG STREAM). STREAM_SPAWN populates; the exec! shutdown
+    -- loop closes each channel + drains the matching future so the
+    -- producer fiber sees closed=true on its next yield, terminates,
+    -- and joins cleanly before pool goes out of scope (otherwise the
+    -- fiber wakes up to a freed pool and segfaults). HashMap-keyed
+    -- stash so the storage survives the WHILE loop's frame-mark
+    -- rewinds (a parallel `Int64[]@list` was getting its first slot
+    -- clobbered after the first grow).
+    MUTABLE streamChanByIdx: HashMap<Value> = {};
+    MUTABLE streamFidByIdx: HashMap<Value> = {};
+    MUTABLE streamCount: Int64 = 0_i64;
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
@@ -3687,9 +3699,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- lock on slots[slot_idx]. The slot holds a Value.Boxed
                    -- (envId); the lock state lives in pool[envId].vars["__locked"].
                    -- Spin via cooperative sleep(1) until the field is Nil,
-                   -- then set TrueVal. On timeout, push Value.Error with
-                   -- kind=Transient, errType=LockTimeout (the user's
-                   -- ON LockTimeout clause maps via IS_ERR + kind checks).
+                   -- then set TrueVal. ALWAYS pushes a result so the caller
+                   -- can dispatch deterministically: Value.TrueVal on success,
+                   -- Value.Error{errType=LockTimeout} on timeout. The bc_emitter
+                   -- checks IS_ERR to decide the success/error path.
                 lockSlot = ops[ip]; ip += 1;
                 lockTimeoutMs = ops[ip]; ip += 1;
                 lockBoxVal = COPY slots[lockSlot];
@@ -3698,6 +3711,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     Value.Boxed AS bid -> lockEnvIdHolder = bid;,
                     DEFAULT -> PASS;
                 END
+                MUTABLE lockResult: Value = Value.TrueVal;
                 IF lockEnvIdHolder AS lockEid THEN
                     MUTABLE acquired = FALSE;
                     MUTABLE timedOut = FALSE;
@@ -3731,15 +3745,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         END
                     END
                     IF timedOut THEN
-                        pv = Value.Error{
+                        lockResult = Value.Error{
                             errMsg: "lock acquire timeout",
                             errKind: "Transient",
                             errType: "LockTimeout"
                         };
-                        IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                        sp += 1;
                     END
-                END,
+                END
+                IF sp >= stack.length() THEN stack.append(lockResult); ELSE stack[sp] = lockResult; END
+                sp += 1;,
             117 -> -- LOCK_RELEASE [slot_idx]: clear the per-resource lock
                    -- on the Box held in slots[slot_idx]. Idempotent when
                    -- the slot isn't a Box (e.g., acquire-failed paths).
@@ -3759,9 +3773,216 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- yield point that lets other BG fibers progress.
                 isp -= 1; sleepMs = istack[isp];
                 sleep(sleepMs);,
+            119 -> -- STREAM_SPAWN [entry_ip] [argc]: allocate a rendezvous
+                   -- channel, spawn a producer fiber that runs exec! from
+                   -- entry_ip with the channel as arg 0 followed by `argc`
+                   -- captures pulled from the value stack. Push
+                   -- Value.Channel{envId} onto the value stack.
+                   --
+                   -- The channel cell is initialized has=Nil, closed=Nil.
+                   -- Producer YIELD spins until has=Nil, then sets
+                   -- v=val, has=TrueVal. Consumer NEXT spins until
+                   -- has=TrueVal (or closed=TrueVal), takes v, sets
+                   -- has=Nil. Both block via cooperative sleep(1).
+                strmEntry = ops[ip]; ip += 1;
+                strmArgc  = ops[ip]; ip += 1;
+                MUTABLE strmEnv: Env = Env{ vars: {} };
+                strmEnv.vars["has"]    = Value.Nil;
+                strmEnv.vars["closed"] = Value.Nil;
+                MUTABLE strmEnvIdHolder: ?Id<Env> = NIL;
+                WITH EXCLUSIVE pool AS strmP { strmEnvIdHolder = strmP.insert(strmEnv); }
+                IF strmEnvIdHolder AS strmEid THEN
+                    strmChan = Value{ Channel: strmEid };
+                    -- Build captures: [channel, ...argc captures from stack].
+                    MUTABLE strmCaps: Value[]@list = List[];
+                    strmCaps.append(COPY strmChan);
+                    FOR strmI IN (0_i64 ..< strmArgc) DO
+                        strmCaps.append(COPY stack[sp - strmArgc + strmI]);
+                    END
+                    sp -= strmArgc;
+                    strmFut: ~Value = BG {
+                        exec!(COPY ops, COPY consts, curEnv, pool, strmEntry, GIVE strmCaps);
+                    };
+                    -- Stash the future so it isn't dropped (fiber keeps
+                    -- running until it self-terminates on STREAM_CLOSE).
+                    sFid = futureTable.length();
+                    futureTable.append(strmFut);
+                    streamKey = streamCount.toString();
+                    streamChanByIdx[streamKey] = COPY strmChan;
+                    streamFidByIdx[streamKey] = Value{ Int64Val: sFid };
+                    streamCount = streamCount + 1_i64;
+                    pv = strmChan;
+                ELSE
+                    pv = Value.Nil;
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            120 -> -- STREAM_YIELD [chan_slot]: pop value from vstack, write
+                   -- to channel.v, set channel.has=TrueVal. Spin (sleep(1))
+                   -- until channel.has=Nil so the consumer has consumed
+                   -- the previous value. If channel.closed=TrueVal, drop
+                   -- the value and exit the producer fiber via FIBER_RET.
+                yldChanSlot = ops[ip]; ip += 1;
+                sp -= 1; yldVal = COPY stack[sp];
+                yldChanRef = COPY slots[yldChanSlot];
+                MUTABLE yldEnvIdHolder: ?Id<Env> = NIL;
+                PARTIAL MATCH yldChanRef START
+                    Value.Channel AS yldEid -> yldEnvIdHolder = yldEid;,
+                    DEFAULT -> PASS;
+                END
+                IF yldEnvIdHolder AS yldEid THEN
+                    MUTABLE yldDone = FALSE;
+                    MUTABLE yldClosed = FALSE;
+                    WHILE !yldDone DO
+                        WITH EXCLUSIVE pool AS yldP {
+                            IF yldP[yldEid] AS yldEnv THEN
+                                MUTABLE yldHasFlag = FALSE;
+                                MUTABLE yldClosedFlag = FALSE;
+                                IF yldEnv.vars["has"] AS yldHasV THEN
+                                    PARTIAL MATCH yldHasV START
+                                        Value.TrueVal -> yldHasFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF yldEnv.vars["closed"] AS yldClV THEN
+                                    PARTIAL MATCH yldClV START
+                                        Value.TrueVal -> yldClosedFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF yldClosedFlag THEN
+                                    yldClosed = TRUE;
+                                    yldDone = TRUE;
+                                ELSE_IF !yldHasFlag THEN
+                                    yldEnv.vars["v"]   = COPY yldVal;
+                                    yldEnv.vars["has"] = Value.TrueVal;
+                                    yldDone = TRUE;
+                                END
+                            ELSE
+                                yldDone = TRUE;
+                                yldClosed = TRUE;
+                            END
+                        }
+                        IF !yldDone THEN
+                            yldSleepArg: Int64 = 1_i64;
+                            sleep(yldSleepArg);
+                        END
+                    END
+                    IF yldClosed THEN
+                        -- Consumer dropped the channel; terminate the
+                        -- producer fiber. The eventual FIBER_RET below
+                        -- exits the exec! loop cleanly.
+                        running = FALSE;
+                        fiberReturned = TRUE;
+                        fiberRetVal = Value.Nil;
+                    END
+                END,
+            121 -> -- STREAM_NEXT [chan_slot]: spin until channel.has=TrueVal
+                   -- (or channel.closed=TrueVal). Take v, set has=Nil, push v.
+                   -- On closed && !has, push Nil to signal the consumer
+                   -- the stream is exhausted (rare in practice; consumers
+                   -- bound the read with LIMIT/REDUCE/etc.).
+                nxtChanSlot = ops[ip]; ip += 1;
+                nxtChanRef = COPY slots[nxtChanSlot];
+                MUTABLE nxtEnvIdHolder: ?Id<Env> = NIL;
+                PARTIAL MATCH nxtChanRef START
+                    Value.Channel AS nxtEid -> nxtEnvIdHolder = nxtEid;,
+                    DEFAULT -> PASS;
+                END
+                pv = Value.Nil;
+                IF nxtEnvIdHolder AS nxtEid THEN
+                    MUTABLE nxtDone = FALSE;
+                    WHILE !nxtDone DO
+                        WITH EXCLUSIVE pool AS nxtP {
+                            IF nxtP[nxtEid] AS nxtEnv THEN
+                                MUTABLE nxtHasFlag = FALSE;
+                                MUTABLE nxtClosedFlag = FALSE;
+                                IF nxtEnv.vars["has"] AS nxtHasV THEN
+                                    PARTIAL MATCH nxtHasV START
+                                        Value.TrueVal -> nxtHasFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF nxtEnv.vars["closed"] AS nxtClV THEN
+                                    PARTIAL MATCH nxtClV START
+                                        Value.TrueVal -> nxtClosedFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF nxtHasFlag THEN
+                                    IF nxtEnv.vars["v"] AS nxtStored THEN
+                                        pv = COPY nxtStored;
+                                    END
+                                    nxtEnv.vars["has"] = Value.Nil;
+                                    nxtDone = TRUE;
+                                ELSE_IF nxtClosedFlag THEN
+                                    nxtDone = TRUE;
+                                END
+                            ELSE
+                                nxtDone = TRUE;
+                            END
+                        }
+                        IF !nxtDone THEN
+                            nxtSleepArg: Int64 = 1_i64;
+                            sleep(nxtSleepArg);
+                        END
+                    END
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            122 -> -- STREAM_CLOSE [chan_slot]: set channel.closed=TrueVal.
+                   -- Wakes any waiting STREAM_YIELD (producer self-terminates)
+                   -- or STREAM_NEXT (consumer gets Nil). Idempotent.
+                clsChanSlot = ops[ip]; ip += 1;
+                clsChanRef = COPY slots[clsChanSlot];
+                PARTIAL MATCH clsChanRef START
+                    Value.Channel AS clsEid ->
+                        WITH EXCLUSIVE pool AS clsP {
+                            IF clsP[clsEid] AS clsEnv THEN
+                                clsEnv.vars["closed"] = Value.TrueVal;
+                            END
+                        },
+                    DEFAULT -> PASS;
+                END,
             DEFAULT ->
                 running = FALSE;
         END
+    END
+
+    -- Drain producer-fiber streams. STREAM_CLOSE on each channel wakes
+    -- the producer's blocked YIELD (it sees closed=TrueVal and exits).
+    -- Then NEXT each future to join the fiber so the BG runtime can
+    -- reclaim its stack BEFORE pool goes out of scope. Without this,
+    -- the producer fiber wakes after main has returned and crashes
+    -- trying to acquire the (now-freed) pool mutex.
+    --
+    -- HashMap-keyed drain.
+    MUTABLE smI: Int64 = 0_i64;
+    WHILE smI < streamCount DO
+        smKey = smI.toString();
+        IF streamChanByIdx[smKey] AS smChan THEN
+            PARTIAL MATCH smChan START
+                Value.Channel AS smEid ->
+                    WITH EXCLUSIVE pool AS smP {
+                        IF smP[smEid] AS smEnv THEN
+                            smEnv.vars["closed"] = Value.TrueVal;
+                        END
+                    },
+                DEFAULT -> PASS;
+            END
+        END
+        smI = smI + 1_i64;
+    END
+    smI = 0_i64;
+    WHILE smI < streamCount DO
+        smKey = smI.toString();
+        IF streamFidByIdx[smKey] AS smFidV THEN
+            smFid = getInt(smFidV);
+            IF smFid >= 0_i64 && smFid < futureTable.length() THEN
+                smDrained = NEXT futureTable[smFid];
+            END
+        END
+        smI = smI + 1_i64;
     END
 
     -- FIBER_RET landed: return the explicit fiber value.
