@@ -249,5 +249,5 @@ How?
      - In other languages, Stateless Model Checking is a separate, difficult tool you have to opt into. In CLEAR, it's just how `./clear test` *will* work.
   3. For `./clear doctor` to be able to walk you ~95% of the way from that to HFT-Standards of C speed, and ADA-level safety.
   4. For code, even at the highest-level of optimization, to be easily understandable.
-  5. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible workloads, it can glide through it gracefully.
+  5. A Control Plane so reliable that even if your most heavily optimized application experiences wildly unpredictible and adversarial workloads, it can glide through it gracefully.
   6. To be able to distribute loads across multiple machines effortlessly like BEAM, but with native speeds.
