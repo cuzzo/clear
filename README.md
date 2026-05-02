@@ -79,6 +79,7 @@ In CLEAR, you can handle all synchronization methods with a single function:
 ```ruby clear illustrative
 FN transact(x: Account@shared, y: Account@shared, amount: Float64) RETURNS !Bool ->
   IF amount <= 0 -> RAISE Input, TransactionFailure, "Invalid Amount, must be positive";
+
   WITH
     POLYMORPHIC x AS a,
     POLYMORPHIC y AS b {
