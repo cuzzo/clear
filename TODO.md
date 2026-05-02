@@ -28,7 +28,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Observable aggregations for streaming pipelines (@shared aggregate results)
  - [x] Enable MVCC in the language as a syncronization capability (in progress - already exists in the runtime)
  - [x] Atomics
- - [ ] True Synchronization Polymorphism
+ - [x] True Synchronization Polymorphism
 
  ## v0.2 (Target = July 15)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
