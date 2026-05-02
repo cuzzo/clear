@@ -87,7 +87,7 @@ FN transact(a: Account@shared, b: Account@shared, amount: Float64) RETURNS !Bool
 
       acctA.balance -= amount;
       acctB.balance += amount;
-  }
+    }
   RETURN True;
 END
 ```
