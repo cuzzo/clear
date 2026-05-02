@@ -507,8 +507,11 @@ pub const Scheduler = struct {
                 func(ctx);
                 if (completion) |completion_ptr| {
                     const typed: *RemoteCompletion = @ptrCast(@alignCast(completion_ptr));
-                    typed.wg.done();
+                    // Order matters: write `finished` BEFORE `wg.done()`. Once
+                    // done() returns, the waiter may already have been woken
+                    // and freed *typed — touching it would be UAF.
                     typed.finished.store(true, .release);
+                    typed.wg.done();
                 }
             }
         }
@@ -594,8 +597,11 @@ pub const Scheduler = struct {
                         self.draining = false;
                         if (completion) |completion_ptr| {
                             const typed: *RemoteCompletion = @ptrCast(@alignCast(completion_ptr));
-                            typed.wg.done();
+                            // Order matters: write `finished` BEFORE `wg.done()`.
+                            // Once done() returns, the waiter may have been woken
+                            // and freed *typed — touching it would be UAF.
                             typed.finished.store(true, .release);
+                            typed.wg.done();
                         }
                     },
                 }
@@ -1329,61 +1335,68 @@ pub const WaitGroup = struct {
     }
 
     pub fn done(self: *WaitGroup) void {
-        // Atomic Decrement
-        const prev = self.counter.fetchSub(1, .seq_cst);
-
-        // If we just dropped to 0 (prev was 1), we must wake the waiter.
-        if (prev == 1) {
-            self.wakeWaiter();
-        }
-    }
-
-    fn wakeWaiter(self: *WaitGroup) void {
-        // Spinlock to grab the waiter
+        // Take the lock BEFORE the decrement so wait() cannot observe
+        // counter==0 and free the WaitGroup while we're still inside this
+        // function (UAF on *self). With the lock held, any wait() call must
+        // either complete its check before us (saw counter>0, parked, will be
+        // woken below) or after us (sees counter==0 only after we release
+        // the lock; by that point all our writes to *self are done).
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
 
+        const prev = self.counter.fetchSub(1, .seq_cst);
+        if (prev != 1) {
+            self.lock.store(0, .release);
+            return;
+        }
+
+        // counter just dropped to 0 — wake the waiter (if parked).
         const task = self.waiting_task;
         const sched = self.sched;
-        // Clear state BEFORE scheduling — once the waiter is scheduled, it may
-        // immediately wake, consume the result, and free the WaitGroup (Promise Inner).
-        // Accessing self after schedule() would be use-after-free.
         self.waiting_task = null;
         self.lock.store(0, .release);
 
         if (task) |t| {
+            // schedule() may cause the waiter to run, return from wait(),
+            // and free *self. Do NOT touch self after this point.
             sched.schedule(t);
         }
     }
 
     // Blocking Wait (Yields Fiber)
     pub fn wait(self: *WaitGroup) void {
-        if (self.counter.load(.seq_cst) == 0) return;
         if (self.sched.current_task == null) {
-            while (self.counter.load(.seq_cst) != 0) {
+            // Non-fiber caller (test code): busy-wait. Acquire the lock for
+            // the final check so we synchronize-with done()'s release; this
+            // makes it safe to free *self after we return.
+            while (true) {
+                while (self.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                if (self.counter.load(.seq_cst) == 0) {
+                    self.lock.store(0, .release);
+                    return;
+                }
+                self.lock.store(0, .release);
                 std.Thread.yield() catch {};
             }
-            return;
         }
 
         const task = self.sched.getCurrent();
 
         while (true) {
-            if (self.counter.load(.seq_cst) == 0) return;
-
-            task.status.store(.Blocked, .release);
-
+            // Always take the lock to check counter — synchronizes with done().
+            // Without this, the lockless fast-path lets us return + destroy
+            // *self while done() is still inside its critical section.
             while (self.lock.swap(1, .acquire) == 1) {
                 std.Thread.yield() catch {};
             }
 
             if (self.counter.load(.seq_cst) == 0) {
                 self.lock.store(0, .release);
-                task.status.store(.Ready, .release);
                 return;
             }
 
+            task.status.store(.Blocked, .release);
             self.waiting_task = task;
             self.lock.store(0, .release);
 
