@@ -37,7 +37,7 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [ ] Built-in support for fiber RACEs
  - [ ] STRICT mode compilation
  - [ ] VM supporting the vast majority of the language, near Python/Ruby non-JIT speed
- - [ ] VM can automatically generate and run LOOM tests for concurrent code
+ - [ ] VM can automatically generate and run LOOM / VOPR tests for concurrent code
  - [ ] An RSpec like testing framework as the first standard library module
  - [ ] A statistical benchmarking & profiling framework like Go/Rust
  - [ ] `./clear fix` fixes *most* errors that *can* be fixed.
