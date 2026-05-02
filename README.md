@@ -211,6 +211,7 @@ See [benchmarks/README.md](benchmarks/README.md).
  * **Mutex Overhead:** Under heavy contention with short critical sections, CLEAR's Mutex can be up to 4x slower than standard implementations.
  * **Future Fixes (v0.3):** This performance gap should be narrowed by v0.3, though Mutexes with deadlock prevention will likely always carry performance overhead.
  * **Design Philosophy:** CLEAR’s main goal is to provide you with a robust set of alternative tools so that standard Mutex locks are *almost* never the best choice.
+ * **Fininte State Machines:** are relatively newly supported to the langauge and have a number of known optimizations left to make more performant. For very short-lived tasks, due to the difference in how they are allocated, FSMs can perform worse. This *will* be addressed by v0.2.
 
 ## ⚠️ DISCLAIMER ⚠️
 
