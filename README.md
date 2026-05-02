@@ -105,7 +105,7 @@ In this example, AtomicPtrs (@shared:atomic) do not support multi-object consist
 
 Because CLEAR's concurrency is declarative, the compiler has total visibility into the lifecycle of your tasks. In Go, every Goroutine requires allocating a continuous stack (2KB+, often 8KB+ for web requests), which means 1 million idle connections consumes gigabytes of RAM.
 
-In CLEAR, the compiler lowers the vast majority of concurrent tasks into Finite State Machines rather than stack-allocated fibers. Some functions that use FFI or are re-entrant may prefer to use stacks explicitly, though *CAN* be lowered to FSMs.
+In CLEAR, the compiler lowers the vast majority of concurrent tasks into Finite State Machines (FSMs) rather than stack-allocated fibers. Some functions that use FFI or are re-entrant may prefer to use stacks explicitly, though *CAN* be lowered to FSMs.
 
 This allows CLEAR to handle millions of concurrent operations with the memory footprint of Rust/Tokio's async/await, but with the developer ergonomics of Go's blocking syntax.
 
