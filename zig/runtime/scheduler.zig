@@ -244,10 +244,14 @@ pub const Scheduler = struct {
     // Default lock-acquire timeout (per-WAIT, not per-program). Debug
     // mode used to be 100ms to surface hangs quickly during development,
     // but high-concurrency benchmarks (14_nested_lock at THREADS=$(nproc))
-    // genuinely sit on contended mutexes longer than that and false-fail.
-    // 5s in Debug is still much shorter than Release's 30s and catches
-    // real bugs without strangling realistic workloads.
-    lock_timeout_ms: i64 = if (builtin.mode == .Debug) 5_000 else 30_000,
+    // genuinely sat on contended mutexes longer than 100ms and would
+    // false-fail. With the Phase 1-6 cycle-detection rework — slab
+    // pin, generation, atomic per-hop lock-state snapshot, atomic
+    // wait-field protocol — false-positive timeouts no longer occur,
+    // so the original 100ms can be restored. 100ms is what the
+    // transpile-test 263_with_lock_contention.cht and other timeout
+    // tests assume; bumping it broke them silently.
+    lock_timeout_ms: i64 = if (builtin.mode == .Debug) 100 else 30_000,
 
     /// Stable index assigned at registration (0..N-1).  Used by
     /// PartitionedStringMap to determine shard ownership.
