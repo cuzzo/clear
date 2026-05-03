@@ -158,12 +158,16 @@ class StackVerifier
 
     output.each_line do |line|
       if line =~ /^[0-9a-f]+\s+<(#{Regexp.escape(@module_prefix)}\..+)>:/
+        # Save $1 BEFORE the inst =~ scan below: the inner regex has no
+        # captures, so its `=~` would clobber $1 to nil and `current_fn`
+        # would end up nil on the next iteration.
+        next_fn = $1
         # Process previous function
         if current_fn_clear && tail_call_fns.include?(current_fn_clear)
           has_self_call = instructions.any? { |inst| inst =~ /\bcall\b.*<#{Regexp.escape(current_fn)}>/ }
           results << { name: current_fn_clear, tco_verified: !has_self_call, has_self_call: has_self_call }
         end
-        current_fn = $1
+        current_fn = next_fn
         current_fn_clear = zig_to_clear_name(current_fn)
         instructions = []
       elsif line =~ /^[0-9a-f]+\s+</

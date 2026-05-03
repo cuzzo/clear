@@ -1,20 +1,77 @@
 require "rspec"
 require "tmpdir"
 require "fileutils"
-require "open3"
+require_relative "../src/tools/formatter"
 
-# Integration tests for `./clear fmt`. Each test writes one or more .cht
-# files into a tmp dir, invokes the real ./clear binary, and asserts on
-# stdout/stderr/exit/file contents.
+# Unit tests for the formatter. Calls Formatter.format(src) directly --
+# the CLI's flag handling (--check / --stdout / --no-warn) and width-
+# warning emission are mirrored in run_fmt below as a few lines of pure
+# Ruby. No subprocess, no `./clear` binary, no Zig dependency, so the
+# whole file runs in the parallel unit job and contributes coverage for
+# src/backends/formatter.rb.
 
-CLEAR_BIN = File.expand_path("../clear", __dir__) unless defined?(CLEAR_BIN)
-
-RSpec.describe "./clear fmt", :integration do
-  # Uses Open3 instead of shell redirection to a fixed /tmp filename so
-  # parallel_rspec workers don't race on the same stderr file.
+RSpec.describe Formatter do
+  # Mirrors the CLI's behaviour from `clear` (case 'fmt'):
+  #   - default:  format every file in place; emit path on change
+  #   - --stdout: print formatted output for the file
+  #   - --check:  exit 1 if any file would be rewritten
+  #   - --no-warn / warn_width: width-warning emission
+  # Returns [stdout, stderr, status] just like the old shell helper.
   def run_fmt(*args)
-    stdout, stderr, status = Open3.capture3(CLEAR_BIN, "fmt", *args)
-    [stdout, stderr, status.exitstatus]
+    check_only = false
+    to_stdout  = false
+    warn_width = true
+    paths      = []
+    args.each do |a|
+      case a
+      when "--check"   then check_only = true
+      when "--stdout"  then to_stdout = true
+      when "--no-warn" then warn_width = false
+      else                  paths << a
+      end
+    end
+
+    stdout = +""
+    stderr = +""
+    changed = false
+    failed  = false
+
+    paths.each do |path|
+      src = File.read(path)
+      out =
+        begin
+          Formatter.format(src)
+        rescue Formatter::Error => e
+          stderr << "#{path}: #{e.message}\n"
+          failed = true
+          next
+        end
+
+      if warn_width
+        out.each_line.with_index(1) do |ln, idx|
+          stripped = ln.sub(/\n\z/, "")
+          if stripped.length > 120
+            stderr << "#{path}:#{idx}: warning: line length #{stripped.length} exceeds 120\n"
+          end
+        end
+      end
+
+      if to_stdout
+        stdout << out
+      elsif check_only
+        changed = true if out != src
+      else
+        if out != src
+          File.write(path, out)
+          stdout << "#{path}\n"
+        end
+      end
+    end
+
+    status = 0
+    status = 1 if failed
+    status = 1 if check_only && changed
+    [stdout, stderr, status]
   end
 
   around do |ex|
