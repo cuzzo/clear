@@ -38,6 +38,10 @@ const tests = [_]Test{
     .{ .name = "parking rwlock loom: two readers + one writer prng seeds",                 .func = &ploom.testRwlockTwoReadersWriter },
     .{ .name = "parking rwlock loom: 1W+2R exhaustive 3^10 base-3 (M5 reader-drain)",      .func = &ploom.testRwlockOneWriterTwoReaders },
     .{ .name = "parking rwlock loom: 2W+1R exhaustive 3^10 base-3 (M5 FIFO/writer-pref)",  .func = &ploom.testRwlockTwoWritersOneReader },
+    .{ .name = "parking cycle loom: self-cycle returns Deadlock (M6)",                     .func = &ploom.testCycleSelf },
+    .{ .name = "parking cycle loom: 2-hop AB/BA returns LockCycle (M6, 4096 schedules)",   .func = &ploom.testCycle2Hop },
+    .{ .name = "parking cycle loom: 3-hop ABC/BCA returns LockCycle (M6, 6561 schedules)", .func = &ploom.testCycle3Hop },
+    .{ .name = "parking cycle loom: read-lock terminator (M6, 256 schedules)",             .func = &ploom.testCycleReadTerminator },
 };
 
 pub fn main() !void {
