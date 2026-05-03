@@ -52,6 +52,17 @@ const FIBERS_PER_SCHEDULER: usize = 8;
 const NUM_FIBERS: usize = NUM_SCHEDULERS * FIBERS_PER_SCHEDULER;
 const ITERS_PER_FIBER: usize = 2_000;
 
+// Bench-scale variant tunables — match what bench 14_nested_lock runs.
+// 64 locks × 32 schedulers × 4 fibers × 500K iters × 2 acquires = 128M
+// paired acquires across 32 OS threads with within-scheduler fiber
+// contention. Designed to push detectCycle's seq-snapshot retry budget
+// beyond what the smaller test exercises.
+const NUM_LOCKS_BIG: usize = 64;
+const NUM_SCHEDULERS_BIG: usize = 32;
+const FIBERS_PER_SCHEDULER_BIG: usize = 4;
+const NUM_FIBERS_BIG: usize = NUM_SCHEDULERS_BIG * FIBERS_PER_SCHEDULER_BIG;
+const ITERS_PER_FIBER_BIG: usize = 500_000;
+
 // xorshift64* for deterministic-but-distinct fiber seeds.
 fn nextRand(state: *u64) u64 {
     var x = state.*;
@@ -361,6 +372,163 @@ test "ParkingRwLock: address-ordered multi-write-acquire under multi-OS-thread c
         std.debug.print(
             "\nFALSE POSITIVE (rwlock): cycles={} deadlocks={} timeouts={} (over {} iters)\n",
             .{ fc, fd, to, NUM_FIBERS * ITERS_PER_FIBER },
+        );
+    }
+    try std.testing.expectEqual(@as(u32, 0), fc);
+    try std.testing.expectEqual(@as(u32, 0), fd);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bench-scale ParkingMutex address-ordered chain test.
+//
+// 32 schedulers × 4 fibers/scheduler × 500K iters × 2 acquires = 128M
+// paired acquires across 32 OS threads with within-scheduler fiber
+// contention. Mirrors bench 14_nested_lock's CLEAR_THREADS=32 regime as
+// closely as possible at unit-test scale.
+//
+// Status: currently PASSES. The smaller test above already caught the
+// 4-scheduler regime fixed in commits dafad7da / 1a48c22c / 543b4942 /
+// b9876146. This test extends coverage to 32 OS threads × within-
+// scheduler fiber contention and is the new lower bound on what a
+// regression must NOT break.
+//
+// Open gap: bench 14_nested_lock at debug+GPA-leak-detection still
+// reproduces a false LockCycle in `--leak` mode (`ruby benchmarks/
+// runner.rb --leak benchmarks/concurrent/14_nested_lock`). The shape
+// difference vs this test is the bench's outer @shared:writeLocked
+// rwlock + Arc-extracted account refs — not just the lock count or
+// iteration count. A test that mirrors the bench's full lock graph
+// (rwlock-shared on outer, mutex on inner, list indexing between)
+// would close this gap. Tracked as the remaining work after
+// parking-lot.zig:117-120's planned packed-atomic-state fix lands;
+// removing that hack should remove the bench-scale false positive too.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SharedMuBig = struct {
+    locks: [NUM_LOCKS_BIG]ParkingMutex = [_]ParkingMutex{.{}} ** NUM_LOCKS_BIG,
+    counters: [NUM_LOCKS_BIG]u64 = [_]u64{0} ** NUM_LOCKS_BIG,
+    false_cycles: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    false_deadlocks: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    timeouts: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    wg: CheatHeader.WaitGroup,
+};
+
+const FiberCtxMuBig = struct {
+    s: *SharedMuBig,
+    seed: u64,
+};
+
+fn workerMuBig(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+    const ctx: *FiberCtxMuBig = @ptrCast(@alignCast(raw.?));
+    defer ctx.s.wg.done();
+
+    var prng = ctx.seed;
+    var i: usize = 0;
+    while (i < ITERS_PER_FIBER_BIG) : (i += 1) {
+        const r = nextRand(&prng);
+        const a: usize = @intCast(r % NUM_LOCKS_BIG);
+        var b: usize = @intCast((r >> 32) % NUM_LOCKS_BIG);
+        if (b == a) b = (a + 1) % NUM_LOCKS_BIG;
+        const lo = @min(a, b);
+        const hi = @max(a, b);
+
+        ctx.s.locks[lo].lock() catch |e| {
+            switch (e) {
+                error.LockCycle => _ = ctx.s.false_cycles.fetchAdd(1, .monotonic),
+                error.Deadlock => _ = ctx.s.false_deadlocks.fetchAdd(1, .monotonic),
+                error.LockTimeout => _ = ctx.s.timeouts.fetchAdd(1, .monotonic),
+            }
+            continue;
+        };
+        ctx.s.locks[hi].lock() catch |e| {
+            switch (e) {
+                error.LockCycle => _ = ctx.s.false_cycles.fetchAdd(1, .monotonic),
+                error.Deadlock => _ = ctx.s.false_deadlocks.fetchAdd(1, .monotonic),
+                error.LockTimeout => _ = ctx.s.timeouts.fetchAdd(1, .monotonic),
+            }
+            ctx.s.locks[lo].unlock();
+            continue;
+        };
+        ctx.s.counters[lo] += 1;
+        ctx.s.counters[hi] += 1;
+        ctx.s.locks[hi].unlock();
+        ctx.s.locks[lo].unlock();
+    }
+}
+
+test "ParkingMutex: bench-scale (32 sched x 4 fiber/sched x 500K iter) does not falsely detect cycle" {
+    const t_alloc = std.testing.allocator;
+    var ebr = EbrContext{};
+    defer ebr.deinit(t_alloc);
+    var pool = fm.StackPool.init(t_alloc);
+    defer pool.deinit();
+    var shutdown = std.atomic.Value(bool).init(false);
+
+    var tctx = ThreadCtx{ .alloc = t_alloc, .ebr = &ebr, .pool = &pool, .shutdown = &shutdown };
+
+    var workers: [NUM_SCHEDULERS_BIG - 1]std.Thread = undefined;
+    var spawned: usize = 0;
+    for (&workers) |*t| {
+        t.* = std.Thread.spawn(.{}, schedulerThread, .{&tctx}) catch break;
+        spawned += 1;
+    }
+    while (fp.global_registry.count() < spawned) {
+        compat.sleepNs(1 * std.time.ns_per_ms);
+    }
+
+    var sched = try fp.Scheduler.init(t_alloc, &ebr, &pool);
+    defer { sched.deinit(); fp.global_registry.deinit(t_alloc); }
+    sched.lock_timeout_ms = 30_000;
+    fp.active_scheduler = &sched;
+    fp.scheduler_running = true;
+    defer fp.scheduler_running = false;
+
+    var shared = SharedMuBig{ .wg = CheatHeader.WaitGroup.init(&sched) };
+    var ctxs: [NUM_FIBERS_BIG]FiberCtxMuBig = undefined;
+    for (&ctxs, 0..) |*c, i| {
+        c.* = .{
+            .s = &shared,
+            .seed = (@as(u64, i) +% 1) *% 0x9E3779B97F4A7C15,
+        };
+    }
+
+    const Main = struct {
+        sh: *SharedMuBig,
+        cs: *[NUM_FIBERS_BIG]FiberCtxMuBig,
+        fn run(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+            const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
+            self.sh.wg.add(NUM_FIBERS_BIG);
+            for (self.cs) |*c| {
+                try CheatHeader.spawnBest(
+                    @intFromPtr(&Runtime.entryWrapper),
+                    @as(CheatHeader.TaskFn, @ptrCast(&workerMuBig)),
+                    c,
+                    .{ .stack_size = .Large },
+                );
+            }
+            self.sh.wg.wait();
+        }
+    };
+    var main_ctx = Main{ .sh = &shared, .cs = &ctxs };
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&Main.run)),
+        &main_ctx,
+        .{ .stack_size = .Large },
+    );
+    sched.run();
+
+    shutdown.store(true, .release);
+    fp.global_registry.notifyAll();
+    for (workers[0..spawned]) |*t| t.join();
+
+    const fc = shared.false_cycles.load(.acquire);
+    const fd = shared.false_deadlocks.load(.acquire);
+    const to = shared.timeouts.load(.acquire);
+    if (fc > 0 or fd > 0) {
+        std.debug.print(
+            "\nBENCH-SCALE FALSE POSITIVE: cycles={} deadlocks={} timeouts={} (over {} iters)\n",
+            .{ fc, fd, to, NUM_FIBERS_BIG * ITERS_PER_FIBER_BIG },
         );
     }
     try std.testing.expectEqual(@as(u32, 0), fc);
