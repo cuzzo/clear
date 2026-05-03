@@ -47,6 +47,8 @@ DEFAULT
 END
 ```
 
+See the [Walkthrough](WALKTHROUGH.md) for more details.
+
 ## WHY CLEAR?
 
 * SQL solved the problem of writing code once, and it constantly improving as the engine improves.
