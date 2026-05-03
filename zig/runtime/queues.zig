@@ -362,9 +362,12 @@ pub const Task = struct {
 
     // Parking-lot lock fields. Set by ParkingMutex/ParkingRwLock on park.
     // Read by the scheduler's timeout scanner. Always null when not parked.
-    // Using std.atomic.Value (not SimAtomic) so scheduler can safely read
-    // from its loop without these becoming Loom yield points.
-    waiting_for_lock: std.atomic.Value(?*anyopaque) = std.atomic.Value(?*anyopaque).init(null),
+    // Loom-instrumented (Atomic, not std.atomic.Value): yieldPoint is a
+    // no-op when __fiber_parent_ctx == null, so scheduler-loop reads from
+    // non-fiber context don't yield. Fiber-context loads DO yield, which
+    // is what loom needs to see interleavings on these fields (e.g. the
+    // park/wake races detectCycle and the lost-wake-on-fetchOr cases).
+    waiting_for_lock: Atomic(?*anyopaque) = Atomic(?*anyopaque).init(null),
     waiting_for_lock_list: ?*WaiterList = null, // back-ptr to lock's waiter list
     lock_waiter_node: ?*WaiterNode = null,      // back-ptr to our WaiterNode in that list
     lock_wait_start_ms: i64 = 0,
@@ -387,7 +390,7 @@ pub const Task = struct {
     // park (owner-then-lock with .release) + ordered unlock (lock-then-
     // owner with .release) lets the reader pair an .acquire on lock with
     // the most-recent owner write.
-    waiting_for_lock_owner: std.atomic.Value(?*Task) = std.atomic.Value(?*Task).init(null),
+    waiting_for_lock_owner: Atomic(?*Task) = Atomic(?*Task).init(null),
     // Set by ParkingRwLock when parking as a write-lock waiter. On timeout,
     // the scheduler decrements this counter (writers_waiting) so future readers
     // are not permanently blocked by a phantom writer count.
@@ -399,7 +402,7 @@ pub const Task = struct {
     // real cycle stops all transitions (parked tasks can't transition), so
     // seqs stay stable and the walk converges; a transient apparent cycle
     // has at least one transitioning task whose seq advances → retry.
-    seq: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+    seq: Atomic(u32) = Atomic(u32).init(0),
     // Tag identifying the kind of lock the task is parked on. detectCycle
     // dispatches on this to look up the lock's CURRENT exclusive owner
     // (rather than trusting waiting_for_lock_owner, which goes stale: when
@@ -409,7 +412,7 @@ pub const Task = struct {
     //   1 = ParkingMutex (exclusive)
     //   2 = ParkingRwLock (write/exclusive)
     //   3 = ParkingRwLock (shared/read) — chain terminator
-    waiting_for_lock_kind: std.atomic.Value(u8) = std.atomic.Value(u8).init(0),
+    waiting_for_lock_kind: Atomic(u8) = Atomic(u8).init(0),
 };
 
 pub const LOCK_KIND_NONE: u8 = 0;
