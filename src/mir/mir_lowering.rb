@@ -60,6 +60,38 @@ class MIRLowering
     stmts
   end
 
+  # Lower a sub-expression in a scope where its @pending_stmts must NOT
+  # leak to outer scope. Yields to the caller (which calls lower); captures
+  # any pending allocs emitted during the block; if any, wraps the result
+  # in a MIR::BlockExpr that contains those pending stmts. Restores outer
+  # @pending_stmts. Used at "lazy" positions (orelse fallback, fiber body)
+  # so that allocations done while lowering a may-not-execute sub-expression
+  # only execute when the sub-expression actually runs.
+  def lower_scoped
+    prev = @pending_stmts
+    @pending_stmts = []
+    result = yield
+    scoped = @pending_stmts
+    @pending_stmts = prev
+    return result if scoped.empty?
+    @block_expr_counter += 1
+    label = "__lazy_#{@block_expr_counter}"
+    MIR::BlockExpr.new(label, scoped + [MIR::BreakStmt.new(label, result)])
+  end
+
+  # Lower `parent.<field>` and apply lower_scoped iff parent declares the
+  # field as lazy via AST::Node#lazy_fields. Single entry point so callers
+  # never write the save/restore pattern by hand. New lazy positions are
+  # added by adding a `lazy_fields` method to the relevant AST class.
+  def descend(parent, field)
+    child = parent.send(field)
+    if parent.respond_to?(:lazy_fields) && parent.lazy_fields.include?(field)
+      lower_scoped { lower(child) }
+    else
+      lower(child)
+    end
+  end
+
   # Returns true when an MIR expression node performs a HEAP allocation.
   # Used by hoist_alloc to decide whether to hoist to a named Let.
   #
@@ -1216,27 +1248,8 @@ class MIRLowering
   # ================================================================
 
   def lower_func_call(node)
-    # Stub interception: replace stubbed function calls with stub behavior
-    stub_info = (@active_stubs || {})[node.name]
-    if stub_info
-      case stub_info[:kind]
-      when :returns
-        return MIR::Ident.new(stub_info[:var])
-      when :with
-        args_mir = node.args.map { |a| lower(a) }
-        return MIR::Call.new(stub_info[:var], args_mir, false)
-      when :captures, :sequence
-        # TEST-INFRA: stub call args are discarded (stub ignores values); no allocation escapes.
-        args_zig = node.args.map { |a| emit_expr(lower(a)) }
-        stub_code = if stub_info[:kind] == :captures
-          "{ #{stub_info[:var]} += 1; }"
-        else
-          "blk_stub: { const __si = #{stub_info[:var]}_idx; #{stub_info[:var]}_idx += 1; break :blk_stub #{stub_info[:var]}_seq[__si]; }"
-        end
-        iz = MIR::InlineZig.new(stub_code, "stub_call")
-        iz.stdlib_def = { borrows: :all }
-        return iz
-      end
+    if (intercept = stub_intercept_for(node.name, nil, node.args))
+      return intercept
     end
 
     # Intrinsic pattern: already resolved by annotator
@@ -1308,6 +1321,12 @@ class MIRLowering
   end
 
   def lower_method_call(node)
+    # Stub interception: a UFCS call `x.query(args)` lowers to `query(x, args)`,
+    # so STUB query intercepts must apply here too.
+    if (intercept = stub_intercept_for(node.name, node.object, node.args))
+      return intercept
+    end
+
     # Intrinsic pattern: already resolved by annotator
     if node.zig_pattern
       return lower_safe_nav_method_call(node) if node.object.is_a?(AST::OptionalUnwrap)
@@ -2012,6 +2031,12 @@ class MIRLowering
   def lower_with_block(node)
     rt_name = @rt_name
     bindings = []
+    # Structured representation of any fallible-acquire clause(s) for the
+    # BC backend (Zig backend uses the InlineZig text emitted into
+    # `bindings`). Each entry: { var_name, action_kind, action_mir,
+    # exit_msg_mir, retries, matched_types, bubble_types }. Both backends
+    # see the same node; only BC consumes `:fallible_clauses`.
+    fallible_clauses = []
     clause = node.lock_error_clause
     # Only RAISE/EXIT exit via `return`; PASS and `-> { stmts }` exit by
     # breaking out of this labeled block. Emit the label only when used
@@ -2079,6 +2104,7 @@ class MIRLowering
         err_method   = var_sync == :write_locked ? "writeOrErr" : "acquireOrErr"
         if clause
           bindings << emit_fallible_lock_binding(lock_expr, err_method, guard_var, alias_name, clause, with_label, node)
+          fallible_clauses << build_fallible_clause_mir(var_name, alias_name, clause)
         else
           bindings << "var #{guard_var} = #{lock_expr}.#{panic_method}();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
         end
@@ -2089,6 +2115,7 @@ class MIRLowering
         lock_expr = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
         if clause
           bindings << emit_fallible_lock_binding(lock_expr, "readOrErr", guard_var, alias_name, clause, with_label, node)
+          fallible_clauses << build_fallible_clause_mir(var_name, alias_name, clause)
         else
           bindings << "var #{guard_var} = #{lock_expr}.read();\ndefer #{guard_var}.release();\nconst #{alias_name} = #{guard_var}.get();\n_ = &#{alias_name};"
         end
@@ -2141,11 +2168,39 @@ class MIRLowering
     stmts = []
     unless all_bindings.empty?
       bindings_iz = MIR::InlineZig.new(all_bindings, "with_block_bindings")
-      bindings_iz.stdlib_def = { allocates: false, borrows: borrows }
+      sd = { allocates: false, borrows: borrows }
+      sd[:fallible_clauses] = fallible_clauses unless fallible_clauses.empty?
+      bindings_iz.stdlib_def = sd
       stmts << bindings_iz
     end
     stmts.concat(body_stmts)
     with_label ? MIR::BlockExpr.new(with_label, stmts) : MIR::ScopeBlock.new(stmts)
+  end
+
+  # Structured representation of a fallible-acquire clause for the BC
+  # backend. The Zig backend renders the clause inline as Zig text via
+  # `emit_fallible_lock_binding`; the BC backend can't parse the Zig
+  # block, so it consumes this descriptor instead. `action_mir` is the
+  # already-lowered MIR body (only for `:block`); `exit_msg_mir` is the
+  # lowered message expression (only for `:exit`). `matched_types` and
+  # `bubble_types` are the annotator-resolved selector lists; `retries`
+  # is the RETRY(N) count or nil.
+  def build_fallible_clause_mir(var_name, alias_name, clause)
+    desc = {
+      var_name:      var_name.to_s,
+      alias_name:    alias_name.to_s,
+      action_kind:   clause[:action],
+      retries:       clause[:retries],
+      matched_types: clause[:matched_types] || [],
+      bubble_types:  clause[:bubble_types] || [],
+    }
+    case clause[:action]
+    when :block
+      desc[:action_mir] = lower_body(clause[:body])
+    when :exit
+      desc[:exit_msg_mir] = lower(clause[:message])
+    end
+    desc
   end
 
   # Emit the acquire-or-catch binding for a fallible lock under a
@@ -2639,12 +2694,10 @@ class MIRLowering
     # an eager List materialization. Run the body inline; YIELD becomes
     # `__sg<id>_local.push(x)` which we rewrite to list-append in the
     # bc_emitter, and NEXT pops the head of the list. This works for all
-    # finite streams (the only kind a synchronous VM can support). For
-    # ~T[INF] BG STREAM bodies that self-close (e.g. just YIELD a few
-    # values, or `WHILE i <= 8 DO YIELD i; ...`), the eager path also
-    # works -- the body runs to completion and produces the materialized
-    # list. Truly infinite generators are still unsupportable, but most
-    # test workloads use finite self-closing generators.
+    # finite streams. For ~T[INF] (`WHILE TRUE`-driven generators) the
+    # eager path would loop forever, so we emit a producer-fiber +
+    # rendezvous-channel form (MIR::StreamSpawn / MIR::StreamYield)
+    # that the bc_emitter compiles to STREAM_SPAWN + STREAM_YIELD opcodes.
     if @target == :bc
       prev_stream_local = @current_stream_local
       prev_stream_is_inf = @current_stream_is_inf
@@ -2653,6 +2706,16 @@ class MIRLowering
       run_body = node.body.map { |expr| lower(expr) }
       @current_stream_local = prev_stream_local
       @current_stream_is_inf = prev_stream_is_inf
+
+      if is_inf
+        # Real producer fiber. The captures handed to FiberCtxBuilder
+        # become the fiber's captures; bc_emitter prepends the channel
+        # handle as arg 0 inside STREAM_SPAWN and inside the producer
+        # frame the channel binds to a synthetic slot consumed by
+        # MIR::StreamYield via lower_yield.
+        captures_map = node.capture_analysis&.captures || {}
+        return MIR::StreamSpawn.new(captures_map, run_body)
+      end
 
       block = MIR::BlockExpr.new(blk_label, [
         MIR::Let.new(local_stream, MIR::MakeList.new("anytype", [], :frame), true, "anytype", nil),
@@ -2746,6 +2809,13 @@ class MIRLowering
   def lower_yield(node)
     stream_local = @current_stream_local || "__stream_local"
     lowered = lower(node.expr)
+    # BC inf-stream path: emit MIR::StreamYield so the bc_emitter routes
+    # to the rendezvous-channel STREAM_YIELD opcode. The Zig backend
+    # never reaches this branch (it sets @current_stream_is_inf only for
+    # the materializing path; @target check guards against confusion).
+    if @target == :bc && @current_stream_is_inf
+      return MIR::StreamYield.new(lowered)
+    end
     if node.yield_dupe
       # Frame string: dupe to stream allocator before push so the value outlives
       # the fiber's frame rewind (or loop mark rewind between yields).
@@ -2767,11 +2837,13 @@ class MIRLowering
       # decl_alloc from the enclosing VarDecl so the allocator matches the cleanup plan).
       inner = lower(node.expr)
 
-      # In BC the BG runtime is synchronous (BG_SPAWN materializes the
-      # body inline and stores the resolved value), so the promise list
-      # is already a Value.List of results. NEXT-all is identity --
-      # return the source MIR directly.
-      return inner if @target == :bc
+      # In BC the BG runtime spawns real fibers via BG_SPAWN and stashes
+      # their futures in `futureTable`; the list elements are
+      # Pair("__future__", id) markers, not yet-resolved values. Route
+      # through MethodCall("next") so the bc_emitter emits AWAIT, which
+      # the runner extends to walk Value.List (await each item, build
+      # result list).
+      return MIR::MethodCall.new(inner, "next", [], true) if @target == :bc
 
       inner_str = emit_expr(inner)
       elem_zig = promise_type.tense_type.element_type.zig_type
@@ -2902,7 +2974,16 @@ class MIRLowering
 
       (when_block.tests || []).each do |test_that|
         full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
+        # Scope @current_bindings to the synthesized test wrapper so
+        # lower_var_decl finds the cleanup entry MIRPass classified for
+        # locals declared inside the TEST THAT body (heap-allocated
+        # struct fields like `x = Client{ host: "..." }` would otherwise
+        # leak: their MIR::Drop never gets emitted).
+        prev_bindings = @current_bindings
+        synth_fn = test_that.synthetic_fn if test_that.respond_to?(:synthetic_fn)
+        @current_bindings = (synth_fn&.cleanup_bindings) || {}
         body_mir = lower_body(test_that.body)
+        @current_bindings = prev_bindings
         body = [preamble_iz.call] + stub_mir + setup_mir + when_setup_mir + body_mir
         tests << MIR::TestDef.new(full_name, body)
       end
@@ -2939,6 +3020,72 @@ class MIRLowering
     iz = MIR::InlineZig.new(ar_code, "assert_raises")
     iz.stdlib_def = { allocates: false, borrows: :all }
     iz
+  end
+
+  # Build the MIR replacement for a stubbed call site, or nil if `fn_name`
+  # is not currently stubbed. Shared between FuncCall (`receiver` is nil)
+  # and UFCS MethodCall (`receiver` is the object). Pure MIR composition
+  # -- no InlineZig escape hatch -- so the checker can see what's going
+  # on. Locals that would otherwise become "unused" after stub
+  # replacement get an explicit MIR::Suppress (`_ = &name;`).
+  def stub_intercept_for(fn_name, receiver, args)
+    stub_info = (@active_stubs || {})[fn_name]
+    return nil unless stub_info
+
+    call_inputs = [receiver, *args].compact
+    suppress_names = call_inputs.flat_map { |n| stub_local_idents(n) }.uniq
+    suppress_stmts = suppress_names.map { |nm| MIR::Suppress.new(nm) }
+
+    @stub_label_counter ||= 0
+    @stub_label_counter += 1
+    counter = @stub_label_counter
+
+    case stub_info[:kind]
+    when :returns
+      return MIR::Ident.new(stub_info[:var]) if suppress_stmts.empty?
+      label = "__stub_ret_#{counter}"
+      MIR::BlockExpr.new(label, suppress_stmts +
+        [MIR::BreakStmt.new(label, MIR::Ident.new(stub_info[:var]))])
+
+    when :captures
+      cnt = MIR::Ident.new(stub_info[:var])
+      inc = MIR::Set.new(cnt, MIR::BinOp.new("+", cnt, MIR::Lit.new("1")), false)
+      # Void block: no label needed because nothing breaks to it.
+      MIR::BlockExpr.new(nil, suppress_stmts + [inc])
+
+    when :sequence
+      label = "__stub_seq_#{counter}"
+      seq = MIR::Ident.new("#{stub_info[:var]}_seq")
+      idx = MIR::Ident.new("#{stub_info[:var]}_idx")
+      si  = "__stub_si_#{counter}"
+      MIR::BlockExpr.new(label, suppress_stmts + [
+        MIR::Let.new(si, idx, false, "usize", nil),
+        MIR::Set.new(idx, MIR::BinOp.new("+", idx, MIR::Lit.new("1")), false),
+        MIR::BreakStmt.new(label, MIR::IndexGet.new(seq, MIR::Ident.new(si))),
+      ])
+
+    when :with
+      args_mir = call_inputs.map { |a| lower(a) }
+      MIR::Call.new(stub_info[:var], args_mir, false)
+    end
+  end
+
+  # Names of local Identifiers reachable from a call-input AST node that
+  # need MIR::Suppress in a stub replacement (otherwise Zig flags them as
+  # unused). Only top-level Identifiers count -- nested expressions
+  # (FieldGet, FuncCall, literals, ...) are evaluated implicitly. Routes
+  # through @decl_zig_name_map / @fn_name_rename_map so suppressed names
+  # match the actual Zig var (cleanup-classification may suffix-rename
+  # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
+  def stub_local_idents(node)
+    return [] unless node.is_a?(AST::Identifier)
+    name = node.name
+    return [] unless name.is_a?(String)
+    decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil
+    renamed = (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) ||
+              (@fn_name_rename_map && @fn_name_rename_map[name]) ||
+              name
+    [renamed]
   end
 
   def lower_stub_decl(node)
@@ -3686,63 +3833,15 @@ class MIRLowering
       return left
     end
 
-    # Default: expr OR fallback -> error union catch or optional orelse
-
-    # Early path: OR fallback struct with string fields.
-    # Detect BEFORE calling lower(node.right) so hoist_alloc never fires for
-    # CopyNode-wrapped string literals. Outer-scope errdefer temps from hoist_alloc
-    # are never cleaned up on the success path (the catch block never runs), causing
-    # a leak — especially inside BG fibers where errdefer fires only on fiber error.
-    if is_error && node.right.is_a?(AST::StructLit)
-      ret_type = node.right.full_type
-      ret_type = ret_type.is_a?(Type) ? ret_type : Type.new(ret_type) if ret_type
-      resolved = ret_type&.resolved
-      schema = @struct_schemas&.dig(resolved)
-      string_fields = schema&.filter_map do |fname, fdef|
-        next if fname.is_a?(Symbol)
-        ft = (fdef.is_a?(Hash) ? fdef[:type] : fdef)
-        ft = ft.is_a?(Type) ? ft : Type.new(ft || :Any)
-        fname if ft.string?
-      end || []
-      if string_fields.any?
-        rt_name = @rt_name
-        left_raw = emit_expr(strip_try(left))
-        # Build struct init without CopyNode-triggered hoist_alloc: unwrap
-        # CopyNode-wrapped rodata string literals to raw literals so lower()
-        # returns MIR::Lit instead of MIR::DeepCopy (which would trigger hoist_alloc).
-        # The inline dupe() inside the catch block handles heap promotion.
-        fields_zig = node.right.fields.map { |k, v|
-          v_lit = if v.is_a?(AST::CopyNode) && v.value.is_a?(AST::Literal) &&
-                     v.value.type_info&.string? && v.value.type_info&.rodata?
-            v.value
-          else
-            v
-          end
-          ".#{k} = #{emit_expr(lower(v_lit))}"
-        }.join(", ")
-        type_name = node.right.name.to_s
-        right_zig = ".{ #{fields_zig} }"
-        # Dupe each string field with proper cleanup on partial failure:
-        # - First field: `try dupe(...)` — propagates OOM, no prior state to clean up.
-        # - Each subsequent field: catch, free all previously-duped fields, re-return error.
-        promos = string_fields.each_with_index.map { |f, i|
-          if i == 0
-            "__fb.#{f} = try #{rt_name}.heapAlloc().dupe(u8, __fb.#{f});"
-          else
-            frees = string_fields[0...i].map { |prev| "#{rt_name}.heapAlloc().free(__fb.#{prev});" }.join(" ")
-            "__fb.#{f} = #{rt_name}.heapAlloc().dupe(u8, __fb.#{f}) catch |__dupe_err| { #{frees} return __dupe_err; };"
-          end
-        }.join(" ")
-        iz = MIR::InlineZig.new(
-          "(#{left_raw} catch __fb: { var __fb: #{type_name} = #{right_zig}; #{promos} break :__fb __fb; })",
-          "or_fallback_dupe"
-        )
-        iz.stdlib_def = { allocates: true }
-        return iz
-      end
-    end
-
-    right = lower(node.right)
+    # Default: expr OR fallback -> error union catch or optional orelse.
+    # The fallback is evaluated lazily (only when left short-circuits to it),
+    # so any allocations done while lowering it must NOT escape to outer
+    # @pending_stmts. AST::BinaryOp#lazy_fields declares :right as lazy when
+    # op == :OR_RESCUE; descend() consults that and wraps the right side in
+    # a MIR::BlockExpr containing the scoped pending stmts. Hot path: zero
+    # allocation. Fallback path: dupes (auto-COPY etc.) happen inside the
+    # block, only when actually entered.
+    right = descend(node, :right)
 
     if is_error
       return MIR::TryCatch.new(strip_try(left), right, nil)

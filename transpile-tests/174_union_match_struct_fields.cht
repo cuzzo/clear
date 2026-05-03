@@ -13,7 +13,7 @@ FN handleCatch!(msg: String, kind: String) RETURNS Value ->
 END
 
 FN tryEval!(TAKES input: Value) RETURNS Value ->
-    MATCH input START
+    PARTIAL MATCH input START
         Value.Error AS e ->
             RETURN handleCatch!(e.errMsg, e.errKind);,
         DEFAULT -> RETURN input;
@@ -22,7 +22,7 @@ FN tryEval!(TAKES input: Value) RETURNS Value ->
 END
 
 FN prStr(v: Value) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.Str AS s -> RETURN s;,
         Value.Wrapped AS w -> RETURN w.inner;,

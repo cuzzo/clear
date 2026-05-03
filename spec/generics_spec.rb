@@ -738,7 +738,7 @@ RSpec.describe SemanticAnnotator do
           src = union_src(<<~BODY)
             opt = Option<Float64>{ Some: 42.0 };
             MUTABLE got = 0.0;
-            MATCH opt START
+            PARTIAL MATCH opt START
               Option.Some -> got = 1.0;,
               Option.None -> got = 2.0;
             END

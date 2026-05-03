@@ -10,7 +10,7 @@ UNION Value {
 }
 
 FN getStr(v: Value) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Str AS s -> RETURN s;,
         DEFAULT -> RETURN "";
     END
@@ -18,7 +18,7 @@ FN getStr(v: Value) RETURNS String ->
 END
 
 FN getSymName(v: Value) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Symbol AS s -> RETURN s;,
         DEFAULT -> RETURN "";
     END
@@ -26,7 +26,7 @@ FN getSymName(v: Value) RETURNS String ->
 END
 
 FN isError?(v: Value) RETURNS Bool ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Error -> RETURN TRUE;,
         DEFAULT -> RETURN FALSE;
     END
@@ -34,7 +34,7 @@ FN isError?(v: Value) RETURNS Bool ->
 END
 
 FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String) RETURNS Value ->
-    MATCH catchExpr START
+    PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             RETURN Value.Tco{ tcoAst: COPY catchItems[2], tcoEnv: 0 };,
         DEFAULT -> RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY errKind };
@@ -43,12 +43,12 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String) RETURNS Value
 END
 
 FN eval!(TAKES ast: Value) RETURNS Value @reentrant ->
-    MATCH TAKES ast START
+    PARTIAL MATCH TAKES ast START
         Value.Str AS s -> RETURN Value{ Str: COPY s };,
         Value.List AS listItems ->
             ownedItems: Value[] = GIVE listItems;
             result = evalList!(ownedItems);
-            MATCH result START
+            PARTIAL MATCH result START
                 Value.Tco AS tco ->
                     RETURN eval!(COPY tco.tcoAst);,
                 DEFAULT -> RETURN result;
@@ -71,7 +71,7 @@ FN evalList!(TAKES items: Value[]) RETURNS Value @reentrant ->
 
     ELSE_IF formName == "try" THEN
         MUTABLE tryResult: Value = eval!(COPY items[1]);
-        MATCH tryResult START
+        PARTIAL MATCH tryResult START
             Value.Error AS e ->
                 RETURN handleCatch!(items[2], e.errMsg, e.errKind);,
             DEFAULT -> RETURN tryResult;
@@ -82,7 +82,7 @@ FN evalList!(TAKES items: Value[]) RETURNS Value @reentrant ->
 END
 
 FN prStr(v: Value, readably: Bool) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.Str AS s -> IF readably THEN RETURN "\"" + s + "\""; END RETURN s;,
         Value.Error AS e -> RETURN "error:" + e.errMsg;,

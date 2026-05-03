@@ -1504,25 +1504,51 @@ pub const CheatLib = struct {
     // -----------------------------------------------------------------
     // Random
     // -----------------------------------------------------------------
+    //
+    // Per-thread userspace PRNG (Xoshiro256++), seeded once from the OS
+    // CSPRNG on first use. Each scheduler-thread has its own state, so
+    // two fibers on different schedulers don't contend; two fibers on
+    // the same scheduler share state, which is fine for non-cryptographic
+    // randomness (the cooperative scheduler serializes them anyway).
+    //
+    // Pre-fix this used compat.randomBytes (which calls getrandom(2))
+    // for every randomInt/random call. On benchmark 14_nested_lock
+    // that meant 2M getrandom syscalls (~8.6s of kernel time, dominating
+    // the 9.9s wall clock). With Xoshiro the per-call cost drops from
+    // ~4µs to ~3ns. CSPRNG semantics are not the contract for randomInt
+    // — std_lib.rb documents it as "random integer in [0, max)" with
+    // no security guarantee, and Rust/Go do the same userspace-PRNG
+    // pattern in their stdlib.
+    threadlocal var prng_state: std.Random.DefaultPrng = undefined;
+    threadlocal var prng_seeded: bool = false;
 
-    /// Random float in [0.0, 1.0). Uses OS CSPRNG.
-    pub fn random() f64 {
-        var bytes: [8]u8 = undefined;
-        compat.randomBytes(&bytes) catch return 0.0;
-        // Use top 52 bits as mantissa of a double in [1.0, 2.0), then subtract 1.0
-        const bits = std.mem.readInt(u64, &bytes, .little);
-        const mantissa = (bits >> 12) | (0x3FF << 52); // exponent = 1023 = 1.0
-        return @as(f64, @bitCast(mantissa)) - 1.0;
+    inline fn threadPrng() std.Random {
+        if (!prng_seeded) {
+            var seed_bytes: [8]u8 = undefined;
+            compat.randomBytes(&seed_bytes) catch {
+                // Fall back to a per-thread fingerprint when getrandom
+                // is unavailable (sandbox / very early init). Sufficient
+                // entropy for non-cryptographic use.
+                const tid: u64 = @intCast(std.Thread.getCurrentId());
+                std.mem.writeInt(u64, &seed_bytes, tid *% 0x9E3779B97F4A7C15, .little);
+            };
+            const seed = std.mem.readInt(u64, &seed_bytes, .little);
+            prng_state = std.Random.DefaultPrng.init(seed);
+            prng_seeded = true;
+        }
+        return prng_state.random();
     }
 
-    /// Random integer in [0, max). Uses OS CSPRNG.
+    /// Random float in [0.0, 1.0). Uses per-thread userspace PRNG.
+    pub fn random() f64 {
+        return threadPrng().float(f64);
+    }
+
+    /// Random integer in [0, max). Uses per-thread userspace PRNG.
     pub fn randomInt(max: i64) i64 {
         if (max <= 0) return 0;
         const umax: u64 = @intCast(max);
-        var bytes: [8]u8 = undefined;
-        compat.randomBytes(&bytes) catch return 0;
-        const val = std.mem.readInt(u64, &bytes, .little);
-        return @intCast(val % umax);
+        return @intCast(threadPrng().uintLessThan(u64, umax));
     }
 
     /// Format an integer into a caller-provided buffer. Returns the slice written.

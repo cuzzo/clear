@@ -89,7 +89,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
 
       FN consumeSlice(xs: V[]) RETURNS Int64 ->
           IF xs.length() > 0 THEN
-              MATCH xs[0] START
+              PARTIAL MATCH xs[0] START
                   V.IntV AS i -> RETURN i;,
                   DEFAULT -> RETURN 0_i64;
               END
@@ -127,7 +127,7 @@ RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integra
       UNION V { Nil, IntV: Int64, Vec: V[] }
 
       FN consumeVec(v: V) RETURNS Int64 ->
-          MATCH v START
+          PARTIAL MATCH v START
               V.Vec AS items -> RETURN items.length();,
               DEFAULT -> RETURN 0_i64;
           END

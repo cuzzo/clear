@@ -5,7 +5,7 @@
 UNION Value { Nil, Str: String, Number: Float64 }
 
 FN getStr(v: Value) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Str AS s -> RETURN s;,
         DEFAULT -> RETURN "";
     END

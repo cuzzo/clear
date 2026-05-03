@@ -37,6 +37,11 @@ UNION Value {
     -- SplitStream with the same bufId and current cursor; NEXT reads
     -- buf[cursor] and advances the handle's cursor (writeback to slot).
     SplitStream { splitBufId: Id<Env>, splitCursor: Int64 },
+    -- Rendezvous channel for ~T[INF] BG STREAM: producer fiber YIELDs
+    -- one item, consumer NEXTs. Channel cell vars: "v" holds the in-flight
+    -- value; "has" is TrueVal/FalseVal; "closed" is TrueVal/FalseVal so
+    -- the producer fiber can exit when the consumer drops the channel.
+    Channel: Id<Env>,
 }
 
 -- Pure helpers
@@ -47,17 +52,17 @@ FN boolVal(b: Bool) RETURNS Value ->
 END
 
 FN isTruthy?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Nil -> RETURN FALSE;, Value.FalseVal -> RETURN FALSE;, DEFAULT -> RETURN TRUE; END
+    PARTIAL MATCH v START Value.Nil -> RETURN FALSE;, Value.FalseVal -> RETURN FALSE;, DEFAULT -> RETURN TRUE; END
     RETURN TRUE;
 END
 
 FN getSymName(v: Value) RETURNS String ->
-    MATCH v START Value.Symbol AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Symbol AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN getNum(v: Value) RETURNS Float64 ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Number AS n -> RETURN n;,
         Value.Int64Val AS i -> RETURN toFloat(i);,
         DEFAULT -> RETURN 0.0;
@@ -66,7 +71,7 @@ FN getNum(v: Value) RETURNS Float64 ->
 END
 
 FN getInt(v: Value) RETURNS Int64 ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Int64Val AS i -> RETURN i;,
         Value.Number AS n -> tr = toInt(n); RETURN tr;,
         DEFAULT -> RETURN 0;
@@ -75,12 +80,12 @@ FN getInt(v: Value) RETURNS Int64 ->
 END
 
 FN isInt64?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Int64Val -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Int64Val -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN getStr(v: Value) RETURNS String ->
-    MATCH v START Value.Str AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Str AS s -> RETURN "" + s;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
@@ -90,7 +95,7 @@ END
 -- stable for integers and is unique for finite floats, so semantics match
 -- the Zig-side numericMapGet/Put.
 FN keyAsStr(v: Value) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Str AS s         -> RETURN "" + s;,
         Value.Int64Val AS i    -> RETURN i.toString();,
         Value.Number AS n      -> RETURN n.toString();,
@@ -101,17 +106,17 @@ FN keyAsStr(v: Value) RETURNS String ->
 END
 
 FN getNativeId(v: Value) RETURNS Int64 ->
-    MATCH v START Value.NativeFn AS id -> RETURN id;, DEFAULT -> RETURN 0; END
+    PARTIAL MATCH v START Value.NativeFn AS id -> RETURN id;, DEFAULT -> RETURN 0; END
     RETURN 0;
 END
 
 FN isList?(v: Value) RETURNS Bool ->
-    MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.List -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN listLen(v: Value) RETURNS Int64 ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.List AS items -> RETURN items.length();,
         Value.TypedI64Arr AS iarr -> RETURN iarr.length();,
         Value.TypedF64Arr AS farr -> RETURN farr.length();,
@@ -122,22 +127,22 @@ FN listLen(v: Value) RETURNS Int64 ->
 END
 
 FN isLambda?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Lambda -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN isBCFn?(v: Value) RETURNS Bool ->
-    MATCH v START Value.BCFn -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.BCFn -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN isBoxed?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Boxed -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Boxed -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.TrueVal -> RETURN "true";,
         Value.FalseVal -> RETURN "false";,
@@ -190,7 +195,8 @@ FN prStr(v: Value, readably: Bool) RETURNS String @reentrant ->
         Value.Weak AS wkId -> RETURN "#<weak:" + wkId.toString() + ">";,
         Value.BCFn AS bcFn -> RETURN "#<bcfn:" + bcFn.bcFnIp.toString() + "/" + bcFn.bcFnArgc.toString() + ">";,
         Value.Boxed -> RETURN "#<box>";,
-        Value.SplitStream AS sst -> RETURN "#<split:" + sst.splitCursor.toString() + ">";
+        Value.SplitStream AS sst -> RETURN "#<split:" + sst.splitCursor.toString() + ">";,
+        Value.Channel -> RETURN "#<channel>";
     END
     RETURN "";
 END
@@ -206,7 +212,7 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS 
                 RETURN COPY (env.vars[name] OR Value.Nil);
             END
             parentVal = env.vars["__p"] OR Value.Nil;
-            MATCH parentVal START
+            PARTIAL MATCH parentVal START
                 Value.EnvRef AS pid -> recurseTo = pid;,
                 DEFAULT -> recurseTo = NIL;
             END
@@ -217,21 +223,21 @@ FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[50000]@pool) RETURNS 
 END
 
 FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
-    MATCH a START
-        Value.Nil -> MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
-        Value.TrueVal -> MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
-        Value.FalseVal -> MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
-        Value.Number AS na -> MATCH b START
+    PARTIAL MATCH a START
+        Value.Nil -> PARTIAL MATCH b START Value.Nil -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.TrueVal -> PARTIAL MATCH b START Value.TrueVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.FalseVal -> PARTIAL MATCH b START Value.FalseVal -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END,
+        Value.Number AS na -> PARTIAL MATCH b START
             Value.Number AS nb -> RETURN na == nb;,
             Value.Int64Val AS ib -> RETURN na == toFloat(ib);,
             DEFAULT -> RETURN FALSE; END,
-        Value.Int64Val AS ia -> MATCH b START
+        Value.Int64Val AS ia -> PARTIAL MATCH b START
             Value.Int64Val AS ib -> RETURN ia == ib;,
             Value.Number AS nb -> RETURN toFloat(ia) == nb;,
             DEFAULT -> RETURN FALSE; END,
-        Value.Str AS sa -> MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
-        Value.Symbol AS sa -> MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
-        Value.List AS la -> MATCH b START
+        Value.Str AS sa -> PARTIAL MATCH b START Value.Str AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.Symbol AS sa -> PARTIAL MATCH b START Value.Symbol AS sb -> RETURN sa == sb;, DEFAULT -> RETURN FALSE; END,
+        Value.List AS la -> PARTIAL MATCH b START
             Value.List AS lb ->
                 IF la.length() != lb.length() THEN RETURN FALSE; END
                 FOR ci IN (0_i64 ..< la.length()) DO
@@ -239,7 +245,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
                 END
                 RETURN TRUE;,
             DEFAULT -> RETURN FALSE; END,
-        Value.Vector AS va -> MATCH b START
+        Value.Vector AS va -> PARTIAL MATCH b START
             Value.Vector AS vb ->
                 IF va.length() != vb.length() THEN RETURN FALSE; END
                 FOR vi IN (0_i64 ..< va.length()) DO
@@ -247,7 +253,7 @@ FN valEqual?(a: Value, b: Value) RETURNS Bool @reentrant ->
                 END
                 RETURN TRUE;,
             DEFAULT -> RETURN FALSE; END,
-        Value.Pair AS pa -> MATCH b START
+        Value.Pair AS pa -> PARTIAL MATCH b START
             Value.Pair AS pb ->
                 RETURN valEqual?(pa.pairCar, pb.pairCar) && valEqual?(pa.pairCdr, pb.pairCdr);,
             DEFAULT -> RETURN FALSE; END,

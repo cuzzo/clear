@@ -824,7 +824,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
         FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
             pool.insert(Env{ x: 1 });
-            MATCH v START
+            PARTIAL MATCH v START
                 Value.Lambda AS lam -> RETURN Value.Nil;,
                 DEFAULT -> RETURN Value.Nil;
             END
@@ -842,7 +842,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
         FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
             pool.insert(Env{ x: 1 });
-            MATCH TAKES v START
+            PARTIAL MATCH TAKES v START
                 Value.Lambda AS lam -> RETURN Value.Nil;,
                 DEFAULT -> RETURN Value.Nil;
             END
@@ -860,7 +860,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Nil, Num: Float64, Str: String, List: Value[], Lambda { body: Value @indirect, id: Int64 } }
         FN test!(TAKES v: Value, MUTABLE pool: Env[10]@pool) RETURNS Value ->
             pool.insert(Env{ x: 1 });
-            MATCH v START
+            PARTIAL MATCH v START
                 Value.Num AS n -> RETURN Value{ Num: n };,
                 DEFAULT -> RETURN Value.Nil;
             END
@@ -901,7 +901,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Num: Float64, List: Value[] }
         FN test!() RETURNS Void ->
             result = Value{ Num: 1.0 };
-            MATCH result START
+            PARTIAL MATCH result START
                 Value.List AS items -> RETURN;,
                 DEFAULT -> RETURN;
             END
@@ -918,7 +918,7 @@ RSpec.describe ZigTranspiler do
         UNION Value { Num: Float64, List: Value[] }
         FN test!() RETURNS Void ->
             result = Value{ Num: 1.0 };
-            MATCH TAKES result START
+            PARTIAL MATCH TAKES result START
                 Value.List AS items -> RETURN;,
                 DEFAULT -> RETURN;
             END
@@ -1111,7 +1111,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         UNION Value { Nil, Symbol: String, List: Value[] }
         FN consume!(TAKES v: Value) RETURNS String ->
-            MATCH TAKES v START
+            PARTIAL MATCH TAKES v START
                 Value.Symbol AS s -> RETURN COPY s;,
                 DEFAULT -> RETURN "other";
             END
@@ -1257,7 +1257,7 @@ RSpec.describe ZigTranspiler do
         }
 
         FN getEnvId!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS Id<Env> ->
-          MATCH v START
+          PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoEnv = COPY tco.tcoEnv;
               RETURN tcoEnv;,
@@ -1287,7 +1287,7 @@ RSpec.describe ZigTranspiler do
         END
 
         FN resolveTco!(v: Value, MUTABLE pool: Env[8]@pool) RETURNS String @reentrant ->
-          MATCH v START
+          PARTIAL MATCH v START
             Value.Tco AS tco ->
               tcoAst = COPY tco.tcoAst;
               tcoEnv = COPY tco.tcoEnv;

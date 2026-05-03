@@ -92,7 +92,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 1 THEN
         -- + works on i64, f64, and strings
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.Str AS s1 -> RETURN Value{ Str: s1 + getStr(evaled[2]) };,
             Value.Int64Val AS ia ->
                 IF isInt64?(evaled[2]) THEN RETURN Value{ Int64Val: ia + getInt(evaled[2]) };
@@ -184,7 +184,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Number: parsed };
     END
     IF id == 32 THEN
-        MATCH evaled[1] START Value.Str -> RETURN Value.TrueVal;, DEFAULT -> RETURN Value.FalseVal; END
+        PARTIAL MATCH evaled[1] START Value.Str -> RETURN Value.TrueVal;, DEFAULT -> RETURN Value.FalseVal; END
         RETURN Value.FalseVal;
     END
     IF id == 33 THEN print(prStr(evaled[1], FALSE)); RETURN Value.Nil; END
@@ -235,7 +235,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 41 THEN
         -- contains?: list membership OR string substring
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS celems ->
                 FOR ci IN (0_i64 ..< celems.length()) DO
                     IF valEqual?(celems[ci], evaled[2]) THEN RETURN Value.TrueVal; END
@@ -283,7 +283,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         -- join(list, separator) -> string
         MUTABLE joined = "";
         sep = getStr(evaled[2]);
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS joinItems ->
                 FOR ji IN (0_i64 ..< joinItems.length()) DO
                     IF ji > 0 THEN joined = joined + sep; END
@@ -393,7 +393,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 34 THEN RETURN listRef(evaled[1], getInt(evaled[2])); END
     IF id == 35 THEN
         -- list-length: works on lists, typed arrays, AND strings
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.Str AS s -> RETURN Value{ Number: toFloat(s.length()) };,
             Value.TypedI64Arr AS iarr -> RETURN Value{ Int64Val: iarr.length() };,
             Value.TypedF64Arr AS farr -> RETURN Value{ Int64Val: farr.length() };,
@@ -403,7 +403,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 36 THEN
         -- list-push: return new list with element appended (preserves typed arrays)
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             -- The TypedI64Arr/TypedF64Arr variant payloads are slices
             -- ([]i64, []f64), which don't have .append(). The List
             -- variant is also stored as a slice once wrapped. Build a
@@ -465,7 +465,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         -- list-set!: return new list with element at idx replaced (functional update)
         setIdx = getInt(evaled[2]);
         newElem = COPY evaled[3];
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS items ->
                 MUTABLE newList: Value[]@list = List[];
                 FOR li IN (0_i64 ..< items.length()) DO
@@ -503,7 +503,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 63 THEN
         -- set-insert: add val to set (list) if not already present
         val = evaled[2];
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS selems ->
                 FOR si IN (0_i64 ..< selems.length()) DO
                     IF valEqual?(selems[si], val) THEN RETURN COPY evaled[1]; END
@@ -526,7 +526,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 64 THEN
         -- set-remove: remove val from set (list)
         val = evaled[2];
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS relems ->
                 MUTABLE rnew: Value[]@list = List[];
                 FOR ri IN (0_i64 ..< relems.length()) DO
@@ -611,7 +611,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 107 THEN
         -- list-pop: remove and return the last element, or Nil if empty.
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS lst ->
                 IF lst.length() == 0 THEN RETURN Value.Nil; END
                 last = COPY lst[lst.length() - 1];
@@ -639,7 +639,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 109 THEN
         -- slice(lst, start, end): lst[start..end] (exclusive on end).
         -- Supports List, TypedI64Arr, TypedF64Arr, and Str byte-slicing.
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS lst ->
                 MUTABLE s = getInt(evaled[2]);
                 MUTABLE e = getInt(evaled[3]);
@@ -683,11 +683,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         -- pool-live-count(lst): returns count of non-Nil entries. The VM
         -- models @pool as a list with removed slots set to Nil; the live
         -- count is the count of non-Nil entries.
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS poolLst ->
                 MUTABLE pcount: Int64 = 0;
                 FOR pk IN (0_i64 ..< poolLst.length()) DO
-                    MATCH poolLst[pk] START
+                    PARTIAL MATCH poolLst[pk] START
                         Value.Nil -> ,
                         DEFAULT -> pcount += 1;
                     END
@@ -698,7 +698,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     END
     IF id == 110 THEN
         -- slice-from(lst, start): lst[start..]. Same shape support as slice.
-        MATCH evaled[1] START
+        PARTIAL MATCH evaled[1] START
             Value.List AS lst ->
                 MUTABLE s = getInt(evaled[2]);
                 IF s < 0 THEN s = 0; END
@@ -750,7 +750,7 @@ FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@po
                 RETURN TRUE;
             END
             parentVal = env.vars["__p"] OR Value.Nil;
-            MATCH parentVal START
+            PARTIAL MATCH parentVal START
                 Value.EnvRef AS pid -> recurseTo = pid;,
                 DEFAULT -> recurseTo = NIL;
             END
@@ -764,7 +764,7 @@ END
 -- let body, lambda body) reassign ast/curEnv and continue instead of recursing.
 
 FN listRef(v: Value, idx: Int64) RETURNS Value ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.List AS items ->
             RETURN COPY items[idx];,
         Value.TypedI64Arr AS iarr ->
@@ -777,17 +777,17 @@ FN listRef(v: Value, idx: Int64) RETURNS Value ->
 END
 
 FN isVector?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Vector -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Vector -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN vecLen(v: Value) RETURNS Int64 ->
-    MATCH v START Value.Vector AS elems -> RETURN elems.length();, DEFAULT -> RETURN 0; END
+    PARTIAL MATCH v START Value.Vector AS elems -> RETURN elems.length();, DEFAULT -> RETURN 0; END
     RETURN 0;
 END
 
 FN vecRef(v: Value, idx: Int64) RETURNS Value ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Vector AS elems ->
             RETURN COPY elems[idx];,
         DEFAULT -> RETURN Value.Nil;
@@ -796,7 +796,7 @@ FN vecRef(v: Value, idx: Int64) RETURNS Value ->
 END
 
 FN vecSetSlot(v: Value, idx: Int64, newVal: Value) RETURNS Value ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Vector AS elems ->
             MUTABLE vsNew: Value[]@list = List[];
             FOR vsi IN (0_i64 ..< elems.length()) DO
@@ -811,12 +811,12 @@ END
 
 
 FN isPair?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Pair -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Pair -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN pairCar(v: Value) RETURNS Value ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Pair AS p ->
             RETURN COPY p.pairCar;,
         DEFAULT -> RETURN Value.Nil;
@@ -825,7 +825,7 @@ FN pairCar(v: Value) RETURNS Value ->
 END
 
 FN pairCdr(v: Value) RETURNS Value ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Pair AS p ->
             RETURN COPY p.pairCdr;,
         DEFAULT -> RETURN Value.Nil;
@@ -834,19 +834,19 @@ FN pairCdr(v: Value) RETURNS Value ->
 END
 
 FN isTco?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Tco -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Tco -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN getTcoAst(v: Value) RETURNS Value ->
-    MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoAst;, DEFAULT -> RETURN Value.Nil; END
+    PARTIAL MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoAst;, DEFAULT -> RETURN Value.Nil; END
     RETURN Value.Nil;
 END
 
 FN getTcoEnv!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
   REQUIRES pool: LOCKED
 ->
-    MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoEnv;, DEFAULT ->
+    PARTIAL MATCH v START Value.Tco AS tco -> RETURN COPY tco.tcoEnv;, DEFAULT ->
         WITH EXCLUSIVE pool AS p {
             dummy: Id<Env> = p.insert(Env{ vars: {} });
             RETURN dummy;
@@ -859,29 +859,29 @@ FN getTcoEnv!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
 END
 
 FN isError?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Error -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Error -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
 FN getErrMsg(v: Value) RETURNS String ->
-    MATCH v START Value.Error AS e -> RETURN COPY e.errMsg;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Error AS e -> RETURN COPY e.errMsg;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN getErrKind(v: Value) RETURNS String ->
-    MATCH v START Value.Error AS e -> RETURN COPY e.errKind;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Error AS e -> RETURN COPY e.errKind;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN getErrType(v: Value) RETURNS String ->
-    MATCH v START Value.Error AS e -> RETURN COPY e.errType;, DEFAULT -> RETURN ""; END
+    PARTIAL MATCH v START Value.Error AS e -> RETURN COPY e.errType;, DEFAULT -> RETURN ""; END
     RETURN "";
 END
 
 FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
 ->
-    MATCH catchExpr START
+    PARTIAL MATCH catchExpr START
         Value.List AS catchItems ->
             MUTABLE catchEnvIdHolder: ?Id<Env> = NIL;
             WITH EXCLUSIVE pool AS p {
@@ -903,7 +903,7 @@ FN handleCatch!(catchExpr: Value, errMsg: String, errKind: String, envId: Id<Env
 END
 
 FN isSymbol?(v: Value) RETURNS Bool ->
-    MATCH v START Value.Symbol -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
+    PARTIAL MATCH v START Value.Symbol -> RETURN TRUE;, DEFAULT -> RETURN FALSE; END
     RETURN FALSE;
 END
 
@@ -912,7 +912,7 @@ FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
   @reentrant
 ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Tco AS tco ->
             tcoAst = COPY tco.tcoAst;
             tcoEnv = COPY tco.tcoEnv;
@@ -928,7 +928,7 @@ FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RE
   REQUIRES pool: LOCKED
   @reentrant
 ->
-    MATCH TAKES ast START
+    PARTIAL MATCH TAKES ast START
         Value.Symbol AS sym ->
             RETURN envGet!(envId, sym, pool);,
         Value.List AS listItems ->
@@ -1101,14 +1101,14 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(listVal) THEN RETURN listVal; END
         fieldFn = eval!(COPY items[2], envId, pool);
         MUTABLE flat: Value[]@list = List[];
-        MATCH listVal START
+        PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR ui IN (0_i64 ..< srcItems.length()) DO
                     MUTABLE fArgs: Value[]@list = List[];
                     fArgs.append(COPY fieldFn); fArgs.append(COPY srcItems[ui]);
                     MUTABLE nested: Value = evalList!(fArgs, envId, pool);
                     nested = resolveTco!(nested, pool);
-                    MATCH nested START
+                    PARTIAL MATCH nested START
                         Value.List AS innerItems ->
                             FOR ni IN (0_i64 ..< innerItems.length()) DO
                                 flat.append(COPY innerItems[ni]);
@@ -1134,7 +1134,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(COPY items[2], envId, pool);
         MUTABLE groups: Value[]@list = List[];
-        MATCH listVal START
+        PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR gi IN (0_i64 ..< srcItems.length()) DO
                     MUTABLE kArgs: Value[]@list = List[];
@@ -1151,7 +1151,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         -- Add to existing group (rebuild pair with appended list)
                         existingList = pairCdr(groups[found]);
                         MUTABLE newGroupItems: Value[]@list = List[];
-                        MATCH existingList START
+                        PARTIAL MATCH existingList START
                             Value.List AS gl -> FOR gj IN (0_i64 ..< gl.length()) DO newGroupItems.append(COPY gl[gj]); END,
                             DEFAULT -> PASS;
                         END
@@ -1172,7 +1172,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         -- (assoc-get alist key) -> value or error if not found
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
-        MATCH alist START
+        PARTIAL MATCH alist START
             Value.List AS pairs ->
                 FOR ai IN (0_i64 ..< pairs.length()) DO
                     pKey = pairCar(pairs[ai]);
@@ -1188,7 +1188,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         startIdx = getInt(eval!(COPY items[2], envId, pool));
         endIdx = getInt(eval!(COPY items[3], envId, pool));
-        MATCH listVal START
+        PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 MUTABLE sliced: Value[]@list = List[];
                 FOR si IN (startIdx ..= endIdx) DO
@@ -1398,7 +1398,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(val) THEN RETURN val; END
         MUTABLE newPairs: Value[]@list = List[];
         MUTABLE replaced = FALSE;
-        MATCH alist START
+        PARTIAL MATCH alist START
             Value.TypedI64Arr AS iarr ->
                 MUTABLE newIarr: Int64[]@list = List[];
                 FOR asi IN (0_i64 ..< iarr.length()) DO
@@ -1428,7 +1428,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         MUTABLE adPairs: Value[]@list = List[];
-        MATCH alist START
+        PARTIAL MATCH alist START
             Value.List AS pairs ->
                 FOR ai IN (0_i64 ..< pairs.length()) DO
                     adKey = pairCar(pairs[ai]);
@@ -1442,7 +1442,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         -- (assoc-contains? alist key) -> bool
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
-        MATCH alist START
+        PARTIAL MATCH alist START
             Value.List AS pairs ->
                 FOR ai IN (0_i64 ..< pairs.length()) DO
                     acKey = pairCar(pairs[ai]);
@@ -1459,7 +1459,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "type-of" THEN
         -- (type-of expr) -> string describing the type
         val = eval!(COPY items[1], envId, pool);
-        MATCH val START
+        PARTIAL MATCH val START
             Value.Nil -> RETURN Value{ Str: "Nil" };,
             Value.TrueVal -> RETURN Value{ Str: "Bool" };,
             Value.FalseVal -> RETURN Value{ Str: "Bool" };,
@@ -1544,7 +1544,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE convertedF: Float64[]@list = List[];
-        MATCH listVal START
+        PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR ci IN (0_i64 ..< srcItems.length()) DO
                     convertedF.append(getNum(srcItems[ci]));
@@ -1573,7 +1573,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE converted: Int64[]@list = List[];
-        MATCH listVal START
+        PARTIAL MATCH listVal START
             Value.List AS srcItems ->
                 FOR ci IN (0_i64 ..< srcItems.length()) DO
                     converted.append(getInt(srcItems[ci]));
@@ -1587,7 +1587,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         -- (to-list typedArr) -> convert TypedI64Arr back to Value[] list
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
-        MATCH arrVal START
+        PARTIAL MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
                 MUTABLE untyped: Value[]@list = List[];
                 FOR ui IN (0_i64 ..< iarr.length()) DO
@@ -1606,7 +1606,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         newVal = eval!(COPY items[2], envId, pool);
         IF isError?(newVal) THEN RETURN newVal; END
         MUTABLE newArr: Int64[]@list = List[];
-        MATCH arrVal START
+        PARTIAL MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
                 FOR pi IN (0_i64 ..< iarr.length()) DO
                     newArr.append(iarr[pi]);
@@ -1620,7 +1620,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "native-sum" THEN
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
-        MATCH arrVal START
+        PARTIAL MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
                 result = nativeSum(iarr);
                 RETURN Value{ Int64Val: result };,
@@ -1631,7 +1631,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "native-sum-f64" THEN
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
-        MATCH arrVal START
+        PARTIAL MATCH arrVal START
             Value.TypedF64Arr AS farr ->
                 RETURN Value{ Number: nativeSumF64(farr) };,
             DEFAULT -> RETURN Value.Error{ errMsg: "native-sum-f64 requires typed Float64 array", errKind: "Type", errType: "" };
@@ -1643,9 +1643,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(aVal) THEN RETURN aVal; END
         bVal = eval!(COPY items[2], envId, pool);
         IF isError?(bVal) THEN RETURN bVal; END
-        MATCH aVal START
+        PARTIAL MATCH aVal START
             Value.TypedF64Arr AS fa ->
-                MATCH bVal START
+                PARTIAL MATCH bVal START
                     Value.TypedF64Arr AS fb ->
                         RETURN Value{ Number: nativeDot(fa, fb) };,
                     DEFAULT -> RETURN Value.Error{ errMsg: "native-dot requires two Float64 arrays", errKind: "Type", errType: "" };
@@ -1705,9 +1705,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(bVal) THEN RETURN bVal; END
         aCdr = pairCdr(aVal);
         bCdr = pairCdr(bVal);
-        MATCH aCdr START
+        PARTIAL MATCH aCdr START
             Value.TypedI64Arr AS ai ->
-                MATCH bCdr START
+                PARTIAL MATCH bCdr START
                     Value.TypedI64Arr AS bi ->
                         RETURN Value{ Int64Val: nativePointManhattan(ai, bi) };,
                     DEFAULT -> RETURN Value.Error{ errMsg: "expected TypedStructI64", errKind: "Type", errType: "" };
@@ -1726,7 +1726,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(dyVal) THEN RETURN dyVal; END
         tagVal = pairCar(sVal);
         sCdr = pairCdr(sVal);
-        MATCH sCdr START
+        PARTIAL MATCH sCdr START
             Value.TypedI64Arr AS si ->
                 MUTABLE trData: Int64[]@list = List[];
                 trData.append(si[0] + getInt(dxVal));
@@ -1741,7 +1741,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(arrVal) THEN RETURN arrVal; END
         needleVal = eval!(COPY items[2], envId, pool);
         IF isError?(needleVal) THEN RETURN needleVal; END
-        MATCH arrVal START
+        PARTIAL MATCH arrVal START
             Value.TypedI64Arr AS iarr ->
                 RETURN boolVal(nativeContains(iarr, getInt(needleVal)));,
             DEFAULT -> RETURN Value.Error{ errMsg: "native-contains requires typed Int64 array", errKind: "Type", errType: "" };
@@ -1792,7 +1792,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     ELSE_IF formName == "try" THEN
         -- (try expr (catch e handler))
         MUTABLE tryResult: Value = eval!(COPY items[1], envId, pool);
-        MATCH tryResult START
+        PARTIAL MATCH tryResult START
             Value.Error AS e ->
                 RETURN handleCatch!(items[2], e.errMsg, e.errKind, envId, pool);,
             DEFAULT -> RETURN tryResult;
@@ -1823,7 +1823,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         idx = getInt(idxVal);
         MUTABLE existingVec = envGet!(envId, vecName, pool);
         MUTABLE newVec: Value[]@list = List[];
-        MATCH existingVec START
+        PARTIAL MATCH existingVec START
             Value.Vector AS oldVec ->
                 FOR vi IN (0_i64 ..< oldVec.length()) DO
                     IF vi == idx THEN
@@ -1842,7 +1842,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         lraName = getSymName(items[1]);
         lraIdx = getInt(eval!(COPY items[2], envId, pool));
         lraCurrent = envGet!(envId, lraName, pool);
-        MATCH lraCurrent START
+        PARTIAL MATCH lraCurrent START
             Value.List AS lraElems ->
                 IF lraIdx < 0 || lraIdx >= lraElems.length() THEN RETURN Value.Nil; END
                 lraRemoved = COPY lraElems[lraIdx];
@@ -1877,7 +1877,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         -- (stream-next! var) - advance stream: return head, update var to tail
         snName = getSymName(items[1]);
         snCurrent = envGet!(envId, snName, pool);
-        MATCH snCurrent START
+        PARTIAL MATCH snCurrent START
             Value.List AS snElems ->
                 IF snElems.length() == 0 THEN RETURN Value.Nil; END
                 snHead = COPY snElems[0];
@@ -1891,7 +1891,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
 
     ELSE_IF formName == "let*" || formName == "let" THEN
-        MATCH items[1] START
+        PARTIAL MATCH items[1] START
             Value.List AS binds ->
                 MUTABLE letIdHolder: ?Id<Env> = NIL;
                 WITH EXCLUSIVE pool AS p {
@@ -1904,7 +1904,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                 IF letIdHolder AS letId THEN
                     IF binds.length() > 0 && isList?(binds[0]) THEN
                         FOR bi IN (0_i64 ..< binds.length()) DO
-                            MATCH binds[bi] START
+                            PARTIAL MATCH binds[bi] START
                                 Value.List AS pair ->
                                     bName = getSymName(pair[0]);
                                     bVal = eval!(COPY pair[1], letId, pool);
@@ -1935,7 +1935,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "fn*" || formName == "lambda" THEN
-        MATCH items[1] START
+        PARTIAL MATCH items[1] START
             Value.List AS pnames ->
                 MUTABLE lambdaBody: Value = Value.Nil;
                 IF items.length() > 2 THEN lambdaBody = COPY items[2]; END
@@ -2046,7 +2046,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
 
         IF isLambda?(f) THEN
-            MATCH f START
+            PARTIAL MATCH f START
                 Value.Lambda AS lam ->
                     MUTABLE callIdHolder: ?Id<Env> = NIL;
                     WITH EXCLUSIVE pool AS p {
@@ -2387,7 +2387,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
         cidx = consts.length(); consts.append(COPY ast);
         ops.append(Value{ Number: 0.0 }); ops.append(Value{ Number: toFloat(cidx) });
     ELSE
-        MATCH ast START Value.List AS items ->
+        PARTIAL MATCH ast START Value.List AS items ->
         IF items.length() > 0 THEN
             formName = getSymName(items[0]);
 
@@ -2566,13 +2566,37 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     -- Each exec! call has its own table -- spawned fibers can recurse
     -- into exec! and each call has its own bookkeeping.
     MUTABLE futureTable: ~Value[]@list = List[];
+    -- Memoize resolved Promise values: `~T@shared` semantics in CLEAR
+    -- guarantee multi-NEXT idempotence, but BC stores plain `Promise(T)`
+    -- handles in futureTable. Promise.next() destroys its heap-allocated
+    -- Inner on the first call (zig/lib/data-structures.zig:505); a
+    -- second next() on the same handle reads `inner.wg.wait()` from
+    -- freed memory (UAF, then double-free of Inner on the second
+    -- destroy). DebugAllocator catches both -- the BC test runner
+    -- surfaces it as `free(): double free detected in tcache 2`.
+    -- Cache the resolved Value here so AWAIT (and the inf-stream drain
+    -- loop) can short-circuit on repeat consumption. Keyed by the
+    -- futureTable index as a string (HashMap<Int64> isn't a thing).
+    MUTABLE futureResolved: HashMap<Value> = {};
+    -- Channel envIds + future indices for producer-fiber streams
+    -- (~T[INF] BG STREAM). STREAM_SPAWN populates; the exec! shutdown
+    -- loop closes each channel + drains the matching future so the
+    -- producer fiber sees closed=true on its next yield, terminates,
+    -- and joins cleanly before pool goes out of scope (otherwise the
+    -- fiber wakes up to a freed pool and segfaults). HashMap-keyed
+    -- stash so the storage survives the WHILE loop's frame-mark
+    -- rewinds (a parallel `Int64[]@list` was getting its first slot
+    -- clobbered after the first grow).
+    MUTABLE streamChanByIdx: HashMap<Value> = {};
+    MUTABLE streamFidByIdx: HashMap<Value> = {};
+    MUTABLE streamCount: Int64 = 0_i64;
 
     WHILE running && ip < ops.length() DO
         MUTABLE pv: Value = Value.Nil;
         op = ops[ip];
         ip += 1;
 
-        MATCH op START
+        PARTIAL MATCH op START
             0 ->  -- LOAD_CONST
                 idx = ops[ip]; ip += 1;
                 pv = COPY consts[idx];
@@ -2589,7 +2613,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             3 ->  -- POP
                 sp -= 1;,
             4 ->  -- ADD (polymorphic)
-                MATCH stack[sp - 2] START
+                PARTIAL MATCH stack[sp - 2] START
                     Value.Str AS s1 ->
                         pv = Value{ Str: COPY (s1 + getStr(stack[sp - 1])) };,
                     Value.Int64Val AS ia ->
@@ -2681,7 +2705,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                     sp += 1;
                 ELSE_IF isBCFn?(fnVal) THEN
-                    MATCH fnVal START
+                    PARTIAL MATCH fnVal START
                         Value.BCFn AS bcfn ->
                             -- BC_CALL semantics inline: save frame, copy args
                             -- (skip fnVal at sp-argc-1) into slots, jump.
@@ -2707,7 +2731,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             sp += 1;
                     END
                 ELSE_IF isLambda?(fnVal) THEN
-                    MATCH fnVal START
+                    PARTIAL MATCH fnVal START
                         Value.Lambda AS lam ->
                             MUTABLE bcCallIdHolder: ?Id<Env> = NIL;
                             WITH EXCLUSIVE pool AS p {
@@ -2933,7 +2957,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     ELSE_IF eql?(dbgCmd, ":locals") || eql?(dbgCmd, ":l") THEN
                         print("  slots:");
                         FOR di IN (0_i64 ..< 256) DO
-                            MATCH slots[di] START
+                            PARTIAL MATCH slots[di] START
                                 Value.Nil ->,
                                 DEFAULT ->
                                     print("    [" + toString(di) + "] " + prStr(slots[di], TRUE));
@@ -2995,7 +3019,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             63 -> -- STRUCT_FIELD [idx] (pop Value.Vector, push fields[idx])
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
-                MATCH stack[sp] START
+                PARTIAL MATCH stack[sp] START
                     Value.Vector AS fields -> pv = COPY fields[fieldIdx];,
                     DEFAULT -> pv = Value.Nil;
                 END
@@ -3004,7 +3028,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             64 -> -- TYPED_FIELD_I64 [idx] (pop TypedI64Arr, push Int64Val)
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
-                MATCH stack[sp] START
+                PARTIAL MATCH stack[sp] START
                     Value.TypedI64Arr AS iarr -> pv = Value{ Int64Val: iarr[fieldIdx] };,
                     DEFAULT -> pv = Value.Nil;
                 END
@@ -3013,7 +3037,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             65 -> -- TYPED_FIELD_F64 [idx] (pop TypedF64Arr, push Number)
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
-                MATCH stack[sp] START
+                PARTIAL MATCH stack[sp] START
                     Value.TypedF64Arr AS farr -> pv = Value{ Number: farr[fieldIdx] };,
                     DEFAULT -> pv = Value.Nil;
                 END
@@ -3031,7 +3055,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1; mapPutVal = COPY stack[sp];
                 sp -= 1; mapPutKey = COPY stack[sp];
                 sp -= 1; mapPutRef = COPY stack[sp];
-                MATCH mapPutRef START
+                PARTIAL MATCH mapPutRef START
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
@@ -3046,7 +3070,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             68 -> -- MAP_GET: pop map, key; push value or Nil
                 sp -= 1; mapGetKey = COPY stack[sp];
                 sp -= 1; mapGetRef = COPY stack[sp];
-                MATCH mapGetRef START
+                PARTIAL MATCH mapGetRef START
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
@@ -3060,7 +3084,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             69 -> -- MAP_CONTAINS: pop map, key; push bool
                 sp -= 1; mapCKey = COPY stack[sp];
                 sp -= 1; mapCRef = COPY stack[sp];
-                MATCH mapCRef START
+                PARTIAL MATCH mapCRef START
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
@@ -3074,7 +3098,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             70 -> -- MAP_DELETE: pop map, key; push Nil
                 sp -= 1; mapDelKey = COPY stack[sp];
                 sp -= 1; mapDelRef = COPY stack[sp];
-                MATCH mapDelRef START
+                PARTIAL MATCH mapDelRef START
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
@@ -3089,7 +3113,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             71 -> -- MAP_KEYS: pop map; push List of Str keys
                 sp -= 1; mapKRef = COPY stack[sp];
                 MUTABLE mapKeyList: Value[]@list = List[];
-                MATCH mapKRef START
+                PARTIAL MATCH mapKRef START
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
@@ -3107,7 +3131,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             72 -> -- MAP_LENGTH: pop map; push Int64Val(size)
                 sp -= 1; mapLRef = COPY stack[sp];
                 MUTABLE mapLen: Int64 = 0;
-                MATCH mapLRef START
+                PARTIAL MATCH mapLRef START
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
@@ -3122,7 +3146,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             73 -> -- SET_INSERT: pop set, value; insert using prStr key; push Nil
                 sp -= 1; setInsVal = COPY stack[sp];
                 sp -= 1; setInsRef = COPY stack[sp];
-                MATCH setInsRef START
+                PARTIAL MATCH setInsRef START
                     Value.MapRef AS setId ->
                         setKey = prStr(setInsVal, TRUE);
                         WITH EXCLUSIVE pool AS p {
@@ -3138,7 +3162,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             74 -> -- SET_CONTAINS: pop set, value; push bool
                 sp -= 1; setChkVal = COPY stack[sp];
                 sp -= 1; setChkRef = COPY stack[sp];
-                MATCH setChkRef START
+                PARTIAL MATCH setChkRef START
                     Value.MapRef AS setId ->
                         setChkKey = prStr(setChkVal, TRUE);
                         WITH EXCLUSIVE pool AS p {
@@ -3153,7 +3177,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             75 -> -- SET_REMOVE: pop set, value; remove; push Nil
                 sp -= 1; setRmVal = COPY stack[sp];
                 sp -= 1; setRmRef = COPY stack[sp];
-                MATCH setRmRef START
+                PARTIAL MATCH setRmRef START
                     Value.MapRef AS setId ->
                         setRmKey = prStr(setRmVal, TRUE);
                         WITH EXCLUSIVE pool AS p {
@@ -3169,7 +3193,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             76 -> -- SET_TOLIST: pop set; push List of values
                 sp -= 1; setTlRef = COPY stack[sp];
                 MUTABLE setTlList: Value[]@list = List[];
-                MATCH setTlRef START
+                PARTIAL MATCH setTlRef START
                     Value.MapRef AS setId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[setId] AS setEnv THEN
@@ -3305,11 +3329,14 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            83 -> -- AWAIT: pop Pair("__future__", id) and NEXT the
-                  -- underlying BG fiber stashed in futureTable[id].
-                  -- Identity on non-Pair values (legacy callers).
+            83 -> -- AWAIT: pop the top value and resolve any embedded futures.
+                  -- (a) Pair("__future__", id): NEXT futureTable[id], push value.
+                  -- (b) Value.List: each item that is a future Pair gets awaited;
+                  --     non-future items pass through. The result is a value list,
+                  --     used by `NEXT futures` (~T[]@list await-all).
+                  -- (c) Anything else: identity (legacy non-future callers).
                 sp -= 1; awaitVal = COPY stack[sp];
-                MATCH awaitVal START
+                PARTIAL MATCH awaitVal START
                     Value.Pair AS fp ->
                         pcar = COPY fp.pairCar;
                         -- The marker is constructed as Value{ Symbol: "__future__" }
@@ -3320,13 +3347,51 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         IF getSymName(pcar) == "__future__" THEN
                             fid = getInt(fp.pairCdr);
                             IF fid >= 0_i64 && fid < futureTable.length() THEN
-                                pv = NEXT futureTable[fid];
+                                fkey = fid.toString();
+                                IF futureResolved[fkey] AS cached THEN
+                                    pv = COPY cached;
+                                ELSE
+                                    pv = NEXT futureTable[fid];
+                                    futureResolved[fkey] = COPY pv;
+                                END
                             ELSE
                                 pv = COPY fp.pairCdr;
                             END
                         ELSE
                             pv = COPY fp.pairCdr;
                         END,
+                    Value.List AS lstItems ->
+                        -- Await-all over a list of futures (~T[]@list). For each
+                        -- element, if it's a Pair("__future__", id) marker, look
+                        -- up the future and NEXT it; otherwise keep the element
+                        -- as-is. Returns a Value.List of resolved values.
+                        MUTABLE awaitedList: Value[]@list = List[];
+                        FOR aiAll IN (0_i64 ..< lstItems.length()) DO
+                            aliVal = COPY lstItems[aiAll];
+                            PARTIAL MATCH aliVal START
+                                Value.Pair AS aliP ->
+                                    aliCar = COPY aliP.pairCar;
+                                    IF getSymName(aliCar) == "__future__" THEN
+                                        aliFid = getInt(aliP.pairCdr);
+                                        IF aliFid >= 0_i64 && aliFid < futureTable.length() THEN
+                                            aliKey = aliFid.toString();
+                                            IF futureResolved[aliKey] AS aliCached THEN
+                                                awaitedList.append(COPY aliCached);
+                                            ELSE
+                                                aliRes = NEXT futureTable[aliFid];
+                                                futureResolved[aliKey] = COPY aliRes;
+                                                awaitedList.append(COPY aliRes);
+                                            END
+                                        ELSE
+                                            awaitedList.append(COPY aliP.pairCdr);
+                                        END
+                                    ELSE
+                                        awaitedList.append(COPY aliVal);
+                                    END,
+                                DEFAULT -> awaitedList.append(COPY aliVal);
+                            END
+                        END
+                        pv = Value{ List: awaitedList };,
                     DEFAULT -> pv = COPY awaitVal;
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
@@ -3360,7 +3425,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 -- Does NOT pop the error: the caller's code typically wants
                 -- both the kind dispatch and a chance to extract msg later.
                 getErrKindRef = COPY stack[sp - 1];
-                MATCH getErrKindRef START
+                PARTIAL MATCH getErrKindRef START
                     Value.Error AS gek -> pv = Value{ Str: COPY gek.errKind };,
                     DEFAULT -> pv = Value{ Str: "" };
                 END
@@ -3368,7 +3433,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             108 -> -- GET_ERR_TYPE (peek top Value.Error, push Value.Str of errType)
                 getErrTypeRef = COPY stack[sp - 1];
-                MATCH getErrTypeRef START
+                PARTIAL MATCH getErrTypeRef START
                     Value.Error AS get1 -> pv = Value{ Str: COPY get1.errType };,
                     DEFAULT -> pv = Value{ Str: "" };
                 END
@@ -3376,7 +3441,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;,
             109 -> -- GET_ERR_MSG (peek top Value.Error, push Value.Str of errMsg)
                 getErrMsgRef = COPY stack[sp - 1];
-                MATCH getErrMsgRef START
+                PARTIAL MATCH getErrMsgRef START
                     Value.Error AS gem -> pv = Value{ Str: COPY gem.errMsg };,
                     DEFAULT -> pv = Value{ Str: "" };
                 END
@@ -3386,7 +3451,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- mutates error.errKind, leaves error on top. For OR EXIT.
                 sp -= 1; eskKind = getStr(COPY stack[sp]);
                 eskRef = COPY stack[sp - 1];
-                MATCH eskRef START
+                PARTIAL MATCH eskRef START
                     Value.Error AS eske ->
                         stack[sp - 1] = Value.Error{
                             errMsg: COPY eske.errMsg,
@@ -3398,7 +3463,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             111 -> -- ERR_SET_TYPE (pop new_type, mutate error.errType under it)
                 sp -= 1; estType = getStr(COPY stack[sp]);
                 estRef = COPY stack[sp - 1];
-                MATCH estRef START
+                PARTIAL MATCH estRef START
                     Value.Error AS este ->
                         stack[sp - 1] = Value.Error{
                             errMsg: COPY este.errMsg,
@@ -3410,7 +3475,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             112 -> -- ERR_SET_MSG (pop new_msg, mutate error.errMsg under it)
                 sp -= 1; esmMsg = getStr(COPY stack[sp]);
                 esmRef = COPY stack[sp - 1];
-                MATCH esmRef START
+                PARTIAL MATCH esmRef START
                     Value.Error AS esme ->
                         stack[sp - 1] = Value.Error{
                             errMsg: COPY esmMsg,
@@ -3435,7 +3500,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 MUTABLE lraNew: Value[]@list = List[];
                 MUTABLE lraRemoved: Value = Value.Nil;
-                MATCH lraSrc START
+                PARTIAL MATCH lraSrc START
                     Value.List AS lraItems ->
                         FOR lraK IN (0_i64 ..< lraItems.length()) DO
                             IF lraK == lraIdx THEN
@@ -3457,7 +3522,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 1;
                 MUTABLE lplNew: Value[]@list = List[];
                 MUTABLE lplPopped: Value = Value.Nil;
-                MATCH lplSrc START
+                PARTIAL MATCH lplSrc START
                     Value.List AS lplItems ->
                         IF lplItems.length() > 0 THEN
                             FOR lplK IN (0_i64 ..< lplItems.length() - 1) DO
@@ -3475,7 +3540,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
             95 -> -- MAP_VALUES: pop map; push List of Value values.
                 sp -= 1; mapVRef = COPY stack[sp];
                 MUTABLE mapValList: Value[]@list = List[];
-                MATCH mapVRef START
+                PARTIAL MATCH mapVRef START
                     Value.MapRef AS mapId ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[mapId] AS mapEnv THEN
@@ -3505,7 +3570,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                   -- cell value, else Nil. Identity on non-Weak values so
                   -- RESOLVE on a value that wasn't LINK'd is a passthrough.
                 sp -= 1; wkRs = COPY stack[sp];
-                MATCH wkRs START
+                PARTIAL MATCH wkRs START
                     Value.Weak AS wkRsIdx ->
                         IF weakAlive[wkRsIdx] THEN
                             pv = COPY weakCells[wkRsIdx];
@@ -3543,7 +3608,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- that only conditionally hold Boxed). Push cell value.
                 sp -= 1; blRef = COPY stack[sp];
                 pv = COPY blRef;
-                MATCH blRef START
+                PARTIAL MATCH blRef START
                     Value.Boxed AS blEnvId ->
                         WITH EXCLUSIVE pool AS blP {
                             IF blP[blEnvId] AS blEnv THEN
@@ -3562,7 +3627,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- For non-Boxed top, drop both (no-op write).
                 sp -= 1; bsRef = COPY stack[sp];
                 sp -= 1; bsVal = COPY stack[sp];
-                MATCH bsRef START
+                PARTIAL MATCH bsRef START
                     Value.Boxed AS bsEnvId ->
                         WITH EXCLUSIVE pool AS bsP {
                             IF bsP[bsEnvId] AS bsEnv THEN
@@ -3577,7 +3642,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 lpfSlot = ops[ip]; ip += 1;
                 lpfList = COPY slots[lpfSlot];
                 pv = Value.Nil;
-                MATCH lpfList START
+                PARTIAL MATCH lpfList START
                     Value.List AS lpfElems ->
                         IF lpfElems.length() > 0 THEN
                             pv = COPY lpfElems[0];
@@ -3619,12 +3684,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 ssxSlot = ops[ip]; ip += 1;
                 ssxHandle = COPY slots[ssxSlot];
                 pv = Value.Nil;
-                MATCH ssxHandle START
+                PARTIAL MATCH ssxHandle START
                     Value.SplitStream AS ssxH ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[ssxH.splitBufId] AS ssxBufEnv THEN
                                 ssxBuf = ssxBufEnv.vars["b"] OR Value.Nil;
-                                MATCH ssxBuf START
+                                PARTIAL MATCH ssxBuf START
                                     Value.List AS ssxElems ->
                                         IF ssxH.splitCursor < ssxElems.length() THEN
                                             pv = COPY ssxElems[ssxH.splitCursor];
@@ -3645,7 +3710,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- with the same bufId and current cursor. Independent reader.
                 sp -= 1; sscSrc = COPY stack[sp];
                 pv = Value.Nil;
-                MATCH sscSrc START
+                PARTIAL MATCH sscSrc START
                     Value.SplitStream AS sscH ->
                         pv = Value.SplitStream{
                             splitBufId: sscH.splitBufId,
@@ -3659,17 +3724,19 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- lock on slots[slot_idx]. The slot holds a Value.Boxed
                    -- (envId); the lock state lives in pool[envId].vars["__locked"].
                    -- Spin via cooperative sleep(1) until the field is Nil,
-                   -- then set TrueVal. On timeout, push Value.Error with
-                   -- kind=Transient, errType=LockTimeout (the user's
-                   -- ON LockTimeout clause maps via IS_ERR + kind checks).
+                   -- then set TrueVal. ALWAYS pushes a result so the caller
+                   -- can dispatch deterministically: Value.TrueVal on success,
+                   -- Value.Error{errType=LockTimeout} on timeout. The bc_emitter
+                   -- checks IS_ERR to decide the success/error path.
                 lockSlot = ops[ip]; ip += 1;
                 lockTimeoutMs = ops[ip]; ip += 1;
                 lockBoxVal = COPY slots[lockSlot];
                 MUTABLE lockEnvIdHolder: ?Id<Env> = NIL;
-                MATCH lockBoxVal START
+                PARTIAL MATCH lockBoxVal START
                     Value.Boxed AS bid -> lockEnvIdHolder = bid;,
                     DEFAULT -> PASS;
                 END
+                MUTABLE lockResult: Value = Value.TrueVal;
                 IF lockEnvIdHolder AS lockEid THEN
                     MUTABLE acquired = FALSE;
                     MUTABLE timedOut = FALSE;
@@ -3679,7 +3746,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             IF p[lockEid] AS lenv THEN
                                 MUTABLE isUnlocked = FALSE;
                                 IF lenv.vars["__locked"] AS lockVal THEN
-                                    MATCH lockVal START
+                                    PARTIAL MATCH lockVal START
                                         Value.Nil -> isUnlocked = TRUE;,
                                         DEFAULT -> PASS;
                                     END
@@ -3703,21 +3770,21 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         END
                     END
                     IF timedOut THEN
-                        pv = Value.Error{
+                        lockResult = Value.Error{
                             errMsg: "lock acquire timeout",
                             errKind: "Transient",
                             errType: "LockTimeout"
                         };
-                        IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
-                        sp += 1;
                     END
-                END,
+                END
+                IF sp >= stack.length() THEN stack.append(lockResult); ELSE stack[sp] = lockResult; END
+                sp += 1;,
             117 -> -- LOCK_RELEASE [slot_idx]: clear the per-resource lock
                    -- on the Box held in slots[slot_idx]. Idempotent when
                    -- the slot isn't a Box (e.g., acquire-failed paths).
                 relSlot = ops[ip]; ip += 1;
                 relBoxVal = COPY slots[relSlot];
-                MATCH relBoxVal START
+                PARTIAL MATCH relBoxVal START
                     Value.Boxed AS rid ->
                         WITH EXCLUSIVE pool AS p {
                             IF p[rid] AS renv THEN
@@ -3731,9 +3798,216 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                    -- yield point that lets other BG fibers progress.
                 isp -= 1; sleepMs = istack[isp];
                 sleep(sleepMs);,
+            119 -> -- STREAM_SPAWN [entry_ip] [argc]: allocate a rendezvous
+                   -- channel, spawn a producer fiber that runs exec! from
+                   -- entry_ip with the channel as arg 0 followed by `argc`
+                   -- captures pulled from the value stack. Push
+                   -- Value.Channel{envId} onto the value stack.
+                   --
+                   -- The channel cell is initialized has=Nil, closed=Nil.
+                   -- Producer YIELD spins until has=Nil, then sets
+                   -- v=val, has=TrueVal. Consumer NEXT spins until
+                   -- has=TrueVal (or closed=TrueVal), takes v, sets
+                   -- has=Nil. Both block via cooperative sleep(1).
+                strmEntry = ops[ip]; ip += 1;
+                strmArgc  = ops[ip]; ip += 1;
+                MUTABLE strmEnv: Env = Env{ vars: {} };
+                strmEnv.vars["has"]    = Value.Nil;
+                strmEnv.vars["closed"] = Value.Nil;
+                MUTABLE strmEnvIdHolder: ?Id<Env> = NIL;
+                WITH EXCLUSIVE pool AS strmP { strmEnvIdHolder = strmP.insert(strmEnv); }
+                IF strmEnvIdHolder AS strmEid THEN
+                    strmChan = Value{ Channel: strmEid };
+                    -- Build captures: [channel, ...argc captures from stack].
+                    MUTABLE strmCaps: Value[]@list = List[];
+                    strmCaps.append(COPY strmChan);
+                    FOR strmI IN (0_i64 ..< strmArgc) DO
+                        strmCaps.append(COPY stack[sp - strmArgc + strmI]);
+                    END
+                    sp -= strmArgc;
+                    strmFut: ~Value = BG {
+                        exec!(COPY ops, COPY consts, curEnv, pool, strmEntry, GIVE strmCaps);
+                    };
+                    -- Stash the future so it isn't dropped (fiber keeps
+                    -- running until it self-terminates on STREAM_CLOSE).
+                    sFid = futureTable.length();
+                    futureTable.append(strmFut);
+                    streamKey = streamCount.toString();
+                    streamChanByIdx[streamKey] = COPY strmChan;
+                    streamFidByIdx[streamKey] = Value{ Int64Val: sFid };
+                    streamCount = streamCount + 1_i64;
+                    pv = strmChan;
+                ELSE
+                    pv = Value.Nil;
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            120 -> -- STREAM_YIELD [chan_slot]: pop value from vstack, write
+                   -- to channel.v, set channel.has=TrueVal. Spin (sleep(1))
+                   -- until channel.has=Nil so the consumer has consumed
+                   -- the previous value. If channel.closed=TrueVal, drop
+                   -- the value and exit the producer fiber via FIBER_RET.
+                yldChanSlot = ops[ip]; ip += 1;
+                sp -= 1; yldVal = COPY stack[sp];
+                yldChanRef = COPY slots[yldChanSlot];
+                MUTABLE yldEnvIdHolder: ?Id<Env> = NIL;
+                PARTIAL MATCH yldChanRef START
+                    Value.Channel AS yldEid -> yldEnvIdHolder = yldEid;,
+                    DEFAULT -> PASS;
+                END
+                IF yldEnvIdHolder AS yldEid THEN
+                    MUTABLE yldDone = FALSE;
+                    MUTABLE yldClosed = FALSE;
+                    WHILE !yldDone DO
+                        WITH EXCLUSIVE pool AS yldP {
+                            IF yldP[yldEid] AS yldEnv THEN
+                                MUTABLE yldHasFlag = FALSE;
+                                MUTABLE yldClosedFlag = FALSE;
+                                IF yldEnv.vars["has"] AS yldHasV THEN
+                                    PARTIAL MATCH yldHasV START
+                                        Value.TrueVal -> yldHasFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF yldEnv.vars["closed"] AS yldClV THEN
+                                    PARTIAL MATCH yldClV START
+                                        Value.TrueVal -> yldClosedFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF yldClosedFlag THEN
+                                    yldClosed = TRUE;
+                                    yldDone = TRUE;
+                                ELSE_IF !yldHasFlag THEN
+                                    yldEnv.vars["v"]   = COPY yldVal;
+                                    yldEnv.vars["has"] = Value.TrueVal;
+                                    yldDone = TRUE;
+                                END
+                            ELSE
+                                yldDone = TRUE;
+                                yldClosed = TRUE;
+                            END
+                        }
+                        IF !yldDone THEN
+                            yldSleepArg: Int64 = 1_i64;
+                            sleep(yldSleepArg);
+                        END
+                    END
+                    IF yldClosed THEN
+                        -- Consumer dropped the channel; terminate the
+                        -- producer fiber. The eventual FIBER_RET below
+                        -- exits the exec! loop cleanly.
+                        running = FALSE;
+                        fiberReturned = TRUE;
+                        fiberRetVal = Value.Nil;
+                    END
+                END,
+            121 -> -- STREAM_NEXT [chan_slot]: spin until channel.has=TrueVal
+                   -- (or channel.closed=TrueVal). Take v, set has=Nil, push v.
+                   -- On closed && !has, push Nil to signal the consumer
+                   -- the stream is exhausted (rare in practice; consumers
+                   -- bound the read with LIMIT/REDUCE/etc.).
+                nxtChanSlot = ops[ip]; ip += 1;
+                nxtChanRef = COPY slots[nxtChanSlot];
+                MUTABLE nxtEnvIdHolder: ?Id<Env> = NIL;
+                PARTIAL MATCH nxtChanRef START
+                    Value.Channel AS nxtEid -> nxtEnvIdHolder = nxtEid;,
+                    DEFAULT -> PASS;
+                END
+                pv = Value.Nil;
+                IF nxtEnvIdHolder AS nxtEid THEN
+                    MUTABLE nxtDone = FALSE;
+                    WHILE !nxtDone DO
+                        WITH EXCLUSIVE pool AS nxtP {
+                            IF nxtP[nxtEid] AS nxtEnv THEN
+                                MUTABLE nxtHasFlag = FALSE;
+                                MUTABLE nxtClosedFlag = FALSE;
+                                IF nxtEnv.vars["has"] AS nxtHasV THEN
+                                    PARTIAL MATCH nxtHasV START
+                                        Value.TrueVal -> nxtHasFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF nxtEnv.vars["closed"] AS nxtClV THEN
+                                    PARTIAL MATCH nxtClV START
+                                        Value.TrueVal -> nxtClosedFlag = TRUE;,
+                                        DEFAULT -> PASS;
+                                    END
+                                END
+                                IF nxtHasFlag THEN
+                                    IF nxtEnv.vars["v"] AS nxtStored THEN
+                                        pv = COPY nxtStored;
+                                    END
+                                    nxtEnv.vars["has"] = Value.Nil;
+                                    nxtDone = TRUE;
+                                ELSE_IF nxtClosedFlag THEN
+                                    nxtDone = TRUE;
+                                END
+                            ELSE
+                                nxtDone = TRUE;
+                            END
+                        }
+                        IF !nxtDone THEN
+                            nxtSleepArg: Int64 = 1_i64;
+                            sleep(nxtSleepArg);
+                        END
+                    END
+                END
+                IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
+                sp += 1;,
+            122 -> -- STREAM_CLOSE [chan_slot]: set channel.closed=TrueVal.
+                   -- Wakes any waiting STREAM_YIELD (producer self-terminates)
+                   -- or STREAM_NEXT (consumer gets Nil). Idempotent.
+                clsChanSlot = ops[ip]; ip += 1;
+                clsChanRef = COPY slots[clsChanSlot];
+                PARTIAL MATCH clsChanRef START
+                    Value.Channel AS clsEid ->
+                        WITH EXCLUSIVE pool AS clsP {
+                            IF clsP[clsEid] AS clsEnv THEN
+                                clsEnv.vars["closed"] = Value.TrueVal;
+                            END
+                        },
+                    DEFAULT -> PASS;
+                END,
             DEFAULT ->
                 running = FALSE;
         END
+    END
+
+    -- Drain producer-fiber streams. STREAM_CLOSE on each channel wakes
+    -- the producer's blocked YIELD (it sees closed=TrueVal and exits).
+    -- Then NEXT each future to join the fiber so the BG runtime can
+    -- reclaim its stack BEFORE pool goes out of scope. Without this,
+    -- the producer fiber wakes after main has returned and crashes
+    -- trying to acquire the (now-freed) pool mutex.
+    --
+    -- HashMap-keyed drain.
+    MUTABLE smI: Int64 = 0_i64;
+    WHILE smI < streamCount DO
+        smKey = smI.toString();
+        IF streamChanByIdx[smKey] AS smChan THEN
+            PARTIAL MATCH smChan START
+                Value.Channel AS smEid ->
+                    WITH EXCLUSIVE pool AS smP {
+                        IF smP[smEid] AS smEnv THEN
+                            smEnv.vars["closed"] = Value.TrueVal;
+                        END
+                    },
+                DEFAULT -> PASS;
+            END
+        END
+        smI = smI + 1_i64;
+    END
+    smI = 0_i64;
+    WHILE smI < streamCount DO
+        smKey = smI.toString();
+        IF streamFidByIdx[smKey] AS smFidV THEN
+            smFid = getInt(smFidV);
+            IF smFid >= 0_i64 && smFid < futureTable.length() THEN
+                smDrained = NEXT futureTable[smFid];
+            END
+        END
+        smI = smI + 1_i64;
     END
 
     -- FIBER_RET landed: return the explicit fiber value.

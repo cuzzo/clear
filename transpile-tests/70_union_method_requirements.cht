@@ -14,7 +14,7 @@ UNION Shape {
 -- Satisfy both method requirements with concrete implementations.
 FN area(s: Shape) RETURNS Float64 ->
   MUTABLE result = 0.0;
-  MATCH IFF s START
+  MATCH s START
     Shape.Circle    AS ci -> result = 3.14159 * ci.radius * ci.radius;,
     Shape.Rectangle AS ri -> result = ri.width * ri.height;,
     Shape.Point            -> result = 0.0;
@@ -24,7 +24,7 @@ END
 
 FN perimeter(s: Shape) RETURNS Float64 ->
   MUTABLE result = 0.0;
-  MATCH IFF s START
+  MATCH s START
     Shape.Circle    AS ci -> result = 2.0 * 3.14159 * ci.radius;,
     Shape.Rectangle AS ri -> result = 2.0 * (ri.width + ri.height);,
     Shape.Point            -> result = 0.0;

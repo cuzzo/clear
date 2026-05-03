@@ -305,7 +305,13 @@ def transpile_cache_key(source_path:, mode:, transpile_flag:, source_text:)
   ].join("\0"))
 end
 
-def transpile_cached(source_path:, mode:, transpile_flag:, source_text:, force: false)
+def transpile_cached(source_path:, mode:, transpile_flag:, source_text:)
+  # The transpile cache is content-addressed: cache_key includes the
+  # compiler signature, dependency signatures, full source path and
+  # source text. If the key hits, the output is bit-identical with
+  # what re-running the transpiler would produce, so `--force`
+  # (which forces re-EMIT of the final binary, not re-TRANSPILE)
+  # still benefits from this cache. clear_bin_spec asserts this.
   cache_key = transpile_cache_key(
     source_path: source_path,
     mode: mode,
@@ -314,7 +320,7 @@ def transpile_cached(source_path:, mode:, transpile_flag:, source_text:, force: 
   )
   cache_file = File.join(TRANSPILER_CACHE_DIR, "#{cache_key}.zig")
 
-  if !force && File.exist?(cache_file)
+  if File.exist?(cache_file)
     debug_cache("hit #{mode} #{File.basename(source_path)}")
     return [File.read(cache_file), cache_file]
   end
@@ -419,8 +425,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
     source_path: source,
     mode: module_mode ? :test_root : :build_root,
     transpile_flag: transpile_flag,
-    source_text: source_text,
-    force: force
+    source_text: source_text
   )
   # Inject comptime profiling flag when building with `clear profile`.
   # This enables allocation tracking in the runtime allocator VTable
@@ -464,8 +469,7 @@ def do_build(source, output: nil, opt_level: 'Debug', extra_flags: [], module_mo
       source_path: pkg_path,
       mode: :module,
       transpile_flag: "--module #{nested_flags}".strip,
-      source_text: pkg_src,
-      force: force
+      source_text: pkg_src
     )
     # Rewrite module imports to file-path imports (all files live in zig/).
     # cheat_runtime → runtime-header.zig, nested packages → name.zig
@@ -607,6 +611,24 @@ when 'build'
       # std.heap.DebugAllocator with safety + retain_metadata + never_unmap.
       # Catches double-free and use-after-free with stack traces.
       use_debug_allocator = true
+      i += 1
+    when '--tsan'
+      # ThreadSanitizer — requires LLVM backend + optimization. Forces
+      # ReleaseSafe + LLVM (stage2 doesn't support TSan instrumentation).
+      opt_level = 'ReleaseSafe'
+      extra_flags = ['-fsanitize-thread']
+      i += 1
+    when '--asan'
+      # UndefinedBehaviorSanitizer (closest Zig has to ASan). Catches OOB,
+      # null deref, alignment errors. Requires LLVM backend + ReleaseSafe.
+      opt_level = 'ReleaseSafe'
+      extra_flags = ['-fsanitize-c=full']
+      i += 1
+    when '--debug-llvm'
+      # Debug optimization but with LLVM backend (vs default stage2). Useful
+      # for isolating stage2 codegen bugs from runtime logic bugs.
+      opt_level = 'Debug'
+      extra_flags = []
       i += 1
     else
       remaining << args[i]

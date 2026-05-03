@@ -104,7 +104,7 @@ test "Scheduler.submitSpawn queues one task after drainChannels" {
     _ = sched.active_tasks.fetchSub(1, .monotonic);
     stack_pool.free(task.base.stack.memory);
     alloc.destroy(task.base);
-    alloc.destroy(task);
+    sched.task_slab.destroy(task);
 }
 
 test "Scheduler.drainRemoteCalls executes and completes exactly once" {

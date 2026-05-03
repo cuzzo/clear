@@ -24,6 +24,12 @@
 const std = @import("std");
 
 // Comptime-switchable atomic: SimAtomic in Loom mode, std.atomic.Value otherwise.
+// `root` here is the executable root — for the parking-lot-loom executable
+// (see ../parking-lot-loom-test.zig), it re-exports `pub const SimAtomic`.
+// For every other build the decl is absent, so the alias resolves to the
+// real `std.atomic.Value`. SimAtomic exposes the same `raw: T` field as
+// `std.atomic.Value`, so helpers like Futex below that take `*Atomic(...)`
+// and use `&ptr.raw` type-check identically in both modes.
 const Atomic = blk: {
     const root = @import("root");
     break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
@@ -73,19 +79,25 @@ const SPIN_BUDGET: u32 = 100;
 // will spuriously wake the futex; we just retry, which is correct.
 const linux = std.os.linux;
 const Futex = struct {
-    inline fn wait(ptr: *std.atomic.Value(u32), expected: u32) void {
+    // Pointer types are `*Atomic(...)` rather than `*std.atomic.Value(...)`
+    // so the helpers type-check whether `Atomic` resolves to the real
+    // std.atomic.Value (production) or to SimAtomic (loom). Both expose
+    // `raw: T`, so `&ptr.raw` is a `*T` in either case. Loom never reaches
+    // these calls at runtime (the non-fiber branch is dead under loom),
+    // so the syscall is never made — but the type system is satisfied.
+    inline fn wait(ptr: *Atomic(u32), expected: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAIT, .private = true };
         _ = linux.futex_4arg(@ptrCast(&ptr.raw), op, expected, null);
     }
-    inline fn wake(ptr: *std.atomic.Value(u32), n: u32) void {
+    inline fn wake(ptr: *Atomic(u32), n: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAKE, .private = true };
         _ = linux.futex_3arg(@ptrCast(&ptr.raw), op, n);
     }
-    inline fn waitU64Low(ptr: *std.atomic.Value(u64), expected_low: u32) void {
+    inline fn waitU64Low(ptr: *Atomic(u64), expected_low: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAIT, .private = true };
         _ = linux.futex_4arg(@ptrCast(&ptr.raw), op, expected_low, null);
     }
-    inline fn wakeU64(ptr: *std.atomic.Value(u64), n: u32) void {
+    inline fn wakeU64(ptr: *Atomic(u64), n: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAKE, .private = true };
         _ = linux.futex_3arg(@ptrCast(&ptr.raw), op, n);
     }
@@ -104,11 +116,263 @@ inline fn getScheduler() ?*fp.Scheduler {
 // resolvable by one party backing off). Depth-limited to 64 to guard
 // against corrupted state. Read locks store null in waiting_for_lock_owner
 // and act as chain terminators.
-fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!void {
-    var current = owner;
-    var depth: usize = 0;
-    while (current) |holder| : (depth += 1) {
-        if (holder == waiter) {
+// Walk the owner chain from `owner` looking for `waiter`. If found,
+// return error.Deadlock when the owner is the waiter (depth 0,
+// self-cyclic, always a user bug) or error.LockCycle when the cycle
+// is multi-hop (AB/BA, resolvable by one party backing off).
+// Depth-limited to 64 to guard against corrupted state. Read locks
+// store null in waiting_for_lock_owner and act as chain terminators.
+//
+// Best-effort under TOCTOU: per-Task fields are atomic with paired
+// release/acquire ordering (see queues.zig for park/wake store order),
+// but a chain walk across N Tasks isn't a single atomic snapshot.
+// 14_nested_lock at THREADS>=4 with a strict-address-ordered workload
+// can still trigger a false-positive panic from a stale-but-consistent
+// chain observation -- documented in benchmarks/tofix.md as the
+// remaining structural fix needed (likely a packed atomic state).
+// Snapshot of one hop in the chain walk. Captured per-Task so we can
+// validate after the walk that no Task transitioned during it AND that
+// the LOCK STATE the Task is waiting on hasn't shifted under us.
+//
+// `gen` is task.generation captured AFTER the slab pin succeeded.
+// During validation, comparing task.generation to `gen` detects
+// slot-level reuse (same slab, same slot, but a different logical
+// Task occupies it now). The slab pin itself rules out the slab
+// having been freed, so the read of task.generation is structurally
+// safe even when the Task slot has been recycled.
+//
+// `wait_kind` / `wait_lock` / `wait_state` capture the lock the
+// holder is waiting on AT THE MOMENT of the walk. Validation re-reads
+// the lock's atomic state and compares to `wait_state`. Any change
+// (owner transfer, flag flip, lock release) is treated as a torn
+// snapshot — the chain we walked is no longer authoritative. This
+// closes the residual false-positive class where the chain walk
+// derived `next` from a lock state that subsequently transitioned but
+// happened to land on the same `next` pointer in a way the seq +
+// per-Task checks didn't notice (e.g. the INITIAL hop, where the
+// lock the waiter is trying to acquire transferred ownership between
+// the caller's pre-walk read and the validation phase).
+const HopSnapshot = struct {
+    task: *Task,
+    seq: u32,
+    gen: u32,
+    /// LOCK_KIND_* of the lock `task` is waiting on at snapshot time.
+    /// Validation re-reads task.waiting_for_lock_kind and compares.
+    wait_kind: u8,
+    /// Lock pointer the task is waiting on. null when the chain
+    /// terminates at this hop (task no longer parked, on a shared
+    /// rwlock, or parked on an unknown lock kind).
+    wait_lock: ?*anyopaque,
+    /// Snapshot of the lock's atomic state at walk time. For
+    /// ParkingMutex this is the full u64 (LOCKED + flags + owner
+    /// pointer). For ParkingRwLock-write it is the write_owner
+    /// pointer cast to u64. Validation re-reads via `readLockState`
+    /// and any difference torns the snapshot.
+    ///
+    /// The next-hop owner pointer is derivable on demand via
+    /// `ownerFromState(wait_state, wait_kind)`, so we don't store
+    /// it separately — keeping HopSnapshot at 32 bytes matters on
+    /// 12 KB Standard fiber stacks where detectCycle frames stack
+    /// alongside lockSlow + the user fiber's own locals.
+    wait_state: u64,
+};
+
+/// Bound on chain length. Cycles in real code are tiny (the
+/// pathological 14_nested_lock benchmark forms 2- or 3-hop cycles);
+/// 32 is generous. Larger arrays inflate detectCycle's stack frame,
+/// and detectCycle runs on the calling fiber's stack — whose default
+/// (Standard tier) is only 12 KB. With pin per hop (32 B) + hop
+/// snapshot (32 B), 32 entries lives in 2 KB plus retry locals.
+const MAX_CHAIN_DEPTH: usize = 32;
+const MAX_DETECT_RETRIES: u32 = 8;
+
+/// Read the atomic state of a lock identified by (kind, ptr). The
+/// returned u64 is the single linearization point that captures
+/// the lock's owner-relevant state. `ownerFromState` extracts the
+/// owner pointer from it. Walker snapshots this once per hop and
+/// re-reads it during validation to detect any transition.
+inline fn readLockState(kind: u8, lock_ptr: *anyopaque) u64 {
+    return switch (kind) {
+        qs.LOCK_KIND_MUTEX => blk: {
+            const m: *ParkingMutex = @ptrCast(@alignCast(lock_ptr));
+            break :blk m.state.load(.acquire);
+        },
+        qs.LOCK_KIND_RWLOCK_WRITE => blk: {
+            const r: *ParkingRwLock = @ptrCast(@alignCast(lock_ptr));
+            break :blk @intFromPtr(r.write_owner.load(.acquire));
+        },
+        // Shared rwlock and unknown kinds are chain terminators —
+        // caller should never hand them to readLockState.
+        else => 0,
+    };
+}
+
+/// Extract the exclusive owner *Task from a state value previously
+/// obtained via readLockState. Returns null if the lock is currently
+/// free or held by a non-fiber (e.g. raw thread that left the owner
+/// bits zero).
+inline fn ownerFromState(state: u64, kind: u8) ?*Task {
+    return switch (kind) {
+        qs.LOCK_KIND_MUTEX => blk: {
+            const owner_bits = state & ParkingMutex.STATE_OWNER_MASK;
+            break :blk if (owner_bits == 0) null else @as(?*Task, @ptrFromInt(owner_bits));
+        },
+        qs.LOCK_KIND_RWLOCK_WRITE => blk: {
+            break :blk if (state == 0) null else @as(?*Task, @ptrFromInt(state));
+        },
+        else => null,
+    };
+}
+
+// detectCycle: walk the owner chain and report a real cycle as
+// error.LockCycle / error.Deadlock.
+//
+// Robustness has FOUR layers:
+//   1. Slab pin per hop. Before reading any field of a chain holder
+//      (`*Task` observed transitively from a lock's state), pin the
+//      slab containing that Task via `fp.pinTask`. The pin holds a
+//      refcount on the slab, so the underlying memory cannot be
+//      freed by `task_slab.shrinkEmpty` while the walk is in
+//      progress. If pinTask returns null, the *Task pointer refers
+//      to a slab that has already been freed (e.g. the holder
+//      finished and its scheduler shrank the empty slab); we treat
+//      that as a chain terminator and the walk is benignly empty.
+//   2. Generation check per hop. After the pin succeeds the slab
+//      memory is alive but the SLOT may have been recycled
+//      (different logical Task now occupies it). `gen` is
+//      task.generation captured at pin time; if a later read of
+//      task.generation differs, we know the slot was reused mid-
+//      walk → snapshot torn, retry.
+//   3. The per-Task `seq` counter. seq increments on every
+//      park/wake transition; if it changed between snapshot and
+//      validation, the holder transitioned and the walk is stale.
+//   4. PER-HOP LOCK STATE SNAPSHOT. The walker captures the full
+//      atomic state of the lock the holder is waiting on (mutex
+//      `state` u64, or rwlock `write_owner` pointer) and re-reads
+//      it during validation. Any transition — owner transfer, flag
+//      flip, lock release — torns the snapshot. The INITIAL hop
+//      (the lock the waiter itself wants) is included: the walker
+//      reads the initial state once per attempt and validates it,
+//      so a transfer between the caller's pre-walk hint and our
+//      derivation cannot produce a false-positive cycle observation.
+//
+// After MAX_DETECT_RETRIES torn snapshots we treat the system as
+// "transitioning constantly" and return without panic. A real cycle
+// would have produced a stable snapshot within the retry budget.
+fn detectCycle(waiter: *Task, lock_ptr: *anyopaque, lock_kind: u8) LockError!void {
+    // detectCycle is only called for exclusive (write-style) locks.
+    // Shared rwlock acquisition cannot deadlock-by-itself: there is
+    // no single owner to walk back to.
+    std.debug.assert(lock_kind == qs.LOCK_KIND_MUTEX or
+                     lock_kind == qs.LOCK_KIND_RWLOCK_WRITE);
+
+    var hops: [MAX_CHAIN_DEPTH]HopSnapshot = undefined;
+    var pins: [MAX_CHAIN_DEPTH]?fp.TaskPin = [_]?fp.TaskPin{null} ** MAX_CHAIN_DEPTH;
+    var attempt: u32 = 0;
+
+    // Always release pins on return, even on early-exit / error paths.
+    defer for (pins) |maybe_pin| {
+        if (maybe_pin) |p| fp.unpinTask(p);
+    };
+
+    while (attempt < MAX_DETECT_RETRIES) : (attempt += 1) {
+        // Drop pins from any prior attempt before re-walking.
+        for (&pins) |*slot| {
+            if (slot.*) |p| { fp.unpinTask(p); slot.* = null; }
+        }
+
+        // Read the initial lock state fresh per attempt. This is the
+        // anchor of the walk: a stale starting owner from a previous
+        // attempt cannot leak through.
+        const initial_state = readLockState(lock_kind, lock_ptr);
+        var current = ownerFromState(initial_state, lock_kind);
+
+        var n: usize = 0;
+        var found_self_at_depth: ?usize = null;
+
+        while (current) |holder| : (n += 1) {
+            if (n >= MAX_CHAIN_DEPTH) break;
+
+            // Pin the slab containing `holder`. If the slab was freed
+            // (or `holder` was never slab-allocated, e.g. a Loom-harness
+            // stub Task), treat as a chain terminator: a freed Task
+            // cannot be in any cycle by definition.
+            const pin = fp.pinTask(holder) orelse break;
+            pins[n] = pin;
+
+            const seq0 = holder.seq.load(.acquire);
+            const wait_kind = holder.waiting_for_lock_kind.load(.acquire);
+            const wait_lock = holder.waiting_for_lock.load(.acquire);
+
+            // Determine if `holder` is parked on a chain-walkable lock.
+            // Shared rwlock and "no kind" are chain terminators; we
+            // record the snapshot anyway (so validation can verify the
+            // holder didn't transition into being waiting on something
+            // walkable mid-validation) but do not extend the walk.
+            const walkable = wait_lock != null and
+                (wait_kind == qs.LOCK_KIND_MUTEX or
+                 wait_kind == qs.LOCK_KIND_RWLOCK_WRITE);
+            const wait_state: u64 = if (walkable)
+                readLockState(wait_kind, wait_lock.?)
+            else
+                0;
+            const next = if (walkable) ownerFromState(wait_state, wait_kind) else null;
+
+            hops[n] = .{
+                .task = holder,
+                .seq = seq0,
+                .gen = pin.gen,
+                .wait_kind = wait_kind,
+                .wait_lock = wait_lock,
+                .wait_state = wait_state,
+            };
+            if (holder == waiter) {
+                found_self_at_depth = n;
+                break;
+            }
+            if (next == null) break;
+            current = next;
+        }
+
+        // Validate snapshot. Four checks per hop, plus an initial-state
+        // re-read covering the hop -1 / waiter-side lock:
+        //   (0) Initial lock state unchanged → the lock the waiter is
+        //       trying to acquire still has the same exclusive owner
+        //       (and same flag bits). Catches the "stale starting
+        //       owner" race that no per-hop check could detect: the
+        //       chain walk derived `current` from a lock state that
+        //       transferred ownership before validation.
+        //   (1) Generation unchanged → the slab slot wasn't recycled.
+        //   (2) Task seq unchanged → the holder didn't transition.
+        //   (3) Holder's wait fields and lock state unchanged → the
+        //       holder is still parked on the same lock with the same
+        //       owner / flag configuration, so the chain link this hop
+        //       represents is still authoritative.
+        // For a real cycle, all participants are parked and the locks'
+        // states are frozen, so all checks pass.
+        var torn = false;
+        if (readLockState(lock_kind, lock_ptr) != initial_state) torn = true;
+        if (!torn) for (hops[0..n]) |h| {
+            if (h.task.generation.load(.acquire) != h.gen) { torn = true; break; }
+            if (h.task.seq.load(.acquire) != h.seq) { torn = true; break; }
+            if (h.task.waiting_for_lock_kind.load(.acquire) != h.wait_kind) {
+                torn = true; break;
+            }
+            if (h.task.waiting_for_lock.load(.acquire) != h.wait_lock) {
+                torn = true; break;
+            }
+            // Re-read the wait lock's state. Equal state ⇒ owner +
+            // flags unchanged ⇒ chain link h.next is still derived
+            // from the same authoritative source.
+            if (h.wait_lock) |wl| {
+                if (readLockState(h.wait_kind, wl) != h.wait_state) {
+                    torn = true; break;
+                }
+            }
+        };
+        if (torn) continue;
+
+        if (found_self_at_depth) |depth| {
             if (depth == 0) {
                 std.debug.print(
                     "DEADLOCK: fiber {*} re-acquired lock {*} it already holds\n",
@@ -123,9 +387,9 @@ fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!voi
             );
             return error.LockCycle;
         }
-        if (depth >= 64) break;
-        current = holder.waiting_for_lock_owner;
+        return; // clean walk, no cycle
     }
+    return;
 }
 
 
@@ -303,8 +567,11 @@ pub const ParkingMutex = struct {
             return error.Deadlock;
         }
 
-        // Walk the owner chain BEFORE taking queue_spin.
-        try detectCycle(task, current_owner, self);
+        // Walk the owner chain BEFORE taking queue_spin. detectCycle
+        // re-reads `self.state` itself (via readLockState) so that a
+        // stale `current_owner` here cannot leak into the walk —
+        // that's the option-(C) initial-state validation.
+        try detectCycle(task, self, qs.LOCK_KIND_MUTEX);
 
         self.spinAcquireQueue();
 
@@ -319,28 +586,74 @@ pub const ParkingMutex = struct {
             }
         }
 
-        // Park. Set HAS_WAITERS_BIT under queue_spin.
-        _ = self.state.fetchOr(STATE_HAS_WAITERS, .release);
+        // Set HAS_WAITERS BEFORE pushing to the queue. The race we close
+        // here: an unlock that runs between the recheck above and our push
+        // to the waiter list. If unlock samples HAS_WAITERS=0 (because we
+        // haven't set it yet), it returns without taking queue_spin and
+        // without waking anyone. Setting HAS_WAITERS first means any
+        // concurrent unlock observes HAS_WAITERS=1 in its fetchAnd and
+        // takes the wake path; once it hits queue_spin it serializes with
+        // us and either pops our node (if we've pushed) or sees an empty
+        // queue + clears the stale HAS_WAITERS.
+        //
+        // After fetchOr, double-check LOCKED. If the lock became free AND
+        // the waiter queue is empty, we can safely grab the lock without
+        // parking. The empty-queue check is critical: if a real waiter is
+        // queued, an in-flight unlock is about to transfer ownership to
+        // them via state.store (line ~493 below). If we acquire here AND
+        // then release queue_spin, that unlock would pop the waiter and
+        // store-overwrite our owner field — both us AND the waiter would
+        // think we own the lock, corrupting the protected data. We hold
+        // queue_spin so no concurrent push can race with isEmpty().
+        const after_or = self.state.fetchOr(STATE_HAS_WAITERS, .acq_rel) | STATE_HAS_WAITERS;
+        if ((after_or & STATE_LOCKED) == 0 and self.waiters.isEmpty()) {
+            // Lock free + queue empty: safe to acquire. A concurrent unlock
+            // that already passed fetchAnd is now waiting on queue_spin;
+            // when it gets in, it pops the empty queue and hits the
+            // stale-HAS_WAITERS cleanup, which only clears HAS_WAITERS —
+            // never touches LOCKED/owner — so our acquire is preserved.
+            const target = STATE_LOCKED | @intFromPtr(task)
+                | (after_or & STATE_HAS_THREAD_SLEEPER);
+            if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
+                self.spinReleaseQueue();
+                return;
+            }
+            // CAS lost — fall through to park.
+        }
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
         self.waiters.push(&node);
+        // Park-side ordering: owner FIRST, then lock with .release. Cycle
+        // detection on another core does an .acquire load of `lock`; if
+        // it sees a non-null lock, it is guaranteed (release/acquire pair)
+        // to also see the matching owner store.
+        task.waiting_for_lock_owner.store(current_owner, .release);
+        task.waiting_for_lock_kind.store(qs.LOCK_KIND_MUTEX, .release);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.waiters;
-        task.lock_waiter_node = &node;
-        task.waiting_for_lock_owner = current_owner;
+        task.waiting_for_lock_list.store(&self.waiters, .release);
+        task.lock_waiter_node.store(&node, .release);
         task.status.store(.Blocked, .release);
+        // Mark transition for detectCycle's snapshot validation. Must come
+        // AFTER the field stores so a walker that observes the new seq is
+        // guaranteed to also observe the new (lock, kind).
+        _ = task.seq.fetchAdd(1, .release);
         self.spinReleaseQueue();
 
         sched.registerLockWaiter(task);
         task.base.yield();
 
+        // Wake-side ordering: lock cleared FIRST so a walker that loads
+        // lock as null after our release stops the chain regardless of
+        // any stale owner field.
         task.waiting_for_lock.store(null, .release);
-        task.waiting_for_lock_list = null;
-        task.lock_waiter_node = null;
-        task.waiting_for_lock_owner = null;
+        task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+        task.waiting_for_lock_owner.store(null, .release);
+        task.waiting_for_lock_list.store(null, .release);
+        task.lock_waiter_node.store(null, .release);
+        _ = task.seq.fetchAdd(1, .release);
 
-        if (task.lock_timed_out) {
-            task.lock_timed_out = false;
+        if (task.lock_timed_out.load(.acquire)) {
+            task.lock_timed_out.store(false, .release);
             if (ownerOf(self.state.load(.acquire)) == task) return;
             std.debug.print("LOCK TIMEOUT: fiber {*} waited for mutex {*}\n", .{ task, self });
             return error.LockTimeout;
@@ -367,20 +680,41 @@ pub const ParkingMutex = struct {
 
         if ((prev & STATE_HAS_WAITERS) != 0) {
             self.spinAcquireQueue();
-            const waiter = self.waiters.pop();
-            const more_after = !self.waiters.isEmpty();
-            if (waiter) |w| {
-                // Transfer ownership: rebuild state with LOCKED, owner, and
-                // any preserved flag bits.
-                const sleeper_bit: u64 = prev & STATE_HAS_THREAD_SLEEPER;
+            // Re-read state under spin: a parker may have re-acquired via
+            // the lockSlow double-check-after-fetchOr path while we were
+            // blocked on queue_spin. If so, abort the transfer — that
+            // owner will wake the queue on its own unlock.
+            const cur_state = self.state.load(.acquire);
+            if ((cur_state & STATE_LOCKED) != 0) {
+                self.spinReleaseQueue();
+                return;
+            }
+            // Peek (don't pop yet): we need to atomically transfer ownership
+            // to head waiter. If state changes between our load and store, we
+            // bail without popping so the head stays queued for next unlock.
+            const head = self.waiters.head;
+            if (head) |w| {
+                const more_after = w.next != null;
+                const sleeper_bit: u64 = cur_state & STATE_HAS_THREAD_SLEEPER;
                 const more_bit: u64 = if (more_after) STATE_HAS_WAITERS else 0;
                 const new_state: u64 = STATE_LOCKED | sleeper_bit | more_bit
                     | @intFromPtr(w.task);
-                self.state.store(new_state, .release);
-                w.task.waiting_for_lock_owner = null;
-                w.task.waiting_for_lock_list = null;
-                w.task.lock_waiter_node = null;
+                if (self.state.cmpxchgStrong(cur_state, new_state, .release, .monotonic) != null) {
+                    // State changed (concurrent fast-path acquire). Bail.
+                    self.spinReleaseQueue();
+                    return;
+                }
+                // Transfer succeeded — now safe to pop and wake.
+                _ = self.waiters.pop();
+                // Wake-side ordering: lock cleared FIRST (with .release)
+                // so a concurrent detectCycle reader sees lock==null and
+                // does not chase a stale waiting_for_lock_owner.
                 w.task.waiting_for_lock.store(null, .release);
+                w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+                w.task.waiting_for_lock_owner.store(null, .release);
+                w.task.waiting_for_lock_list.store(null, .release);
+                w.task.lock_waiter_node.store(null, .release);
+                _ = w.task.seq.fetchAdd(1, .release);
                 const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                 sched.submitResume(w.task);
                 self.spinReleaseQueue();
@@ -444,7 +778,10 @@ pub const ParkingRwLock = struct {
     // in the contended fast path.
     queue_spin: Atomic(u32) = Atomic(u32).init(0),
     waiters: WaiterList = .{},
-    write_owner: std.atomic.Value(?*Task) = std.atomic.Value(?*Task).init(null),
+    // GAP-A fix: was `std.atomic.Value(?*Task)`. With the comptime alias,
+    // SimAtomic substitution under loom now covers every read/write of
+    // write_owner — including the cycle-detect read in currentChainOwner.
+    write_owner: Atomic(?*Task) = Atomic(?*Task).init(null),
     // Profile-only: write-lock hold start. Reader lock hold times are
     // trickier (multiple concurrent readers) and deferred; for now we
     // instrument the write path since that's where contention bites.
@@ -518,9 +855,11 @@ pub const ParkingRwLock = struct {
         const sched = sched_opt.?;
         const task = sched.current_task.?;
 
-        // Detect cycles BEFORE taking the queue spin.
-        const current_write_owner = self.write_owner.load(.acquire);
-        try detectCycle(task, current_write_owner, self);
+        // Detect cycles BEFORE taking the queue spin. detectCycle
+        // re-reads `self.write_owner` itself (via readLockState) so
+        // that a transition between this hint read and the walk
+        // cannot leak through.
+        try detectCycle(task, self, qs.LOCK_KIND_RWLOCK_WRITE);
 
         self.spinAcquireQueue();
 
@@ -532,29 +871,48 @@ pub const ParkingRwLock = struct {
             return;
         }
 
-        // Park in FIFO queue. Set HAS_WAITERS_BIT so unlockers know to
-        // call wakeNext. We OR the bit (idempotent) under queue_spin.
-        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+        // Set HAS_WAITERS_BIT BEFORE pushing. See ParkingMutex.lockSlow for
+        // the full LOST WAKE race explanation. Same fix here: unlock that
+        // races with our park must observe HAS_WAITERS=1 in its fetchAnd
+        // and take the wake path. Only attempt CAS-to-grab when the queue
+        // is empty — an in-flight wakeNext for an existing waiter would
+        // store-overwrite our owner field if we leapfrog them.
+        const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
+        if ((after_or & (WRITE_LOCKED_BIT | READER_MASK)) == 0 and self.waiters.isEmpty()) {
+            const target = WRITE_LOCKED_BIT;
+            if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
+                self.write_owner.store(task, .release);
+                self.spinReleaseQueue();
+                return;
+            }
+            // CAS lost — fall through to park.
+        }
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
         self.waiters.push(&node);
+        // Park-side ordering: owner+kind FIRST, then lock with .release.
+        task.waiting_for_lock_owner.store(self.write_owner.load(.acquire), .release);
+        task.waiting_for_lock_kind.store(qs.LOCK_KIND_RWLOCK_WRITE, .release);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.waiters;
-        task.lock_waiter_node = &node;
-        task.waiting_for_lock_owner = current_write_owner;
+        task.waiting_for_lock_list.store(&self.waiters, .release);
+        task.lock_waiter_node.store(&node, .release);
         task.status.store(.Blocked, .release);
+        _ = task.seq.fetchAdd(1, .release);
         self.spinReleaseQueue();
 
         sched.registerLockWaiter(task);
         task.base.yield();
 
+        // Wake-side ordering: lock FIRST so the chain walker stops at us.
         task.waiting_for_lock.store(null, .release);
-        task.waiting_for_lock_list = null;
-        task.lock_waiter_node = null;
-        task.waiting_for_lock_owner = null;
+        task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+        task.waiting_for_lock_owner.store(null, .release);
+        task.waiting_for_lock_list.store(null, .release);
+        task.lock_waiter_node.store(null, .release);
+        _ = task.seq.fetchAdd(1, .release);
 
-        if (task.lock_timed_out) {
-            task.lock_timed_out = false;
+        if (task.lock_timed_out.load(.acquire)) {
+            task.lock_timed_out.store(false, .release);
             // Did wakeNext grant us the lock right before timeout fired?
             if ((self.state.load(.acquire) & WRITE_LOCKED_BIT) != 0
                 and self.write_owner.load(.acquire) == task)
@@ -662,27 +1020,49 @@ pub const ParkingRwLock = struct {
             }
         }
 
-        // Park.
-        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+        // Set HAS_WAITERS_BIT BEFORE pushing. Same LOST WAKE race as the
+        // exclusive path. For shared acquire, an unlock that runs between
+        // our last state load and our push must observe HAS_WAITERS=1
+        // in its fetchAdd-undo path (line ~813) and call wakeNext.
+        // Only grab a reader slot when no writer holds the lock AND
+        // the queue is empty — leapfrogging a queued writer would
+        // starve them; a queued reader can be safely woken by wakeNext
+        // alongside us.
+        const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
+        if ((after_or & WRITE_LOCKED_BIT) == 0 and self.waiters.isEmpty()) {
+            const prev_retry = self.state.fetchAdd(1, .acquire);
+            if ((prev_retry & WRITE_LOCKED_BIT) == 0) {
+                self.spinReleaseQueue();
+                return;
+            }
+            // Writer arrived between checks — undo and park.
+            _ = self.state.fetchSub(1, .release);
+        }
 
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Read };
         self.waiters.push(&node);
+        // SHARED kind: detectCycle treats this as a chain terminator (read
+        // locks have no single owner — multiple readers may hold it).
+        task.waiting_for_lock_kind.store(qs.LOCK_KIND_RWLOCK_SHARED, .release);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.waiters;
-        task.lock_waiter_node = &node;
+        task.waiting_for_lock_list.store(&self.waiters, .release);
+        task.lock_waiter_node.store(&node, .release);
         // waiting_for_lock_owner stays null: read locks have no single owner.
         task.status.store(.Blocked, .release);
+        _ = task.seq.fetchAdd(1, .release);
         self.spinReleaseQueue();
 
         sched.registerLockWaiter(task);
         task.base.yield();
 
         task.waiting_for_lock.store(null, .release);
-        task.waiting_for_lock_list = null;
-        task.lock_waiter_node = null;
+        task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+        task.waiting_for_lock_list.store(null, .release);
+        task.lock_waiter_node.store(null, .release);
+        _ = task.seq.fetchAdd(1, .release);
 
-        if (task.lock_timed_out) {
-            task.lock_timed_out = false;
+        if (task.lock_timed_out.load(.acquire)) {
+            task.lock_timed_out.store(false, .release);
             // wakeNext would have already incremented our reader slot if it
             // granted us the lock. Detecting that here without a separate
             // flag is racy with concurrent unlocks; keep the simple path
@@ -733,10 +1113,13 @@ pub const ParkingRwLock = struct {
                     }
                     const w = self.waiters.pop().?;
                     self.write_owner.store(w.task, .release);
-                    w.task.waiting_for_lock_owner = null;
-                    w.task.waiting_for_lock_list = null;
-                    w.task.lock_waiter_node = null;
+                    // Wake-side ordering: lock cleared FIRST.
                     w.task.waiting_for_lock.store(null, .release);
+                    w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+                    w.task.waiting_for_lock_owner.store(null, .release);
+                    w.task.waiting_for_lock_list.store(null, .release);
+                    w.task.lock_waiter_node.store(null, .release);
+                    _ = w.task.seq.fetchAdd(1, .release);
                     const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                     sched.submitResume(w.task);
                     return; // grant one writer per wakeNext
@@ -747,9 +1130,11 @@ pub const ParkingRwLock = struct {
                     // stays set; we'll fix it up after the drain.
                     _ = self.state.fetchAdd(1, .acquire);
                     const r = self.waiters.pop().?;
-                    r.task.waiting_for_lock_list = null;
-                    r.task.lock_waiter_node = null;
+                    r.task.waiting_for_lock_list.store(null, .release);
+                    r.task.lock_waiter_node.store(null, .release);
                     r.task.waiting_for_lock.store(null, .release);
+                    r.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
+                    _ = r.task.seq.fetchAdd(1, .release);
                     const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
                     sched.submitResume(r.task);
                     // Continue draining: next head might be another reader.

@@ -1,5 +1,5 @@
--- Test: MATCH TAKES must clean up string payloads in non-slice branches.
--- When MATCH TAKES ast extracts a Symbol (string), the source's defer
+-- Test: PARTIAL MATCH TAKES must clean up string payloads in non-slice branches.
+-- When PARTIAL MATCH TAKES ast extracts a Symbol (string), the source's defer
 -- must still fire for branches that don't take ownership of heap data.
 
 UNION Value { Nil, Number: Float64, Symbol: String, List: Value[] }
@@ -9,7 +9,7 @@ FN makeSymbol() RETURNS Value ->
 END
 
 FN consume!(TAKES v: Value) RETURNS String ->
-    MATCH TAKES v START
+    PARTIAL MATCH TAKES v START
         Value.Symbol AS s -> RETURN COPY s;,
         Value.List AS items -> RETURN "list";,
         DEFAULT -> RETURN "other";

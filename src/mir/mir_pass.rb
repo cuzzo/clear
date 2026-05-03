@@ -71,6 +71,18 @@ class MIRPass
       transform_function!(stmt, promotion_plans[stmt.name])
     end
 
+    # Synthetic test-body wrappers live in @fn_nodes but never appear
+    # under ast.statements, so the loop above skips them. Run the same
+    # transform on each so MIR::Drop / MIR::Cleanup nodes land on the
+    # shared body array (which is also AST::TestThat.body). Keyed by
+    # the wrapper name prefix CompilerFrontend.synthesize_test_body_wrappers!
+    # generates -- intentionally narrow so we don't transform anything
+    # else that someone might add to fn_nodes later.
+    @fn_nodes.each do |name, fn|
+      next unless name.is_a?(String) && name.start_with?("__test_body_")
+      next unless fn&.body
+      transform_function!(fn, promotion_plans[name])
+    end
   end
 
   private

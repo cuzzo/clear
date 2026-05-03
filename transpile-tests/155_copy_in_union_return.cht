@@ -8,7 +8,7 @@ UNION Val {
 }
 
 FN extractStr!(v: Val) RETURNS Val ->
-    MATCH v START
+    PARTIAL MATCH v START
         Val.Str AS s -> RETURN Val{ Str: COPY s };,
         DEFAULT -> RETURN Val.Nil;
     END
@@ -18,7 +18,7 @@ END
 FN main() RETURNS Void ->
     input = Val{ Str: "hello" };
     result = extractStr!(input);
-    MATCH result START
+    PARTIAL MATCH result START
         Val.Str AS s -> ASSERT s == "hello", "copy in union return";,
         DEFAULT -> ASSERT FALSE, "should be Str";
     END

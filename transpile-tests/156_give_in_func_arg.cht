@@ -14,7 +14,7 @@ FN consume!(TAKES items: Val[]) RETURNS Val ->
 END
 
 FN eval!(TAKES ast: Val) RETURNS Val @reentrant ->
-    MATCH TAKES ast START
+    PARTIAL MATCH TAKES ast START
         Val.List AS items ->
             RETURN consume!(GIVE items);,
         DEFAULT -> RETURN Val.Nil;
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
     list.append(Val{ Str: "hello" });
     ast = Val{ List: list };
     result = eval!(COPY ast);
-    MATCH result START
+    PARTIAL MATCH result START
         Val.Str AS s -> ASSERT s == "hello", "give in func arg";,
         DEFAULT -> ASSERT FALSE, "should be Str";
     END

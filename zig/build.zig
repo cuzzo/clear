@@ -120,38 +120,89 @@ pub fn build(b: *std.Build) void {
     // -------------------------------------------------------------------------
     // INDIVIDUAL TEST FILES (all in runtime/)
     // -------------------------------------------------------------------------
-    const test_files = [_][]const u8{
-        "arena-mode-test.zig",
-        "asm-test.zig",
-        "batch-window-test.zig",
-        "control-plane-test.zig",
-        "data-structures-test.zig",
-        "fiber-control-tests.zig",
-        "fiber-memory-test.zig",
-        "fiber-test.zig",
-        "frame-test.zig",
-        "inbox-race-smoke-test.zig",
-        "iouring-test.zig",
-        "ownership-test.zig",
-        "partitioned-map-test.zig",
-        "runtime-isolation-test.zig",
-        "runtime-direct-test.zig",
-        "promote-list-test.zig",
-        "queues-test.zig",
-        "resource-test.zig",
-        "runtime-header-test.zig",
-        "scheduler-direct-test.zig",
-        "semaphore-test.zig",
-        "spsc-ring-test.zig",
-        "spsc-test.zig",
-        "spsc-scheduler-test.zig",
-        "vopr-test.zig",
-        "vopr-loom-test.zig",
-        "yield-test.zig",
-        "parking-lot-loom-test.zig",
-        "parking-lot-test.zig",
-        "parking-lot-hammer-test.zig",
+    // All test files. Files marked `tsan_*` run under ThreadSanitizer too via
+    // `zig build test-tsan`. TSan tests force LLVM backend + ReleaseSafe (the
+    // default stage2 + Debug combo doesn't link the TSan runtime).
+    const TestEntry = struct {
+        path: []const u8,
+        // True when the test exercises shared mutable state across threads/
+        // schedulers and would benefit from data-race detection. Adding a
+        // file here means it ALSO runs under `zig build test-tsan`.
+        tsan: bool = false,
     };
+
+    const test_files = [_]TestEntry{
+        // Concurrency-sensitive — also run under TSan
+        .{ .path = "batch-window-test.zig", .tsan = true },
+        .{ .path = "bounded-channel-test.zig", .tsan = true },
+        .{ .path = "bounded-stream-test.zig", .tsan = true },
+        .{ .path = "cleanup-test.zig", .tsan = true },
+        .{ .path = "control-plane-hammer-test.zig", .tsan = true },
+        .{ .path = "control-plane-test.zig", .tsan = true },
+        .{ .path = "epoll-oneshot-test.zig", .tsan = true },
+        .{ .path = "epoll-steal-test.zig", .tsan = true },
+        .{ .path = "ffi-concurrency-test.zig", .tsan = true },
+        .{ .path = "fiber-test.zig", .tsan = true },
+        .{ .path = "inbox-race-smoke-test.zig", .tsan = true },
+        .{ .path = "inbox-race-test.zig", .tsan = true },
+        .{ .path = "inf-stream-test.zig", .tsan = true },
+        .{ .path = "infstream-hammer-test.zig", .tsan = true },
+        .{ .path = "io-pressure-test.zig", .tsan = true },
+        .{ .path = "iouring-test.zig", .tsan = true },
+        .{ .path = "net-steal-hammer-test.zig", .tsan = true },
+        .{ .path = "parking-lot-cycle-test.zig", .tsan = true },
+        .{ .path = "parking-lot-hammer-test.zig", .tsan = true },
+        // parking-lot-loom-test is built as an executable above (search for
+        // pl_loom_exe). Building via b.addTest puts the test_runner at
+        // module root, hiding `pub const SimAtomic` from the comptime
+        // Atomic alias and silently disabling Loom — see GAP-B.
+        .{ .path = "parking-lot-test.zig", .tsan = true },
+        .{ .path = "pool-test.zig", .tsan = true },
+        .{ .path = "queues-test.zig", .tsan = true },
+        .{ .path = "routing-crash-test.zig", .tsan = true },
+        .{ .path = "runtime-direct-test.zig", .tsan = true },
+        .{ .path = "runtime-isolation-test.zig", .tsan = true },
+        .{ .path = "scheduler-direct-test.zig", .tsan = true },
+        .{ .path = "scheduler-race-test.zig", .tsan = true },
+        .{ .path = "semaphore-test.zig", .tsan = true },
+        .{ .path = "sharded-list-test.zig", .tsan = true },
+        .{ .path = "sharded-pool-test.zig", .tsan = true },
+        .{ .path = "shared-nothing-test.zig", .tsan = true },
+        .{ .path = "shared-promise-test.zig", .tsan = true },
+        .{ .path = "slab-alloc-test.zig", .tsan = true },
+        .{ .path = "spsc-ring-test.zig", .tsan = true },
+        .{ .path = "spsc-scheduler-test.zig", .tsan = true },
+        .{ .path = "spsc-test.zig", .tsan = true },
+        .{ .path = "steal-hammer-test.zig", .tsan = true },
+        .{ .path = "stream-test.zig", .tsan = true },
+        .{ .path = "tcp-fairness-test.zig", .tsan = true },
+        .{ .path = "tcp-starvation-test.zig", .tsan = true },
+        // vopr-loom-test does exhaustive interleaving (16K+ paths per test) which
+        // is unreasonably slow under TSan. The exhaustive enumeration is its own
+        // race detector — TSan adds little. Run under regular test only.
+        .{ .path = "vopr-loom-test.zig", .tsan = false },
+        .{ .path = "vopr-test.zig", .tsan = true },
+        .{ .path = "yield-test.zig", .tsan = true },
+
+        // Single-threaded / pure logic — debug build only
+        .{ .path = "arena-fuzz-test.zig" },
+        .{ .path = "arena-mode-test.zig" },
+        .{ .path = "asm-test.zig" },
+        .{ .path = "data-structures-test.zig" },
+        .{ .path = "fiber-control-tests.zig" },
+        .{ .path = "fiber-memory-test.zig" },
+        .{ .path = "frame-rewind-test.zig" },
+        .{ .path = "frame-test.zig" },
+        .{ .path = "ownership-test.zig" },
+        .{ .path = "partitioned-map-test.zig" },
+        .{ .path = "promote-list-test.zig" },
+        .{ .path = "resource-test.zig" },
+        .{ .path = "runtime-header-test.zig" },
+        .{ .path = "soa-list-test.zig" },
+        .{ .path = "soa-pool-test.zig" },
+    };
+
+    const test_tsan_step = b.step("test-tsan", "Run concurrency-sensitive tests under ThreadSanitizer");
 
     // When -Dcoverage is set, accumulate per-test kcov runs so a final
     // merge step can produce one zig-out/coverage/merged/cobertura.xml
@@ -166,7 +217,8 @@ pub fn build(b: *std.Build) void {
         m.setCwd(b.path("."));
     }
 
-    for (test_files, 0..) |filename, idx| {
+    for (test_files, 0..) |entry, idx| {
+        const filename = entry.path;
         // Skip stress / loom / vopr / hammer / fuzz tests under
         // coverage. These tests run high-iteration concurrency
         // exploration (loom interleavings, VOPR random scenarios,
@@ -185,6 +237,7 @@ pub fn build(b: *std.Build) void {
             std.mem.eql(u8, filename, "vopr-loom-test.zig")
         )) continue;
 
+        // Standard build (Debug, stage2 backend)
         const unit_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
@@ -233,6 +286,34 @@ pub fn build(b: *std.Build) void {
             run_unit_tests.stdio = .inherit;
             run_unit_tests.setCwd(b.path("."));
             test_step.dependOn(&run_unit_tests.step);
+        }
+
+        // TSan build — only for concurrency-sensitive tests. Forces ReleaseSafe
+        // + LLVM backend (stage2 doesn't support TSan instrumentation).
+        if (entry.tsan) {
+            const tsan_tests = b.addTest(.{
+                .root_module = b.createModule(.{
+                    .root_source_file = b.path(filename),
+                    .target = target,
+                    .optimize = .ReleaseSafe,
+                    .sanitize_thread = true,
+                }),
+                .use_llvm = true,
+            });
+            tsan_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+            tsan_tests.root_module.addImport("safety", safety_mod);
+            tsan_tests.root_module.addImport("ebr", ebr_mod);
+            tsan_tests.root_module.addImport("ownership", ownership_mod);
+            tsan_tests.root_module.addImport("compat", compat_mod);
+            tsan_tests.root_module.addAssemblyFile(switch_s);
+            tsan_tests.root_module.addAssemblyFile(onroot_s);
+            tsan_tests.root_module.link_libc = true;
+
+            const run_tsan_tests = std.Build.Step.Run.create(b, b.fmt("run tsan {s}", .{filename}));
+            run_tsan_tests.addArtifactArg(tsan_tests);
+            run_tsan_tests.stdio = .inherit;
+            run_tsan_tests.setCwd(b.path("."));
+            test_tsan_step.dependOn(&run_tsan_tests.step);
         }
     }
 
@@ -384,6 +465,34 @@ pub fn build(b: *std.Build) void {
     const run_loom = b.addRunArtifact(loom_exe);
     run_loom.has_side_effects = true;
     loom_step.dependOn(&run_loom.step);
+
+    // parking-lot-loom — built as an executable so `@import("root")` from
+    // inside lib/parking-lot.zig and runtime/queues.zig resolves to the
+    // entry file (parking-lot-loom-test.zig). The entry has
+    // `pub const SimAtomic` — the comptime Atomic alias picks SimAtomic
+    // and the suite loom-tests instead of running on real atomics. See
+    // GAP-B in docs/agents/parking-lot-loom-coverage.md.
+    //
+    // Module root is `zig/` (not `runtime/`) because runtime/ files like
+    // fiber-core.zig do `@import("../lib/safety.zig")` and Zig 0.16
+    // rejects `../lib/` imports when the module root is `runtime/`. See
+    // commit 9544787a.
+    const pl_loom_exe = b.addExecutable(.{
+        .name = "parking-lot-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("parking-lot-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    pl_loom_exe.root_module.addAssemblyFile(switch_s);
+    pl_loom_exe.root_module.addAssemblyFile(onroot_s);
+    pl_loom_exe.root_module.link_libc = true;
+    const run_pl_loom = b.addRunArtifact(pl_loom_exe);
+    run_pl_loom.has_side_effects = true;
+    run_pl_loom.stdio = .inherit;
+    test_step.dependOn(&run_pl_loom.step);
+    loom_step.dependOn(&run_pl_loom.step);
 
     // -------------------------------------------------------------------------
     // STATIC LIBRARY (cheat-runtime)

@@ -2,22 +2,22 @@ FN main() RETURNS Void ->
   MUTABLE result = 0_i64;
   n = 7_i64;
 
-  MATCH n START
+  PARTIAL MATCH n START
     1_i64 -> result = 1_i64;,
     WHEN n MOD 2 == 0 -> result = 2_i64;,
     DEFAULT -> result = 99_i64;
   END
 
-  ASSERT result == 99, "MATCH WHEN: odd 7 should hit default";
+  ASSERT result == 99, "PARTIAL MATCH WHEN: odd 7 should hit default";
 
   MUTABLE result2 = 0_i64;
   m = 4_i64;
 
-  MATCH m START
+  PARTIAL MATCH m START
     1_i64 -> result2 = 1_i64;,
     WHEN m MOD 2 == 0 -> result2 = 42_i64;,
     DEFAULT -> result2 = 99_i64;
   END
 
-  ASSERT result2 == 42, "MATCH WHEN: even 4 should hit WHEN arm";
+  ASSERT result2 == 42, "PARTIAL MATCH WHEN: even 4 should hit WHEN arm";
 END

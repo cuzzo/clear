@@ -1,6 +1,15 @@
 -- @leak: n = 1000000 -> n = 1000
 -- KV Store Benchmark — CLEAR (HashMap@shared:sharded(128):locked, DashMap)
 --
+-- WARNING: DO NOT RUN IN DEBUG MODE.
+--   The BG worker call chain (string concat + intToString + sharded HashMap put
+--   with locking) exceeds the 12 KB usable stack of a Standard (16 KB) fiber
+--   when compiled in Debug (no inlining, no register allocation). Without
+--   __morestack guard pages, the overflow silently corrupts the next stack in
+--   the slab and segfaults the depot freelist. Use --safe or --optimized.
+--   If you must run debug-instrumented (e.g. for leak detection), force the
+--   BG blocks to @xl (256 KB) to avoid the smash.
+--
 -- Uses @shared:sharded(128):locked — Arc-wrapped lock-striped HashMap.
 -- Each of 8 shards has its own RwLock: readers are concurrent within a shard,
 -- writers are exclusive per-shard. No WITH blocks needed — methods handle
@@ -158,7 +167,10 @@ FN main() RETURNS Void ->
     FOR mi IN (0_i64 ..< workers) -> mix_hits += NEXT mix_futures[mi];
     mixMs = timestampMs() - t3;
 
-    ASSERT total_hits == n, "GET hits must equal key count";
+    -- Assert against workers*chunk, not n: integer division may drop a
+    -- remainder when n doesn't evenly divide workers (e.g. @leak n=1000 with
+    -- nproc=32 → chunk=31, 32*31=992 keys actually written, not 1000).
+    ASSERT total_hits == workers * chunk, "GET hits must equal SET count";
     ASSERT zipf_hits > 0, "Zipf hits must be > 0";
     ASSERT mix_hits > 0, "Mixed hits must be > 0";
 

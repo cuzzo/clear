@@ -5,7 +5,7 @@
 UNION SimpleValue { Nil, Number: Float64 }
 
 FN consume!(TAKES v: SimpleValue) RETURNS Float64 ->
-    MATCH TAKES v START
+    PARTIAL MATCH TAKES v START
         SimpleValue.Number AS n -> RETURN n;,
         DEFAULT -> RETURN 0.0;
     END

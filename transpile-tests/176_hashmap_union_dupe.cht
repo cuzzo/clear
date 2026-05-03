@@ -12,7 +12,7 @@ UNION Value {
 }
 
 FN prStr(v: Value) RETURNS String ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Nil -> RETURN "nil";,
         Value.Number AS n -> RETURN n.toString();,
         Value.Str AS s -> RETURN s;,

@@ -19,13 +19,13 @@ END
 
 FN main() RETURNS Void ->
     v1 = makeStr!("hel", "lo");
-    MATCH v1 START
+    PARTIAL MATCH v1 START
         Val.Str AS s -> ASSERT s == "hello", "case1: Str variant";,
         DEFAULT -> ASSERT FALSE, "case1: should be Str";
     END
 
     v2 = makePair!("wor", "ld");
-    MATCH v2 START
+    PARTIAL MATCH v2 START
         Val.Pair AS p -> ASSERT p.car == "world" && p.cdr == "ldwor", "case2: Pair variant";,
         DEFAULT -> ASSERT FALSE, "case2: should be Pair";
     END

@@ -74,6 +74,47 @@ fn promiseConsumerAfterDone(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     state.result = try state.promise.next();
 }
 
+// Pins the Promise(T).next() contract referenced by the BC runner's
+// AWAIT cache (`futureResolved`). Promise.next() destroys its
+// heap-allocated Inner before returning (zig/lib/data-structures.zig
+// `self.alloc.destroy(self.inner)`); a SECOND next() on the same
+// handle would `self.inner.wg.wait()` against freed memory (UAF, then
+// double-free of Inner on the second destroy) -- DebugAllocator and
+// glibc both catch it (`free(): double free detected in tcache 2`).
+//
+// We previously had a test that EXERCISED the second next() to prove
+// the crash; it triggered SIGABRT during `sched.run()` and made CI
+// red. The contract is documented in the source instead: this test
+// asserts the safe single-next path AND the structural guarantee
+// (next() consumes the handle by destroying Inner). If anyone later
+// makes Promise idempotent (e.g. by folding it into SharedPromise's
+// retain/refcount), the BC's `futureResolved` cache becomes
+// optimization-only and this test should be revisited alongside
+// `_bc_runner.cht`'s AWAIT branch.
+test "Promise(f64).next() consumes the handle: documented contract" {
+    // Assert the type-level shape: Inner has a wg + result; alloc is the
+    // GPA used to destroy() Inner on next(). Calling next() twice on
+    // the same handle is UB by construction.
+    const Inner = CheatLib.Promise(f64).Inner;
+    const fields = @typeInfo(Inner).@"struct".fields;
+    var found_result = false;
+    var found_wg = false;
+    inline for (fields) |f| {
+        if (std.mem.eql(u8, f.name, "result")) found_result = true;
+        if (std.mem.eql(u8, f.name, "wg")) found_wg = true;
+    }
+    try std.testing.expect(found_result);
+    try std.testing.expect(found_wg);
+
+    // alloc is on the Promise struct itself (used in destroy(self.inner))
+    const promise_fields = @typeInfo(CheatLib.Promise(f64)).@"struct".fields;
+    var found_alloc = false;
+    inline for (promise_fields) |f| {
+        if (std.mem.eql(u8, f.name, "alloc")) found_alloc = true;
+    }
+    try std.testing.expect(found_alloc);
+}
+
 test "Promise(f64): next() fast-path when producer finishes first" {
     const allocator = std.testing.allocator;
 

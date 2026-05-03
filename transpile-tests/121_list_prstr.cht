@@ -4,12 +4,12 @@
 UNION Value { Nil, Number: Float64, List: Value[], NativeFn: String, Symbol: String }
 
 FN getNum(v: Value) RETURNS Float64 ->
-    MATCH v START Value.Number AS n -> RETURN n;, DEFAULT -> RETURN 0.0; END
+    PARTIAL MATCH v START Value.Number AS n -> RETURN n;, DEFAULT -> RETURN 0.0; END
     RETURN 0.0;
 END
 
 FN prStr(v: Value) RETURNS String @reentrant ->
-    MATCH v START
+    PARTIAL MATCH v START
         Value.Number AS n ->
             RETURN toInt(n).toString();,
         Value.List AS items ->
@@ -41,7 +41,7 @@ FN evalList!(TAKES items: Value[]) RETURNS Value ->
         evaled.append(COPY items[ei]);
     END
     f = evaled.remove(0_i64);
-    MATCH f START
+    PARTIAL MATCH f START
         Value.NativeFn AS s -> RETURN applyNative(s, evaled);,
         DEFAULT -> RETURN Value.Nil;
     END

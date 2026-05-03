@@ -11,7 +11,7 @@ UNION Val {
 }
 
 FN transform(v: Val) RETURNS Val ->
-    MATCH v START
+    PARTIAL MATCH v START
         Val.Box AS n -> RETURN Val{ Box: n * 2 };,
         DEFAULT -> RETURN Val.Nil;
     END
@@ -21,7 +21,7 @@ END
 FN main() RETURNS Void ->
     MUTABLE v: Val = Val{ Box: 3_i64 };
     v = transform(v);
-    MATCH v START
+    PARTIAL MATCH v START
         Val.Box AS n -> ASSERT n == 6_i64, "doubled";,
         DEFAULT -> ASSERT FALSE, "should be Box";
     END
@@ -29,7 +29,7 @@ FN main() RETURNS Void ->
     MUTABLE w: Val = Val{ Box: 5_i64 };
     w = transform(w);
     w = transform(w);
-    MATCH w START
+    PARTIAL MATCH w START
         Val.Box AS n -> ASSERT n == 20_i64, "double transform";,
         DEFAULT -> ASSERT FALSE, "should be Box after double transform";
     END

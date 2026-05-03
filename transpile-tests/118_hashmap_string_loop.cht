@@ -17,9 +17,9 @@ FN main() RETURNS Void ->
     v1 = map["t1"] OR Value.Nil;
     v2 = map["t2"] OR Value.Nil;
 
-    MATCH v0 START Value.Str AS s -> ASSERT s == "a", "t0=a";, DEFAULT -> ASSERT FALSE, "t0 missing"; END
-    MATCH v1 START Value.Str AS s -> ASSERT s == "b", "t1=b";, DEFAULT -> ASSERT FALSE, "t1 missing"; END
-    MATCH v2 START Value.Str AS s -> ASSERT s == "c", "t2=c";, DEFAULT -> ASSERT FALSE, "t2 missing"; END
+    PARTIAL MATCH v0 START Value.Str AS s -> ASSERT s == "a", "t0=a";, DEFAULT -> ASSERT FALSE, "t0 missing"; END
+    PARTIAL MATCH v1 START Value.Str AS s -> ASSERT s == "b", "t1=b";, DEFAULT -> ASSERT FALSE, "t1 missing"; END
+    PARTIAL MATCH v2 START Value.Str AS s -> ASSERT s == "c", "t2=c";, DEFAULT -> ASSERT FALSE, "t2 missing"; END
 
     RETURN;
 END

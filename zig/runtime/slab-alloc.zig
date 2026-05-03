@@ -1,12 +1,23 @@
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
 
+const root = @import("root");
+const Atomic = if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+
 pub fn SlabAllocator(comptime T: type) type {
     return struct {
         const Self = @This();
 
         const Node = struct {
             next: ?*Node,
+        };
+
+        /// Stable identity of a slab, used to safely pin a slab against
+        /// concurrent reuse. `id` is a slot in the allocator's registry;
+        /// `epoch` distinguishes successive occupants of that slot.
+        pub const Ref = struct {
+            id: u32,
+            epoch: u32,
         };
 
         const Magazine = struct {
@@ -27,12 +38,25 @@ pub fn SlabAllocator(comptime T: type) type {
         threadlocal var local_alloc_mag: Magazine = .{};
         threadlocal var local_free_mag: Magazine = .{};
 
-        const SlabHeader = struct {
+        pub const SlabHeader = struct {
             prev: ?*SlabHeader,
             next: ?*SlabHeader,
             free_head: ?*Node,
             used_count: usize,
             is_full: bool,
+            /// Slot index into the allocator's `slabs` registry. Stable for
+            /// the lifetime of this slab; recycled (with bumped epoch) when
+            /// the slab is freed.
+            id: u32,
+            /// Copy of `epochs[id]` at the time this slab was created.
+            /// A stale `Ref` whose epoch doesn't match the registry's
+            /// current epoch is treated as referring to a freed slab.
+            epoch: u32,
+            /// Refcount held by chain walkers / external readers. Bumped
+            /// under the allocator lock by `pin()`; decremented by
+            /// `unpin()`. `shrinkOne()` waits for this to drain to 0
+            /// before unmapping the slab.
+            pin_count: Atomic(u32),
         };
 
         allocator: std.mem.Allocator,
@@ -40,6 +64,19 @@ pub fn SlabAllocator(comptime T: type) type {
 
         partial_slabs: ?*SlabHeader = null,
         full_slabs: ?*SlabHeader = null,
+        /// Number of slabs in `partial_slabs` whose `used_count == 0`.
+        /// Used to decide whether `shrinkEmpty` has work to do.
+        empty_slab_count: usize = 0,
+
+        /// Registry: slot index → slab pointer. A null entry means the slot
+        /// has been freed (or never occupied). Read under `lock`; written
+        /// under `lock` from grow() and shrinkOne().
+        slabs: std.ArrayListUnmanaged(?*SlabHeader) = .empty,
+        /// Per-slot epoch counter. Incremented when a slot is freed, so a
+        /// stale Ref captured before the free is rejected by `pin()`.
+        epochs: std.ArrayListUnmanaged(u32) = .empty,
+        /// Recyclable slot ids. Pop from here before extending `slabs`.
+        free_slot_ids: std.ArrayListUnmanaged(u32) = .empty,
 
         lock: compat.Mutex = .{},
 
@@ -92,6 +129,10 @@ pub fn SlabAllocator(comptime T: type) type {
             }
             self.partial_slabs = null;
             self.full_slabs = null;
+            self.empty_slab_count = 0;
+            self.slabs.deinit(self.allocator);
+            self.epochs.deinit(self.allocator);
+            self.free_slot_ids.deinit(self.allocator);
         }
 
         /// If the threadlocal magazine belongs to a different instance, flush it.
@@ -163,9 +204,14 @@ pub fn SlabAllocator(comptime T: type) type {
 
         fn createFromDepot(self: *Self) !*T {
             if (self.partial_slabs) |slab| {
+                const was_empty = slab.used_count == 0;
                 const node = slab.free_head.?;
                 slab.free_head = node.next;
                 slab.used_count += 1;
+                if (was_empty) {
+                    std.debug.assert(self.empty_slab_count > 0);
+                    self.empty_slab_count -= 1;
+                }
 
                 if (slab.free_head == null) {
                     self.removeSlab(slab, &self.partial_slabs);
@@ -179,6 +225,10 @@ pub fn SlabAllocator(comptime T: type) type {
             const node = new_slab.free_head.?;
             new_slab.free_head = node.next;
             new_slab.used_count += 1;
+            // grow() prepends a fresh slab to partial_slabs which counted
+            // it as empty — consume that count now.
+            std.debug.assert(self.empty_slab_count > 0);
+            self.empty_slab_count -= 1;
 
             return @ptrCast(@alignCast(node));
         }
@@ -188,6 +238,8 @@ pub fn SlabAllocator(comptime T: type) type {
             const node = new_slab.free_head.?;
             new_slab.free_head = node.next;
             new_slab.used_count += 1;
+            std.debug.assert(self.empty_slab_count > 0);
+            self.empty_slab_count -= 1;
             return @ptrCast(@alignCast(node));
         }
 
@@ -227,15 +279,19 @@ pub fn SlabAllocator(comptime T: type) type {
             node.next = slab.free_head;
             slab.free_head = node;
             std.debug.assert(slab.used_count > 0);
+            const was_full = slab.is_full;
             slab.used_count -= 1;
 
             if (slab.used_count == 0) {
-                if (slab.is_full) {
+                if (was_full) {
                     self.removeSlab(slab, &self.full_slabs);
                     self.prependSlab(slab, &self.partial_slabs);
                     slab.is_full = false;
                 }
-            } else if (slab.is_full) {
+                // Slab is now empty (regardless of whether it was full or
+                // partial before this destroy). Track for shrinkEmpty.
+                self.empty_slab_count += 1;
+            } else if (was_full) {
                 self.removeSlab(slab, &self.full_slabs);
                 self.prependSlab(slab, &self.partial_slabs);
                 slab.is_full = false;
@@ -243,6 +299,19 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         noinline fn grow(self: *Self) !*SlabHeader {
+            // Reserve a registry slot first, so a failed allocAligned doesn't
+            // leave us with a half-initialized slab.
+            const slot_id: u32 = if (self.free_slot_ids.pop()) |reused|
+                reused
+            else blk: {
+                const new_id: u32 = @intCast(self.slabs.items.len);
+                try self.slabs.append(self.allocator, null);
+                errdefer _ = self.slabs.pop();
+                try self.epochs.append(self.allocator, 0);
+                break :blk new_id;
+            };
+            errdefer self.free_slot_ids.append(self.allocator, slot_id) catch {};
+
             // Allocate raw memory with correct alignment
             const bytes = try self.allocAligned(self.slab_size);
 
@@ -251,6 +320,11 @@ pub fn SlabAllocator(comptime T: type) type {
             const addr = @intFromPtr(bytes.ptr);
             if (addr & (self.slab_size - 1) != 0) {
                 std.debug.print("SlabAllocator: unaligned memory: expected {d}-byte alignment, got ptr 0x{x}\n", .{ self.slab_size, addr });
+                self.allocator.rawFree(
+                    bytes,
+                    std.mem.Alignment.fromByteUnits(self.slab_size),
+                    @returnAddress(),
+                );
                 return error.OutOfMemory;
             }
 
@@ -258,12 +332,17 @@ pub fn SlabAllocator(comptime T: type) type {
             const aligned_ptr: *align(@alignOf(SlabHeader)) u8 = @alignCast(raw_single_ptr);
             const slab: *SlabHeader = @ptrCast(aligned_ptr);
 
+            const slot_epoch = self.epochs.items[slot_id];
+
             slab.* = .{
                 .prev = null,
                 .next = null,
                 .free_head = null,
                 .used_count = 0,
                 .is_full = false,
+                .id = slot_id,
+                .epoch = slot_epoch,
+                .pin_count = Atomic(u32).init(0),
             };
 
             var offset = first_obj_offset;
@@ -276,7 +355,10 @@ pub fn SlabAllocator(comptime T: type) type {
                 offset += std.mem.alignForward(usize, object_size, object_align);
             }
 
+            self.slabs.items[slot_id] = slab;
             self.prependSlab(slab, &self.partial_slabs);
+            // Freshly-grown slab has used_count == 0, so it counts as empty.
+            self.empty_slab_count += 1;
             return slab;
         }
 
@@ -381,6 +463,146 @@ pub fn SlabAllocator(comptime T: type) type {
                 }
                 local_free_mag = .{};
             }
+        }
+
+        // ────────────────────────────────────────────────────────────────
+        // Refcount API
+        //
+        // These let an external chain walker (e.g., parking-lot
+        // detectCycle) safely deref a `*T` whose lifetime it does not
+        // own. The walker first turns the pointer into a `Ref` via
+        // `refFromPtr`, then calls `pin(ref)` to bump the slab's
+        // pin_count. As long as pin_count > 0, the slab won't be
+        // unmapped by `shrinkOne`. The walker calls `unpin` to drop
+        // its reference. A `Ref` captured before the slab is freed
+        // becomes stale (the slot's epoch advances on free); `pin`
+        // returns null in that case.
+        //
+        // refFromPtr only reads allocator-owned state (the `slabs`
+        // registry), never the slab itself, so it is safe to call
+        // even when the slab containing `ptr` has been freed.
+        // ────────────────────────────────────────────────────────────────
+
+        /// Find the live slab containing `ptr` and return its Ref.
+        /// Returns null if `ptr` does not point into any live slab in
+        /// this allocator (slab freed, or `ptr` was never from us).
+        ///
+        /// Cost: O(N_slabs) linear scan under the allocator lock.
+        /// Used only from cold cycle-detection paths.
+        pub fn refFromPtr(self: *Self, ptr: *T) ?Ref {
+            const mask = ~(self.slab_size - 1);
+            const slab_base: *SlabHeader = @ptrFromInt(@intFromPtr(ptr) & mask);
+
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            for (self.slabs.items, 0..) |maybe_slab, i| {
+                if (maybe_slab) |s| {
+                    if (s == slab_base) {
+                        return Ref{
+                            .id = @intCast(i),
+                            .epoch = self.epochs.items[i],
+                        };
+                    }
+                }
+            }
+            return null;
+        }
+
+        /// Pin the slab named by `ref`. Returns the slab header on
+        /// success, or null if the ref is stale (slab was freed, or
+        /// the slot has been recycled with a new epoch). The returned
+        /// pointer remains valid until `unpin` is called.
+        pub fn pin(self: *Self, ref: Ref) ?*SlabHeader {
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            if (ref.id >= self.slabs.items.len) return null;
+            if (self.epochs.items[ref.id] != ref.epoch) return null;
+            const slab = self.slabs.items[ref.id] orelse return null;
+            // Bump under the lock so a racing shrinkOne() either sees
+            // pin_count > 0 (and waits) or marks dead before we read.
+            _ = slab.pin_count.fetchAdd(1, .acquire);
+            return slab;
+        }
+
+        /// Drop a pin acquired via `pin`.
+        pub fn unpin(_: *Self, slab: *SlabHeader) void {
+            _ = slab.pin_count.fetchSub(1, .release);
+        }
+
+        /// Read pin count without acquiring the lock. Test-only.
+        pub fn pinCountUnsafe(_: *Self, slab: *SlabHeader) u32 {
+            return slab.pin_count.load(.acquire);
+        }
+
+        // ────────────────────────────────────────────────────────────────
+        // Shrinking
+        //
+        // Empty slabs accumulate when a workload spikes and then
+        // recedes. `shrinkEmpty` releases their backing memory to the
+        // OS, retaining at most `keep_count` empty slabs as a buffer
+        // for the next burst.
+        //
+        // shrinkEmpty does not run on the hot allocation path; call
+        // it explicitly from a maintenance hook (scheduler idle, GC,
+        // periodic timer). It blocks on each slab's pin_count
+        // draining to 0 — uncontended (no chain walks in flight)
+        // this is a cheap atomic load.
+        // ────────────────────────────────────────────────────────────────
+
+        /// Free empty slabs in `partial_slabs` until at most
+        /// `keep_count` empty slabs remain. Returns the number of
+        /// slabs freed.
+        pub fn shrinkEmpty(self: *Self, keep_count: usize) usize {
+            var freed: usize = 0;
+            while (true) {
+                const slab = self.popEmptyForShrink(keep_count) orelse return freed;
+                // Wait for any in-flight pinners to release. Drained
+                // outside the lock so pinners can complete.
+                while (slab.pin_count.load(.acquire) > 0) {
+                    std.atomic.spinLoopHint();
+                }
+                self.lock.lock();
+                self.freeSlabMemory(slab);
+                self.lock.unlock();
+                freed += 1;
+            }
+        }
+
+        /// Pop an empty slab from `partial_slabs` for shrinking, mark
+        /// its registry slot dead and bump its epoch. Returns null if
+        /// no empty slab can be freed (count <= keep_count) or if no
+        /// empty slab exists. Holds the lock for the duration; the
+        /// caller releases the slab's memory after pin_count drains.
+        fn popEmptyForShrink(self: *Self, keep_count: usize) ?*SlabHeader {
+            self.lock.lock();
+            defer self.lock.unlock();
+
+            if (self.empty_slab_count <= keep_count) return null;
+
+            // Find an empty slab in partial_slabs. Scan from head; in a
+            // well-mixed workload most slabs near the head are partial
+            // (recently allocated from), so empties tend to be older.
+            var it = self.partial_slabs;
+            while (it) |slab| : (it = slab.next) {
+                if (slab.used_count == 0) {
+                    self.removeSlab(slab, &self.partial_slabs);
+                    self.empty_slab_count -= 1;
+
+                    // Mark the registry slot dead and bump epoch so any
+                    // outstanding Ref to this slab becomes stale.
+                    self.slabs.items[slab.id] = null;
+                    self.epochs.items[slab.id] +%= 1;
+                    self.free_slot_ids.append(self.allocator, slab.id) catch {
+                        // Leak the slot id rather than the slab memory:
+                        // appending fails only on OOM, which is fine here
+                        // (next grow() falls back to slabs.append).
+                    };
+                    return slab;
+                }
+            }
+            return null;
         }
     };
 }

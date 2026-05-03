@@ -68,7 +68,7 @@ RSpec.describe "IF/MATCH as expressions" do
       ast = parse_if_expr_src(<<~CLEAR)
         FN main() RETURNS Void ->
           n = 1;
-          x = MATCH n START
+          x = PARTIAL MATCH n START
             1 -> "one",
             DEFAULT -> "other"
           END;
@@ -117,7 +117,7 @@ RSpec.describe "IF/MATCH as expressions" do
       ast = annotate_if_expr_src(<<~CLEAR)
         FN main() RETURNS Void ->
           n = 1;
-          x = MATCH n START
+          x = PARTIAL MATCH n START
             1 -> "one",
             DEFAULT -> "other"
           END;
@@ -237,7 +237,7 @@ RSpec.describe "IF/MATCH as expressions" do
         annotate_if_expr_src(<<~CLEAR)
           FN main() RETURNS Void ->
             n = 1;
-            x = MATCH n START
+            x = PARTIAL MATCH n START
               1 -> 1,
               2 -> "two",
               DEFAULT -> 3
@@ -253,7 +253,7 @@ RSpec.describe "IF/MATCH as expressions" do
         annotate_if_expr_src(<<~CLEAR)
           FN main() RETURNS Void ->
             n = 1;
-            x = MATCH n START
+            x = PARTIAL MATCH n START
               1 -> "one",
               DEFAULT -> 99
             END;
@@ -268,14 +268,14 @@ RSpec.describe "IF/MATCH as expressions" do
         annotate_if_expr_src(<<~CLEAR)
           FN main() RETURNS Void ->
             n = 1;
-            x = MATCH n START
+            x = PARTIAL MATCH n START
               1 -> "one",
               2 -> "two"
             END;
             RETURN;
           END
         CLEAR
-      }.to raise_error(StandardError, /DEFAULT.*MATCH IFF|MATCH IFF.*DEFAULT/)
+      }.to raise_error(StandardError, /DEFAULT.*MATCH|MATCH.*DEFAULT/)
     end
   end
 
@@ -334,7 +334,7 @@ RSpec.describe "IF/MATCH as expressions" do
     it "emits MATCH expression with DEFAULT as labeled block" do
       zig = compile_if_expr_src(<<~CLEAR)
         FN label(n: Int64) RETURNS String ->
-          RETURN MATCH n START
+          RETURN PARTIAL MATCH n START
             1 -> "one",
             2 -> "two",
             DEFAULT -> "other"

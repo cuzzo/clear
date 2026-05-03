@@ -1,6 +1,6 @@
 FN classify(cmd: String) RETURNS Int64 ->
   MUTABLE result = 0_i64;
-  MATCH cmd START
+  PARTIAL MATCH cmd START
     "hello" -> result = 1_i64;,
     "world" -> result = 2_i64;,
     DEFAULT -> result = 99_i64;
@@ -11,19 +11,19 @@ END
 FN main() RETURNS Void ->
   -- Static string literals: should hit matching case
   r1 = classify("hello");
-  ASSERT r1 == 1, "MATCH string: should hit 'hello' case";
+  ASSERT r1 == 1, "PARTIAL MATCH string: should hit 'hello' case";
 
   r2 = classify("world");
-  ASSERT r2 == 2, "MATCH string: should hit 'world' case";
+  ASSERT r2 == 2, "PARTIAL MATCH string: should hit 'world' case";
 
   -- Unmatched string: should hit DEFAULT
   r3 = classify("other");
-  ASSERT r3 == 99, "MATCH string: DEFAULT should fire for unmatched string";
+  ASSERT r3 == 99, "PARTIAL MATCH string: DEFAULT should fire for unmatched string";
 
   -- Build a string at runtime via concatenation to prove content equality
   s1 = "hel";
   s2 = "lo";
   dynamic = s1 + s2;
   r4 = classify(dynamic);
-  ASSERT r4 == 1, "MATCH string: content equality should match 'hello' built via concat";
+  ASSERT r4 == 1, "PARTIAL MATCH string: content equality should match 'hello' built via concat";
 END

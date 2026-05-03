@@ -542,7 +542,7 @@ RSpec.describe SemanticAnnotator do
         <<~CLEAR
           UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
           FN bad(v: Value) RETURNS Value ->
-              MATCH v START
+              PARTIAL MATCH v START
                   Value.List AS items ->
                       RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
                   DEFAULT -> RETURN Value.Nil;
@@ -562,7 +562,7 @@ RSpec.describe SemanticAnnotator do
         <<~CLEAR
           UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
           FN bad(TAKES v: Value) RETURNS Value ->
-              MATCH v START
+              PARTIAL MATCH v START
                   Value.List AS items ->
                       RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
                   DEFAULT -> RETURN Value.Nil;
@@ -584,7 +584,7 @@ RSpec.describe SemanticAnnotator do
         <<~CLEAR
           UNION Value { Nil, Num: Float64, List: Value[], Lambda { params: Value[], body: Value @indirect, id: Int64 } }
           FN good(TAKES v: Value) RETURNS Value ->
-              MATCH TAKES v START
+              PARTIAL MATCH TAKES v START
                   Value.List AS items ->
                       RETURN Value.Lambda{ params: items, body: Value{ Num: 0.0 }, id: 1 };,
                   DEFAULT -> RETURN Value.Nil;
@@ -771,7 +771,7 @@ RSpec.describe SemanticAnnotator do
           UNION Value { Nil, Str: String }
           FN test!(MUTABLE map: HashMap<Value>) RETURNS String ->
               val = map["t0"] OR Value.Nil;
-              MATCH val START
+              PARTIAL MATCH val START
                   Value.Str AS s -> RETURN s;,
                   DEFAULT -> RETURN "";
               END

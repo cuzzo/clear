@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
   -- Option<Float64> with a payload variant
   opt = Option<Float64>{ Some: 42.0 };
   MUTABLE got = 0.0;
-  MATCH opt START
+  PARTIAL MATCH opt START
     Option.Some -> got = 1.0;,
     Option.None -> got = 2.0;
   END
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
   -- Option<Float64> with unit variant
   none_val = Option<Float64>{ Some: 0.0 };
   MUTABLE got2 = 0.0;
-  MATCH none_val START
+  PARTIAL MATCH none_val START
     Option.Some -> got2 = 10.0;,
     Option.None -> got2 = 20.0;
   END
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
   -- Result<Float64, Bool>: Ok path
   ok = safeDivide(10.0, 2.0);
   MUTABLE ok_matched = 0.0;
-  MATCH ok START
+  PARTIAL MATCH ok START
     Result.Ok  -> ok_matched = 1.0;,
     Result.Err -> ok_matched = 2.0;
   END
@@ -39,7 +39,7 @@ FN main() RETURNS Void ->
   -- Result<Float64, Bool>: Err path
   err = safeDivide(10.0, 0.0);
   MUTABLE err_matched = 0.0;
-  MATCH err START
+  PARTIAL MATCH err START
     Result.Ok  -> err_matched = 1.0;,
     Result.Err -> err_matched = 2.0;
   END

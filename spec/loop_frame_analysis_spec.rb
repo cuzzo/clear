@@ -434,7 +434,7 @@ RSpec.describe LoopFrameAnalysis do
           WHILE i < 5 DO
             MUTABLE buf: Val[]@list = [];
             buf.append(Val.Nil);
-            MATCH i START
+            PARTIAL MATCH i START
               DEFAULT -> outer.append(Val.Nil);
             END
             i = i + 1_i64;

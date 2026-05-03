@@ -101,6 +101,7 @@ module FiberCtxBuilder
                  fresh_heap_alloc: nil, fresh_heap_id: 0)
     captured = analysis&.captures || {}
     strategies = analysis&.strategies || {}
+    pointer_captures = analysis&.pointer_captures || Set.new
     specs = captured.map do |name, _type_obj|
       strat = strategies[name]
       if promoted_names[name]
@@ -116,6 +117,32 @@ module FiberCtxBuilder
           "#{body_access_prefix}.alloc, &#{body_access_prefix}.#{name});"
         CaptureSpec.new(name, "@TypeOf(#{name})", dupe_var,
                         MIR::Ident.new(dupe_var), dupe_decl, body_cleanup)
+      elsif pointer_captures.include?(name)
+        # Shared mutable collection (HashMap, @pool, @sharded:locked, ...).
+        # Capture by pointer so writes inside the fiber body land on the
+        # outer instance, not on a copied struct.
+        #
+        # Two sub-cases for the binding's existing Zig representation:
+        #   * Function parameter of a `needs_pointer_passing?` type --
+        #     Zig already passes the parameter as a pointer (the
+        #     compiler emits `nodes: anytype` / `pool: *Pool`). Capture
+        #     it by VALUE so the BG context carries the same pointer
+        #     directly; wrapping with `&` would produce a `**T` that
+        #     the body's method calls (`pool.acquire()`) cannot consume.
+        #   * Local declaration -- Zig holds the value inline (e.g.
+        #     `var cNodes = ShardedStringMap{...}`). Capture `&cNodes`
+        #     so writes inside the fiber land on the outer struct, not
+        #     on a copied per-shard-locks instance.
+        # `@TypeOf(&name)` for the field type carries any const-ness
+        # through (parameters are Zig-const, so `&pool` is `*const T`).
+        sym = analysis&.capture_symbols&.dig(name)
+        if sym&.is_param
+          CaptureSpec.new(name, "@TypeOf(#{name})", name,
+                          MIR::Ident.new(name), nil, nil)
+        else
+          CaptureSpec.new(name, "@TypeOf(&#{name})", "&#{name}",
+                          MIR::AddressOf.new(MIR::Ident.new(name)), nil, nil)
+        end
       else
         CaptureSpec.new(name, "@TypeOf(#{name})", name,
                         MIR::Ident.new(name), nil, nil)

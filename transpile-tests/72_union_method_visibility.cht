@@ -20,7 +20,7 @@ UNION Color {
 -- Satisfies the plain FN stub.
 FN code(c: Color) RETURNS Float64 ->
   MUTABLE result = 0.0;
-  MATCH IFF c START
+  MATCH c START
     Color.Red   -> result = 1.0;,
     Color.Green -> result = 2.0;,
     Color.Blue  -> result = 3.0;

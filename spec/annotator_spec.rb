@@ -2758,7 +2758,7 @@ RSpec.describe SemanticAnnotator do
           REQUIRE "helper.cht";
           FN caller() RETURNS Float64 ->
             r = Result{ Ok: 42.0 };
-            MATCH r START
+            PARTIAL MATCH r START
               Result.Ok AS val -> RETURN val;,
               Result.Err -> RETURN 0.0;,
             END
@@ -3331,7 +3331,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
-              MATCH d START
+              PARTIAL MATCH d START
                 Dir.North -> n = 1_i64;,
                 Dir.South -> n = 2_i64;
               END
@@ -3348,7 +3348,7 @@ RSpec.describe SemanticAnnotator do
             FN main() RETURNS Void ->
               d: Dir = Dir.North;
               MUTABLE n = 0_i64;
-              MATCH d START
+              PARTIAL MATCH d START
                 Color.Red -> n = 1_i64;
               END
             END
@@ -4094,7 +4094,7 @@ RSpec.describe SemanticAnnotator do
         }
         FN main() RETURNS Void ->
             d = Data.Pair{ x: 1, y: 2 };
-            MATCH d START
+            PARTIAL MATCH d START
                 Data.Pair AS p ->
                     px = p.x;
                     py = p.y;

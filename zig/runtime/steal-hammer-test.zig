@@ -198,7 +198,7 @@ pub fn main() !void {
                     _ = sched.active_tasks.fetchSub(1, .monotonic);
                     sched.stack_pool.free(task.base.stack.memory);
                     sched.allocator.destroy(task.base);
-                    sched.allocator.destroy(task);
+                    sched.task_slab.destroy(task);
                 },
                 .Ready => {
                     sched.ready_queue.push(sched.allocator, task) catch unreachable;

@@ -23,7 +23,7 @@ END
 
 FN main() RETURNS Void ->
     result = wrapAndReturn!("hello");
-    MATCH result START
+    PARTIAL MATCH result START
         Value.Str AS s -> ASSERT s == "hello", "string survives HPT cleanup";,
         DEFAULT -> ASSERT FALSE, "expected Str variant";
     END

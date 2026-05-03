@@ -1589,11 +1589,13 @@ RSpec.describe MIRLowering do
 
       result = lowering.lower(node)
       zig = emit(result)
-      # Use @TypeOf(name) for the field type and direct init -- the captured
-      # local's actual deduced Zig type is the source of truth (handles Arc
-      # wrapping and already-pointer collection params correctly).
-      expect(zig).to include("x: @TypeOf(x)")
-      expect(zig).to include(".x = x")
+      # Pointer captures (HashMap, @pool, @sharded:locked, ...) flow as
+      # `*T` into the fiber context so writes inside the fiber land on
+      # the outer instance. Without this the fiber operates on a value
+      # copy and per-shard locks become independent mutexes -- writes
+      # never appear to outer readers (regressed examples/graphdb).
+      expect(zig).to include("x: @TypeOf(&x)")
+      expect(zig).to include(".x = &x")
     end
 
     it "lowers pinned BgBlock with submitSpawn" do
@@ -2165,54 +2167,51 @@ RSpec.describe MIRLowering do
       expect(zig).to include("catch undefined")
     end
 
-    context "or_fallback_dupe with struct string fields" do
-      def make_fallback_struct(full_type)
-        node = AST::StructLit.new(tok, full_type.to_s, {})
-        node.full_type = full_type
-        node
-      end
+    context "lazy fallback scoping (descend + lower_scoped)" do
+      # The fallback expression is evaluated lazily. Any allocations done
+      # while lowering it must NOT escape to outer @pending_stmts -- they
+      # belong to the orelse/catch fallback branch and must only run when
+      # that branch is actually taken. AST::BinaryOp#lazy_fields declares
+      # :right as lazy when op == :OR_RESCUE; descend() wraps the right
+      # side in MIR::BlockExpr containing the scoped pending stmts.
+      it "wraps an allocating fallback (struct lit with heap field) in BlockExpr" do
+        # Allocating fallback: a StructLit whose String field gets a
+        # CopyNode-wrapped rodata literal. Lowering the field invokes
+        # hoist_alloc which pushes a `Let __tmp = DeepCopy(...)` into
+        # @pending_stmts. With lazy scoping that hoisted Let must land
+        # inside the MIR::BlockExpr wrapping the fallback, NOT in outer
+        # @pending_stmts.
+        left = make_id("opt_node", full_type: :"?Node")
+        lit  = make_lit(:STRING, "?", full_type: Type.new(:String, location: :rodata))
+        copy = AST::CopyNode.new(tok, lit)
+        copy.full_type = Type.new(:String, location: :heap)
+        struct_lit = AST::StructLit.new(tok, "Node", { "label" => copy })
+        struct_lit.full_type = :Node
 
-      let(:struct_schema) do
-        { "name" => { type: Type.new(:String) }, "code" => { type: Type.new(:Int64) } }
-      end
-      let(:schema_with_two_strings) do
-        { "first" => { type: Type.new(:String) }, "second" => { type: Type.new(:String) } }
-      end
+        node = AST::BinaryOp.new(tok, left, :OR_RESCUE, struct_lit)
+        node.full_type = :Node
 
-      it "generates try dupe (not @panic) for single string field fallback" do
-        left  = make_error_expr("fetchUser")
-        right = make_fallback_struct(:User)
-        node  = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
-        node.full_type = :User
-        node.or_fallback_dupe = true
-
-        l = lowering(struct_schemas: { User: struct_schema })
+        l = lowering(struct_schemas: { Node: { "label" => { type: Type.new(:String) } } })
         result = l.lower(node)
-        zig = emit(result)
-
-        expect(zig).not_to include("@panic")
-        expect(zig).to include("try rt.heapAlloc().dupe(u8")
-        expect(zig).to include("__fb.name")
+        expect(l.instance_variable_get(:@pending_stmts)).to be_empty
+        expect(result).to be_a(MIR::Orelse)
+        expect(result.fallback).to be_a(MIR::BlockExpr)
+        # The hoisted dupe Let lives inside the BlockExpr's body.
+        expect(result.fallback.body).to include(an_instance_of(MIR::Let))
       end
 
-      it "frees already-duped fields on OOM for multi-string-field fallback" do
-        left  = make_error_expr("fetchRecord")
-        right = make_fallback_struct(:Record)
-        node  = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
-        node.full_type = :Record
-        node.or_fallback_dupe = true
+      it "leaves a non-allocating fallback unwrapped" do
+        # Pure rodata fallback, no allocations -> no BlockExpr wrapping.
+        left  = make_id("opt_str", full_type: :"?String")
+        right = make_lit(:STRING, "default", full_type: Type.new(:String, location: :rodata))
 
-        l = lowering(struct_schemas: { Record: schema_with_two_strings })
+        node = AST::BinaryOp.new(tok, left, :OR_RESCUE, right)
+        node.full_type = :String
+
+        l = lowering
         result = l.lower(node)
-        zig = emit(result)
-
-        expect(zig).not_to include("@panic")
-        # First field uses try
-        expect(zig).to match(/try rt\.heapAlloc\(\)\.dupe\(u8, __fb\.first\)/)
-        # Second field uses catch with cleanup of first
-        expect(zig).to match(/catch \|__dupe_err\|/)
-        expect(zig).to include("rt.heapAlloc().free(__fb.first)")
-        expect(zig).to include("return __dupe_err")
+        expect(result).to be_a(MIR::Orelse)
+        expect(result.fallback).not_to be_a(MIR::BlockExpr)
       end
     end
   end

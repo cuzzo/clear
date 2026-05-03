@@ -17,11 +17,11 @@ UNION Value {
 FN envGet!(envId: Id<Env>, name: String, MUTABLE pool: Env[10000]@pool) RETURNS Value @reentrant ->
     IF pool[envId] AS env THEN
         val = COPY (env.vars[name] OR Value{ Number: 0.0 - 777777.0 });
-        MATCH val START
+        PARTIAL MATCH val START
             Value.Number AS n ->
                 IF n == 0.0 - 777777.0 THEN
                     parentVal = env.vars["__p"] OR Value.Nil;
-                    MATCH parentVal START
+                    PARTIAL MATCH parentVal START
                         Value.EnvRef AS pid -> RETURN envGet!(pid, name, pool);,
                         DEFAULT -> RETURN Value.Nil;
                     END
@@ -51,14 +51,14 @@ FN main() RETURNS Void ->
 
     -- Look up x in child (direct)
     xVal = envGet!(childId, "x", pool);
-    MATCH xVal START
+    PARTIAL MATCH xVal START
         Value.Number AS n -> ASSERT n == 5.0, "x=5";,
         DEFAULT -> ASSERT FALSE, "x not found";
     END
 
     -- Look up a in child (should follow __p to root)
     aVal = envGet!(childId, "a", pool);
-    MATCH aVal START
+    PARTIAL MATCH aVal START
         Value.Number AS n -> ASSERT n == 10.0, "a=10 via parent";,
         DEFAULT -> ASSERT FALSE, "a not found via parent";
     END

@@ -340,41 +340,109 @@ pub const TaskConfig = struct {
     use_arena: bool = false,           // true = expose scheduler local_arena via __pinned_local_alloc (@arena BG blocks only)
 };
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Task layout — fields are grouped logically so that within each cache line
+// the contents are correlated, but we do NOT force align(64) on group
+// boundaries. Forcing alignment causes Zig to reorder fields (the aligned
+// field gets moved to the front), which in turn changes lock-state pointer
+// observability under VOPR-style schedules and induces livelock in the
+// loom harness. Slab-allocated Tasks naturally pack and the SlabAllocator
+// chooses slab geometry; revisit hard cache-line padding only if profiling
+// shows true false-sharing on these fields.
+//
+// Group 1: owner-only hot fields. ONLY the scheduler-thread currently
+// running this Task touches these.
+//
+// Group 2: cross-thread-touched atomics. detectCycle (any scheduler),
+// submitResume (any scheduler), and the timeout scanner read/write here.
+//
+// Group 3: cold/rare fields. Not on any hot path.
+// ─────────────────────────────────────────────────────────────────────────────
 pub const Task = struct {
-    base: *Fiber,
-    user_fn: TaskFn,
-    inbox_link: InboxNode = .{ .type = .Resume },
-    runtime_ptr: ?*anyopaque = null,
-    context: ?*anyopaque = null,
+    // ── Group 1: owner-only hot ─────────────────────────────────────────
+    base: *Fiber,                      // 8
+    user_fn: TaskFn,                   // 8
+    runtime_ptr: ?*anyopaque = null,   // 8
+    context: ?*anyopaque = null,       // 8
+    config: TaskConfig = .{},          // 16  (timeout u64 + 3 bools padded)
+    spawn_ns: u64 = 0,                 // 8   (profile-only)
+    wake_time: i64 = 0,                // 8   (0 = not sleeping)
+
+    // ── Group 2: cross-thread-touched atomics ───────────────────────────
     status: Atomic(TaskStatus) = Atomic(TaskStatus).init(.Ready),
-    config: TaskConfig = .{},
-    is_on_root_stack: bool = false,
     /// Debug guard: set to true when inbox_link is pushed to an inbox,
     /// cleared when drainInbox processes it. Detects double-push.
     in_inbox: Atomic(bool) = Atomic(bool).init(false),
-    wake_time: i64 = 0, // Timestamp to wake up (0 = not sleeping - deal with it)
-    // Profile-only: spawn timestamp in ns. Populated by submitSpawn
-    // when `CLEAR_PROFILE == true`, read by the scheduler's .Finished
-    // path to emit a fiber lifetime sample. Field exists always for
-    // simplicity (8 bytes per Task); the update sites compile out in
-    // non-profile builds so there's no instruction-level cost.
-    spawn_ns: u64 = 0,
+    /// Tag identifying the kind of lock the task is parked on. detectCycle
+    /// dispatches on this to look up the lock's CURRENT exclusive owner.
+    ///   0 = not parked
+    ///   1 = ParkingMutex (exclusive)
+    ///   2 = ParkingRwLock (write/exclusive)
+    ///   3 = ParkingRwLock (shared/read) — chain terminator
+    waiting_for_lock_kind: Atomic(u8) = Atomic(u8).init(0),
+    /// Set true by Scheduler.scanLockWaiters when the parked-task's
+    /// deadline elapsed and we removed it from the lock's waiter list.
+    /// Read by the waker-side path in lockSlow after yield() returns
+    /// to decide whether to return error.LockTimeout. Atomic because
+    /// the writer (scanner) and reader (waking fiber) run on
+    /// different threads.
+    lock_timed_out: Atomic(bool) = Atomic(bool).init(false),
+    /// Owner-only flag, but kept in this group rather than group 1 so the
+    /// hot owner-only line stays at exactly 64 bytes. The scheduler reads
+    /// this when entering the root-stack trampoline; cost is negligible.
+    is_on_root_stack: bool = false,
+    /// Monotonic counter of every park/wake transition affecting the
+    /// (waiting_for_lock, waiting_for_lock_kind) pair. detectCycle uses
+    /// this to validate per-hop snapshots across an N-hop chain walk.
+    seq: Atomic(u32) = Atomic(u32).init(0),
+    /// Per-slot generation counter, bumped by Scheduler.drainChannels on
+    /// every Task allocation from `task_slab.create()`. Used by
+    /// detectCycle (Phase 3) to validate that a captured
+    /// `(*Task, generation)` pair still refers to the same logical Task —
+    /// guards against use-after-free when the slot is reallocated to a
+    /// different Task while a chain walker holds a stale pointer.
+    ///
+    /// Atomic so cross-thread reads (chain walkers in other schedulers)
+    /// observe a consistent value paired with the generation-bumping
+    /// store. Loom-instrumented via the comptime Atomic alias so
+    /// generation transitions become yield points under simulation.
+    generation: Atomic(u32) = Atomic(u32).init(0),
+    /// Set by ParkingMutex/ParkingRwLock on park; read by the scheduler's
+    /// timeout scanner. Always null when not parked. Loom-instrumented.
+    waiting_for_lock: Atomic(?*anyopaque) = Atomic(?*anyopaque).init(null),
+    /// Set to the exclusive owner of the lock this task is blocked on.
+    /// Cross-thread cycle-detection reads this field while unlock() /
+    /// park() write it on a different core; Atomic prevents torn reads.
+    waiting_for_lock_owner: Atomic(?*Task) = Atomic(?*Task).init(null),
+    /// Wall-clock millisecond timestamp captured by registerLockWaiter
+    /// when the task parks. Read by Scheduler.scanLockWaiters (called
+    /// from `run()` on whatever scheduler currently holds the task in
+    /// its lock_waiters list) plus the idle-path deadline computation
+    /// at scheduler.zig:830. Atomic to avoid torn reads on cross-
+    /// scheduler timeout-scan paths (the scan thread is not
+    /// necessarily the thread that registered the task — a parked
+    /// task that was previously stolen ends up registered on its
+    /// current scheduler, which may differ from the original).
+    lock_wait_start_ms: Atomic(i64) = Atomic(i64).init(0),
 
-    // Parking-lot lock fields. Set by ParkingMutex/ParkingRwLock on park.
-    // Read by the scheduler's timeout scanner. Always null when not parked.
-    // Using std.atomic.Value (not SimAtomic) so scheduler can safely read
-    // from its loop without these becoming Loom yield points.
-    waiting_for_lock: std.atomic.Value(?*anyopaque) = std.atomic.Value(?*anyopaque).init(null),
-    waiting_for_lock_list: ?*WaiterList = null, // back-ptr to lock's waiter list
-    lock_waiter_node: ?*WaiterNode = null,      // back-ptr to our WaiterNode in that list
-    lock_wait_start_ms: i64 = 0,
-    lock_timed_out: bool = false,
-    // Set to the exclusive owner of the lock this task is blocked on.
-    // Used by cycle detection: follow the chain task -> owner -> owner -> ...
-    // Null when not blocked or blocked on a read lock (no single owner).
-    waiting_for_lock_owner: ?*Task = null,
-    // Set by ParkingRwLock when parking as a write-lock waiter. On timeout,
-    // the scheduler decrements this counter (writers_waiting) so future readers
-    // are not permanently blocked by a phantom writer count.
+    // ── Group 3: cold/rare ──────────────────────────────────────────────
+    inbox_link: InboxNode = .{ .type = .Resume },
+    /// Back-pointer to lock's waiter list. Set by lockSlow before
+    /// yield, cleared by either the wake-side (lockSlow after yield,
+    /// or notifier-side wakeNext) or the timeout scanner. Atomic so
+    /// the scanner's read can't tear with concurrent wake-side
+    /// clears.
+    waiting_for_lock_list: Atomic(?*WaiterList) = Atomic(?*WaiterList).init(null),
+    /// Back-pointer to our WaiterNode in that list. Same writers and
+    /// reader as `waiting_for_lock_list` — the two move together.
+    lock_waiter_node: Atomic(?*WaiterNode) = Atomic(?*WaiterNode).init(null),
+    /// Set by ParkingRwLock when parking as a write-lock waiter. On
+    /// timeout, the scheduler decrements this counter (writers_waiting)
+    /// so future readers are not permanently blocked by a phantom writer.
     lock_counter_ptr: ?*u32 = null,
 };
+
+pub const LOCK_KIND_NONE: u8 = 0;
+pub const LOCK_KIND_MUTEX: u8 = 1;
+pub const LOCK_KIND_RWLOCK_WRITE: u8 = 2;
+pub const LOCK_KIND_RWLOCK_SHARED: u8 = 3;

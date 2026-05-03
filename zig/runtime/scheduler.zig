@@ -188,6 +188,13 @@ pub const Scheduler = struct {
     // 3. IO & Memory
     allocator: std.mem.Allocator,
     global_ebr: *EbrContext,
+    /// Per-scheduler slab allocator for Task structs. Tasks live in
+    /// page-aligned slabs, which (a) lets walkers compute the owning
+    /// slab from a *Task via address arithmetic in Phase 3 (cycle-detect
+    /// UAF fix), and (b) reuses Task slots within a slab instead of
+    /// going through the general allocator on every spawn/finish.
+    /// Slab size: 64 KB (power-of-two, ~330 tasks per slab at ~192 B each).
+    task_slab: SlabAllocator(Task),
 
     // 4a. io_uring — unified I/O ring for poll-based socket I/O, async file
     // I/O, and eventfd wakeups. In Loom mode, this is SimRing.
@@ -234,6 +241,16 @@ pub const Scheduler = struct {
     // long-running legitimate waits don't spuriously time out; 100ms in
     // Debug builds so WITH ... ON <selector> clauses are actually
     // exercised by tests under contention.
+    // Default lock-acquire timeout (per-WAIT, not per-program). Debug
+    // mode used to be 100ms to surface hangs quickly during development,
+    // but high-concurrency benchmarks (14_nested_lock at THREADS=$(nproc))
+    // genuinely sat on contended mutexes longer than 100ms and would
+    // false-fail. With the Phase 1-6 cycle-detection rework — slab
+    // pin, generation, atomic per-hop lock-state snapshot, atomic
+    // wait-field protocol — false-positive timeouts no longer occur,
+    // so the original 100ms can be restored. 100ms is what the
+    // transpile-test 263_with_lock_contention.cht and other timeout
+    // tests assume; bumping it broke them silently.
     lock_timeout_ms: i64 = if (builtin.mode == .Debug) 100 else 30_000,
 
     /// Stable index assigned at registration (0..N-1).  Used by
@@ -273,6 +290,10 @@ pub const Scheduler = struct {
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
             .global_ebr = global_ebr,
+            // Power-of-two slab size required by SlabAllocator; 64 KB hits
+            // the sweet spot for current Task footprint (~192 B incl.
+            // cache-line padding) — ≈330 tasks per slab.
+            .task_slab = SlabAllocator(Task).init(allocator, 64 * 1024),
             .ring = ring,
             .io_helper_stack = try allocator.alloc(u8, IO_HELPER_STACK_SIZE),
             .main_ctx = undefined,
@@ -297,7 +318,7 @@ pub const Scheduler = struct {
                      self.freeStack(task.base.stack.memory);
                 }
                 self.allocator.destroy(task.base); // Free Fiber
-                self.allocator.destroy(task); // Free Task Struct
+                self.task_slab.destroy(task); // Free Task Struct
             }
             q.deinit(self.allocator);
         }
@@ -326,14 +347,14 @@ pub const Scheduler = struct {
              if (task_opt) |task| {
                  self.freeStack(task.base.stack.memory);
                  self.allocator.destroy(task.base);
-                 self.allocator.destroy(task);
+                 self.task_slab.destroy(task);
              }
         }
         self.ready_queue.deinit();
         for (self.pinned_queue.items) |task| {
             self.freeStack(task.base.stack.memory);
             self.allocator.destroy(task.base);
-            self.allocator.destroy(task);
+            self.task_slab.destroy(task);
         }
         self.pinned_queue.deinit(self.allocator);
 
@@ -345,6 +366,12 @@ pub const Scheduler = struct {
         self.local_arena.deinit();
         self.allocator.free(self.io_helper_stack);
         self.ring.deinit();
+        // Tear down the Task slab last; everything above that destroys
+        // Tasks (`self.task_slab.destroy(task)`) just returns the slot to
+        // the slab's free list — the underlying slab pages live until
+        // here. Deinit walks the partial / full slab lists and frees
+        // their memory back to the general allocator.
+        self.task_slab.deinit();
     }
 
     // ------------------------------------------------------------
@@ -501,8 +528,11 @@ pub const Scheduler = struct {
                 func(ctx);
                 if (completion) |completion_ptr| {
                     const typed: *RemoteCompletion = @ptrCast(@alignCast(completion_ptr));
-                    typed.wg.done();
+                    // Order matters: write `finished` BEFORE `wg.done()`. Once
+                    // done() returns, the waiter may already have been woken
+                    // and freed *typed — touching it would be UAF.
                     typed.finished.store(true, .release);
+                    typed.wg.done();
                 }
             }
         }
@@ -535,16 +565,27 @@ pub const Scheduler = struct {
                                 continue;
                             };
                             fiber_ptr.* = Fiber.init(stack_mem, msg.trampoline_addr, effective_size);
-                            const t = self.allocator.create(Task) catch {
+                            const t = self.task_slab.create() catch {
                                 self.freeStack(stack_mem);
                                 self.allocator.destroy(fiber_ptr);
                                 continue;
                             };
-                            // Zero-initialize all fields via aggregate init, then
-                            // set the fiber pointer. This ensures wake_time,
-                            // inbox_link, etc. are properly initialized — not garbage
-                            // from the allocator.
+                            // Slab returns memory potentially recycled from a
+                            // freed Task in the same slot. The previous
+                            // occupant's `generation` is still in memory; we
+                            // capture and bump it so that any external chain
+                            // walker holding a stale `(*Task, generation)`
+                            // pair from the previous occupant detects the
+                            // mismatch and aborts the walk safely.
+                            //
+                            // .release on the bump pairs with .acquire reads
+                            // by chain walkers (detectCycle), so any write
+                            // to the new Task (including its lock-state
+                            // observability through subsequent ParkingMutex
+                            // CAS into lock.state) happens-after the bump.
+                            const prev_gen = t.generation.load(.monotonic);
                             t.* = Task{ .base = fiber_ptr, .user_fn = msg.user_fn.? };
+                            t.generation.store(prev_gen +% 1, .release);
                             if (rt_profile.CLEAR_PROFILE) {
                                 t.spawn_ns = fp_mod.nowNs();
                             }
@@ -556,14 +597,14 @@ pub const Scheduler = struct {
                         if (task.config.pinned) {
                             self.pinned_queue.append(self.allocator, task) catch {
                                 self.freeStack(stack_mem);
-                                self.allocator.destroy(task);
+                                self.task_slab.destroy(task);
                                 continue;
                             };
                         } else {
                             self.ready_queue.push(self.allocator, task) catch {
                                 self.freeStack(stack_mem);
                                 self.fiber_pool.append(self.allocator, task) catch
-                                    self.allocator.destroy(task);
+                                    self.task_slab.destroy(task);
                                 continue;
                             };
                         }
@@ -588,8 +629,11 @@ pub const Scheduler = struct {
                         self.draining = false;
                         if (completion) |completion_ptr| {
                             const typed: *RemoteCompletion = @ptrCast(@alignCast(completion_ptr));
-                            typed.wg.done();
+                            // Order matters: write `finished` BEFORE `wg.done()`.
+                            // Once done() returns, the waiter may have been woken
+                            // and freed *typed — touching it would be UAF.
                             typed.finished.store(true, .release);
+                            typed.wg.done();
                         }
                     },
                 }
@@ -721,7 +765,7 @@ pub const Scheduler = struct {
                         }
                         self.freeStack(task.base.stack.memory);
                         self.allocator.destroy(task.base);
-                        self.allocator.destroy(task);
+                        self.task_slab.destroy(task);
                     },
                     .Ready => {
                         // It yielded, but wants to run again. If a concurrent
@@ -787,7 +831,7 @@ pub const Scheduler = struct {
                 var earliest_ms: i64 = now_ms + self.lock_timeout_ms;
                 for (self.lock_waiters.items) |t| {
                     if (t.waiting_for_lock.load(.monotonic) == null) continue;
-                    const deadline = t.lock_wait_start_ms + self.lock_timeout_ms;
+                    const deadline = t.lock_wait_start_ms.load(.acquire) + self.lock_timeout_ms;
                     if (deadline < earliest_ms) earliest_ms = deadline;
                 }
                 const ms_until = @max(@as(i64, 1), earliest_ms - now_ms);
@@ -895,7 +939,10 @@ pub const Scheduler = struct {
     // The task's waiting_for_lock / waiting_for_lock_list / lock_waiter_node
     // must already be set by the caller.
     pub fn registerLockWaiter(self: *Scheduler, task: *Task) void {
-        task.lock_wait_start_ms = milliTimestamp();
+        // .release pairs with .acquire load by scanLockWaiters /
+        // idle-deadline path on potentially another scheduler thread
+        // (after work-stealing, `self` may not be the original spawner).
+        task.lock_wait_start_ms.store(milliTimestamp(), .release);
         self.lock_waiters.append(self.allocator, task) catch {};
     }
 
@@ -1021,13 +1068,14 @@ pub const Scheduler = struct {
                 _ = self.lock_waiters.swapRemove(i);
                 continue;
             }
-            const deadline = task.lock_wait_start_ms + self.lock_timeout_ms;
-            if (now_ms - task.lock_wait_start_ms > self.lock_timeout_ms) {
+            const start_ms = task.lock_wait_start_ms.load(.acquire);
+            const deadline = start_ms + self.lock_timeout_ms;
+            if (now_ms - start_ms > self.lock_timeout_ms) {
                 // Timed out: remove from lock's waiter list, then wake.
                 var removed = false;
-                if (task.waiting_for_lock_list) |wl| {
+                if (task.waiting_for_lock_list.load(.acquire)) |wl| {
                     wl.spinAcquire();
-                    removed = wl.remove(task.lock_waiter_node.?);
+                    removed = wl.remove(task.lock_waiter_node.load(.acquire).?);
                     wl.spinRelease();
                 }
                 // If this was a ParkingRwLock write-lock waiter and we
@@ -1039,10 +1087,14 @@ pub const Scheduler = struct {
                     }
                 }
                 _ = self.lock_waiters.swapRemove(i);
-                task.lock_timed_out = true;
+                // Set lock_timed_out BEFORE clearing waiting_for_lock so
+                // the waker-side check in lockSlow (which reads
+                // lock_timed_out only after seeing waiting_for_lock has
+                // become null and the fiber resumed) observes the flag.
+                task.lock_timed_out.store(true, .release);
                 task.waiting_for_lock.store(null, .release);
-                task.waiting_for_lock_list = null;
-                task.lock_waiter_node = null;
+                task.waiting_for_lock_list.store(null, .release);
+                task.lock_waiter_node.store(null, .release);
                 task.lock_counter_ptr = null;
                 task.status.store(.Ready, .release);
                 self.enqueueTask(task);
@@ -1302,6 +1354,88 @@ pub const SchedulerRegistry = struct {
 // Global instance
 pub var global_registry: SchedulerRegistry = .{};
 
+/// Pin handle for safe cross-scheduler Task derefs.
+///
+/// Returned by `pinTask`. When `allocator != null`, holds a refcount
+/// on the slab containing the Task, so the slab's memory cannot be
+/// reclaimed while the pin is live. When `allocator == null`, the
+/// pin is a no-op handle returned in test/non-production contexts
+/// where the global scheduler registry is empty (see pinTask).
+///
+/// `gen` is the Task's generation captured at pin time; callers
+/// compare it against `task.generation` after each field read to
+/// detect slot reuse (a TOCTOU window where the slab is alive but
+/// the slot has been freed and reallocated to a different logical
+/// Task — distinct from the slab being freed entirely, which the
+/// slab Ref/epoch mechanism rules out).
+pub const TaskPin = struct {
+    /// Allocator that owns the slab. null for no-op test pins.
+    allocator: ?*SlabAllocator(Task),
+    /// Slab containing the Task, with pin_count >= 1 held by us.
+    /// Undefined when `allocator == null`.
+    slab: *SlabAllocator(Task).SlabHeader,
+    /// Snapshot of `task.generation` at pin time. A subsequent read
+    /// of `task.generation != gen` means the slot was reused while
+    /// we held the pin → the captured ptr now refers to a different
+    /// logical Task and the chain walk should treat its observed
+    /// fields as torn.
+    gen: u32,
+};
+
+/// Find the scheduler whose `task_slab` contains `ptr`, then pin
+/// the slab against reclamation. Returns null if no live slab in
+/// any registered scheduler contains `ptr` (slab freed already, or
+/// `ptr` is for a Task that was never slab-allocated by a
+/// registered Scheduler).
+///
+/// **Test mode**: when `global_registry` is empty (e.g. the Loom
+/// harness, which constructs a Scheduler manually but never calls
+/// `Scheduler.run()` to register it), pinTask returns a no-op pin
+/// that does NOT hold any slab refcount. This is structurally
+/// safe in test contexts because such tests construct stub Tasks
+/// with stable lifetime that outlive any chain walk. It would be
+/// unsafe in production, but production always has at least one
+/// registered scheduler before any fiber lock is acquired (every
+/// fiber comes from a Scheduler that registered itself).
+///
+/// Cost: O(N_schedulers * N_slabs_per_scheduler) under each
+/// scheduler's task_slab lock briefly. Slow path only — used by
+/// detectCycle, never on the lock fast path.
+pub fn pinTask(ptr: *Task) ?TaskPin {
+    const n = global_registry.len.load(.acquire);
+    if (n == 0) {
+        // No registered schedulers → test/non-production context.
+        // Caller's Task lifetime is the caller's responsibility.
+        return TaskPin{
+            .allocator = null,
+            .slab = undefined,
+            .gen = ptr.generation.load(.acquire),
+        };
+    }
+
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        const sched = global_registry.slots[i].load(.acquire) orelse continue;
+        const slab_alloc = &sched.task_slab;
+        const ref = slab_alloc.refFromPtr(ptr) orelse continue;
+        const slab = slab_alloc.pin(ref) orelse continue;
+        // Capture generation AFTER pin — the slab is now guaranteed
+        // alive, so the read is safe. The generation may already
+        // belong to a successor of the original Task (slot reuse
+        // race); the caller's revalidation step catches that.
+        return TaskPin{
+            .allocator = slab_alloc,
+            .slab = slab,
+            .gen = ptr.generation.load(.acquire),
+        };
+    }
+    return null;
+}
+
+pub fn unpinTask(pin: TaskPin) void {
+    if (pin.allocator) |alloc| alloc.unpin(pin.slab);
+}
+
 pub const WaitGroup = struct {
     // The counter must be atomic
     counter: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
@@ -1323,61 +1457,68 @@ pub const WaitGroup = struct {
     }
 
     pub fn done(self: *WaitGroup) void {
-        // Atomic Decrement
-        const prev = self.counter.fetchSub(1, .seq_cst);
-
-        // If we just dropped to 0 (prev was 1), we must wake the waiter.
-        if (prev == 1) {
-            self.wakeWaiter();
-        }
-    }
-
-    fn wakeWaiter(self: *WaitGroup) void {
-        // Spinlock to grab the waiter
+        // Take the lock BEFORE the decrement so wait() cannot observe
+        // counter==0 and free the WaitGroup while we're still inside this
+        // function (UAF on *self). With the lock held, any wait() call must
+        // either complete its check before us (saw counter>0, parked, will be
+        // woken below) or after us (sees counter==0 only after we release
+        // the lock; by that point all our writes to *self are done).
         while (self.lock.swap(1, .acquire) == 1) {
             std.Thread.yield() catch {};
         }
 
+        const prev = self.counter.fetchSub(1, .seq_cst);
+        if (prev != 1) {
+            self.lock.store(0, .release);
+            return;
+        }
+
+        // counter just dropped to 0 — wake the waiter (if parked).
         const task = self.waiting_task;
         const sched = self.sched;
-        // Clear state BEFORE scheduling — once the waiter is scheduled, it may
-        // immediately wake, consume the result, and free the WaitGroup (Promise Inner).
-        // Accessing self after schedule() would be use-after-free.
         self.waiting_task = null;
         self.lock.store(0, .release);
 
         if (task) |t| {
+            // schedule() may cause the waiter to run, return from wait(),
+            // and free *self. Do NOT touch self after this point.
             sched.schedule(t);
         }
     }
 
     // Blocking Wait (Yields Fiber)
     pub fn wait(self: *WaitGroup) void {
-        if (self.counter.load(.seq_cst) == 0) return;
         if (self.sched.current_task == null) {
-            while (self.counter.load(.seq_cst) != 0) {
+            // Non-fiber caller (test code): busy-wait. Acquire the lock for
+            // the final check so we synchronize-with done()'s release; this
+            // makes it safe to free *self after we return.
+            while (true) {
+                while (self.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                if (self.counter.load(.seq_cst) == 0) {
+                    self.lock.store(0, .release);
+                    return;
+                }
+                self.lock.store(0, .release);
                 std.Thread.yield() catch {};
             }
-            return;
         }
 
         const task = self.sched.getCurrent();
 
         while (true) {
-            if (self.counter.load(.seq_cst) == 0) return;
-
-            task.status.store(.Blocked, .release);
-
+            // Always take the lock to check counter — synchronizes with done().
+            // Without this, the lockless fast-path lets us return + destroy
+            // *self while done() is still inside its critical section.
             while (self.lock.swap(1, .acquire) == 1) {
                 std.Thread.yield() catch {};
             }
 
             if (self.counter.load(.seq_cst) == 0) {
                 self.lock.store(0, .release);
-                task.status.store(.Ready, .release);
                 return;
             }
 
+            task.status.store(.Blocked, .release);
             self.waiting_task = task;
             self.lock.store(0, .release);
 
