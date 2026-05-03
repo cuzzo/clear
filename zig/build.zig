@@ -207,7 +207,13 @@ pub fn build(b: *std.Build) void {
             // like "lib/atomic.zig" that would otherwise create deep
             // dirs). kcov instruments the test binary on the fly:
             //   `kcov [opts] OUTPUT_DIR EXECUTABLE [test args]`.
+            //
+            // jammy's apt ships kcov v38, which does not auto-create the
+            // output directory and reports "Can't open directory" if it
+            // doesn't exist. v40+ creates it on demand. Pre-create with
+            // `mkdir -p` so we work on either version.
             const kcov_dir = b.fmt("zig-out/coverage/{d}", .{idx});
+            const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", kcov_dir });
             const run_kcov = b.addSystemCommand(&.{
                 "kcov",
                 "--clean",
@@ -217,6 +223,7 @@ pub fn build(b: *std.Build) void {
             run_kcov.addArtifactArg(unit_tests);
             run_kcov.stdio = .inherit;
             run_kcov.setCwd(b.path("."));
+            run_kcov.step.dependOn(&mkdir_cmd.step);
             test_step.dependOn(&run_kcov.step);
             merge_cmd.?.addArg(kcov_dir);
             merge_cmd.?.step.dependOn(&run_kcov.step);
