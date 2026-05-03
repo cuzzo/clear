@@ -9,10 +9,12 @@
 #     across runs (and across parallel workers) within merge_timeout.
 #   - coverage/index.html     -- standalone HTML report.
 #
-# Disable with COVERAGE=0 (CI fast-mode, dev shells where the ~5%
-# instrumentation overhead isn't wanted).
+# Off by default -- SimpleCov + parallel_rspec adds ~15x to wall time
+# (2s -> 30s on this repo). CI's ruby-unit job opts in via COVERAGE=1
+# so Codecov gets fresh data per push; local devs run uninstrumented
+# and only flip the env var when they want a coverage report.
 
-unless ENV["COVERAGE"] == "0"
+if ENV["COVERAGE"] == "1"
   require "simplecov"
 
   # parallel_rspec forks N workers via Kernel#fork. Two consequences:
