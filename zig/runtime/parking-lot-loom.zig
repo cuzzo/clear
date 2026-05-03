@@ -699,12 +699,19 @@ fn rwReset() void {
 }
 
 // Expected final state: exactly `expected_writers` increments, the lock
-// is fully released, and each reader's observation is in [0, expected_writers].
+// is fully released, no stray bits in `state`, and each reader's
+// observation is in [0, expected_writers].
 fn rwCheckInvariants(expected_writers: usize, reader_slots: []const usize) bool {
     if (g_writer_counter != expected_writers) return false;
     if (g_rw.isWriteLocked()) return false;
     if (g_rw.readerCount() != 0) return false;
     if (!g_rw.waiters.isEmpty()) return false;
+    if (g_rw.write_owner.load(.monotonic) != null) return false;
+    // After all fibers complete, no bits should be set: not WRITE_LOCKED,
+    // not HAS_WAITERS, no reader count. Catches cases where wakeNext
+    // exits with stale HAS_WAITERS uncleared, or reader count not
+    // restored after a fetchAdd/fetchSub undo race.
+    if (g_rw.state.load(.monotonic) != 0) return false;
     for (reader_slots) |s| {
         const obs = g_reader_observed[s];
         if (obs < 0) return false;
@@ -873,6 +880,165 @@ pub fn testRwlockTwoReadersWriter() !void {
 
     if (failures > 0) {
         std.debug.print("\n{d}/{d} PRNG seeds failed\n", .{ failures, prng_seeds });
+        return error.LoomFailures;
+    }
+}
+
+// Entries used by the M5 exhaustive tests below.
+fn entryRwWriterAt2() callconv(.c) void { rwWork(2, true); }
+fn entryRwReaderAt0() callconv(.c) void { rwWork(0, false); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ParkingRwLock M5 — 1 writer + 2 readers exhaustive (reader-drain coverage)
+//
+// The reader-drain path in wakeNext: when a writer releases and the head
+// of the waiter queue is a reader, wakeNext loops popping contiguous
+// readers and granting each a slot via state.fetchAdd(1, .acquire). For
+// every drained reader, only the LAST one's wakeup actually matters for
+// progress — the others must also wake. This test exercises every
+// interleaving up to depth 10 of (1 writer, 2 readers) so schedules
+// where both readers queue before the writer releases (forcing the
+// drain) are reached deterministically.
+//
+// Also exercises the reader fetchAdd-undo race: a reader's optimistic
+// fetchAdd(1) sees NON_READER_BITS set (writer or HAS_WAITERS), undoes
+// via fetchSub(1). If the undo restores state to "0 readers + HAS_WAITERS"
+// the reader must call wakeNext or the queued writer would deadlock.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn testRwlockOneWriterTwoReaders() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const depth: usize = 10;
+    var total_schedules: usize = 1;
+    {
+        var p: usize = 0;
+        while (p < depth) : (p += 1) total_schedules *= 3;
+    }
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        var s = sched_idx;
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast(s % 3);
+            s /= 3;
+        }
+        h.resetExhaustive(&schedule_buf);
+        rwReset();
+
+        try h.createThread(0, @intFromPtr(&entryRwWriterAt0));
+        try h.createThread(1, @intFromPtr(&entryRwReaderAt1));
+        try h.createThread(2, @intFromPtr(&entryRwReaderAt2));
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        if (!rwCheckInvariants(1, &.{ 1, 2 })) {
+            std.debug.print(
+                "\nINVARIANT FAIL sched {d}: wc={d} r1={d} r2={d} state={d} owner={?*} waiters_empty={}\n",
+                .{ sched_idx, g_writer_counter, g_reader_observed[1], g_reader_observed[2], g_rw.state.load(.monotonic), g_rw.write_owner.load(.monotonic), g_rw.waiters.isEmpty() },
+            );
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} schedules failed\n", .{ failures, total_schedules });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ParkingRwLock M5 — 2 writers + 1 reader exhaustive (FIFO / writer-pref)
+//
+// Three fibers, two writers and one reader, each performing one
+// lock/unlock cycle. Exhaustive base-3 depth 10. Targets:
+//
+//   - FIFO fairness with mixed waiter kinds: a reader queued behind a
+//     writer must NOT leapfrog the writer (lockSharedSlow gates the
+//     optimistic fetchAdd on `waiters.isEmpty()`).
+//   - wakeNext writer-promote retry loop (PR-26/27): when a writer is
+//     at the queue head and a concurrent reader fast-path fetchAdds
+//     then undoes, wakeNext's cmpxchgWeak retries until the reader
+//     count is observed as 0 again.
+//   - HAS_WAITERS-bit cleanup at end-of-drain (PR-29): if the queue
+//     drains to empty during wakeNext, the trailing
+//     fetchAnd(~HAS_WAITERS) must run; otherwise the bit is sticky.
+//     The state==0 invariant in rwCheckInvariants catches that.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn testRwlockTwoWritersOneReader() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const depth: usize = 10;
+    var total_schedules: usize = 1;
+    {
+        var p: usize = 0;
+        while (p < depth) : (p += 1) total_schedules *= 3;
+    }
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        var s = sched_idx;
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast(s % 3);
+            s /= 3;
+        }
+        h.resetExhaustive(&schedule_buf);
+        rwReset();
+
+        try h.createThread(0, @intFromPtr(&entryRwWriterAt0));
+        try h.createThread(1, @intFromPtr(&entryRwWriterAt1));
+        try h.createThread(2, @intFromPtr(&entryRwReaderAt2));
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        if (!rwCheckInvariants(2, &.{2})) {
+            std.debug.print(
+                "\nINVARIANT FAIL sched {d}: wc={d} r2={d} state={d} owner={?*} waiters_empty={}\n",
+                .{ sched_idx, g_writer_counter, g_reader_observed[2], g_rw.state.load(.monotonic), g_rw.write_owner.load(.monotonic), g_rw.waiters.isEmpty() },
+            );
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} schedules failed\n", .{ failures, total_schedules });
         return error.LoomFailures;
     }
 }

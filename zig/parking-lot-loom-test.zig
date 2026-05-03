@@ -36,6 +36,8 @@ const tests = [_]Test{
     .{ .name = "parking rwlock loom: two writers exhaustive 256 schedules",                .func = &ploom.testRwlockTwoWriters },
     .{ .name = "parking rwlock loom: writer vs reader exhaustive 256 schedules",           .func = &ploom.testRwlockWriterReader },
     .{ .name = "parking rwlock loom: two readers + one writer prng seeds",                 .func = &ploom.testRwlockTwoReadersWriter },
+    .{ .name = "parking rwlock loom: 1W+2R exhaustive 3^10 base-3 (M5 reader-drain)",      .func = &ploom.testRwlockOneWriterTwoReaders },
+    .{ .name = "parking rwlock loom: 2W+1R exhaustive 3^10 base-3 (M5 FIFO/writer-pref)",  .func = &ploom.testRwlockTwoWritersOneReader },
 };
 
 pub fn main() !void {
