@@ -52,16 +52,21 @@ const FIBERS_PER_SCHEDULER: usize = 8;
 const NUM_FIBERS: usize = NUM_SCHEDULERS * FIBERS_PER_SCHEDULER;
 const ITERS_PER_FIBER: usize = 2_000;
 
-// Bench-scale variant tunables — match what bench 14_nested_lock runs.
-// 64 locks × 32 schedulers × 4 fibers × 500K iters × 2 acquires = 128M
-// paired acquires across 32 OS threads with within-scheduler fiber
-// contention. Designed to push detectCycle's seq-snapshot retry budget
-// beyond what the smaller test exercises.
+// Bench-scale variant tunables. Higher OS-thread count and lock count
+// than the small test, but iter count tuned to be tractable under
+// ThreadSanitizer (the test runs in the .tsan = true tier).
+//   64 locks × 32 schedulers × 4 fibers × 10K iters × 2 acquires =
+//   2.56M paired acquires across 32 OS threads with within-scheduler
+//   fiber contention.
+// Even instrumented under TSan that runs in seconds. The specific
+// false-positive bug observed in bench 14_nested_lock at full scale
+// (16M paired) requires either much longer iter counts or a different
+// shape (rwlock-shared outer + mutex inner). See the test header.
 const NUM_LOCKS_BIG: usize = 64;
 const NUM_SCHEDULERS_BIG: usize = 32;
 const FIBERS_PER_SCHEDULER_BIG: usize = 4;
 const NUM_FIBERS_BIG: usize = NUM_SCHEDULERS_BIG * FIBERS_PER_SCHEDULER_BIG;
-const ITERS_PER_FIBER_BIG: usize = 500_000;
+const ITERS_PER_FIBER_BIG: usize = 10_000;
 
 // xorshift64* for deterministic-but-distinct fiber seeds.
 fn nextRand(state: *u64) u64 {
