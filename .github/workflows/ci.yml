@@ -56,6 +56,21 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      # Cache clear's per-source build dirs + transpiled .zig outputs.
+      # Each `./clear build` keys the cache off the source path SHA, so
+      # every fresh tmp dir in clear_bin_spec hits cold. Persisting these
+      # caches across CI runs (keyed on src/ + zig/runtime/ + zig/lib/
+      # + Gemfile.lock + zig version) means subsequent pushes start
+      # warm. Restore-keys gives a partial hit when only some inputs
+      # change.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            zig/.clear-cache
+            zig/.clear-transpile-cache
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
+          restore-keys: |
+            clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: bundle exec prspec spec/ --tag integration
 
   transpile-tests:
@@ -70,6 +85,16 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      # Same cache as ruby-integration -- both jobs hammer ./clear build
+      # and benefit from a warm clear-cache + transpile-cache across runs.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            zig/.clear-cache
+            zig/.clear-transpile-cache
+          key: clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'Gemfile.lock') }}
+          restore-keys: |
+            clear-build-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
       - run: ./clear test transpile-tests/
 
   module-integration:
