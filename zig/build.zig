@@ -3,6 +3,11 @@ const std = @import("std");
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    // Enable ThreadSanitizer for test/benchmark/hammer modules.
+    // CI: `zig build test -Dsanitize-thread`. Local: same. The flag
+    // routes through Module.sanitize_thread on every test module
+    // created in the test_files loop.
+    const sanitize_thread = b.option(bool, "sanitize-thread", "Enable ThreadSanitizer (TSan) on test/bench/hammer modules") orelse false;
 
     // Common paths
     const switch_s = b.path("runtime/switch.S");
@@ -149,6 +154,7 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path(filename),
                 .target = target,
                 .optimize = optimize,
+                .sanitize_thread = sanitize_thread,
             }),
         });
         unit_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));

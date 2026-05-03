@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+# Cancel in-progress runs of the same workflow on the same branch when a
+# new commit lands. Keeps queue depth low for rapid-fire pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ZIG_VERSION: "0.16.0"
+  RUBY_VERSION: "3.2"
+  # Tests run faster without SimpleCov instrumentation; coverage is a
+  # local-dev concern (see CLAUDE.md `Code Quality / Coverage Reports`).
+  COVERAGE: "0"
+
+jobs:
+  ruby-unit:
+    name: Ruby unit specs (parallel, no integration)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - run: bundle exec prspec spec/
+
+  ruby-integration:
+    name: Ruby integration specs (builds binaries via clear)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: bundle exec prspec spec/ --tag integration
+
+  transpile-tests:
+    name: transpile-tests/ (.cht via clear test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: ./clear test transpile-tests/
+
+  module-integration:
+    name: transpile-tests/module-integration (zig build test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - working-directory: transpile-tests/module-integration
+        run: zig build test
+
+  ffi-integration:
+    name: transpile-tests/ffi-integration (zig build test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - working-directory: transpile-tests/ffi-integration
+        run: zig build test
+
+  zig-unit:
+    name: Zig unit tests (zig build test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - working-directory: zig
+        run: zig build test
+
+  zig-tsan:
+    name: Zig unit tests (TSan)
+    runs-on: ubuntu-latest
+    # ThreadSanitizer adds 5-15x runtime overhead; give it more headroom
+    # than the regular unit-test job.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - working-directory: zig
+        run: zig build test -Dsanitize-thread
