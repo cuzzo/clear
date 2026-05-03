@@ -286,6 +286,28 @@ fn drainSchedState() void {
 var g_mutex: ParkingMutex = .{};
 var g_counter: usize = 0;
 
+// Post-schedule mutex invariants. Every loom mutex test asserts these
+// once all fibers have completed: counter equals expected, lock is fully
+// released, no stray bits left in `state`. A failure here means some
+// schedule left the mutex in an inconsistent state — e.g., a race where
+// two unlock paths cleared LOCKED twice, or a leak of HAS_WAITERS.
+fn mutexCheckInvariants(expected_counter: usize) bool {
+    if (g_counter != expected_counter) return false;
+    if (g_mutex.isLocked()) return false;
+    if (g_mutex.ownerTask() != null) return false;
+    // Whole `state` should be 0 once everyone has unlocked: no LOCKED,
+    // no HAS_WAITERS, no HAS_THREAD_SLEEPER, no owner bits. Tolerate the
+    // sticky-after-wake HAS_THREAD_SLEEPER bit if it is the only set
+    // flag — that is documented as intentional in lockSlow's non-fiber
+    // path. Loom never enters the non-fiber path so this should be 0,
+    // but the tolerance keeps the invariant honest if that changes.
+    const state = g_mutex.state.load(.monotonic);
+    const tolerated: u64 = ParkingMutex.STATE_HAS_THREAD_SLEEPER;
+    if ((state & ~tolerated) != 0) return false;
+    if (!g_mutex.waiters.isEmpty()) return false;
+    return true;
+}
+
 fn entryFiber0() callconv(.c) void {
     g_mutex.lock() catch unreachable;
     g_counter += 1;
@@ -342,8 +364,11 @@ pub fn testMutexAcquireExhaustive() !void {
             continue;
         };
 
-        if (g_counter != 2) {
-            std.debug.print("\nINVARIANT FAIL sched {d}: counter={d}\n", .{ sched_idx, g_counter });
+        if (!mutexCheckInvariants(2)) {
+            std.debug.print(
+                "\nINVARIANT FAIL sched {d}: counter={d} locked={} owner={?*} state={d}\n",
+                .{ sched_idx, g_counter, g_mutex.isLocked(), g_mutex.ownerTask(), g_mutex.state.load(.monotonic) },
+            );
             failures += 1;
         }
     }
@@ -390,8 +415,11 @@ pub fn testMutexAcquirePrng() !void {
 
         ph.run() catch continue;
 
-        if (g_counter != 2) {
-            std.debug.print("\nPRNG FAIL seed {d}: counter={d}\n", .{ seed, g_counter });
+        if (!mutexCheckInvariants(2)) {
+            std.debug.print(
+                "\nPRNG FAIL seed {d}: counter={d} locked={} state={d}\n",
+                .{ seed, g_counter, g_mutex.isLocked(), g_mutex.state.load(.monotonic) },
+            );
             failures += 1;
         }
         ph.deinit();
@@ -405,6 +433,108 @@ pub fn testMutexAcquirePrng() !void {
 
     if (failures > 0) {
         std.debug.print("\n{d}/{d} PRNG seeds failed\n", .{ failures, prng_seeds });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ParkingMutex 3-fiber race coverage (M4)
+//
+// 3 fibers, each does one lock+unlock cycle. Exhaustive base-3 over the
+// initial schedule depth covers every choice of "who runs the next atomic
+// op" for the first DEPTH ops. Beyond that the schedule falls through to
+// round-robin. Total atomic ops per schedule are bounded (~10/fiber × 3
+// fibers + harness overhead), so 3^14 = ~4.8M is overkill but cheap.
+//
+// Targets two races that need 3 fibers to expose:
+//
+//   (a) unlock owner-transfer CAS losing to fast-path acquire:
+//       fiber A holds, fiber B parks (waiter), A unlocks and reaches the
+//       state.cmpxchgStrong(cur_state, owner-transfer-target) — at this
+//       moment fiber C does a fast-path cmpxchg(0, LOCKED|owner_C). C
+//       wins. A's CAS returns non-null and bails. The waiter B stays
+//       queued and is woken by C's eventual unlock. Without the
+//       cmpxchg-bail in unlock, both A and C would think they own the
+//       lock and B's data could be observed by both.
+//
+//   (b) park-grab vs concurrent-arrival: two fibers race into lockSlow
+//       while a third holds the lock; depending on ordering one parks,
+//       one might park-grab once the holder releases.
+//
+// Invariant: every schedule must produce counter==3 and a fully-released
+// mutex (mutexCheckInvariants).
+// ─────────────────────────────────────────────────────────────────────────────
+fn entryRace3a() callconv(.c) void { entryFiber0(); }
+fn entryRace3b() callconv(.c) void { entryFiber1(); }
+fn entryRace3c() callconv(.c) void {
+    g_mutex.lock() catch unreachable;
+    g_counter += 1;
+    g_mutex.unlock();
+    harness.done[2] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+pub fn testMutexThreeFiberRaces() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    // 3 fibers → base-3 schedule encoding. depth=10 → 3^10 = 59,049
+    // schedules. Same depth as lost-wake test for proven coverage of
+    // initial choices.
+    const depth: usize = 10;
+    var total_schedules: usize = 1;
+    {
+        var p: usize = 0;
+        while (p < depth) : (p += 1) total_schedules *= 3;
+    }
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        var s = sched_idx;
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast(s % 3);
+            s /= 3;
+        }
+        h.resetExhaustive(&schedule_buf);
+        g_mutex = .{};
+        g_counter = 0;
+
+        try h.createThread(0, @intFromPtr(&entryRace3a));
+        try h.createThread(1, @intFromPtr(&entryRace3b));
+        try h.createThread(2, @intFromPtr(&entryRace3c));
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        if (!mutexCheckInvariants(3)) {
+            std.debug.print(
+                "\nINVARIANT FAIL sched {d}: counter={d} locked={} state={d}\n",
+                .{ sched_idx, g_counter, g_mutex.isLocked(), g_mutex.state.load(.monotonic) },
+            );
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} schedules failed\n", .{ failures, total_schedules });
         return error.LoomFailures;
     }
 }
@@ -500,7 +630,7 @@ pub fn testMutexLostWake() !void {
         };
 
         const expected = LOST_WAKE_FIBERS * LOST_WAKE_CYCLES;
-        if (g_counter != expected) {
+        if (!mutexCheckInvariants(expected)) {
             counter_failures += 1;
             failures += 1;
         }

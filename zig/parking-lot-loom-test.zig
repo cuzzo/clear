@@ -29,12 +29,13 @@ const Test = struct {
 };
 
 const tests = [_]Test{
-    .{ .name = "parking mutex loom: acquireVsRelease exhaustive 256 schedules",  .func = &ploom.testMutexAcquireExhaustive },
-    .{ .name = "parking mutex loom: acquireVsRelease prng seeds",                 .func = &ploom.testMutexAcquirePrng },
-    .{ .name = "parking mutex loom: lost-wake regression 3x3 base-3 exhaustive",  .func = &ploom.testMutexLostWake },
-    .{ .name = "parking rwlock loom: two writers exhaustive 256 schedules",       .func = &ploom.testRwlockTwoWriters },
-    .{ .name = "parking rwlock loom: writer vs reader exhaustive 256 schedules",  .func = &ploom.testRwlockWriterReader },
-    .{ .name = "parking rwlock loom: two readers + one writer prng seeds",        .func = &ploom.testRwlockTwoReadersWriter },
+    .{ .name = "parking mutex loom: acquireVsRelease exhaustive 256 schedules",            .func = &ploom.testMutexAcquireExhaustive },
+    .{ .name = "parking mutex loom: acquireVsRelease prng seeds",                          .func = &ploom.testMutexAcquirePrng },
+    .{ .name = "parking mutex loom: 3-fiber race coverage 3^10 base-3 exhaustive (M4)",    .func = &ploom.testMutexThreeFiberRaces },
+    .{ .name = "parking mutex loom: lost-wake regression 3x3 base-3 exhaustive",           .func = &ploom.testMutexLostWake },
+    .{ .name = "parking rwlock loom: two writers exhaustive 256 schedules",                .func = &ploom.testRwlockTwoWriters },
+    .{ .name = "parking rwlock loom: writer vs reader exhaustive 256 schedules",           .func = &ploom.testRwlockWriterReader },
+    .{ .name = "parking rwlock loom: two readers + one writer prng seeds",                 .func = &ploom.testRwlockTwoReadersWriter },
 };
 
 pub fn main() !void {
