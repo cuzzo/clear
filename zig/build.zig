@@ -167,6 +167,24 @@ pub fn build(b: *std.Build) void {
     }
 
     for (test_files, 0..) |filename, idx| {
+        // Skip stress / loom / vopr / hammer / fuzz tests under
+        // coverage. These tests run high-iteration concurrency
+        // exploration (loom interleavings, VOPR random scenarios,
+        // hammer stress); kcov's ptrace model adds 5-30x runtime
+        // overhead, ballooning the coverage job to >20min. Their
+        // line coverage redundantly overlaps the underlying
+        // primitives' regular tests, so dropping them barely moves
+        // coverage % while cutting runtime ~5-10x.
+        if (coverage and (
+            std.mem.endsWith(u8, filename, "-loom-test.zig") or
+            std.mem.endsWith(u8, filename, "-vopr-test.zig") or
+            std.mem.endsWith(u8, filename, "-hammer-test.zig") or
+            std.mem.endsWith(u8, filename, "-stress-test.zig") or
+            std.mem.endsWith(u8, filename, "-fuzz-test.zig") or
+            std.mem.eql(u8, filename, "vopr-test.zig") or
+            std.mem.eql(u8, filename, "vopr-loom-test.zig")
+        )) continue;
+
         const unit_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
