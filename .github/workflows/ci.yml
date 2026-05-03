@@ -160,43 +160,63 @@ jobs:
         run: zig build test
 
   zig-tsan:
-    name: Zig unit tests (TSan)
+    # Invokes the `test-tsan` step (LLVM + ReleaseSafe + real
+    # ThreadSanitizer instrumentation). The previous job ran
+    # `zig build test -Dsanitize-thread`, which silently dropped TSan
+    # because stage2 + Debug doesn't link the TSan runtime -- so it
+    # was effectively a duplicate of zig-unit. Switching to test-tsan
+    # gets us actual race detection.
+    #
+    # Sharded 5-way via build.zig's `tsan_step_idx % shard_count`
+    # round-robin. Each shard compiles + runs ~1/5 of the tsan-tagged
+    # tests under LLVM (slow compile, ~5-15x runtime overhead). Single
+    # job hit the 60min ceiling; per-shard fits in 30min. fail-fast:
+    # false so one flaky shard doesn't mask the rest.
+    name: Zig TSan (shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
-    # ThreadSanitizer adds 5-15x runtime overhead; give it more headroom
-    # than the regular unit-test job.
-    timeout-minutes: 60
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
       - working-directory: zig
-        run: zig build test -Dsanitize-thread
+        run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5
 
   zig-coverage:
-    name: Zig unit tests (coverage via kcov)
+    # Sharded across 5 parallel runners, same approach as zig-tsan.
+    # kcov's DWARF instrumentation adds ~3x runtime overhead and the
+    # single-job variant was hitting the 30min ceiling. Each shard
+    # produces its own zig-out/coverage/merged/cobertura.xml from its
+    # subset of tests; Codecov merges them server-side via the
+    # shared `flags: zig` tag (union of covered lines per file).
+    name: Zig coverage (kcov, shard ${{ matrix.shard }}/5)
     # Pin to jammy (22.04). noble (24.04 -- the current ubuntu-latest)
     # dropped kcov from its repos entirely; even with universe enabled
     # `apt-get install kcov` returns "Unable to locate package kcov".
     # jammy still ships kcov in universe.
     runs-on: ubuntu-22.04
-    # kcov DWARF instrumentation adds ~3x runtime overhead.
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
-      # kcov is the standard sampling-coverage tool for Zig binaries
-      # (DWARF-based, no recompile needed). Output: Cobertura XML in
-      # zig-out/coverage/merged/cobertura.xml after the merge step.
       - name: Install kcov
         run: |
           sudo apt-get update
           sudo apt-get install -y kcov
           kcov --version
       - working-directory: zig
-        run: zig build test -Dcoverage
+        run: zig build test -Dcoverage -Dshard-index=${{ matrix.shard }} -Dshard-count=5
       - uses: codecov/codecov-action@v5
         with:
           files: ./zig/zig-out/coverage/merged/cobertura.xml

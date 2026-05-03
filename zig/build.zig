@@ -13,6 +13,13 @@ pub fn build(b: *std.Build) void {
     // step produces zig-out/coverage/merged/cobertura.xml for upload to
     // Codecov / Coveralls. CI: `zig build test -Dcoverage`.
     const coverage = b.option(bool, "coverage", "Wrap test binaries with kcov to collect coverage (writes Cobertura XML)") orelse false;
+    // Test sharding for CI parallelism. With `-Dshard-count=N -Dshard-index=I`
+    // (0 <= I < N), only every Nth test added to `test_step` (selected by
+    // round-robin index within the loop) is built and run. Codecov merges the
+    // per-shard XMLs server-side via the `flags: zig` tag, so each shard can
+    // upload its own cobertura.xml without a separate join job.
+    const shard_index = b.option(u32, "shard-index", "Test shard index (0-based, default 0)") orelse 0;
+    const shard_count = b.option(u32, "shard-count", "Total test shards for CI parallelism (default 1 = no sharding)") orelse 1;
 
     // Common paths
     const switch_s = b.path("runtime/switch.S");
@@ -217,6 +224,17 @@ pub fn build(b: *std.Build) void {
         m.setCwd(b.path("."));
     }
 
+    // Counts only the test_files entries that contribute to `test_step`
+    // (i.e. survive the coverage skip-list when -Dcoverage is set). Used
+    // for round-robin shard assignment so each shard gets a roughly equal
+    // slice of the active set, regardless of which entries got filtered.
+    var test_step_idx: usize = 0;
+    // Mirror counter for `test_tsan_step` -- only increments on entries
+    // with `tsan = true`. The TSan path uses LLVM + ReleaseSafe (real
+    // instrumentation; stage2 + Debug silently drops TSan), so per-shard
+    // sizing here matters more than for the regular test_step path.
+    var tsan_step_idx: usize = 0;
+
     for (test_files, 0..) |entry, idx| {
         const filename = entry.path;
         // Skip stress / loom / vopr / hammer / fuzz tests under
@@ -227,7 +245,7 @@ pub fn build(b: *std.Build) void {
         // line coverage redundantly overlaps the underlying
         // primitives' regular tests, so dropping them barely moves
         // coverage % while cutting runtime ~5-10x.
-        if (coverage and (
+        const skip_for_coverage = coverage and (
             std.mem.endsWith(u8, filename, "-loom-test.zig") or
             std.mem.endsWith(u8, filename, "-vopr-test.zig") or
             std.mem.endsWith(u8, filename, "-hammer-test.zig") or
@@ -235,8 +253,20 @@ pub fn build(b: *std.Build) void {
             std.mem.endsWith(u8, filename, "-fuzz-test.zig") or
             std.mem.eql(u8, filename, "vopr-test.zig") or
             std.mem.eql(u8, filename, "vopr-loom-test.zig")
-        )) continue;
+        );
 
+        // Determine whether this iteration's test_step contribution
+        // belongs to the requested shard. With shard_count=1 (default),
+        // `% 1` is always 0 so every test is included -- behavior is
+        // identical to the unsharded path.
+        var include_in_test_step = !skip_for_coverage;
+        if (include_in_test_step) {
+            const my_shard = (test_step_idx % shard_count) == shard_index;
+            test_step_idx += 1;
+            include_in_test_step = my_shard;
+        }
+
+        if (include_in_test_step) {
         // Standard build (Debug, stage2 backend)
         const unit_tests = b.addTest(.{
             .root_module = b.createModule(.{
@@ -287,15 +317,25 @@ pub fn build(b: *std.Build) void {
             run_unit_tests.setCwd(b.path("."));
             test_step.dependOn(&run_unit_tests.step);
         }
+        }
 
-        // TSan build — only for concurrency-sensitive tests. Forces ReleaseSafe
-        // + LLVM backend (stage2 doesn't support TSan instrumentation).
+        // TSan build — only for concurrency-sensitive tests. Forces LLVM
+        // backend (stage2 doesn't link the TSan runtime regardless of opt
+        // level). Optimize is Debug: race detection is identical at any
+        // opt level (TSan instruments at the IR level, not the optimized
+        // machine code), and Debug compiles ~4x faster than ReleaseSafe
+        // under LLVM. The previous ReleaseSafe pin was holdover from when
+        // the comment-author conflated "stage2 doesn't link TSan" with
+        // "Debug doesn't link TSan."
         if (entry.tsan) {
+            const tsan_in_shard = (tsan_step_idx % shard_count) == shard_index;
+            tsan_step_idx += 1;
+            if (tsan_in_shard) {
             const tsan_tests = b.addTest(.{
                 .root_module = b.createModule(.{
                     .root_source_file = b.path(filename),
                     .target = target,
-                    .optimize = .ReleaseSafe,
+                    .optimize = .Debug,
                     .sanitize_thread = true,
                 }),
                 .use_llvm = true,
@@ -314,6 +354,7 @@ pub fn build(b: *std.Build) void {
             run_tsan_tests.stdio = .inherit;
             run_tsan_tests.setCwd(b.path("."));
             test_tsan_step.dependOn(&run_tsan_tests.step);
+            }
         }
     }
 
