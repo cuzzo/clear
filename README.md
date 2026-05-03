@@ -1,6 +1,6 @@
 # CLEAR 
 [![CI on master](https://github.com/cuzzo/clear/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/cuzzo/clear/actions/workflows/ci.yml?query=branch%3Amaster) [![ruby coverage](https://codecov.io/gh/cuzzo/clear/branch/master/graph/badge.svg?flag=ruby)](
-  https://codecov.io/gh/cuzzo/clear)
+  https://codecov.io/gh/cuzzo/clear) [![Scc Count Badge](https://sloc.xyz/github/boyter/scc/)](https://github.com/boyter/scc/)
 
 CLEAR is a *memory safe* language, with a *declarative concurrency model*, that runs on a Go-like Green Fiber runtime.
 
