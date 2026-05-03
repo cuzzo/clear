@@ -1,4 +1,5 @@
-# CLEAR
+# CLEAR 
+[![CI on master](https://github.com/cuzzo/clear/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/cuzzo/clear/actions/workflows/ci.yml?query=branch%3Amaster)
 
 CLEAR is a *memory safe* language, with a *declarative concurrency model*, that runs on a Go-like Green Fiber runtime.
 
