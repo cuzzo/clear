@@ -8,6 +8,11 @@ pub fn build(b: *std.Build) void {
     // routes through Module.sanitize_thread on every test module
     // created in the test_files loop.
     const sanitize_thread = b.option(bool, "sanitize-thread", "Enable ThreadSanitizer (TSan) on test/bench/hammer modules") orelse false;
+    // Enable kcov coverage collection on test binaries. Each test runs
+    // under `kcov zig-out/coverage/<n> <binary>`, then a final merge
+    // step produces zig-out/coverage/merged/cobertura.xml for upload to
+    // Codecov / Coveralls. CI: `zig build test -Dcoverage`.
+    const coverage = b.option(bool, "coverage", "Wrap test binaries with kcov to collect coverage (writes Cobertura XML)") orelse false;
 
     // Common paths
     const switch_s = b.path("runtime/switch.S");
@@ -148,7 +153,20 @@ pub fn build(b: *std.Build) void {
         "parking-lot-hammer-test.zig",
     };
 
-    for (test_files) |filename| {
+    // When -Dcoverage is set, accumulate per-test kcov runs so a final
+    // merge step can produce one zig-out/coverage/merged/cobertura.xml
+    // for Codecov upload. The merge step depends on every kcov run so
+    // it fires only after all per-test coverage dirs are populated.
+    const merge_cmd = if (coverage)
+        b.addSystemCommand(&.{ "kcov", "--merge", "zig-out/coverage/merged" })
+    else
+        null;
+    if (merge_cmd) |m| {
+        m.stdio = .inherit;
+        m.setCwd(b.path("."));
+    }
+
+    for (test_files, 0..) |filename, idx| {
         const unit_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
@@ -166,12 +184,34 @@ pub fn build(b: *std.Build) void {
         unit_tests.root_module.addAssemblyFile(onroot_s);
         unit_tests.root_module.link_libc = true;
 
-        const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
-        run_unit_tests.addArtifactArg(unit_tests);
-        run_unit_tests.stdio = .inherit;
-        run_unit_tests.setCwd(b.path("."));
-        test_step.dependOn(&run_unit_tests.step);
+        if (coverage) {
+            // Numeric subdir keeps paths flat (test_files contains paths
+            // like "lib/atomic.zig" that would otherwise create deep
+            // dirs). kcov instruments the test binary on the fly:
+            //   `kcov [opts] OUTPUT_DIR EXECUTABLE [test args]`.
+            const kcov_dir = b.fmt("zig-out/coverage/{d}", .{idx});
+            const run_kcov = b.addSystemCommand(&.{
+                "kcov",
+                "--clean",
+                "--include-pattern=runtime/,lib/",
+                kcov_dir,
+            });
+            run_kcov.addArtifactArg(unit_tests);
+            run_kcov.stdio = .inherit;
+            run_kcov.setCwd(b.path("."));
+            test_step.dependOn(&run_kcov.step);
+            merge_cmd.?.addArg(kcov_dir);
+            merge_cmd.?.step.dependOn(&run_kcov.step);
+        } else {
+            const run_unit_tests = std.Build.Step.Run.create(b, b.fmt("run test {s}", .{filename}));
+            run_unit_tests.addArtifactArg(unit_tests);
+            run_unit_tests.stdio = .inherit;
+            run_unit_tests.setCwd(b.path("."));
+            test_step.dependOn(&run_unit_tests.step);
+        }
     }
+
+    if (merge_cmd) |m| test_step.dependOn(&m.step);
 
     // -------------------------------------------------------------------------
     // BENCHMARKS (zig build benchmark)

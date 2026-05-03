@@ -57,3 +57,16 @@ File.write(resultset_path, JSON.pretty_generate("RSpec" => payload))
 
 puts "Collated #{original_keys.size} entries (#{payload['coverage'].size} files) -> single 'RSpec' " \
      "(%.2f%% line coverage)" % merged.covered_percent
+
+# Re-run Cobertura formatter on the merged result so coverage/coverage.xml
+# reflects the union of all workers, not just the last one to write it.
+# Per-worker writes are racy: each parallel_rspec child invokes its
+# at_exit and overwrites coverage.xml with its narrow slice. Doing this
+# explicitly post-collate produces a single accurate file for upload.
+begin
+  require "simplecov-cobertura"
+  SimpleCov::Formatter::CoberturaFormatter.new.format(merged)
+  puts "Wrote #{File.expand_path('../coverage/coverage.xml', __dir__)}"
+rescue LoadError
+  warn "simplecov-cobertura not installed; skipping XML emit"
+end
