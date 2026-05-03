@@ -10,11 +10,21 @@
 const std = @import("std");
 const fc = @import("fiber-core.zig");
 
+/// Diagnostic counter (M2 GAP-B probe). Incremented every time any
+/// SimAtomic method body executes — proves at runtime that SimAtomic is
+/// the active substitution for `Atomic` in parking-lot.zig (vs the
+/// comptime alias silently resolving to `std.atomic.Value`, which would
+/// reduce the entire loom suite to a single-threaded run with real
+/// atomics). Read by tests after a run; > 0 means loom is actually
+/// firing; 0 means GAP-B (b) — nothing has been loom-tested.
+pub var sim_atomic_op_count: usize = 0;
+
 /// Yield to the Loom coordinator.  Called at every atomic operation.
 /// If not running on a fiber (e.g., during queue setup), this is a no-op.
 /// We check __fiber_parent_ctx because __fiber can be stale after a fiber
 /// completes -- only switchTo() sets parent_ctx, and yield() clears it.
 fn yieldPoint() void {
+    sim_atomic_op_count += 1;
     if (fc.__fiber_parent_ctx != null) {
         if (fc.__fiber) |fiber| {
             fiber.yield();
@@ -94,6 +104,13 @@ pub fn SimAtomic(comptime T: type) type {
             yieldPoint();
             const old = self.value;
             self.value = old | val;
+            return old;
+        }
+
+        pub fn fetchAnd(self: *@This(), val: T, _: std.builtin.AtomicOrder) T {
+            yieldPoint();
+            const old = self.value;
+            self.value = old & val;
             return old;
         }
     };

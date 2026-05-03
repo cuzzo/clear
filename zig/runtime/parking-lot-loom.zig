@@ -23,11 +23,10 @@ const fm = @import("fiber-memory.zig");
 const ebr_mod = @import("../lib/ebr.zig");
 const pl = @import("../lib/parking-lot.zig");
 
-// Re-export SimAtomic/SimRing so queues.zig and scheduler.zig pick them up
-// via @import("root").SimAtomic when this file is the root (direct compilation).
-// When run via the parking-lot-loom-test.zig wrapper, the wrapper provides these.
-pub const SimAtomic = @import("vopr-atomic.zig").SimAtomic;
-pub const SimRing = @import("vopr-ring.zig").SimRing;
+// SimAtomic / SimRing live on the test_runner module (see
+// parking-lot-loom-runner.zig). Importing them here would put
+// vopr-atomic.zig / vopr-ring.zig into the test-root module too, tripping
+// "files must belong to only one module" — see GAP-B notes.
 
 const ParkingMutex = pl.ParkingMutex;
 const ParkingRwLock = pl.ParkingRwLock;
@@ -173,6 +172,12 @@ const LoomHarness = struct {
             g_sched.current_task = &self.stub_tasks[chosen];
 
             self.fibers[chosen].switchTo(&self.main_ctx);
+            // Clear parent_ctx so that SimAtomic ops inside the harness
+            // loop don't try to fiber.yield() back into a fiber that just
+            // returned (Fiber.yield sets __fiber = undefined but leaves
+            // __fiber_parent_ctx set; SimAtomic.yieldPoint gates on the
+            // parent_ctx, so a stale value crashes inside switchContext).
+            fc.__fiber_parent_ctx = null;
 
             // After the fiber yields, check if it parked on a lock.
             if (self.stub_tasks[chosen].status.load(.monotonic) == .Blocked) {
@@ -235,8 +240,8 @@ fn entryFiber1() callconv(.c) void {
 // Loom tests
 // ─────────────────────────────────────────────────────────────────────────────
 
-test "parking mutex loom: acquireVsRelease exhaustive 256 schedules" {
-    const allocator = std.testing.allocator;
+pub fn testMutexAcquireExhaustive() !void {
+    const allocator = std.heap.c_allocator;
 
     var ebr: ebr_mod.EbrContext = .{};
     var stack_pool = fm.StackPool.init(allocator);
@@ -288,8 +293,8 @@ test "parking mutex loom: acquireVsRelease exhaustive 256 schedules" {
     }
 }
 
-test "parking mutex loom: acquireVsRelease prng seeds" {
-    const allocator = std.testing.allocator;
+pub fn testMutexAcquirePrng() !void {
+    const allocator = std.heap.c_allocator;
 
     var ebr: ebr_mod.EbrContext = .{};
     var stack_pool = fm.StackPool.init(allocator);
@@ -333,6 +338,119 @@ test "parking mutex loom: acquireVsRelease prng seeds" {
     if (failures > 0) {
         std.debug.print("\n{d}/{d} PRNG seeds failed\n", .{ failures, prng_seeds });
         return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ParkingMutex lost-wake regression
+//
+// The lost-wake race in lockSlow:
+//   1. Holder A is mid-unlock. fetchAnd(LOCKED) returns prev with HAS_WAITERS=0.
+//      Because no waiter bit was set, A returns WITHOUT taking queue_spin and
+//      WITHOUT waking anyone.
+//   2. Parker B holds queue_spin. B re-checked LOCKED=1 (before A's fetchAnd).
+//      Now B does fetchOr(HAS_WAITERS). State: LOCKED=0, HAS_WAITERS=1.
+//   3. B pushes to queue, releases spin, yields. PARKED FOREVER on a free lock.
+//
+// To reproduce in loom, we need 3 fibers each running multiple lock/unlock
+// cycles so the schedule space contains many possible interleavings between
+// "holder's unlock" and "parker's recheck/fetchOr". The earlier 2-fiber x
+// 1-cycle test only had ~10 atomic ops total; the bug's window required a
+// specific 3-op sequence that 8-bit schedules rarely hit. Here: 3 fibers x
+// 3 cycles = ~36 atomic ops + depth-14 schedules (16K) catches it.
+//
+// Detection: counter must equal NUM_FIBERS * CYCLES at end. If any fiber
+// is stuck on a lost wake, harness.run() either hits MAX_STEPS (exhaustive
+// caller treats this as failure) or returns early with no_active=true and
+// the counter check fires.
+// ─────────────────────────────────────────────────────────────────────────────
+const LOST_WAKE_FIBERS: usize = 3;
+const LOST_WAKE_CYCLES: usize = 3;
+
+fn lostWakeBody(comptime slot: usize) void {
+    var i: usize = 0;
+    while (i < LOST_WAKE_CYCLES) : (i += 1) {
+        g_mutex.lock() catch unreachable;
+        g_counter += 1;
+        g_mutex.unlock();
+    }
+    harness.done[slot] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryLostWake0() callconv(.c) void { lostWakeBody(0); }
+fn entryLostWake1() callconv(.c) void { lostWakeBody(1); }
+fn entryLostWake2() callconv(.c) void { lostWakeBody(2); }
+
+pub fn testMutexLostWake() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    // 3 fibers → base-3 schedule encoding (each entry is 0/1/2). depth=10 →
+    // 3^10 = 59,049 schedules. The schedule bytes get `% active_count` in
+    // pickThread, so values 0..2 map directly to fiber indices when all 3
+    // are runnable. The previous binary encoding only ever produced 0/1,
+    // making fiber 2 unreachable and degrading this to a 2-fiber test.
+    const depth: usize = 10;
+    var total_schedules: usize = 1;
+    {
+        var p: usize = 0;
+        while (p < depth) : (p += 1) total_schedules *= 3;
+    }
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+    var step_limit_failures: usize = 0;
+    var counter_failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        var s = sched_idx;
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast(s % 3);
+            s /= 3;
+        }
+        h.resetExhaustive(&schedule_buf);
+        g_mutex = .{};
+        g_counter = 0;
+
+        try h.createThread(0, @intFromPtr(&entryLostWake0));
+        try h.createThread(1, @intFromPtr(&entryLostWake1));
+        try h.createThread(2, @intFromPtr(&entryLostWake2));
+
+        h.run() catch {
+            step_limit_failures += 1;
+            failures += 1;
+            continue;
+        };
+
+        const expected = LOST_WAKE_FIBERS * LOST_WAKE_CYCLES;
+        if (g_counter != expected) {
+            counter_failures += 1;
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print(
+            "\nLOST-WAKE REGRESSION: {d}/{d} schedules failed " ++
+            "(step_limit={d} counter_mismatch={d})\n",
+            .{ failures, total_schedules, step_limit_failures, counter_failures },
+        );
+        return error.LostWakeRegression;
     }
 }
 
@@ -398,8 +516,8 @@ fn rwCheckInvariants(expected_writers: usize, reader_slots: []const usize) bool 
 }
 
 // Two writers, exhaustive. Mirrors the mutex acquireVsRelease test for rwlock.
-test "parking rwlock loom: two writers exhaustive 256 schedules" {
-    const allocator = std.testing.allocator;
+pub fn testRwlockTwoWriters() !void {
+    const allocator = std.heap.c_allocator;
 
     var ebr: ebr_mod.EbrContext = .{};
     var stack_pool = fm.StackPool.init(allocator);
@@ -454,8 +572,8 @@ test "parking rwlock loom: two writers exhaustive 256 schedules" {
 
 // One writer + one reader. Tests writer-preference and lock-handoff
 // correctness when the two contend.
-test "parking rwlock loom: writer vs reader exhaustive 256 schedules" {
-    const allocator = std.testing.allocator;
+pub fn testRwlockWriterReader() !void {
+    const allocator = std.heap.c_allocator;
 
     var ebr: ebr_mod.EbrContext = .{};
     var stack_pool = fm.StackPool.init(allocator);
@@ -510,8 +628,8 @@ test "parking rwlock loom: writer vs reader exhaustive 256 schedules" {
 
 // Two readers + one writer. Exercises the reader-drain path in wakeNext
 // and writer-preference cutting off new readers.
-test "parking rwlock loom: two readers + one writer prng seeds" {
-    const allocator = std.testing.allocator;
+pub fn testRwlockTwoReadersWriter() !void {
+    const allocator = std.heap.c_allocator;
 
     var ebr: ebr_mod.EbrContext = .{};
     var stack_pool = fm.StackPool.init(allocator);

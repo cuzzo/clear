@@ -152,7 +152,10 @@ pub fn build(b: *std.Build) void {
         .{ .path = "net-steal-hammer-test.zig", .tsan = true },
         .{ .path = "parking-lot-cycle-test.zig", .tsan = true },
         .{ .path = "parking-lot-hammer-test.zig", .tsan = true },
-        .{ .path = "parking-lot-loom-test.zig", .tsan = true },
+        // parking-lot-loom-test is built as an executable above (search for
+        // pl_loom_exe). Building via b.addTest puts the test_runner at
+        // module root, hiding `pub const SimAtomic` from the comptime
+        // Atomic alias and silently disabling Loom — see GAP-B.
         .{ .path = "parking-lot-test.zig", .tsan = true },
         .{ .path = "pool-test.zig", .tsan = true },
         .{ .path = "queues-test.zig", .tsan = true },
@@ -462,6 +465,34 @@ pub fn build(b: *std.Build) void {
     const run_loom = b.addRunArtifact(loom_exe);
     run_loom.has_side_effects = true;
     loom_step.dependOn(&run_loom.step);
+
+    // parking-lot-loom — built as an executable so `@import("root")` from
+    // inside lib/parking-lot.zig and runtime/queues.zig resolves to the
+    // entry file (parking-lot-loom-test.zig). The entry has
+    // `pub const SimAtomic` — the comptime Atomic alias picks SimAtomic
+    // and the suite loom-tests instead of running on real atomics. See
+    // GAP-B in docs/agents/parking-lot-loom-coverage.md.
+    //
+    // Module root is `zig/` (not `runtime/`) because runtime/ files like
+    // fiber-core.zig do `@import("../lib/safety.zig")` and Zig 0.16
+    // rejects `../lib/` imports when the module root is `runtime/`. See
+    // commit 9544787a.
+    const pl_loom_exe = b.addExecutable(.{
+        .name = "parking-lot-loom",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("parking-lot-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    pl_loom_exe.root_module.addAssemblyFile(switch_s);
+    pl_loom_exe.root_module.addAssemblyFile(onroot_s);
+    pl_loom_exe.root_module.link_libc = true;
+    const run_pl_loom = b.addRunArtifact(pl_loom_exe);
+    run_pl_loom.has_side_effects = true;
+    run_pl_loom.stdio = .inherit;
+    test_step.dependOn(&run_pl_loom.step);
+    loom_step.dependOn(&run_pl_loom.step);
 
     // -------------------------------------------------------------------------
     // STATIC LIBRARY (cheat-runtime)
