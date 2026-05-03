@@ -131,38 +131,87 @@ inline fn getScheduler() ?*fp.Scheduler {
 // chain observation -- documented in benchmarks/tofix.md as the
 // remaining structural fix needed (likely a packed atomic state).
 // Snapshot of one hop in the chain walk. Captured per-Task so we can
-// validate after the walk that no Task transitioned during it.
+// validate after the walk that no Task transitioned during it AND that
+// the LOCK STATE the Task is waiting on hasn't shifted under us.
+//
+// `gen` is task.generation captured AFTER the slab pin succeeded.
+// During validation, comparing task.generation to `gen` detects
+// slot-level reuse (same slab, same slot, but a different logical
+// Task occupies it now). The slab pin itself rules out the slab
+// having been freed, so the read of task.generation is structurally
+// safe even when the Task slot has been recycled.
+//
+// `wait_kind` / `wait_lock` / `wait_state` capture the lock the
+// holder is waiting on AT THE MOMENT of the walk. Validation re-reads
+// the lock's atomic state and compares to `wait_state`. Any change
+// (owner transfer, flag flip, lock release) is treated as a torn
+// snapshot — the chain we walked is no longer authoritative. This
+// closes the residual false-positive class where the chain walk
+// derived `next` from a lock state that subsequently transitioned but
+// happened to land on the same `next` pointer in a way the seq +
+// per-Task checks didn't notice (e.g. the INITIAL hop, where the
+// lock the waiter is trying to acquire transferred ownership between
+// the caller's pre-walk read and the validation phase).
 const HopSnapshot = struct {
     task: *Task,
     seq: u32,
+    gen: u32,
+    /// LOCK_KIND_* of the lock `task` is waiting on at snapshot time.
+    /// Validation re-reads task.waiting_for_lock_kind and compares.
+    wait_kind: u8,
+    /// Lock pointer the task is waiting on. null when the chain
+    /// terminates at this hop (task no longer parked, on a shared
+    /// rwlock, or parked on an unknown lock kind).
+    wait_lock: ?*anyopaque,
+    /// Snapshot of the lock's atomic state at walk time. For
+    /// ParkingMutex this is the full u64 (LOCKED + flags + owner
+    /// pointer). For ParkingRwLock-write it is the write_owner
+    /// pointer cast to u64. Validation re-reads via `readLockState`
+    /// and any difference torns the snapshot.
+    wait_state: u64,
+    /// Cached owner derived from `wait_state` at walk time. Equals
+    /// `ownerFromState(wait_state, wait_kind)`. Stored separately
+    /// only to make `holder == waiter` checks during the walk a
+    /// pure pointer compare without re-deriving.
     next: ?*Task,
 };
 
 const MAX_CHAIN_DEPTH: usize = 64;
 const MAX_DETECT_RETRIES: u32 = 8;
 
-// Look up the CURRENT exclusive owner of the lock that `holder` is parked on.
-// Reads the lock's authoritative state field — does NOT trust the holder's
-// stored waiting_for_lock_owner (that goes stale when ownership transfers
-// to one waiter and other queued waiters keep their pre-transfer owner field).
-//
-// Returns:
-//   - null + chain-terminator-reason if `holder` is no longer parked
-//     (lock == null), is on a shared/read lock (no single owner), or is
-//     parked on an unknown lock kind.
-//   - the current exclusive owner of the lock otherwise.
-fn currentChainOwner(holder: *Task) ?*Task {
-    const kind = holder.waiting_for_lock_kind.load(.acquire);
-    if (kind == qs.LOCK_KIND_NONE or kind == qs.LOCK_KIND_RWLOCK_SHARED) return null;
-    const lock_raw = holder.waiting_for_lock.load(.acquire) orelse return null;
+/// Read the atomic state of a lock identified by (kind, ptr). The
+/// returned u64 is the single linearization point that captures
+/// the lock's owner-relevant state. `ownerFromState` extracts the
+/// owner pointer from it. Walker snapshots this once per hop and
+/// re-reads it during validation to detect any transition.
+inline fn readLockState(kind: u8, lock_ptr: *anyopaque) u64 {
     return switch (kind) {
         qs.LOCK_KIND_MUTEX => blk: {
-            const m: *ParkingMutex = @ptrCast(@alignCast(lock_raw));
-            break :blk m.ownerTask();
+            const m: *ParkingMutex = @ptrCast(@alignCast(lock_ptr));
+            break :blk m.state.load(.acquire);
         },
         qs.LOCK_KIND_RWLOCK_WRITE => blk: {
-            const r: *ParkingRwLock = @ptrCast(@alignCast(lock_raw));
-            break :blk r.write_owner.load(.acquire);
+            const r: *ParkingRwLock = @ptrCast(@alignCast(lock_ptr));
+            break :blk @intFromPtr(r.write_owner.load(.acquire));
+        },
+        // Shared rwlock and unknown kinds are chain terminators —
+        // caller should never hand them to readLockState.
+        else => 0,
+    };
+}
+
+/// Extract the exclusive owner *Task from a state value previously
+/// obtained via readLockState. Returns null if the lock is currently
+/// free or held by a non-fiber (e.g. raw thread that left the owner
+/// bits zero).
+inline fn ownerFromState(state: u64, kind: u8) ?*Task {
+    return switch (kind) {
+        qs.LOCK_KIND_MUTEX => blk: {
+            const owner_bits = state & ParkingMutex.STATE_OWNER_MASK;
+            break :blk if (owner_bits == 0) null else @as(?*Task, @ptrFromInt(owner_bits));
+        },
+        qs.LOCK_KIND_RWLOCK_WRITE => blk: {
+            break :blk if (state == 0) null else @as(?*Task, @ptrFromInt(state));
         },
         else => null,
     };
@@ -171,63 +220,150 @@ fn currentChainOwner(holder: *Task) ?*Task {
 // detectCycle: walk the owner chain and report a real cycle as
 // error.LockCycle / error.Deadlock.
 //
-// Robustness has two layers:
-//   1. Each hop derives the next Task by reading the LOCK's current owner
-//      (currentChainOwner). The previously-cached waiting_for_lock_owner
-//      field goes stale when ownership transfers to another waiter, so
-//      relying on it produced apparent cycles through tasks that no
-//      longer owned the locks the chain leads through.
-//   2. The per-Task `seq` counter increments on every park/wake transition.
-//      We snapshot seq before reading the lock fields and re-read it after
-//      the walk; if any Task transitioned mid-walk, the snapshot is torn
-//      and we retry. A real cycle is a STABLE configuration (every Task in
-//      the cycle is parked, none can transition until someone breaks the
-//      cycle), so seqs stay stable and the walk converges.
+// Robustness has FOUR layers:
+//   1. Slab pin per hop. Before reading any field of a chain holder
+//      (`*Task` observed transitively from a lock's state), pin the
+//      slab containing that Task via `fp.pinTask`. The pin holds a
+//      refcount on the slab, so the underlying memory cannot be
+//      freed by `task_slab.shrinkEmpty` while the walk is in
+//      progress. If pinTask returns null, the *Task pointer refers
+//      to a slab that has already been freed (e.g. the holder
+//      finished and its scheduler shrank the empty slab); we treat
+//      that as a chain terminator and the walk is benignly empty.
+//   2. Generation check per hop. After the pin succeeds the slab
+//      memory is alive but the SLOT may have been recycled
+//      (different logical Task now occupies it). `gen` is
+//      task.generation captured at pin time; if a later read of
+//      task.generation differs, we know the slot was reused mid-
+//      walk → snapshot torn, retry.
+//   3. The per-Task `seq` counter. seq increments on every
+//      park/wake transition; if it changed between snapshot and
+//      validation, the holder transitioned and the walk is stale.
+//   4. PER-HOP LOCK STATE SNAPSHOT. The walker captures the full
+//      atomic state of the lock the holder is waiting on (mutex
+//      `state` u64, or rwlock `write_owner` pointer) and re-reads
+//      it during validation. Any transition — owner transfer, flag
+//      flip, lock release — torns the snapshot. The INITIAL hop
+//      (the lock the waiter itself wants) is included: the walker
+//      reads the initial state once per attempt and validates it,
+//      so a transfer between the caller's pre-walk hint and our
+//      derivation cannot produce a false-positive cycle observation.
 //
 // After MAX_DETECT_RETRIES torn snapshots we treat the system as
-// "transitioning constantly" and return without panic. A real cycle would
-// have produced a stable snapshot within the retry budget.
-fn detectCycle(waiter: *Task, owner: ?*Task, lock_ptr: *anyopaque) LockError!void {
+// "transitioning constantly" and return without panic. A real cycle
+// would have produced a stable snapshot within the retry budget.
+fn detectCycle(waiter: *Task, lock_ptr: *anyopaque, lock_kind: u8) LockError!void {
+    // detectCycle is only called for exclusive (write-style) locks.
+    // Shared rwlock acquisition cannot deadlock-by-itself: there is
+    // no single owner to walk back to.
+    std.debug.assert(lock_kind == qs.LOCK_KIND_MUTEX or
+                     lock_kind == qs.LOCK_KIND_RWLOCK_WRITE);
+
     var hops: [MAX_CHAIN_DEPTH]HopSnapshot = undefined;
+    var pins: [MAX_CHAIN_DEPTH]?fp.TaskPin = [_]?fp.TaskPin{null} ** MAX_CHAIN_DEPTH;
     var attempt: u32 = 0;
 
+    // Always release pins on return, even on early-exit / error paths.
+    defer for (pins) |maybe_pin| {
+        if (maybe_pin) |p| fp.unpinTask(p);
+    };
+
     while (attempt < MAX_DETECT_RETRIES) : (attempt += 1) {
+        // Drop pins from any prior attempt before re-walking.
+        for (&pins) |*slot| {
+            if (slot.*) |p| { fp.unpinTask(p); slot.* = null; }
+        }
+
+        // Read the initial lock state fresh per attempt. This is the
+        // anchor of the walk: a stale starting owner from a previous
+        // attempt cannot leak through.
+        const initial_state = readLockState(lock_kind, lock_ptr);
+        var current = ownerFromState(initial_state, lock_kind);
+
         var n: usize = 0;
-        var current = owner;
         var found_self_at_depth: ?usize = null;
 
         while (current) |holder| : (n += 1) {
             if (n >= MAX_CHAIN_DEPTH) break;
+
+            // Pin the slab containing `holder`. If the slab was freed
+            // (or `holder` was never slab-allocated, e.g. a Loom-harness
+            // stub Task), treat as a chain terminator: a freed Task
+            // cannot be in any cycle by definition.
+            const pin = fp.pinTask(holder) orelse break;
+            pins[n] = pin;
+
             const seq0 = holder.seq.load(.acquire);
-            const next = currentChainOwner(holder);
-            hops[n] = .{ .task = holder, .seq = seq0, .next = next };
+            const wait_kind = holder.waiting_for_lock_kind.load(.acquire);
+            const wait_lock = holder.waiting_for_lock.load(.acquire);
+
+            // Determine if `holder` is parked on a chain-walkable lock.
+            // Shared rwlock and "no kind" are chain terminators; we
+            // record the snapshot anyway (so validation can verify the
+            // holder didn't transition into being waiting on something
+            // walkable mid-validation) but do not extend the walk.
+            const walkable = wait_lock != null and
+                (wait_kind == qs.LOCK_KIND_MUTEX or
+                 wait_kind == qs.LOCK_KIND_RWLOCK_WRITE);
+            const wait_state: u64 = if (walkable)
+                readLockState(wait_kind, wait_lock.?)
+            else
+                0;
+            const next = if (walkable) ownerFromState(wait_state, wait_kind) else null;
+
+            hops[n] = .{
+                .task = holder,
+                .seq = seq0,
+                .gen = pin.gen,
+                .wait_kind = wait_kind,
+                .wait_lock = wait_lock,
+                .wait_state = wait_state,
+                .next = next,
+            };
             if (holder == waiter) {
                 found_self_at_depth = n;
                 break;
             }
-            if (next == null) break; // holder not parked / shared / unknown kind
+            if (next == null) break;
             current = next;
         }
 
-        // Validate snapshot. Two checks per hop:
-        //   (1) Task seq unchanged → the holder didn't transition (park/wake)
-        //       during the walk. (Without this, the holder could now be on
-        //       a different lock entirely.)
-        //   (2) Re-derived chain link unchanged → the LOCK's owner didn't
-        //       transfer to a different task during the walk. (Without
-        //       this, the chain link is stale: the holder is still parked
-        //       on the same lock, but the lock now has a new owner — so
-        //       our recorded "next" is no longer in the current ownership
-        //       graph.)
-        // For a real cycle, all participants are parked and ownership is
-        // frozen, so both checks pass. For a transient apparent cycle,
-        // either some Task transitions OR some lock changes owner during
-        // the walk — at least one check fails → retry.
+        // Validate snapshot. Four checks per hop, plus an initial-state
+        // re-read covering the hop -1 / waiter-side lock:
+        //   (0) Initial lock state unchanged → the lock the waiter is
+        //       trying to acquire still has the same exclusive owner
+        //       (and same flag bits). Catches the "stale starting
+        //       owner" race that no per-hop check could detect: the
+        //       chain walk derived `current` from a lock state that
+        //       transferred ownership before validation.
+        //   (1) Generation unchanged → the slab slot wasn't recycled.
+        //   (2) Task seq unchanged → the holder didn't transition.
+        //   (3) Holder's wait fields and lock state unchanged → the
+        //       holder is still parked on the same lock with the same
+        //       owner / flag configuration, so the chain link this hop
+        //       represents is still authoritative.
+        // For a real cycle, all participants are parked and the locks'
+        // states are frozen, so all checks pass.
         var torn = false;
-        for (hops[0..n]) |h| {
+        if (readLockState(lock_kind, lock_ptr) != initial_state) torn = true;
+        if (!torn) for (hops[0..n]) |h| {
+            if (h.task.generation.load(.acquire) != h.gen) { torn = true; break; }
             if (h.task.seq.load(.acquire) != h.seq) { torn = true; break; }
-            if (currentChainOwner(h.task) != h.next) { torn = true; break; }
-        }
+            if (h.task.waiting_for_lock_kind.load(.acquire) != h.wait_kind) {
+                torn = true; break;
+            }
+            if (h.task.waiting_for_lock.load(.acquire) != h.wait_lock) {
+                torn = true; break;
+            }
+            // Re-read the wait lock's state. Equal state ⇒ owner +
+            // flags unchanged ⇒ chain link h.next is still derived
+            // from the same authoritative source.
+            if (h.wait_lock) |wl| {
+                if (readLockState(h.wait_kind, wl) != h.wait_state) {
+                    torn = true; break;
+                }
+            }
+        };
         if (torn) continue;
 
         if (found_self_at_depth) |depth| {
@@ -425,8 +561,11 @@ pub const ParkingMutex = struct {
             return error.Deadlock;
         }
 
-        // Walk the owner chain BEFORE taking queue_spin.
-        try detectCycle(task, current_owner, self);
+        // Walk the owner chain BEFORE taking queue_spin. detectCycle
+        // re-reads `self.state` itself (via readLockState) so that a
+        // stale `current_owner` here cannot leak into the walk —
+        // that's the option-(C) initial-state validation.
+        try detectCycle(task, self, qs.LOCK_KIND_MUTEX);
 
         self.spinAcquireQueue();
 
@@ -710,9 +849,11 @@ pub const ParkingRwLock = struct {
         const sched = sched_opt.?;
         const task = sched.current_task.?;
 
-        // Detect cycles BEFORE taking the queue spin.
-        const current_write_owner = self.write_owner.load(.acquire);
-        try detectCycle(task, current_write_owner, self);
+        // Detect cycles BEFORE taking the queue spin. detectCycle
+        // re-reads `self.write_owner` itself (via readLockState) so
+        // that a transition between this hint read and the walk
+        // cannot leak through.
+        try detectCycle(task, self, qs.LOCK_KIND_RWLOCK_WRITE);
 
         self.spinAcquireQueue();
 
@@ -744,7 +885,7 @@ pub const ParkingRwLock = struct {
         var node = WaiterNode{ .task = task, .sched_ptr = sched, .kind = .Write };
         self.waiters.push(&node);
         // Park-side ordering: owner+kind FIRST, then lock with .release.
-        task.waiting_for_lock_owner.store(current_write_owner, .release);
+        task.waiting_for_lock_owner.store(self.write_owner.load(.acquire), .release);
         task.waiting_for_lock_kind.store(qs.LOCK_KIND_RWLOCK_WRITE, .release);
         task.waiting_for_lock.store(self, .release);
         task.waiting_for_lock_list = &self.waiters;

@@ -91,11 +91,15 @@ pub fn main() !void {
     // count drops, some test stopped exercising a code path. Update
     // the threshold upward when adding tests that intentionally extend
     // coverage; never downward without surfacing what was lost.
-    // Tuned at 110 so it is a meaningful regression gate without being
-    // brittle to harmless test reorganization. Current hit count: ~129
+    // Tuned at 132 so it is a meaningful regression gate without being
+    // brittle to harmless test reorganization. Current hit count: ~140
     // (parking-lot.zig sites + queues.zig RunQueue/Task-field sites
-    // reached transitively through the loom suite).
-    const M8_COVERAGE_MIN: usize = 110;
+    // reached transitively through the loom suite, including the
+    // Phase 1-3 additions: task.seq, task.waiting_for_lock_kind,
+    // task.generation, and the option-(C) per-hop lock-state snapshot
+    // sites — readLockState reads of mutex.state / rwlock.write_owner
+    // both during the walk and during validation re-reads.
+    const M8_COVERAGE_MIN: usize = 132;
     std.debug.print(
         "\n[M8 coverage] {d} unique SimAtomic call sites hit (threshold: {d})\n",
         .{ va.sim_unique_site_count, M8_COVERAGE_MIN },
