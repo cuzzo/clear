@@ -168,15 +168,22 @@ const HopSnapshot = struct {
     /// pointer). For ParkingRwLock-write it is the write_owner
     /// pointer cast to u64. Validation re-reads via `readLockState`
     /// and any difference torns the snapshot.
+    ///
+    /// The next-hop owner pointer is derivable on demand via
+    /// `ownerFromState(wait_state, wait_kind)`, so we don't store
+    /// it separately — keeping HopSnapshot at 32 bytes matters on
+    /// 12 KB Standard fiber stacks where detectCycle frames stack
+    /// alongside lockSlow + the user fiber's own locals.
     wait_state: u64,
-    /// Cached owner derived from `wait_state` at walk time. Equals
-    /// `ownerFromState(wait_state, wait_kind)`. Stored separately
-    /// only to make `holder == waiter` checks during the walk a
-    /// pure pointer compare without re-deriving.
-    next: ?*Task,
 };
 
-const MAX_CHAIN_DEPTH: usize = 64;
+/// Bound on chain length. Cycles in real code are tiny (the
+/// pathological 14_nested_lock benchmark forms 2- or 3-hop cycles);
+/// 32 is generous. Larger arrays inflate detectCycle's stack frame,
+/// and detectCycle runs on the calling fiber's stack — whose default
+/// (Standard tier) is only 12 KB. With pin per hop (32 B) + hop
+/// snapshot (32 B), 32 entries lives in 2 KB plus retry locals.
+const MAX_CHAIN_DEPTH: usize = 32;
 const MAX_DETECT_RETRIES: u32 = 8;
 
 /// Read the atomic state of a lock identified by (kind, ptr). The
@@ -318,7 +325,6 @@ fn detectCycle(waiter: *Task, lock_ptr: *anyopaque, lock_kind: u8) LockError!voi
                 .wait_kind = wait_kind,
                 .wait_lock = wait_lock,
                 .wait_state = wait_state,
-                .next = next,
             };
             if (holder == waiter) {
                 found_self_at_depth = n;
