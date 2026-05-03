@@ -153,11 +153,20 @@ const LoomHarness = struct {
         fp.scheduler_running = true;
 
         var steps: usize = 0;
+        var pick_history: [16]u8 = [_]u8{255} ** 16;
+        var pick_history_pos: usize = 0;
         while (steps < MAX_STEPS) : (steps += 1) {
             // Unpark fibers whose tasks became .Ready (woken by submitResume).
+            // Also clear in_inbox: scheduler.run() normally clears it after
+            // dequeuing from ready_queue, but the harness manages fibers
+            // directly and never dequeues. Without this, a second
+            // submitResume on the same task (multi-cycle tests) hits the
+            // double-push guard at line 450 of scheduler.zig and returns
+            // without setting status=.Ready — the fiber parks forever.
             for (0..self.n_threads) |i| {
                 if (self.parked[i] and self.stub_tasks[i].status.load(.monotonic) == .Ready) {
                     self.parked[i] = false;
+                    self.stub_tasks[i].in_inbox.store(false, .release);
                 }
             }
 
@@ -168,6 +177,8 @@ const LoomHarness = struct {
             if (!any_active) break;
 
             const chosen = self.pickThread();
+            pick_history[pick_history_pos] = @intCast(chosen);
+            pick_history_pos = (pick_history_pos + 1) % pick_history.len;
             // Set current_task before switching so lockSlow sees the correct task.
             g_sched.current_task = &self.stub_tasks[chosen];
 
@@ -179,16 +190,73 @@ const LoomHarness = struct {
             // parent_ctx, so a stale value crashes inside switchContext).
             fc.__fiber_parent_ctx = null;
 
-            // After the fiber yields, check if it parked on a lock.
+            // After the fiber yields, decide whether it actually parked
+            // on a lock. status==.Blocked alone is INSUFFICIENT: the
+            // parking-lot park sequence sets status=.Blocked BEFORE
+            // releasing queue_spin and BEFORE the explicit park yield.
+            // If we park-detect on status alone, we freeze the fiber
+            // mid-sequence with queue_spin still held, and any other
+            // fiber's unlock spins on queue_spin forever.
+            //
+            // The correct signal is membership in g_sched.lock_waiters:
+            // sched.registerLockWaiter is called AFTER spinReleaseQueue,
+            // which means the fiber has truly finished its parking work
+            // and is about to (or has already) called task.base.yield().
             if (self.stub_tasks[chosen].status.load(.monotonic) == .Blocked) {
-                self.parked[chosen] = true;
+                for (g_sched.lock_waiters.items) |t| {
+                    if (t == &self.stub_tasks[chosen]) {
+                        self.parked[chosen] = true;
+                        break;
+                    }
+                }
             }
         }
 
         fc.__fiber = null;
         fc.__fiber_parent_ctx = null;
         fp.scheduler_running = false;
-        if (steps >= MAX_STEPS) return error.StepLimitExceeded;
+        if (steps >= MAX_STEPS) {
+            std.debug.print("\n  [STEP_LIMIT diagnostic] fiber states at limit:\n", .{});
+            for (0..self.n_threads) |i| {
+                const st = self.stub_tasks[i].status.load(.monotonic);
+                const wfl = self.stub_tasks[i].waiting_for_lock.load(.monotonic);
+                const wfk = self.stub_tasks[i].waiting_for_lock_kind.load(.monotonic);
+                std.debug.print(
+                    "    fiber {d}: done={}, parked={}, status={}, in_inbox={}, wfl={?*}, kind={d}\n",
+                    .{
+                        i,
+                        self.done[i],
+                        self.parked[i],
+                        st,
+                        self.stub_tasks[i].in_inbox.load(.monotonic),
+                        wfl,
+                        wfk,
+                    },
+                );
+            }
+            std.debug.print(
+                "    g_rw.state={d}, write_owner={?*}, waiters_empty={}\n",
+                .{ g_rw.state.load(.monotonic), g_rw.write_owner.load(.monotonic), g_rw.waiters.isEmpty() },
+            );
+            std.debug.print(
+                "    g_rw.queue_spin={d}\n",
+                .{g_rw.queue_spin.load(.monotonic)},
+            );
+            const va = @import("vopr-atomic.zig");
+            std.debug.print(
+                "    sim ops total={d}, cmpxchg ok={d} fail={d}\n",
+                .{ va.sim_atomic_op_count, va.sim_cmpxchg_succeed_count, va.sim_cmpxchg_fail_count },
+            );
+            std.debug.print("    last 16 picks: ", .{});
+            var k: usize = 0;
+            while (k < pick_history.len) : (k += 1) {
+                const idx = (pick_history_pos + k) % pick_history.len;
+                if (pick_history[idx] == 255) continue;
+                std.debug.print("{d} ", .{pick_history[idx]});
+            }
+            std.debug.print("\n", .{});
+            return error.StepLimitExceeded;
+        }
     }
 
     fn resetExhaustive(self: *LoomHarness, schedule: []const u8) void {

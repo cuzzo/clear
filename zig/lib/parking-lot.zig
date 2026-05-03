@@ -27,18 +27,13 @@ const std = @import("std");
 // `root` here is the executable root — for the parking-lot-loom executable
 // (see ../parking-lot-loom-test.zig), it re-exports `pub const SimAtomic`.
 // For every other build the decl is absent, so the alias resolves to the
-// real `std.atomic.Value`.
+// real `std.atomic.Value`. SimAtomic exposes the same `raw: T` field as
+// `std.atomic.Value`, so helpers like Futex below that take `*Atomic(...)`
+// and use `&ptr.raw` type-check identically in both modes.
 const Atomic = blk: {
     const root = @import("root");
     break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
 };
-
-// True when Atomic was substituted with SimAtomic. Used to comptime-elide
-// the non-fiber futex paths, which (a) loom never runs (loom always goes
-// through the fiber/scheduler path) and (b) wouldn't type-check anyway,
-// because the Linux futex API takes `*std.atomic.Value(u32)` and SimAtomic
-// is a different type.
-const loom_active = Atomic != std.atomic.Value;
 
 const qs = @import("../runtime/queues.zig");
 const fc = @import("../runtime/fiber-core.zig");
@@ -84,19 +79,25 @@ const SPIN_BUDGET: u32 = 100;
 // will spuriously wake the futex; we just retry, which is correct.
 const linux = std.os.linux;
 const Futex = struct {
-    inline fn wait(ptr: *std.atomic.Value(u32), expected: u32) void {
+    // Pointer types are `*Atomic(...)` rather than `*std.atomic.Value(...)`
+    // so the helpers type-check whether `Atomic` resolves to the real
+    // std.atomic.Value (production) or to SimAtomic (loom). Both expose
+    // `raw: T`, so `&ptr.raw` is a `*T` in either case. Loom never reaches
+    // these calls at runtime (the non-fiber branch is dead under loom),
+    // so the syscall is never made — but the type system is satisfied.
+    inline fn wait(ptr: *Atomic(u32), expected: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAIT, .private = true };
         _ = linux.futex_4arg(@ptrCast(&ptr.raw), op, expected, null);
     }
-    inline fn wake(ptr: *std.atomic.Value(u32), n: u32) void {
+    inline fn wake(ptr: *Atomic(u32), n: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAKE, .private = true };
         _ = linux.futex_3arg(@ptrCast(&ptr.raw), op, n);
     }
-    inline fn waitU64Low(ptr: *std.atomic.Value(u64), expected_low: u32) void {
+    inline fn waitU64Low(ptr: *Atomic(u64), expected_low: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAIT, .private = true };
         _ = linux.futex_4arg(@ptrCast(&ptr.raw), op, expected_low, null);
     }
-    inline fn wakeU64(ptr: *std.atomic.Value(u64), n: u32) void {
+    inline fn wakeU64(ptr: *Atomic(u64), n: u32) void {
         const op = linux.FUTEX_OP{ .cmd = .WAKE, .private = true };
         _ = linux.futex_3arg(@ptrCast(&ptr.raw), op, n);
     }
@@ -361,62 +362,53 @@ pub const ParkingMutex = struct {
         const sched_opt = getScheduler();
 
         if (sched_opt == null) {
-            // Loom note: this branch is dead under loom (loom always runs
-            // inside a fiber, so sched_opt is never null). The comptime
-            // guard around the futex/spin code prevents Zig from
-            // type-checking the futex calls, which take
-            // *std.atomic.Value(u64) and would not accept SimAtomic.
-            if (comptime !loom_active) {
-                // Non-fiber: spin-then-yield-then-futex.
-                //
-                // For brief CS the spin phase acquires without leaving
-                // user space. The yield phase covers moderate hold times.
-                // Only for genuinely long waits do we futex-park.
-                //
-                // We CLEAR HAS_THREAD_SLEEPER when waking from futex.
-                // Letting it stay sticky meant every unlock thereafter
-                // paid a Futex.wake syscall (~1500ns) even when no one
-                // was parked, which is what made Mutex slower than
-                // RwLock-as-mutex on contended brief-CS workloads
-                // (RwLock has no thread-sleeper bit at all).
-                const NF_SPIN_BUDGET:  u32 = 256;
-                const NF_YIELD_BUDGET: u32 = 32;
-                while (true) {
-                    var spins: u32 = 0;
-                    while (spins < NF_SPIN_BUDGET) : (spins += 1) {
-                        if ((self.state.load(.monotonic) & STATE_LOCKED) == 0) break;
-                        std.atomic.spinLoopHint();
-                    }
-                    if (spins == NF_SPIN_BUDGET) {
-                        var yields: u32 = 0;
-                        while (yields < NF_YIELD_BUDGET) : (yields += 1) {
-                            std.Thread.yield() catch {};
-                            if ((self.state.load(.monotonic) & STATE_LOCKED) == 0) break;
-                        }
-                        if (yields == NF_YIELD_BUDGET) {
-                            // Long wait -- park on futex.
-                            // The HAS_THREAD_SLEEPER bit is left sticky
-                            // after wake. Clearing it creates a lost-wake
-                            // deadlock when multiple threads are parked:
-                            // A wakes, clears the bit, A unlocks → bit
-                            // clear → no wake fires for still-parked B.
-                            // Sticky-bit means every unlock thereafter
-                            // pays a Futex.wake syscall (~1500ns) but
-                            // it's correct.
-                            const before = self.state.fetchOr(STATE_HAS_THREAD_SLEEPER, .acquire);
-                            if ((before & STATE_LOCKED) == 0) continue; // race
-                            const expected_low: u32 = @truncate(before | STATE_HAS_THREAD_SLEEPER);
-                            Futex.waitU64Low(&self.state, expected_low);
-                            continue;
-                        }
-                    }
-                    // Looks free -- attempt CAS preserving other bits.
-                    const cur = self.state.load(.acquire);
-                    if ((cur & STATE_LOCKED) != 0) continue;
-                    const new_state = cur | STATE_LOCKED;
-                    if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) return;
+            // Non-fiber: spin-then-yield-then-futex.
+            //
+            // For brief CS the spin phase acquires without leaving user
+            // space. The yield phase covers moderate hold times. Only for
+            // genuinely long waits do we futex-park.
+            //
+            // We CLEAR HAS_THREAD_SLEEPER when waking from futex. Letting
+            // it stay sticky meant every unlock thereafter paid a Futex.wake
+            // syscall (~1500ns) even when no one was parked, which is what
+            // made Mutex slower than RwLock-as-mutex on contended brief-CS
+            // workloads (RwLock has no thread-sleeper bit at all).
+            const NF_SPIN_BUDGET:  u32 = 256;
+            const NF_YIELD_BUDGET: u32 = 32;
+            while (true) {
+                var spins: u32 = 0;
+                while (spins < NF_SPIN_BUDGET) : (spins += 1) {
+                    if ((self.state.load(.monotonic) & STATE_LOCKED) == 0) break;
+                    std.atomic.spinLoopHint();
                 }
-            } else unreachable; // loom_active: dead branch
+                if (spins == NF_SPIN_BUDGET) {
+                    var yields: u32 = 0;
+                    while (yields < NF_YIELD_BUDGET) : (yields += 1) {
+                        std.Thread.yield() catch {};
+                        if ((self.state.load(.monotonic) & STATE_LOCKED) == 0) break;
+                    }
+                    if (yields == NF_YIELD_BUDGET) {
+                        // Long wait -- park on futex.
+                        // The HAS_THREAD_SLEEPER bit is left sticky after
+                        // wake. Clearing it on wake creates a lost-wake
+                        // deadlock when multiple threads are parked: A
+                        // wakes, clears the bit, A unlocks → bit clear →
+                        // no wake fires for still-parked B. Sticky-bit
+                        // means every unlock thereafter pays a Futex.wake
+                        // syscall (~1500ns) but it's correct.
+                        const before = self.state.fetchOr(STATE_HAS_THREAD_SLEEPER, .acquire);
+                        if ((before & STATE_LOCKED) == 0) continue; // race
+                        const expected_low: u32 = @truncate(before | STATE_HAS_THREAD_SLEEPER);
+                        Futex.waitU64Low(&self.state, expected_low);
+                        continue;
+                    }
+                }
+                // Looks free -- attempt CAS preserving other bits.
+                const cur = self.state.load(.acquire);
+                if ((cur & STATE_LOCKED) != 0) continue;
+                const new_state = cur | STATE_LOCKED;
+                if (self.state.cmpxchgWeak(cur, new_state, .acquire, .monotonic) == null) return;
+            }
         }
 
         const sched = sched_opt.?;
@@ -590,10 +582,7 @@ pub const ParkingMutex = struct {
         }
 
         if ((prev & STATE_HAS_THREAD_SLEEPER) != 0) {
-            // Loom: SimAtomic isn't a *std.atomic.Value(u64); the futex
-            // path is dead anyway because no thread-sleeper bit can be
-            // set under a fiber-only schedule.
-            if (comptime !loom_active) Futex.wakeU64(&self.state, 1);
+            Futex.wakeU64(&self.state, 1);
         }
     }
 };
