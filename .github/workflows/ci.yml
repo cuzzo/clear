@@ -146,7 +146,11 @@ jobs:
 
   zig-coverage:
     name: Zig unit tests (coverage via kcov)
-    runs-on: ubuntu-latest
+    # Pin to jammy (22.04). noble (24.04 -- the current ubuntu-latest)
+    # dropped kcov from its repos entirely; even with universe enabled
+    # `apt-get install kcov` returns "Unable to locate package kcov".
+    # jammy still ships kcov in universe.
+    runs-on: ubuntu-22.04
     # kcov DWARF instrumentation adds ~3x runtime overhead.
     timeout-minutes: 30
     steps:
@@ -157,11 +161,8 @@ jobs:
       # kcov is the standard sampling-coverage tool for Zig binaries
       # (DWARF-based, no recompile needed). Output: Cobertura XML in
       # zig-out/coverage/merged/cobertura.xml after the merge step.
-      # Explicit `add-apt-repository universe` ensures the package is
-      # findable across ubuntu-latest image variants.
       - name: Install kcov
         run: |
-          sudo add-apt-repository -y universe
           sudo apt-get update
           sudo apt-get install -y kcov
           kcov --version
