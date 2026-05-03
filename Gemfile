@@ -14,5 +14,7 @@ group :development do
   gem 'flay', require: false
   gem 'debride', require: false
   gem 'simplecov', require: false
+  # Cobertura XML output for Codecov / coveralls / GitLab integration
+  gem 'simplecov-cobertura', require: false
 end
 

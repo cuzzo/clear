@@ -40,8 +40,25 @@ unless ENV["COVERAGE"] == "0"
     end
   end
 
+  # Cobertura XML output for Codecov / Coveralls / GitLab. CI-friendly:
+  # only loads the formatter when the gem is actually installed (skip
+  # gracefully if a dev environment has bare simplecov).
+  begin
+    require "simplecov-cobertura"
+    cobertura_available = true
+  rescue LoadError
+    cobertura_available = false
+  end
+
   SimpleCov.start do
     enable_coverage :branch
+
+    if cobertura_available
+      formatter SimpleCov::Formatter::MultiFormatter.new([
+        SimpleCov::Formatter::HTMLFormatter,
+        SimpleCov::Formatter::CoberturaFormatter,
+      ])
+    end
 
     # Track all production code under src/.
     track_files "src/**/*.rb"

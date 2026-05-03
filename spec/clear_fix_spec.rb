@@ -1,6 +1,7 @@
 require "rspec"
 require "tmpdir"
 require "fileutils"
+require "open3"
 
 # Integration tests for `./clear fix` (Phase A — infrastructure).
 #
@@ -11,12 +12,11 @@ require "fileutils"
 CLEAR_BIN = File.expand_path("../clear", __dir__) unless defined?(CLEAR_BIN)
 
 RSpec.describe "./clear fix", :integration do
+  # Uses Open3 instead of shell redirection to a fixed /tmp filename so
+  # parallel_rspec workers don't race on the same stderr file.
   def run_fix(*args)
-    cmd = "#{CLEAR_BIN} fix #{args.join(' ')}"
-    stdout = `#{cmd} 2>/tmp/clear_fix_stderr`
-    stderr = File.read("/tmp/clear_fix_stderr")
-    File.delete("/tmp/clear_fix_stderr") rescue nil
-    [stdout, stderr, $?.exitstatus]
+    stdout, stderr, status = Open3.capture3(CLEAR_BIN, "fix", *args)
+    [stdout, stderr, status.exitstatus]
   end
 
   around do |ex|
@@ -557,11 +557,8 @@ RSpec.describe "./clear fix", :integration do
     end
 
     def run_cmd(*argv)
-      cmd = "#{CLEAR_BIN} #{argv.join(' ')}"
-      out = `#{cmd} 2>/tmp/clear_cmd_stderr`
-      err = File.read("/tmp/clear_cmd_stderr")
-      File.delete("/tmp/clear_cmd_stderr") rescue nil
-      [out, err, $?.exitstatus]
+      out, err, status = Open3.capture3(CLEAR_BIN, *argv)
+      [out, err, status.exitstatus]
     end
 
     it "`build --fix` auto-applies ownership fix and then builds" do

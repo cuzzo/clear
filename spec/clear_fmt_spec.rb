@@ -1,6 +1,7 @@
 require "rspec"
 require "tmpdir"
 require "fileutils"
+require "open3"
 
 # Integration tests for `./clear fmt`. Each test writes one or more .cht
 # files into a tmp dir, invokes the real ./clear binary, and asserts on
@@ -9,12 +10,11 @@ require "fileutils"
 CLEAR_BIN = File.expand_path("../clear", __dir__) unless defined?(CLEAR_BIN)
 
 RSpec.describe "./clear fmt", :integration do
+  # Uses Open3 instead of shell redirection to a fixed /tmp filename so
+  # parallel_rspec workers don't race on the same stderr file.
   def run_fmt(*args)
-    cmd = "#{CLEAR_BIN} fmt #{args.join(' ')}"
-    stdout = `#{cmd} 2>/tmp/clear_fmt_stderr`
-    stderr = File.read("/tmp/clear_fmt_stderr")
-    File.delete("/tmp/clear_fmt_stderr") rescue nil
-    [stdout, stderr, $?.exitstatus]
+    stdout, stderr, status = Open3.capture3(CLEAR_BIN, "fmt", *args)
+    [stdout, stderr, status.exitstatus]
   end
 
   around do |ex|
