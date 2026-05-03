@@ -827,7 +827,7 @@ pub const Scheduler = struct {
                 var earliest_ms: i64 = now_ms + self.lock_timeout_ms;
                 for (self.lock_waiters.items) |t| {
                     if (t.waiting_for_lock.load(.monotonic) == null) continue;
-                    const deadline = t.lock_wait_start_ms + self.lock_timeout_ms;
+                    const deadline = t.lock_wait_start_ms.load(.acquire) + self.lock_timeout_ms;
                     if (deadline < earliest_ms) earliest_ms = deadline;
                 }
                 const ms_until = @max(@as(i64, 1), earliest_ms - now_ms);
@@ -935,7 +935,10 @@ pub const Scheduler = struct {
     // The task's waiting_for_lock / waiting_for_lock_list / lock_waiter_node
     // must already be set by the caller.
     pub fn registerLockWaiter(self: *Scheduler, task: *Task) void {
-        task.lock_wait_start_ms = milliTimestamp();
+        // .release pairs with .acquire load by scanLockWaiters /
+        // idle-deadline path on potentially another scheduler thread
+        // (after work-stealing, `self` may not be the original spawner).
+        task.lock_wait_start_ms.store(milliTimestamp(), .release);
         self.lock_waiters.append(self.allocator, task) catch {};
     }
 
@@ -1061,13 +1064,14 @@ pub const Scheduler = struct {
                 _ = self.lock_waiters.swapRemove(i);
                 continue;
             }
-            const deadline = task.lock_wait_start_ms + self.lock_timeout_ms;
-            if (now_ms - task.lock_wait_start_ms > self.lock_timeout_ms) {
+            const start_ms = task.lock_wait_start_ms.load(.acquire);
+            const deadline = start_ms + self.lock_timeout_ms;
+            if (now_ms - start_ms > self.lock_timeout_ms) {
                 // Timed out: remove from lock's waiter list, then wake.
                 var removed = false;
-                if (task.waiting_for_lock_list) |wl| {
+                if (task.waiting_for_lock_list.load(.acquire)) |wl| {
                     wl.spinAcquire();
-                    removed = wl.remove(task.lock_waiter_node.?);
+                    removed = wl.remove(task.lock_waiter_node.load(.acquire).?);
                     wl.spinRelease();
                 }
                 // If this was a ParkingRwLock write-lock waiter and we
@@ -1079,10 +1083,14 @@ pub const Scheduler = struct {
                     }
                 }
                 _ = self.lock_waiters.swapRemove(i);
-                task.lock_timed_out = true;
+                // Set lock_timed_out BEFORE clearing waiting_for_lock so
+                // the waker-side check in lockSlow (which reads
+                // lock_timed_out only after seeing waiting_for_lock has
+                // become null and the fiber resumed) observes the flag.
+                task.lock_timed_out.store(true, .release);
                 task.waiting_for_lock.store(null, .release);
-                task.waiting_for_lock_list = null;
-                task.lock_waiter_node = null;
+                task.waiting_for_lock_list.store(null, .release);
+                task.lock_waiter_node.store(null, .release);
                 task.lock_counter_ptr = null;
                 task.status.store(.Ready, .release);
                 self.enqueueTask(task);

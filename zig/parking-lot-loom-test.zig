@@ -43,6 +43,7 @@ const tests = [_]Test{
     .{ .name = "parking cycle loom: 3-hop ABC/BCA returns LockCycle (M6, 6561 schedules)", .func = &ploom.testCycle3Hop },
     .{ .name = "parking cycle loom: read-lock terminator (M6, 256 schedules)",             .func = &ploom.testCycleReadTerminator },
     .{ .name = "parking VOPR: address-ordered nested mutex, no false positive (2000 seeds)", .func = &ploom.testVoprAddressOrderedNoFalsePositive },
+    .{ .name = "parking timeout-atomic: parker/scanner handshake (4096 schedules)",          .func = &ploom.testTimeoutAtomicCoverage },
 };
 
 pub fn main() !void {
@@ -91,15 +92,22 @@ pub fn main() !void {
     // count drops, some test stopped exercising a code path. Update
     // the threshold upward when adding tests that intentionally extend
     // coverage; never downward without surfacing what was lost.
-    // Tuned at 132 so it is a meaningful regression gate without being
-    // brittle to harmless test reorganization. Current hit count: ~140
+    // Tuned at 165 so it is a meaningful regression gate without being
+    // brittle to harmless test reorganization. Current hit count: ~177
     // (parking-lot.zig sites + queues.zig RunQueue/Task-field sites
-    // reached transitively through the loom suite, including the
-    // Phase 1-3 additions: task.seq, task.waiting_for_lock_kind,
-    // task.generation, and the option-(C) per-hop lock-state snapshot
-    // sites — readLockState reads of mutex.state / rwlock.write_owner
-    // both during the walk and during validation re-reads.
-    const M8_COVERAGE_MIN: usize = 132;
+    // reached transitively through the loom suite, including:
+    //   - Phase 1-3 additions: task.seq, task.waiting_for_lock_kind,
+    //     task.generation transitions
+    //   - Option-(C) per-hop lock-state snapshot reads on mutex.state /
+    //     rwlock.write_owner (walk + validation)
+    //   - Atomic conversions of task.lock_wait_start_ms,
+    //     task.waiting_for_lock_list, task.lock_waiter_node, and
+    //     task.lock_timed_out — every park/wake exercises the
+    //     parker-side stores; the timeout-atomic test exercises the
+    //     scanner-side load+store handshake (the only path that
+    //     reaches those sites since the loom harness doesn't run
+    //     scanLockWaiters).
+    const M8_COVERAGE_MIN: usize = 165;
     std.debug.print(
         "\n[M8 coverage] {d} unique SimAtomic call sites hit (threshold: {d})\n",
         .{ va.sim_unique_site_count, M8_COVERAGE_MIN },

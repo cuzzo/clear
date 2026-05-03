@@ -380,7 +380,13 @@ pub const Task = struct {
     ///   2 = ParkingRwLock (write/exclusive)
     ///   3 = ParkingRwLock (shared/read) — chain terminator
     waiting_for_lock_kind: Atomic(u8) = Atomic(u8).init(0),
-    lock_timed_out: bool = false,
+    /// Set true by Scheduler.scanLockWaiters when the parked-task's
+    /// deadline elapsed and we removed it from the lock's waiter list.
+    /// Read by the waker-side path in lockSlow after yield() returns
+    /// to decide whether to return error.LockTimeout. Atomic because
+    /// the writer (scanner) and reader (waking fiber) run on
+    /// different threads.
+    lock_timed_out: Atomic(bool) = Atomic(bool).init(false),
     /// Owner-only flag, but kept in this group rather than group 1 so the
     /// hot owner-only line stays at exactly 64 bytes. The scheduler reads
     /// this when entering the root-stack trampoline; cost is negligible.
@@ -408,15 +414,28 @@ pub const Task = struct {
     /// Cross-thread cycle-detection reads this field while unlock() /
     /// park() write it on a different core; Atomic prevents torn reads.
     waiting_for_lock_owner: Atomic(?*Task) = Atomic(?*Task).init(null),
-    lock_wait_start_ms: i64 = 0,
+    /// Wall-clock millisecond timestamp captured by registerLockWaiter
+    /// when the task parks. Read by Scheduler.scanLockWaiters (called
+    /// from `run()` on whatever scheduler currently holds the task in
+    /// its lock_waiters list) plus the idle-path deadline computation
+    /// at scheduler.zig:830. Atomic to avoid torn reads on cross-
+    /// scheduler timeout-scan paths (the scan thread is not
+    /// necessarily the thread that registered the task — a parked
+    /// task that was previously stolen ends up registered on its
+    /// current scheduler, which may differ from the original).
+    lock_wait_start_ms: Atomic(i64) = Atomic(i64).init(0),
 
     // ── Group 3: cold/rare ──────────────────────────────────────────────
     inbox_link: InboxNode = .{ .type = .Resume },
-    /// Back-pointer to lock's waiter list (set/cleared by owner; not
-    /// inspected from remote threads).
-    waiting_for_lock_list: ?*WaiterList = null,
-    /// Back-pointer to our WaiterNode in that list.
-    lock_waiter_node: ?*WaiterNode = null,
+    /// Back-pointer to lock's waiter list. Set by lockSlow before
+    /// yield, cleared by either the wake-side (lockSlow after yield,
+    /// or notifier-side wakeNext) or the timeout scanner. Atomic so
+    /// the scanner's read can't tear with concurrent wake-side
+    /// clears.
+    waiting_for_lock_list: Atomic(?*WaiterList) = Atomic(?*WaiterList).init(null),
+    /// Back-pointer to our WaiterNode in that list. Same writers and
+    /// reader as `waiting_for_lock_list` — the two move together.
+    lock_waiter_node: Atomic(?*WaiterNode) = Atomic(?*WaiterNode).init(null),
     /// Set by ParkingRwLock when parking as a write-lock waiter. On
     /// timeout, the scheduler decrements this counter (writers_waiting)
     /// so future readers are not permanently blocked by a phantom writer.

@@ -630,8 +630,8 @@ pub const ParkingMutex = struct {
         task.waiting_for_lock_owner.store(current_owner, .release);
         task.waiting_for_lock_kind.store(qs.LOCK_KIND_MUTEX, .release);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.waiters;
-        task.lock_waiter_node = &node;
+        task.waiting_for_lock_list.store(&self.waiters, .release);
+        task.lock_waiter_node.store(&node, .release);
         task.status.store(.Blocked, .release);
         // Mark transition for detectCycle's snapshot validation. Must come
         // AFTER the field stores so a walker that observes the new seq is
@@ -648,12 +648,12 @@ pub const ParkingMutex = struct {
         task.waiting_for_lock.store(null, .release);
         task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
         task.waiting_for_lock_owner.store(null, .release);
-        task.waiting_for_lock_list = null;
-        task.lock_waiter_node = null;
+        task.waiting_for_lock_list.store(null, .release);
+        task.lock_waiter_node.store(null, .release);
         _ = task.seq.fetchAdd(1, .release);
 
-        if (task.lock_timed_out) {
-            task.lock_timed_out = false;
+        if (task.lock_timed_out.load(.acquire)) {
+            task.lock_timed_out.store(false, .release);
             if (ownerOf(self.state.load(.acquire)) == task) return;
             std.debug.print("LOCK TIMEOUT: fiber {*} waited for mutex {*}\n", .{ task, self });
             return error.LockTimeout;
@@ -712,8 +712,8 @@ pub const ParkingMutex = struct {
                 w.task.waiting_for_lock.store(null, .release);
                 w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
                 w.task.waiting_for_lock_owner.store(null, .release);
-                w.task.waiting_for_lock_list = null;
-                w.task.lock_waiter_node = null;
+                w.task.waiting_for_lock_list.store(null, .release);
+                w.task.lock_waiter_node.store(null, .release);
                 _ = w.task.seq.fetchAdd(1, .release);
                 const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                 sched.submitResume(w.task);
@@ -894,8 +894,8 @@ pub const ParkingRwLock = struct {
         task.waiting_for_lock_owner.store(self.write_owner.load(.acquire), .release);
         task.waiting_for_lock_kind.store(qs.LOCK_KIND_RWLOCK_WRITE, .release);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.waiters;
-        task.lock_waiter_node = &node;
+        task.waiting_for_lock_list.store(&self.waiters, .release);
+        task.lock_waiter_node.store(&node, .release);
         task.status.store(.Blocked, .release);
         _ = task.seq.fetchAdd(1, .release);
         self.spinReleaseQueue();
@@ -907,12 +907,12 @@ pub const ParkingRwLock = struct {
         task.waiting_for_lock.store(null, .release);
         task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
         task.waiting_for_lock_owner.store(null, .release);
-        task.waiting_for_lock_list = null;
-        task.lock_waiter_node = null;
+        task.waiting_for_lock_list.store(null, .release);
+        task.lock_waiter_node.store(null, .release);
         _ = task.seq.fetchAdd(1, .release);
 
-        if (task.lock_timed_out) {
-            task.lock_timed_out = false;
+        if (task.lock_timed_out.load(.acquire)) {
+            task.lock_timed_out.store(false, .release);
             // Did wakeNext grant us the lock right before timeout fired?
             if ((self.state.load(.acquire) & WRITE_LOCKED_BIT) != 0
                 and self.write_owner.load(.acquire) == task)
@@ -1045,8 +1045,8 @@ pub const ParkingRwLock = struct {
         // locks have no single owner — multiple readers may hold it).
         task.waiting_for_lock_kind.store(qs.LOCK_KIND_RWLOCK_SHARED, .release);
         task.waiting_for_lock.store(self, .release);
-        task.waiting_for_lock_list = &self.waiters;
-        task.lock_waiter_node = &node;
+        task.waiting_for_lock_list.store(&self.waiters, .release);
+        task.lock_waiter_node.store(&node, .release);
         // waiting_for_lock_owner stays null: read locks have no single owner.
         task.status.store(.Blocked, .release);
         _ = task.seq.fetchAdd(1, .release);
@@ -1057,12 +1057,12 @@ pub const ParkingRwLock = struct {
 
         task.waiting_for_lock.store(null, .release);
         task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
-        task.waiting_for_lock_list = null;
-        task.lock_waiter_node = null;
+        task.waiting_for_lock_list.store(null, .release);
+        task.lock_waiter_node.store(null, .release);
         _ = task.seq.fetchAdd(1, .release);
 
-        if (task.lock_timed_out) {
-            task.lock_timed_out = false;
+        if (task.lock_timed_out.load(.acquire)) {
+            task.lock_timed_out.store(false, .release);
             // wakeNext would have already incremented our reader slot if it
             // granted us the lock. Detecting that here without a separate
             // flag is racy with concurrent unlocks; keep the simple path
@@ -1117,8 +1117,8 @@ pub const ParkingRwLock = struct {
                     w.task.waiting_for_lock.store(null, .release);
                     w.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
                     w.task.waiting_for_lock_owner.store(null, .release);
-                    w.task.waiting_for_lock_list = null;
-                    w.task.lock_waiter_node = null;
+                    w.task.waiting_for_lock_list.store(null, .release);
+                    w.task.lock_waiter_node.store(null, .release);
                     _ = w.task.seq.fetchAdd(1, .release);
                     const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                     sched.submitResume(w.task);
@@ -1130,8 +1130,8 @@ pub const ParkingRwLock = struct {
                     // stays set; we'll fix it up after the drain.
                     _ = self.state.fetchAdd(1, .acquire);
                     const r = self.waiters.pop().?;
-                    r.task.waiting_for_lock_list = null;
-                    r.task.lock_waiter_node = null;
+                    r.task.waiting_for_lock_list.store(null, .release);
+                    r.task.lock_waiter_node.store(null, .release);
                     r.task.waiting_for_lock.store(null, .release);
                     r.task.waiting_for_lock_kind.store(qs.LOCK_KIND_NONE, .release);
                     _ = r.task.seq.fetchAdd(1, .release);

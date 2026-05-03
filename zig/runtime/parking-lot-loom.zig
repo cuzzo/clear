@@ -1683,3 +1683,155 @@ pub fn testVoprAddressOrderedNoFalsePositive() !void {
         return error.LoomFailures;
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Timeout-path atomic coverage (M-timeout)
+//
+// The fields task.lock_wait_start_ms (i64) and task.lock_timed_out
+// (bool) became atomic in the same change that made
+// task.waiting_for_lock_list / task.lock_waiter_node atomic. Most of
+// those atomics fire in M3-M6 because every park/wake reads/writes
+// them. The two timeout-specific transitions, however, only happen
+// when Scheduler.scanLockWaiters trips a deadline:
+//
+//   parker (lockSlow):       scanner (scanLockWaiters):
+//     lock_wait_start_ms.store
+//     waiting_for_lock.store(L)         lock_wait_start_ms.load
+//     yield ...                         (deadline check)
+//                                       lock_timed_out.store(true)
+//                                       waiting_for_lock.store(null)
+//     (wake on Ready)
+//     lock_timed_out.load → expect true
+//
+// The loom harness does NOT run scanLockWaiters (it has its own
+// custom run loop that bypasses the timeout scanner). Without a
+// dedicated test the scanner-side load/store sites for those two
+// atomics would never trip a yield point, so a regression that
+// downgraded the .release/.acquire ordering on either field would
+// silently pass M8 coverage.
+//
+// This test bypasses the full lock machinery and directly drives
+// the atomic-field handshake from two virtual fibers, sweeping all
+// reachable schedules. The invariant: parker's load of
+// lock_timed_out, sequenced after observing waiting_for_lock cleared,
+// must see the scanner's store of true via the .release/.acquire
+// pair on waiting_for_lock.
+// ─────────────────────────────────────────────────────────────────────
+
+var g_timeout_observed: bool = false;
+
+fn entryTimeoutParker() callconv(.c) void {
+    const t = &harness.stub_tasks[0];
+
+    // Park-side stores (mirroring the lockSlow park sequence in
+    // ParkingMutex / ParkingRwLock; we do them directly so the test
+    // doesn't need a real lock).
+    t.lock_wait_start_ms.store(100, .release);
+    t.waiting_for_lock.store(@ptrFromInt(0xdead0001), .release);
+    _ = t.seq.fetchAdd(1, .release);
+
+    // "Park" — yield until scanner clears waiting_for_lock. Each
+    // load is a SimAtomic op, so the harness gets to interleave
+    // scanner's stores between iterations.
+    while (t.waiting_for_lock.load(.acquire) != null) {
+        fc.__fiber.?.yield();
+    }
+
+    // Wake-side check. After observing waiting_for_lock == null
+    // (scanner's release-store), an acquire-load on
+    // lock_timed_out must see scanner's prior release-store of true.
+    if (t.lock_timed_out.load(.acquire)) {
+        g_timeout_observed = true;
+    }
+
+    harness.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryTimeoutScanner() callconv(.c) void {
+    const t = &harness.stub_tasks[0];
+
+    // Wait for parker to populate the wait fields. Each load is a
+    // yield point.
+    while (t.waiting_for_lock.load(.acquire) == null) {
+        fc.__fiber.?.yield();
+    }
+
+    // Scanner-side reads (mirroring scheduler.zig:1067). The deadline
+    // check is elided — under loom we want to observe both the load
+    // and the subsequent timeout store regardless of "real" time.
+    const start_ms = t.lock_wait_start_ms.load(.acquire);
+    _ = start_ms;
+
+    // Scanner-side timeout sequence (mirroring scheduler.zig:1090).
+    // Order matters: lock_timed_out FIRST so the parker reading
+    // waiting_for_lock=null can rely on .acquire on it pulling in
+    // the lock_timed_out store.
+    t.lock_timed_out.store(true, .release);
+    t.waiting_for_lock.store(null, .release);
+    _ = t.seq.fetchAdd(1, .release);
+
+    harness.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+pub fn testTimeoutAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    // 16-bit schedule space — 65536 interleavings. Each fiber issues
+    // ~4 SimAtomic ops; a 16-step schedule covers all reasonable
+    // orderings of the 8 ops between the two fibers.
+    var schedule_buf: [16]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+    const total: usize = 4096; // 2^12 — covers all "early" schedule prefixes
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit % 12))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+
+        try h.createThread(0, @intFromPtr(&entryTimeoutParker));
+        try h.createThread(1, @intFromPtr(&entryTimeoutScanner));
+
+        // createThread re-inits stub_tasks[i] each time; reset the
+        // timeout-specific fields plus our test observer.
+        g_timeout_observed = false;
+        h.stub_tasks[0].lock_wait_start_ms.store(0, .monotonic);
+        h.stub_tasks[0].waiting_for_lock.store(null, .monotonic);
+        h.stub_tasks[0].lock_timed_out.store(false, .monotonic);
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        // Invariant: every schedule that completes must have observed
+        // the scanner's timeout store. The parker's load of
+        // lock_timed_out happens AFTER its load of
+        // waiting_for_lock=null, and the scanner stored
+        // lock_timed_out BEFORE waiting_for_lock=null with .release.
+        // Acquire on waiting_for_lock chains the lock_timed_out store
+        // into visibility.
+        if (!g_timeout_observed) failures += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\ntimeout-atomic: {d}/{d} schedules failed\n", .{ failures, total });
+        return error.LoomFailures;
+    }
+}
