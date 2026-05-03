@@ -42,6 +42,7 @@ const tests = [_]Test{
     .{ .name = "parking cycle loom: 2-hop AB/BA returns LockCycle (M6, 4096 schedules)",   .func = &ploom.testCycle2Hop },
     .{ .name = "parking cycle loom: 3-hop ABC/BCA returns LockCycle (M6, 6561 schedules)", .func = &ploom.testCycle3Hop },
     .{ .name = "parking cycle loom: read-lock terminator (M6, 256 schedules)",             .func = &ploom.testCycleReadTerminator },
+    .{ .name = "parking VOPR: address-ordered nested mutex, no false positive (2000 seeds)", .func = &ploom.testVoprAddressOrderedNoFalsePositive },
 };
 
 pub fn main() !void {

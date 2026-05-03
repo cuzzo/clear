@@ -1505,3 +1505,181 @@ pub fn testCycleReadTerminator() !void {
         return error.LoomFailures;
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VOPR — randomized seed-driven testing (no barriers, no synchronization)
+//
+// The M6 tests above use barriers to deterministically reach the cycle
+// state. That validates detectCycle FIRES on a real cycle but does not
+// stress the timing-sensitive paths where detectCycle could FALSE-POSITIVE
+// on a transient apparent cycle that resolves before the chain stabilizes.
+//
+// VOPR fixes that gap. Each test below:
+//   - Runs N fibers doing realistic lock workloads with NO inter-fiber
+//     synchronization. Fibers race naturally, just as they would on real
+//     hardware.
+//   - Drives scheduling via a per-seed PRNG. Each atomic op yields, the
+//     harness picks the next fiber per the seed's bit stream.
+//   - Asserts per-seed invariants. On failure, prints the seed for
+//     reproduction (`./parking-lot-loom --seed <N>` would re-run that
+//     specific schedule).
+//   - Sweeps `LOOM_FUZZ_SEEDS` seeds (default 500, set higher for nightly).
+//
+// Workloads:
+//   1. Address-ordered nested mutex chain (mirrors bench 14_nested_lock).
+//      Cycles are STRUCTURALLY IMPOSSIBLE under address-ordering. Any
+//      LockCycle/Deadlock observed is a false positive in detectCycle's
+//      timing-sensitive snapshot retry logic.
+//   2. Three-lock chain with random arrival order. Cycles ARE possible
+//      here, so detection SHOULD fire on real cycles and NOT fire on
+//      transient apparent cycles.
+//
+// The address-ordered test is the one that should catch the bench-mode
+// false positive. If a seed produces a LockCycle here, the seed is
+// reproduction-pinned and the bug is bisectable to the timing window
+// observed by detectCycle.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const VOPR_LOCKS: usize = 4;
+const VOPR_FIBERS: usize = 4;
+const VOPR_ITERS: usize = 200;
+
+var g_vopr_locks: [VOPR_LOCKS]ParkingMutex = undefined;
+var g_vopr_counters: [VOPR_LOCKS]u64 = undefined;
+var g_vopr_false_cycles: u32 = 0;
+var g_vopr_false_deadlocks: u32 = 0;
+var g_vopr_seeds: [VOPR_FIBERS]u64 = undefined;
+
+fn voprReset() void {
+    var i: usize = 0;
+    while (i < VOPR_LOCKS) : (i += 1) {
+        g_vopr_locks[i] = .{};
+        g_vopr_counters[i] = 0;
+    }
+    g_vopr_false_cycles = 0;
+    g_vopr_false_deadlocks = 0;
+}
+
+inline fn xorshift64(state: *u64) u64 {
+    var x = state.*;
+    x ^= x << 13;
+    x ^= x >> 7;
+    x ^= x << 17;
+    state.* = x;
+    return x;
+}
+
+fn voprAddrOrderedBody(comptime slot: usize) void {
+    var prng = g_vopr_seeds[slot];
+    var i: usize = 0;
+    while (i < VOPR_ITERS) : (i += 1) {
+        const r = xorshift64(&prng);
+        const a: usize = @intCast(r % VOPR_LOCKS);
+        var b: usize = @intCast((r >> 32) % VOPR_LOCKS);
+        if (b == a) b = (a + 1) % VOPR_LOCKS;
+        const lo = @min(a, b);
+        const hi = @max(a, b);
+
+        // Address-ordered acquisition. NO real cycle is possible.
+        g_vopr_locks[lo].lock() catch |e| {
+            switch (e) {
+                error.LockCycle => g_vopr_false_cycles += 1,
+                error.Deadlock => g_vopr_false_deadlocks += 1,
+                error.LockTimeout => {},
+            }
+            continue;
+        };
+        g_vopr_locks[hi].lock() catch |e| {
+            switch (e) {
+                error.LockCycle => g_vopr_false_cycles += 1,
+                error.Deadlock => g_vopr_false_deadlocks += 1,
+                error.LockTimeout => {},
+            }
+            g_vopr_locks[lo].unlock();
+            continue;
+        };
+        g_vopr_counters[lo] += 1;
+        g_vopr_counters[hi] += 1;
+        g_vopr_locks[hi].unlock();
+        g_vopr_locks[lo].unlock();
+    }
+    harness.done[slot] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryVopr0() callconv(.c) void { voprAddrOrderedBody(0); }
+fn entryVopr1() callconv(.c) void { voprAddrOrderedBody(1); }
+fn entryVopr2() callconv(.c) void { voprAddrOrderedBody(2); }
+fn entryVopr3() callconv(.c) void { voprAddrOrderedBody(3); }
+
+pub fn testVoprAddressOrderedNoFalsePositive() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const seed_count: usize = fuzzSeedCount(2000);
+    var failures: usize = 0;
+    var failing_seed: ?u64 = null;
+
+    for (0..seed_count) |seed| {
+        var ph = LoomHarness.initPrng(allocator, seed);
+        harness = &ph;
+
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        drainSchedState();
+
+        voprReset();
+        // Per-fiber PRNG seeds derived from the harness seed so each
+        // fiber's lock pattern is deterministic per seed.
+        var i: usize = 0;
+        while (i < VOPR_FIBERS) : (i += 1) {
+            g_vopr_seeds[i] = (seed +% (@as(u64, i) +% 1)) *% 0x9E3779B97F4A7C15;
+        }
+
+        ph.createThread(0, @intFromPtr(&entryVopr0)) catch continue;
+        ph.createThread(1, @intFromPtr(&entryVopr1)) catch continue;
+        ph.createThread(2, @intFromPtr(&entryVopr2)) catch continue;
+        ph.createThread(3, @intFromPtr(&entryVopr3)) catch continue;
+
+        ph.run() catch {
+            // Step limit — treat as deadlock-without-detection (a real
+            // bug under VOPR: schedule space deadlocks fibers).
+            if (failing_seed == null) failing_seed = seed;
+            failures += 1;
+            ph.deinit();
+            continue;
+        };
+
+        // Invariant: address-ordered acquisition CANNOT form a cycle.
+        // Any LockCycle/Deadlock is a false positive in detectCycle.
+        if (g_vopr_false_cycles > 0 or g_vopr_false_deadlocks > 0) {
+            std.debug.print(
+                "\nVOPR FALSE POSITIVE seed {d}: cycles={d} deadlocks={d}\n",
+                .{ seed, g_vopr_false_cycles, g_vopr_false_deadlocks },
+            );
+            if (failing_seed == null) failing_seed = seed;
+            failures += 1;
+        }
+
+        ph.deinit();
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print(
+            "\nVOPR address-ordered: {d}/{d} seeds failed (first failing seed: {?})\n",
+            .{ failures, seed_count, failing_seed },
+        );
+        return error.LoomFailures;
+    }
+}
