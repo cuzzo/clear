@@ -28,6 +28,31 @@ pub var sim_atomic_op_count: usize = 0;
 pub var sim_cmpxchg_fail_count: usize = 0;
 pub var sim_cmpxchg_succeed_count: usize = 0;
 
+/// M8 coverage tracking. Every SimAtomic method records its caller's
+/// return address — one unique IP per source line that calls a SimAtomic
+/// method. After the loom suite finishes, the unique-IP count is a
+/// structural lower bound on how many distinct atomic-op call sites in
+/// parking-lot.zig were exercised. The runner asserts this count meets
+/// a threshold derived from the per-site audit in
+/// docs/agents/parking-lot-loom-coverage.md, so a regression that quietly
+/// drops a code path stops being silent.
+const MAX_UNIQUE_SITES: usize = 512;
+pub var sim_unique_sites: [MAX_UNIQUE_SITES]usize = [_]usize{0} ** MAX_UNIQUE_SITES;
+pub var sim_unique_site_count: usize = 0;
+
+inline fn recordSite(ip: usize) void {
+    // Linear search; the site set is bounded (<200 in practice for the
+    // parking-lot critical path) and this is cheaper than a hashmap.
+    var i: usize = 0;
+    while (i < sim_unique_site_count) : (i += 1) {
+        if (sim_unique_sites[i] == ip) return;
+    }
+    if (sim_unique_site_count < MAX_UNIQUE_SITES) {
+        sim_unique_sites[sim_unique_site_count] = ip;
+        sim_unique_site_count += 1;
+    }
+}
+
 /// Yield to the Loom coordinator.  Called at every atomic operation.
 /// If not running on a fiber (e.g., during queue setup), this is a no-op.
 /// We check __fiber_parent_ctx because __fiber can be stale after a fiber
@@ -57,11 +82,13 @@ pub fn SimAtomic(comptime T: type) type {
         }
 
         pub fn load(self: *const Self, _: std.builtin.AtomicOrder) T {
+            recordSite(@returnAddress());
             yieldPoint();
             return self.raw;
         }
 
         pub fn store(self: *@This(), v: T, _: std.builtin.AtomicOrder) void {
+            recordSite(@returnAddress());
             yieldPoint();
             self.raw = v;
         }
@@ -73,6 +100,7 @@ pub fn SimAtomic(comptime T: type) type {
             _: std.builtin.AtomicOrder,
             _: std.builtin.AtomicOrder,
         ) ?T {
+            recordSite(@returnAddress());
             yieldPoint();
             if (self.raw == expected) {
                 self.raw = desired;
@@ -94,6 +122,7 @@ pub fn SimAtomic(comptime T: type) type {
         }
 
         pub fn swap(self: *@This(), new_val: T, _: std.builtin.AtomicOrder) T {
+            recordSite(@returnAddress());
             yieldPoint();
             const old = self.raw;
             self.raw = new_val;
@@ -101,6 +130,7 @@ pub fn SimAtomic(comptime T: type) type {
         }
 
         pub fn fetchAdd(self: *@This(), val: T, _: std.builtin.AtomicOrder) T {
+            recordSite(@returnAddress());
             yieldPoint();
             const old = self.raw;
             self.raw = old +% val;
@@ -108,6 +138,7 @@ pub fn SimAtomic(comptime T: type) type {
         }
 
         pub fn fetchSub(self: *@This(), val: T, _: std.builtin.AtomicOrder) T {
+            recordSite(@returnAddress());
             yieldPoint();
             const old = self.raw;
             self.raw = old -% val;
@@ -115,6 +146,7 @@ pub fn SimAtomic(comptime T: type) type {
         }
 
         pub fn fetchOr(self: *@This(), val: T, _: std.builtin.AtomicOrder) T {
+            recordSite(@returnAddress());
             yieldPoint();
             const old = self.raw;
             self.raw = old | val;
@@ -122,6 +154,7 @@ pub fn SimAtomic(comptime T: type) type {
         }
 
         pub fn fetchAnd(self: *@This(), val: T, _: std.builtin.AtomicOrder) T {
+            recordSite(@returnAddress());
             yieldPoint();
             const old = self.raw;
             self.raw = old & val;

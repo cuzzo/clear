@@ -78,5 +78,35 @@ pub fn main() !void {
         "\n{d} passed, {d} failed ({d} total sim atomic ops)\n",
         .{ passed, failed, ops_total },
     );
+
+    // M8 coverage gate. Each SimAtomic method records its caller's
+    // return address (one unique IP per source line that issues an
+    // atomic op). The audit doc enumerates ~53 loom-eligible parking-
+    // lot sites + ~40 task-field site classes; the suite must hit a
+    // healthy fraction or coverage has silently regressed.
+    //
+    // The threshold is set deliberately on the conservative side. It
+    // is a structural backstop: if M3-M6 tests pass but the unique-IP
+    // count drops, some test stopped exercising a code path. Update
+    // the threshold upward when adding tests that intentionally extend
+    // coverage; never downward without surfacing what was lost.
+    // Tuned at 110 so it is a meaningful regression gate without being
+    // brittle to harmless test reorganization. Current hit count: ~129
+    // (parking-lot.zig sites + queues.zig RunQueue/Task-field sites
+    // reached transitively through the loom suite).
+    const M8_COVERAGE_MIN: usize = 110;
+    std.debug.print(
+        "\n[M8 coverage] {d} unique SimAtomic call sites hit (threshold: {d})\n",
+        .{ va.sim_unique_site_count, M8_COVERAGE_MIN },
+    );
+    if (va.sim_unique_site_count < M8_COVERAGE_MIN) {
+        std.debug.print(
+            "FATAL: coverage below threshold — at least {d} sites are unhit. " ++
+            "See docs/agents/parking-lot-loom-coverage.md for the per-site audit.\n",
+            .{M8_COVERAGE_MIN - va.sim_unique_site_count},
+        );
+        std.process.exit(3);
+    }
+
     if (failed != 0) std.process.exit(1);
 }
