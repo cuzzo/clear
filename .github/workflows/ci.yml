@@ -132,7 +132,27 @@ jobs:
       # kcov is the standard sampling-coverage tool for Zig binaries
       # (DWARF-based, no recompile needed). Output: Cobertura XML in
       # zig-out/coverage/merged/cobertura.xml after the merge step.
-      - run: sudo apt-get update && sudo apt-get install -y kcov
+      #
+      # Build from source — kcov isn't reliably present in the
+      # ubuntu-latest apt repos (the runner's apt-get install -y kcov
+      # hit "Unable to locate package kcov" on a recent image). Pinning
+      # v43 (May 2024) keeps the version stable; ~30s build is amortized
+      # against the actual test run.
+      - name: Install kcov
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake binutils-dev libcurl4-openssl-dev zlib1g-dev \
+            libdw-dev libiberty-dev libssl-dev pkg-config
+          wget -q https://github.com/SimonKagstrom/kcov/archive/refs/tags/v43.tar.gz -O kcov-src.tar.gz
+          tar xf kcov-src.tar.gz
+          cd kcov-43
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          make -j"$(nproc)"
+          sudo make install
+          kcov --version
       - working-directory: zig
         run: zig build test -Dcoverage
       - uses: codecov/codecov-action@v5
