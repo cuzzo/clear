@@ -102,6 +102,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # build.zig invokes `ruby src/backends/transpiler.rb` to lower
+      # .cht to Zig; transpiler.rb does `require 'bundler/setup'` so
+      # we need both Ruby and bundle install before zig build runs.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
@@ -113,6 +120,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # build.zig invokes `ruby src/backends/transpiler.rb` to lower
+      # .cht to Zig; transpiler.rb does `require 'bundler/setup'` so
+      # we need both Ruby and bundle install before zig build runs.
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
