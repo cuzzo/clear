@@ -29,7 +29,7 @@ def compile_and_run(src_text)
   end
 end
 
-RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)" do
+RSpec.describe "VM Phase 2 compiler bugs (see docs/agents/vm-bugs.md)", :integration do
   describe "Bug #1 (FIXED): BG ctx field type for slice fn-params" do
     # Fixed by commit 6de9a874. After that fix, fn-param slices render
     # correctly as []T in the BG ctx struct. Under the CaptureStrategy
