@@ -26,6 +26,7 @@ const testing = std.testing;
 
 const ebr_mod = @import("../lib/ebr.zig");
 const atomic_ptr = @import("../lib/atomic_ptr.zig");
+const build_options = @import("build_options");
 
 const EbrContext = ebr_mod.EbrContext;
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
@@ -288,7 +289,8 @@ test "AtomicPtr: rcu-update completes a long retry-driven sequence (within 256 c
     }
 
     var i: usize = 0;
-    while (i < 10_000) : (i += 1) {
+    const iters: usize = if (build_options.coverage) 100 else 10_000;
+    while (i < iters) : (i += 1) {
         try cell.update(&tle, testing.allocator, struct {
             fn call(p: *i64) void {
                 p.* += 1;
@@ -299,7 +301,7 @@ test "AtomicPtr: rcu-update completes a long retry-driven sequence (within 256 c
 
     var g = cell.read(&tle);
     defer g.release();
-    try testing.expectEqual(@as(i64, 10_000), g.get().*);
+    try testing.expectEqual(@as(i64, @intCast(iters)), g.get().*);
 }
 
 // Holds references to a cell + EBR context so a closure can publish

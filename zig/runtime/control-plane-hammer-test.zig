@@ -11,6 +11,7 @@
 const std = @import("std");
 const cp = @import("control-plane.zig");
 const StackSize = @import("fiber-core.zig").StackSize;
+const build_options = @import("build_options");
 
 // ═══════════════════════════════════════════════════════════════════
 // Test 1: Concurrent overflow + recommend — no stale reads
@@ -22,7 +23,7 @@ const StackSize = @import("fiber-core.zig").StackSize;
 // ═══════════════════════════════════════════════════════════════════
 
 const T1_FN_ADDR: usize = 0xAAAA_1111;
-const T1_ITERS: usize = 100_000;
+const T1_ITERS: usize = if (build_options.coverage) 1_000 else 100_000;
 const T1_WRITERS: usize = 4;
 const T1_READERS: usize = 4;
 
@@ -60,6 +61,13 @@ fn t1Reader(_: usize) void {
 
 test "Hammer: concurrent overflow + recommend — no publication race" {
     cp.resetRegistry();
+    if (build_options.coverage) {
+        // The reduced kcov workload can otherwise let all readers finish
+        // before the first writer publication becomes visible, making the
+        // "saw Large" assertion a scheduling accident instead of the
+        // publication-race check this test cares about.
+        cp.recordOverflow(T1_FN_ADDR, .Standard);
+    }
 
     var threads: [T1_WRITERS + T1_READERS]std.Thread = undefined;
 
@@ -97,7 +105,7 @@ test "Hammer: concurrent overflow + recommend — no publication race" {
 // ═══════════════════════════════════════════════════════════════════
 
 const T2_THREADS: usize = 8;
-const T2_ITERS: usize = 50_000;
+const T2_ITERS: usize = if (build_options.coverage) 1_000 else 50_000;
 
 fn t2Worker(thread_id: usize) void {
     const fn_addr: usize = 0xBBBB_0000 + thread_id;
@@ -136,7 +144,7 @@ test "Hammer: distinct functions — independent slots" {
 // ═══════════════════════════════════════════════════════════════════
 
 const T3_FN_ADDR: usize = 0xCCCC_3333;
-const T3_ITERS: usize = 50_000;
+const T3_ITERS: usize = if (build_options.coverage) 1_000 else 50_000;
 const T3_THREADS: usize = 8;
 
 fn t3WorkerStandard(_: usize) void {
@@ -176,7 +184,7 @@ test "Hammer: multi-tier ratchet — converges to max" {
 // ═══════════════════════════════════════════════════════════════════
 
 const T4_FN_ADDR: usize = 0xDDDD_4444;
-const T4_ITERS: usize = 50_000;
+const T4_ITERS: usize = if (build_options.coverage) 1_000 else 50_000;
 const T4_THREADS: usize = 8;
 
 fn t4Overflower(_: usize) void {

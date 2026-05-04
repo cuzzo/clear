@@ -17,6 +17,15 @@ const fp = CheatHeader.scheduler;
 const fm = CheatHeader.fiber_memory;
 const qs = @import("queues.zig");
 
+// Stack tier for spawned fibers in concurrency tests. TSan and kcov
+// instrumentation grows each call frame (shadow-memory probes,
+// interceptor frames), pushing test bodies that fit comfortably in the
+// 16 KB Standard tier past the slab boundary. Under either, spawn at
+// the 64 KB Large tier so the test is exercising the data structure,
+// not the instrumented stack budget.
+const test_stack_size: fc.StackSize =
+    if (@import("build_options").coverage or @import("build_options").tsan) .Large else .Standard;
+
 fn fakeSched() *CheatHeader.scheduler.Scheduler {
     return @ptrFromInt(@as(usize, @alignOf(CheatHeader.scheduler.Scheduler)));
 }
@@ -171,7 +180,7 @@ test "Stream.push and next deliver items via ring buffer" {
     try gen.push(30.0);
 
     // Mark closed directly — avoids wg.done() on fake sched.
-    stream.inner.closed = true;
+    stream.inner.closed.store(true, .release);
 
     const v1 = try stream.next();
     const v2 = try stream.next();
@@ -195,7 +204,7 @@ test "Stream.push works for bool type (ring buffer)" {
     try gen.push(true);
     try gen.push(false);
 
-    stream.inner.closed = true;
+    stream.inner.closed.store(true, .release);
 
     try std.testing.expectEqual(@as(?bool, true),  try stream.next());
     try std.testing.expectEqual(@as(?bool, false), try stream.next());
@@ -209,7 +218,7 @@ test "Stream.next returns null immediately when closed and ring is empty" {
     const alloc = std.testing.allocator;
 
     var stream = try S.spawnNew(alloc, fakeSched());
-    stream.inner.closed = true; // closed before any push
+    stream.inner.closed.store(true, .release); // closed before any push
 
     try std.testing.expectEqual(@as(?i64, null), try stream.next());
 
@@ -227,7 +236,7 @@ test "Stream ring buffer preserves FIFO order across 64-item boundary" {
     var i: i64 = 0;
     while (i < 64) : (i += 1) try gen.push(i);
 
-    stream.inner.closed = true;
+    stream.inner.closed.store(true, .release);
 
     var j: i64 = 0;
     while (j < 64) : (j += 1) {
@@ -600,9 +609,6 @@ test "SplitStream preserves order across two OS-thread consumers" {
 }
 
 test "SplitStream wakes multiple waiting fibers as items arrive" {
-    // Skips under kcov for same reason as parking-lot AB/BA: cleanup
-    // path stack pressure exposed by kcov's timing dilation.
-    if (@import("build_options").coverage) return error.SkipZigTest;
     const allocator = std.testing.allocator;
 
     var global_ctx = EbrContext{};
@@ -631,19 +637,19 @@ test "SplitStream wakes multiple waiting fibers as items arrive" {
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&splitFiberReader)),
         &left_state,
-        .{},
+        .{ .stack_size = test_stack_size },
     );
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&splitFiberReader)),
         &right_state,
-        .{},
+        .{ .stack_size = test_stack_size },
     );
     try sched.submitSpawn(
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&splitFiberProducer)),
         &producer_state,
-        .{},
+        .{ .stack_size = test_stack_size },
     );
 
     sched.run();
@@ -655,7 +661,6 @@ test "SplitStream wakes multiple waiting fibers as items arrive" {
 }
 
 test "SplitStream survives multithreaded spawnBest pubsub hammer" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
     const allocator = std.testing.allocator;
     const subscriber_count = 16;
     const message_count = 4096;
@@ -744,7 +749,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&splitParallelProducer)),
         &producer_state,
-        .{},
+        .{ .stack_size = test_stack_size },
     );
 
     const expected_completed = subscriber_count + 1;
@@ -797,7 +802,6 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
 }
 
 test "concurrentBoundedSelect returns all mapped items in source order" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
     const allocator = std.testing.allocator;
 
     var global_ctx = EbrContext{};
@@ -818,7 +822,7 @@ test "concurrentBoundedSelect returns all mapped items in source order" {
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&boundedSelectConsumer)),
         &state,
-        .{},
+        .{ .stack_size = test_stack_size },
     );
     sched.run();
 
@@ -832,7 +836,6 @@ test "concurrentBoundedSelect returns all mapped items in source order" {
 }
 
 test "concurrentBoundedWhere filters items and preserves source order" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
     const allocator = std.testing.allocator;
 
     var global_ctx = EbrContext{};
@@ -853,7 +856,7 @@ test "concurrentBoundedWhere filters items and preserves source order" {
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&boundedWhereConsumer)),
         &state,
-        .{},
+        .{ .stack_size = test_stack_size },
     );
     sched.run();
 
@@ -885,7 +888,7 @@ test "concurrentBoundedEach visits every item exactly once" {
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&boundedEachConsumer)),
         &state,
-        .{},
+        .{ .stack_size = test_stack_size },
     );
     sched.run();
 

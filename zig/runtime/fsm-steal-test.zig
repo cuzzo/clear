@@ -21,11 +21,11 @@ const fsm = @import("fsm.zig");
 const alloc = std.testing.allocator;
 
 const Counter = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     completed: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Counter = @fieldParentPtr("task", t);
+        const self: *Counter = @ptrCast(@alignCast(t.ctx.?));
         self.completed = true;
         return .{ .Done = {} };
     }
@@ -48,9 +48,9 @@ test "S1: FsmRunQueue.tryStealFrom transfers ~half of victim's tasks" {
     defer alloc.free(tasks);
 
     for (tasks) |*c| {
-        c.* = .{ .task = undefined };
-        c.task = fsm.FsmTask.init(&Counter.doResume);
-        sched_a.enqueueFsm(&c.task);
+        c.* = .{ .task = try sched_a.allocFsmTask(&Counter.doResume) };
+        c.task.ctx = c;
+        sched_a.enqueueFsm(c.task);
     }
 
     const a_before = sched_a.fsm_ready_queue.len();
@@ -79,9 +79,9 @@ test "S2: stolen tasks complete correctly when dispatched by the stealer" {
     const tasks = try alloc.alloc(Counter, N);
     defer alloc.free(tasks);
     for (tasks) |*c| {
-        c.* = .{ .task = undefined };
-        c.task = fsm.FsmTask.init(&Counter.doResume);
-        sched_a.enqueueFsm(&c.task);
+        c.* = .{ .task = try sched_a.allocFsmTask(&Counter.doResume) };
+        c.task.ctx = c;
+        sched_a.enqueueFsm(c.task);
     }
 
     const stolen = sched_b.fsm_ready_queue.tryStealFrom(&sched_a.fsm_ready_queue, alloc);
@@ -112,9 +112,9 @@ test "S3: FSM queue is structurally distinct from stackful ready_queue" {
     var sched = try fp.Scheduler.init(alloc, &ebr_ctx, &pool);
     defer sched.deinit();
 
-    var c: Counter = .{ .task = undefined };
-    c.task = fsm.FsmTask.init(&Counter.doResume);
-    sched.enqueueFsm(&c.task);
+    var c: Counter = .{ .task = try sched.allocFsmTask(&Counter.doResume) };
+    c.task.ctx = &c;
+    sched.enqueueFsm(c.task);
 
     // Enqueuing an FSM must not appear in the stackful queue.
     try std.testing.expectEqual(@as(usize, 1), sched.fsm_ready_queue.len());

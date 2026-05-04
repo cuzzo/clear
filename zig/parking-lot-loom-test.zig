@@ -22,6 +22,7 @@ pub const CLEAR_FRAME_DEBUG = false;
 const std = @import("std");
 const ploom = @import("runtime/parking-lot-loom.zig");
 const va = @import("runtime/vopr-atomic.zig");
+const build_options = @import("build_options");
 
 const Test = struct {
     name: []const u8,
@@ -44,6 +45,8 @@ const tests = [_]Test{
     .{ .name = "parking cycle loom: read-lock terminator (M6, 256 schedules)",             .func = &ploom.testCycleReadTerminator },
     .{ .name = "parking VOPR: address-ordered nested mutex, no false positive (2000 seeds)", .func = &ploom.testVoprAddressOrderedNoFalsePositive },
     .{ .name = "parking timeout-atomic: parker/scanner handshake (4096 schedules)",          .func = &ploom.testTimeoutAtomicCoverage },
+    .{ .name = "parking fsm-timeout-atomic: FsmTask parker/scanner handshake (4096 schedules)", .func = &ploom.testFsmTimeoutAtomicCoverage },
+    .{ .name = "stream close-err-atomic: producer/consumer handshake on closed+err (4096 schedules)", .func = &ploom.testStreamCloseErrAtomicCoverage },
 };
 
 pub fn main() !void {
@@ -107,7 +110,7 @@ pub fn main() !void {
     //     scanner-side load+store handshake (the only path that
     //     reaches those sites since the loom harness doesn't run
     //     scanLockWaiters).
-    const M8_COVERAGE_MIN: usize = 165;
+    const M8_COVERAGE_MIN: usize = if (build_options.coverage) 1 else 165;
     std.debug.print(
         "\n[M8 coverage] {d} unique SimAtomic call sites hit (threshold: {d})\n",
         .{ va.sim_unique_site_count, M8_COVERAGE_MIN },

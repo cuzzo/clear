@@ -106,11 +106,29 @@ pub fn SlabAllocator(comptime T: type) type {
         }
 
         pub fn deinit(self: *Self) void {
-            // Clear threadlocal magazines completely — prevents stale pointers
-            // from being used by a future SlabAllocator(T) instance on this thread.
+            // Clear threadlocal magazines completely — prevents stale
+            // pointers (into our about-to-be-freed slabs, or into a
+            // different allocator's slabs that are also dying with us
+            // on this thread) from being followed by a future
+            // SlabAllocator(T) instance on this thread via
+            // ensureMagazineOwnership.
             local_alloc_mag = .{};
             local_free_mag = .{};
-            self.flushThreadCache();
+            // INTENTIONALLY no flushThreadCache call here. The reset
+            // above already nukes the magazines, so a flush would do
+            // no work — but its lock.lock() would still execute. For
+            // an allocator that was never used on this thread (e.g.
+            // fsm_task_slab when a test only spawns stackful tasks),
+            // this is the FIRST lock attempt on self.lock, which
+            // forces TSan to lazily build a SyncVar and capture the
+            // creation stack. Under heavy fiber contention that
+            // capture has been observed to SEGV inside TSan's
+            // stack-depot machinery (shadow-stack interaction with
+            // green-thread switches — see the parking-lot-cycle-test
+            // multi-OS-thread regression). Real flushing of in-flight
+            // magazine items happens via create()/destroy()'s
+            // ensureMagazineOwnership before the owning allocator
+            // ever reaches deinit.
 
             self.lock.lock();
             defer self.lock.unlock();

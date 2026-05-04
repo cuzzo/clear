@@ -25,7 +25,7 @@ fn busySleepMs(ms: i64) void {
 // ---- S1: re-entrancy -------------------------------------------------------
 
 const Reentrant = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     mutex: *pl.ParkingMutex,
     sched: *fp.Scheduler,
     waiter1: qs.WaiterNode = undefined,
@@ -33,10 +33,10 @@ const Reentrant = struct {
     got_deadlock: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Reentrant = @fieldParentPtr("task", t);
-        const r1 = self.mutex.tryLockForFsm(&self.task, &self.waiter1, self.sched);
+        const self: *Reentrant = @ptrCast(@alignCast(t.ctx.?));
+        const r1 = self.mutex.tryLockForFsm(self.task, &self.waiter1, self.sched);
         if (r1 != .Acquired) return .{ .Done = {} };
-        const r2 = self.mutex.tryLockForFsm(&self.task, &self.waiter2, self.sched);
+        const r2 = self.mutex.tryLockForFsm(self.task, &self.waiter2, self.sched);
         if (r2 == .Error and self.task.lock_error == .Deadlock) {
             self.got_deadlock = true;
         }
@@ -57,8 +57,9 @@ test "FSM safety: re-entrant acquire returns lock_error.Deadlock" {
 
     var mutex: pl.ParkingMutex = .{};
     var s = Reentrant{ .task = undefined, .mutex = &mutex, .sched = &sched };
-    s.task = fsm.FsmTask.init(&Reentrant.doResume);
-    sched.enqueueFsm(&s.task);
+    s.task = try sched.allocFsmTask(&Reentrant.doResume);
+    s.task.ctx = &s;
+    sched.enqueueFsm(s.task);
     sched.drainFsmQueue();
 
     try std.testing.expect(s.got_deadlock);
@@ -69,7 +70,7 @@ test "FSM safety: re-entrant acquire returns lock_error.Deadlock" {
 // ---- S2: pure-FSM cycle ----------------------------------------------------
 
 const CycleA = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     l1: *pl.ParkingMutex,
     l2: *pl.ParkingMutex,
     other_parked: *std.atomic.Value(bool),
@@ -80,17 +81,17 @@ const CycleA = struct {
     got_error: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *CycleA = @fieldParentPtr("task", t);
+        const self: *CycleA = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
-                if (self.l1.tryLockForFsm(&self.task, &self.waiter1, self.sched) != .Acquired)
+                if (self.l1.tryLockForFsm(self.task, &self.waiter1, self.sched) != .Acquired)
                     return .{ .Done = {} };
                 self.step = 1;
                 return .{ .Yielded = {} };
             },
             1 => {
                 if (!self.other_parked.load(.acquire)) return .{ .Yielded = {} };
-                const r = self.l2.tryLockForFsm(&self.task, &self.waiter2, self.sched);
+                const r = self.l2.tryLockForFsm(self.task, &self.waiter2, self.sched);
                 if (r == .Error and
                     (self.task.lock_error == .LockCycle or self.task.lock_error == .Deadlock))
                 {
@@ -105,7 +106,7 @@ const CycleA = struct {
 };
 
 const CycleB = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     l1: *pl.ParkingMutex,
     l2: *pl.ParkingMutex,
     parked: *std.atomic.Value(bool),
@@ -115,14 +116,14 @@ const CycleB = struct {
     step: u8 = 0,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *CycleB = @fieldParentPtr("task", t);
+        const self: *CycleB = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
-                if (self.l2.tryLockForFsm(&self.task, &self.waiter2, self.sched) != .Acquired)
+                if (self.l2.tryLockForFsm(self.task, &self.waiter2, self.sched) != .Acquired)
                     return .{ .Done = {} };
                 self.parked.store(true, .release);
                 self.step = 1;
-                const r = self.l1.tryLockForFsm(&self.task, &self.waiter1, self.sched);
+                const r = self.l1.tryLockForFsm(self.task, &self.waiter1, self.sched);
                 return switch (r) {
                     .Registered => .{ .WaitForLock = {} },
                     .Acquired => continueB(self),
@@ -155,15 +156,17 @@ test "FSM safety: pure-FSM cycle A->L2->B->L1->A detected" {
     var parked = std.atomic.Value(bool).init(false);
 
     var a = CycleA{ .task = undefined, .l1 = &l1, .l2 = &l2, .other_parked = &parked, .sched = &sched };
-    a.task = fsm.FsmTask.init(&CycleA.doResume);
+    a.task = try sched.allocFsmTask(&CycleA.doResume);
+    a.task.ctx = &a;
     var b = CycleB{ .task = undefined, .l1 = &l1, .l2 = &l2, .parked = &parked, .sched = &sched };
-    b.task = fsm.FsmTask.init(&CycleB.doResume);
+    b.task = try sched.allocFsmTask(&CycleB.doResume);
+    b.task.ctx = &b;
 
     // Drive A through step 0: acquires L1, yields.
-    sched.enqueueFsm(&a.task);
+    sched.enqueueFsm(a.task);
     sched.drainFsmQueue();
     // Enqueue B: acquires L2, parks on L1 (setting waiting_for_fsm_owner=A).
-    sched.enqueueFsm(&b.task);
+    sched.enqueueFsm(b.task);
     sched.drainFsmQueue();
     try std.testing.expectEqual(fsm.FsmStatus.Blocked, b.task.status);
     // Now drain: A resumes at step 1, tries L2 → detectCycleFsm sees
@@ -178,7 +181,7 @@ test "FSM safety: pure-FSM cycle A->L2->B->L1->A detected" {
 // ---- S3: timeout -----------------------------------------------------------
 
 const Timeout = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     mutex: *pl.ParkingMutex,
     sched: *fp.Scheduler,
     waiter: qs.WaiterNode = undefined,
@@ -186,11 +189,11 @@ const Timeout = struct {
     got_timeout: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Timeout = @fieldParentPtr("task", t);
+        const self: *Timeout = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 self.step = 1;
-                const r = self.mutex.tryLockForFsm(&self.task, &self.waiter, self.sched);
+                const r = self.mutex.tryLockForFsm(self.task, &self.waiter, self.sched);
                 return switch (r) {
                     .Registered => .{ .WaitForLock = {} },
                     .Acquired => .{ .Done = {} },
@@ -221,8 +224,9 @@ test "FSM safety: lock wait timeout surfaces lock_error.LockTimeout" {
     try std.testing.expect(mutex.tryLock());
 
     var s = Timeout{ .task = undefined, .mutex = &mutex, .sched = &sched };
-    s.task = fsm.FsmTask.init(&Timeout.doResume);
-    sched.enqueueFsm(&s.task);
+    s.task = try sched.allocFsmTask(&Timeout.doResume);
+    s.task.ctx = &s;
+    sched.enqueueFsm(s.task);
     sched.drainFsmQueue();
     try std.testing.expectEqual(fsm.FsmStatus.Blocked, s.task.status);
 

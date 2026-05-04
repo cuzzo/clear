@@ -1,5 +1,6 @@
 const std = @import("std");
 const CheatArena = @import("frame.zig").CheatArena;
+const build_options = @import("build_options");
 
 const Allocation = struct {
     ptr: [*]u8,
@@ -42,8 +43,9 @@ fn verifyAllocation(alloc: Allocation, full_scan: bool) !void {
 
 test "CheatArena: Optimized Fuzz Test" {
     // CONFIGURATION
-    const ITERATIONS = 50_000;
-    const MAX_ALLOC_SIZE = 512 * 1024;
+    const ITERATIONS = if (build_options.coverage) 500 else 50_000;
+    const MAX_ALLOC_SIZE = if (build_options.coverage) 64 * 1024 else 512 * 1024;
+    const CHECKPOINT_EVERY = if (build_options.coverage) 100 else 5000;
 
     // SETUP
     var prng = std.Random.DefaultPrng.init(0x12345678);
@@ -65,7 +67,7 @@ test "CheatArena: Optimized Fuzz Test" {
 
         // --- PERIODIC FULL HEAP CHECK (Every 5,000 ops) ---
         // This ensures deep correctness without paying the cost every loop.
-        if (i % 5000 == 0 and allocations.items.len > 0) {
+        if (i % CHECKPOINT_EVERY == 0 and allocations.items.len > 0) {
             std.debug.print("  [Checkpoint {d}/{d}] Verifying {d} allocations...\n", .{i, ITERATIONS, allocations.items.len});
             for (allocations.items) |alloc| {
                 try verifyAllocation(alloc, true);

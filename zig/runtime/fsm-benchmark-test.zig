@@ -37,11 +37,11 @@ const COMPUTE_ADDS: u32 = 100;
 // ---------------------------------------------------------------------------
 
 const FsmState = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     acc: u64 = 0,
 
     fn doResumeCompute(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *FsmState = @fieldParentPtr("task", t);
+        const self: *FsmState = @ptrCast(@alignCast(t.ctx.?));
         var i: u32 = 0;
         while (i < COMPUTE_ADDS) : (i += 1) self.acc += i;
         return .{ .Done = {} };
@@ -96,7 +96,7 @@ fn runFsmBatched(alloc: std.mem.Allocator, resume_fn: fsm.ResumeFn, label: []con
         for (states) |*s| {
             s.* = .{ .task = undefined };
             s.task = fsm.FsmTask.init(resume_fn);
-            sched.enqueueFsm(&s.task);
+            sched.enqueueFsm(s.task);
         }
         var iters: u32 = 0;
         while (sched.fsm_ready_queue.len() > 0) : (iters += 1) {
@@ -250,7 +250,7 @@ fn runCrossSpawnFsm(alloc: std.mem.Allocator) !u64 {
     for (states) |*s| {
         s.* = .{ .task = undefined };
         s.task = fsm.FsmTask.init(&FsmState.doResumeEmpty);
-        try target.submitFsmSpawn(&s.task);
+        try target.submitFsmSpawn(s.task);
     }
     target.drainChannels();
     // drainFsmQueue processes up to FSM_DRAIN_BATCH (64) tasks per call;
@@ -304,7 +304,7 @@ fn runStealBaseline(alloc: std.mem.Allocator) !u64 {
     for (states) |*s| {
         s.* = .{ .task = undefined };
         s.task = fsm.FsmTask.init(&FsmState.doResumeCompute);
-        sched.enqueueFsm(&s.task);
+        sched.enqueueFsm(s.task);
     }
     var iters: u32 = 0;
     while (sched.fsm_ready_queue.len() > 0) : (iters += 1) {
@@ -334,7 +334,7 @@ fn runStealWithSibling(alloc: std.mem.Allocator) !u64 {
     for (states) |*s| {
         s.* = .{ .task = undefined };
         s.task = fsm.FsmTask.init(&FsmState.doResumeCompute);
-        a.enqueueFsm(&s.task);
+        a.enqueueFsm(s.task);
     }
 
     // Simulate cooperative sibling: every few drain passes on A, B steals

@@ -250,25 +250,28 @@ RSpec.describe "FSM classifier (Phase A)" do
       # Legacy B1 emit named the body fn `runBody`; recursive emit
       # uses `runSeg<N>`. Either signals an FSM body fn is present.
       expect(user_code).to match(/fn run(?:Body|Seg\d+)\(/)
-      expect(user_code).to include("@fieldParentPtr(\"task\", __fsm_task)")
-      expect(user_code).to include("submitFsmSpawn(&__bg0_ctx.task)")
+      expect(user_code).to include("@ptrCast(@alignCast(__fsm_task.ctx.?))")
+      expect(user_code).to include("submitFsmSpawn(__bg0_ctx.task)")
       expect(user_code).not_to include("submitSpawn(")
     end
 
     it "emits spawnFsmBest for an unpinned pure-compute BG" do
       src = "FN main() RETURNS Void -> p: ~Int64 = BG { 42; }; _ = NEXT p; RETURN; END"
       user_code = transpile(src).split("// 3. Main Entry").first
-      expect(user_code).to include("CheatHeader.spawnFsmBest(&__bg0_ctx.task)")
+      expect(user_code).to include("CheatHeader.spawnFsmBest(__bg0_ctx.task)")
       expect(user_code).not_to include("CheatHeader.spawnBest(")
     end
 
-    it "puts task as the first field of the state struct (required for @fieldParentPtr)" do
+    it "stores task as a *FsmTask pointer (slab-allocated; ctx-back-pointer recovery)" do
       src = "FN main() RETURNS Void -> p: ~Int64 = BG { 42; }; _ = NEXT p; RETURN; END"
       user_code = transpile(src).split("// 3. Main Entry").first
-      # The state struct must begin with `task: ...FsmTask` — everything after is captures.
+      # The state struct's first field must be `task: *...FsmTask` — the
+      # FsmTask now lives in the scheduler's fsm_task_slab and the ctx
+      # holds a forward pointer to it (ctx recovery flows back via
+      # FsmTask.ctx, not @fieldParentPtr).
       match = user_code.match(/const __BgCtx0 = struct \{\s*([^\n]+)\n/)
       expect(match).not_to be_nil
-      expect(match[1].strip).to start_with("task: CheatHeader.FsmTask")
+      expect(match[1].strip).to start_with("task: *CheatHeader.FsmTask")
     end
 
     it "resumeFn returns Done, clears wg, and destroys the ctx" do
@@ -347,7 +350,7 @@ RSpec.describe "FSM classifier (Phase A)" do
 
     it "emits the registerFsmWaiter call + step transition" do
       user = transpile(simple_b2_src).split("// 3. Main Entry").first
-      expect(user).to match(/sp_1\.inner\.wg\.registerFsmWaiter\(&__ctx_\d+\.task\)/)
+      expect(user).to match(/sp_1\.inner\.wg\.registerFsmWaiter\(__ctx_\d+\.task\)/)
       expect(user).to include("return .{ .WaitForLock = {} }")
     end
 
@@ -431,7 +434,7 @@ RSpec.describe "FSM classifier (Phase A)" do
       # `rt.sleep(...)` form. The runtime hook is fsmSleepTask.
       # The wake-time arg is rendered via FsmOps::BinOp which wraps
       # binaries in parens for precedence safety; allow either form.
-      expect(user).to match(/__ctx_\d+\.rt\.getSched\(\)\.fsmSleepTask\(&__ctx_\d+\.task,\s*\(?CheatHeader\.milliTimestamp/)
+      expect(user).to match(/__ctx_\d+\.rt\.getSched\(\)\.fsmSleepTask\(__ctx_\d+\.task,\s*\(?CheatHeader\.milliTimestamp/)
       # Yield WaitForLock immediately after setup.
       expect(user).to include("return .{ .WaitForLock = {} }")
       # No fiber yield (stackful path) is emitted.

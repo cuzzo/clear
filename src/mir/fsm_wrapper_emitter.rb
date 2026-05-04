@@ -77,7 +77,7 @@ module FsmWrapperEmitter
   def render_b1_ctx_struct(s, mir_emitter)
     parts = []
     parts << "    const #{s.type_name} = struct {"
-    parts << "        task: CheatHeader.FsmTask,"
+    parts << "        task: *CheatHeader.FsmTask,"
     parts << "        rt: *Runtime,"
     parts << "        inner: *#{s.promise_zig}.Inner,"
     parts << "        alloc: std.mem.Allocator,"
@@ -112,7 +112,7 @@ module FsmWrapperEmitter
   def render_b1_resume_fn(ctx_id)
     <<~ZIG.chomp.lines.map { |l| "        #{l}" }.join.chomp
       fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {
-          const __ctx_#{ctx_id}: *@This() = @fieldParentPtr("task", __fsm_task);
+          const __ctx_#{ctx_id}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));
           if (runBody(__ctx_#{ctx_id})) |_| {} else |err| {
               __ctx_#{ctx_id}.inner.result = err;
           }
@@ -140,7 +140,7 @@ module FsmWrapperEmitter
       end
     <<~ZIG.chomp.lines.map { |l| "        #{l}" }.join.chomp
       fn destroyTask(__fsm_task: *CheatHeader.FsmTask) void {
-          const __ctx_#{ctx_id}: *@This() = @fieldParentPtr("task", __fsm_task);
+          const __ctx_#{ctx_id}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));
       #{extra}    __ctx_#{ctx_id}.alloc.destroy(__ctx_#{ctx_id});
       }
     ZIG
@@ -151,7 +151,7 @@ module FsmWrapperEmitter
   def render_ctx_struct(s, mir_emitter)
     parts = []
     parts << "    const #{s.type_name} = struct {"
-    parts << "        task: CheatHeader.FsmTask,"
+    parts << "        task: *CheatHeader.FsmTask,"
     parts << "        rt: *Runtime,"
     parts << "        inner: *#{s.promise_zig}.Inner,"
     parts << "        alloc: std.mem.Allocator,"
@@ -230,7 +230,7 @@ module FsmWrapperEmitter
   def render_generic_ctx_struct(s, mir_emitter)
     parts = []
     parts << "    const #{s.type_name} = struct {"
-    parts << "        task: CheatHeader.FsmTask,"
+    parts << "        task: *CheatHeader.FsmTask,"
     parts << "        rt: *Runtime,"
     parts << "        inner: *#{s.promise_zig}.Inner,"
     parts << "        alloc: std.mem.Allocator,"
@@ -293,7 +293,7 @@ module FsmWrapperEmitter
 
     [
       "fn resumeFn(__fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {",
-      "    const __ctx_#{d.ctx_id}: *@This() = @fieldParentPtr(\"task\", __fsm_task);",
+      "    const __ctx_#{d.ctx_id}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));",
       indent_block(inner, 4),
       "}",
     ].join("\n")
@@ -403,7 +403,7 @@ module FsmWrapperEmitter
     when MIR::FsmTailLockTry
       [
         "const __lock_r = #{t.lock_field_ref}.#{t.try_method}(",
-        "    &__ctx_#{ctx_id}.task,",
+        "    __ctx_#{ctx_id}.task,",
         "    &__ctx_#{ctx_id}.lock_waiter,",
         "    __ctx_#{ctx_id}.rt.getSched(),",
         ");",
@@ -483,14 +483,23 @@ module FsmWrapperEmitter
     parts << indent_block(s.promoted_decls_zig, 4) unless empty?(s.promoted_decls_zig)
     parts << "    const #{s.ctx_var} = try #{s.alloc_var}.create(#{s.ctx_type});"
     parts << "    errdefer #{s.alloc_var}.destroy(#{s.ctx_var});"
+    # Allocate the FsmTask from the scheduler's fsm_task_slab so
+    # detectCycleFsm can pin it during chain walks (mirrors stackful
+    # Task slab + Option-(C) protocol). The task's `ctx` field is the
+    # forward pointer used by resumeFn / destroyTask to recover *Ctx.
+    parts << "    const #{s.ctx_var}_task = try CheatHeader.allocFsmTask(#{s.rt_name}, &#{s.ctx_type}.resumeFn);"
+    parts << "    errdefer #{s.rt_name}.getSched().fsm_task_slab.destroy(#{s.ctx_var}_task);"
+    parts << "    #{s.ctx_var}_task.ctx = #{s.ctx_var};"
+    # Wire the destroy callback so the scheduler frees ctx after
+    # dispatchOnce finishes writing task.status (the resume fn no
+    # longer destroys ctx inline -- closes a UAF window). The
+    # scheduler returns the FsmTask slot to fsm_task_slab AFTER
+    # destroy_fn runs.
+    parts << "    #{s.ctx_var}_task.destroy_fn = &#{s.ctx_type}.destroyTask;"
     parts << "    #{s.ctx_var}.* = .{"
     parts << indent_block(s.ctx_init_zig, 8)
     parts << "    };"
-    parts << "    #{s.ctx_var}.task = CheatHeader.FsmTask.init(&#{s.ctx_type}.resumeFn);"
-    # Wire the destroy callback so the scheduler frees ctx after
-    # dispatchOnce finishes writing task.status (the resume fn no
-    # longer destroys ctx inline -- closes a UAF window).
-    parts << "    #{s.ctx_var}.task.destroy_fn = &#{s.ctx_type}.destroyTask;"
+    parts << "    #{s.ctx_var}.task = #{s.ctx_var}_task;"
     # Allocate a per-task Runtime backed by a per-task ThreadLocalEbr.
     # The scheduler frees both on .Done (Scheduler.releaseFsmTaskEbr).
     # Without this, FSM ctxs would share the spawning fiber's rt -- and
@@ -501,7 +510,7 @@ module FsmWrapperEmitter
     # size` on the next allocation. See zig/runtime/versioned-fiber-
     # stress-test.zig::"FSM Versioned: 4 BG-FSM writers via
     # spawnFsmBest with per-task rt -- bench-17 fix verifier".
-    parts << "    #{s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(&#{s.ctx_var}.task, #{s.rt_name});"
+    parts << "    #{s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(#{s.ctx_var}_task, #{s.rt_name});"
     parts << "    #{s.spawn_call_zig}"
     parts << "    break :#{blk_label} #{s.promise_var};"
     parts.join("\n")

@@ -1235,3 +1235,88 @@ test "Phase 6: peak slab count is bounded by working-set size" {
     _ = slab.shrinkEmpty(0);
     try std.testing.expect(counter.bytes_in_use < PAGE_SIZE);
 }
+
+// ─────────────────────────────────────────────────────────────────────
+// Integration regression tests.
+//
+// These cover slab/threadlocal/lifecycle interactions that have
+// repeatedly produced bugs in the rest of the runtime — not slab
+// correctness in isolation, but slab's *integration* with TSan,
+// fibers, and cross-allocator-instance lifetimes on a single thread.
+// ─────────────────────────────────────────────────────────────────────
+
+// Regression for the parking-lot-cycle-test SEGV: deinit on an
+// allocator that was never used on this thread must NOT acquire
+// `self.lock` (the redundant flush path). Under TSan, the first
+// lock attempt on a never-touched mutex triggers lazy SyncVar
+// creation + stack-depot capture — observed to SEGV against
+// fiber-corrupted shadow-stack state. This test asserts the
+// no-op deinit completes cleanly; ASan/TSan in CI catch any
+// invalid memory access along the path.
+test "deinit on never-used allocator is safe and lock-free" {
+    var slab = SlabAllocator(TestObj).init(std.heap.page_allocator, PAGE_SIZE);
+    // No create / destroy / flushThreadCache — pristine instance.
+    slab.deinit();
+}
+
+// Regression for an attempted-fix UAF: if deinit leaves the
+// threadlocal magazine pointing at the just-deinited allocator,
+// the NEXT allocator instance on this thread would call
+// ensureMagazineOwnership, deref the freed `old_owner`, and try
+// to lock its dead mutex — heap-use-after-free. The fix is that
+// deinit nukes the threadlocal magazines unconditionally. This
+// test exercises exactly that lifecycle on a single thread.
+test "thread reuses slab instances: A-deinit-then-B-alloc must not UAF" {
+    // Phase 1: instance A — allocate to populate the threadlocal
+    // magazine with A-owned objects.
+    var slab_a = SlabAllocator(TestObj).init(std.heap.page_allocator, PAGE_SIZE);
+    const a_objs = [_]*TestObj{
+        try slab_a.create(),
+        try slab_a.create(),
+        try slab_a.create(),
+    };
+    for (a_objs) |o| slab_a.destroy(o); // populate local_free_mag (owner=A)
+
+    // Phase 2: deinit A. The magazine's owner pointer would be a
+    // dangling reference unless deinit clears it.
+    slab_a.deinit();
+
+    // Phase 3: allocate from B on the SAME thread. The first call
+    // hits ensureMagazineOwnership: if A's pointer leaked through,
+    // ensureMagazineOwnership would try `old_owner.lock.lock()`
+    // on the dead A → UAF. The fix is that A's deinit cleared
+    // the threadlocal owner.
+    var slab_b = SlabAllocator(TestObj).init(std.heap.page_allocator, PAGE_SIZE);
+    defer slab_b.deinit();
+    const b_obj = try slab_b.create();
+    slab_b.destroy(b_obj);
+}
+
+// Regression: multiple init/deinit cycles on the same thread
+// against the same SlabAllocator(T) type must converge to a
+// clean state each time. Catches accumulated stale threadlocal
+// state — magazines, owner pointers, count fields — that would
+// drift across cycles and surface as either UAF (stale ptrs) or
+// silent leaks (uncounted pending objects).
+test "repeated init/deinit cycles on same thread leave no residue" {
+    const cycles = 8;
+    var i: usize = 0;
+    while (i < cycles) : (i += 1) {
+        var slab = SlabAllocator(TestObj).init(std.heap.page_allocator, PAGE_SIZE);
+        // Mixed workload each cycle to ensure both magazines see
+        // ownership transitions.
+        const a = try slab.create();
+        const b = try slab.create();
+        slab.destroy(a);
+        const c = try slab.create();
+        slab.destroy(b);
+        slab.destroy(c);
+        slab.deinit();
+    }
+
+    // Final sanity: a fresh instance after the loop must work.
+    var final = SlabAllocator(TestObj).init(std.heap.page_allocator, PAGE_SIZE);
+    defer final.deinit();
+    const obj = try final.create();
+    final.destroy(obj);
+}

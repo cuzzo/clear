@@ -30,11 +30,11 @@ const PromiseInner = struct {
 
 // Producer FSM — writes 42 and signals wg.done().
 const ProducerState = struct {
-    task: FsmTask,
+    task: *FsmTask,
     inner: *PromiseInner,
 
     fn resumeFn(t: *FsmTask) YieldReason {
-        const self: *@This() = @fieldParentPtr("task", t);
+        const self: *@This() = @ptrCast(@alignCast(t.ctx.?));
         self.inner.result = 42;
         self.inner.wg.done();
         return .{ .Done = {} };
@@ -45,7 +45,7 @@ const ProducerState = struct {
 //   step 0: spawn producer, register on producer.inner.wg, yield.
 //   step 1: read producer result, write own result, done.
 const ConsumerState = struct {
-    task: FsmTask,
+    task: *FsmTask,
     inner: *PromiseInner,
     sched: *Scheduler,
     step: u8 = 0,
@@ -53,15 +53,15 @@ const ConsumerState = struct {
     producer: *ProducerState,
 
     fn resumeFn(t: *FsmTask) YieldReason {
-        const self: *@This() = @fieldParentPtr("task", t);
+        const self: *@This() = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 // Pre-stmts: spawn producer FSM.
                 self.child_inner = self.producer.inner;
-                self.sched.submitFsmSpawn(&self.producer.task) catch unreachable;
+                self.sched.submitFsmSpawn(self.producer.task) catch unreachable;
 
                 // Suspend on the child's wg if not yet done.
-                if (self.child_inner.wg.registerFsmWaiter(&self.task)) {
+                if (self.child_inner.wg.registerFsmWaiter(self.task)) {
                     self.step = 1;
                     return .{ .WaitForLock = {} };
                 }
@@ -104,7 +104,8 @@ test "FSM-NEXT: consumer awaits producer via WaitGroup, gets result + 1" {
     consumer_inner.wg.add(1);
 
     var producer: ProducerState = .{ .task = undefined, .inner = &producer_inner };
-    producer.task = FsmTask.init(&ProducerState.resumeFn);
+    producer.task = try sched.allocFsmTask(&ProducerState.resumeFn);
+    producer.task.ctx = &producer;
 
     var consumer: ConsumerState = .{
         .task = undefined,
@@ -114,9 +115,10 @@ test "FSM-NEXT: consumer awaits producer via WaitGroup, gets result + 1" {
         .child_inner = undefined,
         .producer = &producer,
     };
-    consumer.task = FsmTask.init(&ConsumerState.resumeFn);
+    consumer.task = try sched.allocFsmTask(&ConsumerState.resumeFn);
+    consumer.task.ctx = &consumer;
 
-    sched.enqueueFsm(&consumer.task);
+    sched.enqueueFsm(consumer.task);
 
     // Drain repeatedly until both promises are settled. drainFsmQueue
     // runs up to FSM_DRAIN_BATCH=64 tasks per call; we need at most a
@@ -152,10 +154,11 @@ test "FSM-NEXT: count==0 inline path when producer wins the race" {
     consumer_inner.wg.add(1);
 
     var producer: ProducerState = .{ .task = undefined, .inner = &producer_inner };
-    producer.task = FsmTask.init(&ProducerState.resumeFn);
+    producer.task = try sched.allocFsmTask(&ProducerState.resumeFn);
+    producer.task.ctx = &producer;
 
     // Run producer to completion FIRST.
-    _ = fsm_mod.dispatchOnce(&producer.task);
+    _ = fsm_mod.dispatchOnce(producer.task);
     try std.testing.expectEqual(@as(usize, 0), producer_inner.wg.counter.load(.seq_cst));
 
     // Build consumer pointing at the already-resolved producer.
@@ -167,12 +170,13 @@ test "FSM-NEXT: count==0 inline path when producer wins the race" {
         .child_inner = undefined,
         .producer = &producer,
     };
-    consumer.task = FsmTask.init(&ConsumerState.resumeFn);
+    consumer.task = try sched.allocFsmTask(&ConsumerState.resumeFn);
+    consumer.task.ctx = &consumer;
 
     // Single dispatch: step 0 spawns (no-op for already-Finished
     // producer), registerFsmWaiter sees count==0 and returns false,
     // resume fn falls through to step 1 and finishes.
-    const r1 = fsm_mod.dispatchOnce(&consumer.task);
+    const r1 = fsm_mod.dispatchOnce(consumer.task);
     try std.testing.expect(r1 == .Done);
     try std.testing.expectEqual(@as(i64, 43), try consumer_inner.result);
 }

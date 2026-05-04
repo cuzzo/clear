@@ -22,21 +22,22 @@ const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const ebr = @import("../lib/ebr.zig");
 const fsm = @import("fsm.zig");
+const build_options = @import("build_options");
 
 const alloc = std.testing.allocator;
 
-const MAX_TASKS = 128;
-const STEPS = 256;
+const MAX_TASKS = if (build_options.coverage) 32 else 128;
+const STEPS = if (build_options.coverage) 32 else 256;
 
 // FSM body that yields between 0 and 3 times, then completes.
 const Yieldy = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     yields_remaining: u8,
     resume_count: u32 = 0,
     completed: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Yieldy = @fieldParentPtr("task", t);
+        const self: *Yieldy = @ptrCast(@alignCast(t.ctx.?));
         self.resume_count += 1;
         if (self.yields_remaining == 0) {
             self.completed = true;
@@ -49,18 +50,18 @@ const Yieldy = struct {
 
 // FSM body that immediately blocks on IO, then completes on wake.
 const IoBlocker = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     waiter: fsm.FsmIoWaiter = undefined,
     step: u8 = 0,
     observed: i32 = 0,
     completed: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *IoBlocker = @fieldParentPtr("task", t);
+        const self: *IoBlocker = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 self.step = 1;
-                self.waiter = fsm.FsmIoWaiter.init(&self.task);
+                self.waiter = fsm.FsmIoWaiter.init(self.task);
                 return .{ .WaitForIO = &self.waiter };
             },
             1 => {
@@ -106,24 +107,26 @@ const World = struct {
             return error.InvariantI1_ActiveTaskMismatch;
         }
         // I2/I3: queue length matches count of tasks in .Ready state.
-        // (Direct iteration of the deque is not exposed; we check the
-        // population via status counts instead.)
+        // FsmTasks are slab-allocated; once `completed` is set the
+        // scheduler returns the slot to fsm_task_slab, so reading
+        // y.task.status would be a UAF on a possibly-recycled slot.
+        // Skip completed tasks in the status checks — they are no
+        // longer "live" for the invariant.
         var ready_count: u64 = 0;
-        for (self.yieldy.items) |y| if (y.task.status == .Ready) { ready_count += 1; };
-        for (self.blockers.items) |b| if (b.task.status == .Ready) { ready_count += 1; };
+        for (self.yieldy.items) |y| if (!y.completed and y.task.status == .Ready) { ready_count += 1; };
+        for (self.blockers.items) |b| if (!b.completed and b.task.status == .Ready) { ready_count += 1; };
         if (self.sched.fsm_ready_queue.len() != ready_count) {
             std.debug.print("I2 FAIL {s}: queue_len={d} ready_count={d}\n", .{
                 context, self.sched.fsm_ready_queue.len(), ready_count,
             });
             return error.InvariantI2_QueueReadyMismatch;
         }
-        // I3: Finished flag and Finished status must agree.
-        for (self.yieldy.items) |y| {
-            if (y.completed and y.task.status != .Finished) return error.InvariantI3_StaleCompleted;
-        }
+        // I3: Finished flag is the source of truth post-slab-destroy.
+        // (The previous "completed implies status == Finished" check
+        // would UAF since the FsmTask slot is reused after destroy.)
         // I4: Blocked tasks have waiter set
         for (self.blockers.items) |b| {
-            if (b.task.status == .Blocked and b.task.waiter == null)
+            if (!b.completed and b.task.status == .Blocked and b.task.waiter == null)
                 return error.InvariantI4_BlockedNoWaiter;
         }
         // I5: runaway resumes
@@ -149,17 +152,19 @@ fn executeStep(world: *World, kind: StepKind, rng: std.Random) !void {
             if (world.yieldy.items.len + world.blockers.items.len >= MAX_TASKS) return;
             const y = try alloc.create(Yieldy);
             y.* = .{ .task = undefined, .yields_remaining = rng.uintLessThan(u8, 4) };
-            y.task = fsm.FsmTask.init(&Yieldy.doResume);
+            y.task = try world.sched.allocFsmTask(&Yieldy.doResume);
+            y.task.ctx = y;
             try world.yieldy.append(alloc, y);
-            world.sched.enqueueFsm(&y.task);
+            world.sched.enqueueFsm(y.task);
         },
         .EnqueueBlocker => {
             if (world.yieldy.items.len + world.blockers.items.len >= MAX_TASKS) return;
             const b = try alloc.create(IoBlocker);
             b.* = .{ .task = undefined };
-            b.task = fsm.FsmTask.init(&IoBlocker.doResume);
+            b.task = try world.sched.allocFsmTask(&IoBlocker.doResume);
+            b.task.ctx = b;
             try world.blockers.append(alloc, b);
-            world.sched.enqueueFsm(&b.task);
+            world.sched.enqueueFsm(b.task);
         },
         .Drain => {
             const before: u64 = blk: {
@@ -177,7 +182,7 @@ fn executeStep(world: *World, kind: StepKind, rng: std.Random) !void {
             for (world.blockers.items) |b| {
                 if (b.task.status == .Blocked) {
                     b.waiter.result = @intCast(rng.uintLessThan(u32, 1_000_000));
-                    world.sched.enqueueFsm(&b.task);
+                    world.sched.enqueueFsm(b.task);
                     // enqueueFsm increments active_tasks; we must offset
                     // (the task never got decremented on park).
                     _ = world.sched.active_tasks.fetchSub(1, .monotonic);
@@ -228,7 +233,7 @@ fn runSeed(seed: u64) !void {
         for (world.blockers.items) |b| {
             if (b.task.status == .Blocked) {
                 b.waiter.result = 0;
-                sched.enqueueFsm(&b.task);
+                sched.enqueueFsm(b.task);
                 _ = sched.active_tasks.fetchSub(1, .monotonic);
                 woke_any = true;
             }
@@ -242,7 +247,7 @@ fn runSeed(seed: u64) !void {
 }
 
 test "FSM VOPR: 128 seeds of PRNG-driven fuzzing" {
-    const N_SEEDS = 128;
+    const N_SEEDS = if (build_options.coverage) 4 else 128;
     var seed: u64 = 0;
     while (seed < N_SEEDS) : (seed += 1) {
         runSeed(seed) catch |e| {
@@ -270,8 +275,9 @@ test "FSM VOPR: enqueue -> drain round-trip preserves active_tasks" {
 
     for (tasks) |*y| {
         y.* = .{ .task = undefined, .yields_remaining = 0 };
-        y.task = fsm.FsmTask.init(&Yieldy.doResume);
-        sched.enqueueFsm(&y.task);
+        y.task = try sched.allocFsmTask(&Yieldy.doResume);
+        y.task.ctx = y;
+        sched.enqueueFsm(y.task);
     }
     try std.testing.expectEqual(@as(u64, N), sched.active_tasks.load(.monotonic));
 

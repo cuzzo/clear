@@ -2,6 +2,7 @@
 # Ignore everything at root, then explicitly allow known files/dirs.
 # Anything new dropped at root is ignored by default.
 /*
+!/.github/
 !/.gitignore
 !/.rspec
 !/.vscode/

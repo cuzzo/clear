@@ -3521,10 +3521,30 @@ pub fn spawnBest(trampoline_addr: usize, user_fn: TaskFn, args: ?*anyopaque, con
 }
 
 /// Module-level spawnFsmOn: submit an FSM task to a specific scheduler.
-/// The caller owns the state struct that embeds the FsmTask; the task
-/// pointer must outlive the scheduler run.
+/// `fsm_task` MUST have been allocated via `allocFsmTask` so the
+/// detectCycleFsm slab-pin protocol works. The caller owns the user
+/// ctx struct (separate heap allocation) and points to it from
+/// `fsm_task.ctx`; destroy_fn frees the ctx, the scheduler returns
+/// the FsmTask slot to fsm_task_slab on .Done.
 pub fn spawnFsmOn(target: *fp.Scheduler, fsm_task: *fp.FsmTask) !void {
     try target.submitFsmSpawn(fsm_task);
+}
+
+/// Allocate a fresh slab-allocated FsmTask. The chain-walker
+/// (detectCycleFsm) requires every FsmTask in a lock chain to live
+/// in `Scheduler.fsm_task_slab` so it can pin the slab against
+/// reclamation while traversing. Ctx is the caller's responsibility
+/// — assign the FsmTask's `.ctx` field after allocating it.
+///
+/// Convention:
+///   const task = try CheatHeader.allocFsmTask(parent_rt, &Ctx.resumeFn);
+///   task.ctx = ctx;                 // back-pointer for resumeFn recovery
+///   task.destroy_fn = &Ctx.destroyTask;
+///   const __rt = try CheatHeader.allocFsmTaskRuntime(task, parent_rt);
+///   ctx.rt = __rt;
+///   try CheatHeader.spawnFsmBest(task);
+pub fn allocFsmTask(parent_rt: *Runtime, resume_fn: fp.ResumeFn) !*fp.FsmTask {
+    return parent_rt.getSched().allocFsmTask(resume_fn);
 }
 
 /// Allocate a per-FSM-task Runtime + ThreadLocalEbr.

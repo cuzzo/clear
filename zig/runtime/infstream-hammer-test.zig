@@ -21,11 +21,12 @@ const Runtime = @import("runtime.zig").Runtime;
 const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
+const build_options = @import("build_options");
 
-const NUM_SCHEDULERS = 4;
-const NUM_STREAMS = 8;
-const VALUES_PER_STREAM = 100_000;
-const ROUNDS = 5;
+const NUM_SCHEDULERS = if (build_options.coverage) 2 else 4;
+const NUM_STREAMS = if (build_options.coverage) 2 else 8;
+const VALUES_PER_STREAM = if (build_options.coverage) 200 else 100_000;
+const ROUNDS = if (build_options.coverage) 1 else 5;
 
 var global_ebr: EbrContext = .{};
 var stack_pool: fm.StackPool = undefined;

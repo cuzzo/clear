@@ -113,9 +113,14 @@ fn writerThread(args: *WriterArgs) void {
     var i: usize = 0;
     while (i < args.iters) : (i += 1) {
         const v = args.base + @as(i64, @intCast(i));
-        args.s.update(&rt, testing.allocator, writeSample, .{v}) catch {
-            _ = args.failed_updates.fetchAdd(1, .seq_cst);
-            continue;
+        args.s.update(&rt, testing.allocator, writeSample, .{v}) catch |err| switch (err) {
+            // 64-retry exhaustion is a contention signal under TSan
+            // slowdown; not a torn-state failure.
+            error.UpdateRetriesExhausted => continue,
+            else => {
+                _ = args.failed_updates.fetchAdd(1, .seq_cst);
+                continue;
+            },
         };
 
         if ((i & 0xFFF) == 0xFFF) {
@@ -427,9 +432,18 @@ fn txnTransferThread(args: *TxnArgs) void {
             versioned.updateMulti(.{ args.b, args.a }, &rt, testing.allocator, Helper.reverse_, .{amount})
         else
             versioned.updateMulti(.{ args.a, args.b }, &rt, testing.allocator, Helper.forward, .{amount});
-        result catch {
-            _ = args.failed.fetchAdd(1, .seq_cst);
-            continue;
+        result catch |err| switch (err) {
+            // Retry-budget exhaustion is a contention signal, not an
+            // invariant break. The 64-retry default (post-True-Sync-
+            // Polymorphism #330) is reachable under TSan slowdown with
+            // 4 writers contending the same cell-pair; the writer is
+            // expected to back off and try again at a higher level.
+            // Don't conflate it with a torn-state failure.
+            error.UpdateRetriesExhausted => continue,
+            else => {
+                _ = args.failed.fetchAdd(1, .seq_cst);
+                continue;
+            },
         };
         if ((i & 0xFFF) == 0xFFF) {
             rt.ebr.reclaimLocal(testing.allocator);
@@ -476,8 +490,15 @@ fn txnReaderThread(args: *TxnReaderArgs) void {
                 }
             }
         };
-        versioned.updateMulti(.{ args.a, args.b }, &rt, testing.allocator, ReadCheck.run, .{ args.expected_total, args.violations }) catch {
-            _ = args.violations.fetchAdd(1, .seq_cst);
+        versioned.updateMulti(.{ args.a, args.b }, &rt, testing.allocator, ReadCheck.run, .{ args.expected_total, args.violations }) catch |err| switch (err) {
+            // Same rationale as the writer side: 64-retry exhaustion is
+            // a contention signal, not a torn-snapshot. Only the
+            // ReadCheck.run body's vio.fetchAdd is authoritative for
+            // the a+b invariant; that path runs INSIDE updateMulti
+            // under all N tags held, where any inconsistency would be
+            // a real correctness bug.
+            error.UpdateRetriesExhausted => continue,
+            else => _ = args.violations.fetchAdd(1, .seq_cst),
         };
         if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(testing.allocator);
     }
@@ -589,8 +610,9 @@ test "updateMulti: single-cell update racing multi-cell commit -- no torn state"
             while (i < sa.iters) : (i += 1) {
                 sa.s.update(&rt, testing.allocator, struct {
                     fn inc(p: *i64, _: u8) void { p.* += 1; }
-                }.inc, .{@as(u8, 0)}) catch {
-                    _ = sa.failed.fetchAdd(1, .seq_cst);
+                }.inc, .{@as(u8, 0)}) catch |err| switch (err) {
+                    error.UpdateRetriesExhausted => {},
+                    else => _ = sa.failed.fetchAdd(1, .seq_cst),
                 };
                 if ((i & 0xFFF) == 0xFFF) rt.ebr.reclaimLocal(testing.allocator);
             }

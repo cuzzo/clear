@@ -25,13 +25,14 @@ const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const qs = @import("queues.zig");
+const build_options = @import("build_options");
 
-const NUM_SCHEDULERS = 8;
-const NUM_CLIENTS = 100;
-const MSGS_PER_CLIENT = 200;
-const BURST_SIZE = 5;
+const NUM_SCHEDULERS = if (build_options.coverage) 2 else 8;
+const NUM_CLIENTS = if (build_options.coverage) 4 else 100;
+const MSGS_PER_CLIENT = if (build_options.coverage) 5 else 200;
+const BURST_SIZE = if (build_options.coverage) 2 else 5;
 const PORT: u16 = 16395;
-const TIMEOUT_S: u64 = 30;
+const TIMEOUT_S: u64 = if (build_options.coverage) 5 else 30;
 
 var total_done: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 var total_verified: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);

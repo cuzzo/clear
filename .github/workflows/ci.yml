@@ -149,23 +149,30 @@ jobs:
         run: zig build test
 
   zig-unit:
-    name: Zig unit tests (zig build test)
+    name: Zig unit tests (fast non-TSan)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      # `zig build test` intentionally runs only the fast, non-TSan unit
+      # lane. Concurrency/stress/fuzz tests are covered by the sharded
+      # TSan, hammer TSan, and Loom/VOPR jobs below.
       - working-directory: zig
         run: zig build test
 
   zig-tsan:
-    # Invokes the `test-tsan` step (LLVM + ReleaseSafe + real
-    # ThreadSanitizer instrumentation). The previous job ran
-    # `zig build test -Dsanitize-thread`, which silently dropped TSan
-    # because stage2 + Debug doesn't link the TSan runtime -- so it
-    # was effectively a duplicate of zig-unit. Switching to test-tsan
-    # gets us actual race detection.
+    # Invokes the `test-tsan` step (LLVM + Debug + real ThreadSanitizer
+    # instrumentation). The previous job ran `zig build test
+    # -Dsanitize-thread`, which silently dropped TSan because stage2 +
+    # Debug doesn't link the TSan runtime -- so it was effectively a
+    # duplicate of zig-unit. Switching to test-tsan gets us actual
+    # race detection.
+    #
+    # Hammer stress tests are split out into the dedicated `zig-hammer`
+    # job below; `test-tsan` here covers the rest of the
+    # concurrency-sensitive surface (per-test, not per-iteration).
     #
     # Sharded 5-way via build.zig's `tsan_step_idx % shard_count`
     # round-robin. Each shard compiles + runs ~1/5 of the tsan-tagged
@@ -186,6 +193,60 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - working-directory: zig
         run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5
+
+  zig-hammer:
+    # Hammer stress tests (`*-hammer-test.zig`): high-iteration
+    # concurrency probes whose value is amplified by every memory op
+    # being TSan-instrumented. Excluded from `zig build test` (slow,
+    # low marginal value un-instrumented) and from `zig build
+    # test-tsan` (so the per-shard wallclock there stays bounded).
+    # This job is the dedicated TSan-instrumented run.
+    #
+    # Sharded 5-way independently of test-tsan (separate counter in
+    # build.zig: `hammer_step_idx % shard_count`). Same fail-fast:
+    # false so one flaky shard doesn't mask the rest.
+    name: Zig hammer TSan (shard ${{ matrix.shard }}/5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - working-directory: zig
+        run: zig build test-hammer -Dshard-index=${{ matrix.shard }} -Dshard-count=5
+
+  zig-loom-vopr:
+    # Deterministic interleaving / simulation tests (`*-loom-test.zig`,
+    # `*-vopr-test.zig`, plus the parking-lot-loom standalone exe).
+    # These exhaustively explore schedules in-process — minutes per
+    # test — and dominated `zig build test` wallclock when colocated
+    # with unit tests. The exhaustive enumeration is its own race
+    # detector, so they run WITHOUT TSan; TSan adds multiple-minutes
+    # overhead with no marginal value. Excluded from `zig build test`,
+    # `zig build test-tsan`, and `zig build test-hammer`.
+    #
+    # Sharded 5-way independently of test-tsan / test-hammer (separate
+    # counter in build.zig: `loom_vopr_step_idx % shard_count`).
+    # parking-lot-loom is wired to shard 0 only (single ~40s exe).
+    name: Zig Loom/VOPR (shard ${{ matrix.shard }}/5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - working-directory: zig
+        run: zig build test-loom-vopr -Dshard-index=${{ matrix.shard }} -Dshard-count=5
 
   zig-coverage:
     # Sharded across 5 parallel runners, same approach as zig-tsan.

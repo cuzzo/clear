@@ -508,7 +508,7 @@ test "Versioned: 4 BG fibers x 100_000 reads via scheduler -- broader concurrenc
 // emits for `r1 = BG { WHILE i < 200_000 DO WITH SNAPSHOT c AS view {...} END }`:
 //
 //   const __BgCtx = struct {
-//     task: FsmTask,                               (line 45 of emitted code)
+//     task: *FsmTask,                               (line 45 of emitted code)
 //     rt: *Runtime,                                (sharing main's rt!)
 //     inner: *Promise(i64).Inner,
 //     alloc: std.mem.Allocator,
@@ -524,7 +524,7 @@ test "Versioned: 4 BG fibers x 100_000 reads via scheduler -- broader concurrenc
 //     fn resumeFn(task) -> YieldReason { runSeg0(); ...; .Done }
 //     fn destroyTask(task) -> void { ... }
 //   };
-//   try sched.submitFsmSpawn(&__bg_ctx.task);
+//   try sched.submitFsmSpawn(__bg_ctx.task);
 //
 // Key features the previous (stackful spawnBest) tests miss:
 //   1. The FSM body shares the main fiber's Runtime (`rt`). Both BG
@@ -537,7 +537,7 @@ test "Versioned: 4 BG fibers x 100_000 reads via scheduler -- broader concurrenc
 //   3. `submitFsmSpawn` is the entry; `drainFsmQueue` dispatches them
 //      inline on the worker stack.
 const FsmReaderCtx = struct {
-    task: CheatHeader.FsmTask,
+    task: *CheatHeader.FsmTask,
     rt: *Runtime,
     inner: *CheatLib.Promise(i64).Inner,
     alloc: std.mem.Allocator,
@@ -576,7 +576,7 @@ const FsmReaderCtx = struct {
     }
 
     fn resumeFn(fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {
-        const ctx: *@This() = @fieldParentPtr("task", fsm_task);
+        const ctx: *@This() = @ptrCast(@alignCast(fsm_task.ctx.?));
         if (@This().runSeg0(ctx)) |_| {} else |err| {
             ctx.inner.result = err;
         }
@@ -585,7 +585,7 @@ const FsmReaderCtx = struct {
     }
 
     fn destroyTask(fsm_task: *CheatHeader.FsmTask) void {
-        const ctx: *@This() = @fieldParentPtr("task", fsm_task);
+        const ctx: *@This() = @ptrCast(@alignCast(fsm_task.ctx.?));
         ctx.alloc.destroy(ctx);
     }
 };
@@ -632,9 +632,9 @@ test "FSM Versioned: 2 BG-FSM fibers x 200_000 reads, single scheduler -- DEFAUL
                 .iters = ITERS,
                 .invariant_violations = &violations,
             };
-            ctx1.task = CheatHeader.FsmTask.init(&FsmReaderCtx.resumeFn);
+            ctx1.task = try CheatHeader.allocFsmTask(rt, &FsmReaderCtx.resumeFn); ctx1.task.ctx = ctx1;
             ctx1.task.destroy_fn = &FsmReaderCtx.destroyTask;
-            try rt.getSched().submitFsmSpawn(&ctx1.task);
+            try rt.getSched().submitFsmSpawn(ctx1.task);
 
             const promise2 = try CheatLib.Promise(i64).spawn(sa, rt.getSched());
             const ctx2 = try sa.create(FsmReaderCtx);
@@ -647,9 +647,9 @@ test "FSM Versioned: 2 BG-FSM fibers x 200_000 reads, single scheduler -- DEFAUL
                 .iters = ITERS,
                 .invariant_violations = &violations,
             };
-            ctx2.task = CheatHeader.FsmTask.init(&FsmReaderCtx.resumeFn);
+            ctx2.task = try CheatHeader.allocFsmTask(rt, &FsmReaderCtx.resumeFn); ctx2.task.ctx = ctx2;
             ctx2.task.destroy_fn = &FsmReaderCtx.destroyTask;
-            try rt.getSched().submitFsmSpawn(&ctx2.task);
+            try rt.getSched().submitFsmSpawn(ctx2.task);
 
             const v1 = try promise1.next();
             const v2 = try promise2.next();
@@ -679,7 +679,7 @@ test "FSM Versioned: 2 BG-FSM fibers x 200_000 reads, single scheduler -- DEFAUL
 // suspension point in the body, so the entire body stays in
 // runSeg0 -- including the trailing checkYield.
 const FsmReaderCtxNoYield = struct {
-    task: CheatHeader.FsmTask,
+    task: *CheatHeader.FsmTask,
     rt: *Runtime,
     inner: *CheatLib.Promise(i64).Inner,
     alloc: std.mem.Allocator,
@@ -710,7 +710,7 @@ const FsmReaderCtxNoYield = struct {
     }
 
     fn resumeFn(fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {
-        const ctx: *@This() = @fieldParentPtr("task", fsm_task);
+        const ctx: *@This() = @ptrCast(@alignCast(fsm_task.ctx.?));
         if (@This().runSeg0(ctx)) |_| {} else |err| {
             ctx.inner.result = err;
         }
@@ -719,7 +719,7 @@ const FsmReaderCtxNoYield = struct {
     }
 
     fn destroyTask(fsm_task: *CheatHeader.FsmTask) void {
-        const ctx: *@This() = @fieldParentPtr("task", fsm_task);
+        const ctx: *@This() = @ptrCast(@alignCast(fsm_task.ctx.?));
         ctx.alloc.destroy(ctx);
     }
 };
@@ -757,9 +757,9 @@ test "FSM Versioned CONTROL: same shape WITHOUT checkYield -- isolates the bug" 
                 .iters = ITERS,
                 .invariant_violations = &violations,
             };
-            ctx1.task = CheatHeader.FsmTask.init(&FsmReaderCtxNoYield.resumeFn);
+            ctx1.task = try CheatHeader.allocFsmTask(rt, &FsmReaderCtxNoYield.resumeFn); ctx1.task.ctx = ctx1;
             ctx1.task.destroy_fn = &FsmReaderCtxNoYield.destroyTask;
-            try rt.getSched().submitFsmSpawn(&ctx1.task);
+            try rt.getSched().submitFsmSpawn(ctx1.task);
 
             const promise2 = try CheatLib.Promise(i64).spawn(sa, rt.getSched());
             const ctx2 = try sa.create(FsmReaderCtxNoYield);
@@ -772,9 +772,9 @@ test "FSM Versioned CONTROL: same shape WITHOUT checkYield -- isolates the bug" 
                 .iters = ITERS,
                 .invariant_violations = &violations,
             };
-            ctx2.task = CheatHeader.FsmTask.init(&FsmReaderCtxNoYield.resumeFn);
+            ctx2.task = try CheatHeader.allocFsmTask(rt, &FsmReaderCtxNoYield.resumeFn); ctx2.task.ctx = ctx2;
             ctx2.task.destroy_fn = &FsmReaderCtxNoYield.destroyTask;
-            try rt.getSched().submitFsmSpawn(&ctx2.task);
+            try rt.getSched().submitFsmSpawn(ctx2.task);
 
             const v1 = try promise1.next();
             const v2 = try promise2.next();
@@ -1353,7 +1353,7 @@ test "Versioned: 4 readers + 4 writers on 5 schedulers -- writer-heavy repro" {
 // for `BG { @parallel -> WHILE i < N DO WITH SNAPSHOT c AS MUTABLE va {...} END }`:
 //
 //   const __BgCtxN = struct {
-//     task: CheatHeader.FsmTask,
+//     task: *CheatHeader.FsmTask,
 //     rt: *Runtime,                     <-- SHARES the OUTER rt (clearMain's)
 //     inner: *Promise(void).Inner,
 //     alloc: std.mem.Allocator,
@@ -1366,7 +1366,7 @@ test "Versioned: 4 readers + 4 writers on 5 schedulers -- writer-heavy repro" {
 //       }
 //     }
 //   };
-//   try CheatHeader.spawnFsmBest(&ctx.task);  <-- cross-scheduler distribution!
+//   try CheatHeader.spawnFsmBest(ctx.task);  <-- cross-scheduler distribution!
 //
 // The bug: when these FSMs dispatch on a WORKER scheduler thread, calling
 // `rt.ebr.enter() / .exit() / .retire()` accesses the MAIN scheduler's
@@ -1375,7 +1375,7 @@ test "Versioned: 4 readers + 4 writers on 5 schedulers -- writer-heavy repro" {
 // non-atomic in the slow paths), so this corrupts the limbo and surfaces
 // as `realloc(): invalid old size` in glibc when reclaim() walks the list.
 const FsmWriterCtx = struct {
-    task: CheatHeader.FsmTask,
+    task: *CheatHeader.FsmTask,
     rt: *Runtime,
     inner: *CheatLib.Promise(usize).Inner,
     alloc: std.mem.Allocator,
@@ -1406,7 +1406,7 @@ const FsmWriterCtx = struct {
     }
 
     fn resumeFn(fsm_task: *CheatHeader.FsmTask) CheatHeader.YieldReason {
-        const ctx: *@This() = @fieldParentPtr("task", fsm_task);
+        const ctx: *@This() = @ptrCast(@alignCast(fsm_task.ctx.?));
         if (@This().runSeg0(ctx)) |_| {} else |err| {
             ctx.inner.result = err;
         }
@@ -1415,7 +1415,7 @@ const FsmWriterCtx = struct {
     }
 
     fn destroyTask(fsm_task: *CheatHeader.FsmTask) void {
-        const ctx: *@This() = @fieldParentPtr("task", fsm_task);
+        const ctx: *@This() = @ptrCast(@alignCast(fsm_task.ctx.?));
         ctx.alloc.destroy(ctx);
     }
 };
@@ -1470,13 +1470,13 @@ test "FSM Versioned: 4 BG-FSM writers via spawnFsmBest with per-task rt -- bench
                     .base = @as(i64, @intCast(i)) * 1_000_000,
                     .failed_updates = &failed,
                 };
-                ctx.task = CheatHeader.FsmTask.init(&FsmWriterCtx.resumeFn);
+                ctx.task = try CheatHeader.allocFsmTask(rt, &FsmWriterCtx.resumeFn); ctx.task.ctx = ctx;
                 ctx.task.destroy_fn = &FsmWriterCtx.destroyTask;
                 // The fix: allocate a per-task Runtime + ebr_slot before
                 // spawning. The scheduler frees both on .Done.
-                const task_rt = try CheatHeader.allocFsmTaskRuntime(&ctx.task, rt);
+                const task_rt = try CheatHeader.allocFsmTaskRuntime(ctx.task, rt);
                 ctx.rt = task_rt;
-                try CheatHeader.spawnFsmBest(&ctx.task);
+                try CheatHeader.spawnFsmBest(ctx.task);
             }
 
             for (&promises) |*p| _ = try p.next();
@@ -1527,11 +1527,11 @@ test "FSM Versioned: 8 BG-FSM writers via spawnFsmBest on 5 schedulers (per-task
                     .base = @as(i64, @intCast(i)) * 1_000_000,
                     .failed_updates = &failed,
                 };
-                ctx.task = CheatHeader.FsmTask.init(&FsmWriterCtx.resumeFn);
+                ctx.task = try CheatHeader.allocFsmTask(rt, &FsmWriterCtx.resumeFn); ctx.task.ctx = ctx;
                 ctx.task.destroy_fn = &FsmWriterCtx.destroyTask;
-                const task_rt = try CheatHeader.allocFsmTaskRuntime(&ctx.task, rt);
+                const task_rt = try CheatHeader.allocFsmTaskRuntime(ctx.task, rt);
                 ctx.rt = task_rt;
-                try CheatHeader.spawnFsmBest(&ctx.task);
+                try CheatHeader.spawnFsmBest(ctx.task);
             }
 
             for (&promises) |*p| _ = try p.next();
@@ -1623,9 +1623,10 @@ test "FSM Versioned: per-task Runtime structural separation -- bench-17 fix inva
                     .base = @as(i64, @intCast(i)) * 1_000,
                     .failed_updates = &failed,
                 };
-                ctxs[i].task = CheatHeader.FsmTask.init(&FsmWriterCtx.resumeFn);
+                ctxs[i].task = try CheatHeader.allocFsmTask(rt, &FsmWriterCtx.resumeFn);
+                ctxs[i].task.ctx = ctxs[i];
                 ctxs[i].task.destroy_fn = &FsmWriterCtx.destroyTask;
-                const task_rt = try CheatHeader.allocFsmTaskRuntime(&ctxs[i].task, rt);
+                const task_rt = try CheatHeader.allocFsmTaskRuntime(ctxs[i].task, rt);
                 ctxs[i].rt = task_rt;
                 task_rts[i] = task_rt;
                 task_ebrs[i] = task_rt.ebr;
@@ -1656,7 +1657,7 @@ test "FSM Versioned: per-task Runtime structural separation -- bench-17 fix inva
             try testing.expectEqual(initial_registry + N, after_alloc_registry);
 
             // Phase 2: spawn the FSMs and wait for completion.
-            for (0..N) |i| try CheatHeader.spawnFsmBest(&ctxs[i].task);
+            for (0..N) |i| try CheatHeader.spawnFsmBest(ctxs[i].task);
             for (&promises) |*p| _ = try p.next();
             _ = failed.load(.seq_cst);
 

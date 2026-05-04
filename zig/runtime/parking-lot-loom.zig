@@ -22,6 +22,33 @@ const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const ebr_mod = @import("../lib/ebr.zig");
 const pl = @import("../lib/parking-lot.zig");
+const fsm_mod = @import("fsm.zig");
+const build_options = @import("build_options");
+
+// Minimal binding for data-structures.zig — the loom test only touches
+// Stream(T).Inner fields; the bound deps are unused on the closed/err
+// publish path.
+const DataStructures = @import("../lib/data-structures.zig").bind(struct {
+    pub fn cleanup(comptime T: type, alloc: std.mem.Allocator, cptr: *const T) void {
+        _ = alloc;
+        _ = cptr;
+    }
+    pub fn needsCleanup(comptime T: type) bool {
+        _ = T;
+        return false;
+    }
+    pub fn refInnerType(comptime T: type) ?type {
+        _ = T;
+        return null;
+    }
+    pub fn releaseOne(comptime T: type, alloc: std.mem.Allocator, value: T) void {
+        _ = alloc;
+        _ = value;
+    }
+    pub fn partitionedMapDelayCtxDestroy() bool {
+        return false;
+    }
+});
 
 // SimAtomic / SimRing live on the test_runner module (see
 // parking-lot-loom-runner.zig). Importing them here would put
@@ -42,6 +69,7 @@ const MAX_STEPS = 50_000;
 // Override default (500) via env var LOOM_FUZZ_SEEDS.
 // Used by prng-mode tests to scale coverage for nightly/manual runs.
 fn fuzzSeedCount(default_seeds: usize) usize {
+    if (build_options.coverage) return @min(default_seeds, 4);
     const raw = std.c.getenv("LOOM_FUZZ_SEEDS") orelse return default_seeds;
     const s = std.mem.span(raw);
     return std.fmt.parseInt(usize, s, 10) catch default_seeds;
@@ -370,7 +398,7 @@ pub fn testMutexAcquireExhaustive() !void {
     var stack_pool = fm.StackPool.init(allocator);
     g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
 
-    const depth: usize = 8;
+    const depth: usize = if (build_options.coverage) 4 else 8;
     const total_schedules: usize = @as(usize, 1) << depth;
     var schedule_buf: [depth]u8 = undefined;
 
@@ -517,7 +545,7 @@ pub fn testMutexThreeFiberRaces() !void {
     // 3 fibers → base-3 schedule encoding. depth=10 → 3^10 = 59,049
     // schedules. Same depth as lost-wake test for proven coverage of
     // initial choices.
-    const depth: usize = 10;
+    const depth: usize = if (build_options.coverage) 4 else 10;
     var total_schedules: usize = 1;
     {
         var p: usize = 0;
@@ -624,7 +652,7 @@ pub fn testMutexLostWake() !void {
     // pickThread, so values 0..2 map directly to fiber indices when all 3
     // are runnable. The previous binary encoding only ever produced 0/1,
     // making fiber 2 unreachable and degrading this to a 2-fiber test.
-    const depth: usize = 10;
+    const depth: usize = if (build_options.coverage) 4 else 10;
     var total_schedules: usize = 1;
     {
         var p: usize = 0;
@@ -781,7 +809,7 @@ pub fn testRwlockTwoWriters() !void {
     var stack_pool = fm.StackPool.init(allocator);
     g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
 
-    const depth: usize = 8;
+    const depth: usize = if (build_options.coverage) 4 else 8;
     const total_schedules: usize = @as(usize, 1) << depth;
     var schedule_buf: [depth]u8 = undefined;
 
@@ -837,7 +865,7 @@ pub fn testRwlockWriterReader() !void {
     var stack_pool = fm.StackPool.init(allocator);
     g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
 
-    const depth: usize = 8;
+    const depth: usize = if (build_options.coverage) 4 else 8;
     const total_schedules: usize = @as(usize, 1) << depth;
     var schedule_buf: [depth]u8 = undefined;
 
@@ -965,7 +993,7 @@ pub fn testRwlockOneWriterTwoReaders() !void {
     var stack_pool = fm.StackPool.init(allocator);
     g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
 
-    const depth: usize = 10;
+    const depth: usize = if (build_options.coverage) 4 else 10;
     var total_schedules: usize = 1;
     {
         var p: usize = 0;
@@ -1043,7 +1071,7 @@ pub fn testRwlockTwoWritersOneReader() !void {
     var stack_pool = fm.StackPool.init(allocator);
     g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
 
-    const depth: usize = 10;
+    const depth: usize = if (build_options.coverage) 4 else 10;
     var total_schedules: usize = 1;
     {
         var p: usize = 0;
@@ -1246,7 +1274,7 @@ pub fn testCycle2Hop() !void {
     var stack_pool = fm.StackPool.init(allocator);
     g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
 
-    const depth: usize = 12;
+    const depth: usize = if (build_options.coverage) 6 else 12;
     const total_schedules: usize = @as(usize, 1) << depth;
     var schedule_buf: [depth]u8 = undefined;
 
@@ -1390,7 +1418,7 @@ pub fn testCycle3Hop() !void {
     g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
 
     // 3 fibers — base-3 schedule. depth=8 → 6,561 schedules.
-    const depth: usize = 8;
+    const depth: usize = if (build_options.coverage) 4 else 8;
     var total_schedules: usize = 1;
     {
         var p: usize = 0;
@@ -1519,7 +1547,7 @@ pub fn testCycleReadTerminator() !void {
     harness = &h;
 
     var failures: usize = 0;
-    const total: usize = 256;
+    const total: usize = if (build_options.coverage) 32 else 256;
     for (0..total) |sched_idx| {
         for (0..8) |bit| {
             schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit))) & 1);
@@ -1587,7 +1615,7 @@ pub fn testCycleReadTerminator() !void {
 
 const VOPR_LOCKS: usize = 4;
 const VOPR_FIBERS: usize = 4;
-const VOPR_ITERS: usize = 200;
+const VOPR_ITERS: usize = if (build_options.coverage) 20 else 200;
 
 var g_vopr_locks: [VOPR_LOCKS]ParkingMutex = undefined;
 var g_vopr_counters: [VOPR_LOCKS]u64 = undefined;
@@ -1840,7 +1868,7 @@ pub fn testTimeoutAtomicCoverage() !void {
     harness = &h;
 
     var failures: usize = 0;
-    const total: usize = 4096; // 2^12 — covers all "early" schedule prefixes
+    const total: usize = if (build_options.coverage) 64 else 4096; // 2^12 — covers all "early" schedule prefixes
     for (0..total) |sched_idx| {
         for (0..schedule_buf.len) |bit| {
             schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit % 12))) & 1);
@@ -1880,6 +1908,238 @@ pub fn testTimeoutAtomicCoverage() !void {
 
     if (failures > 0) {
         std.debug.print("\ntimeout-atomic: {d}/{d} schedules failed\n", .{ failures, total });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// FSM timeout-atomic coverage
+//
+// The FsmTask back-pointer fields (lock_waiter, waiting_for_lock,
+// waiting_for_lock_list, waiting_for_fsm_owner, lock_wait_start_ms)
+// became atomic so that scanFsmLockWaiters / detectCycleFsm reads
+// establish a TSan-visible happens-before with parker / wake-side
+// stores. This test exercises the same parker/scanner handshake as
+// testTimeoutAtomicCoverage but on the FSM fields, so a regression
+// that downgrades the .release/.acquire ordering on any of them
+// trips a deterministic schedule under loom.
+//
+//   parker (tryLockForFsm):           scanner (scanFsmLockWaiters):
+//     lock_wait_start_ms.store
+//     waiting_for_lock_list.store(L)    waiting_for_lock_list.load
+//     waiting_for_lock.store(L)         waiting_for_lock.load
+//                                       (deadline check)
+//                                       waiting_for_lock.store(null)
+//     while (wait != null) yield
+//     done
+//
+// Invariant under all schedules: the parker, after observing
+// waiting_for_lock cleared by the scanner, also observes
+// waiting_for_lock_list cleared (because the scanner stored it with
+// .release before clearing waiting_for_lock).
+// ─────────────────────────────────────────────────────────────────────
+
+var g_fsm_task: fsm_mod.FsmTask = undefined;
+var g_fsm_observed: bool = false;
+
+fn entryFsmTimeoutParker() callconv(.c) void {
+    const t = &g_fsm_task;
+
+    // Park-side stores (mirroring tryLockForFsm).
+    t.lock_wait_start_ms.store(100, .release);
+    t.waiting_for_lock_list.store(@ptrFromInt(0xfeed0001), .release);
+    t.waiting_for_lock.store(@ptrFromInt(0xdead0001), .release);
+
+    // "Park" — yield until scanner clears waiting_for_lock.
+    while (t.waiting_for_lock.load(.acquire) != null) {
+        fc.__fiber.?.yield();
+    }
+
+    // After observing waiting_for_lock == null (scanner's release-store),
+    // an acquire-load on waiting_for_lock_list must see the scanner's
+    // prior release-store of null. The fields move together — that's
+    // the structural invariant scanFsmLockWaiters relies on.
+    if (t.waiting_for_lock_list.load(.acquire) == null) {
+        g_fsm_observed = true;
+    }
+
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryFsmTimeoutScanner() callconv(.c) void {
+    const t = &g_fsm_task;
+
+    // Wait for parker to populate the wait fields. Each load is a
+    // yield point.
+    while (t.waiting_for_lock.load(.acquire) == null) {
+        fc.__fiber.?.yield();
+    }
+
+    // Scanner-side reads (mirroring scanFsmLockWaiters).
+    const start_ms = t.lock_wait_start_ms.load(.acquire);
+    _ = start_ms;
+    const wfl = t.waiting_for_lock_list.load(.acquire);
+    _ = wfl;
+
+    // Scanner-side timeout sequence (mirroring scanFsmLockWaiters).
+    // Order: clear waiting_for_lock_list FIRST so the parker reading
+    // waiting_for_lock=null can rely on .acquire on it pulling in the
+    // waiting_for_lock_list=null store.
+    t.waiting_for_lock_list.store(null, .release);
+    t.lock_waiter.store(null, .release);
+    t.waiting_for_lock.store(null, .release);
+
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testFsmTimeoutAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [16]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+    const total: usize = if (build_options.coverage) 64 else 4096;
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit % 12))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+
+        // Reset the FSM task fields between runs.
+        g_fsm_task = fsm_mod.FsmTask.init(undefined);
+        g_fsm_observed = false;
+
+        try h.createThread(0, @intFromPtr(&entryFsmTimeoutParker));
+        try h.createThread(1, @intFromPtr(&entryFsmTimeoutScanner));
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        // Invariant: every completed schedule must observe the
+        // scanner's cleared waiting_for_lock_list after seeing
+        // waiting_for_lock cleared. Acquire on waiting_for_lock chains
+        // the waiting_for_lock_list store into visibility.
+        if (!g_fsm_observed) failures += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\nfsm-timeout-atomic: {d}/{d} schedules failed\n", .{ failures, total });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Stream(T) close/err atomic coverage
+//
+// Stream(T).Inner.closed became Atomic(bool) so push() / next() can
+// fast-path-read it without taking the inner spin lock; setError()
+// writes inner.err under the spin lock, and close() / setError() then
+// publish closed = true with .release. Readers observe closed with
+// .acquire; the spin-lock release-acquire (or the closed
+// release-acquire) chains the prior err write into visibility.
+//
+// This test exercises the parker/closer handshake on closed + err so
+// a regression that downgrades either the .release on closed or the
+// release that the spin lock provides for the err write would trip a
+// deterministic schedule.
+//
+//   producer (setError + close):           consumer (next-empty path):
+//     spinlock.swap(1, .acquire)
+//     err = X                                closed.load(.acquire)  ← null while spin held
+//     spinlock.store(0, .release)           ...
+//     closed.store(true, .release)          closed.load(.acquire)  ← sees true
+//                                            read err              ← must see X
+// ─────────────────────────────────────────────────────────────────────
+
+const StreamI64 = DataStructures.Stream(i64);
+var g_stream_inner: StreamI64.Inner = undefined;
+var g_stream_observed_err: bool = false;
+
+fn entryStreamConsumer() callconv(.c) void {
+    while (!g_stream_inner.closed.load(.acquire)) {
+        fc.__fiber.?.yield();
+    }
+    // After observing closed = true, the err write must be visible.
+    // setError writes err under the spin lock and close() publishes
+    // closed with .release; the chain establishes happens-before.
+    if (g_stream_inner.err) |e| {
+        if (e == error.LoomTestError) g_stream_observed_err = true;
+    }
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryStreamProducer() callconv(.c) void {
+    // setError-equivalent: take spin lock, write err, release spin
+    // lock. Mirrors data-structures.zig Stream.setError.
+    while (g_stream_inner.lock.swap(1, .acquire) == 1) fc.__fiber.?.yield();
+    g_stream_inner.err = error.LoomTestError;
+    g_stream_inner.lock.store(0, .release);
+    // close-equivalent: publish closed with .release.
+    g_stream_inner.closed.store(true, .release);
+
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testStreamCloseErrAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [16]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+    const total: usize = if (build_options.coverage) 64 else 4096;
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit % 12))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+
+        // Reset the Stream Inner between runs.
+        g_stream_inner = .{ .sched = &g_sched };
+        g_stream_observed_err = false;
+
+        try h.createThread(0, @intFromPtr(&entryStreamConsumer));
+        try h.createThread(1, @intFromPtr(&entryStreamProducer));
+
+        h.run() catch {
+            failures += 1;
+            continue;
+        };
+
+        if (!g_stream_observed_err) failures += 1;
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\nstream-close-err-atomic: {d}/{d} schedules failed\n", .{ failures, total });
         return error.LoomFailures;
     }
 }

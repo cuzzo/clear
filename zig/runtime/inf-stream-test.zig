@@ -93,9 +93,9 @@ test "InfStream.close() sets inner.closed to true" {
     inner.* = .{ .sched = @as(*@import("scheduler.zig").Scheduler, @ptrFromInt(@alignOf(@import("scheduler.zig").Scheduler))) };
     defer alloc.destroy(inner);
     var s = S{ .inner = inner, .alloc = alloc };
-    try std.testing.expect(!inner.closed);
+    try std.testing.expect(!inner.closed.load(.monotonic));
     s.close();
-    try std.testing.expect(inner.closed);
+    try std.testing.expect(inner.closed.load(.monotonic));
 }
 
 test "InfStream.push() returns StreamClosed after close()" {
@@ -236,7 +236,7 @@ test "InfStream(string).push() frees value when stream is closed" {
     var s = S{ .inner = inner, .alloc = alloc };
 
     // Close the stream first so any subsequent push() sees closed=true.
-    inner.closed = true;
+    inner.closed.store(true, .release);
 
     // push() must free the slice before returning StreamClosed.
     const val = try alloc.dupe(u8, "leaked?");

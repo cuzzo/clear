@@ -19,12 +19,30 @@ const TestValue = union(enum) {
     Map: CheatLib.StringMap(TestValue),
 };
 
-fn makeRuntime() !struct { rt: Runtime, ebr: ebr_mod.EbrContext } {
-    var ebr = ebr_mod.EbrContext{};
-    var arena_buf: [16384]u8 = undefined;
-    var rt = try Runtime.initFromSlice(&arena_buf, &ebr, std.heap.page_allocator, 0);
-    rt.wireAllocator();
-    return .{ .rt = rt, .ebr = ebr };
+// `ebr` is taken as a pointer parameter so the caller owns its
+// lifetime (the EbrContext is stored by-pointer inside Runtime via
+// ThreadLocalEbr.context). The previous version returned the
+// EbrContext by value alongside the Runtime, leaving the Runtime's
+// internal `context` pointer dangling at the now-defunct
+// makeRuntime() stack frame. Same issue with the frame buffer:
+// `Runtime.init` heap-allocates 16 KB internally and sets
+// `owns_frame_memory = true`, so deinit cleans up.
+//
+// CALLER MUST `rt.wireAllocator()` after receiving the returned
+// Runtime — wireAllocator captures `&rt` into `rt.frame_allocator.ptr`,
+// which would otherwise dangle at the moved-from location. With
+// `wireAllocator` left to the caller the pointer points at the
+// caller's `var rt`, which is the live address.
+//
+// Frame arena: 16 KB normally; 256 KB under -Dcoverage. kcov's
+// per-instruction breakpoint instrumentation inflates the runtime's
+// promote/cleanup recursion path enough to exhaust the 16 KB headroom
+// on union-variant tests with frame-allocated strings, manifesting as
+// segfaults that read like "kcov+mmap corruption". Widening the test's
+// own arena leaves production sizing untouched.
+fn makeRuntime(ebr: *ebr_mod.EbrContext) !Runtime {
+    const arena_size: usize = if (@import("build_options").coverage) 256 * 1024 else 16384;
+    return Runtime.init(std.heap.page_allocator, arena_size, ebr);
 }
 
 test "cleanup: Null variant is no-op" {
@@ -103,85 +121,84 @@ test "cleanup: Map with nested Array values" {
 }
 
 test "promote: Null variant is no-op" {
-    var ctx = try makeRuntime();
-    defer ctx.rt.deinit();
-    defer ctx.ebr.deinit(std.heap.page_allocator);
+    var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(std.heap.page_allocator);
+    var rt = try makeRuntime(&ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
 
     var val = TestValue{ .Null = {} };
-    try CheatLib.promote(TestValue, &ctx.rt, &val);
+    try CheatLib.promote(TestValue, &rt, &val);
 }
 
 test "promote: Str variant dupes to heap" {
-    // kcov's per-instruction breakpoints inside the frame arena's
-    // mmap-backed allocator path corrupt the page mapping; the dupe
-    // segfaults touching its own freshly-allocated buffer. Real bug
-    // suspected but not yet reproduced outside kcov.
-    if (@import("build_options").coverage) return error.SkipZigTest;
-    var ctx = try makeRuntime();
-    defer ctx.rt.deinit();
-    defer ctx.ebr.deinit(std.heap.page_allocator);
+    var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(std.heap.page_allocator);
+    var rt = try makeRuntime(&ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
 
     // promote() only dupes strings whose pointer falls within the frame
     // arena's static_block — string literals (.rodata) are left alone.
     // Allocate via frameAlloc so promote actually escapes it to heap.
-    const frame_str = try ctx.rt.frameAlloc().dupe(u8, "frame string");
+    const frame_str = try rt.frameAlloc().dupe(u8, "frame string");
     var val = TestValue{ .Str = frame_str };
-    try CheatLib.promote(TestValue, &ctx.rt, &val);
+    try CheatLib.promote(TestValue, &rt, &val);
     // After promote, val.Str should be a heap-duped copy
     try std.testing.expectEqualStrings("frame string", val.Str);
     // Free the duped string
-    ctx.rt.heapAlloc().free(val.Str);
+    rt.heapAlloc().free(val.Str);
 }
 
 test "promote: Array of Str elements dupes strings to heap" {
-    // Same kcov+frameAlloc().dupe interaction as the test above.
-    if (@import("build_options").coverage) return error.SkipZigTest;
     // promote recursively dupes strings inside union elements.
     // cleanup frees the list backing but not bare Str variants.
-    var ctx = try makeRuntime();
-    defer ctx.rt.deinit();
-    defer ctx.ebr.deinit(std.heap.page_allocator);
+    var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(std.heap.page_allocator);
+    var rt = try makeRuntime(&ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
 
     var list = std.ArrayListUnmanaged(TestValue).empty;
     // Frame-allocate so promote will escape to heap (literals are no-ops).
-    const hello = try ctx.rt.frameAlloc().dupe(u8, "hello");
-    try list.append(ctx.rt.frameAlloc(), TestValue{ .Str = hello });
-    try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 42.0 });
+    const hello = try rt.frameAlloc().dupe(u8, "hello");
+    try list.append(rt.frameAlloc(), TestValue{ .Str = hello });
+    try list.append(rt.frameAlloc(), TestValue{ .Num = 42.0 });
 
     var val = TestValue{ .Array = list };
-    try CheatLib.promote(TestValue, &ctx.rt, &val);
+    try CheatLib.promote(TestValue, &rt, &val);
 
     try std.testing.expect(val.Array.items.len == 2);
     try std.testing.expectEqualStrings("hello", val.Array.items[0].Str);
 
     // cleanup frees everything: list backing + promoted strings.
-    CheatLib.cleanup(TestValue, ctx.rt.heapAlloc(), &val);
+    CheatLib.cleanup(TestValue, rt.heapAlloc(), &val);
 }
 
 test "promote: nested Map inside Array" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
     // Scenario: array containing map values (like JSON [{...}, {...}])
-    var ctx = try makeRuntime();
-    defer ctx.rt.deinit();
-    defer ctx.ebr.deinit(std.heap.page_allocator);
+    var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(std.heap.page_allocator);
+    var rt = try makeRuntime(&ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
 
-    const heap = ctx.rt.heapAlloc();
+    const heap = rt.heapAlloc();
     var inner_map = CheatLib.StringMap(TestValue){ .alloc = heap };
     try inner_map.put(heap, heap, "key", TestValue{ .Num = 99.0 });
 
     var list = std.ArrayListUnmanaged(TestValue).empty;
-    try list.append(ctx.rt.frameAlloc(), TestValue{ .Map = inner_map });
-    try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 1.0 });
+    try list.append(rt.frameAlloc(), TestValue{ .Map = inner_map });
+    try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
 
     var val = TestValue{ .Array = list };
-    try CheatLib.promote(TestValue, &ctx.rt, &val);
+    try CheatLib.promote(TestValue, &rt, &val);
 
     // Cleanup recursively frees map inside array
     CheatLib.cleanup(TestValue, heap, &val);
 }
 
 test "full cycle: promote then cleanup Array of mixed values" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
     // End-to-end: promote frame data to heap, then cleanup.
     // Strings in union variants are promoted by promote() and freed
     // when they're inside a collection (StringMap.freeUnionPayload).
@@ -278,7 +295,6 @@ test "cleanup: nested List variants recursively freed" {
 }
 
 test "cleanup: List variant ([]T slice) is freed by cleanup" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
     // Simulates the json_parser leak: promoteList creates a heap slice
     // inside a union List variant. cleanup must free it.
     const alloc = std.testing.allocator;
@@ -302,21 +318,22 @@ test "cleanup: List variant ([]T slice) is freed by cleanup" {
 }
 
 test "promote: Array variant promotes backing" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
-    var ctx = try makeRuntime();
-    defer ctx.rt.deinit();
-    defer ctx.ebr.deinit(std.heap.page_allocator);
+    var ebr = ebr_mod.EbrContext{};
+    defer ebr.deinit(std.heap.page_allocator);
+    var rt = try makeRuntime(&ebr);
+    defer rt.deinit();
+    rt.wireAllocator();
 
     var list = std.ArrayListUnmanaged(TestValue).empty;
-    try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 1.0 });
-    try list.append(ctx.rt.frameAlloc(), TestValue{ .Num = 2.0 });
+    try list.append(rt.frameAlloc(), TestValue{ .Num = 1.0 });
+    try list.append(rt.frameAlloc(), TestValue{ .Num = 2.0 });
 
     var val = TestValue{ .Array = list };
-    try CheatLib.promote(TestValue, &ctx.rt, &val);
+    try CheatLib.promote(TestValue, &rt, &val);
 
     // After promote, backing is on heap - can cleanup with heapAlloc
     try std.testing.expect(val.Array.items.len == 2);
-    val.Array.deinit(ctx.rt.heapAlloc());
+    val.Array.deinit(rt.heapAlloc());
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -687,7 +704,6 @@ test "needsCleanup: recursive union with 17 variants compiles" {
 }
 
 test "cleanupAlloc: mixed-provenance strings in union list" {
-    if (@import("build_options").coverage) return error.SkipZigTest;
     // Simulates an @list containing Val.Str elements where some strings
     // are heap-allocated and some are frame-allocated. cleanup with heapAlloc
     // would crash on frame strings. cleanup with frameAlloc would leak heap
@@ -695,8 +711,13 @@ test "cleanupAlloc: mixed-provenance strings in union list" {
     const alloc = std.testing.allocator;
     var ebr = ebr_mod.EbrContext{};
     defer ebr.deinit(alloc);
-    var arena_buf: [16384]u8 = undefined;
-    var rt = try Runtime.initFromSlice(&arena_buf, &ebr, alloc, 0);
+    // Heap-alloc the arena (not stack) so the 256 KB kcov-widened
+    // variant doesn't blow the test thread's stack. See makeRuntime
+    // above for the kcov+frame-arena rationale.
+    const arena_size: usize = if (@import("build_options").coverage) 256 * 1024 else 16384;
+    const arena_buf = try alloc.alloc(u8, arena_size);
+    defer alloc.free(arena_buf);
+    var rt = try Runtime.initFromSlice(arena_buf, &ebr, alloc, 0);
     defer rt.deinit();
     rt.wireAllocator();
 

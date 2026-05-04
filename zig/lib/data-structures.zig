@@ -5,6 +5,16 @@ const Task = @import("../runtime/queues.zig").Task;
 const queues = @import("../runtime/queues.zig");
 const pl = @import("parking-lot.zig");
 
+// Comptime atomic type selection for fields exercised by the loom suite.
+// Mirrors queues.zig: when the test root exports SimAtomic
+// (parking-lot-loom-test.zig), Stream/InfStream `closed` field accesses
+// become yield points so loom can observe close vs push/next races.
+// Falls through to std.atomic.Value for normal builds.
+const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 pub fn bind(comptime deps: type) type {
     return struct {
         const WaitGroup = fp.WaitGroup;
@@ -704,7 +714,14 @@ pub fn bind(comptime deps: type) type {
                 consumer_task: ?*Task = null,
                 producer_task: ?*Task = null,
                 sched:         *fp.Scheduler,
-                closed:        bool = false,
+                /// Atomic so push/next can fast-path-read it without
+                /// taking `lock`. Writers (close, deinit, setError) hold
+                /// `lock` and use .release; readers use .acquire so they
+                /// observe `err` after seeing `closed = true`.
+                closed:        Atomic(bool) = Atomic(bool).init(false),
+                /// Written under `lock` by setError/close-paths BEFORE
+                /// `closed.store(true, .release)`. Readers must observe
+                /// `closed.load(.acquire) == true` before reading this.
                 err:           ?anyerror = null,
                 wg:            WaitGroup = undefined, // lifecycle: generator calls done() in close()
             };
@@ -724,7 +741,7 @@ pub fn bind(comptime deps: type) type {
             pub fn push(self: *Self, val: T) error{StreamClosed}!void {
                 const inner = self.inner;
                 while (true) {
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         cleanup(T, self.alloc, &val);
                         return error.StreamClosed;
                     }
@@ -746,7 +763,7 @@ pub fn bind(comptime deps: type) type {
                         return;
                     }
                     while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         inner.lock.store(0, .release);
                         cleanup(T, self.alloc, &val);
                         return error.StreamClosed;
@@ -770,7 +787,7 @@ pub fn bind(comptime deps: type) type {
             pub fn close(self: *Self) void {
                 const inner = self.inner;
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                inner.closed = true;
+                inner.closed.store(true, .release);
                 if (inner.consumer_task) |consumer| {
                     inner.consumer_task = null;
                     inner.lock.store(0, .release);
@@ -781,9 +798,16 @@ pub fn bind(comptime deps: type) type {
                 inner.wg.done();
             }
 
-            /// Record a terminal error from the generator fiber.
+            /// Record a terminal error from the generator fiber. Acquires
+            /// the spin lock so the err write is ordered with the
+            /// `closed.store(.release)` that close() / deinit() perform;
+            /// consumers that observe `closed.load(.acquire) == true`
+            /// observe the err write too.
             pub fn setError(self: *Self, err: anyerror) void {
-                self.inner.err = err;
+                const inner = self.inner;
+                while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+                inner.err = err;
+                inner.lock.store(0, .release);
             }
 
             /// Returns the next item from the ring, blocking when empty.
@@ -809,7 +833,7 @@ pub fn bind(comptime deps: type) type {
                         }
                         return val;
                     }
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         if (inner.err) |err| return err;
                         return null;
                     }
@@ -819,7 +843,7 @@ pub fn bind(comptime deps: type) type {
                         inner.lock.store(0, .release);
                         continue;
                     }
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         inner.lock.store(0, .release);
                         if (inner.err) |err| return err;
                         return null;
@@ -838,7 +862,7 @@ pub fn bind(comptime deps: type) type {
                 const inner = self.inner;
                 // Signal producer to stop (mirrors InfStream.deinit drain for strings).
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                inner.closed = true;
+                inner.closed.store(true, .release);
                 if (comptime (T == []const u8 or T == []u8)) {
                     const h = inner.head.load(.acquire);
                     const t = inner.tail.load(.acquire);
@@ -903,7 +927,10 @@ pub fn bind(comptime deps: type) type {
                 consumer_task: ?*Task = null,
                 producer_task: ?*Task = null,
                 sched: *fp.Scheduler,
-                closed: bool = false,
+                /// Atomic so push/next/nextOrNull can fast-path-read it
+                /// without taking `lock`. Writers (close, deinit) hold
+                /// `lock` and use .release; readers use .acquire.
+                closed: Atomic(bool) = Atomic(bool).init(false),
                 err: ?anyerror = null,
                 has_generator: bool = false, // true only when created via spawnNew
                 wg: WaitGroup = undefined, // valid only when has_generator == true
@@ -927,7 +954,7 @@ pub fn bind(comptime deps: type) type {
                 const inner = self.inner;
 
                 while (true) {
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         cleanup(T, self.alloc, &val);
                         return error.StreamClosed;
                     }
@@ -957,7 +984,7 @@ pub fn bind(comptime deps: type) type {
 
                     // Buffer full — block until consumer drains at least one slot.
                     while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         inner.lock.store(0, .release);
                         cleanup(T, self.alloc, &val);
                         return error.StreamClosed;
@@ -1006,12 +1033,12 @@ pub fn bind(comptime deps: type) type {
                     }
 
                     // Buffer empty — check for close/error, then block.
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         if (inner.err) |err| return err;
                     }
 
                     while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         inner.lock.store(0, .release);
                         if (inner.err) |err| return err;
                     }
@@ -1035,7 +1062,7 @@ pub fn bind(comptime deps: type) type {
             pub fn close(self: *Self) void {
                 const inner = self.inner;
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                inner.closed = true;
+                inner.closed.store(true, .release);
                 if (inner.consumer_task) |consumer| {
                     inner.consumer_task = null;
                     inner.lock.store(0, .release);
@@ -1076,7 +1103,7 @@ pub fn bind(comptime deps: type) type {
                     }
 
                     // Buffer empty — check for close, then block.
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         if (inner.err) |err| return err;
                         return null; // EOF
                     }
@@ -1088,7 +1115,7 @@ pub fn bind(comptime deps: type) type {
                         inner.lock.store(0, .release);
                         continue; // Data available now.
                     }
-                    if (inner.closed) {
+                    if (inner.closed.load(.acquire)) {
                         inner.lock.store(0, .release);
                         if (inner.err) |err| return err;
                         return null; // EOF
@@ -1108,7 +1135,7 @@ pub fn bind(comptime deps: type) type {
             pub fn deinit(self: *Self) void {
                 const inner = self.inner;
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
-                inner.closed = true;
+                inner.closed.store(true, .release);
 
                 // Drain and free unconsumed items. Read head under the lock so we capture
                 // exactly the items committed before closed=true; producer cannot add more.

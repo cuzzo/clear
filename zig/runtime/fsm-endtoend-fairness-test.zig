@@ -38,11 +38,11 @@ const STACKFUL_YIELDS: u32 = 50;
 
 // FSM that increments a shared counter once, then completes.
 const FsmCounter = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     counter: *std.atomic.Value(u32),
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *FsmCounter = @fieldParentPtr("task", t);
+        const self: *FsmCounter = @ptrCast(@alignCast(t.ctx.?));
         _ = self.counter.fetchAdd(1, .release);
         return .{ .Done = {} };
     }
@@ -74,8 +74,9 @@ fn setupBody(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
     // stackful under an unbounded drain.
     for (setup.fsm_pool) |*f| {
         f.* = .{ .task = undefined, .counter = setup.fsm_counter };
-        f.task = fsm.FsmTask.init(&FsmCounter.doResume);
-        setup.sched.enqueueFsm(&f.task);
+        f.task = try setup.sched.allocFsmTask(&FsmCounter.doResume);
+        f.task.ctx = f;
+        setup.sched.enqueueFsm(f.task);
     }
 
     // Spawn the stackful fiber.
@@ -185,8 +186,9 @@ test "end-to-end fairness: stackful-first + FSM burst still progresses" {
             // Then FSM burst.
             for (self.fsm_pool) |*f| {
                 f.* = .{ .task = undefined, .counter = self.fsm_counter };
-                f.task = fsm.FsmTask.init(&FsmCounter.doResume);
-                self.sched.enqueueFsm(&f.task);
+                f.task = try self.sched.allocFsmTask(&FsmCounter.doResume);
+                f.task.ctx = f;
+                self.sched.enqueueFsm(f.task);
             }
         }
     };

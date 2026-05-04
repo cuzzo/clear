@@ -258,10 +258,11 @@ STD_LIB = {
         FO.alloc_expr("u8", FO.local("__rf_size"))),
       # errdefer ctx.alloc.free(ctx.rf_buf)
       FO.err_defer_free_field("rf_buf"),
-      # ctx.rf_waiter = CheatHeader.FsmIoWaiter.init(&ctx.task)
+      # ctx.rf_waiter = CheatHeader.FsmIoWaiter.init(ctx.task)
+      # `task` is `*FsmTask` (slab-allocated), so pass directly.
       FO.assign_field("rf_waiter",
         FO.call("CheatHeader.FsmIoWaiter.init",
-                [FO.addr(FO.state("task"))])),
+                [FO.state("task")])),
       # try ctx.rt.getSched().submitReadForFsm(&ctx.rf_waiter, ctx.rf_fd, ctx.rf_buf)
       FO.io_submit(:read, "rf_waiter", [FO.state("rf_fd"), FO.state("rf_buf")]),
     ],
@@ -310,7 +311,7 @@ STD_LIB = {
       FO.err_defer_call("CheatHeader.fsmCloseFd", [FO.state("wf_fd")]),
       FO.assign_field("wf_waiter",
         FO.call("CheatHeader.FsmIoWaiter.init",
-                [FO.addr(FO.state("task"))])),
+                [FO.state("task")])),
       FO.io_submit(:write, "wf_waiter", [FO.state("wf_fd"), FO.arg(1)]),
     ],
     fsm_finish_block: [
@@ -676,7 +677,9 @@ STD_LIB = {
       FO.stmt_call(
         "__FSM_CTX.rt.getSched().fsmSleepTask",
         [
-          FO.addr(FO.state("task")),
+          # `task` is a `*FsmTask` (slab-allocated; the ctx holds the
+          # pointer), so pass it directly — no `&` wrapper.
+          FO.state("task"),
           FO.binop("+",
                    FO.call("CheatHeader.milliTimestamp", []),
                    FO.intcast("i64", FO.arg(0))),

@@ -39,6 +39,7 @@ const testing = std.testing;
 const ebr_mod = @import("../lib/ebr.zig");
 const versioned = @import("versioned.zig");
 const Runtime = @import("runtime.zig").Runtime;
+const build_options = @import("build_options");
 
 const EbrContext = ebr_mod.EbrContext;
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
@@ -158,15 +159,19 @@ fn runSequence(seed: u64, steps: usize, allocator: std.mem.Allocator) !void {
 
 test "mvcc-vopr: 200 seeds x 200 steps each, no UAF, no leak, no torn read" {
     var i: u64 = 0;
-    while (i < 200) : (i += 1) {
-        try runSequence(i, 200, testing.allocator);
+    const seeds = if (build_options.coverage) 4 else 200;
+    const steps = if (build_options.coverage) 40 else 200;
+    while (i < seeds) : (i += 1) {
+        try runSequence(i, steps, testing.allocator);
     }
 }
 
 test "mvcc-vopr: 50 seeds x 1000 steps each (longer sequences)" {
     var i: u64 = 1000;
-    while (i < 1050) : (i += 1) {
-        try runSequence(i, 1000, testing.allocator);
+    const seeds = if (build_options.coverage) 2 else 50;
+    const steps = if (build_options.coverage) 80 else 1000;
+    while (i < 1000 + seeds) : (i += 1) {
+        try runSequence(i, steps, testing.allocator);
     }
 }
 

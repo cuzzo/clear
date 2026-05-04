@@ -10,6 +10,7 @@ pub const FsmIoWaiter = fsm_mod.FsmIoWaiter;
 pub const FsmStatus = fsm_mod.FsmStatus;
 pub const YieldReason = fsm_mod.YieldReason;
 pub const FsmRunQueue = fsm_mod.FsmRunQueue;
+pub const ResumeFn = fsm_mod.ResumeFn;
 const compat = @import("../lib/compat.zig");
 // Profile telemetry (comptime-gated). Imports are cheap; actual calls
 // live inside `if (rt_profile.CLEAR_PROFILE)` blocks that compile away
@@ -260,6 +261,16 @@ pub const Scheduler = struct {
     /// going through the general allocator on every spawn/finish.
     /// Slab size: 64 KB (power-of-two, ~330 tasks per slab at ~192 B each).
     task_slab: SlabAllocator(Task),
+    /// Per-scheduler slab allocator for FsmTask structs. Mirrors
+    /// task_slab but for stackless FSM tasks. The slab gives
+    /// detectCycleFsm the same Option-(C) UAF guard the stackful
+    /// detectCycle relies on: chain walkers `pinFsmTask` to hold a
+    /// refcount on the slab, then check `task.generation` to detect
+    /// slot reuse. Without the slab, FsmTasks were heap-allocated
+    /// inside user ctx structs and could be freed mid-walk.
+    /// Slab size: 64 KB (power-of-two, ≈800 FsmTasks per slab at
+    /// ~80 B each).
+    fsm_task_slab: SlabAllocator(fsm_mod.FsmTask),
 
     // 4a. io_uring — unified I/O ring for poll-based socket I/O, async file
     // I/O, and eventfd wakeups. In Loom mode, this is SimRing.
@@ -371,6 +382,7 @@ pub const Scheduler = struct {
             // the sweet spot for current Task footprint (~192 B incl.
             // cache-line padding) — ≈330 tasks per slab.
             .task_slab = SlabAllocator(Task).init(allocator, 64 * 1024),
+            .fsm_task_slab = SlabAllocator(fsm_mod.FsmTask).init(allocator, 64 * 1024),
             .ring = ring,
             .io_helper_stack = try allocator.alloc(u8, IO_HELPER_STACK_SIZE),
             .main_ctx = undefined,
@@ -459,6 +471,7 @@ pub const Scheduler = struct {
         // here. Deinit walks the partial / full slab lists and frees
         // their memory back to the general allocator.
         self.task_slab.deinit();
+        self.fsm_task_slab.deinit();
     }
 
     /// Allocate + register a per-task ThreadLocalEbr from the heap.
@@ -512,6 +525,22 @@ pub const Scheduler = struct {
             self.releaseEbrSlot(ebr_ptr);
             task.ebr_slot = null;
         }
+    }
+
+    /// Allocate a fresh FsmTask from `fsm_task_slab`, bump its
+    /// generation, and initialize it. The slab gives detectCycleFsm
+    /// its UAF-safe pin protocol (mirrors stackful Task slab).
+    /// Generation bump happens AFTER the FsmTask{} reset (which
+    /// zeroes generation): capture pre-reset value, write fresh task,
+    /// store +1 with .release. Any chain walker holding a stale
+    /// `(*FsmTask, generation)` pair from the previous slot occupant
+    /// observes the mismatch and aborts safely.
+    pub fn allocFsmTask(self: *Scheduler, resume_fn: fsm_mod.ResumeFn) !*fsm_mod.FsmTask {
+        const t = try self.fsm_task_slab.create();
+        const prev_gen = t.generation.load(.monotonic);
+        t.* = fsm_mod.FsmTask.init(resume_fn);
+        t.generation.store(prev_gen +% 1, .release);
+        return t;
     }
 
     // ------------------------------------------------------------
@@ -1252,17 +1281,18 @@ pub const Scheduler = struct {
                     }
                     _ = self.active_tasks.fetchSub(1, .monotonic);
                     // Per-task Runtime + ebr_slot teardown MUST happen
-                    // before destroy_fn (destroy_fn frees the ctx struct
-                    // that contains the FsmTask, so reading task fields
-                    // after that is UAF).
+                    // before destroy_fn (destroy_fn reads task.ctx and
+                    // frees the user ctx struct).
                     self.releaseFsmTaskEbr(task);
-                    // State struct is owned by the caller; the FSM emit
-                    // synthesizes a destroy_fn that frees it. We invoke
-                    // it here -- AFTER dispatchOnce has finished writing
-                    // task.status -- so the resume fn no longer needs
-                    // to call alloc.destroy(ctx) inline (which racing
-                    // with dispatchOnce's status write was a UAF).
+                    // The synthesized destroy_fn frees the user ctx
+                    // pointed to by task.ctx. It does NOT free the
+                    // FsmTask itself — the FsmTask lives in
+                    // `fsm_task_slab` and is reclaimed below by
+                    // `fsm_task_slab.destroy(task)`. The slab return
+                    // happens AFTER destroy_fn runs so destroy_fn can
+                    // still read task.ctx.
                     if (task.destroy_fn) |df| df(task);
+                    self.fsm_task_slab.destroy(task);
                 },
                 .Yielded => {
                     // Stage for flush after the batch. Prevents LIFO starvation.
@@ -1357,35 +1387,56 @@ pub const Scheduler = struct {
     /// On expiry: set lock_error = .LockTimeout, clear waiting_for_lock,
     /// re-enqueue for dispatch. Resume fn reads lock_error and surfaces
     /// the error on its next call.
+    ///
+    /// FsmTask back-pointer fields are atomic (matching stackful Task),
+    /// so reads here use .acquire to pair with the .release stores in
+    /// tryLock*ForFsm and wakeNext. The post-spin re-check mirrors the
+    /// stackful scanLockWaiters race fix: between our pre-spin observation
+    /// and taking wl.spinAcquire(), the wake-side can pop our node and
+    /// clear the back-pointers. Re-checking under spin treats that case
+    /// as "wake won" and skips both the remove and the re-enqueue.
     fn scanFsmLockWaiters(self: *Scheduler) void {
         const now_ms = milliTimestamp();
         var i: usize = 0;
         while (i < self.fsm_lock_waiters.items.len) {
             const task = self.fsm_lock_waiters.items[i];
-            if (task.waiting_for_lock == null) {
+            if (task.waiting_for_lock.load(.acquire) == null) {
                 _ = self.fsm_lock_waiters.swapRemove(i);
                 continue;
             }
-            if (now_ms - task.lock_wait_start_ms > self.lock_timeout_ms) {
+            const start_ms = task.lock_wait_start_ms.load(.acquire);
+            if (now_ms - start_ms > self.lock_timeout_ms) {
                 // Remove the FSM's WaiterNode from the parking-lot's
                 // waiter list (mirrors stackful scanLockWaiters). If
                 // we don't, a later unlock will pop the stale node and
                 // either grant ownership to a Done-or-retrying FSM
                 // (use-after-free risk) or push it twice on retry.
-                if (task.waiting_for_lock_list) |raw| {
+                var wake_lost = false;
+                if (task.waiting_for_lock_list.load(.acquire)) |raw| {
                     const wl: *qs.WaiterList = @ptrCast(@alignCast(raw));
-                    if (task.lock_waiter) |raw_w| {
-                        const node: *qs.WaiterNode = @ptrCast(@alignCast(raw_w));
-                        wl.spinAcquire();
+                    wl.spinAcquire();
+                    // Re-check under spin: waker may have popped + cleared
+                    // both fields between our pre-spin observation and now.
+                    const wfl_now = task.waiting_for_lock_list.load(.acquire);
+                    const lw_now = task.lock_waiter.load(.acquire);
+                    if (wfl_now == null or lw_now == null) {
+                        wake_lost = true;
+                    } else {
+                        const node: *qs.WaiterNode = @ptrCast(@alignCast(lw_now.?));
                         _ = wl.remove(node);
-                        wl.spinRelease();
                     }
+                    wl.spinRelease();
+                }
+                if (wake_lost) {
+                    _ = self.fsm_lock_waiters.swapRemove(i);
+                    continue;
                 }
                 task.lock_error = .LockTimeout;
-                task.waiting_for_lock = null;
-                task.waiting_for_lock_list = null;
-                task.lock_waiter = null;
-                task.waiting_for_fsm_owner = null;
+                task.waiting_for_lock.store(null, .release);
+                task.waiting_for_lock_list.store(null, .release);
+                task.lock_waiter.store(null, .release);
+                task.waiting_for_fsm_owner.store(null, .release);
+                _ = task.seq.fetchAdd(1, .release);
                 task.status = .Ready;
                 self.fsm_ready_queue.push(self.allocator, task) catch {};
                 _ = self.fsm_lock_waiters.swapRemove(i);
@@ -1563,11 +1614,41 @@ pub const Scheduler = struct {
             const deadline = start_ms + self.lock_timeout_ms;
             if (now_ms - start_ms > self.lock_timeout_ms) {
                 // Timed out: remove from lock's waiter list, then wake.
+                //
+                // Race with the wake-side path (parking-lot.zig wakeNext):
+                // the waker clears task fields in this order under
+                // queue_spin: waiting_for_lock_list, then lock_waiter_node.
+                // Our pre-spin reads above may have observed
+                // waiting_for_lock as non-null, but by the time we take
+                // wl.spinAcquire() the waker may have already popped this
+                // node, cleared waiting_for_lock_list, and cleared
+                // lock_waiter_node. RE-CHECK both fields under spin: if
+                // either is now null, the wake-side won — the task is
+                // already being resumed normally, so we must NOT re-wake
+                // (would double-enqueue) and must NOT call wl.remove on a
+                // null/stale node pointer (would deref dangling memory or
+                // panic on `.?` unwrap).
                 var removed = false;
+                var wake_lost = false;
                 if (task.waiting_for_lock_list.load(.acquire)) |wl| {
                     wl.spinAcquire();
-                    removed = wl.remove(task.lock_waiter_node.load(.acquire).?);
+                    if (task.waiting_for_lock_list.load(.acquire) == null or
+                        task.lock_waiter_node.load(.acquire) == null)
+                    {
+                        // Waker won the race after we observed wfl != null
+                        // but before we took the spin. Don't touch the
+                        // queue or task fields — the wake-side already
+                        // owns the resume. We just clean up our tracking
+                        // entry so we stop re-checking this task.
+                        wake_lost = true;
+                    } else {
+                        removed = wl.remove(task.lock_waiter_node.load(.acquire).?);
+                    }
                     wl.spinRelease();
+                }
+                if (wake_lost) {
+                    _ = self.lock_waiters.swapRemove(i);
+                    continue;
                 }
                 // If this was a ParkingRwLock write-lock waiter and we
                 // won the removal race, decrement writers_waiting so
@@ -1849,9 +1930,24 @@ pub const SchedulerRegistry = struct {
         return self.id_map.get(id);
     }
 
-    /// Number of currently registered schedulers.
+    /// Number of currently *live* (non-null) registered schedulers.
+    /// Distinct from `len`, which is the high-water slot count and
+    /// only ever grows: unregister leaves a null hole rather than
+    /// decrementing `len`. Callers that gate on "N workers have
+    /// registered" (test harnesses, kvstore startup) MUST count
+    /// live slots — otherwise stale `len` from prior test runs
+    /// reports the new gate as already satisfied before the new
+    /// workers register, producing a race where spawnBest's
+    /// pickTwo() reads null slots and silently falls back to the
+    /// active scheduler. Linear scan is bounded (slots ≤ MAX) and
+    /// only invoked from cold setup paths.
     pub fn count(self: *SchedulerRegistry) u32 {
-        return self.len.load(.acquire);
+        const n = self.len.load(.acquire);
+        var c: u32 = 0;
+        for (self.slots[0..n]) |*slot| {
+            if (slot.load(.acquire) != null) c += 1;
+        }
+        return c;
     }
 };
 
@@ -1937,6 +2033,61 @@ pub fn pinTask(ptr: *Task) ?TaskPin {
 }
 
 pub fn unpinTask(pin: TaskPin) void {
+    if (pin.allocator) |alloc| alloc.unpin(pin.slab);
+}
+
+/// Pin handle for safe cross-scheduler FsmTask derefs. Mirrors TaskPin.
+///
+/// detectCycleFsm walks a chain of `*FsmTask` pointers it discovered
+/// through lock back-pointers. Without a pin, the FsmTask's slot can
+/// be reused by a different logical task between the moment the
+/// walker captured the pointer and the moment it derefs the chain
+/// (Option-(C) protocol). `pinFsmTask` holds a refcount on the slab
+/// so the underlying memory cannot be reclaimed; `gen` is captured
+/// at pin time so callers can detect slot-level reuse.
+pub const FsmTaskPin = struct {
+    /// Allocator that owns the slab. null for no-op test pins.
+    allocator: ?*SlabAllocator(fsm_mod.FsmTask),
+    /// Slab containing the FsmTask, with pin_count >= 1 held by us.
+    /// Undefined when `allocator == null`.
+    slab: *SlabAllocator(fsm_mod.FsmTask).SlabHeader,
+    /// Snapshot of `task.generation` at pin time.
+    gen: u32,
+};
+
+/// Find the scheduler whose `fsm_task_slab` contains `ptr`, then pin
+/// the slab against reclamation. Returns null if no live slab in any
+/// registered scheduler contains `ptr` (slab freed already, or `ptr`
+/// is for an FsmTask that was never slab-allocated by a registered
+/// Scheduler — e.g. a Loom-harness stub or a test that bypasses
+/// allocFsmTask). Test mode (no registered schedulers) returns a
+/// no-op pin, mirroring `pinTask`.
+pub fn pinFsmTask(ptr: *fsm_mod.FsmTask) ?FsmTaskPin {
+    const n = global_registry.len.load(.acquire);
+    if (n == 0) {
+        return FsmTaskPin{
+            .allocator = null,
+            .slab = undefined,
+            .gen = ptr.generation.load(.acquire),
+        };
+    }
+
+    var i: u32 = 0;
+    while (i < n) : (i += 1) {
+        const sched = global_registry.slots[i].load(.acquire) orelse continue;
+        const slab_alloc = &sched.fsm_task_slab;
+        const ref = slab_alloc.refFromPtr(ptr) orelse continue;
+        const slab = slab_alloc.pin(ref) orelse continue;
+        return FsmTaskPin{
+            .allocator = slab_alloc,
+            .slab = slab,
+            .gen = ptr.generation.load(.acquire),
+        };
+    }
+    return null;
+}
+
+pub fn unpinFsmTask(pin: FsmTaskPin) void {
     if (pin.allocator) |alloc| alloc.unpin(pin.slab);
 }
 

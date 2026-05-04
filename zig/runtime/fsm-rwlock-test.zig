@@ -32,7 +32,7 @@ fn busySleepMs(ms: i64) void {
 // ----- Fixtures -----------------------------------------------------------
 
 const WriteFsm = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     rw: *pl.ParkingRwLock,
     counter: *u64,
     sched: *fp.Scheduler,
@@ -41,11 +41,11 @@ const WriteFsm = struct {
     completed: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *WriteFsm = @fieldParentPtr("task", t);
+        const self: *WriteFsm = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 self.step = 1;
-                const r = self.rw.tryWriteLockForFsm(&self.task, &self.waiter, self.sched);
+                const r = self.rw.tryWriteLockForFsm(self.task, &self.waiter, self.sched);
                 return switch (r) {
                     .Acquired => cs(self),
                     .Registered => .{ .WaitForLock = {} },
@@ -65,7 +65,7 @@ const WriteFsm = struct {
 };
 
 const ReadFsm = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     rw: *pl.ParkingRwLock,
     counter: *u64,
     sched: *fp.Scheduler,
@@ -74,11 +74,11 @@ const ReadFsm = struct {
     completed: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *ReadFsm = @fieldParentPtr("task", t);
+        const self: *ReadFsm = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 self.step = 1;
-                const r = self.rw.tryReadLockForFsm(&self.task, &self.waiter, self.sched);
+                const r = self.rw.tryReadLockForFsm(self.task, &self.waiter, self.sched);
                 return switch (r) {
                     .Acquired => cs(self),
                     .Registered => .{ .WaitForLock = {} },
@@ -112,9 +112,10 @@ test "R1: uncontended FSM write acquire/release" {
     var rw: pl.ParkingRwLock = .{};
     var counter: u64 = 0;
     var w = WriteFsm{ .task = undefined, .rw = &rw, .counter = &counter, .sched = &sched };
-    w.task = fsm.FsmTask.init(&WriteFsm.doResume);
+    w.task = try sched.allocFsmTask(&WriteFsm.doResume);
+    w.task.ctx = &w;
 
-    sched.enqueueFsm(&w.task);
+    sched.enqueueFsm(w.task);
     sched.drainFsmQueue();
 
     try std.testing.expect(w.completed);
@@ -141,8 +142,9 @@ test "R2: multiple FSM readers hold concurrently" {
     defer alloc.free(readers);
     for (readers) |*r| {
         r.* = .{ .task = undefined, .rw = &rw, .counter = &counter, .sched = &sched };
-        r.task = fsm.FsmTask.init(&ReadFsm.doResume);
-        sched.enqueueFsm(&r.task);
+        r.task = try sched.allocFsmTask(&ReadFsm.doResume);
+        r.task.ctx = r;
+        sched.enqueueFsm(r.task);
     }
     // All N readers should acquire on the fast path (no writer holds).
     sched.drainFsmQueue();
@@ -174,8 +176,9 @@ test "R3: FSM writer blocks FSM readers; write release wakes all readers" {
     defer alloc.free(readers);
     for (readers) |*r| {
         r.* = .{ .task = undefined, .rw = &rw, .counter = &counter, .sched = &sched };
-        r.task = fsm.FsmTask.init(&ReadFsm.doResume);
-        sched.enqueueFsm(&r.task);
+        r.task = try sched.allocFsmTask(&ReadFsm.doResume);
+        r.task.ctx = r;
+        sched.enqueueFsm(r.task);
     }
 
     // First drain: all readers try to acquire, find WRITE_LOCKED, park.
@@ -256,8 +259,9 @@ test "R5: mixed FSM + stackful write contention" {
             // FSM writers
             for (self.fsms) |*f| {
                 f.* = .{ .task = undefined, .rw = self.rw, .counter = self.counter, .sched = self.sched };
-                f.task = fsm.FsmTask.init(&WriteFsm.doResume);
-                self.sched.enqueueFsm(&f.task);
+                f.task = try self.sched.allocFsmTask(&WriteFsm.doResume);
+                f.task.ctx = f;
+                self.sched.enqueueFsm(f.task);
             }
         }
     };
@@ -284,7 +288,7 @@ test "R5: mixed FSM + stackful write contention" {
 // ---- Safety: re-entrancy + timeout ----------------------------------------
 
 const Reentrant = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     rw: *pl.ParkingRwLock,
     sched: *fp.Scheduler,
     w1: qs.WaiterNode = undefined,
@@ -292,10 +296,10 @@ const Reentrant = struct {
     got_deadlock: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Reentrant = @fieldParentPtr("task", t);
-        const r1 = self.rw.tryWriteLockForFsm(&self.task, &self.w1, self.sched);
+        const self: *Reentrant = @ptrCast(@alignCast(t.ctx.?));
+        const r1 = self.rw.tryWriteLockForFsm(self.task, &self.w1, self.sched);
         if (r1 != .Acquired) return .{ .Done = {} };
-        const r2 = self.rw.tryWriteLockForFsm(&self.task, &self.w2, self.sched);
+        const r2 = self.rw.tryWriteLockForFsm(self.task, &self.w2, self.sched);
         if (r2 == .Error and self.task.lock_error == .Deadlock) self.got_deadlock = true;
         self.rw.unlock();
         return .{ .Done = {} };
@@ -314,8 +318,9 @@ test "R6: FSM write re-entrancy returns lock_error.Deadlock" {
 
     var rw: pl.ParkingRwLock = .{};
     var s = Reentrant{ .task = undefined, .rw = &rw, .sched = &sched };
-    s.task = fsm.FsmTask.init(&Reentrant.doResume);
-    sched.enqueueFsm(&s.task);
+    s.task = try sched.allocFsmTask(&Reentrant.doResume);
+    s.task.ctx = &s;
+    sched.enqueueFsm(s.task);
     sched.drainFsmQueue();
     try std.testing.expect(s.got_deadlock);
     try rw.lock();
@@ -323,7 +328,7 @@ test "R6: FSM write re-entrancy returns lock_error.Deadlock" {
 }
 
 const WriteTimeout = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     rw: *pl.ParkingRwLock,
     sched: *fp.Scheduler,
     waiter: qs.WaiterNode = undefined,
@@ -331,11 +336,11 @@ const WriteTimeout = struct {
     got_timeout: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *WriteTimeout = @fieldParentPtr("task", t);
+        const self: *WriteTimeout = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 self.step = 1;
-                const r = self.rw.tryWriteLockForFsm(&self.task, &self.waiter, self.sched);
+                const r = self.rw.tryWriteLockForFsm(self.task, &self.waiter, self.sched);
                 return switch (r) {
                     .Registered => .{ .WaitForLock = {} },
                     else => .{ .Done = {} },
@@ -365,8 +370,9 @@ test "R7: FSM write wait timeout surfaces lock_error.LockTimeout" {
     try rw.lock(); // never released
 
     var s = WriteTimeout{ .task = undefined, .rw = &rw, .sched = &sched };
-    s.task = fsm.FsmTask.init(&WriteTimeout.doResume);
-    sched.enqueueFsm(&s.task);
+    s.task = try sched.allocFsmTask(&WriteTimeout.doResume);
+    s.task.ctx = &s;
+    sched.enqueueFsm(s.task);
     sched.drainFsmQueue();
     try std.testing.expectEqual(fsm.FsmStatus.Blocked, s.task.status);
 

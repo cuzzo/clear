@@ -143,8 +143,10 @@ module FsmTransform
         MIR::Set.new(MIR::FieldGet.new(ctx_ident, sp_field), promise_expr_mir, false),
       ]
 
+      # `task` is a `*FsmTask` (slab-allocated by allocFsmTask; ctx
+      # holds the pointer), so pass directly — no `&` wrapper.
       register_zig =
-        "__ctx_#{id}.#{sp_field}.inner.wg.registerFsmWaiter(&__ctx_#{id}.task)"
+        "__ctx_#{id}.#{sp_field}.inner.wg.registerFsmWaiter(__ctx_#{id}.task)"
       tail = MIR::FsmTailRegisterYield.new(nil, register_zig, "WaitForLock")
 
       # Bind block as MIR Lit-wrapped Zig. Migrating to fully MIR

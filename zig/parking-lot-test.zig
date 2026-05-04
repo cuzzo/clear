@@ -1,6 +1,7 @@
 pub const CLEAR_FRAME_DEBUG = false;
 
 const std = @import("std");
+const fc = @import("runtime/fiber-core.zig");
 const fm = @import("runtime/fiber-memory.zig");
 const fp = @import("runtime/scheduler.zig");
 const ebr_mod = @import("lib/ebr.zig");
@@ -13,6 +14,13 @@ const EbrContext = CheatHeader.EbrContext;
 const ParkingMutex = pl.ParkingMutex;
 const ParkingRwLock = pl.ParkingRwLock;
 const ParkingRwLocked = pl.ParkingRwLocked;
+
+// See `ParkingMutex: AB/BA cycle` for the rationale: kcov / TSan
+// instrumentation grows fiber-stack frames enough that the LockCycle
+// error-recovery path overflows the 16 KB Standard tier. Promote the
+// affected fibers to the 64 KB Large tier under instrumentation.
+const test_stack_size: fc.StackSize =
+    if (@import("build_options").coverage or @import("build_options").tsan) .Large else .Standard;
 
 fn initSched(t_alloc: std.mem.Allocator, ebr: *EbrContext, sp: *fm.StackPool) !fp.Scheduler {
     return fp.Scheduler.init(t_alloc, ebr, sp);
@@ -580,14 +588,13 @@ test "ParkingMutex: re-entrant lock returns error.Deadlock, lock remains usable"
 }
 
 test "ParkingMutex: AB/BA cycle returns error.LockCycle, blocked fiber unblocked" {
-    // Skips under kcov: the LockCycle error-recovery path uses just
-    // enough fiber stack that kcov's timing dilation pushes it over
-    // 16 KB; result is a slab-header overflow + segfault during
-    // scheduler shutdown. A widened STANDARD_STACK_SIZE under coverage
-    // would fix this in a kcov-only path, but threading
-    // build_options into the runtime breaks the `clear` CLI (which
-    // uses file imports, no named modules). See docs/agents.
-    if (@import("build_options").coverage) return error.SkipZigTest;
+    // The LockCycle error-recovery path uses enough fiber stack that
+    // kcov's timing dilation OR TSan's per-call shadow-memory +
+    // interceptor frames push it over the 16 KB Standard tier; result
+    // was a slab-header overflow + segfault during scheduler shutdown
+    // (`destroyToDepot -> removeSlab` walking a corrupted prev/next
+    // chain). The fix is to spawn the participating fibers at the 64
+    // KB Large tier under instrumentation; see test_stack_size below.
     // Scheduling design (LIFO ready queue):
     //   Spawn B first, then A. LIFO pops A first.
     //   A: locks mu_a, parks on rendezvous (pre-locked, no owner).
@@ -671,13 +678,13 @@ test "ParkingMutex: AB/BA cycle returns error.LockCycle, blocked fiber unblocked
             const self = @as(*@This(), @ptrCast(@alignCast(raw.?)));
             self.s.wg.add(2);
             // Spawn B first so LIFO runs A first.
-            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{});
-            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{});
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberB.run)), self.bc, .{ .stack_size = test_stack_size });
+            try fp.active_scheduler.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&FiberA.run)), self.ac, .{ .stack_size = test_stack_size });
             self.s.wg.wait();
         }
     };
     var main_ctx = Main{ .s = &shared, .ac = &a_ctx, .bc = &b_ctx };
-    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{});
+    try sched.submitSpawn(@intFromPtr(&Runtime.entryWrapper), @as(CheatHeader.TaskFn, @ptrCast(&Main.run)), &main_ctx, .{ .stack_size = test_stack_size });
     sched.run();
 
     try std.testing.expect(shared.a_got_lock_cycle);

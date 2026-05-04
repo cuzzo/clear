@@ -12,9 +12,12 @@
 // FsmIoWaiter, which encodes a marker in the CQE user_data so the scheduler's
 // existing drain path routes the wake to the FSM queue.
 //
-// FsmTasks are user-allocated (the caller owns the state struct that embeds
-// or owns the *FsmTask). This file provides the shape, protocol, and a
-// couple of small helpers; it intentionally does not allocate.
+// FsmTasks are slab-allocated by the Scheduler (`fsm_task_slab`); the
+// user-owned ctx struct holds a `*FsmTask` and the FsmTask's `ctx` field
+// points back. The slab gives detectCycleFsm a Pin protocol that mirrors
+// the stackful Task slab — chain walkers can deref a *FsmTask safely
+// across schedulers without UAF. This file provides the FsmTask shape;
+// allocation lives in `Scheduler.allocFsmTask` (runtime/scheduler.zig).
 //
 // Out-of-scope for this module (handled by the caller / scheduler):
 //   - state struct layout (user-defined)
@@ -23,6 +26,14 @@
 
 const std = @import("std");
 const ebr_mod = @import("../lib/ebr.zig");
+
+// Comptime atomic type selection: SimAtomic in Loom mode, real atomics
+// otherwise. Mirrors queues.zig: loom harness exports SimAtomic so FsmTask
+// field accesses become yield points for deterministic interleaving.
+const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
 
 // -----------------------------------------------------------------------------
 // Status
@@ -84,7 +95,7 @@ pub const ResumeFn = *const fn (*FsmTask) YieldReason;
 // -----------------------------------------------------------------------------
 //
 // Type-erased handle to a state machine. Recovery from `*FsmTask` to the
-// owning ctx struct is via `@fieldParentPtr("task", t)` — Zig resolves the
+// owning ctx struct is via `@ptrCast(@alignCast(t.ctx.?))` — Zig resolves the
 // offset at comptime, so the ctx struct can place `task` at any field
 // position. The codegen and runtime tests place it at offset 0 by
 // convention (predictable layout for debuggers, the offset-0 subtraction
@@ -109,25 +120,48 @@ pub const FsmTask = struct {
     status: FsmStatus = .Ready,
     /// Profile-only: spawn timestamp in ns.
     spawn_ns: u64 = 0,
+    /// Forward pointer to the user-owned ctx struct that holds resume
+    /// state. FsmTask is slab-allocated separately from the ctx (mirrors
+    /// stackful Task: slab pin protects detectCycleFsm chain walks from
+    /// UAF), so resume_fn recovers ctx via
+    /// `@ptrCast(@alignCast(t.ctx.?))` rather than the legacy
+    /// `@fieldParentPtr("task", t)`. Set at spawn, cleared at Done.
+    ctx: ?*anyopaque = null,
+    /// Monotonic counter of every park/wake transition. detectCycleFsm
+    /// uses this to validate per-hop snapshots across a chain walk
+    /// (mirrors stackful Task.seq).
+    seq: Atomic(u32) = Atomic(u32).init(0),
+    /// Per-slot generation. Bumped by Scheduler.allocFsmTask on every
+    /// allocation from fsm_task_slab. detectCycleFsm captures this
+    /// after pinning the slab and re-reads on validation; mismatch =
+    /// slot reused mid-walk = torn snapshot. Mirrors stackful
+    /// Task.generation.
+    generation: Atomic(u32) = Atomic(u32).init(0),
     /// Non-null when blocked on IO.
     waiter: ?*FsmIoWaiter = null,
     /// Non-null when blocked on a parking-lot lock. Opaque `*WaiterNode`.
-    lock_waiter: ?*anyopaque = null,
+    /// Atomic so wake-side writes (under queue_spin) establish a
+    /// TSan-visible happens-before with reader-side scans
+    /// (scanFsmLockWaiters, detectCycleFsm). Mirrors the stackful
+    /// `lock_waiter_node` protocol.
+    lock_waiter: Atomic(?*anyopaque) = Atomic(?*anyopaque).init(null),
     /// Non-null when blocked on a parking-lot lock — points at the
     /// lock's WaiterList so scanFsmLockWaiters can remove the waiter
     /// node on timeout. Mirrors stackful Task.waiting_for_lock_list.
-    waiting_for_lock_list: ?*anyopaque = null,
+    waiting_for_lock_list: Atomic(?*anyopaque) = Atomic(?*anyopaque).init(null),
     /// Surfaced by parking-lot / scheduler when a lock op fails. The
     /// resume fn reads and clears on next dispatch.
     lock_error: FsmLockError = .None,
     /// Points to the lock this task is parked on (opaque). Cleared on wake.
-    waiting_for_lock: ?*anyopaque = null,
+    /// Atomic for the same reason as `lock_waiter` — read by
+    /// scanFsmLockWaiters / detectCycleFsm without holding queue_spin.
+    waiting_for_lock: Atomic(?*anyopaque) = Atomic(?*anyopaque).init(null),
     /// FSM holder of the lock we're parked on (if FSM-held). Used by
     /// detectCycleFsm to walk mixed and pure-FSM cycles.
-    waiting_for_fsm_owner: ?*FsmTask = null,
+    waiting_for_fsm_owner: Atomic(?*FsmTask) = Atomic(?*FsmTask).init(null),
     /// Monotonic ms timestamp of when this FSM parked. Read by the
     /// scheduler's lock timeout scanner.
-    lock_wait_start_ms: i64 = 0,
+    lock_wait_start_ms: Atomic(i64) = Atomic(i64).init(0),
     /// Monotonic ms timestamp at which this FSM should be woken
     /// from a sleep. Set by Scheduler.fsmSleepTask before the resume
     /// fn yields WaitForLock; the scan loop in run() compares
@@ -147,7 +181,7 @@ pub const FsmTask = struct {
     ///
     /// The FSM emit synthesizes a per-ctx-type fn:
     ///   fn destroyTask(t: *FsmTask) void {
-    ///       const c: *@This() = @fieldParentPtr("task", t);
+    ///       const c: *@This() = @ptrCast(@alignCast(t.ctx.?));
     ///       c.alloc.destroy(c);
     ///   }
     /// and stores its pointer here at spawn time.
@@ -195,6 +229,8 @@ pub const FsmTask = struct {
 // Result is filled by the scheduler on CQE drain, then the task is enqueued
 // back onto fsm_ready_queue.
 
+// (FsmRunQueue uses the file-level `Atomic` alias declared at the top.)
+
 pub const FsmIoWaiter = struct {
     task: *FsmTask,
     result: i32 = undefined,
@@ -236,8 +272,6 @@ pub const FsmIoWaiter = struct {
 // (queues-test.zig + vopr-loom.zig); since FsmRunQueue mirrors it verbatim
 // with only the element type changed, the memory-ordering correctness
 // carries over.
-
-const Atomic = std.atomic.Value;
 
 pub const FsmRunQueue = struct {
     pub const INITIAL_LOG_SIZE: u5 = 6; // 2^6 = 64 slots
@@ -383,7 +417,7 @@ pub const FsmRunQueue = struct {
 pub fn dispatchOnce(task: *FsmTask) YieldReason {
     // Clear any previous waiter; a WaitForIO / WaitForLock will set fresh.
     task.waiter = null;
-    task.lock_waiter = null;
+    task.lock_waiter.store(null, .release);
     const reason = task.resume_fn(task);
     switch (reason) {
         .Done => task.status = .Finished,
@@ -409,32 +443,31 @@ const testing = std.testing;
 
 test "FsmTask: trivial single-state task completes" {
     const State = struct {
-        task: FsmTask,
         seen: u32 = 0,
 
         fn doResume(t: *FsmTask) YieldReason {
-            const self: *@This() = @fieldParentPtr("task", t);
+            const self: *@This() = @ptrCast(@alignCast(t.ctx.?));
             self.seen += 1;
             return .{ .Done = {} };
         }
     };
-    var s: State = .{ .task = undefined, .seen = 0 };
-    s.task = FsmTask.init(&State.doResume);
+    var s: State = .{ .seen = 0 };
+    var task = FsmTask.init(&State.doResume);
+    task.ctx = &s;
 
-    const reason = dispatchOnce(&s.task);
+    const reason = dispatchOnce(&task);
     try testing.expect(reason == .Done);
     try testing.expectEqual(@as(u32, 1), s.seen);
-    try testing.expectEqual(FsmStatus.Finished, s.task.status);
+    try testing.expectEqual(FsmStatus.Finished, task.status);
 }
 
 test "FsmTask: multi-step state machine advances per resume" {
     const State = struct {
-        task: FsmTask,
         step: u8 = 0,
         accumulator: u64 = 0,
 
         fn doResume(t: *FsmTask) YieldReason {
-            const self: *@This() = @fieldParentPtr("task", t);
+            const self: *@This() = @ptrCast(@alignCast(t.ctx.?));
             switch (self.step) {
                 0 => {
                     self.accumulator = 10;
@@ -454,29 +487,30 @@ test "FsmTask: multi-step state machine advances per resume" {
             }
         }
     };
-    var s: State = .{ .task = undefined };
-    s.task = FsmTask.init(&State.doResume);
+    var s: State = .{};
+    var task = FsmTask.init(&State.doResume);
+    task.ctx = &s;
 
-    try testing.expect(dispatchOnce(&s.task) == .Yielded);
-    try testing.expectEqual(FsmStatus.Ready, s.task.status);
-    try testing.expect(dispatchOnce(&s.task) == .Yielded);
-    try testing.expect(dispatchOnce(&s.task) == .Done);
-    try testing.expectEqual(FsmStatus.Finished, s.task.status);
+    try testing.expect(dispatchOnce(&task) == .Yielded);
+    try testing.expectEqual(FsmStatus.Ready, task.status);
+    try testing.expect(dispatchOnce(&task) == .Yielded);
+    try testing.expect(dispatchOnce(&task) == .Done);
+    try testing.expectEqual(FsmStatus.Finished, task.status);
     try testing.expectEqual(@as(u64, 27), s.accumulator);
 }
 
 test "FsmTask: WaitForIO sets Blocked and stashes waiter" {
     const State = struct {
-        task: FsmTask,
+        task: *FsmTask = undefined,
         waiter: FsmIoWaiter = undefined,
         step: u8 = 0,
 
         fn doResume(t: *FsmTask) YieldReason {
-            const self: *@This() = @fieldParentPtr("task", t);
+            const self: *@This() = @ptrCast(@alignCast(t.ctx.?));
             switch (self.step) {
                 0 => {
                     self.step = 1;
-                    self.waiter = FsmIoWaiter.init(&self.task);
+                    self.waiter = FsmIoWaiter.init(self.task);
                     return .{ .WaitForIO = &self.waiter };
                 },
                 1 => {
@@ -489,21 +523,23 @@ test "FsmTask: WaitForIO sets Blocked and stashes waiter" {
             }
         }
     };
-    var s: State = .{ .task = undefined };
-    s.task = FsmTask.init(&State.doResume);
+    var s: State = .{};
+    var task = FsmTask.init(&State.doResume);
+    task.ctx = &s;
+    s.task = &task;
 
-    const reason = dispatchOnce(&s.task);
+    const reason = dispatchOnce(&task);
     try testing.expect(reason == .WaitForIO);
-    try testing.expectEqual(FsmStatus.Blocked, s.task.status);
-    try testing.expect(s.task.waiter == &s.waiter);
+    try testing.expectEqual(FsmStatus.Blocked, task.status);
+    try testing.expect(task.waiter == &s.waiter);
 
     // Simulate CQE arrival: scheduler fills result, re-enqueues, re-dispatches.
     s.waiter.result = 42;
-    const second = dispatchOnce(&s.task);
+    const second = dispatchOnce(&task);
     try testing.expect(second == .Done);
-    try testing.expectEqual(FsmStatus.Finished, s.task.status);
+    try testing.expectEqual(FsmStatus.Finished, task.status);
     // Waiter is cleared on re-dispatch entry.
-    try testing.expect(s.task.waiter == null);
+    try testing.expect(task.waiter == null);
 }
 
 test "FsmIoWaiter: encode/decode round-trips with FSM marker" {
@@ -532,24 +568,24 @@ test "FsmIoWaiter: marker distinguishes FSM from stackful IoWaiter" {
 
 test "dispatchOnce: Yielded reuses task across many iterations" {
     const State = struct {
-        task: FsmTask,
         remaining: u32 = 0,
         sum: u64 = 0,
 
         fn doResume(t: *FsmTask) YieldReason {
-            const self: *@This() = @fieldParentPtr("task", t);
+            const self: *@This() = @ptrCast(@alignCast(t.ctx.?));
             if (self.remaining == 0) return .{ .Done = {} };
             self.sum += self.remaining;
             self.remaining -= 1;
             return .{ .Yielded = {} };
         }
     };
-    var s: State = .{ .task = undefined, .remaining = 100 };
-    s.task = FsmTask.init(&State.doResume);
+    var s: State = .{ .remaining = 100 };
+    var task = FsmTask.init(&State.doResume);
+    task.ctx = &s;
 
     var loops: u32 = 0;
     while (true) {
-        const r = dispatchOnce(&s.task);
+        const r = dispatchOnce(&task);
         loops += 1;
         if (r == .Done) break;
     }

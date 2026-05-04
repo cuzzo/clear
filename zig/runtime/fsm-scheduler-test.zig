@@ -19,12 +19,12 @@ const alloc = std.testing.allocator;
 // ----- test fixtures ---------------------------------------------------------
 
 const DoneAfterN = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     remaining: u32,
     step_count: u32 = 0,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *DoneAfterN = @fieldParentPtr("task", t);
+        const self: *DoneAfterN = @ptrCast(@alignCast(t.ctx.?));
         self.step_count += 1;
         if (self.remaining == 0) return .{ .Done = {} };
         self.remaining -= 1;
@@ -35,8 +35,9 @@ const DoneAfterN = struct {
         return .{ .task = undefined, .remaining = n };
     }
 
-    fn bind(self: *DoneAfterN) void {
-        self.task = fsm.FsmTask.init(&DoneAfterN.doResume);
+    fn bind(self: *DoneAfterN, sched: *fp.Scheduler) !void {
+        self.task = try sched.allocFsmTask(&DoneAfterN.doResume);
+        self.task.ctx = self;
     }
 };
 
@@ -51,9 +52,9 @@ test "enqueueFsm + drainFsmQueue: single-step task finishes in one drain" {
     defer sched.deinit();
 
     var s = DoneAfterN.init(0); // Done on first resume
-    s.bind();
+    try s.bind(&sched);
 
-    sched.enqueueFsm(&s.task);
+    sched.enqueueFsm(s.task);
     try std.testing.expect(sched.fsm_ready_queue.len() == 1);
     try std.testing.expectEqual(@as(u64, 1), sched.active_tasks.load(.monotonic));
 
@@ -73,9 +74,9 @@ test ".Yielded defers to next iteration, does not re-drain within same batch" {
     defer sched.deinit();
 
     var s = DoneAfterN.init(5); // 5 yields, then Done (6 total resumes)
-    s.bind();
+    try s.bind(&sched);
 
-    sched.enqueueFsm(&s.task);
+    sched.enqueueFsm(s.task);
 
     // Single batch: the task should be dispatched exactly once even though it
     // re-queued itself via .Yielded. Prevents FSM livelock.
@@ -102,8 +103,8 @@ test "multiple FSM tasks drain fairly in one batch" {
     var tasks: [10]DoneAfterN = undefined;
     for (&tasks) |*t| {
         t.* = DoneAfterN.init(0);
-        t.bind();
-        sched.enqueueFsm(&t.task);
+        try t.bind(&sched);
+        sched.enqueueFsm(t.task);
     }
     try std.testing.expectEqual(@as(u64, 10), sched.active_tasks.load(.monotonic));
 
@@ -126,17 +127,17 @@ test "WaitForIO parks task; manual wake via enqueueFsm resumes" {
     defer sched.deinit();
 
     const IoTask = struct {
-        task: fsm.FsmTask,
+        task: *fsm.FsmTask,
         waiter: fsm.FsmIoWaiter = undefined,
         step: u8 = 0,
         final_result: i32 = 0,
 
         fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-            const self: *@This() = @fieldParentPtr("task", t);
+            const self: *@This() = @ptrCast(@alignCast(t.ctx.?));
             switch (self.step) {
                 0 => {
                     self.step = 1;
-                    self.waiter = fsm.FsmIoWaiter.init(&self.task);
+                    self.waiter = fsm.FsmIoWaiter.init(self.task);
                     return .{ .WaitForIO = &self.waiter };
                 },
                 1 => {
@@ -148,9 +149,10 @@ test "WaitForIO parks task; manual wake via enqueueFsm resumes" {
         }
     };
     var s: IoTask = .{ .task = undefined };
-    s.task = fsm.FsmTask.init(&IoTask.doResume);
+    s.task = try sched.allocFsmTask(&IoTask.doResume);
+    s.task.ctx = &s;
 
-    sched.enqueueFsm(&s.task);
+    sched.enqueueFsm(s.task);
     sched.drainFsmQueue();
     try std.testing.expectEqual(fsm.FsmStatus.Blocked, s.task.status);
     try std.testing.expect(sched.fsm_ready_queue.len() == 0);
@@ -159,7 +161,7 @@ test "WaitForIO parks task; manual wake via enqueueFsm resumes" {
 
     // Simulate CQE arrival: fill result, re-enqueue (what processCqes would do).
     s.waiter.result = 128;
-    sched.enqueueFsm(&s.task);
+    sched.enqueueFsm(s.task);
     // enqueueFsm increments active_tasks; we need to offset because the task
     // was never decremented — it just moved from Blocked to Ready.
     _ = sched.active_tasks.fetchSub(1, .monotonic);
@@ -181,8 +183,8 @@ test "hasWork reports true while FSM queue is non-empty" {
     try std.testing.expect(!sched.hasWorkPub());
 
     var s = DoneAfterN.init(0);
-    s.bind();
-    sched.enqueueFsm(&s.task);
+    try s.bind(&sched);
+    sched.enqueueFsm(s.task);
 
     try std.testing.expect(sched.hasWorkPub());
 

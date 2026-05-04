@@ -27,13 +27,22 @@ const alloc = std.testing.allocator;
 
 // Dummy FsmTask we can identify by its index. We don't run these as
 // real FSMs; we just use FsmTask as a typed handle to push/pop/steal.
+// Backed by a heap-allocated FsmTask so each marker has its own
+// stable slot — the queue stores pointers and the test asserts each
+// push/pop is on a distinct ID.
 const Marker = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     id: u32,
 
-    fn bind(self: *Marker, id: u32) void {
+    fn bind(self: *Marker, allocator: std.mem.Allocator, id: u32) !void {
         self.id = id;
-        self.task = fsm.FsmTask.init(&Marker.never);
+        self.task = try allocator.create(fsm.FsmTask);
+        self.task.* = fsm.FsmTask.init(&Marker.never);
+        self.task.ctx = self;
+    }
+
+    fn unbind(self: *Marker, allocator: std.mem.Allocator) void {
+        allocator.destroy(self.task);
     }
 
     fn never(_: *fsm.FsmTask) fsm.YieldReason {
@@ -51,9 +60,10 @@ test "concurrent: owner push then pop, all tasks accounted for" {
     const N = 5_000;
     const markers = try alloc.alloc(Marker, N);
     defer alloc.free(markers);
-    for (markers, 0..) |*m, i| m.bind(@intCast(i));
+    for (markers, 0..) |*m, i| try m.bind(alloc, @intCast(i));
+    defer for (markers) |*m| m.unbind(alloc);
 
-    for (markers) |*m| try q.push(alloc, &m.task);
+    for (markers) |*m| try q.push(alloc, m.task);
     try std.testing.expectEqual(@as(usize, N), q.len());
 
     var seen = try alloc.alloc(bool, N);
@@ -62,7 +72,7 @@ test "concurrent: owner push then pop, all tasks accounted for" {
 
     var popped: usize = 0;
     while (q.pop()) |t| {
-        const mp: *Marker = @fieldParentPtr("task", t);
+        const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
         try std.testing.expect(!seen[mp.id]);
         seen[mp.id] = true;
         popped += 1;
@@ -80,8 +90,9 @@ test "concurrent: owner pop races with thief stealOne, no duplicates" {
     const N = 10_000;
     const markers = try alloc.alloc(Marker, N);
     defer alloc.free(markers);
-    for (markers, 0..) |*m, i| m.bind(@intCast(i));
-    for (markers) |*m| try q.push(alloc, &m.task);
+    for (markers, 0..) |*m, i| try m.bind(alloc, @intCast(i));
+    defer for (markers) |*m| m.unbind(alloc);
+    for (markers) |*m| try q.push(alloc, m.task);
 
     const seen = try alloc.alloc(std.atomic.Value(u8), N);
     defer alloc.free(seen);
@@ -102,7 +113,7 @@ test "concurrent: owner pop races with thief stealOne, no duplicates" {
     const Owner = struct {
         fn go(qp: *fsm.FsmRunQueue, seen_: []std.atomic.Value(u8), pc: *std.atomic.Value(u64), done: *std.atomic.Value(bool)) void {
             while (qp.pop()) |t| {
-                const mp: *Marker = @fieldParentPtr("task", t);
+                const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
                 const prev = seen_[mp.id].fetchAdd(1, .acq_rel);
                 if (prev != 0) @panic("duplicate task in owner pop");
                 _ = pc.fetchAdd(1, .release);
@@ -114,7 +125,7 @@ test "concurrent: owner pop races with thief stealOne, no duplicates" {
         fn go(qp: *fsm.FsmRunQueue, seen_: []std.atomic.Value(u8), sc: *std.atomic.Value(u64), done: *std.atomic.Value(bool)) void {
             while (!done.load(.acquire)) {
                 if (qp.stealOne()) |t| {
-                    const mp: *Marker = @fieldParentPtr("task", t);
+                    const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
                     const prev = seen_[mp.id].fetchAdd(1, .acq_rel);
                     if (prev != 0) @panic("duplicate task in thief steal");
                     _ = sc.fetchAdd(1, .release);
@@ -124,7 +135,7 @@ test "concurrent: owner pop races with thief stealOne, no duplicates" {
             }
             // After owner signals done, drain any residual tasks that raced.
             while (qp.stealOne()) |t| {
-                const mp: *Marker = @fieldParentPtr("task", t);
+                const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
                 const prev = seen_[mp.id].fetchAdd(1, .acq_rel);
                 if (prev != 0) @panic("duplicate task in thief drain");
                 _ = sc.fetchAdd(1, .release);
@@ -155,7 +166,8 @@ test "concurrent: owner interleaved push + pop races with thief" {
     const N = 10_000;
     const markers = try alloc.alloc(Marker, N);
     defer alloc.free(markers);
-    for (markers, 0..) |*m, i| m.bind(@intCast(i));
+    for (markers, 0..) |*m, i| try m.bind(alloc, @intCast(i));
+    defer for (markers) |*m| m.unbind(alloc);
 
     const seen = try alloc.alloc(std.atomic.Value(u8), N);
     defer alloc.free(seen);
@@ -175,9 +187,9 @@ test "concurrent: owner interleaved push + pop races with thief" {
             // Interleave push + pop: push 8, pop 1, repeat.
             while (i < ms.len) {
                 const end = @min(i + 8, ms.len);
-                while (i < end) : (i += 1) qp.push(alloc, &ms[i].task) catch unreachable;
+                while (i < end) : (i += 1) qp.push(alloc, ms[i].task) catch unreachable;
                 if (qp.pop()) |t| {
-                    const mp: *Marker = @fieldParentPtr("task", t);
+                    const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
                     const prev = seen_[mp.id].fetchAdd(1, .acq_rel);
                     if (prev != 0) @panic("duplicate in producer pop");
                     _ = cnt.fetchAdd(1, .release);
@@ -185,7 +197,7 @@ test "concurrent: owner interleaved push + pop races with thief" {
             }
             // Drain remaining (non-stolen) tasks.
             while (qp.pop()) |t| {
-                const mp: *Marker = @fieldParentPtr("task", t);
+                const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
                 const prev = seen_[mp.id].fetchAdd(1, .acq_rel);
                 if (prev != 0) @panic("duplicate in producer drain");
                 _ = cnt.fetchAdd(1, .release);
@@ -197,7 +209,7 @@ test "concurrent: owner interleaved push + pop races with thief" {
         fn go(qp: *fsm.FsmRunQueue, seen_: []std.atomic.Value(u8), cnt: *std.atomic.Value(u64), done: *std.atomic.Value(bool)) void {
             while (!done.load(.acquire)) {
                 if (qp.stealOne()) |t| {
-                    const mp: *Marker = @fieldParentPtr("task", t);
+                    const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
                     const prev = seen_[mp.id].fetchAdd(1, .acq_rel);
                     if (prev != 0) @panic("duplicate in thief");
                     _ = cnt.fetchAdd(1, .release);
@@ -206,7 +218,7 @@ test "concurrent: owner interleaved push + pop races with thief" {
                 }
             }
             while (qp.stealOne()) |t| {
-                const mp: *Marker = @fieldParentPtr("task", t);
+                const mp: *Marker = @ptrCast(@alignCast(t.ctx.?));
                 const prev = seen_[mp.id].fetchAdd(1, .acq_rel);
                 if (prev != 0) @panic("duplicate in thief drain");
                 _ = cnt.fetchAdd(1, .release);

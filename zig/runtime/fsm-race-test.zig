@@ -31,12 +31,12 @@ const TASKS_PER_THREAD = 2_000;
 const YIELDS_PER_TASK = 3;
 
 const Worker = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     yields_remaining: u8,
     acc: u64 = 0,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Worker = @fieldParentPtr("task", t);
+        const self: *Worker = @ptrCast(@alignCast(t.ctx.?));
         self.acc += 1;
         if (self.yields_remaining == 0) return .{ .Done = {} };
         self.yields_remaining -= 1;
@@ -56,8 +56,9 @@ fn threadBody(state: *ThreadState) void {
     // each yielding Y times.
     for (state.workers) |*w| {
         w.* = .{ .task = undefined, .yields_remaining = YIELDS_PER_TASK };
-        w.task = fsm.FsmTask.init(&Worker.doResume);
-        state.sched.enqueueFsm(&w.task);
+        w.task = state.sched.allocFsmTask(&Worker.doResume) catch unreachable;
+        w.task.ctx = w;
+        state.sched.enqueueFsm(w.task);
     }
     var iters: u32 = 0;
     const iter_cap: u32 = @intCast((TASKS_PER_THREAD * (YIELDS_PER_TASK + 1) / 64) + 100);
@@ -136,33 +137,40 @@ test "FSM race: SPSC submitFsmSpawn producer + consumer coordination" {
     defer alloc.free(workers);
     for (workers) |*w| {
         w.* = .{ .task = undefined, .yields_remaining = 0 };
-        w.task = fsm.FsmTask.init(&Worker.doResume);
+        w.task = try target.allocFsmTask(&Worker.doResume);
+        w.task.ctx = w;
     }
 
     var producer_done = std.atomic.Value(bool).init(false);
 
     const Producer = struct {
         fn go(t: *fp.Scheduler, ws: []Worker, done: *std.atomic.Value(bool)) void {
-            for (ws) |*w| t.submitFsmSpawn(&w.task) catch unreachable;
+            for (ws) |*w| t.submitFsmSpawn(w.task) catch unreachable;
             done.store(true, .release);
         }
     };
 
     var prod = try std.Thread.spawn(.{}, Producer.go, .{ &target, workers, &producer_done });
 
-    // Consumer (main thread): drain until producer signals done AND the
-    // queue is empty AND active_tasks is 0.
+    // Wait until the producer has finished publishing all SPSC messages
+    // before using scheduler idleness as a completion signal. Otherwise
+    // an instrumented/slow schedule can observe producer_done=true while
+    // the target has not yet consumed messages into active_tasks.
+    prod.join();
+
+    // Consumer (main thread): drain until every task has actually reached
+    // Finished and active_tasks has balanced to 0.
     var iters: u64 = 0;
     while (true) : (iters += 1) {
         target.drainChannels();
         target.drainFsmQueue();
-        if (producer_done.load(.acquire) and
+        var completed_now: usize = 0;
+        for (workers) |w| if (w.task.status == .Finished) { completed_now += 1; };
+        if (completed_now == TOTAL and
             target.fsm_ready_queue.len() == 0 and
             target.active_tasks.load(.monotonic) == 0) break;
         if (iters > 10_000_000) return error.DrainTimeout;
     }
-
-    prod.join();
 
     var completed: usize = 0;
     for (workers) |w| if (w.task.status == .Finished) { completed += 1; };
@@ -199,8 +207,9 @@ test "FSM race: concurrent scheduler threads, global completion count balances" 
         fn go(sch: *fp.Scheduler, ws: []Worker) void {
             for (ws) |*w| {
                 w.* = .{ .task = undefined, .yields_remaining = 1 };
-                w.task = fsm.FsmTask.init(&Worker.doResume);
-                sch.enqueueFsm(&w.task);
+                w.task = sch.allocFsmTask(&Worker.doResume) catch unreachable;
+                w.task.ctx = w;
+                sch.enqueueFsm(w.task);
             }
             var it: u32 = 0;
             while (sch.fsm_ready_queue.len() > 0) : (it += 1) {

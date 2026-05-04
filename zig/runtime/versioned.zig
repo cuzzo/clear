@@ -282,6 +282,17 @@ pub fn Versioned(comptime T: type) type {
             var success = false;
             defer if (!success) allocator.destroy(new_ptr);
 
+            // EBR critical section spans the entire retry loop. Without
+            // this pin, the `new_ptr.* = old_ptr.*` copy below would
+            // race against a concurrent updater retiring the same
+            // old_ptr and a third updater's `dumpTrash` freeing it
+            // (TSan-flagged on versioned-fiber-stress-test). The pin
+            // forces reclaim's global_epoch to stop at this thread's
+            // local until update() returns, so any old_ptr we observe
+            // via `self.ptr.load` is alive throughout the memcpy + CAS.
+            trt.ebr.enter();
+            defer trt.ebr.exit();
+
             var retries: usize = 0;
             while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
                 // 1. Load the current state (Snapshot). `.acquire`

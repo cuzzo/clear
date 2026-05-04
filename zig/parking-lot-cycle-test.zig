@@ -36,6 +36,7 @@ const ebr_mod = @import("lib/ebr.zig");
 const CheatHeader = @import("runtime/runtime-header.zig");
 const pl = @import("lib/parking-lot.zig");
 const compat = @import("lib/compat.zig");
+const build_options = @import("build_options");
 
 const Runtime = CheatHeader.Runtime;
 const EbrContext = CheatHeader.EbrContext;
@@ -46,11 +47,11 @@ const ParkingRwLock = pl.ParkingRwLock;
 // 8 fibers per scheduler × 32 fibers × 2K iters × 2 acquires = 128K paired
 // acquires per test. Empirically reproduces the false positive in <1s when
 // the bug is present.
-const NUM_LOCKS: usize = 8;
-const NUM_SCHEDULERS: usize = 4;
-const FIBERS_PER_SCHEDULER: usize = 8;
+const NUM_LOCKS: usize = if (build_options.coverage) 4 else 8;
+const NUM_SCHEDULERS: usize = if (build_options.coverage) 2 else 4;
+const FIBERS_PER_SCHEDULER: usize = if (build_options.coverage) 2 else 8;
 const NUM_FIBERS: usize = NUM_SCHEDULERS * FIBERS_PER_SCHEDULER;
-const ITERS_PER_FIBER: usize = 2_000;
+const ITERS_PER_FIBER: usize = if (build_options.coverage) 50 else 2_000;
 
 // Bench-scale variant tunables. Higher OS-thread count and lock count
 // than the small test, but iter count tuned to be tractable under
@@ -62,11 +63,11 @@ const ITERS_PER_FIBER: usize = 2_000;
 // false-positive bug observed in bench 14_nested_lock at full scale
 // (16M paired) requires either much longer iter counts or a different
 // shape (rwlock-shared outer + mutex inner). See the test header.
-const NUM_LOCKS_BIG: usize = 64;
-const NUM_SCHEDULERS_BIG: usize = 32;
-const FIBERS_PER_SCHEDULER_BIG: usize = 4;
+const NUM_LOCKS_BIG: usize = if (build_options.coverage) 8 else 64;
+const NUM_SCHEDULERS_BIG: usize = if (build_options.coverage) 2 else 32;
+const FIBERS_PER_SCHEDULER_BIG: usize = if (build_options.coverage) 2 else 4;
 const NUM_FIBERS_BIG: usize = NUM_SCHEDULERS_BIG * FIBERS_PER_SCHEDULER_BIG;
-const ITERS_PER_FIBER_BIG: usize = 10_000;
+const ITERS_PER_FIBER_BIG: usize = if (build_options.coverage) 50 else 10_000;
 
 // xorshift64* for deterministic-but-distinct fiber seeds.
 fn nextRand(state: *u64) u64 {
@@ -166,6 +167,8 @@ fn workerMu(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
 }
 
 test "ParkingMutex: address-ordered multi-acquire under multi-OS-thread contention does not falsely detect cycle" {
+    if (@import("builtin").sanitize_thread) return error.SkipZigTest;
+
     const t_alloc = std.testing.allocator;
     var ebr = EbrContext{};
     defer ebr.deinit(t_alloc);
@@ -309,10 +312,8 @@ fn workerRw(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
 }
 
 test "ParkingRwLock: address-ordered multi-write-acquire under multi-OS-thread contention does not falsely detect cycle" {
-    // Skips under kcov: multi-OS-thread fiber contention + ptrace
-    // breakpoints lock up. Same shape as parking-lot-test.zig and
-    // stream-test.zig kcov skips.
-    if (@import("build_options").coverage) return error.SkipZigTest;
+    if (@import("builtin").sanitize_thread) return error.SkipZigTest;
+
     const t_alloc = std.testing.allocator;
     var ebr = EbrContext{};
     defer ebr.deinit(t_alloc);

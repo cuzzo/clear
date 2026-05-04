@@ -127,14 +127,25 @@ fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerr
 
 // ---------------- Stackful Writer / Reader fibers --------------------
 
+// Sample fields are atomic so TSan does not flag the writer's plain
+// reads/writes as data races vs the reader's loads. The parking-lot
+// rwlock provides the actual mutual exclusion, but TSan does not
+// model parking-lot as a synchronization primitive — without atomics
+// here every (writer-write, reader-read) pair on a/b looks like an
+// unsynchronized race in TSan's view, even though the rwlock semantics
+// make it safe. Using `.monotonic` ordering preserves the test's
+// torn-read detection (writer still has a window between the a-store
+// and the b-store; reader still has a window between the a-load and
+// the b-load) without burning the protected-data accesses through
+// extra acquire/release pairs.
 const Sample = struct {
-    a: u64,
-    b: u64,
+    a: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    b: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
 };
 
 const Shared = struct {
     rw: pl.ParkingRwLock = .{},
-    sample: Sample = .{ .a = 0, .b = 0 },
+    sample: Sample = .{},
     torn_reads: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
     done_writers: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
 };
@@ -154,13 +165,18 @@ const WriterCtx = struct {
         var op: usize = 0;
         while (op < ctx.iters) : (op += 1) {
             ctx.shared.rw.lock() catch continue;
-            // Mutate non-atomically with a deliberate window. If a
-            // reader is granted while we hold (the bug), it can read
-            // (a=i, b=stale_or_partial).
-            ctx.shared.sample.a = i;
+            // Mutate with a deliberate window between the two stores.
+            // If a reader is granted while we hold (the bug under
+            // test), it can read (a=i, b=stale_or_partial). The .a/.b
+            // stores are atomic only so TSan does not flag them as
+            // unsynchronized data races against the reader's loads
+            // (TSan does not model the parking-lot rwlock); the
+            // intentional torn-read window between the two stores is
+            // preserved.
+            ctx.shared.sample.a.store(i, .monotonic);
             var k: usize = 0;
             while (k < 32) : (k += 1) std.atomic.spinLoopHint();
-            ctx.shared.sample.b = i * 2;
+            ctx.shared.sample.b.store(i * 2, .monotonic);
             ctx.shared.rw.unlock();
             i += 1;
         }
@@ -183,10 +199,10 @@ const ReaderCtx = struct {
         var op: usize = 0;
         while (op < ctx.iters) : (op += 1) {
             ctx.shared.rw.lockShared() catch continue;
-            const aa = ctx.shared.sample.a;
+            const aa = ctx.shared.sample.a.load(.monotonic);
             var k: usize = 0;
             while (k < 32) : (k += 1) std.atomic.spinLoopHint();
-            const bb = ctx.shared.sample.b;
+            const bb = ctx.shared.sample.b.load(.monotonic);
             if (aa != 0 and bb != aa * 2) {
                 _ = ctx.shared.torn_reads.fetchAdd(1, .monotonic);
             }
@@ -218,9 +234,10 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
 
     try withMainRuntimeN(4, struct {
         fn body(rt: *Runtime) !void {
-            const NW = 4;
-            const NR = 8;
-            const ITERS: usize = 500;
+            const coverage = @import("build_options").coverage;
+            const NW = if (coverage) 1 else 4;
+            const NR = if (coverage) 2 else 8;
+            const ITERS: usize = if (coverage) 50 else 500;
 
             var shared = Shared{};
             const sa = rt.getSched().allocator;

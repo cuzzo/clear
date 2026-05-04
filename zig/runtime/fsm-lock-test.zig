@@ -37,7 +37,7 @@ const alloc = std.testing.allocator;
 //   1: (woken) — we now hold the lock; fall through to 2
 //   2: CS: counter += 1; unlock; Done
 const LockingFsm = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     mutex: *pl.ParkingMutex,
     counter: *u64,
     sched: *fp.Scheduler,
@@ -46,11 +46,11 @@ const LockingFsm = struct {
     completed: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *LockingFsm = @fieldParentPtr("task", t);
+        const self: *LockingFsm = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 self.step = 1;
-                const r = self.mutex.tryLockForFsm(&self.task, &self.waiter, self.sched);
+                const r = self.mutex.tryLockForFsm(self.task, &self.waiter, self.sched);
                 return switch (r) {
                     .Acquired => continueAfterLock(self),
                     .Registered => .{ .WaitForLock = {} },
@@ -73,14 +73,20 @@ const LockingFsm = struct {
     }
 
     fn init(mutex: *pl.ParkingMutex, counter: *u64, sched: *fp.Scheduler) LockingFsm {
-        var x: LockingFsm = .{
-            .task = undefined,
+        return .{
+            .task = undefined,  // caller wires task + task.ctx after copy
             .mutex = mutex,
             .counter = counter,
             .sched = sched,
         };
-        x.task = fsm.FsmTask.init(&LockingFsm.doResume);
-        return x;
+    }
+
+    /// Bind `f` to a slab-allocated FsmTask. Must be called AFTER `f`
+    /// has been moved to its final memory location (the FsmTask.ctx
+    /// back-pointer must address the live struct).
+    fn bind(f: *LockingFsm) !void {
+        f.task = try f.sched.allocFsmTask(&LockingFsm.doResume);
+        f.task.ctx = f;
     }
 };
 
@@ -103,9 +109,9 @@ test "FSM mutex: uncontended tryLockForFsm acquires on fast path" {
     var mutex: pl.ParkingMutex = .{};
     var counter: u64 = 0;
     var f = LockingFsm.init(&mutex, &counter, &sched);
-    f.task = fsm.FsmTask.init(&LockingFsm.doResume);
+    try LockingFsm.bind(&f);
 
-    sched.enqueueFsm(&f.task);
+    sched.enqueueFsm(f.task);
     sched.drainFsmQueue();
 
     try std.testing.expect(f.completed);
@@ -135,14 +141,14 @@ test "FSM mutex: contended FSM parks, wakes on release" {
     try std.testing.expect(mutex.tryLock());
 
     var f = LockingFsm.init(&mutex, &counter, &sched);
-    f.task = fsm.FsmTask.init(&LockingFsm.doResume);
-    sched.enqueueFsm(&f.task);
+    try LockingFsm.bind(&f);
+    sched.enqueueFsm(f.task);
 
     // First drain: FSM finds lock held, registers as waiter, returns
     // WaitForLock. Queue becomes empty.
     sched.drainFsmQueue();
     try std.testing.expectEqual(fsm.FsmStatus.Blocked, f.task.status);
-    try std.testing.expect(f.task.lock_waiter != null);
+    try std.testing.expect(f.task.lock_waiter.load(.acquire) != null);
     try std.testing.expect(sched.fsm_ready_queue.len() == 0);
     // active_tasks is still 1 — task is parked, not finished.
     try std.testing.expectEqual(@as(u64, 1), sched.active_tasks.load(.monotonic));
@@ -200,8 +206,8 @@ const SetupMixed = struct {
         );
         for (self.fsms) |*f| {
             f.* = LockingFsm.init(self.mutex, self.counter, self.sched);
-            f.task = fsm.FsmTask.init(&LockingFsm.doResume);
-            self.sched.enqueueFsm(&f.task);
+            try LockingFsm.bind(f);
+            self.sched.enqueueFsm(f.task);
         }
     }
 };
@@ -283,8 +289,8 @@ test "FSM mutex: 64 FSMs contend, counter equals N" {
             const self: *@This() = @ptrCast(@alignCast(raw.?));
             for (self.fsms_slice) |*f| {
                 f.* = LockingFsm.init(self.mutex_ptr, self.counter_ptr, self.sched_ptr);
-                f.task = fsm.FsmTask.init(&LockingFsm.doResume);
-                self.sched_ptr.enqueueFsm(&f.task);
+                try LockingFsm.bind(f);
+                self.sched_ptr.enqueueFsm(f.task);
             }
         }
     };

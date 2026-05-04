@@ -22,12 +22,13 @@ const pl = @import("../lib/parking-lot.zig");
 const rt_mod = @import("runtime.zig");
 const CheatHeader = @import("runtime-header.zig");
 const Runtime = rt_mod.Runtime;
+const build_options = @import("build_options");
 
 const alloc = std.testing.allocator;
 
 // Same shape as fsm-lock-test's LockingFsm, inlined here for clarity.
 const LockFsm = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     mutex: *pl.ParkingMutex,
     counter: *u64,
     sched: *fp.Scheduler,
@@ -36,11 +37,11 @@ const LockFsm = struct {
     completed: bool = false,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *LockFsm = @fieldParentPtr("task", t);
+        const self: *LockFsm = @ptrCast(@alignCast(t.ctx.?));
         switch (self.step) {
             0 => {
                 self.step = 1;
-                const r = self.mutex.tryLockForFsm(&self.task, &self.waiter, self.sched);
+                const r = self.mutex.tryLockForFsm(self.task, &self.waiter, self.sched);
                 return switch (r) {
                     .Acquired => enterCs(self),
                     .Registered => .{ .WaitForLock = {} },
@@ -93,8 +94,9 @@ const Setup = struct {
                     .counter = self.counter,
                     .sched = self.sched,
                 };
-                self.fsms[fsm_i].task = fsm.FsmTask.init(&LockFsm.doResume);
-                self.sched.enqueueFsm(&self.fsms[fsm_i].task);
+                self.fsms[fsm_i].task = try self.sched.allocFsmTask(&LockFsm.doResume);
+                self.fsms[fsm_i].task.ctx = &self.fsms[fsm_i];
+                self.sched.enqueueFsm(self.fsms[fsm_i].task);
                 fsm_i += 1;
             } else if (kind == 1 and sk_i < self.n_stackful) {
                 const ctx = try alloc.create(StackfulCtx);
@@ -116,8 +118,9 @@ const Setup = struct {
                 .counter = self.counter,
                 .sched = self.sched,
             };
-            self.fsms[fsm_i].task = fsm.FsmTask.init(&LockFsm.doResume);
-            self.sched.enqueueFsm(&self.fsms[fsm_i].task);
+            self.fsms[fsm_i].task = try self.sched.allocFsmTask(&LockFsm.doResume);
+            self.fsms[fsm_i].task.ctx = &self.fsms[fsm_i];
+            self.sched.enqueueFsm(self.fsms[fsm_i].task);
         }
         while (sk_i < self.n_stackful) : (sk_i += 1) {
             const ctx = try alloc.create(StackfulCtx);
@@ -188,7 +191,7 @@ fn runSeed(seed: u64) !void {
 }
 
 test "FSM lock VOPR: 32 seeds of randomized FSM+stackful contention" {
-    const N = 32;
+    const N = if (build_options.coverage) 4 else 32;
     var seed: u64 = 0;
     while (seed < N) : (seed += 1) {
         runSeed(seed) catch |e| {

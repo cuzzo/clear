@@ -58,7 +58,7 @@ RSpec.describe FsmWrapperEmitter do
       "__bg0_ctx",
       "__BgCtx0",
       ".task = undefined,\n.rt = rt,\n.inner = __bg0_promise.inner,\n.alloc = __bg0_alloc,",
-      "try CheatHeader.spawnFsmBest(&__bg0_ctx.task);",
+      "try CheatHeader.spawnFsmBest(__bg0_ctx.task);",
       "rt",
     )
   end
@@ -83,7 +83,7 @@ RSpec.describe FsmWrapperEmitter do
   describe "ctx struct decl" do
     it "emits the fixed-prefix fields (task, rt, inner, alloc)" do
       out = FsmWrapperEmitter.render(body)
-      expect(out).to include("task: CheatHeader.FsmTask,")
+      expect(out).to include("task: *CheatHeader.FsmTask,")
       expect(out).to include("rt: *Runtime,")
       expect(out).to include("inner: *CheatLib.Promise(i64).Inner,")
       expect(out).to include("alloc: std.mem.Allocator,")
@@ -139,7 +139,7 @@ RSpec.describe FsmWrapperEmitter do
   describe "resumeFn dispatch" do
     it "emits the fixed dispatch shape" do
       out = FsmWrapperEmitter.render(body)
-      expect(out).to include("@fieldParentPtr(\"task\", __fsm_task)")
+      expect(out).to include("@ptrCast(@alignCast(__fsm_task.ctx.?))")
       expect(out).to include("switch (__ctx_0.step)")
       expect(out).to include("return .{ .WaitForLock = {} };")
       expect(out).to include("return .{ .Done = {} };")
@@ -206,8 +206,10 @@ RSpec.describe FsmWrapperEmitter do
       expect(out).to include("__bg0_ctx.* = .{")
       expect(out).to include(".rt = rt,")
       expect(out).to include(".inner = __bg0_promise.inner,")
-      expect(out).to include("__bg0_ctx.task = CheatHeader.FsmTask.init(&__BgCtx0.resumeFn);")
-      expect(out).to include("try CheatHeader.spawnFsmBest(&__bg0_ctx.task);")
+      expect(out).to include("const __bg0_ctx_task = try CheatHeader.allocFsmTask(rt, &__BgCtx0.resumeFn);")
+      expect(out).to include("__bg0_ctx_task.ctx = __bg0_ctx;")
+      expect(out).to include("__bg0_ctx.task = __bg0_ctx_task;")
+      expect(out).to include("try CheatHeader.spawnFsmBest(__bg0_ctx.task);")
       expect(out).to include("break :__bg0 __bg0_promise;")
     end
   end

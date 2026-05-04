@@ -32,6 +32,7 @@ const EbrContext = CheatHeader.EbrContext;
 const fp = @import("runtime/scheduler.zig");
 const fm = @import("runtime/fiber-memory.zig");
 const compat = @import("lib/compat.zig");
+const build_options = @import("build_options");
 
 const ParkingMutex = pl.ParkingMutex;
 const ParkingRwLock = pl.ParkingRwLock;
@@ -42,7 +43,7 @@ const DETECTION_PROBE_EVERY: u32 = 200;
 // Number of fibers spawned by the hammer. High enough to produce real
 // contention on the tiny lock pool; low enough that each fiber gets
 // meaningful scheduler time in the time budget.
-const NUM_FIBERS: usize = 16;
+const NUM_FIBERS: usize = if (build_options.coverage) 4 else 16;
 
 // Hammer duration — read from CLEAR_HAMMER_SECONDS or falls back to 2s.
 // Debug builds default to 1s because ReleaseFast gets far more iterations
@@ -53,6 +54,7 @@ fn hammerDurationMs() u64 {
         const secs = std.fmt.parseInt(u64, s, 10) catch 0;
         if (secs > 0) return secs * 1000;
     }
+    if (build_options.coverage) return 50;
     return if (builtin.mode == .Debug) 1000 else 2000;
 }
 

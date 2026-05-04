@@ -162,7 +162,7 @@ fn withMainRuntimeN(comptime workers: usize, comptime body: fn (*Runtime) anyerr
 // the hammer is a runtime-level test, not a compiler-level one.
 
 const HammerWriter = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     rt: *Runtime,
     inner: *CheatLib.Promise(usize).Inner,
     alloc: std.mem.Allocator,
@@ -174,14 +174,14 @@ const HammerWriter = struct {
     iter: usize = 0,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *HammerWriter = @fieldParentPtr("task", t);
+        const self: *HammerWriter = @ptrCast(@alignCast(t.ctx.?));
         const sched = fp.active_scheduler;
         while (true) {
             switch (self.step) {
                 0 => {
                     if (self.iter >= self.iters) return self.finish();
                     self.step = 1;
-                    const r = self.rw.tryWriteLockForFsm(&self.task, &self.waiter, sched);
+                    const r = self.rw.tryWriteLockForFsm(self.task, &self.waiter, sched);
                     switch (r) {
                         .Acquired => {
                             self.cs();
@@ -204,7 +204,13 @@ const HammerWriter = struct {
         }
     }
     fn cs(self: *HammerWriter) void {
-        self.counter.* = std.atomic.Value(u64).init(self.counter.load(.monotonic) + 1);
+        // Use fetchAdd instead of memcpy-of-Atomic so TSan sees this
+        // as a single atomic op. The rwlock semantically protects
+        // the counter, but TSan does not model the parking-lot rwlock,
+        // so plain reassignment of `counter.*` (a memcpy of the
+        // std.atomic.Value(u64) struct) races against the reader's
+        // .load even though the lock is held.
+        _ = self.counter.fetchAdd(1, .release);
         self.rw.unlock();
         self.iter += 1;
     }
@@ -214,13 +220,13 @@ const HammerWriter = struct {
         return .{ .Done = {} };
     }
     fn destroyTask(t: *fsm.FsmTask) void {
-        const self: *HammerWriter = @fieldParentPtr("task", t);
+        const self: *HammerWriter = @ptrCast(@alignCast(t.ctx.?));
         self.alloc.destroy(self);
     }
 };
 
 const HammerReader = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     rt: *Runtime,
     inner: *CheatLib.Promise(usize).Inner,
     alloc: std.mem.Allocator,
@@ -232,14 +238,14 @@ const HammerReader = struct {
     iter: usize = 0,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *HammerReader = @fieldParentPtr("task", t);
+        const self: *HammerReader = @ptrCast(@alignCast(t.ctx.?));
         const sched = fp.active_scheduler;
         while (true) {
             switch (self.step) {
                 0 => {
                     if (self.iter >= self.iters) return self.finish();
                     self.step = 1;
-                    const r = self.rw.tryReadLockForFsm(&self.task, &self.waiter, sched);
+                    const r = self.rw.tryReadLockForFsm(self.task, &self.waiter, sched);
                     switch (r) {
                         .Acquired => {
                             self.cs();
@@ -268,7 +274,7 @@ const HammerReader = struct {
         return .{ .Done = {} };
     }
     fn destroyTask(t: *fsm.FsmTask) void {
-        const self: *HammerReader = @fieldParentPtr("task", t);
+        const self: *HammerReader = @ptrCast(@alignCast(t.ctx.?));
         self.alloc.destroy(self);
     }
 };
@@ -285,17 +291,22 @@ const HammerReader = struct {
 // and the global deadline expires.
 test "FSM RwLock hammer: 8 readers + 4 writers x 5 trials -- bench-17 lost-wakeup repro" {
     if (SKIP_BY_DEFAULT) return error.SkipZigTest;
+    // FsmTasks now live in `Scheduler.fsm_task_slab`, so detectCycleFsm
+    // pins the slab and applies the same Option-(C) protocol the
+    // stackful detectCycle uses. Cross-scheduler chain walks are
+    // UAF-safe — this test runs under TSan.
 
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
 
     try withMainRuntimeN(4, struct {
         fn body(rt: *Runtime) !void {
-            const NR = 8;
-            const NW = 4;
-            const READS = 5_000;
-            const WRITES = 100;
-            const NUM_TRIALS = 5;
+            const coverage = @import("build_options").coverage;
+            const NR = if (coverage) 2 else 8;
+            const NW = if (coverage) 1 else 4;
+            const READS = if (coverage) 100 else 5_000;
+            const WRITES = if (coverage) 10 else 100;
+            const NUM_TRIALS = if (coverage) 1 else 5;
             const PER_TRIAL_DEADLINE_MS: i64 = 5_000;
 
             const sa = rt.getSched().allocator;
@@ -311,8 +322,11 @@ test "FSM RwLock hammer: 8 readers + 4 writers x 5 trials -- bench-17 lost-wakeu
                 for (0..NR) |i| {
                     rprom[i] = try CheatLib.Promise(usize).spawn(sa, rt.getSched());
                     const ctx = try sa.create(HammerReader);
+                    const task = try CheatHeader.allocFsmTask(rt, &HammerReader.doResume);
+                    task.ctx = ctx;
+                    task.destroy_fn = &HammerReader.destroyTask;
                     ctx.* = .{
-                        .task = undefined,
+                        .task = task,
                         .rt = rt,
                         .inner = rprom[i].inner,
                         .alloc = sa,
@@ -320,15 +334,16 @@ test "FSM RwLock hammer: 8 readers + 4 writers x 5 trials -- bench-17 lost-wakeu
                         .counter = &counter,
                         .iters = READS,
                     };
-                    ctx.task = fsm.FsmTask.init(&HammerReader.doResume);
-                    ctx.task.destroy_fn = &HammerReader.destroyTask;
-                    try CheatHeader.spawnFsmBest(&ctx.task);
+                    try CheatHeader.spawnFsmBest(task);
                 }
                 for (0..NW) |i| {
                     wprom[i] = try CheatLib.Promise(usize).spawn(sa, rt.getSched());
                     const ctx = try sa.create(HammerWriter);
+                    const task = try CheatHeader.allocFsmTask(rt, &HammerWriter.doResume);
+                    task.ctx = ctx;
+                    task.destroy_fn = &HammerWriter.destroyTask;
                     ctx.* = .{
-                        .task = undefined,
+                        .task = task,
                         .rt = rt,
                         .inner = wprom[i].inner,
                         .alloc = sa,
@@ -336,9 +351,7 @@ test "FSM RwLock hammer: 8 readers + 4 writers x 5 trials -- bench-17 lost-wakeu
                         .counter = &counter,
                         .iters = WRITES,
                     };
-                    ctx.task = fsm.FsmTask.init(&HammerWriter.doResume);
-                    ctx.task.destroy_fn = &HammerWriter.destroyTask;
-                    try CheatHeader.spawnFsmBest(&ctx.task);
+                    try CheatHeader.spawnFsmBest(task);
                 }
 
                 // Per-trial deadline: if the wakeup is lost, at least

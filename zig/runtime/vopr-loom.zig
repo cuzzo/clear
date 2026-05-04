@@ -78,6 +78,7 @@ const TaskStatus = qs.TaskStatus;
 const fp = @import("scheduler.zig");
 const EbrContext = @import("../lib/ebr.zig").EbrContext;
 const fm = @import("fiber-memory.zig");
+const build_options = @import("build_options");
 
 const MAX_THREADS = 4;
 const MAX_RESULTS = 8;
@@ -871,31 +872,46 @@ fn runExhaustive(
 
 test "loom: exhaustive pop vs steal" {
     // pop=7 ops, steal=4 ops. C(11,4)=330. Depth 12 = 4096 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioPopVsSteal, "pop_vs_steal", 12);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioPopVsSteal, "pop_vs_steal", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioPopVsSteal, "pop_vs_steal", 12);
     std.debug.print("  pop_vs_steal: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive pinned steal" {
     // pop=7 ops, steal+push_back=8 ops. C(15,8)=6435. Depth 14 = 16384 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioPinnedSteal, "pinned_steal", 14);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioPinnedSteal, "pinned_steal", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioPinnedSteal, "pinned_steal", 14);
     std.debug.print("  pinned_steal: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive push during steal" {
     // push+pop=11 ops, steal=4 ops. C(15,4)=1365. Depth 12 = 4096 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioPushDuringSteal, "push_during_steal", 12);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioPushDuringSteal, "push_during_steal", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioPushDuringSteal, "push_during_steal", 12);
     std.debug.print("  push_during_steal: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive aggressive pinned" {
     // pop=7*2=14 ops, steal+push_back=8*2=16 ops. Depth 14 for coverage.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioAggressivePinned, "aggressive_pinned", 14);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioAggressivePinned, "aggressive_pinned", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioAggressivePinned, "aggressive_pinned", 14);
     std.debug.print("  aggressive_pinned: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive all-pinned queue" {
     // Same ops as aggressive pinned. Every steal hits pinned path.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioAllPinned, "all_pinned", 14);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioAllPinned, "all_pinned", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioAllPinned, "all_pinned", 14);
     std.debug.print("  all_pinned: {d} interleavings OK\n", .{count});
 }
 
@@ -911,19 +927,28 @@ test "loom: exhaustive all-pinned queue" {
 
 test "loom: exhaustive epoll wake vs steal" {
     // wake=5 ops, steal=4 ops. C(9,4)=126. Depth 10 = 1024 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioEpollWakeVsSteal, "epoll_wake_vs_steal", 10);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioEpollWakeVsSteal, "epoll_wake_vs_steal", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioEpollWakeVsSteal, "epoll_wake_vs_steal", 10);
     std.debug.print("  epoll_wake_vs_steal: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive double epoll fire" {
     // Both threads: 5 ops each. C(10,5)=252. Depth 10 = 1024 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioDoubleEpollFire, "double_epoll_fire", 10);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioDoubleEpollFire, "double_epoll_fire", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioDoubleEpollFire, "double_epoll_fire", 10);
     std.debug.print("  double_epoll_fire: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive epoll wake-pop vs steal" {
     // wake+pop=12 ops, steal=4 ops. C(16,4)=1820. Depth 14 = 16384 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioEpollWakePopVsSteal, "epoll_wake_pop_vs_steal", 14);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioEpollWakePopVsSteal, "epoll_wake_pop_vs_steal", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioEpollWakePopVsSteal, "epoll_wake_pop_vs_steal", 14);
     std.debug.print("  epoll_wake_pop_vs_steal: {d} interleavings OK\n", .{count});
 }
 
@@ -938,13 +963,19 @@ test "loom: exhaustive epoll wake-pop vs steal" {
 
 test "loom: exhaustive io_uring IoWaiter vs steal" {
     // IoWaiter=5 ops, steal=4 ops. C(9,4)=126. Depth 10 = 1024 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterVsSteal, "iowaiter_vs_steal", 10);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterVsSteal, "iowaiter_vs_steal", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterVsSteal, "iowaiter_vs_steal", 10);
     std.debug.print("  iowaiter_vs_steal: {d} interleavings OK\n", .{count});
 }
 
 test "loom: exhaustive io_uring IoWaiter pop vs steal" {
     // IoWaiter+pop=12 ops, steal=4 ops. C(16,4)=1820. Depth 14 = 16384 schedules.
-    const count = try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterPopVsSteal, "iowaiter_pop_vs_steal", 14);
+    const count = if (build_options.coverage)
+        try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterPopVsSteal, "iowaiter_pop_vs_steal", 6)
+    else
+        try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterPopVsSteal, "iowaiter_pop_vs_steal", 14);
     std.debug.print("  iowaiter_pop_vs_steal: {d} interleavings OK\n", .{count});
 }
 

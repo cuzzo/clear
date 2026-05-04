@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const compat = @import("../lib/compat.zig");
+const build_options = @import("build_options");
 
 const CheatLib = @import("runtime-header.zig").CheatLib;
 const Runtime = @import("runtime.zig").Runtime;
@@ -508,6 +509,8 @@ fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack
 }
 
 test "Multi-Threaded Shared Nothing" {
+    if (build_options.coverage) return error.SkipZigTest;
+
     const allocator = std.heap.smp_allocator;
 
     var global_ctx = EbrContext{};

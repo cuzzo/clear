@@ -137,6 +137,25 @@ pub fn build(b: *std.Build) void {
         // schedulers and would benefit from data-race detection. Adding a
         // file here means it ALSO runs under `zig build test-tsan`.
         tsan: bool = false,
+        // True for high-iteration concurrency/fuzz stress tests whose
+        // value comes from running them under ThreadSanitizer (every
+        // memory op instrumented amplifies what each iteration can
+        // detect). Hammer/fuzz tests are EXCLUDED from the regular
+        // `zig build test` step (slow, low marginal value
+        // un-instrumented) and from the regular `zig build test-tsan`
+        // step (so the per-shard wallclock stays bounded), and run
+        // exclusively in `zig build test-hammer` (TSan-instrumented).
+        // This keeps the CI unit test job fast while preserving stress
+        // coverage on a dedicated job.
+        hammer: bool = false,
+        // True for `*-loom-test.zig` and `*-vopr-test.zig`: deterministic
+        // interleaving / simulation tests that exhaustively explore
+        // schedules in-process. They take minutes each and dominate
+        // `zig build test` wallclock. TSan adds nothing — the exhaustive
+        // enumeration is its own race detector. Routed exclusively to
+        // `zig build test-loom-vopr` (sharded), excluded from `test`,
+        // `test-tsan`, and `test-hammer`.
+        loom_vopr: bool = false,
     };
 
     const test_files = [_]TestEntry{
@@ -145,7 +164,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "bounded-channel-test.zig", .tsan = true },
         .{ .path = "bounded-stream-test.zig", .tsan = true },
         .{ .path = "cleanup-test.zig", .tsan = true },
-        .{ .path = "control-plane-hammer-test.zig", .tsan = true },
+        .{ .path = "control-plane-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "control-plane-test.zig", .tsan = true },
         .{ .path = "epoll-oneshot-test.zig", .tsan = true },
         .{ .path = "epoll-steal-test.zig", .tsan = true },
@@ -157,29 +176,27 @@ pub fn build(b: *std.Build) void {
         .{ .path = "fsm-cross-scheduler-test.zig", .tsan = true },
         .{ .path = "fsm-endtoend-fairness-test.zig", .tsan = true },
         .{ .path = "fsm-fairness-test.zig", .tsan = true },
-        .{ .path = "fsm-hammer-test.zig", .tsan = true },
+        .{ .path = "fsm-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "fsm-lock-safety-test.zig", .tsan = true },
         .{ .path = "fsm-lock-test.zig", .tsan = true },
-        .{ .path = "fsm-lock-vopr-test.zig", .tsan = true },
-        // fsm-loom-test does exhaustive interleaving like vopr-loom-test;
-        // TSan adds nothing on top. Run under regular test only.
-        .{ .path = "fsm-loom-test.zig", .tsan = false },
+        .{ .path = "fsm-lock-vopr-test.zig", .loom_vopr = true },
+        .{ .path = "fsm-loom-test.zig", .loom_vopr = true },
         .{ .path = "fsm-race-test.zig", .tsan = true },
         .{ .path = "fsm-rwlock-test.zig", .tsan = true },
         .{ .path = "fsm-scheduler-test.zig", .tsan = true },
         .{ .path = "fsm-steal-test.zig", .tsan = true },
         .{ .path = "fsm-test.zig", .tsan = true },
-        .{ .path = "fsm-vopr-test.zig", .tsan = true },
+        .{ .path = "fsm-vopr-test.zig", .loom_vopr = true },
         .{ .path = "fsm-wg-test.zig", .tsan = true },
         .{ .path = "inbox-race-smoke-test.zig", .tsan = true },
         .{ .path = "inbox-race-test.zig", .tsan = true },
         .{ .path = "inf-stream-test.zig", .tsan = true },
-        .{ .path = "infstream-hammer-test.zig", .tsan = true },
+        .{ .path = "infstream-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "io-pressure-test.zig", .tsan = true },
         .{ .path = "iouring-test.zig", .tsan = true },
-        .{ .path = "net-steal-hammer-test.zig", .tsan = true },
+        .{ .path = "net-steal-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "parking-lot-cycle-test.zig", .tsan = true },
-        .{ .path = "parking-lot-hammer-test.zig", .tsan = true },
+        .{ .path = "parking-lot-hammer-test.zig", .tsan = true, .hammer = true },
         // parking-lot-loom-test is built as an executable above (search for
         // pl_loom_exe). Building via b.addTest puts the test_runner at
         // module root, hiding `pub const SimAtomic` from the comptime
@@ -201,31 +218,28 @@ pub fn build(b: *std.Build) void {
         .{ .path = "spsc-ring-test.zig", .tsan = true },
         .{ .path = "spsc-scheduler-test.zig", .tsan = true },
         .{ .path = "spsc-test.zig", .tsan = true },
-        .{ .path = "steal-hammer-test.zig", .tsan = true },
+        .{ .path = "steal-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "stream-test.zig", .tsan = true },
         .{ .path = "observable-test.zig", .tsan = true },
         .{ .path = "tcp-fairness-test.zig", .tsan = true },
         .{ .path = "tcp-starvation-test.zig", .tsan = true },
-        // vopr-loom-test does exhaustive interleaving (16K+ paths per test) which
-        // is unreasonably slow under TSan. The exhaustive enumeration is its own
-        // race detector — TSan adds little. Run under regular test only.
-        .{ .path = "vopr-loom-test.zig", .tsan = false },
-        .{ .path = "vopr-test.zig", .tsan = true },
+        .{ .path = "vopr-loom-test.zig", .loom_vopr = true },
+        .{ .path = "vopr-test.zig", .loom_vopr = true },
         .{ .path = "yield-test.zig", .tsan = true },
         // MVCC: Versioned(T) tests + lock hammers
-        .{ .path = "fsm-rwlock-hammer-test.zig", .tsan = true },
-        .{ .path = "parking-rwlock-fiber-hammer-test.zig", .tsan = true },
+        .{ .path = "fsm-rwlock-hammer-test.zig", .tsan = true, .hammer = true },
+        .{ .path = "parking-rwlock-fiber-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "versioned-test.zig", .tsan = true },
         .{ .path = "versioned-stress-test.zig", .tsan = true },
-        .{ .path = "versioned-loom-test.zig", .tsan = false },
-        .{ .path = "versioned-vopr-test.zig", .tsan = true },
+        .{ .path = "versioned-loom-test.zig", .loom_vopr = true },
+        .{ .path = "versioned-vopr-test.zig", .loom_vopr = true },
         .{ .path = "versioned-fiber-stress-test.zig", .tsan = true },
         // Atomics v0.2 / v0.3
-        .{ .path = "atomic-ptr-loom-test.zig", .tsan = false },
+        .{ .path = "atomic-ptr-loom-test.zig", .loom_vopr = true },
         .{ .path = "atomic-ptr-stress-test.zig", .tsan = true },
 
         // Single-threaded / pure logic — debug build only
-        .{ .path = "arena-fuzz-test.zig" },
+        .{ .path = "arena-fuzz-test.zig", .hammer = true },
         .{ .path = "arena-mode-test.zig" },
         .{ .path = "asm-test.zig" },
         .{ .path = "data-structures-test.zig" },
@@ -234,7 +248,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "frame-rewind-test.zig" },
         .{ .path = "frame-test.zig" },
         .{ .path = "ownership-test.zig" },
-        .{ .path = "partitioned-map-test.zig" },
+        .{ .path = "partitioned-map-test.zig", .tsan = true },
         .{ .path = "promote-list-test.zig" },
         .{ .path = "resource-test.zig" },
         .{ .path = "runtime-header-test.zig" },
@@ -244,6 +258,23 @@ pub fn build(b: *std.Build) void {
     };
 
     const test_tsan_step = b.step("test-tsan", "Run concurrency-sensitive tests under ThreadSanitizer");
+    // Dedicated step for high-iteration concurrency stress tests
+    // (`*-hammer-test.zig`). Built with TSan instrumentation: every
+    // memory op instrumented turns each iteration into a real
+    // race-detection probe. Excluded from `test` and `test-tsan`
+    // because un-instrumented hammer runs are mostly wallclock cost
+    // with low marginal value, and the dedicated step lets CI run
+    // it on its own job (parallel with the unit-test job, doesn't
+    // bottleneck the unit-test PR signal).
+    const test_hammer_step = b.step("test-hammer", "Run hammer stress tests under ThreadSanitizer");
+    // Dedicated step for deterministic interleaving / simulation tests
+    // (`*-loom-test.zig`, `*-vopr-test.zig`). Built without TSan: the
+    // exhaustive enumeration is its own race detector, and TSan adds
+    // multiple-minutes-per-test overhead with no marginal value.
+    // Excluded from `test`, `test-tsan`, and `test-hammer` so the
+    // unit-test PR signal stays fast; sharded the same way as
+    // `test-tsan`/`test-hammer` for CI parallelism.
+    const test_loom_vopr_step = b.step("test-loom-vopr", "Run Loom and VOPR deterministic-interleaving tests");
 
     // When -Dcoverage is set, accumulate per-test kcov runs so a final
     // merge step can produce one zig-out/coverage/merged/cobertura.xml
@@ -282,47 +313,72 @@ pub fn build(b: *std.Build) void {
     const kcov_include_arg = b.fmt("--include-path={s},{s}", .{ runtime_dir_abs, lib_dir_abs });
     const kcov_strip_arg = b.fmt("--strip-path={s}/", .{repo_root});
 
-    // build_options module exposing `coverage` to test code. Used by
-    // per-test SkipZigTest guards in source files for kcov-hostile
-    // tests. ONLY attached to test root modules (via per-test
-    // addImport below) -- never to runtime modules, because the
-    // runtime is also compiled by the `clear` CLI, which uses ordinary
-    // file imports and has no named-module registry.
+    // build_options module exposing `coverage` and `tsan` to test code.
+    // Used by per-test SkipZigTest guards in source files for kcov- /
+    // TSan-hostile tests (e.g. AB/BA cycle: the LockCycle error-recovery
+    // path uses just enough fiber stack that TSan's per-call shadow-
+    // memory probes push it over 16 KB, overflowing into the slab
+    // header). ONLY attached to test root modules (via per-test
+    // addImport below) -- never to runtime modules, because the runtime
+    // is also compiled by the `clear` CLI, which uses ordinary file
+    // imports and has no named-module registry.
     const test_build_options = b.addOptions();
     test_build_options.addOption(bool, "coverage", coverage);
+    test_build_options.addOption(bool, "tsan", sanitize_thread);
     const build_options_mod = test_build_options.createModule();
+
+    // Separate options module pinned for the test-tsan step. The TSan
+    // test addTest() below sets `.sanitize_thread = true`
+    // unconditionally for entries with `entry.tsan = true`, so the
+    // build_options module those tests see must report `tsan = true`
+    // regardless of the top-level `-Dsanitize-thread` flag — otherwise
+    // SkipZigTest guards keyed on `build_options.tsan` silently fall
+    // through and tests that should be skipped under TSan
+    // instrumentation run anyway (and crash). CI invokes
+    // `zig build test-tsan` without `-Dsanitize-thread`; before this
+    // split the tsan-skip path was unreachable in CI.
+    const tsan_build_options = b.addOptions();
+    tsan_build_options.addOption(bool, "coverage", coverage);
+    tsan_build_options.addOption(bool, "tsan", true);
+    const tsan_build_options_mod = tsan_build_options.createModule();
     const fiber_core_mod = b.createModule(.{ .root_source_file = fiber_core_path });
     // Mirror counter for `test_tsan_step` -- only increments on entries
     // with `tsan = true`. The TSan path uses LLVM + Debug (stage2 silently
     // drops TSan instrumentation regardless of opt level), so per-shard
     // sizing here matters more than for the regular test_step path.
     var tsan_step_idx: usize = 0;
+    // Mirror counter for `test_hammer_step`. Increments only on
+    // `entry.hammer = true` entries; sharded the same way so each
+    // hammer CI shard gets a roughly equal slice.
+    var hammer_step_idx: usize = 0;
+    // Mirror counter for `test_loom_vopr_step`. Increments only on
+    // `entry.loom_vopr = true` entries; sharded so each loom-vopr CI
+    // shard gets a roughly equal slice.
+    var loom_vopr_step_idx: usize = 0;
 
     for (test_files, 0..) |entry, idx| {
         const filename = entry.path;
-        // Skip stress / loom / vopr / hammer / fuzz tests under
-        // coverage. These tests run high-iteration concurrency
-        // exploration (loom interleavings, VOPR random scenarios,
-        // hammer stress); kcov's ptrace model adds 5-30x runtime
-        // overhead, ballooning the coverage job to >20min. Their
-        // line coverage redundantly overlaps the underlying
-        // primitives' regular tests, so dropping them barely moves
-        // coverage % while cutting runtime ~5-10x.
-        const skip_for_coverage = coverage and (
-            std.mem.endsWith(u8, filename, "-loom-test.zig") or
-            std.mem.endsWith(u8, filename, "-vopr-test.zig") or
-            std.mem.endsWith(u8, filename, "-hammer-test.zig") or
-            std.mem.endsWith(u8, filename, "-stress-test.zig") or
-            std.mem.endsWith(u8, filename, "-fuzz-test.zig") or
-            std.mem.eql(u8, filename, "vopr-test.zig") or
-            std.mem.eql(u8, filename, "vopr-loom-test.zig")
-        );
+        // Coverage runs every test-file entry, including stress /
+        // loom / vopr / hammer / fuzz entries. Those files scale their
+        // own iteration counts down when build_options.coverage is
+        // true, so kcov gets line coverage for the surface without
+        // ptracing the full stress workload.
+        const skip_for_coverage = false;
 
         // Determine whether this iteration's test_step contribution
         // belongs to the requested shard. With shard_count=1 (default),
         // `% 1` is always 0 so every test is included -- behavior is
         // identical to the unsharded path.
-        var include_in_test_step = !skip_for_coverage;
+        //
+        // TSan-tagged entries are excluded from `test_step` entirely —
+        // they run only via `test_tsan_step` (TSan-instrumented,
+        // dedicated CI shards). Hammer entries are similarly routed
+        // only through `test_hammer_step`. This keeps the plain unit
+        // lane from duplicating the expensive concurrency surface that
+        // TSan already covers.
+        // Loom/vopr entries are likewise excluded from `test_step` —
+        // they run only via `test_loom_vopr_step` (sharded, no TSan).
+        var include_in_test_step = !skip_for_coverage and (coverage or (!entry.tsan and !entry.hammer and !entry.loom_vopr));
         if (include_in_test_step) {
             const my_shard = (test_step_idx % shard_count) == shard_index;
             test_step_idx += 1;
@@ -389,18 +445,24 @@ pub fn build(b: *std.Build) void {
         }
         }
 
-        // TSan build — only for concurrency-sensitive tests. Forces LLVM
-        // backend (stage2 doesn't link the TSan runtime regardless of opt
-        // level). Optimize is Debug: race detection is identical at any
-        // opt level (TSan instruments at the IR level, not the optimized
-        // machine code), and Debug compiles ~4x faster than ReleaseSafe
-        // under LLVM. The previous ReleaseSafe pin was holdover from when
-        // the comment-author conflated "stage2 doesn't link TSan" with
-        // "Debug doesn't link TSan."
-        if (entry.tsan) {
-            const tsan_in_shard = (tsan_step_idx % shard_count) == shard_index;
-            tsan_step_idx += 1;
-            if (tsan_in_shard) {
+        // TSan / hammer builds — only for concurrency-sensitive tests.
+        // Forces LLVM backend (stage2 doesn't link the TSan runtime
+        // regardless of opt level). Optimize is Debug: race detection
+        // is identical at any opt level (TSan instruments at the IR
+        // level, not the optimized machine code), and Debug compiles
+        // ~4x faster than ReleaseSafe under LLVM.
+        //
+        // Routing rule:
+        //   entry.hammer = true  → goes into `test_hammer_step` ONLY.
+        //   entry.tsan   = true  → goes into `test_tsan_step` ONLY.
+        // Hammer entries are not double-counted into test-tsan; the
+        // dedicated step keeps each shard's wallclock bounded.
+        if (entry.tsan or entry.hammer) {
+            const target_step = if (entry.hammer) test_hammer_step else test_tsan_step;
+            const idx_ref = if (entry.hammer) &hammer_step_idx else &tsan_step_idx;
+            const in_shard = (idx_ref.* % shard_count) == shard_index;
+            idx_ref.* += 1;
+            if (in_shard) {
             const tsan_tests = b.addTest(.{
                 .root_module = b.createModule(.{
                     .root_source_file = b.path(filename),
@@ -415,16 +477,50 @@ pub fn build(b: *std.Build) void {
             tsan_tests.root_module.addImport("ebr", ebr_mod);
             tsan_tests.root_module.addImport("ownership", ownership_mod);
             tsan_tests.root_module.addImport("compat", compat_mod);
-            tsan_tests.root_module.addImport("build_options", build_options_mod);
+            tsan_tests.root_module.addImport("build_options", tsan_build_options_mod);
             tsan_tests.root_module.addAssemblyFile(switch_s);
             tsan_tests.root_module.addAssemblyFile(onroot_s);
             tsan_tests.root_module.link_libc = true;
 
-            const run_tsan_tests = std.Build.Step.Run.create(b, b.fmt("run tsan {s}", .{filename}));
+            const label = if (entry.hammer) "hammer" else "tsan";
+            const run_tsan_tests = std.Build.Step.Run.create(b, b.fmt("run {s} {s}", .{ label, filename }));
             run_tsan_tests.addArtifactArg(tsan_tests);
             run_tsan_tests.stdio = .inherit;
             run_tsan_tests.setCwd(b.path("."));
-            test_tsan_step.dependOn(&run_tsan_tests.step);
+            target_step.dependOn(&run_tsan_tests.step);
+            }
+        }
+
+        // Loom / VOPR builds — deterministic interleaving / simulation.
+        // No TSan: the exhaustive enumeration is its own race detector,
+        // and TSan adds multiple-minutes-per-test overhead with zero
+        // marginal value. Sharded the same way as TSan/hammer.
+        if (entry.loom_vopr) {
+            const in_shard = (loom_vopr_step_idx % shard_count) == shard_index;
+            loom_vopr_step_idx += 1;
+            if (in_shard) {
+                const lv_tests = b.addTest(.{
+                    .root_module = b.createModule(.{
+                        .root_source_file = b.path(filename),
+                        .target = target,
+                        .optimize = optimize,
+                    }),
+                });
+                lv_tests.root_module.addImport("fiber-core", fiber_core_mod);
+                lv_tests.root_module.addImport("safety", safety_mod);
+                lv_tests.root_module.addImport("ebr", ebr_mod);
+                lv_tests.root_module.addImport("ownership", ownership_mod);
+                lv_tests.root_module.addImport("compat", compat_mod);
+                lv_tests.root_module.addImport("build_options", build_options_mod);
+                lv_tests.root_module.addAssemblyFile(switch_s);
+                lv_tests.root_module.addAssemblyFile(onroot_s);
+                lv_tests.root_module.link_libc = true;
+
+                const run_lv_tests = std.Build.Step.Run.create(b, b.fmt("run loom-vopr {s}", .{filename}));
+                run_lv_tests.addArtifactArg(lv_tests);
+                run_lv_tests.stdio = .inherit;
+                run_lv_tests.setCwd(b.path("."));
+                test_loom_vopr_step.dependOn(&run_lv_tests.step);
             }
         }
     }
@@ -613,7 +709,26 @@ pub fn build(b: *std.Build) void {
     const run_pl_loom = b.addRunArtifact(pl_loom_exe);
     run_pl_loom.has_side_effects = true;
     run_pl_loom.stdio = .inherit;
-    test_step.dependOn(&run_pl_loom.step);
+    if (coverage and shard_index == 0) {
+        const pl_loom_kcov_dir = "zig-out/coverage/parking-lot-loom";
+        const mkdir_cmd = b.addSystemCommand(&.{ "mkdir", "-p", pl_loom_kcov_dir });
+        const run_pl_loom_kcov = b.addSystemCommand(&.{
+            "kcov",
+            "--clean",
+            kcov_include_arg,
+            kcov_strip_arg,
+            pl_loom_kcov_dir,
+        });
+        run_pl_loom_kcov.addArtifactArg(pl_loom_exe);
+        run_pl_loom_kcov.stdio = .inherit;
+        run_pl_loom_kcov.setCwd(b.path("."));
+        run_pl_loom_kcov.step.dependOn(&mkdir_cmd.step);
+        test_step.dependOn(&run_pl_loom_kcov.step);
+        merge_cmd.?.addArg(pl_loom_kcov_dir);
+        merge_cmd.?.step.dependOn(&run_pl_loom_kcov.step);
+    } else if (!coverage and shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_pl_loom.step);
+    }
     loom_step.dependOn(&run_pl_loom.step);
 
     // -------------------------------------------------------------------------

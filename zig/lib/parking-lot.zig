@@ -383,6 +383,13 @@ fn detectCycle(waiter: *Task, lock_ptr: *anyopaque, lock_kind: u8) LockError!voi
         if (torn) continue;
 
         if (found_self_at_depth) |depth| {
+            // No diagnostic print: the loom suite triggers ~10K
+            // cycles per run (4096 + 6561 schedules), and cycle
+            // detection on real workloads can fire repeatedly under
+            // contention. Tests assert on error.Deadlock /
+            // error.LockCycle directly. Re-add a print here only
+            // gated behind an explicit debug flag if the spam is
+            // ever worth the diagnostic.
             if (depth == 0) return error.Deadlock;
             return error.LockCycle;
         }
@@ -392,59 +399,166 @@ fn detectCycle(waiter: *Task, lock_ptr: *anyopaque, lock_kind: u8) LockError!voi
 }
 
 /// Cycle detection for an FSM waiter attempting to acquire `lock_ptr`.
-/// Walks the chain of holders. At each hop: prefer the FSM chain
-/// (waiting_for_fsm_owner) if set, fall back to the stackful chain
-/// (waiting_for_lock_owner). Finds FSM↔FSM cycles and FSM→Stackful
-/// one-hop cycles. Does NOT trace FSM→Stackful→FSM cycles yet —
-/// requires FsmTask to track waiting_for_task_owner (follow-up).
+/// Mirrors the stackful `detectCycle` Option-(C) protocol over a
+/// chain that may mix FSM holders (`waiting_for_fsm_owner`) and
+/// stackful Task holders (`waiting_for_lock_owner`):
 ///
-/// TODO(rebase-onto-vm-fix-rewrite): tighten this to match
-/// detectCycle's option-C protocol (slab pin per Task hop,
-/// generation check, atomic per-hop lock-state snapshot, retry on
-/// torn snapshot, atomic loads on FsmTask back-pointer fields).
-/// See "FSM safety parity" in the rebase plan.
+///   1. Pin the slab containing each holder (FSM via `pinFsmTask`,
+///      stackful via `pinTask`). The pin holds a refcount on the
+///      slab so the underlying memory cannot be reclaimed during
+///      the walk.
+///   2. Snapshot `seq` and `generation` per hop after pin succeeds.
+///      Generation mismatch = slot reused mid-walk = torn snapshot.
+///      Seq mismatch = the holder transitioned (park/wake) = torn.
+///   3. Snapshot the lock state (and atomic back-pointers) per hop.
+///      Lock state change = transfer happened mid-walk = torn.
+///   4. After MAX_DETECT_RETRIES torn observations, give up: a real
+///      cycle would have produced a stable snapshot within the
+///      retry budget.
+///
+/// Without slab-allocating FsmTasks (matching stackful Task), this
+/// would race against `destroy_fn`-triggered free of the user ctx.
+/// The FsmTask now lives in `Scheduler.fsm_task_slab`; ctx (user
+/// state) lives separately on the heap and is freed by destroy_fn,
+/// while the FsmTask slot is returned to the slab AFTER destroy_fn —
+/// so the slab pin keeps the FsmTask memory alive even if its slot
+/// has been reused for a different logical task (caught by the
+/// generation check).
+const FsmHopKind = enum { fsm, stackful };
+const FsmHopSnapshot = struct {
+    kind: FsmHopKind,
+    fsm_ptr: ?*fp.FsmTask = null,
+    task_ptr: ?*Task = null,
+    seq: u32,
+    gen: u32,
+    /// Atomic back-pointer values captured at snapshot time. For an
+    /// FSM hop these are `(waiting_for_fsm_owner, waiting_for_lock)`.
+    /// For a stackful hop these are
+    /// `(waiting_for_lock_owner, waiting_for_lock, waiting_for_lock_kind)`.
+    /// Validation re-reads and compares.
+    next_fsm_owner: ?*fp.FsmTask = null,
+    next_task_owner: ?*Task = null,
+    wait_lock: ?*anyopaque = null,
+    wait_kind: u8 = 0,
+};
+
+const MAX_FSM_CHAIN_DEPTH: usize = 32;
+
 fn detectCycleFsm(
     waiter: *fp.FsmTask,
     initial_task_owner: ?*Task,
     initial_fsm_owner: ?*fp.FsmTask,
     lock_ptr: *anyopaque,
 ) LockError!void {
-    var depth: usize = 0;
-    var cur_task: ?*Task = initial_task_owner;
-    var cur_fsm: ?*fp.FsmTask = initial_fsm_owner;
-    while (depth < 64) : (depth += 1) {
-        if (cur_fsm) |ft| {
-            if (ft == waiter) {
-                if (depth == 0) {
-                    std.debug.print(
-                        "DEADLOCK: FSM {*} re-acquired lock {*}\n",
-                        .{ waiter, lock_ptr },
-                    );
-                    return error.Deadlock;
-                }
-                std.debug.print(
-                    "LOCK CYCLE: FSM {*} waiting on lock {*} via {} hop(s)\n",
-                    .{ waiter, lock_ptr, depth },
-                );
-                return error.LockCycle;
-            }
-            // FsmTask.waiting_for_fsm_owner is a plain ?*FsmTask in
-            // thunks-cleanup. Atomicizing FsmTask fields is the
-            // follow-up step for FSM safety parity; for now read
-            // unsynchronized — the FsmTask lifetime is bounded by
-            // its scheduler's run loop (no cross-scheduler free
-            // window) so this is best-effort.
-            const next_fsm_any = ft.waiting_for_fsm_owner;
-            cur_task = null;
-            cur_fsm = next_fsm_any;
-        } else if (cur_task) |t| {
-            // FSM waiter cannot equal a Task holder; follow the stackful
-            // chain. .acquire pairs with the .release stores in lockSlow's
-            // park sequence after vm-fix-rewrite atomicized the field.
-            cur_fsm = null;
-            cur_task = t.waiting_for_lock_owner.load(.acquire);
-        } else break;
+    _ = lock_ptr;
+    var hops: [MAX_FSM_CHAIN_DEPTH]FsmHopSnapshot = undefined;
+    var fsm_pins: [MAX_FSM_CHAIN_DEPTH]?fp.FsmTaskPin = [_]?fp.FsmTaskPin{null} ** MAX_FSM_CHAIN_DEPTH;
+    var task_pins: [MAX_FSM_CHAIN_DEPTH]?fp.TaskPin = [_]?fp.TaskPin{null} ** MAX_FSM_CHAIN_DEPTH;
+    var attempt: u32 = 0;
+
+    defer {
+        for (fsm_pins) |maybe_pin| if (maybe_pin) |p| fp.unpinFsmTask(p);
+        for (task_pins) |maybe_pin| if (maybe_pin) |p| fp.unpinTask(p);
     }
+
+    while (attempt < MAX_DETECT_RETRIES) : (attempt += 1) {
+        // Drop pins from any prior attempt before re-walking.
+        for (&fsm_pins) |*slot| if (slot.*) |p| { fp.unpinFsmTask(p); slot.* = null; };
+        for (&task_pins) |*slot| if (slot.*) |p| { fp.unpinTask(p); slot.* = null; };
+
+        var cur_task: ?*Task = initial_task_owner;
+        var cur_fsm: ?*fp.FsmTask = initial_fsm_owner;
+        var n: usize = 0;
+        var found_self_at_depth: ?usize = null;
+
+        chain: while (n < MAX_FSM_CHAIN_DEPTH) {
+            if (cur_fsm) |ft| {
+                if (ft == waiter) {
+                    found_self_at_depth = n;
+                    break :chain;
+                }
+                // Pin the FsmTask slab. If it was never slab-allocated
+                // (e.g. test stub) or already reclaimed, treat as a
+                // chain terminator — a freed FsmTask can't be in a
+                // cycle by definition.
+                const pin = fp.pinFsmTask(ft) orelse break :chain;
+                fsm_pins[n] = pin;
+
+                const seq0 = ft.seq.load(.acquire);
+                const next_fsm = ft.waiting_for_fsm_owner.load(.acquire);
+                const wait_lock = ft.waiting_for_lock.load(.acquire);
+
+                hops[n] = .{
+                    .kind = .fsm,
+                    .fsm_ptr = ft,
+                    .seq = seq0,
+                    .gen = pin.gen,
+                    .next_fsm_owner = next_fsm,
+                    .wait_lock = wait_lock,
+                };
+                n += 1;
+                if (next_fsm != null) { cur_fsm = next_fsm; continue :chain; }
+                // FSM holder is parked on a non-FSM (stackful) chain
+                // hop today's runtime can't trace (FsmTask doesn't
+                // record waiting_for_task_owner). Terminate.
+                break :chain;
+            }
+            if (cur_task) |t| {
+                const pin = fp.pinTask(t) orelse break :chain;
+                task_pins[n] = pin;
+
+                const seq0 = t.seq.load(.acquire);
+                const wait_kind = t.waiting_for_lock_kind.load(.acquire);
+                const wait_lock = t.waiting_for_lock.load(.acquire);
+                const next_owner = t.waiting_for_lock_owner.load(.acquire);
+
+                hops[n] = .{
+                    .kind = .stackful,
+                    .task_ptr = t,
+                    .seq = seq0,
+                    .gen = pin.gen,
+                    .next_task_owner = next_owner,
+                    .wait_lock = wait_lock,
+                    .wait_kind = wait_kind,
+                };
+                n += 1;
+                if (next_owner == null) break :chain;
+                cur_task = next_owner;
+                continue :chain;
+            }
+            break :chain;
+        }
+
+        // Validate snapshot.
+        var torn = false;
+        for (hops[0..n]) |h| {
+            switch (h.kind) {
+                .fsm => {
+                    const ft = h.fsm_ptr.?;
+                    if (ft.generation.load(.acquire) != h.gen) { torn = true; break; }
+                    if (ft.seq.load(.acquire) != h.seq) { torn = true; break; }
+                    if (ft.waiting_for_fsm_owner.load(.acquire) != h.next_fsm_owner) { torn = true; break; }
+                    if (ft.waiting_for_lock.load(.acquire) != h.wait_lock) { torn = true; break; }
+                },
+                .stackful => {
+                    const t = h.task_ptr.?;
+                    if (t.generation.load(.acquire) != h.gen) { torn = true; break; }
+                    if (t.seq.load(.acquire) != h.seq) { torn = true; break; }
+                    if (t.waiting_for_lock_owner.load(.acquire) != h.next_task_owner) { torn = true; break; }
+                    if (t.waiting_for_lock.load(.acquire) != h.wait_lock) { torn = true; break; }
+                    if (t.waiting_for_lock_kind.load(.acquire) != h.wait_kind) { torn = true; break; }
+                },
+            }
+        }
+        if (torn) continue;
+
+        if (found_self_at_depth) |depth| {
+            if (depth == 0) return error.Deadlock;
+            return error.LockCycle;
+        }
+        return; // clean walk, no cycle
+    }
+    return;
 }
 
 
@@ -500,13 +614,18 @@ pub const ParkingMutex = struct {
         return @ptrFromInt(owner_bits);
     }
 
+    // queue_spin and waiters.spin are aliases — both serialize the
+    // ParkingMutex's waiter FIFO. We forward to waiters.spin so the
+    // scheduler's scanFsmLockWaiters (which only has a *WaiterList)
+    // synchronizes with parking-lot's push/wakeNext on the SAME
+    // atomic. Without this unification the scanner used wl.spin
+    // while pushers used queue_spin, racing on the WaiterNode.next
+    // and WaiterList.head/tail mutations (TSan-flagged).
     fn spinAcquireQueue(self: *ParkingMutex) void {
-        while (self.queue_spin.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
-            std.atomic.spinLoopHint();
-        }
+        self.waiters.spinAcquire();
     }
     fn spinReleaseQueue(self: *ParkingMutex) void {
-        self.queue_spin.store(0, .release);
+        self.waiters.spinRelease();
     }
 
     /// Test/inspection helpers.
@@ -553,21 +672,26 @@ pub const ParkingMutex = struct {
         waiter: *WaiterNode,
         sched: *fp.Scheduler,
     ) FsmLockResult {
-        // Safety: re-entrancy.
-        if (self.fsm_owner.load(.acquire)) |cur_fsm| {
-            if (cur_fsm == fsm_task) {
-                std.debug.print(
-                    "DEADLOCK: FSM {*} re-acquired mutex {*} it already holds\n",
-                    .{ fsm_task, self },
-                );
-                fsm_task.lock_error = .Deadlock;
-                return .Error;
+        // Safety: re-entrancy. Gate on actual lock-held state so a
+        // stale fsm_owner left over from a previous owner that already
+        // unlocked does not produce a false-positive Deadlock when
+        // the same FSM cleanly re-acquires after release. (unlock()
+        // intentionally avoids clearing fsm_owner to keep the hot
+        // unlock path's atomic-op count stable for loom.)
+        const pre_state = self.state.load(.acquire);
+        if ((pre_state & STATE_LOCKED) != 0) {
+            if (self.fsm_owner.load(.acquire)) |cur_fsm| {
+                if (cur_fsm == fsm_task) {
+                    fsm_task.lock_error = .Deadlock;
+                    return .Error;
+                }
             }
         }
-        // Safety: cycle detection.
-        const pre_state = self.state.load(.acquire);
+        // Safety: cycle detection. Same gating: only treat fsm_owner
+        // as authoritative when the lock is actually held.
         const pre_task_owner = ownerOf(pre_state);
-        const pre_fsm_owner = self.fsm_owner.load(.acquire);
+        const pre_fsm_owner: ?*fp.FsmTask =
+            if ((pre_state & STATE_LOCKED) != 0) self.fsm_owner.load(.acquire) else null;
         detectCycleFsm(fsm_task, pre_task_owner, pre_fsm_owner, self) catch |err| {
             fsm_task.lock_error = switch (err) {
                 error.Deadlock => .Deadlock,
@@ -615,11 +739,14 @@ pub const ParkingMutex = struct {
             .kind = .Write,
         };
         self.waiters.push(waiter);
-        fsm_task.lock_waiter = waiter;
-        fsm_task.waiting_for_lock = self;
-        fsm_task.waiting_for_lock_list = &self.waiters;
-        fsm_task.waiting_for_fsm_owner = pre_fsm_owner;
-        fsm_task.lock_wait_start_ms = compat.milliTimestamp();
+        fsm_task.lock_waiter.store(waiter, .release);
+        fsm_task.waiting_for_lock.store(self, .release);
+        fsm_task.waiting_for_lock_list.store(&self.waiters, .release);
+        fsm_task.waiting_for_fsm_owner.store(pre_fsm_owner, .release);
+        fsm_task.lock_wait_start_ms.store(compat.milliTimestamp(), .release);
+        // detectCycleFsm uses seq to validate per-hop snapshots; bump
+        // on every park transition so chain walkers detect torn reads.
+        _ = fsm_task.seq.fetchAdd(1, .release);
         sched.registerFsmLockWaiter(fsm_task);
 
         self.spinReleaseQueue();
@@ -713,7 +840,9 @@ pub const ParkingMutex = struct {
         // Re-entrancy check: same task already owns the lock → deadlock.
         const cur_state = self.state.load(.acquire);
         const current_owner = ownerOf(cur_state);
-        if (current_owner == task) return error.Deadlock;
+        if (current_owner == task) {
+            return error.Deadlock;
+        }
 
         // Walk the owner chain BEFORE taking queue_spin. detectCycle
         // re-reads `self.state` itself (via readLockState) so that a
@@ -819,11 +948,12 @@ pub const ParkingMutex = struct {
                 self.hold_start_ns = 0;
             }
         }
-        // fsm_owner is set only by FSM-side acquire/transfer paths and
-        // is null when a stackful Task holds the lock — no clear needed
-        // here. Adding an extra .release store every unlock would burn
-        // a SimAtomic yield point and (per loom regression) destabilize
-        // the lost-wake schedule space without functional benefit.
+        // fsm_owner is a chain anchor for detectCycleFsm and is NOT
+        // cleared here. The hot stackful unlock path is sensitive to
+        // extra atomic ops (loom regression on lost-wake schedules);
+        // instead, tryLockForFsm gates its re-entrancy / cycle check
+        // on actual lock-held state so a stale fsm_owner pointer is
+        // ignored when the lock is currently free.
         // Single atomic op: clear LOCKED + OWNER, preserving flag bits.
         // fetchAnd returns the prior value, which tells us whether to wake.
         const prev = self.state.fetchAnd(STATE_FLAG_MASK & ~STATE_LOCKED, .release);
@@ -863,18 +993,17 @@ pub const ParkingMutex = struct {
                 // Transfer succeeded — now safe to pop and wake.
                 _ = self.waiters.pop();
                 if (w.isFsm()) {
-                    // FSM wake: clear FSM-side fields, set fsm_owner so
-                    // detectCycleFsm sees this FSM as the holder, then
-                    // submit FSM resume. FsmTask field atomicization is
-                    // a follow-up; fields are set non-atomically here
-                    // (FsmTask lifetime is bounded by its scheduler's
-                    // run loop).
+                    // FSM wake: clear FSM-side fields with .release so
+                    // scanFsmLockWaiters / detectCycleFsm reading them
+                    // under .acquire observes a consistent post-wake
+                    // state. Mirrors the stackful protocol below.
                     const ft: *fp.FsmTask = @ptrCast(@alignCast(w.fsm_task.?));
                     self.fsm_owner.store(ft, .release);
-                    ft.lock_waiter = null;
-                    ft.waiting_for_lock = null;
-                    ft.waiting_for_lock_list = null;
-                    ft.waiting_for_fsm_owner = null;
+                    ft.waiting_for_lock.store(null, .release);
+                    ft.waiting_for_lock_list.store(null, .release);
+                    ft.lock_waiter.store(null, .release);
+                    ft.waiting_for_fsm_owner.store(null, .release);
+                    _ = ft.seq.fetchAdd(1, .release);
                     const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                     sched.submitFsmResume(ft) catch unreachable;
                 } else {
@@ -977,13 +1106,15 @@ pub const ParkingRwLock = struct {
         return @intCast(self.state.load(.acquire) & READER_MASK);
     }
 
+    // Forward to waiters.spin so the scheduler's scanLockWaiters /
+    // scanFsmLockWaiters (which only have a *WaiterList) serialize on
+    // the SAME atomic as parking-lot's push/wakeNext. See the matching
+    // ParkingMutex.spinAcquireQueue comment.
     fn spinAcquireQueue(self: *ParkingRwLock) void {
-        while (self.queue_spin.cmpxchgWeak(0, 1, .acquire, .monotonic) != null) {
-            std.atomic.spinLoopHint();
-        }
+        self.waiters.spinAcquire();
     }
     fn spinReleaseQueue(self: *ParkingRwLock) void {
-        self.queue_spin.store(0, .release);
+        self.waiters.spinRelease();
     }
 
     // Exclusive (write) lock
@@ -1116,11 +1247,12 @@ pub const ParkingRwLock = struct {
             }
         }
         self.write_owner.store(null, .release);
-        // fsm_write_owner is set only by FSM-side acquire/transfer paths
-        // and is null when a stackful Task holds the lock. Skipping the
-        // clear here saves a SimAtomic yield point on the hot stackful
-        // unlock path (otherwise the address-ordered VOPR loom test
-        // exhausts MAX_STEPS).
+        // fsm_write_owner is a chain anchor for detectCycleFsm and is
+        // NOT cleared here (extra atomic ops on the hot unlock path
+        // destabilize the lost-wake loom regression schedule space).
+        // tryWriteLockForFsm gates its re-entrancy / cycle check on
+        // WRITE_LOCKED_BIT so a stale fsm_write_owner is ignored when
+        // the lock is currently free.
         // Clear write bit. fetchAnd returns the prior value so we can detect
         // HAS_WAITERS in one atomic op (no separate load).
         const prev = self.state.fetchAnd(~WRITE_LOCKED_BIT, .release);
@@ -1144,20 +1276,26 @@ pub const ParkingRwLock = struct {
         waiter: *WaiterNode,
         sched: *fp.Scheduler,
     ) FsmLockResultTop {
-        // Safety: write re-entrancy on the same FSM.
-        if (self.fsm_write_owner.load(.acquire)) |cur| {
-            if (cur == fsm_task) {
-                std.debug.print(
-                    "DEADLOCK: FSM {*} re-acquired rwlock write {*}\n",
-                    .{ fsm_task, self },
-                );
-                fsm_task.lock_error = .Deadlock;
-                return .Error;
+        // Safety: write re-entrancy on the same FSM. Gate on actual
+        // lock-held state (WRITE_LOCKED_BIT) so a stale fsm_write_owner
+        // left behind by a previous owner that already unlocked
+        // does NOT trigger a false-positive Deadlock when the same
+        // FSM cleanly re-acquires after release.
+        const cur_state = self.state.load(.acquire);
+        if ((cur_state & WRITE_LOCKED_BIT) != 0) {
+            if (self.fsm_write_owner.load(.acquire)) |cur| {
+                if (cur == fsm_task) {
+                    fsm_task.lock_error = .Deadlock;
+                    return .Error;
+                }
             }
         }
         // Safety: cycle detection across stackful/FSM writer chains.
+        // Only treat fsm_write_owner as authoritative when the lock is
+        // actually held — otherwise pre_fsm_owner is a stale ghost.
         const pre_task_owner = self.write_owner.load(.acquire);
-        const pre_fsm_owner = self.fsm_write_owner.load(.acquire);
+        const pre_fsm_owner: ?*fp.FsmTask =
+            if ((cur_state & WRITE_LOCKED_BIT) != 0) self.fsm_write_owner.load(.acquire) else null;
         detectCycleFsm(fsm_task, pre_task_owner, pre_fsm_owner, self) catch |err| {
             fsm_task.lock_error = switch (err) {
                 error.Deadlock => .Deadlock,
@@ -1203,11 +1341,12 @@ pub const ParkingRwLock = struct {
             .kind = .Write,
         };
         self.waiters.push(waiter);
-        fsm_task.lock_waiter = waiter;
-        fsm_task.waiting_for_lock = self;
-        fsm_task.waiting_for_lock_list = &self.waiters;
-        fsm_task.waiting_for_fsm_owner = pre_fsm_owner;
-        fsm_task.lock_wait_start_ms = compat.milliTimestamp();
+        fsm_task.lock_waiter.store(waiter, .release);
+        fsm_task.waiting_for_lock.store(self, .release);
+        fsm_task.waiting_for_lock_list.store(&self.waiters, .release);
+        fsm_task.waiting_for_fsm_owner.store(pre_fsm_owner, .release);
+        fsm_task.lock_wait_start_ms.store(compat.milliTimestamp(), .release);
+        _ = fsm_task.seq.fetchAdd(1, .release);
         sched.registerFsmLockWaiter(fsm_task);
 
         self.spinReleaseQueue();
@@ -1288,12 +1427,13 @@ pub const ParkingRwLock = struct {
             .kind = .Read,
         };
         self.waiters.push(waiter);
-        fsm_task.lock_waiter = waiter;
-        fsm_task.waiting_for_lock = self;
-        fsm_task.waiting_for_lock_list = &self.waiters;
+        fsm_task.lock_waiter.store(waiter, .release);
+        fsm_task.waiting_for_lock.store(self, .release);
+        fsm_task.waiting_for_lock_list.store(&self.waiters, .release);
         // Readers have no single owner; leave waiting_for_fsm_owner null.
-        fsm_task.waiting_for_fsm_owner = null;
-        fsm_task.lock_wait_start_ms = compat.milliTimestamp();
+        fsm_task.waiting_for_fsm_owner.store(null, .release);
+        fsm_task.lock_wait_start_ms.store(compat.milliTimestamp(), .release);
+        _ = fsm_task.seq.fetchAdd(1, .release);
         sched.registerFsmLockWaiter(fsm_task);
 
         self.spinReleaseQueue();
@@ -1515,9 +1655,17 @@ pub const ParkingRwLock = struct {
                         const ft: *fp.FsmTask = @ptrCast(@alignCast(w.fsm_task.?));
                         self.fsm_write_owner.store(ft, .release);
                         self.write_owner.store(null, .release);
-                        ft.lock_waiter = null;
-                        ft.waiting_for_lock = null;
-                        ft.waiting_for_fsm_owner = null;
+                        // Wake-side ordering mirrors stackful: clear
+                        // waiting_for_lock_list before lock_waiter, then
+                        // lock cleared with .release so a concurrent
+                        // detectCycleFsm / scanFsmLockWaiters reader
+                        // observing lock==null does not chase a stale
+                        // waiter node.
+                        ft.waiting_for_lock_list.store(null, .release);
+                        ft.lock_waiter.store(null, .release);
+                        ft.waiting_for_lock.store(null, .release);
+                        ft.waiting_for_fsm_owner.store(null, .release);
+                        _ = ft.seq.fetchAdd(1, .release);
                         const sched: *fp.Scheduler = @ptrCast(@alignCast(w.sched_ptr));
                         sched.submitFsmResume(ft) catch unreachable;
                     } else {
@@ -1548,9 +1696,11 @@ pub const ParkingRwLock = struct {
                     }
                     if (r.isFsm()) {
                         const ft: *fp.FsmTask = @ptrCast(@alignCast(r.fsm_task.?));
-                        ft.lock_waiter = null;
-                        ft.waiting_for_lock = null;
-                        ft.waiting_for_fsm_owner = null;
+                        ft.waiting_for_lock_list.store(null, .release);
+                        ft.lock_waiter.store(null, .release);
+                        ft.waiting_for_lock.store(null, .release);
+                        ft.waiting_for_fsm_owner.store(null, .release);
+                        _ = ft.seq.fetchAdd(1, .release);
                         const sched: *fp.Scheduler = @ptrCast(@alignCast(r.sched_ptr));
                         sched.submitFsmResume(ft) catch unreachable;
                     } else {

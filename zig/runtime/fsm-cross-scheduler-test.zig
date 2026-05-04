@@ -18,12 +18,12 @@ const runtime_hdr = @import("runtime-header.zig");
 const alloc = std.testing.allocator;
 
 const Tracker = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     ran_on: std.atomic.Value(u32) = std.atomic.Value(u32).init(std.math.maxInt(u32)),
     completed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Tracker = @fieldParentPtr("task", t);
+        const self: *Tracker = @ptrCast(@alignCast(t.ctx.?));
         const sched_idx: u32 = if (fp.scheduler_running) @intCast(fp.active_scheduler.index) else std.math.maxInt(u32);
         self.ran_on.store(sched_idx, .release);
         self.completed.store(true, .release);
@@ -31,13 +31,12 @@ const Tracker = struct {
     }
 
     fn init() Tracker {
-        var t: Tracker = .{ .task = undefined };
-        t.task = fsm.FsmTask.init(&Tracker.doResume);
-        return t;
+        return .{ .task = undefined };
     }
 
-    fn bind(self: *Tracker) void {
-        self.task = fsm.FsmTask.init(&Tracker.doResume);
+    fn bind(self: *Tracker, sched: *fp.Scheduler) !void {
+        self.task = try sched.allocFsmTask(&Tracker.doResume);
+        self.task.ctx = self;
     }
 };
 
@@ -60,7 +59,7 @@ test "submitFsmSpawn: cross-thread submission routes via SPSC ring" {
     }
 
     var tracker: Tracker = .{ .task = undefined };
-    tracker.bind();
+    try tracker.bind(sched);
 
     // Register scheduler so active_tasks and channel indexing work.
     try fp.global_registry.register(alloc,std.Thread.getCurrentId(), sched);
@@ -72,7 +71,7 @@ test "submitFsmSpawn: cross-thread submission routes via SPSC ring" {
             s.submitFsmSpawn(t) catch unreachable;
         }
     };
-    var th = try std.Thread.spawn(.{}, Submitter.go, .{ sched, &tracker.task });
+    var th = try std.Thread.spawn(.{}, Submitter.go, .{ sched, tracker.task });
     th.join();
 
     // Drain channels (simulates scheduler run-loop iteration).
@@ -98,13 +97,13 @@ test "submitFsmSpawn: same-scheduler fast path skips the ring" {
     }
 
     var tracker: Tracker = .{ .task = undefined };
-    tracker.bind();
+    try tracker.bind(sched);
 
     fp.active_scheduler = sched;
     fp.scheduler_running = true;
     defer fp.scheduler_running = false;
 
-    try sched.submitFsmSpawn(&tracker.task);
+    try sched.submitFsmSpawn(tracker.task);
     // Fast path went direct to fsm_ready_queue — no drainChannels needed.
     try std.testing.expect(sched.fsm_ready_queue.len() == 1);
 
@@ -140,9 +139,9 @@ test "spawnFsmOn: submits to the specified scheduler even if loaded" {
     a.active_tasks.store(1_000, .release);
 
     var tracker: Tracker = .{ .task = undefined };
-    tracker.bind();
+    try tracker.bind(b);
 
-    try runtime_hdr.spawnFsmOn(b, &tracker.task);
+    try runtime_hdr.spawnFsmOn(b, tracker.task);
     a.active_tasks.store(0, .release);
 
     // The task lands on B's queue (either directly via fast path or via
@@ -188,14 +187,14 @@ test "spawnFsmBest: picks the less-loaded scheduler (pickTwo)" {
     var trackers: [N]Tracker = undefined;
     for (&trackers) |*t| {
         t.* = .{ .task = undefined };
-        t.bind();
+        try t.bind(a);
     }
 
     // Load A more heavily than B so the selection bias is consistent.
     a.active_tasks.store(100, .release);
     b.active_tasks.store(1, .release);
 
-    for (&trackers) |*t| try runtime_hdr.spawnFsmBest(&t.task);
+    for (&trackers) |*t| try runtime_hdr.spawnFsmBest(t.task);
 
     // Restore real counts so drain can subtract.
     a.active_tasks.store(0, .release);
@@ -237,12 +236,12 @@ test "submitFsmSpawn: 1000 cross-thread submits all land and complete" {
     defer alloc.free(trackers);
     for (trackers) |*t| {
         t.* = .{ .task = undefined };
-        t.bind();
+        try t.bind(sched);
     }
 
     const Submitter = struct {
         fn go(s: *fp.Scheduler, ts: []Tracker) void {
-            for (ts) |*t| s.submitFsmSpawn(&t.task) catch unreachable;
+            for (ts) |*t| s.submitFsmSpawn(t.task) catch unreachable;
         }
     };
     var th = try std.Thread.spawn(.{}, Submitter.go, .{ sched, trackers });

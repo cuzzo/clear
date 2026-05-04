@@ -23,10 +23,11 @@ const fc = @import("fiber-core.zig");
 const fp = @import("scheduler.zig");
 const fm = @import("fiber-memory.zig");
 const qs = @import("queues.zig");
+const build_options = @import("build_options");
 
-const NUM_SCHEDULERS = 8;
-const NUM_FIBERS = 200;
-const ITERATIONS = 500;
+const NUM_SCHEDULERS = if (build_options.coverage) 2 else 8;
+const NUM_FIBERS = if (build_options.coverage) 16 else 200;
+const ITERATIONS = if (build_options.coverage) 20 else 500;
 
 var completed: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 var correct: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);

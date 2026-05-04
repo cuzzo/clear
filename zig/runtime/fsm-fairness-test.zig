@@ -29,12 +29,12 @@ const compat = @import("../lib/compat.zig");
 const alloc = std.testing.allocator;
 
 const Counter = struct {
-    task: fsm.FsmTask,
+    task: *fsm.FsmTask,
     remaining: u32,
     step_count: u32 = 0,
 
     fn doResume(t: *fsm.FsmTask) fsm.YieldReason {
-        const self: *Counter = @fieldParentPtr("task", t);
+        const self: *Counter = @ptrCast(@alignCast(t.ctx.?));
         self.step_count += 1;
         if (self.remaining == 0) return .{ .Done = {} };
         self.remaining -= 1;
@@ -67,9 +67,8 @@ test "F1: FSM queue cannot hog — drain is bounded per iteration" {
     defer alloc.free(tasks);
 
     for (tasks) |*c| {
-        c.* = .{ .task = undefined, .remaining = 0 };
-        c.task = fsm.FsmTask.init(&Counter.doResume);
-        sched.enqueueFsm(&c.task);
+        c.* = .{ .task = try sched.allocFsmTask(&Counter.doResume), .remaining = 0 }; c.task.ctx = c;
+        sched.enqueueFsm(c.task);
     }
 
     // Before drain: queue has N entries.
@@ -111,9 +110,9 @@ test "F2: Yielded FSMs cannot monopolize a batch — every yielder advances once
     defer alloc.free(tasks);
 
     for (tasks) |*c| {
-        c.* = .{ .task = undefined, .remaining = YIELDS };
-        c.task = fsm.FsmTask.init(&Counter.doResume);
-        sched.enqueueFsm(&c.task);
+        c.* = .{ .task = try sched.allocFsmTask(&Counter.doResume), .remaining = YIELDS }; c.task.ctx = c;
+        
+        sched.enqueueFsm(c.task);
     }
 
     // After one drain: every task must have resumed exactly once. No
@@ -156,9 +155,8 @@ test "F1b: stackful dispatch is reachable even with a large FSM queue" {
     const tasks = try alloc.alloc(Counter, HUGE);
     defer alloc.free(tasks);
     for (tasks) |*c| {
-        c.* = .{ .task = undefined, .remaining = 0 };
-        c.task = fsm.FsmTask.init(&Counter.doResume);
-        sched.enqueueFsm(&c.task);
+        c.* = .{ .task = try sched.allocFsmTask(&Counter.doResume), .remaining = 0 }; c.task.ctx = c;
+        sched.enqueueFsm(c.task);
     }
 
     const t0 = compat.milliTimestamp();
