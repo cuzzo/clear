@@ -1542,7 +1542,8 @@ class Formatter::Emitter
           end
           j += 1
         end
-        chains << { s_idxs: s_idxs, end_idx: j } if s_idxs.length >= 2
+        starts_on_continuation = i > 0 && toks[i - 1].type == :NL
+        chains << { s_idxs: s_idxs, end_idx: j } if s_idxs.length >= 2 || starts_on_continuation
         i = j
       else
         i += 1
@@ -1746,11 +1747,14 @@ class Formatter::Emitter
       last  = last_code(line)
 
       line_depth = depth
+      outdent_leading = false
       if first && CLOSE_LEADING.include?(first.raw)
         depth = [depth - 1, 0].max
         line_depth = depth
       elsif first && OUTDENT_LEADING.include?(first.raw)
-        line_depth = [depth - 1, 0].max
+        depth = [depth - 1, 0].max
+        line_depth = depth
+        outdent_leading = true
       end
 
       if half_indent
@@ -1764,6 +1768,8 @@ class Formatter::Emitter
       out << "\n"
 
       if last && OPEN_TERMINAL.include?(last.raw)
+        depth += 1
+      elsif outdent_leading
         depth += 1
       end
       depth = [depth + post_delta, 0].max

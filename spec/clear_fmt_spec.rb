@@ -165,6 +165,75 @@ RSpec.describe Formatter do
     expect(out).to include("\n    s> SELECT _ * 2\n    s> SUM _")
   end
 
+  it "keeps top-level FNs at column 0 after ELSE_IF blocks in metadata-wrapped functions" do
+    src = <<~CLEAR
+      FN entrySize(entry: String) RETURNS !Int64 EFFECTS REENTRANT ->
+        IF entry == "f:" THEN
+          RETURN 1;
+        ELSE_IF entry == "d:" THEN
+          RETURN 2;
+        END
+
+        RETURN 0;
+      END
+
+      FN scanDir(path: String) RETURNS !Int64 EFFECTS REENTRANT ->
+        RETURN entrySize(path);
+      END
+
+      FN main() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+    path = write("elseif_fn.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("ELSE_IF entry == \"d:\" THEN\n    RETURN 2;\n  END\n\n  RETURN 0;\nEND\n\nFN scanDir")
+    expect(out).to include("\nFN main() RETURNS Void ->\n")
+  end
+
+  it "keeps body indentation balanced after multiple ELSE_IF outdents" do
+    src = <<~CLEAR
+      FN classify(x: Int64) RETURNS Int64 ->
+        IF x == 0 THEN
+          RETURN 0;
+        ELSE_IF x == 1 THEN
+          RETURN 1;
+        ELSE_IF x == 2 THEN
+          RETURN 2;
+        ELSE
+          RETURN 3;
+        END
+
+        RETURN 4;
+      END
+
+      FN after() RETURNS Void ->
+        RETURN;
+      END
+    CLEAR
+    path = write("elseif_balance.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("  ELSE_IF x == 1 THEN\n    RETURN 1;\n  ELSE_IF x == 2 THEN\n")
+    expect(out).to include("  ELSE\n    RETURN 3;\n  END\n\n  RETURN 4;\nEND\n\nFN after")
+  end
+
+  it "indents an existing single-stage pipeline continuation one level past the receiver" do
+    src = <<~CLEAR
+      FN scanDir(path: String) RETURNS !Int64 EFFECTS REENTRANT ->
+        entries = listAll(path)
+        s> SELECT _;
+
+        RETURN entries
+          s> CONCURRENT SELECT _
+          s> REDUCE(0_i64) acc + _;
+      END
+    CLEAR
+    path = write("pipeline_cont.cht", src)
+    out, _, _ = run_fmt("--stdout", path)
+    expect(out).to include("  entries = listAll(path)\n    s> SELECT _;\n")
+    expect(out).to include("  RETURN entries\n    s> CONCURRENT SELECT _\n    s> REDUCE(0) acc + _;\n")
+  end
+
   it "gives `s> RECOVER(...)` one extra indent relative to sibling stages" do
     src = <<~CLEAR
       FN main() RETURNS Int64 ->
