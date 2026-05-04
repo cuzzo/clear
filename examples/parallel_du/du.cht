@@ -1,44 +1,43 @@
--- Parallel du — recursive directory size calculator
+-- pdu: parallel recursive directory size calculator
 --
--- Scans a directory tree, summing file sizes.
--- Spawns BG fibers for subdirectories to scan in parallel.
--- Exercises: File I/O (fileSize, listAll), string parsing, BG fibers, promise lists.
+-- Scans the current directory tree, summing apparent file sizes.
+-- Uses a concurrent pipeline so independent entries can run in parallel.
 --
--- Usage: ./du
--- Compare: du -sb .
+-- Usage: ./pdu
+-- Compare: du -sb . or diskus --apparent-size .
 
-FN scanDir(path: String) RETURNS !Int64 EFFECTS REENTRANT ->
-    entries = listAll(path);
-    MUTABLE total: Int64 = 0;
+FN entrySize(entry: String)
+ RETURNS !Int64
+ EFFECTS REENTRANT
+->
+  fullPath = substr(entry, 2, entry.length() - 2);
+  prefix = substr(entry, 0, 2);
 
-    -- Collect subdirectory scan promises for parallel execution.
-    futures: ~Int64[]@list = [];
+  IF prefix == "f:" THEN
+    RETURN fileSize(fullPath);
+  ELSE_IF prefix == "d:" THEN
+    RETURN scanDir(fullPath);
+  END
 
-    FOR i IN (0_i64 ..< entries.length()) DO
-        entry = entries[i];
-        prefix = substr(entry, 0, 2);
-        name = substr(entry, 2, entry.length() - 2);
-        fullPath = "${path}/${name}";
+  RETURN 0;
+END
 
-        IF prefix == "f:" THEN
-            size = fileSize(fullPath);
-            IF size > 0 -> total += size;
-        ELSE_IF prefix == "d:" THEN
-            append(futures, BG { @service ->
-                scanDir(fullPath);
-            });
-        END
-    END
+FN scanDir(path: String)
+ RETURNS !Int64
+ EFFECTS REENTRANT
+->
+  entries = listAll(path)
+    s> SELECT "${substr(_, 0, 2)}${path}/${substr(_, 2, _.length() - 2)}";
 
-    -- Wait for all subdirectory scans and sum their results.
-    FOR j IN (0_i64 ..< futures.length()) ->
-        total += NEXT futures[j];
+  children = entries
+    s> CONCURRENT SELECT entrySize(_)
+    s> REDUCE(0) acc + _;
 
-    RETURN total;
+  RETURN fileSize(path) + children;
 END
 
 FN main() RETURNS Void ->
-    path = ".";
-    total = scanDir(path);
-    print("${total.toString()}\t${path}");
+  path = ".";
+  total = scanDir(path);
+  print("${total.toString()}\t${path}");
 END
