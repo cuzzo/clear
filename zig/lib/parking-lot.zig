@@ -373,18 +373,7 @@ fn detectCycle(waiter: *Task, lock_ptr: *anyopaque, lock_kind: u8) LockError!voi
         if (torn) continue;
 
         if (found_self_at_depth) |depth| {
-            if (depth == 0) {
-                std.debug.print(
-                    "DEADLOCK: fiber {*} re-acquired lock {*} it already holds\n",
-                    .{ waiter, lock_ptr },
-                );
-                return error.Deadlock;
-            }
-            std.debug.print(
-                "LOCK CYCLE: fiber {*} waiting on lock {*} transitively held by " ++
-                "itself via {} hop(s)\n",
-                .{ waiter, lock_ptr, depth },
-            );
+            if (depth == 0) return error.Deadlock;
             return error.LockCycle;
         }
         return; // clean walk, no cycle
@@ -559,13 +548,7 @@ pub const ParkingMutex = struct {
         // Re-entrancy check: same task already owns the lock → deadlock.
         const cur_state = self.state.load(.acquire);
         const current_owner = ownerOf(cur_state);
-        if (current_owner == task) {
-            std.debug.print(
-                "DEADLOCK: re-entrant lock acquisition — fiber {*} already holds mutex {*}\n",
-                .{ task, self },
-            );
-            return error.Deadlock;
-        }
+        if (current_owner == task) return error.Deadlock;
 
         // Walk the owner chain BEFORE taking queue_spin. detectCycle
         // re-reads `self.state` itself (via readLockState) so that a
