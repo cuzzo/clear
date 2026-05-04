@@ -127,9 +127,10 @@ pub fn build(b: *std.Build) void {
     // -------------------------------------------------------------------------
     // INDIVIDUAL TEST FILES (all in runtime/)
     // -------------------------------------------------------------------------
-    // All test files. Files marked `tsan_*` run under ThreadSanitizer too via
-    // `zig build test-tsan`. TSan tests force LLVM backend + ReleaseSafe (the
-    // default stage2 + Debug combo doesn't link the TSan runtime).
+    // All test files. Files marked `tsan_*` run under ThreadSanitizer too
+    // via `zig build test-tsan`. TSan tests force the LLVM backend (stage2
+    // doesn't link the TSan runtime regardless of opt level); see the
+    // `tsan_tests` block below for details on the Debug optimize choice.
     const TestEntry = struct {
         path: []const u8,
         // True when the test exercises shared mutable state across threads/
@@ -205,6 +206,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "promote-list-test.zig" },
         .{ .path = "resource-test.zig" },
         .{ .path = "runtime-header-test.zig" },
+        .{ .path = "sigaltstack-test.zig" },
         .{ .path = "soa-list-test.zig" },
         .{ .path = "soa-pool-test.zig" },
     };
@@ -229,9 +231,38 @@ pub fn build(b: *std.Build) void {
     // for round-robin shard assignment so each shard gets a roughly equal
     // slice of the active set, regardless of which entries got filtered.
     var test_step_idx: usize = 0;
+
+    // kcov path args -- must use absolute --include-path (not pattern)
+    // to keep Zig's stdlib out of the report. The previous
+    // --include-pattern=runtime/,lib/ also matched
+    // /usr/local/zig/lib/std/... and .../compiler_rt/, polluting max
+    // common path -> kcov stripped only the leading "/" -> cobertura
+    // emitted absolute paths (home/runner/.../zig/runtime/foo.zig) that
+    // Codecov could not map to repo files (only basename-only entries
+    // like switch.S survived via Codecov's basename fuzzy match).
+    //
+    // --strip-path trims the repo root so paths come out repo-relative
+    // (zig/runtime/foo.zig). build_root is `.../zig`; its parent is the
+    // repo root.
+    const runtime_dir_abs = b.path("runtime").getPath(b);
+    const lib_dir_abs = b.path("lib").getPath(b);
+    const repo_root = std.fs.path.dirname(b.build_root.path orelse ".") orelse ".";
+    const kcov_include_arg = b.fmt("--include-path={s},{s}", .{ runtime_dir_abs, lib_dir_abs });
+    const kcov_strip_arg = b.fmt("--strip-path={s}/", .{repo_root});
+
+    // build_options module exposing `coverage` to test code. Used by
+    // per-test SkipZigTest guards in source files for kcov-hostile
+    // tests. ONLY attached to test root modules (via per-test
+    // addImport below) -- never to runtime modules, because the
+    // runtime is also compiled by the `clear` CLI, which uses ordinary
+    // file imports and has no named-module registry.
+    const test_build_options = b.addOptions();
+    test_build_options.addOption(bool, "coverage", coverage);
+    const build_options_mod = test_build_options.createModule();
+    const fiber_core_mod = b.createModule(.{ .root_source_file = fiber_core_path });
     // Mirror counter for `test_tsan_step` -- only increments on entries
-    // with `tsan = true`. The TSan path uses LLVM + ReleaseSafe (real
-    // instrumentation; stage2 + Debug silently drops TSan), so per-shard
+    // with `tsan = true`. The TSan path uses LLVM + Debug (stage2 silently
+    // drops TSan instrumentation regardless of opt level), so per-shard
     // sizing here matters more than for the regular test_step path.
     var tsan_step_idx: usize = 0;
 
@@ -267,7 +298,11 @@ pub fn build(b: *std.Build) void {
         }
 
         if (include_in_test_step) {
-        // Standard build (Debug, stage2 backend)
+        // Standard build (Debug, stage2 backend; coverage forces LLVM
+        // backend so kcov can read complete DWARF for project .zig
+        // sources -- stage2 emits limited DWARF that only exposes .S
+        // files and compiler_rt, leaving project files invisible to
+        // kcov regardless of include filters).
         const unit_tests = b.addTest(.{
             .root_module = b.createModule(.{
                 .root_source_file = b.path(filename),
@@ -275,12 +310,14 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
                 .sanitize_thread = sanitize_thread,
             }),
+            .use_llvm = if (coverage) true else null,
         });
-        unit_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        unit_tests.root_module.addImport("fiber-core", fiber_core_mod);
         unit_tests.root_module.addImport("safety", safety_mod);
         unit_tests.root_module.addImport("ebr", ebr_mod);
         unit_tests.root_module.addImport("ownership", ownership_mod);
         unit_tests.root_module.addImport("compat", compat_mod);
+        unit_tests.root_module.addImport("build_options", build_options_mod);
         unit_tests.root_module.addAssemblyFile(switch_s);
         unit_tests.root_module.addAssemblyFile(onroot_s);
         unit_tests.root_module.link_libc = true;
@@ -300,7 +337,8 @@ pub fn build(b: *std.Build) void {
             const run_kcov = b.addSystemCommand(&.{
                 "kcov",
                 "--clean",
-                "--include-pattern=runtime/,lib/",
+                kcov_include_arg,
+                kcov_strip_arg,
                 kcov_dir,
             });
             run_kcov.addArtifactArg(unit_tests);
@@ -340,11 +378,12 @@ pub fn build(b: *std.Build) void {
                 }),
                 .use_llvm = true,
             });
-            tsan_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+            tsan_tests.root_module.addImport("fiber-core", fiber_core_mod);
             tsan_tests.root_module.addImport("safety", safety_mod);
             tsan_tests.root_module.addImport("ebr", ebr_mod);
             tsan_tests.root_module.addImport("ownership", ownership_mod);
             tsan_tests.root_module.addImport("compat", compat_mod);
+            tsan_tests.root_module.addImport("build_options", build_options_mod);
             tsan_tests.root_module.addAssemblyFile(switch_s);
             tsan_tests.root_module.addAssemblyFile(onroot_s);
             tsan_tests.root_module.link_libc = true;
@@ -386,7 +425,7 @@ pub fn build(b: *std.Build) void {
             }),
         });
 
-        bench_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        bench_tests.root_module.addImport("fiber-core", fiber_core_mod);
         bench_tests.root_module.addImport("safety", safety_mod);
         bench_tests.root_module.addImport("ebr", ebr_mod);
         bench_tests.root_module.addImport("ownership", ownership_mod);
@@ -422,7 +461,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        hammer_tests.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        hammer_tests.root_module.addImport("fiber-core", fiber_core_mod);
         hammer_tests.root_module.addImport("safety", safety_mod);
         hammer_tests.root_module.addImport("ebr", ebr_mod);
         hammer_tests.root_module.addImport("ownership", ownership_mod);
@@ -453,7 +492,7 @@ pub fn build(b: *std.Build) void {
                 .optimize = optimize,
             }),
         });
-        hammer_exe.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+        hammer_exe.root_module.addImport("fiber-core", fiber_core_mod);
         hammer_exe.root_module.addImport("safety", safety_mod);
         hammer_exe.root_module.addImport("ebr", ebr_mod);
         hammer_exe.root_module.addImport("ownership", ownership_mod);
@@ -495,7 +534,7 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         }),
     });
-    loom_exe.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+    loom_exe.root_module.addImport("fiber-core", fiber_core_mod);
     loom_exe.root_module.addImport("safety", safety_mod);
     loom_exe.root_module.addImport("ebr", ebr_mod);
     loom_exe.root_module.addImport("ownership", ownership_mod);
@@ -526,6 +565,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
         }),
     });
+    pl_loom_exe.root_module.addImport("build_options", build_options_mod);
     pl_loom_exe.root_module.addAssemblyFile(switch_s);
     pl_loom_exe.root_module.addAssemblyFile(onroot_s);
     pl_loom_exe.root_module.link_libc = true;
@@ -548,7 +588,7 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    lib.root_module.addImport("fiber-core", b.createModule(.{ .root_source_file = fiber_core_path }));
+    lib.root_module.addImport("fiber-core", fiber_core_mod);
     lib.root_module.addImport("safety", safety_mod);
     lib.root_module.addImport("ebr", ebr_mod);
     lib.root_module.addImport("ownership", ownership_mod);

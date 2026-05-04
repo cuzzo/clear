@@ -309,6 +309,10 @@ fn workerRw(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
 }
 
 test "ParkingRwLock: address-ordered multi-write-acquire under multi-OS-thread contention does not falsely detect cycle" {
+    // Skips under kcov: multi-OS-thread fiber contention + ptrace
+    // breakpoints lock up. Same shape as parking-lot-test.zig and
+    // stream-test.zig kcov skips.
+    if (@import("build_options").coverage) return error.SkipZigTest;
     const t_alloc = std.testing.allocator;
     var ebr = EbrContext{};
     defer ebr.deinit(t_alloc);

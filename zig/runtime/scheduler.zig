@@ -49,6 +49,44 @@ const IO_HELPER_STACK_SIZE = 16 * 1024;
 /// scheduler's thread-local arena instead of the global heap.
 pub threadlocal var __pinned_local_alloc: ?std.mem.Allocator = null;
 
+/// Per-thread alternate signal stack. Fibers run on small stacks (4 KB
+/// for Micro, 16 KB for Standard) with no pthread guard page; any signal
+/// (real SIGSEGV from a bug, SIGBUS, SIGINT, debugger SIGTRAP) whose
+/// handler runs on the current stack would push a signal frame onto the
+/// fiber stack and overflow into the adjacent slab header. sigaltstack
+/// gives signal handlers a dedicated 64 KB buffer instead.
+///
+/// Handlers must still be installed with SA_ONSTACK to actually use the
+/// alternate stack -- this just makes the stack available. Zig's
+/// std.debug.attachSegfaultHandler does set SA_ONSTACK, so installing
+/// the alt stack is sufficient for the segfault-handler case.
+///
+/// Public so a test can verify the handler runs in this range.
+pub threadlocal var sig_alt_stack: [64 * 1024]u8 align(16) = undefined;
+threadlocal var sig_alt_stack_installed: bool = false;
+
+/// Inclusive lower / exclusive upper address bounds of this thread's
+/// `sig_alt_stack`. Used by the sigaltstack-test to verify a handler
+/// invoked with SA_ONSTACK actually ran on this buffer. Must be called
+/// after `ensureSignalAltStack` (so the threadlocal is materialized).
+pub fn sigAltStackRange() [2]usize {
+    return .{ @intFromPtr(&sig_alt_stack), @intFromPtr(&sig_alt_stack) + sig_alt_stack.len };
+}
+
+/// Install `sig_alt_stack` as this thread's alternate signal stack via
+/// `sigaltstack(2)`. Idempotent. Called from `Scheduler.run()`.
+pub fn ensureSignalAltStack() void {
+    if (sig_alt_stack_installed) return;
+    if (builtin.os.tag != .linux) return;
+    const ss = std.posix.stack_t{
+        .sp = &sig_alt_stack,
+        .flags = 0,
+        .size = sig_alt_stack.len,
+    };
+    std.posix.sigaltstack(&ss, null) catch {};
+    sig_alt_stack_installed = true;
+}
+
 const linux = std.os.linux;
 const posix = std.posix;
 const IoUring = linux.IoUring;
@@ -646,6 +684,10 @@ pub const Scheduler = struct {
     }
 
     pub fn run(self: *Scheduler) void {
+
+        // Install alternate signal stack on this OS thread before any
+        // fiber runs. See sig_alt_stack docs above.
+        ensureSignalAltStack();
 
         const my_id = std.Thread.getCurrentId();
 
