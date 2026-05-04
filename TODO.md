@@ -29,10 +29,12 @@ Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the
  - [x] Atomics
  - [x] True Synchronization Polymorphism
  - [ ] COPY/CLONE/SPLIT overloading
+ - [ ] Design by Contract v1: `WITH GURADED x ... AS y { } ON GuardFail`
 
  ## v0.2 (Target = July 15)
  - [ ] Zig 0.16.0 style streaming IO (in progress)
  - [ ] Typed Holes
+ - [ ] Design by Contract v2: PRE { } and POST { } conditions
  - [ ] Cancelable fibers
  - [ ] Built-in support for fiber RACEs
  - [ ] STRICT mode compilation
