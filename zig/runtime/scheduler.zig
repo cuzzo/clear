@@ -530,15 +530,32 @@ pub const Scheduler = struct {
     /// Allocate a fresh FsmTask from `fsm_task_slab`, bump its
     /// generation, and initialize it. The slab gives detectCycleFsm
     /// its UAF-safe pin protocol (mirrors stackful Task slab).
-    /// Generation bump happens AFTER the FsmTask{} reset (which
-    /// zeroes generation): capture pre-reset value, write fresh task,
-    /// store +1 with .release. Any chain walker holding a stale
-    /// `(*FsmTask, generation)` pair from the previous slot occupant
-    /// observes the mismatch and aborts safely.
+    /// Generation bump happens after field reset: capture the previous
+    /// generation, reinitialize the slot, then store +1 with .release.
+    /// Cross-scheduler scanners can retain stale waiter-list pointers briefly,
+    /// so reset the atomic waiter/back-pointer fields with atomic stores rather
+    /// than a bulk struct assignment. Any chain walker holding a stale
+    /// `(*FsmTask, generation)` pair from the previous slot occupant observes
+    /// the mismatch and aborts safely.
     pub fn allocFsmTask(self: *Scheduler, resume_fn: fsm_mod.ResumeFn) !*fsm_mod.FsmTask {
         const t = try self.fsm_task_slab.create();
         const prev_gen = t.generation.load(.monotonic);
-        t.* = fsm_mod.FsmTask.init(resume_fn);
+        t.resume_fn = resume_fn;
+        t.status = .Ready;
+        t.spawn_ns = 0;
+        t.ctx = null;
+        t.seq.store(0, .release);
+        t.waiter = null;
+        t.lock_waiter.store(null, .release);
+        t.waiting_for_lock_list.store(null, .release);
+        t.lock_error = .None;
+        t.waiting_for_lock.store(null, .release);
+        t.waiting_for_fsm_owner.store(null, .release);
+        t.lock_wait_start_ms.store(0, .release);
+        t.fsm_wake_time = 0;
+        t.destroy_fn = null;
+        t.ebr_slot = null;
+        t.task_runtime = null;
         t.generation.store(prev_gen +% 1, .release);
         return t;
     }

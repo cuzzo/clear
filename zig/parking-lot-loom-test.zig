@@ -46,6 +46,7 @@ const tests = [_]Test{
     .{ .name = "parking VOPR: address-ordered nested mutex, no false positive (2000 seeds)", .func = &ploom.testVoprAddressOrderedNoFalsePositive },
     .{ .name = "parking timeout-atomic: parker/scanner handshake (4096 schedules)",          .func = &ploom.testTimeoutAtomicCoverage },
     .{ .name = "parking fsm-timeout-atomic: FsmTask parker/scanner handshake (4096 schedules)", .func = &ploom.testFsmTimeoutAtomicCoverage },
+    .{ .name = "parking fsm-reuse-atomic: FsmTask slab reset vs stale scanner (256 schedules)", .func = &ploom.testFsmReuseAtomicCoverage },
     .{ .name = "stream close-err-atomic: producer/consumer handshake on closed+err (4096 schedules)", .func = &ploom.testStreamCloseErrAtomicCoverage },
 };
 

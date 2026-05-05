@@ -2045,6 +2045,121 @@ pub fn testFsmTimeoutAtomicCoverage() !void {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// FSM slab-reuse reset coverage
+//
+// Regression for the TSan failure where scanFsmLockWaiters retained a
+// stale *FsmTask in fsm_lock_waiters while the scheduler reused the same
+// slab slot for a new FSM task. Bulk struct assignment reset the
+// waiter/back-pointer fields non-atomically, racing with the scanner's
+// atomic loads. Scheduler.allocFsmTask now resets those fields with
+// atomic stores and publishes the new generation last.
+//
+// This loom scenario drives the real allocFsmTask reset while a stale
+// scanner observes the same slot. Once the scanner sees the new
+// generation, acquire/release ordering requires all reset fields to be
+// visible as clear.
+// ─────────────────────────────────────────────────────────────────────
+
+var g_fsm_reuse_task: *fsm_mod.FsmTask = undefined;
+var g_fsm_reuse_allocated: ?*fsm_mod.FsmTask = null;
+var g_fsm_reuse_old_generation: u32 = 0;
+var g_fsm_reuse_same_slot: bool = false;
+var g_fsm_reuse_observed_clear: bool = false;
+
+fn noopFsmResume(_: *fsm_mod.FsmTask) fsm_mod.YieldReason {
+    return .Done;
+}
+
+fn entryFsmReuseScanner() callconv(.c) void {
+    const t = g_fsm_reuse_task;
+
+    while (t.generation.load(.acquire) == g_fsm_reuse_old_generation) {
+        fc.__fiber.?.yield();
+    }
+
+    const clear =
+        t.seq.load(.acquire) == 0 and
+        t.lock_waiter.load(.acquire) == null and
+        t.waiting_for_lock_list.load(.acquire) == null and
+        t.waiting_for_lock.load(.acquire) == null and
+        t.waiting_for_fsm_owner.load(.acquire) == null and
+        t.lock_wait_start_ms.load(.acquire) == 0;
+
+    if (clear) g_fsm_reuse_observed_clear = true;
+
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryFsmReuseAllocator() callconv(.c) void {
+    const t = g_sched.allocFsmTask(&noopFsmResume) catch unreachable;
+    g_fsm_reuse_allocated = t;
+    g_fsm_reuse_same_slot = (t == g_fsm_reuse_task);
+
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testFsmReuseAtomicCoverage() !void {
+    const allocator = std.heap.c_allocator;
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    var schedule_buf: [8]u8 = undefined;
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+    const total: usize = if (build_options.coverage) 16 else 256;
+    for (0..total) |sched_idx| {
+        for (0..schedule_buf.len) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u3, @intCast(bit % 8))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+
+        const old = try g_sched.allocFsmTask(&noopFsmResume);
+        old.seq.store(7, .release);
+        old.lock_waiter.store(@ptrFromInt(0x11110001), .release);
+        old.waiting_for_lock_list.store(@ptrFromInt(0x22220001), .release);
+        old.waiting_for_lock.store(@ptrFromInt(0x33330001), .release);
+        old.waiting_for_fsm_owner.store(@ptrFromInt(0x44440008), .release);
+        old.lock_wait_start_ms.store(55, .release);
+
+        g_fsm_reuse_task = old;
+        g_fsm_reuse_allocated = null;
+        g_fsm_reuse_old_generation = old.generation.load(.acquire);
+        g_fsm_reuse_same_slot = false;
+        g_fsm_reuse_observed_clear = false;
+        g_sched.fsm_task_slab.destroy(old);
+
+        try h.createThread(0, @intFromPtr(&entryFsmReuseScanner));
+        try h.createThread(1, @intFromPtr(&entryFsmReuseAllocator));
+
+        h.run() catch {
+            failures += 1;
+            if (g_fsm_reuse_allocated) |t| g_sched.fsm_task_slab.destroy(t);
+            continue;
+        };
+
+        if (!g_fsm_reuse_same_slot or !g_fsm_reuse_observed_clear) failures += 1;
+        if (g_fsm_reuse_allocated) |t| g_sched.fsm_task_slab.destroy(t);
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures != 0) {
+        std.debug.print("\nfsm-reuse-atomic: {d}/{d} schedules failed\n", .{ failures, total });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Stream(T) close/err atomic coverage
 //
 // Stream(T).Inner.closed became Atomic(bool) so push() / next() can
