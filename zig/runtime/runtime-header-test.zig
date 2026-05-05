@@ -21,6 +21,26 @@ var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
 
+test "CheatLib.read returns immediately when fd already has bytes" {
+    var fds: [2]i32 = undefined;
+    switch (std.posix.errno(std.os.linux.socketpair(std.posix.AF.UNIX, std.posix.SOCK.STREAM, 0, &fds))) {
+        .SUCCESS => {},
+        else => return error.Unexpected,
+    }
+    defer compat.closeFd(fds[0]);
+    defer compat.closeFd(fds[1]);
+
+    const msg = "ready";
+    const written = std.c.write(fds[1], msg.ptr, msg.len);
+    try std.testing.expect(written >= 0);
+    try std.testing.expectEqual(msg.len, @as(usize, @intCast(written)));
+
+    var buf: [16]u8 = undefined;
+    const n = try CheatLib.read(fds[0], &buf);
+    try std.testing.expectEqual(msg.len, n);
+    try std.testing.expectEqualSlices(u8, msg, buf[0..n]);
+}
+
 fn initWorkerGlobals() void {
     global_stack_pool = fm.StackPool.init(alloc);
 }

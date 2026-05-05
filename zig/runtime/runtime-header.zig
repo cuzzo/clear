@@ -493,9 +493,34 @@ pub const CheatLib = struct {
         };
     }
 
-    // Read from a socket via io_uring IORING_OP_RECV.
-    // Submits a single recv and yields; CQE result is the byte count.
+    // Read from a non-blocking socket.
+    //
+    // Fast path: try a direct read first. Hot loopback/socket workloads often
+    // have bytes ready already, and paying an io_uring submission + yield for
+    // every ready read is far more expensive than the syscall itself.
+    //
+    // Slow path: if the fd would block, submit IORING_OP_RECV and yield. This
+    // preserves the completion-based path needed for streaming/parked fibers.
     pub noinline fn read(fd: i32, buffer: []u8) !usize {
+        const n = std.posix.read(fd, buffer) catch |err| {
+            if (err != error.WouldBlock) return err;
+            if (!fp.scheduler_running) return err;
+
+            const sched = fp.active_scheduler;
+            const task = sched.getCurrent();
+            var waiter = fp.Scheduler.IoWaiter{ .task = task };
+            try sched.submitRecv(&waiter, fd, buffer);
+            task.base.yield();
+            if (waiter.result < 0) return fp.Scheduler.ioError(waiter.result);
+            return @intCast(waiter.result);
+        };
+        return n;
+    }
+
+    // Force completion-based socket read. Kept separate so streaming code can
+    // opt into the one-SQE/one-yield path explicitly instead of penalizing
+    // ready-socket hot paths.
+    pub noinline fn readAsync(fd: i32, buffer: []u8) !usize {
         const sched = fp.active_scheduler;
         const task = sched.getCurrent();
         var waiter = fp.Scheduler.IoWaiter{ .task = task };
