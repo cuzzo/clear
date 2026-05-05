@@ -18,6 +18,10 @@ const root = @import("root");
 // get/remove diagnostic workers can overflow Standard 16KB fiber stacks.
 const key_worker_stack_size = if (build_options.coverage or build_options.tsan) .Large else .Standard;
 
+fn coverageIters(comptime normal: usize) usize {
+    return if (build_options.coverage) 1 else normal;
+}
+
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
 var global_shutdown = std.atomic.Value(bool).init(false);
@@ -570,7 +574,7 @@ fn runTinyGetRemoveLoopWithDelays(get_ctx_delay: bool, remove_ctx_delay: bool, k
 
     const FIBERS = 2;
     const KEYS = 2;
-    const ITERS = 256;
+    const ITERS = comptime coverageIters(256);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -763,7 +767,7 @@ test "Promise(i64): repeated concurrent worker batches survive reuse" {
     rt.wireAllocator();
 
     const FIBERS = 4;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const Ctx = struct {
         inner: *CheatLib.Promise(i64).Inner,
@@ -837,7 +841,7 @@ test "RemoteCall: repeated concurrent batches survive reuse" {
     rt.wireAllocator();
 
     const FIBERS = 4;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
     const OPS = 200;
 
     const RemoteCtx = struct {
@@ -1032,7 +1036,7 @@ test "PartitionedStringMap: stack-local remote ops are complete before deinit" {
     defer rt.deinit();
     rt.wireAllocator();
 
-    const ITERS = 2000;
+    const ITERS = comptime coverageIters(2000);
 
     const MainFn = struct {
         fn run(_: *anyopaque, _: ?*anyopaque) anyerror!void {
@@ -1087,7 +1091,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1147,7 +1151,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1207,7 +1211,7 @@ test "PartitionedStringMap: recreated heap-backed map survives repeated concurre
 
     const FIBERS = 4;
     const KEYS = 500;
-    const ITERS = 6;
+    const ITERS = comptime coverageIters(6);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1266,7 +1270,7 @@ test "PartitionedStringMap: inline L6-shaped put-get batches survive repeated ru
 
     const KEYS = 500;
     const FIBERS = 4;
-    const ITERS = 3;
+    const ITERS = comptime coverageIters(3);
 
     const InlineBgWork = struct {
         inner: *CheatLib.Promise(i64).Inner,
@@ -1363,7 +1367,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1422,7 +1426,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1481,7 +1485,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1543,7 +1547,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1605,7 +1609,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1666,7 +1670,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -1727,7 +1731,7 @@ test "PartitionedStringMap: persistent heap-backed map survives repeated concurr
 
     const FIBERS = 4;
     const KEYS = 200;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2223,7 +2227,7 @@ test "PartitionedStringMap: single-worker repeated remote get-remove batches" {
     rt.wireAllocator();
 
     const KEYS = 128;
-    const ITERS = 32;
+    const ITERS = comptime coverageIters(32);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2281,7 +2285,7 @@ test "PartitionedStringMap: same-keys vs fresh-keys get-remove batches" {
 
     const FIBERS = 4;
     const KEYS = 64;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2355,7 +2359,7 @@ test "PartitionedStringMap: get-remove ctx counters drain after each batch" {
 
     const FIBERS = 4;
     const KEYS = 64;
-    const ITERS = 16;
+    const ITERS = comptime coverageIters(16);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2418,7 +2422,7 @@ test "PartitionedStringMap: phased get then remove batches" {
 
     const FIBERS = 4;
     const KEYS = 64;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2482,7 +2486,7 @@ test "PartitionedStringMap: tiny 2-worker 2-key 1-remote-shard loop" {
 
     const FIBERS = 2;
     const KEYS = 2;
-    const ITERS = 256;
+    const ITERS = comptime coverageIters(256);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2544,7 +2548,7 @@ test "PartitionedStringMap: persistent map repeated get-remove with counters" {
 
     const FIBERS = 4;
     const KEYS = 64;
-    const ITERS = 32;
+    const ITERS = comptime coverageIters(32);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2606,7 +2610,7 @@ test "PartitionedStringMap: delayed-destroy diagnostic for get-remove" {
 
     const FIBERS = 4;
     const KEYS = 64;
-    const ITERS = 8;
+    const ITERS = comptime coverageIters(8);
 
     const MainFn = struct {
         outer_rt: *Runtime,
@@ -2682,6 +2686,11 @@ test "PartitionedStringMap: tiny get-remove event log preserves per-op teardown 
 }
 
 test "PartitionedStringMap: repeated tiny get-remove batches preserve event-log invariants" {
+    // kcov already covers this event-log path in the immediately preceding
+    // test. Running the same diagnostic a second time under ptrace can stop
+    // making progress in kcov while the normal/TSan lanes still keep the
+    // larger repetition count as a scheduling stressor.
+    if (build_options.coverage) return error.SkipZigTest;
     try runTinyGetRemoveLoopWithEventLog(128);
 }
 
