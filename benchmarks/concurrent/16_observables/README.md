@@ -1,8 +1,7 @@
 # Concurrent Observables — CLEAR vs Go vs Rust
 
-Benchmarks the lock-free `@observable` runtime backing CLEAR's
-`~T@observable` types against equivalents in Go and Rust, plus
-`@locked` baselines in each.
+Benchmarks the CLEAR-language `~T@observable` pipeline-terminal
+form against matching Go and Rust stream/channel implementations.
 
 Two distinct measurements live in this directory:
 
@@ -12,11 +11,10 @@ Two distinct measurements live in this directory:
    join via `NEXT`. Measures end-to-end cost of the language form,
    including stream yield/resume overhead.
 
-2. **Cross-language atomic-counter comparison** (`bench_clear.zig`,
-   `bench.go`, `bench.rs`): 1 writer thread + K reader threads
-   hammer a shared atomic accumulator. Measures the underlying
-   lock-free runtime (`obs.AtomicSum` for CLEAR; `atomic.Int64` for
-   Go; `AtomicI64` for Rust) head-to-head with no language overhead.
+2. **Runtime-level helper** (`bench_clear.zig`): hand-written Zig
+   for isolating `obs.AtomicSum` itself. This is not used by the
+   benchmark runner's CLEAR headline result because it is not `.cht`
+   code.
 
 ```clear
 -- bench.cht (the canonical CLEAR form)
@@ -25,36 +23,29 @@ final = NEXT running;
 ```
 
 The compiler heap-allocates an `*ObservableSum(i64)` plus a
-WaitGroup, **spawns a CONSUMER fiber cross-scheduler** that pulls
-from `gen` and calls `.add(item)` per emit, and `NEXT` parks main
-on the WG until the consumer's `defer ctx.acc.finish()` issues
-`wg.done()`. Producer (BG STREAM gen), consumer fiber, and main
-all run on different worker threads in the default multi-threaded
-runtime, so the fold genuinely overlaps with the joiner.
+WaitGroup, spawns a consumer fiber that pulls from `gen` and calls
+`.add(item)` per emit, and `NEXT` parks main on the WG until the
+consumer's `defer ctx.acc.finish()` issues `wg.done()`.
 
 ## Workload
 
-  - 1 writer producing 5,000,000 increments
-  - K reader threads each calling `view()` until the writer finishes
-    (K ∈ {1, 4, 8})
+  - 1 producer emitting `0..2,000,000`
+  - 1 consumer summing the stream
+  - 1 joiner waiting for the final sum
+  - deterministic checksum: `sum(0..N-1) + N * 131`
 
 ## Results (this box, ReleaseFast / `-O` / `--release`)
 
 ### CLEAR-language pipeline form (`bench.cht` → `./clear build --optimized`)
 
-```
-CLEAR observable: 12499997500000 (sum 0..N-1) in 61 ms      (~12 ns/item)
-```
-
-5M values produced by a `BG STREAM`, folded via `s> SUM _` (which
-auto-produces a `~Int64@observable`), and joined via `NEXT`. The
-producer (BG STREAM gen), consumer fiber (spawned by the SUM emit
-cross-scheduler), and main (parked on the observable's WaitGroup)
-all run on different worker threads concurrently:
+2M values are produced by a `BG STREAM`, folded via `s> SUM _`
+(which auto-produces a `~Int64@observable`), and joined via `NEXT`.
+`bench.go` and `bench.rs` mirror this shape with bounded channels:
+producer -> consumer sum -> join.
 
 ```clear
 FN main() RETURNS Void ->
-    n_writes: Int64 = 5_000_000_i64;
+    n_writes: Int64 = 2_000_000_i64;
     gen: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < n_writes DO YIELD i; i = i + 1_i64; END
@@ -70,25 +61,8 @@ FN main() RETURNS Void ->
 END
 ```
 
-The 12 ns/item is the language-form cost: BG STREAM yield/resume
-overhead per item + cross-scheduler atomic add + WaitGroup join.
-The pure atomic-add-only number (no stream fiber, no consumer
-fiber spawn) lives in the cross-language reader-stress table below.
-
-### Concurrent reader stress (`bench_clear.zig` / `bench.go` / `bench.rs`)
-
-1 writer thread + K reader threads hammering the shared atomic
-counter. Same workload across all four implementations. (Median of
-3 runs; high variance on hot CPUs, especially at 8 readers.)
-
-| Variant                              | 1 reader               | 4 readers              | 8 readers              |
-|--------------------------------------|------------------------|------------------------|------------------------|
-| **CLEAR `obs.AtomicSum`**            | 37 ns/inc, **142 M r/s** | 67 ns/inc, **466 M r/s** | 88 ns/inc, **831 M r/s** |
-| Go `atomic.Int64`                    | 30 ns/inc, 950 M r/s   | 50 ns/inc, 2.97 G r/s  | 53 ns/inc, 4.31 G r/s  |
-| Rust `AtomicI64`                     | 35 ns/inc, 400 M r/s   | 50 ns/inc, 1.78 G r/s  | 58 ns/inc, 2.40 G r/s  |
-| **CLEAR `compat.Mutex`** (@locked)   | 130 ns/inc, 7.4 M r/s  | 416 ns/inc, 9.5 M r/s  | 797 ns/inc, 10.2 M r/s |
-| Go `sync.Mutex`                      | 63 ns/inc, 25 M r/s    | 384 ns/inc, 11 M r/s   | 1220 ns/inc, 7.7 M r/s |
-| Rust `Mutex<i64>`                    | 157 ns/inc, 6.9 M r/s  | 288 ns/inc, 4.8 M r/s  | 430 ns/inc, 6.6 M r/s  |
+The measured cost is the language-form cost: BG STREAM yield/resume
+overhead per item + observable accumulator add + WaitGroup join.
 
 ### Perf optimization round (`obs.AtomicSum` vs raw `std.atomic.Value`)
 
@@ -152,7 +126,7 @@ const __obs_acc = CheatLib.obs.ObservableSum(i64).new(rt.heapAlloc()) catch unre
 const __obs_wg = rt.heapAlloc().create(CheatHeader.WaitGroup) catch unreachable;
 __obs_wg.* = CheatHeader.WaitGroup.init(rt.getSched()); __obs_wg.add(1);
 __obs_acc.setCompletion(@ptrCast(__obs_wg), CheatHeader.obsWgDone, CheatHeader.obsWgWait, CheatHeader.obsWgDestroy);
-// Spawn consumer fiber cross-scheduler:
+// Spawn consumer fiber:
 const ConsumerCtx = struct { acc: *..., gen: ..., fn run(...) {
     defer ctx.acc.finish();   // wg.done() via callback
     while (try ctx.gen.next()) |it| ctx.acc.add(it);

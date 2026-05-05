@@ -31,7 +31,7 @@ FN main() RETURNS Void ->
     MUTABLE wi = 0_i64;
     WHILE wi < workers DO
         ref = counters[wi];
-        futures.append(BG { @parallel ->
+        futures.append(BG { @standard:@parallel ->
             FOR j IN (0_i64 ..< increments) DO
                 WITH EXCLUSIVE ref AS inner {
                     inner.value = inner.value + 1;

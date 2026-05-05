@@ -638,8 +638,10 @@ if __FILE__ == $0
       dirs += Dir.glob("benchmarks/concurrent/[0-9]*").select { |d| File.directory?(d) }.sort
     when "--server"
       dirs += Dir.glob("benchmarks/server/[0-9]*").select { |d| File.directory?(d) }.sort
+    when "--inter-clear"
+      dirs += Dir.glob("benchmarks/inter-clear/[0-9]*").select { |d| File.directory?(d) }.sort
     when "--all"
-      dirs += Dir.glob("benchmarks/{sequential,concurrent,server}/[0-9]*").select { |d| File.directory?(d) }.sort
+      dirs += Dir.glob("benchmarks/{sequential,concurrent,server,inter-clear}/[0-9]*").select { |d| File.directory?(d) }.sort
     else
       dirs << arg
     end
@@ -648,7 +650,7 @@ if __FILE__ == $0
   if dirs.empty?
     if mode == "leak"
       # Leak mode: run ALL benchmarks by default
-      dirs = Dir.glob("benchmarks/{sequential,concurrent,server}/[0-9]*").select { |d| File.directory?(d) }.sort
+      dirs = Dir.glob("benchmarks/{sequential,concurrent,server,inter-clear}/[0-9]*").select { |d| File.directory?(d) }.sort
     else
       dirs = Dir.glob("benchmarks/sequential/0*").sort
     end

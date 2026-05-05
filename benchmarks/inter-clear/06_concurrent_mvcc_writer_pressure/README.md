@@ -8,7 +8,7 @@ RwLock writer-preferring fairness policy forces reader pile-ups.
 - 4 writers x 25k iters bumping the value.
 - Writes are ~3.5% of reads, sustained for the full run.
 
-The original `17_mvcc_vs_rwlock` has writes at ~0.1% of reads and only
+The original `03_concurrent_mvcc_vs_rwlock` has writes at ~0.1% of reads and only
 4k total writes — writers barely show up. This bench keeps the readers
 similar but turns the writer dial up by 25x.
 
@@ -35,4 +35,4 @@ in tens of milliseconds.
 
 Run via:
 
-    ruby benchmarks/runner.rb --release benchmarks/concurrent/17c_mvcc_writer_pressure/
+    ruby benchmarks/runner.rb --release benchmarks/inter-clear/06_concurrent_mvcc_writer_pressure/

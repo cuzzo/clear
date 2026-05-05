@@ -1,165 +1,51 @@
-// Concurrent-readers benchmark — Go.
-// Mirrors bench_clear.zig: 1 writer + K readers, observe by view().
+// Concurrent observable stream-sum benchmark — Go.
+// Mirrors bench.cht: producer stream -> consumer sum -> join.
 package main
 
 import (
 	"fmt"
-	"sync"
-	"sync/atomic"
 	"time"
 )
 
-const NWrites = 5_000_000
+const NWrites = 2_000_000
 
-var readerCounts = []int{1, 4, 8}
-
-// ---------------- atomic.Int64 (Go's "@observable" equivalent) ----------------
-
-func runAtomic(nReaders int) {
-	var counter atomic.Int64
-	var stop atomic.Uint32
-
-	readerN := make([]int, nReaders)
-
-	var wg sync.WaitGroup
-	totalSink := make([]int64, nReaders)
-	for i := range readerN {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			n := 0
-			var sink int64 = 0
-			for stop.Load() == 0 {
-				sink ^= counter.Load() // data-dependent so compiler can't elide
-				n++
-			}
-			readerN[i] = n
-			totalSink[i] = sink
-		}()
-	}
-
-	t0 := time.Now()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < NWrites; i++ {
-			counter.Add(1)
-		}
-		stop.Store(1)
-	}()
-	wg.Wait()
-	elapsed := time.Since(t0)
-
-	totalReads := 0
-	for _, n := range readerN {
-		totalReads += n
-	}
-	nsPerInc := elapsed.Nanoseconds() / NWrites
-	readsPerSec := int64(0)
-	if elapsed.Nanoseconds() > 0 {
-		readsPerSec = int64(totalReads) * 1_000_000_000 / elapsed.Nanoseconds()
-	}
-	fmt.Printf("[Go atomic.Int64]    writer=%3d ns/inc  readers=%d  total_reads=%d  reads/sec=%d\n",
-		nsPerInc, nReaders, totalReads, readsPerSec)
-	if counter.Load() != int64(NWrites) {
-		fmt.Printf("  !! counter view %d != expected %d\n", counter.Load(), NWrites)
-	}
-	// keep totalSink alive so the compiler can't elide the data-dependent reads
-	var sinkSum int64 = 0
-	for _, s := range totalSink {
-		sinkSum ^= s
-	}
-	if sinkSum == 0xdeadbeef {
-		fmt.Println("  (sink check)")
-	}
-}
-
-// ---------------- sync.Mutex<int64> (Go's "@locked Int64" equivalent) ----------------
-
-type LockedI64 struct {
-	mu  sync.Mutex
-	val int64
-}
-
-func (l *LockedI64) Add(n int64) {
-	l.mu.Lock()
-	l.val += n
-	l.mu.Unlock()
-}
-
-func (l *LockedI64) View() int64 {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.val
-}
-
-func runLocked(nReaders int) {
-	var counter LockedI64
-	var stop atomic.Uint32
-
-	readerN := make([]int, nReaders)
-	totalSink := make([]int64, nReaders)
-
-	var wg sync.WaitGroup
-	for i := range readerN {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			n := 0
-			var sink int64 = 0
-			for stop.Load() == 0 {
-				sink ^= counter.View()
-				n++
-			}
-			readerN[i] = n
-			totalSink[i] = sink
-		}()
-	}
-
-	t0 := time.Now()
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < NWrites; i++ {
-			counter.Add(1)
-		}
-		stop.Store(1)
-	}()
-	wg.Wait()
-	elapsed := time.Since(t0)
-
-	totalReads := 0
-	for _, n := range readerN {
-		totalReads += n
-	}
-	nsPerInc := elapsed.Nanoseconds() / NWrites
-	readsPerSec := int64(0)
-	if elapsed.Nanoseconds() > 0 {
-		readsPerSec = int64(totalReads) * 1_000_000_000 / elapsed.Nanoseconds()
-	}
-	fmt.Printf("[Go sync.Mutex]      writer=%3d ns/inc  readers=%d  total_reads=%d  reads/sec=%d\n",
-		nsPerInc, nReaders, totalReads, readsPerSec)
-	if counter.View() != int64(NWrites) {
-		fmt.Printf("  !! counter view %d != expected %d\n", counter.View(), NWrites)
-	}
-	var sinkSum int64 = 0
-	for _, s := range totalSink {
-		sinkSum ^= s
-	}
-	if sinkSum == 0xdeadbeef {
-		fmt.Println("  (sink check)")
-	}
+func expectedSum() int64 {
+	n := int64(NWrites)
+	return (n * (n - 1)) / 2
 }
 
 func main() {
-	fmt.Printf("Concurrent observable benchmark — Go — N=%d writes, readers=%v\n", NWrites, readerCounts)
-	for _, k := range readerCounts {
-		runAtomic(k)
+	ch := make(chan int64, 64)
+	done := make(chan int64, 1)
+
+	t0 := time.Now()
+	go func() {
+		var sum int64 = 0
+		for v := range ch {
+			sum += v
+		}
+		done <- sum
+	}()
+	go func() {
+		for i := int64(0); i < int64(NWrites); i++ {
+			ch <- i
+		}
+		close(ch)
+	}()
+
+	final := <-done
+	elapsed := time.Since(t0)
+	expected := expectedSum()
+	checksum := final + int64(NWrites)*131
+	expectedChecksum := expected + int64(NWrites)*131
+	if final != expected {
+		panic(fmt.Sprintf("final %d != expected %d", final, expected))
 	}
-	fmt.Println()
-	for _, k := range readerCounts {
-		runLocked(k)
+	if checksum != expectedChecksum {
+		panic(fmt.Sprintf("checksum %d != expected %d", checksum, expectedChecksum))
 	}
+
+	fmt.Printf("Go observable stream sum: %d (sum 0..N-1) in %.6f ms\n", final, float64(elapsed.Nanoseconds())/1_000_000.0)
+	fmt.Printf("BENCH_INFO: Go stream_sum final=%d checksum=%d n=%d\n", final, checksum, NWrites)
+	fmt.Printf("BENCH_RESULT: %.6f ms\n", float64(elapsed.Nanoseconds())/1_000_000.0)
 }

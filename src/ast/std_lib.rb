@@ -643,12 +643,28 @@ STD_LIB = {
     bc: true,
   },
 
+  # Peak virtual memory size (VmPeak) in KB.
+  "peakVirtualMemoryKb" => {
+    args: [],
+    return: :Int64,
+    zig: "CheatLib.peakVirtualMemoryKb()",
+    bc: true,
+  },
+
   # Current resident set size (VmRSS) in KB — physical memory in use right now.
   "currentMemoryKb" => {
     args: [],
     return: :Int64,
     zig: "CheatLib.currentMemoryKb()",
     bc: true,
+  },
+
+  # Benchmark helper: touch pages in the current fiber's allocated stack slice.
+  # No-op on root-stack/FSM execution.
+  "touchCurrentFiberStack" => {
+    args: [:Int64, :Int64],
+    return: :Int64,
+    zig: "CheatLib.touchCurrentFiberStack({0}, {1})",
   },
 
   # Sleep the current fiber for N milliseconds. Cooperative — other fibers run.

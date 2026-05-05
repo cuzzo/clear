@@ -712,7 +712,9 @@ pub fn bind(comptime deps: type) type {
                 tail:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
                 lock:          std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
                 consumer_task: ?*Task = null,
+                consumer_sched: ?*fp.Scheduler = null,
                 producer_task: ?*Task = null,
+                producer_sched: ?*fp.Scheduler = null,
                 sched:         *fp.Scheduler,
                 /// Atomic so push/next can fast-path-read it without
                 /// taking `lock`. Writers (close, deinit, setError) hold
@@ -753,9 +755,11 @@ pub fn bind(comptime deps: type) type {
                         if (h == t) {
                             while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                             if (inner.consumer_task) |consumer| {
+                                const consumer_sched = inner.consumer_sched orelse inner.sched;
                                 inner.consumer_task = null;
+                                inner.consumer_sched = null;
                                 inner.lock.store(0, .release);
-                                inner.sched.schedule(consumer);
+                                consumer_sched.schedule(consumer);
                             } else {
                                 inner.lock.store(0, .release);
                             }
@@ -773,9 +777,11 @@ pub fn bind(comptime deps: type) type {
                         inner.lock.store(0, .release);
                         continue;
                     }
-                    const task = inner.sched.getCurrent();
+                    const waiter_sched = fp.active_scheduler;
+                    const task = waiter_sched.getCurrent();
                     task.status.store(.Blocked, .release);
                     inner.producer_task = task;
+                    inner.producer_sched = waiter_sched;
                     inner.lock.store(0, .release);
                     task.base.yield();
                 }
@@ -789,9 +795,11 @@ pub fn bind(comptime deps: type) type {
                 while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                 inner.closed.store(true, .release);
                 if (inner.consumer_task) |consumer| {
+                    const consumer_sched = inner.consumer_sched orelse inner.sched;
                     inner.consumer_task = null;
+                    inner.consumer_sched = null;
                     inner.lock.store(0, .release);
-                    inner.sched.schedule(consumer);
+                    consumer_sched.schedule(consumer);
                 } else {
                     inner.lock.store(0, .release);
                 }
@@ -824,9 +832,11 @@ pub fn bind(comptime deps: type) type {
                         if (h -% t == BUF_SIZE) {
                             while (inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
                             if (inner.producer_task) |producer| {
+                                const producer_sched = inner.producer_sched orelse inner.sched;
                                 inner.producer_task = null;
+                                inner.producer_sched = null;
                                 inner.lock.store(0, .release);
-                                inner.sched.schedule(producer);
+                                producer_sched.schedule(producer);
                             } else {
                                 inner.lock.store(0, .release);
                             }
@@ -848,9 +858,11 @@ pub fn bind(comptime deps: type) type {
                         if (inner.err) |err| return err;
                         return null;
                     }
-                    const task = inner.sched.getCurrent();
+                    const waiter_sched = fp.active_scheduler;
+                    const task = waiter_sched.getCurrent();
                     task.status.store(.Blocked, .release);
                     inner.consumer_task = task;
+                    inner.consumer_sched = waiter_sched;
                     inner.lock.store(0, .release);
                     task.base.yield();
                 }
@@ -874,9 +886,11 @@ pub fn bind(comptime deps: type) type {
                     inner.tail.store(h, .release);
                 }
                 if (inner.producer_task) |producer| {
+                    const producer_sched = inner.producer_sched orelse inner.sched;
                     inner.producer_task = null;
+                    inner.producer_sched = null;
                     inner.lock.store(0, .release);
-                    inner.sched.schedule(producer);
+                    producer_sched.schedule(producer);
                 } else {
                     inner.lock.store(0, .release);
                 }

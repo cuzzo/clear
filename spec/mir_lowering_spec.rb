@@ -1648,7 +1648,9 @@ RSpec.describe MIRLowering do
       expect(zig).to include("__BgCtx")
       expect(zig).to include(".spawn(")
       expect(zig).to include("fn run(")
-      expect(zig).to include("spawnBest")
+      expect(zig).to include("submitSpawn")
+      expect(zig).to include(".profile_dispatch = 1")
+      expect(zig).not_to include("spawnBest")
     end
 
     it "lowers BgBlock with captures" do

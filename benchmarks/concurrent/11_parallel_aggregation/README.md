@@ -41,6 +41,25 @@ merge is a single sequential pass over 1,000 entries.
 SHARD amortizes well when per-item work is expensive (parsing,
 transformation, I/O). For simple counting it is over-engineered.
 
+## Current profile note
+
+`SHARD(...) s> CONCURRENT EACH` now runs as real shard-parallel work: one
+producer routes keys into per-shard bounded queues, and one worker fiber drains
+each shard. `clear profile` shows the shard workers distributed across
+schedulers, so the old failure mode (a single serial SHARD loop) is no longer
+the limiting factor.
+
+The remaining cost is per-item transport. Every event still pays for a channel
+push, channel pop, scheduler wake/drain work, and a tiny map increment. The
+profile is therefore dominated by worker dispatch and scheduler/channel
+overhead rather than the histogram update itself.
+
+Runtime batching would reduce this overhead by pushing groups of keys through
+each shard queue while preserving per-item CLEAR semantics. That is deferred
+to v0.2. `WINDOW(size: N)` is not a replacement here because it changes `_`
+into a batch array; the optimization needed for SHARD is an internal transport
+batch, not a user-visible pipeline batch.
+
 ## TODO: PARALLEL FOLD primitive
 
 The remaining gap is structural. SHARD routes each item to its owning fiber

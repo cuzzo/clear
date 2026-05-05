@@ -1627,6 +1627,25 @@ pub const CheatLib = struct {
         return -1;
     }
 
+    /// Peak virtual memory size (VmPeak) in KB, from /proc/self/status.
+    pub fn peakVirtualMemoryKb() i64 {
+        const fd = openPathFd("/proc/self/status", .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0) catch return -1;
+        defer compat.closeFd(fd);
+        var buf: [4096]u8 = undefined;
+        const n = std.posix.read(fd, &buf) catch return -1;
+        const content = buf[0..n];
+        if (std.mem.indexOf(u8, content, "VmPeak:")) |pos| {
+            var i = pos + 7;
+            while (i < content.len and (content[i] == ' ' or content[i] == '\t')) : (i += 1) {}
+            var val: i64 = 0;
+            while (i < content.len and content[i] >= '0' and content[i] <= '9') : (i += 1) {
+                val = val * 10 + @as(i64, content[i] - '0');
+            }
+            return val;
+        }
+        return -1;
+    }
+
     /// Current resident set size (VmRSS) in KB, from /proc/self/status.
     pub fn currentMemoryKb() i64 {
         const fd = openPathFd("/proc/self/status", .{ .ACCMODE = .RDONLY, .CLOEXEC = true }, 0) catch return -1;
@@ -1644,6 +1663,36 @@ pub const CheatLib = struct {
             return val;
         }
         return -1;
+    }
+
+    /// Fault pages in the current fiber's allocated stack slice.
+    /// This is benchmark-only plumbing: it makes resident memory reflect the
+    /// selected stack tier instead of only the pages naturally reached by a
+    /// tiny stack frame. It is a no-op on the root stack and for FSM tasks.
+    pub fn touchCurrentFiberStack(bytes_i64: i64, seed: i64) i64 {
+        const fiber = fc.__fiber orelse return seed;
+        if (bytes_i64 <= 0) return seed;
+
+        const requested: usize = @intCast(bytes_i64);
+        const stack = fiber.stack.memory;
+        const bytes = @min(requested, stack.len);
+        if (bytes == 0) return seed;
+
+        var acc: u64 = @bitCast(seed);
+        const start = stack.len - bytes;
+        var offset: usize = 0;
+        while (offset < bytes) : (offset += 4096) {
+            const idx = start + offset;
+            const value: u8 = @truncate(acc +% @as(u64, @intCast(offset)));
+            stack[idx] = value;
+            acc +%= stack[idx];
+        }
+
+        const last = stack.len - 1;
+        const last_value: u8 = @truncate(acc +% @as(u64, @intCast(bytes)));
+        stack[last] = last_value;
+        acc +%= stack[last];
+        return @bitCast(acc);
     }
 
     // -----------------------------------------------------------------

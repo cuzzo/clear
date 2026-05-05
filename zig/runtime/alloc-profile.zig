@@ -6,6 +6,7 @@
 
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
+const SpinLock = @import("profile-lock.zig").SpinLock;
 
 // Profile-table size; shared default with lock-profile / mvcc-profile.
 // `clear profile --profile-max=N` injects the override into the
@@ -26,6 +27,7 @@ const Site = struct {
 
 var sites: [MAX_SITES]Site = [_]Site{.{}} ** MAX_SITES;
 var total_allocs: u64 = 0;
+var mu: SpinLock = .{};
 
 // Counts findSlot() calls that hit the saturated table. Surfaced
 // in the dump as a `# WARNING:` header so doctor can advise the
@@ -59,6 +61,8 @@ pub fn totalBytes() u64 {
 }
 
 pub fn recordAlloc(ret_addr: usize, size: usize) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(ret_addr)) |site| {
         site.alloc_count += 1;
         site.alloc_bytes += size;
@@ -68,6 +72,8 @@ pub fn recordAlloc(ret_addr: usize, size: usize) void {
 }
 
 pub fn recordFree(ret_addr: usize, size: usize) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(ret_addr)) |site| {
         site.free_count += 1;
         site.free_bytes += size;
@@ -80,6 +86,9 @@ pub fn dump() void {
 
     const fd = compat.createFileTruncate(path_ptr) catch return;
     defer compat.closeFd(fd);
+
+    mu.lock();
+    defer mu.unlock();
 
     var buf: [256]u8 = undefined;
 

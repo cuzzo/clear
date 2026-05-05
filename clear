@@ -1052,7 +1052,7 @@ when 'profile'
 
   # Build ReleaseFast with profiling enabled. Debug symbols retained (-fno-strip)
   # for addr2line resolution.
-  do_build(source, output: output, opt_level: 'ReleaseFast', profile: true, profile_max: profile_max)
+  do_build(source, output: output, opt_level: 'ReleaseFast', profile: true, profile_max: profile_max, default_stack: 'Large')
   build_note = profile_max ? " + alloc profiling, profile_max=#{profile_max}" : " + alloc profiling"
   puts "Built: #{output} (ReleaseFast#{build_note})"
 

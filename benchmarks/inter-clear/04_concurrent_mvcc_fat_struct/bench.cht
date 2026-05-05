@@ -1,6 +1,6 @@
 -- 17a: MVCC vs RwLock with a FAT STRUCT and multi-field reads.
 --
--- Why this scenario: 17_mvcc_vs_rwlock uses a single Int64 cell. The read
+-- Why this scenario: 03_concurrent_mvcc_vs_rwlock uses a single Int64 cell. The read
 -- critical section is one cache-line load (~1ns of work), so the ~10-30ns
 -- lock-acquire / EBR-pin overhead dominates and the speedup compresses to
 -- ~2x. This bench reads 8 fields per CS so the relative cost of the

@@ -902,6 +902,19 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "Zig output: default_stack Large upgrades unsized CONCURRENT" do
+      let(:code) {
+        preamble +
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items s> CONCURRENT SELECT double(_); RETURN; END"
+      }
+
+      it "emits .stack_size = .Large" do
+        zig = ZigTranspiler.new.transpile(code, default_stack: "Large")
+        expect(zig).to include(".stack_size = .Large")
+      end
+    end
+
     context "Zig output: CONCURRENT(size: LARGE) WHERE emits .Large" do
       let(:code) {
         preamble +

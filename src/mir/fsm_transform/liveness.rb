@@ -52,7 +52,8 @@ module FsmTransform
         # NextSuspend with a binding); that var is "defined" at
         # the end of this segment AND consumed by the next, so
         # it counts as cross-segment by construction.
-        if seg.tail.respond_to?(:result_var) && seg.tail.result_var
+        if seg.tail.respond_to?(:result_var) && seg.tail.result_var &&
+           !seg.tail.is_a?(Segments::IoSuspend)
           # Type info comes from the call's full_type; the
           # emitter resolves it via the AST node when emitting
           # the state field decl.
@@ -168,7 +169,6 @@ module FsmTransform
       case tail
       when Segments::IoSuspend
         next_idx = seg.index + 1
-        return unless uses_by_seg.key?(next_idx) || true
         bucket = (uses_by_seg[next_idx] ||= Set.new)
         if tail.call_node.respond_to?(:receiver) && tail.call_node.receiver
           walk_idents(tail.call_node.receiver) { |name| bucket << name }

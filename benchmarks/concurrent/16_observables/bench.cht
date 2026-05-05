@@ -2,24 +2,18 @@
 --
 -- The pipeline `gen s> SUM _` heap-allocates an `*ObservableSum(i64)`
 -- and spawns a CONSUMER fiber that pulls from `gen` and calls
--- `.add(item)` per emit. The consumer fiber is unpinned, so in the
--- default multi-threaded runtime it runs on a sibling worker
--- thread concurrently with the BG STREAM gen producer fiber.
+-- `.add(item)` per emit. The consumer stays on the source scheduler
+-- so stream wakeups remain local; cross-scheduler stream wakeups are
+-- covered separately by runtime tests.
 -- `NEXT running` parks main on the observable's WaitGroup and
 -- wakes when the consumer publishes `.finish()`.
 --
--- The metric is wall time for 5M concurrent producer→consumer→
--- accumulator emits, the same workload bench.go and bench.rs
--- measure. The comparable read-side hot-poll (`WHILE current <
--- expected DO WITH VIEW running AS s ... END`) is currently
--- gated by a scheduler limitation -- pinned-vs-ready pickNext
--- (scheduler.zig:826-830) starves an unpinned producer when the
--- joiner is the pinned main fiber. The cross-language
--- many-readers comparison lives in `bench_clear.zig` (real OS
--- threads + obs.AtomicSum directly).
+-- The metric is wall time for 2M producer->consumer->accumulator
+-- emits. bench.go and bench.rs mirror this shape with channels:
+-- one producer, one consumer sum, and a join.
 
 FN main() RETURNS Void ->
-    n_writes: Int64 = 5_000_000_i64;
+    n_writes: Int64 = 2_000_000_i64;
     expected: Int64 = (n_writes * (n_writes - 1_i64)) / 2_i64;
 
     gen: ~?Int64[] = BG STREAM {
@@ -34,8 +28,13 @@ FN main() RETURNS Void ->
     running: ~Int64@observable = gen s> SUM _;
     final = NEXT running;
     elapsed = timestampMs() - t0;
+    checksum: Int64 = final + (n_writes * 131_i64);
+    expected_checksum: Int64 = expected + (n_writes * 131_i64);
 
     ASSERT final == expected, "final mismatch";
+    ASSERT checksum == expected_checksum, "checksum mismatch";
     print("CLEAR observable: ", final, " (sum 0..N-1) in ", elapsed, " ms");
+    print("BENCH_INFO: CLEAR stream_sum final=", final, " checksum=", checksum, " n=", n_writes);
+    print("BENCH_RESULT: ", elapsed, " ms");
     RETURN;
 END

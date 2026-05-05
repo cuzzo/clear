@@ -687,19 +687,22 @@ pub const ParkingMutex = struct {
                 }
             }
         }
-        // Safety: cycle detection. Same gating: only treat fsm_owner
-        // as authoritative when the lock is actually held.
+        // Safety: cycle detection is only meaningful when the lock has an
+        // owner. Keep the uncontended path equivalent to stackful lock() so
+        // hot independent locks do not pay chain-walk setup on every acquire.
         const pre_task_owner = ownerOf(pre_state);
         const pre_fsm_owner: ?*fp.FsmTask =
             if ((pre_state & STATE_LOCKED) != 0) self.fsm_owner.load(.acquire) else null;
-        detectCycleFsm(fsm_task, pre_task_owner, pre_fsm_owner, self) catch |err| {
-            fsm_task.lock_error = switch (err) {
-                error.Deadlock => .Deadlock,
-                error.LockCycle => .LockCycle,
-                else => .Deadlock,
+        if ((pre_state & STATE_LOCKED) != 0) {
+            detectCycleFsm(fsm_task, pre_task_owner, pre_fsm_owner, self) catch |err| {
+                fsm_task.lock_error = switch (err) {
+                    error.Deadlock => .Deadlock,
+                    error.LockCycle => .LockCycle,
+                    else => .Deadlock,
+                };
+                return .Error;
             };
-            return .Error;
-        };
+        }
 
         // Fast path: uncontended CAS.
         const cur = self.state.load(.acquire);

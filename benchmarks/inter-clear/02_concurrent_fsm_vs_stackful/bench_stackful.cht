@@ -1,0 +1,29 @@
+-- Stackful baseline. Same body shape as bench_fsm.cht with @standard to
+-- force the stackful path. Each worker touches the full 16 KB standard
+-- stack allocation so RSS reflects stack-pool residency, not just the
+-- small subset of pages naturally reached by this tiny function.
+
+FN bench_work(x: Int64) RETURNS Int64 ->
+  touched: Int64 = touchCurrentFiberStack(16_384_i64, x);
+  RETURN x * 2 + 1 + (touched MOD 97_i64);
+END
+
+FN main() RETURNS Void ->
+  count: Int64 = 100_000_i64;
+
+  MUTABLE futures: ~Int64[]@list = [];
+  MUTABLE total: Int64 = 0_i64;
+
+  FOR i IN (0 ..< count) DO
+    futures.append(BG { @standard -> bench_work(i); });
+  END
+
+  FOR j IN (0 ..< count) DO
+    r: Int64 = NEXT futures[j];
+    total = total + r;
+  END
+
+  ASSERT total > 0, "non-zero result";
+  print("BENCH_INFO: stackful current_rss_kb=", currentMemoryKb(), " peak_rss_kb=", peakMemoryKb(), " peak_vm_kb=", peakVirtualMemoryKb());
+  RETURN;
+END

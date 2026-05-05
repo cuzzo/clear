@@ -528,6 +528,102 @@ fn splitFiberProducer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     try state.stream.push(103);
 }
 
+const PlainStreamCrossSchedulerState = struct {
+    stream: CheatLib.Stream(i64),
+    ready: *std.atomic.Value(usize),
+    completed: *std.atomic.Value(usize),
+    count: usize = 0,
+    total: i64 = 0,
+};
+
+fn plainStreamCrossSchedulerConsumer(_: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*PlainStreamCrossSchedulerState, @ptrCast(@alignCast(raw_args.?)));
+    _ = state.ready.fetchAdd(1, .acq_rel);
+
+    while (try state.stream.next()) |value| {
+        state.total += value;
+        state.count += 1;
+    }
+
+    _ = state.completed.fetchAdd(1, .acq_rel);
+}
+
+const PlainStreamProducerWakeState = struct {
+    stream: CheatLib.Stream(i64),
+    attempted: usize,
+    completed: *std.atomic.Value(usize),
+    closed: *std.atomic.Value(usize),
+};
+
+fn plainStreamFillProducer(_: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*PlainStreamProducerWakeState, @ptrCast(@alignCast(raw_args.?)));
+    defer state.stream.close();
+
+    var i: usize = 0;
+    while (i < state.attempted) : (i += 1) {
+        state.stream.push(@intCast(i)) catch |err| {
+            if (err == error.StreamClosed) {
+                _ = state.closed.fetchAdd(1, .acq_rel);
+                return;
+            }
+            return err;
+        };
+    }
+
+    _ = state.completed.fetchAdd(1, .acq_rel);
+}
+
+const PlainStreamDeinitState = struct {
+    stream: CheatLib.Stream(i64),
+    completed: *std.atomic.Value(usize),
+};
+
+fn streamProducerParked(stream: CheatLib.Stream(i64)) bool {
+    while (stream.inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+    const parked = stream.inner.producer_task != null;
+    stream.inner.lock.store(0, .release);
+    return parked;
+}
+
+fn streamConsumerParked(stream: CheatLib.Stream(i64)) bool {
+    while (stream.inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+    const parked = stream.inner.consumer_task != null;
+    stream.inner.lock.store(0, .release);
+    return parked;
+}
+
+fn plainStreamDeinitTask(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*PlainStreamDeinitState, @ptrCast(@alignCast(raw_args.?)));
+    while (!streamProducerParked(state.stream)) rt.checkYield();
+    state.stream.deinit();
+    _ = state.completed.fetchAdd(1, .acq_rel);
+}
+
+const PlainStreamCloseState = struct {
+    stream: CheatLib.Stream(i64),
+    completed: *std.atomic.Value(usize),
+};
+
+fn plainStreamCloseTask(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*PlainStreamCloseState, @ptrCast(@alignCast(raw_args.?)));
+    while (!streamConsumerParked(state.stream)) rt.checkYield();
+    state.stream.close();
+    _ = state.completed.fetchAdd(1, .acq_rel);
+}
+
+const PlainStreamNextWakeState = struct {
+    stream: CheatLib.Stream(i64),
+    value: i64 = -1,
+    completed: *std.atomic.Value(usize),
+};
+
+fn plainStreamNextWakeTask(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*PlainStreamNextWakeState, @ptrCast(@alignCast(raw_args.?)));
+    while (!streamProducerParked(state.stream)) rt.checkYield();
+    state.value = (try state.stream.next()).?;
+    _ = state.completed.fetchAdd(1, .acq_rel);
+}
+
 fn splitHammerMix(seed: i64) i64 {
     var x = seed;
     var i: usize = 0;
@@ -659,6 +755,268 @@ test "SplitStream wakes multiple waiting fibers as items arrive" {
     try std.testing.expectEqual(@as(usize, 3), right_state.count);
     try std.testing.expectEqualSlices(i64, left_values[0..left_state.count], &[_]i64{ 101, 102, 103 });
     try std.testing.expectEqualSlices(i64, right_values[0..right_state.count], &[_]i64{ 101, 102, 103 });
+}
+
+test "Stream wakes a consumer parked on a different scheduler" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var shutdown = std.atomic.Value(bool).init(false);
+    var worker_ready = std.atomic.Value(usize).init(0);
+    var worker_sched_ptr = std.atomic.Value(usize).init(0);
+
+    const WorkerCtx = struct {
+        allocator: std.mem.Allocator,
+        global_ctx: *EbrContext,
+        stack_pool: *fm.StackPool,
+        shutdown: *std.atomic.Value(bool),
+        ready: *std.atomic.Value(usize),
+        sched_ptr: *std.atomic.Value(usize),
+    };
+
+    const workerMain = struct {
+        fn run(ctx: *WorkerCtx) void {
+            var worker_sched = fp.Scheduler.init(ctx.allocator, ctx.global_ctx, ctx.stack_pool) catch return;
+            defer worker_sched.deinit();
+            worker_sched.shutdown_on_idle = false;
+            worker_sched.global_shutdown = ctx.shutdown;
+            fp.active_scheduler = &worker_sched;
+            fp.scheduler_running = true;
+            ctx.sched_ptr.store(@intFromPtr(&worker_sched), .release);
+            _ = ctx.ready.fetchAdd(1, .acq_rel);
+            worker_sched.run();
+            fp.scheduler_running = false;
+            ctx.sched_ptr.store(0, .release);
+        }
+    }.run;
+
+    var worker_ctx = WorkerCtx{
+        .allocator = allocator,
+        .global_ctx = &global_ctx,
+        .stack_pool = &stack_pool,
+        .shutdown = &shutdown,
+        .ready = &worker_ready,
+        .sched_ptr = &worker_sched_ptr,
+    };
+
+    const worker = try std.Thread.spawn(.{}, workerMain, .{&worker_ctx});
+    defer {
+        shutdown.store(true, .release);
+        fp.global_registry.notifyAll();
+        worker.join();
+        fp.global_registry.deinit(allocator);
+    }
+
+    const deadline = compat.milliTimestamp() + 5_000;
+    while (worker_ready.load(.acquire) == 0 and compat.milliTimestamp() < deadline) {
+        compat.sleepNs(std.time.ns_per_ms);
+    }
+    try std.testing.expectEqual(@as(usize, 1), worker_ready.load(.acquire));
+
+    const worker_sched = @as(*fp.Scheduler, @ptrFromInt(worker_sched_ptr.load(.acquire)));
+
+    var source_sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer source_sched.deinit();
+
+    const S = CheatLib.Stream(i64);
+    var stream = try S.spawnNew(allocator, &source_sched);
+    defer stream.deinit();
+
+    var ready = std.atomic.Value(usize).init(0);
+    var completed = std.atomic.Value(usize).init(0);
+    var state = PlainStreamCrossSchedulerState{
+        .stream = stream,
+        .ready = &ready,
+        .completed = &completed,
+    };
+
+    try worker_sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&plainStreamCrossSchedulerConsumer)),
+        &state,
+        .{ .stack_size = test_stack_size },
+    );
+
+    while (ready.load(.acquire) == 0 and compat.milliTimestamp() < deadline) {
+        compat.sleepNs(std.time.ns_per_ms);
+    }
+    try std.testing.expectEqual(@as(usize, 1), ready.load(.acquire));
+
+    var parked = false;
+    while (compat.milliTimestamp() < deadline) {
+        while (stream.inner.lock.swap(1, .acquire) == 1) std.Thread.yield() catch {};
+        parked = stream.inner.consumer_task != null;
+        stream.inner.lock.store(0, .release);
+        if (parked) break;
+    }
+    try std.testing.expect(parked);
+
+    var producer = S{ .inner = stream.inner, .alloc = allocator };
+    try producer.push(42);
+    producer.close();
+
+    while (completed.load(.acquire) == 0 and compat.milliTimestamp() < deadline) {
+        compat.sleepNs(std.time.ns_per_ms);
+    }
+
+    try std.testing.expectEqual(@as(usize, 1), completed.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), state.count);
+    try std.testing.expectEqual(@as(i64, 42), state.total);
+}
+
+test "Stream close wakes a consumer parked on empty ring" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    const S = CheatLib.Stream(i64);
+    var stream = try S.spawnNew(allocator, &sched);
+
+    var ready = std.atomic.Value(usize).init(0);
+    var completed = std.atomic.Value(usize).init(0);
+    var close_completed = std.atomic.Value(usize).init(0);
+    var consumer_state = PlainStreamCrossSchedulerState{
+        .stream = stream,
+        .ready = &ready,
+        .completed = &completed,
+    };
+    var close_state = PlainStreamCloseState{
+        .stream = stream,
+        .completed = &close_completed,
+    };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&plainStreamCloseTask)),
+        &close_state,
+        .{ .stack_size = test_stack_size },
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&plainStreamCrossSchedulerConsumer)),
+        &consumer_state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    try std.testing.expectEqual(@as(usize, 1), completed.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), close_completed.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 0), consumer_state.count);
+    stream.deinit();
+}
+
+test "Stream next wakes a producer parked on full ring" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    const S = CheatLib.Stream(i64);
+    var stream = try S.spawnNew(allocator, &sched);
+    defer stream.deinit();
+
+    var completed = std.atomic.Value(usize).init(0);
+    var closed = std.atomic.Value(usize).init(0);
+    var next_completed = std.atomic.Value(usize).init(0);
+    var state = PlainStreamProducerWakeState{
+        .stream = stream,
+        .attempted = 65,
+        .completed = &completed,
+        .closed = &closed,
+    };
+    var next_state = PlainStreamNextWakeState{
+        .stream = stream,
+        .completed = &next_completed,
+    };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&plainStreamNextWakeTask)),
+        &next_state,
+        .{ .stack_size = test_stack_size },
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&plainStreamFillProducer)),
+        &state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    try std.testing.expectEqual(@as(usize, 1), completed.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 0), closed.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), next_completed.load(.acquire));
+    try std.testing.expectEqual(@as(i64, 0), next_state.value);
+
+    var expected: i64 = 1;
+    while (try stream.next()) |value| : (expected += 1) {
+        try std.testing.expectEqual(expected, value);
+    }
+    try std.testing.expectEqual(@as(i64, 65), expected);
+}
+
+test "Stream deinit wakes a producer parked on full ring" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    const S = CheatLib.Stream(i64);
+    const stream = try S.spawnNew(allocator, &sched);
+
+    var completed = std.atomic.Value(usize).init(0);
+    var closed = std.atomic.Value(usize).init(0);
+    var producer_state = PlainStreamProducerWakeState{
+        .stream = stream,
+        .attempted = 65,
+        .completed = &completed,
+        .closed = &closed,
+    };
+    var deinit_completed = std.atomic.Value(usize).init(0);
+    var deinit_state = PlainStreamDeinitState{
+        .stream = stream,
+        .completed = &deinit_completed,
+    };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&plainStreamDeinitTask)),
+        &deinit_state,
+        .{ .stack_size = test_stack_size },
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&plainStreamFillProducer)),
+        &producer_state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    try std.testing.expectEqual(@as(usize, 0), completed.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), closed.load(.acquire));
+    try std.testing.expectEqual(@as(usize, 1), deinit_completed.load(.acquire));
 }
 
 test "SplitStream survives multithreaded spawnBest pubsub hammer" {

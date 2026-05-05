@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
+const SpinLock = @import("profile-lock.zig").SpinLock;
 
 // CLEAR defaults to 4 scheduler threads; scale if more are used. Fixed
 // upper bound avoids per-scheduler allocations in the profile module.
@@ -30,6 +31,7 @@ var short_fibers: u64 = 0;    // < 1ms
 var vshort_fibers: u64 = 0;   // < 10us
 var total_lifetime_ns: u64 = 0;
 var max_lifetime_ns: u64 = 0;
+var mu: SpinLock = .{};
 
 // Per-scheduler fibers-run counter. Index = Scheduler.index.
 var sched_runs: [MAX_SCHEDULERS]u64 = [_]u64{0} ** MAX_SCHEDULERS;
@@ -40,6 +42,8 @@ pub inline fn nowNs() u64 {
 }
 
 pub inline fn recordSchedulerRun(sched_idx: usize) void {
+    mu.lock();
+    defer mu.unlock();
     if (sched_idx >= MAX_SCHEDULERS) return;
     sched_runs[sched_idx] += 1;
     if (sched_idx + 1 > sched_active) sched_active = sched_idx + 1;
@@ -49,6 +53,8 @@ pub inline fn recordFiberExit(spawn_ns: u64, now: u64) void {
     if (spawn_ns == 0) return;           // never recorded a spawn
     if (now <= spawn_ns) return;          // clock went backwards
     const dur: u64 = now - spawn_ns;
+    mu.lock();
+    defer mu.unlock();
     total_fibers += 1;
     total_lifetime_ns += dur;
     if (dur > max_lifetime_ns) max_lifetime_ns = dur;
@@ -60,6 +66,9 @@ pub fn dumpToEnvFile() void {
     const path_ptr = std.c.getenv("CLEAR_FIBER_PROFILE") orelse return;
     const fd = compat.createFileTruncate(path_ptr) catch return;
     defer compat.closeFd(fd);
+
+    mu.lock();
+    defer mu.unlock();
 
     var buf: [256]u8 = undefined;
 

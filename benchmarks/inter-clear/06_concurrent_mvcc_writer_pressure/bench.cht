@@ -1,6 +1,6 @@
 -- 17c: MVCC vs RwLock under WRITER PRESSURE.
 --
--- Why this scenario: 17_mvcc_vs_rwlock has 4 writers x 1k writes vs
+-- Why this scenario: 03_concurrent_mvcc_vs_rwlock has 4 writers x 1k writes vs
 -- 32 readers x 100k reads = 4k writes vs 3.2M reads (~0.1%). At that
 -- ratio writers barely show up in the timeline. This bench drives
 -- writers hard so the RwLock's writer-preferring fairness policy

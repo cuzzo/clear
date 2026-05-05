@@ -29,4 +29,4 @@ than expected.
 
 Run via:
 
-    ruby benchmarks/runner.rb --release benchmarks/concurrent/17b_mvcc_pure_read/
+    ruby benchmarks/runner.rb --release benchmarks/inter-clear/05_concurrent_mvcc_pure_read/

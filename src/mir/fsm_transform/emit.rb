@@ -363,6 +363,7 @@ module FsmTransform
       end
       segments.each do |seg|
         next unless seg.tail.respond_to?(:result_var)
+        next if seg.tail.is_a?(Segments::IoSuspend)
         rv = seg.tail.result_var
         capture_map[rv] ||= "__ctx_#{id}.#{rv}" if rv && rv != "_"
       end

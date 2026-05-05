@@ -2624,9 +2624,13 @@ class MIRLowering
     is_ptr  = "@typeInfo(@TypeOf(#{zig_var})) == .pointer"
     inner_t = "@typeInfo(@TypeOf(#{zig_var})).pointer.child"
     "(if (comptime #{is_ptr}) " \
-      "(if (comptime @hasField(#{inner_t}, \"ctrl\")) #{zig_var}.ctrl.data else #{zig_var}) " \
+      "(if (comptime @typeInfo(#{inner_t}) == .@\"struct\") " \
+        "(if (comptime @hasField(#{inner_t}, \"ctrl\")) #{zig_var}.ctrl.data else #{zig_var}) " \
+       "else #{zig_var}) " \
     "else " \
-      "(if (comptime @hasField(@TypeOf(#{zig_var}), \"ctrl\")) #{zig_var}.ctrl.data else &#{zig_var}))"
+      "(if (comptime @typeInfo(@TypeOf(#{zig_var})) == .@\"struct\") " \
+        "(if (comptime @hasField(@TypeOf(#{zig_var}), \"ctrl\")) #{zig_var}.ctrl.data else &#{zig_var}) " \
+       "else &#{zig_var}))"
   end
 
   # Per-arm prelude that binds the user's alias (`va` in

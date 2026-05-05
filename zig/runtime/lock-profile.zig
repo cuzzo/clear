@@ -16,6 +16,7 @@
 
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
+const SpinLock = @import("profile-lock.zig").SpinLock;
 
 // Profile-table size; shared default with alloc-profile / mvcc-profile.
 // `clear profile --profile-max=N` injects the override into the
@@ -48,6 +49,7 @@ pub const LockStats = struct {
 };
 
 var stats: [MAX_LOCKS]LockStats = [_]LockStats{.{}} ** MAX_LOCKS;
+var mu: SpinLock = .{};
 
 // Counts findSlot() calls that hit the saturated table. Surfaced
 // in the dump as a `# WARNING:` header so doctor can advise the
@@ -76,6 +78,8 @@ fn findSlot(addr: usize) ?*LockStats {
 }
 
 pub inline fn recordAcquire(addr: usize, wait_ns: u64, contended: bool) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(addr)) |s| {
         s.acquires += 1;
         s.total_wait_ns += wait_ns;
@@ -88,6 +92,8 @@ pub inline fn recordAcquire(addr: usize, wait_ns: u64, contended: bool) void {
 /// but stored in the read counters so doctor can compute read/write
 /// split (read-heavy → recommend @shared:versioned).
 pub inline fn recordReadAcquire(addr: usize, wait_ns: u64, contended: bool) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(addr)) |s| {
         s.read_acquires += 1;
         s.read_total_wait_ns += wait_ns;
@@ -97,6 +103,8 @@ pub inline fn recordReadAcquire(addr: usize, wait_ns: u64, contended: bool) void
 }
 
 pub inline fn recordRelease(addr: usize, hold_ns: u64) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(addr)) |s| {
         s.total_hold_ns += hold_ns;
         if (hold_ns > s.max_hold_ns) s.max_hold_ns = hold_ns;
@@ -107,6 +115,9 @@ pub fn dumpToEnvFile() void {
     const path_ptr = std.c.getenv("CLEAR_LOCK_PROFILE") orelse return;
     const fd = compat.createFileTruncate(path_ptr) catch return;
     defer compat.closeFd(fd);
+
+    mu.lock();
+    defer mu.unlock();
 
     var buf: [512]u8 = undefined;
     _ = compat.writeAllFd(fd, "# lock-profile v2\n") catch return;

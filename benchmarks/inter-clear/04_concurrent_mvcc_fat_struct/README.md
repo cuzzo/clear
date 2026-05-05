@@ -3,7 +3,7 @@
 Scenario A from the MVCC scenario taxonomy. Reads an 8-field `Sample`
 struct (64 bytes, one cache line) inside the critical section — the
 read CS sums all 8 fields. This amortizes the lock-acquire / EBR-pin
-cost across more useful work than `17_mvcc_vs_rwlock` (which has a
+cost across more useful work than `03_concurrent_mvcc_vs_rwlock` (which has a
 ~1ns Int64 read).
 
 ## Workload
@@ -22,7 +22,7 @@ lowering or the EBR pin is leaving cycles on the table.
 
 Run via:
 
-    ruby benchmarks/runner.rb --release benchmarks/concurrent/17a_mvcc_fat_struct/
+    ruby benchmarks/runner.rb --release benchmarks/inter-clear/04_concurrent_mvcc_fat_struct/
 
 The runner surfaces `BENCH_INFO:` lines that show RwLock vs MVCC
 times and the speedup ratio.

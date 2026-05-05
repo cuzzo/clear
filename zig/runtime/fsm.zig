@@ -137,6 +137,10 @@ pub const FsmTask = struct {
     /// slot reused mid-walk = torn snapshot. Mirrors stackful
     /// Task.generation.
     generation: Atomic(u32) = Atomic(u32).init(0),
+    /// Scheduler that allocated this task's slab slot. FSM tasks may be
+    /// load-balanced to another scheduler, but completion must return the
+    /// slot to the allocating scheduler's slab.
+    owner_scheduler: ?*anyopaque = null,
     /// Non-null when blocked on IO.
     waiter: ?*FsmIoWaiter = null,
     /// Non-null when blocked on a parking-lot lock. Opaque `*WaiterNode`.

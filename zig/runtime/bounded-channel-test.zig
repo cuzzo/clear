@@ -592,6 +592,133 @@ test "BoundedChannel: setError() unblocks consumers with the error" {
     try std.testing.expect(shared.got_error.load(.seq_cst));
 }
 
+test "BoundedChannel: setError() unblocks a producer waiting on full channel" {
+    const alloc = std.testing.allocator;
+    const Shared = struct {
+        ch: CheatLib.BoundedChannel(i64),
+        producer_filled: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+        producer_saw_closed: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
+    };
+    var shared = Shared{
+        .ch = try CheatLib.BoundedChannel(i64).init(alloc, 4),
+    };
+    defer shared.ch.deinit();
+
+    const Producer = struct {
+        fn run(s: *Shared) void {
+            s.ch.push(1) catch return;
+            s.ch.push(2) catch return;
+            s.ch.push(3) catch return;
+            s.ch.push(4) catch return;
+            s.producer_filled.store(true, .release);
+            s.ch.push(5) catch |err| {
+                if (err == error.StreamClosed) s.producer_saw_closed.store(true, .seq_cst);
+                return;
+            };
+        }
+    };
+
+    var th = try std.Thread.spawn(.{}, Producer.run, .{&shared});
+    while (!shared.producer_filled.load(.acquire)) std.Thread.yield() catch {};
+    shared.ch.setError(error.ProducerFailed);
+    th.join();
+
+    try std.testing.expect(shared.producer_saw_closed.load(.seq_cst));
+}
+
+test "BoundedChannel: independent channels drain concurrently without deadlock" {
+    const alloc = std.testing.allocator;
+    var global_ctx: EbrContext = undefined;
+    var stack_pool: fm.StackPool = undefined;
+    var sched: fp.Scheduler = undefined;
+    var rt: Runtime = undefined;
+    try initSchedEnv(alloc, &global_ctx, &stack_pool, &sched, &rt);
+    defer deinitSchedEnv(&global_ctx, &stack_pool, &sched, &rt, alloc);
+
+    const N_CHANS = 4;
+    const N_ITEMS = 64;
+    const Shared = struct {
+        chans: [N_CHANS]CheatLib.BoundedChannel(i64),
+        wg: CheatHeader.WaitGroup,
+        delivered: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
+        sum: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
+    };
+    var shared = Shared{
+        .chans = undefined,
+        .wg = CheatHeader.WaitGroup.init(&sched),
+    };
+    for (0..N_CHANS) |i| shared.chans[i] = try CheatLib.BoundedChannel(i64).init(alloc, 8);
+    defer for (0..N_CHANS) |i| shared.chans[i].deinit();
+
+    const PairCtx = struct { s: *Shared, idx: usize };
+    const Bundle = struct {
+        s: *Shared,
+        producers: *[N_CHANS]PairCtx,
+        consumers: *[N_CHANS]PairCtx,
+    };
+
+    const Producer = struct {
+        fn run(_: *Runtime, raw: ?*anyopaque) anyerror!void {
+            const ctx = @as(*PairCtx, @ptrCast(@alignCast(raw.?)));
+            defer ctx.s.wg.done();
+            var i: i64 = 0;
+            while (i < N_ITEMS) : (i += 1) {
+                try ctx.s.chans[ctx.idx].push(@as(i64, @intCast(ctx.idx * N_ITEMS)) + i);
+            }
+            ctx.s.chans[ctx.idx].close();
+        }
+    };
+
+    const Consumer = struct {
+        fn run(_: *Runtime, raw: ?*anyopaque) anyerror!void {
+            const ctx = @as(*PairCtx, @ptrCast(@alignCast(raw.?)));
+            defer ctx.s.wg.done();
+            while (try ctx.s.chans[ctx.idx].pop()) |val| {
+                _ = ctx.s.delivered.fetchAdd(1, .seq_cst);
+                _ = ctx.s.sum.fetchAdd(val, .seq_cst);
+            }
+        }
+    };
+
+    var producer_ctxs: [N_CHANS]PairCtx = undefined;
+    var consumer_ctxs: [N_CHANS]PairCtx = undefined;
+
+    const Main = struct {
+        fn run(_: *Runtime, raw: ?*anyopaque) anyerror!void {
+            const bundle = @as(*Bundle, @ptrCast(@alignCast(raw.?)));
+            bundle.s.wg.add(N_CHANS * 2);
+            for (0..N_CHANS) |i| {
+                bundle.producers[i] = .{ .s = bundle.s, .idx = i };
+                bundle.consumers[i] = .{ .s = bundle.s, .idx = i };
+                try fp.active_scheduler.submitSpawn(
+                    @intFromPtr(&Runtime.entryWrapper),
+                    @as(CheatHeader.TaskFn, @ptrCast(&Producer.run)),
+                    &bundle.producers[i], .{},
+                );
+                try fp.active_scheduler.submitSpawn(
+                    @intFromPtr(&Runtime.entryWrapper),
+                    @as(CheatHeader.TaskFn, @ptrCast(&Consumer.run)),
+                    &bundle.consumers[i], .{},
+                );
+            }
+            bundle.s.wg.wait();
+        }
+    };
+
+    var bundle = Bundle{ .s = &shared, .producers = &producer_ctxs, .consumers = &consumer_ctxs };
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(CheatHeader.TaskFn, @ptrCast(&Main.run)),
+        &bundle, .{},
+    );
+    sched.run();
+
+    const expected_count = N_CHANS * N_ITEMS;
+    const last: i64 = @intCast(expected_count - 1);
+    try std.testing.expectEqual(@as(usize, expected_count), shared.delivered.load(.seq_cst));
+    try std.testing.expectEqual(@divExact(last * (last + 1), 2), shared.sum.load(.seq_cst));
+}
+
 // ---------------------------------------------------------------------------
 // Test: back pressure ordering — large item count with small ring; verify all
 //       items arrive exactly once and in-order (single consumer).

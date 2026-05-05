@@ -22,6 +22,7 @@
 
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
+const SpinLock = @import("profile-lock.zig").SpinLock;
 
 // Profile-table size, shared across alloc-profile / lock-profile /
 // mvcc-profile via a single root-level override knob. Default 1024
@@ -58,6 +59,7 @@ pub const CellStats = struct {
 };
 
 var stats: [MAX_CELLS]CellStats = [_]CellStats{.{}} ** MAX_CELLS;
+var mu: SpinLock = .{};
 
 // Counts findSlot() calls that hit the saturated table and had to
 // drop the sample. Surfaced in the dump as a `# WARNING:` header
@@ -83,6 +85,8 @@ fn findSlot(addr: usize, struct_size: u32) ?*CellStats {
 }
 
 pub inline fn recordRead(addr: usize, struct_size: u32) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(addr, struct_size)) |s| {
         s.reads += 1;
     }
@@ -93,6 +97,8 @@ pub inline fn recordRead(addr: usize, struct_size: u32) void {
 /// (0 for fast-path commits). `committed` distinguishes a winning
 /// commit from a bailed-out UpdateRetriesExhausted.
 pub inline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, committed: bool) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(addr, struct_size)) |s| {
         s.retries += retries;
         if (committed) {
@@ -111,6 +117,8 @@ pub inline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, committe
 /// (multi-cell commits forbid the upgrade because AtomicPtr has
 /// no multi-pointer CAS).
 pub inline fn recordMultiCommit(addr: usize, struct_size: u32) void {
+    mu.lock();
+    defer mu.unlock();
     if (findSlot(addr, struct_size)) |s| {
         s.multi_commits += 1;
     }
@@ -120,6 +128,9 @@ pub fn dumpToEnvFile() void {
     const path_ptr = std.c.getenv("CLEAR_MVCC_PROFILE") orelse return;
     const fd = compat.createFileTruncate(path_ptr) catch return;
     defer compat.closeFd(fd);
+
+    mu.lock();
+    defer mu.unlock();
 
     var buf: [256]u8 = undefined;
     _ = compat.writeAllFd(fd, "# mvcc-profile v1\n") catch return;

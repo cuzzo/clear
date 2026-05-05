@@ -314,6 +314,18 @@ class PipelineHost
         copy_type_info(node, new_assert)
         return new_assert
       end
+    when AST::IfStatement
+      new_cond = substitute_placeholders(node.condition)
+      new_then = node.then_branch.map { |stmt| substitute_placeholders(stmt) }
+      new_else = node.else_branch&.map { |stmt| substitute_placeholders(stmt) }
+      if new_cond != node.condition || new_then != node.then_branch || new_else != node.else_branch
+        new_if = AST::IfStatement.new(node.token, new_cond, new_then, new_else, node.then_drops, node.else_drops)
+        new_if.expr_mode = node.expr_mode if node.respond_to?(:expr_mode)
+        new_if.then_result_type = node.then_result_type if node.respond_to?(:then_result_type)
+        new_if.else_result_type = node.else_result_type if node.respond_to?(:else_result_type)
+        copy_type_info(node, new_if)
+        return new_if
+      end
     end
 
     node
@@ -2317,15 +2329,11 @@ class PipelineHost
       .gsub(/\b__obs_acc\b/, "ctx.acc")
       .gsub(/\b#{Regexp.escape(p[:source_name])}\b/, "ctx.gen")
 
-    # Spawn the consumer cross-scheduler (unpinned) so in
-    # multi-threaded mode it can run on a different worker thread
-    # than the joiner. This is critical for hot-poll patterns
-    # (`WHILE current < expected DO WITH VIEW running AS s ... END`)
-    # where the joiner is a pinned main: pinned-first pickNext
-    # (scheduler.zig:826-830) would starve a same-scheduler
-    # consumer. With the consumer on a sibling scheduler, the two
-    # OS threads make actual concurrent progress -- main can spin
-    # on `.view()` and the consumer publishes items in parallel.
+    # Spawn the consumer on the source scheduler. Observable terminal
+    # consumers are tightly coupled to their source Stream; keeping both
+    # sides local avoids cross-scheduler stream waiter handoff on the
+    # hot path and lets producer/consumer/main make cooperative progress
+    # through the scheduler's normal yield points.
     task_cfg = @lowering.send(:task_config_zig, nil, nil)
 
     spawn_zig = <<~ZIG.chomp
@@ -2344,7 +2352,7 @@ class PipelineHost
           const #{ctx_var} = #{rt_name}.heapAlloc().create(#{ctx_type}) catch unreachable;
           errdefer #{rt_name}.heapAlloc().destroy(#{ctx_var});
           #{ctx_var}.* = .{ .acc = __obs_acc, .gen = #{p[:source_name]} };
-          try CheatHeader.spawnBest(
+          try #{rt_name}.getSched().submitSpawn(
               @intFromPtr(&Runtime.entryWrapper),
               @as(CheatHeader.TaskFn, @ptrCast(&#{ctx_type}.run)),
               #{ctx_var},
@@ -3027,25 +3035,13 @@ class PipelineHost
     [:default, expr]
   end
 
-  # SHARD + CONCURRENT EACH (both backends): produces structural MIR
-  # describing a fused single-fiber loop. The "CONCURRENT" name is
-  # misleading -- the original transpile_shard_concurrent_each emitted
-  # a serial while-loop with no real fibers; the body's map[k] = v
-  # used putDirect with the shard idx computed per iteration.
+  # SHARD + CONCURRENT EACH.
   #
-  # Both backends produce the same shape:
-  #   ScopeBlock {
-  #     // (Zig only) Let map_ptr = &map; map_ptr.ensureOwnership();
-  #     // (Zig only) ForStmt body has Let sh = @TypeOf(map.*).shardIndexWithHash(key)
-  #     ForStmt(IterRange(start, end), idx_var, [
-  #       Let key_var = key_expr_with_idx
-  #       ...body lowered with shard_context set so map[k]=v
-  #          dispatches to ShardedMapPut(shard_direct)...
-  #     ])
-  #   }
-  #
-  # For BC, shard_idx/shard_key on the ShardedMapPut are ignored and
-  # the put compiles to plain MAP_PUT.
+  # BC remains sequential because the VM has no scheduler ownership model.
+  # Zig uses one bounded channel and one worker fiber per shard. The producer
+  # computes the routing key/hash and enqueues an owned WorkItem; each worker
+  # serially drains its shard and lowers the body in shard-direct mode so
+  # map[k]/map[k]=v compile to getDirect/putDirect.
   def lower_shard_concurrent_each(lhs, conc_op, smooth_node)
     ctx = conc_op.shard_context
     each_op = conc_op.op
@@ -3067,16 +3063,17 @@ class PipelineHost
     map_node = ctx[:map_var]
     map_var_name = map_node.is_a?(AST::Identifier) ? map_node.name.to_s : nil
 
+    unless is_bc
+      return lower_shard_concurrent_each_zig(
+        id, range_node, conc_op, each_op, ctx, map_node, map_var_name,
+        idx_var, key_var, sh_var, map_ptr, start_mir, end_mir)
+    end
+
     # Set mir_lowering's @shard_context so the body's map[k] = v dispatches
-    # to ShardedMapPut/Get with shard_direct mode (Zig) -- BC ignores these
-    # fields but the same path runs for both backends.
+    # to ShardedMapPut/Get with shard_direct mode. BC ignores those fields, so
+    # keep it nil and compile a correctness-equivalent serial loop.
     prev_ctx = @lowering.instance_variable_get(:@shard_context)
-    @lowering.instance_variable_set(:@shard_context, is_bc ? nil : {
-      map: map_var_name,
-      idx: "#{sh_var}.shard",
-      key: key_var,
-      hash: "#{sh_var}.hash"
-    })
+    @lowering.instance_variable_set(:@shard_context, nil)
 
     key_mir, body_mir = nil, nil
     begin
@@ -3100,45 +3097,163 @@ class PipelineHost
       inner << MIR::InlineZig.new("defer #{rt}.restoreLoopMark(#{lm_var});", "shard_loop_restore_mark")
     end
     inner << MIR::Let.new(key_var, key_mir, false, nil, nil)
-    unless is_bc
-      # __sh#_sh = @TypeOf(__sh#_map.*).shardIndexWithHash(__sh#_key)
-      # Used by the body's putDirect / getDirect (via ShardedMapPut shard_idx).
-      inner << MIR::Let.new(sh_var,
-        MIR::Call.new("@TypeOf(#{map_ptr}.*).shardIndexWithHash",
-          [MIR::Ident.new(key_var)], false),
-        false, nil, nil)
-    end
     inner.concat(body_mir)
 
-    if is_bc
-      # BC: ForStmt over IterRange (the VM iterates Int64 directly so
-      # the idx_var binds an Int64). No map ptr setup or ensureOwnership.
-      return MIR::ForStmt.new(
-        MIR::IterRange.new(start_mir, end_expr),
-        idx_var, inner, nil)
+    # BC: ForStmt over IterRange (the VM iterates Int64 directly so the idx_var
+    # binds an Int64). No map ptr setup, channels, or ensureOwnership.
+    MIR::ForStmt.new(MIR::IterRange.new(start_mir, end_expr), idx_var, inner, nil)
+  end
+
+  def lower_shard_concurrent_each_zig(id, range_node, conc_op, each_op, ctx,
+                                      map_node, map_var_name, idx_var, key_var,
+                                      sh_var, map_ptr, start_mir, end_mir)
+    shard_count = ctx[:shard_count] || map_node.type_info&.shard_count
+    raise "SHARD target missing shard_count" unless shard_count
+
+    map_t = map_node.type_info
+    key_t = if map_t&.numeric_map? && map_t&.key_type
+      map_t.key_type
+    else
+      Type.new(:String)
+    end
+    key_zig = key_t.zig_type
+    string_key = !map_t&.numeric_map?
+
+    start_zig = @lowering.send(:emit_expr, start_mir)
+    end_zig   = @lowering.send(:emit_expr, end_mir)
+    cap_mir = stream_concurrent_capacity_mir(conc_op, shard_count.to_s)
+    cap_zig = @lowering.send(:emit_expr, cap_mir)
+    task_cfg = task_config_zig(conc_op.options["size"]&.name&.downcase&.to_sym)
+
+    key_mir = with_pipeline_context(placeholder: idx_var) { visit_mir(ctx[:key_expr]) }
+    key_zig_expr = @lowering.send(:emit_expr, key_mir)
+
+    caps = FiberCtxBuilder.build(conc_op.capture_analysis, body_access_prefix: "ctx")
+    shard_map_field = "__shard_map"
+    map_capture_map = map_var_name ? { map_var_name => "ctx.#{shard_map_field}.*" } : {}
+    capture_fields_arr = ["        #{shard_map_field}: *@TypeOf(#{map_ptr}.*),"]
+    capture_fields_arr.concat(caps.specs.map { |s| "        #{s.name}: #{s.field_type_zig}," })
+    capture_fields = capture_fields_arr.join("\n")
+    capture_inits = [".#{shard_map_field} = #{map_ptr}"] + caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }
+    capture_inits_str = capture_inits.empty? ? "" : ", #{capture_inits.join(", ")}"
+
+    prev_ctx = @lowering.instance_variable_get(:@shard_context)
+    body_mir = nil
+    begin
+      @lowering.instance_variable_set(:@shard_context, {
+        map: map_var_name,
+        idx: "ctx.shard",
+        key: key_var,
+        hash: "0"
+      })
+      body_mir = with_pipeline_context(placeholder: key_var) do
+        with_fiber_capture_map(map_capture_map.merge(caps.capture_map), capture_symbols: caps.capture_symbols, rt_override: "__rt") do
+          visit_pipeline_body_mir(each_op.body, placeholder: key_var)
+        end
+      end
+    ensure
+      @lowering.instance_variable_set(:@shard_context, prev_ctx)
     end
 
-    # Zig: WhileStmt with explicit i64 counter so the idx_var has the
-    # right type for @mod/arithmetic in the key expression. ForStmt's
-    # `for (0..n) |i|` would bind i as usize, mismatching with i64
-    # operands in the typical key_expr pattern.
+    saved_low_rt = @lowering.instance_variable_get(:@rt_name)
+    @lowering.instance_variable_set(:@rt_name, "__rt")
+    body_zig = begin
+      body_mir.filter_map { |m|
+        code = @lowering.send(:emit_expr, m)
+        next nil if code.nil? || code.empty?
+        code.strip.end_with?("}", ";") ? code : "#{code};"
+      }.join("\n                    ")
+    ensure
+      @lowering.instance_variable_set(:@rt_name, saved_low_rt)
+    end
+
+    key_loop_mark = if ctx[:key_allocates_frame]
+      "const __sh#{id}_key_mark = rt.saveLoopMark();\n              defer rt.restoreLoopMark(__sh#{id}_key_mark);"
+    else
+      ""
+    end
+    body_loop_mark = if ctx[:body_allocates_frame]
+      "const __sh#{id}_body_mark = __rt.saveLoopMark();\n                      defer __rt.restoreLoopMark(__sh#{id}_body_mark);"
+    else
+      ""
+    end
+    key_store_expr = string_key ? "try rt.heapAlloc().dupe(u8, #{key_var})" : key_var
+    key_free = string_key ? "defer __rt.heapAlloc().free(#{key_var});" : ""
     op_str = range_node.inclusive ? "<=" : "<"
-    end_var = "__sh#{id}_end"
-    MIR::ScopeBlock.new([
-      MIR::Let.new(map_ptr, MIR::UnaryOp.new("&", visit_mir(map_node)), false, nil, nil),
-      MIR::ExprStmt.new(
-        MIR::MethodCall.new(MIR::Ident.new(map_ptr), "ensureOwnership", [], false), false),
-      MIR::ScopeBlock.new([
-        MIR::Let.new(idx_var, start_mir, true, "i64", nil),
-        MIR::Let.new(end_var, end_mir, false, "i64", nil),
-        MIR::WhileStmt.new(
-          MIR::BinOp.new(op_str, MIR::Ident.new(idx_var), MIR::Ident.new(end_var)),
-          inner, nil,
-          MIR::Set.new(MIR::Ident.new(idx_var),
-            MIR::BinOp.new("+", MIR::Ident.new(idx_var), MIR::Lit.new("1"))),
-          nil, nil)
-      ])
-    ])
+
+    code = <<~ZIG.chomp
+      {
+          const #{map_ptr} = &#{@lowering.send(:emit_expr, visit_mir(map_node))};
+          #{map_ptr}.ensureOwnership();
+          const __sh#{id}_cap: usize = #{cap_zig};
+          const __ShWork#{id} = struct {
+              key: #{key_zig},
+          };
+          var __sh#{id}_chans: [#{shard_count}]CheatLib.BoundedChannel(__ShWork#{id}) = undefined;
+          for (0..#{shard_count}) |__s| {
+              __sh#{id}_chans[__s] = try CheatLib.BoundedChannel(__ShWork#{id}).init(rt.heapAlloc(), __sh#{id}_cap);
+          }
+          defer for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].deinit();
+
+          var __sh#{id}_wg = CheatHeader.WaitGroup.init(rt.getSched());
+          var __sh#{id}_err = std.atomic.Value(bool).init(false);
+          const __ShWorker#{id} = struct {
+              wg: *CheatHeader.WaitGroup,
+              chans: *[#{shard_count}]CheatLib.BoundedChannel(__ShWork#{id}),
+              err: *std.atomic.Value(bool),
+              shard: usize,
+      #{capture_fields.empty? ? "" : capture_fields + "\n"}        fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
+                  const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
+                  const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
+                  defer ctx.wg.done();
+                  errdefer {
+                      ctx.err.store(true, .release);
+                      for (0..#{shard_count}) |__s| ctx.chans[__s].setError(error.CheatError);
+                  }
+                  while (ctx.chans[ctx.shard].pop() catch |__err| {
+                      ctx.err.store(true, .release);
+                      for (0..#{shard_count}) |__s| ctx.chans[__s].setError(__err);
+                      return __err;
+                  }) |__work| {
+                      const #{key_var}: #{key_zig} = __work.key;
+                      #{key_free}
+                      #{body_loop_mark}
+                      #{body_zig}
+                      __rt.checkYield();
+                  }
+              }
+          };
+          var __sh#{id}_workers: [#{shard_count}]__ShWorker#{id} = undefined;
+          __sh#{id}_wg.add(#{shard_count});
+          for (0..#{shard_count}) |__s| {
+              __sh#{id}_workers[__s] = .{ .wg = &__sh#{id}_wg, .chans = &__sh#{id}_chans, .err = &__sh#{id}_err, .shard = __s#{capture_inits_str} };
+              try CheatHeader.spawnBest(
+                  @intFromPtr(&Runtime.entryWrapper),
+                  @as(CheatHeader.TaskFn, @ptrCast(&__ShWorker#{id}.run)),
+                  &__sh#{id}_workers[__s],
+                  #{task_cfg},
+              );
+          }
+
+          var #{idx_var}: i64 = #{start_zig};
+          const __sh#{id}_end: i64 = #{end_zig};
+          while ((#{idx_var} #{op_str} __sh#{id}_end) and !__sh#{id}_err.load(.acquire)) : (#{idx_var} += 1) {
+              #{key_loop_mark}
+              const #{key_var}: #{key_zig} = #{key_zig_expr};
+              const #{sh_var} = @TypeOf(#{map_ptr}.*).shardIndexWithHash(#{key_var});
+              const __sh#{id}_work = __ShWork#{id}{ .key = #{key_store_expr} };
+              __sh#{id}_chans[#{sh_var}.shard].push(__sh#{id}_work) catch |__err| {
+                  __sh#{id}_err.store(true, .release);
+                  for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].setError(__err);
+                  break;
+              };
+          }
+          for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].close();
+          __sh#{id}_wg.wait();
+          if (__sh#{id}_err.load(.acquire)) return error.CheatError;
+      }
+    ZIG
+    MIR::InlineZig.new(code, "shard_concurrent_each")
   end
 
   # CONCURRENT SELECT ... OR PRUNE: build a structural for-loop that runs

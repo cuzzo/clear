@@ -15,6 +15,7 @@
 
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
+const SpinLock = @import("profile-lock.zig").SpinLock;
 
 pub const MAX_CHANNELS: usize = 1024;
 
@@ -41,7 +42,7 @@ pub const ProfStats = extern struct {
 // would read garbage.
 var stats: [MAX_CHANNELS]ProfStats = [_]ProfStats{.{}} ** MAX_CHANNELS;
 var count: usize = 0;
-var mu: compat.Mutex = .{};
+var mu: SpinLock = .{};
 
 // Returns an id in [0, MAX_CHANNELS) that the channel uses to index
 // into `stats`. When the registry is full, returns MAX_CHANNELS and
@@ -58,6 +59,8 @@ pub fn register(initial_capacity: u64) usize {
 
 pub inline fn recordPush(id: usize, depth: u64, blocked: bool) void {
     if (id >= MAX_CHANNELS) return;
+    mu.lock();
+    defer mu.unlock();
     stats[id].pushes += 1;
     if (depth > stats[id].max_depth) stats[id].max_depth = depth;
     if (blocked) stats[id].push_blocked += 1;
@@ -65,11 +68,15 @@ pub inline fn recordPush(id: usize, depth: u64, blocked: bool) void {
 
 pub inline fn recordPop(id: usize) void {
     if (id >= MAX_CHANNELS) return;
+    mu.lock();
+    defer mu.unlock();
     stats[id].pops += 1;
 }
 
 pub inline fn recordPopBlocked(id: usize) void {
     if (id >= MAX_CHANNELS) return;
+    mu.lock();
+    defer mu.unlock();
     stats[id].pop_blocked += 1;
 }
 
@@ -81,6 +88,9 @@ pub fn dumpToEnvFile() void {
     const path_ptr = std.c.getenv("CLEAR_CHANNEL_PROFILE") orelse return;
     const fd = compat.createFileTruncate(path_ptr) catch return;
     defer compat.closeFd(fd);
+
+    mu.lock();
+    defer mu.unlock();
 
     var buf: [256]u8 = undefined;
     _ = compat.writeAllFd(fd, "# channel-profile v1\n") catch return;

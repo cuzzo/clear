@@ -104,6 +104,38 @@ test "S2: stolen tasks complete correctly when dispatched by the stealer" {
     try std.testing.expectEqual(@as(u64, 0), sched_b.active_tasks.load(.monotonic));
 }
 
+test "S2b: stolen task completion returns FsmTask slot to allocating scheduler" {
+    var ebr_ctx: ebr.EbrContext = .{};
+    defer ebr_ctx.deinit(alloc);
+    var pool_a = fm.StackPool.init(alloc);
+    defer pool_a.deinit();
+    var pool_b = fm.StackPool.init(alloc);
+    defer pool_b.deinit();
+    var sched_a = try fp.Scheduler.init(alloc, &ebr_ctx, &pool_a);
+    defer sched_a.deinit();
+    var sched_b = try fp.Scheduler.init(alloc, &ebr_ctx, &pool_b);
+    defer sched_b.deinit();
+
+    var stolen_ctx: Counter = .{ .task = try sched_a.allocFsmTask(&Counter.doResume) };
+    stolen_ctx.task.ctx = &stolen_ctx;
+    sched_a.enqueueFsm(stolen_ctx.task);
+
+    const stolen = sched_b.fsm_ready_queue.tryStealFrom(&sched_a.fsm_ready_queue, alloc);
+    try std.testing.expectEqual(@as(usize, 1), stolen);
+    _ = sched_b.active_tasks.fetchAdd(stolen, .monotonic);
+    _ = sched_a.active_tasks.fetchSub(stolen, .monotonic);
+
+    sched_b.drainFsmQueue();
+    try std.testing.expect(stolen_ctx.completed);
+
+    var fresh_b: Counter = .{ .task = try sched_b.allocFsmTask(&Counter.doResume) };
+    fresh_b.task.ctx = &fresh_b;
+    defer sched_b.fsm_task_slab.destroy(fresh_b.task);
+
+    try std.testing.expect(sched_b.fsm_task_slab.refFromPtr(fresh_b.task) != null);
+    try std.testing.expect(sched_a.fsm_task_slab.refFromPtr(fresh_b.task) == null);
+}
+
 test "S3: FSM queue is structurally distinct from stackful ready_queue" {
     var ebr_ctx: ebr.EbrContext = .{};
     defer ebr_ctx.deinit(alloc);

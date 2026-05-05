@@ -69,6 +69,20 @@ RSpec.describe FsmTransform::Liveness do
       expect(result.cross_segment_vars).to have_key("buf")
     end
 
+    it "flags a pre-decl referenced by the suspend call receiver" do
+      pre_file = bind_decl("file", AST::Literal.new("{}", :File), full_type: :File)
+      receiver = ident("file")
+      call = io_call("read", [], io_def)
+      call.receiver = receiver
+      seg0 = FsmTransform::Segments::Segment.new(0, [pre_file],
+        FsmTransform::Segments::IoSuspend.new(call, io_def, nil))
+      seg1 = FsmTransform::Segments::Segment.new(1, [],
+        FsmTransform::Segments::Done.new(nil))
+
+      result = FsmTransform::Liveness.analyze([seg0, seg1], { captured: {} })
+      expect(result.cross_segment_vars).to have_key("file")
+    end
+
     it "does NOT flag a pre-decl used only within its own segment" do
       # x is declared and used in seg 0, never read in seg 1 nor in
       # the tail's args.

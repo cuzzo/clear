@@ -24,6 +24,44 @@ Tests whether CLEAR's `@shared:locked` eliminates false sharing by construction.
 | Go heap-alloc (racy) | ~3ms | n/a - no mutex |
 | C padded (racy) | ~3ms | n/a - no mutex |
 
+## CLEAR scheduler mode
+
+This benchmark should use stackful CLEAR workers, for example
+`BG { @standard:@parallel -> ... }`.
+
+The worker task is deliberately tiny:
+
+```clear
+FOR j IN (0_i64 ..< increments) DO
+    WITH EXCLUSIVE ref AS inner {
+        inner.value = inner.value + 1;
+    }
+END
+```
+
+Each worker repeats an uncontended lock, one integer increment, and unlock roughly
+1.25M times. There is no I/O, no meaningful blocking, and only `threadCount()`
+long-running workers, so per-task memory is not the limiting factor. The hot cost
+is per-iteration dispatch.
+
+FSM workers are correct here, but they are the wrong tradeoff for this shape. The
+FSM lowering must preserve resumable lock semantics, so each `WITH EXCLUSIVE`
+goes through the FSM lock protocol, state dispatch, body segment, unlock segment,
+and cleanup bookkeeping. Stackful workers lower to a tight acquire/body/release
+loop. On the 32-thread benchmark, the fixed FSM path was about 2x slower than the
+stackful path for this specific workload.
+
+The memory tradeoff goes the other direction. FSM tasks avoid per-fiber stacks;
+the runtime benchmark reports a compact `FsmTask` plus small state storage versus
+a stackful task with `Task`, `Fiber`, and a reserved stack. That is the right trade
+for huge numbers of parked, blocked, or lightly suspended tasks. It is not the
+right trade for a small number of CPU-bound workers executing millions of tiny
+critical sections.
+
+This benchmark is therefore an example of why CLEAR supports both models:
+use FSMs when task count and memory footprint dominate, and use stackful fibers
+when hot-loop compute throughput dominates.
+
 ## Interpretation
 
 **CLEAR vs Rust Arc<Mutex>**: same mechanism (heap alloc + mutex), CLEAR is ~2x faster.

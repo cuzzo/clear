@@ -557,6 +557,7 @@ pub const Scheduler = struct {
         t.ebr_slot = null;
         t.task_runtime = null;
         t.generation.store(prev_gen +% 1, .release);
+        t.owner_scheduler = self;
         return t;
     }
 
@@ -1309,7 +1310,11 @@ pub const Scheduler = struct {
                     // happens AFTER destroy_fn runs so destroy_fn can
                     // still read task.ctx.
                     if (task.destroy_fn) |df| df(task);
-                    self.fsm_task_slab.destroy(task);
+                    const owner: *Scheduler = if (task.owner_scheduler) |raw|
+                        @ptrCast(@alignCast(raw))
+                    else
+                        self;
+                    owner.fsm_task_slab.destroy(task);
                 },
                 .Yielded => {
                     // Stage for flush after the batch. Prevents LIFO starvation.
