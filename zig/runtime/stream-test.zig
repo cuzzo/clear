@@ -667,7 +667,10 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
     const allocator = std.testing.allocator;
     const subscriber_count = if (build_options.coverage) 3 else 16;
     const message_count = if (build_options.coverage) 64 else 4096;
-    const worker_count = if (build_options.coverage) 2 else 7;
+    // kcov ptraces every scheduler OS thread. This hammer's real cross-thread
+    // coverage belongs to the TSan lane; under kcov keep the same spawnBest /
+    // SplitStream surface on the active scheduler so coverage stays bounded.
+    const worker_count = if (build_options.coverage) 0 else 7;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);

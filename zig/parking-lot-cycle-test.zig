@@ -48,7 +48,11 @@ const ParkingRwLock = pl.ParkingRwLock;
 // acquires per test. Empirically reproduces the false positive in <1s when
 // the bug is present.
 const NUM_LOCKS: usize = if (build_options.coverage) 4 else 8;
-const NUM_SCHEDULERS: usize = if (build_options.coverage) 2 else 4;
+// kcov ptraces every OS thread. In this parking/wakeup stress shape that can
+// stall a worker thread long enough to look like a hung test even though the
+// real multi-thread proof is covered by the TSan lane. Keep coverage mode as a
+// line/surface smoke and leave cross-thread contention to non-coverage runs.
+const NUM_SCHEDULERS: usize = if (build_options.coverage) 1 else 4;
 const FIBERS_PER_SCHEDULER: usize = if (build_options.coverage) 2 else 8;
 const NUM_FIBERS: usize = NUM_SCHEDULERS * FIBERS_PER_SCHEDULER;
 const ITERS_PER_FIBER: usize = if (build_options.coverage) 50 else 2_000;
@@ -64,7 +68,7 @@ const ITERS_PER_FIBER: usize = if (build_options.coverage) 50 else 2_000;
 // (16M paired) requires either much longer iter counts or a different
 // shape (rwlock-shared outer + mutex inner). See the test header.
 const NUM_LOCKS_BIG: usize = if (build_options.coverage) 8 else 64;
-const NUM_SCHEDULERS_BIG: usize = if (build_options.coverage) 2 else 32;
+const NUM_SCHEDULERS_BIG: usize = if (build_options.coverage) 1 else 32;
 const FIBERS_PER_SCHEDULER_BIG: usize = if (build_options.coverage) 2 else 4;
 const NUM_FIBERS_BIG: usize = NUM_SCHEDULERS_BIG * FIBERS_PER_SCHEDULER_BIG;
 const ITERS_PER_FIBER_BIG: usize = if (build_options.coverage) 50 else 10_000;
