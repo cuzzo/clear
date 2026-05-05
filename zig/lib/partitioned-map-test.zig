@@ -7,11 +7,16 @@ const fm = @import("../runtime/fiber-memory.zig");
 const ebr = @import("ebr.zig");
 const header = @import("../runtime/runtime-header.zig");
 const compat = @import("compat.zig");
+const build_options = @import("build_options");
 
 const CheatLib = header.CheatLib;
 const Runtime = rt_mod.Runtime;
 const alloc = std.heap.c_allocator;
 const root = @import("root");
+
+// kcov/TSan instrumentation expands call frames enough that the tiny
+// get/remove diagnostic workers can overflow Standard 16KB fiber stacks.
+const key_worker_stack_size = if (build_options.coverage or build_options.tsan) .Large else .Standard;
 
 var global_ebr_ctx: ebr.EbrContext = .{};
 var global_stack_pool: fm.StackPool = undefined;
@@ -338,7 +343,7 @@ fn spawnKeyWorker(rt: *Runtime, map: *Map, keys: []const []const u8, mode: KeyMo
         @intFromPtr(&Runtime.entryWrapper),
         @as(qs.TaskFn, @ptrCast(&KeyWorkerCtx.run)),
         ctx,
-        .{ .stack_size = .Standard, .pinned = true },
+        .{ .stack_size = key_worker_stack_size, .pinned = true },
     );
     return promise;
 }
@@ -2648,15 +2653,27 @@ test "PartitionedStringMap: delayed get-ctx destroy diagnostic for tiny get-remo
     try runTinyGetRemoveLoopWithDelays(true, false, false, false);
 }
 
+fn skipCoverageKcovTeardownYieldDiagnostic() !void {
+    // GitHub's kcov 38 ptrace runner can stop making progress when this test
+    // injects a cooperative yield in remove/post-completion teardown. The
+    // get-ctx delay diagnostic, ordinary get/remove coverage, and event-log
+    // invariant tests still run under kcov; these teardown-yield diagnostics
+    // continue to run in the normal and TSan lanes.
+    if (build_options.coverage) return error.SkipZigTest;
+}
+
 test "PartitionedStringMap: delayed remove-ctx destroy diagnostic for tiny get-remove" {
+    try skipCoverageKcovTeardownYieldDiagnostic();
     try runTinyGetRemoveLoopWithDelays(false, true, false, false);
 }
 
 test "PartitionedStringMap: delayed key-free diagnostic for tiny get-remove" {
+    try skipCoverageKcovTeardownYieldDiagnostic();
     try runTinyGetRemoveLoopWithDelays(false, false, true, false);
 }
 
 test "PartitionedStringMap: delayed completion-destroy diagnostic for tiny get-remove" {
+    try skipCoverageKcovTeardownYieldDiagnostic();
     try runTinyGetRemoveLoopWithDelays(false, false, false, true);
 }
 

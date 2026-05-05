@@ -179,6 +179,12 @@ jobs:
     # tests under LLVM (slow compile, ~5-15x runtime overhead). Single
     # job hit the 60min ceiling; per-shard fits in 30min. fail-fast:
     # false so one flaky shard doesn't mask the rest.
+    #
+    # Serialize test binaries within each shard with `-j1`. The shards
+    # themselves still run in parallel, but running multiple TSan-
+    # instrumented scheduler tests concurrently inside one constrained
+    # GitHub runner can starve/wedge progress and has hung shard 3/5 in
+    # `spsc-scheduler-test` while the same binary passes repeatedly alone.
     name: Zig TSan (shard ${{ matrix.shard }}/5)
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -192,7 +198,7 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
       - working-directory: zig
-        run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5
+        run: zig build test-tsan -Dshard-index=${{ matrix.shard }} -Dshard-count=5 -j1
 
   zig-hammer:
     # Hammer stress tests (`*-hammer-test.zig`): high-iteration
