@@ -597,6 +597,7 @@ private
 
     # 1. Setup metadata
     is_implicit_return = node.return_type.nil?
+    node.type_params = infer_implicit_type_params(node) if node.respond_to?(:type_params=)
     declared_return = node.return_type || :Any
     lifetime_paths = get_lifetime_paths(node)
     fn_type_params = (node.type_params || []).map(&:to_sym)
@@ -2079,6 +2080,7 @@ private
     verify_tied_return!(node)
 
     actual = node.value.resolved_type
+    actual_full = return_value_type(node.value)
     expected = current_fn_ctx.return_type
 
     # 2. Move marking: returning a non-Copy value moves it out of the function.
@@ -2136,11 +2138,9 @@ private
       end
     end
 
-    if expected && expected != :Void && expected != :Any && actual != expected
-      # Basic check (you might want to allow Number[3] -> Number[] coercion)
-      if !is_safe_autocast?(actual, expected)
-        error!(node, :RETURN_MISMATCH, expected, actual)
-      end
+    if expected && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
+      error!(node, :RETURN_MISMATCH, type_display(expected), type_display(actual_full))
+    elsif expected && expected != :Void && expected != :Any && actual != expected
       node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
       check_prefixed_int_range!(node.value, expected)
     end
@@ -2152,6 +2152,87 @@ private
     end
 
     @branch_terminated = true
+  end
+
+  def return_value_type(value)
+    ti = value.respond_to?(:type_info) ? value.type_info : nil
+    return ti if ti.is_a?(Type)
+    Type.new(value.resolved_type || :Any)
+  end
+
+  def return_type_compatible?(actual_type, expected_type)
+    expected_t = expected_type.is_a?(Type) ? expected_type : Type.new(expected_type)
+    actual_t = actual_type.is_a?(Type) ? actual_type : Type.new(actual_type)
+
+    return true if expected_t.any? || actual_t.any?
+    return expected_t.accepts?(actual_t) if expected_t.fn_type?
+    return false unless same_return_capabilities?(expected_t, actual_t)
+
+    is_safe_autocast?(actual_t, expected_t)
+  end
+
+  def same_return_capabilities?(expected_t, actual_t)
+    name = expected_t.resolved.to_s
+    if name.match?(/\A[A-Z]\z/) && !lookup_type_schema(name.to_sym) &&
+       expected_t.shared? && actual_t.shared? &&
+       expected_t.sync.nil? && expected_t.resolved == actual_t.resolved
+      return true
+    end
+    expected_t.ownership == actual_t.ownership &&
+      expected_t.sync == actual_t.sync &&
+      expected_t.layout == actual_t.layout &&
+      expected_t.elem_ownership == actual_t.elem_ownership &&
+      expected_t.elem_sync == actual_t.elem_sync
+  end
+
+  def type_display(type)
+    t = type.is_a?(Type) ? type : Type.new(type)
+    parts = [t.resolved.to_s]
+
+    ownership = case t.ownership
+    when :multiowned then "@multiOwned"
+    when :shared then "@shared"
+    when :split then "@split"
+    when :link then "@link"
+    when :frozen then "@frozen"
+    end
+    parts << ownership if ownership
+
+    sync = case t.sync
+    when :locked then "@locked"
+    when :write_locked then "@writeLocked"
+    when :versioned then "@versioned"
+    when :atomic then "@atomic"
+    when :always_mutable then "@alwaysMutable"
+    when :local then "@local"
+    end
+    parts << sync if sync
+
+    parts.join(" ")
+  end
+
+  def infer_implicit_type_params(fn_node)
+    explicit = (fn_node.type_params || []).map(&:to_s)
+    return explicit unless explicit.empty?
+    inferred = []
+    ([fn_node.return_type] + (fn_node.params || []).map { |p| p[:type] }).each do |type|
+      collect_implicit_type_params(type, inferred, explicit)
+    end
+    (explicit + inferred).uniq
+  end
+
+  def collect_implicit_type_params(type, out, explicit)
+    return unless type.is_a?(Type)
+    name = type.resolved.to_s
+    if name.match?(/\A[A-Z]\z/) && !explicit.include?(name) && !lookup_type_schema(name.to_sym)
+      out << name
+    end
+    if type.generic_instance?
+      type.generic_args.each { |arg| collect_implicit_type_params(arg, out, explicit) }
+    end
+    collect_implicit_type_params(type.payload_type, out, explicit) if type.respond_to?(:error_union?) && type.error_union?
+    collect_implicit_type_params(type.wrapped_type, out, explicit) if type.respond_to?(:optional?) && type.optional?
+    collect_implicit_type_params(type.element_type, out, explicit) if type.respond_to?(:array?) && type.array?
   end
 
   def visit_StaticCall(node)
@@ -2260,18 +2341,6 @@ private
       sig = @scope_stack.first.locals[node.name]&.type if node.name.is_a?(String)
       if sig.is_a?(FunctionSignature) && sig.requires && !sig.requires.empty?
         node.collapsed_errors = collapse_errors_for_call(sig, node.args)
-      end
-
-      # Atomics M1.7: stamp atomic_borrow on Identifier args whose binding
-      # is sync == :atomic. The MIR-lowering's load wrap (`c.ctrl.data
-      # .load()`) is suppressed for these so the callee receives the cell
-      # ref and can dispatch through @hasDecl(...) probes per family.
-      node.args.each do |arg|
-        next unless arg.is_a?(AST::Identifier)
-        sym = arg.respond_to?(:symbol) ? arg.symbol : nil
-        if sym&.sync == :atomic
-          arg.atomic_borrow = true if arg.respond_to?(:atomic_borrow=)
-        end
       end
 
       # True-Sync-Polymorphism Gate 3 plain-T auto-borrow stamping

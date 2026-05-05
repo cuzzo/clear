@@ -2224,24 +2224,29 @@ class Parser
     error!(current, "Unexpected token #{current.value} (#{current.type}) line #{current.line}")
   end
 
-  # Returns true if, starting from current position '<', the token stream matches:
-  #   < TYPE_ID (, TYPE_ID)* > end_char
+  # Returns true if, starting from current position '<', the token stream matches
+  # a generic argument list followed by end_char. Kept as a token-level peek so
+  # expression parsing can disambiguate `Pair<T>{...}` from `<`/`>`.
   # Used to disambiguate generic annotations from comparison operators.
   def peek_generic_angle_params?(end_char)
     saved = @pos
     begin
       return false unless current.type == :CHAR && current.value == '<'
       @pos += 1 # skip '<'
+      depth = 1
       loop do
-        return false unless current.type == :TYPE_ID
-        @pos += 1 # skip TYPE_ID
-        if current.type == :CHAR && current.value == ','
-          @pos += 1 # skip ','
+        return false if current.nil?
+        if current.type == :CHAR && current.value == '<'
+          depth += 1
         elsif current.type == :CHAR && current.value == '>'
-          @pos += 1 # skip '>'
+          depth -= 1
+          @pos += 1
+          return current.type == :CHAR && current.value == end_char if depth == 0
+          next
+        end
+        @pos += 1
+        if depth == 0
           return current.type == :CHAR && current.value == end_char
-        else
-          return false
         end
       end
     ensure
@@ -2285,7 +2290,7 @@ class Parser
         consume(:CHAR, '<')
         type_args = []
         until match?(:CHAR, '>')
-          type_args << consume(:TYPE_ID).value
+          type_args << type_annotation_source(parse_type_annotation)
           match!(:CHAR, ',')
         end
         consume(:CHAR, '>')
@@ -2495,13 +2500,15 @@ class Parser
     base = consume(:TYPE_ID).value
     inner = ""
 
-    # Generic type arguments: Pair<Number> or Map<String, Number>
+    # Generic type arguments: Pair<Number> or Map<String, Number>.
+    # Type arguments are full type annotations, so Cache<Box @shared:locked>
+    # preserves the synchronization family as part of T.
     # In type-annotation context, '<' is always a generic argument list, never a comparison.
     if match?(:CHAR, '<')
       consume(:CHAR, '<')
       type_args = []
       until match?(:CHAR, '>')
-        type_args << consume(:TYPE_ID).value
+        type_args << type_annotation_source(parse_type_annotation)
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -2639,6 +2646,32 @@ class Parser
     t.elem_sync = elem_sync if elem_sync
     t.observable_token = observable_token if observable_token
     t
+  end
+
+  def type_annotation_source(type)
+    t = type.is_a?(Type) ? type : Type.new(type)
+    parts = [t.resolved.to_s]
+
+    ownership = case t.ownership
+    when :shared then "@shared"
+    when :multiowned then "@multiowned"
+    when :link then "@link"
+    when :split then "@split"
+    when :frozen then "@frozen"
+    end
+    parts << ownership if ownership
+
+    sync = case t.sync
+    when :locked then "@locked"
+    when :write_locked then "@writeLocked"
+    when :versioned then "@versioned"
+    when :atomic then "@atomic"
+    when :local then "@local"
+    when :always_mutable then "@alwaysMutable"
+    end
+    parts << sync if sync
+
+    parts.join("")
   end
 
   # Parses `CONCURRENT(workers: N)? SELECT|WHERE|EACH ...`

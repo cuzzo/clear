@@ -1531,6 +1531,12 @@ class Type
     # Type alias: Number → Float64 (canonical internal name for f64).
     # Both Number and Float64 are accepted; the type system uses :Float64 everywhere.
     str = str.gsub(/\bNumber\b/, 'Float64')
+
+    suffix_ownership = nil
+    suffix_sync = nil
+    unless str.include?("<")
+      str, suffix_ownership, suffix_sync = strip_capability_suffix(str)
+    end
     @raw = str.to_sym
 
     # A0. Detect Tense prefix: ~T (Future/Promise — a BG task producing T)
@@ -1582,8 +1588,8 @@ class Type
     end
 
     # C. Capability fields default — callers pass ownership:/sync:/location:/collection: as keyword args.
-    @ownership  = :affine
-    @sync       = nil
+    @ownership  = suffix_ownership || :affine
+    @sync       = suffix_sync
     @collection = nil
 
     # D. Detect Array Structure
@@ -1651,6 +1657,31 @@ class Type
 
     # Resolved name is the raw string as-is (! and ? are type-level modifiers, not stripped).
     @resolved_cache = @raw.to_sym
+  end
+
+  def strip_capability_suffix(str)
+    return [str, nil, nil] unless str.include?("@")
+
+    base, *caps = str.gsub(/\s+/, "").split("@")
+    ownership = nil
+    sync = nil
+    caps.flat_map { |cap| cap.split(":") }.each do |cap|
+      case cap
+      when "shared" then ownership = :shared
+      when "multiOwned", "multiowned" then ownership = :multiowned
+      when "link" then ownership = :link
+      when "split" then ownership = :split
+      when "frozen" then ownership = :frozen
+      when "locked" then sync = :locked
+      when "writeLocked", "writelocked" then sync = :write_locked
+      when "versioned" then sync = :versioned
+      when "atomic" then sync = :atomic
+      when "local" then sync = :local
+      when "alwaysMutable", "alwaysmutable" then sync = :always_mutable
+      end
+    end
+
+    [base, ownership, sync]
   end
 
   # Computes the Zig type string for this CHEAT type.

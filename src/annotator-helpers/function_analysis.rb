@@ -355,6 +355,7 @@ module FunctionAnalysis
 
     # For alias overlap
     encountered_args = []
+    atomic_bare_value_args = []
 
     node.args.each_with_index do |arg_node, i|
       param = params[i]
@@ -454,6 +455,21 @@ module FunctionAnalysis
       # that the callee can retain/cross execution boundaries, so callers
       # must pass a real shared handle or explicitly write SHARE x.
       actual_type_obj = arg_ti.is_a?(Type) ? arg_ti : Type.new(actual || :Any)
+      if explicit_primitive_atomic_param?(expected_type_obj)
+        unless atomic_cell_arg?(arg_node)
+          arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
+          error!(arg_node,
+            "Type Error: Argument #{i + 1} to '#{node.name}' expects an @atomic #{expected_type_obj.resolved} cell, " \
+            "but '#{arg_name}' is #{actual_type_obj.resolved}. Pass an @atomic binding, or change the parameter to bare #{expected_type_obj.resolved} to load a value.")
+        end
+        arg_node.atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
+      end
+      if atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
+        atomic_bare_value_args << arg_node
+      end
+      if atomic_cell_to_atomic_param?(arg_node, param, signature)
+        arg_node.atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
+      end
       if !match && expected_type_obj.shared?
         unless actual_type_obj.shared?
           hint = if arg_node.is_a?(AST::Identifier)
@@ -511,6 +527,57 @@ module FunctionAnalysis
         name: arg_node.respond_to?(:name) ? arg_node.name : "arg"
       }
     end
+
+    warn_multi_atomic_bare_value_call!(node, atomic_bare_value_args)
+  end
+
+  def atomic_cell_to_bare_value_param?(arg_node, expected_type_obj, param)
+    return false unless arg_node.is_a?(AST::Identifier)
+    sym = arg_node.respond_to?(:symbol) ? arg_node.symbol : nil
+    return false unless sym&.sync == :atomic
+    return false if sym.respond_to?(:layout) && sym.layout == :indirect
+    return false if param[:sync] == :atomic
+    return false if param[:symbol]&.respond_to?(:sync) && param[:symbol].sync == :atomic
+    return false if expected_type_obj.any? || expected_type_obj.fn_type?
+    return false if expected_type_obj.shared? || expected_type_obj.any_sync?
+
+    expected_type_obj.primitive?
+  end
+
+  def atomic_cell_to_atomic_param?(arg_node, param, signature)
+    return false unless arg_node.is_a?(AST::Identifier)
+    sym = arg_node.respond_to?(:symbol) ? arg_node.symbol : nil
+    return false unless sym&.sync == :atomic
+    ptype = param[:type]
+    return true if ptype.is_a?(Type) && ptype.sync == :atomic
+    return true if param[:sync] == :atomic
+    return true if param[:symbol]&.respond_to?(:sync) && param[:symbol].sync == :atomic
+
+    requires = signature.respond_to?(:requires) ? signature.requires : signature[:requires]
+    families = requires && requires[param[:name].to_s]
+    families.respond_to?(:include?) && families.include?(:ATOMIC)
+  end
+
+  def atomic_cell_arg?(arg_node)
+    return false unless arg_node.is_a?(AST::Identifier)
+    sym = arg_node.respond_to?(:symbol) ? arg_node.symbol : nil
+    sym&.sync == :atomic && !(sym.respond_to?(:layout) && sym.layout == :indirect)
+  end
+
+  def explicit_primitive_atomic_param?(type)
+    type.is_a?(Type) && type.sync == :atomic && type.primitive?
+  end
+
+  def warn_multi_atomic_bare_value_call!(node, atomic_args)
+    unique_args = atomic_args.compact
+    return if unique_args.length < 2
+
+    names = unique_args.map { |arg| arg.respond_to?(:name) ? arg.name : "<expr>" }
+    warning!(node,
+      "Call to '#{node.name}' reads multiple atomic values independently " \
+      "(#{names.join(', ')}). This is not a multi-object-consistent snapshot; " \
+      "default mode allows it as ordinary atomic loads. STRICT/STRICT EXTREME " \
+      "will require an explicit @inconsistent call-site annotation.")
   end
 
   # TODO: Needs updated once lifetimes are complex

@@ -104,6 +104,20 @@ RSpec.describe "SHARE keyword" do
     }.not_to raise_error
   end
 
+  it "accepts synchronized shared-family values passed to plain @shared parameters" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN takes_shared(b: Box @shared) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          b = Box{ value: 1 } @shared:locked;
+          takes_shared(b);
+          RETURN;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
   it "accepts SHARE values passed to T@shared parameters" do
     expect {
       annotate(<<~CLEAR)
@@ -258,5 +272,53 @@ RSpec.describe "SHARE keyword" do
         END
       CLEAR
     }.not_to raise_error
+  end
+
+  it "rejects returning a shared handle from a bare return type" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN unwrap_bad(b: Box @shared) RETURNS Box ->
+          RETURN b;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /expected to return 'Box'.*returned 'Box @shared'/m)
+  end
+
+  it "accepts returning a shared handle from a shared return type" do
+    zig = transpile(<<~CLEAR)
+      STRUCT Box { value: Int64 }
+      FN retain_shared(b: Box @shared) RETURNS Box @shared ->
+        RETURN b;
+      END
+    CLEAR
+
+    expect(zig).to include("fn retain_shared")
+    expect(zig).to include("CheatLib.Arc(Box)")
+    expect(zig).to include("CheatLib.arcRetain(Box")
+  end
+
+  it "rejects returning a locked shared handle from a concrete unspecialized shared return type" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN retain_shared() RETURNS Box @shared ->
+          b = Box{ value: 1 } @shared:locked;
+          RETURN b;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /expected to return 'Box @shared'.*returned 'Box @shared @locked'/m)
+  end
+
+  it "rejects returning a multiowned handle from a bare return type" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN unwrap_bad() RETURNS Box ->
+          b = Box{ value: 1 } @multiowned;
+          RETURN b;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /expected to return 'Box'.*returned 'Box @multiOwned'/m)
   end
 end

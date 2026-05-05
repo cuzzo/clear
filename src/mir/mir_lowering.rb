@@ -996,7 +996,9 @@ class MIRLowering
       sym = param[:symbol]
       atomic_sync = sym && (sym.sync == :atomic ||
                             (sym.sync_families && sym.sync_families.include?(:ATOMIC)))
-      zig_t = if is_user_struct
+      zig_t = if p_type_obj.shared? && p_type_obj.resolved.to_s.match?(/\A[A-Z]\z/)
+        "CheatLib.Arc(#{p_type_obj.resolved})"
+      elsif is_user_struct
         "anytype"
       elsif p_type_obj.collection?
         "anytype"
@@ -1018,7 +1020,10 @@ class MIRLowering
 
     # Build return type string. The error prefix is baked into the string,
     # so can_fail on MIR::FnDef is always false (emitter would double it).
-    return_type_str = if fn_can_fail
+    tied_shared_return = tied_shared_family_return_param(node, mutable_scalar_params)
+    return_type_str = if tied_shared_return
+      tied_shared_return
+    elsif fn_can_fail
       # If the user already declared `RETURNS !T`, `final_type` already
       # carries the error union (post-#338 migration the canonical
       # form is `anyerror!T`, but bare `!T` is also accepted). Don't
@@ -1429,7 +1434,7 @@ class MIRLowering
 
     # Generic type args
     type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
-      node.generic_type_args.map { |t| MIR::Ident.new(Type.new(t).zig_type) }
+      node.generic_type_args.map { |t| MIR::Ident.new(generic_type_arg_zig(t)) }
     else
       []
     end
@@ -1494,7 +1499,7 @@ class MIRLowering
     can_fail = callee_can_fail?(node.name)
 
     type_args = if node.respond_to?(:generic_type_args) && node.generic_type_args&.any?
-      node.generic_type_args.map { |t| MIR::Ident.new(Type.new(t).zig_type) }
+      node.generic_type_args.map { |t| MIR::Ident.new(generic_type_arg_zig(t)) }
     else
       []
     end
@@ -5182,7 +5187,7 @@ class MIRLowering
     else
       raise "Internal: lower_clone on unsupported type #{ti&.resolved || node.value.resolved_type}"
     end
-    zig_base = ti&.split_open_stream? ? ti.zig_type : transpile_type(ti.resolved.to_s)
+    zig_base = ti&.split_open_stream? ? ti.zig_type : rc_payload_zig_type(ti)
     MIR::RcRetain.new(lower(node.value), zig_base, func)
   end
 
@@ -5294,11 +5299,47 @@ class MIRLowering
   end
 
   def rc_payload_zig_type(ti)
+    if ti.resolved.to_s.match?(/\A[A-Z]\z/) && ti.shared?
+      return ti.resolved.to_s
+    end
     payload = Type.new(ti)
     payload.ownership = :affine
     payload.provenance = nil
     payload.instance_variable_set(:@zig_type_cache, nil)
+    if payload.any_sync? && !(payload.map? && payload.striped?)
+      inner = payload.bare_data_type.zig_type
+      inner = "CheatLib.Locked(#{inner})"   if payload.sync == :locked
+      inner = "CheatLib.RwLocked(#{inner})" if payload.sync == :write_locked
+      inner = "CheatLib.RefCell(#{inner})"  if payload.sync == :always_mutable
+      inner = "CheatLib.Versioned(#{inner})" if payload.sync == :versioned
+      if payload.sync == :atomic
+        inner = payload.layout == :indirect ? "CheatLib.AtomicPtr(#{inner})" : "CheatLib.Atomic(#{inner})"
+      end
+      return inner
+    end
     payload.zig_type
+  end
+
+  def generic_type_arg_zig(type)
+    if type.is_a?(Type) && type.instance_variable_get(:@generic_payload_type_arg)
+      return rc_payload_zig_type(type)
+    end
+    t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
+    t.zig_type
+  end
+
+  def tied_shared_family_return_param(node, mutable_scalar_params)
+    ret = node.return_type
+    return nil unless ret.is_a?(Type) && ret.shared?
+    return nil unless ret.resolved.to_s.match?(/\A[A-Z]\z/)
+    params = (node.params || []).select do |p|
+      pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
+      pt.shared? && pt.resolved == ret.resolved
+    end
+    return nil unless params.size == 1
+    name = params.first[:name]
+    zig_name = mutable_scalar_params.include?(name) ? "_m_#{name}" : name
+    "@TypeOf(#{zig_name})"
   end
 
   # ================================================================
@@ -6854,7 +6895,7 @@ class MIRLowering
   def make_rc_retain(value_node)
     ti = value_node.type_info
     func = ti.shared? ? "arcRetain" : "rcRetain"
-    zig_base = transpile_type(ti.resolved.to_s)
+    zig_base = rc_payload_zig_type(ti)
     MIR::RcRetain.new(lower(value_node), zig_base, func)
   end
 

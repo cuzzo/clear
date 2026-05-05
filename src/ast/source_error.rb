@@ -122,6 +122,12 @@ module ErrorHelper
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
+  def warning!(node_or_token, message)
+    token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
+    loc = token ? " (line #{token.line})" : ""
+    $stderr.puts "\e[33m[Warning]\e[0m #{message}#{loc}"
+  end
+
   # Emit a fixable finding — a diagnostic with one or more suggested
   # edits.
   #
@@ -222,4 +228,3 @@ end
 class CompilerError < SourceError
   def error_type; "Compiler Error"; end
 end
-

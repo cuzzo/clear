@@ -463,6 +463,116 @@ RSpec.describe SemanticAnnotator do
         call = fn.body[1].value
         expect(call.generic_type_args).to eq([:Bool])
       end
+
+      it "preserves capability axes when T is inferred directly from an argument" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          FN identity<T>(x: T) RETURNS T -> RETURN x; END
+          FN main() RETURNS Void ->
+            b = Box{ value: 1 } @shared:locked;
+            got = identity(b);
+            RETURN;
+          END
+        CLEAR
+
+        ast = run(src)
+        got = ast.statements.last.body[1]
+        call = got.value
+
+        expect(got.type_info).to be_shared
+        expect(got.type_info.sync).to eq(:locked)
+        expect(call.generic_type_args.first).to be_a(Type)
+        expect(call.generic_type_args.first).to be_shared
+        expect(call.generic_type_args.first.sync).to eq(:locked)
+      end
+
+      it "preserves capability axes through Cache<T> get/set" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          STRUCT Cache<T> { value: T }
+          FN get<T>(c: Cache<T>) RETURNS T -> RETURN c.value; END
+          FN set!<T>(MUTABLE c: Cache<T>, TAKES v: T) RETURNS Void ->
+            c.value = v;
+            RETURN;
+          END
+          FN main() RETURNS Void ->
+            b = Box{ value: 1 } @shared:locked;
+            MUTABLE c = Cache<Box @shared:locked>{ value: b };
+            got = get(c);
+            set!(c, got);
+            RETURN;
+          END
+        CLEAR
+
+        ast = run(src)
+        main = ast.statements.last
+        cache = main.body[1]
+        got = main.body[2]
+        set_call = main.body[3]
+
+        cache_arg = cache.type_info.generic_args.first
+        expect(cache_arg).to be_shared
+        expect(cache_arg.sync).to eq(:locked)
+
+        expect(got.type_info).to be_shared
+        expect(got.type_info.sync).to eq(:locked)
+
+        expect(got.value.generic_type_args.first).to be_shared
+        expect(got.value.generic_type_args.first.sync).to eq(:locked)
+        expect(set_call.generic_type_args.first).to be_shared
+        expect(set_call.generic_type_args.first.sync).to eq(:locked)
+      end
+
+      it "infers implicit T for shared-family input and return" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          FN keep(x: T @shared) RETURNS T @shared
+            REQUIRES x: LOCKED | VERSIONED
+          ->
+            RETURN x;
+          END
+          FN main() RETURNS Void ->
+            b = Box{ value: 1 } @shared:locked;
+            got = keep(b);
+            RETURN;
+          END
+        CLEAR
+
+        ast = run(src)
+        keep = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "keep" }
+        got = ast.statements.last.body[1]
+
+        expect(keep.type_params).to eq(["T"])
+        expect(got.type_info).to be_shared
+        expect(got.type_info.sync).to eq(:locked)
+        expect(got.value.generic_type_args.first).to be_a(Type)
+      end
+
+      it "returns bare T when copying out through a polymorphic shared access gate" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          FN copyOut(x: T @shared) RETURNS !T ->
+            WITH POLYMORPHIC x AS y { RETURN COPY y; }
+          END
+          FN main() RETURNS !Void ->
+            b = Box{ value: 1 } @shared:locked;
+            got = copyOut(b) OR EXIT;
+            RETURN;
+          END
+        CLEAR
+
+        ast = run(src)
+        copy_out = ast.statements.find { |s| s.is_a?(AST::FunctionDef) && s.name == "copyOut" }
+        ret = copy_out.body.first.body.first
+        got = ast.statements.last.body[1]
+
+        expect(ret.value.type_info.resolved).to eq(:T)
+        expect(ret.value.type_info.ownership).to eq(:affine)
+        expect(ret.value.type_info.sync).to be_nil
+        expect(got.type_info.resolved).to eq(:Box)
+        expect(got.type_info.ownership).to eq(:affine)
+        expect(got.type_info.sync).to be_nil
+      end
     end
 
     describe "generic function error messages" do
@@ -549,6 +659,52 @@ RSpec.describe SemanticAnnotator do
         src = "STRUCT Pair<T> { first: T, second: T }\nFN makePair<T>(v: T) RETURNS Pair<T> -> RETURN Pair<T>{ first: v, second: v }; END\nFN main() RETURNS Void -> PASS END"
         out = ZigTranspiler.new.transpile(src)
         expect(out).to include("Pair(T)")
+      end
+
+      it "emits capability-preserving type args for Cache<T> get/set" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          STRUCT Cache<T> { value: T }
+          FN get<T>(c: Cache<T>) RETURNS T -> RETURN c.value; END
+          FN set!<T>(MUTABLE c: Cache<T>, TAKES v: T) RETURNS Void ->
+            c.value = v;
+            RETURN;
+          END
+          FN main() RETURNS Void ->
+            b = Box{ value: 1 } @shared:locked;
+            MUTABLE c = Cache<Box @shared:locked>{ value: b };
+            got = get(c);
+            set!(c, got);
+            RETURN;
+          END
+        CLEAR
+
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("Cache(CheatLib.Arc(CheatLib.Locked(Box)))")
+        expect(out).to include("get(CheatLib.Arc(CheatLib.Locked(Box)), c)")
+        expect(out).to include("set(CheatLib.Arc(CheatLib.Locked(Box)), c, got)")
+        expect(out).to include("CheatLib.arcRetain(CheatLib.Locked(Box), b)")
+      end
+
+      it "monomorphizes shared-family returns from the input synchronization strategy" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          FN keep(x: T @shared) RETURNS T @shared
+            REQUIRES x: LOCKED | VERSIONED
+          ->
+            RETURN x;
+          END
+          FN main() RETURNS Void ->
+            b = Box{ value: 1 } @shared:versioned;
+            got = keep(b);
+            RETURN;
+          END
+        CLEAR
+
+        out = ZigTranspiler.new.transpile(src)
+        expect(out).to include("fn keep(comptime T: type, x: CheatLib.Arc(T)) @TypeOf(x)")
+        expect(out).to include("keep(CheatLib.Versioned(Box), b)")
+        expect(out).to include("CheatLib.arcRetain(T, x)")
       end
     end
 

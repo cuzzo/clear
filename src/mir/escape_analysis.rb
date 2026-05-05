@@ -660,7 +660,7 @@ module EscapeAnalysis
           # ── sync axis ────────────────────────────────────────────────
           unless entry.sync && param_sync_was_declared?(param)
             unified = unify_caller_attr(sites, idx) { |s| s&.sync }
-            if unified && entry.sync != unified
+            if unified && entry.sync != unified && param_accepts_caller_sync?(callee_fn, param, unified)
               entry.sync = unified
               changed = true
             end
@@ -732,6 +732,31 @@ module EscapeAnalysis
   private_class_method def self.param_sync_was_declared?(param)
     t = param[:type]
     t.is_a?(Type) && t.any_sync?
+  end
+
+  private_class_method def self.param_accepts_caller_sync?(fn_node, param, sync)
+    t = param[:type]
+    return true if t.is_a?(Type) && (t.shared? || t.any_sync?)
+    return true unless sync == :atomic
+
+    requires = fn_node.respond_to?(:requires) ? fn_node.requires : nil
+    families = requires && requires[param[:name].to_s]
+    return false unless families.respond_to?(:include?)
+
+    case sync
+    when :atomic
+      families.include?(:ATOMIC) || families.include?(:SNAPSHOTTED)
+    when :versioned
+      families.include?(:VERSIONED) || families.include?(:SNAPSHOTTED)
+    when :locked
+      families.include?(:LOCKED)
+    when :write_locked
+      families.include?(:LOCKED)
+    when :local
+      families.include?(:LOCAL)
+    else
+      false
+    end
   end
 
   # E3b: Stamp heap provenance on call expressions that call heap-carry-return functions.

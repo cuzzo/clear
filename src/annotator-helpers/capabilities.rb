@@ -462,7 +462,7 @@ module CapabilityHelper
       if cap[:alias] && !syn
         alias_name = cap[:alias]
         is_mutable = !!cap[:alias_mutable]
-        resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
+        resolved_type = capability_alias_type(cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any)
         current_scope.declare(alias_name, nil, resolved_type, is_mutable, false, nil, :stack)
         sym = current_scope.locals[alias_name]
         sym.non_escaping  = true
@@ -540,13 +540,22 @@ module CapabilityHelper
         end
       end
       alias_name = cap[:alias] || var_name
-      resolved_type = cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any
+      resolved_type = capability_alias_type(cap[:resolved_type] || cap[:old_scope]&.resolve_type(var_name) || :Any)
       current_scope.declare(alias_name, nil, resolved_type, false, false, nil, :stack)
       sym = current_scope.locals[alias_name]
       sym.non_escaping  = true
       sym.borrowed_alias = true  # BORROWED alias: fiber capture is stack-UAF
       og_declare(alias_name, nil, resolved_type)
       @og.borrow("__borrowed_#{var_name}", var_name, mutable: false)
+    end
+  end
+
+  def capability_alias_type(type)
+    t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
+    if t.any_sync? || t.ownership != :affine
+      t.bare_data_type
+    else
+      t
     end
   end
 

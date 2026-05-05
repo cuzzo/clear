@@ -77,7 +77,8 @@ module GenericAnalysis
     # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
     if is_param
       has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
-      has_sync_cap = type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
+      primitive_atomic_param = type_obj.sync == :atomic && type_obj.primitive?
+      has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol].include?(type_obj.sync)
       if has_ownership_cap || has_sync_cap
         error!(node, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
       end
@@ -250,7 +251,11 @@ module GenericAnalysis
       arg = actual_args[i]
       next unless arg
       param_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
-      actual_type = Type.new(arg.resolved_type || :Any)
+      actual_type = if arg.respond_to?(:type_info) && arg.type_info.is_a?(Type)
+        arg.type_info
+      else
+        Type.new(arg.resolved_type || :Any)
+      end
       extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     end
     type_params.each do |tp|
@@ -267,11 +272,17 @@ module GenericAnalysis
     p_res = param_type.resolved
     a_res = actual_type.resolved
     if type_params.include?(p_res)
-      existing = subst[p_res]
-      if existing && existing != a_res
-        error!(node, :GENERIC_FN_CONFLICT, p_res, node.name, existing, a_res)
+      actual_binding = if generic_shared_family_param?(param_type) && actual_type.shared?
+        generic_shared_payload_binding(actual_type)
+      else
+        generic_binding_value(actual_type)
       end
-      subst[p_res] = a_res
+      existing = subst[p_res]
+      if existing && !same_generic_binding?(existing, actual_binding)
+        error!(node, :GENERIC_FN_CONFLICT, p_res, node.name,
+               generic_binding_source(existing), generic_binding_source(actual_binding))
+      end
+      subst[p_res] = actual_binding
     elsif param_type.generic_instance? && actual_type.generic_instance? &&
           param_type.generic_base == actual_type.generic_base
       param_type.generic_args.zip(actual_type.generic_args).each do |p_arg, a_arg|
@@ -292,9 +303,20 @@ module GenericAnalysis
     t = type_obj.is_a?(Type) ? type_obj : Type.new(type_obj)
     resolved = t.resolved
     if subst.key?(resolved)
-      Type.new(subst[resolved])
+      substituted = Type.new(subst[resolved])
+      if generic_type_has_capabilities?(t)
+        merged = Type.new(substituted)
+        merged.ownership = t.ownership if t.ownership != :affine
+        merged.sync = t.sync if t.sync
+        merged.layout = t.layout if t.layout
+        merged.elem_ownership = t.elem_ownership if t.elem_ownership
+        merged.elem_sync = t.elem_sync if t.elem_sync
+        merged
+      else
+        substituted
+      end
     elsif t.generic_instance?
-      new_args = t.generic_args.map { |arg| apply_type_subst(arg, subst).resolved }
+      new_args = t.generic_args.map { |arg| generic_binding_source(apply_type_subst(arg, subst)) }
       Type.new(:"#{t.generic_base}<#{new_args.join(',')}>")
     else
       # Handle array suffix: T[] → String[] when T → String
@@ -319,6 +341,68 @@ module GenericAnalysis
         t
       end
     end
+  end
+
+  def generic_binding_value(type)
+    t = type.is_a?(Type) ? type : Type.new(type)
+    generic_type_has_capabilities?(t) ? Type.new(t) : t.resolved
+  end
+
+  def generic_shared_family_param?(type)
+    type.is_a?(Type) && type.shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
+  end
+
+  def generic_shared_payload_binding(type)
+    t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
+    t.ownership = :affine
+    t.provenance = nil if t.respond_to?(:provenance=)
+    t.instance_variable_set(:@generic_payload_type_arg, true)
+    t
+  end
+
+  def same_generic_binding?(left, right)
+    l = left.is_a?(Type) ? left : Type.new(left)
+    r = right.is_a?(Type) ? right : Type.new(right)
+    l.resolved == r.resolved &&
+      l.ownership == r.ownership &&
+      l.sync == r.sync &&
+      l.layout == r.layout &&
+      l.elem_ownership == r.elem_ownership &&
+      l.elem_sync == r.elem_sync
+  end
+
+  def generic_type_has_capabilities?(type)
+    type.ownership != :affine ||
+      !type.sync.nil? ||
+      !type.layout.nil? ||
+      !type.elem_ownership.nil? ||
+      !type.elem_sync.nil?
+  end
+
+  def generic_binding_source(type)
+    t = type.is_a?(Type) ? type : Type.new(type)
+    parts = [t.resolved.to_s]
+
+    ownership = case t.ownership
+    when :shared then "@shared"
+    when :multiowned then "@multiowned"
+    when :link then "@link"
+    when :split then "@split"
+    when :frozen then "@frozen"
+    end
+    parts << ownership if ownership
+
+    sync = case t.sync
+    when :locked then "@locked"
+    when :write_locked then "@writeLocked"
+    when :versioned then "@versioned"
+    when :atomic then "@atomic"
+    when :local then "@local"
+    when :always_mutable then "@alwaysMutable"
+    end
+    parts << sync if sync
+
+    parts.join("")
   end
 
   # Build a concrete copy of a generic function signature with all type params
