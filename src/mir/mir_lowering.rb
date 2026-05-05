@@ -948,6 +948,7 @@ class MIRLowering
     @current_fn_has_rt = fn_needs_rt
     @current_fn_tail_call = node.tail_call
     @current_fn_zig_name = zig_safe_name(node.name)
+    @current_fn_return_payload_zig = final_type.sub(/\Aanyerror!/, "").sub(/\A!/, "")
 
     # Set current bindings so lower_var_decl can look up cleanup info.
     @current_bindings = node.cleanup_bindings || {}
@@ -2476,6 +2477,7 @@ class MIRLowering
       body_stmts = []
     else
       body_stmts = lower_body(node.body)
+      body_stmts = wrap_body_with_guard(node, body_stmts, with_label)
     end
     @locked_unwrap_map = prev_locked
     @rc_unwrap_map = prev_rc
@@ -2827,8 +2829,83 @@ class MIRLowering
     resolved   = cap[:resolved_type]
     rt_obj     = resolved.is_a?(Type) ? resolved : Type.new(resolved)
     bare_t_zig = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type.zig_type : rt_obj.zig_type
-    body_mir   = lower_body(node.body)
-    MIR::PolymorphicMutate.new(cell_zig, @rt_name, safe_alias, bare_t_zig, body_mir)
+    body_mir = lower_body(node.body)
+    guarded = (node.capabilities || []).find { |c| c[:guard_expr] }
+    if polymorphic_flow_required?(node)
+      guard_cond = guarded ? lower(guarded[:guard_expr]) : nil
+      guard_fail = guarded ? guard_fail_flow_body(node) : []
+      MIR::PolymorphicMutateFlow.new(
+        cell_zig, @rt_name, safe_alias, bare_t_zig,
+        @current_fn_return_payload_zig || "void",
+        body_mir, guard_cond, guard_fail
+      )
+    else
+      body_mir = wrap_body_with_guard(node, body_mir, nil)
+      MIR::PolymorphicMutate.new(cell_zig, @rt_name, safe_alias, bare_t_zig, body_mir)
+    end
+  end
+
+  def polymorphic_flow_required?(node)
+    return true if (node.capabilities || []).any? { |cap| cap[:guard_expr] }
+    ast_contains_return?(node.body)
+  end
+
+  def ast_contains_return?(node)
+    case node
+    when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+      false
+    when Array
+      node.any? { |item| ast_contains_return?(item) }
+    when Hash
+      node.values.any? { |item| ast_contains_return?(item) }
+    when AST::FunctionDef
+      false
+    when AST::ReturnNode
+      true
+    else
+      node.respond_to?(:each_pair) && node.each_pair.any? { |_, v| ast_contains_return?(v) }
+    end
+  end
+
+  def guard_fail_flow_body(node)
+    clause = node.lock_error_clause
+    return [] unless clause && (clause[:matched_types] || []).include?(:GuardFail)
+
+    line = node.token&.line.to_s
+    case clause[:action]
+    when :pass
+      []
+    when :return
+      [MIR::ReturnStmt.new(lower(clause[:value]))]
+    when :raise
+      [MIR::RawZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), "WITH GUARD predicate failed", #{line});\n__flow.* = .{ .kind = .raise_no_commit };\nreturn;), "with_guard_fail_raise")]
+    when :exit
+      msg_zig = emit_expr(lower(clause[:message]))
+      [MIR::RawZig.new(%Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.GuardFail), #{msg_zig}, #{line});\n__flow.* = .{ .kind = .raise_no_commit };\nreturn;), "with_guard_fail_exit")]
+    when :block
+      lower_body(clause[:body])
+    else
+      []
+    end
+  end
+
+  def wrap_body_with_guard(node, body_mir, with_label)
+    guarded = (node.capabilities || []).find { |cap| cap[:guard_expr] }
+    return body_mir unless guarded
+
+    guard_cond = lower(guarded[:guard_expr])
+    fail_body = guard_fail_body(node, with_label)
+    [MIR::IfStmt.new(guard_cond, body_mir, fail_body)]
+  end
+
+  def guard_fail_body(node, with_label)
+    clause = node.lock_error_clause
+    return nil unless clause && (clause[:matched_types] || []).include?(:GuardFail)
+
+    action = emit_error_action_zig(clause, with_label, node, :GuardFail, "WITH GUARD predicate failed")
+    iz = MIR::InlineZig.new(action, "with_guard_fail")
+    iz.stdlib_def = { allocates: false, borrows: [] }
+    [iz]
   end
 
   def emit_snapshot_mutable_call(node, with_label)
@@ -2952,34 +3029,30 @@ class MIRLowering
     err_name = conflict_error.to_s
     msg = err_name == "AtomicConflict" ? "atomic CAS retries exhausted" : "MVCC commit conflict"
     return %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.#{err_name}), "#{msg}", #{line});\nreturn error.CheatError;) unless clause
-    case clause[:action]
-    when :raise
-      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.#{err_name}), "#{msg}", #{line});\nreturn error.CheatError;)
-    when :exit
-      msg_zig = emit_expr(lower(clause[:message]))
-      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.#{err_name}), #{msg_zig}, #{line});\nreturn error.CheatError;)
-    when :pass
-      "break :#{with_label};"
-    when :block
-      body_zig = emit_stmts_zig(lower_body(clause[:body]))
-      "#{body_zig}\nbreak :#{with_label};"
-    else
-      raise "Internal: unknown conflict action #{clause[:action]}"
-    end
+    emit_error_action_zig(clause, with_label, with_node, conflict_error, msg)
   end
 
   # Zig statements for the matched-selector action. Must terminate: return
   # / @panic, or break :__with_<id> (for PASS / `-> { }`).
   def emit_lock_action_zig(clause, with_label, with_node)
+    emit_error_action_zig(clause, with_label, with_node, :LockTimeout, "lock acquire timed out")
+  end
+
+  def emit_error_action_zig(clause, with_label, with_node, error_type, default_msg)
     line = with_node.token&.line.to_s
+    err_name = error_type.to_s
+    kind = AST.kind_of_type(error_type) || :Transient
     case clause[:action]
     when :raise
-      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.LockTimeout), "lock acquire timed out", #{line});\nreturn error.CheatError;)
+      %Q(#{@rt_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{err_name}), "#{default_msg}", #{line});\nreturn error.CheatError;)
     when :exit
       msg_zig = emit_expr(lower(clause[:message]))
-      %Q(#{@rt_name}.setError(.Transient, @intFromEnum(ErrorName.LockTimeout), #{msg_zig}, #{line});\nreturn error.CheatError;)
+      %Q(#{@rt_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{err_name}), #{msg_zig}, #{line});\nreturn error.CheatError;)
     when :pass
       "break :#{with_label};"
+    when :return
+      value_zig = emit_expr(lower(clause[:value]))
+      "return #{value_zig};"
     when :block
       body_zig = emit_stmts_zig(lower_body(clause[:body]))
       "#{body_zig}\nbreak :#{with_label};"

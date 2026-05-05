@@ -363,12 +363,13 @@ module LockHelper
       possible = Set.new([has_atomic_ptr ? :AtomicConflict : :MvccConflict])
     else
       possible = Set.new
-      possible << :LockTimeout
+      possible << :LockTimeout if site[:cap_types].any?
       site[:cap_types].each do |t|
         possible << :LockCycle if types_in_cycle.include?(t)
         possible << :Deadlock  if types_with_self.include?(t)
       end
     end
+    possible << :GuardFail if (node.capabilities || []).any? { |c| c[:guard_expr] }
 
     clause[:selectors].each do |sel|
       expansion = case sel[:form]

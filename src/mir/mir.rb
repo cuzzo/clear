@@ -1211,6 +1211,13 @@ module MIR
     def stmt?; true; end
   end
 
+  PolymorphicMutateFlow = Struct.new(
+    :cell_zig, :rt, :alias_zig, :bare_t_zig, :ret_zig, :body, :guard_cond, :guard_fail_body
+  ) do
+    include Stmt
+    def stmt?; true; end
+  end
+
   # WITH MATCH dispatch: `WITH cell AS va MATCH WHEN F1 -> {...} WHEN
   # F2 -> {...} END`. Lowers to a comptime `if (@hasField/@hasDecl)`
   # chain, one branch per family, each branch containing the matching

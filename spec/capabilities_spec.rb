@@ -1365,7 +1365,7 @@ RSpec.describe SemanticAnnotator do
         c = C{ v: 0 } @locked;
         WITH EXCLUSIVE c AS inner { inner.v = 1; } ON Transient WAT
       FLUX
-      expect { parse_only(src) }.to raise_error(ParserError, /Expected RAISE, PASS, EXIT/)
+      expect { parse_only(src) }.to raise_error(ParserError, /Expected RAISE, PASS, RETURN <expr>, EXIT/)
     end
 
     it "parses WITH POSSIBLE_DEADLOCK EXCLUSIVE modifier" do

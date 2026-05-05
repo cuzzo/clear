@@ -2654,12 +2654,19 @@ pub const CheatLib = struct {
         // probe.
         if (comptime @typeInfo(T) == .pointer) {
             const Child = @typeInfo(T).pointer.child;
-            if (comptime @hasField(Child, "ctrl")) {
+            if (comptime @typeInfo(Child) == .@"struct" and @hasField(Child, "ctrl")) {
                 return polymorphicMutateInner(cell_ptr_or_val.ctrl.data, rt, body, args);
+            }
+            if (comptime @typeInfo(Child) == .pointer) {
+                const GrandChild = @typeInfo(Child).pointer.child;
+                if (comptime @typeInfo(GrandChild) == .@"struct" and @hasField(GrandChild, "ctrl")) {
+                    return polymorphicMutateInner(cell_ptr_or_val.*.ctrl.data, rt, body, args);
+                }
+                return polymorphicMutateInner(cell_ptr_or_val.*, rt, body, args);
             }
             return polymorphicMutateInner(cell_ptr_or_val, rt, body, args);
         }
-        if (comptime @hasField(T, "ctrl")) {
+        if (comptime @typeInfo(T) == .@"struct" and @hasField(T, "ctrl")) {
             return polymorphicMutateInner(cell_ptr_or_val.ctrl.data, rt, body, args);
         }
         // Plain T by value: take address of the formal parameter copy.
@@ -2682,6 +2689,55 @@ pub const CheatLib = struct {
             // Versioned or AtomicPtr -- both expose the same shape:
             //   `.update(rt, alloc, comptime fn, args)`.
             try inner.update(rt, rt.heapAlloc(), body, args);
+        } else if (comptime @hasDecl(Inner, "write")) {
+            var g = inner.write();
+            defer g.release();
+            @call(.auto, body, .{g.get()} ++ args);
+        } else if (comptime @hasDecl(Inner, "acquire")) {
+            var g = inner.acquire();
+            defer g.release();
+            @call(.auto, body, .{g.get()} ++ args);
+        } else {
+            @call(.auto, body, .{inner} ++ args);
+        }
+    }
+
+    pub fn polymorphicMutateFlow(
+        cell_ptr_or_val: anytype,
+        rt: *Runtime,
+        comptime body: anytype,
+        args: anytype,
+    ) !void {
+        const T = @TypeOf(cell_ptr_or_val);
+        if (comptime @typeInfo(T) == .pointer) {
+            const Child = @typeInfo(T).pointer.child;
+            if (comptime @typeInfo(Child) == .@"struct" and @hasField(Child, "ctrl")) {
+                return polymorphicMutateFlowInner(cell_ptr_or_val.ctrl.data, rt, body, args);
+            }
+            if (comptime @typeInfo(Child) == .pointer) {
+                const GrandChild = @typeInfo(Child).pointer.child;
+                if (comptime @typeInfo(GrandChild) == .@"struct" and @hasField(GrandChild, "ctrl")) {
+                    return polymorphicMutateFlowInner(cell_ptr_or_val.*.ctrl.data, rt, body, args);
+                }
+                return polymorphicMutateFlowInner(cell_ptr_or_val.*, rt, body, args);
+            }
+            return polymorphicMutateFlowInner(cell_ptr_or_val, rt, body, args);
+        }
+        if (comptime @typeInfo(T) == .@"struct" and @hasField(T, "ctrl")) {
+            return polymorphicMutateFlowInner(cell_ptr_or_val.ctrl.data, rt, body, args);
+        }
+        return polymorphicMutateFlowInner(&cell_ptr_or_val, rt, body, args);
+    }
+
+    inline fn polymorphicMutateFlowInner(
+        inner: anytype,
+        rt: *Runtime,
+        comptime body: anytype,
+        args: anytype,
+    ) !void {
+        const Inner = @TypeOf(inner.*);
+        if (comptime @hasDecl(Inner, "updateFlow")) {
+            try inner.updateFlow(rt, rt.heapAlloc(), body, args);
         } else if (comptime @hasDecl(Inner, "write")) {
             var g = inner.write();
             defer g.release();

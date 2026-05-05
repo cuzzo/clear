@@ -72,8 +72,8 @@ RSpec.describe AST do
       expect(AST::ERROR_TYPES.key?(:Conflict)).to be false
     end
 
-    it "user types start at id 8 (after the eight stdlib types)" do
-      expect(AST::ERROR_NAME_USER_FIRST).to eq(8)
+    it "user types start at id 9 (after the stdlib/control-flow types)" do
+      expect(AST::ERROR_NAME_USER_FIRST).to eq(9)
     end
   end
 
@@ -165,14 +165,15 @@ RSpec.describe AST do
       expect(entries).to include([:Deadlock, 3])
     end
 
-    it "includes user types at >=8 sorted by id" do
+    it "includes user types at >=9 sorted by id" do
       AST.register_type!(:UserA, :Input)
       AST.register_type!(:UserB, :Input)
       entries = AST.enum_entries
       ids = entries.map(&:last)
       expect(ids).to eq(ids.sort)
-      expect(entries).to include([:UserA, 8])
-      expect(entries).to include([:UserB, 9])
+      expect(entries).to include([:GuardFail, 8])
+      expect(entries).to include([:UserA, 9])
+      expect(entries).to include([:UserB, 10])
     end
   end
 
@@ -226,8 +227,8 @@ RSpec.describe AST do
   end
 
   describe ".types_for_kind" do
-    it "expands :Transient to the retryable types (lock + MVCC + Atomic contention)" do
-      expect(AST.types_for_kind(:Transient).to_set).to eq(Set[:LockTimeout, :LockCycle, :MvccConflict, :AtomicConflict])
+    it "expands :Transient to retryable synchronization and guard-control types" do
+      expect(AST.types_for_kind(:Transient).to_set).to eq(Set[:LockTimeout, :LockCycle, :MvccConflict, :AtomicConflict, :GuardFail])
     end
 
     it "expands :System to include Deadlock" do

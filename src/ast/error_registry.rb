@@ -38,7 +38,8 @@ module AST
   # land in #330 (atomic_ptr 256, versioned 64).
   ERROR_NAME_MVCC_CONFLICT        = 6
   ERROR_NAME_ATOMIC_CONFLICT      = 7
-  ERROR_NAME_USER_FIRST           = 8
+  ERROR_NAME_GUARD_FAIL           = 8
+  ERROR_NAME_USER_FIRST           = 9
 
   # Mutable registry. Seeded with the five stdlib types and extended
   # by the annotator on first use. Hash shape:
@@ -57,6 +58,7 @@ module AST
     MaxDepthExceeded:    { kind: :System,    zig_name: "MaxDepthExceeded",    id: ERROR_NAME_MAX_DEPTH_EXCEEDED,   first_site: nil },
     MvccConflict:        { kind: :Transient, zig_name: "MvccConflict",        id: ERROR_NAME_MVCC_CONFLICT,        first_site: nil },
     AtomicConflict:      { kind: :Transient, zig_name: "AtomicConflict",      id: ERROR_NAME_ATOMIC_CONFLICT,      first_site: nil },
+    GuardFail:           { kind: :Transient, zig_name: "GuardFail",           id: ERROR_NAME_GUARD_FAIL,           first_site: nil },
   }
 
   # Counter for the next user-type id. Reset on a per-program basis via

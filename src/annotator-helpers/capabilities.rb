@@ -276,6 +276,94 @@ module CapabilityHelper
              fixes: fixes, raise_in_collector: false)
   end
 
+  def guard_identifier_allowed!(node)
+    return unless @current_guard_context
+    alias_name = @current_guard_context[:alias]
+    return if node.name == alias_name || %w[TRUE FALSE].include?(node.name)
+
+    error!(node,
+      "WITH GUARD can only reference the guarded alias '#{alias_name}'. " \
+      "Found '#{node.name}'. Multi-object consistency in guard clauses is not yet supported.")
+  end
+
+  def record_guard_call_site!(node)
+    return unless @current_guard_context
+    @guard_call_sites << {
+      with_node: @current_guard_context[:with_node],
+      guard_expr: @current_guard_context[:guard_expr],
+      call: node,
+      callee: node.name,
+    }
+  end
+
+  def validate_guard_purity!
+    (@guard_call_sites || []).each do |site|
+      call = site[:call]
+      callee = site[:callee]
+      reason = guard_impurity_reason(call, callee)
+      next unless reason
+
+      error!(call,
+        "WITH GUARD clauses must be pure, but '#{callee}' #{reason}. " \
+        "Move the impure work before the WITH block and guard on the captured value.")
+    end
+  end
+
+  def guard_impurity_reason(call, callee)
+    return "is an extern call" if call.respond_to?(:extern_call) && call.extern_call
+    return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
+    return "can fail" if call.respond_to?(:can_fail) && call.can_fail
+    if call.respond_to?(:matched_stdlib_def) && call.matched_stdlib_def
+      md = call.matched_stdlib_def
+      return "allocates" if md[:allocates]
+      return "can fail" if md[:can_fail]
+      return "suspends" if md[:suspends]
+      return "mutates its receiver" if md[:mutates_receiver]
+      return nil
+    end
+
+    fn = @fn_nodes[callee] if callee.is_a?(String)
+    return nil unless fn
+    return "can fail" if fn.can_fail
+    effects = fn.effects || Set.new
+    return nil if effects.empty?
+    "has effects #{effects.map { |e| EffectTracker.display(e) }.sort.join(', ')}"
+  end
+
+  def validate_and_visit_with_guards!(node)
+    guarded = (node.capabilities || []).select { |cap| cap[:guard_expr] }
+    return if guarded.empty?
+
+    if guarded.length > 1 || (node.capabilities || []).length > 1
+      error!(node, "WITH GUARD supports exactly one guarded binding in this release; multi-object guard consistency is not yet supported.")
+    end
+    error!(node, "WITH GUARD is not supported with WITH MATCH yet.") if node.arms
+
+    cap = guarded.first
+    error!(node, "WITH GUARD aliases cannot be MUTABLE in this release.") if cap[:alias_mutable]
+    if node.snapshot_mode == :transaction
+      error!(node, "WITH GUARD is not supported on mutable SNAPSHOT transactions in this release.")
+    end
+
+    alias_name = cap[:alias]
+    unless alias_name
+      error!(node, "WITH GUARD requires an AS alias so the guard can reference the unwrapped value.")
+    end
+
+    prev_guard = @current_guard_context
+    @current_guard_context = { with_node: node, guard_expr: cap[:guard_expr], alias: alias_name }
+    begin
+      visit(cap[:guard_expr])
+    ensure
+      @current_guard_context = prev_guard
+    end
+
+    guard_type = cap[:guard_expr].type_info
+    unless guard_type && guard_type.resolved == :Bool
+      error!(cap[:guard_expr], "WITH GUARD expression must return Bool, got #{guard_type || 'Unknown'}.")
+    end
+  end
+
   # Resolve and validate a single capability entry from a WITH block.
   # Visits the var_node, infers capability if needed, validates it,
   # records effects/audit, and handles wildcard expansion.

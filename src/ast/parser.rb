@@ -2976,7 +2976,15 @@ class Parser
         alias_name = consume(:VAR_ID).value
       end
 
-      capabilities << { capability: capability, var_node: var_node, alias: alias_name, alias_mutable: alias_mutable }
+      guard_expr = nil
+      if match!(:KEYWORD, 'GUARD')
+        unless alias_name
+          error!(previous, "WITH GUARD requires an AS alias so the guard can reference the unwrapped value")
+        end
+        guard_expr = parse_expression
+      end
+
+      capabilities << { capability: capability, var_node: var_node, alias: alias_name, alias_mutable: alias_mutable, guard_expr: guard_expr }
 
       # Check for comma (continue) or opening brace (done)
       break unless match!(:CHAR, ',')
@@ -3266,12 +3274,16 @@ class Parser
     { form: form, name: tok.value.to_sym, token: tok }
   end
 
-  # Parse a single error-handler action: RAISE | PASS | EXIT "msg" | -> { stmts }.
+  # Parse a single error-handler action: RAISE | PASS | RETURN expr | EXIT "msg" | -> { stmts }.
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
       { action: :raise, token: previous }
     elsif match!(:KEYWORD, 'PASS')
       { action: :pass, token: previous }
+    elsif match!(:KEYWORD, 'RETURN')
+      tok = previous
+      value = parse_expression
+      { action: :return, value: value, token: tok }
     elsif match!(:KEYWORD, 'EXIT')
       tok = previous
       msg = parse_expression
@@ -3283,7 +3295,7 @@ class Parser
       consume(:CHAR, '}')
       { action: :block, body: body, token: tok }
     else
-      error!(current, "Expected RAISE, PASS, EXIT \"msg\", or -> { ... } after error clause")
+      error!(current, "Expected RAISE, PASS, RETURN <expr>, EXIT \"msg\", or -> { ... } after error clause")
     end
   end
 

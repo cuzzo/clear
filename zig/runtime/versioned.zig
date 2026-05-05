@@ -352,6 +352,53 @@ pub fn Versioned(comptime T: type) type {
             }
             return error.UpdateRetriesExhausted;
         }
+
+        pub fn updateFlow(self: *Self, trt: *Runtime, allocator: std.mem.Allocator, comptime func: anytype, args: anytype) UpdateError!void {
+            const new_ptr = try allocator.create(T);
+            var success = false;
+            defer if (!success) allocator.destroy(new_ptr);
+
+            trt.ebr.enter();
+            defer trt.ebr.exit();
+
+            var retries: usize = 0;
+            while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
+                var old_addr = self.ptr.load(.acquire);
+                while (addrIsTagged(old_addr)) {
+                    std.atomic.spinLoopHint();
+                    old_addr = self.ptr.load(.acquire);
+                }
+                const old_ptr: *T = @ptrFromInt(old_addr);
+
+                new_ptr.* = old_ptr.*;
+                @call(.auto, func, .{new_ptr} ++ args);
+
+                const flow_ptr = args[0];
+                switch (flow_ptr.kind) {
+                    .skip_no_commit, .ret_no_commit, .raise_no_commit => return,
+                    .cont_commit, .ret_commit => {},
+                }
+
+                if (self.ptr.cmpxchgWeak(old_addr, @intFromPtr(new_ptr), .release, .acquire)) |_| {
+                    const hints: usize = @as(usize, 1) << @as(u6, @intCast(@min(retries, 8)));
+                    var i: usize = 0;
+                    while (i < hints) : (i += 1) std.atomic.spinLoopHint();
+                    continue;
+                }
+
+                success = true;
+                try trt.ebr.retire(allocator, old_ptr);
+                if (rt_profile.CLEAR_PROFILE) {
+                    mvcc_profile.recordUpdate(@intFromPtr(self), @sizeOf(T), retries, true);
+                }
+                return;
+            }
+
+            if (rt_profile.CLEAR_PROFILE) {
+                mvcc_profile.recordUpdate(@intFromPtr(self), @sizeOf(T), MAX_UPDATE_RETRIES, false);
+            }
+            return error.UpdateRetriesExhausted;
+        }
     };
 }
 

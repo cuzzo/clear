@@ -110,6 +110,7 @@ class SemanticAnnotator
     # chance to populate sync from callers' arg bindings first. Each entry:
     # { node:, var_node:, capability:, kind: :exclusive | :write_locked_read }
     @deferred_with_validations = []
+    @guard_call_sites = []
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = nil
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
@@ -388,6 +389,7 @@ private
 
     # PASS 6: Compute effect sets for every function via call-graph fixed-point.
     compute_effects!
+    validate_guard_purity!
 
     # PASS 6a: FSM Phase A — classify each function for stackless-fsm
     # compilation, enumerate suspend points, and tag every BG block with
@@ -2315,6 +2317,7 @@ private
     end
 
     resolve_call(node, node.args)
+    record_guard_call_site!(node)
 
     # Record call-site context (loop/cond) for effects propagation.
     # A call sitting inside a loop promotes the callee's SUSPENDS effects
@@ -2365,7 +2368,10 @@ private
     node.args.each { |arg| visit(arg) }
 
     # Collection method dispatch (Pool/HashMap) via declarative registry.
-    return if resolve_collection_method(node)
+    if resolve_collection_method(node)
+      record_guard_call_site!(node)
+      return
+    end
 
     # EXTERN method dispatch: check if the object's type has EXTERN methods registered.
     obj_type = node.object.type_info
@@ -2390,6 +2396,7 @@ private
             current_fn_ctx.frame_count += 1
           end
         end
+        record_guard_call_site!(node)
         return
       end
     end
@@ -2397,6 +2404,7 @@ private
     # Fall through to UFCS: obj.method(args) → method(obj, args)
     ufcs_args = [node.object] + node.args
     resolve_call(node, ufcs_args)
+    record_guard_call_site!(node)
 
     # Record call-site context for effects propagation (see visit_FuncCall).
     record_call_site(node.name) if node.name.is_a?(String)
@@ -2820,6 +2828,8 @@ private
   end
 
   def visit_Identifier(node)
+    guard_identifier_allowed!(node)
+
     # Pipeline expressions (inside s>) are closures over the enclosing scope —
     # lookup_scope_for searches all scopes. Normal code uses resolve_variable_scope
     # which restricts to local scope + function-as-value references.
@@ -4181,6 +4191,10 @@ private
   def visit_CloneNode(node)
     visit(node.value)
     type = node.value.type_info
+    root = get_root_object(node.value)
+    if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
+      error!(node, "Cannot CLONE WITH-scoped '#{root.name}'. WITH bindings are protected borrows; use COPY to return owned data.")
+    end
 
     unless type&.split_open_stream? || type&.shared_promise? || type&.any_rc?
       error!(node, "CLONE is only supported on @split streams, @shared promises, and owned shared handles, got '#{node.value.resolved_type}'")
@@ -4196,6 +4210,10 @@ private
     source_type = node.value.type_info
     source_type = Type.new(source_type) if source_type && !source_type.is_a?(Type)
     error!(node, "SHARE requires a typed value") unless source_type
+    root = get_root_object(node.value)
+    if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
+      error!(node, "Cannot SHARE WITH-scoped '#{root.name}'. WITH bindings are protected borrows; use COPY to return owned data.")
+    end
 
     result = Type.new(source_type, ownership: :shared)
     result.provenance = :heap
@@ -4358,7 +4376,23 @@ private
     end
     with_new_scope(current_scope) do
       expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
+      validate_and_visit_with_guards!(node)
       visit_stmts(node.body)
+      fallible_sources = retryable_with_fallible_sources(node.body)
+      if is_snapshot_txn_body && !fallible_sources.empty?
+        retryable_with_fallible_body_error!(
+          node,
+          "WITH SNAPSHOT ... AS MUTABLE",
+          fallible_sources
+        )
+      end
+      if retryable_with_universal_poly_candidate?(node) && !fallible_sources.empty?
+        retryable_with_fallible_body_error!(
+          node,
+          "WITH POLYMORPHIC",
+          fallible_sources
+        )
+      end
       # MVCC L7.2: WITH MATCH per-arm body annotation. Each arm's body
       # is visited in its own nested scope under the SAME alias binding
       # resolved by the polymorphic-fallback in acquire_capability!
@@ -4544,6 +4578,77 @@ private
   # check.
   SNAPSHOT_POSSIBLE_TYPES = %i[MvccConflict AtomicConflict].freeze
 
+  def retryable_with_fallible_sources(nodes)
+    sources = []
+    visit_fallible = lambda do |n|
+      case n
+      when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
+        return
+      when Array
+        n.each { |item| visit_fallible.call(item) }
+        return
+      when Hash
+        n.each_value { |v| visit_fallible.call(v) }
+        return
+      when AST::FunctionDef
+        return
+      when AST::Raise
+        sources << "RAISE"
+      when AST::OrRaise
+        sources << "OR RAISE"
+      when AST::FuncCall
+        sources << n.name.to_s if retryable_with_call_fallible?(n)
+        n.args.each { |arg| visit_fallible.call(arg) }
+      when AST::MethodCall
+        sources << "#{n.name}()" if retryable_with_call_fallible?(n)
+        visit_fallible.call(n.object)
+        n.args.each { |arg| visit_fallible.call(arg) }
+      when AST::StaticCall
+        sources << n.name.to_s if retryable_with_call_fallible?(n)
+        n.args.each { |arg| visit_fallible.call(arg) }
+      when AST::FreezeNode
+        sources << "FREEZE"
+        visit_fallible.call(n.value)
+      else
+        n.each_pair { |_, v| visit_fallible.call(v) } if n.respond_to?(:each_pair)
+      end
+    end
+    visit_fallible.call(nodes)
+    sources.uniq
+  end
+
+  def retryable_with_call_fallible?(node)
+    return true if node.respond_to?(:can_fail) && node.can_fail
+    return true if node.respond_to?(:error_union_type) && node.error_union_type
+    false
+  end
+
+  def retryable_with_universal_poly_candidate?(node)
+    return true if node.universal_poly
+    return false unless node.polymorphic && (node.capabilities || []).length == 1
+
+    bound_var = node.capabilities.first[:var_node]
+    bound_name = bound_var.respond_to?(:name) ? bound_var.name.to_s : nil
+    bound_sym = bound_var.respond_to?(:symbol) ? bound_var.symbol : nil
+    is_param = bound_sym && bound_sym.respond_to?(:is_param) && bound_sym.is_param
+    fn_node = @fn_nodes[current_fn_ctx&.name]
+    has_req = fn_node && fn_node.respond_to?(:requires) && fn_node.requires &&
+              fn_node.requires.key?(bound_name)
+    is_param && !has_req
+  end
+
+  def retryable_with_fallible_body_error!(node, with_name, sources)
+    detail = sources.first(3).join(", ")
+    detail += ", ..." if sources.length > 3
+    error!(node,
+      "#{with_name} body must be non-fallible for atomicity, " \
+      "but it contains fallible work (#{detail}). Retryable synchronization " \
+      "bodies may run more than once and cannot safely propagate user " \
+      "failures from inside the update callback. Move fallible work outside " \
+      "the WITH body, store the result in a local, then commit only " \
+      "non-fallible mutations inside the WITH.")
+  end
+
   def validate_lock_error_clause!(node, expanded_capabilities)
     clause = node.lock_error_clause
     is_snapshot_txn = node.snapshot_mode == :transaction
@@ -4623,7 +4728,8 @@ private
     # cannot fail. Accept silently for now (parser already restricts the
     # syntax shape); a future polish pass could note the dead clause.
 
-    has_fallible = is_snapshot_txn || expanded_capabilities.any? { |c|
+    has_guard = (node.capabilities || []).any? { |c| c[:guard_expr] }
+    has_fallible = has_guard || is_snapshot_txn || expanded_capabilities.any? { |c|
       c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
     }
     unless has_fallible
@@ -4637,6 +4743,8 @@ private
     case clause[:action]
     when :exit
       visit(clause[:message]) if clause[:message]
+    when :return
+      visit(clause[:value]) if clause[:value]
     when :block
       visit_stmts(clause[:body]) if clause[:body]
     end
@@ -4839,7 +4947,13 @@ private
   #   3. Retry selectors resolve to Transient types only.
   #   4. The matched set intersects the block's possible error set.
   def resolve_error_selectors!(node, clause, is_snapshot_txn = false)
-    possible = is_snapshot_txn ? SNAPSHOT_POSSIBLE_TYPES : LOCK_POSSIBLE_TYPES
+    possible = Set.new
+    possible.merge(SNAPSHOT_POSSIBLE_TYPES) if is_snapshot_txn
+    if (node.capabilities || []).any? { |c| c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read }
+      possible.merge(LOCK_POSSIBLE_TYPES)
+    end
+    possible << :GuardFail if (node.capabilities || []).any? { |c| c[:guard_expr] }
+    possible = possible.to_a
     matched  = []
 
     clause[:selectors].each do |sel|

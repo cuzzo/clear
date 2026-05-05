@@ -249,6 +249,43 @@ pub fn AtomicPtr(comptime T: type) type {
             return error.AtomicConflict;
         }
 
+        pub fn updateFlow(
+            self: *Self,
+            ebr_or_rt: anytype,
+            allocator: std.mem.Allocator,
+            comptime func: anytype,
+            args: anytype,
+        ) !void {
+            const ebr = extractEbr(ebr_or_rt);
+            const new_ptr = try allocator.create(T);
+            var success = false;
+            defer if (!success) allocator.destroy(new_ptr);
+
+            var retries: usize = 0;
+            while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
+                const old_ptr = self.ptr.load(.acquire) orelse unreachable;
+
+                new_ptr.* = old_ptr.*;
+                @call(.auto, func, .{new_ptr} ++ args);
+
+                const flow_ptr = args[0];
+                switch (flow_ptr.kind) {
+                    .skip_no_commit, .ret_no_commit, .raise_no_commit => return,
+                    .cont_commit, .ret_commit => {},
+                }
+
+                if (self.ptr.cmpxchgWeak(old_ptr, new_ptr, .release, .acquire)) |_| {
+                    std.atomic.spinLoopHint();
+                    continue;
+                }
+
+                success = true;
+                try ebr.retire(allocator, old_ptr);
+                return;
+            }
+            return error.AtomicConflict;
+        }
+
         /// Lower-level CAS primitive. Tries to publish `new` if the
         /// currently-published pointer equals `expected`. On success,
         /// retires `expected` via EBR; ownership of `new` transfers

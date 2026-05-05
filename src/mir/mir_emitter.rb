@@ -104,6 +104,7 @@ class MIREmitter
     when MIR::SnapshotTransaction  then emit_snapshot_transaction(node)
     when MIR::SnapshotMultiTxn     then emit_snapshot_multi_txn(node)
     when MIR::PolymorphicMutate    then emit_polymorphic_mutate(node)
+    when MIR::PolymorphicMutateFlow then emit_polymorphic_mutate_flow(node)
     when MIR::WithMatchDispatch    then emit_with_match_dispatch(node)
     # --- Verification-only (no codegen) ---
     when MIR::AllocMark, MIR::ReturnMark, MIR::ReassignMark, MIR::FieldCleanupMark
@@ -294,6 +295,104 @@ class MIREmitter
           }
       }.run, .{});
     ZIG
+  end
+
+  def emit_polymorphic_mutate_flow(node)
+    old_flow_alias = @flow_alias_zig
+    @flow_alias_zig = node.alias_zig
+    body_zig = emit_body_flow(node.body || [], :ret_commit)
+    guard_zig = ""
+    if node.guard_cond
+      fail_zig = emit_body_flow(node.guard_fail_body || [], :ret_no_commit)
+      unless flow_body_terminates?(node.guard_fail_body || [])
+        fail_zig += "\n__flow.* = .{ .kind = .skip_no_commit };\nreturn;"
+      end
+      guard_zig = <<~ZIG
+        if (!(#{emit(node.guard_cond)})) {
+            #{indent_block(fail_zig, 12)}
+        }
+      ZIG
+    end
+    fallthrough_arm = flow_always_exits?(node) ? "unreachable" : "{}"
+    result = <<~ZIG.rstrip
+      const __PolyFlow = struct {
+          kind: enum { cont_commit, skip_no_commit, ret_commit, ret_no_commit, raise_no_commit },
+          ret: #{node.ret_zig} = undefined,
+      };
+      var __poly_flow = __PolyFlow{ .kind = .cont_commit };
+      try CheatLib.polymorphicMutateFlow(#{node.cell_zig}, #{node.rt}, struct {
+          fn run(#{node.alias_zig}: *#{node.bare_t_zig}, __flow: *__PolyFlow) void {
+              _ = &#{node.alias_zig};
+              #{guard_zig}
+              #{body_zig}
+              #{flow_body_terminates?(node.body || []) ? "" : "__flow.* = .{ .kind = .cont_commit };"}
+          }
+      }.run, .{&__poly_flow});
+      switch (__poly_flow.kind) {
+          .ret_commit, .ret_no_commit => return __poly_flow.ret,
+          .raise_no_commit => return error.CheatError,
+          .cont_commit, .skip_no_commit => #{fallthrough_arm},
+      }
+    ZIG
+    @flow_alias_zig = old_flow_alias
+    result
+  end
+
+  def emit_body_flow(stmts, return_kind)
+    return "" unless stmts
+    stmts.filter_map { |s| emit_flow_stmt(s, return_kind) }.join("\n")
+  end
+
+  def emit_flow_stmt(stmt, return_kind)
+    case stmt
+    when MIR::ReturnStmt
+      ret = stmt.value ? emit(stmt.value) : "{}"
+      ret = "#{ret}.*" if @flow_alias_zig && ret == @flow_alias_zig
+      "__flow.* = .{ .kind = .#{return_kind}, .ret = #{ret} };\nreturn;"
+    when MIR::ScopeBlock
+      inner = emit_body_flow(stmt.body || [], return_kind)
+      "{\n#{indent_block(inner, 4)}\n}"
+    when MIR::IfStmt
+      then_zig = emit_body_flow(stmt.then_body || [], return_kind)
+      else_zig = emit_body_flow(stmt.else_body || [], return_kind)
+      if stmt.else_body && !stmt.else_body.empty?
+        "if (#{emit(stmt.cond)}) {\n#{indent_block(then_zig, 4)}\n} else {\n#{indent_block(else_zig, 4)}\n}"
+      else
+        "if (#{emit(stmt.cond)}) {\n#{indent_block(then_zig, 4)}\n}"
+      end
+    else
+      emit(stmt)
+    end
+  end
+
+  def flow_body_terminates?(stmts)
+    return false unless stmts && !stmts.empty?
+    last = stmts.last
+    case last
+    when MIR::ReturnStmt
+      true
+    when MIR::RawZig
+      last.code.to_s.include?("return;") || last.code.to_s.include?("return ")
+    when MIR::ScopeBlock
+      flow_body_terminates?(last.body || [])
+    when MIR::IfStmt
+      flow_body_terminates?(last.then_body || []) &&
+        last.else_body && !last.else_body.empty? &&
+        flow_body_terminates?(last.else_body || [])
+    else
+      false
+    end
+  end
+
+  def flow_always_exits?(node)
+    body_exits = flow_body_terminates?(node.body || [])
+    return body_exits unless node.guard_cond
+    body_exits && flow_body_terminates?(node.guard_fail_body || [])
+  end
+
+  def indent_block(code, spaces)
+    pad = " " * spaces
+    code.to_s.lines.map { |line| line.strip.empty? ? line : "#{pad}#{line}" }.join.rstrip
   end
 
   def emit_snapshot_transaction(node)
