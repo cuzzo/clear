@@ -53,6 +53,7 @@ const CheatLib = CheatHeader.CheatLib;
 const Runtime = rt_mod.Runtime;
 const Scheduler = fp.Scheduler;
 const StackPool = fm.StackPool;
+const build_options = @import("build_options");
 
 const SKIP_BY_DEFAULT = false;
 
@@ -232,12 +233,12 @@ test "ParkingRwLock fiber hammer: 4 writers + 8 readers, torn-read invariant und
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
 
-    try withMainRuntimeN(4, struct {
+    const workers = if (build_options.coverage) 1 else 4;
+    try withMainRuntimeN(workers, struct {
         fn body(rt: *Runtime) !void {
-            const coverage = @import("build_options").coverage;
-            const NW = if (coverage) 1 else 4;
-            const NR = if (coverage) 2 else 8;
-            const ITERS: usize = if (coverage) 50 else 500;
+            const NW = if (build_options.coverage) 1 else 4;
+            const NR = if (build_options.coverage) 1 else 8;
+            const ITERS: usize = if (build_options.coverage) 1 else 500;
 
             var shared = Shared{};
             const sa = rt.getSched().allocator;
