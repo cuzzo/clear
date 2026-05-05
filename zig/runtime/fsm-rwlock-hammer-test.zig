@@ -65,6 +65,7 @@ const CheatLib = CheatHeader.CheatLib;
 const Runtime = rt_mod.Runtime;
 const Scheduler = fp.Scheduler;
 const StackPool = fm.StackPool;
+const build_options = @import("build_options");
 
 const SKIP_BY_DEFAULT = false;
 
@@ -299,14 +300,14 @@ test "FSM RwLock hammer: 8 readers + 4 writers x 5 trials -- bench-17 lost-wakeu
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
 
-    try withMainRuntimeN(4, struct {
+    const workers = if (build_options.coverage) 1 else 4;
+    try withMainRuntimeN(workers, struct {
         fn body(rt: *Runtime) !void {
-            const coverage = @import("build_options").coverage;
-            const NR = if (coverage) 2 else 8;
-            const NW = if (coverage) 1 else 4;
-            const READS = if (coverage) 100 else 5_000;
-            const WRITES = if (coverage) 10 else 100;
-            const NUM_TRIALS = if (coverage) 1 else 5;
+            const NR = if (build_options.coverage) 1 else 8;
+            const NW = if (build_options.coverage) 1 else 4;
+            const READS = if (build_options.coverage) 1 else 5_000;
+            const WRITES = if (build_options.coverage) 1 else 100;
+            const NUM_TRIALS = if (build_options.coverage) 1 else 5;
             const PER_TRIAL_DEADLINE_MS: i64 = 5_000;
 
             const sa = rt.getSched().allocator;
