@@ -824,7 +824,9 @@ class OwnershipDataflow
         return false
       end
     end
-    ti.primitive? || ti.string? || ti.any? || ti.void? || ti.any_rc?
+    is_atomic_ptr = ti.respond_to?(:sync) && ti.sync == :atomic &&
+                    ti.respond_to?(:layout) && ti.layout == :indirect
+    ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
   end
 
   def walk_expr(node, &block)
@@ -1847,7 +1849,9 @@ class BorrowChecker
     ti = ident.type_info rescue nil
     return true unless ti
     ti = Type.new(ti) if !ti.is_a?(Type)
-    ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? rescue false)
+    is_atomic_ptr = ti.respond_to?(:sync) && ti.sync == :atomic &&
+                    ti.respond_to?(:layout) && ti.layout == :indirect
+    ti.primitive? || ti.string? || ti.any? || ti.void? || ((ti.any_rc? rescue false) && !is_atomic_ptr)
   end
 end
 

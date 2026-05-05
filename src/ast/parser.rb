@@ -1126,6 +1126,8 @@ class Parser
     return_lifetime_token = nil
     explicit_return = match?(:KEYWORD, 'RETURNS')  # peek for the post-#335 stamp
     if match!(:KEYWORD, 'RETURNS')
+      shared_return = match!(:KEYWORD, 'SHARED')
+
       if match?(:CHAR, '(')
         # Multi-binding form: collect VAR_IDs separated by ',' or
         # whitespace until ')'. The lexer skips whitespace, so a
@@ -1154,6 +1156,7 @@ class Parser
 
       return_type_token = current
       return_type = parse_type_annotation()
+      return_type = mark_polymorphic_shared_type(return_type) if shared_return
     end
 
     # 3.5. Parse optional REQUIRES clause: gates which sync families this
@@ -2472,6 +2475,13 @@ class Parser
     # Function type: FN(Type, ...) -> ReturnType
     return parse_fn_type_annotation if match?(:KEYWORD, 'FN')
 
+    # Polymorphic shared-family type: SHARED T, SHARED !T, SHARED ~T, etc.
+    # This is distinct from concrete `T @shared` Arc syntax.
+    if match?(:KEYWORD, 'SHARED')
+      consume(:KEYWORD, 'SHARED')
+      return mark_polymorphic_shared_type(parse_type_annotation)
+    end
+
     # Check for tense (Promise) prefix: ~Type
     tense_prefix = ""
     if match!(:CHAR, '~')
@@ -2648,8 +2658,17 @@ class Parser
     t
   end
 
+  def mark_polymorphic_shared_type(type)
+    t = Type.new(type)
+    t.ownership = :shared
+    t.polymorphic_shared = true
+    t
+  end
+
   def type_annotation_source(type)
     t = type.is_a?(Type) ? type : Type.new(type)
+    return "SHARED #{type_annotation_source(Type.new(t).tap { |inner| inner.ownership = :affine; inner.polymorphic_shared = false })}" if t.polymorphic_shared?
+
     parts = [t.resolved.to_s]
 
     ownership = case t.ownership

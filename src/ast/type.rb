@@ -17,6 +17,7 @@ class Type
   attr_accessor :is_observable  # true on ~T@observable — backed by single-writer snapshot / atomic accumulator
   attr_accessor :observable_terminal  # :sum/:count/:max/:min/:avg/:any/:all/:find/:reduce — picks the Zig wrapper
   attr_accessor :observable_token   # A20: source token for the `@observable` capability, used by I1's fixable to offer to delete it
+  attr_accessor :polymorphic_shared # true for `SHARED T`: shared-family polymorphic contract, not concrete Arc syntax
 
   # Unified provenance: where was this data allocated?
   #   :rodata — string literal in binary, valid forever, never freed
@@ -186,6 +187,7 @@ class Type
       @provenance            = other.provenance
       @is_observable         = other.instance_variable_get(:@is_observable)
       @observable_terminal   = other.instance_variable_get(:@observable_terminal)
+      @polymorphic_shared    = other.polymorphic_shared
     else
       @raw = raw_input
       parse_raw_input
@@ -437,6 +439,10 @@ class Type
 
   def shared?
     @ownership == :shared
+  end
+
+  def polymorphic_shared?
+    !!@polymorphic_shared
   end
 
   def frozen?

@@ -2174,7 +2174,7 @@ private
   def same_return_capabilities?(expected_t, actual_t)
     name = expected_t.resolved.to_s
     if name.match?(/\A[A-Z]\z/) && !lookup_type_schema(name.to_sym) &&
-       expected_t.shared? && actual_t.shared? &&
+       expected_t.polymorphic_shared? && actual_t.shared? &&
        expected_t.sync.nil? && expected_t.resolved == actual_t.resolved
       return true
     end
@@ -2850,7 +2850,7 @@ private
       sig = raw_type.raw
       node.full_type = Type.new({ params: sig[:params], return: sig[:return], fn_type: true, reentrant: sig[:reentrant] == true })
       node.fn_ref = true
-    elsif raw_type.is_a?(Type) && raw_type.atomic?
+    elsif raw_type.is_a?(Type) && raw_type.atomic? && raw_type.layout != :indirect
       # Atomics M1.5: a read of an `@shared:atomic` binding produces
       # the bare inner value (load semantics). Type-system-wise the
       # binding shows as the inner T at use sites — the Arc/Atomic

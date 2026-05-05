@@ -526,7 +526,7 @@ RSpec.describe SemanticAnnotator do
       it "infers implicit T for shared-family input and return" do
         src = <<~CLEAR
           STRUCT Box { value: Int64 }
-          FN keep(x: T @shared) RETURNS T @shared
+          FN keep(x: SHARED T) RETURNS SHARED T
             REQUIRES x: LOCKED | VERSIONED
           ->
             RETURN x;
@@ -551,7 +551,7 @@ RSpec.describe SemanticAnnotator do
       it "returns bare T when copying out through a polymorphic shared access gate" do
         src = <<~CLEAR
           STRUCT Box { value: Int64 }
-          FN copyOut(x: T @shared) RETURNS !T ->
+          FN copyOut(x: SHARED T) RETURNS !T ->
             WITH POLYMORPHIC x AS y { RETURN COPY y; }
           END
           FN main() RETURNS !Void ->
@@ -572,6 +572,52 @@ RSpec.describe SemanticAnnotator do
         expect(got.type_info.resolved).to eq(:Box)
         expect(got.type_info.ownership).to eq(:affine)
         expect(got.type_info.sync).to be_nil
+      end
+
+      it "rejects mixed synchronization capabilities across generic shared parameters at the call site" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          STRUCT Toy { value: Int64 }
+          FN choose(x: SHARED T, y: SHARED Z) RETURNS SHARED Z
+            REQUIRES x, y: LOCKED
+          ->
+            RETURN y;
+          END
+          FN main() RETURNS Void ->
+            x = Box{ value: 1 } @shared:locked;
+            y = Toy{ value: 2 } @shared:writeLocked;
+            got = choose(x, y);
+            RETURN;
+          END
+        CLEAR
+
+        expect {
+          run(src)
+        }.to raise_error(CompilerError, /polymorphic @shared parameters.*same synchronization capability.*x.*@shared:locked.*y.*@shared:writeLocked/m)
+      end
+
+      it "allows different generic payloads when shared parameters use the same synchronization capability" do
+        src = <<~CLEAR
+          STRUCT Box { value: Int64 }
+          STRUCT Toy { value: Int64 }
+          FN choose(x: SHARED T, y: SHARED Z) RETURNS SHARED Z
+            REQUIRES x, y: LOCKED
+          ->
+            RETURN y;
+          END
+          FN main() RETURNS Void ->
+            x = Box{ value: 1 } @shared:locked;
+            y = Toy{ value: 2 } @shared:locked;
+            got = choose(x, y);
+            RETURN;
+          END
+        CLEAR
+
+        ast = run(src)
+        got = ast.statements.last.body[2]
+        expect(got.type_info).to be_shared
+        expect(got.type_info.resolved).to eq(:Toy)
+        expect(got.type_info.sync).to eq(:locked)
       end
     end
 
@@ -689,7 +735,7 @@ RSpec.describe SemanticAnnotator do
       it "monomorphizes shared-family returns from the input synchronization strategy" do
         src = <<~CLEAR
           STRUCT Box { value: Int64 }
-          FN keep(x: T @shared) RETURNS T @shared
+          FN keep(x: SHARED T) RETURNS SHARED T
             REQUIRES x: LOCKED | VERSIONED
           ->
             RETURN x;

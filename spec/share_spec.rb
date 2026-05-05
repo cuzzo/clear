@@ -26,6 +26,38 @@ RSpec.describe "SHARE keyword" do
     expect(tokens.find { |t| t.value == "SHARE" }.type).to eq(:KEYWORD)
   end
 
+  it "lexes SHARED as a keyword for polymorphic shared type annotations" do
+    tokens = Lexer.new("FN keep(x: SHARED T) RETURNS SHARED T -> RETURN x; END").tokenize
+    expect(tokens.map(&:value)).to include("SHARED")
+    expect(tokens.find { |t| t.value == "SHARED" }.type).to eq(:KEYWORD)
+  end
+
+  it "parses SHARED T as polymorphic shared while T @shared remains concrete Arc syntax" do
+    ast = parse(<<~CLEAR)
+      FN keep(x: SHARED T) RETURNS SHARED T -> RETURN x; END
+      FN make() RETURNS Box @shared -> RETURN Box{ value: 1 } @shared; END
+    CLEAR
+
+    keep = ast.statements.first
+    concrete = ast.statements.last
+
+    expect(keep.params.first[:type]).to be_polymorphic_shared
+    expect(keep.return_type).to be_polymorphic_shared
+    expect(concrete.return_type).to be_shared
+    expect(concrete.return_type).not_to be_polymorphic_shared
+  end
+
+  it "parses SHARED outside return lifetimes" do
+    ast = parse(<<~CLEAR)
+      FN spawn(counter: Int64) RETURNS SHARED counter:~T -> RETURN counter; END
+    CLEAR
+
+    fn = ast.statements.first
+    expect(fn.return_lifetime.first.name).to eq("counter")
+    expect(fn.return_type).to be_polymorphic_shared
+    expect(fn.return_type.resolved).to eq(:"~T")
+  end
+
   it "parses SHARE as an expression" do
     ast = parse("x = SHARE y;")
     bind = ast.statements.first

@@ -70,10 +70,11 @@ module GenericAnalysis
     # --- Capability validation (moved from parser for separation of concerns) ---
 
     # Ownership/sync capabilities are not allowed on function parameters,
-    # except plain @shared. `T@shared` is the explicit function-boundary
-    # shared-handle contract; callers with bare/local/multiowned values
-    # must use SHARE at the call site. :affine is the default (not a
-    # user-set capability). :link is structural (allowed on params).
+    # except plain @shared. Concrete `T @shared` accepts an Arc handle.
+    # Polymorphic shared-family contracts use `SHARED T`; callers with
+    # bare/local/multiowned values must use SHARE at the call site.
+    # :affine is the default (not a user-set capability). :link is
+    # structural (allowed on params).
     # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
     if is_param
       has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
@@ -258,12 +259,43 @@ module GenericAnalysis
       end
       extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     end
+    enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     type_params.each do |tp|
       unless subst.key?(tp)
         error!(node, :GENERIC_FN_CANNOT_INFER, tp, node.name, tp)
       end
     end
     subst
+  end
+
+  def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
+    shared_args = []
+    signature.params.each_with_index do |param, i|
+      arg = actual_args[i]
+      next unless arg
+      param_type = param[:type].is_a?(Type) ? param[:type] : Type.new(param[:type] || :Any)
+      next unless generic_shared_family_param?(param_type) && type_params.include?(param_type.resolved)
+      actual_type = if arg.respond_to?(:type_info) && arg.type_info.is_a?(Type)
+        arg.type_info
+      else
+        Type.new(arg.resolved_type || :Any)
+      end
+      next unless actual_type.shared?
+      shared_args << {
+        name: param[:name],
+        type: generic_shared_payload_binding(actual_type)
+      }
+    end
+    return if shared_args.size < 2
+
+    first = shared_args.first
+    mismatch = shared_args.find { |arg| !same_shared_call_capability?(first[:type], arg[:type]) }
+    return unless mismatch
+
+    error!(node,
+           "Type Error: polymorphic @shared parameters in '#{node.name}' must use the same synchronization capability. " \
+           "Parameter '#{first[:name]}' is #{shared_call_capability_display(first[:type])}, " \
+           "but parameter '#{mismatch[:name]}' is #{shared_call_capability_display(mismatch[:type])}.")
   end
 
   # Recursively match param_type against actual_type to bind type params.
@@ -349,7 +381,7 @@ module GenericAnalysis
   end
 
   def generic_shared_family_param?(type)
-    type.is_a?(Type) && type.shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
+    type.is_a?(Type) && type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
   end
 
   def generic_shared_payload_binding(type)
@@ -366,6 +398,15 @@ module GenericAnalysis
     l.resolved == r.resolved &&
       l.ownership == r.ownership &&
       l.sync == r.sync &&
+      l.layout == r.layout &&
+      l.elem_ownership == r.elem_ownership &&
+      l.elem_sync == r.elem_sync
+  end
+
+  def same_shared_call_capability?(left, right)
+    l = left.is_a?(Type) ? left : Type.new(left)
+    r = right.is_a?(Type) ? right : Type.new(right)
+    l.sync == r.sync &&
       l.layout == r.layout &&
       l.elem_ownership == r.elem_ownership &&
       l.elem_sync == r.elem_sync
@@ -403,6 +444,21 @@ module GenericAnalysis
     parts << sync if sync
 
     parts.join("")
+  end
+
+  def shared_call_capability_display(type)
+    t = type.is_a?(Type) ? type : Type.new(type)
+    caps = ["@shared"]
+    caps << "indirect" if t.layout == :indirect
+    caps << case t.sync
+            when :locked then "locked"
+            when :write_locked then "writeLocked"
+            when :versioned then "versioned"
+            when :atomic then "atomic"
+            when :local then "local"
+            when :always_mutable then "alwaysMutable"
+            end
+    caps.compact.join(":")
   end
 
   # Build a concrete copy of a generic function signature with all type params

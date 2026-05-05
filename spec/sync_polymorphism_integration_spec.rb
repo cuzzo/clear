@@ -159,12 +159,12 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
     # for every wrong-family binding.
     REJECTION_CASES = [
       # [requires_family, binding_sigil, expected_arg_family_name]
-      [:LOCKED,      "@versioned",       "VERSIONED"],
-      [:LOCKED,      "@indirect:atomic", "ATOMIC"],
+      [:LOCKED,      "@shared:versioned",       "VERSIONED"],
+      [:LOCKED,      "@shared:indirect:atomic", "ATOMIC"],
       [:VERSIONED,   "@shared:locked",   "LOCKED"],
-      [:VERSIONED,   "@indirect:atomic", "ATOMIC"],
+      [:VERSIONED,   "@shared:indirect:atomic", "ATOMIC"],
       [:ATOMIC,      "@shared:locked",   "LOCKED"],
-      [:ATOMIC,      "@versioned",       "VERSIONED"],
+      [:ATOMIC,      "@shared:versioned",       "VERSIONED"],
       [:SNAPSHOTTED, "@shared:locked",   "LOCKED"],  # SNAPSHOTTED rejects LOCKED
     ].freeze
 
@@ -184,7 +184,7 @@ RSpec.describe "True-Sync-Polymorphism integration (#331)" do
 
         src = <<~CLEAR
           STRUCT C { v: Int64 }
-          FN bump!(MUTABLE c: C) RETURNS !Void
+          FN bump!(MUTABLE c: SHARED C) RETURNS !Void
             REQUIRES c: #{req_family}
           ->
             #{with_form}

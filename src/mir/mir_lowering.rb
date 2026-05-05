@@ -5371,7 +5371,7 @@ class MIRLowering
 
   def tied_shared_family_return_param(node, mutable_scalar_params)
     ret = node.return_type
-    return nil unless ret.is_a?(Type) && ret.shared?
+    return nil unless ret.is_a?(Type) && ret.polymorphic_shared?
     return nil unless ret.resolved.to_s.match?(/\A[A-Z]\z/)
     params = (node.params || []).select do |p|
       pt = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
@@ -6928,6 +6928,7 @@ class MIRLowering
     return false if value_node.is_a?(AST::MoveNode)
     ti = value_node.type_info
     return false unless ti&.any_rc?
+    return false if ti.sync == :atomic && ti.layout == :indirect
     rc_map = @rc_unwrap_map || {}
     return false if rc_map.key?(value_node.name)
     true
