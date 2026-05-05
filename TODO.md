@@ -16,6 +16,7 @@
  - [x] Binding metadata for capabilities + `REQUIRES` for overloaded syncronization strategies.
  - [x] Compiler code cleanup with Ruby Gems like Reek, Flog, Flay, CodeCov, etc...
  - [x] Continuous Integration
+ - [ ] Syntax maturity cleanup / sweep
 
 Milestone: A working CLEAR VM with debugger, that supports a decent chunk of the language (including concurrency).
 
