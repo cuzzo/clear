@@ -14,7 +14,7 @@
 -- block-index state corrupts the GPA free list and crashes on subsequent
 -- trimExcess -> pop calls.
 
-FN processLines!(n: Int64) RETURNS Void ->
+FN processLines!(n: Int64) RETURNS !Void ->
     MUTABLE outer: Int64 = 0;
     WHILE outer < 10 DO
         -- Outer frame-local: forces mark_per_iter on the outer loop.
@@ -39,12 +39,12 @@ FN processLines!(n: Int64) RETURNS Void ->
     END
 END
 
-FN main() RETURNS Void ->
+FN main() RETURNS !Void ->
     -- Run many times: if restoreLoopMark corrupts the frame arena the crash
     -- occurs inside this loop.
     MUTABLE k: Int64 = 0;
     WHILE k < 200 DO
-        processLines!(20);
+        processLines!(20) OR EXIT;
         k += 1;
     END
     print("PASS");

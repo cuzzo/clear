@@ -812,6 +812,84 @@ RSpec.describe MIRLowering do
       expect(emit(result)).to eq("handle")
     end
 
+    it "lowers CLONE of a shared handle to Arc retain" do
+      source_type = Type.new(:Box, ownership: :shared)
+      inner = make_id("box", full_type: source_type)
+      node = AST::CloneNode.new(tok, inner)
+      node.full_type = source_type
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RcRetain)
+      expect(result.func).to eq("arcRetain")
+      expect(result.zig_base).to eq("Box")
+      expect(emit(result)).to eq("CheatLib.arcRetain(Box, box)")
+    end
+
+    it "lowers SHARE of a bare value to Arc creation" do
+      inner = make_id("box", full_type: :Box)
+      shared_type = Type.new(:Box, ownership: :shared)
+      node = AST::ShareNode.new(tok, inner)
+      node.full_type = shared_type
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::CapWrap)
+      expect(result.own_fn).to eq("arcCreate")
+      expect(result.zig_base).to eq("Box")
+      expect(emit(result)).to eq("try CheatLib.arcCreate(Box, rt.heapAlloc(), box)")
+    end
+
+    it "lowers SHARE of an existing shared handle to Arc retain" do
+      source_type = Type.new(:Box, ownership: :shared)
+      inner = make_id("box", full_type: source_type)
+      node = AST::ShareNode.new(tok, inner)
+      node.full_type = source_type
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RcRetain)
+      expect(result.func).to eq("arcRetain")
+      expect(result.zig_base).to eq("Box")
+      expect(emit(result)).to eq("CheatLib.arcRetain(Box, box)")
+    end
+
+    it "lowers SHARE of a multiowned handle to Rc-to-Arc promotion" do
+      source_type = Type.new(:Box, ownership: :multiowned)
+      shared_type = Type.new(:Box, ownership: :shared)
+      inner = make_id("box", full_type: source_type)
+      node = AST::ShareNode.new(tok, inner)
+      node.full_type = shared_type
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::SharePromote)
+      expect(result.zig_base).to eq("Box")
+      expect(emit(result)).to include("CheatLib.rcRelease(Box, rt.heapAlloc(), __share_src);")
+    end
+
+    it "records cleanup metadata for hoisted SharePromote allocations" do
+      source_type = Type.new(:Box, ownership: :multiowned)
+      shared_type = Type.new(:Box, ownership: :shared)
+      inner = make_id("box", full_type: source_type)
+      node = AST::ShareNode.new(tok, inner)
+      node.full_type = shared_type
+
+      promote = MIR::SharePromote.new(MIR::Ident.new("box"), "Box", :heap)
+      l = lowering
+      expect(l.send(:mir_allocates?, promote)).to be true
+      entry = l.send(:hoist_cleanup_entry, promote, node)
+      expect(entry).to include(kind: :rc, alloc: :heap, zig_type: "CheatLib.Arc(Box)")
+    end
+
+    it "lowers CLONE of a multiowned handle to Rc retain" do
+      source_type = Type.new(:Box, ownership: :multiowned)
+      inner = make_id("box", full_type: source_type)
+      node = AST::CloneNode.new(tok, inner)
+      node.full_type = source_type
+
+      result = lowering.lower(node)
+      expect(result).to be_a(MIR::RcRetain)
+      expect(result.func).to eq("rcRetain")
+      expect(result.zig_base).to eq("Box")
+    end
+
     it "lowers COPY of union" do
       inner = make_id("val", full_type: :Value)
       node = AST::CopyNode.new(tok, inner)

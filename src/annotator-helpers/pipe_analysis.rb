@@ -211,7 +211,7 @@ module PipeAnalysis
     end
     # Mark the source binding as consumed -- COLLECT is the explicit
     # join, equivalent to NEXT for the future-consume check.
-    og_set_moved(node.left.name) if node.left.is_a?(AST::Identifier)
+    og_set_moved(node.left.name, at_token: node.left.token, action: :collect) if node.left.is_a?(AST::Identifier)
     inner = lhs_t&.tense_type
     # Collection observable (DISTINCT producing `~T[]@set:observable`):
     # COLLECT yields an owned `T[]` snapshot via `materializeNext`, not

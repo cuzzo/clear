@@ -91,6 +91,7 @@ class MIREmitter
     when MIR::DeepCopy         then emit_deep_copy(node)
     when MIR::ContainerInit    then emit_container_init(node)
     when MIR::CapWrap          then emit_cap_wrap(node)
+    when MIR::SharePromote     then emit_share_promote(node)
     when MIR::RcRetain         then emit_rc_retain(node)
     when MIR::RcDowngrade      then emit_rc_downgrade(node)
     when MIR::WeakUpgrade      then emit_weak_upgrade(node)
@@ -937,6 +938,22 @@ class MIREmitter
     else
       raise "MIREmitter#emit_cap_wrap: unhandled strategy :#{node.strategy}"
     end
+  end
+
+  def emit_share_promote(node)
+    source = emit(node.source)
+    alloc = alloc_zig(node.alloc)
+    <<~ZIG.chomp
+      blk_share: {
+          const __share_src = #{source};
+          errdefer CheatLib.rcRelease(#{node.zig_base}, #{alloc}, __share_src);
+          var __share_val = try CheatLib.dupeValue(#{node.zig_base}, __share_src.ctrl.data.*, #{alloc});
+          errdefer CheatLib.cleanup(#{node.zig_base}, #{alloc}, &__share_val);
+          const __share_arc = try CheatLib.arcCreate(#{node.zig_base}, #{alloc}, __share_val);
+          CheatLib.rcRelease(#{node.zig_base}, #{alloc}, __share_src);
+          break :blk_share __share_arc;
+      }
+    ZIG
   end
 
   def emit_rc_retain(node)

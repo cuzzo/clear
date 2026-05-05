@@ -109,6 +109,7 @@ class MIRLowering
     when MIR::MakeList     then node.alloc == :heap
     when MIR::HeapCreate   then true  # always heap by definition
     when MIR::CapWrap      then node.alloc == :heap
+    when MIR::SharePromote then node.alloc == :heap
     when MIR::DeepCopy     then node.alloc == :heap
     when MIR::ConcatStr    then node.alloc == :heap
     when MIR::ContainerInit
@@ -194,6 +195,13 @@ class MIRLowering
         # :passthrough / :local -- inner value passes through; no additional cleanup.
         nil
       end
+    when MIR::SharePromote
+      ti = Type.from_node(ast_node)
+      zig_t = ti&.zig_type
+      raise "hoist_cleanup_entry: MIR::SharePromote has no zig_type -- " \
+            "ast_node type_info unavailable" unless zig_t
+      { kind: :rc, alloc: :heap, has_moved_guard: false, zig_type: zig_t,
+        rc_variant: :standard, rc_alloc: :heap }
     when MIR::Cast
       # Cast is a transparent wrapper; the cleanup is the same as the inner expr.
       hoist_cleanup_entry(mir.expr, ast_node)
@@ -296,6 +304,7 @@ class MIRLowering
     when AST::CopyNode          then lower_copy(node)
     when AST::CloneNode         then lower_clone(node)
     when AST::MoveNode          then lower_move(node)
+    when AST::ShareNode         then lower_share(node)
     when AST::CapabilityWrap    then lower_cap_wrap(node)
     when AST::LinkNode          then lower_link(node)
     when AST::ResolveNode       then lower_resolve(node)
@@ -5166,8 +5175,10 @@ class MIRLowering
     ti = node.value.type_info
     func = if ti&.split_open_stream?
       "splitRetain"
-    elsif ti&.shared_promise?
+    elsif ti&.shared_promise? || ti&.shared?
       "arcRetain"
+    elsif ti&.multiowned?
+      "rcRetain"
     else
       raise "Internal: lower_clone on unsupported type #{ti&.resolved || node.value.resolved_type}"
     end
@@ -5183,6 +5194,24 @@ class MIRLowering
     else
       lower(node.value)
     end
+  end
+
+  def lower_share(node)
+    source_ti = node.value.type_info
+    source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
+    raise "Internal: lower_share requires typed source" unless source_ti
+
+    zig_base = rc_payload_zig_type(source_ti)
+
+    if source_ti.shared?
+      return MIR::RcRetain.new(lower(node.value), zig_base, "arcRetain")
+    end
+
+    if source_ti.multiowned?
+      return MIR::SharePromote.new(lower(node.value), zig_base, :heap)
+    end
+
+    MIR::CapWrap.new(lower(node.value), zig_base, :own_only, nil, nil, "arcCreate", :heap)
   end
 
   def lower_cap_wrap(node)
@@ -5262,6 +5291,14 @@ class MIRLowering
     # Dereference Rc data pointer to get *const T for freeze()
     rc_data = MIR::FieldGet.new(MIR::FieldGet.new(inner, "ctrl"), "data")
     MIR::FreezeExpr.new(rc_data, zig_base)
+  end
+
+  def rc_payload_zig_type(ti)
+    payload = Type.new(ti)
+    payload.ownership = :affine
+    payload.provenance = nil
+    payload.instance_variable_set(:@zig_type_cache, nil)
+    payload.zig_type
   end
 
   # ================================================================

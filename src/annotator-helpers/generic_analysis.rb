@@ -69,11 +69,14 @@ module GenericAnalysis
 
     # --- Capability validation (moved from parser for separation of concerns) ---
 
-    # Ownership/sync capabilities are not allowed on function parameters.
-    # :affine is the default (not a user-set capability). :link is structural (allowed on params).
+    # Ownership/sync capabilities are not allowed on function parameters,
+    # except plain @shared. `T@shared` is the explicit function-boundary
+    # shared-handle contract; callers with bare/local/multiowned values
+    # must use SHARE at the call site. :affine is the default (not a
+    # user-set capability). :link is structural (allowed on params).
     # @raw is structural (byte buffer). Collections, @soa, @indirect are also structural.
     if is_param
-      has_ownership_cap = %i[multiowned shared split].include?(type_obj.ownership)
+      has_ownership_cap = %i[multiowned split].include?(type_obj.ownership)
       has_sync_cap = type_obj.sync && !%i[raw symbol].include?(type_obj.sync)
       if has_ownership_cap || has_sync_cap
         error!(node, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")

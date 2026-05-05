@@ -272,6 +272,53 @@ RSpec.describe BorrowChecker do
       expect(errors.first).to include("u")
     end
 
+    it "catches SHARE of a borrowed value" do
+      errors = check_errors(<<~CLEAR)
+        STRUCT User { id: Int64 }
+        FN main() RETURNS Void ->
+          u: %User = User{ id: 1 };
+          WITH BORROWED u AS ref {
+            shared = SHARE u;
+          }
+          RETURN;
+        END
+      CLEAR
+      expect(errors.length).to eq(1)
+      expect(errors.first).to include("MOVE_WHILE_BORROWED")
+      expect(errors.first).to include("u")
+    end
+
+    it "catches SHARE of a complex expression that moves a borrowed value" do
+      errors = check_errors(<<~CLEAR)
+        STRUCT User { id: Int64 }
+        STRUCT Box { user: User }
+        FN main() RETURNS Void ->
+          u: %User = User{ id: 1 };
+          WITH BORROWED u AS ref {
+            shared = SHARE Box{ user: u };
+          }
+          RETURN;
+        END
+      CLEAR
+      expect(errors.length).to eq(1)
+      expect(errors.first).to include("MOVE_WHILE_BORROWED")
+      expect(errors.first).to include("u")
+    end
+
+    it "walks SHARE nodes while looking for explicit moved identifiers" do
+      token = Lexer::Token.new(:VAR_ID, "u", 9, 7)
+      ident = AST::Identifier.new(token, "u")
+      ident.full_type = Type.new(:User)
+      ident.was_moved = true
+      share = AST::ShareNode.new(token, ident)
+      fn = Struct.new(:name, :body).new("main", [])
+      checker = BorrowChecker.new(fn, schema_lookup: nil)
+      seen = []
+
+      checker.send(:walk_for_was_moved, share) { |node| seen << node.name.to_s }
+      expect(seen).to eq(["u"])
+    end
+
     it "allows GIVE on @list inside WITH BORROWED (CopyNode - frame stays alive)" do
       errors = check_errors(<<~CLEAR)
         FN consume(TAKES items: Int64[]) RETURNS Int64 ->

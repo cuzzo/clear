@@ -641,6 +641,7 @@ class MIRChecker
   #
   # Allocating types:
   #   DupeSlice, HeapCreate, ConcatStr, AllocSlice, MakeList, CapWrap,
+  #   SharePromote,
   #   DeepCopy (strategy != :passthrough), ContainerInit (alloc != nil)
   #
   # Called only when strict: true because the codebase still has open
@@ -756,6 +757,7 @@ class MIRChecker
     when MIR::MakeList     then expr.alloc == :heap
     when MIR::ConcatStr    then expr.alloc == :heap
     when MIR::CapWrap      then expr.alloc == :heap
+    when MIR::SharePromote then expr.alloc == :heap
     when MIR::ContainerInit then expr.alloc == :heap
     when MIR::DeepCopy
       expr.strategy != :passthrough && expr.alloc == :heap
@@ -777,6 +779,7 @@ class MIRChecker
     when MIR::DestroyPtr    then yield expr.ptr     if expr.ptr
     when MIR::DeepCopy      then yield expr.source  if expr.source
     when MIR::CapWrap       then yield expr.inner   if expr.inner
+    when MIR::SharePromote  then yield expr.source  if expr.source
     when MIR::ContainerInit then yield expr.capacity if expr.capacity
     when MIR::ConcatStr     then expr.parts&.each { |p| yield p }
     when MIR::MakeList      then expr.items&.each  { |i| yield i }

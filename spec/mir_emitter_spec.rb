@@ -572,6 +572,18 @@ RSpec.describe MIREmitter do
     end
   end
 
+  describe "SharePromote" do
+    it "emits Rc to Arc promotion with Rc release" do
+      node = MIR::SharePromote.new(MIR::Ident.new("ref"), "User", :heap)
+      zig = e.emit(node)
+
+      expect(zig).to include("const __share_src = ref;")
+      expect(zig).to include("CheatLib.dupeValue(User, __share_src.ctrl.data.*, rt.heapAlloc())")
+      expect(zig).to include("CheatLib.rcRelease(User, rt.heapAlloc(), __share_src);")
+      expect(zig).to include("CheatLib.arcCreate(User, rt.heapAlloc(), __share_val)")
+    end
+  end
+
   describe "MakeList" do
     it "emits makeList with items" do
       node = MIR::MakeList.new("i64", [MIR::Lit.new("1"), MIR::Lit.new("2")], :frame)

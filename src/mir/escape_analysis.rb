@@ -397,7 +397,7 @@ module EscapeAnalysis
       e2_walk_calls_in_expr(node.value, &blk)
     when AST::ReturnNode
       e2_walk_calls_in_expr(node.value, &blk)
-    when AST::MoveNode, AST::CopyNode, AST::CloneNode, AST::FreezeNode, AST::CapabilityWrap
+    when AST::MoveNode, AST::CopyNode, AST::CloneNode, AST::FreezeNode, AST::ShareNode, AST::CapabilityWrap
       e2_walk_calls_in_expr(node.value, &blk)
     when AST::BinaryOp
       e2_walk_calls_in_expr(node.left, &blk)

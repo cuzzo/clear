@@ -1,4 +1,5 @@
 require "rspec"
+require_relative "../src/ast/lexer"
 require_relative "../src/mir/ownership_graph"
 
 RSpec.describe OwnershipGraph do
@@ -36,6 +37,28 @@ RSpec.describe OwnershipGraph do
       graph.transfer("x", "y")
       expect(graph.moved?("x.child")).to be true
       expect(graph.moved?("x.child.name")).to be true
+    end
+
+    it "records the move site and action on source and children" do
+      token = Lexer::Token.new(:VAR_ID, "x", 7, 11)
+      graph.declare("x.child")
+      graph.transfer("x", "y", at_token: token, action: :share)
+
+      expect(graph["x"].move_line).to eq(7)
+      expect(graph["x"].move_col).to eq(11)
+      expect(graph["x"].move_action).to eq(:share)
+      expect(graph["x.child"].move_line).to eq(7)
+      expect(graph["x.child"].move_action).to eq(:share)
+    end
+
+    it "records move metadata for direct mark_moved" do
+      token = Lexer::Token.new(:VAR_ID, "x", 8, 5)
+      graph.mark_moved("x", at_token: token, action: :give)
+
+      expect(graph.moved?("x")).to be true
+      expect(graph["x"].move_line).to eq(8)
+      expect(graph["x"].move_col).to eq(5)
+      expect(graph["x"].move_action).to eq(:give)
     end
 
     it "returns nil for undeclared source" do
@@ -200,6 +223,27 @@ RSpec.describe OwnershipGraph do
       expect(graph.live?("x")).to be true
     end
 
+    it "restores move metadata from lightweight snapshots" do
+      token = Lexer::Token.new(:VAR_ID, "x", 12, 4)
+      graph.declare("x")
+      graph.mark_moved("x", at_token: token, action: :share)
+      snapshot = graph.fork_lightweight
+      graph["x"].state = :live
+      graph["x"].move_line = nil
+      graph["x"].move_action = nil
+
+      graph.restore_lightweight(snapshot)
+      expect(graph.moved?("x")).to be true
+      expect(graph["x"].move_line).to eq(12)
+      expect(graph["x"].move_action).to eq(:share)
+    end
+
+    it "restores legacy state-only lightweight snapshots" do
+      graph.declare("x")
+      graph.restore_lightweight({ node_states: { "x" => :moved }, edge_count: 0 })
+      expect(graph.moved?("x")).to be true
+    end
+
     it "captures edge count for restoration" do
       graph.declare("x")
       snapshot = graph.fork_lightweight
@@ -236,6 +280,20 @@ RSpec.describe OwnershipGraph do
       graph.transfer("x", "y")
       graph.merge(other)
       expect(graph.moved?("x")).to be true
+    end
+
+    it "copies move metadata from the moved branch on merge" do
+      token = Lexer::Token.new(:VAR_ID, "x", 21, 9)
+      other = OwnershipGraph.new
+      graph.declare("x")
+      other.declare("x")
+      other.mark_moved("x", at_token: token, action: :share)
+
+      graph.merge(other)
+      expect(graph.moved?("x")).to be true
+      expect(graph["x"].move_line).to eq(21)
+      expect(graph["x"].move_col).to eq(9)
+      expect(graph["x"].move_action).to eq(:share)
     end
   end
 

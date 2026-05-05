@@ -1209,11 +1209,19 @@ private
         next if branch_terminates[i]
         next unless snap
         # Lightweight merge: just apply moved states
-        snap[:node_states].each do |path, state|
+        snap[:node_states].each do |path, saved|
+          state = saved.is_a?(Hash) ? saved[:state] : saved
           node = @og.nodes[path]
           next unless node
           if node.state != state
-            node.state = :moved if state == :moved
+            if state == :moved
+              node.state = :moved
+              if saved.is_a?(Hash)
+                node.move_line = saved[:move_line]
+                node.move_col = saved[:move_col]
+                node.move_action = saved[:move_action]
+              end
+            end
           end
         end
       end
@@ -1469,7 +1477,7 @@ private
       source_name = node.expr.name
       if @og[source_name] && @og[source_name].kind != :borrowed
         node.expr.was_moved = true
-        og_set_moved(source_name)
+        og_set_moved(source_name, at_token: node.expr.token, action: :takes)
       end
     end
 
@@ -1766,7 +1774,8 @@ private
         # loop (e.g. MATCH struct bindings with field extraction) and aren't consumed by iteration.
         loop_body_names = collect_body_identifier_names(node.do_branch)
         current_scope.locals.each do |name, _entry|
-          was_live = pre_loop_states&.dig(:node_states, name) == :live
+          saved = pre_loop_states&.dig(:node_states, name)
+          was_live = (saved.is_a?(Hash) ? saved[:state] : saved) == :live
           is_moved = @og&.moved?(name)
           if was_live && is_moved
             next unless loop_body_names.include?(name)
@@ -1840,7 +1849,8 @@ private
         loop_body_names = collect_body_identifier_names(node.do_branch)
         current_scope.locals.each do |name, _entry|
           next if name == node.binding_name
-          was_live = pre_loop_states&.dig(:node_states, name) == :live
+          saved = pre_loop_states&.dig(:node_states, name)
+          was_live = (saved.is_a?(Hash) ? saved[:state] : saved) == :live
           is_moved = @og&.moved?(name)
           if was_live && is_moved
             next unless loop_body_names.include?(name)
@@ -2087,7 +2097,7 @@ private
       # gets a chance to run. Mirrors NEXT's `og_set_moved` (line ~4388).
       vt = vti.is_a?(Type) ? vti : (vti ? Type.new(vti) : nil)
       if vt&.future?
-        og_set_moved(node.value.name)
+        og_set_moved(node.value.name, at_token: node.value.token, action: :return)
       end
     end
 
@@ -3908,7 +3918,7 @@ private
     node.storage   = node.value.storage
 
     # Consume the source variable — it is affinely transferred
-    og_set_moved(node.value.name)
+    og_set_moved(node.value.name, at_token: node.value.token, action: :give)
   end
 
   # Ensure a value node is owned data suitable for storage in structs, unions,
@@ -4103,12 +4113,36 @@ private
     visit(node.value)
     type = node.value.type_info
 
-    unless type&.split_open_stream? || type&.shared_promise?
-      error!(node, "CLONE is only supported on @split streams and @shared promises, got '#{node.value.resolved_type}'")
+    unless type&.split_open_stream? || type&.shared_promise? || type&.any_rc?
+      error!(node, "CLONE is only supported on @split streams, @shared promises, and owned shared handles, got '#{node.value.resolved_type}'")
     end
 
     node.full_type = node.value.full_type
     node.storage = node.value.storage
+    current_fn_ctx.needs_rt = true if current_fn_ctx && type&.any_rc?
+  end
+
+  def visit_ShareNode(node)
+    visit(node.value)
+    source_type = node.value.type_info
+    source_type = Type.new(source_type) if source_type && !source_type.is_a?(Type)
+    error!(node, "SHARE requires a typed value") unless source_type
+
+    result = Type.new(source_type, ownership: :shared)
+    result.provenance = :heap
+    node.full_type = result
+    node.storage = :heap
+
+    if share_consumes_source?(node.value)
+      root = get_root_object(node.value)
+      if root.is_a?(AST::Identifier)
+        og_set_moved(root.name, at_token: root.token, action: :share)
+        root.was_moved = true
+      end
+    end
+
+    current_fn_ctx.heap_count += 1 if current_fn_ctx
+    record_effect(EffectTracker::HEAP)
   end
 
   def visit_OptionalUnwrap(node)
@@ -5043,7 +5077,7 @@ private
       # NEXT on ~T[]@list: await all promises, return T[]@list.
       # The promise list is linearly consumed — each inner promise is freed by its next() call.
       if node.expr.is_a?(AST::Identifier)
-        og_set_moved(node.expr.name)
+        og_set_moved(node.expr.name, at_token: node.expr.token, action: :next)
       end
       elem_sym = promise_type.tense_type.element_type.to_sym
       node.full_type = Type.new(:"#{elem_sym}[]", collection: :list)
@@ -5060,7 +5094,7 @@ private
       # done after the first call, so a second NEXT would just
       # re-take the same snapshot, violating the consume-or-transfer
       # semantics. Match scalar-NEXT behavior: linearly consume.
-      og_set_moved(node.expr.name) if node.expr.is_a?(AST::Identifier)
+      og_set_moved(node.expr.name, at_token: node.expr.token, action: :next) if node.expr.is_a?(AST::Identifier)
       elem_sym = promise_type.tense_type.element_type.to_sym
       node.full_type = Type.new(:"#{elem_sym}[]")
       node.storage   = :heap
@@ -5092,7 +5126,7 @@ private
     else
       # NEXT on ~T: returns T, marks the promise as linearly consumed.
       if node.expr.is_a?(AST::Identifier)
-        og_set_moved(node.expr.name)
+        og_set_moved(node.expr.name, at_token: node.expr.token, action: :next)
       end
       node.full_type = promise_type.tense_type.to_sym
     end
@@ -5190,7 +5224,7 @@ private
       if Type.new(node.value.resolved_type).requires_move?
         graph_path = path.map(&:to_s).join(".")
         @og.declare(graph_path, kind: :affine, scope_depth: @og_scope_depth) unless @og[graph_path]
-        og_set_moved(graph_path)
+        og_set_moved(graph_path, at_token: node.value.token, action: :move)
       end
       return
     end
@@ -6163,8 +6197,18 @@ private
                 scope_depth: @og_scope_depth, line: node&.respond_to?(:line) ? node.line : 0)
   end
 
-  def og_move(from, to, at_token: nil) = @og.transfer(from, to, at_token: at_token)
-  def og_set_moved(name) = (@og[name]&.state = :moved)
+  def og_move(from, to, at_token: nil, action: :move) = @og.transfer(from, to, at_token: at_token, action: action)
+  def og_set_moved(name, at_token: nil, action: :move) = @og.mark_moved(name, at_token: at_token, action: action)
+
+  def share_consumes_source?(node)
+    return false if node.is_a?(AST::CopyNode)
+
+    ti = node.type_info
+    ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    return false if ti&.shared?
+
+    true
+  end
 
   # Mark an identifier as moved if its type is non-Copy.
   # Skips generic type params (can't determine copyability at annotation time).
@@ -6175,7 +6219,7 @@ private
     return if vt.nil?
     return if current_fn_ctx&.type_params&.include?(vt.resolved)
     return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
-    og_set_moved(node.name)
+    og_set_moved(node.name, at_token: node.token, action: :move)
     node.was_moved = true
   end
 

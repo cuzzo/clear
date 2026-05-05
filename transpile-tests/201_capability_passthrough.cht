@@ -1,5 +1,5 @@
 -- P1.6 / P1.7 fixture: a caller's @shared:locked binding flows
--- transparently to bumpIt's bare param. Inside bumpIt, WITH EXCLUSIVE
+-- transparently to bumpIt's bare param. Inside bumpIt, WITH POLYMORPHIC EXCLUSIVE
 -- on the parameter works because:
 --
 --   - EscapeAnalysis.propagate_caller_sync! (P1.4) stamps the param's
@@ -17,7 +17,7 @@ STRUCT Counter { value: Int64 }
 FN bumpIt(c: Counter) RETURNS Void
   REQUIRES c: LOCKED
 ->
-    WITH EXCLUSIVE c AS inner {
+    WITH POLYMORPHIC EXCLUSIVE c AS inner {
         inner.value = inner.value + 1;
     }
 END

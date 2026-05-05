@@ -530,6 +530,23 @@ RSpec.describe MIRChecker do
       expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
     end
 
+    it "passes: SharePromote as Let.init" do
+      body = [
+        MIR::Let.new("s", MIR::SharePromote.new(MIR::Ident.new("rc"), "User", :heap), false, nil, nil),
+      ]
+      errors = checker.check_fn!(fn_def("ok_share_promote", body), strict: true)
+      expect(errors.select { |e| e.include?("UNHOISTED_ALLOC") }).to be_empty
+    end
+
+    it "flags: SharePromote as Call argument" do
+      promote = MIR::SharePromote.new(MIR::Ident.new("rc"), "User", :heap)
+      body = [
+        MIR::ExprStmt.new(MIR::Call.new("useShared", [promote], false), false),
+      ]
+      errors = checker.check_fn!(fn_def("share_promote_arg", body), strict: true)
+      expect(errors.any? { |e| e.include?("UNHOISTED_ALLOC") && e.include?("SharePromote") }).to be true
+    end
+
     it "flags: MakeList in ExprStmt (discarded)" do
       body = [
         MIR::ExprStmt.new(MIR::MakeList.new("i64", [], :heap), true),

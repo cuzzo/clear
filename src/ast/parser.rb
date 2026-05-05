@@ -152,6 +152,7 @@ class Parser
   primary(:KEYWORD, 'GIVE', AST::MoveNode, ['GIVE', :expression])
   primary(:KEYWORD, 'COPY', AST::CopyNode, ['COPY', :expression])
   primary(:KEYWORD, 'CLONE', AST::CloneNode, ['CLONE', :expression])
+  primary(:KEYWORD, 'SHARE', AST::ShareNode, ['SHARE', :expression])
   primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
   primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
   primary(:KEYWORD, 'FREEZE', AST::FreezeNode, ['FREEZE', :expression])

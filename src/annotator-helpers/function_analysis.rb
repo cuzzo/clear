@@ -447,6 +447,27 @@ module FunctionAnalysis
         end
       end
 
+      # Case 0b: strict shared-handle boundary. Type#== intentionally
+      # compares only the resolved base type for backward compatibility,
+      # so `Point@shared` would otherwise accept bare `Point`. Keep this
+      # check local to function calls: a `T@shared` parameter promises
+      # that the callee can retain/cross execution boundaries, so callers
+      # must pass a real shared handle or explicitly write SHARE x.
+      actual_type_obj = arg_ti.is_a?(Type) ? arg_ti : Type.new(actual || :Any)
+      if !match && expected_type_obj.shared?
+        unless actual_type_obj.shared?
+          hint = if arg_node.is_a?(AST::Identifier)
+            " Use SHARE #{arg_node.name} to create a shared handle."
+          else
+            " Use SHARE <expr> to create a shared handle."
+          end
+          error!(arg_node,
+            "Type Error: Argument #{i + 1} to '#{node.name}' expects #{expected_type_obj} @shared, " \
+            "got #{actual_type_obj}.#{hint}")
+        end
+        match = true if expected_type_obj.resolved == actual_type_obj.resolved
+      end
+
       # Case 1: Exact Match or Any
       if !match && (expected == :Any || actual == :Any || expected == actual)
         match = true

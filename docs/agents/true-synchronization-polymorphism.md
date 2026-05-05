@@ -333,6 +333,67 @@ Combined with `LOCKED` and `SNAPSHOTTED`, this lets a fn declare
 sync strategy, including non-sync ones. (Or introduce `ANY` as the
 umbrella — naming choice deferred.)
 
+#### Revised function-boundary rule: `T@shared` is strict
+
+The older "capabilities flow through ordinary function boundaries"
+draft treated `T@shared`-style parameters as a polymorphic acceptance
+surface: callers could pass bare `T`, `@multiowned`, or concrete
+`@shared:*` bindings, and the callee body would decide whether it
+needed a `WITH`, `CLONE`, or execution-boundary-safe capture.
+
+That plan is now deliberately narrowed for v0.1:
+
+- A parameter declared as `T@shared` accepts only a real shared handle.
+  Bare `T`, `@local`, and `@multiowned` do not satisfy it implicitly.
+- Callers with an owned value must write `SHARE x`. `SHARE` promotes the
+  value into the shared function-boundary representation and consumes
+  the source unless the caller writes `SHARE COPY x`.
+- Callers with `@multiowned` must also opt in with `SHARE x` if they
+  want to cross a `T@shared` API boundary. For v0.1 this may wrap in
+  the contending Arc/shared representation; the non-contending
+  `@multiowned` effect is not preserved silently.
+- `WITH POLYMORPHIC` remains the access-polymorphic mechanism for
+  functions that explicitly admit several synchronization families via
+  `REQUIRES`. It is not a hidden conversion from bare `T` to
+  `T@shared`.
+
+This keeps the effect model honest. The old implicit plan only works
+without semantic surprises for narrow transaction-style helpers that do
+not cross execution boundaries and do not retain the value. If such a
+helper later captures into `BG`, `DO`, or `CONCURRENT`, an implicit
+bare/`@multiowned` acceptance path would have to silently upgrade to
+`T@shared` and add contention/effects at the call site. v0.1 avoids
+that by making the upgrade explicit.
+
+Future optimization: once the compiler has callee-behavior summaries,
+`SHARE x` can be elided or downgraded when proven safe:
+
+- If the callee does not cross an execution boundary and does not
+  retain/clone the handle, `SHARE x` can lower to a no-op/direct borrow.
+- If the callee stays on one scheduler and only needs retain semantics,
+  `SHARE x` may lower to `@multiowned`/Rc instead of Arc, avoiding the
+  `contends` effect.
+- If the callee crosses `BG`, `DO`, or `CONCURRENT`, stores the handle
+  beyond the call, or otherwise needs scheduler-safe sharing, `SHARE x`
+  must remain the shared/Arc representation and surface the relevant
+  effects.
+
+Acceptance coverage for this revised boundary should extend the existing
+polymorphic-sync suite with three representative callee shapes:
+
+1. A `T@shared` function that only retains the handle (`CLONE x`) and
+   never opens an access gate. This verifies that `T@shared` signatures
+   may rely on retain semantics, and bare callers must write `SHARE x`.
+2. A `T@shared` function that crosses an execution boundary by capturing
+   the handle into one representative `BG` / `DO` / `CONCURRENT` body.
+   We only need one boundary form for this acceptance target; the point
+   is proving that implicit bare/`@multiowned` admission would have
+   needed a hidden upgrade and effect change.
+3. The existing transaction/access-gate case: a function that crosses
+   `WITH POLYMORPHIC x AS y { ... }`. This remains the intended surface
+   for true synchronization polymorphism rather than `T@shared`
+   accepting arbitrary non-shared callers.
+
 ### Gate 3 — multi-family `WITH POLYMORPHIC` lowering
 
 Today's `WITH POLYMORPHIC` lowering doesn't yet handle multi-family

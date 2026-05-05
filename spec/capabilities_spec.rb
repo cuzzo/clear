@@ -154,16 +154,29 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "capability annotation on a function parameter" do
+    context "@multiowned capability annotation on a function parameter" do
       let(:code) {
         <<~FLUX
           STRUCT Point { x: Float64 }
-          FN bad(p: Point @shared) RETURNS Float64 -> RETURN 0; END
+          FN bad(p: Point @multiowned) RETURNS Float64 -> RETURN 0; END
         FLUX
       }
 
-      it "raises a parser error: capabilities are not allowed on function parameters" do
+      it "raises an annotation error: capabilities are not allowed on function parameters" do
         expect { ast }.to raise_error(/Capability annotations are not allowed on function parameters/i)
+      end
+    end
+
+    context "@shared capability annotation on a function parameter" do
+      let(:code) {
+        <<~FLUX
+          STRUCT Point { x: Float64 }
+          FN ok(p: Point @shared) RETURNS Float64 -> RETURN 0; END
+        FLUX
+      }
+
+      it "is accepted as the explicit shared function-boundary contract" do
+        expect { ast }.not_to raise_error
       end
     end
   end

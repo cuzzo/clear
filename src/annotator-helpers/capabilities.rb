@@ -902,9 +902,9 @@ module CapabilityHelper
       ti = info.type
       if @og.live?(name)
         if kind == :resource || kind == :affine
-          og_set_moved(name)
+          og_set_moved(name, at_token: node.token, action: :capture)
         elsif ti.is_a?(Type) && ti.needs_escape_promotion?
-          og_set_moved(name)
+          og_set_moved(name, at_token: node.token, action: :capture)
         end
       end
       return

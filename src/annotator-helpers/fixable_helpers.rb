@@ -222,6 +222,9 @@ module FixableHelper
     return error!(use_node, "Use of moved value '#{name}'") unless og_node.move_line && og_node.move_col
 
     fixes = []
+    move_action = ownership_move_action_label(og_node.move_action)
+    move_suffix = move_action ? " by #{move_action}" : ""
+
     fixes << Fix.new(
       description: "Wrap the consuming reference with COPY at line #{og_node.move_line} " \
                    "(the original survives for the later use).",
@@ -262,11 +265,24 @@ module FixableHelper
     end
 
     fixable!(use_node,
-      message: "Use of moved value '#{name}' (moved at line #{og_node.move_line})",
+      message: "Use of moved value '#{name}' (moved at line #{og_node.move_line}#{move_suffix})",
       category: :ownership,
       level: :error,
       fixes: fixes,
       raise_in_collector: true)
+  end
+
+  def ownership_move_action_label(action)
+    case action
+    when :share then "SHARE"
+    when :give then "GIVE"
+    when :takes then "TAKES"
+    when :return then "RETURN"
+    when :next then "NEXT"
+    when :collect then "COLLECT"
+    when :capture then "capture"
+    else nil
+    end
   end
 
   # Type: `Integer literal N overflows T (range ...)`. When the

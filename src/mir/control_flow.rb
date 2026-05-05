@@ -680,6 +680,9 @@ class OwnershipDataflow
         consumed << name if state[name]
       end
 
+    when AST::ShareNode
+      collect_share_transfer(node, state, consumed)
+
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
       # COPY / FREEZE do NOT move the source.
 
@@ -713,13 +716,14 @@ class OwnershipDataflow
       next if copy_type?(n)
       consumed << name
     end
+    collect_share_transfers_in(node, state, consumed)
   end
 
   # Collect only explicitly moved identifiers (was_moved set by annotator).
   # Used for function calls where non-TAKES args are borrowed, not moved.
   def collect_explicit_moves(node, state)
     return [] unless node
-    consumed = []
+    consumed = Set.new
     walk_expr_skip_copy(node) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
       name = n.name.to_s
@@ -727,7 +731,29 @@ class OwnershipDataflow
       next if copy_type?(n)
       consumed << name
     end
-    consumed
+    collect_share_transfers_in(node, state, consumed)
+    consumed.to_a
+  end
+
+  def collect_share_transfers_in(node, state, consumed)
+    walk_expr(node) do |n|
+      collect_share_transfer(n, state, consumed) if n.is_a?(AST::ShareNode)
+    end
+  end
+
+  def collect_share_transfer(node, state, consumed)
+    source = node.value
+    return if source.is_a?(AST::CopyNode)
+
+    if source.is_a?(AST::Identifier)
+      ti = Type.from_node(source)
+      return if ti&.shared?
+      name = source.name.to_s
+      consumed << name if state[name]
+      return
+    end
+
+    collect_ownership_transfers(source, state, consumed)
   end
 
   # Collect resource captures from BG blocks nested in function/method call args.
@@ -828,6 +854,8 @@ class OwnershipDataflow
       node.pairs&.each { |_k, v| walk_expr(v.is_a?(Array) ? v[1] : v, &block) }
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
       walk_expr(node.value, &block)
+    when AST::ShareNode
+      walk_expr(node.value, &block)
     when AST::MoveNode
       walk_expr(node.value, &block)
     when AST::CapabilityWrap
@@ -849,6 +877,8 @@ class OwnershipDataflow
     case node
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
       # Do not recurse: COPY/FREEZE does not consume the source.
+    when AST::ShareNode
+      walk_expr_skip_copy(node.value, &block)
     when AST::BinaryOp
       walk_expr_skip_copy(node.left, &block)
       walk_expr_skip_copy(node.right, &block)
@@ -1015,6 +1045,8 @@ class UseAfterMoveChecker
       elsif arg.is_a?(AST::MoveNode)
         # GIVE wrapper: inner is being moved, not read.
         next
+      elsif arg.is_a?(AST::ShareNode)
+        check_share_reads(arg, state)
       elsif arg.is_a?(AST::CopyNode) || arg.is_a?(AST::CloneNode) || arg.is_a?(AST::FreezeNode)
         # COPY/FREEZE: the source IS read (must be live to copy/freeze from).
         check_reads_in_expr(arg.value, state)
@@ -1042,6 +1074,9 @@ class UseAfterMoveChecker
       unless node.value.is_a?(AST::Identifier)
         check_reads_in_expr(node.value, state)
       end
+
+    when AST::ShareNode
+      check_share_reads(node, state)
 
     when AST::BinaryOp
       check_reads_in_expr(node.left, state)
@@ -1082,6 +1117,18 @@ class UseAfterMoveChecker
     when AST::StringConcat
       # String interpolation parts may contain identifiers.
       node.parts&.each { |p| check_reads_in_expr(p, state) }
+    end
+  end
+
+  def check_share_reads(node, state)
+    source = node.value
+    if source.is_a?(AST::CopyNode)
+      check_reads_in_expr(source.value, state)
+    elsif source.is_a?(AST::Identifier)
+      ti = Type.from_node(source)
+      check_identifier_read(source.name.to_s, state, source.token) if ti&.shared?
+    else
+      check_reads_in_expr(source, state)
     end
   end
 
@@ -1726,6 +1773,8 @@ class BorrowChecker
     when AST::MoveNode
       inner = node.value
       names << inner.name.to_s if inner.is_a?(AST::Identifier)
+    when AST::ShareNode
+      _collect_share_moves(node, names)
     when AST::CopyNode, AST::CloneNode, AST::FreezeNode
       # COPY/FREEZE does NOT move the source.
     when AST::CapabilityWrap
@@ -1743,6 +1792,21 @@ class BorrowChecker
       next if copy_type?(ident)
       names << ident.name.to_s
     end
+  end
+
+  def _collect_share_moves(node, names)
+    source = node.value
+    return if source.is_a?(AST::CopyNode)
+
+    if source.is_a?(AST::Identifier)
+      ti = source.type_info rescue nil
+      ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      return if ti&.shared?
+      names << source.name.to_s
+      return
+    end
+
+    _collect_moves(source, names)
   end
 
   # Walk expression tree for was_moved identifiers, skipping CopyNode.
@@ -1771,6 +1835,8 @@ class BorrowChecker
     when AST::ListLit
       node.items&.each { |i| walk_for_was_moved(i, &block) }
     when AST::MoveNode
+      walk_for_was_moved(node.value, &block)
+    when AST::ShareNode
       walk_for_was_moved(node.value, &block)
     when AST::CapabilityWrap
       walk_for_was_moved(node.value, &block)

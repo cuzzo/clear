@@ -15,7 +15,7 @@
 -- blocks are kept alive until restoreFrameMark fires at function exit, and the
 -- block-index arithmetic in getMark/trimExcess is never invoked per-iteration.
 
-FN heavyInner!(outer: Int64) RETURNS String ->
+FN heavyInner!(outer: Int64) RETURNS !Void ->
     MUTABLE resp = "";
     MUTABLE i: Int64 = 0;
     WHILE i < 8 DO
@@ -31,16 +31,16 @@ FN heavyInner!(outer: Int64) RETURNS String ->
         resp = resp + i.toString() + ",";
         i += 1;
     END
-    RETURN resp;
+    ASSERT resp == "0,1,2,3,4,5,6,7,", "wrong result";
+    RETURN;
 END
 
-FN main() RETURNS Void ->
+FN main() RETURNS !Void ->
     -- 50 outer iterations.  Each calls heavyInner! which exercises the doubly-
     -- nested rewind path with overflow blocks.
     MUTABLE outer: Int64 = 0;
     WHILE outer < 50 DO
-        result = heavyInner!(outer);
-        ASSERT result == "0,1,2,3,4,5,6,7,", "wrong result";
+        heavyInner!(outer) OR EXIT;
         outer += 1;
     END
     print("PASS");

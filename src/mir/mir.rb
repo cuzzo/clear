@@ -1040,6 +1040,12 @@ module MIR
     include Expr
   end
 
+  # Promote a consumed Rc(T) handle into a fresh Arc(T).
+  # Zig: copy rc.ctrl.data.* into a new Arc, then release the consumed Rc.
+  SharePromote = Struct.new(:source, :zig_base, :alloc) do
+    include Expr
+  end
+
   # Rc/Arc retain (reference count increment).
   # Zig: CheatLib.arcRetain(T, name)  or  CheatLib.rcRetain(T, name)
   RcRetain = Struct.new(:source, :zig_base, :func) do

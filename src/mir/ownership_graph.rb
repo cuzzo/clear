@@ -14,7 +14,7 @@
 
 class OwnershipGraph
   Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line,
-                    :move_line, :move_col,
+                    :move_line, :move_col, :move_action,
                     keyword_init: true) do
     def live?;    state == :live; end
     def moved?;   state == :moved; end
@@ -66,7 +66,7 @@ class OwnershipGraph
   end
 
   # Move ownership from source to target. Invalidates source and all children.
-  def transfer(from, to, at_token: nil)
+  def transfer(from, to, at_token: nil, action: :move)
     source = @nodes[from]
     return unless source
 
@@ -79,11 +79,15 @@ class OwnershipGraph
     # Invalidate source and all owned children; record the move site
     # (when a token is given) so `clear fix` can locate where the
     # consuming reference lives.
-    if at_token
-      source.move_line = at_token.respond_to?(:line)   ? at_token.line   : nil
-      source.move_col  = at_token.respond_to?(:column) ? at_token.column : nil
-    end
-    invalidate(from)
+    record_move_site(source, at_token, action)
+    invalidate(from, source)
+  end
+
+  def mark_moved(path, at_token: nil, action: :move)
+    source = @nodes[path]
+    return unless source
+    record_move_site(source, at_token, action)
+    invalidate(path, source)
   end
 
   # Add a borrow edge. Returns nil on success, error string on conflict.
@@ -159,15 +163,31 @@ class OwnershipGraph
   # Use for branches that won't declare new nodes (IF/ELSE in flat code).
   def fork_lightweight
     states = {}
-    @nodes.each { |k, v| states[k] = v.state }
+    @nodes.each do |k, v|
+      states[k] = {
+        state: v.state,
+        move_line: v.move_line,
+        move_col: v.move_col,
+        move_action: v.move_action,
+      }
+    end
     { node_states: states, edge_count: @edges.size }
   end
 
   # Restore from lightweight snapshot: reset states and truncate edges.
   def restore_lightweight(snapshot)
-    snapshot[:node_states].each do |path, state|
+    snapshot[:node_states].each do |path, saved|
       node = @nodes[path]
-      node.state = state if node
+      next unless node
+
+      if saved.is_a?(Hash)
+        node.state = saved[:state]
+        node.move_line = saved[:move_line]
+        node.move_col = saved[:move_col]
+        node.move_action = saved[:move_action]
+      else
+        node.state = saved
+      end
     end
     target_count = snapshot[:edge_count]
     while @edges.size > target_count
@@ -194,7 +214,12 @@ class OwnershipGraph
           errors << "variable '#{path}' is moved in one branch but live in the other"
         when [:live, :dropped], [:dropped, :live]
         end
-        mine.state = :moved if theirs.moved?
+        if theirs.moved?
+          mine.state = :moved
+          mine.move_line = theirs.move_line
+          mine.move_col = theirs.move_col
+          mine.move_action = theirs.move_action
+        end
       end
     end
 
@@ -227,14 +252,26 @@ class OwnershipGraph
 
   private
 
-  def invalidate(path)
+  def invalidate(path, move_source = nil)
     node = @nodes[path]
     return unless node
+    if move_source && node != move_source
+      node.move_line = move_source.move_line
+      node.move_col = move_source.move_col
+      node.move_action = move_source.move_action
+    end
     node.state = :moved
     @children[path].each do |child|
-      @nodes[child]&.state = :moved
-      invalidate(child)  # recurse for nested children
+      invalidate(child, move_source)  # recurse for nested children
     end
+  end
+
+  def record_move_site(node, at_token, action)
+    node.move_action = action
+    return unless at_token
+
+    node.move_line = at_token.respond_to?(:line)   ? at_token.line   : nil
+    node.move_col  = at_token.respond_to?(:column) ? at_token.column : nil
   end
 
   def collect_descendants(path, result)

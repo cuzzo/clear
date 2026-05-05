@@ -250,6 +250,103 @@ RSpec.describe UseAfterMoveChecker do
       expect(df.exit_states["a"]).to eq(:moved)
       expect(df.exit_states["b"]).to eq(:owned)
     end
+
+    it "exit_states show moved after SHARE into a shared parameter" do
+      df = analyze_state(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN takes_shared(b: Box @shared) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          b = Box{ value: 1 };
+          takes_shared(SHARE b);
+          RETURN;
+        END
+      CLEAR
+      expect(df.exit_states["b"]).to eq(:moved)
+    end
+
+    it "exit_states show moved after SHARE in a binding RHS" do
+      df = analyze_state(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN main() RETURNS Void ->
+          b = Box{ value: 1 };
+          s = SHARE b;
+          RETURN;
+        END
+      CLEAR
+      expect(df.exit_states["b"]).to eq(:moved)
+      expect(df.exit_states["s"]).to eq(:owned)
+    end
+
+    it "exit_states preserve source ownership when SHARE wraps COPY" do
+      df = analyze_state(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN main() RETURNS Void ->
+          b = Box{ value: 1 };
+          s = SHARE COPY b;
+          RETURN;
+        END
+      CLEAR
+      expect(df.exit_states["b"]).to eq(:owned)
+      expect(df.exit_states["s"]).to eq(:owned)
+    end
+
+    it "exit_states show moved for nested affine values in complex SHARE expressions" do
+      df = analyze_state(<<~CLEAR)
+        STRUCT Inner { value: Int64 }
+        STRUCT Box { inner: Inner }
+        FN main() RETURNS Void ->
+          inner = Inner{ value: 1 };
+          s = SHARE Box{ inner: inner };
+          RETURN;
+        END
+      CLEAR
+      expect(df.exit_states["inner"]).to eq(:moved)
+      expect(df.exit_states["s"]).to eq(:owned)
+    end
+  end
+
+  describe "SHARE read checks" do
+    it "reports SHARE COPY reads of already moved values in call arguments" do
+      errors = check_errors(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN takes_shared(b: Box @shared) RETURNS Void -> RETURN; END
+        FN main() RETURNS Void ->
+          b = Box{ value: 1 };
+          moved = b;
+          takes_shared(SHARE COPY b);
+          RETURN;
+        END
+      CLEAR
+      expect(errors.any? { |e| e.include?("USE_AFTER_MOVE") && e.include?("b") }).to be true
+    end
+
+    it "reports SHARE COPY reads of already moved values in expressions" do
+      errors = check_errors(<<~CLEAR)
+        STRUCT Box { value: Int64 }
+        FN main() RETURNS Void ->
+          b = Box{ value: 1 };
+          moved = b;
+          s = SHARE COPY b;
+          RETURN;
+        END
+      CLEAR
+      expect(errors.any? { |e| e.include?("USE_AFTER_MOVE") && e.include?("b") }).to be true
+    end
+
+    it "treats SHARE of an existing shared handle as a read" do
+      token = Lexer::Token.new(:VAR_ID, "shared", 7, 3)
+      ident = AST::Identifier.new(token, "shared")
+      ident.full_type = Type.new(:Box, ownership: :shared)
+      share = AST::ShareNode.new(token, ident)
+      checker = UseAfterMoveChecker.new(double(name: "main"), double)
+      state = {
+        "shared" => OwnershipDataflow::OwnerEntry.new(state: :moved, allocator: :heap, needs_cleanup: true)
+      }
+
+      checker.send(:check_share_reads, share, state)
+      expect(checker.errors.first).to include("USE_AFTER_MOVE")
+      expect(checker.errors.first).to include("shared")
+    end
   end
 
   # =========================================================================

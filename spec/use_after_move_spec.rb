@@ -58,6 +58,27 @@ RSpec.describe "Use-after-move detection" do
     CLEAR
   end
 
+  it "reports TAKES when a method argument consumes a value" do
+    expect_error(<<~CLEAR, /Use of moved value 'item'.*moved at line 5 by TAKES/m)
+      STRUCT Item { v: Int64 }
+      FN main() RETURNS Void ->
+          MUTABLE pool: Item[10]@pool = [];
+          item = Item{ v: 1 };
+          pool.insert(item);
+          x = item.v;
+          RETURN;
+      END
+    CLEAR
+  end
+
+  it "maps move actions to user-facing labels" do
+    annotator = SemanticAnnotator.new
+
+    expect(annotator.send(:ownership_move_action_label, :return)).to eq("RETURN")
+    expect(annotator.send(:ownership_move_action_label, :collect)).to eq("COLLECT")
+    expect(annotator.send(:ownership_move_action_label, :capture)).to eq("capture")
+  end
+
   # =========================================================================
   # 3. Struct literal consumes captured variables.
   # =========================================================================
