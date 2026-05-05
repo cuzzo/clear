@@ -271,7 +271,7 @@ does single-cell whole-struct commits) is deferred.
 2. Extend `AtomicPtrMigrationSuggester` to recognize
    `@shared:versioned` sources whose WITH SNAPSHOT MUTABLE bodies
    are whole-struct replace.
-3. New `emit_atomic_ptr_upgrade_from_mvcc!` in doctor.rb.
+3. New `emit_atomic_ptr_upgrade_from_mvcc!` in `src/tools/doctor.rb`.
 
 **Risk:** Medium — touches mvcc-profile + the suggester. Not a
 correctness concern; a feature gap.
@@ -359,7 +359,7 @@ is intentional — different migration targets.
 | C. Consolidate two migration suggesters           | Medium | 2-4h | src/tools/ |
 | J. Dedicated `:atomic_ptr` cleanup kind           | Medium | 1h  | promotion_plan.rb, mir_emitter.rb |
 | E. Escape-via-RETURN test + investigate          | Medium | 2h  | transpile-tests/, possibly promotion_plan.rb |
-| H. Doctor MVCC→AtomicPtr upgrade signal           | Medium | 3h  | mvcc-profile.zig, suggester, doctor.rb |
+| H. Doctor MVCC→AtomicPtr upgrade signal           | Medium | 3h  | mvcc-profile.zig, suggester, src/tools/doctor.rb |
 | G. VOPR test for AtomicPtr                        | n/a   | n/a | (no action — deferred correctly) |
 | K. Consolidate doctor candidate lists             | n/a   | n/a | (no action — intentional parallelism) |
 

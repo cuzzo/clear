@@ -500,7 +500,7 @@ module Doctor
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
-    require_relative "tools/atomic_migration_suggester"
+    require_relative "atomic_migration_suggester"
     candidates = AtomicMigrationSuggester.analyze(File.read(src_path))
     return if candidates.empty?
 
@@ -536,7 +536,7 @@ module Doctor
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
-    require_relative "tools/atomic_ptr_migration_suggester"
+    require_relative "atomic_ptr_migration_suggester"
     candidates = AtomicPtrMigrationSuggester.analyze(File.read(src_path))
     return if candidates.empty?
 
@@ -725,7 +725,7 @@ module Doctor
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
-    require_relative "tools/atomic_ptr_migration_suggester"
+    require_relative "atomic_ptr_migration_suggester"
     candidates = AtomicPtrMigrationSuggester.analyze(File.read(src_path))
     versioned_candidates = candidates.select { |c| c[:sync] == :versioned }
     return if versioned_candidates.empty?
@@ -767,7 +767,7 @@ module Doctor
     src_path = File.join(profile_dir, 'source.cht')
     return unless File.exist?(src_path)
 
-    require_relative "tools/atomic_escape_suggester"
+    require_relative "atomic_escape_suggester"
     findings = AtomicEscapeSuggester.analyze(File.read(src_path))
     return if findings.empty?
 

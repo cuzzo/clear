@@ -4,7 +4,7 @@ require_relative "../src/tools/atomic_migration_suggester"
 
 # Atomics M1.9 / M1.10: static eligibility check for the
 # @shared:locked -> @shared:atomic migration. Tested in isolation;
-# the doctor wires the runtime contention signal in src/doctor.rb.
+# the doctor wires the runtime contention signal in src/tools/doctor.rb.
 RSpec.describe "AtomicMigrationSuggester (M1.9/M1.10 static eligibility)" do
   def candidates(src)
     AtomicMigrationSuggester.analyze(src)

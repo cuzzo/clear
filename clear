@@ -1111,7 +1111,7 @@ when 'profile'
   puts "  MVCC:     #{mvcc_file}" if File.exist?(mvcc_file)
 
 when 'doctor'
-  require_relative 'src/doctor'
+  require_relative 'src/tools/doctor'
   Doctor.run(ARGV[1])
 
 when 'fix'

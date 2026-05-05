@@ -5,7 +5,7 @@ require_relative "../src/tools/atomic_ptr_migration_suggester"
 # AtomicPtr M3.15: static eligibility check for the @shared:writeLocked
 # / @shared:locked (struct) -> @indirect:atomic migration. Tested in
 # isolation; the doctor wires the runtime contention signal in
-# src/doctor.rb (M3.16).
+# src/tools/doctor.rb (M3.16).
 RSpec.describe "AtomicPtrMigrationSuggester (M3.15 static eligibility)" do
   def candidates(src)
     AtomicPtrMigrationSuggester.analyze(src)
