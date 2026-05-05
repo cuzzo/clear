@@ -2294,3 +2294,83 @@ RSpec.describe MIRLowering do
     end
   end
 end
+
+RSpec.describe "MIRLowering allocation cleanup classification" do
+  let(:tok) { Lexer::Token.new(:KEYWORD, "test", 1, 1) }
+
+  def lowering(**opts)
+    MIRLowering.new(**opts)
+  end
+
+  def typed_node(type)
+    AST::Identifier.new(tok, "value").tap { |node| node.full_type = type }
+  end
+
+  it "only treats heap-backed MIR allocation nodes as cleanup-relevant" do
+    l = lowering
+
+    expect(l.send(:mir_allocates?, MIR::DupeSlice.new(MIR::Ident.new("s"), :heap))).to be(true)
+    expect(l.send(:mir_allocates?, MIR::DupeSlice.new(MIR::Ident.new("s"), :frame))).to be(false)
+    expect(l.send(:mir_allocates?, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap))).to be(true)
+    expect(l.send(:mir_allocates?, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :frame))).to be(false)
+    expect(l.send(:mir_allocates?, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :frame, nil))).to be(true)
+  end
+
+  it "recurses through casts when deciding whether an expression allocates" do
+    l = lowering
+    heap_copy = MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :heap)
+    frame_copy = MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :frame)
+
+    expect(l.send(:mir_allocates?, MIR::Cast.new(heap_copy, "[]const u8", :as))).to be(true)
+    expect(l.send(:mir_allocates?, MIR::Cast.new(frame_copy, "[]const u8", :as))).to be(false)
+  end
+
+  it "classifies direct allocation cleanup entries by allocation shape" do
+    l = lowering
+
+    expect(l.send(:hoist_cleanup_entry, MIR::DupeSlice.new(MIR::Ident.new("s"), :heap), nil)).to include(kind: :heap_string)
+    expect(l.send(:hoist_cleanup_entry, MIR::ConcatStr.new([MIR::Ident.new("a"), MIR::Ident.new("b")], :heap, "rt"), nil)).to include(kind: :heap_string)
+    expect(l.send(:hoist_cleanup_entry, MIR::AllocSlice.new("i64", MIR::Lit.new("4"), :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "i64")
+    expect(l.send(:hoist_cleanup_entry, MIR::MakeList.new("i64", [MIR::Lit.new("1")], :heap), nil)).to include(kind: :list, zig_type: "std.ArrayListUnmanaged(i64)")
+    expect(l.send(:hoist_cleanup_entry, MIR::HeapCreate.new("Node", MIR::StructInit.new("Node", []), :heap, nil), nil)).to include(kind: :heap_struct_plain, zig_type: "Node")
+    expect(l.send(:hoist_cleanup_entry, MIR::ContainerInit.new("std.ArrayListUnmanaged(i64)", :list_empty, :heap, nil), nil)).to include(kind: :list)
+  end
+
+  it "classifies DeepCopy cleanup entries by copy strategy" do
+    l = lowering
+
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :heap), nil)).to include(kind: :heap_string)
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "i64", :list_shallow, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "i64")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("xs"), nil, "Value", :list_deep, :heap), nil)).to include(kind: :takes_slice, elem_zig_type: "Value")
+    expect(l.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("v"), "Value", nil, :union, :heap), nil)).to include(kind: :non_copy_union, zig_type: "Value")
+  end
+
+  it "raises when a heap DeepCopy strategy lacks a cleanup mapping" do
+    expect {
+      lowering.send(:hoist_cleanup_entry, MIR::DeepCopy.new(MIR::Ident.new("x"), nil, nil, :full_value, :heap), nil)
+    }.to raise_error(/DeepCopy with unknown strategy :full_value/)
+  end
+
+  it "classifies capability wrappers and share promotion cleanup entries" do
+    l = lowering
+
+    locked = MIR::CapWrap.new(MIR::Ident.new("box"), "Box", :sync_only, "lockedCreate", "CheatLib.Locked(Box)", nil, :heap)
+    rw_locked = MIR::CapWrap.new(MIR::Ident.new("box"), "Box", :sync_only, "rwLockedCreate", "CheatLib.RwLocked(Box)", nil, :heap)
+    owned = MIR::CapWrap.new(MIR::Ident.new("box"), "Box", :own_only, nil, nil, "arcCreate", :heap)
+    passthrough = MIR::CapWrap.new(MIR::Ident.new("box"), "Box", :passthrough, nil, nil, nil, :heap)
+    shared_node = typed_node(Type.new(:Box, ownership: :shared))
+
+    expect(l.send(:hoist_cleanup_entry, locked, nil)).to include(kind: :locked, zig_type: "CheatLib.Locked(Box)")
+    expect(l.send(:hoist_cleanup_entry, rw_locked, nil)).to include(kind: :write_locked, zig_type: "CheatLib.RwLocked(Box)")
+    expect(l.send(:hoist_cleanup_entry, owned, shared_node)).to include(kind: :rc, zig_type: "CheatLib.Arc(Box)")
+    expect(l.send(:hoist_cleanup_entry, passthrough, nil)).to be_nil
+    expect(l.send(:hoist_cleanup_entry, MIR::SharePromote.new(MIR::Ident.new("box"), "Box", :heap), shared_node)).to include(kind: :rc, zig_type: "CheatLib.Arc(Box)")
+  end
+
+  it "delegates cleanup classification through Cast wrappers" do
+    l = lowering
+    inner = MIR::DeepCopy.new(MIR::Ident.new("s"), nil, nil, :string, :heap)
+
+    expect(l.send(:hoist_cleanup_entry, MIR::Cast.new(inner, "[]const u8", :as), nil)).to include(kind: :heap_string)
+  end
+end

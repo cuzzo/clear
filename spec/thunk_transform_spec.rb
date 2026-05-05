@@ -1,4 +1,5 @@
 require "rspec"
+require "ostruct"
 require_relative "../src/mir/thunk_transform"
 require_relative "../src/ast/lexer"
 require_relative "../src/ast/parser"
@@ -88,6 +89,201 @@ RSpec.describe "ThunkTransform scaffolding" do
         ThunkTransform::Emit.assert_non_fallible_ret!(fake_fn, "!i64")
       }.to raise_error(/emit_trampoline.*emit_mutual_trampoline.*errdefer/m)
     end
+  end
+end
+
+RSpec.describe "ThunkTransform emit coverage" do
+  let(:tok) { Lexer::Token.new(:IDENT, "x", 1, 1) }
+
+  class FakeThunkLowering
+    OP_TO_ZIG = {
+      ADD: "+",
+      SUB: "-",
+      MUL: "*",
+      DIV: "/",
+      LT_EQ: "<=",
+    }.freeze
+
+    def lower(ast)
+      case ast
+      when AST::Identifier
+        MIR::Ident.new(ast.name)
+      when AST::Literal
+        MIR::Lit.new(ast.value.to_s)
+      when AST::BinaryOp
+        MIR::BinOp.new(OP_TO_ZIG.fetch(ast.op, ast.op.to_s), lower(ast.left), lower(ast.right))
+      else
+        MIR::Ident.new(ast.to_s)
+      end
+    end
+
+    def emit_expr(mir)
+      case mir
+      when MIR::Ident then mir.name
+      when MIR::Lit then mir.value
+      when MIR::BinOp then "#{emit_expr(mir.left)} #{mir.op} #{emit_expr(mir.right)}"
+      else mir.to_s
+      end
+    end
+  end
+
+  def id(name)
+    AST::Identifier.new(tok, name)
+  end
+
+  def int(value)
+    AST::Literal.new(tok, :INT64, value)
+  end
+
+  def bin(left, op, right)
+    AST::BinaryOp.new(tok, left, op, right)
+  end
+
+  def fn(name, params:, return_type: "i64", plan: nil, mutual_plan: nil, tight: false)
+    OpenStruct.new(
+      name: name,
+      params: params,
+      return_type: return_type,
+      thunk_plan: plan,
+      mutual_thunk_plan: mutual_plan,
+      tight_reentrance: tight
+    )
+  end
+
+  def param(name, type = "i64")
+    { name: name, type: type }
+  end
+
+  it "emits heap-CPS trampoline scaffolding for simple recursive thunks" do
+    plan = OpenStruct.new(
+      base_cases: [{ cond_ast: bin(id("n"), :LT_EQ, int(1)), value_ast: int(1) }],
+      recurse_args: [bin(id("n"), :SUB, int(1))],
+      combine_lhs: id("n"),
+      combine_op: :MUL
+    )
+    zig = ThunkTransform::Emit.emit_trampoline(
+      fn("factorial", params: [param("n")], plan: plan),
+      FakeThunkLowering.new
+    )
+
+    expect(zig).to include("const Frame = struct")
+    expect(zig).to include("rt.checkYield();")
+    expect(zig).to include("const child = rt.heapAlloc().create(Frame) catch unreachable;")
+    expect(zig).to include(".n = current.n - 1")
+    expect(zig).to include("const result: i64 = current.n * current.child_result;")
+    expect(zig).to include("rt.heapAlloc().destroy(current);")
+  end
+
+  it "skips the scheduler yield line for tight thunk trampolines" do
+    plan = OpenStruct.new(
+      base_cases: [{ cond_ast: id("done"), value_ast: id("acc") }],
+      recurse_args: [id("n"), id("acc")],
+      combine_lhs: id("acc"),
+      combine_op: :ADD
+    )
+    zig = ThunkTransform::Emit.emit_trampoline(
+      fn("sum", params: [param("n"), param("acc")], plan: plan, tight: true),
+      FakeThunkLowering.new
+    )
+
+    expect(zig).to include("// (TIGHT: scheduler yield-check skipped)")
+    expect(zig).not_to include("rt.checkYield();")
+  end
+
+  it "raises directed errors for invalid simple thunk plans" do
+    expect {
+      ThunkTransform::Emit.emit_trampoline(fn("missing", params: []), FakeThunkLowering.new)
+    }.to raise_error(/has no thunk_plan/)
+
+    bad_op = OpenStruct.new(base_cases: [], recurse_args: [], combine_lhs: id("x"), combine_op: :MOD)
+    expect {
+      ThunkTransform::Emit.emit_trampoline(fn("bad_op", params: [], plan: bad_op), FakeThunkLowering.new)
+    }.to raise_error(/unsupported op MOD/)
+
+    bad_arity = OpenStruct.new(base_cases: [], recurse_args: [id("x")], combine_lhs: id("x"), combine_op: :ADD)
+    expect {
+      ThunkTransform::Emit.emit_trampoline(fn("bad_arity", params: [], plan: bad_arity), FakeThunkLowering.new)
+    }.to raise_error(/arg\/param count mismatch/)
+  end
+
+  it "qualifies only bare frame parameters" do
+    fn_node = fn("sample", params: [param("n"), param("name")])
+
+    expect(ThunkTransform::Emit.qualify_params("n + obj.n + name_extra + name", fn_node)).
+      to eq("current.n + obj.n + name_extra + current.name")
+  end
+
+  it "emits mutual-recursion trampolines with tagged frame variants" do
+    even = fn("even", params: [param("n")])
+    odd = fn("odd", params: [param("n")])
+    even_plan = OpenStruct.new(
+      base_cases: [{ cond_ast: bin(id("n"), :LT_EQ, int(0)), value_ast: int(1) }],
+      target_fn: "odd",
+      target_args: [bin(id("n"), :SUB, int(1))]
+    )
+    odd_plan = OpenStruct.new(
+      base_cases: [{ cond_ast: bin(id("n"), :LT_EQ, int(0)), value_ast: int(0) }],
+      target_fn: "even",
+      target_args: [bin(id("n"), :SUB, int(1))]
+    )
+    cycle = [even, odd]
+    even.mutual_thunk_plan = OpenStruct.new(cycle_fns: cycle, own_plan: even_plan)
+    odd.mutual_thunk_plan = OpenStruct.new(cycle_fns: cycle, own_plan: odd_plan)
+
+    zig = ThunkTransform::Emit.emit_mutual_trampoline(even, FakeThunkLowering.new)
+
+    expect(zig).to include("const Frame = union(enum)")
+    expect(zig).to include("even: struct")
+    expect(zig).to include("odd: struct")
+    expect(zig).to include("var current: Frame = .{ .even")
+    expect(zig).to include("current = .{ .odd = .{ .n = f.n - 1 } };")
+  end
+
+  it "raises directed errors for invalid mutual thunk plans" do
+    missing = fn("missing", params: [])
+    expect {
+      ThunkTransform::Emit.emit_mutual_trampoline(missing, FakeThunkLowering.new)
+    }.to raise_error(/has no mutual_thunk_plan/)
+
+    cf = fn("even", params: [param("n")])
+    cf.mutual_thunk_plan = OpenStruct.new(
+      cycle_fns: [cf],
+      own_plan: OpenStruct.new(base_cases: [], target_fn: "odd", target_args: [])
+    )
+    expect {
+      ThunkTransform::Emit.emit_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
+    }.to raise_error(/cycle member 'odd' not found/)
+
+    target = fn("odd", params: [param("n")])
+    cf.mutual_thunk_plan = OpenStruct.new(
+      cycle_fns: [cf, target],
+      own_plan: OpenStruct.new(base_cases: [], target_fn: "odd", target_args: [])
+    )
+    expect {
+      ThunkTransform::Emit.emit_mutual_arm(cf, cf.mutual_thunk_plan, "i64", FakeThunkLowering.new)
+    }.to raise_error(/target arg\/param count mismatch/)
+  end
+
+  it "keeps the legacy build hook as a no-op" do
+    expect(ThunkTransform::Emit.build([], nil, FakeThunkLowering.new, nil)).to be_nil
+  end
+end
+
+RSpec.describe "ThunkTransform recursive splitter helpers" do
+  let(:tok) { Lexer::Token.new(:IDENT, "f", 1, 1) }
+
+  it "walks arrays while looking for mutual-recursion calls" do
+    call = AST::FuncCall.new(tok, "even", [])
+
+    expect(ThunkTransform::RecursiveSplitter.contains_any_call?([AST::Identifier.new(tok, "x"), call], ["even"])).to be(true)
+    expect(ThunkTransform::RecursiveSplitter.contains_any_call?([AST::Identifier.new(tok, "x")], ["even"])).to be(false)
+  end
+
+  it "walks arrays while looking for self-recursion calls" do
+    call = AST::FuncCall.new(tok, "fact", [])
+
+    expect(ThunkTransform::RecursiveSplitter.contains_self_call?([AST::Identifier.new(tok, "x"), call], "fact")).to be(true)
+    expect(ThunkTransform::RecursiveSplitter.contains_self_call?([AST::Identifier.new(tok, "x")], "fact")).to be(false)
   end
 end
 

@@ -280,8 +280,8 @@ class PipelineHost
         return new_assign
       end
     when AST::UnaryOp
-      new_operand = substitute_placeholders(node.operand)
-      if new_operand != node.operand
+      new_operand = substitute_placeholders(node.right)
+      if new_operand != node.right
         new_uo = AST::UnaryOp.new(node.token, node.op, new_operand)
         copy_type_info(node, new_uo)
         return new_uo
