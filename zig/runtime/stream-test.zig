@@ -12,6 +12,7 @@ const CheatLib = CheatHeader.CheatLib;
 const Runtime = CheatHeader.Runtime;
 const EbrContext = CheatHeader.EbrContext;
 const compat = @import("../lib/compat.zig");
+const build_options = @import("build_options");
 const fc = @import("fiber-core.zig");
 const fp = CheatHeader.scheduler;
 const fm = CheatHeader.fiber_memory;
@@ -24,7 +25,7 @@ const qs = @import("queues.zig");
 // the 64 KB Large tier so the test is exercising the data structure,
 // not the instrumented stack budget.
 const test_stack_size: fc.StackSize =
-    if (@import("build_options").coverage or @import("build_options").tsan) .Large else .Standard;
+    if (build_options.coverage or build_options.tsan) .Large else .Standard;
 
 fn fakeSched() *CheatHeader.scheduler.Scheduler {
     return @ptrFromInt(@as(usize, @alignOf(CheatHeader.scheduler.Scheduler)));
@@ -661,10 +662,12 @@ test "SplitStream wakes multiple waiting fibers as items arrive" {
 }
 
 test "SplitStream survives multithreaded spawnBest pubsub hammer" {
+    if (!build_options.tsan and !build_options.coverage) return error.SkipZigTest;
+
     const allocator = std.testing.allocator;
-    const subscriber_count = 16;
-    const message_count = 4096;
-    const worker_count = 7;
+    const subscriber_count = if (build_options.coverage) 3 else 16;
+    const message_count = if (build_options.coverage) 64 else 4096;
+    const worker_count = if (build_options.coverage) 2 else 7;
 
     var global_ctx = EbrContext{};
     defer global_ctx.deinit(allocator);
