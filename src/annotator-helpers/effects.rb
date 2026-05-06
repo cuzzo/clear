@@ -1043,11 +1043,21 @@ module EffectTracker
         # ON MvccConflict action. Detect structurally rather than via
         # heap_count proxy (T1 cleanup).
         found[0] = true if n.snapshot_mode == :transaction
-        # WITH with a fallible lock-error clause (RAISE / EXIT) also
-        # routes through `return error.CheatError`. PASS / block-action
-        # exit via `break :__with_<id>` and don't raise.
-        if n.lock_error_clause && [:raise, :exit].include?(n.lock_error_clause[:action])
-          found[0] = true
+        # WITH with a fallible lock-error clause raises whenever a path
+        # through the lowering can hit `rt.setError(...); return
+        # error.CheatError;`. Two cases:
+        #   1. The user's matched-selector action is :raise or :exit —
+        #      the matched arm emits the raise directly.
+        #   2. The clause has bubble_types — unselected error variants
+        #      (typically LockCycle / Deadlock) auto-emit rt.setError +
+        #      return error.CheatError regardless of the user's action.
+        # When neither holds (user matched all selectors AND used a
+        # non-raising action like :pass / :return / :block), no path
+        # raises, so we don't flag the enclosing fn.
+        if (clause = n.lock_error_clause)
+          action_raises  = %i[raise exit].include?(clause[:action])
+          has_bubble     = clause[:bubble_types].is_a?(Array) && !clause[:bubble_types].empty?
+          found[0] = true if action_raises || has_bubble
         end
         n.body&.each { |stmt| traverse.call(stmt) } unless found[0]
         n.arms&.each { |arm| arm[:body]&.each { |stmt| traverse.call(stmt) } } unless found[0]
