@@ -87,7 +87,7 @@ RSpec.describe "WITH GUARD clauses" do
     }.to raise_error(CompilerError, /can only reference the guarded alias 'y'.*other/m)
   end
 
-  it "rejects mutable guarded aliases in v1" do
+  it "rejects MUTABLE guarded aliases when the body field-assigns through the alias" do
     expect {
       annotate(<<~CLEAR)
         STRUCT Counter { value: Int64 }
@@ -99,7 +99,128 @@ RSpec.describe "WITH GUARD clauses" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /GUARD aliases cannot be MUTABLE/)
+    }.to raise_error(CompilerError, /GUARD aliases cannot be MUTABLE and mutated inside the body.*'y'/m)
+  end
+
+  it "accepts a MUTABLE guarded alias when the body never mutates it" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE c AS MUTABLE y GUARD y.value > 0 {
+            v = y.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
+  it "rejects when a MUTABLE guarded alias is reassigned in the body" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE c AS MUTABLE y GUARD y.value > 0 {
+            y = Counter{ value: 9 };
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /declared MUTABLE and mutated/)
+  end
+
+  it "rejects when a MUTABLE guarded alias is mutated via compound assignment on a field" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE c AS MUTABLE y GUARD y.value > 0 {
+            y.value += 1;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /declared MUTABLE and mutated/)
+  end
+
+  it "rejects when a MUTABLE guarded alias is mutated via index assignment" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Bin { items: Int64[3] }
+        FN main() RETURNS Void ->
+          b = Bin{ items: [0_i64, 0_i64, 0_i64] } @shared:locked;
+          WITH EXCLUSIVE b AS MUTABLE y GUARD y.items[0] >= 0 {
+            y.items[0] = 7;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /declared MUTABLE and mutated/)
+  end
+
+  it "rejects when a MUTABLE guarded alias is passed to a helper that takes MUTABLE" do
+    # The caller's binding receives mutation through the callee's
+    # MUTABLE-by-ref parameter. Without the mutation-mark on
+    # MUTABLE-arg passing in function_analysis.rb, this case slipped
+    # through validate_with_guard_no_body_mutation! as a false negative.
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN bump!(MUTABLE c: Counter) RETURNS Void ->
+          c.value = c.value + 1;
+          RETURN;
+        END
+        FN main() RETURNS Void ->
+          c = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE c AS MUTABLE y GUARD y.value > 0 {
+            bump!(y);
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /declared MUTABLE and mutated/)
+  end
+
+  it "names only the mutated MUTABLE alias when multiple are MUTABLE but only one is mutated" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 1 } @shared:locked;
+          b = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE a AS MUTABLE x GUARD x.value > 0,
+               EXCLUSIVE b AS MUTABLE y GUARD y.value > 0 {
+            x.value = 9;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError) { |e|
+      expect(e.message).to match(/declared MUTABLE and mutated/)
+      expect(e.message).to include("'x'")
+      expect(e.message).not_to include("'y'")
+    }
+  end
+
+  it "accepts a multi-object GUARD with MUTABLE aliases when the body mutates none of them" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 1 } @shared:locked;
+          b = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE a AS MUTABLE x GUARD x.value > 0,
+               EXCLUSIVE b AS MUTABLE y GUARD y.value > 0 {
+            v = x.value + y.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.not_to raise_error
   end
 
   it "rejects non-Bool guard expressions" do
@@ -296,6 +417,135 @@ RSpec.describe "WITH GUARD clauses" do
     expect(zig).to include(".ret_commit")
     expect(zig).to include(".ret_no_commit")
     expect(zig).to include("return __poly_flow.ret")
+  end
+
+  it "accepts a multi-binding WITH where each capability has its own self-only GUARD" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 1 } @shared:locked;
+          b = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE a AS x GUARD x.value > 0,
+               EXCLUSIVE b AS y GUARD y.value > 0 {
+            v = x.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.not_to raise_error
+  end
+
+  it "rejects a GUARD predicate that references a sibling alias from the same WITH" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 5 };
+          c = Counter{ value: 3 };
+          WITH BORROWED a AS b, BORROWED c AS d GUARD d.value > b.value {
+            v = b.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError,
+      /sibling alias bound by the same WITH.*Multi-object consistency for aliased objects is not supported.*Use an `IF` guard clause inside the WITH body/m)
+  end
+
+  it "rejects a sibling-alias GUARD reference even when the sibling has its own GUARD" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 1 } @shared:locked;
+          b = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE a AS x GUARD x.value > 0,
+               EXCLUSIVE b AS y GUARD x.value == y.value {
+            v = x.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError, /Multi-object consistency for aliased objects is not supported/)
+  end
+
+  it "ANDs multiple per-capability self-only GUARD predicates in the emitted Zig" do
+    zig = transpile(<<~CLEAR)
+      STRUCT Counter { value: Int64 }
+      FN main() RETURNS !Void ->
+        a = Counter{ value: 1 };
+        b = Counter{ value: 1 };
+        WITH BORROWED a AS x GUARD x.value > 0,
+             BORROWED b AS y GUARD y.value > 0 {
+          v = x.value;
+        }
+        RETURN;
+      END
+    CLEAR
+
+    expect(zig).to match(/x\.value > 0\) and \(y\.value > 0/)
+  end
+
+  it "rejects a MUTABLE participating alias mutated in the body of a multi-binding GUARD" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 1 } @shared:locked;
+          b = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE a AS x GUARD x.value > 0,
+               EXCLUSIVE b AS MUTABLE y GUARD y.value > 0 {
+            y.value = 2;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError,
+      /GUARD aliases cannot be MUTABLE and mutated inside the body.*'y'.*declared MUTABLE and mutated/m)
+  end
+
+  it "rejects guard references to a non-alias symbol in a multi-binding WITH" do
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 1 } @shared:locked;
+          b = Counter{ value: 1 } @shared:locked;
+          other = 0;
+          WITH EXCLUSIVE a AS x GUARD x.value > other,
+               EXCLUSIVE b AS y GUARD y.value > 0 {
+            v = x.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError,
+      /can only reference the guarded alias 'x'.*Found 'other'/m)
+  end
+
+  it "rejects sibling-alias references even when the same name shadows an outer binding" do
+    # Outer scope has a binding named `b`; the WITH binds something
+    # AS `b` too. The predicate-identifier check fires on the
+    # sibling-alias set BEFORE outer-scope lookup, so the user gets
+    # the multi-object-consistency diagnostic — not a successful
+    # compile against the outer `b` (which would be wrong) or a
+    # generic "undefined variable" error (which would be confusing).
+    expect {
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          outer_a = Counter{ value: 5 };
+          b = 99_i64;
+          c = Counter{ value: 3 };
+          WITH BORROWED outer_a AS a, BORROWED c AS b GUARD a.value > b.value {
+            v = a.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    }.to raise_error(CompilerError,
+      /sibling alias bound by the same WITH.*Multi-object consistency for aliased objects is not supported/m)
   end
 
   it "keeps mutation-only universal polymorphic WITH on the non-flow helper" do

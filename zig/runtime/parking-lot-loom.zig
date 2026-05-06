@@ -2777,3 +2777,204 @@ pub fn testStreamCloseErrAtomicCoverage() !void {
         return error.LoomFailures;
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multi-fallible sorted-acquire pattern (emit_sorted_lock_acquires_fallible)
+//
+// Validates the SHAPE the CLEAR transpiler emits for `WITH EXCLUSIVE a,
+// EXCLUSIVE b ... ON ...` blocks — sort-by-address + sequential
+// acquire + held-bitmap-tracked reverse-release. Two fibers concurrently
+// run this pattern under SimAtomic interleavings, each grabbing the
+// SAME pair of locks (in arg order; the sort normalizes to address
+// order at the call site).
+//
+// Properties verified (across all PRNG schedules):
+//   1. No deadlock — sorted-acquire order prevents AB/BA cycles.
+//   2. Counter consistency — both counters end at 2*ITERS_PER_FIBER
+//      (each fiber bumps both per iteration, no torn writes).
+//   3. No leaked locks — held-bitmap reverse-release cleans up under
+//      any interleaving.
+//
+// Note on coverage: the OrErr / partial-acquire-failure path is
+// timeout-driven; SimAtomic does not model time, so the failure
+// branch cannot be deterministically scheduled here. The success-path
+// sequencing (which is the common case in practice) is what this
+// test exercises. Real timeout behaviour is covered by
+// transpile-tests/365_multi_lock_with_on_hammer.cht (TSan) and
+// transpile-tests/366_multi_lock_retry_recovers.cht (deterministic
+// retry recovery).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const MFF_ITERS: usize = if (build_options.coverage) 3 else 10;
+var g_mff_a: ParkingMutex = .{};
+var g_mff_b: ParkingMutex = .{};
+var g_mff_count_a: u64 = 0;
+var g_mff_count_b: u64 = 0;
+var g_mff_leak: bool = false;
+
+fn mffReset() void {
+    g_mff_a = .{};
+    g_mff_b = .{};
+    g_mff_count_a = 0;
+    g_mff_count_b = 0;
+    g_mff_leak = false;
+    g_mff_per_fiber[0] = 0;
+    g_mff_per_fiber[1] = 0;
+}
+
+// Mirror the shape emit_sorted_lock_acquires_fallible produces:
+// sort-by-address + sequential acquire + held-bitmap-tracked
+// reverse-release. Timeout / cycle / deadlock errors take the
+// failure path (release whatever's held in reverse, mark this iter
+// as a no-op, continue to the next iter). The success path bumps
+// per-iter counters (only when the iteration actually completes).
+fn mffSortedAcquireBody(per_fiber_counter: *u64) void {
+    var iter: usize = 0;
+    while (iter < MFF_ITERS) : (iter += 1) {
+        var held_a: bool = false;
+        var held_b: bool = false;
+
+        const lo: *ParkingMutex = if (@intFromPtr(&g_mff_a) <= @intFromPtr(&g_mff_b)) &g_mff_a else &g_mff_b;
+        const hi: *ParkingMutex = if (lo == &g_mff_a) &g_mff_b else &g_mff_a;
+
+        // Acquire lo first. On any error, skip the iteration.
+        lo.lock() catch {
+            continue;
+        };
+        if (lo == &g_mff_a) held_a = true else held_b = true;
+
+        // Acquire hi second. On error, the held-bitmap reverse-release
+        // fixup releases lo before we move on — exactly the path
+        // emit_sorted_lock_acquires_fallible takes when the Nth
+        // acquire fails after N-1 succeeded.
+        hi.lock() catch {
+            if (lo == &g_mff_a) {
+                if (held_a) { g_mff_a.unlock(); held_a = false; }
+            } else {
+                if (held_b) { g_mff_b.unlock(); held_b = false; }
+            }
+            continue;
+        };
+        if (hi == &g_mff_a) held_a = true else held_b = true;
+
+        // Critical section: bump both counters and the per-fiber
+        // success counter. Single-fiber-at-a-time under loom, so a
+        // straight += is consistent.
+        g_mff_count_a += 1;
+        g_mff_count_b += 1;
+        per_fiber_counter.* += 1;
+
+        // Release in reverse-acquisition order (LIFO), gated by the
+        // held flags — same shape as the success-path release.
+        if (hi == &g_mff_a) {
+            if (held_a) { g_mff_a.unlock(); held_a = false; }
+        } else {
+            if (held_b) { g_mff_b.unlock(); held_b = false; }
+        }
+        if (lo == &g_mff_a) {
+            if (held_a) { g_mff_a.unlock(); held_a = false; }
+        } else {
+            if (held_b) { g_mff_b.unlock(); held_b = false; }
+        }
+
+        // Invariant: held bitmap fully cleared after a successful
+        // iteration. Reverse-release branches above must have
+        // toggled both flags off.
+        if (held_a or held_b) {
+            g_mff_leak = true;
+        }
+    }
+}
+
+var g_mff_per_fiber: [2]u64 = [_]u64{0} ** 2;
+
+fn entryMff0() callconv(.c) void {
+    mffSortedAcquireBody(&g_mff_per_fiber[0]);
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryMff1() callconv(.c) void {
+    mffSortedAcquireBody(&g_mff_per_fiber[1]);
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testMultiFallibleSortedAcquire() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const seed_count: usize = fuzzSeedCount(500);
+    var failures: usize = 0;
+    var failing_seed: ?u64 = null;
+
+    for (0..seed_count) |seed| {
+        var ph = LoomHarness.initPrng(allocator, seed);
+        harness = &ph;
+
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        drainSchedState();
+
+        mffReset();
+
+        ph.createThread(0, @intFromPtr(&entryMff0)) catch continue;
+        ph.createThread(1, @intFromPtr(&entryMff1)) catch continue;
+
+        ph.run() catch {
+            // Step limit — fibers couldn't complete. Treated as a real
+            // failure since address-ordered acquisition cannot deadlock.
+            if (failing_seed == null) failing_seed = seed;
+            failures += 1;
+            ph.deinit();
+            continue;
+        };
+
+        // Counter consistency invariant: each successful iteration
+        // bumps BOTH counters together under the multi-lock, so
+        // count_a == count_b == sum of per-fiber successful iters.
+        // A torn write or a held-bitmap miscount would break this.
+        const successful: u64 = g_mff_per_fiber[0] + g_mff_per_fiber[1];
+        if (g_mff_count_a != successful or g_mff_count_b != successful) {
+            std.debug.print(
+                "\nmff seed {d}: torn counters: a={d} b={d} successful={d} (per-fiber {d}, {d})\n",
+                .{ seed, g_mff_count_a, g_mff_count_b, successful, g_mff_per_fiber[0], g_mff_per_fiber[1] },
+            );
+            if (failing_seed == null) failing_seed = seed;
+            failures += 1;
+        }
+        if (g_mff_leak) {
+            std.debug.print("\nmff seed {d}: held-bitmap leaked\n", .{seed});
+            if (failing_seed == null) failing_seed = seed;
+            failures += 1;
+        }
+        if (g_mff_a.isLocked() or g_mff_b.isLocked()) {
+            std.debug.print(
+                "\nmff seed {d}: leaked lock (a_locked={} b_locked={})\n",
+                .{ seed, g_mff_a.isLocked(), g_mff_b.isLocked() },
+            );
+            if (failing_seed == null) failing_seed = seed;
+            failures += 1;
+        }
+
+        ph.deinit();
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print(
+            "\nmff sorted-acquire: {d}/{d} seeds failed (first failing seed: {?})\n",
+            .{ failures, seed_count, failing_seed },
+        );
+        return error.LoomFailures;
+    }
+}

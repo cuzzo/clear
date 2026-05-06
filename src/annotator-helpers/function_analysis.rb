@@ -374,6 +374,25 @@ module FunctionAnalysis
         if current_scope.is_immutable?(arg_node.name)
           emit_immutable_arg_error!(arg_node, current_scope, i + 1, param[:name])
         end
+
+        # Rule 3: Mark the caller's binding as mutated-through-call on
+        # the SymbolEntry. The callee receives a mutable reference
+        # (CLEAR's MUTABLE-by-ref calling convention), so any mutation
+        # inside the callee is observable at the caller's binding —
+        # post-annotation passes like the GUARD MUTABLE-mutation check
+        # (validate_with_guard_no_body_mutation!) need to see this.
+        #
+        # Critically, we mark ONLY entry.mutated, NOT
+        # decl_node.var_mutated. The latter drives the var/const emit
+        # decision for the Zig-level binding, and at the Zig level the
+        # call site doesn't visibly mutate the local — Zig's
+        # "var-never-mutated" safety check would fire if we promoted
+        # the binding to `var` here. The "MUTABLE never reassigned"
+        # lint also reads decl_node.var_mutated; keeping that path
+        # untouched preserves existing lint behavior.
+        if arg_node.is_a?(AST::Identifier)
+          mark_var_mutated_via_call(arg_node.name)
+        end
       end
 
       # C. Handle ownership (Affine / Linear):

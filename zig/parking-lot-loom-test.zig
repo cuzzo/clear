@@ -52,6 +52,7 @@ const tests = [_]Test{
     .{ .name = "parking fsm-rwlock loom: 1 FSM writer + 1 FSM reader exhaustive (256 schedules)", .func = &ploom.testFsmRwlockWriterReader },
     .{ .name = "parking fsm-rwlock loom: 1W+2R FSM 3^10 base-3 exhaustive (wake-on-undo guard)", .func = &ploom.testFsmRwlockOneWriterTwoReaders },
     .{ .name = "stream close-err-atomic: producer/consumer handshake on closed+err (4096 schedules)", .func = &ploom.testStreamCloseErrAtomicCoverage },
+    .{ .name = "multi-fallible sorted-acquire: 2-fiber address-ordered held-bitmap (500 seeds)",      .func = &ploom.testMultiFallibleSortedAcquire },
 };
 
 pub fn main() !void {

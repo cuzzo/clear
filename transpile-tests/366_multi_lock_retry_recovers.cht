@@ -1,0 +1,64 @@
+-- Deterministic VOPR-style test for the RETRY(N) path of
+-- emit_sorted_lock_acquires_fallible: drive a real LockTimeout via
+-- a holder that naps longer than the debug-build timeout (100ms),
+-- then verify the waiter's RETRY clause recovers and observes the
+-- post-release state.
+--
+-- This exercises (per iteration of the retry loop):
+--   * Sorted-acquire begins; first lock fails with LockTimeout.
+--   * Reverse-release fixup runs (in this case nothing to release;
+--     all subsequent retries also start fresh).
+--   * `if (__retry + 1 < N) continue;` jumps back to the top.
+--   * Re-sort + re-acquire. Eventually the holder releases and
+--     acquisition succeeds.
+--
+-- A regression that left a held lock from a partial-acquire would
+-- deadlock the retry; a regression that lost track of the held
+-- bitmap on retry would double-release on the eventual success.
+
+STRUCT Counter { value: Int64 }
+
+FN napFor(ms: Int64) RETURNS !Void ->
+    sleep(ms);
+    RETURN;
+END
+
+FN main() RETURNS !Void ->
+    MUTABLE a = Counter{ value: 10 } @shared:locked;
+    MUTABLE b = Counter{ value: 20 } @shared:locked;
+
+    -- Holder: takes a's lock for ~200ms (longer than the 100ms debug
+    -- lock_timeout_ms), then increments and releases.
+    holder = BG {
+        WITH EXCLUSIVE a AS x {
+            napFor(200);
+            x.value = x.value + 100;
+        }
+    };
+
+    -- Waiter: starts after holder has the lock, then attempts the
+    -- multi-lock. The first acquire of `a` will time out; RETRY(10)
+    -- gives plenty of attempts to reacquire after the holder releases.
+    waiter = BG {
+        napFor(20);
+        WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
+            x.value = x.value + 1;
+            y.value = y.value + 1;
+        } ON LockTimeout RETRY(10) THEN RAISE
+    };
+
+    NEXT holder;
+    NEXT waiter;
+
+    -- Holder ran first (acquired 'a' and bumped to 110), then waiter
+    -- retried until it acquired both, and bumped each by 1.
+    -- Final: a = 10 + 100 + 1 = 111, b = 20 + 1 = 21.
+    WITH EXCLUSIVE a AS x {
+        ASSERT x.value == 111, "a: holder + waiter retry-recovered";
+    }
+    WITH EXCLUSIVE b AS y {
+        ASSERT y.value == 21, "b: waiter retry-recovered";
+    }
+
+    RETURN;
+END

@@ -2214,13 +2214,21 @@ class MIRLowering
       c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
     }
     needs_sort = fallible_caps.length >= 2
-    if needs_sort && clause
-      raise "WITH with 2+ fallible lock captures cannot combine with an ON/RETRY clause yet; " \
-            "split into separate WITH blocks (node at line #{node.token&.line})"
-    end
 
     if needs_sort
-      bindings << emit_sorted_lock_acquires(fallible_caps)
+      if clause
+        bindings << emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, node)
+        # Per-cap descriptors for the BC backend's fallible-acquire dispatch.
+        # Zig backend renders inline above; this populates fallible_clauses
+        # so BC consumers see the same shape as the single-cap path.
+        fallible_caps.each do |cap|
+          var_name = with_cap_var_name(cap[:var_node])
+          alias_name = cap[:alias] || var_name
+          fallible_clauses << build_fallible_clause_mir(var_name, alias_name, clause)
+        end
+      else
+        bindings << emit_sorted_lock_acquires(fallible_caps, node)
+      end
     end
 
     (node.capabilities || []).each do |cap|
@@ -2830,10 +2838,9 @@ class MIRLowering
     rt_obj     = resolved.is_a?(Type) ? resolved : Type.new(resolved)
     bare_t_zig = rt_obj.respond_to?(:bare_data_type) ? rt_obj.bare_data_type.zig_type : rt_obj.zig_type
     body_mir = lower_body(node.body)
-    guarded = (node.capabilities || []).find { |c| c[:guard_expr] }
+    guard_cond = combined_guard_cond(node)
     if polymorphic_flow_required?(node)
-      guard_cond = guarded ? lower(guarded[:guard_expr]) : nil
-      guard_fail = guarded ? guard_fail_flow_body(node) : []
+      guard_fail = guard_cond ? guard_fail_flow_body(node) : []
       MIR::PolymorphicMutateFlow.new(
         cell_zig, @rt_name, safe_alias, bare_t_zig,
         @current_fn_return_payload_zig || "void",
@@ -2890,12 +2897,20 @@ class MIRLowering
   end
 
   def wrap_body_with_guard(node, body_mir, with_label)
-    guarded = (node.capabilities || []).find { |cap| cap[:guard_expr] }
-    return body_mir unless guarded
+    guard_cond = combined_guard_cond(node)
+    return body_mir unless guard_cond
 
-    guard_cond = lower(guarded[:guard_expr])
     fail_body = guard_fail_body(node, with_label)
     [MIR::IfStmt.new(guard_cond, body_mir, fail_body)]
+  end
+
+  # Lower every per-capability `guard_expr` and AND them together so the
+  # body runs only when every predicate holds (multi-object consistency).
+  def combined_guard_cond(node)
+    guarded = (node.capabilities || []).select { |cap| cap[:guard_expr] }
+    return nil if guarded.empty?
+    guarded.map { |g| lower(g[:guard_expr]) }
+           .reduce { |acc, e| MIR::BinOp.new("and", acc, e) }
   end
 
   def guard_fail_body(node, with_label)
@@ -3061,6 +3076,43 @@ class MIRLowering
     end
   end
 
+  # Build the per-capture entry list shared by the panicking and
+  # fallible sorted-acquire emitters. `with_node` is the WithBlock AST
+  # node; its object_id provides a per-WITH suffix so locals declared
+  # at the bindings level (`__sort_guard_*`, `__held_*`) can never
+  # collide with locals from a sibling or nested WITH that happens to
+  # be lowered into the same Zig scope. Each WITH wraps its bindings
+  # in its own labeled block today, so collisions are impossible in
+  # practice, but the suffix makes the property defensible against
+  # future lowering changes.
+  def build_sorted_acquire_entries(fallible_caps, fallible:, with_node: nil)
+    suffix = with_node ? "_#{with_node.object_id.abs}" : ""
+    fallible_caps.each_with_index.map do |cap, i|
+      var_name   = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
+      alias_name = cap[:alias] || var_name
+      resolved   = cap[:resolved_type]
+      zig_var    = @do_capture_map&.dig(var_name) || var_name
+      var_storage = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.storage : nil
+      is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
+      lock_expr  = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
+      addr_expr  = is_arc ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
+      var_sync   = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.sync : nil
+      panic_method, err_method = case cap[:capability]
+                                 when :EXCLUSIVE
+                                   var_sync == :write_locked ? %w[write writeOrErr] : %w[acquire acquireOrErr]
+                                 when :write_locked_read
+                                   %w[read readOrErr]
+                                 end
+      {
+        i: i, alias_name: alias_name,
+        guard_var: "__sort_guard#{suffix}_#{i}",
+        held_var:  "__held#{suffix}_#{i}",
+        lock_expr: lock_expr, addr_expr: addr_expr,
+        method: fallible ? err_method : panic_method,
+      }
+    end
+  end
+
   # Emit Zig for acquiring N>=2 fallible lock captures in runtime
   # pointer-address order. Produces:
   #   - one __guardN per capture (undefined, typed via @TypeOf)
@@ -3069,37 +3121,11 @@ class MIRLowering
   #   - a for-loop over __order with a switch to call the right acquire()
   #   - defer __guardN.release() for each guard
   #   - const alias = __guardN.get() aliases
-  # Uses panic-variant acquire methods (acquire / read / write) so the
-  # existing behavior (panic on LockError) is preserved. MVP scope; the
-  # fallible variants would need a combined-clause design.
-  def emit_sorted_lock_acquires(fallible_caps)
+  # Uses panic-variant acquire methods (acquire / read / write); no
+  # ON-clause handling. The fallible-variant emitter sits beside this.
+  def emit_sorted_lock_acquires(fallible_caps, with_node = nil)
     n = fallible_caps.length
-    entries = fallible_caps.each_with_index.map do |cap, i|
-      var_name   = cap[:var_node].respond_to?(:name) ? cap[:var_node].name : cap[:var_node].to_s
-      alias_name = cap[:alias] || var_name
-      resolved   = cap[:resolved_type]
-      zig_var    = @do_capture_map&.dig(var_name) || var_name
-      # lock_expr is the "logical lock container" we call .acquire()/.read()/.write() on.
-      var_storage = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.storage : nil
-      is_arc = (var_storage == :shared || var_storage == :multiowned) || resolved&.any_rc?
-      lock_expr  = is_arc ? "#{zig_var}.ctrl.data.*" : zig_var
-      # addr_expr is the stable runtime identity used as the sort key.
-      # Arc's ctrl.data is already a *T — take that pointer directly, no
-      # deref-then-addr. For direct Locked(T), take &zig_var (stable for
-      # the variable's lifetime, and captures across fibers share it).
-      addr_expr  = is_arc ? "#{zig_var}.ctrl.data" : "&#{zig_var}"
-      var_sync   = cap[:var_node].respond_to?(:symbol) ? cap[:var_node].symbol&.sync : nil
-      method = case cap[:capability]
-               when :EXCLUSIVE
-                 var_sync == :write_locked ? "write" : "acquire"
-               when :write_locked_read
-                 "read"
-               end
-      {
-        i: i, alias_name: alias_name, guard_var: "__sort_guard_#{i}",
-        lock_expr: lock_expr, addr_expr: addr_expr, method: method,
-      }
-    end
+    entries = build_sorted_acquire_entries(fallible_caps, fallible: false, with_node: with_node)
 
     guard_decls = entries.map { |e|
       "var #{e[:guard_var]}: @TypeOf(#{e[:lock_expr]}.#{e[:method]}()) = undefined;"
@@ -3138,6 +3164,129 @@ class MIRLowering
                 #{switch_arms}
                 else => unreachable,
               }
+          }
+      }
+      #{defer_releases}
+      #{alias_decls}
+    ZIG
+  end
+
+  # Fallible variant of emit_sorted_lock_acquires. Uses the OrErr
+  # acquire methods, tracks held guards in a per-cap bool, and on any
+  # acquisition error releases held guards in reverse-acquisition order
+  # before either retrying (`RETRY(N) THEN ...`) or running the user's
+  # ON action. Defers at WITH-scope use the same held-bitmap so they're
+  # safe no-ops on the failure path. The on-success path leaves all
+  # __heldN flags true; the WITH body runs with all locks held; defers
+  # release on scope exit as usual.
+  def emit_sorted_lock_acquires_fallible(fallible_caps, clause, with_label, with_node)
+    n = fallible_caps.length
+    entries = build_sorted_acquire_entries(fallible_caps, fallible: true, with_node: with_node)
+
+    action_zig = emit_lock_action_zig(clause, with_label, with_node)
+    matched    = clause[:matched_types] || []
+    bubble     = clause[:bubble_types]  || []
+    retries    = clause[:retries]
+    line       = with_node.token&.line.to_s
+    acq_loop   = "__acq_sort_#{with_node.object_id.abs}"
+
+    guard_decls = entries.map { |e|
+      "var #{e[:guard_var]}: @TypeOf(try #{e[:lock_expr]}.#{e[:method]}()) = undefined;"
+    }.join("\n")
+    held_decls = entries.map { |e| "var #{e[:held_var]}: bool = false;" }.join("\n")
+
+    ptr_init   = entries.map { |e| "@intFromPtr(#{e[:addr_expr]})" }.join(", ")
+    order_init = (0...n).to_a.join(", ")
+
+    acquire_arms = entries.map { |e|
+      <<~ZIG.rstrip
+        #{e[:i]} => {
+                                        if (#{e[:lock_expr]}.#{e[:method]}()) |__g| {
+                                            #{e[:guard_var]} = __g;
+                                            #{e[:held_var]} = true;
+                                        } else |__err_inner| {
+                                            __err_caught = __err_inner;
+                                            __success = false;
+                                        }
+                                    },
+      ZIG
+    }.join("\n                                ")
+
+    release_arms = entries.map { |e|
+      "#{e[:i]} => if (#{e[:held_var]}) { #{e[:guard_var]}.release(); #{e[:held_var]} = false; },"
+    }.join("\n                            ")
+
+    handler_arms = []
+    unless matched.empty?
+      matched_errs = matched.map { |t| "error.#{AST.zig_name_of_type(t)}" }.join(", ")
+      handler_arms << "#{matched_errs} => { #{action_zig} }"
+    end
+    bubble.each do |t|
+      zig = AST.zig_name_of_type(t)
+      kind = AST.kind_of_type(t)
+      handler_arms << %Q(error.#{zig} => { #{@rt_name}.setError(.#{kind}, @intFromEnum(ErrorName.#{zig}), "lock #{zig}", #{line}); return error.CheatError; })
+    end
+    # Catch-all: __err_caught is `?anyerror`, so Zig requires an else
+    # arm. Set a generic System error before propagating so callers
+    # don't see CheatError with stale rt.__error content from a prior
+    # operation. This path covers Zig errors that aren't in the
+    # OrErr method's documented set (defensive).
+    handler_arms << %Q(else => |__err_other| { #{@rt_name}.setError(.System, 0, @errorName(__err_other), #{line}); return error.CheatError; })
+    handler_switch = "switch (__err_caught.?) {\n                    #{handler_arms.join(",\n                    ")},\n                }"
+
+    retry_branch = if retries
+      "if (__retry + 1 < #{retries}) continue;"
+    else
+      "// no retries configured"
+    end
+
+    defer_releases = entries.map { |e| "defer if (#{e[:held_var]}) #{e[:guard_var]}.release();" }.join("\n")
+    alias_decls    = entries.map { |e|
+      "const #{e[:alias_name]} = #{e[:guard_var]}.get();\n_ = &#{e[:alias_name]};"
+    }.join("\n")
+
+    <<~ZIG.rstrip
+      #{guard_decls}
+      #{held_decls}
+      #{acq_loop}: {
+          var __retry: usize = 0;
+          while (true) : (__retry += 1) {
+              const __ptrs = [_]usize{ #{ptr_init} };
+              var __order = [_]u8{ #{order_init} };
+              var __i: usize = 0;
+              while (__i < #{n}) : (__i += 1) {
+                  var __j: usize = 0;
+                  while (__j + 1 < #{n}) : (__j += 1) {
+                      if (__ptrs[__order[__j]] > __ptrs[__order[__j + 1]]) {
+                          const __tmp = __order[__j];
+                          __order[__j] = __order[__j + 1];
+                          __order[__j + 1] = __tmp;
+                      }
+                  }
+              }
+              var __success = true;
+              var __err_caught: ?anyerror = null;
+              var __k: usize = 0;
+              while (__k < #{n}) : (__k += 1) {
+                  const __idx = __order[__k];
+                  switch (__idx) {
+                      #{acquire_arms}
+                      else => unreachable,
+                  }
+                  if (!__success) break;
+              }
+              if (__success) break :#{acq_loop};
+              var __r: usize = __k;
+              while (__r > 0) {
+                  __r -= 1;
+                  switch (__order[__r]) {
+                      #{release_arms}
+                      else => unreachable,
+                  }
+              }
+              #{retry_branch}
+              #{handler_switch}
+              unreachable;
           }
       }
       #{defer_releases}

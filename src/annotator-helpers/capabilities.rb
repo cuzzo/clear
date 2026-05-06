@@ -278,12 +278,22 @@ module CapabilityHelper
 
   def guard_identifier_allowed!(node)
     return unless @current_guard_context
-    alias_name = @current_guard_context[:alias]
-    return if node.name == alias_name || %w[TRUE FALSE].include?(node.name)
+    own_alias = @current_guard_context[:alias]
+    return if node.name == own_alias || %w[TRUE FALSE].include?(node.name)
 
-    error!(node,
-      "WITH GUARD can only reference the guarded alias '#{alias_name}'. " \
-      "Found '#{node.name}'. Multi-object consistency in guard clauses is not yet supported.")
+    sibling_aliases = @current_guard_context[:sibling_aliases] || []
+    if sibling_aliases.include?(node.name)
+      error!(node,
+        "WITH GUARD '#{own_alias}' references '#{node.name}', a sibling alias bound by the same WITH. " \
+        "Multi-object consistency for aliased objects is not supported: synchronized sources " \
+        "(locked, atomic, versioned) cannot provide a cross-object atomic snapshot, so a guard " \
+        "spanning multiple aliases would be checking values that are no longer consistent by the " \
+        "time the body runs. Each GUARD may only reference its own alias. " \
+        "Use an `IF` guard clause inside the WITH body for cross-alias checks.")
+    else
+      error!(node,
+        "WITH GUARD can only reference the guarded alias '#{own_alias}'. Found '#{node.name}'.")
+    end
   end
 
   def record_guard_call_site!(node)
@@ -331,37 +341,76 @@ module CapabilityHelper
   end
 
   def validate_and_visit_with_guards!(node)
-    guarded = (node.capabilities || []).select { |cap| cap[:guard_expr] }
+    caps = node.capabilities || []
+    guarded = caps.select { |cap| cap[:guard_expr] }
     return if guarded.empty?
 
-    if guarded.length > 1 || (node.capabilities || []).length > 1
-      error!(node, "WITH GUARD supports exactly one guarded binding in this release; multi-object guard consistency is not yet supported.")
-    end
     error!(node, "WITH GUARD is not supported with WITH MATCH yet.") if node.arms
-
-    cap = guarded.first
-    error!(node, "WITH GUARD aliases cannot be MUTABLE in this release.") if cap[:alias_mutable]
     if node.snapshot_mode == :transaction
       error!(node, "WITH GUARD is not supported on mutable SNAPSHOT transactions in this release.")
     end
 
-    alias_name = cap[:alias]
-    unless alias_name
-      error!(node, "WITH GUARD requires an AS alias so the guard can reference the unwrapped value.")
+    # Every participating capability must bind an alias so the guard can
+    # name it, and every alias must be immutable. MUTABLE aliases could
+    # change inside the body and silently invalidate the predicate.
+    missing_alias = caps.reject { |c| c[:alias] }
+    unless missing_alias.empty?
+      error!(node, "WITH GUARD requires every participating binding to have an AS alias so the guard can reference the unwrapped value.")
     end
 
+    aliases = caps.map { |c| c[:alias] }.compact
     prev_guard = @current_guard_context
-    @current_guard_context = { with_node: node, guard_expr: cap[:guard_expr], alias: alias_name }
     begin
-      visit(cap[:guard_expr])
+      guarded.each do |gcap|
+        own = gcap[:alias]
+        siblings = aliases - [own]
+        @current_guard_context = {
+          with_node: node, guard_expr: gcap[:guard_expr],
+          alias: own, sibling_aliases: siblings,
+        }
+        visit(gcap[:guard_expr])
+
+        guard_type = gcap[:guard_expr].type_info
+        unless guard_type && guard_type.resolved == :Bool
+          error!(gcap[:guard_expr], "WITH GUARD expression must return Bool, got #{guard_type || 'Unknown'}.")
+        end
+      end
     ensure
       @current_guard_context = prev_guard
     end
+  end
 
-    guard_type = cap[:guard_expr].type_info
-    unless guard_type && guard_type.resolved == :Bool
-      error!(cap[:guard_expr], "WITH GUARD expression must return Bool, got #{guard_type || 'Unknown'}.")
-    end
+  # Post-body check: a MUTABLE GUARD alias is fine as long as the body
+  # never mutates it. Mutation inside the body could silently invalidate
+  # the predicate evaluated at WITH entry, so reject only the cases that
+  # actually exhibit mutation. Must run AFTER `visit_stmts(node.body)` so
+  # the annotator's existing `mark_var_mutated` calls (assignment, field/
+  # index store, mutating method dispatch, RESTRICT borrow) have stamped
+  # the alias's SymbolEntry. Lookup-only — no AST re-walking.
+  def validate_with_guard_no_body_mutation!(node)
+    caps = node.capabilities || []
+    return if caps.none? { |cap| cap[:guard_expr] }
+
+    mutable_caps = caps.select { |c| c[:alias_mutable] && c[:alias] }
+    return if mutable_caps.empty?
+
+    mutated = mutable_caps.map { |c| c[:alias] }.select { |a| alias_mutated?(a) }
+    return if mutated.empty?
+
+    names = mutated.map { |n| "'#{n}'" }.join(', ')
+    is_or_are = mutated.length == 1 ? 'is' : 'are'
+    error!(node,
+      "WITH GUARD aliases cannot be MUTABLE and mutated inside the body: " \
+      "#{names} #{is_or_are} declared MUTABLE and mutated inside the WITH. " \
+      "Only MUTABLE objects that change inside the body are rejected because their value " \
+      "could be modified after the GUARD predicate evaluates, silently invalidating it. " \
+      "Drop the mutation, drop MUTABLE from the alias, or move the mutation outside the guarded WITH.")
+  end
+
+  def alias_mutated?(alias_name)
+    scope = lookup_scope_for(alias_name)
+    return false unless scope
+    !!scope.locals[alias_name]&.mutated
   end
 
   # Resolve and validate a single capability entry from a WITH block.

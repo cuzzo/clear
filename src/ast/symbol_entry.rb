@@ -69,6 +69,12 @@
 class SymbolEntry
   attr_accessor :reg, :type, :mutable, :storage, :sync, :rebindable,
                 :size, :capabilities, :valid,
+                :mutated,        # set by mark_var_mutated when the binding
+                                 # is reassigned, field/index-assigned, or
+                                 # passed to a mutates_receiver method.
+                                 # Lives on the SymbolEntry (not just the
+                                 # decl node) so WITH aliases — which have
+                                 # no `reg` — also record their mutation.
                 :invalid_reason, :resource, :close_zig, :read,
                 :scope,          # Back-reference to owning Scope (set by Scope#declare)
                 :scope_depth,    # Atomics M2.6: declaring scope depth (0 = root)

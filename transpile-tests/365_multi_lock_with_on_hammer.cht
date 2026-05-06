@@ -1,0 +1,88 @@
+-- Hammer test for emit_sorted_lock_acquires_fallible: many fibers
+-- concurrently entering multi-fallible WITH+ON blocks with overlapping
+-- lock sets. Verifies:
+--   1. No deadlock — sorted-acquire prevents cycles.
+--   2. No torn writes — counters under multi-lock are consistent.
+--   3. No leaked locks on the partial-acquire / reverse-release path.
+--   4. ON LockTimeout RETRY(N) THEN RAISE recovers under contention.
+-- Runs under TSan in CI via the standard transpile-test pipeline.
+
+STRUCT Counter { value: Int64 }
+
+FN main() RETURNS !Void ->
+    MUTABLE a = Counter{ value: 0 } @shared:locked;
+    MUTABLE b = Counter{ value: 0 } @shared:locked;
+
+    -- Per-fiber iteration count. Tuned to be:
+    --   * Large enough that real contention develops between the
+    --     fibers (each iteration takes both locks) — torn writes or
+    --     leaked locks show up as a counter mismatch.
+    --   * Small enough to stay fast under both TSan (~10x slowdown)
+    --     and kcov instrumentation (~3-5x). The CLEAR runtime
+    --     doesn't read Zig's build_options.coverage flag, so the
+    --     iteration count is fixed at the source level rather than
+    --     gated. 25 × 4 fibers × 2 lock acquires each = 200 lock
+    --     ops per pair, enough to exercise the sorted-acquire path
+    --     under contention without bloating CI time.
+    iters = 25_i64;
+
+    f1 = BG {
+        MUTABLE i: Int64 = 0;
+        WHILE i < iters DO
+            WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
+                x.value = x.value + 1;
+                y.value = y.value + 1;
+            } ON LockTimeout RETRY(2) THEN RAISE
+            i = i + 1;
+        END
+    };
+    f2 = BG {
+        MUTABLE i: Int64 = 0;
+        WHILE i < iters DO
+            WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
+                x.value = x.value + 1;
+                y.value = y.value + 1;
+            } ON LockTimeout RETRY(2) THEN RAISE
+            i = i + 1;
+        END
+    };
+    f3 = BG {
+        MUTABLE i: Int64 = 0;
+        WHILE i < iters DO
+            WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
+                x.value = x.value + 1;
+                y.value = y.value + 1;
+            } ON LockTimeout RETRY(2) THEN RAISE
+            i = i + 1;
+        END
+    };
+    f4 = BG {
+        MUTABLE i: Int64 = 0;
+        WHILE i < iters DO
+            WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
+                x.value = x.value + 1;
+                y.value = y.value + 1;
+            } ON LockTimeout RETRY(2) THEN RAISE
+            i = i + 1;
+        END
+    };
+
+    NEXT f1;
+    NEXT f2;
+    NEXT f3;
+    NEXT f4;
+
+    -- Both counters must equal the sum of all per-fiber bumps.
+    -- A torn write or dropped increment would show up as a mismatch.
+    -- A held-but-not-released lock from the partial-acquire fixup
+    -- would deadlock these reads and time us out.
+    expected = iters * 4_i64;
+    WITH EXCLUSIVE a AS x {
+        ASSERT x.value == expected, "counter a torn or lock leaked";
+    }
+    WITH EXCLUSIVE b AS y {
+        ASSERT y.value == expected, "counter b torn or lock leaked";
+    }
+
+    RETURN;
+END

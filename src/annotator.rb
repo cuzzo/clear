@@ -2296,6 +2296,11 @@ private
     node.error_kind = method_def[:error_kind] if method_def[:error_kind]
     node.error_type = method_def[:error_type] if method_def[:error_type]
     current_fn_ctx.alloc_count += 1 if current_fn_ctx && (method_def[:allocates] || method_def[:can_fail])
+
+    if method_def[:mutates_receiver] && node.is_a?(AST::MethodCall)
+      root = chain_root_name(node.object)
+      mark_var_mutated(root) if root
+    end
   end
 
   def visit_FuncCall(node)
@@ -2477,6 +2482,8 @@ private
     #    instead of by-value getAt().
     if matched_def[:mutates_receiver] && node.is_a?(AST::MethodCall)
       mark_chain_needs_mut_ref!(node.object)
+      root = chain_root_name(node.object)
+      mark_var_mutated(root) if root
     end
 
     # 6. Collection type narrowing (e.g., append narrows Any[] → T[])
@@ -2967,8 +2974,40 @@ private
   def mark_var_mutated(name)
     scope = lookup_scope_for(name)
     return unless scope
-    decl_node = scope.locals[name]&.reg
-    decl_node.var_mutated = true if decl_node&.respond_to?(:var_mutated=)
+    entry = scope.locals[name]
+    return unless entry
+    entry.mutated = true
+    entry.reg.var_mutated = true if entry.reg&.respond_to?(:var_mutated=)
+  end
+
+  # Mark a binding as mutated INDIRECTLY (e.g. via a function call that
+  # takes the binding by mutable reference). Sets only the SymbolEntry
+  # flag — does NOT touch decl_node.var_mutated. The lint
+  # ("MUTABLE never reassigned") and the var/const emit decision both
+  # key off decl_node.var_mutated; promoting them here would cause Zig
+  # to emit `var` for a local that has no visible Zig-level mutation,
+  # tripping Zig's "var never mutated" safety check. The SymbolEntry
+  # flag is what post-annotation passes (like
+  # validate_with_guard_no_body_mutation!) read to detect any mutation,
+  # direct or indirect.
+  def mark_var_mutated_via_call(name)
+    scope = lookup_scope_for(name)
+    return unless scope
+    entry = scope.locals[name]
+    return unless entry
+    entry.mutated = true
+  end
+
+  # Walk a chained access expression (GetField/GetIndex chain rooted at an
+  # Identifier) and return the root identifier name, or nil if the chain
+  # doesn't bottom out at one. Used to attribute receiver mutation back to
+  # the declared binding.
+  def chain_root_name(node)
+    curr = node
+    while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
+      curr = curr.target
+    end
+    curr.is_a?(AST::Identifier) ? curr.name : nil
   end
 
   # ==========================================
@@ -3041,6 +3080,13 @@ private
         error!(assignment_node, "Cannot modify index of immutable list '#{var_name}'")
       end
       mark_var_mutated(var_name)
+    else
+      # Chained target (e.g. `y.items[0] = ...`). Mark the root binding
+      # mutated so post-annotation passes (GUARD validation, etc.) can see
+      # it. Immutability is enforced by the assignment_field visitor on
+      # the way up.
+      root = chain_root_name(index_node.target)
+      mark_var_mutated(root) if root
     end
 
     # 3. Type Check — for map assignments, use the unwrapped value type (V, not ?V).
@@ -3102,6 +3148,12 @@ private
       if syn == :locked || syn == :write_locked || syn == :always_mutable
         assignment_node.auto_lock = { var: var_name, sync: syn }
       end
+    else
+      # Chained target (e.g. `y.items.field = ...` or `obj.f.g = ...`).
+      # Attribute mutation to the chain root so post-annotation passes
+      # see it without re-walking the AST.
+      root = chain_root_name(field_node.target)
+      mark_var_mutated(root) if root
     end
 
     # 4. Type Check
@@ -4378,6 +4430,7 @@ private
       expanded_capabilities.each { |cap| declare_capability_scope!(cap) }
       validate_and_visit_with_guards!(node)
       visit_stmts(node.body)
+      validate_with_guard_no_body_mutation!(node)
       fallible_sources = retryable_with_fallible_sources(node.body)
       if is_snapshot_txn_body && !fallible_sources.empty?
         retryable_with_fallible_body_error!(
