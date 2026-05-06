@@ -42,10 +42,20 @@ ruby benchmarks/runner.rb --smoke benchmarks/server/02_json_api/  # CLEAR only, 
 ruby benchmarks/runner.rb --fast  benchmarks/sequential/04_hashmap/ # All langs, 0.25x scale
 ruby benchmarks/runner.rb --release benchmarks/sequential/04_hashmap/ # 5x scale, best of 5
 ruby benchmarks/runner.rb --smoke --all                            # Smoke test everything
+ruby benchmarks/runner.rb --leak --all --bencher-json bencher.json  # Leak checks + Bencher BMF JSON
 
 # Core count
 ruby benchmarks/runner.rb --cores=2 benchmarks/concurrent/09_kvstore/
 ```
+
+## Bencher CI
+
+Leak-mode benchmark CI writes Bencher JSON for each shard and uploads it with `bencher run`.
+GitHub Actions needs:
+
+- `secrets.BENCHER_API_TOKEN` -- Bencher API token
+- `vars.BENCHER_PROJECT` -- optional Bencher project slug; CI uses Bencher's on-the-fly project mode when unset
+- `vars.BENCHER_TESTBED` -- optional; defaults to `ubuntu-latest`
 
 The runner automatically:
 - Transpiles `.cht` -> Zig -> binary (ReleaseFast)

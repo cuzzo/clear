@@ -2,6 +2,7 @@
 
 require 'fileutils'
 require 'benchmark'
+require 'json'
 
 # Find the Zig compiler (local or system). Resolve to absolute path
 # since the runner chdir's into zig/ for compilation.
@@ -12,6 +13,27 @@ ZIG = [
 ].find { |p| !p.empty? && File.exist?(p) } || "zig"
 
 RUN_TIMEOUT = (ENV['BENCH_TIMEOUT'] || 2).to_i
+
+$bencher_metrics = nil
+
+def bencher_benchmark_name(dir, label = nil)
+  return dir unless label
+
+  "#{dir}/#{label}"
+end
+
+def bencher_record(name, measure, value)
+  return unless $bencher_metrics
+
+  $bencher_metrics[name] ||= {}
+  $bencher_metrics[name][measure] = { "value" => value.to_f }
+end
+
+def write_bencher_json(path)
+  dir = File.dirname(path)
+  FileUtils.mkdir_p(dir) unless dir == "."
+  File.write(path, JSON.pretty_generate($bencher_metrics || {}))
+end
 
 # Per-benchmark timeout: read TIMEOUT file if present.
 # Returns nil for server benchmarks with no file (no timeout = original behavior).
@@ -27,6 +49,30 @@ end
 def bench_threads(dir)
   f = "#{dir}/THREADS"
   File.exist?(f) ? File.read(f).strip : nil
+end
+
+def leak_sources(dir)
+  if File.exist?("#{dir}/bench.cht")
+    ["#{dir}/bench.cht"]
+  elsif File.exist?("#{dir}/server.cht")
+    ["#{dir}/server.cht"]
+  else
+    Dir.glob("#{dir}/bench*.cht").sort
+  end
+end
+
+def apply_shard(dirs, shard_spec)
+  return dirs unless shard_spec
+  unless shard_spec =~ /\A(\d+)\/(\d+)\z/
+    abort "Invalid --shard=#{shard_spec.inspect}; expected INDEX/COUNT"
+  end
+
+  index = $1.to_i
+  count = $2.to_i
+  abort "Invalid --shard=#{shard_spec.inspect}; COUNT must be > 0" if count <= 0
+  abort "Invalid --shard=#{shard_spec.inspect}; INDEX must be in 0...COUNT" if index < 0 || index >= count
+
+  dirs.each_with_index.select { |_, i| (i % count) == index }.map(&:first)
 end
 
 # Benchmark output protocol:
@@ -60,6 +106,56 @@ def measure_min(command, runs = 5, timeout: RUN_TIMEOUT)
   [best_time, best_info]
 end
 
+def server_benchmark?(dir)
+  File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.cht")
+end
+
+def run_leak_check(dir, bench_bin, timeout_s: 60, timeout_ok: false)
+  scale = ENV['BENCH_SCALE'] || "1.0"
+  threads = bench_threads(dir) || ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+  threads = "0" if threads.empty?
+
+  cmd = "BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} timeout #{timeout_s} ./#{bench_bin}"
+  output = nil
+  elapsed_s = Benchmark.realtime { output = `#{cmd} 2>&1` }
+  exit_status = $?.exitstatus
+  leak_lines = output.lines.select { |l| l.include?("leaked:") }
+  leak_count = leak_lines.size
+  status = :clean
+
+  if exit_status == 124
+    if timeout_ok
+      puts "    STARTED (#{timeout_s}s liveness check; server kept running)"
+      status = :started
+    else
+      puts "    TIMEOUT (#{timeout_s}s in debug mode)"
+      status = :timeout
+    end
+  elsif exit_status != 0 && exit_status != 124
+    puts "    CRASH (exit #{exit_status}), leaks: #{leak_count}"
+    status = :crash
+    if leak_count > 0
+      sources = output.scan(/in (\S+) \(/).flatten.uniq
+      sources.each { |s| puts "      - #{s}" }
+    end
+  elsif leak_count > 0
+    puts "    LEAKS: #{leak_count}"
+    status = :leaks
+    sources = output.scan(/in (\S+) \(/).flatten
+    tallied = sources.tally.sort_by { |_, c| -c }
+    tallied.each { |fn, count| puts "      - #{fn} (#{count}x)" }
+  else
+    puts "    CLEAN"
+  end
+
+  {
+    status: status,
+    elapsed_ms: elapsed_s * 1000.0,
+    exit_status: exit_status,
+    leak_count: leak_count,
+  }
+end
+
 # -------------------------------------------------------------------------
 # Standard benchmark: self-contained binary, timed externally
 # -------------------------------------------------------------------------
@@ -69,13 +165,9 @@ def run_bench(dir)
   bto = bench_timeout(dir)
 
   # Detect server benchmarks (have client.go + server.cht)
-  if File.exist?("#{dir}/client.go") && File.exist?("#{dir}/server.cht")
-    if leak_mode
-      puts "=== LEAK CHECK: #{dir} === SKIP (server benchmark)"
-      return
-    end
+  if server_benchmark?(dir)
     # Server benchmarks: only apply timeout if TIMEOUT file exists.
-    return run_server_bench(dir, timeout: bto)
+    return run_server_bench(dir, timeout: bto) unless leak_mode
   end
 
   puts leak_mode ? "=== LEAK CHECK: #{dir} ===" : "=== BENCHMARK: #{dir} ==="
@@ -83,6 +175,7 @@ def run_bench(dir)
   has_c    = !leak_mode && File.exist?("#{dir}/bench.c")
   has_rust = !leak_mode && File.exist?("#{dir}/bench.rs") && system("command -v rustc > /dev/null 2>&1")
   has_go   = !leak_mode && File.exist?("#{dir}/bench.go") && system("command -v go > /dev/null 2>&1")
+  variant_sources = !leak_mode && !File.exist?("#{dir}/bench.cht") ? Dir.glob("#{dir}/bench*.cht").sort : []
 
   # Clean stale binaries before recompiling
   %w[bench_c bench_rust bench_go bench_clear].each { |b| FileUtils.rm_f("#{dir}/#{b}") }
@@ -115,48 +208,118 @@ def run_bench(dir)
     end
   end
 
+  if variant_sources.any?
+    scale = ENV['BENCH_SCALE'] || "1.0"
+    runs = case ENV['BENCH_MODE']
+           when 'fast' then 3
+           when 'release' then 5
+           when 'leak' then 1
+           when 'smoke' then 1
+           else 5
+           end
+    threads = bench_threads(dir) || ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
+    threads = "0" if threads.empty?
+    jemalloc_lib = Dir.glob("/lib/x86_64-linux-gnu/libjemalloc.so*").first ||
+                   Dir.glob("/usr/lib/libjemalloc.so*").first ||
+                   Dir.glob("/usr/local/lib/libjemalloc.so*").first
+    jemalloc_preload = jemalloc_lib ? "LD_PRELOAD=#{jemalloc_lib} " : ""
+    jemalloc_note = jemalloc_lib ? ", jemalloc" : ""
+
+    results = {}
+    peak_rss = {}
+    bench_info = []
+
+    variant_sources.each do |source_path|
+      label = File.basename(source_path, ".cht")
+      bin = "#{dir}/bench_clear_#{label}"
+      puts "Compiling CLEAR variant #{label}..."
+      output = `./clear build --optimized #{source_path} -o #{bin} 2>&1`
+      unless File.exist?(bin)
+        puts "WARNING: CLEAR variant #{label} failed: #{output.lines.last&.strip}"
+        next
+      end
+      puts "Running CLEAR variant #{label} (best of #{runs}, CLEAR_THREADS=#{threads}#{jemalloc_note}, scale=#{scale})..."
+      results[label], info = measure_min("#{jemalloc_preload}BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} ./#{bin}", runs, timeout: bto || RUN_TIMEOUT)
+      bench_info += info
+      rss_output = `timeout #{bto || RUN_TIMEOUT}s sh -c "#{jemalloc_preload}CLEAR_THREADS=#{threads} /usr/bin/time -v ./#{bin}" 2>&1`
+      peak_rss[label] = $1.to_i if rss_output =~ /Maximum resident set size.*?:\s*(\d+)/
+      FileUtils.rm_f(bin)
+    end
+
+    puts "\nRESULTS for #{dir}:"
+    results.each do |label, t|
+      rss_str = peak_rss[label] ? "  RSS: #{peak_rss[label]} KB" : ""
+      if t.nil?
+        puts "#{'%-22s' % "CLEAR #{label}"} TIMEOUT (#{bto || RUN_TIMEOUT}s)#{rss_str}"
+      else
+        puts "#{'%-22s' % "CLEAR #{label}"} #{'%.4f' % t} s#{rss_str}"
+      end
+    end
+    bench_info.uniq.each { |line| puts line }
+    return
+  end
+
   # 4. Compile CLEAR
   # bench.zt: pure Zig benchmark (runtime-level, no CLEAR transpilation needed).
   # bench.cht with "@use_zig": scheduler-dependent Zig (e.g. socket I/O, fiber benchmarks).
   has_clear = false
   if leak_mode
     # Leak mode: build with ./clear build (debug, GPA leak detection enabled)
-    if File.exist?("#{dir}/bench.cht")
-      src = File.read("#{dir}/bench.cht")
+    sources = leak_sources(dir)
+    if sources.any?
+      sources.each do |source_path|
+        label = File.basename(source_path, ".cht")
+        puts "  #{label}:"
+        src = File.read(source_path)
 
-      # @leak_skip: benchmark has no heap allocations, leak check is pointless
-      if src.include?("@leak_skip")
-        puts "  SKIP (no heap allocations)"
-        return
-      end
+        # @leak_skip: benchmark has no heap allocations, leak check is pointless
+        if src.include?("@leak_skip")
+          puts "    SKIP (no heap allocations)"
+          next
+        end
 
-      # @leak: old -> new  (reduce iteration counts for debug mode)
-      build_src = "#{dir}/bench.cht"
-      subs = src.scan(/^--\s*@leak:\s*(.+?)\s*->\s*(.+?)\s*$/)
-      if subs.any?
-        # Split into comment and code lines so sub! doesn't match the @leak comment itself
-        comment_lines = []
-        code_lines = []
-        src.each_line { |l| (l.match?(/^\s*--/) ? comment_lines : code_lines) << l }
-        code_text = code_lines.join
-        # gsub!, not sub!: the same iteration count usually appears in BOTH
-        # the producer loop and the consumer loop (e.g. spawn N futures /
-        # await N futures), and replacing only the first leaves the
-        # consumer indexing past the producer's reduced length.
-        subs.each { |old, new_val| code_text.gsub!(old.strip, new_val.strip) }
-        patched = comment_lines.join + code_text
-        build_src = "/tmp/bench_leak_#{File.basename(dir)}.cht"
-        File.write(build_src, patched)
-      end
+        # @leak: old -> new  (reduce iteration counts for debug mode)
+        build_src = source_path
+        subs = src.scan(/^--\s*@leak:\s*(.+?)\s*->\s*(.+?)\s*$/)
+        if subs.any?
+          # Split into comment and code lines so sub! doesn't match the @leak comment itself
+          comment_lines = []
+          code_lines = []
+          src.each_line { |l| (l.match?(/^\s*--/) ? comment_lines : code_lines) << l }
+          code_text = code_lines.join
+          # gsub!, not sub!: the same iteration count usually appears in BOTH
+          # the producer loop and the consumer loop (e.g. spawn N futures /
+          # await N futures), and replacing only the first leaves the
+          # consumer indexing past the producer's reduced length.
+          subs.each { |old, new_val| code_text.gsub!(old.strip, new_val.strip) }
+          patched = comment_lines.join + code_text
+          build_src = "/tmp/bench_leak_#{File.basename(dir)}_#{label}.cht"
+          File.write(build_src, patched)
+        end
 
-      puts "Compiling CLEAR (debug, leak detection)..."
-      output = `./clear build #{build_src} -o #{dir}/bench_clear 2>&1`
-      if File.exist?("#{dir}/bench_clear")
-        has_clear = true
-      else
-        puts "WARNING: debug build failed: #{output.lines.last&.strip}"
+        bench_bin = "#{dir}/bench_clear_#{label}"
+        puts "    Compiling CLEAR (debug, leak detection)..."
+        output = nil
+        build_elapsed_s = Benchmark.realtime { output = `./clear build #{build_src} -o #{bench_bin} 2>&1` }
+        if File.exist?(bench_bin)
+          has_clear = true
+          is_server = server_benchmark?(dir)
+          metric_name = bencher_benchmark_name(dir, label)
+          bencher_record(metric_name, "leak-build-ms", build_elapsed_s * 1000.0)
+          leak_result = run_leak_check(
+            dir,
+            bench_bin,
+            timeout_s: is_server ? 1 : 60,
+            timeout_ok: is_server,
+          )
+          bencher_record(metric_name, "leak-run-ms", leak_result[:elapsed_ms])
+          bencher_record(metric_name, "leak-count", leak_result[:leak_count])
+        else
+          puts "    WARNING: debug build failed: #{output.lines.last&.strip}"
+        end
+        FileUtils.rm_f(build_src) if build_src != source_path
+        FileUtils.rm_f(bench_bin)
       end
-      FileUtils.rm_f(build_src) if build_src != "#{dir}/bench.cht"
     else
       puts "No CLEAR source found, skipping."
     end
@@ -214,44 +377,12 @@ def run_bench(dir)
          when 'fast' then 3
          when 'release' then 5
          when 'leak' then 1
+         when 'smoke' then 1
          else 5
          end
 
   # Leak mode: run CLEAR once with timeout, capture stderr for GPA leak reports
-  if leak_mode
-    if has_clear
-      threads = bench_threads(dir) || ENV['BENCH_CORES'] || ENV['CLEAR_THREADS'] || `nproc 2>/dev/null`.strip
-      threads = "0" if threads.empty?
-      cmd = "BENCH_SCALE=#{scale} CLEAR_THREADS=#{threads} timeout 60 ./#{dir}/bench_clear"
-      output = `#{cmd} 2>&1`
-      exit_status = $?.exitstatus
-      leak_lines = output.lines.select { |l| l.include?("leaked:") }
-      leak_count = leak_lines.size
-
-      if exit_status == 124
-        puts "  TIMEOUT (60s in debug mode)"
-      elsif exit_status != 0 && exit_status != 124
-        puts "  CRASH (exit #{exit_status}), leaks: #{leak_count}"
-        # Show first leak source if any
-        if leak_count > 0
-          sources = output.scan(/in (\S+) \(/).flatten.uniq
-          sources.each { |s| puts "    - #{s}" }
-        end
-      elsif leak_count > 0
-        puts "  LEAKS: #{leak_count}"
-        sources = output.scan(/in (\S+) \(/).flatten
-        # Group by unique source function
-        tallied = sources.tally.sort_by { |_, c| -c }
-        tallied.each { |fn, count| puts "    - #{fn} (#{count}x)" }
-      else
-        puts "  CLEAN"
-      end
-    else
-      puts "  SKIP (no CLEAR source or build failed)"
-    end
-    FileUtils.rm_f("#{dir}/bench_clear")
-    return
-  end
+  return if leak_mode
 
   bench_info = []  # BENCH_INFO: lines surfaced from any bench
 
@@ -611,6 +742,8 @@ if __FILE__ == $0
   mode = "normal"
   scale = "1.0"
   cores = `nproc 2>/dev/null`.strip
+  shard_spec = ENV['BENCH_SHARD']
+  bencher_json_path = nil
 
   args = ARGV.dup
   while (arg = args.shift)
@@ -626,6 +759,12 @@ if __FILE__ == $0
       scale = "1.0"
     when /^--cores=(\d+)$/
       cores = $1
+    when /^--shard=(\d+\/\d+)$/
+      shard_spec = $1
+    when /^--bencher-json=(.+)$/
+      bencher_json_path = $1
+    when "--bencher-json"
+      bencher_json_path = args.shift || abort("Missing path after --bencher-json")
     when "--leak"
       mode = "leak"
       scale = "0.001"
@@ -656,9 +795,16 @@ if __FILE__ == $0
     end
   end
 
+  dirs = apply_shard(dirs.uniq.sort, shard_spec)
+  if shard_spec
+    puts "Benchmark shard #{shard_spec}: #{dirs.length} benchmark(s)"
+  end
+
   ENV['BENCH_MODE'] = mode
   ENV['BENCH_SCALE'] = scale
   ENV['BENCH_CORES'] = cores
 
+  $bencher_metrics = {} if bencher_json_path
   dirs.each { |d| run_bench(d); puts }
+  write_bencher_json(bencher_json_path) if bencher_json_path
 end

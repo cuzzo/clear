@@ -148,6 +148,96 @@ jobs:
       - working-directory: transpile-tests/ffi-integration
         run: zig build test
 
+  benchmark-leak:
+    # Leak-mode benchmark CI compiles every CLEAR benchmark in debug/GPA
+    # mode and runs a reduced workload. It does not compare timings; it
+    # catches benchmark-only leaks and debug-mode runtime wiring issues
+    # that unit/transpile tests do not exercise.
+    name: Benchmark leak checks (shard ${{ matrix.shard }}/5)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    env:
+      BENCHER_PROJECT: ${{ vars.BENCHER_PROJECT }}
+      BENCHER_TESTBED: ${{ vars.BENCHER_TESTBED }}
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ${{ env.RUBY_VERSION }}
+          bundler-cache: true
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            zig/.clear-cache
+            zig/.clear-transpile-cache
+          key: clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-${{ hashFiles('src/**', 'zig/runtime/**', 'zig/lib/**', 'benchmarks/**/*.cht', 'Gemfile.lock') }}
+          restore-keys: |
+            clear-bench-leak-${{ runner.os }}-zig${{ env.ZIG_VERSION }}-
+      - run: ruby benchmarks/runner.rb --leak --all --shard=${{ matrix.shard }}/5 --cores=2 --bencher-json tmp/benchmark-leak-${{ matrix.shard }}.json
+      - name: Validate Bencher JSON
+        run: |
+          ruby -rjson -e '
+            path = "tmp/benchmark-leak-${{ matrix.shard }}.json"
+            data = JSON.parse(File.read(path))
+            abort("Bencher JSON is empty") if data.empty?
+            data.each do |benchmark, measures|
+              abort("Bencher benchmark #{benchmark.inspect} has no measures") unless measures.is_a?(Hash) && !measures.empty?
+              measures.each do |measure, payload|
+                value = payload["value"]
+                abort("Bencher measure #{benchmark}/#{measure} missing numeric value") unless value.is_a?(Numeric)
+              end
+            end
+          '
+      - uses: bencherdev/bencher@main
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+      - name: Upload leak benchmark shard to Bencher
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        env:
+          BENCHER_API_TOKEN: ${{ secrets.BENCHER_API_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BENCHER_JSON: tmp/benchmark-leak-${{ matrix.shard }}.json
+        run: |
+          testbed="${BENCHER_TESTBED:-ubuntu-latest}"
+          branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+
+          args=(
+            --token "$BENCHER_API_TOKEN"
+            --branch "$branch"
+            --testbed "$testbed"
+            --adapter json
+            --file "$BENCHER_JSON"
+            --err
+            --github-actions "$GITHUB_TOKEN"
+          )
+
+          if [ -n "$BENCHER_PROJECT" ]; then
+            args=(--project "$BENCHER_PROJECT" "${args[@]}")
+          else
+            args=(--ci-on-the-fly "${args[@]}")
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            args+=(
+              --start-point "$GITHUB_BASE_REF"
+              --start-point-hash "${{ github.event.pull_request.base.sha }}"
+              --start-point-clone-thresholds
+              --start-point-reset
+            )
+          fi
+
+          bencher run "${args[@]}"
+
   zig-unit:
     name: Zig unit tests (fast non-TSan)
     runs-on: ubuntu-latest
