@@ -140,7 +140,7 @@ class Formatter::FormatLexer
         push(:OP, m, sl, sc)
       when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
         push(:SYM, m, sl, sc)
-      when m = @s.scan(/[a-zA-Z_@]\w*[!?]?/)
+      when m = @s.scan(/[a-zA-Z_@$]\w*[!?]?/)
         if ::Lexer::KEYWORDS.include?(m)
           push(:KEYWORD, m, sl, sc)
         elsif m =~ /\A[A-Z]/
