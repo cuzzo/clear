@@ -175,6 +175,21 @@ fn checkTaskConservationAndDuplicates(state: *VoprState) InvariantError!void {
             }
         }
 
+        // Walk yield_queue (cooperative-yield FIFO; mirrors production
+        // Scheduler.yield_queue). Tasks here are owner-local and never
+        // stolen, so they can't appear in any other scheduler's queues.
+        for (sched.yield_queue.items) |task| {
+            if (!state.task_registry.contains(task)) {
+                std.debug.print("VOPR INVARIANT: invalid task pointer {*} in yield_queue of sched {d}\n", .{ task, sched_idx });
+                return InvariantError.InvalidTaskPointer;
+            }
+            if (seen_map.contains(task)) {
+                std.debug.print("VOPR INVARIANT: duplicate task {*} in yield_queue of sched {d}\n", .{ task, sched_idx });
+                return InvariantError.DuplicateTask;
+            }
+            seen_map.put(state.allocator, task, @intCast(sched_idx)) catch unreachable;
+        }
+
         // Walk sleeping_queue
         for (sched.sleeping_queue.items) |task| {
             if (!state.task_registry.contains(task)) {

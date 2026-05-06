@@ -260,6 +260,18 @@ pub const Scheduler = struct {
     // flush them back to the main queue after the batch, guaranteeing
     // FIFO-style progress across all yielders.
     fsm_deferred_queue: std.ArrayListUnmanaged(*FsmTask) = .empty,
+    // Stackful-task analog of fsm_deferred_queue. Tasks that yielded
+    // cooperatively via coopYield go here (FIFO) instead of back to
+    // the LIFO Chase-Lev ready_queue. Without this split, two
+    // co-located cooperative fibers starve the older one: writer
+    // pushes itself back to ready_queue, scheduler pops bottom and
+    // gets writer again, reader at top never runs. (Proven by VOPR
+    // test "ready queue starves the older of two co-located
+    // cooperative tasks".) Owner-only — never stolen, never crosses
+    // threads, no atomics needed. Drained after ready_queue per main-
+    // loop iteration so newly spawned / cross-thread-resumed tasks
+    // get cache-hot priority but yielded tasks rotate fairly.
+    yield_queue: std.ArrayListUnmanaged(*Task) = .empty,
     stack_cache: std.ArrayListUnmanaged([]u8) = .empty,   // LIFO Cache for Stacks
     sleeping_queue: std.ArrayListUnmanaged(*Task) = .empty,
     // Fibers parked waiting for a ParkingMutex or ParkingRwLock.
@@ -513,6 +525,15 @@ pub const Scheduler = struct {
             self.task_slab.destroy(task);
         }
         self.pinned_queue.deinit(self.allocator);
+        // Free any cooperatively-yielded stackful tasks that never got
+        // popped before shutdown. Same destroy path as pinned_queue.
+        for (self.yield_queue.items) |task| {
+            self.releaseTaskEbr(task);
+            self.freeStack(task.base.stack);
+            self.allocator.destroy(task.base);
+            self.task_slab.destroy(task);
+        }
+        self.yield_queue.deinit(self.allocator);
         // FSM tasks have caller-owned state structs. We do not free them
         // here — just release the queue storage. Any unfinished FSM is the
         // caller's responsibility.
@@ -1199,12 +1220,23 @@ pub const Scheduler = struct {
             }
 
             // Look for tasks ready to start:
-            if (self.ready_queue.len() > 0 or self.pinned_queue.items.len > 0) {
-                // Pinned queue first (owner-local, no steal contention).
-                const task = if (self.pinned_queue.items.len > 0)
-                    self.pinned_queue.swapRemove(0)
-                else
-                    (self.ready_queue.pop() orelse continue);
+            if (self.ready_queue.len() > 0 or self.pinned_queue.items.len > 0 or self.yield_queue.items.len > 0) {
+                // Priority order:
+                //   1. Pinned queue (owner-local, no steal contention)
+                //   2. Ready queue (Chase-Lev: cache-hot LIFO for fresh
+                //      spawns/resumes, stealable by sibling schedulers)
+                //   3. Yield queue (FIFO of cooperatively-yielded tasks).
+                //      Drained AFTER ready_queue so new spawns get prompt
+                //      CPU, but FIFO order within so co-located cooperative
+                //      yielders rotate fairly.
+                const task = blk: {
+                    if (self.pinned_queue.items.len > 0)
+                        break :blk self.pinned_queue.swapRemove(0);
+                    if (self.ready_queue.pop()) |t| break :blk t;
+                    if (self.yield_queue.items.len > 0)
+                        break :blk self.yield_queue.orderedRemove(0);
+                    continue;
+                };
                 self.current_task = task;
 
                 // Clear the double-push guard now that the task is
@@ -1264,7 +1296,18 @@ pub const Scheduler = struct {
                         // wake already queued it through submitResume, honor the
                         // in_inbox guard and avoid a duplicate enqueue.
                         if (!task.in_inbox.load(.acquire)) {
-                            self.enqueueTask(task);
+                            // Cooperative coopYield path goes to yield_queue
+                            // (FIFO), so the just-yielded task does NOT win
+                            // the next pop against tasks that yielded earlier.
+                            // All other re-enqueues (e.g., scheduler-internal
+                            // suspensions that store .Ready without setting
+                            // co_yielded) keep the legacy ready_queue route.
+                            if (task.co_yielded) {
+                                task.co_yielded = false;
+                                self.yield_queue.append(self.allocator, task) catch unreachable;
+                            } else {
+                                self.enqueueTask(task);
+                            }
                         }
                     },
                     .Blocked => {
@@ -1528,6 +1571,7 @@ pub const Scheduler = struct {
     fn hasWork(self: *Scheduler) bool {
         return self.ready_queue.len() > 0
             or self.pinned_queue.items.len > 0
+            or self.yield_queue.items.len > 0
             or self.fsm_ready_queue.len() > 0;
     }
 
@@ -1547,6 +1591,10 @@ pub const Scheduler = struct {
         if (self.hasWork()) {
             const task = self.getCurrent();
             task.status.store(.Ready, .release);
+            // Mark as cooperative-yield so run() routes to yield_queue
+            // (FIFO) instead of ready_queue (LIFO). Without this, two
+            // co-located cooperative fibers starve the older one.
+            task.co_yielded = true;
             task.base.yield();
             // Resumed here — task.status remains .Ready (scheduler sets nothing on resume)
         }

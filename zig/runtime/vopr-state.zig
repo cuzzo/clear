@@ -72,6 +72,16 @@ pub const SimTask = struct {
     /// True if task was spawned as pinned (permanent). Drain never clears
     /// config.pinned for originally-pinned tasks.
     originally_pinned: bool = false,
+    /// Tick at which the task was most recently enqueued (push or yield-back).
+    /// Used by the ready-queue fairness invariant to detect starvation when
+    /// a task waits in queue while the same scheduler keeps popping others.
+    enqueued_tick: u64 = 0,
+    /// Tick at which the task was most recently popped. 0 means never.
+    last_pop_tick: u64 = 0,
+    /// Total number of times this task has been popped. Increases each
+    /// executePopAndRun call. Used by the cooperative-fairness scenario
+    /// test to assert each co-located task gets CPU time.
+    pop_count: u32 = 0,
 };
 
 /// SimScheduler wraps a heap-allocated RunQueue.
@@ -79,6 +89,11 @@ pub const SimTask = struct {
 pub const SimScheduler = struct {
     ready_queue: *RunQueue,
     pinned_queue: std.ArrayListUnmanaged(*Task) = .empty,
+    /// Mirrors Scheduler.yield_queue in scheduler.zig. Cooperative yields
+    /// land here (FIFO) instead of on the LIFO Chase-Lev ready_queue, so
+    /// co-located cooperative tasks rotate fairly. Drained AFTER ready_queue
+    /// each tick: see executePopAndRun for the priority logic.
+    yield_queue: std.ArrayListUnmanaged(*Task) = .empty,
     sleeping_queue: std.ArrayListUnmanaged(*Task),
     current_task: ?*Task,
     poll_fds: std.AutoHashMapUnmanaged(i32, *Task),
@@ -105,6 +120,7 @@ pub const SimScheduler = struct {
     pub fn deinit(self: *SimScheduler, allocator: std.mem.Allocator) void {
         self.sleeping_queue.deinit(allocator);
         self.pinned_queue.deinit(allocator);
+        self.yield_queue.deinit(allocator);
         self.poll_fds.deinit(allocator);
         self.pending_shard_ops.deinit(allocator);
         self.ready_queue.deinit();
@@ -117,6 +133,22 @@ pub const SimScheduler = struct {
         } else {
             self.ready_queue.push(allocator, task) catch unreachable;
         }
+    }
+
+    /// Cooperative-yield re-enqueue. Mirrors Scheduler.run()'s .Ready
+    /// handler routing for tasks that set co_yielded before yielding.
+    pub fn yieldTask(self: *SimScheduler, allocator: std.mem.Allocator, task: *Task) void {
+        self.yield_queue.append(allocator, task) catch unreachable;
+    }
+
+    /// Pop the next task respecting the production priority order:
+    /// pinned > ready_queue (LIFO) > yield_queue (FIFO). Returns null
+    /// when all three are empty.
+    pub fn popNext(self: *SimScheduler) ?*Task {
+        if (self.pinned_queue.items.len > 0) return self.pinned_queue.swapRemove(0);
+        if (self.ready_queue.pop()) |t| return t;
+        if (self.yield_queue.items.len > 0) return self.yield_queue.orderedRemove(0);
+        return null;
     }
 };
 
@@ -243,6 +275,9 @@ pub const VoprState = struct {
         sim.alive = true;
         sim.pending_remote_count = 0;
         sim.originally_pinned = pinned;
+        sim.enqueued_tick = self.tick;
+        sim.last_pop_tick = 0;
+        sim.pop_count = 0;
 
         self.tasks[self.task_count] = sim;
         self.task_count += 1;
@@ -260,6 +295,7 @@ pub const VoprState = struct {
 
         self.schedulers[target_sched].enqueueTask(self.allocator, task_ptr);
         self.schedulers[target_sched].active_tasks += 1;
+        sim.enqueued_tick = self.tick;
     }
 
     /// Queue a spawn for the DrainSpawns step.

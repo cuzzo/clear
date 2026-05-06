@@ -407,6 +407,15 @@ pub const Task = struct {
     /// hot owner-only line stays at exactly 64 bytes. The scheduler reads
     /// this when entering the root-stack trampoline; cost is negligible.
     is_on_root_stack: bool = false,
+    /// Owner-only fairness flag. Set by Scheduler.coopYield before
+    /// yielding; consumed by run()'s .Ready handler to route the task
+    /// to the FIFO yield_queue (cooperative-fairness path) instead of
+    /// re-pushing onto the LIFO Chase-Lev ready_queue. Cleared by the
+    /// run loop after consumption. Without this flag, two co-located
+    /// cooperative fibers starve the older one (proven by the VOPR
+    /// "ready queue starves the older of two co-located cooperative
+    /// tasks" test).
+    co_yielded: bool = false,
     /// Monotonic counter of every park/wake transition affecting the
     /// (waiting_for_lock, waiting_for_lock_kind) pair. detectCycle uses
     /// this to validate per-hop snapshots across an N-hop chain walk.

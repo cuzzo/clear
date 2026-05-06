@@ -73,17 +73,10 @@ fn executeStep(state: *VoprState, sched_idx: usize, step: StepKind) void {
 }
 
 fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) void {
-    // Pinned queue first (matches production scheduler's run loop),
-    // then ready queue. Pinned tasks include both permanently-pinned
-    // tasks and temporarily-pinned tasks from sendAndWait's steal guard.
-    const task = if (sched.pinned_queue.items.len > 0)
-        sched.pinned_queue.swapRemove(0)
-    else blk: {
-        if (sched.ready_queue.len() == 0) return;
-        // This exercises the real pop() — the TOCTOU fix (bug 1) means
-        // pop() can return null even after len() > 0.
-        break :blk sched.ready_queue.pop() orelse return;
-    };
+    // Mirror production scheduler's pop priority: pinned > ready_queue
+    // (LIFO Chase-Lev) > yield_queue (FIFO cooperative). popNext returns
+    // null when nothing is runnable.
+    const task = sched.popNext() orelse return;
 
     // Validate the pointer is in our registry
     if (!state.task_registry.contains(task)) {
@@ -99,6 +92,12 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
         std.debug.print("VOPR: task {*} not found in SimTask pool\n", .{task});
         @panic("VOPR: orphaned task pointer");
     };
+
+    // Fairness instrumentation: this task just left the ready queue. The
+    // ready-queue starvation invariant compares each in-queue task's
+    // enqueued_tick against the owning scheduler's most-recent pop tick.
+    sim.pop_count +%= 1;
+    sim.last_pop_tick = state.tick;
 
     if (sim.steps_remaining > 0) {
         sim.steps_remaining -= 1;
@@ -150,10 +149,20 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
             }
         }
 
-        // Yield — push back to ready queue
+        // Cooperative yield — route through yield_queue (FIFO) instead
+        // of the LIFO ready_queue, exactly mirroring scheduler.zig's
+        // coopYield + .Ready handler split for stackful tasks. Pinned
+        // tasks (including the temporary-pin set above for pending
+        // remote ops) keep going through enqueueTask so they land back
+        // on pinned_queue.
         task.status.store(.Ready, .release);
-        sched.enqueueTask(state.allocator, task);
+        if (task.config.pinned) {
+            sched.enqueueTask(state.allocator, task);
+        } else {
+            sched.yieldTask(state.allocator, task);
+        }
         state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
+        sim.enqueued_tick = state.tick;
     }
 
     sched.current_task = null;
@@ -215,6 +224,7 @@ fn executePollEpoll(state: *VoprState, sched: *SimScheduler, sched_idx: u32) voi
 
         // Clean up fd registration
         if (state.getSimTask(task)) |sim| {
+            sim.enqueued_tick = state.tick;
             if (sim.io_fd >= 0) {
                 _ = sched.poll_fds.remove(sim.io_fd);
                 if (state.sim_fds.getPtr(sim.io_fd)) |sfd| {
@@ -285,6 +295,7 @@ fn executeDrainSpawns(state: *VoprState) void {
         target.enqueueTask(state.allocator, spawn.task);
         target.active_tasks += 1;
         state.task_registry.put(state.allocator, spawn.task, .InQueue) catch unreachable;
+        if (state.getSimTask(spawn.task)) |sim| sim.enqueued_tick = state.tick;
     }
 }
 
@@ -299,6 +310,7 @@ fn executeWakeSleepers(state: *VoprState, sched: *SimScheduler) void {
             task.status.store(.Ready, .release);
             sched.enqueueTask(state.allocator, task);
             state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
+            if (state.getSimTask(task)) |sim| sim.enqueued_tick = state.tick;
         } else {
             i += 1;
         }
@@ -518,6 +530,79 @@ test "vopr: task conservation and pinned affinity" {
     }
 }
 
+test "vopr: ready queue starves the older of two co-located cooperative tasks" {
+    // Reproduces the runtime bug uncovered by
+    //   versioned-fiber-stress-test.zig "Versioned: retired version
+    //   survives writer task exit while another task holds a guard".
+    //
+    // Shape: two cooperative tasks land on the same scheduler. Each call
+    // to PopAndRun simulates the production loop's
+    //   pop -> run-one-step -> if !Finished, push back via enqueueTask
+    // path (scheduler.zig's run() inner loop, lines ~1207 & ~1267 at
+    // master 7f32acdb). That path is what every coopYield boils down to.
+    //
+    // Production claim: coopYield "yields to the scheduler when another
+    // fiber is ready" (runtime.zig:543). For two tasks A and B in the
+    // same ready queue, both should make progress.
+    //
+    // Production reality: queues.zig's RunQueue is Chase-Lev with
+    // owner-LIFO semantics. push/pop both touch the bottom. After the
+    // newer task yields, it is re-pushed at the bottom and is the very
+    // next thing pop() returns -- the older task at the top is starved.
+    //
+    // This test proves the bug deterministically without involving any
+    // fibers, atomics-races, or test-runner timing: it is pure queue
+    // policy. Today it FAILS on master; if any future change makes it
+    // pass, the production cooperative-fairness contract is restored.
+    const allocator = std.testing.allocator;
+    var state = VoprState.init(7, allocator);
+    state.random = state.rng.random();
+    defer state.deinit();
+
+    state.initSchedulers(1);
+    const sched = &state.schedulers[0];
+
+    // Two cooperative tasks: lots of steps so neither finishes during
+    // the test, no I/O so they never block. They model the writer and
+    // reader fibers in the failing test's `while !flag { yield }` loops.
+    try state.spawnTask(0, false);
+    try state.spawnTask(0, false);
+    state.tasks[0].?.steps_remaining = 10_000;
+    state.tasks[0].?.will_do_io = false;
+    state.tasks[1].?.steps_remaining = 10_000;
+    state.tasks[1].?.will_do_io = false;
+
+    // No shards, so executePopAndRun's shard-access branch is dead and
+    // the path reduces to: pop -> decrement steps -> push back. This is
+    // exactly the inner loop the production scheduler runs when a
+    // task's coopYield reports more work.
+    const ITERS: usize = 64;
+    var i: usize = 0;
+    while (i < ITERS) : (i += 1) {
+        state.tick = i;
+        executePopAndRun(&state, sched, 0);
+    }
+
+    // Each task should have run at least once. With LIFO Chase-Lev today,
+    // task 0 (pushed first) is starved: pop_count==0. The newer task 1
+    // cycles at the bottom forever.
+    const a = state.tasks[0].?;
+    const b = state.tasks[1].?;
+    if (a.pop_count == 0 or b.pop_count == 0) {
+        std.debug.print(
+            "VOPR fairness: after {d} pop-and-run iters with 2 co-located cooperative tasks, " ++
+                "task A.pop_count={d} task B.pop_count={d} -- the older task is starved.\n",
+            .{ ITERS, a.pop_count, b.pop_count },
+        );
+    }
+    try std.testing.expect(a.pop_count > 0);
+    try std.testing.expect(b.pop_count > 0);
+    // Stronger: roughly fair, within an order of magnitude.
+    const ratio_threshold: u32 = 8;
+    try std.testing.expect(a.pop_count * ratio_threshold >= b.pop_count);
+    try std.testing.expect(b.pop_count * ratio_threshold >= a.pop_count);
+}
+
 test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAccess" {
     // Deterministic reproduction: verifies the invariant checker catches the
     // scenario that sendAndWait's temporary pin prevents in the real runtime.
@@ -531,19 +616,17 @@ test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAcc
     state.random = state.rng.random();
     defer state.deinit();
 
-    // Init schedulers first, shards AFTER pop-and-run to avoid the
-    // temporary pin from shard access during executePopAndRun.
     state.initSchedulers(2);
 
-    // Spawn an unpinned task on sched 1
+    // Spawn an unpinned task on sched 1. spawnTask lands it on the
+    // ready_queue directly (where steals can find it). Earlier versions
+    // of this test ran one PopAndRun first to simulate a yield cycle,
+    // but after the cooperative-fairness fix unpinned yields land in
+    // yield_queue (unstealable by design), so the spawn alone produces
+    // the right shape: unpinned task sitting in sched 1's ready_queue.
     try state.spawnTask(1, false);
     const task = &state.tasks[0].?.task;
 
-    // Step 1: Pop the task on sched 1 (no shards, so no shard access).
-    executePopAndRun(&state, &state.schedulers[1], 1);
-    // After PopAndRun, the task yielded back to sched 1's ready queue.
-
-    // Now init shards for the invariant checker.
     state.initShards(2);
 
     // Step 2: Simulate the task sending a REMOTE shard op to sched 0.
