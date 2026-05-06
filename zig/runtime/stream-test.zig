@@ -79,9 +79,28 @@ const BoundedEachState = struct {
     total: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
 };
 
+const BoundedErrorState = struct {
+    items: [4]CheatLib.Promise(i64),
+    err: ?anyerror = null,
+};
+
 fn boundedAccumulate(_: *Runtime, raw_args: ?*anyopaque, value: i64) anyerror!void {
     const state = @as(*BoundedEachState, @ptrCast(@alignCast(raw_args.?)));
     _ = state.total.fetchAdd(value, .seq_cst);
+}
+
+fn boundedMapErrorOnThree(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!i64 {
+    if (value == 3) return error.IntentionalBoundedSelect;
+    return value;
+}
+
+fn boundedWhereErrorOnThree(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!bool {
+    if (value == 3) return error.IntentionalBoundedWhere;
+    return true;
+}
+
+fn boundedEachErrorOnThirty(_: *Runtime, _: ?*anyopaque, value: i64) anyerror!void {
+    if (value == 30) return error.IntentionalBoundedEach;
 }
 
 fn boundedSelectConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
@@ -100,6 +119,35 @@ fn boundedEachConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedEachState, @ptrCast(@alignCast(raw_args.?)));
     try CheatLib.concurrentBoundedEach(i64, 4, boundedAccumulate,
         rt, &state.items, 2, 3, false, .{}, state);
+}
+
+fn boundedSelectErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*BoundedErrorState, @ptrCast(@alignCast(raw_args.?)));
+    var result = CheatLib.concurrentBoundedSelect(i64, i64, 4, boundedMapErrorOnThree,
+        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null) catch |err| {
+        state.err = err;
+        return;
+    };
+    result.deinit(rt.heapAlloc());
+}
+
+fn boundedWhereErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*BoundedErrorState, @ptrCast(@alignCast(raw_args.?)));
+    var result = CheatLib.concurrentBoundedWhere(i64, 4, boundedWhereErrorOnThree,
+        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null) catch |err| {
+        state.err = err;
+        return;
+    };
+    result.deinit(rt.heapAlloc());
+}
+
+fn boundedEachErrorConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
+    const state = @as(*BoundedErrorState, @ptrCast(@alignCast(raw_args.?)));
+    CheatLib.concurrentBoundedEach(i64, 4, boundedEachErrorOnThirty,
+        rt, &state.items, 2, 3, false, .{}, null) catch |err| {
+        state.err = err;
+        return;
+    };
 }
 
 fn makeBoundedPromiseItems(rt: *Runtime, values: [4]i64) ![4]CheatLib.Promise(i64) {
@@ -1257,4 +1305,49 @@ test "concurrentBoundedEach visits every item exactly once" {
     sched.run();
 
     try std.testing.expectEqual(@as(i64, 100), state.total.load(.seq_cst));
+}
+
+test "concurrentBounded callbacks propagate worker errors" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = EbrContext{};
+    defer global_ctx.deinit(allocator);
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    fp.active_scheduler = &sched;
+    defer fp.global_registry.deinit(allocator);
+
+    var rt = try Runtime.init(allocator, 4 * 1024, &global_ctx);
+    defer rt.deinit();
+    rt.wireAllocator();
+
+    var select_state = BoundedErrorState{ .items = try makeBoundedPromiseItems(&rt, .{ 1, 2, 3, 4 }) };
+    var where_state = BoundedErrorState{ .items = try makeBoundedPromiseItems(&rt, .{ 1, 2, 3, 4 }) };
+    var each_state = BoundedErrorState{ .items = try makeBoundedPromiseItems(&rt, .{ 10, 20, 30, 40 }) };
+
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&boundedSelectErrorConsumer)),
+        &select_state,
+        .{ .stack_size = test_stack_size },
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&boundedWhereErrorConsumer)),
+        &where_state,
+        .{ .stack_size = test_stack_size },
+    );
+    try sched.submitSpawn(
+        @intFromPtr(&Runtime.entryWrapper),
+        @as(qs.TaskFn, @ptrCast(&boundedEachErrorConsumer)),
+        &each_state,
+        .{ .stack_size = test_stack_size },
+    );
+    sched.run();
+
+    try std.testing.expectEqual(error.IntentionalBoundedSelect, select_state.err.?);
+    try std.testing.expectEqual(error.IntentionalBoundedWhere, where_state.err.?);
+    try std.testing.expectEqual(error.IntentionalBoundedEach, each_state.err.?);
 }

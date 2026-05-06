@@ -494,6 +494,12 @@ If the runtime code in zig/ is touched, make these checks:
 - **File Operations / General Concurrency:** Actively search for logic races, starvation, or priority inversion. If found, write a test proving the failure, then implement the fix.
 - **Performance:** Code on critical, hot paths must be strictly non-blocking. This definitively prohibits any form of lock acquisition and any global heap allocations (which inherently rely on hidden locks) within these paths.
 
+### Other Review Requirements
+
+- **Changes to Tests:** Make sure there are no hacks in test changes. Any changes to tests should be because there was a bug before, or the code has changed such that the new expectations match a correct state.
+- **Deletions to Tests:** No test should be deleted unless 1: the corresponding functionality was deleted and the test is no longer needed, or 2: it was a test-nothing test, or 3: it is redundant with other tests.
+- **Test Additions:** Do not test nothing just to cover lines. Make sure that tests actually test that the code works correctly, not just that things "run" and don't fail. Avoid adding redundant tests when an existing test could be modestly expanded to test a new expectation. Avoid abstractions in tests as much as possible. Tests can repeat themselves. Production code should not repeat itself. Avoid adding production changes *specifically* for testing. To the extent possible use test code and mocks to test what you need to test. Production code ideally is readable and has no concerns or special cases for testing.
+
 
 ## Output
 - Answer is always line 1. Reasoning comes after, never before.

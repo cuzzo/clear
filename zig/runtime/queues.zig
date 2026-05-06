@@ -125,6 +125,7 @@ pub const RunQueue = struct {
     fn makeArray(alloc: std.mem.Allocator, log_size: u5) !*CircularArray {
         const size = @as(u32, 1) << log_size;
         const data = try alloc.alloc(Atomic(?*Task), size);
+        errdefer alloc.free(data);
         for (data) |*slot| slot.* = Atomic(?*Task).init(null);
         const arr = try alloc.create(CircularArray);
         arr.* = .{ .data = data, .mask = size - 1 };

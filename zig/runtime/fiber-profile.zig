@@ -140,6 +140,23 @@ test "fiber profile records per-site scheduler attribution" {
     try std.testing.expectEqual(@as(u64, 2000), site.total_lifetime_ns);
 }
 
+test "fiber profile handles site collisions and saturation" {
+    resetForTest();
+    defer resetForTest();
+
+    recordSiteSpawn(1, .local, .stack);
+    recordSiteSpawn(1 + MAX_SITES, .parallel, .fsm);
+    try std.testing.expect(findSiteLocked(1) != null);
+    try std.testing.expect(findSiteLocked(1 + MAX_SITES) != null);
+
+    var i: u32 = 2;
+    while (i <= MAX_SITES) : (i += 1) {
+        recordSiteSpawn(i, .local, .stack);
+    }
+    recordSiteSpawn(MAX_SITES + 2, .parallel, .fsm);
+    try std.testing.expectEqual(@as(u64, 2), site_dropped);
+}
+
 pub inline fn recordSiteRun(site_id: u32, sched_idx: usize) void {
     if (site_id == 0) return;
     mu.lock();

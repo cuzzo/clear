@@ -1006,6 +1006,7 @@ pub const Scheduler = struct {
                         if (task.config.pinned) {
                             self.pinned_queue.append(self.allocator, task) catch {
                                 self.freeLocalStackMemory(stack_mem);
+                                self.allocator.destroy(task.base);
                                 self.task_slab.destroy(task);
                                 continue;
                             };
@@ -1013,7 +1014,10 @@ pub const Scheduler = struct {
                             self.ready_queue.push(self.allocator, task) catch {
                                 self.freeLocalStackMemory(stack_mem);
                                 self.fiber_pool.append(self.allocator, task) catch
-                                    self.task_slab.destroy(task);
+                                    {
+                                        self.allocator.destroy(task.base);
+                                        self.task_slab.destroy(task);
+                                    };
                                 continue;
                             };
                         }
@@ -2325,6 +2329,298 @@ test "migrated stack free routes back to owning scheduler" {
     try std.testing.expectEqual(@as(usize, 1), owner.stack_cache.items.len);
 }
 
+fn makeDeinitCleanupTask(sched: *Scheduler, size: StackSize) !*Task {
+    const memory = try sched.allocStack(size);
+    const fiber = try sched.allocator.create(Fiber);
+    errdefer sched.allocator.destroy(fiber);
+    fiber.* = Fiber.initWithOwner(memory, @intFromPtr(&dummyTaskFn), size, sched);
+    const task = try sched.task_slab.create();
+    task.* = Task{ .base = fiber, .user_fn = @ptrCast(&dummyTaskFn) };
+    return task;
+}
+
+test "Scheduler.deinit releases task stacks left in internal queues" {
+    const alloc = std.testing.allocator;
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var sched = try Scheduler.init(alloc, &global_ebr, null);
+    sched.index = 0;
+
+    try sched.fiber_pool.append(alloc, try makeDeinitCleanupTask(&sched, .Micro));
+    try sched.ready_queue.push(alloc, try makeDeinitCleanupTask(&sched, .Micro));
+    try sched.pinned_queue.append(alloc, try makeDeinitCleanupTask(&sched, .Micro));
+
+    sched.deinit();
+}
+
+test "remote FSM ctx free routes slab128 back to owning scheduler" {
+    const alloc = std.testing.allocator;
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var owner = try Scheduler.init(alloc, &global_ebr, null);
+    defer owner.deinit();
+    owner.index = 0;
+
+    var thief = try Scheduler.init(alloc, &global_ebr, null);
+    defer thief.deinit();
+    thief.index = 1;
+
+    const task = try owner.allocFsmTask(&dummyFsmResume);
+    const ctx = try owner.allocFsmCtx(Scheduler.FsmCtx128, task);
+
+    active_scheduler = &thief;
+    scheduler_running = true;
+    defer {
+        scheduler_running = false;
+        active_scheduler = undefined;
+    }
+
+    thief.freeFsmCtx(Scheduler.FsmCtx128, task, ctx);
+    try std.testing.expect(owner.dirty_mask.load(.acquire) != 0);
+    owner.drainChannels();
+    owner.fsm_task_slab.destroy(task);
+}
+
+test "Scheduler.init cleans up thread EBR on later allocation failures" {
+    const backing = std.testing.allocator;
+
+    var fail_after_thread_ebr = std.testing.FailingAllocator.init(backing, .{ .fail_index = 1 });
+    var ebr_after_thread: EbrContext = .{};
+    try std.testing.expectError(
+        error.OutOfMemory,
+        Scheduler.init(fail_after_thread_ebr.allocator(), &ebr_after_thread, null),
+    );
+    defer ebr_after_thread.deinit(backing);
+
+    var fail_after_register = std.testing.FailingAllocator.init(backing, .{ .fail_index = 2 });
+    var ebr_after_register: EbrContext = .{};
+    try std.testing.expectError(
+        error.OutOfMemory,
+        Scheduler.init(fail_after_register.allocator(), &ebr_after_register, null),
+    );
+    defer ebr_after_register.deinit(backing);
+    try std.testing.expectEqual(@as(usize, 0), ebr_after_register.registry.items.len);
+}
+
+test "drainChannels releases stack memory when spawn allocation steps fail" {
+    const backing = std.testing.allocator;
+
+    var offset: usize = 0;
+    while (offset < 64) : (offset += 1) {
+        var failing = std.testing.FailingAllocator.init(backing, .{});
+        const alloc = failing.allocator();
+        var global_ebr: EbrContext = .{};
+        defer global_ebr.deinit(alloc);
+
+        var sched = try Scheduler.init(alloc, &global_ebr, null);
+        defer sched.deinit();
+        sched.index = 0;
+
+        try sched.submitSpawn(@intFromPtr(&dummyTaskFn), @ptrCast(&dummyTaskFn), null, .{});
+        failing.fail_index = failing.alloc_index + offset;
+        sched.drainChannels();
+    }
+
+}
+
+fn prewarmSpawnAllocations(sched: *Scheduler) !void {
+    const stack_mem = try sched.stack_pool.alloc(.Standard);
+    try sched.stack_cache.append(sched.allocator, stack_mem);
+    const task = try sched.task_slab.create();
+    sched.task_slab.destroy(task);
+}
+
+test "drainChannels releases stack memory when pinned queue append fails" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const alloc = failing.allocator();
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var sched = try Scheduler.init(alloc, &global_ebr, null);
+    defer sched.deinit();
+    sched.index = 0;
+    try prewarmSpawnAllocations(&sched);
+
+    try sched.submitSpawn(
+        @intFromPtr(&dummyTaskFn),
+        @ptrCast(&dummyTaskFn),
+        null,
+        .{ .pinned = true },
+    );
+    failing.fail_index = failing.alloc_index + 1;
+    sched.drainChannels();
+}
+
+test "drainChannels releases stack memory when ready queue growth fails" {
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{});
+    const alloc = failing.allocator();
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var sched = try Scheduler.init(alloc, &global_ebr, null);
+    defer sched.deinit();
+    sched.index = 0;
+    try prewarmSpawnAllocations(&sched);
+
+    var i: usize = 0;
+    while (i < 64) : (i += 1) {
+        try sched.ready_queue.push(alloc, try makeDeinitCleanupTask(&sched, .Micro));
+    }
+
+    try sched.submitSpawn(@intFromPtr(&dummyTaskFn), @ptrCast(&dummyTaskFn), null, .{});
+    failing.fail_index = failing.alloc_index + 1;
+    sched.drainChannels();
+}
+
+fn finishWhileRegisteredAsLockWaiter(_: *anyopaque, raw: ?*anyopaque) anyerror!void {
+    const sched: *Scheduler = @ptrCast(@alignCast(raw.?));
+    sched.registerLockWaiter(sched.getCurrent());
+}
+
+test "Scheduler.run removes finished tasks from lock waiter scan list" {
+    const alloc = std.heap.smp_allocator;
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var sched = try Scheduler.init(alloc, &global_ebr, null);
+    defer sched.deinit();
+    sched.index = 0;
+
+    try sched.submitSpawn(
+        @intFromPtr(&rt_profile.Runtime.entryWrapper),
+        @ptrCast(&finishWhileRegisteredAsLockWaiter),
+        &sched,
+        .{},
+    );
+    sched.run();
+
+    try std.testing.expectEqual(@as(usize, 0), sched.lock_waiters.items.len);
+}
+
+const RemoteFreeDrainArgs = struct {
+    owner: *Scheduler,
+    start: *std.atomic.Value(bool),
+    waiting: *std.atomic.Value(bool),
+};
+
+fn drainRemoteFreeAfterStart(args: *RemoteFreeDrainArgs) void {
+    while (!args.start.load(.acquire)) {
+        args.waiting.store(true, .release);
+        std.Thread.yield() catch {};
+    }
+    args.owner.drainChannels();
+}
+
+fn fillRemoteFsmCtxFreeRing(owner: *Scheduler, sender_idx: usize) !void {
+    const ring = try owner.ensureChannel(sender_idx);
+    var i: usize = 0;
+    while (i < 4096) : (i += 1) {
+        const task = try owner.allocFsmTask(&dummyFsmResume);
+        const ctx = try owner.allocFsmCtx(Scheduler.FsmCtx128, task);
+        task.ctx = ctx;
+        const msg = SpscMessage{
+            .tag = .RemoteFsmCtxFree,
+            .fsm_ctx_ptr = @intFromPtr(ctx),
+            .fsm_ctx_class = @intFromEnum(fsm_mod.FsmCtxAllocClass.slab128),
+        };
+        try std.testing.expect(ring.push(msg));
+        owner.fsm_task_slab.destroy(task);
+    }
+    const bit = @as(u64, 1) << @intCast(sender_idx);
+    _ = owner.dirty_mask.fetchOr(bit, .release);
+}
+
+const RemoteStackFreeArgs = struct {
+    thief: *Scheduler,
+    stack: Stack,
+    started: *std.atomic.Value(bool),
+};
+
+fn remoteStackFreeProducer(args: *RemoteStackFreeArgs) void {
+    active_scheduler = args.thief;
+    scheduler_running = true;
+    defer {
+        scheduler_running = false;
+        active_scheduler = undefined;
+    }
+
+    args.started.store(true, .release);
+    args.thief.freeStack(args.stack);
+}
+
+test "remote FSM ctx free backpressure drains while scheduler is running" {
+    const alloc = std.testing.allocator;
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var owner = try Scheduler.init(alloc, &global_ebr, null);
+    defer owner.deinit();
+    owner.index = 0;
+
+    var thief = try Scheduler.init(alloc, &global_ebr, null);
+    defer thief.deinit();
+    thief.index = 1;
+
+    try fillRemoteFsmCtxFreeRing(&owner, thief.index);
+    const task = try owner.allocFsmTask(&dummyFsmResume);
+    const ctx = try owner.allocFsmCtx(Scheduler.FsmCtx128, task);
+
+    var start = std.atomic.Value(bool).init(false);
+    var waiting = std.atomic.Value(bool).init(false);
+    var args = RemoteFreeDrainArgs{ .owner = &owner, .start = &start, .waiting = &waiting };
+    var drainer = try std.Thread.spawn(.{}, drainRemoteFreeAfterStart, .{&args});
+    while (!waiting.load(.acquire)) {
+        std.Thread.yield() catch {};
+    }
+
+    active_scheduler = &thief;
+    scheduler_running = true;
+    defer {
+        scheduler_running = false;
+        active_scheduler = undefined;
+    }
+
+    start.store(true, .release);
+    thief.freeFsmCtx(Scheduler.FsmCtx128, task, ctx);
+    drainer.join();
+    owner.drainChannels();
+    owner.fsm_task_slab.destroy(task);
+}
+
+test "remote stack free backpressure drains while scheduler is running" {
+    const alloc = std.testing.allocator;
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var owner = try Scheduler.init(alloc, &global_ebr, null);
+    defer owner.deinit();
+    owner.index = 0;
+
+    var thief = try Scheduler.init(alloc, &global_ebr, null);
+    defer thief.deinit();
+    thief.index = 1;
+
+    try fillRemoteFsmCtxFreeRing(&owner, thief.index);
+    const memory = try owner.allocStack(.Micro);
+    const stack = Stack{ .memory = memory, .owner = &owner };
+
+    var started = std.atomic.Value(bool).init(false);
+    var args = RemoteStackFreeArgs{ .thief = &thief, .stack = stack, .started = &started };
+    var producer = try std.Thread.spawn(.{}, remoteStackFreeProducer, .{&args});
+    while (!started.load(.acquire)) {
+        std.Thread.yield() catch {};
+    }
+    var spins: usize = 0;
+    while (spins < 1024) : (spins += 1) {
+        std.Thread.yield() catch {};
+    }
+    owner.drainChannels();
+    producer.join();
+    owner.drainChannels();
+}
+
 pub const WaitGroup = struct {
     // The counter must be atomic
     counter: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
@@ -2599,6 +2895,15 @@ test "SmartEventFd: parked notify writes one wake token" {
     efd.finishSleep();
 }
 
+test "SmartEventFd: prepareSleep is idempotent while parked" {
+    var efd = try SmartEventFd.init();
+    defer efd.deinit();
+
+    try std.testing.expect(efd.prepareSleep());
+    try std.testing.expect(efd.prepareSleep());
+    efd.finishSleep();
+}
+
 test "IoWaiter: encode/decode roundtrip" {
     var dummy_fiber = fc.Fiber{
         .stack = fc.Stack{ .memory = &[_]u8{} },
@@ -2647,3 +2952,7 @@ test "IoWaiter: encode is distinct from sentinels" {
 }
 
 fn dummyTaskFn(_: *anyopaque, _: ?*anyopaque) anyerror!void {}
+
+fn dummyFsmResume(_: *fsm_mod.FsmTask) YieldReason {
+    return .Done;
+}
