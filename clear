@@ -646,6 +646,16 @@ when 'build'
       opt_level = 'Debug'
       extra_flags = []
       i += 1
+    when '--gradual'
+      # Gradual-typing mode (see docs/agents/gradual-typing.md).
+      # Parser inserts implicit Auto for omitted parameter / return
+      # type annotations; the inference pass resolves each Auto from
+      # observed uses. `clear fix` rewrites resolved Autos to their
+      # concrete types. Imports are still required to be fully typed
+      # (STRICT-imports boundary, §7).
+      require_relative 'src/ast/parser'
+      Parser.gradual_mode = true
+      i += 1
     else
       remaining << args[i]
       i += 1

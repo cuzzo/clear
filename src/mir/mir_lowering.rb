@@ -1192,10 +1192,23 @@ class MIRLowering
       trampoline_zig = ThunkTransform::Emit.emit_mutual_trampoline(node, self)
       body_mir = takes_mir + [MIR::RawZig.new(trampoline_zig, :thunk_trampoline_body, nil, nil)]
     else
-      body_mir = takes_mir + lower_body(node.body)
+      pre_checks = lower_pre_clauses(node)
+      body_mir = takes_mir + pre_checks + lower_body(node.body)
     end
 
-    if has_catch
+    # POST + CATCH is rejected at annotation time (see
+    # visit_post_clauses! in capabilities.rb) with a clean CLEAR error,
+    # so by the time we reach lowering this combination is impossible.
+    has_post = node.respond_to?(:post_clauses) && node.post_clauses && node.post_clauses.any?
+
+    if has_post
+      # Inner/outer pair: inner contains the original body, outer wraps
+      # in a debug-mode POST validator. In release builds the wrapper's
+      # body collapses to a single tail call to the inner, which LLVM
+      # inlines into every callsite — zero overhead.
+      [build_post_inner_fn(node, params_mir, return_type_str, prologue, body_mir, comptime_params),
+       build_post_outer_fn(node, params_mir, return_type_str, fn_needs_rt, vis, comptime_params)]
+    elsif has_catch
       # Emit inner/outer function pair
       inner_name = "__#{node.name}_body"
       already_error_union = final_type.start_with?("!") ||
@@ -1240,6 +1253,103 @@ class MIRLowering
       MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
                       prologue + body_mir, vis, false, comptime_params)
     end
+  end
+
+  # Build the inner function for a POST-having FunctionDef. Holds the
+  # original body verbatim. Marked :private so callers go through the
+  # outer wrapper (which validates).
+  def build_post_inner_fn(node, params_mir, return_type_str, prologue, body_mir, comptime_params)
+    inner_name = "__#{zig_safe_name(node.name)}_post_body"
+    MIR::FnDef.new(inner_name, params_mir, return_type_str,
+                   prologue + body_mir, :private, false, comptime_params)
+  end
+
+  # Build the outer wrapper for a POST-having FunctionDef. Calls the
+  # inner, captures the result, evaluates each POST predicate inside a
+  # debug-mode `if` block, panics on violation, returns the result.
+  def build_post_outer_fn(node, params_mir, return_type_str, fn_needs_rt, vis, comptime_params)
+    inner_name = "__#{zig_safe_name(node.name)}_post_body"
+    # The outer wrapper sees parameters under their Zig-level names —
+    # MUTABLE-by-value params get renamed to `_m_<name>` (see
+    # `mutable_scalar_params` in lower_function_def). The inner body
+    # uses the same renaming, so the call must forward the renamed
+    # names verbatim. Forwarding the user-level name would produce
+    # "use of undeclared identifier" at the wrapper's call site.
+    mutable_scalar = (node.params || []).select { |p|
+      p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
+    }.map { |p| p[:name] }.to_set
+    forward_name = ->(p) { mutable_scalar.include?(p[:name]) ? "_m_#{p[:name]}" : p[:name] }
+    arg_idents = (node.params || []).map { |p| MIR::Ident.new(forward_name.call(p)) }
+    arg_idents = [MIR::Ident.new("rt")] + arg_idents if fn_needs_rt
+
+    # Use the structured Type from the FunctionDef rather than parsing
+    # the emitted Zig string — the latter misses `?void`,
+    # `anyerror!T`, and any whitespace variants the formatter might
+    # emit. Type#error_union? / Type#void? / Type#payload_type are
+    # the single source of truth.
+    rt_obj = node.return_type.is_a?(Type) ? node.return_type : (node.return_type ? Type.new(node.return_type) : nil)
+    is_error_union = !!(rt_obj && rt_obj.error_union?)
+    payload_type   = is_error_union ? rt_obj.payload_type : rt_obj
+    is_void        = !!(payload_type && payload_type.respond_to?(:void?) && payload_type.void?)
+
+    # Structured: MIR::Call(callee, args, try_wrap, heap_provenance).
+    # The `try_wrap` field forwards errors verbatim before any POST
+    # predicate evaluates; on success, `result` binds the payload.
+    inner_call_mir = MIR::Call.new(inner_name, arg_idents, is_error_union, nil)
+    call_zig = emit_expr(inner_call_mir)
+
+    # Each predicate check decomposes into structured MIR:
+    #   MIR::IfStmt(!cond, [MIR::Panic("DEBUG_POST failed: <source>")])
+    # The lowered cond is the same MIR expression the annotator type-
+    # checked against Bool. Only the wrapping comptime-debug-mode gate
+    # remains as InlineZig — Zig's `@import("builtin").mode == .Debug`
+    # has no MIR representation today (would need a new MIR node like
+    # MIR::ComptimeIf or MIR::DebugBlock; see follow-up).
+    check_stmts = (node.post_clauses || []).map do |entry|
+      expr   = entry[:expr]
+      source = entry[:source]
+      cond_mir = lower(expr)
+      msg_text = source && !source.empty? ? "DEBUG_POST failed: #{source}" : "DEBUG_POST failed"
+      MIR::IfStmt.new(MIR::UnaryOp.new("!", cond_mir),
+                      [MIR::Panic.new(msg_text)],
+                      nil)
+    end
+
+    checks_zig = emit_stmts_zig(check_stmts, indent: "        ")
+
+    debug_block = if check_stmts.empty?
+      ""
+    else
+      <<~ZIG.rstrip
+        if (@import("builtin").mode == .Debug) {
+        #{checks_zig}
+        }
+      ZIG
+    end
+
+    body_zig = if is_void
+      # Void return: no `result` to bind (visit_post_clauses! never
+      # declares it for void-payload functions, so a predicate can't
+      # reference it). Just call inner, run checks, return.
+      <<~ZIG.rstrip
+        #{call_zig};
+        #{debug_block}
+        return;
+      ZIG
+    else
+      <<~ZIG.rstrip
+        const result = #{call_zig};
+        _ = &result;
+        #{debug_block}
+        return result;
+      ZIG
+    end
+
+    iz = MIR::InlineZig.new(body_zig, "post_outer_body")
+    iz.stdlib_def = { allocates: false, borrows: [] }
+
+    MIR::FnDef.new(zig_safe_name(node.name), params_mir, return_type_str,
+                   [iz], vis, false, comptime_params)
   end
 
   # Returns [zig_string, clause_bodies] where clause_bodies is an array of
@@ -2894,6 +3004,60 @@ class MIRLowering
     else
       []
     end
+  end
+
+  # Emit MIR for each PRE clause on a function definition. Each
+  # predicate is lowered to a guarded if-statement that, when the
+  # predicate is false, sets PreconditionFail on the runtime context
+  # and returns the CheatError sentinel. Fail-fast: the first failing
+  # PRE returns; later PREs are not evaluated.
+  def lower_pre_clauses(node)
+    pre_clauses = node.respond_to?(:pre_clauses) ? (node.pre_clauses || []) : []
+    return [] if pre_clauses.empty?
+
+    pre_clauses.map do |entry|
+      expr   = entry[:expr]
+      source = entry[:source]
+      cond = lower(expr)
+      line = expr.respond_to?(:token) && expr.token ? expr.token.line.to_s : "0"
+
+      msg_text = if source && !source.empty?
+        "PRE failed: #{source}"
+      else
+        "precondition failed"
+      end
+      msg_zig = zig_string_lit(msg_text)
+
+      fail_zig = %Q(#{@rt_name}.setError(.Input, @intFromEnum(ErrorName.PreconditionFail), #{msg_zig}, #{line});\nreturn error.CheatError;)
+      iz = MIR::InlineZig.new(fail_zig, "pre_fail")
+      iz.stdlib_def = { allocates: false, borrows: [] }
+      MIR::IfStmt.new(MIR::UnaryOp.new("!", cond), [iz], nil)
+    end
+  end
+
+  # Escape an arbitrary Ruby string for embedding as a Zig string
+  # literal. `\` and `"` are escape-prefixed; named-escape control
+  # characters (\n \r \t) get their named form; every other byte in
+  # 0x00..0x1F or 0x7F gets a `\xNN` hex escape. Anything 0x20+
+  # (printable + UTF-8 high bytes) passes through verbatim — Zig
+  # accepts UTF-8 in string literals.
+  def zig_string_lit(text)
+    out = +'"'
+    text.each_byte do |b|
+      case b
+      when 0x5c  then out << '\\\\'      # backslash
+      when 0x22  then out << '\\"'        # double quote
+      when 0x0a  then out << '\\n'
+      when 0x0d  then out << '\\r'
+      when 0x09  then out << '\\t'
+      when 0x00..0x1f, 0x7f
+        out << format('\\x%02x', b)
+      else
+        out << b.chr(Encoding::ASCII_8BIT)
+      end
+    end
+    out << '"'
+    out
   end
 
   def wrap_body_with_guard(node, body_mir, with_label)

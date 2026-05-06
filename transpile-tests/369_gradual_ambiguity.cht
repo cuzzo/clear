@@ -1,0 +1,40 @@
+-- Gradual typing M1.7 — ambiguity rejection.
+--
+-- This file is INTENTIONALLY a compile failure, used to lock in
+-- the diagnostic format. The transpile-test runner doesn't compile
+-- it; the spec/gradual_typing_spec.rb suite drives the same surface
+-- through the annotator and asserts on the FixableFinding shape.
+-- Keeping it here as documentation of the expected user-facing
+-- diagnostic — see comment block below for the exact text.
+--
+-- Source that triggers ambiguity:
+--
+--     FN parseValue(x: Auto) RETURNS Int64 ->
+--         RETURN 0;
+--     END
+--
+--     FN main() RETURNS !Void ->
+--         a = parseValue(5);          -- Int64
+--         b = parseValue("hello");    -- String — disagrees with a
+--         RETURN;
+--     END
+--
+-- Expected diagnostic (per docs/agents/gradual-typing.md §6):
+--
+--     [Error] Ambiguous Auto for parameter 'x' of `parseValue`:
+--             observed as Int64, String.
+--       Option 1 (recommended): pin one concrete type at the
+--         declaration and convert at the divergent sites...
+--       Option 2: if these types do not have an obvious conversion
+--         path, restructure the call sites...
+--       Option 3 (last resort): if you genuinely need to accept
+--         multiple types, define a union explicitly:
+--           UNION X { Variant0: Int64, Variant1: String }
+--         Auto does NOT auto-create unions.
+--
+-- v1 placeholder body — keeps this file syntactically valid for
+-- the runner. Real ambiguity reproduction lives in the spec.
+
+FN main() RETURNS !Void ->
+    RETURN;
+END

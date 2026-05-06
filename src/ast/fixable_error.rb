@@ -83,7 +83,11 @@ class FixableFinding
     @token = token
     @category = category
     @fixes = Array(fixes)
-    raise ArgumentError, "at least one Fix required" if @fixes.empty?
+    # An empty `fixes` is permitted for diagnostic-only findings (e.g.
+    # gradual-typing's ambiguity / unresolved-Auto reports — see
+    # docs/agents/gradual-typing.md §4.3 / §6). The CLI's `clear fix`
+    # iterates `.fixes` and naturally skips findings with no
+    # applicable fix; the message is still surfaced.
   end
 
   def fatal?; @level == :error; end

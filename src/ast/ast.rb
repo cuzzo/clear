@@ -538,6 +538,15 @@ module AST
     attr_accessor :fsm_eligible
     attr_accessor :fsm_ineligible_reason  # Symbol: :reentrant, :extern, :self_recursive, :no_suspends
     attr_accessor :fsm_suspend_points
+    # PRE clauses: Array of expression AST nodes parsed from
+    # `PRE: <expr>` between RETURNS and `->`. Each predicate is checked
+    # at function entry, fail-fast, raising PreconditionFail.
+    # See docs / spec/with_pre_spec.rb for semantics.
+    attr_accessor :pre_clauses
+    # DEBUG_POST clauses: same shape as pre_clauses (Array of
+    # {expr:, source:}). Checked in a debug-only wrapper after the
+    # function body returns; panics on violation. See spec/with_post_spec.rb.
+    attr_accessor :post_clauses
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do

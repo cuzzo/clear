@@ -45,11 +45,29 @@ class Parser
     @@suffix_rules[[type, value]] = block
   end
 
-  def initialize(tokens, source_code = "")
+  def initialize(tokens, source_code = "", gradual: nil)
     @tokens = tokens
     @pos = 0
     @source_code = source_code
+    # `gradual` controls whether omitted type annotations on
+    # parameters / return types parse as implicit Auto (per
+    # docs/agents/gradual-typing.md §3.3). Defaults to the global
+    # Parser.gradual_mode flag set by the CLI; can be overridden
+    # per-instance by passing the kwarg explicitly. Without gradual
+    # mode, omitted annotations behave exactly as before this feature
+    # landed.
+    @gradual = gradual.nil? ? self.class.gradual_mode : gradual
   end
+
+  class << self
+    # Process-global gradual-mode flag. Set by `clear --gradual` at
+    # build start; read by Parser.new instances that don't pass an
+    # explicit gradual: kwarg. This matches how the existing CLI
+    # threads compile-time choices (--optimized, --tsan, etc.) — one
+    # build, one mode.
+    attr_accessor :gradual_mode
+  end
+  self.gradual_mode = false
 
   def parse
     stmts = []
@@ -761,6 +779,10 @@ class Parser
         end
         if match!(:CHAR, ':')
           p_type = parse_type_annotation
+        elsif @gradual
+          # Gradual mode: omitted annotation becomes implicit Auto.
+          # The inference pass resolves these from call-site arg types.
+          p_type = Type.new(:Auto, auto: true)
         end
       end
 
@@ -1039,7 +1061,8 @@ class Parser
           # marked as indirect BEFORE parse_type_annotation returns.
           indirect_fields = Set.new
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
-            fname = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value
+            fname_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
+            fname = fname_tok.value
             consume(:CHAR, ':')
             # Peek: will parse_type_annotation consume @indirect?
             ftype = parse_type_annotation
@@ -1047,6 +1070,7 @@ class Parser
             # We detect it was present by checking @last_indirect_consumed.
             indirect_fields << fname if @last_indirect_consumed
             @last_indirect_consumed = false
+            reject_auto_in_aggregate_field!(ftype, fname, fname_tok, "UNION inline-variant")
             [fname, ftype]
           end
           var_data = { kind: :inline_struct, fields: field_pairs.to_h }
@@ -1055,6 +1079,7 @@ class Parser
         elsif match!(:CHAR, ':')
           # Single-type payload: Data: Number  (or Data: Number @indirect)
           vtype = parse_type_annotation
+          reject_auto_in_aggregate_field!(vtype, var_name, nil, "UNION variant payload")
           if @last_indirect_consumed
             @last_indirect_consumed = false
             vtype = { kind: :indirect_payload, type: vtype }
@@ -1072,6 +1097,26 @@ class Parser
     node.type_params = type_params unless type_params.empty?
     node.methods = method_reqs unless method_reqs.empty?
     node
+  end
+
+  # Slice the source text spanning [start_tok, end_tok). Used to capture
+  # the textual form of an expression we just parsed, so the runtime
+  # error path can quote it back to the user (e.g. PRE clauses).
+  def source_slice_between(start_tok, end_tok)
+    return "" unless @source_code && start_tok && end_tok
+    lines = @source_code.lines
+    sl, sc = start_tok.line, start_tok.column
+    el, ec = end_tok.line, end_tok.column
+    return "" if sl < 1 || sl > lines.length
+    if sl == el
+      lines[sl - 1][sc - 1, ec - sc].to_s.strip
+    else
+      parts = []
+      parts << lines[sl - 1][sc - 1..]
+      ((sl + 1)..(el - 1)).each { |l| parts << lines[l - 1] }
+      parts << (lines[el - 1][0, ec - 1] || "")
+      parts.join.strip
+    end
   end
 
   def parse_function_def(visibility = :package)
@@ -1125,6 +1170,16 @@ class Parser
     return_type_token = nil
     return_lifetime_token = nil
     explicit_return = match?(:KEYWORD, 'RETURNS')  # peek for the post-#335 stamp
+    # Gradual mode: when RETURNS is omitted, treat as implicit Auto so
+    # the inference pass picks the return type up from RETURN exprs.
+    # We mark explicit_return = true so the existing fallible-return
+    # enforcement uses the inferred type once resolved. Without
+    # `--gradual`, omitted RETURNS keeps its current behavior
+    # (implicit-Void / inferred per the legacy path).
+    if !explicit_return && @gradual
+      return_type = Type.new(:Auto, auto: true)
+      explicit_return = true
+    end
     if match!(:KEYWORD, 'RETURNS')
       shared_return = match!(:KEYWORD, 'SHARED')
 
@@ -1225,6 +1280,36 @@ class Parser
       end
     end
 
+    # 7. Optional PRE clauses (zero or more). Each `PRE: <expr>` is
+    # checked at function entry, fail-fast, with PreconditionFail
+    # raised on failure. parse_expression naturally terminates at the
+    # next keyword (PRE / -> / etc.), so no statement terminator is
+    # required. We snapshot the source text of the predicate so the
+    # runtime error message can quote it back to the user.
+    pre_clauses = []
+    while match!(:KEYWORD, 'PRE')
+      consume(:CHAR, ':')
+      start_tok = current
+      expr = parse_expression
+      end_tok = current
+      src = source_slice_between(start_tok, end_tok)
+      pre_clauses << { expr: expr, source: src }
+    end
+
+    # 8. Optional DEBUG_POST clauses (zero or more). Same shape as PRE,
+    # but checked in a debug-only wrapper around the function body.
+    # Predicate may reference parameters and the synthetic `result`.
+    # Panics on violation; not present in release builds.
+    post_clauses = []
+    while match!(:KEYWORD, 'DEBUG_POST')
+      consume(:CHAR, ':')
+      start_tok = current
+      expr = parse_expression
+      end_tok = current
+      src = source_slice_between(start_tok, end_tok)
+      post_clauses << { expr: expr, source: src }
+    end
+
     arrow_token = current
     consume(:ARROW, '->')
     body = parse_block_body(['END', 'CATCH'])
@@ -1321,6 +1406,8 @@ class Parser
     node.tight_reentrance = effects_span[:tight] if effects_span
     node.requires_clauses = requires_clauses unless requires_clauses.empty?
     node.return_type_token = return_type_token
+    node.pre_clauses = pre_clauses unless pre_clauses.empty?
+    node.post_clauses = post_clauses unless post_clauses.empty?
     node
   end
 
@@ -2197,7 +2284,8 @@ class Parser
 
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
-      name = consume(:VAR_ID).value
+      name_tok = consume(:VAR_ID)
+      name = name_tok.value
 
       # Syntax: name=default: Type  (default before type annotation)
       default_val = nil
@@ -2212,9 +2300,31 @@ class Parser
 
       type = parse_type_annotation()
 
+      reject_auto_in_aggregate_field!(type, name, name_tok, "STRUCT")
+
       [name, { type: type, default: default_val, borrowed: borrowed }]
     end
     pairs.to_h
+  end
+
+  # M2.3 — `Auto` is not allowed in aggregate-type field/variant
+  # positions (struct fields, union inline-variant fields, union
+  # single-type payloads). Cross-callsite type inference into a
+  # named aggregate is intentionally not supported; aggregate field
+  # types must be concrete. The diagnostic points at the field's
+  # declaration so the user can replace `Auto` with a real type.
+  def reject_auto_in_aggregate_field!(type, field_name, field_tok, context_label)
+    return unless type.is_a?(Type) && type.auto?
+    auto_tok = type.respond_to?(:auto_token) ? type.auto_token : nil
+    anchor = auto_tok || field_tok
+    error!(
+      anchor,
+      "Auto is not allowed in #{context_label} field declarations. " \
+      "Field '#{field_name}' must have a concrete type. Cross-callsite " \
+      "field inference is intentionally not supported -- " \
+      "replace `Auto` with the field's actual type (e.g. Int64, " \
+      "String, Foo[], HashMap<String, Bar>)."
+    )
   end
 
   def parse_primary
@@ -2482,6 +2592,19 @@ class Parser
       return mark_polymorphic_shared_type(parse_type_annotation)
     end
 
+    # Auto — gradual-typing placeholder. Resolved to a concrete type
+    # by the inference pass (see docs/agents/gradual-typing.md). At
+    # parse time it's just a sentinel Type whose `auto?` flag is set;
+    # downstream code treats it as "unresolved, fill me in". Stash
+    # the keyword token so the fix emitter can replace this exact
+    # span with the resolved type's source form.
+    if match?(:KEYWORD, 'Auto')
+      auto_tok = consume(:KEYWORD, 'Auto')
+      t = Type.new(:Auto, auto: true)
+      t.auto_token = auto_tok
+      return t
+    end
+
     # Check for tense (Promise) prefix: ~Type
     tense_prefix = ""
     if match!(:CHAR, '~')
@@ -2505,6 +2628,25 @@ class Parser
     if match?(:PERCENT)
       consume(:PERCENT)
       is_heap = true
+    end
+
+    # Audit#3 — clear diagnostic for `?Auto` / `!Auto` / `~Auto` /
+    # `%Auto`. Combining a prefix with `Auto` has no defined
+    # semantics yet (would `?Auto` infer a nullable T or a regular
+    # T?), so reject explicitly with a message pointing at the
+    # offending Auto keyword. Without this check the parser would
+    # fall through to `consume(:TYPE_ID)` and emit a generic
+    # "Expected TYPE_ID, got Auto" error.
+    if match?(:KEYWORD, 'Auto')
+      prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{is_heap ? '%' : ''}"
+      error!(
+        current,
+        "`#{prefix_chars}Auto` is not supported. `Auto` cannot be combined with " \
+        "the prefix `#{prefix_chars}` -- the inferred type's wrapping is " \
+        "not defined yet. Use `Auto` alone (the inferencer will pick the " \
+        "concrete type) or write the wrapped type explicitly (e.g. " \
+        "`#{prefix_chars}Int64`, `#{prefix_chars}String`)."
+      )
     end
 
     base = consume(:TYPE_ID).value

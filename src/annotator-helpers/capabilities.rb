@@ -276,50 +276,103 @@ module CapabilityHelper
              fixes: fixes, raise_in_collector: false)
   end
 
-  def guard_identifier_allowed!(node)
-    return unless @current_guard_context
-    own_alias = @current_guard_context[:alias]
-    return if node.name == own_alias || %w[TRUE FALSE].include?(node.name)
+  # Predicate identifier scope check. Used by both WITH GUARD (where the
+  # predicate may reference only its own alias) and FN PRE (where the
+  # predicate may reference only function parameters). Branches on the
+  # active context's :kind so each surface gets its own diagnostic.
+  def predicate_identifier_allowed!(node)
+    ctx = @current_predicate_context
+    return unless ctx
+    return if %w[TRUE FALSE].include?(node.name)
 
-    sibling_aliases = @current_guard_context[:sibling_aliases] || []
-    if sibling_aliases.include?(node.name)
-      error!(node,
-        "WITH GUARD '#{own_alias}' references '#{node.name}', a sibling alias bound by the same WITH. " \
-        "Multi-object consistency for aliased objects is not supported: synchronized sources " \
-        "(locked, atomic, versioned) cannot provide a cross-object atomic snapshot, so a guard " \
-        "spanning multiple aliases would be checking values that are no longer consistent by the " \
-        "time the body runs. Each GUARD may only reference its own alias. " \
-        "Use an `IF` guard clause inside the WITH body for cross-alias checks.")
-    else
-      error!(node,
-        "WITH GUARD can only reference the guarded alias '#{own_alias}'. Found '#{node.name}'.")
+    case ctx[:kind]
+    when :guard
+      own_alias = ctx[:alias]
+      return if node.name == own_alias
+
+      sibling_aliases = ctx[:sibling_aliases] || []
+      if sibling_aliases.include?(node.name)
+        error!(node,
+          "WITH GUARD '#{own_alias}' references '#{node.name}', a sibling alias bound by the same WITH. " \
+          "Multi-object consistency for aliased objects is not supported: synchronized sources " \
+          "(locked, atomic, versioned) cannot provide a cross-object atomic snapshot, so a guard " \
+          "spanning multiple aliases would be checking values that are no longer consistent by the " \
+          "time the body runs. Each GUARD may only reference its own alias. " \
+          "Use an `IF` guard clause inside the WITH body for cross-alias checks.")
+      else
+        emit_typo_suggestion!(
+          node.token, node.name, [own_alias],
+          "WITH GUARD can only reference the guarded alias '#{own_alias}'. Found '#{node.name}'.",
+          "the guarded alias",
+          category: :capability, cascade: true)
+      end
+    when :pre
+      params = ctx[:param_names] || []
+      return if params.include?(node.name)
+      emit_typo_suggestion!(
+        node.token, node.name, params,
+        "PRE clauses may only reference function parameters. " \
+        "Found '#{node.name}', which is not a parameter of '#{ctx[:fn_name]}'.",
+        "a parameter of '#{ctx[:fn_name]}'",
+        category: :type, cascade: true)
+    when :post
+      allowed = ctx[:allowed_names] || []
+      rejected = ctx[:rejected_param_names] || Set.new
+      unless allowed.include?(node.name)
+        return emit_typo_suggestion!(
+          node.token, node.name, allowed,
+          "DEBUG_POST clauses may only reference function parameters or 'result'. " \
+          "Found '#{node.name}', which is not in scope for '#{ctx[:fn_name]}'.",
+          "a parameter of '#{ctx[:fn_name]}' or 'result'",
+          category: :type, cascade: true)
+      end
+      if rejected.include?(node.name)
+        error!(node,
+          "DEBUG_POST cannot reference synchronized parameter '#{node.name}'. " \
+          "The predicate runs after the function returns and any locks have " \
+          "been released; reading a synchronized field outside its lock is " \
+          "racy. Move the check inside a WITH block in the body, or assert " \
+          "against an unsynchronized snapshot value instead.")
+      end
     end
   end
 
-  def record_guard_call_site!(node)
-    return unless @current_guard_context
-    @guard_call_sites << {
-      with_node: @current_guard_context[:with_node],
-      guard_expr: @current_guard_context[:guard_expr],
-      call: node,
-      callee: node.name,
+  def record_predicate_call_site!(node)
+    ctx = @current_predicate_context
+    return unless ctx
+    @predicate_call_sites << {
+      kind:       ctx[:kind],
+      with_node:  ctx[:with_node],
+      fn_node:    ctx[:fn_node],
+      pred_expr:  ctx[:pred_expr],
+      call:       node,
+      callee:     node.name,
     }
   end
 
-  def validate_guard_purity!
-    (@guard_call_sites || []).each do |site|
+  def validate_predicate_purity!
+    (@predicate_call_sites || []).each do |site|
       call = site[:call]
       callee = site[:callee]
-      reason = guard_impurity_reason(call, callee)
+      reason = predicate_impurity_reason(call, callee)
       next unless reason
 
-      error!(call,
-        "WITH GUARD clauses must be pure, but '#{callee}' #{reason}. " \
-        "Move the impure work before the WITH block and guard on the captured value.")
+      surface, hint = case site[:kind]
+                      when :pre
+                        ["PRE clauses",
+                         "Move the impure work into the function body and validate the captured value there."]
+                      when :post
+                        ["DEBUG_POST clauses",
+                         "Move the impure work into the function body and assert against an unsynchronized snapshot value instead."]
+                      else
+                        ["WITH GUARD clauses",
+                         "Move the impure work before the WITH block and guard on the captured value."]
+                      end
+      error!(call, "#{surface} must be pure, but '#{callee}' #{reason}. #{hint}")
     end
   end
 
-  def guard_impurity_reason(call, callee)
+  def predicate_impurity_reason(call, callee)
     return "is an extern call" if call.respond_to?(:extern_call) && call.extern_call
     return "has extern effects" if call.respond_to?(:extern_effects) && call.extern_effects && !call.extern_effects.empty?
     return "can fail" if call.respond_to?(:can_fail) && call.can_fail
@@ -359,13 +412,13 @@ module CapabilityHelper
     end
 
     aliases = caps.map { |c| c[:alias] }.compact
-    prev_guard = @current_guard_context
+    prev_guard = @current_predicate_context
     begin
       guarded.each do |gcap|
         own = gcap[:alias]
         siblings = aliases - [own]
-        @current_guard_context = {
-          with_node: node, guard_expr: gcap[:guard_expr],
+        @current_predicate_context = {
+          kind: :guard, with_node: node, pred_expr: gcap[:guard_expr],
           alias: own, sibling_aliases: siblings,
         }
         visit(gcap[:guard_expr])
@@ -376,7 +429,135 @@ module CapabilityHelper
         end
       end
     ensure
-      @current_guard_context = prev_guard
+      @current_predicate_context = prev_guard
+    end
+  end
+
+  # Visit PRE clauses on a function definition. Runs after parameters
+  # have been declared into the routine scope (so the predicate can
+  # reference them and resolve their types) and before the body is
+  # visited. Each predicate must be Bool, may reference only parameters
+  # / TRUE / FALSE, and is held to the same purity rules as WITH GUARD.
+  #
+  # PRE failures emit `rt.setError(...PreconditionFail); return error.CheatError;`,
+  # which means a PRE-having function MUST declare an error-union return
+  # (`RETURNS !T`). The function-level `enforce_fallible_returns!` pass
+  # catches the explicit-T case (since pre_clauses now flag the fn as
+  # raising); the implicit-RETURNS case is caught here.
+  def visit_pre_clauses!(fn_node)
+    pre_clauses = fn_node.respond_to?(:pre_clauses) ? (fn_node.pre_clauses || []) : []
+    return if pre_clauses.empty?
+
+    unless fn_node.respond_to?(:explicit_return_type) && fn_node.explicit_return_type
+      message = "Function '#{fn_node.name}' has PRE clauses but no explicit return type. " \
+                "PRE clauses can fail at runtime, so the function must declare an error-union " \
+                "return. Add `RETURNS !Void` (or `RETURNS !T` for a value-returning function) " \
+                "to the signature."
+
+      arrow_tok = fn_node.respond_to?(:arrow_token) ? fn_node.arrow_token : nil
+      if arrow_tok
+        # Auto-fix: insert `RETURNS !Void ` immediately before the
+        # `->` arrow. The body is implicit-Void (no RETURNS clause
+        # was given), so !Void is the correct error-union widening.
+        fixes = [Fix.new(
+          description: "Insert `RETURNS !Void` so PRE-failure errors can propagate.",
+          confidence: :auto,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: arrow_tok.line, col: arrow_tok.column, length: 0),
+            replacement: 'RETURNS !Void ',
+          )],
+        )]
+        fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
+      else
+        error!(fn_node, message)
+      end
+    end
+
+    param_names = (fn_node.params || []).map { |p| p[:name].to_s }
+    prev_ctx = @current_predicate_context
+    begin
+      pre_clauses.each do |entry|
+        expr = entry[:expr]
+        @current_predicate_context = {
+          kind: :pre, fn_node: fn_node, pred_expr: expr,
+          param_names: param_names, fn_name: fn_node.name,
+        }
+        visit(expr)
+
+        pred_type = expr.type_info
+        unless pred_type && pred_type.resolved == :Bool
+          error!(expr, "PRE expression must return Bool, got #{pred_type || 'Unknown'}.")
+        end
+      end
+    ensure
+      @current_predicate_context = prev_ctx
+    end
+  end
+
+  # Visit DEBUG_POST clauses on a function definition. Runs AFTER the
+  # body has been annotated, while still inside the routine scope so
+  # parameters resolve normally. Each predicate may reference parameters
+  # plus the synthetic `result` (typed as the function's return payload).
+  # Predicates referring to synchronized parameters are rejected because
+  # POST runs after locks are released — reading a sync'd field outside
+  # the lock is racy. POST predicates are debug-only assertions and do
+  # NOT require the function to return an error union.
+  def visit_post_clauses!(fn_node)
+    post_clauses = fn_node.respond_to?(:post_clauses) ? (fn_node.post_clauses || []) : []
+    return if post_clauses.empty?
+
+    # POST + CATCH on the same function is not yet supported. Reject at
+    # annotation time with a clean CLEAR diagnostic rather than letting
+    # MIR lowering hit an internal raise.
+    has_catch = fn_node.respond_to?(:catch_clauses) && fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
+    has_default_catch = fn_node.respond_to?(:default_catch) && fn_node.default_catch.is_a?(Array) && fn_node.default_catch.any?
+    if has_catch || has_default_catch
+      error!(fn_node,
+        "DEBUG_POST clauses cannot be combined with CATCH on the same function. " \
+        "Split into two functions (one with CATCH, one with DEBUG_POST that calls it), " \
+        "or move the assertion into a separate validation helper.")
+    end
+
+    param_names = (fn_node.params || []).map { |p| p[:name].to_s }
+    rejected = (fn_node.params || []).filter_map do |p|
+      sym = current_scope.locals[p[:name].to_s]
+      next unless sym && %i[locked write_locked versioned atomic].include?(sym.sync)
+      p[:name].to_s
+    end.to_set
+
+    rt = fn_node.return_type
+    rt_obj = rt.is_a?(Type) ? rt : (rt ? Type.new(rt) : nil)
+    payload = if rt_obj && rt_obj.error_union?
+                rt_obj.payload_type
+              else
+                rt_obj
+              end
+
+    with_new_scope(current_scope) do
+      if payload
+        current_scope.declare("result", nil, payload, false, false, nil, :stack)
+      end
+
+      allowed_names = param_names + ["result"]
+      prev_ctx = @current_predicate_context
+      begin
+        post_clauses.each do |entry|
+          expr = entry[:expr]
+          @current_predicate_context = {
+            kind: :post, fn_node: fn_node, pred_expr: expr,
+            allowed_names: allowed_names, rejected_param_names: rejected,
+            fn_name: fn_node.name,
+          }
+          visit(expr)
+
+          pred_type = expr.type_info
+          unless pred_type && pred_type.resolved == :Bool
+            error!(expr, "DEBUG_POST expression must return Bool, got #{pred_type || 'Unknown'}.")
+          end
+        end
+      ensure
+        @current_predicate_context = prev_ctx
+      end
     end
   end
 

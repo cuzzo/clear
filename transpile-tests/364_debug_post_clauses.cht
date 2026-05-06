@@ -1,0 +1,115 @@
+-- DEBUG_POST clauses run as a debug-only wrapper around the function
+-- body. Predicate references parameters and the synthetic `result`.
+-- Panics on violation in debug builds; collapses to a tail call in
+-- release.
+
+FN double(x: Int64) RETURNS Int64
+    DEBUG_POST: result == x * 2
+->
+    RETURN x * 2;
+END
+
+FN sum(x: Int64, y: Int64) RETURNS Int64
+    DEBUG_POST: result >= x
+    DEBUG_POST: result >= y
+->
+    RETURN x + y;
+END
+
+-- POST + PRE on the same function. PRE raises (caller-recoverable);
+-- POST panics (programmer-error). The function returns `!T` because
+-- of PRE; POST sees the success-path result.
+FN safeDouble!(x: Int64) RETURNS !Int64
+    PRE: x > 0
+    DEBUG_POST: result > x
+->
+    RETURN x * 2;
+END
+
+-- Void-return DEBUG_POST: the predicate references parameters only
+-- (no `result` since there's nothing to return). Exercises the
+-- void code path in build_post_outer_fn — the wrapper calls inner
+-- without binding a result, runs the predicate, returns.
+STRUCT Counter { value: Int64 }
+FN bumpBy!(MUTABLE c: Counter, n: Int64) RETURNS Void
+    DEBUG_POST: n >= 0
+->
+    WITH EXCLUSIVE c AS x { x.value = x.value + n; }
+    RETURN;
+END
+
+-- Error-propagating body + DEBUG_POST: when the body raises, the
+-- inner call propagates via `try` and the POST wrapper never
+-- evaluates the predicate. The caller sees the original error,
+-- not a panic.
+FN doubleOrRaise!(x: Int64) RETURNS !Int64
+    DEBUG_POST: result > 0
+->
+    IF x < 0 THEN RAISE Input, NegativeInput, "x must be non-negative"; END
+    RETURN x * 2;
+END
+
+-- Nested-call DEBUG_POST chain: each layer's wrapper calls the
+-- inner of the next layer (via the outer wrapper), so each level's
+-- POST evaluates at its own exit. Verifies the wrappers compose.
+FN base(x: Int64) RETURNS Int64
+    DEBUG_POST: result >= 0
+->
+    RETURN x * x;
+END
+FN mid(x: Int64) RETURNS Int64
+    DEBUG_POST: result >= 0
+->
+    RETURN base(x) + 1;
+END
+FN top(x: Int64) RETURNS Int64
+    DEBUG_POST: result > 0
+->
+    RETURN mid(x);
+END
+
+FN main() RETURNS !Void ->
+    a = double(5);
+    ASSERT a == 10, "double(5) == 10";
+
+    b = double(0);
+    ASSERT b == 0, "double(0) == 0";
+
+    s = sum(3, 4);
+    ASSERT s == 7, "sum(3, 4) == 7";
+
+    -- safeDouble: PRE holds, POST holds.
+    sd = safeDouble!(3) OR RAISE;
+    ASSERT sd == 6, "safeDouble(3) == 6";
+
+    -- safeDouble: PRE fails, caller recovers via OR.
+    sd_neg = safeDouble!(-1_i64) OR -42_i64;
+    ASSERT sd_neg == -42_i64, "safeDouble(-1): PRE x > 0 fails";
+
+    -- Void-return DEBUG_POST: predicate holds (n=7 >= 0), body runs,
+    -- void wrapper returns cleanly without trying to bind a `result`.
+    -- The Counter's @shared:locked allows side-effect verification.
+    MUTABLE counter = Counter{ value: 0 } @shared:locked;
+    bumpBy!(counter, 7);
+    WITH EXCLUSIVE counter AS x {
+        ASSERT x.value == 7, "bumpBy ran the body";
+    }
+
+    -- Error-propagating body: the inner raises, `try` propagates
+    -- before the POST predicate evaluates. Caller catches the
+    -- error via OR — no panic.
+    err_recovered = doubleOrRaise!(-5_i64) OR -77_i64;
+    ASSERT err_recovered == -77_i64, "POST does not fire on error path";
+
+    -- Same fn, success path: POST predicate (result > 0) holds.
+    ok_path = doubleOrRaise!(4) OR RAISE;
+    ASSERT ok_path == 8, "POST allows the success path";
+
+    -- Nested-call DEBUG_POST chain: top -> mid -> base. Each layer's
+    -- POST evaluates at its own exit; all hold for x=3.
+    -- base(3) = 9, mid(3) = 9+1 = 10, top(3) = 10.
+    nested = top(3);
+    ASSERT nested == 10, "nested POST chain composes cleanly";
+
+    RETURN;
+END

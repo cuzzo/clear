@@ -23,6 +23,7 @@ require_relative "annotator-helpers/lock_helper"
 require_relative "mir/alloc"
 require_relative "annotator-helpers/method_analysis"
 require_relative "annotator-helpers/union"
+require_relative "annotator-helpers/auto_inference"
 
 # Handle Type inference, and semantic validation
 class SemanticAnnotator
@@ -110,7 +111,7 @@ class SemanticAnnotator
     # chance to populate sync from callers' arg bindings first. Each entry:
     # { node:, var_node:, capability:, kind: :exclusive | :write_locked_read }
     @deferred_with_validations = []
-    @guard_call_sites = []
+    @predicate_call_sites = []
     # Tracks remaining statements in current body for forward reference analysis
     @stmts_after = nil
     # Ownership graph: shadow tracker that runs in parallel with the scope-based system.
@@ -128,6 +129,15 @@ class SemanticAnnotator
     AST.reset_user_types!
     @program = node  # #327: WithMatchCheck reads node.sync_policy below.
     visit(node)
+    # Auto / gradual-typing inference (gradual-typing.md M1.7).
+    # After the body walk has populated `type_info` on every
+    # constraint-source AST node, run Pass B (collector) + Pass C
+    # (unifier) to resolve Auto slots. Resolved slots have their decl
+    # types mutated to concrete; unresolved / ambiguous slots emit
+    # fixable findings via M1.4 helpers. Runs BEFORE the downstream
+    # analyses (effect inference, with-match check) so they see
+    # finalized signatures.
+    run_auto_inference!(node) if program_has_auto?(node)
     # P1.7: now that all bodies are annotated and arg.symbol is wired at
     # every call site, propagate caller sync into callee param entries.
     # Then re-check the WITH validations that we deferred during the body
@@ -180,6 +190,104 @@ class SemanticAnnotator
   end
 
 private
+
+  # M1.7 — Auto / gradual-typing inference pipeline. Runs Pass B
+  # (collect constraint sources) and Pass C (unify, resolve, emit
+  # diagnostics) after the body walk has populated type_info on
+  # every constraint source. Mutates decl types in place — Auto
+  # Types become concrete after a successful resolution.
+  #
+  # M2.1 layers an operator-evidence collector that scans body
+  # BinaryOp expressions for hints; ambiguity / unresolved findings
+  # consult this evidence to offer ranked candidate fixes.
+  def run_auto_inference!(program_node)
+    collector = AutoConstraintCollector.new(@fn_nodes)
+    slots = collector.collect!(program_node)
+    return if slots.empty?
+
+    # M2.2: forward-flow evidence for shape-tagged slots from empty
+    # `[]` / `{}` initializers. Walks each fn body for `.append(e)`
+    # / `x[k] = v` patterns and records the operands as constraint
+    # sources on the matching shape slot.
+    ShapeEvidenceCollector.new(slots, @fn_nodes).collect!
+
+    # M2.1: collect operator hints from BinaryOps over Auto-binding
+    # operands. Used by ambiguity / unresolved finding builders.
+    op_evidence = OperatorEvidenceCollector.new(slots, @fn_nodes).collect!
+
+    unifier = AutoUnifier.new(slots)
+    result = unifier.resolve!
+
+    # M2.2: stamp paired `:map_key` + `:map_value` resolutions into a
+    # joint `HashMap<K, V>` type on the binding's decl.
+    unifier.stamp_map_pairs!(result.resolved)
+
+    # Resolved slots: emit :info findings with :auto fix (replace
+    # the Auto keyword span with the resolved type's source form).
+    # M2.2: shape slots are skipped by emit_auto_resolved_finding!
+    # (per-sub-slot fixes would write the scalar where the wrapped
+    # container type belongs). The shape-aware emission below
+    # produces one finding per fully-resolved shape-tracked decl.
+    result.resolved.each_value { |resolution| emit_auto_resolved_finding!(resolution) }
+    emit_auto_shape_resolved_findings!(result.resolved)
+
+    # Ambiguous slots: emit :error findings with the ranked Option 1/
+    # 2/3 text plus operator-derived candidates (M2.1).
+    result.ambiguous.each_value { |ambiguity|
+      emit_auto_ambiguity_finding!(ambiguity, op_evidence: op_evidence)
+    }
+
+    # Unresolved slots: emit :error findings. M2.1 attaches ranked
+    # candidates from operator evidence when the body uses the
+    # binding in BinaryOp expressions. M2.2: shape sub-slots
+    # (map_key / map_value / list_element) emit per-sub-slot
+    # unresolved findings so the user knows which half is missing.
+    result.unresolved.each_value { |slot|
+      emit_auto_unresolved_finding!(slot, op_evidence: op_evidence)
+    }
+  end
+
+  # M2.2 — One :info finding per shape-tracked decl whose type was
+  # successfully wrapped (list_element resolved → `T[]`; map pair
+  # both resolved → `HashMap<K,V>`). Groups by decl_node so map
+  # pairs produce a single binding-level message instead of two
+  # confusing per-sub-slot ones.
+  def emit_auto_shape_resolved_findings!(resolved_slots)
+    seen = {}
+    resolved_slots.each_value do |resolution|
+      slot = resolution.slot
+      next unless slot.respond_to?(:shape) && slot.shape
+      next if seen[slot.decl_node.object_id]
+      seen[slot.decl_node.object_id] = true
+      emit_auto_shape_resolved_finding!(slot.decl_node, slot)
+    end
+  end
+
+  # Quick walk to detect whether the program has any Auto Types.
+  # Skips the inference pipeline entirely when there are none —
+  # avoids the cost on regular (non-gradual) programs.
+  def program_has_auto?(node)
+    return false if node.nil?
+    case node
+    when Type
+      return node.auto?
+    when Symbol, String, Numeric, TrueClass, FalseClass
+      return false
+    when Array
+      return node.any? { |c| program_has_auto?(c) }
+    when Hash
+      return node.each_value.any? { |v| program_has_auto?(v) }
+    end
+    return true if node.respond_to?(:type) && node.type.is_a?(Type) && node.type.auto?
+    return true if node.respond_to?(:return_type) && node.return_type.is_a?(Type) && node.return_type.auto?
+    if node.respond_to?(:params) && node.params.is_a?(Array)
+      return true if node.params.any? { |p| p[:type].is_a?(Type) && p[:type].auto? }
+    end
+    if node.respond_to?(:each_pair)
+      return node.each_pair.any? { |_, v| program_has_auto?(v) }
+    end
+    false
+  end
 
   # P1.7: replay each deferred WITH-on-param check now that caller-sync
   # propagation has had a chance to populate entry.sync. If a param's sync
@@ -389,7 +497,7 @@ private
 
     # PASS 6: Compute effect sets for every function via call-graph fixed-point.
     compute_effects!
-    validate_guard_purity!
+    validate_predicate_purity!
 
     # PASS 6a: FSM Phase A — classify each function for stackless-fsm
     # compilation, enumerate suspend points, and tag every BG block with
@@ -738,6 +846,7 @@ private
     @fn_raises_directly[node.name] = node.uses_frame || node.uses_heap || node.uses_alloc || heap_ret ||
       (@fn_has_fnptr[node.name] == true) ||
       (node.reentrant == :non_reentrant) ||
+      (node.respond_to?(:pre_clauses) && node.pre_clauses && node.pre_clauses.any?) ||
       scan_for_raises(node.body)
 
     # Visit CATCH clause bodies with __error and snapshot in scope.
@@ -2140,9 +2249,18 @@ private
       end
     end
 
-    if expected && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
+    # Gradual-typing tolerance: if either the expected (declared)
+    # return or the actual (computed) return is an unresolved Auto,
+    # skip the strict-equality check. The unifier (Pass C) resolves
+    # both ends after the body walk; mismatch surfaces when the
+    # resolved decl gets re-validated downstream.
+    actual_is_auto = actual_full.respond_to?(:auto?) && actual_full.auto?
+    expected_obj   = expected.is_a?(Type) ? expected : (expected ? Type.new(expected) : nil)
+    expected_is_auto = expected_obj.respond_to?(:auto?) && expected_obj.auto?
+
+    if !actual_is_auto && !expected_is_auto && expected && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
       error!(node, :RETURN_MISMATCH, type_display(expected), type_display(actual_full))
-    elsif expected && expected != :Void && expected != :Any && actual != expected
+    elsif !actual_is_auto && !expected_is_auto && expected && expected != :Void && expected != :Any && actual != expected
       node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
       check_prefixed_int_range!(node.value, expected)
     end
@@ -2322,7 +2440,7 @@ private
     end
 
     resolve_call(node, node.args)
-    record_guard_call_site!(node)
+    record_predicate_call_site!(node)
 
     # Record call-site context (loop/cond) for effects propagation.
     # A call sitting inside a loop promotes the callee's SUSPENDS effects
@@ -2374,7 +2492,7 @@ private
 
     # Collection method dispatch (Pool/HashMap) via declarative registry.
     if resolve_collection_method(node)
-      record_guard_call_site!(node)
+      record_predicate_call_site!(node)
       return
     end
 
@@ -2401,7 +2519,7 @@ private
             current_fn_ctx.frame_count += 1
           end
         end
-        record_guard_call_site!(node)
+        record_predicate_call_site!(node)
         return
       end
     end
@@ -2409,7 +2527,7 @@ private
     # Fall through to UFCS: obj.method(args) → method(obj, args)
     ufcs_args = [node.object] + node.args
     resolve_call(node, ufcs_args)
-    record_guard_call_site!(node)
+    record_predicate_call_site!(node)
 
     # Record call-site context for effects propagation (see visit_FuncCall).
     record_call_site(node.name) if node.name.is_a?(String)
@@ -2657,6 +2775,27 @@ private
     final_type, error = node.value.coerce!(node.type)
     error!(node, error) if error
 
+    # M2.2 — empty `[]` / `{}` initializer with `: Auto`: coerce!
+    # returns the Auto Type unchanged because Auto tolerates any
+    # source. But binding the scope as Auto then breaks method
+    # dispatch (e.g. `xs.append(...)` has no Auto overload). Force
+    # the scope-bound type to the value's inferred container type
+    # (`Any[]` / `HashMap<Any>`) so the body walk type-checks
+    # against a permissive container; ShapeEvidenceCollector +
+    # AutoUnifier later refine the decl's stamped type to the
+    # forward-flow result. The decl_node.type stays Auto so the
+    # constraint collector still recognizes the binding as a
+    # shape-tagged Auto slot.
+    if node.type.is_a?(Type) && node.type.auto? &&
+       node.value.respond_to?(:type_object) && node.value.type_object &&
+       (
+         (node.value.is_a?(AST::ListLit) && node.value.items.empty? &&
+          !node.value.instance_variable_get(:@constructor_collection)) ||
+         (node.value.is_a?(AST::HashLit) && node.value.pairs.empty?)
+       )
+      final_type = node.value.type_object
+    end
+
     check_prefixed_int_range!(node.value, node.value.coerced_type || final_type)
     propagate_declared_type_to_value!(node, final_type)
 
@@ -2835,7 +2974,7 @@ private
   end
 
   def visit_Identifier(node)
-    guard_identifier_allowed!(node)
+    predicate_identifier_allowed!(node)
 
     # Pipeline expressions (inside s>) are closures over the enclosing scope —
     # lookup_scope_for searches all scopes. Normal code uses resolve_variable_scope
@@ -3345,8 +3484,12 @@ private
       return
     end
 
-    # Analyze all values
-    node.pairs.each { |k, v| visit(v) }
+    # Analyze all keys + values. Visiting keys populates their
+    # type_info, which the Auto-inference pass (`:map_key` shape
+    # slots, M2.2) reads to resolve the binding's HashMap key type
+    # when the user writes `m: Auto = { "k": v, ... }` or reassigns
+    # a shape-tracked binding to a hash literal.
+    node.pairs.each { |k, v| visit(k); visit(v) }
 
     # Infer Type from first value
     first_val_type = node.pairs.values.first.resolved_type

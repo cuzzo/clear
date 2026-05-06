@@ -51,11 +51,22 @@ module FunctionAnalysis
       declare_and_verify_params(node)
       declare_captures(node)
 
+      # PRE clauses run at function entry — visit them with parameters in
+      # scope so each predicate type-checks and resolves identifiers
+      # against the parameter set. Visited before the body so the body's
+      # locals can't leak into the predicate's symbol scope.
+      visit_pre_clauses!(node) if node.is_a?(AST::FunctionDef)
+
       if body.is_a?(Array)
         visit_stmts(body)
       else
         visit(body)
       end
+
+      # DEBUG_POST clauses run AFTER the body is annotated (return type
+      # is known and synthetic `result` can be typed against it). Still
+      # inside the routine scope so parameters are visible.
+      visit_post_clauses!(node) if node.is_a?(AST::FunctionDef)
 
       finalize_scope(node)
       og_pop_scope
@@ -505,6 +516,17 @@ module FunctionAnalysis
 
       # Case 1: Exact Match or Any
       if !match && (expected == :Any || actual == :Any || expected == actual)
+        match = true
+
+      elsif !match && (expected_type_obj.respond_to?(:auto?) && expected_type_obj.auto?)
+        # Gradual-typing tolerance: param declared Auto. The
+        # AutoUnifier (annotator's Pass C) resolves it from the
+        # observed call-site arg types AFTER this body walk
+        # completes; coercing the call-site arg here would commit
+        # to a type the unifier hasn't picked yet. Treat as a
+        # match for now; mismatch (if the resolution disagrees
+        # with this arg's actual type) surfaces when the resolved
+        # decl gets re-validated downstream.
         match = true
 
       elsif !match && is_safe_autocast?(actual, expected)

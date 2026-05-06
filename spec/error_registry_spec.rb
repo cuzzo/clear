@@ -72,8 +72,8 @@ RSpec.describe AST do
       expect(AST::ERROR_TYPES.key?(:Conflict)).to be false
     end
 
-    it "user types start at id 9 (after the stdlib/control-flow types)" do
-      expect(AST::ERROR_NAME_USER_FIRST).to eq(9)
+    it "user types start at id 10 (after the stdlib/control-flow types)" do
+      expect(AST::ERROR_NAME_USER_FIRST).to eq(10)
     end
   end
 
@@ -165,15 +165,16 @@ RSpec.describe AST do
       expect(entries).to include([:Deadlock, 3])
     end
 
-    it "includes user types at >=9 sorted by id" do
+    it "includes user types at >=10 sorted by id" do
       AST.register_type!(:UserA, :Input)
       AST.register_type!(:UserB, :Input)
       entries = AST.enum_entries
       ids = entries.map(&:last)
       expect(ids).to eq(ids.sort)
       expect(entries).to include([:GuardFail, 8])
-      expect(entries).to include([:UserA, 9])
-      expect(entries).to include([:UserB, 10])
+      expect(entries).to include([:PreconditionFail, 9])
+      expect(entries).to include([:UserA, 10])
+      expect(entries).to include([:UserB, 11])
     end
   end
 
@@ -237,7 +238,9 @@ RSpec.describe AST do
 
     it "returns an empty array for kinds with no registered types" do
       AST.reset_user_types!
-      expect(AST.types_for_kind(:Input)).to eq([])
+      # :Input now contains the stdlib PreconditionFail type, so it's
+      # no longer empty after a reset.
+      expect(AST.types_for_kind(:Input)).to eq([:PreconditionFail])
       expect(AST.types_for_kind(:NotFound)).to eq([])
       expect(AST.types_for_kind(:Permission)).to eq([])
       expect(AST.types_for_kind(:Canceled)).to eq([])

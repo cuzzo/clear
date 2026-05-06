@@ -512,4 +512,343 @@ module FixableHelper
       )]
     )
   end
+
+  # ---------------------------------------------------------------
+  # Auto / gradual-typing fixable findings (M1.4) + operator-aware
+  # suggestions (M2.1). See docs/agents/gradual-typing.md §6 and §12.
+  # ---------------------------------------------------------------
+
+  # Per-operator candidate-type table for M2.1 suggestions. Each
+  # entry: { default: Symbol, alts: [Symbol], notes: { Sym => String } }.
+  # The :default candidate is ranked first; :alts follow in order.
+  # When multiple operators apply to the same slot, the candidate
+  # set is the INTERSECTION across ops; ranking is by lowest sum of
+  # per-op indices (most-default-across-the-board wins).
+  AUTO_OP_CANDIDATES = {
+    ADD:        { default: :Int64,   alts: [:Float64, :String] },
+    SUB:        { default: :Int64,   alts: [:Float64] },
+    MUL:        { default: :Int64,   alts: [:Float64] },
+    DIV:        { default: :Float64, alts: [:Int64],
+                  notes: { Int64: "integer division — TRUNCATES toward zero" } },
+    MOD:        { default: :Int64,   alts: [] },
+    EQ:         { default: :Int64,   alts: [:Float64, :String] },
+    NEQ:        { default: :Int64,   alts: [:Float64, :String] },
+    LT:         { default: :Int64,   alts: [:Float64, :String] },
+    GT:         { default: :Int64,   alts: [:Float64, :String] },
+    LTE:        { default: :Int64,   alts: [:Float64, :String] },
+    GTE:        { default: :Int64,   alts: [:Float64, :String] },
+    AND:        { default: :Bool,    alts: [] },
+    OR:         { default: :Bool,    alts: [] },
+  }.freeze
+
+  # Rank candidate concrete types from a Set<op_symbol> per the
+  # AUTO_OP_CANDIDATES table. Returns [[type_sym, note_or_nil], ...]
+  # ordered by:
+  #   1. Type appears in EVERY observed op's candidate list (intersection).
+  #   2. Sum of per-op rank (default = 0, first alt = 1, ...) ascending.
+  # Notes carried through from any op that has a note for that type.
+  def auto_rank_candidates(ops)
+    return [] if ops.nil? || ops.empty?
+
+    # Per-type aggregation across ops.
+    agg = {}  # type_sym => { count:, rank_sum:, notes: [] }
+    ops.each do |op|
+      entry = AUTO_OP_CANDIDATES[op]
+      next unless entry
+      ranked = [entry[:default]] + entry[:alts]
+      ranked.each_with_index do |type_sym, idx|
+        agg[type_sym] ||= { count: 0, rank_sum: 0, notes: [] }
+        agg[type_sym][:count]    += 1
+        agg[type_sym][:rank_sum] += idx
+        if entry[:notes] && entry[:notes][type_sym]
+          agg[type_sym][:notes] << entry[:notes][type_sym]
+        end
+      end
+    end
+
+    # Only keep candidates that appear for EVERY observed op
+    # (intersection — otherwise we'd suggest a type for which one
+    # of the user's operations has no defined behavior).
+    n_ops = ops.size
+    intersection = agg.select { |_, v| v[:count] == n_ops }
+    intersection
+      .sort_by { |_, v| v[:rank_sum] }
+      .map { |type_sym, v| [type_sym, v[:notes].uniq.first] }
+  end
+
+  # Build an :interactive Fix for a single operator-derived candidate.
+  # Returns nil when the slot has no Auto token to replace (implicit
+  # Auto under --gradual; for those the diagnostic still surfaces the
+  # candidates as text but no auto-applicable fix).
+  def build_auto_candidate_fix(slot, type_sym, note, position)
+    auto_tok = auto_token_for(slot)
+    return nil unless auto_tok
+    type_str = type_sym.to_s
+    desc = +"(#{position}) Pin #{auto_slot_label(slot)} to `#{type_str}`."
+    desc << " #{note}" if note
+    Fix.new(
+      description: desc,
+      confidence: :interactive,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: auto_tok.line, col: auto_tok.column, length: 'Auto'.length),
+        replacement: type_str,
+      )]
+    )
+  end
+
+  # Build the diagnostic body listing the operator hints + ranked
+  # candidates. Used by both the unresolved and ambiguity finding
+  # builders when op_evidence is present.
+  def build_auto_op_evidence_block(ops, candidates)
+    return "" if candidates.empty?
+    op_list = ops.to_a.sort.join(", ")
+    msg = +"\n  In the body, the binding is used in operator(s): #{op_list}.\n"
+    msg << "  Suggested fixes:\n"
+    candidates.each_with_index do |(type_sym, note), idx|
+      label = idx == 0 ? "(recommended)" : ""
+      line = "    #{idx + 1}. #{label.ljust(15)} #{type_sym}"
+      line << "  -- #{note}" if note
+      msg << line << "\n"
+    end
+    msg
+  end
+
+  # ---------------------------------------------------------------
+  # Auto / gradual-typing fixable findings (M1.4).
+  # See docs/agents/gradual-typing.md §5 (clear fix integration) and
+  # §6 (ambiguity resolution) for the diagnostic-format spec.
+  # ---------------------------------------------------------------
+
+  # Resolved Auto slot. Emits an :info finding with an :auto fix that
+  # replaces the explicit `Auto` keyword with the resolved type's
+  # source form. For implicit-Auto slots (omitted under `--gradual`),
+  # there is no token to replace — we still emit the :info finding so
+  # the user sees what was inferred, but no auto fix.
+  #
+  # M2.2: shape-tagged slots are skipped here. Per-sub-slot findings
+  # would offer wrong fix replacements (writing the scalar element /
+  # key / value type into the binding's `Auto` slot, which holds the
+  # whole container type). The caller emits one binding-level
+  # finding per shape-tracked decl via `emit_auto_shape_resolved_finding!`.
+  def emit_auto_resolved_finding!(resolution)
+    slot = resolution.slot
+    return if slot.respond_to?(:shape) && slot.shape
+
+    type_str = auto_type_source_form(resolution.type)
+    label = auto_slot_label(slot)
+    auto_tok = auto_token_for(slot)
+    fixable!(
+      auto_tok || slot.decl_node,
+      message: "Inferred type for #{label}: #{type_str}.",
+      category: :type, level: :info,
+      fixes: build_auto_replace_fixes(auto_tok, type_str),
+    )
+  end
+
+  # M2.2 — Emits a single :info finding per shape-tracked decl whose
+  # `decl.type` has been successfully wrapped by `stamp_slot!` /
+  # `stamp_map_pairs!` (i.e., for lists when the element type
+  # resolved, for maps when both key and value resolved). The fix
+  # replacement is the wrapped type's source form so the user's
+  # `clear fix` rewrites `Auto` to e.g. `Int64[]` /
+  # `HashMap<String, Int64>` rather than the misleading scalar.
+  # Partial map resolutions intentionally produce no resolved
+  # finding here — the unresolved sub-slot's finding tells the
+  # user what's missing.
+  def emit_auto_shape_resolved_finding!(decl, slot)
+    return unless decl && decl.type.is_a?(Type)
+    return if decl.type.auto?  # not yet wrapped — skip
+    type_str = auto_type_source_form(decl.type)
+    name = decl.respond_to?(:name) ? decl.name : "<binding>"
+    auto_tok = auto_token_for(slot)
+    fixable!(
+      auto_tok || decl,
+      message: "Inferred type for `#{name}`: #{type_str}.",
+      category: :type, level: :info,
+      fixes: build_auto_replace_fixes(auto_tok, type_str),
+    )
+  end
+
+  # Shared `:auto`-confidence Fix builder: returns `[Fix]` that
+  # replaces the literal `Auto` keyword span with `type_str`. Empty
+  # array if `auto_tok` is nil (implicit-Auto under `--gradual` —
+  # there's no token span to edit).
+  def build_auto_replace_fixes(auto_tok, type_str)
+    return [] unless auto_tok
+    [Fix.new(
+      description: "Replace `Auto` with the inferred type `#{type_str}`.",
+      confidence: :auto,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: auto_tok.line, col: auto_tok.column, length: 'Auto'.length),
+        replacement: type_str,
+      )]
+    )]
+  end
+
+  # Ambiguous Auto slot — two or more incompatible observed types.
+  # Emits :error with the ranked Option-1 / Option-2 / Option-3 text
+  # per spec §6. None of the proposed actions are :auto: the user
+  # must pick a concrete type and either narrow callsites or build a
+  # union. v1 includes the option text in the message; per-callsite
+  # conversion fixes are a follow-up (would require knowing each
+  # callsite's argument span and a coercion table). M2.1 layers
+  # operator-derived candidates on top: when the body uses the
+  # binding in operator expressions, those operators' default types
+  # are offered as :interactive Fixes.
+  def emit_auto_ambiguity_finding!(ambiguity, op_evidence: {})
+    slot = ambiguity.slot
+    label = auto_slot_label(slot)
+    observed = ambiguity.observed_types
+    observed_strs = observed.map { |t| auto_type_source_form(t) }
+
+    message = build_auto_ambiguity_message(label, observed_strs, slot)
+
+    # M2.1: append operator-derived suggestions when present.
+    ops = op_evidence[slot_id_for(slot)] || Set.new
+    candidates = auto_rank_candidates(ops)
+    message += build_auto_op_evidence_block(ops, candidates) unless candidates.empty?
+
+    fixes = candidates.each_with_index
+                      .filter_map { |(type_sym, note), i|
+                        build_auto_candidate_fix(slot, type_sym, note, i + 1)
+                      }
+
+    auto_tok = auto_token_for(slot)
+    fixable!(
+      auto_tok || slot.decl_node,
+      message: message, category: :type, level: :error, fixes: fixes,
+    )
+  end
+
+  # No observed types at all — Auto slot the inference pass could not
+  # constrain (e.g., a parameter on a fn that's never called, or an
+  # empty `[]` never used). Emits :error directing the user to
+  # specify a concrete type. M2.1: when the body uses the binding in
+  # operator expressions, ranked candidate types per the
+  # AUTO_OP_CANDIDATES table are offered as :interactive Fixes.
+  def emit_auto_unresolved_finding!(slot, op_evidence: {})
+    label = auto_slot_label(slot)
+    base_msg = "Cannot infer type for #{label} — no observed uses to drive inference."
+
+    # M2.1: operator-derived candidates ranked per AUTO_OP_CANDIDATES.
+    ops = op_evidence[slot_id_for(slot)] || Set.new
+    candidates = auto_rank_candidates(ops)
+
+    message = base_msg.dup
+    if candidates.empty?
+      message << " Replace `Auto` with a concrete type, or remove the unused declaration."
+    else
+      message << build_auto_op_evidence_block(ops, candidates)
+    end
+
+    fixes = candidates.each_with_index
+                      .filter_map { |(type_sym, note), i|
+                        build_auto_candidate_fix(slot, type_sym, note, i + 1)
+                      }
+
+    auto_tok = auto_token_for(slot)
+    fixable!(
+      auto_tok || slot.decl_node,
+      message: message, category: :type, level: :error, fixes: fixes,
+    )
+  end
+
+  # Reverse-lookup helper: given a Slot struct, return its hash key
+  # in the slots map (matches the IDs AutoConstraintCollector uses).
+  def slot_id_for(slot)
+    case slot.kind
+    when :param  then [:param, slot.fn_name, slot.index]
+    when :return then [:return, slot.fn_name]
+    when :local  then [:local, slot.decl_node.object_id]
+    end
+  end
+
+  # ---------------------------------------------------------------
+  # Auto helpers (private to this module).
+  # ---------------------------------------------------------------
+
+  def auto_type_source_form(type)
+    # Prefer the resolved symbol's name; falls back to to_s for
+    # parameterized types (`Int64[]`, `HashMap<String, Int64>`).
+    if type.respond_to?(:resolved)
+      sym = type.resolved
+      sym.to_s
+    else
+      type.to_s
+    end
+  end
+
+  def auto_slot_label(slot)
+    # M2.2: shape-tagged slots (forward-flow inference for empty
+    # `[]` / `{}`) get a more specific label so the diagnostic
+    # tells the user which sub-type is being inferred.
+    if slot.respond_to?(:shape) && slot.shape
+      name = slot.decl_node.respond_to?(:name) ? slot.decl_node.name : "<local>"
+      case slot.shape
+      when :list_element then return "element type of list `#{name}`"
+      when :map_key      then return "key type of map `#{name}`"
+      when :map_value    then return "value type of map `#{name}`"
+      end
+    end
+
+    case slot.kind
+    when :param
+      param = slot.decl_node.params[slot.index]
+      "parameter '#{param[:name]}' of `#{slot.fn_name}`"
+    when :return
+      "return type of `#{slot.fn_name}`"
+    when :local
+      name = slot.decl_node.respond_to?(:name) ? slot.decl_node.name : "<local>"
+      "local '#{name}'"
+    else
+      # AutoConstraintCollector only creates :param / :return /
+      # :local slots. A different kind reaching this path means a
+      # caller fabricated a Slot with an unrecognized kind — fail
+      # loudly so the bug isn't masked by a "slot" placeholder
+      # appearing in user-facing diagnostics.
+      raise ArgumentError, "auto_slot_label: unrecognized slot kind #{slot.kind.inspect}"
+    end
+  end
+
+  def auto_token_for(slot)
+    # The cached `slot.auto_token` (captured at registration) is
+    # the authoritative source of the original Auto keyword span.
+    # `stamp_slot!` / `stamp_map_pairs!` may overwrite
+    # `decl_node.type` with the wrapped concrete type, which
+    # would lose the auto_token if read live; the cache is
+    # resilient to that. Slots are always constructed via
+    # `AutoConstraintCollector`, which sets auto_token at every
+    # registration site.
+    slot.auto_token
+  end
+
+  def build_auto_ambiguity_message(label, observed_strs, slot)
+    types_list = observed_strs.join(', ')
+    msg = +"Ambiguous Auto for #{label}: observed as #{types_list}.\n"
+
+    # Option 1: pin one type; convert at divergent callsites.
+    msg << "  Option 1 (recommended): pin one concrete type at the\n"
+    msg << "    declaration and convert at the divergent sites. The\n"
+    msg << "    candidate types observed are: #{types_list}.\n"
+    msg << "    Pick the one whose semantics match your intent and\n"
+    msg << "    convert the others (e.g. `Int64.toString(x)`,\n"
+    msg << "    `Int.fromString(s) OR RAISE`).\n"
+
+    # Option 2: types not obviously compatible.
+    msg << "  Option 2: if these types do not have an obvious\n"
+    msg << "    conversion path, restructure the call sites so a\n"
+    msg << "    single concrete type flows through.\n"
+
+    # Option 3: union — example only, never auto-applied.
+    if slot.kind == :param || slot.kind == :return
+      union_name = slot.kind == :param ? slot.decl_node.params[slot.index][:name].to_s.capitalize : "Result"
+      variants = observed_strs.map.with_index { |t, i| "Variant#{i}: #{t}" }.join(', ')
+      msg << "  Option 3 (last resort): if you genuinely need to accept\n"
+      msg << "    multiple types, define a union explicitly:\n"
+      msg << "      UNION #{union_name} { #{variants} }\n"
+      msg << "    Auto does NOT auto-create unions.\n"
+    end
+
+    msg
+  end
 end

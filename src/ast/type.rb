@@ -38,6 +38,27 @@ class Type
   # Resolves the result type of a binary operation given two operand types.
   # Returns a BinaryOpResult with type, optional coercions, and storage.
   def self.binary_op(op, left_type, right_type)
+    # Gradual-typing tolerance: if either operand is an unresolved
+    # Auto, the body-validation pass would crash with
+    # "Cannot add types: Auto and Auto" before the unifier ever runs.
+    # The result type depends on the OPERATOR class:
+    #   * boolean-result ops (==, !=, <, >, ..., AND, OR) always
+    #     produce Bool regardless of operand types — keep that.
+    #   * arithmetic / numeric ops produce Auto (depends on operands)
+    #     — the AutoUnifier resolves it after observing concrete
+    #     types at the constraint sources.
+    auto_present = (left_type.respond_to?(:auto?) && left_type.auto?) ||
+                   (right_type.respond_to?(:auto?) && right_type.auto?)
+    if auto_present
+      case op
+      when :AND, :OR, *BOOL_RESULT_OPS
+        return BinaryOpResult.new(type: :Bool)
+      else
+        auto_t = Type.new(:Auto, auto: true)
+        return BinaryOpResult.new(type: auto_t)
+      end
+    end
+
     t_left = left_type&.resolved
     t_right = right_type&.resolved
 
@@ -71,6 +92,14 @@ class Type
   def self.coerce_error(source_type, target_type)
     source = source_type.is_a?(Type) ? source_type : Type.new(source_type)
     target = target_type.is_a?(Type) ? target_type : Type.new(target_type)
+
+    # Gradual-typing tolerance: an Auto target accepts any source —
+    # the AutoUnifier resolves the target's concrete type after the
+    # body walk, mutating the decl in place. Source-side Auto is
+    # similarly tolerated: the source expression's resolved type
+    # propagates once the unifier pins the slot it depends on.
+    return nil if target.respond_to?(:auto?) && target.auto?
+    return nil if source.respond_to?(:auto?) && source.auto?
 
     return nil if target.accepts?(source)
 
@@ -154,7 +183,7 @@ class Type
 
   public
 
-  def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil) # stripe_count kept for backwards compat (ignored)
+  def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil, auto: false) # stripe_count kept for backwards compat (ignored)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
       other = raw_input
@@ -188,6 +217,7 @@ class Type
       @is_observable         = other.instance_variable_get(:@is_observable)
       @observable_terminal   = other.instance_variable_get(:@observable_terminal)
       @polymorphic_shared    = other.polymorphic_shared
+      @is_auto               = other.instance_variable_get(:@is_auto)
     else
       @raw = raw_input
       parse_raw_input
@@ -217,6 +247,14 @@ class Type
     @shard_count = shard_count if shard_count
     @is_observable = true if observable
     @observable_terminal = observable_terminal if observable_terminal
+    # Gradual-typing placeholder. When set, this Type represents an
+    # unresolved Auto slot — the inference pass (see
+    # docs/agents/gradual-typing.md) walks every Auto Type, collects
+    # constraints from observed uses, and replaces the Type with a
+    # resolved one before the body-validation pass runs.
+    # Only overwrite when explicitly requested so the copy-constructor
+    # path (`Type.new(other_type)`) preserves auto-ness from `other`.
+    @is_auto = true if auto
   end
 
   # Delegate [] to the raw value for Hash-typed raws (function signatures).
@@ -353,6 +391,19 @@ class Type
   def void?
     resolved == :Void
   end
+
+  # Gradual-typing placeholder. True when this Type is an unresolved
+  # `Auto` slot waiting for the inference pass to fill it in.
+  def auto?
+    !!@is_auto
+  end
+
+  # Source-position token for the `Auto` keyword. Set by the parser
+  # at the explicit-Auto site so the fix emitter (M1.4) can compute
+  # the span when replacing `Auto` with the resolved concrete type.
+  # Nil for implicit-Auto (omitted annotation under `--gradual`),
+  # which has no source token to point at.
+  attr_accessor :auto_token
 
   def fn_type?
     @raw.is_a?(Hash) && @raw[:fn_type] == true

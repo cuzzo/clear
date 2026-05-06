@@ -56,8 +56,22 @@ class ModuleImporter
     source     = File.read(abs_path)
     source_dir = File.dirname(abs_path)
 
-    tokens = Lexer.new(source).tokenize
-    ast    = Parser.new(tokens, source).parse
+    # STRICT-imports boundary (gradual-typing.md §7): imported modules
+    # must export concrete types in their public surface. Force the
+    # parser into strict mode (gradual=false) for the duration of the
+    # imported module's parse so `--gradual` from the top-level build
+    # never propagates across module boundaries. Explicit `Auto` in
+    # source still tokenizes; the post-parse check below catches it.
+    saved_gradual = Parser.gradual_mode
+    Parser.gradual_mode = false
+    begin
+      tokens = Lexer.new(source).tokenize
+      ast    = Parser.new(tokens, source).parse
+    ensure
+      Parser.gradual_mode = saved_gradual
+    end
+
+    reject_auto_in_public_signatures!(ast, abs_path)
 
     annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir)
     annotator.annotate!(ast)
@@ -67,6 +81,42 @@ class ModuleImporter
     @module_cache[abs_path] = mod
     @compiling.delete(abs_path)
     mod
+  end
+
+  # STRICT-imports check (M1.5). Imported modules cannot expose
+  # `Auto` in any function's public signature — params or return —
+  # because cross-module inference is intentionally not supported
+  # (gradual-typing.md §7). The importer rejects with a diagnostic
+  # that points the user at running `clear fix --apply` on the
+  # imported module before re-importing.
+  def reject_auto_in_public_signatures!(ast, abs_path)
+    rel_path = File.basename(abs_path)
+    ast.statements.each do |stmt|
+      next unless stmt.is_a?(AST::FunctionDef)
+      vis = stmt.visibility || :package
+      # `:private` functions are not visible across modules and may
+      # keep Auto. Public surface is `:pub` and `:package`.
+      next if vis == :private
+
+      offending = []
+      (stmt.params || []).each do |p|
+        offending << "param '#{p[:name]}'" if auto_type?(p[:type])
+      end
+      offending << "return type" if auto_type?(stmt.return_type)
+      next if offending.empty?
+
+      msg = "Imported function '#{stmt.name}' from module '#{rel_path}' has " \
+            "`Auto` in its public signature (#{offending.join(', ')}). " \
+            "Imported modules must export concrete types — cross-module " \
+            "inference is not supported. Compile '#{rel_path}' WITHOUT " \
+            "`--gradual` (or with each Auto resolved via " \
+            "`clear fix --apply`), then re-import."
+      raise CompilerError.new(stmt.token, msg, ast.respond_to?(:source_code) ? ast.source_code : nil)
+    end
+  end
+
+  def auto_type?(t)
+    t.is_a?(Type) && t.auto?
   end
 
   private
