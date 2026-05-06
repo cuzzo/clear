@@ -843,7 +843,8 @@ class MIREmitter
     rt = node.rt_expr || "rt"
     case node.strategy
     when :list
-      elem = node.zig_type[/ArrayListUnmanaged\((.+)\)/, 1]
+      elem = node.elem_type or
+        raise "MIREmitter#emit_escape_promote: :list promotion for '#{node.name}' missing elem_type"
       "try CheatLib.promoteList(#{elem}, #{rt}, &#{node.name});"
     when :string_map
       "#{node.name}.alloc = #{rt}.heapAlloc();"

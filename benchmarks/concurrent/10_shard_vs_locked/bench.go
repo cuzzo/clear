@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	numKeys   = 1_000_000
+	numKeys   = 10_000_000
 	numShards = 32
 	chanBuf   = 512
 )

@@ -374,6 +374,31 @@ test "Versioned(i64): read returns the current pointer + EBR is active during th
     try testing.expect(!rt.ebr.is_active.load(.seq_cst));
 }
 
+test "Versioned(i64): nested read guards keep EBR pinned until the outer guard releases" {
+    var ctx = EbrContext{};
+    defer ctx.deinit(testing.allocator);
+
+    var frame: [1024]u8 = undefined;
+    var rt = try makeRuntime(&ctx, &frame);
+    defer rt.deinit();
+
+    var s = try versioned.Versioned(i64).init(testing.allocator, 100);
+    defer s.deinit(&rt, testing.allocator) catch unreachable;
+
+    var outer = s.read(&rt);
+    var inner = s.read(&rt);
+    try testing.expect(rt.ebr.is_active.load(.seq_cst));
+    try testing.expectEqual(@as(u32, 2), rt.ebr.pin_depth.load(.seq_cst));
+
+    inner.release();
+    try testing.expect(rt.ebr.is_active.load(.seq_cst));
+    try testing.expectEqual(@as(u32, 1), rt.ebr.pin_depth.load(.seq_cst));
+
+    outer.release();
+    try testing.expect(!rt.ebr.is_active.load(.seq_cst));
+    try testing.expectEqual(@as(u32, 0), rt.ebr.pin_depth.load(.seq_cst));
+}
+
 const incArgs = struct { delta: i64 };
 fn incBy(p: *i64, delta: i64) void {
     p.* += delta;

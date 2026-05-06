@@ -1,7 +1,5 @@
 const std = @import("std");
 const fc = @import("fiber-core.zig");
-const ebr_mod = @import("../lib/ebr.zig");
-const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 
 const Fiber = fc.Fiber;
 const StackSize = fc.StackSize;
@@ -352,6 +350,8 @@ pub const TaskConfig = struct {
     stack_size: StackSize = .Standard,  // Default to Standard
     pinned: bool = false,              // true = cannot be stolen by other schedulers
     use_arena: bool = false,           // true = expose scheduler local_arena via __pinned_local_alloc (@arena BG blocks only)
+    profile_site_id: u32 = 0,          // profile-only BG/worker site id; 0 = unattributed
+    profile_dispatch: u8 = 0,          // profile-only: fiber-profile.DispatchKind enum value
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -380,6 +380,7 @@ pub const Task = struct {
     context: ?*anyopaque = null,       // 8
     config: TaskConfig = .{},          // 16  (timeout u64 + 3 bools padded)
     spawn_ns: u64 = 0,                 // 8   (profile-only)
+    profile_site_id: u32 = 0,          // 4   (profile-only)
     wake_time: i64 = 0,                // 8   (0 = not sleeping)
 
     // ── Group 2: cross-thread-touched atomics ───────────────────────────
@@ -455,13 +456,6 @@ pub const Task = struct {
     /// so future readers are not permanently blocked by a phantom writer.
     lock_counter_ptr: ?*u32 = null,
 
-    /// Heap-allocated ThreadLocalEbr (registered with EbrContext).
-    /// Allocated by the scheduler in drainChannels.Spawn on the OS thread
-    /// stack so that EbrContext.register's deep allocator path doesn't
-    /// run inside the fiber (which would overflow Standard 12 KB stacks).
-    /// Unregistered + freed by the scheduler in run() when task finishes.
-    /// entryWrapper hands this pointer to Runtime.initFromSliceWithEbr.
-    ebr_slot: ?*ThreadLocalEbr = null,
 };
 
 pub const LOCK_KIND_NONE: u8 = 0;

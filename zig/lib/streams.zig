@@ -440,6 +440,7 @@ pub fn concurrentBoundedSelect(
     rt: anytype,
     items: anytype,
     workers: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -462,12 +463,14 @@ pub fn concurrentBoundedSelect(
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: *[N]PromiseT,
         slots: []Slot,
         next_idx: *std.atomic.Value(usize),
+        batch_size: usize,
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
@@ -476,14 +479,17 @@ pub fn concurrentBoundedSelect(
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
-                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
-                if (idx >= N) break;
-                const item = try ctx.items[idx].next();
-                const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                    continue;
-                };
-                ctx.slots[idx] = mapped;
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= N) break;
+                const end = @min(start + ctx.batch_size, N);
+                for (start..end) |idx| {
+                    const item = try ctx.items[idx].next();
+                    const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                    ctx.slots[idx] = mapped;
+                }
                 worker_rt.checkYield();
             }
         }
@@ -499,6 +505,7 @@ pub fn concurrentBoundedSelect(
             .items = items,
             .slots = slots,
             .next_idx = &next_idx,
+            .batch_size = batch_size,
             .err_code = &err_code,
             .user_ctx = user_ctx,
         };
@@ -543,6 +550,7 @@ pub fn concurrentBoundedWhere(
     rt: anytype,
     items: anytype,
     workers: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -564,6 +572,7 @@ pub fn concurrentBoundedWhere(
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
@@ -571,6 +580,7 @@ pub fn concurrentBoundedWhere(
         slots: []Slot,
         alloc: std.mem.Allocator,
         next_idx: *std.atomic.Value(usize),
+        batch_size: usize,
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
@@ -579,17 +589,20 @@ pub fn concurrentBoundedWhere(
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
-                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
-                if (idx >= N) break;
-                var item = try ctx.items[idx].next();
-                const keep = predFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                    continue;
-                };
-                if (keep) {
-                    ctx.slots[idx] = item;
-                } else {
-                    cleanupItemFn(ctx.alloc, &item);
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= N) break;
+                const end = @min(start + ctx.batch_size, N);
+                for (start..end) |idx| {
+                    var item = try ctx.items[idx].next();
+                    const keep = predFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                    if (keep) {
+                        ctx.slots[idx] = item;
+                    } else {
+                        cleanupItemFn(ctx.alloc, &item);
+                    }
                 }
                 worker_rt.checkYield();
             }
@@ -607,6 +620,7 @@ pub fn concurrentBoundedWhere(
             .slots = slots,
             .alloc = alloc,
             .next_idx = &next_idx,
+            .batch_size = batch_size,
             .err_code = &err_code,
             .user_ctx = user_ctx,
         };
@@ -649,6 +663,7 @@ pub fn concurrentBoundedEach(
     rt: anytype,
     items: anytype,
     workers: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -661,11 +676,13 @@ pub fn concurrentBoundedEach(
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: *[N]PromiseT,
         next_idx: *std.atomic.Value(usize),
+        batch_size: usize,
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
@@ -674,13 +691,16 @@ pub fn concurrentBoundedEach(
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
-                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
-                if (idx >= N) break;
-                const item = try ctx.items[idx].next();
-                eachFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                    continue;
-                };
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= N) break;
+                const end = @min(start + ctx.batch_size, N);
+                for (start..end) |idx| {
+                    const item = try ctx.items[idx].next();
+                    eachFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                }
                 worker_rt.checkYield();
             }
         }
@@ -695,6 +715,7 @@ pub fn concurrentBoundedEach(
             .wg = &wg,
             .items = items,
             .next_idx = &next_idx,
+            .batch_size = batch_size,
             .err_code = &err_code,
             .user_ctx = user_ctx,
         };
@@ -738,6 +759,7 @@ pub fn concurrentStreamSelect(
     src: anytype,
     workers: usize,
     capacity: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -750,6 +772,7 @@ pub fn concurrentStreamSelect(
     defer chan.deinit();
     var err_code = std.atomic.Value(u16).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Feeder = struct {
         wg: *WaitGroupT,
@@ -778,18 +801,25 @@ pub fn concurrentStreamSelect(
         local: std.ArrayListUnmanaged(R),
         alloc: std.mem.Allocator,
         err: *std.atomic.Value(u16),
+        batch_size: usize,
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
             const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
-            while (try ctx.chan.pop()) |item| {
-                const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |e| {
-                    _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
-                    continue;
-                };
-                try ctx.local.append(ctx.alloc, mapped);
+            while (try ctx.chan.pop()) |first| {
+                var item = first;
+                var n: usize = 0;
+                while (true) : (n += 1) {
+                    const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |e| {
+                        _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
+                        break;
+                    };
+                    try ctx.local.append(ctx.alloc, mapped);
+                    if (n + 1 >= ctx.batch_size) break;
+                    item = (try ctx.chan.pop()) orelse break;
+                }
                 worker_rt.checkYield();
             }
         }
@@ -811,6 +841,7 @@ pub fn concurrentStreamSelect(
             .local = .empty,
             .alloc = alloc,
             .err = &err_code,
+            .batch_size = batch_size,
             .user_ctx = user_ctx,
         };
         if (parallel) {
@@ -859,6 +890,7 @@ pub fn concurrentStreamWhere(
     src: anytype,
     workers: usize,
     capacity: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -870,6 +902,7 @@ pub fn concurrentStreamWhere(
     defer chan.deinit();
     var err_code = std.atomic.Value(u16).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Feeder = struct {
         wg: *WaitGroupT,
@@ -898,23 +931,30 @@ pub fn concurrentStreamWhere(
         local: std.ArrayListUnmanaged(T),
         alloc: std.mem.Allocator,
         err: *std.atomic.Value(u16),
+        batch_size: usize,
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
             const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
-            while (try ctx.chan.pop()) |item| {
-                var item_mut = item;
-                const keep = predFn(worker_rt, ctx.user_ctx, item) catch |e| {
-                    _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
-                    cleanupItemFn(ctx.alloc, &item_mut);
-                    continue;
-                };
-                if (keep) {
-                    try ctx.local.append(ctx.alloc, item);
-                } else {
-                    cleanupItemFn(ctx.alloc, &item_mut);
+            while (try ctx.chan.pop()) |first| {
+                var item = first;
+                var n: usize = 0;
+                while (true) : (n += 1) {
+                    var item_mut = item;
+                    const keep = predFn(worker_rt, ctx.user_ctx, item) catch |e| {
+                        _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
+                        cleanupItemFn(ctx.alloc, &item_mut);
+                        break;
+                    };
+                    if (keep) {
+                        try ctx.local.append(ctx.alloc, item);
+                    } else {
+                        cleanupItemFn(ctx.alloc, &item_mut);
+                    }
+                    if (n + 1 >= ctx.batch_size) break;
+                    item = (try ctx.chan.pop()) orelse break;
                 }
                 worker_rt.checkYield();
             }
@@ -936,6 +976,7 @@ pub fn concurrentStreamWhere(
             .local = .empty,
             .alloc = alloc,
             .err = &err_code,
+            .batch_size = batch_size,
             .user_ctx = user_ctx,
         };
         if (parallel) {
@@ -983,6 +1024,7 @@ pub fn concurrentStreamEach(
     src: anytype,
     workers: usize,
     capacity: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -995,6 +1037,7 @@ pub fn concurrentStreamEach(
     defer chan.deinit();
     var err_code = std.atomic.Value(u16).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Feeder = struct {
         wg: *WaitGroupT,
@@ -1021,17 +1064,24 @@ pub fn concurrentStreamEach(
         wg: *WaitGroupT,
         chan: *ChannelT,
         err: *std.atomic.Value(u16),
+        batch_size: usize,
         user_ctx: ?*anyopaque,
 
         fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
             const worker_rt = @as(*RuntimeT, @ptrCast(@alignCast(raw_rt)));
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
-            while (try ctx.chan.pop()) |item| {
-                eachFn(worker_rt, ctx.user_ctx, item) catch |e| {
-                    _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
-                    continue;
-                };
+            while (try ctx.chan.pop()) |first| {
+                var item = first;
+                var n: usize = 0;
+                while (true) : (n += 1) {
+                    eachFn(worker_rt, ctx.user_ctx, item) catch |e| {
+                        _ = ctx.err.cmpxchgStrong(0, @intFromError(e), .seq_cst, .seq_cst);
+                        break;
+                    };
+                    if (n + 1 >= ctx.batch_size) break;
+                    item = (try ctx.chan.pop()) orelse break;
+                }
                 worker_rt.checkYield();
             }
         }
@@ -1050,6 +1100,7 @@ pub fn concurrentStreamEach(
             .wg = &wg,
             .chan = &chan,
             .err = &err_code,
+            .batch_size = batch_size,
             .user_ctx = user_ctx,
         };
         if (parallel) {
@@ -1083,6 +1134,7 @@ pub fn concurrentListSelect(
     rt: anytype,
     items: []const T,
     workers: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -1102,12 +1154,14 @@ pub fn concurrentListSelect(
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: []const T,
         slots: []Slot,
         next_idx: *std.atomic.Value(usize),
+        batch_size: usize,
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
@@ -1116,14 +1170,17 @@ pub fn concurrentListSelect(
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
-                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
-                if (idx >= ctx.items.len) break;
-                const item = ctx.items[idx];
-                const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                    continue;
-                };
-                ctx.slots[idx] = mapped;
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= ctx.items.len) break;
+                const end = @min(start + ctx.batch_size, ctx.items.len);
+                for (start..end) |idx| {
+                    const item = ctx.items[idx];
+                    const mapped = mapFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                    ctx.slots[idx] = mapped;
+                }
                 worker_rt.checkYield();
             }
         }
@@ -1139,6 +1196,7 @@ pub fn concurrentListSelect(
             .items = items,
             .slots = slots,
             .next_idx = &next_idx,
+            .batch_size = batch_size,
             .err_code = &err_code,
             .user_ctx = user_ctx,
         };
@@ -1182,6 +1240,7 @@ pub fn concurrentListWhere(
     rt: anytype,
     items: []const T,
     workers: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -1201,12 +1260,14 @@ pub fn concurrentListWhere(
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: []const T,
         slots: []Slot,
         next_idx: *std.atomic.Value(usize),
+        batch_size: usize,
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
@@ -1215,14 +1276,17 @@ pub fn concurrentListWhere(
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
-                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
-                if (idx >= ctx.items.len) break;
-                const item = ctx.items[idx];
-                const keep = predFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                    continue;
-                };
-                if (keep) ctx.slots[idx] = item;
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= ctx.items.len) break;
+                const end = @min(start + ctx.batch_size, ctx.items.len);
+                for (start..end) |idx| {
+                    const item = ctx.items[idx];
+                    const keep = predFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                    if (keep) ctx.slots[idx] = item;
+                }
                 worker_rt.checkYield();
             }
         }
@@ -1238,6 +1302,7 @@ pub fn concurrentListWhere(
             .items = items,
             .slots = slots,
             .next_idx = &next_idx,
+            .batch_size = batch_size,
             .err_code = &err_code,
             .user_ctx = user_ctx,
         };
@@ -1279,6 +1344,7 @@ pub fn concurrentListEach(
     rt: anytype,
     items: []const T,
     workers: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -1288,11 +1354,13 @@ pub fn concurrentListEach(
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: []const T,
         next_idx: *std.atomic.Value(usize),
+        batch_size: usize,
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
@@ -1301,13 +1369,16 @@ pub fn concurrentListEach(
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
-                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
-                if (idx >= ctx.items.len) break;
-                const item = ctx.items[idx];
-                eachFn(worker_rt, ctx.user_ctx, item) catch |err| {
-                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                    continue;
-                };
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= ctx.items.len) break;
+                const end = @min(start + ctx.batch_size, ctx.items.len);
+                for (start..end) |idx| {
+                    const item = ctx.items[idx];
+                    eachFn(worker_rt, ctx.user_ctx, item) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                }
                 worker_rt.checkYield();
             }
         }
@@ -1322,6 +1393,7 @@ pub fn concurrentListEach(
             .wg = &wg,
             .items = items,
             .next_idx = &next_idx,
+            .batch_size = batch_size,
             .err_code = &err_code,
             .user_ctx = user_ctx,
         };
@@ -1350,6 +1422,7 @@ pub fn concurrentListEachInPlace(
     rt: anytype,
     items: []T,
     workers: usize,
+    batch: usize,
     parallel: bool,
     task_cfg: anytype,
     user_ctx: ?*anyopaque,
@@ -1359,11 +1432,13 @@ pub fn concurrentListEachInPlace(
     var err_code = std.atomic.Value(u16).init(0);
     var next_idx = std.atomic.Value(usize).init(0);
     var wg = WaitGroupT.init(rt.getSched());
+    const batch_size = @max(batch, 1);
 
     const Worker = struct {
         wg: *WaitGroupT,
         items: []T,
         next_idx: *std.atomic.Value(usize),
+        batch_size: usize,
         err_code: *std.atomic.Value(u16),
         user_ctx: ?*anyopaque,
 
@@ -1372,13 +1447,16 @@ pub fn concurrentListEachInPlace(
             const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
             defer ctx.wg.done();
             while (true) {
-                const idx = ctx.next_idx.fetchAdd(1, .monotonic);
-                if (idx >= ctx.items.len) break;
-                const item_ptr = &ctx.items[idx];
-                eachFn(worker_rt, ctx.user_ctx, item_ptr) catch |err| {
-                    _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
-                    continue;
-                };
+                const start = ctx.next_idx.fetchAdd(ctx.batch_size, .monotonic);
+                if (start >= ctx.items.len) break;
+                const end = @min(start + ctx.batch_size, ctx.items.len);
+                for (start..end) |idx| {
+                    const item_ptr = &ctx.items[idx];
+                    eachFn(worker_rt, ctx.user_ctx, item_ptr) catch |err| {
+                        _ = ctx.err_code.cmpxchgStrong(0, @intFromError(err), .seq_cst, .seq_cst);
+                        continue;
+                    };
+                }
                 worker_rt.checkYield();
             }
         }
@@ -1393,6 +1471,7 @@ pub fn concurrentListEachInPlace(
             .wg = &wg,
             .items = items,
             .next_idx = &next_idx,
+            .batch_size = batch_size,
             .err_code = &err_code,
             .user_ctx = user_ctx,
         };

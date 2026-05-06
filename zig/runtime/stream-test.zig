@@ -87,19 +87,19 @@ fn boundedAccumulate(_: *Runtime, raw_args: ?*anyopaque, value: i64) anyerror!vo
 fn boundedSelectConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedSelectState, @ptrCast(@alignCast(raw_args.?)));
     state.results = try CheatLib.concurrentBoundedSelect(i64, i64, 4, boundedMapDouble,
-        rt.heapAlloc(), rt, &state.items, 2, false, .{}, null);
+        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null);
 }
 
 fn boundedWhereConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedSelectState, @ptrCast(@alignCast(raw_args.?)));
     state.results = try CheatLib.concurrentBoundedWhere(i64, 4, boundedKeepGtTwo,
-        rt.heapAlloc(), rt, &state.items, 2, false, .{}, null);
+        rt.heapAlloc(), rt, &state.items, 2, 3, false, .{}, null);
 }
 
 fn boundedEachConsumer(rt: *Runtime, raw_args: ?*anyopaque) anyerror!void {
     const state = @as(*BoundedEachState, @ptrCast(@alignCast(raw_args.?)));
     try CheatLib.concurrentBoundedEach(i64, 4, boundedAccumulate,
-        rt, &state.items, 2, false, .{}, state);
+        rt, &state.items, 2, 3, false, .{}, state);
 }
 
 fn makeBoundedPromiseItems(rt: *Runtime, values: [4]i64) ![4]CheatLib.Promise(i64) {
@@ -1130,7 +1130,7 @@ test "SplitStream survives multithreaded spawnBest pubsub hammer" {
                 .Finished => {
                     _ = sched.active_tasks.fetchSub(1, .monotonic);
                     sched.releaseTaskEbr(task);
-                    sched.stack_pool.free(task.base.stack.memory);
+                    sched.freeStack(task.base.stack);
                     sched.allocator.destroy(task.base);
                     sched.task_slab.destroy(task);
                 },

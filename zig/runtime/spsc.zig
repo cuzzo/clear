@@ -27,6 +27,13 @@ pub const MessageTag = enum(u8) {
     /// counted when originally enqueued). Used by ParkingMutex unlock
     /// to wake an FSM waiter on a different scheduler.
     FsmResume,
+    /// Return a stackful fiber stack to the scheduler that allocated it.
+    /// Stack pools are scheduler-local because their slab magazines are not
+    /// safe to mutate from arbitrary scheduler threads.
+    RemoteStackFree,
+    /// Return a generated FSM ctx slab slot to the scheduler that allocated
+    /// it. Same locality rule as RemoteStackFree.
+    RemoteFsmCtxFree,
 };
 
 /// A value-type message copied into the ring buffer.
@@ -40,6 +47,8 @@ pub const Message = struct {
     config_stack_size: u8 = 0, // StackSize enum as u8
     config_pinned: bool = false,
     config_timeout_ms: u64 = 0,
+    config_profile_site_id: u32 = 0,
+    config_profile_dispatch: u8 = 0,
     // Resume fields
     task: ?*anyopaque = null, // *Task as opaque
     // RemoteCall fields
@@ -49,6 +58,12 @@ pub const Message = struct {
     // FsmSpawn fields — reuses `task` would conflate with Resume, so
     // a dedicated pointer field keeps decoding branch-free.
     fsm_task: ?*anyopaque = null, // *FsmTask as opaque
+    // RemoteStackFree fields
+    stack_ptr: usize = 0,
+    stack_len: usize = 0,
+    // RemoteFsmCtxFree fields
+    fsm_ctx_ptr: usize = 0,
+    fsm_ctx_class: u8 = 0,
 };
 
 /// SPSC ring buffer.  Fixed capacity, power-of-two size.

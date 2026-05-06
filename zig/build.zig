@@ -170,6 +170,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "epoll-steal-test.zig", .tsan = true },
         .{ .path = "ffi-concurrency-test.zig", .tsan = true },
         .{ .path = "fiber-test.zig", .tsan = true },
+        .{ .path = "fiber-profile-test.zig", .tsan = true },
         // FSM (stackless task) tests
         .{ .path = "fsm-benchmark-test.zig", .tsan = true },
         .{ .path = "fsm-concurrent-test.zig", .tsan = true },
@@ -730,6 +731,25 @@ pub fn build(b: *std.Build) void {
         test_loom_vopr_step.dependOn(&run_pl_loom.step);
     }
     loom_step.dependOn(&run_pl_loom.step);
+
+    const versioned_loom_exe = b.addExecutable(.{
+        .name = "versioned-loom-test",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("versioned-loom-test.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    versioned_loom_exe.root_module.addAssemblyFile(switch_s);
+    versioned_loom_exe.root_module.addAssemblyFile(onroot_s);
+    versioned_loom_exe.root_module.link_libc = true;
+    const run_versioned_loom = b.addRunArtifact(versioned_loom_exe);
+    run_versioned_loom.has_side_effects = true;
+    run_versioned_loom.stdio = .inherit;
+    if (shard_index == 0) {
+        test_loom_vopr_step.dependOn(&run_versioned_loom.step);
+    }
+    loom_step.dependOn(&run_versioned_loom.step);
 
     // -------------------------------------------------------------------------
     // VERSIONED-EXHAUST -- Deterministic MVCC retry-exhaustion check

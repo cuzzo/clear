@@ -1286,45 +1286,76 @@ module PipeAnalysis
     node.storage = :stack
   end
 
-  VALID_CONCURRENT_OPTIONS = %w[workers capacity parallel size].freeze
+  VALID_CONCURRENT_OPTIONS = %w[workers capacity batch parallel size].freeze
   VALID_CONCURRENT_SIZES   = %w[MICRO STANDARD LARGE XL].freeze
+
+  def validate_positive_numeric_concurrent_option!(name, expr)
+    visit(expr)
+    unless [:Float64, :Int64].include?(expr.resolved_type)
+      error!(expr, "CONCURRENT #{name} must be a number, got #{expr.resolved_type}")
+    end
+
+    literal_val = numeric_literal_value(expr)
+    if literal_val && literal_val <= 0
+      error!(expr, "CONCURRENT #{name} must be greater than 0, got #{literal_val.to_i}")
+    end
+  end
+
+  def numeric_literal_value(expr)
+    if expr.is_a?(AST::Literal)
+      expr.value.to_f
+    elsif expr.is_a?(AST::UnaryOp) && expr.op == :SUB
+      right = expr.right
+      -right.value.to_f if right.is_a?(AST::Literal)
+    end
+  end
+
+  def queue_backed_concurrent_source?(node)
+    lhs = node.left
+    lhs_type = lhs.type_info
+    shard_concurrent_source?(lhs) || bounded_stream_source?(lhs) ||
+      lhs_type&.inf_stream? || lhs_type&.dynamic_stream? ||
+      lhs_type&.open_stream? || lhs.is_a?(AST::RangeLit)
+  end
+
+  def shard_concurrent_source?(lhs)
+    lhs.is_a?(AST::BinaryOp) && lhs.op == :SMOOTH && lhs.right.is_a?(AST::ShardOp)
+  end
 
   def analyze_concurrent_op(node)
     conc    = node.right   # the ConcurrentOp node
     options = conc.options
     lhs_type = node.left.type_info
 
+    # Detect SHARD predecessor: (range) s> SHARD(key, map) s> CONCURRENT EACH { ... }
+    # node.left is BinaryOp(SMOOTH, range, ShardOp) when SHARD precedes CONCURRENT.
+    shard_node = nil
+    if shard_concurrent_source?(node.left)
+      shard_node = node.left.right
+      target_info = shard_node.target_map.type_info
+      conc.shard_context = {
+        map_var: shard_node.target_map,
+        shard_count: target_info&.shard_count,
+        key_expr: shard_node.key_expr
+      }
+    end
+
     # Validate workers option if present
     if (ps = options["workers"])
-      visit(ps)
-      unless [:Float64, :Int64].include?(ps.resolved_type)
-        error!(ps, "CONCURRENT workers must be a number, got #{ps.resolved_type}")
-      end
-      # Validate workers > 0 for literal values (including negated literals like -1)
-      literal_val = if ps.is_a?(AST::Literal)
-        ps.value.to_f
-      elsif ps.is_a?(AST::UnaryOp) && ps.op == :SUB && ps.right.is_a?(AST::Literal)
-        -ps.right.value.to_f
-      end
-      if literal_val && literal_val <= 0
-        error!(ps, "CONCURRENT workers must be greater than 0, got #{literal_val.to_i}")
-      end
+      validate_positive_numeric_concurrent_option!("workers", ps)
     end
 
     # Validate capacity option if present
     if (cap = options["capacity"])
-      visit(cap)
-      unless [:Float64, :Int64].include?(cap.resolved_type)
-        error!(cap, "CONCURRENT capacity must be a number, got #{cap.resolved_type}")
+      unless queue_backed_concurrent_source?(node)
+        error!(cap, "CONCURRENT capacity only applies to stream or sharded sources; use batch: N to control work chunking for collections")
       end
-      literal_val = if cap.is_a?(AST::Literal)
-        cap.value.to_f
-      elsif cap.is_a?(AST::UnaryOp) && cap.op == :SUB && cap.right.is_a?(AST::Literal)
-        -cap.right.value.to_f
-      end
-      if literal_val && literal_val <= 0
-        error!(cap, "CONCURRENT capacity must be greater than 0, got #{literal_val.to_i}")
-      end
+      validate_positive_numeric_concurrent_option!("capacity", cap)
+    end
+
+    # Validate batch option if present
+    if (batch = options["batch"])
+      validate_positive_numeric_concurrent_option!("batch", batch)
     end
 
     # Validate parallel option is Bool if present
@@ -1350,19 +1381,6 @@ module PipeAnalysis
       unless VALID_CONCURRENT_OPTIONS.include?(key)
         error!(conc, "Unknown CONCURRENT option '#{key}'. Valid options: #{VALID_CONCURRENT_OPTIONS.join(', ')}")
       end
-    end
-
-    # Detect SHARD predecessor: (range) s> SHARD(key, map) s> CONCURRENT EACH { ... }
-    # node.left is BinaryOp(SMOOTH, range, ShardOp) when SHARD precedes CONCURRENT.
-    shard_node = nil
-    if node.left.is_a?(AST::BinaryOp) && node.left.op == :SMOOTH && node.left.right.is_a?(AST::ShardOp)
-      shard_node = node.left.right
-      target_info = shard_node.target_map.type_info
-      conc.shard_context = {
-        map_var: shard_node.target_map,
-        shard_count: target_info&.shard_count,
-        key_expr: shard_node.key_expr
-      }
     end
 
     # Type analysis for concurrent ops is identical to synchronous versions.

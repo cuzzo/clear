@@ -27,13 +27,153 @@
 
 const std = @import("std");
 const testing = std.testing;
+const fc = @import("fiber-core.zig");
+const root = @import("root");
+const sim_atomic = if (@hasDecl(root, "SimAtomicState")) root.SimAtomicState else @import("vopr-atomic.zig");
 
 const ebr_mod = @import("../lib/ebr.zig");
 const versioned = @import("versioned.zig");
 const Runtime = @import("runtime.zig").Runtime;
+const scheduler_mod = @import("scheduler.zig");
 
 const EbrContext = ebr_mod.EbrContext;
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
+
+const Fiber = fc.Fiber;
+const Context = fc.Context;
+const STACK_SIZE = 64 * 1024;
+const MAX_STEPS = 10_000;
+
+var pin_harness: *PinDepthLoomHarness = undefined;
+var wake_harness: *WakeGateLoomHarness = undefined;
+
+const PinDepthLoomHarness = struct {
+    fibers: [2]Fiber = undefined,
+    stacks: [2][]u8 = [_][]u8{ &.{}, &.{} },
+    main_ctx: Context = undefined,
+    done: [2]bool = [_]bool{ false, false },
+    schedule: []const u8,
+    pos: usize = 0,
+    allocator: std.mem.Allocator,
+    ctx: EbrContext = .{},
+    local: ThreadLocalEbr,
+    violation: bool = false,
+    observed_pinned: bool = false,
+    observed_inner_window: bool = false,
+    outer_hold_window: bool = false,
+
+    fn init(allocator: std.mem.Allocator, schedule: []const u8) PinDepthLoomHarness {
+        var h = PinDepthLoomHarness{
+            .schedule = schedule,
+            .allocator = allocator,
+            .local = ThreadLocalEbr{ .context = undefined },
+        };
+        h.local.context = &h.ctx;
+        return h;
+    }
+
+    fn deinit(self: *PinDepthLoomHarness) void {
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        self.local.deinit(self.allocator);
+        self.ctx.deinit(self.allocator);
+        for (&self.stacks) |*stack| {
+            if (stack.len > 0) {
+                self.allocator.free(stack.*);
+                stack.* = &.{};
+            }
+        }
+    }
+
+    fn createThread(self: *PinDepthLoomHarness, id: usize, entry_fn: usize) !void {
+        self.stacks[id] = try self.allocator.alloc(u8, STACK_SIZE);
+        self.fibers[id] = Fiber.init(self.stacks[id], entry_fn, .Large);
+        self.done[id] = false;
+    }
+
+    fn pickThread(self: *PinDepthLoomHarness) usize {
+        if (self.done[0]) return 1;
+        if (self.done[1]) return 0;
+        const bit = if (self.pos < self.schedule.len) self.schedule[self.pos] else 0;
+        self.pos += 1;
+        return bit & 1;
+    }
+
+    fn run(self: *PinDepthLoomHarness) !void {
+        var steps: usize = 0;
+        while (steps < MAX_STEPS) : (steps += 1) {
+            if (self.done[0] and self.done[1]) break;
+            const chosen = self.pickThread();
+            self.fibers[chosen].switchTo(&self.main_ctx);
+        }
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        if (steps >= MAX_STEPS) return error.StepLimitExceeded;
+        if (self.violation) return error.PinDepthInactiveWhilePinned;
+    }
+
+    fn observe(self: *PinDepthLoomHarness) void {
+        const depth = self.local.pin_depth.load(.seq_cst);
+        const active = self.local.is_active.load(.seq_cst);
+        if (depth > 0) {
+            self.observed_pinned = true;
+            if (self.outer_hold_window) {
+                if (!active) self.violation = true;
+                if (depth == 1) self.observed_inner_window = true;
+            }
+        }
+    }
+};
+
+fn entryNestedPinReader() callconv(.c) void {
+    const h = pin_harness;
+    h.local.enter();
+    h.local.enter();
+    h.local.exit();
+    h.outer_hold_window = true;
+
+    // Keep the inner-exit/outer-still-held window open long enough for
+    // exhaustive schedules to observe it. These are explicit Loom thread
+    // yields, not production retries/timers/IO.
+    fc.__fiber.?.yield();
+    fc.__fiber.?.yield();
+
+    h.outer_hold_window = false;
+    h.local.exit();
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryPinObserver() callconv(.c) void {
+    const h = pin_harness;
+    var i: usize = 0;
+    while (i < 8) : (i += 1) {
+        h.observe();
+        fc.__fiber.?.yield();
+    }
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn runPinDepthSchedule(allocator: std.mem.Allocator, schedule: []const u8) !PinDepthLoomHarness {
+    var h = PinDepthLoomHarness.init(allocator, schedule);
+    errdefer h.deinit();
+    pin_harness = &h;
+    try h.createThread(0, @intFromPtr(&entryNestedPinReader));
+    try h.createThread(1, @intFromPtr(&entryPinObserver));
+    try h.run();
+    return h;
+}
+
+fn fillBinarySchedule(buf: []u8, value: usize) void {
+    for (buf, 0..) |*slot, i| {
+        slot.* = @intCast((value >> @intCast(i)) & 1);
+    }
+}
 
 test "Loom-shim sanity: shared-memory.Atomic resolves to std.atomic.Value when SimAtomic absent" {
     // No `pub const SimAtomic = ...` at root, so the comptime
@@ -55,6 +195,178 @@ test "Loom-shim sanity: ebr.Atomic resolves to std.atomic.Value when SimAtomic a
     _ = x.load(.acquire);
     x.store(7, .release);
     _ = x.cmpxchgWeak(@as(u32, 7), @as(u32, 8), .release, .monotonic);
+}
+
+pub fn testNestedEbrPinDepthLoom(allocator: std.mem.Allocator, require_sim_atomic: bool) !void {
+    const before_ops = sim_atomic.sim_atomic_op_count;
+    var saw_pinned = false;
+    var saw_inner_window = false;
+
+    var schedule: [12]u8 = undefined;
+    var n: usize = 0;
+    while (n < (1 << schedule.len)) : (n += 1) {
+        fillBinarySchedule(&schedule, n);
+        var h = try runPinDepthSchedule(allocator, &schedule);
+        saw_pinned = saw_pinned or h.observed_pinned;
+        saw_inner_window = saw_inner_window or h.observed_inner_window;
+        h.deinit();
+    }
+
+    if (require_sim_atomic and sim_atomic.sim_atomic_op_count == before_ops) {
+        return error.SimAtomicNotActive;
+    }
+    if (!saw_pinned) return error.PinDepthPinnedWindowNotObserved;
+    if (!saw_inner_window) return error.PinDepthInnerExitWindowNotObserved;
+}
+
+test "loom: nested EBR pin keeps is_active true until final exit" {
+    // Under `zig test`, @import("root") is the generated test runner,
+    // so this is a structural fallback. The real SimAtomic-backed run is
+    // the `versioned-loom-test` executable wired in build.zig.
+    try testNestedEbrPinDepthLoom(testing.allocator, false);
+}
+
+const WakeGateLoomHarness = struct {
+    fibers: [2]Fiber = undefined,
+    stacks: [2][]u8 = [_][]u8{ &.{}, &.{} },
+    main_ctx: Context = undefined,
+    done: [2]bool = [_]bool{ false, false },
+    schedule: []const u8,
+    pos: usize = 0,
+    allocator: std.mem.Allocator,
+    event: scheduler_mod.SmartEventFd = .{ .fd = -1 },
+    work_available: bool = false,
+    scheduler_blocked: bool = false,
+    writes: u32 = 0,
+    violation: bool = false,
+    consumed_prepark_notify: bool = false,
+
+    fn init(allocator: std.mem.Allocator, schedule: []const u8) WakeGateLoomHarness {
+        return .{ .schedule = schedule, .allocator = allocator };
+    }
+
+    fn deinit(self: *WakeGateLoomHarness) void {
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        for (&self.stacks) |*stack| {
+            if (stack.len > 0) {
+                self.allocator.free(stack.*);
+                stack.* = &.{};
+            }
+        }
+    }
+
+    fn createThread(self: *WakeGateLoomHarness, id: usize, entry_fn: usize) !void {
+        self.stacks[id] = try self.allocator.alloc(u8, STACK_SIZE);
+        self.fibers[id] = Fiber.init(self.stacks[id], entry_fn, .Large);
+        self.done[id] = false;
+    }
+
+    fn pickThread(self: *WakeGateLoomHarness) usize {
+        if (self.done[0]) return 1;
+        if (self.done[1]) return 0;
+        const bit = if (self.pos < self.schedule.len) self.schedule[self.pos] else 0;
+        self.pos += 1;
+        return bit & 1;
+    }
+
+    fn run(self: *WakeGateLoomHarness) !void {
+        var steps: usize = 0;
+        while (steps < MAX_STEPS) : (steps += 1) {
+            if (self.done[0] and self.done[1]) break;
+            const chosen = self.pickThread();
+            self.fibers[chosen].switchTo(&self.main_ctx);
+        }
+        fc.__fiber = null;
+        fc.__fiber_parent_ctx = null;
+        fc.__fiber_stack_limit = null;
+        if (steps >= MAX_STEPS) return error.StepLimitExceeded;
+        if (self.violation) return error.WakeGateMissedWake;
+    }
+};
+
+fn entryWakeScheduler() callconv(.c) void {
+    const h = wake_harness;
+    const should_sleep = h.event.prepareSleep();
+    if (!should_sleep) {
+        h.consumed_prepark_notify = true;
+        h.done[0] = true;
+        fc.__fiber.?.yield();
+        unreachable;
+    }
+
+    // Window 1: producer may notify after prepareSleep and before the
+    // scheduler's last work check.
+    fc.__fiber.?.yield();
+    if (h.work_available) {
+        h.event.finishSleep();
+        h.done[0] = true;
+        fc.__fiber.?.yield();
+        unreachable;
+    }
+
+    // Window 2: producer may notify after the last work check but before
+    // the scheduler enters the blocking syscall. It must observe Parked
+    // and request an eventfd write.
+    fc.__fiber.?.yield();
+    h.scheduler_blocked = true;
+
+    // Window 3: producer may notify while the scheduler is logically
+    // blocked. It must request an eventfd write.
+    fc.__fiber.?.yield();
+    h.event.finishSleep();
+    h.scheduler_blocked = false;
+    h.done[0] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn entryWakeProducer() callconv(.c) void {
+    const h = wake_harness;
+    fc.__fiber.?.yield();
+    h.work_available = true;
+    if (h.event.armNotify()) h.writes += 1;
+    if (h.scheduler_blocked and h.writes == 0) h.violation = true;
+    h.done[1] = true;
+    fc.__fiber.?.yield();
+    unreachable;
+}
+
+fn runWakeGateSchedule(allocator: std.mem.Allocator, schedule: []const u8) !WakeGateLoomHarness {
+    var h = WakeGateLoomHarness.init(allocator, schedule);
+    errdefer h.deinit();
+    wake_harness = &h;
+    try h.createThread(0, @intFromPtr(&entryWakeScheduler));
+    try h.createThread(1, @intFromPtr(&entryWakeProducer));
+    try h.run();
+    return h;
+}
+
+pub fn testSchedulerWakeGateLoom(allocator: std.mem.Allocator, require_sim_atomic: bool) !void {
+    const before_ops = sim_atomic.sim_atomic_op_count;
+    var saw_blocked_write = false;
+    var saw_prepark_token = false;
+
+    var schedule: [10]u8 = undefined;
+    var n: usize = 0;
+    while (n < (1 << schedule.len)) : (n += 1) {
+        fillBinarySchedule(&schedule, n);
+        var h = try runWakeGateSchedule(allocator, &schedule);
+        saw_blocked_write = saw_blocked_write or h.writes > 0;
+        saw_prepark_token = saw_prepark_token or h.consumed_prepark_notify;
+        h.deinit();
+    }
+
+    if (require_sim_atomic and sim_atomic.sim_atomic_op_count == before_ops) {
+        return error.SimAtomicNotActive;
+    }
+    if (!saw_blocked_write) return error.WakeGateParkedNotifyWindowNotObserved;
+    if (!saw_prepark_token) return error.WakeGatePreparkNotifyWindowNotObserved;
+}
+
+test "loom: scheduler wake gate does not miss notify around park" {
+    try testSchedulerWakeGateLoom(testing.allocator, false);
 }
 
 // Smoke test: full Versioned(T) + EBR lifecycle with the shim in place.

@@ -285,3 +285,83 @@ test "FSM VOPR: enqueue -> drain round-trip preserves active_tasks" {
     try std.testing.expectEqual(@as(u64, 0), sched.active_tasks.load(.monotonic));
     try std.testing.expect(sched.fsm_ready_queue.len() == 0);
 }
+
+test "FSM VOPR: remote ctx slab frees drain through owner scheduler" {
+    const N_SEEDS = if (build_options.coverage) 2 else 32;
+    const OPS = if (build_options.coverage) 16 else 128;
+    const MAX_LIVE = 64;
+
+    const SmallCtx = extern struct { bytes: [64]u8 };
+
+    var seed: u64 = 0;
+    while (seed < N_SEEDS) : (seed += 1) {
+        var global_ebr: ebr.EbrContext = .{};
+        defer global_ebr.deinit(alloc);
+        var pool_owner = fm.StackPool.init(alloc);
+        defer pool_owner.deinit();
+        var pool_current = fm.StackPool.init(alloc);
+        defer pool_current.deinit();
+
+        var owner = try fp.Scheduler.init(alloc, &global_ebr, &pool_owner);
+        defer owner.deinit();
+        var current = try fp.Scheduler.init(alloc, &global_ebr, &pool_current);
+        defer current.deinit();
+        owner.index = 0;
+        current.index = 1;
+
+        var tasks: [MAX_LIVE]?*fsm.FsmTask = [_]?*fsm.FsmTask{null} ** MAX_LIVE;
+        var ctxs: [MAX_LIVE]?*SmallCtx = [_]?*SmallCtx{null} ** MAX_LIVE;
+        defer {
+            fp.scheduler_running = false;
+            for (tasks, ctxs) |task_opt, ctx_opt| {
+                if (task_opt) |task| {
+                    if (ctx_opt) |ctx| owner.freeFsmCtx(SmallCtx, task, ctx);
+                    owner.fsm_task_slab.destroy(task);
+                }
+            }
+            owner.drainChannels();
+        }
+
+        var prng = std.Random.DefaultPrng.init(seed);
+        const rng = prng.random();
+
+        var op: usize = 0;
+        while (op < OPS) : (op += 1) {
+            switch (rng.uintLessThan(u8, 4)) {
+                0, 1 => {
+                    var slot: ?usize = null;
+                    for (tasks, 0..) |task_opt, i| {
+                        if (task_opt == null) {
+                            slot = i;
+                            break;
+                        }
+                    }
+                    if (slot) |i| {
+                        const task = try owner.allocFsmTask(&Yieldy.doResume);
+                        const ctx = try owner.allocFsmCtx(SmallCtx, task);
+                        task.ctx = ctx;
+                        tasks[i] = task;
+                        ctxs[i] = ctx;
+                    }
+                },
+                2 => {
+                    const i = rng.uintLessThan(usize, MAX_LIVE);
+                    if (tasks[i]) |task| {
+                        if (ctxs[i]) |ctx| {
+                            fp.active_scheduler = &current;
+                            fp.scheduler_running = true;
+                            current.freeFsmCtx(SmallCtx, task, ctx);
+                            fp.scheduler_running = false;
+                            ctxs[i] = null;
+                        }
+                        owner.fsm_task_slab.destroy(task);
+                        tasks[i] = null;
+                    }
+                },
+                else => owner.drainChannels(),
+            }
+        }
+
+        owner.drainChannels();
+    }
+}

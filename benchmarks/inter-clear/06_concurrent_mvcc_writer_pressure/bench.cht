@@ -14,6 +14,8 @@
 -- Expected: 4-7x MVCC win on 32 cores. The mechanism is reader-pile-up
 -- amplification under writer-preferring fairness, which compounds the
 -- baseline ~2x lock-acquire-overhead win.
+-- @leak: 100000_i64 -> 1000_i64
+-- @leak: 25000_i64 -> 250_i64
 
 STRUCT Counter { value: Int64 }
 

@@ -22,7 +22,7 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
 
-const NUM_KEYS: usize = 1_000_000;
+const NUM_KEYS: usize = 10_000_000;
 const NUM_SHARDS: usize = 32;
 const CHAN_BUF: usize = 512;
 

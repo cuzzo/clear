@@ -880,13 +880,16 @@ module FsmTransform
     # body shapes.
     def build_spawn_setup(ctx, lowering)
       is_local_pin = (ctx[:pin_mode] == true || ctx[:pin_mode] == :local)
+      is_default_local = (ctx[:pin_mode].nil? || ctx[:pin_mode] == false) && !ctx[:parallel]
+      is_local_dispatch = is_local_pin || is_default_local
+      dispatch = is_local_dispatch ? :local : :parallel
       spawn_call_zig =
-        if is_local_pin
+        if is_local_dispatch
           "try #{ctx[:rt_name]}.getSched().submitFsmSpawn(#{ctx[:ctx_var]}.task);"
         else
           "try CheatHeader.spawnFsmBest(#{ctx[:ctx_var]}.task);"
         end
-      alloc_expr_zig = is_local_pin ?
+      alloc_expr_zig = is_local_dispatch ?
         "#{ctx[:rt_name]}.getSched().allocator" : "#{ctx[:rt_name]}.heapAlloc()"
 
       # `.task = undefined` and `.rt = undefined` here are rebound by
@@ -910,7 +913,23 @@ module FsmTransform
         ctx_init_zig,
         spawn_call_zig,
         ctx[:rt_name],
+        ctx[:profile_site_id],
+        profile_dispatch_id(dispatch),
+        bg_profile_site_comment(ctx, dispatch, :fsm),
       )
+    end
+
+    def profile_dispatch_id(dispatch)
+      case dispatch
+      when :local, true then 1
+      when :parallel then 2
+      when :shared then 3
+      else 1
+      end
+    end
+
+    def bg_profile_site_comment(ctx, dispatch, form)
+      "// CLEAR_PROFILE_TASK_SITE id=#{ctx[:profile_site_id]} kind=BG line=#{ctx[:profile_line]} column=#{ctx[:profile_column]} dispatch=#{dispatch} form=#{form}"
     end
   end
 end

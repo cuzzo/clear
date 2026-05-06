@@ -1,4 +1,6 @@
 require "rspec"
+require "open3"
+require "tempfile"
 require_relative "../src/backends/transpiler"
 require_relative "../src/ast/ast"
 require_relative "../src/annotator-helpers/effects"
@@ -255,10 +257,19 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(user_code).not_to include("submitSpawn(")
     end
 
-    it "emits spawnFsmBest for an unpinned pure-compute BG" do
+    it "emits submitFsmSpawn for a default pure-compute BG" do
       src = "FN main() RETURNS Void -> p: ~Int64 = BG { 42; }; _ = NEXT p; RETURN; END"
       user_code = transpile(src).split("// 3. Main Entry").first
+      expect(user_code).to include("submitFsmSpawn(__bg0_ctx.task)")
+      expect(user_code).not_to include("CheatHeader.spawnFsmBest(")
+      expect(user_code).not_to include("CheatHeader.spawnBest(")
+    end
+
+    it "emits spawnFsmBest for an explicit @parallel pure-compute BG" do
+      src = "FN main() RETURNS Void -> p: ~Int64 = BG { @parallel -> 42; }; _ = NEXT p; RETURN; END"
+      user_code = transpile(src).split("// 3. Main Entry").first
       expect(user_code).to include("CheatHeader.spawnFsmBest(__bg0_ctx.task)")
+      expect(user_code).not_to include("submitFsmSpawn(__bg0_ctx.task)")
       expect(user_code).not_to include("CheatHeader.spawnBest(")
     end
 
@@ -274,11 +285,11 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(match[1].strip).to start_with("task: *CheatHeader.FsmTask")
     end
 
-    it "resumeFn returns Done, clears wg, and destroys the ctx" do
+    it "resumeFn returns Done, clears wg, and frees the ctx through the runtime helper" do
       src = "FN main() RETURNS Void -> p: ~Int64 = BG { 42; }; _ = NEXT p; RETURN; END"
       user_code = transpile(src).split("// 3. Main Entry").first
       expect(user_code).to include("__ctx_0.inner.wg.done()")
-      expect(user_code).to include("__ctx_0.alloc.destroy(__ctx_0)")
+      expect(user_code).to include("CheatHeader.freeFsmCtx(@This(), __fsm_task, __ctx_0)")
       expect(user_code).to include("return .{ .Done = {} }")
     end
 
@@ -289,6 +300,33 @@ RSpec.describe "FSM classifier (Phase A)" do
       expect(user_code).to include("submitSpawn").or include("spawnBest(")
       expect(user_code).not_to include("FsmTask")
       expect(user_code).not_to include("spawnFsmBest")
+    end
+
+    it "falls back to stackful for BG with @stack wildcard sizing" do
+      src = "FN main() RETURNS Void -> p: ~Int64 = BG { @stack -> 7; }; _ = NEXT p; RETURN; END"
+      user_code = transpile(src).split("// 3. Main Entry").first
+      expect(user_code).to include("submitSpawn").or include("spawnBest(")
+      expect(user_code).to include(".stack_size = .Micro")
+      expect(user_code).not_to include("FsmTask")
+      expect(user_code).not_to include("spawnFsmBest")
+    end
+
+    it "emits a compile error telling oversized FSM ctx users to use @stack" do
+      vars = (0...34).map { |i| "    a#{i}: Int64 = #{i}_i64;" }.join("\n")
+      sum = (0...34).map { |i| "a#{i}" }.join(" + ")
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+        #{vars}
+            p: ~Int64 = BG { #{sum}; };
+            result: Int64 = NEXT p;
+            RETURN;
+        END
+      CLEAR
+
+      user_code = transpile(src).split("// 3. Main Entry").first
+      expect(user_code).to include("@compileError")
+      expect(user_code).to include("FSM context is larger than 256 bytes")
+      expect(user_code).to include("use @stack")
     end
 
     it "falls back to stackful for BG that transitively calls @reentrant" do

@@ -232,6 +232,64 @@ convert "worked by accident" tests into hard crashes).
   correctness covered by `fsm-lock-test.zig`, `fsm-lock-vopr-test.zig`
   (32-seed PRNG mixed contention), and `fsm-lock-safety-test.zig`.
 
+## Active Tracker
+
+### EBR Scheduler-Thread Wiring
+
+Recent MVCC/EBR work moved runtime use toward one `ThreadLocalEbr` per
+scheduler thread, with tasks resolving the active participant through
+runtime/scheduler TLS rather than owning a private participant per spawn.
+The correctness contract is:
+
+- A task may be stolen or resumed on another scheduler.
+- A `Versioned(T).Guard` must release the exact EBR participant it pinned.
+- Nested pins must keep the participant active until the outermost guard
+  releases.
+- Retired nodes must survive writer-task exit while any task still holds
+  a guard.
+
+Required tests:
+
+| Kind | Required coverage |
+|---|---|
+| Unit | `ThreadLocalEbr.enter` / `exit` nested pin depth: inner exit must not clear `is_active`; outer exit must clear it. |
+| Unit | `Versioned(T).Guard` captures and releases the same `ThreadLocalEbr` pointer even if the active scheduler changes before guard release. |
+| Fiber stress | Writer task retires a version and exits while a different task holds a guard; reclaim must not free the guarded value until release. |
+| Scheduler stress | MVCC reads/writes under task stealing, proving `Runtime.currentEbr()` follows the executing scheduler and does not use per-task EBR state. |
+| Loom | Exhaustive model for EBR `pin_depth`, `is_active`, `local_epoch`, retire, and reclaim interleavings. Any new atomic field or ordering in EBR must be represented in this model. |
+| Loom | Guard migration model: pin on participant A, scheduler TLS changes before release, guard release still exits participant A and reclaim sees the correct active set. |
+| VOPR | No EBR-specific VOPR is required unless the fix adds retries, IO, timers, or scheduler-yield loops. If scheduler migration/retry logic changes, add it to the scheduler/FSM VOPR model. |
+
+### FSM Context Allocation
+
+Current generated FSM contexts are heap allocated and carry one field per
+promoted variable name. The planned allocation policy is:
+
+- **Now:** add 64 B, 128 B, and 256 B scheduler-local slabs for generated FSM
+  contexts, initialized with the scheduler/runtime allocator.
+- **Now:** add explicit `@stack` so the compiler can select a stack tier
+  at compile time when an FSM context is too large or a stack is the
+  better execution model.
+- **Future:** reuse context slots across disjoint live ranges instead of
+  one field per source variable name.
+- **Future:** add `@fsm:heap` as an explicit opt-in for oversized heap
+  FSM contexts.
+
+Required tests:
+
+| Kind | Required coverage |
+|---|---|
+| Runtime unit | 64 B, 128 B, and 256 B slab allocate/free/reuse, exact-size boundaries, and alignment. |
+| Runtime unit | Oversized context never enters a small slab class. |
+| Runtime scheduler | FSM task allocated on one scheduler and completed/stolen/freed on another routes free correctly and does not touch a non-thread-safe foreign slab directly. |
+| Runtime leak | Slab contexts are returned on success, error, cancellation, lock timeout, and IO wake error paths. |
+| Runtime stress | Many schedulers spawn and complete small FSM contexts concurrently with kcov-compatible bounded hammer tests. |
+| Compiler/transpile | Small context lowers to 64 B slab; medium context lowers to 128 B slab; larger common context lowers to 256 B slab; oversized context requires `@stack` or future `@fsm:heap`. |
+| Compiler/transpile | Generated FSM context no longer stores unnecessary allocator fields for the slab path. |
+| Compiler/transpile | Current no-slot-reuse behavior is covered with a fixture that has disjoint variables across suspend points; future slot reuse changes that expected shape deliberately. |
+| Loom | If FSM context slabs add new atomics or remote-free queues, model allocate/free/reuse and cross-scheduler free routing. Existing runtime stress is not a substitute for this. |
+| VOPR | If context free routing adds retries, timed polling, IO waits, or scheduler-yield loops, add those transitions to the scheduler/FSM VOPR model. Pure local slab allocate/free does not require VOPR by policy. |
+
 ## Roadmap
 
 **Landed:**

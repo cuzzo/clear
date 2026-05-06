@@ -247,6 +247,12 @@ RSpec.describe "pipeline backend coverage" do
       expect(pipeline_host.send(:substitute_placeholders, AST::StructLit.new(tok, "Box", { "x" => id("_") })).fields["x"].name).to eq("__it")
       expect(pipeline_host.send(:substitute_placeholders, AST::HashLit.new(tok, { "k" => id("_") })).pairs["k"].name).to eq("__it")
       expect(pipeline_host.send(:substitute_placeholders, AST::Assert.new(tok, id("_"), nil)).condition.name).to eq("__it")
+
+      if_stmt = AST::IfStatement.new(tok, id("_"), [AST::FuncCall.new(tok, "t", [id("_")])], [AST::FuncCall.new(tok, "e", [id("acc")])])
+      replaced = pipeline_host.send(:substitute_placeholders, if_stmt)
+      expect(replaced.condition.name).to eq("__it")
+      expect(replaced.then_branch.first.args.first.name).to eq("__it")
+      expect(replaced.else_branch.first.args.first.name).to eq("__acc")
     end
 
     it "substitutes assignment and bind targets plus SOA EACH fields" do
@@ -266,6 +272,43 @@ RSpec.describe "pipeline backend coverage" do
       stmt = AST::FuncCall.new(tok, "f", [AST::BinaryOp.new(tok, id("x"), :ADD, id("_"))])
       expect(pipeline_host.send(:ast_stmts_use_placeholder?, [stmt])).to be true
       expect(pipeline_host.send(:ast_stmts_use_placeholder?, [AST::FuncCall.new(tok, "f", [id("x")])])).to be false
+    end
+
+    it "lowers SHARD+CONCURRENT EACH to a sequential BC loop" do
+      lowering.instance_variable_set(:@target, :bc)
+      range = AST::RangeLit.new(tok, lit(0), lit(4), false)
+      key_expr = id("_")
+      map = id("counts")
+      conc = AST::ConcurrentOp.new(tok, AST::EachOp.new(tok, [AST::FuncCall.new(tok, "touch", [id("_")])]), {})
+      conc.shard_context = { auto_detected: true, key_expr: key_expr, map_var: map }
+
+      pipeline_host.define_singleton_method(:visit_mir) do |node|
+        node.is_a?(AST::Literal) ? MIR::Lit.new(node.value) : MIR::Ident.new(node.name)
+      end
+      pipeline_host.define_singleton_method(:visit_pipeline_body_mir) do |_body, placeholder:|
+        [MIR::ExprStmt.new(MIR::Ident.new("body_for_#{placeholder}"), nil)]
+      end
+
+      result = pipeline_host.send(:lower_shard_concurrent_each, range, conc, OpenStruct.new)
+
+      expect(result).to be_a(MIR::ForStmt)
+      expect(result.capture).to match(/__sh\d+_i/)
+      expect(result.body.first).to be_a(MIR::Let)
+      expect(result.body.last.expr.name).to match(/body_for___sh\d+_key/)
+    ensure
+      lowering.instance_variable_set(:@target, nil)
+    end
+
+    it "wraps explicit concurrent batch options for Zig usize use" do
+      batch = lit(8)
+      conc = OpenStruct.new(options: { "batch" => batch })
+      pipeline_host.define_singleton_method(:visit_mir) { |node| MIR::Lit.new(node.value) }
+      lowering.define_singleton_method(:emit_expr) { |node| node.respond_to?(:value) ? node.value.to_s : node.name.to_s }
+
+      mir = pipeline_host.send(:bounded_concurrent_batch_mir, conc)
+
+      expect(mir).to be_a(MIR::InlineZig)
+      expect(mir.code).to eq("@intCast(8)")
     end
   end
 end

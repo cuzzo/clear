@@ -20,6 +20,7 @@ const SpinLock = @import("profile-lock.zig").SpinLock;
 // CLEAR defaults to 4 scheduler threads; scale if more are used. Fixed
 // upper bound avoids per-scheduler allocations in the profile module.
 pub const MAX_SCHEDULERS: usize = 32;
+pub const MAX_SITES: usize = 256;
 
 // Buckets (in nanoseconds) used to classify lifetimes.
 pub const SHORT_NS: u64 = 1_000_000;     // 1 ms
@@ -37,6 +38,64 @@ var mu: SpinLock = .{};
 var sched_runs: [MAX_SCHEDULERS]u64 = [_]u64{0} ** MAX_SCHEDULERS;
 var sched_active: usize = 0;
 
+pub const DispatchKind = enum(u8) {
+    unknown = 0,
+    local = 1,
+    parallel = 2,
+    pinned = 3,
+};
+
+pub const TaskForm = enum(u8) {
+    unknown = 0,
+    stack = 1,
+    fsm = 2,
+};
+
+const Site = struct {
+    id: u32 = 0,
+    dispatch: DispatchKind = .unknown,
+    form: TaskForm = .unknown,
+    spawns: u64 = 0,
+    runs: u64 = 0,
+    exits: u64 = 0,
+    total_lifetime_ns: u64 = 0,
+    max_lifetime_ns: u64 = 0,
+    sched_runs: [MAX_SCHEDULERS]u64 = [_]u64{0} ** MAX_SCHEDULERS,
+};
+
+var sites: [MAX_SITES]Site = [_]Site{.{}} ** MAX_SITES;
+var site_dropped: u64 = 0;
+
+pub fn resetForTest() void {
+    mu.lock();
+    defer mu.unlock();
+    total_fibers = 0;
+    short_fibers = 0;
+    vshort_fibers = 0;
+    total_lifetime_ns = 0;
+    max_lifetime_ns = 0;
+    sched_runs = [_]u64{0} ** MAX_SCHEDULERS;
+    sched_active = 0;
+    sites = [_]Site{.{}} ** MAX_SITES;
+    site_dropped = 0;
+}
+
+fn findSiteLocked(site_id: u32) ?*Site {
+    if (site_id == 0) return null;
+    var idx: usize = @as(usize, site_id) % MAX_SITES;
+    var probes: usize = 0;
+    while (probes < MAX_SITES) : (probes += 1) {
+        if (sites[idx].id == site_id) return &sites[idx];
+        if (sites[idx].id == 0) {
+            sites[idx].id = site_id;
+            return &sites[idx];
+        }
+        idx = (idx + 1) % MAX_SITES;
+    }
+    site_dropped += 1;
+    return null;
+}
+
 pub inline fn nowNs() u64 {
     return compat.nanoTimestamp();
 }
@@ -49,7 +108,49 @@ pub inline fn recordSchedulerRun(sched_idx: usize) void {
     if (sched_idx + 1 > sched_active) sched_active = sched_idx + 1;
 }
 
-pub inline fn recordFiberExit(spawn_ns: u64, now: u64) void {
+pub inline fn recordSiteSpawn(site_id: u32, dispatch: DispatchKind, form: TaskForm) void {
+    if (site_id == 0) return;
+    mu.lock();
+    defer mu.unlock();
+    if (findSiteLocked(site_id)) |site| {
+        site.spawns += 1;
+        if (site.dispatch == .unknown) site.dispatch = dispatch;
+        if (site.form == .unknown) site.form = form;
+    }
+}
+
+test "fiber profile records per-site scheduler attribution" {
+    resetForTest();
+    defer resetForTest();
+
+    recordSiteSpawn(7, .local, .fsm);
+    recordSchedulerRun(3);
+    recordSiteRun(7, 3);
+    recordFiberExit(7, 100, 2100);
+
+    try std.testing.expectEqual(@as(u64, 1), total_fibers);
+    try std.testing.expectEqual(@as(u64, 1), sched_runs[3]);
+    const site = findSiteLocked(7).?;
+    try std.testing.expectEqual(@as(u64, 1), site.spawns);
+    try std.testing.expectEqual(@as(u64, 1), site.runs);
+    try std.testing.expectEqual(@as(u64, 1), site.exits);
+    try std.testing.expectEqual(DispatchKind.local, site.dispatch);
+    try std.testing.expectEqual(TaskForm.fsm, site.form);
+    try std.testing.expectEqual(@as(u64, 1), site.sched_runs[3]);
+    try std.testing.expectEqual(@as(u64, 2000), site.total_lifetime_ns);
+}
+
+pub inline fn recordSiteRun(site_id: u32, sched_idx: usize) void {
+    if (site_id == 0) return;
+    mu.lock();
+    defer mu.unlock();
+    if (findSiteLocked(site_id)) |site| {
+        site.runs += 1;
+        if (sched_idx < MAX_SCHEDULERS) site.sched_runs[sched_idx] += 1;
+    }
+}
+
+pub inline fn recordFiberExit(site_id: u32, spawn_ns: u64, now: u64) void {
     if (spawn_ns == 0) return;           // never recorded a spawn
     if (now <= spawn_ns) return;          // clock went backwards
     const dur: u64 = now - spawn_ns;
@@ -60,6 +161,11 @@ pub inline fn recordFiberExit(spawn_ns: u64, now: u64) void {
     if (dur > max_lifetime_ns) max_lifetime_ns = dur;
     if (dur < SHORT_NS)  short_fibers  += 1;
     if (dur < VSHORT_NS) vshort_fibers += 1;
+    if (findSiteLocked(site_id)) |site| {
+        site.exits += 1;
+        site.total_lifetime_ns += dur;
+        if (dur > site.max_lifetime_ns) site.max_lifetime_ns = dur;
+    }
 }
 
 pub fn dumpToEnvFile() void {
@@ -70,7 +176,7 @@ pub fn dumpToEnvFile() void {
     mu.lock();
     defer mu.unlock();
 
-    var buf: [256]u8 = undefined;
+    var buf: [1024]u8 = undefined;
 
     _ = compat.writeAllFd(fd, "# fiber-profile v1\n") catch return;
 
@@ -84,6 +190,46 @@ pub fn dumpToEnvFile() void {
     var i: usize = 0;
     while (i < sched_active) : (i += 1) {
         const line = std.fmt.bufPrint(&buf, "{d}\t{d}\n", .{ i, sched_runs[i] }) catch continue;
+        _ = compat.writeAllFd(fd, line) catch return;
+    }
+
+    _ = compat.writeAllFd(fd, "# per-site fibers\n# site\tspawns\truns\texits\ttotal_lifetime_ns\tmax_lifetime_ns\tdispatch\tform\tschedulers\n") catch return;
+    if (site_dropped > 0) {
+        const warn = std.fmt.bufPrint(&buf,
+            "# WARNING: {d} fiber-site samples dropped (cap={d}; rebuild runtime with larger MAX_SITES)\n",
+            .{ site_dropped, MAX_SITES },
+        ) catch return;
+        _ = compat.writeAllFd(fd, warn) catch return;
+    }
+    for (&sites) |*site| {
+        if (site.id == 0) continue;
+        var sched_buf: [512]u8 = undefined;
+        var sched_len: usize = 0;
+        var first = true;
+        var si: usize = 0;
+        while (si < sched_active) : (si += 1) {
+            const runs = site.sched_runs[si];
+            if (runs == 0) continue;
+            if (!first and sched_len < sched_buf.len) {
+                sched_buf[sched_len] = ',';
+                sched_len += 1;
+            }
+            first = false;
+            const part = std.fmt.bufPrint(sched_buf[sched_len..], "{d}:{d}", .{ si, runs }) catch break;
+            sched_len += part.len;
+        }
+        const scheds = sched_buf[0..sched_len];
+        const line = std.fmt.bufPrint(&buf, "{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t{s}\t{s}\t{s}\n", .{
+            site.id,
+            site.spawns,
+            site.runs,
+            site.exits,
+            site.total_lifetime_ns,
+            site.max_lifetime_ns,
+            @tagName(site.dispatch),
+            @tagName(site.form),
+            scheds,
+        }) catch continue;
         _ = compat.writeAllFd(fd, line) catch return;
     }
 }

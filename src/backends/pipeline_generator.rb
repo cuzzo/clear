@@ -1737,6 +1737,11 @@ module PipelineGenerator
     end
   end
 
+  def concurrent_batch_code(options)
+    batch = options["batch"]
+    batch ? visit(batch) : "1"
+  end
+
   # Inspect the expression for OR PRUNE / OR RAISE error policy
   # Returns [:prune, inner_expr], [:raise, inner_expr], or [:default, expr]
   def extract_concurrent_error_policy(expr)
@@ -1794,6 +1799,7 @@ module PipelineGenerator
     # Persistent worker pool: spawn N workers that each pull items
     # from a shared atomic index.  Zero per-item heap allocation.
     spawn_call = concurrent_spawn_call(options, "__ccs#{id}_wg", "__CcsWorker#{id}", "__ccs#{id}_workers[__w]")
+    batch_code = concurrent_batch_code(options)
 
     <<~ZIG.chomp
       #{@current_pipe_label}: {
@@ -1808,10 +1814,12 @@ module PipelineGenerator
           for (__ccs#{id}_results) |*__s| __s.* = null;#{err_decl}
           var __ccs#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
           const __ccs#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __ccs#{id}_batch: usize = @max(@as(usize, @intCast(#{batch_code})), 1);
           const __CcsWorker#{id} = struct {
               wg:      *CheatHeader.WaitGroup,
               items:   []const #{item_zig},
               results: []?#{result_zig},
+              batch:   usize,
               next:    *std.atomic.Value(usize),#{err_field}
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
@@ -1819,9 +1827,12 @@ module PipelineGenerator
                   const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                   defer ctx.wg.done();
                   while (true) {
-                      const __idx = ctx.next.fetchAdd(1, .monotonic);
-                      if (__idx >= ctx.items.len) break;
-                      #{fiber_result_code}
+                      const __start = ctx.next.fetchAdd(ctx.batch, .monotonic);
+                      if (__start >= ctx.items.len) break;
+                      const __end = @min(__start + ctx.batch, ctx.items.len);
+                      for (__start..__end) |__idx| {
+                          #{fiber_result_code}
+                      }
                       __rt.checkYield();
                   }
               }
@@ -1835,6 +1846,7 @@ module PipelineGenerator
                   .wg      = &__ccs#{id}_wg,
                   .items   = __ccs#{id}_items,
                   .results = __ccs#{id}_results,
+                  .batch   = __ccs#{id}_batch,
                   .next    = &__ccs#{id}_next,#{err_ctx_init}
               };
               #{spawn_call}
@@ -1888,6 +1900,7 @@ module PipelineGenerator
     end
 
     spawn_call = concurrent_spawn_call(options, "__ccw#{id}_wg", "__CcwWorker#{id}", "__ccw#{id}_workers[__w]")
+    batch_code = concurrent_batch_code(options)
 
     <<~ZIG.chomp
       #{@current_pipe_label}: {
@@ -1902,10 +1915,12 @@ module PipelineGenerator
           for (__ccw#{id}_results) |*__s| __s.* = null;#{err_decl}
           var __ccw#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
           const __ccw#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __ccw#{id}_batch: usize = @max(@as(usize, @intCast(#{batch_code})), 1);
           const __CcwWorker#{id} = struct {
               wg:      *CheatHeader.WaitGroup,
               items:   []const #{item_zig},
               results: []?#{item_zig},
+              batch:   usize,
               next:    *std.atomic.Value(usize),#{err_field}
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
@@ -1913,9 +1928,12 @@ module PipelineGenerator
                   const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                   defer ctx.wg.done();
                   while (true) {
-                      const __idx = ctx.next.fetchAdd(1, .monotonic);
-                      if (__idx >= ctx.items.len) break;
-                      #{pred_body}
+                      const __start = ctx.next.fetchAdd(ctx.batch, .monotonic);
+                      if (__start >= ctx.items.len) break;
+                      const __end = @min(__start + ctx.batch, ctx.items.len);
+                      for (__start..__end) |__idx| {
+                          #{pred_body}
+                      }
                       __rt.checkYield();
                   }
               }
@@ -1929,6 +1947,7 @@ module PipelineGenerator
                   .wg      = &__ccw#{id}_wg,
                   .items   = __ccw#{id}_items,
                   .results = __ccw#{id}_results,
+                  .batch   = __ccw#{id}_batch,
                   .next    = &__ccw#{id}_next,#{err_ctx_init}
               };
               #{spawn_call}
@@ -1968,6 +1987,7 @@ module PipelineGenerator
     end
 
     spawn_call = concurrent_spawn_call(options, "__cce#{id}_wg", "__CceWorker#{id}", "__cce#{id}_workers[__w]")
+    batch_code = concurrent_batch_code(options)
 
     <<~ZIG.chomp
       {
@@ -1980,9 +2000,11 @@ module PipelineGenerator
           if (__cce#{id}_len == 0) {} else {
           var __cce#{id}_wg = CheatHeader.WaitGroup.init(#{rt_name}.getSched());
           const __cce#{id}_n_workers: usize = @intCast(#{workers_code});
+          const __cce#{id}_batch: usize = @max(@as(usize, @intCast(#{batch_code})), 1);
           const __CceWorker#{id} = struct {
               wg:    *CheatHeader.WaitGroup,
               items: []#{item_zig},
+              batch: usize,
               next:  *std.atomic.Value(usize),
               fn run(raw_rt: *anyopaque, raw_args: ?*anyopaque) anyerror!void {
                   const __rt = @as(*Runtime, @ptrCast(@alignCast(raw_rt)));
@@ -1990,11 +2012,14 @@ module PipelineGenerator
                   const ctx = @as(*@This(), @ptrCast(@alignCast(raw_args.?)));
                   defer ctx.wg.done();
                   while (true) {
-                      const __idx = ctx.next.fetchAdd(1, .monotonic);
-                      if (__idx >= ctx.items.len) break;
-                      const __each_item = &ctx.items[__idx];
-                      _ = __each_item;
-                      #{body_code}
+                      const __start = ctx.next.fetchAdd(ctx.batch, .monotonic);
+                      if (__start >= ctx.items.len) break;
+                      const __end = @min(__start + ctx.batch, ctx.items.len);
+                      for (__start..__end) |__idx| {
+                          const __each_item = &ctx.items[__idx];
+                          _ = __each_item;
+                          #{body_code}
+                      }
                       __rt.checkYield();
                   }
               }
@@ -2007,6 +2032,7 @@ module PipelineGenerator
               __cce#{id}_workers[__w] = .{
                   .wg    = &__cce#{id}_wg,
                   .items = @constCast(__cce#{id}_items),
+                  .batch = __cce#{id}_batch,
                   .next  = &__cce#{id}_next,
               };
               #{spawn_call}

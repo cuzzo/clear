@@ -22,6 +22,11 @@ const EbrContext = ebr_mod.EbrContext;
 const ThreadLocalEbr = ebr_mod.ThreadLocalEbr;
 const SlabAllocator = @import("slab-alloc.zig").SlabAllocator;
 
+const Atomic = blk: {
+    const root = @import("root");
+    break :blk if (@hasDecl(root, "SimAtomic")) root.SimAtomic else std.atomic.Value;
+};
+
 fn milliTimestamp() i64 {
     return compat.milliTimestamp();
 }
@@ -153,9 +158,22 @@ pub const RemoteCompletion = struct {
 
 // A thread-safe wake-up signal
 pub const SmartEventFd = struct {
+    const WakeEmpty: u32 = 0;
+    const WakeParked: u32 = 1;
+    const WakeNotified: u32 = 2;
+
     fd: i32,
-    // 0 = Awake (Busy processing), 1 = Sleeping (Waiting on io_uring)
-    state: std.atomic.Value(u32) = std.atomic.Value(u32).init(0),
+
+    // Parker state for cross-scheduler wake coalescing:
+    //   Empty    -- scheduler is awake or no wake token is pending
+    //   Parked   -- scheduler is about to block / blocked in io_uring
+    //   Notified -- one wake token is pending
+    //
+    // Producers swap in Notified after enqueueing work. Only the producer
+    // that observes Parked writes eventfd; producers that observe Empty or
+    // Notified rely on the scheduler's next prepareSleep() consuming the
+    // token or on the already-pending eventfd wake.
+    state: Atomic(u32) = Atomic(u32).init(WakeEmpty),
 
     pub fn init() !SmartEventFd {
         // EFD_SEMAPHORE: Reads decrement counter by 1.
@@ -169,16 +187,18 @@ pub const SmartEventFd = struct {
         compat.closeFd(self.fd);
     }
 
-    // HOT PATH: This is what makes it fast!
+    /// Record a wake token. Returns true only when the target scheduler
+    /// was already parked and therefore needs a kernel eventfd write.
+    pub fn armNotify(self: *SmartEventFd) bool {
+        const old = self.state.swap(WakeNotified, .acq_rel);
+        return old == WakeParked;
+    }
+
+    // HOT PATH: coalesces wakeups in userspace. Only the Empty -> Notified
+    // transition is recorded when the scheduler is awake; only Parked ->
+    // Notified performs the eventfd write needed to wake io_uring.
     pub fn notify(self: *SmartEventFd) void {
-        // Unconditionally write to eventfd.  The previous optimization
-        // (skip write when target appears awake) raced with the target's
-        // markSleeping/hasChannelMessages/poll sequence, causing missed
-        // wakeups that deadlocked pinned fiber yield-poll loops.
-        //
-        // Cost: ~200ns write() syscall per notify.  Acceptable because
-        // notify is called once per submitSpawn/submitResume/sendAndWait,
-        // each of which already costs 1-10us for SPSC push + channel drain.
+        if (!self.armNotify()) return;
         const val: u64 = 1;
         const bytes = std.mem.asBytes(&val);
         _ = std.c.write(self.fd, bytes.ptr, bytes.len);
@@ -192,14 +212,31 @@ pub const SmartEventFd = struct {
         _ = std.posix.read(self.fd, buf) catch {};
     }
 
-    // Called before entering io_uring wait
-    pub fn markSleeping(self: *SmartEventFd) void {
-        self.state.store(1, .seq_cst);
+    /// Prepare to block in io_uring. Returns false when a producer already
+    /// left a wake token while we were awake; the scheduler must not sleep
+    /// and should loop back to drain queues.
+    pub fn prepareSleep(self: *SmartEventFd) bool {
+        while (true) {
+            const old = self.state.load(.acquire);
+            switch (old) {
+                WakeNotified => {
+                    if (self.state.cmpxchgWeak(WakeNotified, WakeEmpty, .acq_rel, .acquire) == null)
+                        return false;
+                },
+                WakeEmpty => {
+                    if (self.state.cmpxchgWeak(WakeEmpty, WakeParked, .acq_rel, .acquire) == null)
+                        return true;
+                },
+                WakeParked => return true,
+                else => unreachable,
+            }
+        }
     }
 
-    // Called immediately after exiting io_uring wait
-    pub fn markAwake(self: *SmartEventFd) void {
-        self.state.store(0, .seq_cst);
+    // Called when the scheduler decides not to sleep after prepareSleep()
+    // or immediately after io_uring returns.
+    pub fn finishSleep(self: *SmartEventFd) void {
+        _ = self.state.swap(WakeEmpty, .acq_rel);
     }
 };
 
@@ -246,7 +283,7 @@ pub const Scheduler = struct {
     dirty_mask: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     /// Re-entrancy guard for drainChannels (prevents RemoteCall → map.put → sendAndWait → drainChannels)
     draining: bool = false,
-    stack_pool: *StackPool,    // GLOBAL Stack Cache
+    stack_pool: StackPool,
     event_fd: SmartEventFd,
     load: std.atomic.Value(isize) = std.atomic.Value(isize).init(0),
     global_shutdown: ?*std.atomic.Value(bool) = null,
@@ -254,6 +291,9 @@ pub const Scheduler = struct {
     // 3. IO & Memory
     allocator: std.mem.Allocator,
     global_ebr: *EbrContext,
+    /// One EBR participant per scheduler OS thread. Tasks borrow this
+    /// through Runtime.currentEbr(); they do not allocate EBR slots.
+    thread_ebr: *ThreadLocalEbr,
     /// Per-scheduler slab allocator for Task structs. Tasks live in
     /// page-aligned slabs, which (a) lets walkers compute the owning
     /// slab from a *Task via address arithmetic in Phase 3 (cycle-detect
@@ -271,6 +311,13 @@ pub const Scheduler = struct {
     /// Slab size: 64 KB (power-of-two, ≈800 FsmTasks per slab at
     /// ~80 B each).
     fsm_task_slab: SlabAllocator(fsm_mod.FsmTask),
+    /// Per-scheduler slabs for generated FSM context payloads. The
+    /// compiler/runtime route <=64 B, <=128 B, and <=256 B contexts here; larger
+    /// contexts stay explicit heap until @fsm:heap / @stack policy is
+    /// fully surfaced in the language.
+    fsm_ctx_64_slab: SlabAllocator(FsmCtx64),
+    fsm_ctx_128_slab: SlabAllocator(FsmCtx128),
+    fsm_ctx_256_slab: SlabAllocator(FsmCtx256),
 
     // 4a. io_uring — unified I/O ring for poll-based socket I/O, async file
     // I/O, and eventfd wakeups. In Loom mode, this is SimRing.
@@ -347,7 +394,12 @@ pub const Scheduler = struct {
     // Not used by default — only when the CLEAR programmer opts in with @arena.
     local_arena: std.heap.ArenaAllocator,
 
-    pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, stack_pool: *StackPool) !Scheduler {
+    pub const FsmCtx64 = extern struct { bytes: [64]u8 };
+    pub const FsmCtx128 = extern struct { bytes: [128]u8 };
+    pub const FsmCtx256 = extern struct { bytes: [256]u8 };
+
+    pub fn init(allocator: std.mem.Allocator, global_ebr: *EbrContext, unused_shared_stack_pool: anytype) !Scheduler {
+        _ = unused_shared_stack_pool;
         const efd = try SmartEventFd.init();
 
         // io_uring ring for all I/O: poll-based socket I/O, async file reads,
@@ -365,8 +417,14 @@ pub const Scheduler = struct {
             _ = try ring.submit();
         }
 
+        const thread_ebr = try allocator.create(ThreadLocalEbr);
+        errdefer allocator.destroy(thread_ebr);
+        thread_ebr.* = .{ .context = global_ebr };
+        try global_ebr.register(allocator, thread_ebr);
+        errdefer global_ebr.unregister(thread_ebr);
+
         const sched = Scheduler{
-            .stack_pool = stack_pool,
+            .stack_pool = StackPool.init(allocator),
             .fiber_pool = .empty,
             .ready_queue = try RunQueue.initWithAllocator(allocator),
             .fsm_ready_queue = try FsmRunQueue.initWithAllocator(allocator),
@@ -378,11 +436,15 @@ pub const Scheduler = struct {
             .load = std.atomic.Value(isize).init(0),
             .allocator = allocator,
             .global_ebr = global_ebr,
+            .thread_ebr = thread_ebr,
             // Power-of-two slab size required by SlabAllocator; 64 KB hits
             // the sweet spot for current Task footprint (~192 B incl.
             // cache-line padding) — ≈330 tasks per slab.
             .task_slab = SlabAllocator(Task).init(allocator, 64 * 1024),
             .fsm_task_slab = SlabAllocator(fsm_mod.FsmTask).init(allocator, 64 * 1024),
+            .fsm_ctx_64_slab = SlabAllocator(FsmCtx64).init(allocator, 64 * 1024),
+            .fsm_ctx_128_slab = SlabAllocator(FsmCtx128).init(allocator, 64 * 1024),
+            .fsm_ctx_256_slab = SlabAllocator(FsmCtx256).init(allocator, 64 * 1024),
             .ring = ring,
             .io_helper_stack = try allocator.alloc(u8, IO_HELPER_STACK_SIZE),
             .main_ctx = undefined,
@@ -407,7 +469,7 @@ pub const Scheduler = struct {
             for (q.items) |task| {
                 self.releaseTaskEbr(task);
                 if (task.base.stack.memory.len > 0) {
-                     self.freeStack(task.base.stack.memory);
+                     self.freeStack(task.base.stack);
                 }
                 self.allocator.destroy(task.base); // Free Fiber
                 self.task_slab.destroy(task); // Free Task Struct
@@ -438,7 +500,7 @@ pub const Scheduler = struct {
              const task_opt = self.ready_queue.getBuffer()[i & self.ready_queue.getMask()].load(.monotonic);
              if (task_opt) |task| {
                  self.releaseTaskEbr(task);
-                 self.freeStack(task.base.stack.memory);
+                 self.freeStack(task.base.stack);
                  self.allocator.destroy(task.base);
                  self.task_slab.destroy(task);
              }
@@ -446,7 +508,7 @@ pub const Scheduler = struct {
         self.ready_queue.deinit();
         for (self.pinned_queue.items) |task| {
             self.releaseTaskEbr(task);
-            self.freeStack(task.base.stack.memory);
+            self.freeStack(task.base.stack);
             self.allocator.destroy(task.base);
             self.task_slab.destroy(task);
         }
@@ -457,7 +519,9 @@ pub const Scheduler = struct {
         self.fsm_ready_queue.deinit();
         self.fsm_deferred_queue.deinit(self.allocator);
 
+        self.drainChannels();
         self.stack_pool.flushLocalCache();
+        self.stack_pool.deinit();
         self.stack_cache.deinit(self.allocator);
         for (&self.channels) |*ch| {
             if (ch.load(.acquire)) |ring| self.allocator.destroy(ring);
@@ -472,58 +536,27 @@ pub const Scheduler = struct {
         // their memory back to the general allocator.
         self.task_slab.deinit();
         self.fsm_task_slab.deinit();
+        self.fsm_ctx_64_slab.deinit();
+        self.fsm_ctx_128_slab.deinit();
+        self.fsm_ctx_256_slab.deinit();
+        self.global_ebr.unregister(self.thread_ebr);
+        self.thread_ebr.deinit(self.allocator);
+        self.allocator.destroy(self.thread_ebr);
     }
 
-    /// Allocate + register a per-task ThreadLocalEbr from the heap.
-    /// Used by both stackful Task spawn (drainChannels.Spawn) and FSM
-    /// task spawn (CheatHeader.allocFsmTaskRuntime). Caller owns the
-    /// returned slot until releaseEbrSlot is called.
-    pub fn allocEbrSlot(self: *Scheduler) !*ThreadLocalEbr {
-        const ebr_ptr = try self.allocator.create(ThreadLocalEbr);
-        errdefer self.allocator.destroy(ebr_ptr);
-        ebr_ptr.* = .{ .context = self.global_ebr };
-        try self.global_ebr.register(self.allocator, ebr_ptr);
-        return ebr_ptr;
-    }
-
-    /// Unregister + deinit + free a ThreadLocalEbr previously allocated
-    /// by allocEbrSlot. Shared by releaseTaskEbr (stackful) and
-    /// releaseFsmTaskEbr (FSM).
-    pub fn releaseEbrSlot(self: *Scheduler, ebr: *ThreadLocalEbr) void {
-        self.global_ebr.unregister(ebr);
-        ebr.deinit(self.allocator);
-        self.allocator.destroy(ebr);
-    }
-
-    /// Unregister + free a task's heap-allocated ThreadLocalEbr if any.
-    /// Used both by the .Finished path during normal task completion AND
-    /// by deinit() to clean up tasks left behind in fiber_pool /
-    /// sleeping_queue / ready_queue / pinned_queue at shutdown.
-    /// Public so test runners with their own .Finished handling
-    /// (stream-test, steal-hammer-test) can call this before destroy.
+    /// Compatibility hook for test runners with custom .Finished handling.
+    /// Tasks no longer own EBR slots; the scheduler thread owns one slot.
     pub fn releaseTaskEbr(self: *Scheduler, task: *Task) void {
-        if (task.ebr_slot) |e| {
-            self.releaseEbrSlot(e);
-            task.ebr_slot = null;
-        }
+        _ = self;
+        _ = task;
     }
 
-    /// FSM analog of releaseTaskEbr. The FSM allocator helper
-    /// (CheatHeader.allocFsmTaskRuntime) heap-allocates a per-task
-    /// ThreadLocalEbr + Runtime and stashes the pointers as opaques on
-    /// the FsmTask. drainFsmQueue's .Done branch invokes this BEFORE
-    /// destroy_fn, so that even if destroy_fn frees the ctx struct (and
-    /// with it the FsmTask body), the per-task Runtime + ebr_slot are
-    /// cleanly torn down first.
+    /// Release the per-FSM Runtime shell before destroy_fn frees the ctx.
     pub fn releaseFsmTaskEbr(self: *Scheduler, task: *fsm_mod.FsmTask) void {
         if (task.task_runtime) |rt_ptr| {
             rt_ptr.deinit();
             self.allocator.destroy(rt_ptr);
             task.task_runtime = null;
-        }
-        if (task.ebr_slot) |ebr_ptr| {
-            self.releaseEbrSlot(ebr_ptr);
-            task.ebr_slot = null;
         }
     }
 
@@ -554,11 +587,86 @@ pub const Scheduler = struct {
         t.lock_wait_start_ms.store(0, .release);
         t.fsm_wake_time = 0;
         t.destroy_fn = null;
-        t.ebr_slot = null;
         t.task_runtime = null;
         t.generation.store(prev_gen +% 1, .release);
         t.owner_scheduler = self;
         return t;
+    }
+
+    pub fn allocFsmCtx(self: *Scheduler, comptime T: type, task: *fsm_mod.FsmTask) !*T {
+        const size = @sizeOf(T);
+        const alignment = @alignOf(T);
+        const ptr = if (comptime size <= 64 and alignment <= 16) blk: {
+            const slot = try self.fsm_ctx_64_slab.create();
+            task.ctx_alloc_class = .slab64;
+            break :blk @as(*T, @ptrCast(@alignCast(slot)));
+        } else if (comptime size <= 128 and alignment <= 16) blk: {
+            const slot = try self.fsm_ctx_128_slab.create();
+            task.ctx_alloc_class = .slab128;
+            break :blk @as(*T, @ptrCast(@alignCast(slot)));
+        } else if (comptime size <= 256 and alignment <= 16) blk: {
+            const slot = try self.fsm_ctx_256_slab.create();
+            task.ctx_alloc_class = .slab256;
+            break :blk @as(*T, @ptrCast(@alignCast(slot)));
+        } else blk: {
+            const heap_ptr = try self.allocator.create(T);
+            task.ctx_alloc_class = .heap;
+            break :blk heap_ptr;
+        };
+        task.owner_scheduler = self;
+        return ptr;
+    }
+
+    pub fn freeFsmCtx(self: *Scheduler, comptime T: type, task: *fsm_mod.FsmTask, ctx: *T) void {
+        const class = task.ctx_alloc_class;
+        const owner: *Scheduler = if (task.owner_scheduler) |raw|
+            @ptrCast(@alignCast(raw))
+        else
+            self;
+
+        if (owner != self and (class == .slab64 or class == .slab128 or class == .slab256)) {
+            self.submitRemoteFsmCtxFree(owner, class, @intFromPtr(ctx));
+            task.ctx_alloc_class = .none;
+            task.ctx = null;
+            return;
+        }
+
+        switch (class) {
+            .none => {},
+            .slab64 => self.fsm_ctx_64_slab.destroy(@as(*FsmCtx64, @ptrCast(@alignCast(ctx)))),
+            .slab128 => self.fsm_ctx_128_slab.destroy(@as(*FsmCtx128, @ptrCast(@alignCast(ctx)))),
+            .slab256 => self.fsm_ctx_256_slab.destroy(@as(*FsmCtx256, @ptrCast(@alignCast(ctx)))),
+            .heap => owner.allocator.destroy(ctx),
+        }
+        task.ctx_alloc_class = .none;
+        task.ctx = null;
+    }
+
+    fn submitRemoteFsmCtxFree(
+        self: *Scheduler,
+        owner: *Scheduler,
+        class: fsm_mod.FsmCtxAllocClass,
+        ptr: usize,
+    ) void {
+        const sender_idx = if (scheduler_running) active_scheduler.index else self.index;
+        std.debug.assert(sender_idx < owner.channels.len);
+        const ring = owner.ensureChannel(sender_idx) catch {
+            @panic("failed to allocate remote FSM ctx-free channel");
+        };
+        const msg = SpscMessage{
+            .tag = .RemoteFsmCtxFree,
+            .fsm_ctx_ptr = ptr,
+            .fsm_ctx_class = @intFromEnum(class),
+        };
+        while (!ring.push(msg)) {
+            if (scheduler_running) {
+                active_scheduler.drainChannels();
+            }
+            std.Thread.yield() catch {};
+        }
+        const bit = @as(u64, 1) << @intCast(sender_idx);
+        const old_dirty = owner.dirty_mask.fetchOr(bit, .release);
+        if ((old_dirty & bit) == 0) owner.event_fd.notify();
     }
 
     // ------------------------------------------------------------
@@ -577,7 +685,7 @@ pub const Scheduler = struct {
     // HOT PATH: Freeing a stack.
     // Standard-sized stacks are kept in the L1 cache for fast reuse.
     // All other sizes are returned directly to the pool slab.
-    fn freeStack(self: *Scheduler, stack: []u8) void {
+    fn freeLocalStackMemory(self: *Scheduler, stack: []u8) void {
         if (stack.len == STANDARD_STACK_SIZE and self.stack_cache.items.len < STACK_CACHE_LIMIT) {
             self.stack_cache.append(self.allocator, stack) catch {
                 self.stack_pool.free(stack);
@@ -585,6 +693,40 @@ pub const Scheduler = struct {
         } else {
             self.stack_pool.free(stack);
         }
+    }
+
+    pub fn freeStack(self: *Scheduler, stack: Stack) void {
+        const owner = if (stack.owner) |raw|
+            @as(*Scheduler, @ptrCast(@alignCast(raw)))
+        else
+            self;
+        if (owner == self) {
+            self.freeLocalStackMemory(stack.memory);
+            return;
+        }
+        self.submitRemoteStackFree(owner, stack.memory);
+    }
+
+    fn submitRemoteStackFree(self: *Scheduler, owner: *Scheduler, memory: []u8) void {
+        const sender_idx = if (scheduler_running) active_scheduler.index else self.index;
+        std.debug.assert(sender_idx < owner.channels.len);
+        const ring = owner.ensureChannel(sender_idx) catch {
+            @panic("failed to allocate remote stack-free channel");
+        };
+        const msg = SpscMessage{
+            .tag = .RemoteStackFree,
+            .stack_ptr = @intFromPtr(memory.ptr),
+            .stack_len = memory.len,
+        };
+        while (!ring.push(msg)) {
+            if (scheduler_running) {
+                active_scheduler.drainChannels();
+            }
+            std.Thread.yield() catch {};
+        }
+        const bit = @as(u64, 1) << @intCast(sender_idx);
+        const old_dirty = owner.dirty_mask.fetchOr(bit, .release);
+        if ((old_dirty & bit) == 0) owner.event_fd.notify();
     }
 
     // IDLE PATH: Scavenge memory (The Cleanup)
@@ -636,6 +778,8 @@ pub const Scheduler = struct {
             .config_stack_size = @intFromEnum(config.stack_size),
             .config_pinned = config.pinned,
             .config_timeout_ms = config.timeout_ms,
+            .config_profile_site_id = config.profile_site_id,
+            .config_profile_dispatch = config.profile_dispatch,
         };
         // Wait-and-work: if ring is full, drain our own channels + yield
         while (!ring.push(msg)) {
@@ -646,8 +790,9 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
-        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
-        self.event_fd.notify();
+        const bit = @as(u64, 1) << @intCast(sender_idx);
+        const old_dirty = self.dirty_mask.fetchOr(bit, .release);
+        if ((old_dirty & bit) == 0) self.event_fd.notify();
     }
 
     // ------------------------------------------------------------
@@ -680,8 +825,9 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
-        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
-        self.event_fd.notify();
+        const bit = @as(u64, 1) << @intCast(sender_idx);
+        const old_dirty = self.dirty_mask.fetchOr(bit, .release);
+        if ((old_dirty & bit) == 0) self.event_fd.notify();
     }
 
     /// Wake a previously-parked FSM task. Same routing as submitFsmSpawn
@@ -712,8 +858,9 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
-        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
-        self.event_fd.notify();
+        const bit = @as(u64, 1) << @intCast(sender_idx);
+        const old_dirty = self.dirty_mask.fetchOr(bit, .release);
+        if ((old_dirty & bit) == 0) self.event_fd.notify();
     }
 
     // ------------------------------------------------------------
@@ -753,8 +900,9 @@ pub const Scheduler = struct {
                 std.Thread.yield() catch {};
             }
         }
-        _ = self.dirty_mask.fetchOr(@as(u64, 1) << @intCast(sender_idx), .seq_cst);
-        self.event_fd.notify();
+        const bit = @as(u64, 1) << @intCast(sender_idx);
+        const old_dirty = self.dirty_mask.fetchOr(bit, .release);
+        if ((old_dirty & bit) == 0) self.event_fd.notify();
     }
     /// Lightweight: only process RemoteCall messages. Spawn and Resume are
     /// left in the ring for the full drainChannels to handle. Safe to call
@@ -806,6 +954,8 @@ pub const Scheduler = struct {
                             .stack_size = @enumFromInt(msg.config_stack_size),
                             .pinned = msg.config_pinned,
                             .timeout_ms = msg.config_timeout_ms,
+                            .profile_site_id = msg.config_profile_site_id,
+                            .profile_dispatch = msg.config_profile_dispatch,
                         };
                         const effective_size = cp.recommendSize(
                             if (msg.user_fn) |f| @intFromPtr(f) else 0,
@@ -814,12 +964,12 @@ pub const Scheduler = struct {
                         const stack_mem = self.allocStack(effective_size) catch continue;
                         const task = blk: {
                             const fiber_ptr = self.allocator.create(Fiber) catch {
-                                self.freeStack(stack_mem);
+                                self.freeLocalStackMemory(stack_mem);
                                 continue;
                             };
-                            fiber_ptr.* = Fiber.init(stack_mem, msg.trampoline_addr, effective_size);
+                            fiber_ptr.* = Fiber.initWithOwner(stack_mem, msg.trampoline_addr, effective_size, self);
                             const t = self.task_slab.create() catch {
-                                self.freeStack(stack_mem);
+                                self.freeLocalStackMemory(stack_mem);
                                 self.allocator.destroy(fiber_ptr);
                                 continue;
                             };
@@ -841,17 +991,13 @@ pub const Scheduler = struct {
                             t.generation.store(prev_gen +% 1, .release);
                             if (rt_profile.CLEAR_PROFILE) {
                                 t.spawn_ns = fp_mod.nowNs();
+                                t.profile_site_id = config.profile_site_id;
+                                fp_mod.recordSiteSpawn(
+                                    config.profile_site_id,
+                                    @as(fp_mod.DispatchKind, @enumFromInt(config.profile_dispatch)),
+                                    .stack,
+                                );
                             }
-                            // Allocate + register a per-task ThreadLocalEbr on
-                            // the OS thread stack. Doing this here (instead of
-                            // inside entryWrapper) keeps EbrContext.register's
-                            // deep allocator path off the small fiber stack.
-                            t.ebr_slot = self.allocEbrSlot() catch {
-                                self.freeStack(stack_mem);
-                                self.allocator.destroy(fiber_ptr);
-                                self.allocator.destroy(t);
-                                continue;
-                            };
                             break :blk t;
                         };
                         task.context = msg.args;
@@ -859,13 +1005,13 @@ pub const Scheduler = struct {
                         task.config = config;
                         if (task.config.pinned) {
                             self.pinned_queue.append(self.allocator, task) catch {
-                                self.freeStack(stack_mem);
+                                self.freeLocalStackMemory(stack_mem);
                                 self.task_slab.destroy(task);
                                 continue;
                             };
                         } else {
                             self.ready_queue.push(self.allocator, task) catch {
-                                self.freeStack(stack_mem);
+                                self.freeLocalStackMemory(stack_mem);
                                 self.fiber_pool.append(self.allocator, task) catch
                                     self.task_slab.destroy(task);
                                 continue;
@@ -890,6 +1036,19 @@ pub const Scheduler = struct {
                         const fsm_task: *FsmTask = @ptrCast(@alignCast(msg.fsm_task.?));
                         fsm_task.status = .Ready;
                         self.fsm_ready_queue.push(self.allocator, fsm_task) catch unreachable;
+                    },
+                    .RemoteStackFree => {
+                        const memory = @as([*]u8, @ptrFromInt(msg.stack_ptr))[0..msg.stack_len];
+                        self.freeLocalStackMemory(memory);
+                    },
+                    .RemoteFsmCtxFree => {
+                        const class: fsm_mod.FsmCtxAllocClass = @enumFromInt(msg.fsm_ctx_class);
+                        switch (class) {
+                            .slab64 => self.fsm_ctx_64_slab.destroy(@as(*FsmCtx64, @ptrCast(@alignCast(@as(*anyopaque, @ptrFromInt(msg.fsm_ctx_ptr)))))),
+                            .slab128 => self.fsm_ctx_128_slab.destroy(@as(*FsmCtx128, @ptrCast(@alignCast(@as(*anyopaque, @ptrFromInt(msg.fsm_ctx_ptr)))))),
+                            .slab256 => self.fsm_ctx_256_slab.destroy(@as(*FsmCtx256, @ptrCast(@alignCast(@as(*anyopaque, @ptrFromInt(msg.fsm_ctx_ptr)))))),
+                            .none, .heap => {},
+                        }
                     },
                     .RemoteCall => {
                         if (self.draining) {
@@ -960,7 +1119,11 @@ pub const Scheduler = struct {
 
         while (true) {
             if (self.global_shutdown) |flag| {
-                if (flag.load(.monotonic)) break;
+                if (flag.load(.monotonic)) {
+                    self.drainChannels();
+                    self.scavengeMemory(true);
+                    break;
+                }
             }
 
             // Scan lock_waiters every iteration (fast or slow path). Without
@@ -1062,6 +1225,7 @@ pub const Scheduler = struct {
 
                 if (rt_profile.CLEAR_PROFILE) {
                     fp_mod.recordSchedulerRun(self.index);
+                    fp_mod.recordSiteRun(task.profile_site_id, self.index);
                 }
                 // 1. Switch to the Task
                 task.base.switchTo(&self.main_ctx);
@@ -1072,7 +1236,7 @@ pub const Scheduler = struct {
                 switch (task.status.load(.acquire)) {
                     .Finished => {
                         if (rt_profile.CLEAR_PROFILE) {
-                            fp_mod.recordFiberExit(task.spawn_ns, fp_mod.nowNs());
+                            fp_mod.recordFiberExit(task.profile_site_id, task.spawn_ns, fp_mod.nowNs());
                         }
                         _ = self.active_tasks.fetchSub(1, .monotonic);
                         // Remove from lock_waiters before destroying to prevent stale pointer access.
@@ -1085,11 +1249,9 @@ pub const Scheduler = struct {
                                 break;
                             }
                         }
-                        // Unregister + free the per-task ThreadLocalEbr
-                        // (deinit drains limbo into the global orphans list
-                        // so reclaim() can free them once safe).
+                        // Compatibility no-op: tasks no longer own EBR slots.
                         self.releaseTaskEbr(task);
-                        self.freeStack(task.base.stack.memory);
+                        self.freeStack(task.base.stack);
                         self.allocator.destroy(task.base);
                         self.task_slab.destroy(task);
                     },
@@ -1196,15 +1358,20 @@ pub const Scheduler = struct {
             // Flush any pending SQEs (e.g. the timeout above) before sleeping.
             self.flushRing();
 
-            // A. Announce we are going to sleep
-            self.event_fd.markSleeping();
+            // A. Park in userspace. If a producer already left a wake
+            // token while we were awake, consume it and loop instead of
+            // entering io_uring.
+            if (!self.event_fd.prepareSleep()) {
+                continue;
+            }
 
             // B. The Double Check
-            // We must check for new work ONE LAST TIME after setting the flag.
+            // We must check for new work ONE LAST TIME after parking.
             // If we don't do this, a task could arrive between our last check
-            // and the 'markSleeping' call, and we would sleep forever.
+            // and the prepareSleep call. Producers that arrive after
+            // prepareSleep observe WakeParked and write eventfd.
             if (self.hasWork() or self.hasChannelMessages()) {
-                self.event_fd.markAwake();
+                self.event_fd.finishSleep();
                 continue; // Restart loop to process the new work
             }
 
@@ -1212,7 +1379,7 @@ pub const Scheduler = struct {
             const count = self.copyCqesOnIoStack(wait_nr);
 
             // D. We are awake
-            self.event_fd.markAwake();
+            self.event_fd.finishSleep();
 
             if (count > 0) {
                 self.processCqes(self.uring_cqes[0..count]);
@@ -1264,6 +1431,16 @@ pub const Scheduler = struct {
     /// Caller owns the backing state struct; scheduler only moves the handle.
     pub fn enqueueFsm(self: *Scheduler, task: *FsmTask) void {
         task.status = .Ready;
+        if (rt_profile.CLEAR_PROFILE) {
+            if (task.spawn_ns == 0) {
+                task.spawn_ns = fp_mod.nowNs();
+                fp_mod.recordSiteSpawn(
+                    task.profile_site_id,
+                    @as(fp_mod.DispatchKind, @enumFromInt(task.profile_dispatch)),
+                    .fsm,
+                );
+            }
+        }
         self.fsm_ready_queue.push(self.allocator, task) catch unreachable;
         _ = self.active_tasks.fetchAdd(1, .monotonic);
     }
@@ -1291,16 +1468,20 @@ pub const Scheduler = struct {
         var i: usize = 0;
         while (i < snapshot) : (i += 1) {
             const task = self.fsm_ready_queue.pop() orelse break;
+            if (rt_profile.CLEAR_PROFILE) {
+                fp_mod.recordSchedulerRun(self.index);
+                fp_mod.recordSiteRun(task.profile_site_id, self.index);
+            }
             const reason = fsm_mod.dispatchOnce(task);
             switch (reason) {
                 .Done => {
                     if (rt_profile.CLEAR_PROFILE) {
-                        fp_mod.recordFiberExit(task.spawn_ns, fp_mod.nowNs());
+                        fp_mod.recordFiberExit(task.profile_site_id, task.spawn_ns, fp_mod.nowNs());
                     }
                     _ = self.active_tasks.fetchSub(1, .monotonic);
-                    // Per-task Runtime + ebr_slot teardown MUST happen
-                    // before destroy_fn (destroy_fn reads task.ctx and
-                    // frees the user ctx struct).
+                    // Per-task Runtime shell teardown MUST happen before
+                    // destroy_fn (destroy_fn reads task.ctx and frees the
+                    // user ctx struct).
                     self.releaseFsmTaskEbr(task);
                     // The synthesized destroy_fn frees the user ctx
                     // pointed to by task.ctx. It does NOT free the
@@ -2113,6 +2294,37 @@ pub fn unpinFsmTask(pin: FsmTaskPin) void {
     if (pin.allocator) |alloc| alloc.unpin(pin.slab);
 }
 
+test "migrated stack free routes back to owning scheduler" {
+    const alloc = std.testing.allocator;
+    var global_ebr: EbrContext = .{};
+    defer global_ebr.deinit(alloc);
+
+    var owner = try Scheduler.init(alloc, &global_ebr, null);
+    defer owner.deinit();
+    owner.index = 0;
+
+    var thief = try Scheduler.init(alloc, &global_ebr, null);
+    defer thief.deinit();
+    thief.index = 1;
+
+    const memory = try owner.allocStack(.Standard);
+    const stack = Stack{ .memory = memory, .owner = &owner };
+
+    active_scheduler = &thief;
+    scheduler_running = true;
+    defer {
+        scheduler_running = false;
+        active_scheduler = undefined;
+    }
+
+    thief.freeStack(stack);
+    try std.testing.expectEqual(@as(usize, 0), thief.stack_cache.items.len);
+    try std.testing.expect(owner.dirty_mask.load(.acquire) != 0);
+
+    owner.drainChannels();
+    try std.testing.expectEqual(@as(usize, 1), owner.stack_cache.items.len);
+}
+
 pub const WaitGroup = struct {
     // The counter must be atomic
     counter: std.atomic.Value(usize) = std.atomic.Value(usize).init(0),
@@ -2360,6 +2572,31 @@ test "ioError: i32 min does not overflow" {
     // The i64 widening in ioError prevents undefined behavior.
     const err = Scheduler.ioError(std.math.minInt(i32));
     try std.testing.expectEqual(error.Unexpected, err);
+}
+
+test "SmartEventFd: awake notify is consumed without kernel wake" {
+    var efd = try SmartEventFd.init();
+    defer efd.deinit();
+
+    efd.notify();
+    try std.testing.expect(!efd.prepareSleep());
+    efd.finishSleep();
+
+    try std.testing.expect(efd.prepareSleep());
+    efd.finishSleep();
+}
+
+test "SmartEventFd: parked notify writes one wake token" {
+    var efd = try SmartEventFd.init();
+    defer efd.deinit();
+
+    try std.testing.expect(efd.prepareSleep());
+    efd.notify();
+    efd.consume();
+    efd.finishSleep();
+
+    try std.testing.expect(efd.prepareSleep());
+    efd.finishSleep();
 }
 
 test "IoWaiter: encode/decode roundtrip" {

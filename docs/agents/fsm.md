@@ -3,11 +3,32 @@
 CLEAR has two lowerings for `BG { ... }` blocks:
 
 - **Stackful** — the BG body runs in its own fiber with a real stack (16-64 KB depending on build mode). Fast to suspend (just `swapcontext`), but every BG pays the stack cost up front.
-- **FSM** — the BG body is compiled to a state machine. The "stack" is a heap-allocated context struct (sized to the live cross-segment vars only, typically 32-200 bytes). Suspends become state transitions. Tens of thousands of in-flight FSM tasks fit in the memory of a few hundred fibers.
+- **FSM** — the BG body is compiled to a state machine. The "stack" is a context struct sized to the live cross-segment vars only. Contexts use scheduler-local 64 B / 128 B / 256 B slabs for the common cases. Suspends become state transitions. Tens of thousands of in-flight FSM tasks fit in the memory of a few hundred fibers.
 
 The annotator decides per-BG which lowering to use. Eligible bodies go FSM; the rest stay stackful. A BG annotated with explicit `@local` (stack-size directive) always stays stackful; that opt-out is preserved.
 
 This document covers what FSM lowering supports today, what it doesn't, and why.
+
+## Context allocation plan
+
+**Now: slab-allocate small FSM contexts.** The runtime should provide scheduler-local slabs for 64 B, 128 B, and 256 B FSM context payloads, using the scheduler/runtime allocator passed into initialization. This is for the generated FSM context, not the shared fiber stack pool. The compiler should route contexts that fit into the smallest usable slab class and keep oversized contexts off the slab path.
+
+**Now: add `@stack` for compiler-picked stackful fallback.** When the compiler knows an FSM context is too large for the small slab classes, the explicit escape hatch should be stackful `@stack`, with the compiler selecting the stack tier from compile-time frame analysis. This keeps short-lived large contexts from silently paying heap/FSM costs when a stack is the better model.
+
+**Future: reuse FSM state slots.** Current liveness promotes by source variable name. It does not allocate reusable storage slots for disjoint live ranges. A future pass should build an interference graph over cross-segment values and map non-overlapping values to shared fields, so ten steps that each carry two dead-before-next-step values need two slots, not twenty.
+
+**Future: add `@fsm:heap`.** Heap FSM contexts should be explicit. If a context does not fit the slab classes and the user still wants FSM semantics, `@fsm:heap` will opt into heap allocation. Until that exists, oversized short-lived work should prefer `@stack`.
+
+## Current state-field allocation
+
+The compiler does **not** reuse context slots today.
+
+- `Liveness.analyze` returns `cross_segment_vars` keyed by variable name.
+- `Emit.build_recursive` emits one context field per promoted variable name.
+- `SuspendResolvers.resolve_next` emits a distinct `sp_N` field for each `NEXT` suspend and a distinct result field for each result variable.
+- `Emit.compute_sp_indices` assigns monotonically increasing `sp_1`, `sp_2`, ... to reachable `NEXT`/IO suspend points.
+
+That means reuse happens only when user code literally reuses the same variable name. Distinct variables with disjoint lifetimes still become distinct context fields. Distinct suspend points also get distinct `sp_N` fields.
 
 ## How a BG body becomes an FSM
 

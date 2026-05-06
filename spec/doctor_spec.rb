@@ -77,4 +77,71 @@ RSpec.describe Doctor do
       expect(out).to include("(heap rc) = @multiowned RC allocation tracked by rcCreate")
     end
   end
+
+  it "prints exact @parallel recommendations for imbalanced local BG sites" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "source.cht"), "FN main() ->\n  x = BG { 1 };\nEND\n")
+      File.write(File.join(dir, "transpiled.zig"), <<~ZIG)
+        // CLEAR_PROFILE_TASK_SITE id=7 kind=BG line=2 column=7 dispatch=local form=fsm
+      ZIG
+      rows = [{
+        id: 7,
+        runs: 10,
+        exits: 5,
+        total_lifetime_ns: 15_000,
+        scheds: { 0 => 9, 1 => 1 },
+        dispatch: "local",
+        form: "fsm",
+      }]
+
+      out = capture_stdout { Doctor.emit_parallel_bg_hint!(dir, rows) }
+
+      expect(out).to include("Exact imbalanced local BG task sites")
+      expect(out).to include("line 2: x = BG { 1 };")
+      expect(out).to include("site=7 form=fsm runs=10 sched=0 90% avg=3.0us")
+      expect(out).to include("Use `BG { @parallel -> ... }`")
+    end
+  end
+
+  it "falls back to source scanning when profile metadata has local dispatches" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "source.cht"), <<~CLEAR)
+        FN main() ->
+          a = BG { 1 };
+          b = BG { @parallel -> 2 };
+        END
+      CLEAR
+      File.write(File.join(dir, "transpiled.zig"), <<~ZIG)
+        try rt.getSched().submitSpawn(...);
+        try rt.getSched().submitSpawn(...);
+        try CheatHeader.spawnBest(...);
+      ZIG
+
+      out = capture_stdout { Doctor.emit_parallel_bg_hint!(dir, []) }
+
+      expect(out).to include("Profile contains local BG dispatches")
+      expect(out).to include("Candidate BG sites:")
+      expect(out).to include("line 2: a = BG { 1 };")
+      expect(out).not_to include("line 3: b = BG")
+    end
+  end
+
+  it "parses task metadata and handles missing source lines" do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "transpiled.zig"), <<~ZIG)
+        // CLEAR_PROFILE_TASK_SITE id=0 kind=BG line=1 column=1 dispatch=local form=fsm
+        // CLEAR_PROFILE_TASK_SITE id=12 kind=BG line=4 column=9 dispatch=parallel form=stack
+      ZIG
+
+      expect(Doctor.task_site_metadata(dir)[12]).to include(
+        kind: "BG",
+        line: 4,
+        column: 9,
+        dispatch: "parallel",
+        form: "stack",
+      )
+      expect(Doctor.source_line(dir, "?")).to eq("")
+      expect(Doctor.source_line(dir, 4)).to eq("")
+    end
+  end
 end

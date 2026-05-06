@@ -70,7 +70,11 @@ module PromotionClassifier
           next unless fval.is_a?(AST::Identifier)
           next unless fti&.needs_escape_promotion? && !fti&.string? && !fti&.heap_provenance?
 
-          var_promotes << { var: fval.name, zig_type: fti.zig_type }
+          var_promotes << {
+            var: fval.name,
+            zig_type: fti.zig_type,
+            elem_zig_type: elem_zig_type_for(fti),
+          }
           handled_fields << fname.to_s
         end
 
@@ -100,7 +104,11 @@ module PromotionClassifier
                        !ti&.string? && !ti&.heap_provenance?
         if needs_escape
           if ti.list_collection? || ti.map?
-            var_promotes << { var: val.name, zig_type: ti.zig_type }
+            var_promotes << {
+              var: val.name,
+              zig_type: ti.zig_type,
+              elem_zig_type: elem_zig_type_for(ti),
+            }
           else
             struct_promote ||= zig_type_for(ret_type)
           end
@@ -211,6 +219,14 @@ module PromotionClassifier
   private_class_method def self.zig_type_for(type)
     name = type.resolved.to_s.sub(/^[!?]+/, '')
     Type.new(name).zig_type
+  end
+
+  private_class_method def self.elem_zig_type_for(type)
+    elem = type&.element_type
+    return nil unless elem
+    Type.new(elem).zig_type
+  rescue
+    elem.to_s
   end
 
   private_class_method def self.referenced_vars(node)

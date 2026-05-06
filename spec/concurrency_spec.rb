@@ -302,11 +302,13 @@ RSpec.describe SemanticAnnotator do
         FLUX
       }
 
-      it "uses spawnBest by default (no auto-pin)" do
+      it "uses local FSM submit by default" do
         zig = ZigTranspiler.new.transpile(code)
         user_code = zig.split("// 3. Main Entry").first
-        # Pure-compute body becomes an FSM (Phase B1) — spawn dispatch is spawnFsmBest.
-        expect(user_code).to match(/spawn(Best|FsmBest)/)
+        # Pure-compute body becomes an FSM (Phase B1). Plain BG stays
+        # scheduler-local; explicit @parallel is the distributed path.
+        expect(user_code).to include("submitFsmSpawn")
+        expect(user_code).not_to match(/spawn(Best|FsmBest)/)
       end
     end
 
@@ -686,6 +688,15 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "Zig output: DO @stack branch emits computed stack tier exactly" do
+      let(:code) { preamble + "DO { @stack -> work() }" }
+
+      it "emits .Micro rather than the default .Standard" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
     context "Zig output: DO @large branch emits .Large task config" do
       let(:code) { preamble + "DO { @large -> work() }" }
 
@@ -734,6 +745,16 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
+    context "BG { @stack -> expr; }" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @stack -> work(); }; NEXT p; RETURN; END" }
+
+      it "sets stack_size :stack on the BgBlock" do
+        fn = ast.statements.last
+        bg = fn.body.first.value
+        expect(bg.stack_size).to eq(:stack)
+      end
+    end
+
     context "BG { @large -> expr; }" do
       let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @large -> work(); }; NEXT p; RETURN; END" }
 
@@ -777,6 +798,16 @@ RSpec.describe SemanticAnnotator do
       it "emits .stack_size = .Micro in submitSpawn" do
         zig = ZigTranspiler.new.transpile(code)
         expect(zig).to include(".stack_size = .Micro")
+      end
+    end
+
+    context "Zig output: BG @stack emits computed stack tier exactly" do
+      let(:code) { work_fn + "FN f() RETURNS !Void -> p: ~Void = BG { @stack -> work(); }; NEXT p; RETURN; END" }
+
+      it "emits .Micro rather than the default .Standard" do
+        zig = ZigTranspiler.new.transpile(code)
+        expect(zig).to include(".stack_size = .Micro")
+        expect(zig).not_to include("FsmTask")
       end
     end
 
@@ -837,6 +868,24 @@ RSpec.describe SemanticAnnotator do
         size_node = conc.options["size"]
         expect(size_node).to be_a(AST::Identifier)
         expect(size_node.name).to eq("MICRO")
+      end
+    end
+
+    context "CONCURRENT(workers: 4, batch: 8) WHERE" do
+      let(:code) {
+        preamble +
+        "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
+        "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
+        "r = items s> CONCURRENT(workers: 4, batch: 8) WHERE big(_); RETURN; END"
+      }
+
+      it "parses workers and batch options" do
+        fn   = ast.statements.last
+        pipe = fn.body[1].value
+        conc = pipe.right
+        expect(conc).to be_a(AST::ConcurrentOp)
+        expect(conc.options["workers"]).to be_a(AST::Literal)
+        expect(conc.options["batch"]).to be_a(AST::Literal)
       end
     end
 
@@ -1208,6 +1257,50 @@ RSpec.describe SemanticAnnotator do
           END
         CLEAR
         expect { run(code) }.to raise_error(/Unknown CONCURRENT option/)
+      end
+
+      it "rejects capacity for direct collection sources" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums s> CONCURRENT(workers: 2, capacity: 8) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/capacity only applies to stream or sharded sources.*batch: N/)
+      end
+
+      it "rejects batch of 0" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums s> CONCURRENT(workers: 2, batch: 0) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/batch must be greater than 0/)
+      end
+
+      it "rejects negative batch values" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums s> CONCURRENT(workers: 2, batch: -1) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/batch must be greater than 0/)
+      end
+
+      it "rejects non-number batch values" do
+        code = <<~CLEAR
+          FN main() RETURNS Void ->
+            nums: Float64[] = [1.0, 2.0];
+            result = nums s> CONCURRENT(workers: 2, batch: TRUE) SELECT _ * 2.0;
+            RETURN;
+          END
+        CLEAR
+        expect { run(code) }.to raise_error(/batch must be a number/)
       end
 
       it "rejects non-Bool pin value" do
@@ -1712,13 +1805,14 @@ RSpec.describe SemanticAnnotator do
     end
 
     describe "Transpiler" do
-      it "BgBlock emits a labeled block with Promise spawn and spawnBest (default)" do
+      it "BgBlock emits a labeled block with Promise spawn and local submit by default" do
         src = "FN f() RETURNS !Void -> p: ~Float64 = BG { 42.0; }; r: Float64 = NEXT p; RETURN; END"
         out = transpile_fn(src)
         expect(out).to include("CheatLib.Promise(f64).spawn(")
-        # Pure-compute body is Phase-B1 FSM-eligible — dispatch is spawnFsmBest
-        # (same call shape, same Promise wiring, FsmTask-backed execution).
-        expect(out).to match(/spawn(Best|FsmBest)\(/)
+        # Pure-compute body is Phase-B1 FSM-eligible; default dispatch is
+        # scheduler-local, while explicit @parallel uses spawnFsmBest.
+        expect(out).to include("submitFsmSpawn(")
+        expect(out).not_to match(/spawn(Best|FsmBest)\(/)
         expect(out).to include("break :")
         expect(out).to include("__ctx_0.inner.result = 42")
       end

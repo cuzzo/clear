@@ -1,0 +1,17 @@
+-- Test: CONCURRENT(batch: N) preserves item-wise semantics while chunking work claims.
+
+FN main() RETURNS Void ->
+    nums = [1, 2, 3, 4, 5, 6, 7];
+
+    doubled = nums s> CONCURRENT(workers: 3, batch: 3) SELECT _ * 2;
+    ASSERT doubled.length() == 7, "batch SELECT length";
+    ASSERT doubled[0] == 2, "batch SELECT order 0";
+    ASSERT doubled[6] == 14, "batch SELECT partial final item";
+
+    evens = nums s> CONCURRENT(workers: 2, batch: 4) WHERE _ MOD 2 == 0;
+    ASSERT evens.length() == 3, "batch WHERE length";
+    ASSERT evens[0] == 2, "batch WHERE order 0";
+    ASSERT evens[2] == 6, "batch WHERE order 2";
+
+    RETURN;
+END

@@ -838,6 +838,9 @@ module MIR
                            # capture inits the lowering decided)
     :spawn_call_zig,       # "try ...spawn(&ctx.task);"
     :rt_name,              # "rt" (the surrounding fn's runtime)
+    :profile_site_id,      # integer id used by runtime fiber profile
+    :profile_dispatch_id,  # fiber-profile.DispatchKind enum value
+    :profile_site_comment, # CLEAR_PROFILE_TASK_SITE metadata comment
   )
 
   # Catch wrapper. Wraps raw Zig code for try/catch but exposes
@@ -982,10 +985,11 @@ module MIR
   # `name` may be a dotted path (e.g. "__ret.field") for per-field
   # promotion in a return-with-promotion pattern; the emitter takes &name
   # verbatim.
-  EscapePromote = Struct.new(:name, :zig_type, :strategy, :data, :rt_expr) do
+  EscapePromote = Struct.new(:name, :zig_type, :strategy, :data, :rt_expr, :elem_type) do
     include Stmt
     # data: strategy-specific payload (field set, alloc symbol, etc.)
     # rt_expr: Zig expression for runtime (e.g. "rt", "do_rt")
+    # elem_type: Zig element type for :list promotion.
   end
 
   # --- Deep Copy ---

@@ -1,7 +1,7 @@
--- @leak: n = 1000000 -> n = 1000
+-- @leak: n = 10000000 -> n = 10000
 -- Parallel Aggregation Benchmark — Distributed Histogram + Stats
 --
--- Deterministic LCG generates 100K events. Each event is bucketed into
+-- Deterministic LCG generates 10M events. Each event is bucketed into
 -- one of 1,000 categories. Two phases:
 --
 --   Phase 1 (SHARD): Build histogram via @sharded(32) map.
@@ -24,7 +24,7 @@ FN absInt(x: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    n = 1000000;
+    n = 10000000;
     buckets = 1000;
 
     -- Pre-compute seeds (LCG is sequential so we must pre-compute).
@@ -38,7 +38,7 @@ FN main() RETURNS Void ->
     -- Phase 1: Build histogram via SHARD with integer keys — zero string allocation.
     t0 = timestampMs();
     MUTABLE counts: HashMap<Int64, Int64>@sharded(32) = {};
-    (0..<n) s> SHARD(absInt(seeds[_]) MOD buckets, counts) s> CONCURRENT EACH {
+    (0..<n) s> SHARD(absInt(seeds[_]) MOD buckets, counts) s> CONCURRENT(batch: 512) EACH {
         counts[_] = (counts[_] OR 0_i64) + 1_i64;
     };
     shardMs = timestampMs() - t0;

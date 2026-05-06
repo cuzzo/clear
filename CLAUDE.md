@@ -471,6 +471,30 @@ If you ever encounter a compiler bug, stop everything you're doing, and fix the 
 
 If you ever find a limitation in the language that you have to work around, stop, identify the problem, and suggest how the language needs to be improved to fix this limitation focing work arounds.
 
+## Definition of Done
+
+Before concluding a task and declaring it complete, you must explicitly review and verify the following:
+
+### Transpilation Review Requirements
+
+If the transpiler in src/ is touched, make these checks:
+
+- **Memory Safety Invariants:** Verify that no existing MIRChecker invariants (INV-1 through INV-10) were bypassed or modified.
+- **Escape Analysis Completeness:** Confirm that any frame-allocated values that survive their declaring frame are explicitly upgraded to the heap in `EscapeAnalysis`.  If any new escape method is added, it must be considered *EVERYWHERE* that does any escape analysis.
+- **Zero Transpiler Band-aids:** Ensure no special logic for intrinsic/standard library functions was added outside of `src/ast/std_lib.rb` or `src/ast/type.rb`.  No new RawZig is allowed.  Add Zig code in zig/ and thoroughly unit test it there.  Do not shoe-horn it into the transpiler.
+- **Zero Runtime Overhead:** The transpiler should never add runtime overhead. You need explicit permission to add any runtime overhead. Zig comptime should be used to achieve all abstractions unless explicitly permitted otherwise.
+
+### Concurrency Review Requirements
+
+If the runtime code in zig/ is touched, make these checks:
+
+- **Atomics Introduced:** You must write a **Loom test** to exhaust CPU instruction reordering and memory visibility permutations.
+- **Locks, Threads, or FFI Introduced:** You must write a **Hammer test** (oversubscribed threads, saturated queues) and run it with TSan/ASan. For Zig, ensure execution via `std.testing.allocator` to catch leaks.
+- **Retries, Timeouts, Network, or Disk I/O Introduced:** You must write a deterministic **VOPR (simulator) test** using a deterministic seed to catch combinatoric failures. Do not write real-time Chaos tests.
+- **File Operations / General Concurrency:** Actively search for logic races, starvation, or priority inversion. If found, write a test proving the failure, then implement the fix.
+- **Performance:** Code on critical, hot paths must be strictly non-blocking. This definitively prohibits any form of lock acquisition and any global heap allocations (which inherently rely on hidden locks) within these paths.
+
+
 ## Output
 - Answer is always line 1. Reasoning comes after, never before.
 - No preamble. No "Great question!", "Sure!", "Of course!", "Certainly!", "Absolutely!".

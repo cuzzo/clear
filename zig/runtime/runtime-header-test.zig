@@ -3,6 +3,7 @@ const rt_mod = @import("runtime.zig");
 const fp = @import("scheduler.zig");
 const qs = @import("queues.zig");
 const fm = @import("fiber-memory.zig");
+const fsm = @import("fsm.zig");
 const ebr = @import("../lib/ebr.zig");
 const header = @import("runtime-header.zig");
 const compat = @import("../lib/compat.zig");
@@ -41,6 +42,10 @@ test "CheatLib.read returns immediately when fd already has bytes" {
     try std.testing.expectEqualSlices(u8, msg, buf[0..n]);
 }
 
+fn dummyFsmResume(_: *fsm.FsmTask) fsm.YieldReason {
+    return .{ .Done = {} };
+}
+
 fn initWorkerGlobals() void {
     global_stack_pool = fm.StackPool.init(alloc);
 }
@@ -75,6 +80,88 @@ fn stopWorkers(threads: []std.Thread, n: usize) void {
     fp.global_registry.deinit(alloc);
     fp.global_registry = .{};
     global_shutdown.store(false, .release);
+}
+
+test "FSM ctx allocation routes 64B, 128B, 256B, and oversized contexts" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var stack_pool = fm.StackPool.init(allocator);
+    defer stack_pool.deinit();
+
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    defer sched.deinit();
+    defer fp.global_registry.deinit(allocator);
+
+    const SmallCtx = extern struct { bytes: [64]u8 };
+    const MediumCtx = extern struct { bytes: [128]u8 };
+    const LargeCtx = extern struct { bytes: [256]u8 };
+    const OversizedCtx = extern struct { bytes: [257]u8 };
+
+    const small_task = try sched.allocFsmTask(&dummyFsmResume);
+    defer sched.fsm_task_slab.destroy(small_task);
+    const small = try sched.allocFsmCtx(SmallCtx, small_task);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.slab64, small_task.ctx_alloc_class);
+    sched.freeFsmCtx(SmallCtx, small_task, small);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.none, small_task.ctx_alloc_class);
+
+    const medium_task = try sched.allocFsmTask(&dummyFsmResume);
+    defer sched.fsm_task_slab.destroy(medium_task);
+    const medium = try sched.allocFsmCtx(MediumCtx, medium_task);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.slab128, medium_task.ctx_alloc_class);
+    sched.freeFsmCtx(MediumCtx, medium_task, medium);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.none, medium_task.ctx_alloc_class);
+
+    const large_task = try sched.allocFsmTask(&dummyFsmResume);
+    defer sched.fsm_task_slab.destroy(large_task);
+    const large = try sched.allocFsmCtx(LargeCtx, large_task);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.slab256, large_task.ctx_alloc_class);
+    sched.freeFsmCtx(LargeCtx, large_task, large);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.none, large_task.ctx_alloc_class);
+
+    const oversized_task = try sched.allocFsmTask(&dummyFsmResume);
+    defer sched.fsm_task_slab.destroy(oversized_task);
+    const oversized = try sched.allocFsmCtx(OversizedCtx, oversized_task);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.heap, oversized_task.ctx_alloc_class);
+    sched.freeFsmCtx(OversizedCtx, oversized_task, oversized);
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.none, oversized_task.ctx_alloc_class);
+}
+
+test "FSM ctx slab free routes back to owner scheduler" {
+    const allocator = std.testing.allocator;
+
+    var global_ctx = ebr.EbrContext{};
+    defer global_ctx.deinit(allocator);
+
+    var pool_a = fm.StackPool.init(allocator);
+    defer pool_a.deinit();
+    var pool_b = fm.StackPool.init(allocator);
+    defer pool_b.deinit();
+
+    var owner = try fp.Scheduler.init(allocator, &global_ctx, &pool_a);
+    defer owner.deinit();
+    var current = try fp.Scheduler.init(allocator, &global_ctx, &pool_b);
+    defer current.deinit();
+    defer fp.global_registry.deinit(allocator);
+    owner.index = 0;
+    current.index = 1;
+
+    const SmallCtx = extern struct { bytes: [256]u8 };
+    const task = try owner.allocFsmTask(&dummyFsmResume);
+    defer owner.fsm_task_slab.destroy(task);
+    const ctx = try owner.allocFsmCtx(SmallCtx, task);
+    task.ctx = ctx;
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.slab256, task.ctx_alloc_class);
+
+    fp.active_scheduler = &current;
+    fp.scheduler_running = true;
+    current.freeFsmCtx(SmallCtx, task, ctx);
+    fp.scheduler_running = false;
+
+    try std.testing.expectEqual(fsm.FsmCtxAllocClass.none, task.ctx_alloc_class);
+    owner.drainChannels();
 }
 
 // This is the function the Fiber will run

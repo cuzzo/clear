@@ -728,7 +728,8 @@ class MIRLowering
       node.zig_type,
       node.strategy,
       node.fields,
-      @rt_name
+      @rt_name,
+      node.elem_type,
     )
   end
 
@@ -3333,6 +3334,9 @@ class MIRLowering
 
     task_cfg = task_config_zig(node.stack_size, node.computed_stack_tier)
     pin_mode = node.respond_to?(:pinned) ? node.pinned : nil
+    bg_site_id = id + 1
+    bg_site_line = node.token&.line || 0
+    bg_site_col = node.token&.column || 0
 
     # Universal transform path (CLAUDE.md Invariant 13). The
     # transform inspects the AST body via Segments.split, produces
@@ -3367,6 +3371,9 @@ class MIRLowering
         is_void: is_void, alloc_var: alloc_var, promise_var: promise_var,
         ctx_var: ctx_var, promoted_decls: promoted_decls,
         capture_inits: capture_inits, rt_name: rt_name, pin_mode: pin_mode,
+        parallel: !!node.parallel,
+        profile_site_id: bg_site_id, profile_line: bg_site_line,
+        profile_column: bg_site_col,
         inner_zig: inner_zig, arena_init_flag: !!node.arena_mode,
       }
       transform_result = FsmTransform.transform(node, transform_ctx, self)
@@ -3393,10 +3400,14 @@ class MIRLowering
     # delegation works; Stage 4b inlines them into Emit.build_*
     # and deletes them.
 
-    spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, task_cfg, pin_mode)
+    bg_dispatch = node.parallel ? :parallel : ((pin_mode == false || pin_mode.nil?) ? :local : pin_mode)
+    profiled_task_cfg = task_config_with_profile(task_cfg, bg_site_id, bg_dispatch)
+    spawn_call = fiber_spawn_call_zig(rt_name, ctx_type, ctx_var, profiled_task_cfg, bg_dispatch)
+    profile_comment = bg_profile_site_comment(bg_site_id, bg_site_line, bg_site_col, bg_dispatch, :stack)
 
     bg_code = <<~ZIG.chomp
       #{blk_label}: {
+          #{profile_comment}
           const #{ctx_type} = struct {
               inner: *#{promise_zig}.Inner,
               alloc: std.mem.Allocator,
@@ -4128,7 +4139,11 @@ class MIRLowering
   def task_config_zig(stack_size, computed_tier)
     default = @debug_mode ? "Large" : "Standard"
     variant = if stack_size
-      STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
+      if stack_size == :stack || stack_size == "stack"
+        STACK_SIZE_ZIG_VARIANT.fetch(computed_tier || :standard, default)
+      else
+        STACK_SIZE_ZIG_VARIANT.fetch(stack_size, default)
+      end
     elsif computed_tier
       computed = STACK_SIZE_ZIG_VARIANT.fetch(computed_tier, default)
       TIER_RANK.fetch(computed, 0) >= TIER_RANK.fetch(default, 0) ? computed : default
@@ -4148,9 +4163,31 @@ class MIRLowering
       "try #{rt_name}.getSched().submitSpawn(\n    #{spawn_args}\n);"
     when :shared
       "try CheatHeader.spawnPinned(\n    #{spawn_args}\n);"
+    when :parallel
+      "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
     else
       "try CheatHeader.spawnBest(\n    #{spawn_args}\n);"
     end
+  end
+
+  def task_config_with_profile(task_cfg, site_id, dispatch)
+    fields = ".profile_site_id = #{site_id}, .profile_dispatch = #{profile_dispatch_id(dispatch)}"
+    stripped = task_cfg.strip
+    return ".{ #{fields} }" if stripped == ".{}"
+    stripped.sub(/\}\s*\z/, ", #{fields} }")
+  end
+
+  def profile_dispatch_id(dispatch)
+    case dispatch
+    when :local, true then 1
+    when :parallel then 2
+    when :shared then 3
+    else 1
+    end
+  end
+
+  def bg_profile_site_comment(site_id, line, col, dispatch, form)
+    "// CLEAR_PROFILE_TASK_SITE id=#{site_id} kind=BG line=#{line} column=#{col} dispatch=#{dispatch} form=#{form}"
   end
 
   def fiber_string_promotes(node, id, prefix)

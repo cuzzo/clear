@@ -331,6 +331,37 @@ RSpec.describe "Stack Tier Recommendations" do
   end
 
   describe "BG block auto-sizing" do
+    it "@stack warns with the computed concrete tier" do
+      src = <<~CLEAR
+        FN compute(n: Float64) RETURNS Float64 ->
+            RETURN n * 2.0;
+        END
+        FN main() RETURNS Void ->
+            p: ~Float64 = BG { @stack -> compute(21.0); };
+            result: Float64 = NEXT p;
+            RETURN;
+        END
+      CLEAR
+      warnings = []
+      allow($stderr).to receive(:puts) { |msg| warnings << msg }
+      analyze(src)
+      expect(warnings.any? { |w| w.include?("@stack resolved to @micro") && w.include?("replace @stack with @micro") }).to be true
+    end
+
+    it "@stack does not silently become @service for plain reentrant callees" do
+      src = <<~CLEAR
+        FN fib(n: Float64) RETURNS Float64 @reentrant ->
+            IF n < 2.0 THEN RETURN n; END
+            RETURN fib(n - 1.0) + fib(n - 2.0);
+        END
+        FN main() RETURNS Void ->
+            p: ~Float64 = BG { @stack -> fib(10.0); };
+            result: Float64 = NEXT p; RETURN;
+        END
+      CLEAR
+      expect { analyze(src) }.to raise_error(CompilerError, /Declare `@service` explicitly/)
+    end
+
     it "assigns computed_stack_tier to BG blocks" do
       src = <<~CLEAR
         FN compute(n: Float64) RETURNS Float64 ->

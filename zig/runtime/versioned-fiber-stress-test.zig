@@ -279,6 +279,63 @@ const ReaderCtx = struct {
     }
 };
 
+const HeldGuardReaderCtx = struct {
+    inner: *CheatLib.Promise(i64).Inner,
+    bg_alloc: std.mem.Allocator,
+    cell: *versioned.Versioned(Sample),
+    reader_pinned: *std.atomic.Value(bool),
+    release_reader: *std.atomic.Value(bool),
+    violations: *std.atomic.Value(usize),
+
+    fn run(rt_raw: *anyopaque, raw: ?*anyopaque) anyerror!void {
+        const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+        defer ctx.bg_alloc.destroy(ctx);
+        defer ctx.inner.wg.done();
+
+        const rt: *Runtime = @ptrCast(@alignCast(rt_raw));
+        var g = ctx.cell.read(rt);
+        defer g.release();
+
+        const view = g.get().*;
+        ctx.reader_pinned.store(true, .release);
+
+        while (!ctx.release_reader.load(.acquire)) {
+            rt.checkYield();
+        }
+
+        if (view.a != 1 or view.b != 2) {
+            _ = ctx.violations.fetchAdd(1, .seq_cst);
+        }
+        ctx.inner.result = view.a + view.b;
+    }
+};
+
+const RetireThenExitWriterCtx = struct {
+    inner: *CheatLib.Promise(i64).Inner,
+    bg_alloc: std.mem.Allocator,
+    cell: *versioned.Versioned(Sample),
+    reader_pinned: *std.atomic.Value(bool),
+
+    fn setSample(p: *Sample, a: i64, b: i64) void {
+        p.a = a;
+        p.b = b;
+    }
+
+    fn run(rt_raw: *anyopaque, raw: ?*anyopaque) anyerror!void {
+        const ctx: *@This() = @ptrCast(@alignCast(raw.?));
+        defer ctx.bg_alloc.destroy(ctx);
+        defer ctx.inner.wg.done();
+
+        const rt: *Runtime = @ptrCast(@alignCast(rt_raw));
+        while (!ctx.reader_pinned.load(.acquire)) {
+            rt.checkYield();
+        }
+
+        try ctx.cell.update(rt, ctx.bg_alloc, setSample, .{ 7, 14 });
+        ctx.inner.result = 1;
+    }
+};
+
 // ----------------------------------------------------------------------
 // The actual test. Mirrors the user's CLEAR repro:
 //   r1 = BG { N reads }; r2 = BG { N reads };
@@ -315,7 +372,7 @@ test "Versioned: 2 BG fibers x 200_000 reads via scheduler -- repro for processC
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -397,7 +454,7 @@ test "Versioned: 2 BG fibers, heap-allocated cell -- exact CLEAR @shared:version
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
                 test_alloc.destroy(cell);
             }
@@ -447,6 +504,80 @@ test "Versioned: 2 BG fibers, heap-allocated cell -- exact CLEAR @shared:version
     }.body);
 }
 
+test "Versioned: retired version survives writer task exit while another task holds a guard" {
+    stack_pool = StackPool.init(test_alloc);
+    defer stack_pool.deinit();
+
+    try withMainRuntime(struct {
+        fn body(rt: *Runtime) !void {
+            const count = fp.global_registry.count();
+            if (count < 2) return error.SkipZigTest;
+
+            const cell = try test_alloc.create(versioned.Versioned(Sample));
+            cell.* = try versioned.Versioned(Sample).init(test_alloc, .{ .a = 1, .b = 2 });
+            defer {
+                cell.deinit(rt, test_alloc) catch unreachable;
+                var i: usize = 0;
+                while (i < 6) : (i += 1) {
+                    global_ebr.reclaim(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
+                }
+                test_alloc.destroy(cell);
+            }
+
+            var reader_pinned = std.atomic.Value(bool).init(false);
+            var release_reader = std.atomic.Value(bool).init(false);
+            var violations = std.atomic.Value(usize).init(0);
+
+            const sa = rt.getSched().allocator;
+            const reader_promise = try CheatLib.Promise(i64).spawn(sa, rt.getSched());
+            const reader_ctx = try sa.create(HeldGuardReaderCtx);
+            reader_ctx.* = .{
+                .inner = reader_promise.inner,
+                .bg_alloc = sa,
+                .cell = cell,
+                .reader_pinned = &reader_pinned,
+                .release_reader = &release_reader,
+                .violations = &violations,
+            };
+            try CheatHeader.spawnBest(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&HeldGuardReaderCtx.run)),
+                reader_ctx,
+                .{ .stack_size = .Large },
+            );
+
+            const writer_promise = try CheatLib.Promise(i64).spawn(sa, rt.getSched());
+            const writer_ctx = try sa.create(RetireThenExitWriterCtx);
+            writer_ctx.* = .{
+                .inner = writer_promise.inner,
+                .bg_alloc = sa,
+                .cell = cell,
+                .reader_pinned = &reader_pinned,
+            };
+            try CheatHeader.spawnBest(
+                @intFromPtr(&Runtime.entryWrapper),
+                @as(CheatHeader.TaskFn, @ptrCast(&RetireThenExitWriterCtx.run)),
+                writer_ctx,
+                .{ .stack_size = .Large },
+            );
+
+            try testing.expectEqual(@as(i64, 1), try writer_promise.next());
+
+            var i: usize = 0;
+            while (i < 12) : (i += 1) {
+                global_ebr.reclaim(test_alloc);
+                rt.currentEbr().reclaimLocal(test_alloc);
+                rt.checkYield();
+            }
+
+            release_reader.store(true, .release);
+            try testing.expectEqual(@as(i64, 3), try reader_promise.next());
+            try testing.expectEqual(@as(usize, 0), violations.load(.seq_cst));
+        }
+    }.body);
+}
+
 // ----------------------------------------------------------------------
 // Variant: 4 BG readers x 100_000 iters each. Strictly more concurrent
 // EBR enter/exit pressure across more fibers. If the bug is a per-fiber
@@ -467,7 +598,7 @@ test "Versioned: 4 BG fibers x 100_000 reads via scheduler -- broader concurrenc
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -528,8 +659,7 @@ test "Versioned: 4 BG fibers x 100_000 reads via scheduler -- broader concurrenc
 //
 // Key features the previous (stackful spawnBest) tests miss:
 //   1. The FSM body shares the main fiber's Runtime (`rt`). Both BG
-//      fibers + main fiber call `rt.ebr.enter()`/`rt.ebr.exit()` on
-//      the SAME ThreadLocalEbr.
+//      fibers + main fiber enter/exit EBR through Runtime.currentEbr().
 //   2. The FSM body calls `rt.checkYield()` -> `coopYield()` ->
 //      `getCurrent()` which returns the SCHEDULER's current_task,
 //      not the FSM's task. The yield mechanics for FSM-on-worker-
@@ -612,7 +742,7 @@ test "FSM Versioned: 2 BG-FSM fibers x 200_000 reads, single scheduler -- DEFAUL
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
                 test_alloc.destroy(cell);
             }
@@ -737,7 +867,7 @@ test "FSM Versioned CONTROL: same shape WITHOUT checkYield -- isolates the bug" 
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
                 test_alloc.destroy(cell);
             }
@@ -786,17 +916,9 @@ test "FSM Versioned CONTROL: same shape WITHOUT checkYield -- isolates the bug" 
 }
 
 // ----------------------------------------------------------------------
-// Diagnostic: confirm BG fibers do NOT register their EBR with the
-// shared EbrContext. This is a separate concern from the checkYield
-// bug, but it's a real footgun for any future EBR-pressure scenario:
-// entryWrapper (runtime.zig:564-613) creates a Runtime with a fresh
-// ThreadLocalEbr but never calls global_ctx.register(). No retire is
-// safe across BG fibers because reclaim() can advance the global
-// epoch without waiting for the BG fiber's local_epoch.
-//
-// (Note: this is not what the user's CLEAR program crashes on -- that
-// crash is checkYield-from-FSM. This diagnostic flags an adjacent
-// concern that, as far as I can see, also has no test coverage.)
+// Diagnostic: confirm BG fibers use a registered scheduler-thread EBR.
+// This guards the core safety invariant: reclaim() must observe a pinned
+// BG fiber even though the task itself does not own an EBR slot.
 const RegProbeCtx = struct {
     inner: *CheatLib.Promise(usize).Inner,
     bg_alloc: std.mem.Allocator,
@@ -813,15 +935,15 @@ const RegProbeCtx = struct {
         var g = ctx.cell.read(rt);
         defer g.release();
 
-        // Walk the registry under its lock and count how many entries
-        // are registered. If this BG fiber's ebr is NOT in the
-        // registry, the count won't include it.
+        // Walk the registry under its lock and confirm the scheduler
+        // thread's EBR participant is registered.
         global_ebr.registry_lock.lock();
         defer global_ebr.registry_lock.unlock();
 
         var seen_self: usize = 0;
+        const current_ebr = rt.currentEbr();
         for (global_ebr.registry.items) |entry| {
-            if (entry == rt.ebr) seen_self = 1;
+            if (entry == current_ebr) seen_self = 1;
         }
         ctx.ebr_count_inside.store(seen_self, .seq_cst);
         ctx.inner.result = global_ebr.registry.items.len;
@@ -901,7 +1023,7 @@ test "EBR registration: BG fiber's pin must block reclaim advance (UAF guard)" {
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -966,7 +1088,7 @@ test "DIAGNOSTIC: BG fiber's ThreadLocalEbr IS registered with EbrContext" {
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -1010,8 +1132,7 @@ var ebr_diag_seen_self: usize = 99;
 // `versioned-stress-test.zig` (std.Thread workers, no scheduler), which
 // does NOT exercise:
 //   - Cross-scheduler @parallel BG distribution (spawnFsmBest)
-//   - Scheduler-managed task.ebr_slot lifecycle (alloc on submitter,
-//     destroy on completer; potentially different schedulers)
+//   - Scheduler-thread EBR lifecycle under migratable tasks
 //   - Versioned.update's per-write heap-alloc + EBR-retire under many
 //     concurrent writers all racing the same cell
 //
@@ -1085,7 +1206,7 @@ test "Versioned: 4 BG-FSM writers race the same cell -- bench-17 heap-corruption
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -1147,7 +1268,7 @@ test "Versioned: 32 BG-FSM writers race the same cell -- bench-17 scale-up repro
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -1208,7 +1329,7 @@ test "Versioned: 32 readers + 4 writers on 5 schedulers -- bench-17 mixed-load r
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -1288,7 +1409,7 @@ test "Versioned: 4 readers + 4 writers on 5 schedulers -- writer-heavy repro" {
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -1368,12 +1489,9 @@ test "Versioned: 4 readers + 4 writers on 5 schedulers -- writer-heavy repro" {
 //   };
 //   try CheatHeader.spawnFsmBest(ctx.task);  <-- cross-scheduler distribution!
 //
-// The bug: when these FSMs dispatch on a WORKER scheduler thread, calling
-// `rt.ebr.enter() / .exit() / .retire()` accesses the MAIN scheduler's
-// per-thread EBR data structures from a different OS thread. ThreadLocalEbr
-// is non-thread-safe (limbo lists are plain ArrayList(usize), epoch is
-// non-atomic in the slow paths), so this corrupts the limbo and surfaces
-// as `realloc(): invalid old size` in glibc when reclaim() walks the list.
+// The bug: when these FSMs dispatch on a WORKER scheduler thread, EBR must
+// resolve to that worker scheduler's thread EBR, not to the spawning runtime's
+// fallback slot.
 const FsmWriterCtx = struct {
     task: *CheatHeader.FsmTask,
     rt: *Runtime,
@@ -1422,17 +1540,9 @@ const FsmWriterCtx = struct {
 
 // Bench-17 EXACT shape repro. The previous writer-stress tests used
 // stackful `spawnBest` and passed -- they didn't capture the FSM-on-worker
-// Bench-17 EXACT shape repro using the per-task Runtime pattern: each
-// FSM ctx gets its own Runtime backed by a per-task ThreadLocalEbr
-// (allocFsmTaskRuntime). This is the shape the CLEAR codegen emits.
-//
-// Without the per-task rt, glibc heap aborts with `realloc(): invalid
-// old size` after enough iterations: writer FSMs dispatch on worker
-// threads but call `rt.ebr.retire(...)` on the main rt's ebr, corrupting
-// the non-thread-safe limbo list. With the runtime-side fix
-// (FsmTask.ebr_slot/task_runtime + Scheduler.releaseFsmTaskEbr in
-// drainFsmQueue's .Done branch), this test passes deterministically.
-test "FSM Versioned: 4 BG-FSM writers via spawnFsmBest with per-task rt -- bench-17 fix verifier" {
+// shape. Each FSM ctx still gets its own Runtime shell because codegen stores
+// an `rt` pointer, but EBR resolves through Runtime.currentEbr() at dispatch.
+test "FSM Versioned: 4 BG-FSM writers via spawnFsmBest with Runtime.currentEbr -- bench-17 fix verifier" {
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
 
@@ -1447,7 +1557,7 @@ test "FSM Versioned: 4 BG-FSM writers via spawnFsmBest with per-task rt -- bench
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -1462,7 +1572,7 @@ test "FSM Versioned: 4 BG-FSM writers via spawnFsmBest with per-task rt -- bench
                 const ctx = try sa.create(FsmWriterCtx);
                 ctx.* = .{
                     .task = undefined,
-                    .rt = undefined, // rebound below to per-task rt
+                    .rt = undefined, // rebound below to per-task Runtime shell
                     .inner = promises[i].inner,
                     .alloc = sa,
                     .cell = &cell,
@@ -1472,8 +1582,8 @@ test "FSM Versioned: 4 BG-FSM writers via spawnFsmBest with per-task rt -- bench
                 };
                 ctx.task = try CheatHeader.allocFsmTask(rt, &FsmWriterCtx.resumeFn); ctx.task.ctx = ctx;
                 ctx.task.destroy_fn = &FsmWriterCtx.destroyTask;
-                // The fix: allocate a per-task Runtime + ebr_slot before
-                // spawning. The scheduler frees both on .Done.
+                // Allocate a per-task Runtime shell before spawning. The
+                // scheduler frees it on .Done.
                 const task_rt = try CheatHeader.allocFsmTaskRuntime(ctx.task, rt);
                 ctx.rt = task_rt;
                 try CheatHeader.spawnFsmBest(ctx.task);
@@ -1485,11 +1595,9 @@ test "FSM Versioned: 4 BG-FSM writers via spawnFsmBest with per-task rt -- bench
     }.body);
 }
 
-// Higher writer pressure on more schedulers using the per-task Runtime
-// fix. Validates that the fix scales: more cross-thread dispatch + more
-// retire pressure on more schedulers, and we still don't corrupt the
-// heap because each task's EBR ops route through its own slot.
-test "FSM Versioned: 8 BG-FSM writers via spawnFsmBest on 5 schedulers (per-task rt) -- bench-17 fix scale" {
+// Higher writer pressure on more schedulers using per-task Runtime shells.
+// Validates that Runtime.currentEbr() scales under cross-thread dispatch.
+test "FSM Versioned: 8 BG-FSM writers via spawnFsmBest on 5 schedulers (Runtime.currentEbr) -- bench-17 fix scale" {
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
 
@@ -1504,7 +1612,7 @@ test "FSM Versioned: 8 BG-FSM writers via spawnFsmBest on 5 schedulers (per-task
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
@@ -1519,7 +1627,7 @@ test "FSM Versioned: 8 BG-FSM writers via spawnFsmBest on 5 schedulers (per-task
                 const ctx = try sa.create(FsmWriterCtx);
                 ctx.* = .{
                     .task = undefined,
-                    .rt = undefined, // rebound below to per-task rt
+                    .rt = undefined, // rebound below to per-task Runtime shell
                     .inner = promises[i].inner,
                     .alloc = sa,
                     .cell = &cell,
@@ -1540,16 +1648,14 @@ test "FSM Versioned: 8 BG-FSM writers via spawnFsmBest on 5 schedulers (per-task
     }.body);
 }
 
-// Gap 1: structural invariants for the per-task Runtime fix.
+// Gap 1: structural invariants for the FSM Runtime shell + thread EBR fix.
 //
 // The bench-17 fix verifier above (and its 8-writer scale-up) prove
 // the fix at the *behavioral* level: the heap doesn't abort. This
-// test pins the *structural* property that makes the fix work: each
-// FSM task's Runtime is genuinely separate from the parent rt and
-// from every other FSM task's rt. If a regression ever causes
-// allocFsmTaskRuntime to be skipped (so ctx.rt aliases the parent)
-// or aliased across tasks (shared per-task rt), this test fires
-// before any concurrent work runs.
+// test pins the *structural* properties that make the fix work:
+// each FSM task has a separate Runtime shell, but none allocates a
+// task-local EBR participant. MVCC operations resolve EBR through
+// Runtime.currentEbr(), i.e. the active scheduler thread's registered slot.
 //
 // The behavioral test catches the bug only stochastically; the
 // glibc abort fires after enough iterations corrupt the limbo. This
@@ -1558,22 +1664,17 @@ test "FSM Versioned: 8 BG-FSM writers via spawnFsmBest on 5 schedulers (per-task
 //
 // Invariants checked (all before any FSM task starts running):
 //   I1  every per-task Runtime pointer is unique
-//   I2  every per-task ThreadLocalEbr pointer is unique
+//   I2  registry size does not grow with task count
 //   I3  no per-task Runtime aliases the parent rt
-//   I4  no per-task ThreadLocalEbr aliases the parent rt's ebr
-//   I5  every per-task ebr is registered in the shared EbrContext
-//        (count grew by exactly N)
+//   I4  runtime shells keep only the non-scheduler fallback ebr
 //
 // And after all tasks complete:
-//   I6  the registry has shrunk back to its pre-spawn size (each
-//        per-task ebr was unregistered by releaseFsmTaskEbr)
+//   I5  the registry size is unchanged
 //
-// I6 is the load-bearing invariant for the fix's cleanup half. The
-// fix has two parts: (a) allocate per-task runtime, (b) release it
-// when the FSM task is .Done. If (b) regresses, ebrs leak; the
-// DebugAllocator catches the heap leak, but I6 catches the *logic*
-// directly so the failure is interpretable.
-test "FSM Versioned: per-task Runtime structural separation -- bench-17 fix invariants" {
+// The fix has two parts: (a) allocate per-task runtime shell, (b) keep EBR
+// scheduler-local. If either regresses, this catches it before relying on
+// stochastic heap corruption.
+test "FSM Versioned: Runtime shells use scheduler-thread EBR -- bench-17 fix invariants" {
     stack_pool = StackPool.init(test_alloc);
     defer stack_pool.deinit();
 
@@ -1588,12 +1689,11 @@ test "FSM Versioned: per-task Runtime structural separation -- bench-17 fix inva
                 var i: usize = 0;
                 while (i < 6) : (i += 1) {
                     global_ebr.reclaim(test_alloc);
-                    rt.ebr.reclaimLocal(test_alloc);
+                    rt.currentEbr().reclaimLocal(test_alloc);
                 }
             }
 
-            // Snapshot the registry size BEFORE we allocate any per-task
-            // ebrs. We compare back to this number after cleanup.
+            // Snapshot the registry size before allocating Runtime shells.
             global_ebr.registry_lock.lock();
             const initial_registry: usize = global_ebr.registry.items.len;
             global_ebr.registry_lock.unlock();
@@ -1605,7 +1705,6 @@ test "FSM Versioned: per-task Runtime structural separation -- bench-17 fix inva
             const sa = rt.getSched().allocator;
             var promises: [N]CheatLib.Promise(usize) = undefined;
             var task_rts: [N]*Runtime = undefined;
-            var task_ebrs: [N]*@import("../lib/ebr.zig").ThreadLocalEbr = undefined;
             var ctxs: [N]*FsmWriterCtx = undefined;
 
             // Phase 1: allocate all per-task Runtimes BEFORE spawning any.
@@ -1629,7 +1728,6 @@ test "FSM Versioned: per-task Runtime structural separation -- bench-17 fix inva
                 const task_rt = try CheatHeader.allocFsmTaskRuntime(ctxs[i].task, rt);
                 ctxs[i].rt = task_rt;
                 task_rts[i] = task_rt;
-                task_ebrs[i] = task_rt.ebr;
             }
 
             // I1: per-task Runtimes are pairwise distinct.
@@ -1638,32 +1736,23 @@ test "FSM Versioned: per-task Runtime structural separation -- bench-17 fix inva
                     try testing.expect(task_rts[i] != task_rts[j]);
                 }
             }
-            // I2: per-task ThreadLocalEbrs are pairwise distinct.
-            for (0..N) |i| {
-                for (i + 1..N) |j| {
-                    try testing.expect(task_ebrs[i] != task_ebrs[j]);
-                }
-            }
-            // I3: no per-task Runtime aliases the parent.
-            for (0..N) |i| try testing.expect(task_rts[i] != rt);
-            // I4: no per-task ebr aliases the parent's ebr.
-            for (0..N) |i| try testing.expect(task_ebrs[i] != rt.ebr);
-
-            // I5: every per-task ebr is registered with the shared
-            // EbrContext. Registry grew by exactly N from pre-spawn.
+            // I2: registry does not grow with task count.
             global_ebr.registry_lock.lock();
             const after_alloc_registry = global_ebr.registry.items.len;
             global_ebr.registry_lock.unlock();
-            try testing.expectEqual(initial_registry + N, after_alloc_registry);
+            try testing.expectEqual(initial_registry, after_alloc_registry);
+            // I3: no per-task Runtime aliases the parent.
+            for (0..N) |i| try testing.expect(task_rts[i] != rt);
+            // I4: runtime shells use the parent's fallback ebr pointer, but
+            // scheduler execution ignores it and uses currentEbr().
+            for (0..N) |i| try testing.expect(task_rts[i].ebr == rt.ebr);
 
             // Phase 2: spawn the FSMs and wait for completion.
             for (0..N) |i| try CheatHeader.spawnFsmBest(ctxs[i].task);
             for (&promises) |*p| _ = try p.next();
             _ = failed.load(.seq_cst);
 
-            // I6: every per-task ebr was unregistered by
-            // releaseFsmTaskEbr in drainFsmQueue's .Done branch.
-            // Registry has returned to its pre-spawn size.
+            // I5: task completion did not add or leak EBR participants.
             global_ebr.registry_lock.lock();
             const after_done_registry = global_ebr.registry.items.len;
             global_ebr.registry_lock.unlock();

@@ -145,6 +145,7 @@ pub const CheatLib = struct {
         rt: *Runtime,
         items: *[N]Promise(T),
         workers: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -166,7 +167,7 @@ pub const CheatLib = struct {
                     cleanup(R, alloc_, ptr);
                 }
             }.cleanupResult,
-            alloc, rt, items, workers, parallel, task_cfg, user_ctx
+            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -178,6 +179,7 @@ pub const CheatLib = struct {
         rt: *Runtime,
         items: *[N]Promise(T),
         workers: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -199,7 +201,7 @@ pub const CheatLib = struct {
                     cleanup(T, alloc_, ptr);
                 }
             }.cleanupItem,
-            alloc, rt, items, workers, parallel, task_cfg, user_ctx
+            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -210,6 +212,7 @@ pub const CheatLib = struct {
         rt: *Runtime,
         items: *[N]Promise(T),
         workers: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -226,7 +229,7 @@ pub const CheatLib = struct {
                     try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
                 }
             }.parallelSpawn,
-            rt, items, workers, parallel, task_cfg, user_ctx
+            rt, items, workers, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -243,6 +246,7 @@ pub const CheatLib = struct {
         src: anytype,
         workers: usize,
         capacity: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -264,7 +268,7 @@ pub const CheatLib = struct {
                     cleanup(R, alloc_, ptr);
                 }
             }.cleanupResult,
-            is_inf, alloc, rt, src, workers, capacity, parallel, task_cfg, user_ctx
+            is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -277,6 +281,7 @@ pub const CheatLib = struct {
         src: anytype,
         workers: usize,
         capacity: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -298,7 +303,7 @@ pub const CheatLib = struct {
                     cleanup(T, alloc_, ptr);
                 }
             }.cleanupItem,
-            is_inf, alloc, rt, src, workers, capacity, parallel, task_cfg, user_ctx
+            is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -311,6 +316,7 @@ pub const CheatLib = struct {
         src: anytype,
         workers: usize,
         capacity: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -327,7 +333,7 @@ pub const CheatLib = struct {
                     try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
                 }
             }.parallelSpawn,
-            is_inf, alloc, rt, src, workers, capacity, parallel, task_cfg, user_ctx
+            is_inf, alloc, rt, src, workers, capacity, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -342,6 +348,7 @@ pub const CheatLib = struct {
         rt: *Runtime,
         items: []const T,
         workers: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -363,7 +370,7 @@ pub const CheatLib = struct {
                     cleanup(R, alloc_, ptr);
                 }
             }.cleanupResult,
-            alloc, rt, items, workers, parallel, task_cfg, user_ctx
+            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -374,6 +381,7 @@ pub const CheatLib = struct {
         rt: *Runtime,
         items: []const T,
         workers: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -395,7 +403,7 @@ pub const CheatLib = struct {
                     cleanup(T, alloc_, ptr);
                 }
             }.cleanupItem,
-            alloc, rt, items, workers, parallel, task_cfg, user_ctx
+            alloc, rt, items, workers, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -405,6 +413,7 @@ pub const CheatLib = struct {
         rt: *Runtime,
         items: []const T,
         workers: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -421,7 +430,7 @@ pub const CheatLib = struct {
                     try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
                 }
             }.parallelSpawn,
-            rt, items, workers, parallel, task_cfg, user_ctx
+            rt, items, workers, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -431,6 +440,7 @@ pub const CheatLib = struct {
         rt: *Runtime,
         items: []T,
         workers: usize,
+        batch: usize,
         parallel: bool,
         task_cfg: fp.TaskConfig,
         user_ctx: ?*anyopaque,
@@ -447,7 +457,7 @@ pub const CheatLib = struct {
                     try CheatLib.spawnBest(@intFromPtr(&Runtime.entryWrapper), user_fn, args, config);
                 }
             }.parallelSpawn,
-            rt, items, workers, parallel, task_cfg, user_ctx
+            rt, items, workers, batch, parallel, task_cfg, user_ctx
         );
     }
 
@@ -3621,21 +3631,35 @@ pub fn allocFsmTask(parent_rt: *Runtime, resume_fn: fp.ResumeFn) !*fp.FsmTask {
     return parent_rt.getSched().allocFsmTask(resume_fn);
 }
 
-/// Allocate a per-FSM-task Runtime + ThreadLocalEbr.
+/// Allocate a generated FSM context using the scheduler-local ctx slabs
+/// for the common small cases (64 B / 128 B), falling back to heap for
+/// larger or over-aligned contexts. The allocation class is recorded on
+/// the FsmTask so destroy can route the free back to the owning scheduler.
+pub fn allocFsmCtx(comptime T: type, parent_rt: *Runtime, fsm_task: *fp.FsmTask) !*T {
+    return parent_rt.getSched().allocFsmCtx(T, fsm_task);
+}
+
+/// Free a generated FSM context through the allocation class recorded by
+/// allocFsmCtx. This is called by generated destroyTask after it has run
+/// type-specific cleanup.
+pub fn freeFsmCtx(comptime T: type, fsm_task: *fp.FsmTask, ctx: *T) void {
+    const owner: *fp.Scheduler = if (fsm_task.owner_scheduler) |raw|
+        @ptrCast(@alignCast(raw))
+    else
+        fp.active_scheduler;
+    const current = if (fp.scheduler_running) fp.active_scheduler else owner;
+    current.freeFsmCtx(T, fsm_task, ctx);
+}
+
+/// Allocate a per-FSM-task Runtime shell.
 ///
-/// FSM tasks dispatched via spawnFsmBest can run on any scheduler thread.
-/// If they share the spawning fiber's Runtime, EBR enter/exit/retire calls
-/// in the body would touch the spawning thread's ThreadLocalEbr from a
-/// foreign OS thread -- corrupting the non-thread-safe limbo list and
-/// surfacing later as `realloc(): invalid old size` from glibc.
+/// FSM tasks still need their own Runtime pointer because generated FSM
+/// contexts store `rt` directly, but EBR no longer lives on the task. MVCC
+/// operations call Runtime.currentEbr(), which resolves to the active
+/// scheduler thread's registered EBR slot at dispatch time.
 ///
-/// The fix: every FSM task gets its own Runtime backed by its own
-/// ThreadLocalEbr slot (registered with the EbrContext), so all EBR
-/// operations in the body route through a slot dedicated to that task.
-///
-/// Lifecycle: this fn allocates ebr_slot + Runtime, registers the slot
-/// with EbrContext, and stashes both pointers on `task.ebr_slot` /
-/// `task.task_runtime`. The scheduler frees them in `releaseFsmTaskEbr`
+/// Lifecycle: this fn allocates Runtime and stashes it on
+/// `task.task_runtime`. The scheduler frees it in `releaseFsmTaskEbr`
 /// after the task reaches .Done.
 ///
 /// Caller MUST invoke this BEFORE submitting the task (spawnFsmBest /
@@ -3648,22 +3672,17 @@ pub fn allocFsmTask(parent_rt: *Runtime, resume_fn: fp.ResumeFn) !*fp.FsmTask {
 ///   6. try CheatHeader.spawnFsmBest(&ctx.task);
 pub fn allocFsmTaskRuntime(fsm_task: *fp.FsmTask, parent_rt: *Runtime) !*Runtime {
     const allocator = parent_rt.heap_allocator;
-    const sched = parent_rt.getSched();
-
-    const ebr_ptr = try sched.allocEbrSlot();
-    errdefer sched.releaseEbrSlot(ebr_ptr);
 
     const rt_ptr = try allocator.create(Runtime);
     errdefer allocator.destroy(rt_ptr);
-    // Build a minimal Runtime backed by ebr_ptr. No frame slice -- the FSM
-    // body uses its own ctx for state; if it calls frameAlloc via a deep
-    // path, that lands in the lazy-heap arena (initFromSliceWithEbr with
-    // an empty frame slice). The codegen does NOT rely on the per-task
-    // Runtime owning frame memory; only its ebr matters for MVCC ops.
-    rt_ptr.* = try Runtime.initFromSliceWithEbr(&[_]u8{}, ebr_ptr, allocator, 0);
+    // Build a minimal Runtime. No frame slice -- the FSM body uses its own
+    // ctx for state; if it calls frameAlloc via a deep path, that lands in
+    // the lazy-heap arena. The ebr pointer is only the non-scheduler
+    // fallback; under scheduler dispatch Runtime.currentEbr() returns the
+    // active scheduler's thread_ebr.
+    rt_ptr.* = try Runtime.initFromSliceWithEbr(&[_]u8{}, parent_rt.ebr, allocator, 0);
     rt_ptr.wireAllocator();
 
-    fsm_task.ebr_slot = ebr_ptr;
     fsm_task.task_runtime = rt_ptr;
     return rt_ptr;
 }

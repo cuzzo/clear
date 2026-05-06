@@ -471,8 +471,25 @@ RSpec.describe MIREmitter do
 
   describe "EscapePromote" do
     it "emits list promotion" do
-      node = MIR::EscapePromote.new("items", "CheatLib.ArrayListUnmanaged(i64)", :list, nil, "rt")
+      node = MIR::EscapePromote.new("items", "CheatLib.ArrayListUnmanaged(i64)", :list, nil, "rt", "i64")
       expect(e.emit(node)).to eq("try CheatLib.promoteList(i64, rt, &items);")
+    end
+
+    it "emits nested list promotion from explicit elem_type" do
+      node = MIR::EscapePromote.new(
+        "items",
+        "CheatLib.ArrayListUnmanaged(CheatLib.Promise(i64))",
+        :list,
+        nil,
+        "rt",
+        "CheatLib.Promise(i64)"
+      )
+      expect(e.emit(node)).to eq("try CheatLib.promoteList(CheatLib.Promise(i64), rt, &items);")
+    end
+
+    it "requires explicit elem_type for list promotion" do
+      node = MIR::EscapePromote.new("items", "CheatLib.ArrayListUnmanaged(i64)", :list, nil, "rt")
+      expect { e.emit(node) }.to raise_error(RuntimeError, /missing elem_type/)
     end
 
     it "emits string_map promotion" do

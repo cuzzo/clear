@@ -198,7 +198,7 @@ pub fn main() !void {
                 .Finished => {
                     _ = sched.active_tasks.fetchSub(1, .monotonic);
                     sched.releaseTaskEbr(task);
-                    sched.stack_pool.free(task.base.stack.memory);
+                    sched.freeStack(task.base.stack);
                     sched.allocator.destroy(task.base);
                     sched.task_slab.destroy(task);
                 },

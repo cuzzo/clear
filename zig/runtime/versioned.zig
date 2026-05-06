@@ -1,5 +1,6 @@
 const std = @import("std");
 const Runtime = @import("runtime.zig").Runtime;
+const ThreadLocalEbr = @import("../lib/ebr.zig").ThreadLocalEbr;
 const compat = @import("../lib/compat.zig");
 const rt_profile = @import("runtime-header.zig");
 const mvcc_profile = @import("mvcc-profile.zig");
@@ -173,7 +174,7 @@ pub fn Versioned(comptime T: type) type {
         // by the caller immediately after this call returns.
         pub fn deinit(self: *Self, trt: *Runtime, allocator: std.mem.Allocator) !void {
             const current_ptr: *T = @ptrFromInt(addrUntag(self.ptr.load(.acquire)));
-            try trt.ebr.retire(allocator, current_ptr);
+            try trt.currentEbr().retire(allocator, current_ptr);
         }
 
         // B1 fix (2026-04-30): cleanup variant for `Arc(Versioned(T))`.
@@ -206,7 +207,8 @@ pub fn Versioned(comptime T: type) type {
         // through the returned Guard.
         pub fn read(self: *Self, trt: *Runtime) Guard {
             // A. Signal start
-            trt.ebr.enter();
+            const ebr = trt.currentEbr();
+            ebr.enter();
 
             // B. Load pointer (Safe because we are in the epoch).
             //    Acquire-paired with the cmpxchg .release in update().
@@ -218,7 +220,7 @@ pub fn Versioned(comptime T: type) type {
             if (rt_profile.CLEAR_PROFILE) {
                 mvcc_profile.recordRead(@intFromPtr(self), @sizeOf(T));
             }
-            return Guard{ .ptr = val, .rt = trt };
+            return Guard{ .ptr = val, .ebr = ebr };
         }
 
         // H3: closure-based read API that auto-releases via defer.
@@ -240,7 +242,7 @@ pub fn Versioned(comptime T: type) type {
         // The Read Guard
         pub const Guard = struct {
             ptr: *T,
-            rt: *Runtime,
+            ebr: *ThreadLocalEbr,
 
             pub fn get(self: *Guard) *T {
                 return self.ptr;
@@ -248,7 +250,7 @@ pub fn Versioned(comptime T: type) type {
 
             pub fn release(self: *Guard) void {
                 // C. Signal done
-                self.rt.ebr.exit();
+                self.ebr.exit();
             }
         };
 
@@ -290,8 +292,9 @@ pub fn Versioned(comptime T: type) type {
             // forces reclaim's global_epoch to stop at this thread's
             // local until update() returns, so any old_ptr we observe
             // via `self.ptr.load` is alive throughout the memcpy + CAS.
-            trt.ebr.enter();
-            defer trt.ebr.exit();
+            const ebr = trt.currentEbr();
+            ebr.enter();
+            defer ebr.exit();
 
             var retries: usize = 0;
             while (retries < MAX_UPDATE_RETRIES) : (retries += 1) {
@@ -337,7 +340,7 @@ pub fn Versioned(comptime T: type) type {
                 // === SUCCESS PATH === — disarm the defer cleanup,
                 // retire the old pointer for EBR-deferred free.
                 success = true;
-                try trt.ebr.retire(allocator, old_ptr);
+                try ebr.retire(allocator, old_ptr);
                 if (rt_profile.CLEAR_PROFILE) {
                     mvcc_profile.recordUpdate(@intFromPtr(self), @sizeOf(T), retries, true);
                 }
@@ -522,8 +525,9 @@ pub fn updateMulti(
         // 5. Pin EBR. The user's txn body reads from the captured
         //    snapshots (which are still valid because EBR retirement
         //    only fires after every active epoch drains).
-        trt.ebr.enter();
-        defer trt.ebr.exit();
+        const ebr = trt.currentEbr();
+        ebr.enter();
+        defer ebr.exit();
 
         // 6. Copy each captured snapshot into the new_node so the user
         //    starts from the latest committed state for that cell.
@@ -556,7 +560,7 @@ pub fn updateMulti(
         inline for (0..N) |i| {
             const T = @TypeOf(cells[i].*).Inner;
             const old_node: *T = @ptrFromInt(snap_addrs[i]);
-            try trt.ebr.retire(allocator, old_node);
+            try ebr.retire(allocator, old_node);
             // AtomicPtr M3.16: record per-cell that THIS commit was
             // multi-cell. The doctor uses `multi_commits > 0` to
             // disqualify the cell from the @shared:versioned ->

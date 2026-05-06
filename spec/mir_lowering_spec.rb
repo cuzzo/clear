@@ -50,6 +50,34 @@ RSpec.describe MIRLowering do
     node
   end
 
+  describe "task profile helpers" do
+    it "injects profile fields into empty and non-empty task configs" do
+      low = lowering
+
+      expect(low.send(:task_config_with_profile, ".{}", 9, :parallel)).to eq(".{ .profile_site_id = 9, .profile_dispatch = 2 }")
+      expect(low.send(:task_config_with_profile, ".{ .stack_size = .Large }", 4, :shared))
+        .to eq(".{ .stack_size = .Large , .profile_site_id = 4, .profile_dispatch = 3 }")
+    end
+
+    it "maps unknown dispatches to local and emits profile comments" do
+      low = lowering
+
+      expect(low.send(:profile_dispatch_id, :unexpected)).to eq(1)
+      expect(low.send(:bg_profile_site_comment, 5, 12, 3, :unexpected, :stack))
+        .to eq("// CLEAR_PROFILE_TASK_SITE id=5 kind=BG line=12 column=3 dispatch=unexpected form=stack")
+    end
+
+    it "routes parallel fiber spawn through spawnBest" do
+      low = lowering
+
+      out = low.send(:fiber_spawn_call_zig, "__rt", "__Worker", "__worker", ".{}", :parallel)
+
+      expect(out).to include("CheatHeader.spawnBest")
+      expect(out).to include("&__Worker.run")
+      expect(out).to include("__worker")
+    end
+  end
+
   # =========================================================================
   # Old MIR translation
   # =========================================================================
@@ -100,12 +128,13 @@ RSpec.describe MIRLowering do
     end
 
     it "translates MIR::Promote to MIR::EscapePromote" do
-      promote = MIR::Promote.new(tok, "items", "ArrayListUnmanaged(i64)", :list, nil)
+      promote = MIR::Promote.new(tok, "items", "ArrayListUnmanaged(i64)", :list, nil, "i64")
       result = lowering.lower(promote)
       expect(result).to be_a(MIR::EscapePromote)
       expect(result.name).to eq("items")
       expect(result.strategy).to eq(:list)
       expect(result.zig_type).to eq("ArrayListUnmanaged(i64)")
+      expect(result.elem_type).to eq("i64")
       zig = emit(result)
       expect(zig).to include("promoteList")
     end

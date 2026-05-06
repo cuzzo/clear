@@ -167,6 +167,9 @@ pub const StackSize = enum {
 pub const Stack = struct {
     // The raw slice of memory we own
     memory: []u8,
+    // Scheduler that owns the stack pool this memory came from. Kept as an
+    // opaque pointer to avoid a fiber-core -> scheduler import cycle.
+    owner: ?*anyopaque = null,
 
     // Add this helper. Fiber.reset() relies on it.
     pub fn getStackTop(self: Stack) usize {
@@ -185,6 +188,10 @@ pub const Fiber = struct {
     stack_guard_head: ?*safety.GuardNode = null,
 
     pub fn init(memory: []u8, entry_fn: usize, size: StackSize) Fiber {
+        return initWithOwner(memory, entry_fn, size, null);
+    }
+
+    pub fn initWithOwner(memory: []u8, entry_fn: usize, size: StackSize, owner: ?*anyopaque) Fiber {
         //std.debug.print("\n=== Fiber.init ===\n", .{});
         //std.debug.print("Memory: 0x{x} - 0x{x} ({} bytes)\n", .{
         //    @intFromPtr(memory.ptr),
@@ -197,7 +204,7 @@ pub const Fiber = struct {
         // In release builds this is 16KB * N_fibers of wasted writes.
         if (builtin.mode == .Debug) @memset(memory, 0xCC);
 
-        const stack = Stack{ .memory = memory };
+        const stack = Stack{ .memory = memory, .owner = owner };
         const stack_top_addr = @intFromPtr(memory.ptr) + memory.len;
         const aligned_top = stack_top_addr & ~@as(usize, 15);
 

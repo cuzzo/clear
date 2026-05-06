@@ -67,6 +67,32 @@ RSpec.describe FsmWrapperEmitter do
     MIR::FsmIoBody.new(blk_label, ctx_struct(**kw), spawn_setup)
   end
 
+  def b1_body
+    MIR::FsmB1Body.new(
+      "__bg_b1",
+      MIR::FsmB1CtxStruct.new(
+        "__BgB1Ctx",
+        "CheatLib.Promise(i64)",
+        "value: i64,",
+        MIR::FsmStep.new(0, 0, "__rt_b1", "_ = &__rt_b1;", [
+          MIR::RawZig.new("__ctx_0.inner.result = __ctx_0.value;", :fsm_body, nil, nil),
+        ]),
+      ),
+      MIR::FsmSpawnSetup.new(
+        "__bg_b1_alloc",
+        "rt.heapAlloc()",
+        "__bg_b1_promise",
+        "CheatLib.Promise(i64)",
+        "",
+        "__bg_b1_ctx",
+        "__BgB1Ctx",
+        ".task = undefined,\n.rt = rt,\n.inner = __bg_b1_promise.inner,\n.alloc = __bg_b1_alloc,\n.value = 42,",
+        "try CheatHeader.spawnFsmBest(__bg_b1_ctx.task);",
+        "rt",
+      ),
+    )
+  end
+
   describe "outer block structure" do
     it "wraps the entire emission in a labeled block" do
       out = FsmWrapperEmitter.render(body)
@@ -77,6 +103,19 @@ RSpec.describe FsmWrapperEmitter do
 
     it "rejects non-FsmIoBody inputs" do
       expect { FsmWrapperEmitter.render("oops") }.to raise_error(ArgumentError)
+    end
+  end
+
+  describe "B1 pure-compute body" do
+    it "emits a single runBody and fixed resume function" do
+      out = FsmWrapperEmitter.render(b1_body)
+
+      expect(out).to start_with("__bg_b1: {")
+      expect(out).to include("fn runBody(__ctx_0: *@This()) anyerror!void {")
+      expect(out).to include("__ctx_0.inner.result = __ctx_0.value;")
+      expect(out).to include("if (runBody(__ctx_0)) |_| {} else |err|")
+      expect(out).to include("return .{ .Done = {} };")
+      expect(out).to include("break :__bg_b1 __bg_b1_promise;")
     end
   end
 
@@ -150,6 +189,7 @@ RSpec.describe FsmWrapperEmitter do
       # is rendered separately on the ctx struct.
       expect(out).to include("fn destroyTask(")
       expect(out).to include(".destroy_fn = &__BgCtx0.destroyTask")
+      expect(out).to include("CheatHeader.freeFsmCtx(@This(), __fsm_task, __ctx_0)")
     end
 
     it "interpolates step-0 error cleanup into the catch arm" do
@@ -201,12 +241,12 @@ RSpec.describe FsmWrapperEmitter do
       out = FsmWrapperEmitter.render(body)
       expect(out).to include("const __bg0_alloc = rt.heapAlloc();")
       expect(out).to include("const __bg0_promise = try CheatLib.Promise(i64).spawn(__bg0_alloc, rt.getSched());")
-      expect(out).to include("const __bg0_ctx = try __bg0_alloc.create(__BgCtx0);")
-      expect(out).to include("errdefer __bg0_alloc.destroy(__bg0_ctx);")
+      expect(out).to include("const __bg0_ctx_task = try CheatHeader.allocFsmTask(rt, &__BgCtx0.resumeFn);")
+      expect(out).to include("const __bg0_ctx = try CheatHeader.allocFsmCtx(__BgCtx0, rt, __bg0_ctx_task);")
+      expect(out).to include("errdefer CheatHeader.freeFsmCtx(__BgCtx0, __bg0_ctx_task, __bg0_ctx);")
       expect(out).to include("__bg0_ctx.* = .{")
       expect(out).to include(".rt = rt,")
       expect(out).to include(".inner = __bg0_promise.inner,")
-      expect(out).to include("const __bg0_ctx_task = try CheatHeader.allocFsmTask(rt, &__BgCtx0.resumeFn);")
       expect(out).to include("__bg0_ctx_task.ctx = __bg0_ctx;")
       expect(out).to include("__bg0_ctx.task = __bg0_ctx_task;")
       expect(out).to include("try CheatHeader.spawnFsmBest(__bg0_ctx.task);")

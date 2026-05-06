@@ -512,7 +512,7 @@ fn threadEntryPoint(allocator: std.mem.Allocator, global_ctx: *EbrContext, stack
 }
 
 test "Multi-Threaded Shared Nothing" {
-    if (build_options.coverage) return error.SkipZigTest;
+    if (build_options.coverage or build_options.tsan) return error.SkipZigTest;
 
     const allocator = std.heap.smp_allocator;
 

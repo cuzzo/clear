@@ -16,7 +16,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::time::Instant;
 
-const N: i64 = 1_000_000;
+const N: usize = 10_000_000;
 const BUCKETS: i64 = 1_000;
 
 fn lcg(state: i64) -> i64 {
@@ -26,7 +26,7 @@ fn lcg(state: i64) -> i64 {
 
 fn main() {
     // Pre-compute seeds (LCG is sequential)
-    let mut seeds = Vec::with_capacity(N as usize);
+    let mut seeds = Vec::with_capacity(N);
     let mut seed: i64 = 42;
     for _ in 0..N {
         seed = lcg(seed);
@@ -66,7 +66,7 @@ fn main() {
     let average = total / values.len() as f64;
     let stats_time = t1.elapsed();
 
-    assert_eq!(total as i64, N, "total mismatch");
+    assert_eq!(total as i64, N as i64, "total mismatch");
 
     println!("Events: {}", N);
     println!("Buckets: {}", BUCKETS);

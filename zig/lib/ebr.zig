@@ -148,6 +148,10 @@ pub const ThreadLocalEbr = struct {
     // is_active: "I am currently holding a pointer inside a critical section"
     is_active: Atomic(bool) = Atomic(bool).init(false),
 
+    // Nested EBR guards on the same participant. The first enter publishes
+    // the epoch; only the final exit clears is_active.
+    pin_depth: Atomic(u32) = Atomic(u32).init(0),
+
     // link to the global world
     context: *EbrContext,
 
@@ -215,6 +219,9 @@ pub const ThreadLocalEbr = struct {
     // now 1) and is the dominant cost in tight read loops like the
     // bench-17 200K-read fiber.
     pub fn enter(self: *ThreadLocalEbr) void {
+        const prev_depth = self.pin_depth.fetchAdd(1, .acq_rel);
+        if (prev_depth != 0) return;
+
         const global = self.context.global_epoch.load(.acquire);
         self.local_epoch.store(global, .monotonic);
         // The .seq_cst here is doing two jobs:
@@ -234,6 +241,10 @@ pub const ThreadLocalEbr = struct {
     // StoreLoad (no further loads in this thread depend on reclaim
     // observing is_active=false promptly).
     pub fn exit(self: *ThreadLocalEbr) void {
+        const prev_depth = self.pin_depth.fetchSub(1, .acq_rel);
+        std.debug.assert(prev_depth > 0);
+        if (prev_depth != 1) return;
+
         self.is_active.store(false, .release);
     }
 };

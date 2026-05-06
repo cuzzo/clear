@@ -1175,13 +1175,14 @@ module MIR
   # Promote: escape promotion inserted before return statements.
   # Emits frame->heap copy/promotion code. Replaces PromotionClassifier lookups in transpiler.
   #
-  # strategy:  :list     — promoteList (dupe backing buffer to heap)
+  # strategy:  :list     — promoteList (dupe backing buffer to heap; elem_type required)
   #            :string_map — swap allocator to heapAlloc
   #            :fields   — promoteFields (recursive field promotion)
   #            :generic  — promote (single value deep copy)
-  Promote = Struct.new(:token, :name, :zig_type, :strategy, :fields) do
+  Promote = Struct.new(:token, :name, :zig_type, :strategy, :fields, :elem_type) do
     include AST::Locatable
     # fields: Set of field names for :fields strategy (nil = all fields)
+    # elem_type: Zig element type for :list promotion.
   end
 
   # SuppressCleanup: move suppression marker inserted at consumption points

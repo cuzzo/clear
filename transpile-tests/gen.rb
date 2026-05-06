@@ -67,11 +67,8 @@ class TestGenerator
 
     execution_block = if needs_scheduler
       <<~ZIG
-          const fm = @import("runtime/fiber-memory.zig");
           const fp = @import("runtime/scheduler.zig");
-          var stack_pool = fm.StackPool.init(t_alloc);
-          defer stack_pool.deinit();
-          var sched = try fp.Scheduler.init(t_alloc, &global_ctx, &stack_pool);
+          var sched = try fp.Scheduler.init(t_alloc, &global_ctx, null);
           defer {
               fp.scheduler_running = false;
               sched.deinit();

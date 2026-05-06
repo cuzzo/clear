@@ -1147,49 +1147,49 @@ BUILTIN_OPS = {
   # {0}=elem_zig_type
   needsCleanup: { zig: "CheatLib.needsCleanup({0})", bc: true, borrows: :all },
   concurrentBoundedSelect: {
-    zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    zig: "try CheatLib.concurrentBoundedSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
     bc: true,
     allocates: true
   },
   concurrentBoundedWhere: {
-    zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})",
+    zig: "try CheatLib.concurrentBoundedWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
     bc: true,
     allocates: true
   },
   concurrentBoundedEach: {
-    zig: "try CheatLib.concurrentBoundedEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
+    zig: "try CheatLib.concurrentBoundedEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})",
     bc: true,
     borrows: :all
   },
   concurrentStreamSelect: {
-    zig: "try CheatLib.concurrentStreamSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
+    zig: "try CheatLib.concurrentStreamSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11}, {12})",
     bc: true,
     allocates: true
   },
   concurrentStreamWhere: {
-    zig: "try CheatLib.concurrentStreamWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    zig: "try CheatLib.concurrentStreamWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
     bc: true,
     allocates: true
   },
   concurrentStreamEach: {
-    zig: "try CheatLib.concurrentStreamEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
+    zig: "try CheatLib.concurrentStreamEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10}, {11})",
     bc: true,
     borrows: :all
   },
   concurrentListSelect: {
-    zig: "try CheatLib.concurrentListSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})",
+    zig: "try CheatLib.concurrentListSelect({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, {10})",
     allocates: true
   },
   concurrentListWhere: {
-    zig: "try CheatLib.concurrentListWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
+    zig: "try CheatLib.concurrentListWhere({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9})",
     allocates: true
   },
   concurrentListEach: {
-    zig: "try CheatLib.concurrentListEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})",
+    zig: "try CheatLib.concurrentListEach({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
     borrows: :all
   },
   concurrentListEachInPlace: {
-    zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7})",
+    zig: "try CheatLib.concurrentListEachInPlace({0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8})",
     borrows: :all
   },
 }.freeze

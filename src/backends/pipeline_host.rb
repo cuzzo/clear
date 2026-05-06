@@ -3123,6 +3123,8 @@ class PipelineHost
     end_zig   = @lowering.send(:emit_expr, end_mir)
     cap_mir = stream_concurrent_capacity_mir(conc_op, shard_count.to_s)
     cap_zig = @lowering.send(:emit_expr, cap_mir)
+    batch_mir = bounded_concurrent_batch_mir(conc_op)
+    batch_zig = @lowering.send(:emit_expr, batch_mir)
     task_cfg = task_config_zig(conc_op.options["size"]&.name&.downcase&.to_sym)
 
     key_mir = with_pipeline_context(placeholder: idx_var) { visit_mir(ctx[:key_expr]) }
@@ -3178,7 +3180,43 @@ class PipelineHost
       ""
     end
     key_store_expr = string_key ? "try rt.heapAlloc().dupe(u8, #{key_var})" : key_var
-    key_free = string_key ? "defer __rt.heapAlloc().free(#{key_var});" : ""
+    key_free_work = if string_key
+      "for (__work.keys) |__k| __rt.heapAlloc().free(__k);\n                  __rt.heapAlloc().free(__work.keys);"
+    else
+      "__rt.heapAlloc().free(__work.keys);"
+    end
+    key_free_success = string_key ? "__rt.heapAlloc().free(#{key_var});" : ""
+    key_free_remaining = string_key ? "errdefer for (__work.keys[__sh#{id}_ki..]) |__k| __rt.heapAlloc().free(__k);" : ""
+    key_slice_cleanup = string_key ? "for (__sh#{id}_keys) |__k| rt.heapAlloc().free(__k);" : ""
+    pending_batch_cleanup = string_key ? "for (__sh#{id}_batches[__s].items) |__k| rt.heapAlloc().free(__k);" : ""
+    channel_buffer_cleanup = if string_key
+      <<~ZIG.chomp
+        fn cleanupBuffered(chan: *CheatLib.BoundedChannel(__ShWork#{id}), __rt: *Runtime) void {
+                          const inner = chan.inner;
+                          inner.mutex.lock();
+                          while (inner.tail != inner.head) {
+                              const __work = inner.buf[inner.tail & inner.mask];
+                              inner.tail += 1;
+                              for (__work.keys) |__k| __rt.heapAlloc().free(__k);
+                              __rt.heapAlloc().free(__work.keys);
+                          }
+                          inner.mutex.unlock();
+                      }
+      ZIG
+    else
+      <<~ZIG.chomp
+        fn cleanupBuffered(chan: *CheatLib.BoundedChannel(__ShWork#{id}), __rt: *Runtime) void {
+                          const inner = chan.inner;
+                          inner.mutex.lock();
+                          while (inner.tail != inner.head) {
+                              const __work = inner.buf[inner.tail & inner.mask];
+                              inner.tail += 1;
+                              __rt.heapAlloc().free(__work.keys);
+                          }
+                          inner.mutex.unlock();
+                      }
+      ZIG
+    end
     op_str = range_node.inclusive ? "<=" : "<"
 
     code = <<~ZIG.chomp
@@ -3186,8 +3224,12 @@ class PipelineHost
           const #{map_ptr} = &#{@lowering.send(:emit_expr, visit_mir(map_node))};
           #{map_ptr}.ensureOwnership();
           const __sh#{id}_cap: usize = #{cap_zig};
+          const __sh#{id}_batch: usize = @max(@as(usize, #{batch_zig}), 1);
           const __ShWork#{id} = struct {
-              key: #{key_zig},
+              keys: []#{key_zig},
+          };
+          const __ShCleanup#{id} = struct {
+              #{channel_buffer_cleanup}
           };
           var __sh#{id}_chans: [#{shard_count}]CheatLib.BoundedChannel(__ShWork#{id}) = undefined;
           for (0..#{shard_count}) |__s| {
@@ -3215,10 +3257,18 @@ class PipelineHost
                       for (0..#{shard_count}) |__s| ctx.chans[__s].setError(__err);
                       return __err;
                   }) |__work| {
-                      const #{key_var}: #{key_zig} = __work.key;
-                      #{key_free}
-                      #{body_loop_mark}
-                      #{body_zig}
+                      errdefer {
+                          #{key_free_work}
+                      }
+                      var __sh#{id}_ki: usize = 0;
+                      while (__sh#{id}_ki < __work.keys.len) : (__sh#{id}_ki += 1) {
+                          #{key_free_remaining}
+                          const #{key_var}: #{key_zig} = __work.keys[__sh#{id}_ki];
+                          #{body_loop_mark}
+                          #{body_zig}
+                          #{key_free_success}
+                      }
+                      __rt.heapAlloc().free(__work.keys);
                       __rt.checkYield();
                   }
               }
@@ -3235,21 +3285,47 @@ class PipelineHost
               );
           }
 
+          var __sh#{id}_batches: [#{shard_count}]std.ArrayListUnmanaged(#{key_zig}) = [_]std.ArrayListUnmanaged(#{key_zig}){.empty} ** #{shard_count};
+          defer for (0..#{shard_count}) |__s| {
+              #{pending_batch_cleanup}
+              __sh#{id}_batches[__s].deinit(rt.heapAlloc());
+          };
+
           var #{idx_var}: i64 = #{start_zig};
           const __sh#{id}_end: i64 = #{end_zig};
           while ((#{idx_var} #{op_str} __sh#{id}_end) and !__sh#{id}_err.load(.acquire)) : (#{idx_var} += 1) {
               #{key_loop_mark}
               const #{key_var}: #{key_zig} = #{key_zig_expr};
               const #{sh_var} = @TypeOf(#{map_ptr}.*).shardIndexWithHash(#{key_var});
-              const __sh#{id}_work = __ShWork#{id}{ .key = #{key_store_expr} };
-              __sh#{id}_chans[#{sh_var}.shard].push(__sh#{id}_work) catch |__err| {
-                  __sh#{id}_err.store(true, .release);
-                  for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].setError(__err);
-                  break;
-              };
+              try __sh#{id}_batches[#{sh_var}.shard].append(rt.heapAlloc(), #{key_store_expr});
+              if (__sh#{id}_batches[#{sh_var}.shard].items.len >= __sh#{id}_batch) {
+                  const __sh#{id}_keys = try __sh#{id}_batches[#{sh_var}.shard].toOwnedSlice(rt.heapAlloc());
+                  const __sh#{id}_work = __ShWork#{id}{ .keys = __sh#{id}_keys };
+                  __sh#{id}_chans[#{sh_var}.shard].push(__sh#{id}_work) catch |__err| {
+                      #{key_slice_cleanup}
+                      rt.heapAlloc().free(__sh#{id}_keys);
+                      __sh#{id}_err.store(true, .release);
+                      for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].setError(__err);
+                      break;
+                  };
+              }
+          }
+          for (0..#{shard_count}) |__s| {
+              if (__sh#{id}_batches[__s].items.len > 0 and !__sh#{id}_err.load(.acquire)) {
+                  const __sh#{id}_keys = try __sh#{id}_batches[__s].toOwnedSlice(rt.heapAlloc());
+                  const __sh#{id}_work = __ShWork#{id}{ .keys = __sh#{id}_keys };
+                  __sh#{id}_chans[__s].push(__sh#{id}_work) catch |__err| {
+                      #{key_slice_cleanup}
+                      rt.heapAlloc().free(__sh#{id}_keys);
+                      __sh#{id}_err.store(true, .release);
+                      for (0..#{shard_count}) |__ss| __sh#{id}_chans[__ss].setError(__err);
+                      break;
+                  };
+              }
           }
           for (0..#{shard_count}) |__s| __sh#{id}_chans[__s].close();
           __sh#{id}_wg.wait();
+          for (0..#{shard_count}) |__s| __ShCleanup#{id}.cleanupBuffered(&__sh#{id}_chans[__s], rt);
           if (__sh#{id}_err.load(.acquire)) return error.CheatError;
       }
     ZIG
@@ -3350,6 +3426,16 @@ class PipelineHost
       visit_mir(par)
     else
       MIR::Lit.new("false")
+    end
+  end
+
+  def bounded_concurrent_batch_mir(conc_op)
+    if (batch = conc_op.options["batch"])
+      raw = visit_mir(batch)
+      raw_zig = @lowering.send(:emit_expr, raw)
+      MIR::InlineZig.new("@intCast(#{raw_zig})", "bounded_batch_usize")
+    else
+      MIR::Lit.new("1")
     end
   end
 
@@ -3492,6 +3578,7 @@ class PipelineHost
       MIR::Ident.new("rt"),
       items_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3519,6 +3606,7 @@ class PipelineHost
       MIR::Ident.new("rt"),
       items_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3545,6 +3633,7 @@ class PipelineHost
       MIR::Ident.new("rt"),
       items_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3620,6 +3709,7 @@ class PipelineHost
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
       cap_mir,
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3654,6 +3744,7 @@ class PipelineHost
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
       cap_mir,
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3688,6 +3779,7 @@ class PipelineHost
       src_ptr,
       bounded_concurrent_worker_count_for_call_mir(conc_op),
       cap_mir,
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3734,6 +3826,7 @@ class PipelineHost
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3760,6 +3853,7 @@ class PipelineHost
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3785,6 +3879,7 @@ class PipelineHost
       MIR::Ident.new("rt"),
       MIR::Ident.new("pipe_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),
@@ -3859,6 +3954,7 @@ class PipelineHost
       # const so the in-place helper can write through the slice.
       MIR::InlineZig.new("@constCast(pipe_items)", "list_each_inplace_mut_items"),
       bounded_concurrent_worker_count_for_call_mir(conc_op),
+      bounded_concurrent_batch_mir(conc_op),
       bounded_concurrent_parallel_mir(conc_op),
       bounded_concurrent_task_cfg_mir(conc_op),
       MIR::AddressOf.new(MIR::Ident.new(cb[:ctx_var])),

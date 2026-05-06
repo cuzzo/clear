@@ -875,15 +875,6 @@ pub fn main() !void {
     defer rt.deinit();
     rt.wireAllocator();
 
-    // Register the main runtime's ThreadLocalEbr with the global
-    // EbrContext so EbrContext.reclaim() observes its pinned epoch
-    // during Versioned.read() critical sections. Without this, reclaim
-    // can advance past a still-pinned reader's local_epoch -> UAF.
-    // BG fibers get their own per-task ThreadLocalEbr registered by the
-    // scheduler (see drainChannels.Spawn); main runtime registers here.
-    try global_ctx.register(allocator, rt.ebr);
-    defer global_ctx.unregister(rt.ebr);
-
     // 4. Shared infrastructure
     const fm = @import("fiber-memory.zig");
     const fp = @import("scheduler.zig");
@@ -988,4 +979,3 @@ pub fn main() !void {
         workers[i].join();
     }
 }
-

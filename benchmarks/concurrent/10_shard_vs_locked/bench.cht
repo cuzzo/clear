@@ -1,4 +1,4 @@
--- @leak: n = 1000000 -> n = 1000
+-- @leak: n = 10000000 -> n = 10000
 -- KV Store Benchmark — CLEAR (True Shared-Nothing via SHARD pipeline)
 --
 -- Uses @sharded(32) with the SHARD pipeline operator.
@@ -11,36 +11,36 @@
 --   3. Every map operation is LOCAL — no SPSC, no yield, no locks
 --
 -- Workloads:
---   1. Uniform SET   — 1M sequential keys (partitioned across 32 shards)
---   2. Uniform GET   — 1M sequential keys (100% hit, all local)
---   3. Mixed 80/20   — 200K SET + 800K GET via separate SHARD pipelines
+--   1. Uniform SET   — 10M sequential keys (partitioned across 32 shards)
+--   2. Uniform GET   — 10M sequential keys (100% hit, all local)
+--   3. Mixed 80/20   — 2M SET + 8M GET via separate SHARD pipelines
 --
 -- Compare to Go (sync.Map) and Rust (dashmap).
 
 FN main() RETURNS Void ->
     MUTABLE map: HashMap<String>@sharded(32) = {};
-    n = 1000000;
+    n = 10000000;
 
     -- Workload 1: Uniform SET (1M keys, partitioned)
     t0 = timestampMs();
-    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT EACH {
+    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
         map[_] = "value";
     };
     setMs = timestampMs() - t0;
 
     -- Workload 2: Uniform GET (1M keys, all local, 100% hit)
     t1 = timestampMs();
-    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT EACH {
+    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
         got = map[_] OR "";
     };
     getMs = timestampMs() - t1;
 
     -- Workload 3: Mixed — 200K SET (overwrite) + 800K GET
     t2 = timestampMs();
-    (0..<(n / 5)) s> SHARD("key:" + toString(_), map) s> CONCURRENT EACH {
+    (0..<(n / 5)) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
         map[_] = "updated";
     };
-    (0..<((n / 5) * 4)) s> SHARD("key:" + toString(_), map) s> CONCURRENT EACH {
+    (0..<((n / 5) * 4)) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
         got = map[_] OR "";
     };
     mixMs = timestampMs() - t2;

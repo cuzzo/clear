@@ -272,18 +272,42 @@ module Doctor
 
     totals = {}
     sched_rows = []
-    in_sched = false
+    site_rows = []
+    mode = nil
     File.readlines(fiber_file).each do |l|
       s = l.strip
-      next if s.empty? || s.start_with?('#') && !s.include?('per-scheduler')
+      next if s.empty?
       if s.include?('per-scheduler')
-        in_sched = true
+        mode = :sched
+        next
+      elsif s.include?('per-site fibers')
+        mode = :site
         next
       end
-      if in_sched
+      next if s.start_with?('#')
+      if mode == :sched
         f = s.split
         next if f.size < 2
         sched_rows << { idx: f[0].to_i, runs: f[1].to_i } if f[0] =~ /\A\d+\z/
+      elsif mode == :site
+        f = s.split(/\t/)
+        next if f.size < 9 || f[0] !~ /\A\d+\z/
+        scheds = {}
+        f[8].to_s.split(',').each do |pair|
+          sid, runs = pair.split(':', 2)
+          scheds[sid.to_i] = runs.to_i if sid && runs
+        end
+        site_rows << {
+          id: f[0].to_i,
+          spawns: f[1].to_i,
+          runs: f[2].to_i,
+          exits: f[3].to_i,
+          total_lifetime_ns: f[4].to_i,
+          max_lifetime_ns: f[5].to_i,
+          dispatch: f[6],
+          form: f[7],
+          scheds: scheds,
+        }
       else
         if s =~ /\A(\w+):\s*(\d+)/
           totals[$1] = $2.to_i
@@ -333,9 +357,132 @@ module Doctor
         puts "  *** Scheduler imbalance: one scheduler ran #{imbalance_pct}%"
         puts "      of all fibers. Other schedulers were idle. BG spawn"
         puts "      policy may be routing too aggressively to a single target."
+        emit_parallel_bg_hint!(profile_dir, site_rows)
       end
       puts ""
     end
+  end
+
+  def emit_parallel_bg_hint!(profile_dir, site_rows = [])
+    metadata = task_site_metadata(profile_dir)
+    imbalanced_sites = site_rows.select do |site|
+      next false unless site[:runs] && site[:runs] > 0
+      site_scheduler_skew(site) >= 0.80
+    end
+    local_sites = imbalanced_sites.select { |site| site[:dispatch] == 'local' }
+
+    if local_sites.any?
+      emit_exact_local_bg_sites!(profile_dir, local_sites, metadata)
+      return
+    end
+
+    dispatch_counts = task_dispatch_counts(profile_dir)
+    return unless local_dispatch_warning?(dispatch_counts)
+
+    emit_generic_local_bg_hint!(local_bg_source_lines(File.join(profile_dir, 'source.cht')))
+  end
+
+  def emit_exact_local_bg_sites!(profile_dir, local_sites, metadata)
+    puts ""
+    puts "      Exact imbalanced local BG task sites:"
+    local_sites.sort_by { |site| -site[:runs] }.first(8).each do |site|
+      site_id = site[:id]
+      runs = site[:runs]
+      exits = site[:exits]
+      line = (metadata[site_id] || {})[:line] || '?'
+      snippet = source_line(profile_dir, line)
+      max_sched, max_runs = site[:scheds].max_by { |_, runs| runs } || [nil, 0]
+      pct = runs > 0 ? (max_runs.to_f / runs * 100).round : 0
+      avg_us = exits > 0 ? (site[:total_lifetime_ns] / exits / 1000.0).round(1) : 0
+      puts "        line #{line}: #{snippet}"
+      puts "          site=#{site_id} form=#{site[:form]} runs=#{runs} sched=#{max_sched} #{pct}% avg=#{avg_us}us"
+    end
+    emit_parallel_bg_advice!
+  end
+
+  def emit_generic_local_bg_hint!(local_bg_lines)
+    puts ""
+    puts "      Profile contains local BG dispatches (`BG {}` defaults to the"
+    puts "      current scheduler)."
+    if local_bg_lines.any?
+      puts "      Candidate BG sites:"
+      local_bg_lines.first(6).each do |site|
+        puts "        line #{site[:line]}: #{site[:text]}"
+      end
+    end
+    emit_parallel_bg_advice!
+  end
+
+  def emit_parallel_bg_advice!
+    puts "      Use `BG { @parallel -> ... }` for CPU-parallel worker fanout."
+    puts "      Keep plain `BG {}` for scheduler-affine, IO-affine, or"
+    puts "      locality-sensitive work."
+  end
+
+  def site_scheduler_skew(site)
+    max_runs = site[:scheds].values.max || 0
+    max_runs.to_f / site[:runs]
+  end
+
+  def task_dispatch_counts(profile_dir)
+    zig_source = File.join(profile_dir, 'transpiled.zig')
+    return { local: 0, parallel: 0 } unless File.exist?(zig_source)
+
+    zig = File.read(zig_source)
+    {
+      local: zig.scan(/\bsubmitFsmSpawn\s*\(/).size + zig.scan(/\bsubmitSpawn\s*\(/).size,
+      parallel: zig.scan(/\bspawnFsmBest\s*\(/).size + zig.scan(/\bspawnBest\s*\(/).size,
+    }
+  end
+
+  def local_dispatch_warning?(counts)
+    local = counts[:local]
+    parallel = counts[:parallel]
+    local > 0 && (parallel == 0 || local > parallel)
+  end
+
+  def task_site_metadata(profile_dir)
+    zig_source = File.join(profile_dir, 'transpiled.zig')
+    return {} unless File.exist?(zig_source)
+
+    sites = {}
+    File.foreach(zig_source) do |line|
+      next unless line.include?('CLEAR_PROFILE_TASK_SITE')
+      attrs = {}
+      line.scan(/(\w+)=([^\s]+)/) { |k, v| attrs[k.to_sym] = v }
+      id = attrs[:id].to_i
+      next if id <= 0
+      sites[id] = {
+        kind: attrs[:kind],
+        line: attrs[:line]&.to_i,
+        column: attrs[:column]&.to_i,
+        dispatch: attrs[:dispatch],
+        form: attrs[:form],
+      }
+    end
+    sites
+  end
+
+  def source_line(profile_dir, line)
+    return '' unless line && line != '?'
+    clear_source = File.join(profile_dir, 'source.cht')
+    return '' unless File.exist?(clear_source)
+    File.readlines(clear_source)[line.to_i - 1]&.strip.to_s[0, 90]
+  end
+
+  def local_bg_source_lines(clear_source)
+    return [] unless File.exist?(clear_source)
+
+    lines = File.readlines(clear_source)
+    sites = []
+    lines.each_with_index do |line, idx|
+      next unless line.include?('BG') && line =~ /\bBG\s*\{/
+
+      next if line.include?('@parallel')
+
+      sites << { line: idx + 1, text: line.strip[0, 80] }
+    end
+    sites
   end
 
   # ── Lock Hold & Contention ──

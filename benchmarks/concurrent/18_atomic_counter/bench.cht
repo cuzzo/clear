@@ -1,4 +1,5 @@
 -- @leak: 1000000 -> 1000
+-- @leak: 8000000_i64 -> 8000_i64
 -- Atomic Counter Benchmark — CLEAR
 --
 -- N workers each perform ITERATIONS atomic increments on a single shared

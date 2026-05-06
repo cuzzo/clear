@@ -6118,6 +6118,13 @@ private
       end
     end
 
+    if user_size == :stack
+      loc = node.respond_to?(:line) ? " (line #{node.line})" : ""
+      $stderr.puts "\e[33m[Warning]\e[0m Stack sizing: @stack resolved to @#{computed}; " \
+                   "replace @stack with @#{computed}. In STRICT mode, @stack will be rejected.#{loc}"
+      return
+    end
+
     # User-specified size too small
     if user_size && TIER_ORDER.fetch(user_size, 0) < TIER_ORDER.fetch(computed, 0)
       error!(node, "Stack safety: @#{user_size} (#{EffectTracker::STACK_TIER_BUDGET[user_size]} bytes) " \

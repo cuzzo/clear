@@ -2,6 +2,7 @@
 -- force the stackful path. Each worker touches the full 16 KB standard
 -- stack allocation so RSS reflects stack-pool residency, not just the
 -- small subset of pages naturally reached by this tiny function.
+-- @leak: 100_000_i64 -> 1_000_i64
 
 FN bench_work(x: Int64) RETURNS Int64 ->
   touched: Int64 = touchCurrentFiberStack(16_384_i64, x);

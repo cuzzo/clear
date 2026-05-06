@@ -80,7 +80,9 @@ else
 // Runtime, so we duck-type with @hasField.
 inline fn extractEbr(arg: anytype) *ThreadLocalEbr {
     const T = @TypeOf(arg);
-    return if (comptime @hasField(@typeInfo(T).pointer.child, "ebr"))
+    return if (comptime @hasDecl(@typeInfo(T).pointer.child, "currentEbr"))
+        arg.currentEbr()
+    else if (comptime @hasField(@typeInfo(T).pointer.child, "ebr"))
         arg.ebr
     else
         arg;

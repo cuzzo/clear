@@ -3340,6 +3340,7 @@ class Parser
   # After `:` the next word is also looked up here (with `@` prepended if absent).
   DO_BRANCH_SIGILS = {
     '@micro'    => { stack_size: :micro    },
+    '@stack'    => { stack_size: :stack    },
     '@standard' => { stack_size: :standard },
     '@large'    => { stack_size: :large    },
     '@xl'       => { stack_size: :xl       },
@@ -3352,6 +3353,7 @@ class Parser
   # Sigils valid at the start of a BG body (stack size + pinned).
   BG_SIGILS = {
     '@micro'    => { stack_size: :micro    },
+    '@stack'    => { stack_size: :stack    },
     '@standard' => { stack_size: :standard },
     '@large'    => { stack_size: :large    },
     '@xl'       => { stack_size: :xl       },
@@ -3380,7 +3382,7 @@ class Parser
       cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
       attrs    = DO_BRANCH_SIGILS[cap_name]
       error!(tok, "Unknown branch prefix #{tok.value.inspect}. " \
-                  "Expected @micro, @standard, @large, @xl, @pinned, @parallel, or @canSmash") unless attrs
+                  "Expected @micro, @stack, @standard, @large, @xl, @service, @pinned, @parallel, or @canSmash") unless attrs
 
       if attrs[:stack_size]
         error!(tok, "Duplicate stack size in branch prefix") if stack_size

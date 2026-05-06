@@ -1,4 +1,5 @@
 -- @leak: 25600000 -> 25600
+-- @leak: 100000 -> 100
 -- Socket Throughput Benchmark
 --
 -- WHAT WE ARE MEASURING:

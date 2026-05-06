@@ -1,5 +1,30 @@
 # Benchmarks
 
+## Branch Quality Tracker - benchmark-fix
+
+Ruby coverage and static analysis findings introduced by this branch:
+
+- [x] Cover `CONCURRENT(batch: N)` validation branches in `PipeAnalysis`.
+- [x] Cover `PipelineHost#substitute_placeholders` for hash, assert, and if nodes.
+- [x] Cover SHARD+CONCURRENT Zig lowering error/cleanup branches.
+- [x] Cover FSM profile dispatch fallback branches.
+- [x] Cover `FsmWrapperEmitter` B1 wrapper emission branches.
+- [x] Cover MIR BG task profile helper branches.
+- [x] Cover Doctor `@parallel` recommendation metadata, source-line fallback, and local BG scanning.
+- [x] Reduce local Reek/Flog pressure in `PipeAnalysis#analyze_concurrent_op` by sharing concurrent option validation helpers.
+- [x] Reduce local Reek/Flog pressure in `Doctor#emit_parallel_bg_hint!` and `Doctor#section_fibers` by splitting recommendation helpers and caching repeated fields.
+- [ ] Reduce new Reek pressure in `PipelineHost#lower_shard_concurrent_each_zig`; tracked for the runtime-lowering follow-up because this RawZig path should move out of `PipelineHost`.
+- [x] Reduce repeated `batch` option handling in `PipelineGenerator#transpile_concurrent_*`.
+- [ ] Add or intentionally defer RuboCop wiring; the current bundle has no `rubocop` executable.
+
+Verification after this pass:
+
+- `COVERAGE=1 bundle exec rspec spec`: 3596 examples, 0 failures; added-line coverage delta is clean (`uncovered_added=0`).
+- `bundle exec reek src --format json`: branch has 83 normalized new findings versus `origin/master`, down from 95 before this pass; remaining findings are mostly large-method/design pressure in the branch's compiler/runtime lowering work.
+- `bundle exec flay src`: branch total 26151 versus master 26099.
+- `bundle exec flog src`: no changed method with a positive complexity delta above 10 after normalization; reported "new" rows are parser/name matching artifacts at score 0.0.
+- `bundle exec rubocop`: not available in the current bundle.
+
 ## Single-Core (Benchmark 05: HashMap, 1M keys)
 
 CLEAR's numeric HashMap outperforms hand-optimized C with FNV-1a hashing. CLEAR uses Zig's AutoHashMap with frame-arena allocation - zero GPA calls in the hot path.

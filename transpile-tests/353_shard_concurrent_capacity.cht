@@ -5,12 +5,12 @@ FN main() RETURNS Void ->
     buckets = 8_i64;
     MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
 
-    (0..<n) s> SHARD(_ MOD buckets, counts) s> CONCURRENT(capacity: 2) EACH {
+    (0..<n) s> SHARD(_ MOD buckets, counts) s> CONCURRENT(capacity: 2, batch: 3) EACH {
         counts[_] = (counts[_] OR 0_i64) + 1_i64;
     };
 
     ASSERT counts.count() == buckets, "expected bucket count";
     vals = counts.values();
     total = vals s> CONCURRENT SUM toFloat(_);
-    ASSERT total == toFloat(n), "total mismatch with small shard channel capacity";
+    ASSERT total == toFloat(n), "total mismatch with small shard channel capacity and batch";
 END

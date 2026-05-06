@@ -8,7 +8,6 @@
 // Shared state (heap-allocated, outlives all threads):
 //   - allocator
 //   - EbrContext  (thread-safe — has its own registry_lock)
-//   - StackPool   (thread-safe — slab allocator with atomic free lists)
 //   - shutdown    (atomic bool — signals workers to exit after main)
 //
 // Per-thread:
@@ -80,10 +79,7 @@ pub fn main() !void {
     rt.wireAllocator();
 
     // 4. Shared infrastructure
-    const fm = @import("runtime/fiber-memory.zig");
     const fp = @import("runtime/scheduler.zig");
-    var stack_pool = fm.StackPool.init(allocator);
-    defer stack_pool.deinit();
 
     // Global shutdown flag — workers check this each loop iteration.
     var shutdown = std.atomic.Value(bool).init(false);
@@ -110,19 +106,17 @@ pub fn main() !void {
     const WorkerCtx = struct {
         allocator: std.mem.Allocator,
         global_ctx: *EbrContext,
-        stack_pool: *fm.StackPool,
         shutdown: *std.atomic.Value(bool),
     };
     var worker_ctx = WorkerCtx{
         .allocator = allocator,
         .global_ctx = &global_ctx,
-        .stack_pool = &stack_pool,
         .shutdown = &shutdown,
     };
 
     const workerMain = struct {
         fn run(ctx: *WorkerCtx) void {
-            var worker_sched = fp.Scheduler.init(ctx.allocator, ctx.global_ctx, ctx.stack_pool) catch return;
+            var worker_sched = fp.Scheduler.init(ctx.allocator, ctx.global_ctx, null) catch return;
             defer worker_sched.deinit();
             worker_sched.shutdown_on_idle = false; // stay alive until explicit shutdown
             worker_sched.global_shutdown = ctx.shutdown;
@@ -147,7 +141,7 @@ pub fn main() !void {
     }
 
     // 7. Main scheduler (runs on the main thread).
-    var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+    var sched = try fp.Scheduler.init(allocator, &global_ctx, null);
     defer {
         sched.deinit();
         fp.global_registry.deinit(allocator);

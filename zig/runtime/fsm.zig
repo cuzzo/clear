@@ -25,7 +25,6 @@
 //   - FSM <-> stackful await interop (handled by promise wake path)
 
 const std = @import("std");
-const ebr_mod = @import("../lib/ebr.zig");
 
 // Comptime atomic type selection: SimAtomic in Loom mode, real atomics
 // otherwise. Mirrors queues.zig: loom harness exports SimAtomic so FsmTask
@@ -90,6 +89,14 @@ pub const YieldReason = union(enum) {
 
 pub const ResumeFn = *const fn (*FsmTask) YieldReason;
 
+pub const FsmCtxAllocClass = enum(u8) {
+    none,
+    slab64,
+    slab128,
+    slab256,
+    heap,
+};
+
 // -----------------------------------------------------------------------------
 // FsmTask
 // -----------------------------------------------------------------------------
@@ -120,6 +127,10 @@ pub const FsmTask = struct {
     status: FsmStatus = .Ready,
     /// Profile-only: spawn timestamp in ns.
     spawn_ns: u64 = 0,
+    /// Profile-only: generated BG/worker site id; 0 = unattributed.
+    profile_site_id: u32 = 0,
+    /// Profile-only: fiber-profile.DispatchKind enum value.
+    profile_dispatch: u8 = 0,
     /// Forward pointer to the user-owned ctx struct that holds resume
     /// state. FsmTask is slab-allocated separately from the ctx (mirrors
     /// stackful Task: slab pin protects detectCycleFsm chain walks from
@@ -186,27 +197,21 @@ pub const FsmTask = struct {
     /// The FSM emit synthesizes a per-ctx-type fn:
     ///   fn destroyTask(t: *FsmTask) void {
     ///       const c: *@This() = @ptrCast(@alignCast(t.ctx.?));
-    ///       c.alloc.destroy(c);
+    ///       CheatHeader.freeFsmCtx(@This(), t, c);
     ///   }
     /// and stores its pointer here at spawn time.
     destroy_fn: ?*const fn (*FsmTask) void = null,
 
-    /// Per-task ThreadLocalEbr slot.
-    ///
-    /// FSM tasks dispatched via spawnFsmBest can run on ANY scheduler
-    /// thread. If the task body calls into the EBR primitives (read,
-    /// update, retire) using a Runtime captured at spawn time, those
-    /// calls would touch the spawning thread's ThreadLocalEbr from a
-    /// foreign OS thread -- corrupting the non-thread-safe limbo
-    /// list. To prevent that, every FSM task gets its own ebr_slot,
-    /// registered with the global EbrContext, owned by the slot's
-    /// Runtime (see task_runtime), and freed on .Done dispatch.
-    ebr_slot: ?*ebr_mod.ThreadLocalEbr = null,
+    /// Allocation class for the generated FSM ctx pointed to by `ctx`.
+    /// Set by CheatHeader.allocFsmCtx; consumed by freeFsmCtx. `none`
+    /// covers hand-written runtime tests that do not use generated ctx
+    /// allocation.
+    ctx_alloc_class: FsmCtxAllocClass = .none,
 
-    /// Per-task Runtime. Heap-allocated alongside ebr_slot at spawn
-    /// time and freed by the scheduler on .Done. The codegen binds
-    /// the FSM ctx's `rt` field to this pointer BEFORE spawning so
-    /// all EBR ops in the body route through the per-task slot.
+    /// Per-task Runtime shell. Heap-allocated at spawn time and freed by
+    /// the scheduler on .Done. The codegen binds the FSM ctx's `rt` field
+    /// to this pointer BEFORE spawning; MVCC uses Runtime.currentEbr() to
+    /// resolve the active scheduler thread's EBR slot at dispatch time.
     /// Lazy-imports runtime.zig in the field type so the
     /// runtime.zig -> scheduler.zig -> fsm.zig -> runtime.zig cycle
     /// resolves: only the pointer-to-Runtime is needed here, not the

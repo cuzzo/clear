@@ -55,6 +55,7 @@ module FsmWrapperEmitter
     parts = []
     parts << "#{body.blk_label}: {"
     parts << render_ctx_struct(body.ctx_struct, mir_emitter)
+    parts << render_ctx_size_gate(body.ctx_struct.type_name)
     parts << render_spawn_setup(body.spawn_setup, body.blk_label)
     parts << "}"
     parts.join("\n")
@@ -69,6 +70,7 @@ module FsmWrapperEmitter
     parts = []
     parts << "#{body.blk_label}: {"
     parts << render_b1_ctx_struct(body.ctx_struct, mir_emitter)
+    parts << render_ctx_size_gate(body.ctx_struct.type_name)
     parts << render_spawn_setup(body.spawn_setup, body.blk_label)
     parts << "}"
     parts.join("\n")
@@ -128,7 +130,7 @@ module FsmWrapperEmitter
   # embedded in it) lives long enough for the status write before
   # being freed here.
   #
-  # extra_zig is optional cleanup that runs BEFORE alloc.destroy
+  # extra_zig is optional cleanup that runs BEFORE freeFsmCtx
   # (e.g. WITH+suspend-in-CS releases any locks still held on the
   # err path).
   def render_destroy_task(ctx_id, extra_zig = nil)
@@ -141,7 +143,17 @@ module FsmWrapperEmitter
     <<~ZIG.chomp.lines.map { |l| "        #{l}" }.join.chomp
       fn destroyTask(__fsm_task: *CheatHeader.FsmTask) void {
           const __ctx_#{ctx_id}: *@This() = @ptrCast(@alignCast(__fsm_task.ctx.?));
-      #{extra}    __ctx_#{ctx_id}.alloc.destroy(__ctx_#{ctx_id});
+      #{extra}    CheatHeader.freeFsmCtx(@This(), __fsm_task, __ctx_#{ctx_id});
+      }
+    ZIG
+  end
+
+  def render_ctx_size_gate(type_name)
+    <<~ZIG.chomp.lines.map { |l| "    #{l}" }.join.chomp
+      comptime {
+          if (@sizeOf(#{type_name}) > 256) {
+              @compileError("FSM context is larger than 256 bytes; use @stack on this BG block to force a compiler-sized stackful fiber.");
+          }
       }
     ZIG
   end
@@ -222,6 +234,7 @@ module FsmWrapperEmitter
     parts = []
     parts << "#{body.blk_label}: {"
     parts << render_generic_ctx_struct(body.ctx_struct, mir_emitter)
+    parts << render_ctx_size_gate(body.ctx_struct.type_name)
     parts << render_spawn_setup(body.spawn_setup, body.blk_label)
     parts << "}"
     parts.join("\n")
@@ -478,17 +491,18 @@ module FsmWrapperEmitter
 
   def render_spawn_setup(s, blk_label)
     parts = []
+    parts << "    #{s.profile_site_comment}" if s.respond_to?(:profile_site_comment) && !empty?(s.profile_site_comment)
     parts << "    const #{s.alloc_var} = #{s.alloc_expr_zig};"
     parts << "    const #{s.promise_var} = try #{s.promise_zig}.spawn(#{s.alloc_var}, #{s.rt_name}.getSched());"
     parts << indent_block(s.promoted_decls_zig, 4) unless empty?(s.promoted_decls_zig)
-    parts << "    const #{s.ctx_var} = try #{s.alloc_var}.create(#{s.ctx_type});"
-    parts << "    errdefer #{s.alloc_var}.destroy(#{s.ctx_var});"
     # Allocate the FsmTask from the scheduler's fsm_task_slab so
     # detectCycleFsm can pin it during chain walks (mirrors stackful
     # Task slab + Option-(C) protocol). The task's `ctx` field is the
     # forward pointer used by resumeFn / destroyTask to recover *Ctx.
     parts << "    const #{s.ctx_var}_task = try CheatHeader.allocFsmTask(#{s.rt_name}, &#{s.ctx_type}.resumeFn);"
     parts << "    errdefer #{s.rt_name}.getSched().fsm_task_slab.destroy(#{s.ctx_var}_task);"
+    parts << "    const #{s.ctx_var} = try CheatHeader.allocFsmCtx(#{s.ctx_type}, #{s.rt_name}, #{s.ctx_var}_task);"
+    parts << "    errdefer CheatHeader.freeFsmCtx(#{s.ctx_type}, #{s.ctx_var}_task, #{s.ctx_var});"
     parts << "    #{s.ctx_var}_task.ctx = #{s.ctx_var};"
     # Wire the destroy callback so the scheduler frees ctx after
     # dispatchOnce finishes writing task.status (the resume fn no
@@ -496,20 +510,18 @@ module FsmWrapperEmitter
     # scheduler returns the FsmTask slot to fsm_task_slab AFTER
     # destroy_fn runs.
     parts << "    #{s.ctx_var}_task.destroy_fn = &#{s.ctx_type}.destroyTask;"
+    if s.respond_to?(:profile_site_id) && s.profile_site_id
+      parts << "    #{s.ctx_var}_task.profile_site_id = #{s.profile_site_id};"
+      parts << "    #{s.ctx_var}_task.profile_dispatch = #{s.profile_dispatch_id};"
+    end
     parts << "    #{s.ctx_var}.* = .{"
     parts << indent_block(s.ctx_init_zig, 8)
     parts << "    };"
     parts << "    #{s.ctx_var}.task = #{s.ctx_var}_task;"
-    # Allocate a per-task Runtime backed by a per-task ThreadLocalEbr.
-    # The scheduler frees both on .Done (Scheduler.releaseFsmTaskEbr).
-    # Without this, FSM ctxs would share the spawning fiber's rt -- and
-    # when distributed across worker schedulers via spawnFsmBest, calls
-    # to rt.ebr.enter()/.exit()/.retire() would touch a non-thread-safe
-    # ThreadLocalEbr from a foreign OS thread, corrupting the limbo
-    # list and aborting in glibc's malloc with `realloc(): invalid old
-    # size` on the next allocation. See zig/runtime/versioned-fiber-
-    # stress-test.zig::"FSM Versioned: 4 BG-FSM writers via
-    # spawnFsmBest with per-task rt -- bench-17 fix verifier".
+    # Allocate a per-task Runtime shell. EBR is resolved at dispatch time
+    # through Runtime.currentEbr(), so FSMs running on worker schedulers use
+    # the active scheduler thread's registered EBR slot instead of the
+    # spawning runtime's fallback slot.
     parts << "    #{s.ctx_var}.rt = try CheatHeader.allocFsmTaskRuntime(#{s.ctx_var}_task, #{s.rt_name});"
     parts << "    #{s.spawn_call_zig}"
     parts << "    break :#{blk_label} #{s.promise_var};"

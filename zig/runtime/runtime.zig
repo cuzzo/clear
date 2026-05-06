@@ -528,6 +528,16 @@ pub const Runtime = struct {
         return fp.active_scheduler;
     }
 
+    /// EBR participant for the currently executing thread. Scheduler tasks
+    /// use the active scheduler's registered slot; direct/non-scheduler code
+    /// keeps using the Runtime-owned slot.
+    pub inline fn currentEbr(self: *Runtime) *ThreadLocalEbr {
+        if (fp.scheduler_running) {
+            return fp.active_scheduler.thread_ebr;
+        }
+        return self.ebr;
+    }
+
     // Cooperative yield check — injected at the back-edge of every non-TIGHT while loop.
     // Uses a power-of-two counter so the hot path is: wrapping-add + AND + compare-zero.
     // Yields to the scheduler only when another fiber is ready; single-fiber programs pay
@@ -623,13 +633,12 @@ pub const Runtime = struct {
         else
             full_stack_memory[0..0]; // empty slice - arena will use heap lazily
 
-        // Use the ThreadLocalEbr the scheduler pre-allocated and
-        // registered with EbrContext on its OS thread stack. Doing the
-        // EbrContext.register() here would overflow Standard fiber
-        // stacks (testing.allocator's append chain costs ~2-3 KB).
+        // MVCC/AtomicPtr access uses Runtime.currentEbr(), which resolves to
+        // the active scheduler's per-thread EBR slot. The runtime's fallback
+        // ebr pointer is only used outside scheduler execution.
         var rt = Runtime.initFromSliceWithEbr(
             frame_slice,
-            task.ebr_slot.?,
+            sched.thread_ebr,
             sched.allocator,
             task.config.timeout_ms
         ) catch unreachable;

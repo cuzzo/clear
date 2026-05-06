@@ -202,7 +202,6 @@ class ZigTranspiler
 
         test "cheat main" {
             const fp = CheatHeader.scheduler;
-            const fm = CheatHeader.fiber_memory;
             var da = std.heap.DebugAllocator(.{}){};
             defer _ = da.deinit();
             const allocator = da.allocator();
@@ -211,9 +210,7 @@ class ZigTranspiler
             var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
             defer rt.deinit();
             rt.wireAllocator();
-            var stack_pool = fm.StackPool.init(allocator);
-            defer stack_pool.deinit();
-            var sched = try fp.Scheduler.init(allocator, &global_ctx, &stack_pool);
+            var sched = try fp.Scheduler.init(allocator, &global_ctx, null);
             defer {
                 sched.deinit();
                 fp.global_registry.deinit(allocator);

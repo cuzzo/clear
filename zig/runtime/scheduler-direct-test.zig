@@ -103,7 +103,7 @@ test "Scheduler.submitSpawn queues one task after drainChannels" {
     const task = sched.ready_queue.pop().?;
     _ = sched.active_tasks.fetchSub(1, .monotonic);
     sched.releaseTaskEbr(task);
-    stack_pool.free(task.base.stack.memory);
+    sched.freeStack(task.base.stack);
     alloc.destroy(task.base);
     sched.task_slab.destroy(task);
 }

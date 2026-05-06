@@ -539,7 +539,7 @@ class MIRPass
         next if t.needs_pointer_passing?
         next if @bg_heap_upgraded&.include?(name)  # Already heap from Phase 1.5b
         if t.list_collection?
-          result << MIR::Promote.new(bg.token, name, t.zig_type, :list, nil)
+          result << MIR::Promote.new(bg.token, name, t.zig_type, :list, nil, list_elem_zig_type(t))
         else
           # :bg_string: annotate directly on BgBlock (no MIR::Promote needed)
           bg.capture_string_dupes ||= Set.new
@@ -864,7 +864,7 @@ class MIRPass
     # Per-variable promotions.
     (filtered[:var_promotes] || []).each do |vp|
       strategy = classify_promote_strategy(vp[:zig_type])
-      result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil)
+      result << MIR::Promote.new(ret_node.token, vp[:var], vp[:zig_type], strategy, nil, vp[:elem_zig_type])
     end
 
     # Struct-level field promotion: annotate the ReturnNode directly so
@@ -929,6 +929,12 @@ class MIRPass
     else
       :generic
     end
+  end
+
+  def list_elem_zig_type(type_obj)
+    elem = type_obj&.element_type
+    return nil unless elem
+    Type.new(elem).zig_type
   end
 
 end
