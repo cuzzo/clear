@@ -16,7 +16,7 @@ Result   = sum of all LCG outputs mod 1e9 (checksum: 516709808)
 
 ## Back pressure mechanisms
 
-- **CLEAR**: `BG STREAM { YIELD i } s> CONCURRENT(capacity: 64) EACH { ... }`
+- **CLEAR**: `BG STREAM { YIELD i } |> CONCURRENT(capacity: 64) EACH { ... }`
   The producer fiber blocks in `BoundedChannel.push()` when all 64 slots are
   occupied. Workers accumulate into a `@shared:locked` struct — no result list
   is ever materialized. Peak memory is O(capacity), not O(N).
@@ -56,7 +56,7 @@ fiber stack pool (~16 MB) is the main runtime cost vs Go's ~2 MB.
 ## Note on prior CLEAR implementation (semaphore approach)
 
 The original CLEAR benchmark (prior to BoundedChannel) used
-`items s> CONCURRENT(workers: 32) SELECT processItem(_.seed)` which:
+`items |> CONCURRENT(workers: 32) SELECT processItem(_.seed)` which:
 - Materialized all 100K results into a heap list (O(N) memory)
 - Used a semaphore to gate fiber dispatch (not a channel)
 - Reported 37ms, but was not measuring the same workload

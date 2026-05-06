@@ -53,7 +53,7 @@ For simple counting over a fixed input, it is over-engineered.
 
 ## Current profile note
 
-`SHARD(...) s> CONCURRENT EACH` now runs as real shard-parallel work: one
+`SHARD(...) |> CONCURRENT EACH` now runs as real shard-parallel work: one
 producer routes keys into per-shard bounded queues, and one worker fiber drains
 each shard. `clear profile` shows the shard workers distributed across
 schedulers, so the old failure mode (a single serial SHARD loop) is no longer
@@ -76,7 +76,7 @@ CLEAR's best possible histogram implementation.
 A future `PARALLEL FOLD ... MERGE` pipeline stage would close this gap:
 
 ```clear
-counts = (0..<n) s> PARALLEL FOLD HashMap<Int64, Int64> {
+counts = (0..<n) |> PARALLEL FOLD HashMap<Int64, Int64> {
     k = absInt(seeds[_]) MOD buckets;
     _acc[k] = (_acc[k] OR 0_i64) + 1_i64;
 } MERGE {

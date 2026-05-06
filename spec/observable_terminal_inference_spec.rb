@@ -40,7 +40,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
-            _ = gen s> SUM _ s> COLLECT;
+            _ = gen |> SUM _ |> COLLECT;
         END
       F
       pipe = last_pipe_node(annotate(src))
@@ -59,7 +59,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
-            _ = gen s> COUNT _ > 2 s> COLLECT;
+            _ = gen |> COUNT _ > 2 |> COLLECT;
         END
       F
       expect(last_pipe_node(annotate(src)).observable_terminal).to be true
@@ -72,7 +72,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
-            uniq = gen s> DISTINCT _;
+            uniq = gen |> DISTINCT _;
         END
       F
       expect(last_pipe_node(annotate(src)).observable_terminal).to be true
@@ -84,7 +84,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
       src = <<~F
         FN main() RETURNS Void ->
             xs = [1, 2, 3, 4];
-            total = xs s> SUM _;
+            total = xs |> SUM _;
         END
       F
       expect(last_pipe_node(annotate(src)).observable_terminal).to be_nil
@@ -94,7 +94,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
       src = <<~F
         FN main() RETURNS Void ->
             xs = [1, 2, 3, 4, 1];
-            uniq = xs s> DISTINCT _;
+            uniq = xs |> DISTINCT _;
         END
       F
       expect(last_pipe_node(annotate(src)).observable_terminal).to be_nil
@@ -108,7 +108,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
     it "leaves observable_terminal nil on SUM over a range (eager fold, no concurrent producer)" do
       src = <<~F
         FN main() RETURNS Void ->
-            total = (1..<10) s> SUM _;
+            total = (1..<10) |> SUM _;
         END
       F
       expect(last_pipe_node(annotate(src)).observable_terminal).to be_nil
@@ -126,7 +126,7 @@ RSpec.describe "fold-terminal observable inference (Phase 2.2)" do
                 MUTABLE i: Int64 = 1;
                 WHILE i <= 4 DO YIELD i; i = i + 1; END
             };
-            _ = gen s> REDUCE(0) acc + _ s> COLLECT;
+            _ = gen |> REDUCE(0) acc + _ |> COLLECT;
         END
       F
       expect(last_pipe_node(annotate(src)).observable_terminal).to be true

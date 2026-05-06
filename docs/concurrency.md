@@ -198,9 +198,9 @@ Apply pipeline operators in parallel with a persistent worker pool:
 
 ```clear
 -- ILLUSTRATIVE
-results = items s> CONCURRENT(workers: 8) SELECT transform(_);
-filtered = items s> CONCURRENT(workers: 4) WHERE predicate(_);
-items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
+results = items |> CONCURRENT(workers: 8) SELECT transform(_);
+filtered = items |> CONCURRENT(workers: 4) WHERE predicate(_);
+items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 ```
 
 ### Options
@@ -222,11 +222,11 @@ items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 ```ruby clear illustrative
 -- Skip failed items
 results = items
-  s> CONCURRENT(workers: 4) SELECT risky_fn(_) OR PRUNE;
+  |> CONCURRENT(workers: 4) SELECT risky_fn(_) OR PRUNE;
 
 -- Propagate first error
 results = items
-  s> CONCURRENT(workers: 4) SELECT risky_fn(_) OR RAISE;
+  |> CONCURRENT(workers: 4) SELECT risky_fn(_) OR RAISE;
 ```
 
 ### How It Works
@@ -235,7 +235,7 @@ CONCURRENT spawns N persistent worker fibers that pull items from a shared atomi
 
 ```
 results = items
-  s> SELECT BG { risky_fn(_) OR RAISE };
+  |> SELECT BG { risky_fn(_) OR RAISE };
 -- this is valid, but it would spawn N tasks, all at once.  It is NOT recommended.
 ```
 
@@ -290,7 +290,7 @@ The compiler enforces these at compile time:
 
 | Goal | Construct |
 |---|---|
-| Process a batch of items | `s> CONCURRENT(workers: N) SELECT/WHERE/EACH` |
+| Process a batch of items | `|> CONCURRENT(workers: N) SELECT/WHERE/EACH` |
 | Fire off a background task | `BG { work(); }` |
 | Run independent tasks concurrently | `DO { task1(), task2(), task3() }` |
 | Generate values lazily | `BG STREAM { YIELD ...; }` |

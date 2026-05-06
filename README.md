@@ -20,8 +20,8 @@ It's designed to be:
 
 ```ruby
 bill = users AS @u
-  s> UNNEST @u.orders
-  s> SUM _.price * @u.discount;
+  |> UNNEST @u.orders
+  |> SUM _.price * @u.discount;
 
 -- Fuses nested iteration with aggregation. No intermediate allocations.
 ```
@@ -31,12 +31,12 @@ bill = users AS @u
 ```ruby
 FN myFunc(id: Int64, name: String) RETURNS MyPage ->
   page = fetchData(id, name) OR RAISE
-    s> parseHeader OR EXIT "Invalid Header"   -- parseHeader RAISES Input, ParseError
-    s> parseBody OR EXIT "Invalid Body"       -- we can attach messages to be handled specifically below
-    s> fetchUser
-      s> RECOVER(defaultUser())
-    s> TAP saveToDb(id, name, _)
-    s> renderHomePage;
+    |> parseHeader OR EXIT "Invalid Header"   -- parseHeader RAISES Input, ParseError
+    |> parseBody OR EXIT "Invalid Body"       -- we can attach messages to be handled specifically below
+    |> fetchUser
+      |> RECOVER(defaultUser())
+    |> TAP saveToDb(id, name, _)
+    |> renderHomePage;
     
   RETURN page; 
 
@@ -70,7 +70,7 @@ In CLEAR, you describe the strategy you want to employ, and the compiler generat
 ```ruby clear illustrative
 -- `notify()` users in parallel, with back pressure
 users
-  s> CONCURRENT(workers: 8, capacity: 800, parallel: TRUE)
+  |> CONCURRENT(workers: 8, capacity: 800, parallel: TRUE)
      EACH notify
 
 -- Spawn a short-lived green fiber, do all allocations in an Arena for speed:

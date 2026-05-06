@@ -7,7 +7,7 @@ Two distinct measurements live in this directory:
 
 1. **CLEAR-language form** (`bench.cht`): the canonical user pattern
    that exercises the full pipeline-terminal observable wiring —
-   BG STREAM producer + `s> SUM _` consumer-fiber spawn + WaitGroup
+   BG STREAM producer + `|> SUM _` consumer-fiber spawn + WaitGroup
    join via `NEXT`. Measures end-to-end cost of the language form,
    including stream yield/resume overhead.
 
@@ -18,7 +18,7 @@ Two distinct measurements live in this directory:
 
 ```clear
 -- bench.cht (the canonical CLEAR form)
-running: ~Int64@observable = gen s> SUM _;
+running: ~Int64@observable = gen |> SUM _;
 final = NEXT running;
 ```
 
@@ -38,7 +38,7 @@ consumer's `defer ctx.acc.finish()` issues `wg.done()`.
 
 ### CLEAR-language pipeline form (`bench.cht` → `./clear build --optimized`)
 
-2M values are produced by a `BG STREAM`, folded via `s> SUM _`
+2M values are produced by a `BG STREAM`, folded via `|> SUM _`
 (which auto-produces a `~Int64@observable`), and joined via `NEXT`.
 `bench.go` and `bench.rs` mirror this shape with bounded channels:
 producer -> consumer sum -> join.
@@ -52,7 +52,7 @@ FN main() RETURNS Void ->
     };
 
     t0 = timestampMs();
-    running: ~Int64@observable = gen s> SUM _;
+    running: ~Int64@observable = gen |> SUM _;
     final = NEXT running;
     elapsed = timestampMs() - t0;
 

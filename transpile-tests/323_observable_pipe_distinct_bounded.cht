@@ -13,7 +13,7 @@
 FN main() RETURNS Void ->
     s: ~Int64[5] = [BG { 3_i64; }, BG { 1_i64; }, BG { 3_i64; }, BG { 2_i64; }, BG { 1_i64; }];
 
-    running: ~Int64[5]@set:observable = s s> DISTINCT _;
+    running: ~Int64[5]@set:observable = s |> DISTINCT _;
     final = NEXT running;
 
     -- 5 items, 3 unique -- {1, 2, 3}.

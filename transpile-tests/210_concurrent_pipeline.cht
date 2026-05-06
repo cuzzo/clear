@@ -8,7 +8,7 @@ FN double(x: Int64) RETURNS Int64 -> RETURN x * 2; END
 FN main() RETURNS Void ->
     -- CONCURRENT SELECT: parallel map
     items: Int64[] = [1, 2, 3, 4, 5];
-    doubled = items s> CONCURRENT(workers: 2) SELECT double(_);
+    doubled = items |> CONCURRENT(workers: 2) SELECT double(_);
     ASSERT doubled.length() == 5, "concurrent select length";
     ASSERT doubled[0] == 2, "concurrent select [0]";
     ASSERT doubled[4] == 10, "concurrent select [4]";
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
     -- CONCURRENT SELECT with larger workload (exercises worker pool)
     MUTABLE big: Int64[]@list = [];
     FOR i IN (0_i64 ..< 100) -> big.append(i);
-    mapped = big s> CONCURRENT(workers: 4) SELECT _ * 3;
+    mapped = big |> CONCURRENT(workers: 4) SELECT _ * 3;
     ASSERT mapped.length() == 100, "big concurrent select length";
     ASSERT mapped[0] == 0, "big concurrent select [0]";
     ASSERT mapped[99] == 297, "big concurrent select [99]";

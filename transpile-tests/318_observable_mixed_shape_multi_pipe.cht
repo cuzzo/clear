@@ -16,8 +16,8 @@ FN main() RETURNS Void ->
         WHILE j < 6_i64 DO YIELD j MOD 3_i64; j = j + 1_i64; END
     };
 
-    sum_running:      ~Int64@observable      = gen1 s> SUM _;
-    distinct_running: ~Int64[]@set:observable = gen2 s> DISTINCT _;
+    sum_running:      ~Int64@observable      = gen1 |> SUM _;
+    distinct_running: ~Int64[]@set:observable = gen2 |> DISTINCT _;
 
     sum_final = NEXT sum_running;
     dist_final = NEXT distinct_running;

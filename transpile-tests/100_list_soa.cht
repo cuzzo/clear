@@ -11,38 +11,38 @@ FN main() RETURNS Void ->
     items.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
     -- SUM: iterates only the health field array
-    total = items s> SUM _.health;
+    total = items |> SUM _.health;
     ASSERT total == 300, "SUM health should be 300";
 
     -- MIN / MAX
-    min_x = items s> MIN _.x;
-    max_y = items s> MAX _.y;
+    min_x = items |> MIN _.x;
+    max_y = items |> MAX _.y;
     ASSERT min_x == 10, "MIN x should be 10";
     ASSERT max_y == 60, "MAX y should be 60";
 
     -- AVERAGE
-    avg_vx = items s> AVERAGE _.vx;
+    avg_vx = items |> AVERAGE _.vx;
     ASSERT avg_vx == 3, "AVERAGE vx should be 3";
 
     -- COUNT
-    cnt = items s> COUNT _.health > 0;
+    cnt = items |> COUNT _.health > 0;
     ASSERT cnt == 2, "COUNT health > 0 should be 2";
 
     -- ANY / ALL
-    any_dead = items s> ANY _.health == 0;
-    all_pos  = items s> ALL _.x > 0;
+    any_dead = items |> ANY _.health == 0;
+    all_pos  = items |> ALL _.x > 0;
     ASSERT any_dead == TRUE,  "ANY health == 0 should be true";
     ASSERT all_pos  == TRUE,  "ALL x > 0 should be true";
 
     -- WHERE: reassembles full structs for matching elements
-    alive = items s> WHERE _.health > 0;
+    alive = items |> WHERE _.health > 0;
     ASSERT length(alive) == 2, "WHERE health > 0 should return 2 elements";
     ASSERT alive[0].health == 100, "first alive health is 100";
     ASSERT alive[1].health == 200, "second alive health is 200";
 
     -- EACH: in-place field mutation
-    items s> EACH { _.health = 50.0; };
-    new_total = items s> SUM _.health;
+    items |> EACH { _.health = 50.0; };
+    new_total = items |> SUM _.health;
     ASSERT new_total == 150.0, "EACH set health=50, sum should be 150";
 
     RETURN;

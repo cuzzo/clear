@@ -1,7 +1,7 @@
 require_relative "../ast/ast"
 require_relative "../ast/std_lib"
 
-# Pipeline Rewriter — transforms high-level pipeline operators (s>) into 
+# Pipeline Rewriter — transforms high-level pipeline operators (|>) into 
 # regular AST nodes (ForEach, IfStatement, BlockExpr) AFTER annotation.
 #
 # Running after annotation allows us to use type information for things like
@@ -28,7 +28,7 @@ class PipelineRewriter
     return node unless node
 
     # Handle SMOOTH nodes BEFORE recursing into children.
-    # This preserves pipeline chains (a s> WHERE s> SELECT s> SUM)
+    # This preserves pipeline chains (a |> WHERE |> SELECT |> SUM)
     # so collect_chain can discover and fuse them into a single loop.
     if node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
       return rewrite_pipeline(node)
@@ -102,7 +102,7 @@ class PipelineRewriter
     terminal = chain[:terminal]
     real_source = chain[:source]
 
-    # Named binding chains (source AS @u s> UNNEST ...) must reach the MIR
+    # Named binding chains (source AS @u |> UNNEST ...) must reach the MIR
     # lowering intact so lower_binding_chain can fuse them into nested loops
     # with correct @u -> loop_var substitution. PipelineRewriter has no concept
     # of named bindings and would emit @u as a raw identifier.
@@ -113,7 +113,7 @@ class PipelineRewriter
     real_source = rewrite!(real_source)
 
     # Skip rewriting for pool, sharded, SOA sources, and when the source is
-    # itself a pipeline (e.g. data s> SKIP 2 s> SUM _). These need special
+    # itself a pipeline (e.g. data |> SKIP 2 |> SUM _). These need special
     # iteration patterns that the transpiler's pipeline_generator handles.
     if needs_transpiler_pipeline?(real_source) || (real_source.is_a?(AST::BinaryOp) && real_source.op == :SMOOTH)
       # Only patch if the source actually changed; patching the same object
@@ -196,7 +196,7 @@ class PipelineRewriter
     # real_source was already rewritten above; use it as the rewritten source.
     source = real_source
 
-    # CASE 2/3: x s> f(y) -> f(x, y) or x s> f -> f(x)
+    # CASE 2/3: x |> f(y) -> f(x, y) or x |> f -> f(x)
     # Skip rewriting when the callee returns an error union — the transpiler's
     # transpile_Smooth handles error propagation and snapshot semantics for CATCH.
     # The SMOOTH's full_type may already be unwrapped by CATCH, so also check
@@ -231,7 +231,7 @@ class PipelineRewriter
       return call
     end
 
-    # CASE 4: x s> RECOVER(default) -> x OR default
+    # CASE 4: x |> RECOVER(default) -> x OR default
     if rhs.is_a?(AST::RecoverOp)
       op = AST::BinaryOp.new(rhs.token, source.dup, :OR_RESCUE, rhs.default_expr.dup)
       op.full_type = node.full_type

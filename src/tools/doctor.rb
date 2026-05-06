@@ -160,7 +160,7 @@ module Doctor
     # for srcline-sorted samples against the transpiled Zig, (b)
     # mapping each Zig line back to its CLEAR source line via the
     # `// CLR:N` comments the transpiler emits. Pipeline stages (lines
-    # containing `s>`) are called out explicitly — they're the most
+    # containing `|>`) are called out explicitly — they're the most
     # common perf "why is this slow" question.
     zig_source = File.join(profile_dir, 'transpiled.zig')
     clear_source = File.join(profile_dir, 'source.cht')
@@ -204,9 +204,8 @@ module Doctor
     top = clear_samples.sort_by { |_, pct| -pct }.first(10)
     top.each do |line_no, pct|
       snippet = source_lines[line_no - 1]&.rstrip || ''
-      # Detect `s>` as a standalone token. Avoid matching identifiers
-      # that happen to contain the substring.
-      pipeline = snippet =~ /(^|[\s(;])s>/ ? ' [pipeline stage]' : ''
+      # Detect `|>` as a standalone token.
+      pipeline = snippet =~ /\|>/ ? ' [pipeline stage]' : ''
       trimmed = snippet.lstrip[0, 64]
       puts "  %5.1f%%  line %-4d  %s%s" % [pct, line_no, trimmed, pipeline]
     end

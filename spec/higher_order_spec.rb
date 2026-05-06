@@ -29,12 +29,12 @@ RSpec.describe SemanticAnnotator do
   describe "Higher-Order Syntax (SELECT)" do
     let(:result) { ast.statements.last.full_type }
 
-    context "Basic Projection: list s> SELECT _.method()" do
+    context "Basic Projection: list |> SELECT _.method()" do
       let(:code) {
         <<~FLUX
           words: String[] = ["a", "bb", "ccc"];
           -- Project List<String> -> List<Int64> using .length()
-          lengths = words s> SELECT _.length();
+          lengths = words |> SELECT _.length();
         FLUX
       }
 
@@ -44,14 +44,14 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Chained Pipe: string s> split s> SELECT" do
+    context "Chained Pipe: string |> split |> SELECT" do
       let(:code) {
         <<~FLUX
           raw = "apple,banana";
           -- 1. split returns String
           -- 2. SELECT iterates Strings
           -- 3. _.length() returns Int64
-          lengths = raw s> split(",") s> SELECT _.length();
+          lengths = raw |> split(",") |> SELECT _.length();
         FLUX
       }
 
@@ -60,13 +60,13 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Struct/Hash Projection: list s> SELECT %{...}" do
+    context "Struct/Hash Projection: list |> SELECT %{...}" do
       let(:code) {
         <<~FLUX
           nums = [10, 20];
 
           -- Create a List of HashMaps
-          complex = nums s> SELECT %{
+          complex = nums |> SELECT %{
             "original": _,
             "doubled": _ * 2
           };
@@ -80,12 +80,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Array Projection: list s> SELECT [_]" do
+    context "Array Projection: list |> SELECT [_]" do
       let(:code) {
         <<~FLUX
           nums = [1_i64, 2_i64];
           -- Wrap each item in a list -> [[1], [2]]
-          nested = nums s> SELECT [_];
+          nested = nums |> SELECT [_];
         FLUX
       }
 
@@ -101,7 +101,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           num = 100;
-          bad = num s> SELECT _ + 1;
+          bad = num |> SELECT _ + 1;
         FLUX
       }
 
@@ -117,7 +117,7 @@ RSpec.describe SemanticAnnotator do
   describe "Higher-Order Syntax (INDEX)" do
     let(:result) { ast.statements.last.full_type }
 
-    context "Basic INDEX: list s> INDEX _.field" do
+    context "Basic INDEX: list |> INDEX _.field" do
       let(:code) {
         <<~FLUX
           STRUCT User { name: String, age: Int64 }
@@ -126,7 +126,7 @@ RSpec.describe SemanticAnnotator do
             User{ name: %"Bob", age: 30_i64 },
             User{ name: %"Charlie", age: 25_i64 }
           ];
-          grouped = users s> INDEX _.age;
+          grouped = users |> INDEX _.age;
         FLUX
       }
 
@@ -136,7 +136,7 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "INDEX with string keys: list s> INDEX _.name" do
+    context "INDEX with string keys: list |> INDEX _.name" do
       let(:code) {
         <<~FLUX
           STRUCT Item { category: String, price: Float64 }
@@ -145,7 +145,7 @@ RSpec.describe SemanticAnnotator do
             Item{ category: %"electronics", price: 100 },
             Item{ category: %"food", price: 20 }
           ];
-          byCategory = items s> INDEX _.category;
+          byCategory = items |> INDEX _.category;
         FLUX
       }
 
@@ -158,7 +158,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           num = 100;
-          bad = num s> INDEX _;
+          bad = num |> INDEX _;
         FLUX
       }
 
@@ -178,7 +178,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           nums = [1, 2, 3, 4, 5];
-          sum = nums s> REDUCE(0) acc + _;
+          sum = nums |> REDUCE(0) acc + _;
         FLUX
       }
 
@@ -196,7 +196,7 @@ RSpec.describe SemanticAnnotator do
             Item{ value: 20_i64 },
             Item{ value: 30_i64 }
           ];
-          total = items s> REDUCE(0_i64) acc + _.value;
+          total = items |> REDUCE(0_i64) acc + _.value;
         FLUX
       }
 
@@ -209,7 +209,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           num = 100;
-          bad = num s> REDUCE(0) acc + _;
+          bad = num |> REDUCE(0) acc + _;
         FLUX
       }
 
@@ -234,7 +234,7 @@ RSpec.describe SemanticAnnotator do
             Item{ name: %"a", value: 10_i64 },
             Item{ name: %"b", value: 20_i64 }
           ];
-          sorted = items s> ORDER_BY _.value;
+          sorted = items |> ORDER_BY _.value;
         FLUX
       }
 
@@ -247,7 +247,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           nums = [3_i64, 1_i64, 2_i64];
-          sorted = nums s> ORDER_BY _;
+          sorted = nums |> ORDER_BY _;
         FLUX
       }
 
@@ -260,7 +260,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           num = 100;
-          bad = num s> ORDER_BY _;
+          bad = num |> ORDER_BY _;
         FLUX
       }
 
@@ -280,7 +280,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           nums = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
-          first_three = nums s> LIMIT 3;
+          first_three = nums |> LIMIT 3;
         FLUX
       }
 
@@ -298,7 +298,7 @@ RSpec.describe SemanticAnnotator do
             Item{ value: 20_i64 },
             Item{ value: 30_i64 }
           ];
-          limited = items s> LIMIT 2;
+          limited = items |> LIMIT 2;
         FLUX
       }
 
@@ -311,7 +311,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           num = 100;
-          bad = num s> LIMIT 5;
+          bad = num |> LIMIT 5;
         FLUX
       }
 
@@ -335,7 +335,7 @@ RSpec.describe SemanticAnnotator do
             Container{ values: [1_i64, 2_i64] },
             Container{ values: [3_i64, 4_i64] }
           ];
-          flattened = containers s> UNNEST _.values;
+          flattened = containers |> UNNEST _.values;
         FLUX
       }
 
@@ -353,7 +353,7 @@ RSpec.describe SemanticAnnotator do
             Batch{ nums: [40] },
             Batch{ nums: [50, 60] }
           ];
-          all_nums = batches s> UNNEST _.nums;
+          all_nums = batches |> UNNEST _.nums;
         FLUX
       }
 
@@ -367,7 +367,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Int64 }
           items = [Item{ value: 10_i64 }];
-          bad = items s> UNNEST _.value;
+          bad = items |> UNNEST _.value;
         FLUX
       }
 
@@ -380,7 +380,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           num = 100;
-          bad = num s> UNNEST _;
+          bad = num |> UNNEST _;
         FLUX
       }
 
@@ -400,7 +400,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           nums = [1, 2, 1, 3, 2, 4];
-          unique = nums s> DISTINCT _;
+          unique = nums |> DISTINCT _;
         FLUX
       }
 
@@ -418,7 +418,7 @@ RSpec.describe SemanticAnnotator do
             Item{ id: 2_i64, name: %"b" },
             Item{ id: 1_i64, name: %"c" }
           ];
-          unique_by_id = items s> DISTINCT _.id;
+          unique_by_id = items |> DISTINCT _.id;
         FLUX
       }
 
@@ -431,7 +431,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           num = 100;
-          bad = num s> DISTINCT _;
+          bad = num |> DISTINCT _;
         FLUX
       }
 
@@ -618,7 +618,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
               items: Score[] = [];
-              items s> EACH { _.value = 0.0; };
+              items |> EACH { _.value = 0.0; };
               RETURN;
             END
           CLEAR
@@ -631,7 +631,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
               MUTABLE items: Score[]@list = [];
-              items s> EACH { _.value = 0.0; };
+              items |> EACH { _.value = 0.0; };
               RETURN;
             END
           CLEAR
@@ -644,7 +644,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
               MUTABLE pool: Score[100]@pool = [];
-              pool s> EACH { _.value = 0.0; };
+              pool |> EACH { _.value = 0.0; };
               RETURN;
             END
           CLEAR
@@ -657,7 +657,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
               MUTABLE sp: Score[100]@pool:sharded(4) = [];
-              sp s> EACH { _.value = 0.0; };
+              sp |> EACH { _.value = 0.0; };
               RETURN;
             END
           CLEAR
@@ -669,7 +669,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 42.0;
-              x s> EACH { _ = 0.0; };
+              x |> EACH { _ = 0.0; };
               RETURN;
             END
           CLEAR
@@ -681,7 +681,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
             items: Score[] = [];
-            items s> EACH { _.value = 0.0; };
+            items |> EACH { _.value = 0.0; };
             RETURN;
           END
         CLEAR
@@ -694,7 +694,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
             MUTABLE pool: Score[100]@pool = [];
-            pool s> EACH { _.value = 0.0; };
+            pool |> EACH { _.value = 0.0; };
             RETURN;
           END
         CLEAR
@@ -707,7 +707,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
             MUTABLE sp: Score[100]@pool:sharded(4) = [];
-            sp s> EACH { _.value = 0.0; };
+            sp |> EACH { _.value = 0.0; };
             RETURN;
           END
         CLEAR
@@ -724,7 +724,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
             items: Score[] = [];
-            items s> EACH { _.value = 0.0; };
+            items |> EACH { _.value = 0.0; };
             RETURN;
           END
         CLEAR
@@ -737,7 +737,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Score { value: Float64 }
           FN f() RETURNS !Void ->
             items: Score[] = [];
-            items s> EACH { _.value = 0.0; };
+            items |> EACH { _.value = 0.0; };
             RETURN;
           END
         CLEAR
@@ -982,7 +982,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Score { value: Float64 }
         FN f() RETURNS !Void ->
           MUTABLE items = List[];
-          total = items s> SUM _.value;
+          total = items |> SUM _.value;
           RETURN;
         END
       CLEAR
@@ -1024,7 +1024,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
         FN f() RETURNS !Float64 ->
           MUTABLE items: Entity[]@list:soa = [];
-          total = items s> SUM _.health;
+          total = items |> SUM _.health;
           RETURN total;
         END
       CLEAR
@@ -1128,7 +1128,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
         FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
-          total = entities s> SUM _.x;
+          total = entities |> SUM _.x;
           RETURN;
         END
       CLEAR
@@ -1143,7 +1143,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
         FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
-          entities s> EACH { _.x = _.x + _.vx; };
+          entities |> EACH { _.x = _.x + _.vx; };
           RETURN;
         END
       CLEAR
@@ -1158,7 +1158,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Point { x: Float64, y: Float64, z: Float64 }
         FN f() RETURNS !Void ->
           MUTABLE pts: Point[] = [];
-          total = pts s> SUM _.x;
+          total = pts |> SUM _.x;
           RETURN;
         END
       CLEAR
@@ -1172,7 +1172,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Stats { a: Float64, b: Float64, c: Float64, d: Float64 }
         FN f() RETURNS !Void ->
           MUTABLE data: Stats[] = [];
-          data s> EACH { _.a = _.a + _.b; };
+          data |> EACH { _.a = _.a + _.b; };
           RETURN;
         END
       CLEAR
@@ -1186,7 +1186,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
         FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
-          entities s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; _.health = _.health - 1.0; };
+          entities |> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; _.health = _.health - 1.0; };
           RETURN;
         END
       CLEAR
@@ -1199,7 +1199,7 @@ RSpec.describe SemanticAnnotator do
       code = <<~CLEAR
         FN f() RETURNS !Void ->
           MUTABLE nums: Float64[] = [];
-          total = nums s> SUM _;
+          total = nums |> SUM _;
           RETURN;
         END
       CLEAR
@@ -1213,7 +1213,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
         FN f() RETURNS !Void ->
           MUTABLE entities: Entity[] = [];
-          alive = entities s> WHERE _.health > 0;
+          alive = entities |> WHERE _.health > 0;
           RETURN;
         END
       CLEAR
@@ -1232,7 +1232,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
-            result = data s> TAKE_WHILE _ < 5.0;
+            result = data |> TAKE_WHILE _ < 5.0;
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1244,7 +1244,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               data: Float64[] = [1.0];
-              result = data s> TAKE_WHILE _ + 1.0;
+              result = data |> TAKE_WHILE _ + 1.0;
           END
         CLEAR
       }.to raise_error(CompilerError, /TAKE_WHILE predicate must evaluate to Bool/)
@@ -1255,7 +1255,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              result = x s> TAKE_WHILE _ < 5.0;
+              result = x |> TAKE_WHILE _ < 5.0;
           END
         CLEAR
       }.to raise_error(CompilerError, /Cannot TAKE_WHILE non-list/)
@@ -1270,7 +1270,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
-            result = data s> WINDOW(2) _.length();
+            result = data |> WINDOW(2) _.length();
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1282,7 +1282,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               data: Float64[] = [1.0];
-              result = data s> WINDOW("bad") _.length();
+              result = data |> WINDOW("bad") _.length();
           END
         CLEAR
       }.to raise_error(CompilerError, /WINDOW size must be a number/)
@@ -1293,7 +1293,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              result = x s> WINDOW(2) _.length();
+              result = x |> WINDOW(2) _.length();
           END
         CLEAR
       }.to raise_error(CompilerError, /Cannot WINDOW non-list/)
@@ -1308,7 +1308,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             data: Int64[] = [1, 2, 3, 4, 5];
-            result = data s> WINDOW(size: 3) _.length();
+            result = data |> WINDOW(size: 3) _.length();
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1319,7 +1319,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             data: Int64[] = [1, 2, 3];
-            result = data s> WINDOW(time: "500ms") _.length();
+            result = data |> WINDOW(time: "500ms") _.length();
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1330,7 +1330,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             data: Int64[] = [1, 2, 3];
-            result = data s> WINDOW(size: 2, time: "1s") _.length();
+            result = data |> WINDOW(size: 2, time: "1s") _.length();
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1342,8 +1342,8 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
-              result = data s> WINDOW(size: 3) _.length();
-              result2 = data s> WINDOW(size: 0) _.length();
+              result = data |> WINDOW(size: 3) _.length();
+              result2 = data |> WINDOW(size: 0) _.length();
           END
         CLEAR
       }.to raise_error(CompilerError, /WINDOW size must be > 0/)
@@ -1354,7 +1354,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
-              result = data s> WINDOW(bad_key: 3) _.length();
+              result = data |> WINDOW(bad_key: 3) _.length();
           END
         CLEAR
       }.to raise_error(CompilerError, /Unknown WINDOW option/)
@@ -1365,7 +1365,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
-              result = data s> WINDOW(size: "bad") _.length();
+              result = data |> WINDOW(size: "bad") _.length();
           END
         CLEAR
       }.to raise_error(CompilerError, /WINDOW size must be a number/)
@@ -1376,7 +1376,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
-              result = data s> WINDOW(time: "5x") _.length();
+              result = data |> WINDOW(time: "5x") _.length();
           END
         CLEAR
       }.to raise_error(CompilerError, /WINDOW time format must be like/)
@@ -1387,7 +1387,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               data: Int64[] = [1, 2, 3];
-              result = data s> WINDOW(time: 500) _.length();
+              result = data |> WINDOW(time: 500) _.length();
           END
         CLEAR
       }.to raise_error(CompilerError, /WINDOW time must be a string literal/)
@@ -1397,7 +1397,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             gen: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
-            result = gen s> WINDOW(size: 2) _.length();
+            result = gen |> WINDOW(size: 2) _.length();
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1408,7 +1408,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             gen: ~Int64[INF] = BG STREAM { YIELD 1; YIELD 2; };
-            result = gen s> WINDOW(size: 2) _.length();
+            result = gen |> WINDOW(size: 2) _.length();
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1427,7 +1427,7 @@ RSpec.describe SemanticAnnotator do
         FN f() RETURNS !Void ->
             as: A[] = [A{ id: 1 }];
             bs: B[] = [B{ id: 1 }];
-            result = as s> JOIN(bs) %(a, b) -> a.id == b.id;
+            result = as |> JOIN(bs) %(a, b) -> a.id == b.id;
         END
       CLEAR
       bind = tree.statements.last.body.last
@@ -1442,7 +1442,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
               as: A[] = [A{ id: 1 }];
               b: Int64 = 1;
-              result = as s> JOIN(b) %(a, b2) -> TRUE;
+              result = as |> JOIN(b) %(a, b2) -> TRUE;
           END
         CLEAR
       }.to raise_error(CompilerError, /JOIN right source must be a list/)
@@ -1456,7 +1456,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
               as: A[] = [A{ id: 1 }];
               bs: B[] = [B{ id: 1 }];
-              result = as s> JOIN(bs) %(x) -> TRUE;
+              result = as |> JOIN(bs) %(x) -> TRUE;
           END
         CLEAR
       }.to raise_error(CompilerError, /JOIN lambda must take exactly 2 parameters/)
@@ -1471,7 +1471,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
-            result = data s> TAP { _ + 0.0; };
+            result = data |> TAP { _ + 0.0; };
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1482,7 +1482,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Float64 ->
             data: Float64[] = [1.0, 2.0];
-            total = data s> TAP { _ + 0.0; } s> SUM _;
+            total = data |> TAP { _ + 0.0; } |> SUM _;
             RETURN total;
         END
       CLEAR
@@ -1495,7 +1495,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              result = x s> TAP { _ + 0.0; };
+              result = x |> TAP { _ + 0.0; };
           END
         CLEAR
       }.to raise_error(CompilerError, /Cannot TAP non-collection/)
@@ -1505,7 +1505,7 @@ RSpec.describe SemanticAnnotator do
       zig = ZigTranspiler.new.transpile(<<~CLEAR)
         FN f() RETURNS !Float64 ->
             data: Float64[] = [1.0, 2.0];
-            total = data s> TAP { _ + 0.0; } s> SUM _;
+            total = data |> TAP { _ + 0.0; } |> SUM _;
             RETURN total;
         END
       CLEAR
@@ -1521,7 +1521,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Void ->
             data: Float64[] = [1.0, 2.0, 3.0];
-            rest = data s> SKIP 1_i64;
+            rest = data |> SKIP 1_i64;
         END
       CLEAR
       bind = tree.statements.first.body.last
@@ -1533,7 +1533,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Item { value: Float64 }
         FN f() RETURNS !Void ->
             items: Item[] = [Item{ value: 1.0 }];
-            rest = items s> SKIP 1_i64;
+            rest = items |> SKIP 1_i64;
         END
       CLEAR
       fn = tree.statements.last
@@ -1546,7 +1546,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              result = x s> SKIP 1_i64;
+              result = x |> SKIP 1_i64;
           END
         CLEAR
       }.to raise_error(CompilerError, /Cannot SKIP non-list/)
@@ -1556,7 +1556,7 @@ RSpec.describe SemanticAnnotator do
       tree = run(<<~CLEAR)
         FN f() RETURNS !Float64 ->
             data: Float64[] = [1.0, 2.0, 3.0];
-            total = data s> SKIP 1_i64 s> SUM _;
+            total = data |> SKIP 1_i64 |> SUM _;
             RETURN total;
         END
       CLEAR
@@ -1581,7 +1581,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
-            result = nums s> FIND _ > 2.0;
+            result = nums |> FIND _ > 2.0;
             RETURN;
           END
         CLEAR
@@ -1595,7 +1595,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Item { x: Float64 }
           FN f() RETURNS !Void ->
             items: Item[] = [];
-            result = items s> FIND _.x > 0.0;
+            result = items |> FIND _.x > 0.0;
             RETURN;
           END
         CLEAR
@@ -1609,7 +1609,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> FIND _ > 0.0;
+              x |> FIND _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -1621,7 +1621,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> FIND _;
+              nums |> FIND _;
               RETURN;
             END
           CLEAR
@@ -1632,7 +1632,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> FIND _ > 1.0;
+            result = nums |> FIND _ > 1.0;
             RETURN;
           END
         CLEAR
@@ -1645,7 +1645,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> FIND _ > 0.5;
+            result = nums |> FIND _ > 0.5;
             RETURN;
           END
         CLEAR
@@ -1662,7 +1662,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> ANY _ > 1.0;
+            result = nums |> ANY _ > 1.0;
             RETURN;
           END
         CLEAR
@@ -1676,7 +1676,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> ANY _ > 0.0;
+              x |> ANY _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -1688,7 +1688,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> ANY _;
+              nums |> ANY _;
               RETURN;
             END
           CLEAR
@@ -1699,7 +1699,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> ANY _ > 0.0;
+            result = nums |> ANY _ > 0.0;
             RETURN;
           END
         CLEAR
@@ -1711,7 +1711,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> ANY _ > 0.0;
+            result = nums |> ANY _ > 0.0;
             RETURN;
           END
         CLEAR
@@ -1728,7 +1728,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> ALL _ > 0.0;
+            result = nums |> ALL _ > 0.0;
             RETURN;
           END
         CLEAR
@@ -1742,7 +1742,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> ALL _ > 0.0;
+              x |> ALL _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -1754,7 +1754,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> ALL _;
+              nums |> ALL _;
               RETURN;
             END
           CLEAR
@@ -1765,7 +1765,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> ALL _ > 0.0;
+            result = nums |> ALL _ > 0.0;
             RETURN;
           END
         CLEAR
@@ -1778,7 +1778,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [];
-            result = nums s> ALL _ > 0.0;
+            result = nums |> ALL _ > 0.0;
             RETURN;
           END
         CLEAR
@@ -1795,7 +1795,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
-            result = nums s> COUNT _ > 1.0;
+            result = nums |> COUNT _ > 1.0;
             RETURN;
           END
         CLEAR
@@ -1809,7 +1809,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> COUNT _ > 0.0;
+              x |> COUNT _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -1821,7 +1821,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> COUNT _;
+              nums |> COUNT _;
               RETURN;
             END
           CLEAR
@@ -1832,7 +1832,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> COUNT _ > 1.0;
+            result = nums |> COUNT _ > 1.0;
             RETURN;
           END
         CLEAR
@@ -1844,7 +1844,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> COUNT _ > 0.0;
+            result = nums |> COUNT _ > 0.0;
             RETURN;
           END
         CLEAR
@@ -1862,8 +1862,8 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0, 3.0, 4.0];
-              filtered: Float64[] = nums s> WHERE _ > 2.0;
-              n: Int64 = filtered s> COUNT _ > 3.0;
+              filtered: Float64[] = nums |> WHERE _ > 2.0;
+              n: Int64 = filtered |> COUNT _ > 3.0;
               RETURN;
             END
           CLEAR
@@ -1876,7 +1876,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT User { active: Bool }
             FN f() RETURNS !Void ->
               users: User[] = [];
-              result = users s> ANY _.active == TRUE;
+              result = users |> ANY _.active == TRUE;
               RETURN;
             END
           CLEAR
@@ -1889,7 +1889,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT User { score: Float64 }
             FN f() RETURNS !Void ->
               users: User[] = [];
-              result = users s> ALL _.score > 0.0;
+              result = users |> ALL _.score > 0.0;
               RETURN;
             END
           CLEAR
@@ -1901,7 +1901,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT User { score: Float64 }
           FN f() RETURNS !Void ->
             users: User[] = [];
-            found = users s> FIND _.score > 50.0;
+            found = users |> FIND _.score > 50.0;
             RETURN;
           END
         CLEAR
@@ -1928,7 +1928,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> SUM _;
+            result = nums |> SUM _;
             RETURN;
           END
         CLEAR
@@ -1943,7 +1943,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Item { value: Float64 }
             FN f() RETURNS !Void ->
               items: Item[] = [];
-              result = items s> SUM _.value;
+              result = items |> SUM _.value;
               RETURN;
             END
           CLEAR
@@ -1955,7 +1955,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> SUM _;
+              x |> SUM _;
               RETURN;
             END
           CLEAR
@@ -1967,7 +1967,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> SUM _ > 0.0;
+              nums |> SUM _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -1980,7 +1980,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Tag { name: String }
             FN f() RETURNS !Void ->
               tags: Tag[] = [];
-              tags s> SUM _.name;
+              tags |> SUM _.name;
               RETURN;
             END
           CLEAR
@@ -1991,7 +1991,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> SUM _;
+            result = nums |> SUM _;
             RETURN;
           END
         CLEAR
@@ -2008,7 +2008,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
-            result = nums s> AVERAGE _;
+            result = nums |> AVERAGE _;
             RETURN;
           END
         CLEAR
@@ -2022,7 +2022,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> AVERAGE _;
+              x |> AVERAGE _;
               RETURN;
             END
           CLEAR
@@ -2034,7 +2034,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> AVERAGE _ > 0.0;
+              nums |> AVERAGE _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -2045,7 +2045,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> AVERAGE _;
+            result = nums |> AVERAGE _;
             RETURN;
           END
         CLEAR
@@ -2058,7 +2058,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [];
-            result = nums s> AVERAGE _;
+            result = nums |> AVERAGE _;
             RETURN;
           END
         CLEAR
@@ -2074,7 +2074,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
-            result = nums s> MIN _;
+            result = nums |> MIN _;
             RETURN;
           END
         CLEAR
@@ -2088,7 +2088,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> MIN _;
+              x |> MIN _;
               RETURN;
             END
           CLEAR
@@ -2100,7 +2100,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> MIN _ > 0.0;
+              nums |> MIN _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -2113,7 +2113,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Tag { name: String }
             FN f() RETURNS !Void ->
               tags: Tag[] = [];
-              tags s> MIN _.name;
+              tags |> MIN _.name;
               RETURN;
             END
           CLEAR
@@ -2124,7 +2124,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> MIN _;
+            result = nums |> MIN _;
             RETURN;
           END
         CLEAR
@@ -2137,7 +2137,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> MIN _;
+            result = nums |> MIN _;
             RETURN;
           END
         CLEAR
@@ -2154,7 +2154,7 @@ RSpec.describe SemanticAnnotator do
         tree = run(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0, 2.0, 3.0];
-            result = nums s> MAX _;
+            result = nums |> MAX _;
             RETURN;
           END
         CLEAR
@@ -2168,7 +2168,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               x: Float64 = 1.0;
-              x s> MAX _;
+              x |> MAX _;
               RETURN;
             END
           CLEAR
@@ -2180,7 +2180,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0];
-              nums s> MAX _ > 0.0;
+              nums |> MAX _ > 0.0;
               RETURN;
             END
           CLEAR
@@ -2191,7 +2191,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> MAX _;
+            result = nums |> MAX _;
             RETURN;
           END
         CLEAR
@@ -2204,7 +2204,7 @@ RSpec.describe SemanticAnnotator do
         out = transpile_fn(<<~CLEAR)
           FN f() RETURNS !Void ->
             nums: Float64[] = [1.0];
-            result = nums s> MAX _;
+            result = nums |> MAX _;
             RETURN;
           END
         CLEAR
@@ -2222,8 +2222,8 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0, 3.0, 4.0];
-              filtered: Float64[] = nums s> WHERE _ > 2.0;
-              total = filtered s> SUM _;
+              filtered: Float64[] = nums |> WHERE _ > 2.0;
+              total = filtered |> SUM _;
               RETURN;
             END
           CLEAR
@@ -2235,8 +2235,8 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0, 3.0];
-              filtered: Float64[] = nums s> WHERE _ > 1.0;
-              minimum = filtered s> MIN _;
+              filtered: Float64[] = nums |> WHERE _ > 1.0;
+              minimum = filtered |> MIN _;
               RETURN;
             END
           CLEAR
@@ -2249,7 +2249,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
               scores: Score[] = [];
-              avg = scores s> AVERAGE _.value;
+              avg = scores |> AVERAGE _.value;
               RETURN;
             END
           CLEAR
@@ -2262,7 +2262,7 @@ RSpec.describe SemanticAnnotator do
             STRUCT Score { value: Float64 }
             FN f() RETURNS !Void ->
               scores: Score[] = [];
-              result = scores s> MAX _.value;
+              result = scores |> MAX _.value;
               RETURN;
             END
           CLEAR
@@ -2274,7 +2274,7 @@ RSpec.describe SemanticAnnotator do
           run(<<~CLEAR)
             FN f() RETURNS !Void ->
               nums: Float64[] = [1.0, 2.0];
-              total = nums s> SUM _;
+              total = nums |> SUM _;
               doubled = total * 2.0;
               RETURN;
             END
@@ -2288,11 +2288,11 @@ RSpec.describe SemanticAnnotator do
     subject(:ast) { run(code) }
     let(:result) { ast.statements.last.full_type&.resolved }
 
-    context "sharded list s> SUM _ resolves to Float64" do
+    context "sharded list |> SUM _ resolves to Float64" do
       let(:code) {
         <<~FLUX
           MUTABLE slist: Float64[]@list:sharded(2) = [];
-          total = slist s> SUM _;
+          total = slist |> SUM _;
         FLUX
       }
 
@@ -2305,11 +2305,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> COUNT predicate resolves to Int64" do
+    context "sharded list |> COUNT predicate resolves to Int64" do
       let(:code) {
         <<~FLUX
           MUTABLE slist: Float64[]@list:sharded(2) = [];
-          n = slist s> COUNT _ > 0.0;
+          n = slist |> COUNT _ > 0.0;
         FLUX
       }
 
@@ -2318,11 +2318,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> ANY predicate resolves to Bool" do
+    context "sharded list |> ANY predicate resolves to Bool" do
       let(:code) {
         <<~FLUX
           MUTABLE slist: Float64[]@list:sharded(2) = [];
-          found = slist s> ANY _ > 0.0;
+          found = slist |> ANY _ > 0.0;
         FLUX
       }
 
@@ -2335,7 +2335,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUSH
           MUTABLE slist: Float64[]@list:sharded(3) = [];
-          total = slist s> SUM _;
+          total = slist |> SUM _;
         FLUSH
       }
 
@@ -2347,11 +2347,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> ALL predicate resolves to Bool" do
+    context "sharded list |> ALL predicate resolves to Bool" do
       let(:code) {
         <<~FLUX
           MUTABLE slist: Float64[]@list:sharded(2) = [];
-          result = slist s> ALL _ > 0.0;
+          result = slist |> ALL _ > 0.0;
         FLUX
       }
 
@@ -2360,11 +2360,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> AVERAGE _ resolves to Float64" do
+    context "sharded list |> AVERAGE _ resolves to Float64" do
       let(:code) {
         <<~FLUX
           MUTABLE slist: Float64[]@list:sharded(2) = [];
-          result = slist s> AVERAGE _;
+          result = slist |> AVERAGE _;
         FLUX
       }
 
@@ -2377,11 +2377,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> MIN _ resolves to Float64" do
+    context "sharded list |> MIN _ resolves to Float64" do
       let(:code) {
         <<~FLUX
           MUTABLE slist: Float64[]@list:sharded(2) = [];
-          result = slist s> MIN _;
+          result = slist |> MIN _;
         FLUX
       }
 
@@ -2390,11 +2390,11 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> MAX _ resolves to Float64" do
+    context "sharded list |> MAX _ resolves to Float64" do
       let(:code) {
         <<~FLUX
           MUTABLE slist: Float64[]@list:sharded(2) = [];
-          result = slist s> MAX _;
+          result = slist |> MAX _;
         FLUX
       }
 
@@ -2403,12 +2403,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> WHERE predicate resolves to element array type" do
+    context "sharded list |> WHERE predicate resolves to element array type" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE slist: Item[]@list:sharded(2) = [];
-          result = slist s> WHERE _.value > 0.0;
+          result = slist |> WHERE _.value > 0.0;
         FLUX
       }
 
@@ -2421,12 +2421,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "sharded list s> FIND predicate resolves to optional element type" do
+    context "sharded list |> FIND predicate resolves to optional element type" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE slist: Item[]@list:sharded(2) = [];
-          result = slist s> FIND _.value > 0.0;
+          result = slist |> FIND _.value > 0.0;
         FLUX
       }
 
@@ -2446,7 +2446,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Item { value: Float64 }
           FN f() RETURNS !Void ->
             MUTABLE slist: Item[]@list:sharded(2) = [];
-            result = slist s> WHERE _.value > 0.0;
+            result = slist |> WHERE _.value > 0.0;
             RETURN;
           END
         FLUX
@@ -2464,7 +2464,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE slist: Item[]@list:sharded(2) = [];
-          slist s> EACH { _.value = 0.0; };
+          slist |> EACH { _.value = 0.0; };
         FLUX
       }
 
@@ -2481,12 +2481,12 @@ RSpec.describe SemanticAnnotator do
     subject(:ast) { run(code) }
     let(:result) { ast.statements.last.full_type&.resolved }
 
-    context "pool s> SUM _.field resolves to Float64" do
+    context "pool |> SUM _.field resolves to Float64" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          total = pool s> SUM _.value;
+          total = pool |> SUM _.value;
         FLUX
       }
 
@@ -2499,12 +2499,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> WHERE _.value > 0 resolves to Item[]" do
+    context "pool |> WHERE _.value > 0 resolves to Item[]" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          result = pool s> WHERE _.value > 0.0;
+          result = pool |> WHERE _.value > 0.0;
         FLUX
       }
 
@@ -2517,12 +2517,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> COUNT predicate resolves to Int64" do
+    context "pool |> COUNT predicate resolves to Int64" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          n = pool s> COUNT _.value > 0.0;
+          n = pool |> COUNT _.value > 0.0;
         FLUX
       }
 
@@ -2531,12 +2531,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> ANY predicate resolves to Bool" do
+    context "pool |> ANY predicate resolves to Bool" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          found = pool s> ANY _.value > 0.0;
+          found = pool |> ANY _.value > 0.0;
         FLUX
       }
 
@@ -2545,12 +2545,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> ALL predicate resolves to Bool" do
+    context "pool |> ALL predicate resolves to Bool" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          all_pos = pool s> ALL _.value > 0.0;
+          all_pos = pool |> ALL _.value > 0.0;
         FLUX
       }
 
@@ -2559,12 +2559,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> MIN _.field resolves to Float64" do
+    context "pool |> MIN _.field resolves to Float64" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          mn = pool s> MIN _.value;
+          mn = pool |> MIN _.value;
         FLUX
       }
 
@@ -2573,12 +2573,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> MAX _.field resolves to Float64" do
+    context "pool |> MAX _.field resolves to Float64" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          mx = pool s> MAX _.value;
+          mx = pool |> MAX _.value;
         FLUX
       }
 
@@ -2587,12 +2587,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> AVERAGE _.field resolves to Float64" do
+    context "pool |> AVERAGE _.field resolves to Float64" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          avg = pool s> AVERAGE _.value;
+          avg = pool |> AVERAGE _.value;
         FLUX
       }
 
@@ -2606,7 +2606,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          total = pool s> SUM _.value;
+          total = pool |> SUM _.value;
         FLUX
       }
 
@@ -2624,12 +2624,12 @@ RSpec.describe SemanticAnnotator do
     subject(:ast) { run(code) }
     let(:result) { ast.statements.last.full_type&.resolved }
 
-    context "pool s> FIND predicate resolves to optional element type" do
+    context "pool |> FIND predicate resolves to optional element type" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          found = pool s> FIND _.value == 10.0;
+          found = pool |> FIND _.value == 10.0;
         FLUX
       }
 
@@ -2642,12 +2642,12 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "pool s> FIND on empty pool resolves without error" do
+    context "pool |> FIND on empty pool resolves without error" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           MUTABLE pool: Item[100]@pool = [];
-          found = pool s> FIND _.value == 99.0;
+          found = pool |> FIND _.value == 99.0;
         FLUX
       }
 
@@ -2656,13 +2656,13 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "Zig output: pool s> FIND emits slot materialization and find loop" do
+    context "Zig output: pool |> FIND emits slot materialization and find loop" do
       let(:code) {
         <<~FLUX
           STRUCT Item { value: Float64 }
           FN f() RETURNS !Void ->
             MUTABLE pool: Item[100]@pool = [];
-            found = pool s> FIND _.value == 10.0;
+            found = pool |> FIND _.value == 10.0;
             RETURN;
           END
         FLUX

@@ -52,7 +52,7 @@ class Lexer
       when @s.scan(/\.\.</) then add(:RANGE_EXCL, '..<', start_col)
       when @s.scan(/\.\./) then add(:RANGE, '..', start_col)
       when @s.scan(/->/) then add(:ARROW, '->', start_col)
-      when @s.scan(/s>/) then add(:SMOOTH, 's>', start_col)
+      when @s.scan(/\|>/) then add(:SMOOTH, '|>', start_col)
       when @s.scan(/OR\b/) then add(:OR_RESCUE, 'OR', start_col)
       when @s.scan(/==/) then add(:CHAR, '==', start_col)
       when @s.scan(/>=/) then add(:CHAR, '>=', start_col)

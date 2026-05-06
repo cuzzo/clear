@@ -27,7 +27,7 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
   end
 
   describe "T13: REDUCE on observable requires a numeric scalar accumulator" do
-    it "rejects ~Bool@observable = stream s> REDUCE(false, _ OR acc)" do
+    it "rejects ~Bool@observable = stream |> REDUCE(false, _ OR acc)" do
       # Bool accumulator routes to AtomicFor(bool) which @compileErrors
       # in Zig; H10's whitelist catches it earlier as a CLEAR coerce
       # failure (the lift to ~Bool@observable doesn't fire, so the
@@ -38,7 +38,7 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Bool@observable = gen s> REDUCE(false) (_ > 1_i64) OR acc;
+            running: ~Bool@observable = gen |> REDUCE(false) (_ > 1_i64) OR acc;
             _ = NEXT running;
             RETURN;
         END
@@ -46,14 +46,14 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
       expect { annotate(src) }.to raise_error(CompilerError)
     end
 
-    it "accepts ~Int64@observable = stream s> REDUCE(0, acc + _)" do
+    it "accepts ~Int64@observable = stream |> REDUCE(0, acc + _)" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             gen: ~?Int64[] = BG STREAM {
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Int64@observable = gen s> REDUCE(0_i64) acc + _;
+            running: ~Int64@observable = gen |> REDUCE(0_i64) acc + _;
             _ = NEXT running;
             RETURN;
         END
@@ -70,12 +70,12 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running_sum: ~Int64@observable = g1 s> SUM _;
+            running_sum: ~Int64@observable = g1 |> SUM _;
             g2: ~?Int64[] = BG STREAM {
                 MUTABLE j: Int64 = 0_i64;
                 WHILE j < 4_i64 DO YIELD j; j = j + 1_i64; END
             };
-            running_max: ~Int64@observable = g2 s> MAX _;
+            running_max: ~Int64@observable = g2 |> MAX _;
             final_sum = NEXT running_sum;
             final_max = NEXT running_max;
             RETURN;
@@ -91,12 +91,12 @@ RSpec.describe "T13/T14: observable terminal validation + nesting" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running_sum: ~Int64@observable = g1 s> SUM _;
+            running_sum: ~Int64@observable = g1 |> SUM _;
             g2: ~?Int64[] = BG STREAM {
                 MUTABLE j: Int64 = 0_i64;
                 WHILE j < 4_i64 DO YIELD j; j = j + 1_i64; END
             };
-            running_max: ~Int64@observable = g2 s> MAX _;
+            running_max: ~Int64@observable = g2 |> MAX _;
             final_sum = NEXT running_sum;
             final_max = NEXT running_max;
             RETURN;

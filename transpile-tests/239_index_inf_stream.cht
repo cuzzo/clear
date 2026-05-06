@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
             i = i + 1;
         END
     };
-    grouped1 = c1 s> LIMIT 9 s> INDEX toString(_);
+    grouped1 = c1 |> LIMIT 9 |> INDEX toString(_);
     ASSERT grouped1["0"].length() == 3, "three 0s";
     ASSERT grouped1["1"].length() == 3, "three 1s";
     ASSERT grouped1["2"].length() == 3, "three 2s";
@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
             j = j + 1;
         END
     };
-    grouped2 = c2 s> WHERE _ < 2 s> LIMIT 6 s> INDEX toString(_);
+    grouped2 = c2 |> WHERE _ < 2 |> LIMIT 6 |> INDEX toString(_);
     ASSERT grouped2["0"].length() == 3, "three 0s after WHERE";
     ASSERT grouped2["1"].length() == 3, "three 1s after WHERE";
 

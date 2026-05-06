@@ -60,11 +60,11 @@ FN main() RETURNS Void ->
 
     t0 = timestampMs();
     FOR iter IN (0_i64 ..< iterations) DO
-        soa s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
+        soa |> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
     END
     soaMs = timestampMs() - t0;
 
-    checksum = soa s> SUM _.x + _.y;
+    checksum = soa |> SUM _.x + _.y;
     print("BENCH_RESULT: ${soaMs.toString()} ms");
     print("SOA layout (${n.toString()} particles x ${iterations.toString()} iters)");
     print("  SOA:         ${soaMs.toString()} ms");

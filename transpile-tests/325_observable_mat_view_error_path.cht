@@ -13,7 +13,7 @@ FN runMatViewWithRaise(early: Bool) RETURNS !Int64 ->
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 8_i64 DO YIELD i MOD 3_i64; i = i + 1_i64; END
     };
-    running: ~Int64[]@set:observable = gen s> DISTINCT _;
+    running: ~Int64[]@set:observable = gen |> DISTINCT _;
     WITH MATERIALIZED VIEW running AS snap {
         -- Owned []Int64 snap. If `early` is TRUE, raise BEFORE the
         -- block returns normally. The cleanup template must still

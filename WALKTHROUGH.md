@@ -325,17 +325,17 @@ p = Pair<Int64>{ first: 1, second: 2 };
 
 ## 9. Higher-Order Functions & Error Handling
 
-CLEAR supports powerful functional pipelines via the Smooth operator `s>`.
+CLEAR supports powerful functional pipelines via the Smooth operator `|>`.
 
 ```ruby clear illustrative
 -- 1. Pipelines: Filter, Aggregate, Transform
-alive = entities s> WHERE _.health > 0;
-total = scores s> SUM _.value;
-names = users s> SELECT _.name;
+alive = entities |> WHERE _.health > 0;
+total = scores |> SUM _.value;
+names = users |> SELECT _.name;
 
 -- 2. Side effects & Function Piping
-entities s> EACH { _.x += _.vx; };
-result = data s> process s> validate s> format;
+entities |> EACH { _.x += _.vx; };
+result = data |> process |> validate |> format;
 
 -- 3. Error Handling: Inline OR / OR RAISE
 val = parseInt("abc") OR 0;                         -- OKAY: Fallback value
@@ -561,7 +561,7 @@ DO {
 }
 
 -- CONCURRENT: Parallel pipelines
-results = items s> CONCURRENT(workers: 8) SELECT transform(_);
+results = items |> CONCURRENT(workers: 8) SELECT transform(_);
 ```
 
 ### BG Stack Modifiers
@@ -782,10 +782,10 @@ END
 
 | Sigil | Meaning | Example |
 |---|---|---|
-| `@` | Capability / pipeline binding | `value @shared`, `s> process AS @p` |
+| `@` | Capability / pipeline binding | `value @shared`, `|> process AS @p` |
 | `!` | Mutation suffix | `FN increment!(...)` |
-| `s>` | Smooth operator (pipeline) | `items s> WHERE _ > 5` |
-| `_` | Pipeline element placeholder | `s> SELECT _.name` |
+| `|>` | Smooth operator (pipeline) | `items |> WHERE _ > 5` |
+| `_` | Pipeline element placeholder | `|> SELECT _.name` |
 | `!T` | Error union type | `RETURNS !Float64` |
 | `?T` | Optional type | `RETURNS ?User` |
 | `~T` | Promise / stream type | `p: ~Int64 = BG { 42; }` |

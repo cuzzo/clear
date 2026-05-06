@@ -1,5 +1,5 @@
 -- UNNEST test with struct field accessor pattern
--- This is the most common use case: list s> UNNEST _.field
+-- This is the most common use case: list |> UNNEST _.field
 
 STRUCT Item { id: Int64, tags: Int64[] }
 
@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
   items.append(item3);
 
   -- Test UNNEST: flatten all tags from all items
-  all_tags = items s> UNNEST _.tags;
+  all_tags = items |> UNNEST _.tags;
 
   ASSERT all_tags.length() == 6, "Should have 6 tags total";
   ASSERT all_tags[0] == 10, "First should be 10";

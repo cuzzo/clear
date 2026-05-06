@@ -28,7 +28,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    gen s> CONCURRENT(capacity: 64) EACH {
+    gen |> CONCURRENT(capacity: 64) EACH {
         h = processItem(_);
         WITH EXCLUSIVE acc AS a {
             a.value = a.value %+ h;

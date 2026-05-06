@@ -24,37 +24,37 @@ FN main() RETURNS Void ->
     -- -------------------------------------------------------
     -- Test 1: SELECT — scale all readings by 0.1
     -- -------------------------------------------------------
-    scaled = readings s> SELECT _ * 0.1;
+    scaled = readings |> SELECT _ * 0.1;
     ASSERT scaled.length() == 1000, "SELECT preserves length";
 
     -- -------------------------------------------------------
     -- Test 2: WHERE — filter readings above threshold
     -- -------------------------------------------------------
-    high = readings s> WHERE _ > 500.0;
-    low = readings s> WHERE _ <= 500.0;
+    high = readings |> WHERE _ > 500.0;
+    low = readings |> WHERE _ <= 500.0;
     ASSERT high.length() + low.length() == 1000, "WHERE partitions correctly";
 
     -- -------------------------------------------------------
     -- Test 3: Chained pipeline — SELECT then WHERE in one expression
     -- -------------------------------------------------------
-    filtered = readings s> SELECT _ * 2.0 s> WHERE _ > 500.0;
+    filtered = readings |> SELECT _ * 2.0 |> WHERE _ > 500.0;
     ASSERT filtered.length() > 0, "chained SELECT then WHERE";
 
     -- -------------------------------------------------------
     -- Test 3b: REDUCE — fold to sum
     -- -------------------------------------------------------
-    total = readings s> REDUCE(0.0) acc + _;
+    total = readings |> REDUCE(0.0) acc + _;
     ASSERT total > 0.0, "REDUCE sum is positive";
 
     -- -------------------------------------------------------
     -- Test 4: Aggregation operators
     -- -------------------------------------------------------
-    s = readings s> SUM _;
+    s = readings |> SUM _;
     ASSERT s > 0.0, "SUM is positive";
-    avg = readings s> AVERAGE _;
+    avg = readings |> AVERAGE _;
     ASSERT avg > 0.0, "AVERAGE is positive";
-    mn = readings s> MIN _;
-    mx = readings s> MAX _;
+    mn = readings |> MIN _;
+    mx = readings |> MAX _;
     ASSERT mn <= avg, "MIN <= AVERAGE";
     ASSERT mx >= avg, "MAX >= AVERAGE";
 
@@ -62,13 +62,13 @@ FN main() RETURNS Void ->
     -- Test 5: CONCURRENT SELECT — parallel transform
     -- -------------------------------------------------------
     small = generateReadings(100, 7);
-    doubled = small s> CONCURRENT(workers: 4) SELECT _ * 2.0;
+    doubled = small |> CONCURRENT(workers: 4) SELECT _ * 2.0;
     ASSERT doubled.length() == 100, "CONCURRENT SELECT preserves length";
 
     -- -------------------------------------------------------
     -- Test 6: CONCURRENT WHERE — parallel filter
     -- -------------------------------------------------------
-    filtered2 = small s> CONCURRENT(workers: 4) WHERE _ > 300.0;
+    filtered2 = small |> CONCURRENT(workers: 4) WHERE _ > 300.0;
     ASSERT filtered2.length() > 0, "CONCURRENT WHERE produces results";
     ASSERT filtered2.length() < 100, "CONCURRENT WHERE filters some items";
 
@@ -77,7 +77,7 @@ FN main() RETURNS Void ->
     -- -------------------------------------------------------
     MUTABLE buckets: HashMap<Int64>@sharded(4) = {};
     n = 200_i64;
-    (0..<n) s> SHARD("b:${toString(_ MOD 10)}", buckets) s> CONCURRENT EACH {
+    (0..<n) |> SHARD("b:${toString(_ MOD 10)}", buckets) |> CONCURRENT EACH {
         cur = buckets[_] OR 0_i64;
         buckets[_] = cur + 1;
     };

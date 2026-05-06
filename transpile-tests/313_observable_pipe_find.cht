@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running: ~?Int64@observable = gen s> FIND _ > 42_i64;
+    running: ~?Int64@observable = gen |> FIND _ > 42_i64;
     final = NEXT running;
 
     ASSERT final != NIL, "FIND should produce a value";

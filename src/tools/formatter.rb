@@ -27,7 +27,7 @@
 # Deferred to v1.2:
 #   - FN signature forced wrap when >120 chars (§3.1).
 #   - WITH forced wraps: 2+ captures, 1-cap >120, ON-clause shape (§3.2, §3.3).
-#   - Pipeline forced wraps incl. `s> RECOVER` extra indent (§3.4, §3.7).
+#   - Pipeline forced wraps incl. `|> RECOVER` extra indent (§3.4, §3.7).
 #   - Method chain forced wrap (§3.5).
 #   - Pipeline/chain assignment drop when first line >80 (§3.6).
 #
@@ -65,7 +65,7 @@ class Formatter
   ].to_set.freeze
 
   EXPR_START_OPS = %w[
-    == != <= >= && || ** += -= *= /= :: -> s>
+    == != <= >= && || ** += -= *= /= :: -> |>
     .. ..< ..<= ..= %* %+ %- !* !+ !-
   ].to_set.freeze
 
@@ -136,7 +136,7 @@ class Formatter::FormatLexer
       when @s.peek(1) == '"'
         raw = consume_string
         push(:STRING, raw, sl, sc)
-      when m = @s.scan(/->|s>|==|!=|>=|<=|&&|\|\||\*\*|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
+      when m = @s.scan(/->|\|>|==|!=|>=|<=|&&|\|\||\*\*|\+=|-=|\*=|\/=|::|\.\.<=|\.\.=|\.\.<|\.\.\.|\.\.|%\*|%\+|%-|!\*|!\+|!-/)
         push(:OP, m, sl, sc)
       when m = @s.scan(/[=+\-*\/<>&|!.,;(){}\[\]:?~%]/)
         push(:SYM, m, sl, sc)
@@ -1110,7 +1110,7 @@ class Formatter::Emitter
        ORDER_BY LIMIT SKIP UNNEST DISTINCT TAP TAKE_WHILE WINDOW JOIN SHARD].include?(raw)
   end
 
-  # Stage ends at the next `s>` at the SAME depth, a `;`, or an unmatched
+  # Stage ends at the next `|>` at the SAME depth, a `;`, or an unmatched
   # closing bracket. Inside nested `{}` / `()` the content is opaque.
   def find_concurrent_stage_end(toks, start)
     depth = 0
@@ -1126,7 +1126,7 @@ class Formatter::Emitter
         when ';'
           return j if depth == 0
         end
-      elsif t.type == :OP && t.raw == 's>' && depth == 0
+      elsif t.type == :OP && t.raw == '|>' && depth == 0
         return j
       end
       j += 1
@@ -1483,16 +1483,16 @@ class Formatter::Emitter
 
   # ---- Pipeline forced wraps (§3.4, §3.7) --------------------------------
   #
-  # When a pipeline chain has 2+ `s>` stages (at the same expression depth,
+  # When a pipeline chain has 2+ `|>` stages (at the same expression depth,
   # before any `;` / `,` / closing bracket), each stage renders on its own
   # line at +1 from the receiver.
   #
-  # `s> RECOVER(...)` gets one extra indent level relative to its sibling
-  # stages:  users s> a s> RECOVER(default) s> b  ->
+  # `|> RECOVER(...)` gets one extra indent level relative to its sibling
+  # stages:  users |> a |> RECOVER(default) |> b  ->
   #   users
-  #     s> a
-  #     s> RECOVER(default)    <-- +1 more
-  #     s> b
+  #     |> a
+  #     |> RECOVER(default)    <-- +1 more
+  #     |> b
   def expand_pipelines(toks)
     chains = find_s_chains(toks)
     return toks if chains.empty?
@@ -1519,7 +1519,7 @@ class Formatter::Emitter
     chains = []
     i = 0
     while i < toks.length
-      if toks[i].type == :OP && toks[i].raw == 's>'
+      if toks[i].type == :OP && toks[i].raw == '|>'
         s_idxs = [i]
         depth = 0
         j = i + 1
@@ -1537,7 +1537,7 @@ class Formatter::Emitter
             when ',', ';'
               break if depth == 0
             end
-          elsif t.type == :OP && t.raw == 's>' && depth == 0
+          elsif t.type == :OP && t.raw == '|>' && depth == 0
             s_idxs << j
           end
           j += 1
@@ -1567,7 +1567,7 @@ class Formatter::Emitter
   end
 
   # Emit a wrapped pipeline chain. Each stage on its own line at +1
-  # (relative to receiver). Stages that are `s> RECOVER(...)` get an
+  # (relative to receiver). Stages that are `|> RECOVER(...)` get an
   # additional +1. Strips source NLs inside stages so the canonical
   # layout wins regardless of the input layout.
   #
@@ -1590,7 +1590,7 @@ class Formatter::Emitter
       insert_nl(out) if k > 0
       out << phantom(:INDENT_OPEN) if recover
 
-      out << toks[s_idx]  # s>
+      out << toks[s_idx]  # |>
 
       (s_idx + 1 ... next_bound).each do |j|
         next if toks[j].type == :NL  # discard source NLs inside a stage

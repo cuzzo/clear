@@ -44,7 +44,7 @@ name = users[0];           -- "Alice"
 
 **Limitations**: Removing from the middle is O(N) (shift elements). Handles/pointers to elements are invalidated on reallocation. Not suitable for frequent insert/remove of interior elements.
 
-**Variant — sharded list**: `T[]@list:sharded(N)` splits the list into N shards for parallel pipeline operations (`s> EACH`, `s> SUM`). Each shard is an independent list. Round-robin distribution on append.
+**Variant — sharded list**: `T[]@list:sharded(N)` splits the list into N shards for parallel pipeline operations (`|> EACH`, `|> SUM`). Each shard is an independent list. Round-robin distribution on append.
 
 **Lazy inference**: `List[]` creates an untyped list. The element type is inferred from the first `append`:
 
@@ -222,7 +222,7 @@ Sharding splits the collection into N independent partitions. Each shard is a co
 - **Pools**: Round-robin distribution on `insert`. Handle encodes shard index in upper bits.
 - **Hash maps**: Key-based routing via `hash(key) % N`. Same key always maps to same shard.
 
-**Pipeline operations** (`s> EACH`, `s> SUM`, `s> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
+**Pipeline operations** (`|> EACH`, `|> SUM`, `|> WHERE`, etc.) process each shard in parallel via DO blocks — one fiber per shard, no contention between them.
 
 ### The DragonflyDB Model — Each Thread Owns Its Partition
 
@@ -244,7 +244,7 @@ n = 1000000;
 
 -- SHARD routes each key to the scheduler that owns its shard.
 -- CONCURRENT EACH runs one fiber per shard — zero locks, zero routing.
-(0..<n) s> SHARD("key:${toString(_)}", map) s> CONCURRENT EACH {
+(0..<n) |> SHARD("key:${toString(_)}", map) |> CONCURRENT EACH {
     map[_] = "value";
 };
 ```

@@ -375,14 +375,14 @@ RSpec.describe "./clear fix", :integration do
   end
 
   describe "operator-typo rule table" do
-    it "suggests `s>` for `|>`" do
-      src = "FN main() RETURNS Int64 ->\n  v = [1] s> SUM _;\n  RETURN v;\nEND\n"
-      # Swap the correct operator to `|>` to simulate the typo.
-      src = src.sub('s>', '|>')
+    it "suggests `|>` for `s>`" do
+      src = "FN main() RETURNS Int64 ->\n  v = [1] |> SUM _;\n  RETURN v;\nEND\n"
+      # Swap the correct operator to `s>` to simulate the typo.
+      src = src.sub('|>', 's>')
       path = write("op1.cht", src)
       out, _, _ = run_fix("--dry-run", path)
-      expect(out).to match(/Unknown operator `\|>`/)
-      expect(out).to match(/Replace `\|>` with `s>`/)
+      expect(out).to match(/Unknown operator `s>`/)
+      expect(out).to match(/Replace `s>` with `\|>`/)
     end
 
     it "suggests `->` for `=>`" do
@@ -401,8 +401,8 @@ RSpec.describe "./clear fix", :integration do
     it "ignores typo patterns inside strings and line comments" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          -- pipeline: |> and arrow: =>
-          msg = "|> and => in a string";
+          -- pipeline: s> and arrow: =>
+          msg = "s> and => in a string";
           RETURN;
         END
       CLEAR
@@ -411,17 +411,17 @@ RSpec.describe "./clear fix", :integration do
       expect(out).not_to match(/Unknown operator/)
     end
 
-    it "apply + build round-trip fixes a `|>` typo" do
+    it "apply + build round-trip fixes a `s>` typo" do
       src = <<~CLEAR
         FN main() RETURNS Int64 ->
-          total = [1, 2, 3] |> SUM _;
+          total = [1, 2, 3] s> SUM _;
           RETURN total;
         END
       CLEAR
       path = write("ops.cht", src)
       out, _, _ = run_fix(path)
       expect(out).to match(/applied 1 edit/)
-      expect(File.read(path)).to include("[1, 2, 3] s> SUM _")
+      expect(File.read(path)).to include("[1, 2, 3] |> SUM _")
       build_out = `#{CLEAR_BIN} build #{path} -o #{path}.bin 2>&1`
       expect($?.exitstatus).to eq(0), "build failed: #{build_out}"
     end

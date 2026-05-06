@@ -8,7 +8,7 @@ FN main() RETURNS Void ->
   ];
 
   -- INDEX: Group items by category
-  grouped = items s> INDEX _.category;
+  grouped = items |> INDEX _.category;
 
   -- Verify grouping
   fruits = grouped["fruit"];

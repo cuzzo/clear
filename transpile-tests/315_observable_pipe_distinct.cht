@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running: ~Int64[]@set:observable = gen s> DISTINCT _;
+    running: ~Int64[]@set:observable = gen |> DISTINCT _;
     final = NEXT running;
 
     -- 0..9 mod 3 yields {0, 1, 2} -- 3 unique items.

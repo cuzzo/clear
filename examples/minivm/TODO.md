@@ -59,7 +59,7 @@ CLEAR structs and unions lower to Scheme vectors and tagged pairs:
 |------|------|-------|
 | TCO: trampoline loop in `eval` | Medium | Convert tail-position calls to loop iterations. Without this, any recursive CLEAR program stack-overflows. |
 | `set!` for mutable bindings | Small | Walk scope chain, find binding, update in place. |
-| Error values + propagation | Large | New error Value variant. Check after every sub-eval, unwind on `RAISE`, catch on `s>`. Biggest single item. |
+| Error values + propagation | Large | New error Value variant. Check after every sub-eval, unwind on `RAISE`, catch on `|>`. Biggest single item. |
 | Growable env pool + cycle cleanup | Medium | Replace fixed 10,000-slot array. Handle Env->Lambda->Env reference cycles. |
 
 ### Tooling Hooks

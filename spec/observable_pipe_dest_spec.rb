@@ -6,7 +6,7 @@ require_relative "../src/ast/ast"
 # Pipeline-terminal observable wiring (Commit 3): the annotator must
 # accept the canonical user-facing form
 #
-#     running: ~Int64@observable = stream s> SUM _;
+#     running: ~Int64@observable = stream |> SUM _;
 #
 # without rejecting the assignment as a type mismatch. The pipe
 # BinaryOp gets `observable_dest = true` so pipeline_generator.rb
@@ -32,7 +32,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
   end
 
   # Innermost SUM/etc. pipe (where `observable_terminal` is stamped).
-  # `find_pipe` returns the OUTERMOST smooth (e.g. `... s> COLLECT`),
+  # `find_pipe` returns the OUTERMOST smooth (e.g. `... |> COLLECT`),
   # which is fine for COLLECT-checks but wrong for terminal-stamps.
   def find_first_sum_pipe(ast)
     pipes = []
@@ -51,7 +51,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
     pipes.first
   end
 
-  it "accepts `running: ~Int64@observable = gen s> SUM _;` (no type-mismatch)" do
+  it "accepts `running: ~Int64@observable = gen |> SUM _;` (no type-mismatch)" do
     src = <<~F
       FN main() RETURNS Void ->
           gen: ~?Int64[] = BG STREAM {
@@ -61,7 +61,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
                   i = i + 1_i64;
               END
           };
-          running: ~Int64@observable = gen s> SUM _;
+          running: ~Int64@observable = gen |> SUM _;
           _ = NEXT running;
           RETURN;
       END
@@ -79,7 +79,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
                   i = i + 1_i64;
               END
           };
-          running: ~Int64@observable = gen s> SUM _;
+          running: ~Int64@observable = gen |> SUM _;
           _ = NEXT running;
           RETURN;
       END
@@ -103,7 +103,7 @@ RSpec.describe "observable pipe destination (Commit 3)" do
                   i = i + 1_i64;
               END
           };
-          total = gen s> SUM _ s> COLLECT;
+          total = gen |> SUM _ |> COLLECT;
           _ = total;
           RETURN;
       END

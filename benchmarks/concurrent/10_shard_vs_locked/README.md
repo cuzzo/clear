@@ -6,7 +6,7 @@ uniform SET, uniform GET, mixed 80/20 (200K SET + 800K GET).
 ## The CLEAR feature: SHARD pipeline
 
 ```clear
-(0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT EACH {
+(0..<n) |> SHARD("key:" + toString(_), map) |> CONCURRENT EACH {
     map[_] = "value";
 };
 ```

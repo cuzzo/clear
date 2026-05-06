@@ -1,6 +1,6 @@
 -- Concurrent observable benchmark — CLEAR.
 --
--- The pipeline `gen s> SUM _` heap-allocates an `*ObservableSum(i64)`
+-- The pipeline `gen |> SUM _` heap-allocates an `*ObservableSum(i64)`
 -- and spawns a CONSUMER fiber that pulls from `gen` and calls
 -- `.add(item)` per emit. The consumer stays on the source scheduler
 -- so stream wakeups remain local; cross-scheduler stream wakeups are
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     };
 
     t0 = timestampMs();
-    running: ~Int64@observable = gen s> SUM _;
+    running: ~Int64@observable = gen |> SUM _;
     final = NEXT running;
     elapsed = timestampMs() - t0;
     checksum: Int64 = final + (n_writes * 131_i64);

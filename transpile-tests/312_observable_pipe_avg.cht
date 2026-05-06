@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running: ~Float64@observable = gen s> AVERAGE _;
+    running: ~Float64@observable = gen |> AVERAGE _;
     final = NEXT running;
 
     -- 0..9 sums to 45, count 10 → average 4.5

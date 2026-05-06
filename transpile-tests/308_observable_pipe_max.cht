@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running: ~Int64@observable = gen s> MAX _;
+    running: ~Int64@observable = gen |> MAX _;
     final = NEXT running;
 
     ASSERT final == 99_i64, "running max mismatch";

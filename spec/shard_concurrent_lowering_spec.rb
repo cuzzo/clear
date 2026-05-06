@@ -5,7 +5,7 @@ RSpec.describe "SHARD + CONCURRENT EACH lowering" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
           MUTABLE counts: HashMap<Int64, Int64>@sharded(4) = {};
-          (0..<16_i64) s> SHARD(_ MOD 4_i64, counts) s> CONCURRENT EACH {
+          (0..<16_i64) |> SHARD(_ MOD 4_i64, counts) |> CONCURRENT EACH {
               counts[_] = (counts[_] OR 0_i64) + 1_i64;
           };
       END

@@ -23,8 +23,8 @@ RSpec.describe SemanticAnnotator do
   let(:ast) { run(code) }
   let(:result) { ast.statements.last.resolved_type }
 
-  describe "Smooth Operator (s>)" do
-    context "when piping to a Function Call: x s> f()" do
+  describe "Smooth Operator (|>)" do
+    context "when piping to a Function Call: x |> f()" do
       let(:code) {
         <<~FLUX
           -- Define function that returns a Float64
@@ -33,7 +33,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Pipe 1 (Float64) into identity()
-          result = 1 s> identity();
+          result = 1 |> identity();
         FLUX
       }
 
@@ -42,7 +42,7 @@ RSpec.describe SemanticAnnotator do
       end
    end
 
-   context "when piping to a Function Call: x s> f()" do
+   context "when piping to a Function Call: x |> f()" do
      let(:code) {
         <<~FLUX
           FN add(a: Float64, b: Float64) RETURNS Float64 ->
@@ -50,7 +50,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- 1 is 'a', 2 is 'b'
-          result = 1 s> add(2);
+          result = 1 |> add(2);
         FLUX
      }
 
@@ -59,7 +59,7 @@ RSpec.describe SemanticAnnotator do
      end
    end
 
-   context "when piping to a Function Call: x s> f()" do
+   context "when piping to a Function Call: x |> f()" do
      let(:code) {
         <<~FLUX
           FN require_string(s: String) RETURNS Bool ->
@@ -67,7 +67,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Passing Float64 (1) into String expectation
-          result = 1 s> require_string();
+          result = 1 |> require_string();
         FLUX
       }
 
@@ -76,7 +76,7 @@ RSpec.describe SemanticAnnotator do
       end
     end
 
-    context "when piping to an Identifier: x s> f" do
+    context "when piping to an Identifier: x |> f" do
       let(:code) {
         <<~FLUX
           FN identity(n: Float64) RETURNS Float64 ->
@@ -84,7 +84,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Pipe to identifier 'identity' without parens
-          result = 1 s> identity;
+          result = 1 |> identity;
         FLUX
       }
 
@@ -94,7 +94,7 @@ RSpec.describe SemanticAnnotator do
     end
 
 
-    context "when piping to an Identifier: x s> f" do
+    context "when piping to an Identifier: x |> f" do
       let(:code) {
         <<~FLUX
           FN add(a: Float64, b: Float64) RETURNS Float64 ->
@@ -102,7 +102,7 @@ RSpec.describe SemanticAnnotator do
           END
 
           -- Pipe 1 to add. 'add' needs 2 args. We only provided 1 (via pipe).
-          result = 1 s> add;
+          result = 1 |> add;
         FLUX
       }
 
@@ -114,7 +114,7 @@ RSpec.describe SemanticAnnotator do
     context "when piping to Native/Intrinsics" do
       let(:code) {
         <<~FLUX
-          x = 10 s> print();
+          x = 10 |> print();
         FLUX
       }
 
@@ -132,8 +132,8 @@ RSpec.describe SemanticAnnotator do
 
           -- Float64 -> Float64 -> Bool
           result = 5
-            s> double()
-            s> to_bool();
+            |> double()
+            |> to_bool();
         FLUX
       }
 
@@ -149,7 +149,7 @@ RSpec.describe SemanticAnnotator do
           FN s2(n: Float64) -> RETURN n * 2; END
           FN s3(n: Float64) -> RETURN n + 5; END
 
-          result = s1() s> s2 s> s3;
+          result = s1() |> s2 |> s3;
         FLUX
       }
 

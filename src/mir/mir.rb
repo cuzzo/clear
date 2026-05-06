@@ -1513,11 +1513,11 @@ module MIR
     # body so the values survive across the BC_CALL boundary.
   end
 
-  # Pipeline IR node. Wraps the pre-computed MIR output of a s> chain.
+  # Pipeline IR node. Wraps the pre-computed MIR output of a |> chain.
   # Phase 1: inner carries old-path MIR (RawZig or MIR tree); all other fields nil.
   # Future phases: source_type, stages, sink, sink_alloc encode streaming structure.
   #
-  # ast_node:    original s> BinaryOp AST node
+  # ast_node:    original |> BinaryOp AST node
   # inner:       pre-computed MIR from existing paths (Phase 1), nil in Phase 2+
   # source_type: :range/:slice/:list/:pool/:sharded/:inf_stream (Phase 2+)
   # stages:      Array of stage descriptors (Phase 3+)

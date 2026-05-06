@@ -1163,7 +1163,7 @@ private
     clause[:filter_messages] = filter_messages
   end
 
-  # Collect input types from pipeline s> steps that can fail.
+  # Collect input types from pipeline |> steps that can fail.
   def collect_pipe_input_types(body, types)
     body.each do |stmt|
       walk_ast(stmt) do |node|
@@ -2640,7 +2640,7 @@ private
   # Pipeline-terminal observable detection (Commit 3 of the
   # observable wiring). When the bind site has shape:
   #
-  #   running: ~Int64@observable = stream s> SUM _;
+  #   running: ~Int64@observable = stream |> SUM _;
   #
   # Phase 2.2 already stamped `observable_terminal = true` on the
   # pipe BinaryOp. Here we lift the pipe's apparent type from
@@ -2732,7 +2732,7 @@ private
       ok = pipe.is_a?(AST::BinaryOp) && pipe.op == :SMOOTH && pipe.observable_dest
       unless ok
         msg = "`~T@observable` bindings must be initialized by a pipeline-terminal fold " \
-              "over a tense stream (e.g. `running: ~Int64@observable = stream s> SUM _`). " \
+              "over a tense stream (e.g. `running: ~Int64@observable = stream |> SUM _`). " \
               "The producer fiber, atomic accumulator, and WaitGroup wiring all live in " \
               "the fold's codegen path -- a bare declaration or a non-fold initializer has " \
               "no producer, so NEXT/COLLECT would deadlock and cleanup would touch an " \
@@ -2847,7 +2847,7 @@ private
     # existing Lockdown 2/3 checks (BG capture / struct+collection
     # store) fire automatically once non_escaping is set; RETURN is
     # rejected by visit_ReturnNode's non_escaping guard. Users get the
-    # value out via `s> COLLECT` (joins + extracts scalar) or
+    # value out via `|> COLLECT` (joins + extracts scalar) or
     # `WITH MATERIALIZED VIEW` (deep-copy snapshot).
     if node.type_info&.observable?
       node.symbol.non_escaping = true
@@ -2976,7 +2976,7 @@ private
   def visit_Identifier(node)
     predicate_identifier_allowed!(node)
 
-    # Pipeline expressions (inside s>) are closures over the enclosing scope —
+    # Pipeline expressions (inside |>) are closures over the enclosing scope —
     # lookup_scope_for searches all scopes. Normal code uses resolve_variable_scope
     # which restricts to local scope + function-as-value references.
     scope = @smooth_depth > 0 ? lookup_scope_for(node.name) : resolve_variable_scope(node.name)

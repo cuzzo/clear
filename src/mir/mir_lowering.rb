@@ -4730,7 +4730,7 @@ class MIRLowering
   end
 
   def lower_binary_op(node)
-    # Pipeline operator: x s> f -> f(x), or complex pipeline ops
+    # Pipeline operator: x |> f -> f(x), or complex pipeline ops
     return lower_smooth(node) if node.op == :SMOOTH
 
     # Error chain: expr OR handler
@@ -4962,7 +4962,7 @@ class MIRLowering
       return MIR::Pipeline.new(node, inner, source_type, nil, nil, nil)
     end
 
-    # COLLECT: x s> COLLECT -> joins the observable + destroys the heap
+    # COLLECT: x |> COLLECT -> joins the observable + destroys the heap
     # allocation when `x` is an inline sub-expression (no binding owns
     # cleanup). When `x` is a named binding, the binding's
     # `:observable` cleanup entry handles destroy at scope exit;
@@ -4977,8 +4977,8 @@ class MIRLowering
       # Collection observable (DISTINCT producing `~T[]@set:observable`):
       # COLLECT must yield an owned ArrayList(T), not the StreamSetSnapshot
       # that `next()` returns. Mirrors lower_next_expr's collection branch
-      # so `final = stream s> DISTINCT _ s> COLLECT` and `final = NEXT
-      # (stream s> DISTINCT _)` produce the same shape.
+      # so `final = stream |> DISTINCT _ |> COLLECT` and `final = NEXT
+      # (stream |> DISTINCT _)` produce the same shape.
       collect_method = (ft && ft.observable? && ft.tense_type&.array?) ? "materializeNext" : "next"
       collect_args = collect_method == "materializeNext" ?
         [MIR::InlineZig.new("#{@rt_name}.heapAlloc()", "obs_alloc")] : []
@@ -5015,14 +5015,14 @@ class MIRLowering
       ])
     end
 
-    # RecoverOp: x s> RECOVER(default) -> (x catch default)
+    # RecoverOp: x |> RECOVER(default) -> (x catch default)
     if rhs.is_a?(AST::RecoverOp)
       left = lower(node.left)
       default_val = lower(rhs.default_expr)
       return MIR::TryCatch.new(strip_try(left), default_val, nil)
     end
 
-    # Simple pipe: x s> f -> f(x) or x s> f(y) -> f(x, y)
+    # Simple pipe: x |> f -> f(x) or x |> f(y) -> f(x, y)
     left = lower(node.left)
     left_zig = emit_expr(left)
 
@@ -5049,14 +5049,14 @@ class MIRLowering
     end
 
     call_mir = if rhs.is_a?(AST::Identifier)
-      # x s> f -> f(x)
+      # x |> f -> f(x)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left])
       synthetic.full_type = node.full_type
       synthetic.storage = node.storage if node.respond_to?(:storage)
       synthetic.zig_pattern = rhs.zig_pattern if rhs.respond_to?(:zig_pattern) && rhs.zig_pattern
       lower_func_call(synthetic)
     elsif rhs.is_a?(AST::FuncCall)
-      # x s> f(y) -> f(x, y)
+      # x |> f(y) -> f(x, y)
       synthetic = AST::FuncCall.new(rhs.token, rhs.name, [node.left] + rhs.args)
       synthetic.full_type = node.full_type || rhs.full_type
       synthetic.storage = node.storage if node.respond_to?(:storage)

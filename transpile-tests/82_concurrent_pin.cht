@@ -7,8 +7,8 @@ END
 
 FN main() RETURNS Void ->
     items = [Work{value: 1.0}, Work{value: 2.0}, Work{value: 3.0}];
-    results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT compute(_);
-    total = results s> SUM _;
+    results = items |> CONCURRENT(workers: 2, parallel: TRUE) SELECT compute(_);
+    total = results |> SUM _;
     ASSERT total == 18.0, "parallel: TRUE should still produce correct results";
     RETURN;
 END

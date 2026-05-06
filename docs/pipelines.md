@@ -1,6 +1,6 @@
 # Pipelines and Higher-Order Functions
 
-CLEAR's pipeline system lets you transform, filter, aggregate, and iterate collections using the smooth operator (`s>`).
+CLEAR's pipeline system lets you transform, filter, aggregate, and iterate collections using the smooth operator (`|>`).
 
 Every pipeline operator works on arrays, `@list`, `@pool`, sharded collections, `@pool:soa`, streams `~T[]`, etc - the same syntax regardless of the underlying storage.
 
@@ -8,33 +8,33 @@ Every pipeline operator works on arrays, `@list`, `@pool`, sharded collections, 
 
 ```ruby clear illustrative
 scores
-  s> WHERE _ <= 50 
-  s> SUM _;
+  |> WHERE _ <= 50 
+  |> SUM _;
 
 users 
-  s> SELECT _.name 
-  s> DISTINCT _;
+  |> SELECT _.name 
+  |> DISTINCT _;
   
 entities 
-  s> EACH { _.health = _.health - 1.0; };
+  |> EACH { _.health = _.health - 1.0; };
 ```
 
 This document describes both the collection pipeline model and the stream/future pipeline surface. The full operator set is supported for finite streams (`~T[]`, `~T[N]`); infinite streams (`~T[INF]`) require `LIMIT` to bound them and then support all non-materialization operators.
 
-## The Smooth Operator (`s>`)
+## The Smooth Operator (`|>`)
 
-`s>` pipes a value into a function or operator. It's CLEAR's equivalent of `|>` (Elixir) or `.` method chaining (Ruby), but it also works with collection operators.
+`|>` pipes a value into a function or operator. It's CLEAR's equivalent of `|>` (Elixir) or `.` method chaining (Ruby), but it also works with collection operators.
 
 ```ruby clear illustrative
--- Pipe to a function: x s> f  →  f(x)
+-- Pipe to a function: x |> f  →  f(x)
 result = data 
-  s> process 
-  s> validate
-  s> format;
+  |> process 
+  |> validate
+  |> format;
 
--- Pipe to an operator: list s> WHERE predicate
+-- Pipe to an operator: list |> WHERE predicate
 alive = entities 
-  s> WHERE _.health > 0;
+  |> WHERE _.health > 0;
 ```
 
 Pipelines chain left to right. Each stage passes its result to the next.
@@ -45,8 +45,8 @@ The `AS @v` syntax binds the current pipeline element to a named reference that 
 
 ```ruby clear illustrative
 bill = users AS @u
-  s> UNNEST @u.orders
-  s> SUM _.price * @u.discount;
+  |> UNNEST @u.orders
+  |> SUM _.price * @u.discount;
 ```
 
 ### Why bindings exist
@@ -57,16 +57,16 @@ Without a binding, `_` always refers to the *current* element - the item being i
 -- Without AS @u: @u is not available inside the fold.
 -- `_` after UNNEST is the Order, not the User.
 bill = users
-  s> UNNEST _.orders
-  s> SUM _.price;         -- can access order.price, but NOT user.discount
+  |> UNNEST _.orders
+  |> SUM _.price;         -- can access order.price, but NOT user.discount
 ```
 
 `AS @u` captures the outer element before the `UNNEST` replaces `_`, keeping it accessible:
 
 ```ruby clear illustrative
 bill = users AS @u
-  s> UNNEST @u.orders     -- @u = the User; _ = each Order
-  s> SUM _.price * @u.discount;  -- cross-reference: order.price * user.discount
+  |> UNNEST @u.orders     -- @u = the User; _ = each Order
+  |> SUM _.price * @u.discount;  -- cross-reference: order.price * user.discount
 ```
 
 The compiler fuses this into a single nested loop with no intermediate allocations.
@@ -77,9 +77,9 @@ A binding created with `AS @v` is visible from the point of declaration to the e
 
 ```ruby clear illustrative
 bill = users AS @u
-  s> UNNEST @u.orders   -- @u is in scope
-  s> WHERE _.qty > 1    -- @u still in scope
-  s> SUM _.price * @u.discount;  -- @u still in scope
+  |> UNNEST @u.orders   -- @u is in scope
+  |> WHERE _.qty > 1    -- @u still in scope
+  |> SUM _.price * @u.discount;  -- @u still in scope
 
 -- @u is not accessible here (out of scope after the pipeline ends)
 ```
@@ -92,34 +92,34 @@ When you UNNEST and need a name for the inner element (instead of `_`), use a se
 
 ```ruby clear illustrative
 bill = users AS @u
-  s> UNNEST @u.orders AS @o    -- @u = User, @o = Order
-  s> SUM @o.price * @u.discount;
+  |> UNNEST @u.orders AS @o    -- @u = User, @o = Order
+  |> SUM @o.price * @u.discount;
 ```
 
 `AS @o` after the UNNEST expression binds the inner element. Both `@u` and `@o` are available in the fold.
 
 ### Supported combinations
 
-**UNNEST binding chains** - fold operators that work after `AS @u s> UNNEST`:
+**UNNEST binding chains** - fold operators that work after `AS @u |> UNNEST`:
 
 | Fold | Example |
 |---|---|
-| SUM | `s> SUM _.price * @u.discount` |
-| COUNT | `s> COUNT TRUE` |
-| AVERAGE | `s> AVERAGE _.price` |
-| MIN | `s> MIN _.price` |
-| MAX | `s> MAX _.price` |
-| ANY | `s> ANY _.price > 50.0` |
-| ALL | `s> ALL @u.discount > 0.0` |
-| FIND | `s> FIND _.price > 10.0` (returns `?ElemType`) |
+| SUM | `|> SUM _.price * @u.discount` |
+| COUNT | `|> COUNT TRUE` |
+| AVERAGE | `|> AVERAGE _.price` |
+| MIN | `|> MIN _.price` |
+| MAX | `|> MAX _.price` |
+| ANY | `|> ANY _.price > 50.0` |
+| ALL | `|> ALL @u.discount > 0.0` |
+| FIND | `|> FIND _.price > 10.0` (returns `?ElemType`) |
 
 Intermediate `WHERE` stages filter the inner elements before the fold:
 
 ```ruby clear illustrative
 total = users AS @u
-  s> UNNEST @u.orders
-  s> WHERE _.qty > 1        -- filter inner elements
-  s> SUM _.price * @u.discount;
+  |> UNNEST @u.orders
+  |> WHERE _.qty > 1        -- filter inner elements
+  |> SUM _.price * @u.discount;
 ```
 
 `SELECT` is not supported in UNNEST binding chains (the inner projection would lose the `@u` context). Use field access in the fold expression instead.
@@ -128,13 +128,13 @@ total = users AS @u
 
 | Operator | Example |
 |---|---|
-| CONCURRENT SELECT | `AS @u s> CONCURRENT SELECT @u.val * 2.0` |
-| CONCURRENT SUM | `AS @u s> CONCURRENT SUM @u.score` |
-| CONCURRENT COUNT | `AS @u s> CONCURRENT COUNT @u.active` |
-| CONCURRENT MIN | `AS @u s> CONCURRENT MIN @u.score` |
-| CONCURRENT MAX | `AS @u s> CONCURRENT MAX @u.score` |
-| CONCURRENT AVERAGE | `AS @u s> CONCURRENT AVERAGE @u.score` |
-| CONCURRENT WHERE | `AS @u s> CONCURRENT WHERE @u.score > 50.0` |
+| CONCURRENT SELECT | `AS @u |> CONCURRENT SELECT @u.val * 2.0` |
+| CONCURRENT SUM | `AS @u |> CONCURRENT SUM @u.score` |
+| CONCURRENT COUNT | `AS @u |> CONCURRENT COUNT @u.active` |
+| CONCURRENT MIN | `AS @u |> CONCURRENT MIN @u.score` |
+| CONCURRENT MAX | `AS @u |> CONCURRENT MAX @u.score` |
+| CONCURRENT AVERAGE | `AS @u |> CONCURRENT AVERAGE @u.score` |
+| CONCURRENT WHERE | `AS @u |> CONCURRENT WHERE @u.score > 50.0` |
 
 In all concurrent cases, `@u` resolves to the item being processed by the current worker.
 
@@ -147,7 +147,7 @@ Inside pipeline expressions, `_` refers to the current element. For struct eleme
 nums: Float64[] = [1.0, 3.0, 7.0, 9.0];
 
 big = nums 
-  s> WHERE _ > 5.0;
+  |> WHERE _ > 5.0;
 
 ASSERT length(big) == 2, "WHERE filters by element value";
 
@@ -155,12 +155,12 @@ ASSERT length(big) == 2, "WHERE filters by element value";
 users = [User{name: "alice"}, User{name: "bob"}];
 
 names = users
-  s> SELECT _.name;
+  |> SELECT _.name;
 
 scores = [Score{value: 10.0}, Score{value: 20.0}];
 
 total = scores 
-  s> SUM _.value;
+  |> SUM _.value;
 
 ASSERT total == 30.0, "SUM aggregates field values";
 ```
@@ -169,7 +169,7 @@ In EACH blocks, `_` is mutable — you can assign to fields:
 
 ```ruby clear illustrative
 pool 
-  s> EACH { _.health = _.health - damage; };
+  |> EACH { _.health = _.health - damage; };
 ```
 
 ## Operators
@@ -178,14 +178,14 @@ pool
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
-| **SELECT** | `list s> SELECT expr` | `ExprType[]` | Project each element through an expression |
-| **WHERE** | `list s> WHERE pred` | `ElemType[]` | Keep elements matching a boolean predicate |
-| **ORDER_BY** | `list s> ORDER_BY key` | `ElemType[]` | Sort by key expression |
-| **LIMIT** | `list s> LIMIT n` | `ElemType[]` | First N elements |
-| **SKIP** | `list s> SKIP n` | `ElemType[]` | Drop first N elements, return rest |
-| **DISTINCT** | `list s> DISTINCT key` | `ElemType[]` | Unique by key (first occurrence wins) |
-| **UNNEST** | `list s> UNNEST expr` | `InnerType[]` | Flatten nested arrays (flatmap) |
-| **INDEX** | `list s> INDEX key` | `HashMap<ElemType[]>` | Group into a hashmap by key |
+| **SELECT** | `list |> SELECT expr` | `ExprType[]` | Project each element through an expression |
+| **WHERE** | `list |> WHERE pred` | `ElemType[]` | Keep elements matching a boolean predicate |
+| **ORDER_BY** | `list |> ORDER_BY key` | `ElemType[]` | Sort by key expression |
+| **LIMIT** | `list |> LIMIT n` | `ElemType[]` | First N elements |
+| **SKIP** | `list |> SKIP n` | `ElemType[]` | Drop first N elements, return rest |
+| **DISTINCT** | `list |> DISTINCT key` | `ElemType[]` | Unique by key (first occurrence wins) |
+| **UNNEST** | `list |> UNNEST expr` | `InnerType[]` | Flatten nested arrays (flatmap) |
+| **INDEX** | `list |> INDEX key` | `HashMap<ElemType[]>` | Group into a hashmap by key |
 
 SELECT accepts any expression, including struct literals. This lets you project into a different struct type in one step:
 
@@ -195,7 +195,7 @@ STRUCT Summary { key: Int64, normalized: Float64 }
 
 raws: Raw[] = [Raw{ id: 1, score: 100.0 }, Raw{ id: 2, score: 200.0 }];
 
-summaries = raws s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
+summaries = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
 
 ASSERT summaries[0].key == 1, "id preserved";
 ASSERT summaries[1].normalized == 2.0, "score normalized";
@@ -207,13 +207,13 @@ The result type is inferred from the expression - `Summary[]` above, not `Raw[]`
 
 ```ruby clear
 -- WHERE before SELECT: filter on the raw element (efficient)
-high = raws s> WHERE _.score > 75.0 s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
+high = raws |> WHERE _.score > 75.0 |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
 
 -- SELECT before aggregate: project then sum/min/max a field
-total = raws s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } s> SUM _.normalized;
+total = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } |> SUM _.normalized;
 
 -- SELECT before WHERE: build struct first, then filter on a struct field (less efficient)
-norm_high = raws s> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } s> WHERE _.normalized > 0.75;
+norm_high = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } |> WHERE _.normalized > 0.75;
 ```
 
 When SELECT precedes a fold or WHERE, the compiler binds the projected value to a temp variable per iteration. This avoids the Zig restriction on struct literals in arithmetic/boolean expression positions, so the generated code is always valid without changing semantics.
@@ -222,11 +222,11 @@ When SELECT precedes a fold or WHERE, the compiler binds the projected value to 
 
 | Operator | Syntax | Returns | Empty list |
 |---|---|---|---|
-| **SUM** | `list s> SUM expr` | Int64 / UInt64 / Float32 / Float64 | 0 |
-| **AVERAGE** | `list s> AVERAGE expr` | `Float64` | 0 |
-| **MIN** | `list s> MIN expr` | matches expr type | panics |
-| **MAX** | `list s> MAX expr` | matches expr type | panics |
-| **REDUCE** | `list s> REDUCE(init) expr` | type of init | init |
+| **SUM** | `list |> SUM expr` | Int64 / UInt64 / Float32 / Float64 | 0 |
+| **AVERAGE** | `list |> AVERAGE expr` | `Float64` | 0 |
+| **MIN** | `list |> MIN expr` | matches expr type | panics |
+| **MAX** | `list |> MAX expr` | matches expr type | panics |
+| **REDUCE** | `list |> REDUCE(init) expr` | type of init | init |
 
 The return type is driven by the expression type. SUM widens small integers to `Int64`/`UInt64`; floats stay at their original width (`Float32` stays `Float32`). AVERAGE always returns `Float64`. MIN and MAX preserve the exact expression type. REDUCE is the general fold - `acc` is the mutable accumulator, `_` is the current element:
 
@@ -234,7 +234,7 @@ The return type is driven by the expression type. SUM widens small integers to `
 nums: Float64[] = [2.0, 3.0, 4.0];
 
 product = nums 
-  s> REDUCE(1.0) acc * _;
+  |> REDUCE(1.0) acc * _;
 
 ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 ```
@@ -243,23 +243,23 @@ ASSERT product == 24.0, "REDUCE multiplies 2*3*4";
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
-| **COUNT** | `list s> COUNT pred` | `Int64` | Number of matches |
-| **ANY** | `list s> ANY pred` | `Bool` | True if any match (short-circuits) |
-| **ALL** | `list s> ALL pred` | `Bool` | True if all match (short-circuits) |
-| **FIND** | `list s> FIND pred` | `?ElemType` | First match or null |
+| **COUNT** | `list |> COUNT pred` | `Int64` | Number of matches |
+| **ANY** | `list |> ANY pred` | `Bool` | True if any match (short-circuits) |
+| **ALL** | `list |> ALL pred` | `Bool` | True if all match (short-circuits) |
+| **FIND** | `list |> FIND pred` | `?ElemType` | First match or null |
 
 ### Side Effects
 
 | Operator | Syntax | Returns | Description |
 |---|---|---|---|
-| **EACH** | `list s> EACH { body }` | `Void` | Iterate with mutable `_`; side-effect only |
-| **TAP** | `list s> TAP { body }` | `ElemType[]` | Observe each element (read-only `_`), pass collection through |
+| **EACH** | `list |> EACH { body }` | `Void` | Iterate with mutable `_`; side-effect only |
+| **TAP** | `list |> TAP { body }` | `ElemType[]` | Observe each element (read-only `_`), pass collection through |
 
 EACH is the only operator where `_` is mutable. Use it for in-place updates:
 
 ```ruby clear illustrative
 entities 
-  s> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
+  |> EACH { _.x = _.x + _.vx; _.y = _.y + _.vy; };
 ```
 
 ### TAP (Debugging / Observation)
@@ -268,9 +268,9 @@ TAP runs a body for each element but passes the collection through unchanged. Un
 
 ```ruby clear illustrative
 result = scores
-    s> WHERE _.points > 100
-    s> TAP { print("score: ${_.points.toString()}"); }
-    s> SUM _.points;
+    |> WHERE _.points > 100
+    |> TAP { print("score: ${_.points.toString()}"); }
+    |> SUM _.points;
 ```
 
 ### WINDOW (Sliding Window)
@@ -281,11 +281,11 @@ WINDOW produces a sliding window of size N over the collection. `_` inside the b
 data: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
 -- Each window is a 3-element slice; body projects to window length
-lengths = data s> WINDOW(3) _.length();
+lengths = data |> WINDOW(3) _.length();
 ASSERT lengths.length() == 3, "5 elements, window 3 -> 3 windows";
 
 -- Access individual elements in the window
-firsts = data s> WINDOW(2) _[0];
+firsts = data |> WINDOW(2) _[0];
 ASSERT firsts[0] == 1.0, "first element of first window";
 ```
 
@@ -305,24 +305,24 @@ A partial batch at the end is always included. Works on all source types: arrays
 ```ruby clear
 FN sumBatch(batch: Int64[]) RETURNS Int64 ->
     MUTABLE s: Int64 = 0;
-    batch s> EACH { s = s + _; };
+    batch |> EACH { s = s + _; };
     RETURN s;
 END
 
 -- Array source, size-only: [1..7] -> [1,2,3], [4,5,6], [7]
 arr: Int64[] = [1, 2, 3, 4, 5, 6, 7];
-sums = arr s> WINDOW(size: 3) sumBatch(_);
+sums = arr |> WINDOW(size: 3) sumBatch(_);
 ASSERT sums.length() == 3;   -- 3 batches
 ASSERT sums[2] == 7;         -- partial final batch
 
 -- Open stream, size + time (first-of-either)
 gen: ~?Int64[] = BG STREAM { MUTABLE i: Int64 = 1; WHILE i <= 10 DO YIELD i; i = i + 1; END };
-sums2 = gen s> WINDOW(size: 4, time: "500ms") sumBatch(_);
+sums2 = gen |> WINDOW(size: 4, time: "500ms") sumBatch(_);
 ASSERT sums2.length() == 3;  -- [1-4], [5-8], [9-10]
 
 -- Time-only: entire array arrives fast, all items in one final batch
 arr2: Int64[] = [100, 200, 300];
-lens = arr2 s> WINDOW(time: "1s") _.length();
+lens = arr2 |> WINDOW(time: "1s") _.length();
 ASSERT lens[0] == 3;  -- one batch of 3
 ```
 
@@ -336,7 +336,7 @@ JOIN performs a left outer join between two collections using a two-parameter la
 STRUCT User { id: Int64, name: String }
 STRUCT Order { userId: Int64, amount: Float64 }
 
-results = users s> JOIN(orders) %(u, o) -> u.id == o.userId;
+results = users |> JOIN(orders) %(u, o) -> u.id == o.userId;
 -- results: JoinResult_User_Order[]
 -- results[i].left  -- the User
 -- results[i].right -- ?Order (NIL if no match)
@@ -373,7 +373,7 @@ The columns are the three pipeline-capable stream types. "Stage" operators filte
 | `LIMIT` | yes | yes | yes - converts stream to `T[]` |
 | `TAP` | yes | yes | not yet |
 
-`LIMIT` can appear anywhere in the chain relative to other fusible stages. The compiler fuses the entire chain into a single while loop - `counter s> WHERE _ > 0 s> LIMIT 5 s> EACH` and `counter s> LIMIT 5 s> WHERE _ > 0 s> EACH` both work; they differ only in whether LIMIT counts pre- or post-filter items.
+`LIMIT` can appear anywhere in the chain relative to other fusible stages. The compiler fuses the entire chain into a single while loop - `counter |> WHERE _ > 0 |> LIMIT 5 |> EACH` and `counter |> LIMIT 5 |> WHERE _ > 0 |> EACH` both work; they differ only in whether LIMIT counts pre- or post-filter items.
 
 #### Fold terminals (produce a scalar or optional value)
 
@@ -390,7 +390,7 @@ The columns are the three pipeline-capable stream types. "Stage" operators filte
 | `FIND` | yes | yes | via LIMIT |
 | `REDUCE` | yes | yes | via LIMIT |
 
-"via LIMIT" means LIMIT must appear earlier in the same pipeline chain. LIMIT converts `~T[INF]` to `T[]` (a regular list); the fold terminal then operates on that list. Example: `counter s> WHERE _ > 0 s> LIMIT 5 s> SUM _`.
+"via LIMIT" means LIMIT must appear earlier in the same pipeline chain. LIMIT converts `~T[INF]` to `T[]` (a regular list); the fold terminal then operates on that list. Example: `counter |> WHERE _ > 0 |> LIMIT 5 |> SUM _`.
 
 #### Materialization terminals (produce a new collection)
 
@@ -418,8 +418,8 @@ The batching `WINDOW(size:, time:)` operator works directly on streams without m
 s: ~Int64[] = 0 ..< 10;
 vals = s.toList();
 total = vals 
-  s> WHERE _ > 3 
-  s> SUM _;
+  |> WHERE _ > 3 
+  |> SUM _;
 ```
 
 #### Concurrent operators
@@ -436,7 +436,7 @@ total = vals
 nums: ~Float64[4] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }, BG { 4.0; }];
 
 doubled = nums 
-  s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+  |> CONCURRENT(workers: 2) SELECT _ * 2.0;
 ```
 
 Direct range expressions still use the non-concurrent path unless first bound as `~T[N]`.
@@ -463,13 +463,13 @@ SKIP and LIMIT are complementary: SKIP drops the first N elements, LIMIT takes t
 ```ruby clear illustrative
 -- Pagination: page 3, 10 items per page
 page = items 
-  s> SKIP 20
-  s> LIMIT 10;
+  |> SKIP 20
+  |> LIMIT 10;
 
 -- Skip header row, process the rest
 data = rows 
-  s> SKIP 1 
-  s> SELECT parseRow;
+  |> SKIP 1 
+  |> SELECT parseRow;
 ```
 
 ## Chaining
@@ -479,14 +479,14 @@ Operators compose naturally:
 ```ruby clear illustrative
 -- Filter, sort, take top 3
 leaderboard = scores
-    s> WHERE _.points > 100
-    s> ORDER_BY _.points
-    s> LIMIT 3;
+    |> WHERE _.points > 100
+    |> ORDER_BY _.points
+    |> LIMIT 3;
 
 -- Count active users with high scores
 n = users
-    s> WHERE _.active == TRUE
-    s> COUNT _.score > 1000;
+    |> WHERE _.active == TRUE
+    |> COUNT _.score > 1000;
 ```
 
 ## Collection Compatibility
@@ -497,32 +497,32 @@ Every operator works on every collection type:
 -- Array
 nums: Float64[] = [1, 2, 3];
 total = nums 
-  s> SUM _;
+  |> SUM _;
 
 -- List
 MUTABLE data = List[];
 avg = data 
-  s> AVERAGE _.value;
+  |> AVERAGE _.value;
 
 -- Pool
 MUTABLE pool: Entity[1000]@pool = [];
 alive = pool 
-  s> WHERE _.health > 0;
+  |> WHERE _.health > 0;
 
 -- Pool with SOA (field-slice iteration — cache-optimal)
 MUTABLE soa_pool: Entity[1000]@pool:soa = [];
 total_hp = soa_pool 
-  s> SUM _.health;  -- iterates only the health array
+  |> SUM _.health;  -- iterates only the health array
 
 -- List with SOA
 MUTABLE soa_list: Entity[]@list:soa = [];
 avg = soa_list 
-  s> AVERAGE _.health;   -- contiguous f64 slice
+  |> AVERAGE _.health;   -- contiguous f64 slice
 
 -- Sharded (parallel EACH via DO blocks)
 MUTABLE sharded: Entity[10000]@pool:sharded(4) = [];
 sharded 
-  s> EACH { _.processed = TRUE; };
+  |> EACH { _.processed = TRUE; };
 ```
 
 ## Loop Fusion
@@ -532,9 +532,9 @@ The compiler automatically fuses chains of WHERE and SELECT stages ending in a f
 ```ruby clear illustrative
 -- Written as 3 stages:
 result = data 
-  s> WHERE _ > 500.0 
-  s> SELECT _ * _ 
-  s> SUM _;
+  |> WHERE _ > 500.0 
+  |> SELECT _ * _ 
+  |> SUM _;
 
 -- Compiled as a single loop (no intermediate arrays):
 -- for (data) |it| { if (it > 500) { sum += it * it; } }
@@ -553,7 +553,7 @@ MUTABLE pool: Entity[10000]@pool:soa = [];
 -- SUM _.health iterates only the health array (contiguous f64[]).
 -- Without :soa, it would load all 5 fields per element.
 total = pool 
-  s> SUM _.health;
+  |> SUM _.health;
 ```
 
 For WHERE and FIND, the predicate uses field-slice access (fast), and the struct is reassembled only for matching elements.
@@ -574,11 +574,11 @@ MUTABLE data: Score[10000]@pool:sharded(4) = [];
 
 -- Parallel WHERE: one fiber per shard
 results = data 
-  s> CONCURRENT WHERE dbFetch(_.id).val > threshold;
+  |> CONCURRENT WHERE dbFetch(_.id).val > threshold;
 
 -- Process in parallel
 results = data 
-  s> CONCURRENT(parallel: TRUE) SELECT dbFetch(_.id).name;
+  |> CONCURRENT(parallel: TRUE) SELECT dbFetch(_.id).name;
 ```
 
 Options: 

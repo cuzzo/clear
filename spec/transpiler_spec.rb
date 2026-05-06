@@ -250,7 +250,7 @@ RSpec.describe ZigTranspiler do
 
         FN main() RETURNS Void ->
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
-            (0_i64 ..< 100_i64) s> SHARD(makeKey(_), counts) s> CONCURRENT EACH {
+            (0_i64 ..< 100_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR 0;
                 counts[_] = cur + 1;
             };
@@ -269,7 +269,7 @@ RSpec.describe ZigTranspiler do
 
         FN main() RETURNS Void ->
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
-            (0_i64 ..< 100_i64) s> SHARD(makeKey(_), counts) s> CONCURRENT EACH {
+            (0_i64 ..< 100_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR 0;
                 counts[_] = cur + 1;
             };
@@ -291,7 +291,7 @@ RSpec.describe ZigTranspiler do
 
         FN main() RETURNS Void ->
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
-            (0_i64 ..< 100_i64) s> SHARD(makeKey(_), counts) s> CONCURRENT EACH {
+            (0_i64 ..< 100_i64) |> SHARD(makeKey(_), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR 0;
                 counts[_] = cur + 1;
             };
@@ -307,7 +307,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN main() RETURNS Void ->
             MUTABLE map: HashMap<String>@sharded(4) = {};
-            (0_i64 ..< 10_i64) s> SHARD("k:" + toString(_), map) s> CONCURRENT EACH {
+            (0_i64 ..< 10_i64) |> SHARD("k:" + toString(_), map) |> CONCURRENT EACH {
                 map[_] = "value";
             };
             RETURN;
@@ -327,7 +327,7 @@ RSpec.describe ZigTranspiler do
             keys.append("a");
             keys.append("b");
             MUTABLE counts: HashMap<Int64>@sharded(4) = {};
-            (0_i64 ..< 2_i64) s> SHARD(keys[_], counts) s> CONCURRENT EACH {
+            (0_i64 ..< 2_i64) |> SHARD(keys[_], counts) |> CONCURRENT EACH {
                 cur = counts[_] OR 0;
                 counts[_] = cur + 1;
             };
@@ -1597,7 +1597,7 @@ RSpec.describe ZigTranspiler do
     it "does not emit .items on a slice parameter in WHERE pipeline" do
       src = <<~CLEAR
         FN filterSum(data: Float64[]) RETURNS !Float64 ->
-            RETURN data s> WHERE _ > 5.0 s> SUM _;
+            RETURN data |> WHERE _ > 5.0 |> SUM _;
         END
         FN main() RETURNS Void ->
             MUTABLE data: Float64[]@list = [];
@@ -1615,7 +1615,7 @@ RSpec.describe ZigTranspiler do
     it "does not emit .items on a slice parameter in SUM pipeline" do
       src = <<~CLEAR
         FN sumAll(data: Float64[]) RETURNS Float64 ->
-            RETURN data s> SUM _;
+            RETURN data |> SUM _;
         END
         FN main() RETURNS Void ->
             MUTABLE data: Float64[]@list = [];
@@ -1638,7 +1638,7 @@ RSpec.describe ZigTranspiler do
         FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 5;
             MUTABLE acc: Int64 = 0;
-            s s> SELECT _ * 2 s> WHERE _ > 3 s> EACH {
+            s |> SELECT _ * 2 |> WHERE _ > 3 |> EACH {
                 acc = acc + _;
             };
             RETURN;
@@ -1655,7 +1655,7 @@ RSpec.describe ZigTranspiler do
         FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 8;
             MUTABLE acc: Int64 = 0;
-            s s> SKIP 2 s> TAKE_WHILE _ < 6 s> EACH {
+            s |> SKIP 2 |> TAKE_WHILE _ < 6 |> EACH {
                 acc = acc + _;
             };
             RETURN;
@@ -1678,7 +1678,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN f() RETURNS !Void ->
             s: ~Int64[3] = [BG { 1; }, BG { 2; }, BG { 3; }];
-            vals = s s> CONCURRENT(workers: 2) SELECT _ * 2;
+            vals = s |> CONCURRENT(workers: 2) SELECT _ * 2;
             RETURN;
         END
       CLEAR
@@ -1693,7 +1693,7 @@ RSpec.describe ZigTranspiler do
       src = <<~CLEAR
         FN f() RETURNS !Void ->
             s: ~Int64[4] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }];
-            vals = s s> CONCURRENT(workers: 2) WHERE _ > 2;
+            vals = s |> CONCURRENT(workers: 2) WHERE _ > 2;
             RETURN;
         END
       CLEAR
@@ -1709,7 +1709,7 @@ RSpec.describe ZigTranspiler do
         FN f() RETURNS !Void ->
             MUTABLE total: Int64@shared:locked = 0;
             s: ~Int64[2] = [BG { 10; }, BG { 20; }];
-            s s> CONCURRENT(workers: 2) EACH {
+            s |> CONCURRENT(workers: 2) EACH {
                 WITH EXCLUSIVE total AS t {
                     t = t + _;
                 }
@@ -1771,7 +1771,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
             MUTABLE soa: Point[100]@soa = [];
             soa.append(Point{ x: 1.0, y: 2.0 });
-            soa s> EACH { _.x = _.x + _.y; };
+            soa |> EACH { _.x = _.x + _.y; };
             RETURN;
         END
       CLEAR
@@ -1797,7 +1797,7 @@ RSpec.describe ZigTranspiler do
             MUTABLE seeds: Int64[]@list = [];
             seeds.append(1_i64);
             seeds.append(2_i64);
-            (0..<2) s> SHARD(makeKey(seeds[_]), counts) s> CONCURRENT EACH {
+            (0..<2) |> SHARD(makeKey(seeds[_]), counts) |> CONCURRENT EACH {
                 cur = counts[_] OR 0;
                 counts[_] = cur + 1;
             };
@@ -1827,19 +1827,19 @@ RSpec.describe ZigTranspiler do
     CLEAR
 
     it "generates an outer for-loop with named capture for AS @u" do
-      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders s> SUM _.price; RETURN; END"
+      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders |> SUM _.price; RETURN; END"
       zig = transpile(src)
       expect(zig).to match(/for.*\|__pipe_u\|/)
     end
 
     it "generates an inner for-loop over the unnested field" do
-      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders s> SUM _.price; RETURN; END"
+      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders |> SUM _.price; RETURN; END"
       zig = transpile(src)
       expect(zig).to match(/__pipe_u\.orders/)
     end
 
     it "substitutes @u in the fold expression" do
-      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders s> SUM _.price; RETURN; END"
+      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders |> SUM _.price; RETURN; END"
       zig = transpile(src)
       # _.price should reference the inner loop variable, @u should be the outer
       expect(zig).to include("__pipe_u")
@@ -1847,7 +1847,7 @@ RSpec.describe ZigTranspiler do
     end
 
     it "generates explicit inner binding for UNNEST @u.orders AS @o" do
-      src = struct_preamble + "_ = users AS @u s> UNNEST @u.orders AS @o s> SUM @o.price; RETURN; END"
+      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders AS @o |> SUM @o.price; RETURN; END"
       zig = transpile(src)
       expect(zig).to match(/for.*\|__pipe_u\|/)
       expect(zig).to match(/for.*\|__pipe_o\|/)
@@ -1861,7 +1861,7 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           ao: Order[] = [Order{ price: 10.0, qty: 2 }];
           us: User[] = [User{ name: "a", discount: 0.9, orders: ao }];
-          _ = us AS @u s> UNNEST @u.orders s> WHERE _.qty > 1 s> SUM _.price * @u.discount;
+          _ = us AS @u |> UNNEST @u.orders |> WHERE _.qty > 1 |> SUM _.price * @u.discount;
           RETURN;
         END
       CLEAR
@@ -1877,12 +1877,12 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           ao: Order[] = [Order{ price: 5.0, qty: 1 }];
           us: User[] = [User{ name: "x", orders: ao }];
-          cnt  = us AS @u s> UNNEST @u.orders s> COUNT TRUE;
-          any_ = us AS @u s> UNNEST @u.orders s> ANY _.price > 0.0;
-          all_ = us AS @u s> UNNEST @u.orders s> ALL _.qty > 0;
-          mn   = us AS @u s> UNNEST @u.orders s> MIN _.price;
-          mx   = us AS @u s> UNNEST @u.orders s> MAX _.price;
-          avg  = us AS @u s> UNNEST @u.orders s> AVERAGE _.price;
+          cnt  = us AS @u |> UNNEST @u.orders |> COUNT TRUE;
+          any_ = us AS @u |> UNNEST @u.orders |> ANY _.price > 0.0;
+          all_ = us AS @u |> UNNEST @u.orders |> ALL _.qty > 0;
+          mn   = us AS @u |> UNNEST @u.orders |> MIN _.price;
+          mx   = us AS @u |> UNNEST @u.orders |> MAX _.price;
+          avg  = us AS @u |> UNNEST @u.orders |> AVERAGE _.price;
           RETURN;
         END
       CLEAR
@@ -1894,7 +1894,7 @@ RSpec.describe ZigTranspiler do
         STRUCT SimpleUser { val: Float64 }
         FN main() RETURNS Void ->
           sus: SimpleUser[] = [SimpleUser{ val: 1.0 }, SimpleUser{ val: 2.0 }];
-          _ = sus AS @u s> CONCURRENT(workers: 2) SELECT @u.val * 2.0;
+          _ = sus AS @u |> CONCURRENT(workers: 2) SELECT @u.val * 2.0;
           RETURN;
         END
       CLEAR
@@ -1907,7 +1907,7 @@ RSpec.describe ZigTranspiler do
         STRUCT SimpleUser { val: Float64 }
         FN main() RETURNS Void ->
           sus: SimpleUser[] = [SimpleUser{ val: 1.0 }];
-          _ = sus AS @u s> CONCURRENT(workers: 1) SUM @u.val;
+          _ = sus AS @u |> CONCURRENT(workers: 1) SUM @u.val;
           RETURN;
         END
       CLEAR
@@ -1926,7 +1926,7 @@ RSpec.describe ZigTranspiler do
         STRUCT User { name: String, orders: Order[]@list }
         FN main() RETURNS Void ->
           users: User[] = [User{ name: "alice", orders: [Order{price: 10.0}] }];
-          total = users AS @u s> UNNEST @u.orders s> SUM _.price;
+          total = users AS @u |> UNNEST @u.orders |> SUM _.price;
           bad = @u.name;
           RETURN;
         END
@@ -1940,7 +1940,7 @@ RSpec.describe ZigTranspiler do
         STRUCT User { name: String, orders: Order[]@list }
         FN main() RETURNS Void ->
           users: User[] = [User{ name: "alice", orders: [Order{price: 10.0}] }];
-          total = users AS @u s> UNNEST @u.orders s> SELECT _.price s> SUM _;
+          total = users AS @u |> UNNEST @u.orders |> SELECT _.price |> SUM _;
           RETURN;
         END
       CLEAR
@@ -1959,17 +1959,17 @@ RSpec.describe ZigTranspiler do
     CLEAR
 
     it "raises a type error when SUM accesses a non-existent field on _" do
-      src = point_preamble + "_ = pts s> SUM _.z; RETURN; END"
+      src = point_preamble + "_ = pts |> SUM _.z; RETURN; END"
       expect { transpile(src) }.to raise_error(/field access 'z'.*Point|Point.*field.*'z'/i)
     end
 
     it "raises a type error when WHERE accesses a non-existent field on _" do
-      src = point_preamble + "_ = pts s> WHERE _.z > 0.0; RETURN; END"
+      src = point_preamble + "_ = pts |> WHERE _.z > 0.0; RETURN; END"
       expect { transpile(src) }.to raise_error(/field access 'z'.*Point|Point.*field.*'z'/i)
     end
 
     it "raises a type error when SELECT accesses a non-existent field on _" do
-      src = point_preamble + "_ = pts s> SELECT _.z; RETURN; END"
+      src = point_preamble + "_ = pts |> SELECT _.z; RETURN; END"
       expect { transpile(src) }.to raise_error(/field access 'z'.*Point|Point.*field.*'z'/i)
     end
   end

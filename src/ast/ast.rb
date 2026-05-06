@@ -165,7 +165,7 @@ module AST
     when ConcurrentOp
       yield node.capture_analysis if node.capture_analysis
     when BinaryOp
-      # `x s> CONCURRENT EACH { ... }` parses as BinaryOp(op=:SMOOTH);
+      # `x |> CONCURRENT EACH { ... }` parses as BinaryOp(op=:SMOOTH);
       # the ConcurrentOp lives on .right. (Other binary ops can also
       # contain ConcurrentOps in either side via nested expressions.)
       _expr_each_concurrent_capture(node.left, &block) if node.respond_to?(:left)
@@ -591,7 +591,7 @@ module AST
     # any pending allocs. OR_RESCUE's right side is the fallback expression;
     # its allocations must only run when the orelse short-circuits to it.
     def lazy_fields = (op == :OR_RESCUE ? [:right] : [])
-    # Observable Phase 2.2: true on a `s> SUM/MAX/MIN/COUNT/AVERAGE/ANY/ALL/FIND/DISTINCT/REDUCE`
+    # Observable Phase 2.2: true on a `|> SUM/MAX/MIN/COUNT/AVERAGE/ANY/ALL/FIND/DISTINCT/REDUCE`
     # whose source is a still-running tense stream — fold terminal is backed by
     # an Observable<T> / atomic accumulator and may be observed via WITH VIEW.
     attr_accessor :observable_terminal
@@ -792,7 +792,7 @@ module AST
   DistinctOp   = Struct.new(:token, :expression) { include Locatable }
   # EachOp: side-effect iteration over a collection.
   # Uses `_` as the implicit item binding. Body is a list of statements.
-  # Syntax: collection s> EACH { _.field = value; };
+  # Syntax: collection |> EACH { _.field = value; };
   # On sharded pools, auto-dispatches N parallel fibers (one per shard).
   EachOp       = Struct.new(:token, :body) { include Locatable }
   # TAP: side-effect observer — runs body for each item, returns original list unchanged.
@@ -829,7 +829,7 @@ module AST
   MinOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
   MaxOp     = Struct.new(:token, :expression) { include Locatable } # Number (panics on empty)
   # ShardOp: route items to owning schedulers by key hash.
-  # Syntax: collection s> SHARD(key_expr, target_map) s> CONCURRENT EACH { body }
+  # Syntax: collection |> SHARD(key_expr, target_map) |> CONCURRENT EACH { body }
   # key_expr uses `_` as the implicit item binding (consistent with SELECT/WHERE).
   # target_map is the @sharded HashMap whose shardIndex determines routing.
   ShardOp = Struct.new(:token, :key_expr, :target_map) { include Locatable }
@@ -1100,7 +1100,7 @@ module AST
     3 => { ops: ['||'], assoc: :left },
     # LEVEL 1: Both Pipe and Rescue live here.
     # They bind loosely and strictly left-to-right.
-    1 => { ops: ['OR', 's>', 'AS'], assoc: :left }
+    1 => { ops: ['OR', '|>', 'AS'], assoc: :left }
   }
   MAX_PRECEDENCE = PRECEDENCE_MAP.keys.max
 

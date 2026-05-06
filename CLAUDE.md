@@ -381,7 +381,7 @@ CLEAR distinguishes between **Types** (what data is) and **Capabilities** (how i
 ### Key Sigils
 - `$` = Pipeline binding / test LET lazy binding / interpolation
 - `!` = Mutation suffix
-- `s>` = SMOOTH operator (safe pipeline with error propagation)
+- `|>` = SMOOTH operator (safe pipeline with error propagation)
 - `_` = Placeholder
 - `!!` = Explicit panic
 

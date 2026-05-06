@@ -39,7 +39,7 @@ FN doIt(c: Acc) RETURNS !Void
     items.append(1_i64);
     items.append(2_i64);
     items.append(3_i64);
-    items s> CONCURRENT(workers: 2) EACH {
+    items |> CONCURRENT(workers: 2) EACH {
         WITH EXCLUSIVE c AS inner { inner.count = inner.count + _; }
     };
 END

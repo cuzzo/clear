@@ -51,7 +51,7 @@ RSpec.describe "A20: I1 fixable error (drop @observable)" do
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };
-          running: ~Int64@observable = gen s> SUM _;
+          running: ~Int64@observable = gen |> SUM _;
           _ = NEXT running;
           RETURN;
       END

@@ -27,11 +27,11 @@ FN scanDir(path: String)
  EFFECTS REENTRANT
 ->
   entries = listAll(path)
-    s> SELECT "${substr(_, 0, 2)}${path}/${substr(_, 2, _.length() - 2)}";
+    |> SELECT "${substr(_, 0, 2)}${path}/${substr(_, 2, _.length() - 2)}";
 
   children = entries
-    s> CONCURRENT SELECT entrySize(_)
-    s> REDUCE(0) acc + _;
+    |> CONCURRENT SELECT entrySize(_)
+    |> REDUCE(0) acc + _;
 
   RETURN fileSize(path) + children;
 END

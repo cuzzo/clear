@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
             i = i + 1_i64;
         END
     };
-    running: ~String[]@set:observable = gen s> DISTINCT _;
+    running: ~String[]@set:observable = gen |> DISTINCT _;
     final = NEXT running;
     ASSERT final.length() == 3_i64, "3 unique strings";
     print("ok");

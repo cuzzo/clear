@@ -8,21 +8,21 @@ END
 FN main() RETURNS Void ->
     -- Edge case 1: empty collection produces empty result
     empty: Item[] = [];
-    empty_results = empty s> CONCURRENT(workers: 4) SELECT triple(_);
-    empty_total = empty_results s> SUM _;
+    empty_results = empty |> CONCURRENT(workers: 4) SELECT triple(_);
+    empty_total = empty_results |> SUM _;
     ASSERT empty_total == 0.0, "empty collection should produce empty results";
 
     -- Edge case 2: workers larger than collection
     small = [Item{value: 1.0}, Item{value: 2.0}];
-    big_pool_results = small s> CONCURRENT(workers: 100) SELECT triple(_);
-    big_pool_total = big_pool_results s> SUM _;
+    big_pool_results = small |> CONCURRENT(workers: 100) SELECT triple(_);
+    big_pool_total = big_pool_results |> SUM _;
     ASSERT big_pool_total == 9.0, "workers > len should still work (3+6)";
 
     -- Edge case 3: chaining result of CONCURRENT SELECT into WHERE
     items = [Item{value: 1.0}, Item{value: 2.0}, Item{value: 3.0}, Item{value: 4.0}];
-    tripled = items s> CONCURRENT(workers: 2) SELECT triple(_);
-    big_ones = tripled s> WHERE _ > 7.0;
-    big_total = big_ones s> SUM _;
+    tripled = items |> CONCURRENT(workers: 2) SELECT triple(_);
+    big_ones = tripled |> WHERE _ > 7.0;
+    big_total = big_ones |> SUM _;
     ASSERT big_total == 21.0, "chained: tripled [1,2,3,4]=[3,6,9,12], WHERE >7 = [9,12], sum=21";
 
     -- Edge case 4: CONCURRENT EACH on @list
@@ -30,8 +30,8 @@ FN main() RETURNS Void ->
     append(list_items, Item{value: 1.0});
     append(list_items, Item{value: 2.0});
     append(list_items, Item{value: 3.0});
-    list_items s> CONCURRENT(workers: 2) EACH { _.value = _.value * 2.0; };
-    list_total = list_items s> SUM _.value;
+    list_items |> CONCURRENT(workers: 2) EACH { _.value = _.value * 2.0; };
+    list_total = list_items |> SUM _.value;
     ASSERT list_total == 12.0, "CONCURRENT EACH on @list should double values";
 
     RETURN;

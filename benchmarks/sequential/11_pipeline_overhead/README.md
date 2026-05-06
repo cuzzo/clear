@@ -1,6 +1,6 @@
 # Benchmark 23: Pipeline Overhead
 
-Measures the abstraction tax of CLEAR's `s>` pipeline operators vs handwritten loops. 10M float64 elements, 20 iterations each.
+Measures the abstraction tax of CLEAR's `|>` pipeline operators vs handwritten loops. 10M float64 elements, 20 iterations each.
 
 `BENCH_RESULT` = sum loop (handwritten), used for cross-language comparison.
 
@@ -18,7 +18,7 @@ CLEAR and Go are comparable. The 2x gap to C is the cost of CLEAR's `FOR` loop o
 
 | Test | Handwritten | Pipeline | Overhead |
 |------|-------------|----------|---------|
-| SUM only (`s> SUM _`) | 194ms | 194ms | 0ms (0%) |
+| SUM only (`|> SUM _`) | 194ms | 194ms | 0ms (0%) |
 | WHERE + SELECT + SUM (2-stage) | 285ms | 292ms | +7ms (+2.5%) |
 | WHERE + SELECT + WHERE + SUM (4-stage) | 974ms | 1047ms | +73ms (+7.5%) |
 

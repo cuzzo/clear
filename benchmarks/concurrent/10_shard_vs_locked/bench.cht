@@ -5,7 +5,7 @@
 -- Zero locks. Zero cross-scheduler routing. Each fiber processes ONLY
 -- keys that hash to its own shard. DragonflyDB model.
 --
--- Syntax: (range) s> SHARD(key_expr, map) s> CONCURRENT EACH { body }
+-- Syntax: (range) |> SHARD(key_expr, map) |> CONCURRENT EACH { body }
 --   1. SHARD builds the key, hashes it, routes to the owning scheduler
 --   2. CONCURRENT EACH runs one fiber per shard on its owning scheduler
 --   3. Every map operation is LOCAL — no SPSC, no yield, no locks
@@ -23,24 +23,24 @@ FN main() RETURNS Void ->
 
     -- Workload 1: Uniform SET (1M keys, partitioned)
     t0 = timestampMs();
-    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
+    (0..<n) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
         map[_] = "value";
     };
     setMs = timestampMs() - t0;
 
     -- Workload 2: Uniform GET (1M keys, all local, 100% hit)
     t1 = timestampMs();
-    (0..<n) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
+    (0..<n) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
         got = map[_] OR "";
     };
     getMs = timestampMs() - t1;
 
     -- Workload 3: Mixed — 200K SET (overwrite) + 800K GET
     t2 = timestampMs();
-    (0..<(n / 5)) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
+    (0..<(n / 5)) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
         map[_] = "updated";
     };
-    (0..<((n / 5) * 4)) s> SHARD("key:" + toString(_), map) s> CONCURRENT(batch: 128) EACH {
+    (0..<((n / 5) * 4)) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
         got = map[_] OR "";
     };
     mixMs = timestampMs() - t2;

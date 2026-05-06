@@ -4,7 +4,7 @@ FN main() RETURNS Void ->
     data: Float64[] = [1.0, 2.0, 3.0, 10.0, 4.0, 5.0];
 
     -- Take while less than 5
-    result = data s> TAKE_WHILE _ < 5.0;
+    result = data |> TAKE_WHILE _ < 5.0;
     ASSERT result.length() == 3, "TAKE_WHILE stops at first false";
     ASSERT result[0] == 1.0, "first element";
     ASSERT result[2] == 3.0, "last taken element";
@@ -16,31 +16,31 @@ FN main() RETURNS Void ->
     nums.append(1.0);
     nums.append(-1.0);
     nums.append(7.0);
-    taken = nums s> TAKE_WHILE _ > 0.0;
+    taken = nums |> TAKE_WHILE _ > 0.0;
     ASSERT taken.length() == 3, "TAKE_WHILE on @list";
 
     -- Empty result when first element fails
     all_neg: Float64[] = [-1.0, -2.0, -3.0];
-    empty = all_neg s> TAKE_WHILE _ > 0.0;
+    empty = all_neg |> TAKE_WHILE _ > 0.0;
     ASSERT empty.length() == 0, "TAKE_WHILE empty result";
 
     -- All elements pass
     all_pos: Float64[] = [1.0, 2.0, 3.0];
-    full = all_pos s> TAKE_WHILE _ > 0.0;
+    full = all_pos |> TAKE_WHILE _ > 0.0;
     ASSERT full.length() == 3, "TAKE_WHILE all pass";
 
     -- Chaining: TAKE_WHILE then SELECT
-    chained = data s> TAKE_WHILE _ < 5.0 s> SELECT _ * 10.0;
+    chained = data |> TAKE_WHILE _ < 5.0 |> SELECT _ * 10.0;
     ASSERT chained.length() == 3, "chain length";
     ASSERT chained[0] == 10.0, "chain: first * 10";
     ASSERT chained[2] == 30.0, "chain: last * 10";
 
     -- Fusion: TAKE_WHILE + SUM (single loop, no intermediate)
-    fused = data s> TAKE_WHILE _ < 5.0 s> SUM _;
+    fused = data |> TAKE_WHILE _ < 5.0 |> SUM _;
     ASSERT fused == 6.0, "TAKE_WHILE + SUM fusion: 1+2+3 = 6";
 
     -- Fusion: TAKE_WHILE + SELECT + SUM
-    fused2 = data s> TAKE_WHILE _ < 5.0 s> SELECT _ * 2.0 s> SUM _;
+    fused2 = data |> TAKE_WHILE _ < 5.0 |> SELECT _ * 2.0 |> SUM _;
     ASSERT fused2 == 12.0, "TAKE_WHILE + SELECT + SUM: (1+2+3)*2 = 12";
 
     RETURN;

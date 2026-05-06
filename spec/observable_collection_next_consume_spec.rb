@@ -21,7 +21,7 @@ RSpec.describe "NEXT on collection observable: linear consume" do
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 3_i64 DO YIELD i; i = i + 1_i64; END
           };
-          running: ~Int64[]@set:observable = gen s> DISTINCT _;
+          running: ~Int64[]@set:observable = gen |> DISTINCT _;
           first  = NEXT running;
           second = NEXT running;
           RETURN;
@@ -37,7 +37,7 @@ RSpec.describe "NEXT on collection observable: linear consume" do
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 3_i64 DO YIELD i; i = i + 1_i64; END
           };
-          running: ~Int64[]@set:observable = gen s> DISTINCT _;
+          running: ~Int64[]@set:observable = gen |> DISTINCT _;
           final = NEXT running;
           RETURN;
       END

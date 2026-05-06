@@ -1,7 +1,7 @@
 -- WITH VIEW on a pipeline-terminal observable. Verifies the
 -- canonical reader form works:
 --
---     running: ~Int64@observable = stream s> SUM _;
+--     running: ~Int64@observable = stream |> SUM _;
 --     WITH VIEW running AS s -> use(s); END
 --
 -- The reader sees the accumulator's running value via a single
@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running: ~Int64@observable = gen s> SUM _;
+    running: ~Int64@observable = gen |> SUM _;
 
     -- WITH VIEW reads the accumulator without joining the producer.
     -- The producer races against this read; s is in [0, 45].

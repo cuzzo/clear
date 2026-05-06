@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
     };
 
     -- Find the first item with character '3' in it.
-    matched: ~?String@observable = gen s> FIND _.contains?("3");
+    matched: ~?String@observable = gen |> FIND _.contains?("3");
     final = NEXT matched;
 
     -- final is ?String. Verify a match was found.

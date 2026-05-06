@@ -12,7 +12,7 @@ require_relative "../src/backends/transpiler"
 #
 #   ```clear
 #   -- ILLUSTRATIVE
-#   x s> WHERE _.value > threshold;
+#   x |> WHERE _.value > threshold;
 #   ```
 #
 # Run: bundle exec rspec spec/doc_spec.rb

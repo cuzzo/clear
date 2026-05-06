@@ -68,18 +68,18 @@ Allowing streams as pipeline sources requires:
 
 ### 4. Range sources in pipelines -- same gap
 
-`(0..<n) s> SELECT ...` also fails `require_array_input!`. Ranges are only
+`(0..<n) |> SELECT ...` also fails `require_array_input!`. Ranges are only
 accepted by `CONCURRENT EACH` and `SHARD`. All other pipeline stages reject
 them. This is the same codegen gap as streams: need a pull-loop instead of a
 slice.
 
 ### 5. `BG` as a `SELECT` expression
 
-`list s> SELECT BG { f(_) }` would produce `Promise(T)[]` -- a list of futures.
+`list |> SELECT BG { f(_) }` would produce `Promise(T)[]` -- a list of futures.
 This is not currently valid; SELECT does not permit BG as the body expression.
 To make this useful, downstream stages (`SUM`, `EACH`, `REDUCE`) would also need
 `NEXT`-aware variants that await each promise before folding:
-`futures s> SUM NEXT _`.
+`futures |> SUM NEXT _`.
 
 ## Ideal idiomatic CLEAR implementation
 
@@ -102,16 +102,16 @@ FN main() RETURNS Void ->
     };
 
     -- 64 subscribers: each gets an independent cursor via LINK.
-    -- (0..<64) s> SELECT BG { ... } requires range pipeline + BG-in-SELECT support.
+    -- (0..<64) |> SELECT BG { ... } requires range pipeline + BG-in-SELECT support.
     MUTABLE futures: ~Int64[]@list = [];
     FOR i IN (0_i64 ..< 64) ->
         sub = LINK publisher;                    -- independent cursor, ref-counted
         futures.append(BG {
-            sub s> SUM processMessage(_)         -- stream pipeline source support
+            sub |> SUM processMessage(_)         -- stream pipeline source support
         });
     END
 
-    total = futures s> SUM NEXT _;               -- BG-in-SELECT / NEXT-fold support
+    total = futures |> SUM NEXT _;               -- BG-in-SELECT / NEXT-fold support
 
     elapsed = timestampMs() - t0;
     print("Checksum:", total MOD 1000000000);
@@ -125,7 +125,7 @@ Properties of this implementation:
 - One publisher fiber, zero message duplication
 - Each subscriber processes every message exactly once
 - `LINK publisher` clones the cursor (ref-counted, O(1))
-- `sub s> SUM processMessage(_)` pulls lazily from the stream -- no intermediate
+- `sub |> SUM processMessage(_)` pulls lazily from the stream -- no intermediate
   list, O(ring_buffer_size) memory total (~4KB per subscriber at BUF_SIZE=64)
 - Publisher blocks on the slowest subscriber -- true backpressure, no drops
 - Total memory: O(64 * 64 * sizeof(Int64)) = ~32 KB, not ~420 MB
@@ -194,7 +194,7 @@ Allow `BG { expr }` as a SELECT body expression. The SELECT result type becomes
 they await each promise before folding. This enables:
 
 ```
-list s> SELECT BG { expensive(_) } s> SUM NEXT _
+list |> SELECT BG { expensive(_) } |> SUM NEXT _
 ```
 
 which is a bounded parallel map-reduce: up to `workers` BG fibers run

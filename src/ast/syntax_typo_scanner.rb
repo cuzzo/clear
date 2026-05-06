@@ -1,5 +1,5 @@
 # Rule-driven scanner that detects common operator typos in CLEAR
-# source (e.g. `|>` meant `s>`, `=>` meant `->`) and emits FixableFinding
+# source (e.g. `s>` meant `|>`, `=>` meant `->`) and emits FixableFinding
 # entries via FixCollector. Runs as a PRE-PARSE pass in `clear fix`;
 # the legacy compile path does not invoke it, so behaviour there is
 # unchanged.
@@ -23,10 +23,10 @@ require_relative "fixable_error"
 module SyntaxTypoScanner
   # One rule = (pattern, replacement, human-readable label for the fix).
   # Patterns are literal string matches, not regexes — intentional; a
-  # regex would risk matching sub-strings of larger operators (e.g.,
-  # `|>=` would have `|>` inside it, which would be wrong to flag).
+  # regex would risk matching sub-strings of larger identifiers (e.g.
+  # `selectors>` would have `s>` inside it, which would be wrong to flag).
   RULES = [
-    { match: '|>', replace: 's>', label: 'pipeline operator (use `s>`, not `|>`)' },
+    { match: 's>', replace: '|>', label: 'pipeline operator (use `|>`, not `s>`)' },
     { match: '=>', replace: '->', label: 'arrow (use `->`, not `=>`)' },
   ].freeze
 
@@ -82,17 +82,22 @@ module SyntaxTypoScanner
         next
       end
 
-      # Check each rule at this position
+      # Check each rule at this position. For patterns whose first
+      # char is an identifier char (e.g. `s>`), require the preceding
+      # char to be a non-identifier so we don't flag `selectors>` or
+      # similar valid identifiers.
       matched = false
       RULES.each do |r|
         pat = r[:match]
-        if source[i, pat.length] == pat
-          emit_typo_finding!(line, col, r)
-          i += pat.length
-          col += pat.length
-          matched = true
-          break
+        next unless source[i, pat.length] == pat
+        if pat[0] =~ /[A-Za-z_]/ && i > 0 && source[i - 1] =~ /[A-Za-z0-9_]/
+          next
         end
+        emit_typo_finding!(line, col, r)
+        i += pat.length
+        col += pat.length
+        matched = true
+        break
       end
       next if matched
 

@@ -31,7 +31,7 @@ RSpec.describe "A22: nested observable pipes" do
               MUTABLE j: Int64 = 0_i64;
               WHILE j < 5_i64 DO YIELD j; j = j + 1_i64; END
           };
-          outer: ~Int64@observable = g_outer s> SUM (_ + (g_inner s> SUM _));
+          outer: ~Int64@observable = g_outer |> SUM (_ + (g_inner |> SUM _));
           _ = NEXT outer;
           RETURN;
       END
@@ -49,8 +49,8 @@ RSpec.describe "A22: nested observable pipes" do
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 3_i64 DO YIELD i; i = i + 1_i64; END
           };
-          inner_running: ~Int64@observable = g s> SUM _;
-          outer: ~Int64@observable = g s> SUM (_ + WITH VIEW inner_running AS s s);
+          inner_running: ~Int64@observable = g |> SUM _;
+          outer: ~Int64@observable = g |> SUM (_ + WITH VIEW inner_running AS s s);
           _ = NEXT outer;
           RETURN;
       END
@@ -65,12 +65,12 @@ RSpec.describe "A22: nested observable pipes" do
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };
-          running_sum: ~Int64@observable = g1 s> SUM _;
+          running_sum: ~Int64@observable = g1 |> SUM _;
           g2: ~?Int64[] = BG STREAM {
               MUTABLE j: Int64 = 0_i64;
               WHILE j < 4_i64 DO YIELD j; j = j + 1_i64; END
           };
-          running_max: ~Int64@observable = g2 s> MAX _;
+          running_max: ~Int64@observable = g2 |> MAX _;
           a = NEXT running_sum;
           b = NEXT running_max;
           RETURN;

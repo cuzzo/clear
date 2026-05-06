@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
         END
     };
     MUTABLE sum1: Int64 = 0;
-    counter s> TAP { ASSERT _ > 0, "tap sees positive item"; } s> LIMIT 5 s> EACH { sum1 = sum1 + _; };
+    counter |> TAP { ASSERT _ > 0, "tap sees positive item"; } |> LIMIT 5 |> EACH { sum1 = sum1 + _; };
     ASSERT sum1 == 15, "TAP then LIMIT 5 then EACH: 1+2+3+4+5";
 
     -- TAP + LIMIT + SUM
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
             j = j + 1;
         END
     };
-    total = counter2 s> TAP { ASSERT _ > 0, "tap sees item"; } s> LIMIT 4 s> SUM _;
+    total = counter2 |> TAP { ASSERT _ > 0, "tap sees item"; } |> LIMIT 4 |> SUM _;
     ASSERT total == 10, "TAP then LIMIT 4 then SUM: 1+2+3+4";
 
     -- WHERE before TAP before LIMIT: TAP sees only filtered items
@@ -33,7 +33,7 @@ FN main() RETURNS Void ->
         END
     };
     MUTABLE sum3: Int64 = 0;
-    counter3 s> WHERE _ MOD 2 == 0 s> TAP { ASSERT _ MOD 2 == 0, "tap sees even"; } s> LIMIT 3 s> EACH { sum3 = sum3 + _; };
+    counter3 |> WHERE _ MOD 2 == 0 |> TAP { ASSERT _ MOD 2 == 0, "tap sees even"; } |> LIMIT 3 |> EACH { sum3 = sum3 + _; };
     ASSERT sum3 == 12, "WHERE evens then TAP then LIMIT 3 then EACH: 2+4+6";
 
     -- SELECT before TAP before LIMIT
@@ -44,7 +44,7 @@ FN main() RETURNS Void ->
             m = m + 1;
         END
     };
-    total2 = counter4 s> SELECT _ * 10 s> TAP { ASSERT _ > 0, "tap sees scaled"; } s> LIMIT 3 s> SUM _;
+    total2 = counter4 |> SELECT _ * 10 |> TAP { ASSERT _ > 0, "tap sees scaled"; } |> LIMIT 3 |> SUM _;
     ASSERT total2 == 60, "SELECT *10 then TAP then LIMIT 3 then SUM: 10+20+30";
 
     print("OK");

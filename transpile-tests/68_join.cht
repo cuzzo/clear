@@ -17,7 +17,7 @@ FN main() RETURNS Void ->
     ];
 
     -- Lambda join: match user.id to order.userId
-    results = users s> JOIN(orders) %(u, o) -> u.id == o.userId;
+    results = users |> JOIN(orders) %(u, o) -> u.id == o.userId;
     ASSERT results.length() == 3, "one result per left element";
 
     -- Alice (id=1) has a match

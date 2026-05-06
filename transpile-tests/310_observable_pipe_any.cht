@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running: ~Bool@observable = gen s> ANY _ > 50_i64;
+    running: ~Bool@observable = gen |> ANY _ > 50_i64;
     final = NEXT running;
 
     ASSERT final == TRUE, "running ANY mismatch";

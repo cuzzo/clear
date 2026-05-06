@@ -20,7 +20,7 @@ RSpec.describe "C4: ~T[]@observable without :set is rejected" do
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };
-          running: ~Int64[]@observable = gen s> DISTINCT _;
+          running: ~Int64[]@observable = gen |> DISTINCT _;
           _ = NEXT running;
           RETURN;
       END
@@ -35,7 +35,7 @@ RSpec.describe "C4: ~T[]@observable without :set is rejected" do
               MUTABLE i: Int64 = 0_i64;
               WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
           };
-          running: ~Int64[]@set:observable = gen s> DISTINCT _;
+          running: ~Int64[]@set:observable = gen |> DISTINCT _;
           final = NEXT running;
           RETURN;
       END

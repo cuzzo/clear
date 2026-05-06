@@ -53,7 +53,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Int64@observable = gen s> SUM _;
+            running: ~Int64@observable = gen |> SUM _;
             _ = NEXT running;
             RETURN;
         END
@@ -70,7 +70,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Int64@observable:locked = gen s> SUM _;
+            running: ~Int64@observable:locked = gen |> SUM _;
             _ = NEXT running;
             RETURN;
         END
@@ -86,7 +86,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Int64@observable:shared = gen s> SUM _;
+            running: ~Int64@observable:shared = gen |> SUM _;
             _ = NEXT running;
             RETURN;
         END
@@ -102,7 +102,7 @@ RSpec.describe "I1/I2: @observable lockdown" do
                 MUTABLE i: Int64 = 0_i64;
                 WHILE i < 4_i64 DO YIELD i; i = i + 1_i64; END
             };
-            running: ~Int64[]@set:observable = gen s> DISTINCT _;
+            running: ~Int64[]@set:observable = gen |> DISTINCT _;
             final = NEXT running;
             RETURN;
         END

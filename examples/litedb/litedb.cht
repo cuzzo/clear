@@ -104,15 +104,15 @@ FN main() RETURNS Void ->
     ASSERT evenCount == 3, "lambda: 3 even (10,20,40)";
 
     -- REDUCE pipeline
-    keySum = allKeys s> REDUCE(0_i64) acc + _;
+    keySum = allKeys |> REDUCE(0_i64) acc + _;
     ASSERT keySum == 70, "REDUCE sum = 70";
 
     -- WHERE + REDUCE
-    evenSum = allKeys s> WHERE _ MOD 2 == 0 s> REDUCE(0_i64) acc + _;
+    evenSum = allKeys |> WHERE _ MOD 2 == 0 |> REDUCE(0_i64) acc + _;
     ASSERT evenSum == 70, "WHERE even REDUCE = 70 (all even)";
 
     -- WHERE + SELECT + REDUCE: keys > 15, doubled
-    bigDoubled = allKeys s> WHERE _ > 15 s> SELECT _ * 2 s> REDUCE(0_i64) acc + _;
+    bigDoubled = allKeys |> WHERE _ > 15 |> SELECT _ * 2 |> REDUCE(0_i64) acc + _;
     ASSERT bigDoubled == 120, "WHERE>15 + SELECT*2 + REDUCE = 120 (20*2+40*2)";
 
     -- @shared:locked concurrent access

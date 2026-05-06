@@ -15,7 +15,7 @@ FN main() RETURNS Void ->
     };
 
     -- Sum via REDUCE: 1 + 2 + 3 + 4 + 5 = 15
-    running: ~Int64@observable = gen s> REDUCE(0_i64) acc + _;
+    running: ~Int64@observable = gen |> REDUCE(0_i64) acc + _;
     final = NEXT running;
 
     ASSERT final == 15_i64, "running reduce-sum mismatch";

@@ -7,7 +7,7 @@ FN main() RETURNS Void ->
     Item{ name: "a", value: 10_i64 },
     Item{ name: "b", value: 20_i64 }
   ];
-  sorted = items s> ORDER_BY _.value;
+  sorted = items |> ORDER_BY _.value;
 
   ASSERT sorted[0].value == 10, "First should be 10";
   ASSERT sorted[1].value == 20, "Second should be 20";
@@ -15,7 +15,7 @@ FN main() RETURNS Void ->
 
   -- Test 2: Sort simple integers
   nums: Int64[] = [5_i64, 2_i64, 8_i64, 1_i64, 9_i64];
-  sorted_nums = nums s> ORDER_BY _;
+  sorted_nums = nums |> ORDER_BY _;
 
   ASSERT sorted_nums[0] == 1, "First should be 1";
   ASSERT sorted_nums[1] == 2, "Second should be 2";

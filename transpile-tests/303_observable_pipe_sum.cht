@@ -17,7 +17,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running: ~Int64@observable = gen s> SUM _;
+    running: ~Int64@observable = gen |> SUM _;
     final = NEXT running;
 
     -- 0 + 1 + ... + 99 = 4950

@@ -831,7 +831,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         preamble +
         "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT(size: LARGE) SELECT double(_); RETURN; END"
+        "r = items |> CONCURRENT(size: LARGE) SELECT double(_); RETURN; END"
       }
 
       it "parses without error" do
@@ -840,7 +840,7 @@ RSpec.describe SemanticAnnotator do
 
       it "captures size option as an Identifier node" do
         fn   = ast.statements.last
-        # r = items s> CONCURRENT(...) SELECT ...
+        # r = items |> CONCURRENT(...) SELECT ...
         # fn.body[0] = items decl, fn.body[1] = r bind (BinaryOp SMOOTH on RHS)
         pipe = fn.body[1].value        # BinaryOp(:SMOOTH, items, ConcurrentOp)
         conc = pipe.right              # ConcurrentOp
@@ -856,7 +856,7 @@ RSpec.describe SemanticAnnotator do
         preamble +
         "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
         "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT(workers: 4, size: MICRO) WHERE big(_); RETURN; END"
+        "r = items |> CONCURRENT(workers: 4, size: MICRO) WHERE big(_); RETURN; END"
       }
 
       it "parses both workers and size options" do
@@ -876,7 +876,7 @@ RSpec.describe SemanticAnnotator do
         preamble +
         "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
         "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT(workers: 4, batch: 8) WHERE big(_); RETURN; END"
+        "r = items |> CONCURRENT(workers: 4, batch: 8) WHERE big(_); RETURN; END"
       }
 
       it "parses workers and batch options" do
@@ -893,7 +893,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         preamble +
         "FN f() RETURNS !Void -> items: Float64[] = [1.0]; " \
-        "items s> CONCURRENT(size: STANDARD) EACH { double(_); }; RETURN; END"
+        "items |> CONCURRENT(size: STANDARD) EACH { double(_); }; RETURN; END"
       }
 
       it "accepts STANDARD as a valid size" do
@@ -905,7 +905,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         preamble +
         "FN f() RETURNS !Void -> items: Float64[] = [1.0]; " \
-        "r = items s> CONCURRENT(size: XL) SELECT double(_); RETURN; END"
+        "r = items |> CONCURRENT(size: XL) SELECT double(_); RETURN; END"
       }
 
       it "accepts XL as a valid size" do
@@ -917,7 +917,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         preamble +
         "FN f() RETURNS !Void -> items: Float64[] = [1.0]; " \
-        "r = items s> CONCURRENT(size: HUGE) SELECT double(_); RETURN; END"
+        "r = items |> CONCURRENT(size: HUGE) SELECT double(_); RETURN; END"
       }
 
       it "raises a Compiler Error" do
@@ -929,7 +929,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         preamble +
         "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT(size: MICRO) SELECT double(_); RETURN; END"
+        "r = items |> CONCURRENT(size: MICRO) SELECT double(_); RETURN; END"
       }
 
       it "emits .stack_size = .Micro in each spawned fiber" do
@@ -942,7 +942,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         preamble +
         "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT SELECT double(_); RETURN; END"
+        "r = items |> CONCURRENT SELECT double(_); RETURN; END"
       }
 
       it "emits .stack_size = .Standard (the default)" do
@@ -955,7 +955,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         preamble +
         "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT SELECT double(_); RETURN; END"
+        "r = items |> CONCURRENT SELECT double(_); RETURN; END"
       }
 
       it "emits .stack_size = .Large" do
@@ -969,7 +969,7 @@ RSpec.describe SemanticAnnotator do
         preamble +
         "FN big(x: Float64) RETURNS Bool -> RETURN x > 1.0; END\n" \
         "FN f() RETURNS !Void -> items: Float64[] = [1.0, 2.0]; " \
-        "r = items s> CONCURRENT(size: LARGE) WHERE big(_); RETURN; END"
+        "r = items |> CONCURRENT(size: LARGE) WHERE big(_); RETURN; END"
       }
 
       it "emits .stack_size = .Large" do
@@ -997,7 +997,7 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
-          results = items s> CONCURRENT SELECT double(_);
+          results = items |> CONCURRENT SELECT double(_);
           RETURN;
         END
       CLEAR
@@ -1011,7 +1011,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Item { value: Float64 }
         FN f() RETURNS !Void ->
           items: Item[] = [];
-          evens = items s> CONCURRENT WHERE _.value > 0.0;
+          evens = items |> CONCURRENT WHERE _.value > 0.0;
           RETURN;
         END
       CLEAR
@@ -1025,7 +1025,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Score { value: Float64 }
         FN f() RETURNS !Void ->
           items: Score[] = [];
-          items s> CONCURRENT EACH { _.value = 0.0; };
+          items |> CONCURRENT EACH { _.value = 0.0; };
           RETURN;
         END
       CLEAR
@@ -1040,7 +1040,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
             items: Float64[] = [1.0, 2.0];
-            results = items s> CONCURRENT(workers: 4) SELECT _ * 2.0;
+            results = items |> CONCURRENT(workers: 4) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1055,7 +1055,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
             x: Float64 = 42.0;
-            r = x s> CONCURRENT SELECT _ * 2.0;
+            r = x |> CONCURRENT SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1067,7 +1067,7 @@ RSpec.describe SemanticAnnotator do
         run(<<~CLEAR)
           FN f() RETURNS !Void ->
             items: Float64[] = [1.0, 2.0];
-            r = items s> CONCURRENT WHERE _ * 2.0;
+            r = items |> CONCURRENT WHERE _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1081,7 +1081,7 @@ RSpec.describe SemanticAnnotator do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
-          results = items s> CONCURRENT(workers: 3) SELECT _ * 2.0;
+          results = items |> CONCURRENT(workers: 3) SELECT _ * 2.0;
           RETURN;
         END
       CLEAR
@@ -1095,7 +1095,7 @@ RSpec.describe SemanticAnnotator do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
-          evens = items s> CONCURRENT WHERE _ > 1.0;
+          evens = items |> CONCURRENT WHERE _ > 1.0;
           RETURN;
         END
       CLEAR
@@ -1110,7 +1110,7 @@ RSpec.describe SemanticAnnotator do
         STRUCT Score { value: Float64 }
         FN f() RETURNS !Void ->
           items: Score[] = [];
-          items s> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
+          items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
           RETURN;
         END
       CLEAR
@@ -1124,7 +1124,7 @@ RSpec.describe SemanticAnnotator do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items s> CONCURRENT SELECT _ * 2.0;
+          results = items |> CONCURRENT SELECT _ * 2.0;
           RETURN;
         END
       CLEAR
@@ -1138,7 +1138,7 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
           RETURN;
         END
       CLEAR
@@ -1157,7 +1157,7 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
           RETURN;
         END
       CLEAR
@@ -1171,7 +1171,7 @@ RSpec.describe SemanticAnnotator do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
-          results = items s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+          results = items |> CONCURRENT(workers: 2) SELECT _ * 2.0;
           RETURN;
         END
       CLEAR
@@ -1183,7 +1183,7 @@ RSpec.describe SemanticAnnotator do
       out = transpile_fn(<<~CLEAR)
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0, 3.0];
-          results = items s> CONCURRENT(workers: 2, parallel: TRUE) SELECT _ * 2.0;
+          results = items |> CONCURRENT(workers: 2, parallel: TRUE) SELECT _ * 2.0;
           RETURN;
         END
       CLEAR
@@ -1198,7 +1198,7 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR PRUNE;
           RETURN;
         END
       CLEAR
@@ -1213,7 +1213,7 @@ RSpec.describe SemanticAnnotator do
         END
         FN f() RETURNS !Void ->
           items: Float64[] = [1.0, 2.0];
-          results = items s> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
+          results = items |> CONCURRENT(workers: 2) SELECT mayFail(_) OR RAISE;
           RETURN;
         END
       CLEAR
@@ -1230,7 +1230,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT(workers: 0) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(workers: 0) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1241,7 +1241,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0];
-            result = nums s> CONCURRENT(workers: -1) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(workers: -1) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1252,7 +1252,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0];
-            result = nums s> CONCURRENT(invalid_opt: 4) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(invalid_opt: 4) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1263,7 +1263,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT(workers: 2, capacity: 8) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(workers: 2, capacity: 8) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1274,7 +1274,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT(workers: 2, batch: 0) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(workers: 2, batch: 0) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1285,7 +1285,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT(workers: 2, batch: -1) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(workers: 2, batch: -1) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1296,7 +1296,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT(workers: 2, batch: TRUE) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(workers: 2, batch: TRUE) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1307,7 +1307,7 @@ RSpec.describe SemanticAnnotator do
         code = <<~CLEAR
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0];
-            result = nums s> CONCURRENT(workers: 4, parallel: 1) SELECT _ * 2.0;
+            result = nums |> CONCURRENT(workers: 4, parallel: 1) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -1326,7 +1326,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT SELECT double(_) OR PRUNE;
+            result = nums |> CONCURRENT SELECT double(_) OR PRUNE;
             RETURN;
           END
         CLEAR
@@ -1340,7 +1340,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT SELECT double(_) OR RAISE;
+            result = nums |> CONCURRENT SELECT double(_) OR RAISE;
             RETURN;
           END
         CLEAR
@@ -1354,7 +1354,7 @@ RSpec.describe SemanticAnnotator do
           END
           FN main() RETURNS Void ->
             nums: Float64[] = [1.0, 2.0];
-            result = nums s> CONCURRENT SELECT mayFail(_) OR PRUNE;
+            result = nums |> CONCURRENT SELECT mayFail(_) OR PRUNE;
             RETURN;
           END
         CLEAR

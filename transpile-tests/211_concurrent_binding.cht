@@ -13,38 +13,38 @@ FN main() RETURNS Void ->
     ];
 
     -- CONCURRENT SELECT: transform using @u
-    discounts = users AS @u s> CONCURRENT(workers: 2) SELECT @u.discount;
+    discounts = users AS @u |> CONCURRENT(workers: 2) SELECT @u.discount;
     ASSERT discounts[0] == 0.9, "alice discount";
     ASSERT discounts[1] == 0.8, "bob discount";
 
     -- CONCURRENT SELECT: expression using @u
-    scores_doubled = users AS @u s> CONCURRENT(workers: 2) SELECT @u.score * 2;
+    scores_doubled = users AS @u |> CONCURRENT(workers: 2) SELECT @u.score * 2;
     ASSERT scores_doubled[0] == 20, "alice score doubled";
     ASSERT scores_doubled[1] == 40, "bob score doubled";
 
     -- CONCURRENT SUM using @u
-    total_score = users AS @u s> CONCURRENT(workers: 2) SUM @u.score;
+    total_score = users AS @u |> CONCURRENT(workers: 2) SUM @u.score;
     ASSERT total_score == 30.0, "sum of scores";
 
     -- CONCURRENT COUNT using @u
-    n = users AS @u s> CONCURRENT(workers: 2) COUNT @u.discount > 0.0;
+    n = users AS @u |> CONCURRENT(workers: 2) COUNT @u.discount > 0.0;
     ASSERT n == 2, "both have non-zero discount";
 
     -- CONCURRENT MIN/MAX using @u
-    min_score = users AS @u s> CONCURRENT(workers: 2) MIN @u.score;
+    min_score = users AS @u |> CONCURRENT(workers: 2) MIN @u.score;
     ASSERT min_score == 10.0, "min score is alice";
 
-    max_score = users AS @u s> CONCURRENT(workers: 2) MAX @u.score;
+    max_score = users AS @u |> CONCURRENT(workers: 2) MAX @u.score;
     ASSERT max_score == 20.0, "max score is bob";
 
     -- CONCURRENT AVERAGE using @u
-    avg_score = users AS @u s> CONCURRENT(workers: 2) AVERAGE @u.score;
+    avg_score = users AS @u |> CONCURRENT(workers: 2) AVERAGE @u.score;
     ASSERT avg_score == 15.0, "(10+20)/2 = 15";
 
     -- CONCURRENT WHERE using @u: keep users with score > 15 (scalar-only struct)
     STRUCT ScoreEntry { val: Float64 }
     entries: ScoreEntry[] = [ScoreEntry{ val: 10.0 }, ScoreEntry{ val: 25.0 }, ScoreEntry{ val: 5.0 }];
-    high = entries AS @e s> CONCURRENT(workers: 2) WHERE @e.val > 15.0;
+    high = entries AS @e |> CONCURRENT(workers: 2) WHERE @e.val > 15.0;
     ASSERT high.length() == 1, "only the 25.0 entry qualifies";
 
     print("OK");

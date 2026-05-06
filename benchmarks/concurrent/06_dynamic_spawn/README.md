@@ -64,7 +64,7 @@ batch parallelism:
 FOR i IN (0_i64 ..< 100000) -> futures.append(BG { doWork(i); });
 
 -- Batch parallelism (idiomatic CLEAR):
-results = (0_i64 ..< 100000) s> CONCURRENT EACH doWork(_);
+results = (0_i64 ..< 100000) |> CONCURRENT EACH doWork(_);
 ```
 
 CONCURRENT EACH distributes work across schedulers without per-item fiber

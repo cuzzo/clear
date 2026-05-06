@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running1: ~Bool@observable = gen_all_true s> ALL _ < 100_i64;
+    running1: ~Bool@observable = gen_all_true |> ALL _ < 100_i64;
     final1 = NEXT running1;
     ASSERT final1 == TRUE, "ALL true: every item < 100";
 
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    running2: ~Bool@observable = gen_one_false s> ALL _ < 25_i64;
+    running2: ~Bool@observable = gen_one_false |> ALL _ < 25_i64;
     final2 = NEXT running2;
     ASSERT final2 == FALSE, "ALL false: items 25..49 violate";
 

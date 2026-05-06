@@ -539,7 +539,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
-            vals = s s> CONCURRENT(workers: 2) SELECT _ * 2.0;
+            vals = s |> CONCURRENT(workers: 2) SELECT _ * 2.0;
             RETURN;
           END
         CLEAR
@@ -550,7 +550,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
-            vals = s s> CONCURRENT(workers: 2) WHERE _ > 1.5;
+            vals = s |> CONCURRENT(workers: 2) WHERE _ > 1.5;
             RETURN;
           END
         CLEAR
@@ -562,7 +562,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             MUTABLE total: Float64@shared:locked = 0.0;
             s: ~Float64[3] = [BG { 1.0; }, BG { 2.0; }, BG { 3.0; }];
-            s s> CONCURRENT(workers: 2) EACH {
+            s |> CONCURRENT(workers: 2) EACH {
               WITH EXCLUSIVE total AS t {
                 t = t + _;
               }
@@ -577,7 +577,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; YIELD 3; };
-            vals = s s> CONCURRENT(workers: 2, capacity: 4) SELECT _ * 2;
+            vals = s |> CONCURRENT(workers: 2, capacity: 4) SELECT _ * 2;
             RETURN;
           END
         CLEAR
@@ -588,7 +588,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; };
-            vals = s s> CONCURRENT(workers: 2, capacity: 0) SELECT _ * 2;
+            vals = s |> CONCURRENT(workers: 2, capacity: 0) SELECT _ * 2;
             RETURN;
           END
         CLEAR
@@ -599,7 +599,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; };
-            vals = s s> CONCURRENT(workers: 2, capacity: -1) SELECT _ * 2;
+            vals = s |> CONCURRENT(workers: 2, capacity: -1) SELECT _ * 2;
             RETURN;
           END
         CLEAR
@@ -610,7 +610,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; };
-            vals = s s> CONCURRENT(workers: 2, buffer: 4) SELECT _ * 2;
+            vals = s |> CONCURRENT(workers: 2, buffer: 4) SELECT _ * 2;
             RETURN;
           END
         CLEAR
@@ -1472,7 +1472,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 8;
             MUTABLE acc: Int64 = 0;
-            s s> SELECT _ * 2 s> WHERE _ > 3 s> EACH {
+            s |> SELECT _ * 2 |> WHERE _ > 3 |> EACH {
               acc = acc + _;
             };
             RETURN;
@@ -1488,7 +1488,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~Int64[] = 0 ..< 8;
-            _ = s s> REDUCE(0_i64) acc + _ s> COLLECT;
+            _ = s |> REDUCE(0_i64) acc + _ |> COLLECT;
             RETURN;
           END
         CLEAR
@@ -1500,7 +1500,7 @@ RSpec.describe SemanticAnnotator do
           FN f() RETURNS !Void ->
             s: ~Int64[] = 1 ..< 100;
             MUTABLE sum: Int64 = 0;
-            s s> LIMIT 3 s> EACH { sum = sum + _; };
+            s |> LIMIT 3 |> EACH { sum = sum + _; };
             RETURN;
           END
         CLEAR
@@ -1511,7 +1511,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
-            s s> EACH { print(_); };
+            s |> EACH { print(_); };
             RETURN;
           END
         CLEAR
@@ -1524,7 +1524,7 @@ RSpec.describe SemanticAnnotator do
         src = <<~CLEAR
           FN f() RETURNS !Void ->
             s: ~?Int64[] = BG STREAM { YIELD 1; YIELD 2; };
-            _ = s s> REDUCE(0) acc + _ s> COLLECT;
+            _ = s |> REDUCE(0) acc + _ |> COLLECT;
             RETURN;
           END
         CLEAR

@@ -9,9 +9,9 @@ END
 FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
     -- item 3.0 will error and be pruned
-    results = nums s> CONCURRENT(workers: 3) SELECT safeDouble(_) OR PRUNE;
+    results = nums |> CONCURRENT(workers: 3) SELECT safeDouble(_) OR PRUNE;
     -- results should have [2.0, 4.0, 8.0, 10.0] (4 items, 3.0 pruned)
-    total = results s> SUM _;
+    total = results |> SUM _;
     ASSERT total == 24.0, "pruned result should sum to 24";
     RETURN;
 END

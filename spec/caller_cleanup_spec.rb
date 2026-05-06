@@ -110,7 +110,7 @@ RSpec.describe "Caller-side cleanup for promoted returns" do
             RETURN u;
         END
         FN process(u: User) RETURNS !String ->
-            validUser = u s> checkUser;
+            validUser = u |> checkUser;
             RETURN validUser.name;
         CATCH Input
             RETURN "error";

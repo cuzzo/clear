@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
 
     vals2: ~Int64[] = 0 ..< 5;
     MUTABLE sum: Int64 = 0;
-    vals2 s> EACH {
+    vals2 |> EACH {
         sum = sum + _;
     };
     ASSERT sum == 10, "variable-backed EACH";

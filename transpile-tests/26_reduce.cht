@@ -3,7 +3,7 @@ STRUCT Item { name: String, value: Int64 }
 FN main() RETURNS Void ->
   -- Test 1: Simple sum
   nums: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
-  sum = nums s> REDUCE(0_i64) acc + _;
+  sum = nums |> REDUCE(0_i64) acc + _;
   ASSERT sum == 15, "Sum should be 15";
 
   -- Test 2: Reduce with struct field access
@@ -12,11 +12,11 @@ FN main() RETURNS Void ->
     Item{ name: "b", value: 20_i64 },
     Item{ name: "c", value: 30_i64 }
   ];
-  total = items s> REDUCE(0_i64) acc + _.value;
+  total = items |> REDUCE(0_i64) acc + _.value;
   ASSERT total == 60, "Total should be 60";
 
   -- Test 3: Product
   factors: Int64[] = [2_i64, 3_i64, 4_i64];
-  product = factors s> REDUCE(1_i64) acc * _;
+  product = factors |> REDUCE(1_i64) acc * _;
   ASSERT product == 24, "Product should be 24";
 END

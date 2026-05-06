@@ -180,8 +180,8 @@ class Parser
   primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
 
   # Pipeline operators use :pipe_expression (min precedence 2) so their
-  # body expression stops before `s>` (precedence 1), enabling chaining:
-  #   list s> SELECT _ * 2.0 s> WHERE _ > 5.0
+  # body expression stops before `|>` (precedence 1), enabling chaining:
+  #   list |> SELECT _ * 2.0 |> WHERE _ > 5.0
   primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :pipe_expression])
   primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :pipe_expression])
   primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :pipe_expression])
@@ -452,8 +452,8 @@ class Parser
   def run_action(item)
     # Convention: :UPPER_CASE is a Token Type to eat
     return consume(item).value if item == item.upcase
-    # :pipe_expression → parse_expression with min precedence = s> (1)
-    # Excludes s> (prec 1, since 1 > 1 is false) but includes OR (prec 2).
+    # :pipe_expression → parse_expression with min precedence = |> (1)
+    # Excludes |> (prec 1, since 1 > 1 is false) but includes OR (prec 2).
     return parse_expression(1) if item == :pipe_expression
     # :down_case => parse function to run
     return send("parse_#{item}")
@@ -1631,7 +1631,7 @@ class Parser
 
     # Precedence levels (higher = tighter binding)
     case token.value
-    when 's>'             then 1
+    when '|>'             then 1
     when 'OR', 'AS'       then 2
     when '..<', '..<=', '..=' then 3
     when '||'             then 4
@@ -1664,10 +1664,10 @@ class Parser
       rhs = parse_or_rescue
       return AST::BinaryOp.new(op_token, lhs, :OR_RESCUE, rhs)
 
-    when 's>'
+    when '|>'
       # SMOOTH binds Level 1, but its RHS allows chained pipe operators
       rhs = parse_expression(next_prec)
-      # Predicate suffix: x s> isPositive? parses as OptionalUnwrap(Identifier).
+      # Predicate suffix: x |> isPositive? parses as OptionalUnwrap(Identifier).
       # Unwrap and restore the ? suffix as part of the function name.
       if rhs.is_a?(AST::OptionalUnwrap) && rhs.target.is_a?(AST::Identifier)
         rhs = AST::Identifier.new(rhs.token, "#{rhs.target.name}?")
@@ -2464,12 +2464,12 @@ class Parser
   end
 
   # REDUCE(initial_value) expression
-  # e.g., myList s> REDUCE(0) acc + _.value
+  # e.g., myList |> REDUCE(0) acc + _.value
   #
   # The body must use the pipe-precedence (1) so it stops before the
-  # next `s>` token, matching every other pipeline op (SELECT/WHERE/...).
-  # Otherwise `list s> REDUCE(0) acc + _ s> COLLECT` parses as
-  # `list s> REDUCE(0) (acc + _ s> COLLECT)` -- COLLECT gets eaten by
+  # next `|>` token, matching every other pipeline op (SELECT/WHERE/...).
+  # Otherwise `list |> REDUCE(0) acc + _ |> COLLECT` parses as
+  # `list |> REDUCE(0) (acc + _ |> COLLECT)` -- COLLECT gets eaten by
   # the body and the chain breaks.
   def parse_reduce_op
     reduce_token = consume(:KEYWORD, 'REDUCE')
@@ -2491,9 +2491,9 @@ class Parser
 
   # WINDOW(size) expression        -- sliding window (positional arg)
   # WINDOW(size: N, time: 'Xms')  -- batch/tumbling window (named args)
-  # e.g., prices s> WINDOW(3) SUM(_) / 3.0
-  # e.g., stream s> WINDOW(size: 100) SELECT process(_)
-  # e.g., stream s> WINDOW(size: 100, time: '500ms') EACH { ... }
+  # e.g., prices |> WINDOW(3) SUM(_) / 3.0
+  # e.g., stream |> WINDOW(size: 100) SELECT process(_)
+  # e.g., stream |> WINDOW(size: 100, time: '500ms') EACH { ... }
   def parse_window_op
     window_token = consume(:KEYWORD, 'WINDOW')
     consume(:CHAR, '(')
@@ -2520,8 +2520,8 @@ class Parser
   end
 
   # JOIN(right_source) key_expr_or_lambda
-  # e.g., users s> JOIN(orders) _.userId
-  # e.g., users s> JOIN(orders) %(a, b) -> a.id == b.userId
+  # e.g., users |> JOIN(orders) _.userId
+  # e.g., users |> JOIN(orders) %(a, b) -> a.id == b.userId
   def parse_join_op
     join_token = consume(:KEYWORD, 'JOIN')
     consume(:CHAR, '(')
@@ -2532,7 +2532,7 @@ class Parser
   end
 
   # SHARD(key_expr, target_map)
-  # e.g., (0..<n) s> SHARD("key:" + _, map) s> CONCURRENT EACH { ... }
+  # e.g., (0..<n) |> SHARD("key:" + _, map) |> CONCURRENT EACH { ... }
   # Routes items to owning schedulers by hashing the key expression.
   # `_` is the implicit item binding (same as SELECT/WHERE).
   def parse_shard_op
@@ -2858,7 +2858,7 @@ class Parser
   def parse_concurrent_inner_op(parent_token)
     if match?(:KEYWORD, 'SELECT')
       consume(:KEYWORD, 'SELECT')
-      expr = parse_expression(1)  # stop before s> for chaining
+      expr = parse_expression(1)  # stop before |> for chaining
       AST::SelectOp.new(previous, expr)
     elsif match?(:KEYWORD, 'WHERE')
       consume(:KEYWORD, 'WHERE')

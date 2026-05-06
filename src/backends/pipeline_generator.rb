@@ -1,4 +1,4 @@
-# Generates Zig code for pipeline operators (s>) that need special
+# Generates Zig code for pipeline operators (|>) that need special
 # iteration patterns: pool, sharded, SOA sources, and CONCURRENT.
 #
 # For plain-array sources, PipelineRewriter converts most operators
@@ -10,7 +10,7 @@
 #     WINDOW, JOIN (all sources)
 module PipelineGenerator
   # Unique label for each pipeline block -- prevents Zig label collisions
-  # when pipelines are chained (e.g., a s> SELECT s> WHERE).
+  # when pipelines are chained (e.g., a |> SELECT |> WHERE).
   def next_pipe_label
     @pipe_label_counter = (@pipe_label_counter || 0) + 1
     "__pblk#{@pipe_label_counter}"
@@ -22,7 +22,7 @@ module PipelineGenerator
   # sources, individual operator methods handle each stage via materialization.
   # -------------------------------------------------------------------------
 
-  # When lower_concurrent detected `list AS @u s> CONCURRENT op`, this wraps
+  # When lower_concurrent detected `list AS @u |> CONCURRENT op`, this wraps
   # the expression visit with @u -> placeholder substitution active.
   def with_concurrent_outer_binding(placeholder, &blk)
     return blk.call unless @concurrent_outer_binding
@@ -697,7 +697,7 @@ module PipelineGenerator
     end
   end
 
-  # Transpile `collection s> EACH _.expr` — side-effect iteration.
+  # Transpile `collection |> EACH _.expr` — side-effect iteration.
   # Dispatches to the appropriate implementation based on the source type:
   #   - Regular array/list → sequential for loop
   #   - Plain pool         → sequential live-slot scan

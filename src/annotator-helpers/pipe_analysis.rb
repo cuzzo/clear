@@ -4,11 +4,11 @@ require 'set'
 
 module PipeAnalysis
   # =========================================================
-  # SMOOTH OPERATOR (s>)
+  # SMOOTH OPERATOR (|>)
   # =========================================================
   def visit_Smooth(node)
     @smooth_depth += 1
-    # Logic: x s> f  -> f(x)
+    # Logic: x |> f  -> f(x)
 
     # 1. Visit the Left (Input) FIRST
     visit(node.left)
@@ -20,7 +20,7 @@ module PipeAnalysis
     elsif node.right.is_a?(AST::Identifier)
       analyze_pipe_to_identifier(node)
     else
-      # Case 3: Invalid RHS (e.g. 10 s> (expression))
+      # Case 3: Invalid RHS (e.g. 10 |> (expression))
       error!(node, "Invalid pipe destination. Must be a Function Call or Identifier.")
       node.full_type = :Any
     end
@@ -45,7 +45,7 @@ module PipeAnalysis
   # The caller (analyze_sum_op etc.) ALSO lifts the pipe's
   # full_type to `~T@observable` so the binding inherits the
   # observable type without requiring an explicit annotation. The
-  # user joins via `s> COLLECT` (or NEXT) to get back a scalar T.
+  # user joins via `|> COLLECT` (or NEXT) to get back a scalar T.
   def stamp_observable_terminal!(node)
     # RangeLits annotate as `~Int64[]` (a tense dynamic_stream) but
     # fold eagerly to a scalar -- there's no fiber producing values
@@ -481,7 +481,7 @@ module PipeAnalysis
   end
 
   def analyze_reduce_op(node)
-    # REDUCE: list s> REDUCE(initial) acc + _.value
+    # REDUCE: list |> REDUCE(initial) acc + _.value
     # Also accepts range/stream sources for the fused lazy path.
     is_stream = finite_stream_source?(node.left)
     require_array_input!(node, "REDUCE", allow_range: is_stream, allow_stream: is_stream)
@@ -537,7 +537,7 @@ module PipeAnalysis
   end
 
   def analyze_limit_op(node)
-    # LIMIT: list s> LIMIT n
+    # LIMIT: list |> LIMIT n
     # Also accepts range and stream sources (fused lazy path).
     is_range  = node.left.is_a?(AST::RangeLit)
     lhs_ti    = node.left.type_info
@@ -567,7 +567,7 @@ module PipeAnalysis
   end
 
   def analyze_unnest_op(node)
-    # UNNEST: list s> UNNEST _.arr (flatmap)
+    # UNNEST: list |> UNNEST _.arr (flatmap)
     # Optional inner binding: UNNEST _.arr AS @o  parses as UNNEST BIND_VAR(_.arr, @o)
     # because :pipe_expression uses parse_expression(1) which consumes AS at prec 2.
     require_array_input!(node, "UNNEST")
@@ -607,7 +607,7 @@ module PipeAnalysis
   end
 
   def analyze_distinct_op(node)
-    # DISTINCT: list s> DISTINCT _.field (or just DISTINCT _)
+    # DISTINCT: list |> DISTINCT _.field (or just DISTINCT _)
     # Returns a Set of unique key values (T[]@set or T[N]@set).
     lhs_type  = node.left.type_info
     is_inf    = lhs_type&.inf_stream?
@@ -655,7 +655,7 @@ module PipeAnalysis
   end
 
   def analyze_pipe_to_func_call(node)
-    # Case 1: x s> f(y)  => f(x, y)
+    # Case 1: x |> f(y)  => f(x, y)
     # We intentionally modify the AST temporarily to leverage visit_FuncCall's
     # existing validation logic (arity, type checks, intrinsics).
 
@@ -675,7 +675,7 @@ module PipeAnalysis
   end
 
   def analyze_pipe_to_identifier(node)
-    # Case 2: x s> f  => f(x)
+    # Case 2: x |> f  => f(x)
     # We must MANUALLY validate this because we aren't creating a FuncCall node.
 
     visit(node.right) # Resolves 'f' to its Signature/Type
@@ -768,7 +768,7 @@ module PipeAnalysis
   end
 
   def analyze_skip_op(node)
-    # SKIP: list s> SKIP n -> same list type with first n elements removed (also accepts range/InfStream)
+    # SKIP: list |> SKIP n -> same list type with first n elements removed (also accepts range/InfStream)
     is_inf   = node.left.type_info&.inf_stream?
     is_range = finite_stream_source?(node.left) || is_inf
     require_array_input!(node, "SKIP", allow_range: is_range, allow_stream: is_range)
@@ -791,7 +791,7 @@ module PipeAnalysis
   end
 
   def analyze_tap_op(node)
-    # TAP: list s> TAP { body } -> same list type (pass-through); also accepts range/stream source.
+    # TAP: list |> TAP { body } -> same list type (pass-through); also accepts range/stream source.
     lhs_type = node.left.type_info
     is_inf   = lhs_type&.inf_stream?
     is_range = finite_stream_source?(node.left) || is_inf
@@ -829,7 +829,7 @@ module PipeAnalysis
   # =========================================================
 
   def analyze_find_op(node)
-    # FIND: list s> FIND predicate  → ?ElemType (first match or null; also accepts range)
+    # FIND: list |> FIND predicate  → ?ElemType (first match or null; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "FIND", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -849,7 +849,7 @@ module PipeAnalysis
   end
 
   def analyze_any_op(node)
-    # ANY: list s> ANY predicate  → Bool (short-circuits; also accepts range)
+    # ANY: list |> ANY predicate  → Bool (short-circuits; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "ANY", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -869,7 +869,7 @@ module PipeAnalysis
   end
 
   def analyze_all_op(node)
-    # ALL: list s> ALL predicate  → Bool (vacuous truth on empty; also accepts range)
+    # ALL: list |> ALL predicate  → Bool (vacuous truth on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "ALL", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -889,7 +889,7 @@ module PipeAnalysis
   end
 
   def analyze_count_op(node)
-    # COUNT: list s> COUNT predicate  → Int64 (also accepts range)
+    # COUNT: list |> COUNT predicate  → Int64 (also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "COUNT", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -916,7 +916,7 @@ module PipeAnalysis
   # Covers :Float64, :Int64, :Byte, :Float64.
 
   def analyze_sum_op(node)
-    # SUM: list s> SUM expr  → upsized numeric type (int→Int64/UInt64, float→same float)
+    # SUM: list |> SUM expr  → upsized numeric type (int→Int64/UInt64, float→same float)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "SUM", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -937,7 +937,7 @@ module PipeAnalysis
   end
 
   def analyze_average_op(node)
-    # AVERAGE: list s> AVERAGE expr  → Float64 (0 for empty; also accepts range)
+    # AVERAGE: list |> AVERAGE expr  → Float64 (0 for empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "AVERAGE", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -958,7 +958,7 @@ module PipeAnalysis
   end
 
   def analyze_min_op(node)
-    # MIN: list s> MIN expr  → exact expression type (panics on empty; also accepts range)
+    # MIN: list |> MIN expr  → exact expression type (panics on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "MIN", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -979,7 +979,7 @@ module PipeAnalysis
   end
 
   def analyze_max_op(node)
-    # MAX: list s> MAX expr  → exact expression type (panics on empty; also accepts range)
+    # MAX: list |> MAX expr  → exact expression type (panics on empty; also accepts range)
     is_range = finite_stream_source?(node.left)
     require_array_input!(node, "MAX", allow_range: is_range, allow_stream: is_range)
     item_type = is_range ? finite_stream_element_type(node.left) : node.left.type_info.element_type.resolved
@@ -1327,7 +1327,7 @@ module PipeAnalysis
     options = conc.options
     lhs_type = node.left.type_info
 
-    # Detect SHARD predecessor: (range) s> SHARD(key, map) s> CONCURRENT EACH { ... }
+    # Detect SHARD predecessor: (range) |> SHARD(key, map) |> CONCURRENT EACH { ... }
     # node.left is BinaryOp(SMOOTH, range, ShardOp) when SHARD precedes CONCURRENT.
     shard_node = nil
     if shard_concurrent_source?(node.left)

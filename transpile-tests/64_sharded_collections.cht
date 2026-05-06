@@ -24,13 +24,13 @@ FN main() RETURNS Void ->
     ASSERT sp.get(id_c) != NIL, "id_c should still be valid";
 
     -- EACH on sharded pool: parallel side-effect iteration across 4 fibers
-    sp s> EACH { _.value = 0.0; };
+    sp |> EACH { _.value = 0.0; };
 
     -- EACH on a regular @list (sequential iteration)
     MUTABLE items: Score[]@list = [];
     append(items, Score{ value: 1.0 });
     append(items, Score{ value: 2.0 });
-    items s> EACH { _.value = 0.0; };
+    items |> EACH { _.value = 0.0; };
 
     -- @list:sharded(2): 2 independent list shards
     MUTABLE sl: Score[]@list:sharded(2) = [];

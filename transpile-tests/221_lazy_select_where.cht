@@ -1,10 +1,10 @@
--- Test: fused range pipeline -- range s> SELECT/WHERE/TAKEWHILE/LIMIT/SKIP s> EACH
+-- Test: fused range pipeline -- range |> SELECT/WHERE/TAKEWHILE/LIMIT/SKIP |> EACH
 -- compiles to a SINGLE fused while loop with no intermediate list materialization.
 
 FN main() RETURNS Void ->
     -- SELECT then WHERE then EACH
     MUTABLE total: Int64 = 0;
-    (0_i64 ..< 10) s> SELECT _ * 2 s> WHERE _ > 5 s> EACH {
+    (0_i64 ..< 10) |> SELECT _ * 2 |> WHERE _ > 5 |> EACH {
         total = total + _;
     };
     -- 0..10 -> *2: 0,2,4,6,8,10,12,14,16,18 -> >5: 6,8,10,12,14,16,18 = 84
@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
 
     -- WHERE only
     MUTABLE big: Int64 = 0;
-    (0_i64 ..< 8) s> WHERE _ > 4 s> EACH {
+    (0_i64 ..< 8) |> WHERE _ > 4 |> EACH {
         big = big + _;
     };
     -- 5+6+7 = 18
@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
 
     -- SELECT only
     MUTABLE cubed: Int64 = 0;
-    (1_i64 ..< 4) s> SELECT _ * _ * _ s> EACH {
+    (1_i64 ..< 4) |> SELECT _ * _ * _ |> EACH {
         cubed = cubed + _;
     };
     -- 1+8+27 = 36
@@ -28,7 +28,7 @@ FN main() RETURNS Void ->
 
     -- TAKE_WHILE: stop when element >= 5
     MUTABLE tw_sum: Int64 = 0;
-    (0_i64 ..< 100) s> TAKE_WHILE _ < 5 s> EACH {
+    (0_i64 ..< 100) |> TAKE_WHILE _ < 5 |> EACH {
         tw_sum = tw_sum + _;
     };
     -- 0+1+2+3+4 = 10
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
 
     -- LIMIT: first 3 elements
     MUTABLE lim_sum: Int64 = 0;
-    (10_i64 ..< 20) s> LIMIT 3 s> EACH {
+    (10_i64 ..< 20) |> LIMIT 3 |> EACH {
         lim_sum = lim_sum + _;
     };
     -- 10+11+12 = 33
@@ -44,7 +44,7 @@ FN main() RETURNS Void ->
 
     -- SKIP: skip first 3 elements
     MUTABLE skip_sum: Int64 = 0;
-    (0_i64 ..< 6) s> SKIP 3 s> EACH {
+    (0_i64 ..< 6) |> SKIP 3 |> EACH {
         skip_sum = skip_sum + _;
     };
     -- 3+4+5 = 12
@@ -52,7 +52,7 @@ FN main() RETURNS Void ->
 
     -- Chained: SELECT then TAKE_WHILE
     MUTABLE chain_sum: Int64 = 0;
-    (1_i64 ..< 10) s> SELECT _ * 3 s> TAKE_WHILE _ < 15 s> EACH {
+    (1_i64 ..< 10) |> SELECT _ * 3 |> TAKE_WHILE _ < 15 |> EACH {
         chain_sum = chain_sum + _;
     };
     -- 1..10 -> *3: 3,6,9,12,15,18,... -> <15: 3,6,9,12 = 30

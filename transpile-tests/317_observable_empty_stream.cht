@@ -8,42 +8,42 @@
 FN main() RETURNS Void ->
     -- SUM on empty: 0
     g1: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_sum: ~Int64@observable = g1 s> SUM _;
+    s_sum: ~Int64@observable = g1 |> SUM _;
     ASSERT (NEXT s_sum) == 0_i64, "SUM empty -> 0";
 
     -- COUNT on empty: 0
     g2: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_count: ~Int64@observable = g2 s> COUNT _ > 0_i64;
+    s_count: ~Int64@observable = g2 |> COUNT _ > 0_i64;
     ASSERT (NEXT s_count) == 0_i64, "COUNT empty -> 0";
 
     -- AVG on empty: 0.0 (sentinel since count==0)
     g3: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_avg: ~Float64@observable = g3 s> AVERAGE _;
+    s_avg: ~Float64@observable = g3 |> AVERAGE _;
     ASSERT (NEXT s_avg) == 0.0, "AVG empty -> 0.0";
 
     -- ANY on empty: false
     g4: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_any: ~Bool@observable = g4 s> ANY _ > 0_i64;
+    s_any: ~Bool@observable = g4 |> ANY _ > 0_i64;
     ASSERT (NEXT s_any) == FALSE, "ANY empty -> false";
 
     -- ALL on empty: true (vacuous truth)
     g5: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_all: ~Bool@observable = g5 s> ALL _ > 0_i64;
+    s_all: ~Bool@observable = g5 |> ALL _ > 0_i64;
     ASSERT (NEXT s_all) == TRUE, "ALL empty -> true (vacuous)";
 
     -- FIND on empty: NIL
     g6: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_find: ~?Int64@observable = g6 s> FIND _ > 0_i64;
+    s_find: ~?Int64@observable = g6 |> FIND _ > 0_i64;
     ASSERT (NEXT s_find) == NIL, "FIND empty -> NIL";
 
     -- REDUCE on empty: returns the seed
     g7: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_reduce: ~Int64@observable = g7 s> REDUCE(42_i64) acc + _;
+    s_reduce: ~Int64@observable = g7 |> REDUCE(42_i64) acc + _;
     ASSERT (NEXT s_reduce) == 42_i64, "REDUCE empty -> seed";
 
     -- DISTINCT on empty: zero-length owned slice
     g8: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_distinct: ~Int64[]@set:observable = g8 s> DISTINCT _;
+    s_distinct: ~Int64[]@set:observable = g8 |> DISTINCT _;
     final_d = NEXT s_distinct;
     ASSERT final_d.length() == 0_i64, "DISTINCT empty -> 0 items";
 
@@ -52,10 +52,10 @@ FN main() RETURNS Void ->
     -- semantics intentionally avoid panic for observables (the
     -- producer fiber may legitimately publish 0 items in flight).
     g9: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_max: ~Int64@observable = g9 s> MAX _;
+    s_max: ~Int64@observable = g9 |> MAX _;
     max_empty = NEXT s_max;  -- value is min_i64 sentinel
     g10: ~?Int64[] = BG STREAM { IF FALSE THEN YIELD 0_i64; END };
-    s_min: ~Int64@observable = g10 s> MIN _;
+    s_min: ~Int64@observable = g10 |> MIN _;
     min_empty = NEXT s_min;  -- value is max_i64 sentinel
     print("max-empty: ", max_empty, " min-empty: ", min_empty);
 

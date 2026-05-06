@@ -30,33 +30,33 @@ FN main() RETURNS Void ->
     id3: Id<Item> = pool.insert(Item{ value: 30.0 });
 
     -- SUM of a pool field
-    total = pool s> SUM _.value;
+    total = pool |> SUM _.value;
     ASSERT total == 60.0, "pool SUM should be 60";
 
     -- WHERE on pool returns regular array (count verified via COUNT below)
-    big = pool s> WHERE _.value > 15.0;
+    big = pool |> WHERE _.value > 15.0;
 
     -- COUNT on pool
-    n = pool s> COUNT _.value > 15.0;
+    n = pool |> COUNT _.value > 15.0;
     ASSERT n == 2, "pool COUNT should be 2";
 
     -- ANY on pool
-    has_ten = pool s> ANY _.value == 10.0;
+    has_ten = pool |> ANY _.value == 10.0;
     ASSERT has_ten == TRUE, "pool ANY should find 10";
 
     -- ALL on pool
-    all_pos = pool s> ALL _.value > 0.0;
+    all_pos = pool |> ALL _.value > 0.0;
     ASSERT all_pos == TRUE, "pool ALL positive should be true";
 
     -- MIN / MAX on pool
-    mn = pool s> MIN _.value;
-    mx = pool s> MAX _.value;
+    mn = pool |> MIN _.value;
+    mx = pool |> MAX _.value;
     ASSERT mn == 10.0, "pool MIN should be 10";
     ASSERT mx == 30.0, "pool MAX should be 30";
 
     -- After removing one slot, SUM reflects only live items
     pool.remove(id1);
-    total2 = pool s> SUM _.value;
+    total2 = pool |> SUM _.value;
     ASSERT total2 == 50.0, "pool SUM after remove should be 50";
 
     -- -------------------------
@@ -68,16 +68,16 @@ FN main() RETURNS Void ->
     append(slist, 3.0);
     append(slist, 4.0);
 
-    sl_sum = slist s> SUM _;
+    sl_sum = slist |> SUM _;
     ASSERT sl_sum == 10.0, "sharded list SUM should be 10";
 
-    sl_count = slist s> COUNT _ > 2.0;
+    sl_count = slist |> COUNT _ > 2.0;
     ASSERT sl_count == 2, "sharded list COUNT > 2 should be 2";
 
-    sl_any = slist s> ANY _ == 3.0;
+    sl_any = slist |> ANY _ == 3.0;
     ASSERT sl_any == TRUE, "sharded list ANY should find 3";
 
-    sl_all = slist s> ALL _ > 0.0;
+    sl_all = slist |> ALL _ > 0.0;
     ASSERT sl_all == TRUE, "sharded list ALL positive";
 
     -- -------------------------
@@ -87,10 +87,10 @@ FN main() RETURNS Void ->
     append(slist2, Item{ value: 5.0 });
     append(slist2, Item{ value: 6.0 });
     -- EACH runs N parallel fibers, one per shard (side-effect mutation)
-    slist2 s> EACH { _.value = 0.0; };
+    slist2 |> EACH { _.value = 0.0; };
 
     -- Verify the mutation was applied to all elements
-    after_sum = slist2 s> SUM _.value;
+    after_sum = slist2 |> SUM _.value;
     ASSERT after_sum == 0.0, "after EACH mutation all values should be 0";
 
     RETURN;

@@ -7,13 +7,13 @@ FN main() RETURNS Void ->
     -- LIMIT + EACH on bounded stream (~T[N])
     s1: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     MUTABLE sum1: Int64 = 0;
-    s1 s> LIMIT 3 s> EACH { sum1 = sum1 + _; };
+    s1 |> LIMIT 3 |> EACH { sum1 = sum1 + _; };
     ASSERT sum1 == 6, "LIMIT 3 on ~T[5]: 1+2+3";
 
     -- LIMIT + EACH on dynamic range stream (~T[])
     s2: ~Int64[] = 1 ..< 100;
     MUTABLE sum2: Int64 = 0;
-    s2 s> LIMIT 4 s> EACH { sum2 = sum2 + _; };
+    s2 |> LIMIT 4 |> EACH { sum2 = sum2 + _; };
     ASSERT sum2 == 10, "LIMIT 4 on ~T[]: 1+2+3+4";
 
     -- LIMIT + EACH on infinite stream (~T[INF])
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
         END
     };
     MUTABLE sum3: Int64 = 0;
-    counter s> LIMIT 5 s> EACH { sum3 = sum3 + _; };
+    counter |> LIMIT 5 |> EACH { sum3 = sum3 + _; };
     ASSERT sum3 == 15, "LIMIT 5 on ~T[INF]: 1+2+3+4+5";
 
     -- LIMIT + SUM on infinite stream (~T[INF])
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
             j = j + 1;
         END
     };
-    total = counter2 s> LIMIT 5 s> SUM _;
+    total = counter2 |> LIMIT 5 |> SUM _;
     ASSERT total == 15, "LIMIT 5 + SUM on ~T[INF]: 1+2+3+4+5";
 
     -- LIMIT + COUNT on infinite stream
@@ -47,7 +47,7 @@ FN main() RETURNS Void ->
             k = k + 1;
         END
     };
-    cnt = counter3 s> LIMIT 7 s> COUNT _ >= 0;
+    cnt = counter3 |> LIMIT 7 |> COUNT _ >= 0;
     ASSERT cnt == 7, "LIMIT 7 + COUNT on ~T[INF]";
 
     -- WHERE before LIMIT on ~T[INF]: LIMIT counts filtered items
@@ -59,7 +59,7 @@ FN main() RETURNS Void ->
         END
     };
     MUTABLE sum4: Int64 = 0;
-    counter4 s> WHERE _ MOD 2 == 0 s> LIMIT 3 s> EACH { sum4 = sum4 + _; };
+    counter4 |> WHERE _ MOD 2 == 0 |> LIMIT 3 |> EACH { sum4 = sum4 + _; };
     ASSERT sum4 == 12, "WHERE evens then LIMIT 3: 2+4+6";
 
     -- SELECT before LIMIT on ~T[INF]
@@ -70,7 +70,7 @@ FN main() RETURNS Void ->
             m = m + 1;
         END
     };
-    total2 = counter5 s> SELECT _ * 10 s> LIMIT 4 s> SUM _;
+    total2 = counter5 |> SELECT _ * 10 |> LIMIT 4 |> SUM _;
     ASSERT total2 == 100, "SELECT *10 then LIMIT 4 SUM: 10+20+30+40";
 
     -- SKIP before LIMIT on ~T[INF]
@@ -82,7 +82,7 @@ FN main() RETURNS Void ->
         END
     };
     MUTABLE sum5: Int64 = 0;
-    counter6 s> SKIP 5 s> LIMIT 3 s> EACH { sum5 = sum5 + _; };
+    counter6 |> SKIP 5 |> LIMIT 3 |> EACH { sum5 = sum5 + _; };
     ASSERT sum5 == 21, "SKIP 5 then LIMIT 3: 6+7+8";
 
     -- LIMIT before WHERE on ~T[INF]: LIMIT counts source items, WHERE filters among those
@@ -94,7 +94,7 @@ FN main() RETURNS Void ->
         END
     };
     MUTABLE sum6: Int64 = 0;
-    counter7 s> LIMIT 6 s> WHERE _ MOD 2 == 0 s> EACH { sum6 = sum6 + _; };
+    counter7 |> LIMIT 6 |> WHERE _ MOD 2 == 0 |> EACH { sum6 = sum6 + _; };
     ASSERT sum6 == 12, "LIMIT 6 then WHERE evens: 2+4+6";
 
     print("OK");

@@ -1,15 +1,15 @@
 -- @leak: n = 10000000 -> n = 10000
--- Benchmark: Pipeline Overhead — s> operators vs Handwritten Loops
+-- Benchmark: Pipeline Overhead — |> operators vs Handwritten Loops
 --
--- Measures the abstraction cost of s> pipeline operators vs handwritten loops.
--- All s> pipelines fuse into a single pass (no intermediate allocations).
+-- Measures the abstraction cost of |> pipeline operators vs handwritten loops.
+-- All |> pipelines fuse into a single pass (no intermediate allocations).
 --
 -- MEASURED RESULTS (x86-64, 10M elements x 20 iters, --optimized):
 --
 --   VARIANT                        | TIME  | vs C
 --   C sum loop                     | ~47ms | 1.0x baseline
 --   CLEAR sum loop                 | ~178ms| 3.8x (LLVM vs GCC vectorization)
---   CLEAR sum pipeline (s> SUM _)  | ~175ms| ~0 overhead
+--   CLEAR sum pipeline (|> SUM _)  | ~175ms| ~0 overhead
 --   CLEAR 2-stage fused loop       | ~273ms| -
 --   CLEAR 2-stage pipeline         | ~276ms| ~3ms overhead (checkYield)
 --   CLEAR 4-stage fused loop       | ~338ms| -
@@ -53,7 +53,7 @@ FN sumLoop(data: Float64[]) RETURNS Float64 ->
 END
 
 FN sumPipeline(data: Float64[]) RETURNS Float64 ->
-    RETURN data s> SUM _;
+    RETURN data |> SUM _;
 END
 
 -- ============================================================
@@ -70,7 +70,7 @@ FN fusedLoop(data: Float64[]) RETURNS Float64 ->
 END
 
 FN chainedPipeline(data: Float64[]) RETURNS !Float64 ->
-    RETURN data s> WHERE _ > 500.0 s> SELECT _ * _ s> SUM _;
+    RETURN data |> WHERE _ > 500.0 |> SELECT _ * _ |> SUM _;
 END
 
 -- ============================================================
@@ -89,7 +89,7 @@ FN longFusedLoop(data: Float64[]) RETURNS Float64 ->
 END
 
 FN longChainedPipeline(data: Float64[]) RETURNS !Float64 ->
-    RETURN data s> WHERE _ > 200.0 s> SELECT _ * 2.0 s> WHERE _ < 1500.0 s> SUM _;
+    RETURN data |> WHERE _ > 200.0 |> SELECT _ * 2.0 |> WHERE _ < 1500.0 |> SUM _;
 END
 
 FN main() RETURNS Void ->
@@ -150,7 +150,7 @@ FN main() RETURNS Void ->
     print("BENCH_RESULT: ${sumLoopMs.toString()} ms");
     print("Pipeline overhead (${n.toString()} elements x ${iters.toString()} iters)");
     print("  Sum loop (handwritten):       ${sumLoopMs.toString()} ms");
-    print("  Sum pipeline (s> SUM _):      ${sumPipeMs.toString()} ms  overhead: ${(sumPipeMs - sumLoopMs).toString()} ms");
+    print("  Sum pipeline (|> SUM _):      ${sumPipeMs.toString()} ms  overhead: ${(sumPipeMs - sumLoopMs).toString()} ms");
     print("  Fused loop (2-stage):         ${fusedMs.toString()} ms");
     print("  Chained pipeline (2-stage):   ${chainMs.toString()} ms  overhead: ${(chainMs - fusedMs).toString()} ms");
     print("  Fused loop (4-stage):         ${longFusedMs.toString()} ms");

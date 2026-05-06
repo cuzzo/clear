@@ -16,7 +16,7 @@ RSpec.describe PipelineRewriter do
       FN double(n: Float64) RETURNS Float64 -> RETURN n * 2.0; END
       FN main() RETURNS Void ->
           x = 5.0;
-          result = x s> double;
+          result = x |> double;
           RETURN;
       END
     CLEAR
@@ -32,7 +32,7 @@ RSpec.describe PipelineRewriter do
     ast = parse_and_rewrite(<<~CLEAR)
       FN main() RETURNS Void ->
           items = [1.0, 2.0, 3.0];
-          result = items s> WHERE _ > 1.0 s> SELECT _ * 2.0;
+          result = items |> WHERE _ > 1.0 |> SELECT _ * 2.0;
           RETURN;
       END
     CLEAR
@@ -67,7 +67,7 @@ RSpec.describe PipelineRewriter do
       STRUCT S { v: Float64 }
       FN main() RETURNS Void ->
           items = [1.0, 2.0];
-          result = items s> SELECT S{ v: _ };
+          result = items |> SELECT S{ v: _ };
           RETURN;
       END
     CLEAR
@@ -87,7 +87,7 @@ RSpec.describe PipelineRewriter do
       STRUCT S { v: Float64 }
       FN main() RETURNS Void ->
           items = [1.0, 2.0];
-          total = items s> SELECT S{ v: _ } s> SUM _.v;
+          total = items |> SELECT S{ v: _ } |> SUM _.v;
           RETURN;
       END
     CLEAR
@@ -115,7 +115,7 @@ RSpec.describe PipelineRewriter do
     ast = parse_and_rewrite(<<~CLEAR)
       FN main() RETURNS Void ->
           items = [1.0, 2.0, 3.0];
-          total = items s> SUM _;
+          total = items |> SUM _;
           RETURN;
       END
     CLEAR

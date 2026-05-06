@@ -28,10 +28,10 @@ FN main() RETURNS Void ->
     ASSERT fallback == "default", "OR value fallback";
 
     -- RECOVER in pipeline: replace error with default value
-    result = riskyFetch("") s> RECOVER("fallback_data");
+    result = riskyFetch("") |> RECOVER("fallback_data");
     ASSERT result == "fallback_data", "RECOVER replaces error with default";
 
-    result2 = riskyFetch("example.com") s> RECOVER("fallback");
+    result2 = riskyFetch("example.com") |> RECOVER("fallback");
     ASSERT result2 == "data:example.com", "RECOVER passes through on success";
 
     RETURN;

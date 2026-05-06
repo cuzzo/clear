@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
         BG { 4; }
     ];
 
-    doubled = nums s> CONCURRENT(workers: 2) SELECT _ * 2;
+    doubled = nums |> CONCURRENT(workers: 2) SELECT _ * 2;
     ASSERT doubled.length() == 4, "concurrent bounded SELECT keeps cardinality";
     ASSERT doubled[0] == 2, "select item 0";
     ASSERT doubled[1] == 4, "select item 1";
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
         BG { 5; }
     ];
 
-    filtered = vals s> CONCURRENT(workers: 3) WHERE _ > 2;
+    filtered = vals |> CONCURRENT(workers: 3) WHERE _ > 2;
     ASSERT filtered.length() == 3, "concurrent bounded WHERE filters items";
     ASSERT filtered[0] == 3, "where item 0";
     ASSERT filtered[1] == 4, "where item 1";
@@ -39,7 +39,7 @@ FN main() RETURNS Void ->
         BG { 40.0; }
     ];
 
-    sums s> CONCURRENT(workers: 2) EACH {
+    sums |> CONCURRENT(workers: 2) EACH {
         WITH EXCLUSIVE total AS t {
             t.value = t.value + _;
         }

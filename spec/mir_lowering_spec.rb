@@ -2108,7 +2108,7 @@ RSpec.describe MIRLowering do
   # =========================================================================
 
   describe "SMOOTH pipeline lowering" do
-    it "lowers simple pipe x s> f to function call via intrinsic pattern" do
+    it "lowers simple pipe x |> f to function call via intrinsic pattern" do
       lhs = make_lit(:NUMBER, 42, full_type: :Number)
       lhs.coerced_type = nil
       rhs = AST::Identifier.new(tok, "double")
@@ -2124,7 +2124,7 @@ RSpec.describe MIRLowering do
       expect(zig).to include("42")
     end
 
-    it "lowers pipe with args x s> f(y) to f(x, y) via intrinsic pattern" do
+    it "lowers pipe with args x |> f(y) to f(x, y) via intrinsic pattern" do
       lhs = make_lit(:NUMBER, 10, full_type: :Number)
       lhs.coerced_type = nil
       arg = make_lit(:NUMBER, 20, full_type: :Number)

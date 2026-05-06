@@ -17,8 +17,8 @@ END
 
 -- Two pipelines with different types: snapshot type is ambiguous
 FN processBoth(u: User, o: Order) RETURNS !String ->
-    validUser = u s> checkUser;
-    validOrder = o s> checkOrder;
+    validUser = u |> checkUser;
+    validOrder = o |> checkOrder;
     RETURN validUser.name;
 
 CATCH Input

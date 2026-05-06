@@ -153,16 +153,16 @@ RSpec.describe Formatter do
     expect(out).to include("WITH\n    EXCLUSIVE a AS x,\n    EXCLUSIVE b AS y {")
   end
 
-  it "wraps pipelines with 2+ `s>` stages each on its own line" do
+  it "wraps pipelines with 2+ `|>` stages each on its own line" do
     src = <<~CLEAR
       FN main() RETURNS Int64 ->
-        v = items s> SELECT _ * 2 s> SUM _;
+        v = items |> SELECT _ * 2 |> SUM _;
         RETURN v;
       END
     CLEAR
     path = write("p.cht", src)
     out, _, _ = run_fmt("--stdout", path)
-    expect(out).to include("\n    s> SELECT _ * 2\n    s> SUM _")
+    expect(out).to include("\n    |> SELECT _ * 2\n    |> SUM _")
   end
 
   it "keeps top-level FNs at column 0 after ELSE_IF blocks in metadata-wrapped functions" do
@@ -221,32 +221,32 @@ RSpec.describe Formatter do
     src = <<~CLEAR
       FN scanDir(path: String) RETURNS !Int64 EFFECTS REENTRANT ->
         entries = listAll(path)
-        s> SELECT _;
+        |> SELECT _;
 
         RETURN entries
-          s> CONCURRENT SELECT _
-          s> REDUCE(0_i64) acc + _;
+          |> CONCURRENT SELECT _
+          |> REDUCE(0_i64) acc + _;
       END
     CLEAR
     path = write("pipeline_cont.cht", src)
     out, _, _ = run_fmt("--stdout", path)
-    expect(out).to include("  entries = listAll(path)\n    s> SELECT _;\n")
-    expect(out).to include("  RETURN entries\n    s> CONCURRENT SELECT _\n    s> REDUCE(0) acc + _;\n")
+    expect(out).to include("  entries = listAll(path)\n    |> SELECT _;\n")
+    expect(out).to include("  RETURN entries\n    |> CONCURRENT SELECT _\n    |> REDUCE(0) acc + _;\n")
   end
 
-  it "gives `s> RECOVER(...)` one extra indent relative to sibling stages" do
+  it "gives `|> RECOVER(...)` one extra indent relative to sibling stages" do
     src = <<~CLEAR
       FN main() RETURNS Int64 ->
-        v = items s> a s> RECOVER(0) s> b;
+        v = items |> a |> RECOVER(0) |> b;
         RETURN v;
       END
     CLEAR
     path = write("r.cht", src)
     out, _, _ = run_fmt("--stdout", path)
     # a and b at +1 (4 spaces inside main); RECOVER at +2 (6 spaces).
-    expect(out).to match(/^    s> a$/)
-    expect(out).to match(/^      s> RECOVER\(0\)$/)
-    expect(out).to match(/^    s> b;$/)
+    expect(out).to match(/^    |> a$/)
+    expect(out).to match(/^      |> RECOVER\(0\)$/)
+    expect(out).to match(/^    |> b;$/)
   end
 
   it "wraps long call args onto own lines with closing paren at call column" do
@@ -347,7 +347,7 @@ RSpec.describe Formatter do
   it "drops pipeline receiver onto its own line when first line exceeds 80 (§3.6)" do
     src = <<~CLEAR
       FN main() RETURNS Int64 ->
-        some_really_really_long_variable_name = some_really_really_long_receiver_expression_thing s> a s> b;
+        some_really_really_long_variable_name = some_really_really_long_receiver_expression_thing |> a |> b;
         RETURN 0;
       END
     CLEAR
@@ -355,22 +355,22 @@ RSpec.describe Formatter do
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to match(/some_really_really_long_variable_name =\n/)
     expect(out).to match(/^    some_really_really_long_receiver_expression_thing$/)
-    expect(out).to match(/^      s> a$/)
-    expect(out).to match(/^      s> b;$/)
+    expect(out).to match(/^      |> a$/)
+    expect(out).to match(/^      |> b;$/)
   end
 
   it "keeps receiver inline when first line fits within 80 chars" do
-    src = "FN main() RETURNS Int64 ->\n  x = items s> filter s> reduce;\n  RETURN 0;\nEND\n"
+    src = "FN main() RETURNS Int64 ->\n  x = items |> filter |> reduce;\n  RETURN 0;\nEND\n"
     path = write("nodrop.cht", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
     expect(out).to match(/^  x = items$/)
-    expect(out).to match(/^    s> filter$/)
+    expect(out).to match(/^    |> filter$/)
   end
 
   it "drops trailing pipeline keyword after CONCURRENT with 2+ args (§3.11)" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-        items s> CONCURRENT(workers: 4, capacity: 8) EACH { doWork(_); };
+        items |> CONCURRENT(workers: 4, capacity: 8) EACH { doWork(_); };
         RETURN;
       END
     CLEAR
@@ -383,7 +383,7 @@ RSpec.describe Formatter do
   it "leaves single-arg CONCURRENT inline" do
     src = <<~CLEAR
       FN main() RETURNS Void ->
-        items s> CONCURRENT(workers: 4) EACH { doWork(_); };
+        items |> CONCURRENT(workers: 4) EACH { doWork(_); };
         RETURN;
       END
     CLEAR
@@ -584,11 +584,11 @@ RSpec.describe Formatter do
   end
 
   describe "pipeline edge cases" do
-    it "emits unary minus correctly after `s>` operator" do
-      # Drives EXPR_START_OPS lookup for `s>` in unary_context?.
+    it "emits unary minus correctly after `|>` operator" do
+      # Drives EXPR_START_OPS lookup for `|>` in unary_context?.
       src = <<~CLEAR
         FN main() RETURNS Int64 ->
-          v = items s> SELECT _ * -1 s> SUM _;
+          v = items |> SELECT _ * -1 |> SUM _;
           RETURN v;
         END
       CLEAR
@@ -612,14 +612,14 @@ RSpec.describe Formatter do
       expect(out).to include("RETURN -x;")
     end
 
-    it "ends a CONCURRENT stage when an `s>` operator follows" do
+    it "ends a CONCURRENT stage when an `|>` operator follows" do
       # Drives line 1130 of formatter.rb: find_concurrent_stage_end returns
-      # when it hits an `s>` at the same depth as the stage start. The
+      # when it hits an `|>` at the same depth as the stage start. The
       # bracket-less SELECT body keeps depth=0 throughout, so the next
-      # `s>` is the first thing we trip on.
+      # `|>` is the first thing we trip on.
       src = <<~CLEAR
         FN main() RETURNS Int64 ->
-          v = items s> CONCURRENT(workers: 4, capacity: 8) SELECT _ * 2 s> SUM _;
+          v = items |> CONCURRENT(workers: 4, capacity: 8) SELECT _ * 2 |> SUM _;
           RETURN v;
         END
       CLEAR
@@ -627,24 +627,24 @@ RSpec.describe Formatter do
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
       expect(out).to include("CONCURRENT(workers: 4, capacity: 8)")
-      expect(out).to include("s> SUM _")
+      expect(out).to include("|> SUM _")
     end
 
-    it "stops `s>` arg scanning at unmatched closing bracket" do
-      # Pipeline used as a call argument: `consume(items s> filter)`.
+    it "stops `|>` arg scanning at unmatched closing bracket" do
+      # Pipeline used as a call argument: `consume(items |> filter)`.
       # The scanner sees `)` at depth 0 and breaks (line 1533 of formatter.rb).
       src = <<~CLEAR
         FN consume(xs: Int64[]) RETURNS Int64 -> RETURN xs.length(); END
         FN main() RETURNS Int64 ->
           xs: Int64[] = [1_i64, 2_i64, 3_i64];
-          n = consume(xs s> SELECT _);
+          n = consume(xs |> SELECT _);
           RETURN n;
         END
       CLEAR
       path = write("pipe_in_call.cht", src)
       out, _, status = run_fmt("--no-warn", "--stdout", path)
       expect(status).to eq(0)
-      expect(out).to include("consume(xs s> SELECT _)")
+      expect(out).to include("consume(xs |> SELECT _)")
     end
   end
 
@@ -840,7 +840,7 @@ RSpec.describe Formatter do
 
     it "find_concurrent_stage_end falls through to end-of-input when nothing terminates" do
       # Drives line 1134 (return j after the loop). Construct a stream of
-      # tokens with no `;`, no closing bracket at depth 0, no `s>`.
+      # tokens with no `;`, no closing bracket at depth 0, no `|>`.
       em   = Formatter::Emitter.new([])
       toks = tokenize("EACH foo bar")
       expect(em.send(:find_concurrent_stage_end, toks, 0)).to eq(toks.length)

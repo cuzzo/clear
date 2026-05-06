@@ -12,7 +12,7 @@
 
 **3. Implicit "Railway" Error Handling**
   * CLEAR treats errors as data, but handles them via control flow.
-  * The `SMOOTH` operator `s>` (aka the `PIPE` or `|> ` in Elixir, etc) acts as a guard.
+  * The `SMOOTH` operator `|>` (aka the `PIPE` or `|> ` in Elixir, etc) acts as a guard.
     * It automatically bubbles errors down the chain, to be handled elsewhere, or allows them to be handled inline elegantly.
   * This ensures code reads top-to-bottom & is left-sided (the "Happy Path") -- making it always clear what's desired vs what's the fallback.
   * *The Result:* No if [err != nil]() boilerplate. No [Pyramid of Doom](). No [checkOk]() clutter. No `if .nil?` everywhere.

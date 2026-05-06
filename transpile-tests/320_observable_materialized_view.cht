@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
-    s_sum: ~Int64@observable = g_sum s> SUM _;
+    s_sum: ~Int64@observable = g_sum |> SUM _;
     WITH MATERIALIZED VIEW s_sum AS snap {
         ASSERT snap >= 0_i64, "snap below 0";
         ASSERT snap <= 45_i64, "snap above 45";
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 8_i64 DO YIELD i MOD 3_i64; i = i + 1_i64; END
     };
-    s_dist: ~Int64[]@set:observable = g_dist s> DISTINCT _;
+    s_dist: ~Int64[]@set:observable = g_dist |> DISTINCT _;
     WITH MATERIALIZED VIEW s_dist AS snap {
         -- snap is an owned `Int64[]` slice; iterable, length-queryable
         ASSERT snap.length() <= 3_i64, "snap above max-distinct";

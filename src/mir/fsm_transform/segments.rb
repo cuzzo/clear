@@ -96,7 +96,7 @@ module FsmTransform
     # Adding new shapes (IF with suspend, WhileLoop+IO, etc.) extends
     # this method's case dispatch + adds a new tail variant if needed.
     def split(body, lowering)
-      # Rewrite pipeline+IO shapes (`readFile(p) s> stage`) into
+      # Rewrite pipeline+IO shapes (`readFile(p) |> stage`) into
       # linear stmts so the standard splitter sees the suspending
       # call at top level.
       body = rewrite_pipeline_io(body)
@@ -301,18 +301,18 @@ module FsmTransform
         io_suspending_call?(expr)
     end
 
-    # Rewrite top-level `LHS s> RHS` stmts whose synthesized call
+    # Rewrite top-level `LHS |> RHS` stmts whose synthesized call
     # would suspend. Lifts the suspending portion into a synthetic
     # BindExpr ahead of the post-stage chain so the standard
     # splitter sees the suspend at top level.
     #
     # Cases handled:
-    #   1. LHS is a suspending FuncCall (e.g. `readFile(p) s> g`):
+    #   1. LHS is a suspending FuncCall (e.g. `readFile(p) |> g`):
     #      lift LHS as `__pipe_v_K = readFile(p)`; replace LHS with
     #      `Identifier("__pipe_v_K")` carrying the call's full_type.
     #
     # NOT yet handled (kept as-is, falls to stackful):
-    #   - `path s> readFile s> g` (RHS is a suspending Identifier;
+    #   - `path |> readFile |> g` (RHS is a suspending Identifier;
     #     the suspending call is synthesized, not in the AST)
     #   - `BindExpr(:decl, name, value=BinaryOp(:SMOOTH))`
     #     (suspending pipeline as the value of a bind)

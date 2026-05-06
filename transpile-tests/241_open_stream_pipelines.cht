@@ -19,10 +19,10 @@ FN main() RETURNS Void ->
             i = i + 1;
         END
     };
-    evens = gen1 s> WHERE _ MOD 2 == 0;
+    evens = gen1 |> WHERE _ MOD 2 == 0;
     ASSERT evens.length() == 4, "open stream WHERE: 4 even numbers in 1..8";
     MUTABLE sum1: Int64 = 0;
-    evens s> EACH { sum1 = sum1 + _; };
+    evens |> EACH { sum1 = sum1 + _; };
     ASSERT sum1 == 20, "open stream WHERE: 2+4+6+8=20";
 
     -- -------------------------------------------------------
@@ -35,10 +35,10 @@ FN main() RETURNS Void ->
         YIELD 4;
         YIELD 5;
     };
-    doubled = gen2 s> SELECT _ * 2;
+    doubled = gen2 |> SELECT _ * 2;
     ASSERT doubled.length() == 5, "open stream SELECT: 5 items";
     MUTABLE sum2: Int64 = 0;
-    doubled s> EACH { sum2 = sum2 + _; };
+    doubled |> EACH { sum2 = sum2 + _; };
     ASSERT sum2 == 30, "open stream SELECT: 2+4+6+8+10=30";
 
     -- -------------------------------------------------------
@@ -50,7 +50,7 @@ FN main() RETURNS Void ->
         YIELD 20;
         YIELD 30;
     };
-    gen3 s> EACH { sum3 = sum3 + _; };
+    gen3 |> EACH { sum3 = sum3 + _; };
     ASSERT sum3 == 60, "open stream EACH: 10+20+30=60";
 
     -- -------------------------------------------------------
@@ -65,7 +65,7 @@ FN main() RETURNS Void ->
     };
     -- SUM on a tense stream produces ~Int64@observable; COLLECT
     -- joins the producer and returns the final scalar.
-    total4 = gen4 s> SUM _ s> COLLECT;
+    total4 = gen4 |> SUM _ |> COLLECT;
     ASSERT total4 == 15, "open stream SUM: 1+2+3+4+5=15";
 
     -- -------------------------------------------------------
@@ -79,7 +79,7 @@ FN main() RETURNS Void ->
     };
     -- COUNT on a tense stream produces ~Int64@observable; COLLECT
     -- joins the producer and returns the final scalar.
-    n5 = gen5 s> COUNT _ > 150 s> COLLECT;
+    n5 = gen5 |> COUNT _ > 150 |> COLLECT;
     ASSERT n5 == 3, "open stream COUNT: 200+300+400 > 150";
 
     -- -------------------------------------------------------
@@ -94,7 +94,7 @@ FN main() RETURNS Void ->
     };
     -- WHERE strips the source's tenseness, so SUM here folds
     -- eagerly to scalar (no observable lift, no COLLECT).
-    total6 = gen6 s> WHERE _ MOD 2 == 0 s> SUM _;
+    total6 = gen6 |> WHERE _ MOD 2 == 0 |> SUM _;
     ASSERT total6 == 30, "open stream WHERE+SUM: 2+4+6+8+10=30";
 
     -- -------------------------------------------------------
@@ -107,10 +107,10 @@ FN main() RETURNS Void ->
         YIELD 4;
         YIELD 5;
     };
-    results7 = gen7 s> CONCURRENT(workers: 2) SELECT _ * 2;
+    results7 = gen7 |> CONCURRENT(workers: 2) SELECT _ * 2;
     ASSERT results7.length() == 5, "concurrent open stream SELECT: 5 items";
     MUTABLE sum7: Int64 = 0;
-    results7 s> EACH { sum7 = sum7 + _; };
+    results7 |> EACH { sum7 = sum7 + _; };
     ASSERT sum7 == 30, "concurrent open stream SELECT: 2+4+6+8+10=30";
 
     -- -------------------------------------------------------
@@ -123,10 +123,10 @@ FN main() RETURNS Void ->
             i8 = i8 + 1;
         END
     };
-    evens8 = gen8 s> CONCURRENT(workers: 3) WHERE _ MOD 2 == 0;
+    evens8 = gen8 |> CONCURRENT(workers: 3) WHERE _ MOD 2 == 0;
     ASSERT evens8.length() == 4, "concurrent open stream WHERE: 4 even numbers";
     MUTABLE sum8: Int64 = 0;
-    evens8 s> EACH { sum8 = sum8 + _; };
+    evens8 |> EACH { sum8 = sum8 + _; };
     ASSERT sum8 == 20, "concurrent open stream WHERE: 2+4+6+8=20";
 
     -- -------------------------------------------------------
@@ -138,7 +138,7 @@ FN main() RETURNS Void ->
         YIELD 200;
         YIELD 300;
     };
-    gen9 s> CONCURRENT(workers: 2) EACH {
+    gen9 |> CONCURRENT(workers: 2) EACH {
         WITH EXCLUSIVE acc9 AS a {
             a.value = a.value + _;
         }

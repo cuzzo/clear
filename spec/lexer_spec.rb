@@ -163,7 +163,7 @@ RSpec.describe Lexer do
     end
 
     it "handles complex operators" do
-      lexer = Lexer.new(".. -> s> OR || &&")
+      lexer = Lexer.new(".. -> |> OR || &&")
       tokens = lexer.tokenize
 
       expect(tokens.map(&:type)).to eq([
@@ -351,7 +351,7 @@ RSpec.describe Lexer do
       require_relative "../src/annotator"
       src = <<~CLEAR
         FN check?(n: Float64) RETURNS Bool -> RETURN n > 0.0; END
-        FN main() RETURNS Void -> result = 5.0 s> check?; RETURN; END
+        FN main() RETURNS Void -> result = 5.0 |> check?; RETURN; END
       CLEAR
       tokens = Lexer.new(src).tokenize
       ast = Parser.new(tokens, src).parse
@@ -371,7 +371,7 @@ RSpec.describe Lexer do
     end
 
     it "includes ! without parens (pipeline)" do
-      tokens = Lexer.new("x s> mutate!").tokenize
+      tokens = Lexer.new("x |> mutate!").tokenize
       expect(tokens[2].type).to eq(:VAR_ID)
       expect(tokens[2].value).to eq("mutate!")
     end

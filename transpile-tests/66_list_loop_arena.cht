@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
             append(vals, inner + 0.0);
             inner = inner + 1_i64;
         END
-        s = vals s> SUM _;
+        s = vals |> SUM _;
         total = total + s;
         outer = outer + 1_i64;
     END

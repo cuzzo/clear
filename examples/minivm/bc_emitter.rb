@@ -2009,7 +2009,7 @@ class BcEmitter
     emit_op(POP)  # discard the Nil pushed by MAP_PUT
   end
 
-  # MIR::Sort lowers `items s> ORDER_BY <key>` to a comparator-as-expression
+  # MIR::Sort lowers `items |> ORDER_BY <key>` to a comparator-as-expression
   # (key_a, key_b) over placeholder identifiers `a` and `b`. The Zig backend
   # emits `std.mem.sort` with an anonymous-struct lessThan; the VM has no
   # in-place sort native and no closures, so we expand structurally to an
@@ -4478,7 +4478,7 @@ class BcEmitter
       # Auto-try propagation: when the MIR call is marked try_wrap (the
       # callee can_fail), and we're inside a helper, check IS_ERR and
       # propagate the error sentinel via BC_RET. This mirrors Zig's
-      # `try fn()` short-circuit and is what makes `valid = u s> failable`
+      # `try fn()` short-circuit and is what makes `valid = u |> failable`
       # actually exit the function on failure rather than letting the
       # error sentinel get bound to `valid` and ignored. Skip when the
       # callee's return type is not an error union (can_fail can come

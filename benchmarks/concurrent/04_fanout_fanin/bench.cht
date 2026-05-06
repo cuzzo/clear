@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     FOR i IN (0_i64 ..< 10000) -> items.append(Work{ seed: i });
 
     -- Fan-out: scale workers with core count, distributed across schedulers
-    results = items s> CONCURRENT(parallel: TRUE) SELECT doWork(_.seed);
+    results = items |> CONCURRENT(parallel: TRUE) SELECT doWork(_.seed);
 
     -- Fan-in: sum results
     MUTABLE total: Int64 = 0;

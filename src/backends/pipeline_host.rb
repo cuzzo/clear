@@ -40,8 +40,8 @@ class PipelineHost
 
   # Conditional version of with_named_binding: registers the binding only
   # if a name is provided, otherwise just calls the block. Used at the
-  # CONCURRENT lowering site where `list AS @u s> ...` provides a name
-  # but plain `list s> ...` does not.
+  # CONCURRENT lowering site where `list AS @u |> ...` provides a name
+  # but plain `list |> ...` does not.
   def with_optional_named_binding(clear_name, zig_var, &blk)
     return blk.call if clear_name.nil?
     with_named_binding(clear_name, zig_var, &blk)
@@ -373,7 +373,7 @@ class PipelineHost
       return lower_range_reduce(range_chain[:source], range_chain[:stages], rhs, node) if range_chain
     end
 
-    # Binding-unnest chain: source AS @u s> UNNEST expr [AS @o] s> [stages] s> fold
+    # Binding-unnest chain: source AS @u |> UNNEST expr [AS @o] |> [stages] |> fold
     # Must be fused into nested loops - materializing UNNEST would lose the @u context.
     if (bchain = unwrap_binding_unnest_chain(node))
       return lower_binding_chain(bchain, node)
@@ -965,7 +965,7 @@ class PipelineHost
     expr_mir = visit_pipeline_expr_mir(list_node, distinct_node.expression)
 
     # Use unwrap_range_chain to detect stream sources: list_node may be a SMOOTH
-    # chain (e.g. counter s> LIMIT 9) whose annotated full_type is already a
+    # chain (e.g. counter |> LIMIT 9) whose annotated full_type is already a
     # materialized list, so checking lhs_ti.dynamic_stream? is insufficient.
     range_chain = unwrap_range_chain(list_node)
     if range_chain
@@ -1311,7 +1311,7 @@ class PipelineHost
       elsif lhs_ti&.dynamic_stream? || lhs_ti&.bounded_stream?
         lhs_ti.tense_type.element_type.resolved
       elsif range_chain[:source].type_info&.inf_stream?
-        # list_node is a SMOOTH chain (e.g. counter s> LIMIT 9); lhs_ti is the
+        # list_node is a SMOOTH chain (e.g. counter |> LIMIT 9); lhs_ti is the
         # materialized list type so tense_type is unavailable. Pull element type
         # from the inf stream source directly.
         range_chain[:source].type_info.inf_stream_element_type.resolved
@@ -1622,12 +1622,12 @@ class PipelineHost
       # so field-writes propagate. The BC ForStmt iterates by-value, so
       # field mutations on __each_item never reach the underlying list.
       # Lower to an index loop with an explicit writeback when the source
-      # is a known list-bound Identifier (the common case: `xs s> EACH`).
+      # is a known list-bound Identifier (the common case: `xs |> EACH`).
       # BC backend: in Zig, `for (items.items) |*item|` gives a pointer
       # so field-writes propagate. The BC ForStmt iterates by-value, so
       # field mutations on __each_item never reach the underlying list.
       # Lower to an index loop with an explicit writeback when the source
-      # is a known list-bound Identifier (the common case: `xs s> EACH`).
+      # is a known list-bound Identifier (the common case: `xs |> EACH`).
       # Use the original Identifier as the in-place target so the writeback
       # actually updates the user's binding (a fresh __each_src copy
       # wouldn't propagate the mutation back to `xs`).
@@ -1730,10 +1730,10 @@ class PipelineHost
   end
 
   # Detect a binding-unnest chain suitable for fused nested-loop generation:
-  #   BIND_VAR(source, @u) s> [BIND_VAR(]UNNEST(expr)[, @o)] s> [WHERE/SELECT] s> fold
+  #   BIND_VAR(source, @u) |> [BIND_VAR(]UNNEST(expr)[, @o)] |> [WHERE/SELECT] |> fold
   #
   # Note: `UNNEST expr AS @o` parses as BIND_VAR(UnnestOp(expr), @o) because AS has
-  # higher precedence than s>. Both `s> UNNEST expr` and `s> UNNEST expr AS @o` are handled.
+  # higher precedence than |>. Both `|> UNNEST expr` and `|> UNNEST expr AS @o` are handled.
   #
   # Returns a hash with the chain components, or nil if the pattern doesn't match.
   def unwrap_binding_unnest_chain(node)
@@ -2146,7 +2146,7 @@ class PipelineHost
         MIR::ForStmt.new(iter, cap, [*p[:stage_stmts], *body_mir], nil)
       ])
     end
-    # BC backend, variable-backed finite stream (`s: ~T[] = 0..<n; s s> EACH`):
+    # BC backend, variable-backed finite stream (`s: ~T[] = 0..<n; s |> EACH`):
     # the source slot holds the materialized list (RangeLit -> iota in BC), so
     # iterate it as a list instead of going through .next() coroutine semantics.
     # Same shape applies to inf streams: source slot holds a Value.Channel, and
@@ -2234,7 +2234,7 @@ class PipelineHost
     # Heap-allocate the observable accumulator + a WaitGroup, then
     # wire the WG into the observable's completion callback. The
     # producer fiber's `defer ctx.acc.finish()` issues `wg.done()`;
-    # joiners (`NEXT running` / `s> COLLECT`) park on `wg.wait()`.
+    # joiners (`NEXT running` / `|> COLLECT`) park on `wg.wait()`.
     # observable.zig stays runtime-free -- the WG bridge lives in
     # runtime-header.zig (CheatHeader.obsWg*).
     # H9: every InlineZig that allocates carries a stdlib_def so the MIR
@@ -2599,7 +2599,7 @@ class PipelineHost
     h[entry[:ast_class]] = sym if entry[:ast_class]
   }.freeze
 
-  # Emit a single fused accumulating while loop for range s> stages s> fold.
+  # Emit a single fused accumulating while loop for range |> stages |> fold.
   # fold_op is one of CountOp, SumOp, AverageOp, AnyOp, AllOp, FindOp, MinOp, MaxOp.
   # Returns a MIR::BlockExpr (labeled) so the accumulated result can be used as an expression.
   def lower_range_fold(range_lit, stages, fold_op, smooth_node)
@@ -2796,7 +2796,7 @@ class PipelineHost
     ])
   end
 
-  # Emit a single fused accumulating while loop for range s> stages s> REDUCE(init) body.
+  # Emit a single fused accumulating while loop for range |> stages |> REDUCE(init) body.
   # Returns a MIR::BlockExpr so the accumulated result can be used as an expression.
   def lower_range_reduce(range_lit, stages, reduce_op, smooth_node = nil)
     p = build_lazy_range_prefix(range_lit, stages)
@@ -2905,7 +2905,7 @@ class PipelineHost
     end
 
     # List-source CONCURRENT (Zig backend only -- BC handles lists via
-    # the BC short-circuit above). `list AS @u s> CONCURRENT ...` is
+    # the BC short-circuit above). `list AS @u |> CONCURRENT ...` is
     # supported: extract the binding name and run the callback body
     # lowering with `@u` registered to resolve to `__item`.
     if @lowering.instance_variable_get(:@target) != :bc
@@ -2944,7 +2944,7 @@ class PipelineHost
       end
     end
 
-    # Detect `list AS @u s> CONCURRENT SELECT @u.field` -- thread the binding
+    # Detect `list AS @u |> CONCURRENT SELECT @u.field` -- thread the binding
     # into the CONCURRENT worker body so @u resolves to ctx.items[__idx].
     lhs = smooth_node.left
     prev_outer = @concurrent_outer_binding
@@ -2978,7 +2978,7 @@ class PipelineHost
   #
   # When `lhs` is `BIND_VAR(source, @u)`, register @u as an alias for the
   # pipeline iterator "it" and use the unwrapped source as the actual
-  # data source. This makes `users AS @u s> CONCURRENT SELECT @u.field`
+  # data source. This makes `users AS @u |> CONCURRENT SELECT @u.field`
   # work — substitute_placeholders rewrites @u → it inside the inner
   # expression at MIR-build time. Mirrors @concurrent_outer_binding's
   # role on the Zig path.
@@ -4089,12 +4089,12 @@ class PipelineHost
     elsif rhs.is_a?(AST::SkipOp)
       return transpile_skip(lhs, rhs, node)
     elsif rhs.is_a?(AST::ShardOp)
-      raise "SHARD must be followed by s> CONCURRENT EACH"
+      raise "SHARD must be followed by |> CONCURRENT EACH"
     elsif rhs.is_a?(AST::ConcurrentOp)
       return transpile_concurrent(node)
     end
 
-    # Simple function pipe: x s> f -> f(x)
+    # Simple function pipe: x |> f -> f(x)
     synthetic_call = if rhs.is_a?(AST::Identifier)
       AST::FuncCall.new(rhs.token, rhs.name, [lhs])
     elsif rhs.is_a?(AST::FuncCall)
