@@ -209,9 +209,11 @@ jobs:
           BENCHER_JSON: tmp/benchmark-leak-${{ matrix.shard }}.json
         run: |
           testbed="${BENCHER_TESTBED:-ubuntu-latest}"
+          project="${BENCHER_PROJECT:-clear}"
           branch="${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
 
           args=(
+            --project "$project"
             --token "$BENCHER_API_TOKEN"
             --branch "$branch"
             --testbed "$testbed"
@@ -220,12 +222,6 @@ jobs:
             --err
             --github-actions "$GITHUB_TOKEN"
           )
-
-          if [ -n "$BENCHER_PROJECT" ]; then
-            args=(--project "$BENCHER_PROJECT" "${args[@]}")
-          else
-            args=(--ci-on-the-fly "${args[@]}")
-          fi
 
           if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
             args+=(

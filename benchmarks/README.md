@@ -54,7 +54,7 @@ Leak-mode benchmark CI writes Bencher JSON for each shard and uploads it with `b
 GitHub Actions needs:
 
 - `secrets.BENCHER_API_TOKEN` -- Bencher API token
-- `vars.BENCHER_PROJECT` -- optional Bencher project slug; CI uses Bencher's on-the-fly project mode when unset
+- `vars.BENCHER_PROJECT` -- optional Bencher project slug; CI defaults to `clear` when unset
 - `vars.BENCHER_TESTBED` -- optional; defaults to `ubuntu-latest`
 
 The runner automatically:
