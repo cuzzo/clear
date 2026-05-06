@@ -1,6 +1,6 @@
--- Test: buildList + writeFile in a loop inside a BG fiber.
--- Verifies file I/O works on standard (16KB) fiber stacks
--- after posix-based writeFile/readFile rewrite.
+# Test: buildList + writeFile in a loop inside a BG fiber.
+# Verifies file I/O works on standard (16KB) fiber stacks
+# after posix-based writeFile/readFile rewrite.
 
 FN buildList(n: Int64) RETURNS !String ->
     MUTABLE parts: String[]@list = [];

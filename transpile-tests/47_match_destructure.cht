@@ -1,7 +1,7 @@
 STRUCT Point { x: Float64, y: Float64, z: Float64 }
 
 FN main() RETURNS Void ->
-  -- PASS no-op test
+  # PASS no-op test
   MUTABLE tag = 0;
   PARTIAL MATCH tag START
     1 -> PASS;,
@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
   END
   ASSERT tag == 99, "PASS: branch with PASS should be skipped";
 
-  -- Partial match with ...
+  # Partial match with ...
   p1 = Point{ x: 10, y: 5, z: 3 };
   MUTABLE r1 = 0;
   PARTIAL MATCH p1 START
@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
   END
   ASSERT r1 == 1, "struct pattern: {x: 10, ...} should match";
 
-  -- Wildcard field with _
+  # Wildcard field with _
   p2 = Point{ x: 1, y: 99, z: 3 };
   MUTABLE r2 = 0;
   PARTIAL MATCH p2 START
@@ -28,7 +28,7 @@ FN main() RETURNS Void ->
   END
   ASSERT r2 == 42, "struct pattern: wildcard y should be ignored";
 
-  -- Multi-field condition (no ...)
+  # Multi-field condition (no ...)
   p3 = Point{ x: 5, y: 5, z: 5 };
   MUTABLE r3 = 0;
   PARTIAL MATCH p3 START
@@ -37,7 +37,7 @@ FN main() RETURNS Void ->
   END
   ASSERT r3 == 7, "struct pattern: multi-field check should match";
 
-  -- DEFAULT fires when no struct case matches
+  # DEFAULT fires when no struct case matches
   p4 = Point{ x: 0, y: 0, z: 0 };
   MUTABLE r4 = 0;
   PARTIAL MATCH p4 START

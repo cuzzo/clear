@@ -1,6 +1,6 @@
--- Test: lambda closures capture their defining environment.
--- (def! a 10) then (def! f (fn* (x) (+ x a))) then (f 5) should be 15.
--- This tests that envGet follows the __p parent chain correctly.
+# Test: lambda closures capture their defining environment.
+# (def! a 10) then (def! f (fn* (x) (+ x a))) then (f 5) should be 15.
+# This tests that envGet follows the __p parent chain correctly.
 
 STRUCT Env { vars: HashMap<Value> }
 
@@ -36,27 +36,27 @@ END
 FN main() RETURNS Void ->
     MUTABLE pool: Env[10000]@pool = [];
 
-    -- Create root env and set a=10
+    # Create root env and set a=10
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
     IF pool[rootId] AS env THEN
         env.vars["a"] = Value{ Number: 10.0 };
     END
 
-    -- Create child env with __p -> root, set x=5
+    # Create child env with __p -> root, set x=5
     childId: Id<Env> = pool.insert(Env{ vars: {} });
     IF pool[childId] AS env THEN
         env.vars["__p"] = Value{ EnvRef: rootId };
         env.vars["x"] = Value{ Number: 5.0 };
     END
 
-    -- Look up x in child (direct)
+    # Look up x in child (direct)
     xVal = envGet!(childId, "x", pool);
     PARTIAL MATCH xVal START
         Value.Number AS n -> ASSERT n == 5.0, "x=5";,
         DEFAULT -> ASSERT FALSE, "x not found";
     END
 
-    -- Look up a in child (should follow __p to root)
+    # Look up a in child (should follow __p to root)
     aVal = envGet!(childId, "a", pool);
     PARTIAL MATCH aVal START
         Value.Number AS n -> ASSERT n == 10.0, "a=10 via parent";,

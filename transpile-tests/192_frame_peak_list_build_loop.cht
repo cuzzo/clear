@@ -1,6 +1,6 @@
--- Test: building a temporary list inside a loop has bounded frame.
--- Each iteration creates a list, joins it, and discards it.
--- The loop mark should reclaim the per-iteration list and strings.
+# Test: building a temporary list inside a loop has bounded frame.
+# Each iteration creates a list, joins it, and discards it.
+# The loop mark should reclaim the per-iteration list and strings.
 
 FN main() RETURNS Void ->
     MUTABLE total: Int64 = 0;
@@ -12,8 +12,8 @@ FN main() RETURNS Void ->
     END
     peak = framePeakBytes();
 
-    -- 200 iterations, each builds ~10 strings + join.
-    -- With proper frame rewind, peak should be much less than 200x.
+    # 200 iterations, each builds ~10 strings + join.
+    # With proper frame rewind, peak should be much less than 200x.
     ASSERT peak < 500000, "frame peak bounded for list build loop";
     ASSERT total > 0, "accumulated string lengths";
 

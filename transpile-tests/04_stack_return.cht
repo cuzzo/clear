@@ -1,36 +1,36 @@
 STRUCT Point { x: Int64, y: Int64 }
 
--- 1. Function returns Point by Value
---    Because we modified the transpiler, this generates:
---    pub fn makePoint(rt: *Runtime, x: i64, y: i64) !Point
+# 1. Function returns Point by Value
+#    Because we modified the transpiler, this generates:
+#    pub fn makePoint(rt: *Runtime, x: i64, y: i64) !Point
 FN makePoint(x: Int64, y: Int64) RETURNS Point ->
-    -- 2. Create on Stack
-    --    Zig: var p = Point{ .x = x, .y = y };
+    # 2. Create on Stack
+    #    Zig: var p = Point{ .x = x, .y = y };
     p = Point{ x: x, y: y };
 
-    -- 3. Return by Copy
-    --    Zig handles the copy (or RVO) automatically.
+    # 3. Return by Copy
+    #    Zig handles the copy (or RVO) automatically.
     RETURN p;
 END
 
 FN main() RETURNS Void ->
-    -- 4. Receive Stack Object
+    # 4. Receive Stack Object
     p1 = makePoint(10, 20);
 
-    -- 5. Proof by Omission
-    --    We do NOT call free(p1).
-    --    If p1 was on the heap, the test runner would scream "LEAK detected".
-    --    Since it passes, p1 must be on the stack.
+    # 5. Proof by Omission
+    #    We do NOT call free(p1).
+    #    If p1 was on the heap, the test runner would scream "LEAK detected".
+    #    Since it passes, p1 must be on the stack.
 
-    -- 6. Verify Data Integrity
+    # 6. Verify Data Integrity
     ASSERT p1.x == 10, "Stack return x mismatch";
     ASSERT p1.y == 20, "Stack return y mismatch";
 
-    -- Verify independence (copy behavior)
+    # Verify independence (copy behavior)
     MUTABLE p2 = p1;
     p2.x = 999;
 
-    -- ASSERT p1.x == 10, "Mutation of p2 affected p1 (Reference detected!)";
+    # ASSERT p1.x == 10, "Mutation of p2 affected p1 (Reference detected!)";
     ASSERT p2.x == 999, "Mutation of p2 failed";
 
     RETURN;

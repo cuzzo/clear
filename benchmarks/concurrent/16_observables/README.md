@@ -17,7 +17,7 @@ Two distinct measurements live in this directory:
    code.
 
 ```clear
--- bench.cht (the canonical CLEAR form)
+# bench.cht (the canonical CLEAR form)
 running: ~Int64@observable = gen |> SUM _;
 final = NEXT running;
 ```

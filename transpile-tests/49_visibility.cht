@@ -1,8 +1,8 @@
--- 49_visibility: PUB / PRIVATE / package-private function visibility
---
--- PUB FN    -> emits `pub fn` in Zig (importable by other modules)
--- FN        -> emits `fn` in Zig (package-private, same directory)
--- PRIVATE FN -> emits `fn` in Zig (private, not importable even within directory)
+# 49_visibility: PUB / PRIVATE / package-private function visibility
+#
+# PUB FN    -> emits `pub fn` in Zig (importable by other modules)
+# FN        -> emits `fn` in Zig (package-private, same directory)
+# PRIVATE FN -> emits `fn` in Zig (private, not importable even within directory)
 
 PUB FN publicAdd(a: Float64, b: Float64) RETURNS Float64 ->
   RETURN a + b;

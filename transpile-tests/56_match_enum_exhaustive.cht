@@ -1,5 +1,5 @@
--- MATCH on enums: enforced exhaustiveness
--- Regular PARTIAL MATCH: no exhaustiveness required
+# MATCH on enums: enforced exhaustiveness
+# Regular PARTIAL MATCH: no exhaustiveness required
 
 ENUM Color { Red, Green, Blue }
 ENUM Direction { North, South, East, West }
@@ -27,18 +27,18 @@ FN direction_code(d: Direction) RETURNS Float64 ->
 END
 
 FN main() RETURNS Void ->
-  -- MATCH: exhaustive, no DEFAULT needed
+  # MATCH: exhaustive, no DEFAULT needed
   ASSERT color_name(Color.Red)   == 1, "MATCH: Red = 1";
   ASSERT color_name(Color.Green) == 2, "MATCH: Green = 2";
   ASSERT color_name(Color.Blue)  == 3, "MATCH: Blue = 3";
 
-  -- All four directions exhaustively matched
+  # All four directions exhaustively matched
   ASSERT direction_code(Direction.North) == 1, "Direction: North";
   ASSERT direction_code(Direction.South) == 2, "Direction: South";
   ASSERT direction_code(Direction.East)  == 3, "Direction: East";
   ASSERT direction_code(Direction.West)  == 4, "Direction: West";
 
-  -- Regular PARTIAL MATCH: partial coverage is allowed
+  # Regular PARTIAL MATCH: partial coverage is allowed
   b: Bit = Bit.Zero;
   MUTABLE out = 0_i64;
   PARTIAL MATCH b START
@@ -47,7 +47,7 @@ FN main() RETURNS Void ->
   END
   ASSERT out == 0, "Regular PARTIAL MATCH with DEFAULT still works";
 
-  -- Regular PARTIAL MATCH: partial, no DEFAULT (Zig compiles fine; no runtime exhaustion)
+  # Regular PARTIAL MATCH: partial, no DEFAULT (Zig compiles fine; no runtime exhaustion)
   MUTABLE flag = 0_i64;
   b2: Bit = Bit.One;
   PARTIAL MATCH b2 START
@@ -55,7 +55,7 @@ FN main() RETURNS Void ->
   END
   ASSERT flag == 1, "Regular PARTIAL MATCH partial: Bit.One fires";
 
-  -- Inline MATCH
+  # Inline MATCH
   MUTABLE result = 0_i64;
   c2: Color = Color.Blue;
   MATCH c2 START

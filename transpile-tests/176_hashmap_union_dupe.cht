@@ -1,6 +1,6 @@
--- Test: storing a non-Copy union value from a list into a HashMap must dupe.
--- Without duping, the list cleanup frees the value's heap data while the
--- HashMap still references it, causing use-after-free on HashMap cleanup.
+# Test: storing a non-Copy union value from a list into a HashMap must dupe.
+# Without duping, the list cleanup frees the value's heap data while the
+# HashMap still references it, causing use-after-free on HashMap cleanup.
 
 STRUCT Env {
     vars: HashMap<Value>,
@@ -22,17 +22,17 @@ FN prStr(v: Value) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    -- Simulate lambda param binding: store list elements into a HashMap
+    # Simulate lambda param binding: store list elements into a HashMap
     MUTABLE env: HashMap<Value> = {};
     MUTABLE args: Value[]@list = List[];
     args.append(Value{ Str: "hello" });
     args.append(Value{ Str: "world" });
 
-    -- Store elements from args into the map (no COPY, no GIVE)
+    # Store elements from args into the map (no COPY, no GIVE)
     env["a"] = args[0];
     env["b"] = args[1];
 
-    -- Verify values are accessible
+    # Verify values are accessible
     ASSERT prStr(env["a"] OR Value.Nil) == "hello", "a is hello";
     ASSERT prStr(env["b"] OR Value.Nil) == "world", "b is world";
 

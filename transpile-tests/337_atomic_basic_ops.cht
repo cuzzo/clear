@@ -1,27 +1,27 @@
--- Atomics M1.5: basic ops on @shared:atomic primitive.
--- Verifies the compiler lowers the surface ops correctly and the
--- Arc<Atomic<i64>> wrapper from M1 dispatches through .ctrl.data.
+# Atomics M1.5: basic ops on @shared:atomic primitive.
+# Verifies the compiler lowers the surface ops correctly and the
+# Arc<Atomic<i64>> wrapper from M1 dispatches through .ctrl.data.
 
 FN main() RETURNS Void ->
     MUTABLE c: Int64 = 0 @shared:atomic;
 
-    -- read: x = c -> x = c.load()
+    # read: x = c -> x = c.load()
     x = c;
     ASSERT x == 0, "initial load: expected 0";
 
-    -- write: c = v -> c.store(v)
+    # write: c = v -> c.store(v)
     c = 5;
     ASSERT c == 5, "after store: expected 5";
 
-    -- compound +=: c += 3 -> c.fetchAdd(3)
+    # compound +=: c += 3 -> c.fetchAdd(3)
     c += 3;
     ASSERT c == 8, "after fetchAdd(3): expected 8";
 
-    -- compound -=: c -= 2 -> c.fetchSub(2)
+    # compound -=: c -= 2 -> c.fetchSub(2)
     c -= 2;
     ASSERT c == 6, "after fetchSub(2): expected 6";
 
-    -- read inside expression: y = c + 1 -> y = c.load() + 1
+    # read inside expression: y = c + 1 -> y = c.load() + 1
     y = c + 1;
     ASSERT y == 7, "load-then-add expression: expected 7";
 

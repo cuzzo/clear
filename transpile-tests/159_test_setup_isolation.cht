@@ -1,5 +1,5 @@
--- Test: Setup isolation between TEST THAT blocks.
--- Each test gets fresh setup - mutations in one test do not leak to another.
+# Test: Setup isolation between TEST THAT blocks.
+# Each test gets fresh setup - mutations in one test do not leak to another.
 
 FN main() RETURNS Void ->
     RETURN;

@@ -1,11 +1,11 @@
--- Test: local list assigned to outer MUTABLE variable inside a mark_per_iter loop.
---
--- Bug: local list is frame-allocated; the loop's per-iteration frame rewind frees
--- its backing buffer, but the outer variable still holds the pointer → use-after-free
--- on the next iteration (crash in dupe / stack.items access).
---
--- Fix: escape analysis must detect that the local list escapes to the outer scope
--- via direct assignment and promote it to heap at declaration time.
+# Test: local list assigned to outer MUTABLE variable inside a mark_per_iter loop.
+#
+# Bug: local list is frame-allocated; the loop's per-iteration frame rewind frees
+# its backing buffer, but the outer variable still holds the pointer → use-after-free
+# on the next iteration (crash in dupe / stack.items access).
+#
+# Fix: escape analysis must detect that the local list escapes to the outer scope
+# via direct assignment and promote it to heap at declaration time.
 
 FN main() RETURNS Void ->
     MUTABLE items: String[]@list = [];
@@ -14,15 +14,15 @@ FN main() RETURNS Void ->
     items.append("c");
     MUTABLE i = 0_i64;
     WHILE i < 2 DO
-        -- frame_str triggers mark_per_iter so the loop frame is rewound each iteration.
+        # frame_str triggers mark_per_iter so the loop frame is rewound each iteration.
         frame_str = i.toString();
-        -- Rebuild items as all but the last element.
+        # Rebuild items as all but the last element.
         MUTABLE next: String[]@list = [];
         FOR j IN (0_i64 ..< items.length() - 1) DO
             next.append(COPY items[j]);
         END
-        -- Without the fix: next is frame-backed; frame rewind frees it between iterations.
-        -- With the fix: next is heap-backed; survives the frame rewind as the new items.
+        # Without the fix: next is frame-backed; frame rewind frees it between iterations.
+        # With the fix: next is heap-backed; survives the frame rewind as the new items.
         items = next;
         i += 1;
     END

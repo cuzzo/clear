@@ -1,19 +1,19 @@
--- Phase 4: Generic Functions
+# Phase 4: Generic Functions
 
 STRUCT Pair<T> { first: T, second: T }
 STRUCT Box<T> { value: T }
 
--- Simple identity function
+# Simple identity function
 FN identity<T>(x: T) RETURNS T ->
   RETURN x;
 END
 
--- Wrap a value in a pair
+# Wrap a value in a pair
 FN makePair<T>(val: T) RETURNS Pair<T> ->
   RETURN Pair<T>{ first: val, second: val };
 END
 
--- Box and unbox round-trip
+# Box and unbox round-trip
 FN makeBox<T>(val: T) RETURNS Box<T> ->
   RETURN Box<T>{ value: val };
 END
@@ -22,31 +22,31 @@ FN unbox<T>(b: Box<T>) RETURNS T ->
   RETURN b.value;
 END
 
--- Generic function using a generic struct parameter (struct field access)
+# Generic function using a generic struct parameter (struct field access)
 FN firstOf<T>(p: Pair<T>) RETURNS T ->
   RETURN p.first;
 END
 
 FN main() RETURNS Void ->
-  -- identity with Float64
+  # identity with Float64
   n = identity(42.0);
   ASSERT n == 42.0;
 
-  -- identity with Bool
+  # identity with Bool
   b = identity(TRUE);
   ASSERT b == TRUE;
 
-  -- makePair produces a generic struct
+  # makePair produces a generic struct
   p = makePair(7.0);
   ASSERT p.first == 7.0;
   ASSERT p.second == 7.0;
 
-  -- makeBox + unbox round-trip
+  # makeBox + unbox round-trip
   box = makeBox(99.0);
   val = unbox(box);
   ASSERT val == 99.0;
 
-  -- firstOf extracts typed field from generic struct
+  # firstOf extracts typed field from generic struct
   pair = Pair<Float64>{ first: 3.0, second: 4.0 };
   f = firstOf(pair);
   ASSERT f == 3.0;

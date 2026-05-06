@@ -1,10 +1,10 @@
--- Mixed-shape multi-pipe: SUM (scalar `:observable` cleanup) and
--- DISTINCT (collection `:observable` cleanup) in the same function.
--- Confirms the cleanup classifier handles two terminals with the
--- same kind tag but different inner shapes correctly when both are
--- alive in the same scope. Also exercises ObservableTerminal.destroy's
--- comptime `@hasDecl(Inner, "deinit")` branching: scalar AtomicSum
--- skips deinit; collection StreamSet runs it.
+# Mixed-shape multi-pipe: SUM (scalar `:observable` cleanup) and
+# DISTINCT (collection `:observable` cleanup) in the same function.
+# Confirms the cleanup classifier handles two terminals with the
+# same kind tag but different inner shapes correctly when both are
+# alive in the same scope. Also exercises ObservableTerminal.destroy's
+# comptime `@hasDecl(Inner, "deinit")` branching: scalar AtomicSum
+# skips deinit; collection StreamSet runs it.
 
 FN main() RETURNS Void ->
     gen1: ~?Int64[] = BG STREAM {

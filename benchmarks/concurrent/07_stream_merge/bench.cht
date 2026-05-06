@@ -1,17 +1,17 @@
--- @leak: 100000 -> 1000
--- Stream Merge Benchmark — CLEAR
---
--- 8 BG STREAM producers each yield 100K values (LCG sequence).
--- Consumer reads round-robin from all 8 streams, sums all values.
--- Total: 800K values merged from 8 streams.
---
--- Uses infinite streams (~T[INF]) — NEXT returns T directly (not optional).
--- Each YIELD suspends the producer fiber; NEXT resumes it.
--- Zero channel overhead, zero lock contention.
+# @leak: 100000 -> 1000
+# Stream Merge Benchmark — CLEAR
+#
+# 8 BG STREAM producers each yield 100K values (LCG sequence).
+# Consumer reads round-robin from all 8 streams, sums all values.
+# Total: 800K values merged from 8 streams.
+#
+# Uses infinite streams (~T[INF]) — NEXT returns T directly (not optional).
+# Each YIELD suspends the producer fiber; NEXT resumes it.
+# Zero channel overhead, zero lock contention.
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
-    -- Create 8 producer streams (infinite — consumer controls iteration count)
+    # Create 8 producer streams (infinite — consumer controls iteration count)
     s0: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 1; WHILE TRUE DO x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64; YIELD x; END };
     s1: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 2; WHILE TRUE DO x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64; YIELD x; END };
     s2: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 3; WHILE TRUE DO x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64; YIELD x; END };
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
     s6: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 7; WHILE TRUE DO x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64; YIELD x; END };
     s7: ~Int64[INF] = BG STREAM { MUTABLE x: Int64 = 8; WHILE TRUE DO x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64; YIELD x; END };
 
-    -- Consumer: round-robin merge from all 8 streams
+    # Consumer: round-robin merge from all 8 streams
     MUTABLE total: Int64 = 0;
     MUTABLE j: Int64 = 0;
     WHILE j < 100000 DO

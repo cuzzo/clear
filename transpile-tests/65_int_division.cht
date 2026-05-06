@@ -1,25 +1,25 @@
--- Test: integer division uses @divTrunc for i64
+# Test: integer division uses @divTrunc for i64
 
 FN main() RETURNS Void ->
-    -- Basic division
+    # Basic division
     a = 7_i64 / 2_i64;
     ASSERT a == 3_i64, "7 / 2 should be 3";
 
-    -- Exact division
+    # Exact division
     b = 100_i64 / 10_i64;
     ASSERT b == 10_i64, "100 / 10 should be 10";
 
-    -- Negative truncation (toward zero)
+    # Negative truncation (toward zero)
     c = -7_i64 / 2_i64;
     ASSERT c == -3_i64, "-7 / 2 should be -3";
 
-    -- Division with variable operands
+    # Division with variable operands
     x = 15_i64;
     y = 4_i64;
     z = x / y;
     ASSERT z == 3_i64, "15 / 4 should be 3";
 
-    -- Float division still uses native /
+    # Float division still uses native /
     f = 7.0 / 2.0;
     ASSERT f == 3.5, "7.0 / 2.0 should be 3.5";
 

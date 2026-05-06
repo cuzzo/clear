@@ -1,8 +1,8 @@
--- Pipeline-terminal observable ANY.
---
--- A BG STREAM produces values; ANY publishes "true" on the first item
--- matching the predicate (`fetchOr`-backed AtomicAny inside an
--- `*ObservableAny()` wrapper); NEXT joins and returns the final boolean.
+# Pipeline-terminal observable ANY.
+#
+# A BG STREAM produces values; ANY publishes "true" on the first item
+# matching the predicate (`fetchOr`-backed AtomicAny inside an
+# `*ObservableAny()` wrapper); NEXT joins and returns the final boolean.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {

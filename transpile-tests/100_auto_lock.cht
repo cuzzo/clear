@@ -1,26 +1,26 @@
--- Test: auto-lock — one-line field mutations on @locked without WITH block.
--- The compiler auto-wraps each mutation in an inline acquire/release guard.
+# Test: auto-lock — one-line field mutations on @locked without WITH block.
+# The compiler auto-wraps each mutation in an inline acquire/release guard.
 
 STRUCT Counter { value: Int64 }
 
 FN main() RETURNS Void ->
-    -- @locked variable
+    # @locked variable
     MUTABLE c = Counter{ value: 0 } @locked;
 
-    -- Auto-lock: each statement gets its own guard scope
+    # Auto-lock: each statement gets its own guard scope
     c.value = c.value + 1;
     c.value = c.value + 1;
     c.value = c.value + 1;
 
-    -- Verify via explicit WITH block
+    # Verify via explicit WITH block
     WITH EXCLUSIVE c AS inner {
         ASSERT inner.value == 3, "auto-lock: expected 3 after three increments";
     }
 
-    -- @writeLocked variable
+    # @writeLocked variable
     MUTABLE w = Counter{ value: 10 } @writeLocked;
 
-    -- Auto-lock on @writeLocked
+    # Auto-lock on @writeLocked
     w.value = w.value + 5;
 
     WITH EXCLUSIVE w AS inner {

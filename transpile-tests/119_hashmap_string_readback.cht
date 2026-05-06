@@ -1,4 +1,4 @@
--- Minimal: HashMap<Value> with union, extract string manually.
+# Minimal: HashMap<Value> with union, extract string manually.
 
 UNION Value { Nil, Str: String }
 

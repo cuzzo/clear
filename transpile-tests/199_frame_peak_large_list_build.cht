@@ -1,7 +1,7 @@
--- Build a large list of strings in a loop.
--- Each iteration creates a string via interpolation and appends to a list.
--- The list is outer-scope, so loop marks are disabled.
--- Question: does the frame arena grow unboundedly?
+# Build a large list of strings in a loop.
+# Each iteration creates a string via interpolation and appends to a list.
+# The list is outer-scope, so loop marks are disabled.
+# Question: does the frame arena grow unboundedly?
 
 FN main() RETURNS Void ->
     MUTABLE keys: String[]@list = [];
@@ -16,10 +16,10 @@ FN main() RETURNS Void ->
     peak = framePeakBytes();
     ASSERT keys.length() == 5000, "built 5000 keys";
 
-    -- Per-iteration intermediates (toString, interpolation) accumulate without
-    -- loop marks (list is outer-scope). 5000 iters * ~56 bytes = ~280 KB.
-    -- After escape fix (Phase 2): intermediates reclaimed, peak < 100 KB.
-    -- For now assert a ceiling that catches regressions but allows current behavior.
+    # Per-iteration intermediates (toString, interpolation) accumulate without
+    # loop marks (list is outer-scope). 5000 iters * ~56 bytes = ~280 KB.
+    # After escape fix (Phase 2): intermediates reclaimed, peak < 100 KB.
+    # For now assert a ceiling that catches regressions but allows current behavior.
     print("peak=${peak.toString()} keys=${keys.length().toString()}");
     ASSERT peak < 2000000, "frame peak < 2 MB for 5K string list";
 

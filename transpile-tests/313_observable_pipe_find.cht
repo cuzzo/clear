@@ -1,9 +1,9 @@
--- Pipeline-terminal observable FIND.
---
--- A BG STREAM produces values; FIND publishes the first item matching
--- the predicate into a `~?Int64@observable` binding (heap-allocated
--- `*ObservableFind(i64)` with a CAS-on-flag first-wins publication).
--- NEXT joins and returns the optional final.
+# Pipeline-terminal observable FIND.
+#
+# A BG STREAM produces values; FIND publishes the first item matching
+# the predicate into a `~?Int64@observable` binding (heap-allocated
+# `*ObservableFind(i64)` with a CAS-on-flag first-wins publication).
+# NEXT joins and returns the optional final.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {

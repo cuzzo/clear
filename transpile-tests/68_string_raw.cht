@@ -1,5 +1,5 @@
--- Test: String@raw byte buffer semantics
--- String@raw allows byte indexing and treats data as raw bytes.
+# Test: String@raw byte buffer semantics
+# String@raw allows byte indexing and treats data as raw bytes.
 
 FN test_byte_indexing() RETURNS Void ->
     buf: String@raw = "hello";

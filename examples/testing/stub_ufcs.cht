@@ -1,7 +1,7 @@
--- Example: STUB with UFCS method calls.
--- Demonstrates stubbing instance-style methods on structs.
---
--- Run: clear test examples/testing/stub_ufcs.cht
+# Example: STUB with UFCS method calls.
+# Demonstrates stubbing instance-style methods on structs.
+#
+# Run: clear test examples/testing/stub_ufcs.cht
 
 STRUCT Client { host: String }
 

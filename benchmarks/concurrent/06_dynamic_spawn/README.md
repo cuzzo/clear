@@ -60,10 +60,10 @@ blocks in a sequential loop. Real CLEAR code uses CONCURRENT EACH for
 batch parallelism:
 
 ```clear
--- Individual spawn (what this benchmark tests):
+# Individual spawn (what this benchmark tests):
 FOR i IN (0_i64 ..< 100000) -> futures.append(BG { doWork(i); });
 
--- Batch parallelism (idiomatic CLEAR):
+# Batch parallelism (idiomatic CLEAR):
 results = (0_i64 ..< 100000) |> CONCURRENT EACH doWork(_);
 ```
 

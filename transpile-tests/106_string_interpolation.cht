@@ -1,22 +1,22 @@
--- Test: string interpolation with ${expr} syntax.
+# Test: string interpolation with ${expr} syntax.
 
 FN main() RETURNS Void ->
     name = "World";
     greeting = "Hello, ${name}!";
     ASSERT greeting == "Hello, World!", "basic interpolation";
 
-    -- Expression interpolation
+    # Expression interpolation
     x: Int64 = 7;
     result = "x is ${x.toString()}";
     ASSERT result == "x is 7", "expression interpolation";
 
-    -- Multiple interpolations
+    # Multiple interpolations
     a = "foo";
     b = "bar";
     combined = "${a} and ${b}";
     ASSERT combined == "foo and bar", "multiple interpolation";
 
-    -- Bare $ is literal
+    # Bare $ is literal
     price = "costs $5";
     ASSERT price == "costs $5", "bare dollar is literal";
 

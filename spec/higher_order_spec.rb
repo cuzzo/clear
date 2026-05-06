@@ -33,7 +33,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           words: String[] = ["a", "bb", "ccc"];
-          -- Project List<String> -> List<Int64> using .length()
+          # Project List<String> -> List<Int64> using .length()
           lengths = words |> SELECT _.length();
         FLUX
       }
@@ -48,9 +48,9 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           raw = "apple,banana";
-          -- 1. split returns String
-          -- 2. SELECT iterates Strings
-          -- 3. _.length() returns Int64
+          # 1. split returns String
+          # 2. SELECT iterates Strings
+          # 3. _.length() returns Int64
           lengths = raw |> split(",") |> SELECT _.length();
         FLUX
       }
@@ -65,7 +65,7 @@ RSpec.describe SemanticAnnotator do
         <<~FLUX
           nums = [10, 20];
 
-          -- Create a List of HashMaps
+          # Create a List of HashMaps
           complex = nums |> SELECT %{
             "original": _,
             "doubled": _ * 2
@@ -84,7 +84,7 @@ RSpec.describe SemanticAnnotator do
       let(:code) {
         <<~FLUX
           nums = [1_i64, 2_i64];
-          -- Wrap each item in a list -> [[1], [2]]
+          # Wrap each item in a list -> [[1], [2]]
           nested = nums |> SELECT [_];
         FLUX
       }

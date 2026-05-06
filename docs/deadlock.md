@@ -27,16 +27,16 @@ FN main() RETURNS Void ->
     t = BG {
         WITH EXCLUSIVE s AS outer {
             outer.value = 1;
-            -- DEADLOCK: trying to re-acquire the same mutex this fiber holds.
-            -- pthread_mutex_lock blocks the OS thread. The lock is never
-            -- released because the releaser IS the blocked fiber.
+            # DEADLOCK: trying to re-acquire the same mutex this fiber holds.
+            # pthread_mutex_lock blocks the OS thread. The lock is never
+            # released because the releaser IS the blocked fiber.
             WITH EXCLUSIVE s AS inner {
                 inner.value = 2;
             }
         }
     };
 
-    NEXT t;  -- hangs here
+    NEXT t;  # hangs here
 END
 ```
 
@@ -46,7 +46,7 @@ This compiles without error and hangs at runtime.
 
 ```ruby clear illustrative
 FN update_inner(inner: State) RETURNS Void ->
-    -- Takes the already-unlocked value; no lock needed here.
+    # Takes the already-unlocked value; no lock needed here.
     inner.value = 2;
 END
 
@@ -56,7 +56,7 @@ FN main() RETURNS Void ->
     t = BG {
         WITH EXCLUSIVE s AS inner {
             inner.value = 1;
-            update_inner(inner);  -- pass the unlocked value, not the lock
+            update_inner(inner);  # pass the unlocked value, not the lock
         }
     };
 
@@ -77,7 +77,7 @@ FN main() RETURNS Void ->
     s = State{ value: 0 } @locked;
 
     producer = BG {
-        -- producer needs 's' to do its work
+        # producer needs 's' to do its work
         WITH EXCLUSIVE s AS inner {
             inner.value = 42;
         }
@@ -85,13 +85,13 @@ FN main() RETURNS Void ->
 
     consumer = BG {
         WITH EXCLUSIVE s AS outer {
-            -- consumer holds 's', then waits for producer
-            NEXT producer;  -- DEADLOCK: producer can't acquire 's' — consumer holds it
+            # consumer holds 's', then waits for producer
+            NEXT producer;  # DEADLOCK: producer can't acquire 's' — consumer holds it
             print(outer.value.toString());
         }
     };
 
-    NEXT consumer;  -- hangs here
+    NEXT consumer;  # hangs here
 END
 ```
 
@@ -109,10 +109,10 @@ FN main() RETURNS Void ->
         }
     };
 
-    NEXT producer;  -- wait for producer BEFORE acquiring the lock
+    NEXT producer;  # wait for producer BEFORE acquiring the lock
 
     WITH s AS inner {
-        print(inner.value.toString());  -- 42
+        print(inner.value.toString());  # 42
     }
 END
 ```
@@ -149,7 +149,7 @@ FN main() RETURNS Void ->
             amount = ra.balance / 2;
             ra.balance = ra.balance - amount;
         }
-        -- a is unlocked here. No re-entrancy possible.
+        # a is unlocked here. No re-entrancy possible.
         WITH EXCLUSIVE b AS rb {
             rb.balance = rb.balance + amount;
         }

@@ -1,5 +1,5 @@
--- Test: PROFILE inside TEST blocks.
--- Verifies that PROFILE compiles and produces timing + alloc output.
+# Test: PROFILE inside TEST blocks.
+# Verifies that PROFILE compiles and produces timing + alloc output.
 
 FN compute(n: Float64) RETURNS Float64 ->
     MUTABLE sum = 0.0;

@@ -401,7 +401,7 @@ RSpec.describe "./clear fix", :integration do
     it "ignores typo patterns inside strings and line comments" do
       src = <<~CLEAR
         FN main() RETURNS Void ->
-          -- pipeline: s> and arrow: =>
+          # pipeline: s> and arrow: =>
           msg = "s> and => in a string";
           RETURN;
         END

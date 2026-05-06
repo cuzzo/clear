@@ -1,9 +1,9 @@
--- Test: reassigning a non-Copy variable using itself as an argument.
--- Bug: `x = f(x)` generated `cleanup(x); x = f(x)` (use-after-free).
--- Fix: generate `{ const __new = f(x); cleanup(x); x = __new; }`.
---
--- Unions with @indirect fields are non-Copy and have heap cleanup.
--- This test uses MUTABLE v = transform(v) to trigger the bug.
+# Test: reassigning a non-Copy variable using itself as an argument.
+# Bug: `x = f(x)` generated `cleanup(x); x = f(x)` (use-after-free).
+# Fix: generate `{ const __new = f(x); cleanup(x); x = __new; }`.
+#
+# Unions with @indirect fields are non-Copy and have heap cleanup.
+# This test uses MUTABLE v = transform(v) to trigger the bug.
 
 UNION Val {
     Nil,

@@ -1,15 +1,15 @@
--- Test: real lock contention triggers the ON <selector> action.
--- Debug builds set Scheduler.lock_timeout_ms = 100 (30s in release),
--- so a holder that sleeps 300ms reliably times out any concurrent
--- waiter. The waiter's timeout action bumps a separate counter so
--- main can verify the path actually fired.
+# Test: real lock contention triggers the ON <selector> action.
+# Debug builds set Scheduler.lock_timeout_ms = 100 (30s in release),
+# so a holder that sleeps 300ms reliably times out any concurrent
+# waiter. The waiter's timeout action bumps a separate counter so
+# main can verify the path actually fired.
 
 STRUCT Counter { value: Int64 }
 
--- Helper so sleep() gets the caller's runtime. sleep()'s stdlib
--- template hardcodes `rt.`, which is the wrong symbol inside a BG
--- body where the runtime is bound as `__rt_bgN`. Calling a plain FN
--- trampolines through needs_rt so the right handle is passed in.
+# Helper so sleep() gets the caller's runtime. sleep()'s stdlib
+# template hardcodes `rt.`, which is the wrong symbol inside a BG
+# body where the runtime is bound as `__rt_bgN`. Calling a plain FN
+# trampolines through needs_rt so the right handle is passed in.
 FN napFor(ms: Int64) RETURNS !Void ->
     sleep(ms);
     RETURN;

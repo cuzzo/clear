@@ -1,6 +1,6 @@
--- Exact reproducer for scheme leak: Value.List contains []Value,
--- each element may itself be a Value.List with its own heap slice.
--- cleanup must recurse into elements.
+# Exact reproducer for scheme leak: Value.List contains []Value,
+# each element may itself be a Value.List with its own heap slice.
+# cleanup must recurse into elements.
 
 UNION Value { Num: Float64, List: Value[] }
 
@@ -24,7 +24,7 @@ END
 
 FN main() RETURNS Void ->
     result = makeOuter();
-    -- result is Value.List containing two Value.List elements.
-    -- cleanup(Value) must free: outer []Value slice + each inner []Value slice.
+    # result is Value.List containing two Value.List elements.
+    # cleanup(Value) must free: outer []Value slice + each inner []Value slice.
     RETURN;
 END

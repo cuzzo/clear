@@ -1,18 +1,18 @@
--- MVCC followup: pin that `@shared:versioned` (and bare `@versioned`)
--- can be captured into a BG fiber without tripping the L5 non-escape
--- check. Pre-fix the WITH-block alias-tracking in capabilities.rb's
--- `_unified_capture_walk` was missing -- the walker treated `view`
--- (the WITH SNAPSHOT alias declared INSIDE the BG body) as an outer
--- capture, resolved it through `node.symbol` to the borrowed_alias=true
--- SymbolEntry, and rejected the BG as "captures a WITH-scoped binding"
--- even though no outer non-escape was actually being captured. The
--- fix augments locally_bound with the WITH alias names before
--- recursing into the body.
+# MVCC followup: pin that `@shared:versioned` (and bare `@versioned`)
+# can be captured into a BG fiber without tripping the L5 non-escape
+# check. Pre-fix the WITH-block alias-tracking in capabilities.rb's
+# `_unified_capture_walk` was missing -- the walker treated `view`
+# (the WITH SNAPSHOT alias declared INSIDE the BG body) as an outer
+# capture, resolved it through `node.symbol` to the borrowed_alias=true
+# SymbolEntry, and rejected the BG as "captures a WITH-scoped binding"
+# even though no outer non-escape was actually being captured. The
+# fix augments locally_bound with the WITH alias names before
+# recursing into the body.
 
 STRUCT C { v: Int64 }
 
 FN main() RETURNS Void ->
-    -- Multiple BG readers + 1 BG writer on the same Versioned cell.
+    # Multiple BG readers + 1 BG writer on the same Versioned cell.
     MUTABLE c = C{ v: 0_i64 } @shared:versioned;
 
     r1: ~Int64 = BG {
@@ -45,15 +45,15 @@ FN main() RETURNS Void ->
     MUTABLE s: Int64 = (NEXT r1) + (NEXT r2);
     NEXT w;
 
-    -- s aggregates 100 reads of c.v while writes interleave; result is
-    -- a non-negative number (could be 0 if all reads land before any
-    -- write commits, or up to ~250 if all 5 writes commit early). The
-    -- assertion bounds the range and confirms both reader fibers
-    -- completed without UAF / panic.
+    # s aggregates 100 reads of c.v while writes interleave; result is
+    # a non-negative number (could be 0 if all reads land before any
+    # write commits, or up to ~250 if all 5 writes commit early). The
+    # assertion bounds the range and confirms both reader fibers
+    # completed without UAF / panic.
     ASSERT s >= 0_i64, "readers completed";
     ASSERT s <= 1000_i64, "sum bounded by reads * max value";
 
-    -- Final state: writer committed all 5 increments.
+    # Final state: writer committed all 5 increments.
     WITH SNAPSHOT c AS view {
         ASSERT view.v == 5_i64, "writer completed all 5 increments";
     }

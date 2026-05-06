@@ -5,6 +5,6 @@ FN main() RETURNS Void ->
 
   result = s1 + s2 + s3;
 
-  -- Verify concatenation
+  # Verify concatenation
   ASSERT eql?(result, "Hello World"), "String concatenation failed";
 END

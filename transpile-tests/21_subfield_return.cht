@@ -1,7 +1,7 @@
 STRUCT Inner { value: Int64 }
 STRUCT Outer { inner: Inner, count: Int64 }
 
--- Function that extracts and returns sub-field
+# Function that extracts and returns sub-field
 FN extractInner(TAKES o: Outer) RETURNS Inner ->
     result = o.inner;
     RETURN result;
@@ -10,13 +10,13 @@ END
 FN main() RETURNS Void ->
     outer = Outer{ inner: Inner{ value: 99 }, count: 5 };
 
-    -- Move entire outer into function, get inner back
+    # Move entire outer into function, get inner back
     inner = extractInner(outer);
 
     ASSERT inner.value == 99, "Extracted inner value should be 99";
 
-    -- outer is now moved (consumed by extractInner)
-    -- inner is the only owner of the Inner struct
-    -- No leaks or double-frees should occur
+    # outer is now moved (consumed by extractInner)
+    # inner is the only owner of the Inner struct
+    # No leaks or double-frees should occur
     RETURN;
 END

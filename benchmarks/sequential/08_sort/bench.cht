@@ -1,29 +1,29 @@
--- @leak: 1000000 -> 1000
--- Sort Benchmark — Quicksort + Mergesort
--- N = 1,000,000 f64 values
---
--- Data: deterministic permutation via Knuth's multiplicative hash
---   val[i] = (i * 2654435761) MOD N  cast to f64
---   Produces a permutation of [0, N-1].
---
--- Both algorithms are in-place (or near-in-place for mergesort with external buffer).
--- Function parameters use plain Float64[] (slice) — CLEAR auto-converts @list to slice
--- at the call site via CheatLib's @hasField comptime check.
---
--- Key optimizations active:
---   1. TIGHT inner loops: eliminates rt.checkYield() and saveLoopMark/restoreLoopMark
---      overhead from pure compare/swap loops — the dominant cost before this change.
---   2. var_mutated SROA: loop index vars (i, j, k, sp, etc.) are read AND reassigned,
---      so no `_ = &name;` is emitted — LLVM can keep them in registers.
+# @leak: 1000000 -> 1000
+# Sort Benchmark — Quicksort + Mergesort
+# N = 1,000,000 f64 values
+#
+# Data: deterministic permutation via Knuth's multiplicative hash
+#   val[i] = (i * 2654435761) MOD N  cast to f64
+#   Produces a permutation of [0, N-1].
+#
+# Both algorithms are in-place (or near-in-place for mergesort with external buffer).
+# Function parameters use plain Float64[] (slice) — CLEAR auto-converts @list to slice
+# at the call site via CheatLib's @hasField comptime check.
+#
+# Key optimizations active:
+#   1. TIGHT inner loops: eliminates rt.checkYield() and saveLoopMark/restoreLoopMark
+#      overhead from pure compare/swap loops — the dominant cost before this change.
+#   2. var_mutated SROA: loop index vars (i, j, k, sp, etc.) are read AND reassigned,
+#      so no `_ = &name;` is emitted — LLVM can keep them in registers.
 
--- Iterative Lomuto quicksort over a plain slice.
--- The `!` suffix marks a function with MUTABLE parameters (CLEAR convention).
+# Iterative Lomuto quicksort over a plain slice.
+# The `!` suffix marks a function with MUTABLE parameters (CLEAR convention).
 FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
-  -- Pre-allocate stacks: log2(1M) < 20; 48 entries is safe.
-  -- Using @list so both stacks live in the frame arena; trivially freed on exit.
+  # Pre-allocate stacks: log2(1M) < 20; 48 entries is safe.
+  # Using @list so both stacks live in the frame arena; trivially freed on exit.
   MUTABLE lo_stk: Int64[]@list = [];
   MUTABLE hi_stk: Int64[]@list = [];
-  -- Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
+  # Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
   FOR fill_i IN (0_i64 ..< 48) DO
     lo_stk.append(0);
     hi_stk.append(0);
@@ -33,7 +33,7 @@ FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
   MUTABLE sp = 1;
   MUTABLE tmp = 0.0;
 
-  -- TIGHT: pure compare-and-swap, no per-iteration allocation.
+  # TIGHT: pure compare-and-swap, no per-iteration allocation.
   TIGHT WHILE sp > 0 DO
     sp -= 1;
     lo = lo_stk[sp];
@@ -68,11 +68,11 @@ FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
   RETURN;
 END
 
--- Bottom-up iterative mergesort.
--- arr and tmp are both plain slices (Float64[]); no allocation inside this function.
+# Bottom-up iterative mergesort.
+# arr and tmp are both plain slices (Float64[]); no allocation inside this function.
 FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS Void ->
   MUTABLE width = 1;
-  -- TIGHT: all loops here are pure compare/copy, no allocation.
+  # TIGHT: all loops here are pure compare/copy, no allocation.
   TIGHT WHILE width < n DO
     MUTABLE lo = 0;
     TIGHT WHILE lo < n DO
@@ -112,7 +112,7 @@ END
 FN main() RETURNS Void ->
   n = 1000000_i64;
 
-  -- Build data: permutation of [0, N-1] via Knuth multiplicative hash
+  # Build data: permutation of [0, N-1] via Knuth multiplicative hash
   MUTABLE arr: Float64[]@list = [];
   MUTABLE seed_i = 0;
   WHILE seed_i < n DO
@@ -121,14 +121,14 @@ FN main() RETURNS Void ->
     seed_i += 1;
   END
 
-  -- Quicksort
+  # Quicksort
   t0 = timestampMs();
   qsort!(arr, n);
   qsortMs = timestampMs() - t0;
   ASSERT arr[0] <= arr[1], "qsort: not sorted at start";
   ASSERT arr[n - 2] <= arr[n - 1], "qsort: not sorted at end";
 
-  -- Refill for mergesort
+  # Refill for mergesort
   seed_i = 0;
   TIGHT WHILE seed_i < n DO
     v = seed_i * 2654435761_i64 MOD n + 0.0;
@@ -136,7 +136,7 @@ FN main() RETURNS Void ->
     seed_i += 1;
   END
 
-  -- Mergesort (needs a temp buffer of the same size)
+  # Mergesort (needs a temp buffer of the same size)
   MUTABLE tmp_arr: Float64[]@list = [];
   FOR ti IN (0_i64 ..< n) -> tmp_arr.append(0.0);
   t1 = timestampMs();

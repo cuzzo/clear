@@ -12,9 +12,9 @@ FN tailClone() RETURNS ~?Int64[] @split ->
 END
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: CLONE captured by BG keeps an independent replay handle.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: CLONE captured by BG keeps an independent replay handle.
+    # -------------------------------------------------------
     source: ~?Int64[] @split = BG STREAM {
         YIELD 1;
         YIELD 2;
@@ -35,9 +35,9 @@ FN main() RETURNS Void ->
     ASSERT from_main_2 == 2, "original split stream preserves order after BG capture";
     ASSERT from_main_3 == NIL, "original split stream still exhausts normally";
 
-    -- -------------------------------------------------------
-    -- Test 2: returned clone keeps only the unread tail.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: returned clone keeps only the unread tail.
+    # -------------------------------------------------------
     tail: ~?Int64[] @split = tailClone();
     t1: ?Int64 = NEXT tail;
     t2: ?Int64 = NEXT tail;

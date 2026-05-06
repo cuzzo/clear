@@ -1,6 +1,6 @@
--- Test: @list used in union constructor return must not crash on cleanup.
--- Bug: defer cleanup tries to heap-free frame-arena Values after the
--- list is deep-copied into the return value.
+# Test: @list used in union constructor return must not crash on cleanup.
+# Bug: defer cleanup tries to heap-free frame-arena Values after the
+# list is deep-copied into the return value.
 
 STRUCT Pair {
     car: String,
@@ -20,7 +20,7 @@ END
 
 FN buildList!() RETURNS !Val ->
     MUTABLE items: Val[]@list = List[];
-    -- Use dynamically built strings (frame-arena allocated, not rodata)
+    # Use dynamically built strings (frame-arena allocated, not rodata)
     items.append(Val{ Str: makeStr!("hel", "lo") });
     items.append(Val{ Str: makeStr!("wor", "ld") });
     RETURN Val{ List: items };

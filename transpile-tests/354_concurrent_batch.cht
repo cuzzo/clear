@@ -1,4 +1,4 @@
--- Test: CONCURRENT(batch: N) preserves item-wise semantics while chunking work claims.
+# Test: CONCURRENT(batch: N) preserves item-wise semantics while chunking work claims.
 
 FN main() RETURNS Void ->
     nums = [1, 2, 3, 4, 5, 6, 7];

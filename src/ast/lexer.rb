@@ -43,7 +43,7 @@ class Lexer
       case
       # --- SKIPPABLE (No Token Generated) = MANUAL ADVANCE!!!
       when @s.scan(/\s+/) then advance_pos(@s.matched)
-      when @s.scan(/--.*$/) then advance_pos(@s.matched)
+      when @s.scan(/#.*$/) then advance_pos(@s.matched)
 
       # --- TOKENS (Auto-advance via add) ---
       when @s.scan(/\.\.\./) then add(:ELLIPSIS, '...', start_col)

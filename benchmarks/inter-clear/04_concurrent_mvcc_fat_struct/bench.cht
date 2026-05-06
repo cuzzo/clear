@@ -1,18 +1,18 @@
--- 17a: MVCC vs RwLock with a FAT STRUCT and multi-field reads.
---
--- Why this scenario: 03_concurrent_mvcc_vs_rwlock uses a single Int64 cell. The read
--- critical section is one cache-line load (~1ns of work), so the ~10-30ns
--- lock-acquire / EBR-pin overhead dominates and the speedup compresses to
--- ~2x. This bench reads 8 fields per CS so the relative cost of the
--- lock/pin amortizes across more useful work, and any RwLock contention
--- scales with the wider critical section.
---
--- Workload: 32 readers x 80k iters; each iter does ONE acquire and reads
--- all 8 fields inside the CS, summing them. 4 sparse writers do 1k
--- field-bumps each.
---
--- Expected on 32 cores: 3-5x MVCC win over RwLock. Below that means the
--- EBR pin or the WITH-block lowering is leaving free cycles on the table.
+# 17a: MVCC vs RwLock with a FAT STRUCT and multi-field reads.
+#
+# Why this scenario: 03_concurrent_mvcc_vs_rwlock uses a single Int64 cell. The read
+# critical section is one cache-line load (~1ns of work), so the ~10-30ns
+# lock-acquire / EBR-pin overhead dominates and the speedup compresses to
+# ~2x. This bench reads 8 fields per CS so the relative cost of the
+# lock/pin amortizes across more useful work, and any RwLock contention
+# scales with the wider critical section.
+#
+# Workload: 32 readers x 80k iters; each iter does ONE acquire and reads
+# all 8 fields inside the CS, summing them. 4 sparse writers do 1k
+# field-bumps each.
+#
+# Expected on 32 cores: 3-5x MVCC win over RwLock. Below that means the
+# EBR pin or the WITH-block lowering is leaving free cycles on the table.
 
 STRUCT Sample {
     a: Int64, b: Int64, c: Int64, d: Int64,
@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
     writes_per: Int64 = 1000_i64;
     total_reads: Int64 = n_readers * reads_per;
 
-    -- ---------- Variant A: @shared:writeLocked (RwLock) ----------
+    # ---------- Variant A: @shared:writeLocked (RwLock) ----------
     MUTABLE c_rw = Sample{ a: 1_i64, b: 2_i64, c: 3_i64, d: 4_i64,
                             e: 5_i64, f: 6_i64, g: 7_i64, h: 8_i64 } @shared:writeLocked;
 
@@ -63,7 +63,7 @@ FN main() RETURNS Void ->
     FOR w IN (0_i64 ..< n_writers) DO NEXT rw_writers[w]; END
     elapsed_rw_ms = timestampMs() - t0_rw;
 
-    -- ---------- Variant B: @shared:versioned (MVCC) ----------
+    # ---------- Variant B: @shared:versioned (MVCC) ----------
     MUTABLE c_v = Sample{ a: 1_i64, b: 2_i64, c: 3_i64, d: 4_i64,
                            e: 5_i64, f: 6_i64, g: 7_i64, h: 8_i64 } @shared:versioned;
 
@@ -100,7 +100,7 @@ FN main() RETURNS Void ->
     FOR w IN (0_i64 ..< n_writers) DO NEXT v_writers[w]; END
     elapsed_v_ms = timestampMs() - t0_v;
 
-    -- ---------- Report ----------
+    # ---------- Report ----------
     rw_ops_per_sec = (total_reads * 1000_i64) / elapsed_rw_ms;
     v_ops_per_sec  = (total_reads * 1000_i64) / elapsed_v_ms;
     speedup_x100 = (elapsed_rw_ms * 100_i64) / elapsed_v_ms;

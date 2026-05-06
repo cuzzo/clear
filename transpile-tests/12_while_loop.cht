@@ -7,7 +7,7 @@ FN main() RETURNS Void ->
     i = i + 1_i64;
   END
 
-  -- Verify loop ran 10 times: sum = 0+1+2+...+9 = 45
+  # Verify loop ran 10 times: sum = 0+1+2+...+9 = 45
   ASSERT i == 10, "Loop counter should be 10";
   ASSERT sum == 45, "Sum should be 45";
 END

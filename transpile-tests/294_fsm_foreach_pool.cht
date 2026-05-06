@@ -1,7 +1,7 @@
--- FSM ForEach over a @pool collection with a suspend in the body.
--- Pool iteration uses indexed access into `coll.slots[i].value` and
--- skips any slot whose `.alive` flag is false. Drives the
--- :pool_indexed shape registered via Type#fsm_foreach_descriptor.
+# FSM ForEach over a @pool collection with a suspend in the body.
+# Pool iteration uses indexed access into `coll.slots[i].value` and
+# skips any slot whose `.alive` flag is false. Drives the
+# :pool_indexed shape registered via Type#fsm_foreach_descriptor.
 
 STRUCT Entity { health: Int64 }
 

@@ -1,20 +1,20 @@
--- FSM Phase B1 stress: many concurrent pure-compute FSMs.
---
--- Spawns 64 FSM tasks in tight succession and awaits them all. This
--- exercises:
---   - The fsm_ready_queue (Chase-Lev work-stealing deque) under load
---   - FSM_DRAIN_BATCH=64 (one full batch in flight)
---   - SPSC FSM submission across schedulers (when CLEAR_THREADS>1)
---   - Heap allocation/free of N state structs
---
--- Result is the sum 1..64 == 2080.
+# FSM Phase B1 stress: many concurrent pure-compute FSMs.
+#
+# Spawns 64 FSM tasks in tight succession and awaits them all. This
+# exercises:
+#   - The fsm_ready_queue (Chase-Lev work-stealing deque) under load
+#   - FSM_DRAIN_BATCH=64 (one full batch in flight)
+#   - SPSC FSM submission across schedulers (when CLEAR_THREADS>1)
+#   - Heap allocation/free of N state structs
+#
+# Result is the sum 1..64 == 2080.
 
 FN compute(n: Int64) RETURNS Int64 ->
   RETURN n * n;
 END
 
 FN main() RETURNS Void ->
-  -- Build a list of squares-promises, then sum after.
+  # Build a list of squares-promises, then sum after.
   MUTABLE futures: ~Int64[]@list = [];
   MUTABLE i = 1_i64;
   WHILE i <= 64 DO
@@ -26,7 +26,7 @@ FN main() RETURNS Void ->
   MUTABLE total = 0_i64;
   FOR r IN results -> total += r;
 
-  -- 1^2 + 2^2 + ... + 64^2 = n(n+1)(2n+1)/6 = 64*65*129/6 = 89440.
+  # 1^2 + 2^2 + ... + 64^2 = n(n+1)(2n+1)/6 = 64*65*129/6 = 89440.
   ASSERT total == 89440, "sum of 1..64 squared";
   RETURN;
 END

@@ -1,19 +1,19 @@
--- WITH MATERIALIZED VIEW on observables. Owned mid-fold snapshot
--- via the wrapper's `materialize(alloc)` method (which forwards to
--- `inner.materialize`). The alias is owned by the WITH block; the
--- standard heap-cleanup path frees it at scope exit.
---
--- Tests both shapes:
---   - Scalar (SUM)     : materialize returns `!T` -> alias is T.
---   - Collection (DISTINCT) : materialize returns `![]T` -> alias is []T,
---     callable via `.length()` etc.
---
--- The producer races against the WITH block, so snapshots are
--- partial values somewhere in [empty, final]. Tests bound-check
--- with the loosest valid range.
+# WITH MATERIALIZED VIEW on observables. Owned mid-fold snapshot
+# via the wrapper's `materialize(alloc)` method (which forwards to
+# `inner.materialize`). The alias is owned by the WITH block; the
+# standard heap-cleanup path frees it at scope exit.
+#
+# Tests both shapes:
+#   - Scalar (SUM)     : materialize returns `!T` -> alias is T.
+#   - Collection (DISTINCT) : materialize returns `![]T` -> alias is []T,
+#     callable via `.length()` etc.
+#
+# The producer races against the WITH block, so snapshots are
+# partial values somewhere in [empty, final]. Tests bound-check
+# with the loosest valid range.
 
 FN main() RETURNS Void ->
-    -- Scalar
+    # Scalar
     g_sum: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
@@ -25,14 +25,14 @@ FN main() RETURNS Void ->
     }
     ASSERT (NEXT s_sum) == 45_i64, "SUM final";
 
-    -- Collection (DISTINCT)
+    # Collection (DISTINCT)
     g_dist: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 8_i64 DO YIELD i MOD 3_i64; i = i + 1_i64; END
     };
     s_dist: ~Int64[]@set:observable = g_dist |> DISTINCT _;
     WITH MATERIALIZED VIEW s_dist AS snap {
-        -- snap is an owned `Int64[]` slice; iterable, length-queryable
+        # snap is an owned `Int64[]` slice; iterable, length-queryable
         ASSERT snap.length() <= 3_i64, "snap above max-distinct";
         ASSERT snap.length() >= 0_i64, "snap negative";
     }

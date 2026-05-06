@@ -3,9 +3,9 @@ require_relative '../src/ast/parser'
 require_relative '../src/annotator'
 
 # Extract ```clear code blocks from markdown files and verify they compile.
-# Blocks containing "-- COMPILER ERROR" are expected to fail.
-# Blocks containing "-- ILLUSTRATIVE" are skipped entirely.
-# Blocks containing "-- SKIP-DOC-TEST" are skipped entirely.
+# Blocks containing "# COMPILER ERROR" are expected to fail.
+# Blocks containing "# ILLUSTRATIVE" are skipped entirely.
+# Blocks containing "# SKIP-DOC-TEST" are skipped entirely.
 #
 # Each block is wrapped in FN main() if it doesn't define one,
 # so standalone expressions/statements can be tested.
@@ -41,7 +41,7 @@ def wrap_in_main(code)
 
   # Wrap standalone statements in a main function
   # Filter out lines that would cause issues as standalone statements
-  lines = code.lines.reject { |l| l.strip.start_with?("--") && l.strip == "--" }
+  lines = code.lines.reject { |l| l.strip == "#" }
   "FN main() RETURNS Void ->\n#{code}\n    RETURN;\nEND\n"
 end
 
@@ -75,11 +75,11 @@ RSpec.describe "Documentation code examples" do
         next if block[:illustrative]
 
         # Skip blocks that are clearly not CLEAR code (bash commands, etc.)
-        next if code.strip.start_with?("$") || code.strip.start_with?("#")
+        next if code.strip.start_with?("$")
         next if code.include?("bundle ") || code.include?("./clear ") || code.include?("ruby ")
         next if code.include?("redis-benchmark") || code.include?("zig build")
 
-        expects_error = code.include?("-- COMPILER ERROR")
+        expects_error = code.include?("# COMPILER ERROR")
 
         if expects_error
           it "#{file}:#{line} (block #{idx + 1}) expects compiler error" do

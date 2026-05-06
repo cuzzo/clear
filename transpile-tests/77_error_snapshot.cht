@@ -1,4 +1,4 @@
--- Error snapshots: pipeline |> steps capture the input element on failure.
+# Error snapshots: pipeline |> steps capture the input element on failure.
 
 STRUCT User { name: String, age: Int64 }
 
@@ -14,7 +14,7 @@ FN processUser(u: User) RETURNS !String ->
     RETURN valid.name;
 
 CATCH Input
-    -- snapshot is the User that failed validation
+    # snapshot is the User that failed validation
     RETURN snapshot.name;
 END
 

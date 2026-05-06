@@ -15,7 +15,7 @@
 #
 # String/comment skipping is conservative: we honour triple-quoted
 # strings, single-quoted strings (including backslash escapes and
-# `${...}` interpolation), and `--` line comments. When in doubt, we
+# `${...}` interpolation), and `#` line comments. When in doubt, we
 # skip the scan rather than emit a false-positive finding.
 
 require_relative "fixable_error"
@@ -75,7 +75,7 @@ module SyntaxTypoScanner
       end
 
       # Line comment — skip to newline
-      if source[i] == '-' && source[i + 1] == '-'
+      if source[i] == '#'
         while i < len && source[i] != "\n"
           i += 1; col += 1
         end

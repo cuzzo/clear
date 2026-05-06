@@ -1,10 +1,10 @@
--- Test: string concatenation in a loop must not grow frame arena unboundedly.
--- Pattern: MUTABLE resp = ""; WHILE ... -> resp = resp + "data\r\n"; END
--- Each concat creates a NEW frame-arena string. The old resp value is
--- unreachable but still in the frame arena until the function returns.
--- This test does 5000 iterations. Without per-iteration frame rewind,
--- each iteration adds ~5000 bytes -> ~500 KB of unreclaimable frame memory.
--- With proper loop mark, the frame should stay bounded.
+# Test: string concatenation in a loop must not grow frame arena unboundedly.
+# Pattern: MUTABLE resp = ""; WHILE ... -> resp = resp + "data\r\n"; END
+# Each concat creates a NEW frame-arena string. The old resp value is
+# unreachable but still in the frame arena until the function returns.
+# This test does 5000 iterations. Without per-iteration frame rewind,
+# each iteration adds ~5000 bytes -> ~500 KB of unreclaimable frame memory.
+# With proper loop mark, the frame should stay bounded.
 
 FN buildResponse(n: Int64) RETURNS !String ->
     MUTABLE resp = "";
@@ -15,13 +15,13 @@ FN buildResponse(n: Int64) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    -- 5000 iterations of string concat in a loop.
-    -- Without frame rewind per iteration, this would use ~5000 * 5000 bytes
-    -- of frame arena per call. With rewind, it stays bounded.
+    # 5000 iterations of string concat in a loop.
+    # Without frame rewind per iteration, this would use ~5000 * 5000 bytes
+    # of frame arena per call. With rewind, it stays bounded.
     result = buildResponse(5000);
     ASSERT result.length() > 0, "should have built a response";
 
-    -- Call again to verify frame arena was reclaimed from first call.
+    # Call again to verify frame arena was reclaimed from first call.
     result2 = buildResponse(5000);
     ASSERT result2.length() > 0, "second call should also work";
 

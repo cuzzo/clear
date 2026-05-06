@@ -7,14 +7,14 @@ This guide showcases CLEAR: a memory-safe language that combines the ergonomics 
 Bindings are immutable by default. Reassignment requires the `MUTABLE` keyword.
 
 ```ruby clear
-x = 5;                        -- OKAY: Immutable binding (default)
-name = "Alice";               -- OKAY: Immutable string
-pi = 3.14159;                 -- OKAY: Immutable float
+x = 5;                        # OKAY: Immutable binding (default)
+name = "Alice";               # OKAY: Immutable string
+pi = 3.14159;                 # OKAY: Immutable float
 
-x = 6;                        -- COMPILER ERROR: x is immutable
+x = 6;                        # COMPILER ERROR: x is immutable
 
-MUTABLE counter = 0;          -- OKAY: Explicit mutability
-counter = 1;                  -- OKAY: can reassign mutable binding
+MUTABLE counter = 0;          # OKAY: Explicit mutability
+counter = 1;                  # OKAY: can reassign mutable binding
 ```
 
 ## 2. Primitive Types
@@ -61,7 +61,7 @@ FN process(u: User) RETURNS Void ->
 END
 
 FN main() RETURNS Void ->
-  -- At the call site, capabilities are unwrapped:
+  # At the call site, capabilities are unwrapped:
   shared_u = User{ name: "Alice" } @shared;
   WITH shared_u AS val { process(val); }
   RETURN;
@@ -90,16 +90,16 @@ CLEAR uses **affine types** by default. Every value has exactly one owner. When 
 ```ruby clear
 FN process(TAKES s: String) RETURNS Void ->
     print(s);
-    -- s is destroyed here (end of scope)
+    # s is destroyed here (end of scope)
 END
 
 FN main() RETURNS Void ->
     msg = "Hello";
 
-    process(msg);                   -- OKAY: Implicit transfer (by FN signature)
+    process(msg);                   # OKAY: Implicit transfer (by FN signature)
 
-    print(GIVE msg);                -- COMPILER ERROR: USE AFTER MOVE: You can't GIVE `msg`.  `process(msg)` TOOK it away.
-    print(msg);                     -- COMPILER ERROR: USE AFTER MOVE: You can't use `msg`.  `process(msg)` TOOK it away.
+    print(GIVE msg);                # COMPILER ERROR: USE AFTER MOVE: You can't GIVE `msg`.  `process(msg)` TOOK it away.
+    print(msg);                     # COMPILER ERROR: USE AFTER MOVE: You can't use `msg`.  `process(msg)` TOOK it away.
 
     RETURN;
 END
@@ -121,7 +121,7 @@ Function parameters are **implicit borrows** by default. Only `TAKES` transfers 
 ```ruby clear
 UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect } }
 
--- Borrow: can read, cannot store or move
+# Borrow: can read, cannot store or move
 FN inspect(v: Value) RETURNS String ->
     MATCH v START
         Value.Num AS n -> RETURN n.toString();,
@@ -129,14 +129,14 @@ FN inspect(v: Value) RETURNS String ->
     END
 END
 
--- Owned: can store into collections
+# Owned: can store into collections
 FN store!(TAKES v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
-    map["item"] = v;                -- OKAY: v is owned via TAKES
+    map["item"] = v;                # OKAY: v is owned via TAKES
     RETURN;
 END
 
 FN bad!(v: Value, MUTABLE map: HashMap<Value>) RETURNS Void ->
-    map["item"] = v;                -- COMPILER ERROR: Cannot move borrowed value 'v'
+    map["item"] = v;                # COMPILER ERROR: Cannot move borrowed value 'v'
     RETURN;
 END
 ```
@@ -148,20 +148,20 @@ END
 The `@sharded` capability partitions data across threads, enabling massive parallelism without lock contention by automatically pinning threads to specific data shards.
 
 ```ruby clear
--- A sharded map distributes keys across independent thread-local heaps
+# A sharded map distributes keys across independent thread-local heaps
 MUTABLE registry: HashMap<Int64>@sharded(8) = {};
 
--- CLEAR automatically pins this fiber to the correct shard
+# CLEAR automatically pins this fiber to the correct shard
 BG {
     registry["key"] = 42;
 }
 
--- Sharding is also available for Pools and Lists
+# Sharding is also available for Pools and Lists
 MUTABLE users: User[100]@pool:sharded(4) = [];
 MUTABLE logs: String[]@list:sharded(2) = [];
 
--- Note: Sharding provides peak throughput but carries a risk of
--- data skew if keys/items are not uniformly distributed.
+# Note: Sharding provides peak throughput but carries a risk of
+# data skew if keys/items are not uniformly distributed.
 ```
 
 NOTE: shared-nothing architectures present problems if your workloads can be heavily skewed.
@@ -209,7 +209,7 @@ END
 CLEAR provides standard control flow constructs with support for one-line shorthands.
 
 ```ruby clear
--- 1. IF / ELSE_IF / ELSE
+# 1. IF / ELSE_IF / ELSE
 x = 75;
 IF x > 100 THEN
     print("Large");
@@ -219,16 +219,16 @@ ELSE
     print("Small");
 END
 
--- 2. WHILE loops
+# 2. WHILE loops
 MUTABLE i = 0;
 WHILE i < 10 DO
     print(i.toString());
     i += 1;
 END
 
--- 3. FOR loops (Range iteration)
-FOR j IN (1 ..= 5) -> print(j.toString());     -- OKAY: Inclusive range
-FOR j IN (1 ..< 5) -> print(j.toString());     -- OKAY: Exclusive range
+# 3. FOR loops (Range iteration)
+FOR j IN (1 ..= 5) -> print(j.toString());     # OKAY: Inclusive range
+FOR j IN (1 ..< 5) -> print(j.toString());     # OKAY: Exclusive range
 ```
 
 ## 8. Enums, Unions, and Pattern Matching
@@ -258,10 +258,10 @@ Unions carry a payload per variant. Unit variants (no payload) are also supporte
 UNION Result { Ok: Float64, Err: String, Empty }
 
 FN main() RETURNS Void ->
-    -- Payload variant
+    # Payload variant
     r = Result{ Ok: 42.0 };
 
-    -- Unit variant (no payload)
+    # Unit variant (no payload)
     e = Result.Empty;
 
     MATCH r START
@@ -285,20 +285,20 @@ END
 ```ruby clear illustrative
 UNION Value { Nil, Num: Float64, List: Value[] }
 
--- Borrowed source: MATCH AS produces a borrow
+# Borrowed source: MATCH AS produces a borrow
 FN sum(v: Value) RETURNS Float64 ->
     MATCH v START
-        Value.List AS items ->       -- items is &[]Value (borrow)
-            RETURN items.length();   -- OKAY: reading a borrow
+        Value.List AS items ->       # items is &[]Value (borrow)
+            RETURN items.length();   # OKAY: reading a borrow
         DEFAULT -> RETURN 0.0;
     END
 END
 
--- Owned source: MATCH AS moves the payload
+# Owned source: MATCH AS moves the payload
 FN take!(TAKES v: Value) RETURNS Value[] ->
     MATCH v START
-        Value.List AS items ->       -- items is []Value (owned, v consumed)
-            RETURN items;            -- OKAY: returning owned data
+        Value.List AS items ->       # items is []Value (owned, v consumed)
+            RETURN items;            # OKAY: returning owned data
         DEFAULT -> RETURN List[];
     END
 END
@@ -308,8 +308,8 @@ Storing a borrowed `MATCH AS` binding into a struct or union variant is a compil
 
 ```ruby clear illustrative
 FN bad(items: Value[]) RETURNS Value ->
-    -- items is a borrowed parameter
-    RETURN Value.Lambda{ params: items };  -- COMPILER ERROR: Cannot store borrowed 'items'
+    # items is a borrowed parameter
+    RETURN Value.Lambda{ params: items };  # COMPILER ERROR: Cannot store borrowed 'items'
 END
 ```
 
@@ -328,20 +328,20 @@ p = Pair<Int64>{ first: 1, second: 2 };
 CLEAR supports powerful functional pipelines via the Smooth operator `|>`.
 
 ```ruby clear illustrative
--- 1. Pipelines: Filter, Aggregate, Transform
+# 1. Pipelines: Filter, Aggregate, Transform
 alive = entities |> WHERE _.health > 0;
 total = scores |> SUM _.value;
 names = users |> SELECT _.name;
 
--- 2. Side effects & Function Piping
+# 2. Side effects & Function Piping
 entities |> EACH { _.x += _.vx; };
 result = data |> process |> validate |> format;
 
--- 3. Error Handling: Inline OR / OR RAISE
-val = parseInt("abc") OR 0;                         -- OKAY: Fallback value
-content = readFile("config.json") OR RAISE;         -- OKAY: Explicit propagation
+# 3. Error Handling: Inline OR / OR RAISE
+val = parseInt("abc") OR 0;                         # OKAY: Fallback value
+content = readFile("config.json") OR RAISE;         # OKAY: Explicit propagation
 
--- 4. Function-level CATCH
+# 4. Function-level CATCH
 FN main() RETURNS Void ->
     result = loadConfig("config.json") OR RAISE;
     print("Config: ${result}");
@@ -365,24 +365,24 @@ Tense represents a value that will exist in the future. CLEAR eliminates the com
 - A **STREAM** of users is simply one way to produce "Future Users".
 
 ```ruby clear illustrative
--- 1. Promise (~T): A single future value
+# 1. Promise (~T): A single future value
 p: ~String = BG { sleep(100); RETURN "Data"; };
-val = NEXT p;                                       -- OKAY: Blocks until ready
+val = NEXT p;                                       # OKAY: Blocks until ready
 
--- 2. Open Stream (~?T[]): Asynchronous generator
--- NEXT on ~?T[] returns ?T, with NIL signaling exhaustion.
+# 2. Open Stream (~?T[]): Asynchronous generator
+# NEXT on ~?T[] returns ?T, with NIL signaling exhaustion.
 gen: ~?Int64[] = BG STREAM {
     YIELD 10;
     YIELD 20;
 };
-val = NEXT gen;                                     -- OKAY: Returns ?Int64 (NIL when exhausted)
+val = NEXT gen;                                     # OKAY: Returns ?Int64 (NIL when exhausted)
 
--- 3. Infinite Stream (~T[INF]): Lazy rendezvous generator
+# 3. Infinite Stream (~T[INF]): Lazy rendezvous generator
 counter: ~Int64[INF] = BG STREAM {
     MUTABLE i = 0;
     WHILE TRUE DO { YIELD i; i += 1; }
 };
-v1 = NEXT counter;                                  -- OKAY: Returns Int64 (never NIL)
+v1 = NEXT counter;                                  # OKAY: Returns Int64 (never NIL)
 ```
 
 ### Stream Capabilities: `@shared` vs `@split`
@@ -427,20 +427,20 @@ All collections are **automatically monomorphized** -- the compiler generates ze
 ```ruby clear
 STRUCT User { name: String }
 
--- 1. Fixed Array
+# 1. Fixed Array
 vals = [10, 20, 30];
 
--- 2. Dynamic List
+# 2. Dynamic List
 MUTABLE items: Int64[]@list = [];
 items.append(42);
 
--- 3. Generational Pool
--- Pools provide peak cache locality. Switching from List to @pool:soa
--- (Structure of Arrays) is a one-line refactor for massive speed.
+# 3. Generational Pool
+# Pools provide peak cache locality. Switching from List to @pool:soa
+# (Structure of Arrays) is a one-line refactor for massive speed.
 MUTABLE users: User[100]@pool = [];
 
-id = users.insert(User{ name: "Alice" });           -- Returns stable handle
-user = users.get(id) OR RAISE;                      -- Returns ?T (checks stale handles)
+id = users.insert(User{ name: "Alice" });           # Returns stable handle
+user = users.get(id) OR RAISE;                      # Returns ?T (checks stale handles)
 ```
 
 ### Element-Level Capabilities
@@ -448,13 +448,13 @@ user = users.get(id) OR RAISE;                      -- Returns ?T (checks stale 
 Capabilities normally apply to the **collection** (`T[]@shared` = one shared list). For rare cases where each **element** needs its own capability, place the capability before the array suffix:
 
 ```ruby clear illustrative
--- Collection-level (common): one Arc wrapping the whole list
+# Collection-level (common): one Arc wrapping the whole list
 MUTABLE shared_list: User[]@list:shared = [];
 
--- Element-level (rare): each element is individually Arc'd
+# Element-level (rare): each element is individually Arc'd
 MUTABLE arc_users: User@shared[]@list = [];
 
--- Element-level with pool: each slot holds an Arc'd user
+# Element-level with pool: each slot holds an Arc'd user
 MUTABLE arc_pool: User@shared[100]@pool = [];
 ```
 
@@ -466,12 +466,12 @@ Strings in CLEAR are Copy (like Rust's `&str` — a pointer + length). Assignmen
 
 ```ruby clear
 x = "hello";
-y = x;                         -- x is moved (strings are owned, non-Copy)
--- z = x;                      -- would be use-after-move error
-z = COPY y;                    -- OK: explicit deep-copy
+y = x;                         # x is moved (strings are owned, non-Copy)
+# z = x;                      -- would be use-after-move error
+z = COPY y;                    # OK: explicit deep-copy
 
--- String concatenation
-full = "foo" + "bar";          -- "foobar" (single allocation, no intermediate)
+# String concatenation
+full = "foo" + "bar";          # "foobar" (single allocation, no intermediate)
 ```
 
 Like arrays, Strings have capabilities:
@@ -485,14 +485,14 @@ Like arrays, Strings have capabilities:
 For recursive or cyclic data structures, use `@indirect` (heap-allocated pointer, like Rust's `Box<T>`). Combined with `@reentrant` for recursive traversal:
 
 ```ruby clear illustrative
--- Recursive tree node using @indirect for child pointers
+# Recursive tree node using @indirect for child pointers
 STRUCT Node {
     value: Int64,
-    left: ?Node@indirect,     -- Optional heap-allocated child
+    left: ?Node@indirect,     # Optional heap-allocated child
     right: ?Node@indirect
 }
 
--- Recursive traversal must be @reentrant
+# Recursive traversal must be @reentrant
 FN sumTree(n: Node) RETURNS Int64 @reentrant ->
     MUTABLE total = n.value;
     IF n.left -> total += sumTree(n?.left OR 0);
@@ -513,7 +513,7 @@ END
 - `RESOLVE expr` -- upgrade a weak reference back to an optional strong reference (`?T`)
 
 ```ruby clear illustrative
--- Parent-child with back-pointer cycle
+# Parent-child with back-pointer cycle
 STRUCT Parent {
     name: String,
     child: ?Child@multiowned@indirect
@@ -521,16 +521,16 @@ STRUCT Parent {
 
 STRUCT Child {
     name: String,
-    parent: ?Parent@link          -- weak back-pointer, breaks the cycle
+    parent: ?Parent@link          # weak back-pointer, breaks the cycle
 }
 
 FN main() RETURNS Void ->
     p = Parent{ name: "Alice", child: NIL } @multiowned;
 
-    -- LINK downgrades the strong Rc to a WeakRc
+    # LINK downgrades the strong Rc to a WeakRc
     weak_p = LINK p;
 
-    -- RESOLVE returns ?Parent@multiowned; bind first, then use ?. to safely access fields
+    # RESOLVE returns ?Parent@multiowned; bind first, then use ?. to safely access fields
     resolved = RESOLVE weak_p;
     name = resolved?.name OR "dropped";
     ASSERT name == "Alice", "resolved";
@@ -551,16 +551,16 @@ Key rules:
 CLEAR makes background tasks and fork-join parallelism trivial.
 
 ```ruby clear illustrative
--- BG: Background execution
+# BG: Background execution
 p: ~Int64 = BG { RETURN slowComputation(); };
 
--- DO: Fork-Join parallel execution
+# DO: Fork-Join parallel execution
 DO {
     step1(),
     step2()
 }
 
--- CONCURRENT: Parallel pipelines
+# CONCURRENT: Parallel pipelines
 results = items |> CONCURRENT(workers: 8) SELECT transform(_);
 ```
 
@@ -580,8 +580,8 @@ results = items |> CONCURRENT(workers: 8) SELECT transform(_);
 CLEAR uses a simple namespace-based module system via `REQUIRE`.
 
 ```ruby clear illustrative
-REQUIRE "math_utils.cht" AS m;                      -- Local file alias
-REQUIRE "pkg:geometry";                             -- Package import
+REQUIRE "math_utils.cht" AS m;                      # Local file alias
+REQUIRE "pkg:geometry";                             # Package import
 
 FN main() RETURNS Void ->
     p = geometry.Point{ x: 1, y: 2 };
@@ -599,13 +599,13 @@ CLEAR integrates directly with Zig and C libraries via `EXTERN` declarations. Al
 ### Importing Functions and Types
 
 ```ruby clear illustrative
--- Import a struct type from a Zig module
+# Import a struct type from a Zig module
 EXTERN STRUCT Vec2 { x: Float64, y: Float64 } FROM "math_native";
 
--- Import a free function
+# Import a free function
 EXTERN FN computeDistance(v: Vec2) RETURNS Float64 FROM "math_native";
 
--- Import with allocator injection (EFFECTS)
+# Import with allocator injection (EFFECTS)
 EXTERN FN parseJson(data: String) RETURNS !JsonDoc
     EFFECTS :alloc:heap FROM "json_native";
 ```
@@ -615,11 +615,11 @@ EXTERN FN parseJson(data: String) RETURNS !JsonDoc
 For passing default options or defining Zig-compatible layouts:
 
 ```ruby clear illustrative
--- Local struct (no external module)
+# Local struct (no external module)
 EXTERN STRUCT ParseOptions {};
 EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
 
--- Comptime type parameters for generic FFI
+# Comptime type parameters for generic FFI
 EXTERN FN parseFromSliceLeaky<T>(comptime: T, content: String, options: ParseOptions)
     RETURNS !T EFFECTS :alloc:heap FROM "std.json";
 ```
@@ -631,7 +631,7 @@ EXTERN STRUCT Dir {} FROM "std.fs";
 EXTERN FN cwd() RETURNS Dir FROM "std.fs";
 EXTERN FN Dir.makePath(self: Dir, path: String) RETURNS Void FROM "std.fs";
 
--- Chained method call (both trampolined to g0)
+# Chained method call (both trampolined to g0)
 cwd().makePath("data");
 ```
 
@@ -641,9 +641,9 @@ cwd().makePath("data");
 EXTERN STRUCT Buffer { data: String }
     CLOSE "deinit" FROM "native_resource";
 
--- Buffer.deinit() is auto-called when buf goes out of scope
+# Buffer.deinit() is auto-called when buf goes out of scope
 buf = createBuffer("hello");
--- defer buf.deinit() emitted automatically
+# defer buf.deinit() emitted automatically
 ```
 
  * See [json_api](benchmarks/24_json_api/server.cht) for an example.
@@ -729,8 +729,8 @@ print(bar.index);
 WITH RESTRICT node AS n {
   MUTABLE gc = n.grandChild();
   gc.value = 0;
-  node.left = Nil; -- COMPIILER ERROR: `node` is RESTRICTED.  It's immutable in this scope.
-  n.left = Nil;    -- COMPIILER ERROR: `n` is RESTRICTED.  It's immutable in this scope.
+  node.left = Nil; # COMPIILER ERROR: `node` is RESTRICTED.  It's immutable in this scope.
+  n.left = Nil;    # COMPIILER ERROR: `n` is RESTRICTED.  It's immutable in this scope.
 }
 ```
 

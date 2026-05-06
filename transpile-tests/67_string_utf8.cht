@@ -1,5 +1,5 @@
--- Test: String UTF-8 semantics (Rust model)
--- String is UTF-8, no integer indexing. Use codepointCount/charAt for codepoints.
+# Test: String UTF-8 semantics (Rust model)
+# String is UTF-8, no integer indexing. Use codepointCount/charAt for codepoints.
 
 FN test_ascii() RETURNS !Void ->
     s = "hello";

@@ -1,5 +1,5 @@
--- Test: COPY on Val[] (slice of unions) must deep-copy elements.
--- Verifies cleanup([]Val, ...) works for owned slices in the runtime.
+# Test: COPY on Val[] (slice of unions) must deep-copy elements.
+# Verifies cleanup([]Val, ...) works for owned slices in the runtime.
 
 UNION Val {
     Nil,

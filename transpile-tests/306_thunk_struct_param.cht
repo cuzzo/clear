@@ -1,12 +1,12 @@
--- T4 (Tranche 2): THUNK with a struct parameter carried through frames.
---
--- The audit's "mutable non-local captures" angle isn't reachable in
--- current CLEAR -- top-level FNs don't capture and the splitter shape
--- forbids MUTABLE locals in the body. The reachable analogue is a
--- struct-by-value parameter that gets materialized into every Frame.
--- This pins that the Frame's `<param>: Box` field correctly holds a
--- struct and that `current.b.v` access through `qualify_params`
--- produces valid Zig.
+# T4 (Tranche 2): THUNK with a struct parameter carried through frames.
+#
+# The audit's "mutable non-local captures" angle isn't reachable in
+# current CLEAR -- top-level FNs don't capture and the splitter shape
+# forbids MUTABLE locals in the body. The reachable analogue is a
+# struct-by-value parameter that gets materialized into every Frame.
+# This pins that the Frame's `<param>: Box` field correctly holds a
+# struct and that `current.b.v` access through `qualify_params`
+# produces valid Zig.
 
 STRUCT Box { v: Int64 }
 
@@ -17,13 +17,13 @@ FN sumWithBox(b: Box, n: Int64) RETURNS Int64
 END
 
 FN main() RETURNS Void ->
-  -- Each frame carries `b` by value; b.v stays at 7 across all 5
-  -- frames; result is 7 * 5 = 35.
+  # Each frame carries `b` by value; b.v stays at 7 across all 5
+  # frames; result is 7 * 5 = 35.
   box: Box = Box{ v: 7_i64 };
   r = sumWithBox(box, 5_i64);
   ASSERT r == 35_i64, "sumWithBox({v:7}, 5) == 35";
 
-  -- Different struct value -> different Frame init.
+  # Different struct value -> different Frame init.
   box2: Box = Box{ v: -3_i64 };
   r2 = sumWithBox(box2, 4_i64);
   ASSERT r2 == -12_i64, "sumWithBox({v:-3}, 4) == -12";

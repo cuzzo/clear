@@ -1,9 +1,9 @@
--- Two observable pipelines in the same function -- verifies the
--- per-pipe `fid` counter keeps `__obs_acc` / `__ObsConsumerCtx` /
--- `__rt_obs_*` symbols unique across observables. Without that
--- uniqueness the second pipe's struct/var declarations would
--- shadow the first's and Zig would either reject the redefinition
--- or (worse) the consumer fibers would clobber each other.
+# Two observable pipelines in the same function -- verifies the
+# per-pipe `fid` counter keeps `__obs_acc` / `__ObsConsumerCtx` /
+# `__rt_obs_*` symbols unique across observables. Without that
+# uniqueness the second pipe's struct/var declarations would
+# shadow the first's and Zig would either reject the redefinition
+# or (worse) the consumer fibers would clobber each other.
 
 FN main() RETURNS Void ->
     gen1: ~?Int64[] = BG STREAM {

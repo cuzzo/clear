@@ -1,19 +1,19 @@
--- @leak: 1000000 -> 1000
--- HashMap Benchmark — Int64 -> Float64, 1M inserts + 1M lookups
---
--- All three languages use integer keys (i64) and float values (f64).
--- CLEAR's bucket array lives in the frame arena — zero GPA alloc/free calls.
--- C uses calloc/free for the bucket array. Rust uses heap via with_capacity.
+# @leak: 1000000 -> 1000
+# HashMap Benchmark — Int64 -> Float64, 1M inserts + 1M lookups
+#
+# All three languages use integer keys (i64) and float values (f64).
+# CLEAR's bucket array lives in the frame arena — zero GPA alloc/free calls.
+# C uses calloc/free for the bucket array. Rust uses heap via with_capacity.
 
 FN main() RETURNS Void ->
     MUTABLE m: HashMap<Int64, Float64> = {};
 
-    -- Insert phase: 1M integer key-value pairs
+    # Insert phase: 1M integer key-value pairs
     t0 = timestampMs();
     FOR i IN (0_i64 ..< 1000000) -> m[i] = i + 0.0;
     insertMs = timestampMs() - t0;
 
-    -- Lookup phase: sum all values to prevent dead-code elimination
+    # Lookup phase: sum all values to prevent dead-code elimination
     t1 = timestampMs();
     MUTABLE total = 0.0;
     FOR j IN (0_i64 ..< 1000000) -> total = total + (m[j] OR 0.0);

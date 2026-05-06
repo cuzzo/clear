@@ -1,29 +1,29 @@
--- Test: REDUCE on variable-backed finite streams (~T[], ~T[N]) and infinite
--- streams (~T[INF] with LIMIT).
+# Test: REDUCE on variable-backed finite streams (~T[], ~T[N]) and infinite
+# streams (~T[INF] with LIMIT).
 
 FN main() RETURNS Void ->
-    -- REDUCE on dynamic stream (~T[]): produces ~T@observable; COLLECT joins.
+    # REDUCE on dynamic stream (~T[]): produces ~T@observable; COLLECT joins.
     s1: ~Int64[] = 1 ..< 6;
     product1 = s1 |> REDUCE(1_i64) acc * _ |> COLLECT;
     ASSERT product1 == 120, "dynamic stream REDUCE product 1*2*3*4*5";
 
-    -- WHERE + REDUCE on dynamic stream: WHERE strips tense, so REDUCE
-    -- folds eagerly to a scalar (no observable lift here).
+    # WHERE + REDUCE on dynamic stream: WHERE strips tense, so REDUCE
+    # folds eagerly to a scalar (no observable lift here).
     s2: ~Int64[] = 0 ..< 10;
     filtered = s2 |> WHERE _ > 5 |> REDUCE(0_i64) acc + _;
     ASSERT filtered == 30, "dynamic stream WHERE+REDUCE: 6+7+8+9";
 
-    -- REDUCE on bounded stream (~T[N]): observable; COLLECT joins.
+    # REDUCE on bounded stream (~T[N]): observable; COLLECT joins.
     s3: ~Int64[4] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }];
     sum3 = s3 |> REDUCE(0_i64) acc + _ |> COLLECT;
     ASSERT sum3 == 10, "bounded stream REDUCE sum 1+2+3+4";
 
-    -- WHERE + REDUCE on bounded stream: WHERE strips tense (eager).
+    # WHERE + REDUCE on bounded stream: WHERE strips tense (eager).
     s4: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     evens = s4 |> WHERE _ MOD 2 == 0 |> REDUCE(0_i64) acc + _;
     ASSERT evens == 6, "bounded stream WHERE+REDUCE: 2+4";
 
-    -- REDUCE on infinite stream with LIMIT: LIMIT strips tense (eager).
+    # REDUCE on infinite stream with LIMIT: LIMIT strips tense (eager).
     counter: ~Int64[INF] = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE TRUE DO

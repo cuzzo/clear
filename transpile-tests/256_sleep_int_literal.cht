@@ -1,18 +1,18 @@
--- Stdlib templates with primitive numeric arg types now coerce literals
--- to the declared type at the call boundary. Bug 256 was: the `sleep`
--- template `"rt.sleep(@intCast(@as(u64, @bitCast({0}))))"` substituted
--- `{0}` with raw text, so `sleep(1)` produced `@bitCast(1)` -- and Zig
--- rejects `@bitCast` of a `comptime_int` (no defined bit width).
---
--- The fix is structural: every stdlib arg with a declared primitive type
--- gets wrapped in `@as(<zig_type>, ...)` BEFORE substitution. Now the
--- template sees a typed value and `@bitCast` works. The same coercion
--- closes the same bug class for every other primitive-numeric template
--- without per-template band-aids. (See coerce_stdlib_arg in
--- src/mir/mir_lowering.rb.)
---
--- The runtime call goes inside a BG fiber because `sleep` requires a
--- live fiber context (cooperative yield point).
+# Stdlib templates with primitive numeric arg types now coerce literals
+# to the declared type at the call boundary. Bug 256 was: the `sleep`
+# template `"rt.sleep(@intCast(@as(u64, @bitCast({0}))))"` substituted
+# `{0}` with raw text, so `sleep(1)` produced `@bitCast(1)` -- and Zig
+# rejects `@bitCast` of a `comptime_int` (no defined bit width).
+#
+# The fix is structural: every stdlib arg with a declared primitive type
+# gets wrapped in `@as(<zig_type>, ...)` BEFORE substitution. Now the
+# template sees a typed value and `@bitCast` works. The same coercion
+# closes the same bug class for every other primitive-numeric template
+# without per-template band-aids. (See coerce_stdlib_arg in
+# src/mir/mir_lowering.rb.)
+#
+# The runtime call goes inside a BG fiber because `sleep` requires a
+# live fiber context (cooperative yield point).
 
 FN main() RETURNS Void ->
     pr: ~Int64 = BG {

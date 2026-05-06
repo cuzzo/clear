@@ -77,7 +77,7 @@ In CLEAR, the compiler and runtime handle the physics of where data lives for yo
 If you need to explicitly force an object onto the heap (e.g., for recursive structures or large buffers), you can use the `indirect` capability (similar to `Box` in Rust).
 
 ```CLEAR
--- Recursive structures use 'indirect' to avoid infinite size on stack
+# Recursive structures use 'indirect' to avoid infinite size on stack
 STRUCT Node {
   value: Int64,
   left: ?Node @indirect,
@@ -119,12 +119,12 @@ In CLEAR, we separate **Types** from **Capabilities**.
 
 
 ```CLEAR
-affUser = User.new();         -- creates `affine User` (default)
-a = affUser;                  -- OKAY, affine MOVE, affUser is dead
-b = affUser;                  -- Compiler error, affUser is dead
+affUser = User.new();         # creates `affine User` (default)
+a = affUser;                  # OKAY, affine MOVE, affUser is dead
+b = affUser;                  # Compiler error, affUser is dead
 
-sharedU = SHARE(User.new());  -- turns `affine User` into `shared User` (Arc)
-c = sharedU;                  -- OKAY, sharedU is not dead
+sharedU = SHARE(User.new());  # turns `affine User` into `shared User` (Arc)
+c = sharedU;                  # OKAY, sharedU is not dead
 ```
 
 #### Why it's superior: Zero Blast Radius Refactoring
@@ -134,7 +134,7 @@ In Rust, capabilities like `Arc`, `Rc`, and `Mutex` infect function signatures. 
 In CLEAR, if you need thread-safety, you change **one line** at the definition site:
 
 ```CLEAR
--- Change multiowned (Rc) to shared (Arc)
+# Change multiowned (Rc) to shared (Arc)
 sharedU = SHARE(User.new());
 ```
 
@@ -152,10 +152,10 @@ For multi-threaded `shared` objects, you choose the strategy:
 For complex data, use `alwaysMutable` (`RefCell`). CLEAR handles the lock for you:
 
 ```CLEAR
--- 99% Case: Compiler handles temporary lock
+# 99% Case: Compiler handles temporary lock
 user.login_count += 1;
 
--- 1% Case: Scoped mutation
+# 1% Case: Scoped mutation
 WITH user.config {
   _.theme = "Light";
   _.retries = 5;
@@ -212,12 +212,12 @@ Rust's borrow checker is hard because its side effects are non-local and implici
 ```CLEAR
 MUT node = buildTree();
 WITH RESTRICT node.child {
-  -- Inside this block, node.child is immutable (restricted).
+  # Inside this block, node.child is immutable (restricted).
   gc = node.grandChild();
 
-  node.child.name = "OK"; -- COMPILER ERROR: node.child is RESTRICTed.
+  node.child.name = "OK"; # COMPILER ERROR: node.child is RESTRICTed.
 }
--- Outside the block, node.child is mutable again.
+# Outside the block, node.child is mutable again.
 ```
 
 **Path-Based Scoping:** CLEAR allows you to restrict only the specific part of a data structure you are using (e.g., `node.child`), leaving the rest of the object mutable. This minimizes "poison" and makes complex architectures easier to reason about.

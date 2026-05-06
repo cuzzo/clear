@@ -1,17 +1,17 @@
--- Repro: comparing a UNION value to a unit variant with == should
--- either work (compiler synthesizes variant equality) or be rejected
--- at the CLEAR level (require user to write MATCH).
---
--- Currently the compiler silently emits Zig `==` between two union
--- values, and Zig rejects: "operator == not allowed for type 'Status'".
--- The error surfaces only during Zig compilation, with a Zig-level
--- diagnostic that the user has no easy way to map back to their CLEAR
--- source.
---
--- The bug bit _bc_runner.cht's lock_acquire path (Phase B):
---   IF (lenv.vars["__locked"] OR Value.Nil) == Value.Nil THEN ...
--- which never compiled. Worked around in commit 1bc679ec by rewriting
--- as MATCH.
+# Repro: comparing a UNION value to a unit variant with == should
+# either work (compiler synthesizes variant equality) or be rejected
+# at the CLEAR level (require user to write MATCH).
+#
+# Currently the compiler silently emits Zig `==` between two union
+# values, and Zig rejects: "operator == not allowed for type 'Status'".
+# The error surfaces only during Zig compilation, with a Zig-level
+# diagnostic that the user has no easy way to map back to their CLEAR
+# source.
+#
+# The bug bit _bc_runner.cht's lock_acquire path (Phase B):
+#   IF (lenv.vars["__locked"] OR Value.Nil) == Value.Nil THEN ...
+# which never compiled. Worked around in commit 1bc679ec by rewriting
+# as MATCH.
 
 UNION Status { Active, Idle: Int64 }
 

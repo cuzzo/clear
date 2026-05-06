@@ -1,29 +1,29 @@
--- True-Sync-Polymorphism: ACCEPTANCE end-to-end transpile-test.
---
--- A single transaction body shape (`x.value = x.value + 1`) is used
--- by every supported sync family. The test verifies each family
--- ends up with the right cumulative result -- so a silent upgrade
--- (e.g., @atomic accidentally lowering as a no-op, or @local
--- accidentally locking) would surface as a wrong final value.
---
--- Per family, two paths are exercised:
---   1. tick_<family>! mutates the cell.
---   2. read_<family>! returns the current value via the family's
---      read shape (WITH for locked, WITH SNAPSHOT for snapshot-style).
--- Returning a value FROM a snapshot-mutate closure (`WITH SNAPSHOT c
--- AS MUTABLE x { ... }`) is not supported -- the closure runs in a
--- separate Zig namespace and can't capture outer mutable state. So
--- the test does mutate-then-read, which mirrors realistic transaction
--- shapes anyway.
---
--- The HEADLINE acceptance ("ONE polymorphic tick! body for ALL sync
--- strategies including @local / @multiowned / plain T") is NOT in
--- this file -- it's pending in
--- spec/polymorphic_transaction_acceptance_spec.rb.
+# True-Sync-Polymorphism: ACCEPTANCE end-to-end transpile-test.
+#
+# A single transaction body shape (`x.value = x.value + 1`) is used
+# by every supported sync family. The test verifies each family
+# ends up with the right cumulative result -- so a silent upgrade
+# (e.g., @atomic accidentally lowering as a no-op, or @local
+# accidentally locking) would surface as a wrong final value.
+#
+# Per family, two paths are exercised:
+#   1. tick_<family>! mutates the cell.
+#   2. read_<family>! returns the current value via the family's
+#      read shape (WITH for locked, WITH SNAPSHOT for snapshot-style).
+# Returning a value FROM a snapshot-mutate closure (`WITH SNAPSHOT c
+# AS MUTABLE x { ... }`) is not supported -- the closure runs in a
+# separate Zig namespace and can't capture outer mutable state. So
+# the test does mutate-then-read, which mirrors realistic transaction
+# shapes anyway.
+#
+# The HEADLINE acceptance ("ONE polymorphic tick! body for ALL sync
+# strategies including @local / @multiowned / plain T") is NOT in
+# this file -- it's pending in
+# spec/polymorphic_transaction_acceptance_spec.rb.
 
 STRUCT Counter { value: Int64 }
 
--- ── LOCKED (mutex). Inline body -- can return from WITH. ──────
+# ── LOCKED (mutex). Inline body -- can return from WITH. ──────
 FN tick_locked!(MUTABLE c: Counter) RETURNS Int64
   REQUIRES c: LOCKED
 ->
@@ -32,7 +32,7 @@ FN tick_locked!(MUTABLE c: Counter) RETURNS Int64
     RETURN r;
 END
 
--- ── VERSIONED (MVCC). Mutate-only; caller reads separately. ──
+# ── VERSIONED (MVCC). Mutate-only; caller reads separately. ──
 FN tick_versioned!(MUTABLE c: Counter) RETURNS !Void
   REQUIRES c: VERSIONED
 ->
@@ -48,7 +48,7 @@ FN read_versioned(c: Counter) RETURNS Int64
     RETURN r;
 END
 
--- ── ATOMIC indirect (AtomicPtr struct cell). Mutate-only. ────
+# ── ATOMIC indirect (AtomicPtr struct cell). Mutate-only. ────
 FN tick_atomic!(MUTABLE c: Counter) RETURNS !Void
   REQUIRES c: ATOMIC
 ->
@@ -64,10 +64,10 @@ FN read_atomic(c: Counter) RETURNS Int64
     RETURN r;
 END
 
--- ── LOCAL family (#336): @local / @multiowned / plain T. ─────
--- WITH POLYMORPHIC on a LOCAL-typed param lowers to direct alias
--- access -- no lock, no Arc unwrap, no snapshot. The body's
--- mutation flows back through the alias's *T pointer.
+# ── LOCAL family (#336): @local / @multiowned / plain T. ─────
+# WITH POLYMORPHIC on a LOCAL-typed param lowers to direct alias
+# access -- no lock, no Arc unwrap, no snapshot. The body's
+# mutation flows back through the alias's *T pointer.
 FN tick_local!(MUTABLE c: Counter) RETURNS Void
   REQUIRES c: LOCAL
 ->
@@ -84,8 +84,8 @@ FN read_local(c: Counter) RETURNS Int64
 END
 
 FN main() RETURNS Void ->
-    -- LOCKED: three sequential transactions on @shared:locked.
-    -- The inline body returns the new value directly (no closure).
+    # LOCKED: three sequential transactions on @shared:locked.
+    # The inline body returns the new value directly (no closure).
     MUTABLE locked_c = Counter{ value: 0 } @shared:locked;
     r1 = tick_locked!(locked_c);
     r2 = tick_locked!(locked_c);
@@ -97,49 +97,49 @@ FN main() RETURNS Void ->
         ASSERT view.value == 3_i64, "locked: cumulative result 3";
     }
 
-    -- VERSIONED: mutate-then-read.
+    # VERSIONED: mutate-then-read.
     MUTABLE versioned_c = Counter{ value: 0 } @shared:versioned;
     tick_versioned!(versioned_c);
     tick_versioned!(versioned_c);
     tick_versioned!(versioned_c);
     ASSERT read_versioned(versioned_c) == 3_i64, "versioned: cumulative result 3";
 
-    -- ATOMIC indirect: mutate-then-read.
+    # ATOMIC indirect: mutate-then-read.
     MUTABLE atomic_c = Counter{ value: 0 } @indirect:atomic;
     tick_atomic!(atomic_c);
     tick_atomic!(atomic_c);
     tick_atomic!(atomic_c);
     ASSERT read_atomic(atomic_c) == 3_i64, "atomic: cumulative result 3";
 
-    -- LOCAL family (#336): @local + @multiowned.
-    --
-    -- @local: localCreate returns a *T, so the WITH POLYMORPHIC
-    -- alias is the same *T -- mutation through the alias flows
-    -- back to the binding.
+    # LOCAL family (#336): @local + @multiowned.
+    #
+    # @local: localCreate returns a *T, so the WITH POLYMORPHIC
+    # alias is the same *T -- mutation through the alias flows
+    # back to the binding.
     MUTABLE local_c = Counter{ value: 0 } @local;
     tick_local!(local_c);
     tick_local!(local_c);
     tick_local!(local_c);
     ASSERT read_local(local_c) == 3_i64, "local: cumulative result 3";
 
-    -- @multiowned: Rc(T) wraps the value; the alias resolves to
-    -- the underlying *T via the comptime probe's `c.ctrl.data`
-    -- branch. Mutation flows back through the Rc.
+    # @multiowned: Rc(T) wraps the value; the alias resolves to
+    # the underlying *T via the comptime probe's `c.ctrl.data`
+    # branch. Mutation flows back through the Rc.
     MUTABLE multi_c = Counter{ value: 0 } @multiowned;
     tick_local!(multi_c);
     tick_local!(multi_c);
     tick_local!(multi_c);
     ASSERT read_local(multi_c) == 3_i64, "multiowned: cumulative result 3";
 
-    -- PENDING (closes the milestone): plain T mutation through a
-    -- polymorphic param. Plain T param is passed by value (Zig
-    -- copy semantic), so the body's mutation doesn't flow back to
-    -- the caller's binding. The READ form works (read_local with
-    -- a plain-T arg compiles; just not exercised here). Mutating
-    -- plain T through a polymorphic param is the missing calling-
-    -- convention piece for the unified-fn close. See
-    -- spec/polymorphic_transaction_acceptance_spec.rb for the
-    -- "ONE polymorphic tick! body for ALL sync strategies" gate.
+    # PENDING (closes the milestone): plain T mutation through a
+    # polymorphic param. Plain T param is passed by value (Zig
+    # copy semantic), so the body's mutation doesn't flow back to
+    # the caller's binding. The READ form works (read_local with
+    # a plain-T arg compiles; just not exercised here). Mutating
+    # plain T through a polymorphic param is the missing calling-
+    # convention piece for the unified-fn close. See
+    # spec/polymorphic_transaction_acceptance_spec.rb for the
+    # "ONE polymorphic tick! body for ALL sync strategies" gate.
 
     RETURN;
 END

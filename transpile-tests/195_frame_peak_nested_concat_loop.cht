@@ -1,6 +1,6 @@
--- Test: nested string concat (multi-part) in a loop has bounded frame.
--- Pattern: s = a + b + c creates two frame-arena allocations per iteration.
--- Tests that all intermediate concat results are reclaimed per iteration.
+# Test: nested string concat (multi-part) in a loop has bounded frame.
+# Pattern: s = a + b + c creates two frame-arena allocations per iteration.
+# Tests that all intermediate concat results are reclaimed per iteration.
 
 FN formatLine(n: Int64) RETURNS !String ->
     RETURN "[" + n.toString() + "] " + "item";
@@ -15,8 +15,8 @@ FN main() RETURNS Void ->
     peak = framePeakBytes();
 
     ASSERT total > 0, "accumulated lengths";
-    -- 500 calls, each with ~3 concats + toString. Without rewind: ~50KB+
-    -- of dead frame strings. With rewind: bounded.
+    # 500 calls, each with ~3 concats + toString. Without rewind: ~50KB+
+    # of dead frame strings. With rewind: bounded.
     ASSERT peak < 500000, "frame peak bounded for nested concat loop";
 
     print("PASS: frame peak bounded in nested concat loop");

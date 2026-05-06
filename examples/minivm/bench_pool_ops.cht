@@ -1,5 +1,5 @@
--- VM pool benchmark: measures cost of pool.insert + pool[id].vars[key] access
--- under @shared:locked. Simulates the inner loop of envSet!/envGet!.
+# VM pool benchmark: measures cost of pool.insert + pool[id].vars[key] access
+# under @shared:locked. Simulates the inner loop of envSet!/envGet!.
 
 REQUIRE "types.cht";
 

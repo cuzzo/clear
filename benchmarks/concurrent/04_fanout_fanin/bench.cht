@@ -1,15 +1,15 @@
--- @leak: 10000 -> 100
--- Fan-Out / Fan-In Benchmark — CLEAR
---
--- 10,000 items, each processed with CPU-bound work (100K LCG iterations),
--- results collected into a single sum.
---
--- Uses CONCURRENT(workers: 8, parallel: TRUE) SELECT — persistent worker
--- pool distributed across schedulers.  8 workers process 10K items via
--- shared atomic index.  Zero per-item fiber spawn.
---
--- Compare to Go (10K goroutines + WaitGroup) and Rust (10K Tokio tasks
--- + JoinSet).
+# @leak: 10000 -> 100
+# Fan-Out / Fan-In Benchmark — CLEAR
+#
+# 10,000 items, each processed with CPU-bound work (100K LCG iterations),
+# results collected into a single sum.
+#
+# Uses CONCURRENT(workers: 8, parallel: TRUE) SELECT — persistent worker
+# pool distributed across schedulers.  8 workers process 10K items via
+# shared atomic index.  Zero per-item fiber spawn.
+#
+# Compare to Go (10K goroutines + WaitGroup) and Rust (10K Tokio tasks
+# + JoinSet).
 
 STRUCT Work { seed: Int64 }
 
@@ -21,14 +21,14 @@ END
 
 FN main() RETURNS Void ->
     t0 = timestampMs();
-    -- Build work items
+    # Build work items
     MUTABLE items: Work[] = [];
     FOR i IN (0_i64 ..< 10000) -> items.append(Work{ seed: i });
 
-    -- Fan-out: scale workers with core count, distributed across schedulers
+    # Fan-out: scale workers with core count, distributed across schedulers
     results = items |> CONCURRENT(parallel: TRUE) SELECT doWork(_.seed);
 
-    -- Fan-in: sum results
+    # Fan-in: sum results
     MUTABLE total: Int64 = 0;
     FOR j IN (0_i64 ..< 10000) -> total = total %+ results[j];
 

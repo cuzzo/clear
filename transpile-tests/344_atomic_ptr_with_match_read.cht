@@ -1,18 +1,18 @@
--- AtomicPtr M3.13 + True-Sync-Polymorphism (#332): polymorphic
--- read-mode SNAPSHOT on a `REQUIRES c: VERSIONED | ATOMIC` parameter.
--- After #324/#328/#330 unified the SNAPSHOT shape across both
--- families (Versioned.read for @versioned, AtomicPtr.read for
--- @indirect:atomic; both return a Guard the body reads via field
--- access), the body is uniform and per-arm MATCH dispatch is no
--- longer required.
+# AtomicPtr M3.13 + True-Sync-Polymorphism (#332): polymorphic
+# read-mode SNAPSHOT on a `REQUIRES c: VERSIONED | ATOMIC` parameter.
+# After #324/#328/#330 unified the SNAPSHOT shape across both
+# families (Versioned.read for @versioned, AtomicPtr.read for
+# @indirect:atomic; both return a Guard the body reads via field
+# access), the body is uniform and per-arm MATCH dispatch is no
+# longer required.
 
 STRUCT Cfg { port: Int64 }
 
 FN dump(c: Cfg) RETURNS Void
     REQUIRES c: VERSIONED | ATOMIC
 ->
-    -- Read-mode SNAPSHOT. The lowering's comptime probe selects
-    -- Versioned.read or AtomicPtr.read per actual cell type.
+    # Read-mode SNAPSHOT. The lowering's comptime probe selects
+    # Versioned.read or AtomicPtr.read per actual cell type.
     WITH SNAPSHOT c AS x { ASSERT x.port == 8080, "snapshot read: expected 8080"; }
     RETURN;
 END

@@ -1,25 +1,25 @@
--- @leak: 1000000 -> 1000
--- @leak: 8000000_i64 -> 8000_i64
--- Atomic Counter Benchmark — CLEAR
---
--- N workers each perform ITERATIONS atomic increments on a single shared
--- @shared:atomic Int64 counter. Total expected: N * ITERATIONS. Apples-
--- to-apples comparison with Go (sync/atomic.AddInt64) and Rust
--- (AtomicI64.fetch_add(_, Relaxed)).
---
--- This is a contended-cache-line workload: every increment hits the same
--- 64-byte cache line, which bounces between L1s on every op. The
--- absolute throughput is governed by inter-core coherence latency, not
--- the increment instruction itself. Differences across languages reflect:
---
---   1. Memory ordering (CLEAR uses .monotonic = Rust Relaxed; Go's
---      sync/atomic.AddInt64 is seq-cst on x86 — fair-but-stronger).
---   2. Wrapper overhead (CLEAR's M1 layout is Arc(Atomic(T)) — every op
---      goes through `.ctrl.data.fetchAdd`. M2 will drop the Arc and
---      collapse to a direct Atomic(T)).
---   3. Scheduler / fiber overhead per op (atomic ops in a tight loop
---      should NOT yield, but if the compiler injects a yield-budget
---      check the cost shows up here).
+# @leak: 1000000 -> 1000
+# @leak: 8000000_i64 -> 8000_i64
+# Atomic Counter Benchmark — CLEAR
+#
+# N workers each perform ITERATIONS atomic increments on a single shared
+# @shared:atomic Int64 counter. Total expected: N * ITERATIONS. Apples-
+# to-apples comparison with Go (sync/atomic.AddInt64) and Rust
+# (AtomicI64.fetch_add(_, Relaxed)).
+#
+# This is a contended-cache-line workload: every increment hits the same
+# 64-byte cache line, which bounces between L1s on every op. The
+# absolute throughput is governed by inter-core coherence latency, not
+# the increment instruction itself. Differences across languages reflect:
+#
+#   1. Memory ordering (CLEAR uses .monotonic = Rust Relaxed; Go's
+#      sync/atomic.AddInt64 is seq-cst on x86 — fair-but-stronger).
+#   2. Wrapper overhead (CLEAR's M1 layout is Arc(Atomic(T)) — every op
+#      goes through `.ctrl.data.fetchAdd`. M2 will drop the Arc and
+#      collapse to a direct Atomic(T)).
+#   3. Scheduler / fiber overhead per op (atomic ops in a tight loop
+#      should NOT yield, but if the compiler injects a yield-budget
+#      check the cost shows up here).
 
 FN bump_loop!(MUTABLE c: Int64, n: Int64) RETURNS Void REQUIRES c: ATOMIC ->
     MUTABLE i: Int64 = 0;

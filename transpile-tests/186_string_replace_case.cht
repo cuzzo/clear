@@ -1,25 +1,25 @@
--- Test: replace, lowercase, uppercase string functions.
+# Test: replace, lowercase, uppercase string functions.
 
 FN main() RETURNS Void ->
-    -- replace: all occurrences
+    # replace: all occurrences
     ASSERT replace("hello world", "world", "CLEAR") == "hello CLEAR";
     ASSERT replace("aaa", "a", "bb") == "bbbbbb";
     ASSERT replace("no match", "xyz", "abc") == "no match";
     ASSERT replace("", "a", "b") == "";
 
-    -- lowercase
+    # lowercase
     ASSERT lowercase("Hello World") == "hello world";
     ASSERT lowercase("ALLCAPS") == "allcaps";
     ASSERT lowercase("already") == "already";
     ASSERT lowercase("MiXeD123") == "mixed123";
 
-    -- uppercase
+    # uppercase
     ASSERT uppercase("Hello World") == "HELLO WORLD";
     ASSERT uppercase("alllower") == "ALLLOWER";
     ASSERT uppercase("ALREADY") == "ALREADY";
     ASSERT uppercase("MiXeD123") == "MIXED123";
 
-    -- chained
+    # chained
     result = replace(lowercase("Hello WORLD"), "hello", "hi");
     ASSERT result == "hi world";
 

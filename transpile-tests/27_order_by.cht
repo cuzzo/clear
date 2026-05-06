@@ -1,7 +1,7 @@
 STRUCT Item { name: String, value: Int64 }
 
 FN main() RETURNS Void ->
-  -- Test 1: Sort structs by field
+  # Test 1: Sort structs by field
   items = [
     Item{ name: "c", value: 30_i64 },
     Item{ name: "a", value: 10_i64 },
@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
   ASSERT sorted[1].value == 20, "Second should be 20";
   ASSERT sorted[2].value == 30, "Third should be 30";
 
-  -- Test 2: Sort simple integers
+  # Test 2: Sort simple integers
   nums: Int64[] = [5_i64, 2_i64, 8_i64, 1_i64, 9_i64];
   sorted_nums = nums |> ORDER_BY _;
 

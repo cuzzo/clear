@@ -1,6 +1,6 @@
--- Test: HashMap put with struct literal value containing COPY'd fields
--- must not double-dupe. The struct literal is freshly constructed (owned),
--- so the HashMap dupe guard should skip it.
+# Test: HashMap put with struct literal value containing COPY'd fields
+# must not double-dupe. The struct literal is freshly constructed (owned),
+# so the HashMap dupe guard should skip it.
 
 UNION Value { Nil, Str: String, Number: Float64 }
 
@@ -16,8 +16,8 @@ FN main() RETURNS Void ->
     MUTABLE env: HashMap<Value> = {};
     s = "hello";
 
-    -- Struct literal with COPY: the COPY already dupes to heap.
-    -- HashMap put must NOT wrap this in another dupeUnionValue.
+    # Struct literal with COPY: the COPY already dupes to heap.
+    # HashMap put must NOT wrap this in another dupeUnionValue.
     env["a"] = Value{ Str: COPY s };
     env["b"] = Value{ Str: COPY s };
     env["c"] = Value{ Number: 42.0 };

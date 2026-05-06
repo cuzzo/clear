@@ -1,39 +1,39 @@
--- Test: lazy range REDUCE -- range |> REDUCE(init) expr compiles to a
--- single fused while loop with no intermediate list materialization.
+# Test: lazy range REDUCE -- range |> REDUCE(init) expr compiles to a
+# single fused while loop with no intermediate list materialization.
 
 FN main() RETURNS Void ->
-    -- Basic sum via REDUCE
+    # Basic sum via REDUCE
     s: Int64 = (1_i64 ..< 6) |> REDUCE(0_i64) acc + _;
-    -- 1+2+3+4+5 = 15
+    # 1+2+3+4+5 = 15
     ASSERT s == 15, "reduce sum 1..6 should be 15";
 
-    -- Product via REDUCE
+    # Product via REDUCE
     p: Int64 = (1_i64 ..< 6) |> REDUCE(1_i64) acc * _;
-    -- 1*2*3*4*5 = 120
+    # 1*2*3*4*5 = 120
     ASSERT p == 120, "reduce product 1..6 should be 120";
 
-    -- Sum-of-squares via REDUCE (acc + _ * _)
+    # Sum-of-squares via REDUCE (acc + _ * _)
     s2: Int64 = (0_i64 ..< 5) |> REDUCE(0_i64) acc + _ * _;
-    -- 0+1+4+9+16 = 30
+    # 0+1+4+9+16 = 30
     ASSERT s2 == 30, "reduce sum-of-squares 0..5 should be 30";
 
-    -- REDUCE on empty range returns initial value
+    # REDUCE on empty range returns initial value
     empty: Int64 = (5_i64 ..< 5) |> REDUCE(42_i64) acc + _;
     ASSERT empty == 42, "reduce on empty range should return initial value";
 
-    -- REDUCE with WHERE stage
+    # REDUCE with WHERE stage
     filtered: Int64 = (0_i64 ..< 10) |> WHERE _ > 5 |> REDUCE(0_i64) acc + _;
-    -- 6+7+8+9 = 30
+    # 6+7+8+9 = 30
     ASSERT filtered == 30, "reduce where >5 in 0..10 should be 30";
 
-    -- REDUCE with SELECT stage
+    # REDUCE with SELECT stage
     doubled: Int64 = (1_i64 ..< 5) |> SELECT _ * 2 |> REDUCE(0_i64) acc + _;
-    -- 2+4+6+8 = 20
+    # 2+4+6+8 = 20
     ASSERT doubled == 20, "reduce select*2 1..5 should be 20";
 
-    -- REDUCE with SELECT + WHERE
+    # REDUCE with SELECT + WHERE
     sw: Int64 = (1_i64 ..< 10) |> SELECT _ * _ |> WHERE _ > 10 |> REDUCE(0_i64) acc + _;
-    -- squares: 1,4,9,16,25,36,49,64,81 -> >10: 16,25,36,49,64,81 = 271
+    # squares: 1,4,9,16,25,36,49,64,81 -> >10: 16,25,36,49,64,81 = 271
     ASSERT sw == 271, "reduce select*select where>10 1..10 should be 271";
 
     print("PASS");

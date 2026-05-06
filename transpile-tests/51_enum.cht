@@ -6,18 +6,18 @@ FN mirror(d: Direction) RETURNS Direction ->
 END
 
 FN main() RETURNS Void ->
-  -- Basic variant assignment
+  # Basic variant assignment
   d: Direction = Direction.North;
 
-  -- Equality
+  # Equality
   ASSERT d == Direction.North, "Enum: equality check";
   ASSERT d != Direction.South,  "Enum: inequality check";
 
-  -- Pass to function, receive enum return
+  # Pass to function, receive enum return
   d2 = mirror(d);
   ASSERT d == d2, "Enum: pass-through round-trip";
 
-  -- PARTIAL MATCH on enum
+  # PARTIAL MATCH on enum
   MUTABLE result = 0_i64;
   PARTIAL MATCH d START
     Direction.North -> result = 1_i64;,
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
   END
   ASSERT result == 1, "Enum: PARTIAL MATCH should hit North case";
 
-  -- Default branch fires for unmatched variant
+  # Default branch fires for unmatched variant
   d3: Direction = Direction.West;
   MUTABLE result2 = 0_i64;
   PARTIAL MATCH d3 START
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
   END
   ASSERT result2 == 99, "Enum: PARTIAL MATCH default fires for West";
 
-  -- Second independent enum type
+  # Second independent enum type
   s: Status = Status.Active;
   ASSERT s == Status.Active,   "Enum: second enum type works";
   ASSERT s != Status.Inactive, "Enum: second enum inequality";

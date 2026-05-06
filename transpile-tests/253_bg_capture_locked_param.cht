@@ -1,12 +1,12 @@
--- Repro: BG block inside a function that received an @shared:locked
--- argument via REQUIRES LOCKED. The param is `anytype` from the
--- caller's POV, and the actual deduced runtime type is *Arc(Locked(T)).
--- The BG capture codegen used to compute the field type from the
--- nominal parameter type (without Arc), producing a Zig type-mismatch
--- when the ctx struct was initialized with `&pool`.
---
--- This is exactly what _bc_runner.cht's exec! does when BG_SPAWN
--- creates a real fiber capturing the @shared:locked pool.
+# Repro: BG block inside a function that received an @shared:locked
+# argument via REQUIRES LOCKED. The param is `anytype` from the
+# caller's POV, and the actual deduced runtime type is *Arc(Locked(T)).
+# The BG capture codegen used to compute the field type from the
+# nominal parameter type (without Arc), producing a Zig type-mismatch
+# when the ctx struct was initialized with `&pool`.
+#
+# This is exactly what _bc_runner.cht's exec! does when BG_SPAWN
+# creates a real fiber capturing the @shared:locked pool.
 
 STRUCT Counter { value: Int64 }
 

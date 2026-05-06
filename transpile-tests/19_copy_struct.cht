@@ -2,16 +2,16 @@ STRUCT Inner { value: Int64 }
 STRUCT Outer { inner: Inner, count: Int64 }
 
 FN main() RETURNS Void ->
-    -- Create outer struct with nested inner struct
+    # Create outer struct with nested inner struct
     outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
 
-    -- COPY the nested struct (this would fail with move semantics)
+    # COPY the nested struct (this would fail with move semantics)
     MUTABLE inner_copy = COPY outer.inner;
 
-    -- Modify the copy
+    # Modify the copy
     inner_copy.value = 100;
 
-    -- Original should be unchanged
+    # Original should be unchanged
     ASSERT outer.inner.value == 42, "Original inner should be 42";
     ASSERT inner_copy.value == 100, "Copy should be 100";
     ASSERT outer.count == 1, "Outer count should be 1";

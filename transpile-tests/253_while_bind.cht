@@ -1,8 +1,8 @@
--- Test: WHILE expr AS y optional binding
+# Test: WHILE expr AS y optional binding
 
 STRUCT Node { val: Int64 }
 
--- Test 1: WHILE list.pop() AS item -- drain a list
+# Test 1: WHILE list.pop() AS item -- drain a list
 FN test_pop_drain() RETURNS !Void ->
     MUTABLE items: Int64[5]@list = [];
     items.append(1_i64);
@@ -18,13 +18,13 @@ FN test_pop_drain() RETURNS !Void ->
     RETURN;
 END
 
--- Test 3: WHILE RESOLVE link AS y -- linked-list traversal via @link
+# Test 3: WHILE RESOLVE link AS y -- linked-list traversal via @link
 FN test_resolve_traversal() RETURNS !Void ->
     n1 = Node{ val: 10 } @multiowned;
     n2 = Node{ val: 20 } @multiowned;
     n3 = Node{ val: 30 } @multiowned;
 
-    -- Build a chain: link -> n1 -> n2 -> n3 (via LINK reassignment each iter)
+    # Build a chain: link -> n1 -> n2 -> n3 (via LINK reassignment each iter)
     MUTABLE links: Node@link[3]@list = [];
     links.append(LINK n1);
     links.append(LINK n2);
@@ -42,7 +42,7 @@ FN test_resolve_traversal() RETURNS !Void ->
     RETURN;
 END
 
--- Test 4: WHILE RESOLVE link AS y -- terminates when strong ref drops
+# Test 4: WHILE RESOLVE link AS y -- terminates when strong ref drops
 FN makeWeakNode() RETURNS !Node@link ->
     n = Node{ val: 42 } @multiowned;
     RETURN LINK n;

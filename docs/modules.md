@@ -58,27 +58,27 @@ CLEAR enforces three levels of visibility. Access control is checked at compile-
 ### Example
 
 ```ruby clear illustrative
--- internal_helper.cht
+# internal_helper.cht
 
 PRIVATE FN secret_calc() RETURNS Int64 -> ... END
 
 FN package_helper() RETURNS Int64 ->
-    RETURN secret_calc();  -- OK: same file
+    RETURN secret_calc();  # OK: same file
 END
 
 PUB FN public_api() RETURNS Int64 ->
-    RETURN package_helper(); -- OK: same package
+    RETURN package_helper(); # OK: same package
 END
 ```
 
 ```ruby clear illustrative
--- main.cht
+# main.cht
 REQUIRE "internal_helper.cht";
 
 FN main() RETURNS Void ->
-    internal_helper.public_api();     -- OK: PUB
-    internal_helper.package_helper();  -- OK: same directory
-    -- internal_helper.secret_calc();  -- ERROR: PRIVATE
+    internal_helper.public_api();     # OK: PUB
+    internal_helper.package_helper();  # OK: same directory
+    # internal_helper.secret_calc();  -- ERROR: PRIVATE
 END
 ```
 

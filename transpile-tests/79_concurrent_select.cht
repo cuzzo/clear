@@ -1,4 +1,4 @@
--- Test: CONCURRENT SELECT — parallel transform with workers backpressure
+# Test: CONCURRENT SELECT — parallel transform with workers backpressure
 STRUCT Work { value: Float64 }
 
 FN double(w: Work) RETURNS Float64 ->
@@ -8,14 +8,14 @@ END
 FN main() RETURNS Void ->
     items = [Work{value: 1.0}, Work{value: 2.0}, Work{value: 3.0}, Work{value: 4.0}, Work{value: 5.0}];
 
-    -- CONCURRENT SELECT: map items to doubled values (workers: 3)
+    # CONCURRENT SELECT: map items to doubled values (workers: 3)
     results = items |> CONCURRENT(workers: 3) SELECT double(_);
 
-    -- Verify via SUM (order-preserving means sum is deterministic)
+    # Verify via SUM (order-preserving means sum is deterministic)
     total = results |> SUM _;
     ASSERT total == 30.0, "sum of doubled [1,2,3,4,5] should be 30";
 
-    -- Also test with default workers
+    # Also test with default workers
     results2 = items |> CONCURRENT SELECT _.value;
     total2 = results2 |> SUM _;
     ASSERT total2 == 15.0, "sum of values [1,2,3,4,5] should be 15";

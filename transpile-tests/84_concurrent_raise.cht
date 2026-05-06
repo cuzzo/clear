@@ -1,4 +1,4 @@
--- Test: CONCURRENT SELECT with OR RAISE — when no errors, works as normal SELECT
+# Test: CONCURRENT SELECT with OR RAISE — when no errors, works as normal SELECT
 FN alwaysOk(x: Float64) RETURNS !Float64 ->
     RETURN x * 2.0;
 END

@@ -1,11 +1,11 @@
--- Infinite streams: ~T[INF] — lazy rendezvous generator; NEXT returns T (never nil).
--- BG STREAM { WHILE TRUE DO YIELD x; END } creates a generator that rendezvous with
--- each NEXT call. The generator blocks after each YIELD until NEXT is called.
+# Infinite streams: ~T[INF] — lazy rendezvous generator; NEXT returns T (never nil).
+# BG STREAM { WHILE TRUE DO YIELD x; END } creates a generator that rendezvous with
+# each NEXT call. The generator blocks after each YIELD until NEXT is called.
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: Infinite counter stream — consume first 3 values.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: Infinite counter stream — consume first 3 values.
+    # -------------------------------------------------------
     counter: ~Float64[INF] = BG STREAM {
         MUTABLE i: Float64 = 0.0;
         WHILE TRUE DO
@@ -22,9 +22,9 @@ FN main() RETURNS Void ->
     ASSERT v2 == 1.0, "inf stream: second value is 1";
     ASSERT v3 == 2.0, "inf stream: third value is 2";
 
-    -- -------------------------------------------------------
-    -- Test 2: Stream with captured variable.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: Stream with captured variable.
+    # -------------------------------------------------------
     base: Float64 = 10.0;
     multiplier: ~Float64[INF] = BG STREAM {
         MUTABLE j: Float64 = 1.0;
@@ -40,9 +40,9 @@ FN main() RETURNS Void ->
     ASSERT u1 == 10.0, "inf stream with capture: first value";
     ASSERT u2 == 20.0, "inf stream with capture: second value";
 
-    -- -------------------------------------------------------
-    -- Test 3: Bool infinite stream.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: Bool infinite stream.
+    # -------------------------------------------------------
     toggler: ~Bool[INF] = BG STREAM {
         MUTABLE flag: Bool = TRUE;
         WHILE TRUE DO

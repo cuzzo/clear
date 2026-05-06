@@ -1,41 +1,41 @@
--- @leak: 2000000 -> 2000
--- Pointer-Chasing Benchmark — CLEAR (@pool + Id<Node>)
---
--- 2,000,000 nodes, additive prime-step permutation.
---   Walk: cur_idx = (cur_idx + STEP) MOD N (arithmetic, no next pointer needed)
---   STEP = 999983 (prime, gcd(STEP, 2000000) = 1 → full-length cycle).
---
--- Memory pressure:
---   - Pool slots = 2 M × ~32 bytes (CheatLib.Pool has alive+generation fields)
---   - Working set ≈ 64 MB → 8× larger than L2 (8 MB), no L3 on this machine.
---   - Every pool.get() dereferences cold DRAM data (same as C).
---
--- MEASURED RESULTS (x86-64 Linux, 2M nodes, walk phase only):
---
---   VARIANT                    | WALK TIME | vs C
---   C (raw pointer chain)      | ~214 ms   | 1.0× baseline
---   CLEAR (@pool + Id<Node>)   | ~204 ms   | ~-5% (comparable)
---
--- Both timings cover the walk phase only (2M pointer dereferences).
--- Setup (build) is excluded from BENCH_RESULT on both sides.
---
--- ANALYSIS:
---   The benchmark is in the memory-bound regime: 2M nodes × 32-byte pool
---   slots = 64 MB working set >> L2. Every pool.get() and C->next load
---   hits DRAM. The extra ops in pool.get() (alive check, generation check,
---   address arithmetic) are absorbed into the same memory stall latency.
---   In this regime, LLVM's auto-vectorization and instruction scheduling
---   for CLEAR/Zig can match or beat GCC's output for C.
---
--- MEMORY GAP:
---   C RSS: ~32 MB (2M × 16-byte nodes).
---   CLEAR RSS: ~91 MB (2M × 32-byte pool slots + 16 MB id_list + scheduler).
---   Pool slots carry alive+generation fields = 2× C node size.
---   id_list pre-allocated with initCapacity(2M) -- no frame-arena doubling waste.
---
--- CONCLUSION: CLEAR's @pool walk throughput is on par with raw C pointer
---   chasing in the memory-bound regime. The cost is memory: pool slots are
---   2× larger than raw C structs, and the scheduler adds fixed overhead.
+# @leak: 2000000 -> 2000
+# Pointer-Chasing Benchmark — CLEAR (@pool + Id<Node>)
+#
+# 2,000,000 nodes, additive prime-step permutation.
+#   Walk: cur_idx = (cur_idx + STEP) MOD N (arithmetic, no next pointer needed)
+#   STEP = 999983 (prime, gcd(STEP, 2000000) = 1 → full-length cycle).
+#
+# Memory pressure:
+#   - Pool slots = 2 M × ~32 bytes (CheatLib.Pool has alive+generation fields)
+#   - Working set ≈ 64 MB → 8× larger than L2 (8 MB), no L3 on this machine.
+#   - Every pool.get() dereferences cold DRAM data (same as C).
+#
+# MEASURED RESULTS (x86-64 Linux, 2M nodes, walk phase only):
+#
+#   VARIANT                    | WALK TIME | vs C
+#   C (raw pointer chain)      | ~214 ms   | 1.0× baseline
+#   CLEAR (@pool + Id<Node>)   | ~204 ms   | ~-5% (comparable)
+#
+# Both timings cover the walk phase only (2M pointer dereferences).
+# Setup (build) is excluded from BENCH_RESULT on both sides.
+#
+# ANALYSIS:
+#   The benchmark is in the memory-bound regime: 2M nodes × 32-byte pool
+#   slots = 64 MB working set >> L2. Every pool.get() and C->next load
+#   hits DRAM. The extra ops in pool.get() (alive check, generation check,
+#   address arithmetic) are absorbed into the same memory stall latency.
+#   In this regime, LLVM's auto-vectorization and instruction scheduling
+#   for CLEAR/Zig can match or beat GCC's output for C.
+#
+# MEMORY GAP:
+#   C RSS: ~32 MB (2M × 16-byte nodes).
+#   CLEAR RSS: ~91 MB (2M × 32-byte pool slots + 16 MB id_list + scheduler).
+#   Pool slots carry alive+generation fields = 2× C node size.
+#   id_list pre-allocated with initCapacity(2M) -- no frame-arena doubling waste.
+#
+# CONCLUSION: CLEAR's @pool walk throughput is on par with raw C pointer
+#   chasing in the memory-bound regime. The cost is memory: pool slots are
+#   2× larger than raw C structs, and the scheduler adds fixed overhead.
 
 STRUCT Node { val: Int64 }
 
@@ -47,14 +47,14 @@ FN main() RETURNS Void ->
     MUTABLE pool: Node[2000000]@pool = [];
     MUTABLE id_list: Id<Node>[2000000]@list = [];
 
-    -- Phase 1: insert N nodes, record IDs in insertion order.
+    # Phase 1: insert N nodes, record IDs in insertion order.
     FOR i IN (0_i64 ..< n_nodes) DO
         id = pool.insert(Node{ val: i });
         id_list.append(id);
     END
 
-    -- Phase 2: walk N steps via arithmetic permutation, accumulate sum.
-    -- Time only this phase (mirrors C walk phase).
+    # Phase 2: walk N steps via arithmetic permutation, accumulate sum.
+    # Time only this phase (mirrors C walk phase).
     MUTABLE cur_idx: Int64 = 0;
     MUTABLE sum = 0;
     t1 = timestampMs();

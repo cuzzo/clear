@@ -1,8 +1,8 @@
--- Tests: cleanup of heap-owning captures in WHILE bind and IF bind.
--- Latent bug: WHILE pop() AS v where v contains heap-allocated data
---   → without fix, v's inner list leaks each iteration (no defer cleanup(v)).
--- Incorrect implementation: IF call() AS v where v contains heap-allocated data
---   → without fix, v's inner list leaks at end of then-block.
+# Tests: cleanup of heap-owning captures in WHILE bind and IF bind.
+# Latent bug: WHILE pop() AS v where v contains heap-allocated data
+#   → without fix, v's inner list leaks each iteration (no defer cleanup(v)).
+# Incorrect implementation: IF call() AS v where v contains heap-allocated data
+#   → without fix, v's inner list leaks at end of then-block.
 
 STRUCT Container { vals: Int64[8]@list }
 
@@ -18,9 +18,9 @@ FN make_optional_container(n: Int64) RETURNS !?Container ->
     RETURN Container{ vals: vals };
 END
 
--- Test 1: WHILE pop() AS v where v is a struct with a list field.
--- Each iteration, v.vals is a heap-allocated list that must be freed.
--- Without fix: v.vals leaks on every iteration.
+# Test 1: WHILE pop() AS v where v is a struct with a list field.
+# Each iteration, v.vals is a heap-allocated list that must be freed.
+# Without fix: v.vals leaks on every iteration.
 FN test_while_pop_heap_capture() RETURNS !Void ->
     MUTABLE pool: Container[4]@list = [];
     MUTABLE c1 = make_container(10);
@@ -38,9 +38,9 @@ FN test_while_pop_heap_capture() RETURNS !Void ->
     RETURN;
 END
 
--- Test 2: IF call() AS v where v is a struct with a list field.
--- v.vals must be freed at end of the then-block.
--- Without fix: v.vals leaks.
+# Test 2: IF call() AS v where v is a struct with a list field.
+# v.vals must be freed at end of the then-block.
+# Without fix: v.vals leaks.
 FN test_if_bind_heap_capture() RETURNS !Void ->
     MUTABLE got_it: Bool = FALSE;
     IF make_optional_container(42) AS c THEN

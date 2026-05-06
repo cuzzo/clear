@@ -1,12 +1,12 @@
--- FSM unification: a BG body with BOTH a WITH lock-acquire AND an
--- IO suspend (sleep). The legacy WITH path required exactly one
--- top-level WITH and no other suspends; the recursive splitter +
--- LockSuspend tail expansion handle this composition for free.
+# FSM unification: a BG body with BOTH a WITH lock-acquire AND an
+# IO suspend (sleep). The legacy WITH path required exactly one
+# top-level WITH and no other suspends; the recursive splitter +
+# LockSuspend tail expansion handle this composition for free.
 
 STRUCT Counter { value: Int64 }
 
 FN main() RETURNS Void ->
-  -- 1. WITH then sleep: lock-acquire, mutate, release, then suspend.
+  # 1. WITH then sleep: lock-acquire, mutate, release, then suspend.
   c1 = Counter{ value: 0 } @locked;
   p1: ~Void = BG {
     WITH EXCLUSIVE c1 AS inner {
@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
     ASSERT inner.value == 10, "1: WITH+IO ran the CS body";
   }
 
-  -- 2. sleep then WITH: IO suspend before lock-acquire.
+  # 2. sleep then WITH: IO suspend before lock-acquire.
   c2 = Counter{ value: 100 } @locked;
   p2: ~Void = BG {
     sleep(5);

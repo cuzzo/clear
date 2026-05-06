@@ -1,6 +1,6 @@
--- Multi-fallible WITH + ON clause + per-cap GUARDs.
--- Validates that 2+ EXCLUSIVE captures can combine with ON GuardFail
--- and ON LockTimeout RAISE (the path that used to raise at lowering).
+# Multi-fallible WITH + ON clause + per-cap GUARDs.
+# Validates that 2+ EXCLUSIVE captures can combine with ON GuardFail
+# and ON LockTimeout RAISE (the path that used to raise at lowering).
 
 STRUCT Counter { value: Int64 }
 
@@ -27,9 +27,9 @@ FN bumpBoth!(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Void ->
     RETURN;
 END
 
--- Exercises the RETRY(N) THEN <action> path through the fallible
--- sorted-acquire emitter. Under no contention the inner loop succeeds
--- on the first iteration, so the body runs.
+# Exercises the RETRY(N) THEN <action> path through the fallible
+# sorted-acquire emitter. Under no contention the inner loop succeeds
+# on the first iteration, so the body runs.
 FN bumpWithRetry!(MUTABLE a: Counter, MUTABLE b: Counter) RETURNS !Void ->
     WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
         x.value = x.value + 10;
@@ -42,7 +42,7 @@ FN main() RETURNS !Void ->
     MUTABLE a = Counter{ value: 1 } @shared:locked;
     MUTABLE b = Counter{ value: 2 } @shared:locked;
 
-    -- Both predicates hold: body runs, RETURN TRUE escapes WITH.
+    # Both predicates hold: body runs, RETURN TRUE escapes WITH.
     ok1 = bothPositive!(a, b) OR RAISE;
     ASSERT ok1 == TRUE, "both-positive: predicates hold";
 
@@ -53,7 +53,7 @@ FN main() RETURNS !Void ->
     s2 = sumIfPositive!(a, b) OR RAISE;
     ASSERT s2 == 5, "after bump: 2 + 3";
 
-    -- Drive one predicate false: ON GuardFail RETURN -1 fires.
+    # Drive one predicate false: ON GuardFail RETURN -1 fires.
     MUTABLE c = Counter{ value: 0 } @shared:locked;
     s_neg = sumIfPositive!(a, c) OR RAISE;
     ASSERT s_neg == -1_i64, "guard fail: ON-clause RETURN took over";
@@ -61,13 +61,13 @@ FN main() RETURNS !Void ->
     ok2 = bothPositive!(a, c) OR RAISE;
     ASSERT ok2 == FALSE, "guard fail: bothPositive returned FALSE";
 
-    -- Same locks in reverse argument order also works (sorted-acquire is
-    -- by mutex address, not by declaration order).
+    # Same locks in reverse argument order also works (sorted-acquire is
+    # by mutex address, not by declaration order).
     s3 = sumIfPositive!(b, a) OR RAISE;
     ASSERT s3 == 5, "argument order swapped: still works";
 
-    -- Exercise the RETRY(N) path. No contention here, so the first
-    -- iteration of the acquire loop succeeds and the body runs.
+    # Exercise the RETRY(N) path. No contention here, so the first
+    # iteration of the acquire loop succeeds and the body runs.
     bumpWithRetry!(a, b) OR RAISE;
     s4 = sumIfPositive!(a, b) OR RAISE;
     ASSERT s4 == 25, "after retry-bump: 12 + 13";

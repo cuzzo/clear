@@ -1,7 +1,7 @@
--- Test: PARTIAL MATCH destructuring with field binding.
---
--- { x, y } syntax in struct patterns binds fields to local variables.
--- Works for both plain struct matching and union variant destructuring.
+# Test: PARTIAL MATCH destructuring with field binding.
+#
+# { x, y } syntax in struct patterns binds fields to local variables.
+# Works for both plain struct matching and union variant destructuring.
 
 STRUCT Point { x: Int64, y: Int64 }
 
@@ -19,7 +19,7 @@ FN makeRect(x: Int64, y: Int64) RETURNS Shape ->
 END
 
 FN main() RETURNS Void ->
-    -- Test 1: Struct pattern with binding (extract fields by name)
+    # Test 1: Struct pattern with binding (extract fields by name)
     p = Point{ x: 3, y: 4 };
     MUTABLE sum: Int64 = 0;
     PARTIAL MATCH p START
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
     END
     ASSERT sum == 7, "struct destructure binding";
 
-    -- Test 2: Struct pattern mixing bind and match value
+    # Test 2: Struct pattern mixing bind and match value
     p2 = Point{ x: 10, y: 20 };
     MUTABLE matched: Int64 = 0;
     PARTIAL MATCH p2 START
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
     END
     ASSERT matched == 20, "struct pattern mix bind and match";
 
-    -- Test 3: Union variant destructuring
+    # Test 3: Union variant destructuring
     s = makeRect(5, 12);
     MUTABLE area: Int64 = 0;
     PARTIAL MATCH s START
@@ -45,7 +45,7 @@ FN main() RETURNS Void ->
     END
     ASSERT area == 60, "union variant destructuring";
 
-    -- Test 4: Union variant with AS still works alongside destructure
+    # Test 4: Union variant with AS still works alongside destructure
     s2 = makeCircle(3.14);
     MUTABLE radius: Float64 = 0.0;
     PARTIAL MATCH s2 START
@@ -54,7 +54,7 @@ FN main() RETURNS Void ->
     END
     ASSERT radius == 3.14, "union AS still works alongside destructure";
 
-    -- Test 5: WHEN guard with field access (alternative to guard patterns)
+    # Test 5: WHEN guard with field access (alternative to guard patterns)
     p3 = Point{ x: 15, y: 25 };
     MUTABLE guarded: Int64 = 0;
     PARTIAL MATCH p3 START
@@ -63,7 +63,7 @@ FN main() RETURNS Void ->
     END
     ASSERT guarded == 40, "WHEN guard with field access";
 
-    -- Test 6: WHEN guard as fallthrough after struct pattern
+    # Test 6: WHEN guard as fallthrough after struct pattern
     p4 = Point{ x: 5, y: 99 };
     MUTABLE result: Int64 = 0;
     PARTIAL MATCH p4 START

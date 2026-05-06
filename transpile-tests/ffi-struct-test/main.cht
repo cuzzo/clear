@@ -1,6 +1,6 @@
--- FFI struct test: parse JSON via native module, iterate results in CLEAR.
---
--- Tests EXTERN STRUCT with fields + EXTERN FN for lifecycle management.
+# FFI struct test: parse JSON via native module, iterate results in CLEAR.
+#
+# Tests EXTERN STRUCT with fields + EXTERN FN for lifecycle management.
 
 EXTERN STRUCT JsonDoc { id: Int64, data: Int64[] } FROM "native_json";
 EXTERN FN parseJson(content: String) RETURNS JsonDoc FROM "native_json";
@@ -9,39 +9,39 @@ EXTERN FN dataLength(doc: JsonDoc) RETURNS Int64 FROM "native_json";
 EXTERN FN dataGet(doc: JsonDoc, index: Int64) RETURNS Int64 FROM "native_json";
 
 FN main() RETURNS Void ->
-    -- Parse a JSON string
+    # Parse a JSON string
     json = "{\"id\":42,\"data\":[10,20,30,40,50]}";
     doc = parseJson(json);
 
-    -- Access struct fields
+    # Access struct fields
     ASSERT doc.id == 42, "id should be 42";
 
-    -- Get array length via FFI helper
+    # Get array length via FFI helper
     len = dataLength(doc);
     ASSERT len == 5, "data should have 5 elements";
 
-    -- Sum via FFI element access (helper function)
+    # Sum via FFI element access (helper function)
     MUTABLE sum: Int64 = 0;
     FOR i IN (0_i64 ..< len) DO
         sum += dataGet(doc, i);
     END
     ASSERT sum == 150, "sum should be 150";
 
-    -- Try direct field access on the slice
+    # Try direct field access on the slice
     ASSERT doc.data.length() == 5, "direct data.length() should be 5";
 
-    -- Direct index access
+    # Direct index access
     ASSERT doc.data[0] == 10, "doc.data[0] should be 10";
     ASSERT doc.data[4] == 50, "doc.data[4] should be 50";
 
-    -- Sum via direct FOR loop over the slice
+    # Sum via direct FOR loop over the slice
     MUTABLE directSum: Int64 = 0;
     FOR i IN (0_i64 ..< doc.data.length()) DO
         directSum += doc.data[i];
     END
     ASSERT directSum == 150, "direct loop sum should be 150";
 
-    -- Cleanup
+    # Cleanup
     freeDoc(doc);
 
     print("FFI struct test passed");

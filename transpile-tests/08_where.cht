@@ -1,8 +1,8 @@
 FN main() RETURNS Void ->
   raw: Float64[] = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-  -- PROJECT multiple fields
-  -- We create a new HashMap for every item in the list
+  # PROJECT multiple fields
+  # We create a new HashMap for every item in the list
   filtered = raw |> WHERE _ > 5;
 
   ASSERT filtered.length() == 5, "Unexpected Length";

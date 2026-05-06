@@ -1,6 +1,6 @@
--- Test: Nested BG blocks (outer BG spawns inner BG)
--- Verifies that parameter names and runtime references are unique
--- per BG block nesting level, avoiding Zig shadowing errors.
+# Test: Nested BG blocks (outer BG spawns inner BG)
+# Verifies that parameter names and runtime references are unique
+# per BG block nesting level, avoiding Zig shadowing errors.
 
 FN main() RETURNS Void ->
     outerP: ~Int64 = BG {

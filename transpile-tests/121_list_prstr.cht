@@ -1,5 +1,5 @@
--- Test: create list via native function, return through eval chain, print.
--- Reproducer for scheme test 14: (list 1 2 3) prints "(  )".
+# Test: create list via native function, return through eval chain, print.
+# Reproducer for scheme test 14: (list 1 2 3) prints "(  )".
 
 UNION Value { Nil, Number: Float64, List: Value[], NativeFn: String, Symbol: String }
 
@@ -49,7 +49,7 @@ FN evalList!(TAKES items: Value[]) RETURNS !Value ->
 END
 
 FN main() RETURNS Void ->
-    -- Build (list 1 2 3) as [NativeFn("list"), Number(1), Number(2), Number(3)]
+    # Build (list 1 2 3) as [NativeFn("list"), Number(1), Number(2), Number(3)]
     MUTABLE ast: Value[]@list = List[];
     ast.append(Value{ NativeFn: "list" });
     ast.append(Value{ Number: 1.0 });

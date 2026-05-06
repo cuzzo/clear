@@ -1,25 +1,25 @@
 STRUCT Node { id: Int64 }
 
--- A function that creates a shared Node and returns it.
--- On return, the local Arc is retained (count 1->2) then the local defer
--- releases it (count 2->1), so the caller receives count = 1.
+# A function that creates a shared Node and returns it.
+# On return, the local Arc is retained (count 1->2) then the local defer
+# releases it (count 2->1), so the caller receives count = 1.
 FN makeNode(id_val: Int64) RETURNS !Node @shared ->
     n = Node{ id: id_val } @shared;
     RETURN n;
 END
 
--- Test: data created inside a function is still accessible after the function returns.
--- Proves that the Arc prevents premature deallocation of the inner heap Node.
+# Test: data created inside a function is still accessible after the function returns.
+# Proves that the Arc prevents premature deallocation of the inner heap Node.
 FN main() RETURNS Void ->
     n = makeNode(7);
     ASSERT n.id == 7, "id should be 7 after function return";
 
-    -- A second caller-side clone to prove refcount management works end-to-end.
+    # A second caller-side clone to prove refcount management works end-to-end.
     n2 = n;
     ASSERT n2.id == 7, "n2.id should also be 7";
 
-    -- Scope exit:
-    --   defer arcRelease(Node, alloc, n2)  -> count 2->1
-    --   defer arcRelease(Node, alloc, n)   -> count 1->0  (Node and ref_count freed)
+    # Scope exit:
+    #   defer arcRelease(Node, alloc, n2)  -> count 2->1
+    #   defer arcRelease(Node, alloc, n)   -> count 1->0  (Node and ref_count freed)
     RETURN;
 END

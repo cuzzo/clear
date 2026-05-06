@@ -1,6 +1,6 @@
--- Test: outer ArrayList grows across many loop iterations, forcing internal resize.
--- Appending to an outer list in a loop triggers heap promotion (direct_outer_mutations).
--- After resize, all previously-stored elements must survive frame rewinds.
+# Test: outer ArrayList grows across many loop iterations, forcing internal resize.
+# Appending to an outer list in a loop triggers heap promotion (direct_outer_mutations).
+# After resize, all previously-stored elements must survive frame rewinds.
 
 FN main() RETURNS Void ->
     MUTABLE items: String[]@list = [];
@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
     ASSERT items[99] == "entry-100", "100th item";
     ASSERT items[199] == "entry-200", "last item";
 
-    -- Verify items after a second pass that also frame-allocates
+    # Verify items after a second pass that also frame-allocates
     MUTABLE total: Int64 = 0;
     FOR i IN (0_i64 ..< 200) DO
         j = i + 1;

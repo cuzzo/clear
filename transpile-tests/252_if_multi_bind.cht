@@ -1,10 +1,10 @@
--- Test: IF (x AS y) && (z AS a) multi-binding syntax
+# Test: IF (x AS y) && (z AS a) multi-binding syntax
 
 FN main() RETURNS Void ->
     str1 = "hello world";
     str2 = "foo bar";
 
-    -- Test 1: both bindings present
+    # Test 1: both bindings present
     MUTABLE both_found: Bool = FALSE;
     IF (str1.indexOf("world") AS p1) && (str2.indexOf("bar") AS p2) THEN
         both_found = TRUE;
@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
     END
     ASSERT both_found == TRUE, "both bindings found";
 
-    -- Test 2: second binding nil, else taken
+    # Test 2: second binding nil, else taken
     MUTABLE result: Bool = FALSE;
     IF (str1.indexOf("hello") AS p1) && (str2.indexOf("xyz") AS p2) THEN
         result = TRUE;

@@ -1,13 +1,13 @@
--- @leak: 10000 -> 100
--- Pub-Sub Benchmark — CLEAR
---
--- 1 publisher broadcasts 10K messages to 64 subscribers.
--- Each subscriber processes every message (2000 LCG iterations).
--- Total work: 10K * 64 * 2000 = 1.28 billion LCG iterations.
---
--- CLEAR: publisher writes once to a shared SplitStream ring buffer.
--- Each subscriber CLONEs an independent cursor — zero message copying.
--- Compare to Go/Rust: publisher sends to 64 separate channels (N copies).
+# @leak: 10000 -> 100
+# Pub-Sub Benchmark — CLEAR
+#
+# 1 publisher broadcasts 10K messages to 64 subscribers.
+# Each subscriber processes every message (2000 LCG iterations).
+# Total work: 10K * 64 * 2000 = 1.28 billion LCG iterations.
+#
+# CLEAR: publisher writes once to a shared SplitStream ring buffer.
+# Each subscriber CLONEs an independent cursor — zero message copying.
+# Compare to Go/Rust: publisher sends to 64 separate channels (N copies).
 
 STRUCT Msg { seed: Int64 }
 

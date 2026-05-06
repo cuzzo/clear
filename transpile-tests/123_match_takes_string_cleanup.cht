@@ -1,6 +1,6 @@
--- Test: PARTIAL MATCH TAKES must clean up string payloads in non-slice branches.
--- When PARTIAL MATCH TAKES ast extracts a Symbol (string), the source's defer
--- must still fire for branches that don't take ownership of heap data.
+# Test: PARTIAL MATCH TAKES must clean up string payloads in non-slice branches.
+# When PARTIAL MATCH TAKES ast extracts a Symbol (string), the source's defer
+# must still fire for branches that don't take ownership of heap data.
 
 UNION Value { Nil, Number: Float64, Symbol: String, List: Value[] }
 

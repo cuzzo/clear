@@ -1,14 +1,14 @@
--- Test: automatic lock-sort when a single WITH block acquires 2 locks.
---
--- Two fibers each acquire the SAME pair of @shared:locked counters but
--- the source lists them in OPPOSITE orders. Without sorting this is a
--- classic AB/BA LockCycle setup; the Debug-mode lock_timeout_ms (100ms)
--- would trigger under contention and the assertion at the end would
--- fail.
---
--- With automatic pointer-sort, both WITH blocks acquire the two
--- underlying mutexes in the same order at runtime regardless of source
--- order, so no cycle can form and both fibers complete cleanly.
+# Test: automatic lock-sort when a single WITH block acquires 2 locks.
+#
+# Two fibers each acquire the SAME pair of @shared:locked counters but
+# the source lists them in OPPOSITE orders. Without sorting this is a
+# classic AB/BA LockCycle setup; the Debug-mode lock_timeout_ms (100ms)
+# would trigger under contention and the assertion at the end would
+# fail.
+#
+# With automatic pointer-sort, both WITH blocks acquire the two
+# underlying mutexes in the same order at runtime regardless of source
+# order, so no cycle can form and both fibers complete cleanly.
 
 STRUCT Counter { value: Int64 }
 
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
     a = Counter{ value: 0 } @shared:locked;
     b = Counter{ value: 0 } @shared:locked;
 
-    -- Fiber 1: WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y
+    # Fiber 1: WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y
     t1 = BG {
         WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
             napFor(50);
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
         }
     };
 
-    -- Fiber 2: reversed source order: WITH EXCLUSIVE b AS y, EXCLUSIVE a AS x
+    # Fiber 2: reversed source order: WITH EXCLUSIVE b AS y, EXCLUSIVE a AS x
     t2 = BG {
         WITH EXCLUSIVE b AS y, EXCLUSIVE a AS x {
             napFor(50);

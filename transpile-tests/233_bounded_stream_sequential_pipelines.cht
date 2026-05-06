@@ -1,60 +1,60 @@
--- Test: sequential pipeline ops on finite bounded streams (~T[N]).
--- ~T[N] uses while(stream.next()) for sequential iteration, same as ~T[].
--- N is only used for CONCURRENT dispatch; sequential ops share the same path.
+# Test: sequential pipeline ops on finite bounded streams (~T[N]).
+# ~T[N] uses while(stream.next()) for sequential iteration, same as ~T[].
+# N is only used for CONCURRENT dispatch; sequential ops share the same path.
 
 FN main() RETURNS Void ->
-    -- EACH
+    # EACH
     s1: ~Int64[4] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }];
     MUTABLE sum1: Int64 = 0;
     s1 |> EACH { sum1 = sum1 + _; };
     ASSERT sum1 == 10, "EACH over bounded stream";
 
-    -- WHERE + EACH
+    # WHERE + EACH
     s2: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     MUTABLE sum2: Int64 = 0;
     s2 |> WHERE _ > 2 |> EACH { sum2 = sum2 + _; };
     ASSERT sum2 == 12, "WHERE+EACH: 3+4+5";
 
-    -- SELECT + EACH
+    # SELECT + EACH
     s3: ~Int64[3] = [BG { 2; }, BG { 3; }, BG { 4; }];
     MUTABLE sum3: Int64 = 0;
     s3 |> SELECT _ * 2 |> EACH { sum3 = sum3 + _; };
     ASSERT sum3 == 18, "SELECT+EACH: (2+3+4)*2";
 
-    -- SUM (now produces ~Int64@observable on a tense stream;
-    -- COLLECT joins the producer and returns the final scalar)
+    # SUM (now produces ~Int64@observable on a tense stream;
+    # COLLECT joins the producer and returns the final scalar)
     s4: ~Int64[4] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }];
     total = s4 |> SUM _ |> COLLECT;
     ASSERT total == 10, "SUM over bounded stream";
 
-    -- WHERE + SUM: WHERE on a tense stream returns a plain array
-    -- (strips tense), so SUM here folds eagerly to scalar (no
-    -- observable lift). No COLLECT needed.
+    # WHERE + SUM: WHERE on a tense stream returns a plain array
+    # (strips tense), so SUM here folds eagerly to scalar (no
+    # observable lift). No COLLECT needed.
     s5: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     filtered_sum = s5 |> WHERE _ > 2 |> SUM _;
     ASSERT filtered_sum == 12, "WHERE+SUM: 3+4+5";
 
-    -- SELECT + SUM
+    # SELECT + SUM
     s6: ~Int64[3] = [BG { 2; }, BG { 3; }, BG { 4; }];
-    -- SELECT + SUM: same as WHERE — SELECT strips tenseness, so the
-    -- SUM folds eagerly to a scalar (no observable lift here).
+    # SELECT + SUM: same as WHERE — SELECT strips tenseness, so the
+    # SUM folds eagerly to a scalar (no observable lift here).
     doubled_sum = s6 |> SELECT _ * 2 |> SUM _;
     ASSERT doubled_sum == 18, "SELECT+SUM: (2+3+4)*2";
 
-    -- SKIP + EACH
+    # SKIP + EACH
     s7: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     MUTABLE sum7: Int64 = 0;
     s7 |> SKIP 2 |> EACH { sum7 = sum7 + _; };
     ASSERT sum7 == 12, "SKIP 2+EACH: 3+4+5";
 
-    -- TAKE_WHILE + EACH
+    # TAKE_WHILE + EACH
     s8: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     MUTABLE sum8: Int64 = 0;
     s8 |> TAKE_WHILE _ < 4 |> EACH { sum8 = sum8 + _; };
     ASSERT sum8 == 6, "TAKE_WHILE<4+EACH: 1+2+3";
 
-    -- COUNT (now produces ~Int64@observable on a tense stream;
-    -- COLLECT joins the producer and returns the final scalar)
+    # COUNT (now produces ~Int64@observable on a tense stream;
+    # COLLECT joins the producer and returns the final scalar)
     s9: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     cnt = s9 |> COUNT _ > 2 |> COLLECT;
     ASSERT cnt == 3, "COUNT >2 over bounded stream";

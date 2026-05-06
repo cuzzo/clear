@@ -1,4 +1,4 @@
--- Same benchmark, but without @shared:locked. Measures lock overhead.
+# Same benchmark, but without @shared:locked. Measures lock overhead.
 
 REQUIRE "types.cht";
 

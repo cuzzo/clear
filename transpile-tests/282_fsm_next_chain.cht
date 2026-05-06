@@ -1,29 +1,29 @@
--- FSM Phase B2-NEXT-CHAIN: a BG body with N consecutive NEXTs lowers
--- to an (N+1)-state FsmTask. Each NEXT is its own suspend point;
--- between them, segment locals + result vars cross the boundary via
--- state-struct fields.
+# FSM Phase B2-NEXT-CHAIN: a BG body with N consecutive NEXTs lowers
+# to an (N+1)-state FsmTask. Each NEXT is its own suspend point;
+# between them, segment locals + result vars cross the boundary via
+# state-struct fields.
 
 FN add(x: Int64, y: Int64) RETURNS Int64 ->
   RETURN x + y;
 END
 
 FN main() RETURNS Void ->
-  -- 1. Two consecutive NEXTs (3-state FSM). Result of first feeds
-  --    into the second's promise expr; result of second goes into
-  --    the post-stmt return.
+  # 1. Two consecutive NEXTs (3-state FSM). Result of first feeds
+  #    into the second's promise expr; result of second goes into
+  #    the post-stmt return.
   outer1: ~Int64 = BG {
     a: ~Int64 = BG { 10; };
-    x = NEXT a;          -- suspend 1 → x lives across boundary
+    x = NEXT a;          # suspend 1 → x lives across boundary
     b: ~Int64 = BG { x + 1; };
-    y = NEXT b;          -- suspend 2 → y lives in seg 2
-    add(x, y);            -- seg 2 reads BOTH x (from suspend 1) and y
+    y = NEXT b;          # suspend 2 → y lives in seg 2
+    add(x, y);            # seg 2 reads BOTH x (from suspend 1) and y
   };
   r1 = NEXT outer1;
   ASSERT r1 == 21, "1: chained NEXT — x=10, y=11, add=21";
 
-  -- 2. Three consecutive NEXTs. Each step transforms the previous
-  --    result. Verifies the loop dispatcher transitions through
-  --    states 0→1→2→3.
+  # 2. Three consecutive NEXTs. Each step transforms the previous
+  #    result. Verifies the loop dispatcher transitions through
+  #    states 0→1→2→3.
   outer2: ~Int64 = BG {
     p1: ~Int64 = BG { 1; };
     v1 = NEXT p1;
@@ -31,33 +31,33 @@ FN main() RETURNS Void ->
     v2 = NEXT p2;
     p3: ~Int64 = BG { v2 * 10; };
     v3 = NEXT p3;
-    v3 + v2 + v1;        -- 100 + 10 + 1 = 111
+    v3 + v2 + v1;        # 100 + 10 + 1 = 111
   };
   r2 = NEXT outer2;
   ASSERT r2 == 111, "2: 3-NEXT chain, all results live in final seg";
 
-  -- 3. Pre-suspend local crosses MULTIPLE suspends. `seed` is
-  --    declared in seg 0 and read in seg 2 (after both suspends).
+  # 3. Pre-suspend local crosses MULTIPLE suspends. `seed` is
+  #    declared in seg 0 and read in seg 2 (after both suspends).
   outer3: ~Int64 = BG {
     seed = 100_i64;
     pa: ~Int64 = BG { 1; };
     qa = NEXT pa;
     pb: ~Int64 = BG { 2; };
     qb = NEXT pb;
-    seed + qa + qb;       -- 100 + 1 + 2 = 103
+    seed + qa + qb;       # 100 + 1 + 2 = 103
   };
   r3 = NEXT outer3;
   ASSERT r3 == 103, "3: seg-0 local survives 2 suspends";
 
-  -- 4. Captures from outer scope still flow through alongside
-  --    chained suspends.
+  # 4. Captures from outer scope still flow through alongside
+  #    chained suspends.
   cap = 1000_i64;
   outer4: ~Int64 = BG {
     pa4: ~Int64 = BG { 7; };
     qa4 = NEXT pa4;
     pb4: ~Int64 = BG { qa4 * 2; };
     qb4 = NEXT pb4;
-    cap + qa4 + qb4;      -- 1000 + 7 + 14 = 1021
+    cap + qa4 + qb4;      # 1000 + 7 + 14 = 1021
   };
   r4 = NEXT outer4;
   ASSERT r4 == 1021, "4: captures + chained NEXT";

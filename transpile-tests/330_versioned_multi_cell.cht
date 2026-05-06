@@ -1,8 +1,8 @@
--- MVCC L8: multi-cell WITH SNAPSHOT MUTABLE.
--- Two @versioned cells transferred atomically -- the runtime sorts cells
--- by `@intFromPtr` so two transactions touching the same cell-set in
--- different textual orders converge on the same commit order
--- (multi-object consistency).
+# MVCC L8: multi-cell WITH SNAPSHOT MUTABLE.
+# Two @versioned cells transferred atomically -- the runtime sorts cells
+# by `@intFromPtr` so two transactions touching the same cell-set in
+# different textual orders converge on the same commit order
+# (multi-object consistency).
 
 STRUCT Account { balance: Int64 }
 
@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     a = Account{ balance: 100 } @versioned;
     b = Account{ balance: 200 } @versioned;
 
-    -- Forward: move 25 from a to b.
+    # Forward: move 25 from a to b.
     WITH SNAPSHOT a AS MUTABLE va, SNAPSHOT b AS MUTABLE vb {
         va.balance = va.balance - 25;
         vb.balance = vb.balance + 25;
@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
     WITH SNAPSHOT a AS view_a { ASSERT view_a.balance == 75, "forward: a"; }
     WITH SNAPSHOT b AS view_b { ASSERT view_b.balance == 225, "forward: b"; }
 
-    -- Reverse textual order: same commit order at runtime (address-sorted).
+    # Reverse textual order: same commit order at runtime (address-sorted).
     WITH SNAPSHOT b AS MUTABLE vb, SNAPSHOT a AS MUTABLE va {
         vb.balance = vb.balance - 25;
         va.balance = va.balance + 25;

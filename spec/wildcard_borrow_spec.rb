@@ -23,7 +23,7 @@ RSpec.describe "Wildcard Borrows" do
     code = base_code + <<~FLUX
       MUTABLE foo = Foo{ b1: Bar{ val: 1 }, b2: Bar{ val: 2 } };
       WITH RESTRICT foo.* {
-        foo.b1.val = 10; -- Should error
+        foo.b1.val = 10; # Should error
       }
     FLUX
     expect { run(code) }.to raise_error(/Lifetime Error: Cannot assign to 'foo' because it is currently borrowed/)
@@ -34,7 +34,7 @@ RSpec.describe "Wildcard Borrows" do
       FN takeFoo(f: Foo) -> PASS END
       MUTABLE foo = Foo{ b1: Bar{ val: 1 }, b2: Bar{ val: 2 } };
       WITH RESTRICT foo.* {
-        takeFoo(foo); -- Should be fine
+        takeFoo(foo); # Should be fine
       }
     FLUX
     expect { run(code) }.not_to raise_error
@@ -44,7 +44,7 @@ RSpec.describe "Wildcard Borrows" do
     code = base_code + <<~FLUX
       MUTABLE foo = Foo{ b1: Bar{ val: 1 }, b2: Bar{ val: 2 } };
       WITH RESTRICT foo.* {
-        foo.b2.val = 20; -- Should error
+        foo.b2.val = 20; # Should error
       }
     FLUX
     expect { run(code) }.to raise_error(/Lifetime Error: Cannot assign to 'foo' because it is currently borrowed/)

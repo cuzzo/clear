@@ -139,9 +139,9 @@ Value argument list), so there are no save/restore complications.
 ### Register File
 
 ```clear
-MUTABLE iregs: Int64[] = [];      -- 64 i64 registers
-MUTABLE fregs: Float64[] = [];    -- 64 f64 registers
-MUTABLE regs: Value[]@list = List[];  -- 64 Value registers
+MUTABLE iregs: Int64[] = [];      # 64 i64 registers
+MUTABLE fregs: Float64[] = [];    # 64 f64 registers
+MUTABLE regs: Value[]@list = List[];  # 64 Value registers
 FOR ri IN (0_i64 ..< 64) DO iregs.append(0_i64); END
 FOR ri IN (0_i64 ..< 64) DO fregs.append(0.0); END
 FOR ri IN (0_i64 ..< 64) DO regs.append(Value.Nil); END

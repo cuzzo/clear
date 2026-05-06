@@ -1,10 +1,10 @@
--- AtomicPtr M3.13: WITH SNAPSHOT MATCH MUTABLE -- polymorphic
--- mutate dispatch.
---
--- The two families differ on the mutate surface (VERSIONED requires
--- ON MvccConflict; ATOMIC forbids it), so polymorphic mutate REQUIRES
--- VERSIONED|ATOMIC must use SNAPSHOT MATCH (M3.11). Each arm uses
--- its family-specific shape; comptime dispatch picks at the call site.
+# AtomicPtr M3.13: WITH SNAPSHOT MATCH MUTABLE -- polymorphic
+# mutate dispatch.
+#
+# The two families differ on the mutate surface (VERSIONED requires
+# ON MvccConflict; ATOMIC forbids it), so polymorphic mutate REQUIRES
+# VERSIONED|ATOMIC must use SNAPSHOT MATCH (M3.11). Each arm uses
+# its family-specific shape; comptime dispatch picks at the call site.
 
 STRUCT Counter { value: Int64 }
 

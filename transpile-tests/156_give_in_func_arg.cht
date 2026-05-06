@@ -1,6 +1,6 @@
--- Test: GIVE inside a function call argument must compile.
--- Bug: GIVE generates a blk: expression that breaks when wrapped
--- in the @hasField(@TypeOf(...)) template for slice coercion.
+# Test: GIVE inside a function call argument must compile.
+# Bug: GIVE generates a blk: expression that breaks when wrapped
+# in the @hasField(@TypeOf(...)) template for slice coercion.
 
 UNION Val {
     Nil,

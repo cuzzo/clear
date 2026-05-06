@@ -1,6 +1,6 @@
--- Debugger support for the Mal interpreter.
--- File-based debug pause (tree-walker) and helpers.
--- Returns action codes: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
+# Debugger support for the Mal interpreter.
+# File-based debug pause (tree-walker) and helpers.
+# Returns action codes: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
 
 REQUIRE "types.cht";
 REQUIRE "parser.cht";
@@ -15,25 +15,25 @@ FN readFileSafe!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS String ->
     RETURN content;
 END
 
--- Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
--- When inspectResult is non-empty, writes it as response from a prior :i command.
--- Returns: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
--- When returning 4, the parsed inspect AST is stored in env at "__dbg_inspect".
--- The caller should eval it, format with prStr, and re-call with the result string.
+# Debug pause: writes break info, polls for commands, resumes on :c/:s/:n/:f.
+# When inspectResult is non-empty, writes it as response from a prior :i command.
+# Returns: 0=continue, 1=step-into, 2=step-over, 3=step-out, 4=inspect-pending
+# When returning 4, the parsed inspect AST is stored in env at "__dbg_inspect".
+# The caller should eval it, format with prStr, and re-call with the result string.
 
 FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
 ->
-    -- If we have an inspect result from the caller, write it before resuming polling
+    # If we have an inspect result from the caller, write it before resuming polling
     IF inspectResult.length() > 0 THEN
         writeFile("/tmp/_debug_resp.txt", inspectResult);
     ELSE
-        -- Build call stack string
+        # Build call stack string
         stackStr = envGet!(envId, "__dbg_stack", pool);
         stackDisplay = getStr(stackStr);
 
-        -- Write break info
+        # Write break info
         MUTABLE breakInfo = COPY reason;
         IF stackDisplay.length() > 0 THEN
             breakInfo = breakInfo + "\n  stack: " + stackDisplay;
@@ -59,7 +59,7 @@ FN debugPause!(reason: String, envId: Id<Env>, inspectResult: String, MUTABLE po
             ELSE_IF cmdRaw == ":f" || cmdRaw == ":finish" THEN
                 debugAction = 3; debugActive = FALSE;
             ELSE_IF startsWith?(cmdRaw, ":i ") THEN
-                -- Parse the inspect expression, store AST in env, return 4
+                # Parse the inspect expression, store AST in env, return 4
                 inspectExpr = substr(cmdRaw, 3, cmdRaw.length() - 3);
                 MUTABLE inspPenv: HashMap<Value> = {};
                 tokenizeToEnv!(inspPenv, inspectExpr);

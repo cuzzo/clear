@@ -28,7 +28,7 @@ RSpec.describe SemanticAnnotator do
     context "simple valid lifetime" do
       let(:code) {
         <<~FLUX
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(n: Float64) RETURNS n:Float64 ->
             RETURN n;
           END
@@ -46,7 +46,7 @@ RSpec.describe SemanticAnnotator do
     context "simple invalid lifetime" do
       let(:code) {
         <<~FLUX
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(n: Float64) RETURNS x:Float64 ->
             RETURN n;
           END
@@ -83,7 +83,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -120,7 +120,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -141,7 +141,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -165,7 +165,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -190,7 +190,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -214,7 +214,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -238,7 +238,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Bar { index: Float64 }
           STRUCT Foo { b: Bar }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -266,7 +266,7 @@ RSpec.describe SemanticAnnotator do
             f.b = Bar{index: 10};
           END
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(f: Foo) RETURNS f:Bar ->
             RETURN f.b;
           END
@@ -292,7 +292,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Foo { bar: Bar, baz: Baz }
           STRUCT Root { foo: Foo }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(r: Root) RETURNS f.baz:Bar ->
             RETURN r.bar;
           END
@@ -312,7 +312,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Foo { bar: Bar, baz: Baz }
           STRUCT Root { foo: Foo }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(r: Root) RETURNS r.foo.bar:Bar ->
             RETURN r.foo.bar;
           END
@@ -336,7 +336,7 @@ RSpec.describe SemanticAnnotator do
           STRUCT Foo { bar1: Bar, bar2: Bar }
           STRUCT Root { foo: Foo }
 
-          -- Define function that returns a Float64
+          # Define function that returns a Float64
           FN identity(r: Root) RETURNS r.foo.bar2:Bar ->
             RETURN r.foo.bar1;
           END

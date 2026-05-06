@@ -1,13 +1,13 @@
--- BG block: spawn a background fiber that returns a value via Promise (~T).
--- NEXT blocks the caller fiber until the result is ready.
+# BG block: spawn a background fiber that returns a value via Promise (~T).
+# NEXT blocks the caller fiber until the result is ready.
 
 FN main() RETURNS Void ->
-    -- Simple case: BG block with a literal result.
+    # Simple case: BG block with a literal result.
     p: ~Float64 = BG { 42.0; };
     result: Float64 = NEXT p;
     ASSERT result == 42.0, "BG block: simple literal result";
 
-    -- Capture an outer variable by value into the fiber.
+    # Capture an outer variable by value into the fiber.
     x: Float64 = 7.0;
     q: ~Float64 = BG { x + 1.0; };
     result2: Float64 = NEXT q;

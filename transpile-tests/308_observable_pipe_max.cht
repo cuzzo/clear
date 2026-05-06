@@ -1,8 +1,8 @@
--- Pipeline-terminal observable MAX.
---
--- A BG STREAM produces values; MAX folds them into a `~Int64@observable`
--- binding (heap-allocated `*ObservableMax(i64)` with a CAS-loop running
--- max); NEXT joins the producer and returns the final max.
+# Pipeline-terminal observable MAX.
+#
+# A BG STREAM produces values; MAX folds them into a `~Int64@observable`
+# binding (heap-allocated `*ObservableMax(i64)` with a CAS-loop running
+# max); NEXT joins the producer and returns the final max.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {

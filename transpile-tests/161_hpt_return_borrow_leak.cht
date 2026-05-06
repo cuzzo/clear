@@ -1,6 +1,6 @@
--- Test: RETURN f(g()) where g() returns union with heap data, f() borrows it.
--- Fix: f() must COPY extracted string fields before returning; caller must use
--- named binding for g() so its cleanup is a regular defer (not errdefer).
+# Test: RETURN f(g()) where g() returns union with heap data, f() borrows it.
+# Fix: f() must COPY extracted string fields before returning; caller must use
+# named binding for g() so its cleanup is a regular defer (not errdefer).
 
 UNION Val {
     Nil,
@@ -26,8 +26,8 @@ FN extractStr!(v: Val) RETURNS !String ->
     RETURN getStr(v);
 END
 
--- Named binding ensures makeLambda!()'s cleanup is a regular defer, not errdefer.
--- getStr copies the extracted string, so it survives when v is freed.
+# Named binding ensures makeLambda!()'s cleanup is a regular defer, not errdefer.
+# getStr copies the extracted string, so it survives when v is freed.
 FN safeReturn!() RETURNS !String ->
     v = makeLambda!();
     RETURN extractStr!(v);

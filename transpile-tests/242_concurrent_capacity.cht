@@ -1,15 +1,15 @@
--- Test: CONCURRENT(workers: N, capacity: X) explicit channel capacity.
--- Verifies that capacity controls the BoundedChannel size and that
--- pipelines still produce correct results with explicit capacity.
+# Test: CONCURRENT(workers: N, capacity: X) explicit channel capacity.
+# Verifies that capacity controls the BoundedChannel size and that
+# pipelines still produce correct results with explicit capacity.
 
 STRUCT Acc {
     value: Int64
 }
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: capacity smaller than auto-default (tight backlog)
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: capacity smaller than auto-default (tight backlog)
+    # -------------------------------------------------------
     gen1: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE i <= 10 DO
@@ -23,9 +23,9 @@ FN main() RETURNS Void ->
     results1 |> EACH { sum1 = sum1 + _; };
     ASSERT sum1 == 110, "capacity=4: 2+4+6+8+10+12+14+16+18+20=110";
 
-    -- -------------------------------------------------------
-    -- Test 2: capacity larger than auto-default (generous backlog)
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: capacity larger than auto-default (generous backlog)
+    # -------------------------------------------------------
     gen2: ~?Int64[] = BG STREAM {
         MUTABLE i2: Int64 = 1;
         WHILE i2 <= 6 DO
@@ -39,9 +39,9 @@ FN main() RETURNS Void ->
     evens2 |> EACH { sum2 = sum2 + _; };
     ASSERT sum2 == 12, "capacity=32: 2+4+6=12";
 
-    -- -------------------------------------------------------
-    -- Test 3: capacity=1 (extreme back pressure) with EACH
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: capacity=1 (extreme back pressure) with EACH
+    # -------------------------------------------------------
     acc3 = Acc{ value: 0 } @shared:locked;
     gen3: ~?Int64[] = BG STREAM {
         YIELD 10;
@@ -58,9 +58,9 @@ FN main() RETURNS Void ->
         ASSERT a.value == 100, "capacity=1: 10+20+30+40=100";
     }
 
-    -- -------------------------------------------------------
-    -- Test 4: capacity on ~T[INF] infinite stream SELECT
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 4: capacity on ~T[INF] infinite stream SELECT
+    # -------------------------------------------------------
     gen4: ~Int64[INF] = BG STREAM {
         MUTABLE i4: Int64 = 1;
         WHILE i4 <= 8 DO

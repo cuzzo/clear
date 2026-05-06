@@ -1,54 +1,54 @@
--- Footgun: Iterator Invalidation — CLEAR
---
--- CLEAR's pipeline-based iteration makes iterator invalidation structurally
--- impossible for the common cases:
---
--- 1. Pipeline consumption: `list | filter(...) | map(...)` consumes the
---    collection immutably. There is no separate iterator object to
---    invalidate — the pipeline is a single expression.
---
--- 2. Ownership prevents concurrent mutation: if you are iterating a list
---    via a pipeline, the list is borrowed. You cannot pass it to a function
---    that would mutate it at the same time (would require two owners or
---    a GIVE that invalidates the pipeline).
---
--- 3. @shared:locked forces explicit serialization: shared lists accessed
---    via WITH blocks are locked during access. You cannot modify the list
---    from another fiber while iterating under a lock.
---
--- The "add during iteration" pattern does not arise because pipelines
--- produce new collections rather than mutating the source in-place.
+# Footgun: Iterator Invalidation — CLEAR
+#
+# CLEAR's pipeline-based iteration makes iterator invalidation structurally
+# impossible for the common cases:
+#
+# 1. Pipeline consumption: `list | filter(...) | map(...)` consumes the
+#    collection immutably. There is no separate iterator object to
+#    invalidate — the pipeline is a single expression.
+#
+# 2. Ownership prevents concurrent mutation: if you are iterating a list
+#    via a pipeline, the list is borrowed. You cannot pass it to a function
+#    that would mutate it at the same time (would require two owners or
+#    a GIVE that invalidates the pipeline).
+#
+# 3. @shared:locked forces explicit serialization: shared lists accessed
+#    via WITH blocks are locked during access. You cannot modify the list
+#    from another fiber while iterating under a lock.
+#
+# The "add during iteration" pattern does not arise because pipelines
+# produce new collections rather than mutating the source in-place.
 
 FN safe_filter() RETURNS Void ->
     numbers = [1, 2, 3, 4, 5];
 
-    -- Pipeline iteration: produces a new list, never modifies source.
-    -- numbers is not mutated; odds is a fresh allocation.
+    # Pipeline iteration: produces a new list, never modifies source.
+    # numbers is not mutated; odds is a fresh allocation.
     odds = numbers | filter($n -> n % 2 != 0) | collect();
     print("odds: " + odds.toString());
 
-    -- The source list is unchanged.
+    # The source list is unchanged.
     print("numbers still intact: " + numbers.toString());
 END
 
 FN shared_list_access() RETURNS Void ->
     items = [10, 20, 30, 40] @shared:locked;
 
-    -- Reader: iterates while holding the lock.
+    # Reader: iterates while holding the lock.
     reader = BG {
         WITH items AS list {
-            -- list is locked for read for the duration of this block.
-            -- No other fiber can acquire EXCLUSIVE during this WITH.
+            # list is locked for read for the duration of this block.
+            # No other fiber can acquire EXCLUSIVE during this WITH.
             sum = list | reduce(0, $acc $n -> acc + n);
             print("sum = " + sum.toString());
         }
-        -- Lock released here.
+        # Lock released here.
     };
 
-    -- Writer: must wait for reader to release lock before it can modify.
+    # Writer: must wait for reader to release lock before it can modify.
     writer = BG {
         WITH EXCLUSIVE items AS list {
-            -- Only runs after reader releases lock.
+            # Only runs after reader releases lock.
             list.append!(50);
             print("appended 50");
         }
@@ -63,22 +63,22 @@ FN main() RETURNS Void ->
     shared_list_access();
 END
 
--- Summary:
---
--- CLEAR vs the other languages on iterator invalidation:
---
---   C:     Silent UB — realloc moves the array, pointer dangling;
---          delete-by-index skips elements. No detection.
---
---   Go:    Spec-defined but surprising — range snapshots the length,
---          new appends not visited; delete-by-index still skips without
---          i-- correction. Map modification during range: undefined order.
---
---   Rust:  Compile-time error — iterator holds &T, mutation requires
---          &mut T; borrow checker rejects the combination. retain() and
---          drain_filter() are safe alternatives.
---
---   CLEAR: Structurally impossible for pipelines — no mutable iterator
---          object to invalidate; pipelines produce new collections.
---          Shared lists via @shared:locked serialize access via mutex,
---          preventing concurrent iteration + mutation.
+# Summary:
+#
+# CLEAR vs the other languages on iterator invalidation:
+#
+#   C:     Silent UB — realloc moves the array, pointer dangling;
+#          delete-by-index skips elements. No detection.
+#
+#   Go:    Spec-defined but surprising — range snapshots the length,
+#          new appends not visited; delete-by-index still skips without
+#          i-- correction. Map modification during range: undefined order.
+#
+#   Rust:  Compile-time error — iterator holds &T, mutation requires
+#          &mut T; borrow checker rejects the combination. retain() and
+#          drain_filter() are safe alternatives.
+#
+#   CLEAR: Structurally impossible for pipelines — no mutable iterator
+#          object to invalidate; pipelines produce new collections.
+#          Shared lists via @shared:locked serialize access via mutex,
+#          preventing concurrent iteration + mutation.

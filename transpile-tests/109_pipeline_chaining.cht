@@ -1,16 +1,16 @@
--- Test: Pipeline chaining — multiple |> operators in one expression.
---
--- Previously broken: the second operator's expression consumed |> as part
--- of the first expression, losing the array type context.
+# Test: Pipeline chaining — multiple |> operators in one expression.
+#
+# Previously broken: the second operator's expression consumed |> as part
+# of the first expression, losing the array type context.
 
 FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
-    -- Chained: SELECT then WHERE
+    # Chained: SELECT then WHERE
     big = nums |> SELECT _ * 10.0 |> WHERE _ > 25.0;
     ASSERT big.length() == 3, "chained SELECT then WHERE";
 
-    -- Chained: WHERE then SELECT
+    # Chained: WHERE then SELECT
     small = nums |> WHERE _ < 4.0 |> SELECT _ + 100.0;
     ASSERT small.length() == 3, "chained WHERE then SELECT";
     ASSERT small[0] == 101.0, "chained WHERE then SELECT value";

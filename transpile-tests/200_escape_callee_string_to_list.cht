@@ -1,7 +1,7 @@
--- Test: callee returning frame string stored in outer list (Pattern 2 + 4).
--- buildKey() returns via preserveAndRewind — string lives in caller's frame.
--- Appending that to an outer list requires a heap dupe at the call site,
--- otherwise the loop mark rewind destroys the string (dangling pointer).
+# Test: callee returning frame string stored in outer list (Pattern 2 + 4).
+# buildKey() returns via preserveAndRewind — string lives in caller's frame.
+# Appending that to an outer list requires a heap dupe at the call site,
+# otherwise the loop mark rewind destroys the string (dangling pointer).
 
 FN buildKey(i: Int64) RETURNS !String ->
     RETURN "key-" + i.toString();

@@ -1,18 +1,18 @@
--- T3 (Tranche 2): simple-recurrence THUNK returning Float64.
---
--- Existing tests (296, 297, 301) cover Int64; 298 covers Bool. Float64
--- exercises a different code path because:
---   - The Frame's `child_result: f64 = undefined` field is initialized
---     differently than int (no zero-init).
---   - The combine `lhs + child_result` uses Zig f64 addition.
---   - `rt.checkYield` runs at every loop iteration; CAS retries on
---     f64 (if any) hit different ordering.
---
--- Optional / Union returns in the simple-recurrence shape don't
--- compile because the binary-op type checker rejects mixed
--- fallible/plain operands and Optional doesn't auto-unify across
--- multiple return paths in current CLEAR. f64 is the next-most-
--- exotic scalar return type that the splitter accepts.
+# T3 (Tranche 2): simple-recurrence THUNK returning Float64.
+#
+# Existing tests (296, 297, 301) cover Int64; 298 covers Bool. Float64
+# exercises a different code path because:
+#   - The Frame's `child_result: f64 = undefined` field is initialized
+#     differently than int (no zero-init).
+#   - The combine `lhs + child_result` uses Zig f64 addition.
+#   - `rt.checkYield` runs at every loop iteration; CAS retries on
+#     f64 (if any) hit different ordering.
+#
+# Optional / Union returns in the simple-recurrence shape don't
+# compile because the binary-op type checker rejects mixed
+# fallible/plain operands and Optional doesn't auto-unify across
+# multiple return paths in current CLEAR. f64 is the next-most-
+# exotic scalar return type that the splitter accepts.
 
 FN sumF(n: Float64) RETURNS Float64
   EFFECTS REENTRANT:THUNK ->
@@ -21,16 +21,16 @@ FN sumF(n: Float64) RETURNS Float64
 END
 
 FN main() RETURNS Void ->
-  -- Base case.
+  # Base case.
   ASSERT sumF(0.0) == 0.0, "sumF(0.0) == 0.0";
 
-  -- Small recursion: 1 + 0 = 1.
+  # Small recursion: 1 + 0 = 1.
   ASSERT sumF(1.0) == 1.0, "sumF(1.0) == 1.0";
 
-  -- 5 + 4 + 3 + 2 + 1 + 0 = 15.
+  # 5 + 4 + 3 + 2 + 1 + 0 = 15.
   ASSERT sumF(5.0) == 15.0, "sumF(5.0) == 15.0";
 
-  -- 100-deep recursion: 100*(101)/2 = 5050.
+  # 100-deep recursion: 100*(101)/2 = 5050.
   ASSERT sumF(100.0) == 5050.0, "sumF(100.0) == 5050.0";
 
   RETURN;

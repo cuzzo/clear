@@ -1,6 +1,6 @@
--- Method requirements in UNION declarations.
--- FN signatures inside a UNION body are compile-time constraints:
--- the compiler verifies that matching top-level functions exist.
+# Method requirements in UNION declarations.
+# FN signatures inside a UNION body are compile-time constraints:
+# the compiler verifies that matching top-level functions exist.
 
 UNION Shape {
   Circle    { radius: Float64 },
@@ -11,7 +11,7 @@ UNION Shape {
   FN perimeter(s: Shape) RETURNS Float64
 }
 
--- Satisfy both method requirements with concrete implementations.
+# Satisfy both method requirements with concrete implementations.
 FN area(s: Shape) RETURNS Float64 ->
   MUTABLE result = 0.0;
   MATCH s START

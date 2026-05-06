@@ -1,8 +1,8 @@
--- Pipeline-terminal observable AVG.
---
--- A BG STREAM produces values; AVG folds them into a
--- `~Float64@observable` binding (heap-allocated `*ObservableAvg(f64)`
--- backed by atomic sum + count). View / NEXT both return Float64.
+# Pipeline-terminal observable AVG.
+#
+# A BG STREAM produces values; AVG folds them into a
+# `~Float64@observable` binding (heap-allocated `*ObservableAvg(f64)`
+# backed by atomic sum + count). View / NEXT both return Float64.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {
@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     running: ~Float64@observable = gen |> AVERAGE _;
     final = NEXT running;
 
-    -- 0..9 sums to 45, count 10 → average 4.5
+    # 0..9 sums to 45, count 10 → average 4.5
     ASSERT final == 4.5, "running avg mismatch";
     print("ok");
     RETURN;

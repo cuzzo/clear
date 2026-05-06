@@ -1,4 +1,4 @@
--- Test: CONCURRENT EACH — parallel side-effect iteration
+# Test: CONCURRENT EACH — parallel side-effect iteration
 STRUCT Counter { value: Float64 }
 
 FN main() RETURNS Void ->
@@ -8,7 +8,7 @@ FN main() RETURNS Void ->
     append(items, Counter{value: 0.0});
     append(items, Counter{value: 0.0});
 
-    -- CONCURRENT EACH: set each item's value to 1.0 in parallel (workers: 2)
+    # CONCURRENT EACH: set each item's value to 1.0 in parallel (workers: 2)
     items |> CONCURRENT(workers: 2) EACH { _.value = 1.0; };
 
     total = items |> SUM _.value;

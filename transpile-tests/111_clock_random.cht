@@ -1,29 +1,29 @@
--- Test: timestampMs(), sleep(), random(), randomInt() standard library.
+# Test: timestampMs(), sleep(), random(), randomInt() standard library.
 
 FN main() RETURNS Void ->
-    -- timestampMs: returns positive Int64
+    # timestampMs: returns positive Int64
     t1 = timestampMs();
     ASSERT t1 > 0, "timestampMs should be positive";
 
-    -- Two calls should be non-decreasing
+    # Two calls should be non-decreasing
     t2 = timestampMs();
     ASSERT t2 >= t1, "timestampMs should be non-decreasing";
 
-    -- random: returns Float64 in [0.0, 1.0)
+    # random: returns Float64 in [0.0, 1.0)
     r1 = random();
     ASSERT r1 >= 0.0, "random should be >= 0.0";
     ASSERT r1 < 1.0, "random should be < 1.0";
 
-    -- randomInt: returns Int64 in [0, max)
+    # randomInt: returns Int64 in [0, max)
     ri = randomInt(10);
     ASSERT ri >= 0, "randomInt should be >= 0";
     ASSERT ri < 10, "randomInt should be < 10";
 
-    -- randomInt(1) should always return 0
+    # randomInt(1) should always return 0
     ri1 = randomInt(1);
     ASSERT ri1 == 0, "randomInt(1) should be 0";
 
-    -- randomInt(0) edge case
+    # randomInt(0) edge case
     ri0 = randomInt(0);
     ASSERT ri0 == 0, "randomInt(0) should be 0";
 

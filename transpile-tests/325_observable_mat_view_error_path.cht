@@ -1,12 +1,12 @@
--- A15: WITH MATERIALIZED VIEW must free the owned snapshot even when
--- the body exits via RAISE / OR EXIT. The cleanup template emits a
--- `defer free(...)` (Zig defer fires on every exit path including
--- error-return and early break), so the materialized slice should be
--- freed before the raise propagates.
---
--- Tested via DebugAllocator: a leaked materialized slice would surface
--- as `[DebugAllocator] (err): memory address X leaked` and exit non-zero.
--- Successful run prints "ok" and exits clean.
+# A15: WITH MATERIALIZED VIEW must free the owned snapshot even when
+# the body exits via RAISE / OR EXIT. The cleanup template emits a
+# `defer free(...)` (Zig defer fires on every exit path including
+# error-return and early break), so the materialized slice should be
+# freed before the raise propagates.
+#
+# Tested via DebugAllocator: a leaked materialized slice would surface
+# as `[DebugAllocator] (err): memory address X leaked` and exit non-zero.
+# Successful run prints "ok" and exits clean.
 
 FN runMatViewWithRaise(early: Bool) RETURNS !Int64 ->
     gen: ~?Int64[] = BG STREAM {
@@ -15,9 +15,9 @@ FN runMatViewWithRaise(early: Bool) RETURNS !Int64 ->
     };
     running: ~Int64[]@set:observable = gen |> DISTINCT _;
     WITH MATERIALIZED VIEW running AS snap {
-        -- Owned []Int64 snap. If `early` is TRUE, raise BEFORE the
-        -- block returns normally. The cleanup template must still
-        -- free `snap` on the error path.
+        # Owned []Int64 snap. If `early` is TRUE, raise BEFORE the
+        # block returns normally. The cleanup template must still
+        # free `snap` on the error path.
         IF early THEN RAISE Input, "early bail from mat-view body"; END
         ASSERT snap.length() <= 3_i64, "snap shape ok";
     }
@@ -25,13 +25,13 @@ FN runMatViewWithRaise(early: Bool) RETURNS !Int64 ->
 END
 
 FN main() RETURNS Void ->
-    -- Happy path: body completes normally, snap is freed at end-of-WITH.
+    # Happy path: body completes normally, snap is freed at end-of-WITH.
     happy = runMatViewWithRaise(FALSE) OR RAISE;
     ASSERT happy == 1_i64, "happy path returned 1";
 
-    -- Error path: body raises mid-WITH; snap must still be freed.
-    -- CATCH the raised error so the test process exits cleanly while
-    -- the DebugAllocator still flags a leak if the cleanup didn't fire.
+    # Error path: body raises mid-WITH; snap must still be freed.
+    # CATCH the raised error so the test process exits cleanly while
+    # the DebugAllocator still flags a leak if the cleanup didn't fire.
     sad = runMatViewWithRaise(TRUE) OR -1_i64;
     ASSERT sad == -1_i64, "error path returned the OR fallback";
 

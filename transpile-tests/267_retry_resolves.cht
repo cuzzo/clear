@@ -1,13 +1,13 @@
--- Test: RETRY(N) actually retries under real contention and eventually
--- succeeds when the holder releases between attempts.
---
--- Debug lock_timeout_ms = 100. Holder sleeps 150ms — longer than one
--- timeout window, shorter than two. Waiter uses RETRY(3) THEN PASS:
--- the first attempt times out; the retry arrives after the holder has
--- released and acquires cleanly.
---
--- Without actual retry semantics, the waiter would run the PASS action
--- on the first timeout and never increment the counter.
+# Test: RETRY(N) actually retries under real contention and eventually
+# succeeds when the holder releases between attempts.
+#
+# Debug lock_timeout_ms = 100. Holder sleeps 150ms — longer than one
+# timeout window, shorter than two. Waiter uses RETRY(3) THEN PASS:
+# the first attempt times out; the retry arrives after the holder has
+# released and acquires cleanly.
+#
+# Without actual retry semantics, the waiter would run the PASS action
+# on the first timeout and never increment the counter.
 
 STRUCT Counter { value: Int64 }
 STRUCT Marker { bit: Int64 }
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
     c = Counter{ value: 0 } @shared:locked;
     marker = Marker{ bit: 0 } @shared:locked;
 
-    -- Holder: take c for 150ms, then release.
+    # Holder: take c for 150ms, then release.
     holder = BG {
         WITH EXCLUSIVE c AS inner {
             napFor(150);
@@ -29,9 +29,9 @@ FN main() RETURNS Void ->
         }
     };
 
-    -- Waiter: try to acquire with up to 3 retries. First attempt waits
-    -- 100ms and times out. Second attempt catches the (now-released)
-    -- lock and sets the marker.
+    # Waiter: try to acquire with up to 3 retries. First attempt waits
+    # 100ms and times out. Second attempt catches the (now-released)
+    # lock and sets the marker.
     waiter = BG {
         napFor(20);
         WITH EXCLUSIVE c AS inner {
@@ -43,7 +43,7 @@ FN main() RETURNS Void ->
     NEXT holder;
     NEXT waiter;
 
-    -- If RETRY worked, waiter's increment and marker write both landed.
+    # If RETRY worked, waiter's increment and marker write both landed.
     WITH EXCLUSIVE marker AS m {
         ASSERT m.bit == 1, "RETRY should have succeeded on a later attempt";
     }

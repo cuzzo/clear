@@ -1,6 +1,6 @@
--- Test: promoteFields follows through @indirect pointers.
--- A function returns a union with an @indirect field containing a frame-allocated
--- string. promoteFields must promote the string through the *T pointer to heap.
+# Test: promoteFields follows through @indirect pointers.
+# A function returns a union with an @indirect field containing a frame-allocated
+# string. promoteFields must promote the string through the *T pointer to heap.
 
 UNION Value {
     Nil, Str: String,

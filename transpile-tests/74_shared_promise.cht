@@ -1,15 +1,15 @@
--- Shared promises: ~T@shared — a memoized promise with Arc-style ref counting.
--- Multiple NEXT calls on the same handle return the cached result after the
--- first block.  The underlying Inner is freed when the last handle is consumed.
+# Shared promises: ~T@shared — a memoized promise with Arc-style ref counting.
+# Multiple NEXT calls on the same handle return the cached result after the
+# first block.  The underlying Inner is freed when the last handle is consumed.
 
 FN expensive(x: Float64) RETURNS Float64 ->
     RETURN x * x;
 END
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: Single holder, NEXT called twice (idempotent).
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: Single holder, NEXT called twice (idempotent).
+    # -------------------------------------------------------
     sp: ~Float64@shared = BG { expensive(7.0); };
 
     r1: Float64 = NEXT sp;
@@ -18,9 +18,9 @@ FN main() RETURNS Void ->
     r2: Float64 = NEXT sp;
     ASSERT r2 == 49.0, "shared promise: second NEXT returns same cached value";
 
-    -- -------------------------------------------------------
-    -- Test 2: Simple shared promise with a captured variable.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: Simple shared promise with a captured variable.
+    # -------------------------------------------------------
     base: Float64 = 6.0;
     sp2: ~Float64@shared = BG { expensive(base); };
 
@@ -30,9 +30,9 @@ FN main() RETURNS Void ->
     ASSERT v1 == 36.0, "shared promise with capture: first NEXT";
     ASSERT v2 == 36.0, "shared promise with capture: second NEXT (cached)";
 
-    -- -------------------------------------------------------
-    -- Test 3: Shared promise that produces a Bool.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: Shared promise that produces a Bool.
+    # -------------------------------------------------------
     flag: ~Bool@shared = BG { TRUE; };
     b1: Bool = NEXT flag;
     b2: Bool = NEXT flag;

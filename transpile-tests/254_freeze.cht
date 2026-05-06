@@ -1,5 +1,5 @@
--- Test: FREEZE operator compacts a @multiowned struct tree into a contiguous buffer.
--- Result is T @frozen; field access auto-derefs through _root; cleanup via deinit.
+# Test: FREEZE operator compacts a @multiowned struct tree into a contiguous buffer.
+# Result is T @frozen; field access auto-derefs through _root; cleanup via deinit.
 
 STRUCT Point { x: Int64, y: Int64 }
 
@@ -14,6 +14,6 @@ FN main() RETURNS Void ->
     testSimple();
 END
 
--- EXPECT
--- 3
--- 4
+# EXPECT
+# 3
+# 4

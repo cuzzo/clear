@@ -1,13 +1,13 @@
--- Stackful baseline. Same body as bench_fsm.cht, @xl forces full
--- per-fiber stack allocation via spawnBest (instead of the FSM
--- ctx-struct path).
---
--- The body wraps sleep in `napFor` because the stackful path's
--- transpiler currently mis-rewrites bare `sleep(...)` inside a BG
--- (emits `rt.sleep(...)` instead of `__rt_bg0.sleep(...)`).
--- Routing through a user fn dodges that pre-existing bug.
--- Functionally identical to bench_fsm.cht: each fiber suspends
--- once for ~50ms.
+# Stackful baseline. Same body as bench_fsm.cht, @xl forces full
+# per-fiber stack allocation via spawnBest (instead of the FSM
+# ctx-struct path).
+#
+# The body wraps sleep in `napFor` because the stackful path's
+# transpiler currently mis-rewrites bare `sleep(...)` inside a BG
+# (emits `rt.sleep(...)` instead of `__rt_bg0.sleep(...)`).
+# Routing through a user fn dodges that pre-existing bug.
+# Functionally identical to bench_fsm.cht: each fiber suspends
+# once for ~50ms.
 
 FN napFor(ms: Int64) RETURNS !Void ->
   sleep(ms);

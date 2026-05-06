@@ -1,8 +1,8 @@
--- Pipeline-terminal observable ALL.
---
--- A BG STREAM produces values; ALL stays true until the first item
--- fails the predicate, then flips to false (`fetchAnd`-backed
--- AtomicAll inside an `*ObservableAll()` wrapper).
+# Pipeline-terminal observable ALL.
+#
+# A BG STREAM produces values; ALL stays true until the first item
+# fails the predicate, then flips to false (`fetchAnd`-backed
+# AtomicAll inside an `*ObservableAll()` wrapper).
 
 FN main() RETURNS Void ->
     gen_all_true: ~?Int64[] = BG STREAM {

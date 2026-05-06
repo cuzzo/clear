@@ -401,12 +401,12 @@ RSpec.describe LoopFrameAnalysis do
           MUTABLE outer: Val[]@list = [];
           MUTABLE i = 0_i64;
           WHILE i < 5 DO
-            -- frame-alloc in WHILE's direct body drives mark_per_iter=true
+            # frame-alloc in WHILE's direct body drives mark_per_iter=true
             MUTABLE buf: Val[]@list = [];
             buf.append(Val.Nil);
             FOR k IN (0_i64 ..< 4_i64) DO
-              -- Mutation buried inside a nested FOR; transitively in a
-              -- rewinding loop's body.
+              # Mutation buried inside a nested FOR; transitively in a
+              # rewinding loop's body.
               outer.append(Val.Nil);
             END
             i = i + 1_i64;

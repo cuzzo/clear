@@ -1,5 +1,5 @@
--- Test: TEST framework with struct types.
--- Verifies that struct creation and field access work inside TEST blocks.
+# Test: TEST framework with struct types.
+# Verifies that struct creation and field access work inside TEST blocks.
 
 STRUCT Point { x: Float64, y: Float64 }
 

@@ -1,5 +1,5 @@
--- Test: Private functions are accessible in test mode.
--- Verifies that PRIVATE FN can be called from TEST THAT blocks.
+# Test: Private functions are accessible in test mode.
+# Verifies that PRIVATE FN can be called from TEST THAT blocks.
 
 PRIVATE FN secret() RETURNS Float64 ->
     RETURN 42.0;

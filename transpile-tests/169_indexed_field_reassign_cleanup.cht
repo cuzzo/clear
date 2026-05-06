@@ -1,6 +1,6 @@
--- Test: Reassigning list[idx].field with heap-backed list
--- Verifies that move suppression fires for the RHS variable when
--- assigning through indexed struct field access, preventing double-free.
+# Test: Reassigning list[idx].field with heap-backed list
+# Verifies that move suppression fires for the RHS variable when
+# assigning through indexed struct field access, preventing double-free.
 
 STRUCT Node { keys: Int64[]@list, vals: String[]@list }
 
@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     nodes[0].keys.append(1);
     nodes[0].vals.append("one");
 
-    -- Replace vals (String[]@list) through indexed access
+    # Replace vals (String[]@list) through indexed access
     MUTABLE nv: String[]@list = [];
     nv.append("ten");
     nv.append("twenty");
@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
     ASSERT nodes[0].vals[0] == "ten", "val 0 is ten";
     ASSERT nodes[0].vals[1] == "twenty", "val 1 is twenty";
 
-    -- Replace keys (Int64[]@list) through indexed access
+    # Replace keys (Int64[]@list) through indexed access
     MUTABLE nk: Int64[]@list = [];
     nk.append(10);
     nk.append(20);

@@ -26,13 +26,13 @@ This document describes both the collection pipeline model and the stream/future
 `|>` pipes a value into a function or operator. It's CLEAR's equivalent of `|>` (Elixir) or `.` method chaining (Ruby), but it also works with collection operators.
 
 ```ruby clear illustrative
--- Pipe to a function: x |> f  →  f(x)
+# Pipe to a function: x |> f  →  f(x)
 result = data 
   |> process 
   |> validate
   |> format;
 
--- Pipe to an operator: list |> WHERE predicate
+# Pipe to an operator: list |> WHERE predicate
 alive = entities 
   |> WHERE _.health > 0;
 ```
@@ -54,19 +54,19 @@ bill = users AS $u
 Without a binding, `_` always refers to the *current* element - the item being iterated at the innermost level. After `UNNEST`, `_` becomes each inner element (an Order), and the outer element (the User) is no longer reachable.
 
 ```ruby clear illustrative
--- Without AS $u: $u is not available inside the fold.
--- `_` after UNNEST is the Order, not the User.
+# Without AS $u: $u is not available inside the fold.
+# `_` after UNNEST is the Order, not the User.
 bill = users
   |> UNNEST _.orders
-  |> SUM _.price;         -- can access order.price, but NOT user.discount
+  |> SUM _.price;         # can access order.price, but NOT user.discount
 ```
 
 `AS $u` captures the outer element before the `UNNEST` replaces `_`, keeping it accessible:
 
 ```ruby clear illustrative
 bill = users AS $u
-  |> UNNEST $u.orders     -- $u = the User; _ = each Order
-  |> SUM _.price * $u.discount;  -- cross-reference: order.price * user.discount
+  |> UNNEST $u.orders     # $u = the User; _ = each Order
+  |> SUM _.price * $u.discount;  # cross-reference: order.price * user.discount
 ```
 
 The compiler fuses this into a single nested loop with no intermediate allocations.
@@ -77,11 +77,11 @@ A binding created with `AS $v` is visible from the point of declaration to the e
 
 ```ruby clear illustrative
 bill = users AS $u
-  |> UNNEST $u.orders   -- $u is in scope
-  |> WHERE _.qty > 1    -- $u still in scope
-  |> SUM _.price * $u.discount;  -- $u still in scope
+  |> UNNEST $u.orders   # $u is in scope
+  |> WHERE _.qty > 1    # $u still in scope
+  |> SUM _.price * $u.discount;  # $u still in scope
 
--- $u is not accessible here (out of scope after the pipeline ends)
+# $u is not accessible here (out of scope after the pipeline ends)
 ```
 
 Multiple pipelines in the same function can each use their own `$u` - bindings are scoped to the pipeline expression, not the function.
@@ -92,7 +92,7 @@ When you UNNEST and need a name for the inner element (instead of `_`), use a se
 
 ```ruby clear illustrative
 bill = users AS $u
-  |> UNNEST $u.orders AS $o    -- $u = User, $o = Order
+  |> UNNEST $u.orders AS $o    # $u = User, $o = Order
   |> SUM $o.price * $u.discount;
 ```
 
@@ -118,7 +118,7 @@ Intermediate `WHERE` stages filter the inner elements before the fold:
 ```ruby clear illustrative
 total = users AS $u
   |> UNNEST $u.orders
-  |> WHERE _.qty > 1        -- filter inner elements
+  |> WHERE _.qty > 1        # filter inner elements
   |> SUM _.price * $u.discount;
 ```
 
@@ -143,7 +143,7 @@ In all concurrent cases, `$u` resolves to the item being processed by the curren
 Inside pipeline expressions, `_` refers to the current element. For struct elements, access fields with `_.fieldname`:
 
 ```ruby clear
--- _ is the element itself (for scalar collections)
+# _ is the element itself (for scalar collections)
 nums: Float64[] = [1.0, 3.0, 7.0, 9.0];
 
 big = nums 
@@ -151,7 +151,7 @@ big = nums
 
 ASSERT length(big) == 2, "WHERE filters by element value";
 
--- _.field for struct collections
+# _.field for struct collections
 users = [User{name: "alice"}, User{name: "bob"}];
 
 names = users
@@ -206,13 +206,13 @@ The result type is inferred from the expression - `Summary[]` above, not `Raw[]`
 **Pipeline fusion with SELECT T{}:** SELECT composes with WHERE and aggregates in a single fused loop - no intermediate list allocation:
 
 ```ruby clear
--- WHERE before SELECT: filter on the raw element (efficient)
+# WHERE before SELECT: filter on the raw element (efficient)
 high = raws |> WHERE _.score > 75.0 |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 };
 
--- SELECT before aggregate: project then sum/min/max a field
+# SELECT before aggregate: project then sum/min/max a field
 total = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } |> SUM _.normalized;
 
--- SELECT before WHERE: build struct first, then filter on a struct field (less efficient)
+# SELECT before WHERE: build struct first, then filter on a struct field (less efficient)
 norm_high = raws |> SELECT Summary{ key: _.id, normalized: _.score / 100.0 } |> WHERE _.normalized > 0.75;
 ```
 
@@ -280,11 +280,11 @@ WINDOW produces a sliding window of size N over the collection. `_` inside the b
 ```ruby clear
 data: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
--- Each window is a 3-element slice; body projects to window length
+# Each window is a 3-element slice; body projects to window length
 lengths = data |> WINDOW(3) _.length();
 ASSERT lengths.length() == 3, "5 elements, window 3 -> 3 windows";
 
--- Access individual elements in the window
+# Access individual elements in the window
 firsts = data |> WINDOW(2) _[0];
 ASSERT firsts[0] == 1.0, "first element of first window";
 ```
@@ -309,21 +309,21 @@ FN sumBatch(batch: Int64[]) RETURNS Int64 ->
     RETURN s;
 END
 
--- Array source, size-only: [1..7] -> [1,2,3], [4,5,6], [7]
+# Array source, size-only: [1..7] -> [1,2,3], [4,5,6], [7]
 arr: Int64[] = [1, 2, 3, 4, 5, 6, 7];
 sums = arr |> WINDOW(size: 3) sumBatch(_);
-ASSERT sums.length() == 3;   -- 3 batches
-ASSERT sums[2] == 7;         -- partial final batch
+ASSERT sums.length() == 3;   # 3 batches
+ASSERT sums[2] == 7;         # partial final batch
 
--- Open stream, size + time (first-of-either)
+# Open stream, size + time (first-of-either)
 gen: ~?Int64[] = BG STREAM { MUTABLE i: Int64 = 1; WHILE i <= 10 DO YIELD i; i = i + 1; END };
 sums2 = gen |> WINDOW(size: 4, time: "500ms") sumBatch(_);
-ASSERT sums2.length() == 3;  -- [1-4], [5-8], [9-10]
+ASSERT sums2.length() == 3;  # [1-4], [5-8], [9-10]
 
--- Time-only: entire array arrives fast, all items in one final batch
+# Time-only: entire array arrives fast, all items in one final batch
 arr2: Int64[] = [100, 200, 300];
 lens = arr2 |> WINDOW(time: "1s") _.length();
-ASSERT lens[0] == 3;  -- one batch of 3
+ASSERT lens[0] == 3;  # one batch of 3
 ```
 
 > **Note:** The sliding-window form `WINDOW(N)` (positional integer, no named params) is the existing collection-only operator above. The named-param form `WINDOW(size:, time:)` is the new batching operator and works on both collections and streams.
@@ -337,9 +337,9 @@ STRUCT User { id: Int64, name: String }
 STRUCT Order { userId: Int64, amount: Float64 }
 
 results = users |> JOIN(orders) %(u, o) -> u.id == o.userId;
--- results: JoinResult_User_Order[]
--- results[i].left  -- the User
--- results[i].right -- ?Order (NIL if no match)
+# results: JoinResult_User_Order[]
+# results[i].left  -- the User
+# results[i].right -- ?Order (NIL if no match)
 ```
 
 The result element type is an anonymous struct `{ left: L, right: ?R }`. The lambda must take exactly two parameters (left element, right element) and return Bool.
@@ -453,7 +453,7 @@ gen: ~?Int64[] = BG STREAM {
 
 v1 = NEXT gen;
 v2 = NEXT gen;
-v3 = NEXT gen;     -- NIL
+v3 = NEXT gen;     # NIL
 ```
 
 ### SKIP and LIMIT (Pagination)
@@ -461,12 +461,12 @@ v3 = NEXT gen;     -- NIL
 SKIP and LIMIT are complementary: SKIP drops the first N elements, LIMIT takes the first N.
 
 ```ruby clear illustrative
--- Pagination: page 3, 10 items per page
+# Pagination: page 3, 10 items per page
 page = items 
   |> SKIP 20
   |> LIMIT 10;
 
--- Skip header row, process the rest
+# Skip header row, process the rest
 data = rows 
   |> SKIP 1 
   |> SELECT parseRow;
@@ -477,13 +477,13 @@ data = rows
 Operators compose naturally:
 
 ```ruby clear illustrative
--- Filter, sort, take top 3
+# Filter, sort, take top 3
 leaderboard = scores
     |> WHERE _.points > 100
     |> ORDER_BY _.points
     |> LIMIT 3;
 
--- Count active users with high scores
+# Count active users with high scores
 n = users
     |> WHERE _.active == TRUE
     |> COUNT _.score > 1000;
@@ -494,32 +494,32 @@ n = users
 Every operator works on every collection type:
 
 ```ruby clear illustrative
--- Array
+# Array
 nums: Float64[] = [1, 2, 3];
 total = nums 
   |> SUM _;
 
--- List
+# List
 MUTABLE data = List[];
 avg = data 
   |> AVERAGE _.value;
 
--- Pool
+# Pool
 MUTABLE pool: Entity[1000]@pool = [];
 alive = pool 
   |> WHERE _.health > 0;
 
--- Pool with SOA (field-slice iteration — cache-optimal)
+# Pool with SOA (field-slice iteration — cache-optimal)
 MUTABLE soa_pool: Entity[1000]@pool:soa = [];
 total_hp = soa_pool 
-  |> SUM _.health;  -- iterates only the health array
+  |> SUM _.health;  # iterates only the health array
 
--- List with SOA
+# List with SOA
 MUTABLE soa_list: Entity[]@list:soa = [];
 avg = soa_list 
-  |> AVERAGE _.health;   -- contiguous f64 slice
+  |> AVERAGE _.health;   # contiguous f64 slice
 
--- Sharded (parallel EACH via DO blocks)
+# Sharded (parallel EACH via DO blocks)
 MUTABLE sharded: Entity[10000]@pool:sharded(4) = [];
 sharded 
   |> EACH { _.processed = TRUE; };
@@ -530,14 +530,14 @@ sharded
 The compiler automatically fuses chains of WHERE and SELECT stages ending in a fold (SUM, REDUCE, AVERAGE, MIN, MAX, COUNT, ANY, ALL, FIND) into a single loop with zero intermediate allocations.
 
 ```ruby clear illustrative
--- Written as 3 stages:
+# Written as 3 stages:
 result = data 
   |> WHERE _ > 500.0 
   |> SELECT _ * _ 
   |> SUM _;
 
--- Compiled as a single loop (no intermediate arrays):
--- for (data) |it| { if (it > 500) { sum += it * it; } }
+# Compiled as a single loop (no intermediate arrays):
+# for (data) |it| { if (it > 500) { sum += it * it; } }
 ```
 
 This eliminates the allocation and iteration overhead of intermediate lists. Stages that require materialization (ORDER_BY, DISTINCT, INDEX) break the fusion chain - operations before them are fused separately.
@@ -550,8 +550,8 @@ When a `@pool:soa` is used in a pipeline, the compiler rewrites field accesses t
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
 MUTABLE pool: Entity[10000]@pool:soa = [];
 
--- SUM _.health iterates only the health array (contiguous f64[]).
--- Without :soa, it would load all 5 fields per element.
+# SUM _.health iterates only the health array (contiguous f64[]).
+# Without :soa, it would load all 5 fields per element.
 total = pool 
   |> SUM _.health;
 ```
@@ -572,11 +572,11 @@ The `CONCURRENT` modifier currently parallelizes collection pipelines for `SELEC
 ```ruby clear illustrative
 MUTABLE data: Score[10000]@pool:sharded(4) = [];
 
--- Parallel WHERE: one fiber per shard
+# Parallel WHERE: one fiber per shard
 results = data 
   |> CONCURRENT WHERE dbFetch(_.id).val > threshold;
 
--- Process in parallel
+# Process in parallel
 results = data 
   |> CONCURRENT(parallel: TRUE) SELECT dbFetch(_.id).name;
 ```

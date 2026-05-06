@@ -1,10 +1,10 @@
 FN main() RETURNS Void ->
   raw = "apple,banana,cherry";
 
-  -- PROJECT: get length of each word after split
+  # PROJECT: get length of each word after split
   lengths = raw |> split(",") |> SELECT _.length();
 
-  -- Verify lengths: apple=5, banana=6, cherry=6
+  # Verify lengths: apple=5, banana=6, cherry=6
   ASSERT lengths[0] == 5, "apple length should be 5";
   ASSERT lengths[1] == 6, "banana length should be 6";
   ASSERT lengths[2] == 6, "cherry length should be 6";

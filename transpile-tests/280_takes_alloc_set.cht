@@ -1,5 +1,5 @@
--- Bug: frame-allocated @set GIVE'd to TAKES @set param → alloc mismatch.
--- Same architectural cause as 277.
+# Bug: frame-allocated @set GIVE'd to TAKES @set param → alloc mismatch.
+# Same architectural cause as 277.
 
 FN consume!(TAKES s: Int64[]@set) RETURNS Int64 ->
     RETURN s.length();

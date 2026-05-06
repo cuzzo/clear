@@ -64,7 +64,7 @@ RSpec.describe Lexer do
 
     it "skips comments but tracks position" do
       #                  123456789012345678
-      lexer = Lexer.new("IF -- comment\n x")
+      lexer = Lexer.new("IF # comment\n x")
       tokens = lexer.tokenize
 
       expect_token(tokens[0], :KEYWORD, "IF", 1, 1)

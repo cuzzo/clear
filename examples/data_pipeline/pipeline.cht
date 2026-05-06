@@ -1,8 +1,8 @@
--- Data Pipeline — Multi-stage concurrent data processing
---
--- Generates sensor readings, processes through pipeline stages.
--- Tests: Pipeline chains, CONCURRENT operators, SHARD pipeline,
--- aggregation operators on real data.
+# Data Pipeline — Multi-stage concurrent data processing
+#
+# Generates sensor readings, processes through pipeline stages.
+# Tests: Pipeline chains, CONCURRENT operators, SHARD pipeline,
+# aggregation operators on real data.
 
 FN generateReadings(n: Int64, seed: Int64) RETURNS !Float64[]@list ->
     MUTABLE readings: Float64[]@list = [];
@@ -21,34 +21,34 @@ FN main() RETURNS Void ->
     readings = generateReadings(1000, 42);
     ASSERT readings.length() == 1000, "generated 1000 readings";
 
-    -- -------------------------------------------------------
-    -- Test 1: SELECT — scale all readings by 0.1
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: SELECT — scale all readings by 0.1
+    # -------------------------------------------------------
     scaled = readings |> SELECT _ * 0.1;
     ASSERT scaled.length() == 1000, "SELECT preserves length";
 
-    -- -------------------------------------------------------
-    -- Test 2: WHERE — filter readings above threshold
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: WHERE — filter readings above threshold
+    # -------------------------------------------------------
     high = readings |> WHERE _ > 500.0;
     low = readings |> WHERE _ <= 500.0;
     ASSERT high.length() + low.length() == 1000, "WHERE partitions correctly";
 
-    -- -------------------------------------------------------
-    -- Test 3: Chained pipeline — SELECT then WHERE in one expression
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: Chained pipeline — SELECT then WHERE in one expression
+    # -------------------------------------------------------
     filtered = readings |> SELECT _ * 2.0 |> WHERE _ > 500.0;
     ASSERT filtered.length() > 0, "chained SELECT then WHERE";
 
-    -- -------------------------------------------------------
-    -- Test 3b: REDUCE — fold to sum
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3b: REDUCE — fold to sum
+    # -------------------------------------------------------
     total = readings |> REDUCE(0.0) acc + _;
     ASSERT total > 0.0, "REDUCE sum is positive";
 
-    -- -------------------------------------------------------
-    -- Test 4: Aggregation operators
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 4: Aggregation operators
+    # -------------------------------------------------------
     s = readings |> SUM _;
     ASSERT s > 0.0, "SUM is positive";
     avg = readings |> AVERAGE _;
@@ -58,23 +58,23 @@ FN main() RETURNS Void ->
     ASSERT mn <= avg, "MIN <= AVERAGE";
     ASSERT mx >= avg, "MAX >= AVERAGE";
 
-    -- -------------------------------------------------------
-    -- Test 5: CONCURRENT SELECT — parallel transform
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 5: CONCURRENT SELECT — parallel transform
+    # -------------------------------------------------------
     small = generateReadings(100, 7);
     doubled = small |> CONCURRENT(workers: 4) SELECT _ * 2.0;
     ASSERT doubled.length() == 100, "CONCURRENT SELECT preserves length";
 
-    -- -------------------------------------------------------
-    -- Test 6: CONCURRENT WHERE — parallel filter
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 6: CONCURRENT WHERE — parallel filter
+    # -------------------------------------------------------
     filtered2 = small |> CONCURRENT(workers: 4) WHERE _ > 300.0;
     ASSERT filtered2.length() > 0, "CONCURRENT WHERE produces results";
     ASSERT filtered2.length() < 100, "CONCURRENT WHERE filters some items";
 
-    -- -------------------------------------------------------
-    -- Test 7: SHARD pipeline — partitioned map operations
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 7: SHARD pipeline — partitioned map operations
+    # -------------------------------------------------------
     MUTABLE buckets: HashMap<Int64>@sharded(4) = {};
     n = 200_i64;
     (0..<n) |> SHARD("b:${toString(_ MOD 10)}", buckets) |> CONCURRENT EACH {

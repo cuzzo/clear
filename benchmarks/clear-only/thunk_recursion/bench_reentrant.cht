@@ -1,11 +1,11 @@
--- @leak_skip
--- Phase 5b: deep recursion on a plain `EFFECTS REENTRANT` fn.
---
--- Identical workload to bench_thunk.cht but the function uses
--- the plain (unbounded) reentrance variant; the BG site declares
--- `@service` to satisfy the explicit-OS-thread rule landed in
--- Phase 4g. Each recursive call grows the OS thread stack by one
--- real frame (~vs. one heap Frame for :THUNK).
+# @leak_skip
+# Phase 5b: deep recursion on a plain `EFFECTS REENTRANT` fn.
+#
+# Identical workload to bench_thunk.cht but the function uses
+# the plain (unbounded) reentrance variant; the BG site declares
+# `@service` to satisfy the explicit-OS-thread rule landed in
+# Phase 4g. Each recursive call grows the OS thread stack by one
+# real frame (~vs. one heap Frame for :THUNK).
 
 FN sum_n(n: Int64) RETURNS Int64
   EFFECTS REENTRANT ->
@@ -14,13 +14,13 @@ FN sum_n(n: Int64) RETURNS Int64
 END
 
 FN main() RETURNS Void ->
-  -- @service: 2 MB OS thread stack pre-allocation. Depth 100,000
-  -- on optimized builds typically uses ~80-100 bytes/frame --
-  -- about 8-10 MB, exceeding the 2 MB @service budget. We keep
-  -- the call at the same N as the THUNK variant; if the @service
-  -- stack overflows the binary aborts with a stack trace. That's
-  -- the takeaway: plain :reentrant has a hard ceiling at the
-  -- @service tier; THUNK doesn't.
+  # @service: 2 MB OS thread stack pre-allocation. Depth 100,000
+  # on optimized builds typically uses ~80-100 bytes/frame --
+  # about 8-10 MB, exceeding the 2 MB @service budget. We keep
+  # the call at the same N as the THUNK variant; if the @service
+  # stack overflows the binary aborts with a stack trace. That's
+  # the takeaway: plain :reentrant has a hard ceiling at the
+  # @service tier; THUNK doesn't.
   t0 = timestampMs();
   n = 99000_i64 %+ (t0 MOD 1000_i64);
   p: ~Int64 = BG { @service -> sum_n(n); };

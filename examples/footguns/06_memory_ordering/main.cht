@@ -1,37 +1,37 @@
--- Footgun: Memory Ordering — CLEAR
---
--- CLEAR does not expose memory ordering knobs. All shared mutable state
--- goes through @shared:locked (Arc<Mutex<T>>) or @shared:writeLocked
--- (Arc<RwLock<T>>). Mutex/RwLock acquisition and release emit full
--- sequential-consistency barriers on all architectures — there is no
--- "relaxed" mode to accidentally choose.
---
--- You cannot write the publish-flag pattern in CLEAR without a lock.
--- The tradeoff: lock-free data structures are not expressible in pure
--- CLEAR (they require dropping to inline Zig). In exchange, the entire
--- category of "wrong memory ordering" bugs is eliminated from the
--- language surface.
+# Footgun: Memory Ordering — CLEAR
+#
+# CLEAR does not expose memory ordering knobs. All shared mutable state
+# goes through @shared:locked (Arc<Mutex<T>>) or @shared:writeLocked
+# (Arc<RwLock<T>>). Mutex/RwLock acquisition and release emit full
+# sequential-consistency barriers on all architectures — there is no
+# "relaxed" mode to accidentally choose.
+#
+# You cannot write the publish-flag pattern in CLEAR without a lock.
+# The tradeoff: lock-free data structures are not expressible in pure
+# CLEAR (they require dropping to inline Zig). In exchange, the entire
+# category of "wrong memory ordering" bugs is eliminated from the
+# language surface.
 
 STRUCT State { message: String }
 
 FN main() RETURNS Void ->
-    -- @shared:locked = Arc<Mutex<State>>. All accesses are SC by
-    -- construction. There is no ordering annotation to get wrong.
+    # @shared:locked = Arc<Mutex<State>>. All accesses are SC by
+    # construction. There is no ordering annotation to get wrong.
     s = State{ message: "" } @shared:locked;
 
     producer = BG {
         WITH EXCLUSIVE s AS inner {
             inner.message = "hello from producer";
-            -- Mutex release here emits a full barrier. The consumer is
-            -- guaranteed to see this write when it acquires the lock.
+            # Mutex release here emits a full barrier. The consumer is
+            # guaranteed to see this write when it acquires the lock.
         }
     };
 
     consumer = BG {
-        NEXT producer;   -- wait for producer to finish
+        NEXT producer;   # wait for producer to finish
         WITH s AS inner {
-            -- Mutex acquire here emits a full barrier. Always sees the
-            -- producer's write regardless of hardware memory model.
+            # Mutex acquire here emits a full barrier. Always sees the
+            # producer's write regardless of hardware memory model.
             print(inner.message);
         }
     };
@@ -39,19 +39,19 @@ FN main() RETURNS Void ->
     NEXT consumer;
 END
 
--- Summary of memory ordering exposure per language:
---
---   C:     Full hierarchy (_Atomic + memory_order_*). Relaxed misuse
---          silently breaks on ARM/POWER. No compile-time guard.
---
---   Go:    sync/atomic is always SC. Cannot express Relaxed even if
---          you wanted to. Non-atomic accesses are data races (detectable
---          with -race).
---
---   Rust:  Full hierarchy (std::sync::atomic::Ordering). Relaxed misuse
---          compiles, works on x86, silently breaks on ARM/POWER.
---          TSan does not detect ordering bugs — only data races.
---
---   CLEAR: No ordering choice. All shared state is mutex/rwlock-protected.
---          SC by construction. Cannot express lock-free patterns without
---          inline Zig.
+# Summary of memory ordering exposure per language:
+#
+#   C:     Full hierarchy (_Atomic + memory_order_*). Relaxed misuse
+#          silently breaks on ARM/POWER. No compile-time guard.
+#
+#   Go:    sync/atomic is always SC. Cannot express Relaxed even if
+#          you wanted to. Non-atomic accesses are data races (detectable
+#          with -race).
+#
+#   Rust:  Full hierarchy (std::sync::atomic::Ordering). Relaxed misuse
+#          compiles, works on x86, silently breaks on ARM/POWER.
+#          TSan does not detect ordering bugs — only data races.
+#
+#   CLEAR: No ordering choice. All shared state is mutex/rwlock-protected.
+#          SC by construction. Cannot express lock-free patterns without
+#          inline Zig.

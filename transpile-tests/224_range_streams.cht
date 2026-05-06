@@ -1,9 +1,9 @@
--- Test: ranges are finite stream values by default.
--- Covers:
--- 1. grouped postfix call: (0 ..< 3).toList()
--- 2. plain integer bounds stay integer-typed
--- 3. NEXT on ~T[] yields ?T until exhaustion
--- 4. variable-backed EACH lowers through the finite-stream MIR path
+# Test: ranges are finite stream values by default.
+# Covers:
+# 1. grouped postfix call: (0 ..< 3).toList()
+# 2. plain integer bounds stay integer-typed
+# 3. NEXT on ~T[] yields ?T until exhaustion
+# 4. variable-backed EACH lowers through the finite-stream MIR path
 
 FN main() RETURNS Void ->
     vals = (0 ..< 3).toList();

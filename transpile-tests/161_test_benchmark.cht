@@ -1,5 +1,5 @@
--- Test: BENCHMARK inside TEST blocks.
--- Verifies that BENCHMARK compiles and runs with timing output.
+# Test: BENCHMARK inside TEST blocks.
+# Verifies that BENCHMARK compiles and runs with timing output.
 
 FN compute(n: Float64) RETURNS Float64 ->
     MUTABLE sum = 0.0;

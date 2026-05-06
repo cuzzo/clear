@@ -1,16 +1,16 @@
--- Producer-fiber error path. The BG STREAM source raises mid-stream
--- after publishing some items. The wrapper's invariants must hold:
---
---   1. The consumer fiber's `defer ctx.acc.finish()` fires on the
---      error-return path, so the WaitGroup is decremented and any
---      joiner (NEXT/COLLECT) unblocks.
---   2. NEXT returns the partial accumulator state — whatever was
---      published before the producer raised. No deadlock, no UAF
---      on cleanup (the destroy still runs and frees the heap
---      allocation).
---
--- The scheduler logs "Task Crashed" for the failed BG fiber; that's
--- expected diagnostic output, not a failure.
+# Producer-fiber error path. The BG STREAM source raises mid-stream
+# after publishing some items. The wrapper's invariants must hold:
+#
+#   1. The consumer fiber's `defer ctx.acc.finish()` fires on the
+#      error-return path, so the WaitGroup is decremented and any
+#      joiner (NEXT/COLLECT) unblocks.
+#   2. NEXT returns the partial accumulator state — whatever was
+#      published before the producer raised. No deadlock, no UAF
+#      on cleanup (the destroy still runs and frees the heap
+#      allocation).
+#
+# The scheduler logs "Task Crashed" for the failed BG fiber; that's
+# expected diagnostic output, not a failure.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {
@@ -25,7 +25,7 @@ FN main() RETURNS Void ->
     running: ~Int64@observable = gen |> SUM _;
     final = NEXT running;
 
-    -- The producer published 0+1+2 before raising. NEXT returns 3.
+    # The producer published 0+1+2 before raising. NEXT returns 3.
     ASSERT final == 3_i64, "partial sum mismatch";
     print("ok");
     RETURN;

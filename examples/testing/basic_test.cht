@@ -1,7 +1,7 @@
--- Example: Basic TEST/WHEN/TEST THAT framework usage.
--- Demonstrates test structure, setup isolation, and assertions.
---
--- Run: clear test examples/testing/basic_test.cht
+# Example: Basic TEST/WHEN/TEST THAT framework usage.
+# Demonstrates test structure, setup isolation, and assertions.
+#
+# Run: clear test examples/testing/basic_test.cht
 
 FN add(a: Float64, b: Float64) RETURNS Float64 ->
     RETURN a + b;

@@ -1,6 +1,6 @@
--- Test: reproduce bench 25 line parsing pattern exactly.
--- Simulates tcpRead raw data, line splitting, startsWith? dispatch,
--- and the WORK:ID:N colon-delimited parsing.
+# Test: reproduce bench 25 line parsing pattern exactly.
+# Simulates tcpRead raw data, line splitting, startsWith? dispatch,
+# and the WORK:ID:N colon-delimited parsing.
 
 FN heavyCompute(seed: Int64, n: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;
@@ -27,7 +27,7 @@ FN handleData(data: String) RETURNS !String ->
         END
 
         IF line.length() == 0 THEN
-            -- skip
+            # skip
         ELSE_IF startsWith?(line, "WORK:") THEN
             rest: String@raw = substr(line, 5_i64, line.length() - 5);
             MUTABLE colonPos: Int64 = 0;
@@ -51,20 +51,20 @@ FN handleData(data: String) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    -- Test 1: single WORK command
+    # Test 1: single WORK command
     r1 = handleData("WORK:42:100\r\n");
     ASSERT startsWith?(r1, ":"), "WORK result starts with colon";
 
-    -- Test 2: multiple pipelined commands
+    # Test 2: multiple pipelined commands
     r2 = handleData("WORK:1:5\r\nWORK:2:10\r\nQUIT\r\n");
-    -- Should have 3 response lines: two :results and one +OK
+    # Should have 3 response lines: two :results and one +OK
     ASSERT r2.length() > 10, "multi-command response has content";
 
-    -- Test 3: READY? and QUIT
+    # Test 3: READY? and QUIT
     r3 = handleData("QUIT\r\n");
     ASSERT r3 == "+OK\r\n", "QUIT returns +OK";
 
-    -- Test 4: unknown command
+    # Test 4: unknown command
     r4 = handleData("BOGUS\r\n");
     ASSERT startsWith?(r4, "-ERR"), "unknown returns -ERR";
 

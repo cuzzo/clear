@@ -1,14 +1,14 @@
--- FSM Phase B2-WITH (rwlock): @writeLocked + EXCLUSIVE → write lock
--- via tryWriteLockForFsm; @writeLocked + write_locked_read → read
--- lock via tryReadLockForFsm.
---
--- Same 2-state FSM shape as the mutex case, just dispatching to the
--- rwlock primitives.
+# FSM Phase B2-WITH (rwlock): @writeLocked + EXCLUSIVE → write lock
+# via tryWriteLockForFsm; @writeLocked + write_locked_read → read
+# lock via tryReadLockForFsm.
+#
+# Same 2-state FSM shape as the mutex case, just dispatching to the
+# rwlock primitives.
 
 STRUCT Counter { value: Int64 }
 
 FN main() RETURNS Void ->
-  -- 1. Write lock: 4 contending FSM writers each increment.
+  # 1. Write lock: 4 contending FSM writers each increment.
   c1 = Counter{ value: 0 } @writeLocked;
   w1: ~Void = BG { WITH EXCLUSIVE c1 AS inner { inner.value = inner.value + 1; } };
   w2: ~Void = BG { WITH EXCLUSIVE c1 AS inner { inner.value = inner.value + 1; } };
@@ -19,7 +19,7 @@ FN main() RETURNS Void ->
     ASSERT inner.value == 4, "1: 4 FSM writers @writeLocked";
   }
 
-  -- 2. @shared:writeLocked — Arc-wrapped rwlock, write FSM.
+  # 2. @shared:writeLocked — Arc-wrapped rwlock, write FSM.
   c2 = Counter{ value: 100 } @shared:writeLocked;
   s1: ~Void = BG { WITH EXCLUSIVE c2 AS inner { inner.value = inner.value + 1; } };
   s2: ~Void = BG { WITH EXCLUSIVE c2 AS inner { inner.value = inner.value + 1; } };
@@ -28,10 +28,10 @@ FN main() RETURNS Void ->
     ASSERT inner.value == 102, "2: 2 FSM writers @shared:writeLocked";
   }
 
-  -- 3. Read lock: implicit WITH on a @writeLocked infers
-  --    write_locked_read. FSM acquires via tryReadLockForFsm and
-  --    releases via unlockShared. We verify by ASSERTing inside the
-  --    CS — failure surfaces as an error on NEXT.
+  # 3. Read lock: implicit WITH on a @writeLocked infers
+  #    write_locked_read. FSM acquires via tryReadLockForFsm and
+  #    releases via unlockShared. We verify by ASSERTing inside the
+  #    CS — failure surfaces as an error on NEXT.
   c3 = Counter{ value: 42 } @writeLocked;
   r1: ~Void = BG { WITH c3 AS view { ASSERT view.value == 42, "r1 read"; } };
   r2: ~Void = BG { WITH c3 AS view { ASSERT view.value == 42, "r2 read"; } };

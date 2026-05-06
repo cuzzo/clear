@@ -7,10 +7,10 @@ FN main() RETURNS Void ->
     Item{ category: "fruit", value: 30_i64 }
   ];
 
-  -- INDEX: Group items by category
+  # INDEX: Group items by category
   grouped = items |> INDEX _.category;
 
-  -- Verify grouping
+  # Verify grouping
   fruits = grouped["fruit"];
   veggies = grouped["veggie"];
 

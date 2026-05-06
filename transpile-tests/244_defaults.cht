@@ -1,13 +1,13 @@
--- Test: function and struct defaults
--- Verifies:
---   1. Primitive param default injected at call site
---   2. Override the default
---   3. Empty struct literal Foo{} uses all field defaults
---   4. Struct field defaults emitted in Zig struct definition
---   5. DEFAULT param default injects struct{} at call site
---   6. Multiple default params - all omitted
---   7. Multiple default params - trailing defaults injected
---   8. DEFAULT as a struct field default (nested struct defaults in Zig)
+# Test: function and struct defaults
+# Verifies:
+#   1. Primitive param default injected at call site
+#   2. Override the default
+#   3. Empty struct literal Foo{} uses all field defaults
+#   4. Struct field defaults emitted in Zig struct definition
+#   5. DEFAULT param default injects struct{} at call site
+#   6. Multiple default params - all omitted
+#   7. Multiple default params - trailing defaults injected
+#   8. DEFAULT as a struct field default (nested struct defaults in Zig)
 
 STRUCT Config {
     retries=3: Int64,
@@ -36,40 +36,40 @@ FN addWithDefaults(a=1: Int64, b=2: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    -- Test 1: primitive default used
+    # Test 1: primitive default used
     r1 = run();
     ASSERT r1 == 20, "test1: default n=10, 10*2=20";
 
-    -- Test 2: override the default
+    # Test 2: override the default
     r2 = run(5);
     ASSERT r2 == 10, "test2: override n=5, 5*2=10";
 
-    -- Test 3: empty struct literal uses all field defaults
+    # Test 3: empty struct literal uses all field defaults
     cfg = Config{};
     ASSERT cfg.retries == 3, "test3: default retries=3";
     ASSERT cfg.timeout == 1000, "test3: default timeout=1000";
 
-    -- Test 4: makeConfig() returns empty struct with defaults
+    # Test 4: makeConfig() returns empty struct with defaults
     cfg2 = makeConfig();
     ASSERT cfg2.retries == 3, "test4: makeConfig retries=3";
 
-    -- Test 5: DEFAULT param injects struct{} at call site
+    # Test 5: DEFAULT param injects struct{} at call site
     r5 = runWithConfig();
     ASSERT r5 == 1003, "test5: DEFAULT cfg, 3+1000=1003";
 
-    -- Test 6: override DEFAULT param
+    # Test 6: override DEFAULT param
     r6 = runWithConfig(Config{ retries: 5, timeout: 500 });
     ASSERT r6 == 505, "test6: explicit cfg, 5+500=505";
 
-    -- Test 7: multiple defaults - all omitted
+    # Test 7: multiple defaults - all omitted
     r7 = addWithDefaults();
     ASSERT r7 == 3, "test7: both defaults, 1+2=3";
 
-    -- Test 8: multiple defaults - first provided, trailing injected
+    # Test 8: multiple defaults - first provided, trailing injected
     r8 = addWithDefaults(10);
     ASSERT r8 == 12, "test8: first=10, second=2, 10+2=12";
 
-    -- Test 9: DEFAULT as struct field default (nested Zig .{} initializer)
+    # Test 9: DEFAULT as struct field default (nested Zig .{} initializer)
     outer = Outer{};
     ASSERT outer.count == 5, "test9: outer.count=5";
     ASSERT outer.cfg.retries == 3, "test9: outer.cfg.retries=3";

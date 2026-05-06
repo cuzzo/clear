@@ -1,4 +1,4 @@
--- Test: TAKES slice parameter must clean up elements + buffer.
+# Test: TAKES slice parameter must clean up elements + buffer.
 
 UNION Value { Nil, Symbol: String, List: Value[] }
 

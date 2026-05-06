@@ -1,11 +1,11 @@
--- Phases 1, 2 & 3: Generic Struct Definitions + Type Annotations + Struct Literals
+# Phases 1, 2 & 3: Generic Struct Definitions + Type Annotations + Struct Literals
 
 STRUCT Pair<T> { first: T, second: T }
 STRUCT Triple<A, B, C> { a: A, b: B, c: C }
 STRUCT Wrapper<T> { value: T }
 STRUCT KeyValue<K, V> { key: K, value: V }
 
--- Phase 2: generic types in function signatures compile to correct Zig.
+# Phase 2: generic types in function signatures compile to correct Zig.
 FN identity(p: Pair<Float64>) RETURNS Pair<Float64> ->
   RETURN p;
 END
@@ -15,7 +15,7 @@ FN wrapNumber(n: Float64) RETURNS Wrapper<Float64> ->
 END
 
 FN main() RETURNS Void ->
-  -- Phase 3: generic struct literals with type args.
+  # Phase 3: generic struct literals with type args.
   p = Pair<Float64>{ first: 1.0, second: 2.0 };
   ASSERT p.first == 1.0;
   ASSERT p.second == 2.0;
@@ -23,16 +23,16 @@ FN main() RETURNS Void ->
   w = Wrapper<Float64>{ value: 42.0 };
   ASSERT w.value == 42.0;
 
-  -- Round-trip through a function
+  # Round-trip through a function
   w2 = wrapNumber(99.0);
   ASSERT w2.value == 99.0;
 
-  -- Multi-param generic
+  # Multi-param generic
   kv = KeyValue<Float64, Bool>{ key: 7.0, value: TRUE };
   ASSERT kv.key == 7.0;
   ASSERT kv.value == TRUE;
 
-  -- identity round-trip
+  # identity round-trip
   orig = Pair<Float64>{ first: 3.0, second: 4.0 };
   copy = identity(orig);
   ASSERT copy.first == 3.0;

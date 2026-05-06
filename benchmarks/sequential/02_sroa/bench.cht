@@ -1,23 +1,23 @@
--- @leak_skip
--- SROA (Scalar Replacement of Aggregates) Benchmark
---
--- BigVec has 130 Int64 fields (1040 bytes). sum3() reads only x1, x2, x3.
--- 127 of the 130 field initialisations are dead writes.
---
--- LLVM's SROA pass decomposes BigVec into scalars and DCE eliminates
--- the 127 dead initialisations. The loop body reduces to ~3 integer
--- adds per iteration when SROA succeeds.
---
--- Integers are used (not floats) to avoid fast-math skew in cross-
--- language comparisons. See planned fastmath benchmark in README.
---
--- acc is fed back each iteration to create a serial dependency that
--- prevents constant folding. Modulo 1_000_000_007 keeps acc bounded.
---
--- TIGHT WHILE: pure compute loop, no frame allocation, no
--- saveLoopMark/restoreLoopMark overhead.
---
--- N = 100 000 000 iterations.
+# @leak_skip
+# SROA (Scalar Replacement of Aggregates) Benchmark
+#
+# BigVec has 130 Int64 fields (1040 bytes). sum3() reads only x1, x2, x3.
+# 127 of the 130 field initialisations are dead writes.
+#
+# LLVM's SROA pass decomposes BigVec into scalars and DCE eliminates
+# the 127 dead initialisations. The loop body reduces to ~3 integer
+# adds per iteration when SROA succeeds.
+#
+# Integers are used (not floats) to avoid fast-math skew in cross-
+# language comparisons. See planned fastmath benchmark in README.
+#
+# acc is fed back each iteration to create a serial dependency that
+# prevents constant folding. Modulo 1_000_000_007 keeps acc bounded.
+#
+# TIGHT WHILE: pure compute loop, no frame allocation, no
+# saveLoopMark/restoreLoopMark overhead.
+#
+# N = 100 000 000 iterations.
 
 STRUCT BigVec {
   x1: Int64, x2: Int64, x3: Int64, x4: Int64, x5: Int64,
@@ -48,7 +48,7 @@ STRUCT BigVec {
   x126: Int64, x127: Int64, x128: Int64, x129: Int64, x130: Int64
 }
 
--- Only reads x1, x2, x3. The other 127 fields are dead.
+# Only reads x1, x2, x3. The other 127 fields are dead.
 FN sum3(v: BigVec) RETURNS Int64 ->
     RETURN v.x1 + v.x2 + v.x3;
 END

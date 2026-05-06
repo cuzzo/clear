@@ -1,6 +1,6 @@
--- Test: union constructor return with frame-arena data must be promoted.
--- Bug: PromotionPlan doesn't handle union constructor returns, so
--- frame-allocated strings inside the union are invalidated by frame rewind.
+# Test: union constructor return with frame-arena data must be promoted.
+# Bug: PromotionPlan doesn't handle union constructor returns, so
+# frame-allocated strings inside the union are invalidated by frame rewind.
 
 UNION Val {
     Nil,

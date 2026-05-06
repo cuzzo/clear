@@ -1,8 +1,8 @@
--- Benchmark: create array of 10000 integers, filter evens, sum them.
--- Compares typed (Int64[]) vs untyped paths.
+# Benchmark: create array of 10000 integers, filter evens, sum them.
+# Compares typed (Int64[]) vs untyped paths.
 
 FN main() RETURNS Void ->
-    -- Build array of 0..9999
+    # Build array of 0..9999
     MUTABLE nums: Int64[] = [];
     MUTABLE i = 0_i64;
     WHILE i < 10000 DO
@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
         i = i + 1_i64;
     END
 
-    -- Filter even numbers and sum
+    # Filter even numbers and sum
     MUTABLE sum = 0_i64;
     MUTABLE j = 0_i64;
     WHILE j < nums.length() DO

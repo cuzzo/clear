@@ -1,5 +1,5 @@
--- Test: README demo -- binding chain with UNNEST and SUM.
--- users AS $u |> UNNEST $u.orders |> SUM _.price * $u.discount
+# Test: README demo -- binding chain with UNNEST and SUM.
+# users AS $u |> UNNEST $u.orders |> SUM _.price * $u.discount
 
 STRUCT Order { price: Float64, qty: Int64 }
 STRUCT User { name: String, discount: Float64, orders: Order[]@list }

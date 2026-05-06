@@ -1,6 +1,6 @@
--- MVCC L8: three-cell WITH SNAPSHOT MUTABLE.
--- The runtime's address-sort + tagged-pointer commit handles N cells
--- transparently; the compiler does not pick an order.
+# MVCC L8: three-cell WITH SNAPSHOT MUTABLE.
+# The runtime's address-sort + tagged-pointer commit handles N cells
+# transparently; the compiler does not pick an order.
 
 STRUCT Slot { v: Int64 }
 

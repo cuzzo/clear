@@ -1,20 +1,20 @@
--- MVCC L7.5: WITH MATCH per-arm body dispatch. Verifies that a single
--- helper fn declared `REQUIRES c: VERSIONED | LOCKED` compiles into
--- two arm bodies wrapped in a comptime `if (@hasDecl(...))` /
--- `else if (@hasField(...))` chain (mir_lowering: lower_with_match_block).
--- Each arm binds the user's alias (`va`) to a `*Counter` via the
--- family-appropriate Guard:
---     VERSIONED -> Versioned.read(rt).get()      (EBR-pinned read)
---     LOCKED  -> Locked.acquire().get()        (mutex-held read)
--- so `va.value` lowers identically across arms. Caller passes a
--- `c@versioned` cell to the first call and a `c@locked` cell to the
--- second; Zig's comptime resolves the matching arm at each call site.
+# MVCC L7.5: WITH MATCH per-arm body dispatch. Verifies that a single
+# helper fn declared `REQUIRES c: VERSIONED | LOCKED` compiles into
+# two arm bodies wrapped in a comptime `if (@hasDecl(...))` /
+# `else if (@hasField(...))` chain (mir_lowering: lower_with_match_block).
+# Each arm binds the user's alias (`va`) to a `*Counter` via the
+# family-appropriate Guard:
+#     VERSIONED -> Versioned.read(rt).get()      (EBR-pinned read)
+#     LOCKED  -> Locked.acquire().get()        (mutex-held read)
+# so `va.value` lowers identically across arms. Caller passes a
+# `c@versioned` cell to the first call and a `c@locked` cell to the
+# second; Zig's comptime resolves the matching arm at each call site.
 
 STRUCT Counter { value: Int64 }
 
--- Read the cell's `value` via whichever sync primitive is in play.
--- The body is identical across arms (`result = va.value;`); the
--- difference lives in the per-arm prelude that obtains the Guard.
+# Read the cell's `value` via whichever sync primitive is in play.
+# The body is identical across arms (`result = va.value;`); the
+# difference lives in the per-arm prelude that obtains the Guard.
 FN read_value!(MUTABLE c: Counter) RETURNS Int64
   REQUIRES c: VERSIONED | LOCKED
 ->
@@ -27,20 +27,20 @@ FN read_value!(MUTABLE c: Counter) RETURNS Int64
 END
 
 FN main() RETURNS Void ->
-    -- VERSIONED arm: c1 is *Versioned(Counter); WithMatchInner peels
-    -- the pointer, sees `Inner` decl, selects the VERSIONED arm.
+    # VERSIONED arm: c1 is *Versioned(Counter); WithMatchInner peels
+    # the pointer, sees `Inner` decl, selects the VERSIONED arm.
     MUTABLE c1 = Counter{ value: 42 } @versioned;
     v1 = read_value!(c1);
     ASSERT v1 == 42, "VERSIONED arm read";
 
-    -- LOCKED arm: c2 is *Locked(Counter); WithMatchInner peels
-    -- the pointer, sees `mutex` field, selects the LOCKED arm.
+    # LOCKED arm: c2 is *Locked(Counter); WithMatchInner peels
+    # the pointer, sees `mutex` field, selects the LOCKED arm.
     MUTABLE c2 = Counter{ value: 7 } @locked;
     v2 = read_value!(c2);
     ASSERT v2 == 7, "LOCKED arm read";
 
-    -- Calling read_value! twice on the same versioned cell exercises
-    -- the EBR-pinned Guard release between calls.
+    # Calling read_value! twice on the same versioned cell exercises
+    # the EBR-pinned Guard release between calls.
     v1b = read_value!(c1);
     ASSERT v1b == 42, "VERSIONED arm read (second call, same cell)";
 

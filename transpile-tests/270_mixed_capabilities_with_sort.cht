@@ -1,20 +1,20 @@
--- Test: mixed-capability WITH block compiles with the multi-lock sort.
---
--- A single WITH block acquires four different capability kinds:
---   - EXCLUSIVE a AS x  (fallible — goes through the pointer-sort path)
---   - RESTRICT r AS rv  (pure mutable alias; no lock)
---   - BORROWED b AS bv  (pure immutable alias; no lock)
---   - EXCLUSIVE c AS w  (fallible — goes through the pointer-sort path)
---
--- Fallible captures share the sorted acquire codegen; non-fallible
--- captures emit unchanged. Verifies:
---   1. Parser accepts the mixed, comma-separated capability list.
---   2. mir_lowering correctly intersperses sorted-acquire code for
---      the EXCLUSIVE entries with direct alias bindings for
---      RESTRICT / BORROWED entries.
---   3. All four aliases are usable inside the body.
---   4. RESTRICT / BORROWED bindings don't collide with the sorted
---      guard-var naming scheme.
+# Test: mixed-capability WITH block compiles with the multi-lock sort.
+#
+# A single WITH block acquires four different capability kinds:
+#   - EXCLUSIVE a AS x  (fallible — goes through the pointer-sort path)
+#   - RESTRICT r AS rv  (pure mutable alias; no lock)
+#   - BORROWED b AS bv  (pure immutable alias; no lock)
+#   - EXCLUSIVE c AS w  (fallible — goes through the pointer-sort path)
+#
+# Fallible captures share the sorted acquire codegen; non-fallible
+# captures emit unchanged. Verifies:
+#   1. Parser accepts the mixed, comma-separated capability list.
+#   2. mir_lowering correctly intersperses sorted-acquire code for
+#      the EXCLUSIVE entries with direct alias bindings for
+#      RESTRICT / BORROWED entries.
+#   3. All four aliases are usable inside the body.
+#   4. RESTRICT / BORROWED bindings don't collide with the sorted
+#      guard-var naming scheme.
 
 STRUCT Counter { value: Int64 }
 STRUCT Plain { data: Int64 }
@@ -22,19 +22,19 @@ STRUCT Plain { data: Int64 }
 FN main() RETURNS Void ->
     a = Counter{ value: 0 } @locked;
     c = Counter{ value: 0 } @locked;
-    MUTABLE r = Plain{ data: 5 };      -- RESTRICT target (must be mutable)
-    b = Plain{ data: 10 };             -- BORROWED target
+    MUTABLE r = Plain{ data: 5 };      # RESTRICT target (must be mutable)
+    b = Plain{ data: 10 };             # BORROWED target
 
     WITH EXCLUSIVE a AS x, RESTRICT r AS rv, BORROWED b AS bv, EXCLUSIVE c AS w {
-        x.value = x.value + rv.data;   -- rv via RESTRICT
-        w.value = w.value + bv.data;   -- bv via BORROWED
+        x.value = x.value + rv.data;   # rv via RESTRICT
+        w.value = w.value + bv.data;   # bv via BORROWED
     }
 
     WITH EXCLUSIVE a AS xx { ASSERT xx.value == 5, "a.value must be 5 (0 + rv.data)"; }
     WITH EXCLUSIVE c AS ww { ASSERT ww.value == 10, "c.value must be 10 (0 + bv.data)"; }
 
-    -- Reversed source order on the fallible pair — runtime sort still
-    -- produces the same guard ordering, so this also compiles + runs.
+    # Reversed source order on the fallible pair — runtime sort still
+    # produces the same guard ordering, so this also compiles + runs.
     WITH EXCLUSIVE c AS w2, RESTRICT r AS rv2, BORROWED b AS bv2, EXCLUSIVE a AS x2 {
         x2.value = x2.value + rv2.data;
         w2.value = w2.value + bv2.data;

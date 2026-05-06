@@ -1,5 +1,5 @@
--- Shared types and pure helpers for the Mal interpreter.
--- Value union, Env struct, and accessor functions.
+# Shared types and pure helpers for the Mal interpreter.
+# Value union, Env struct, and accessor functions.
 
 STRUCT Env {
     vars: HashMap<Value>
@@ -21,30 +21,30 @@ UNION Value {
     TypedF64Arr: Float64[],
     MapRef: Id<Env>,
     Weak: Int64,
-    -- Bytecode-compiled function pointer. bcIp is the entry IP into the
-    -- ops stream; bcArgc is the number of arguments the helper expects.
-    -- Created by MAKE_BC_FN, called via the regular CALL opcode (which
-    -- detects BCFn and dispatches to BC_CALL semantics inline).
+    # Bytecode-compiled function pointer. bcIp is the entry IP into the
+    # ops stream; bcArgc is the number of arguments the helper expects.
+    # Created by MAKE_BC_FN, called via the regular CALL opcode (which
+    # detects BCFn and dispatches to BC_CALL semantics inline).
     BCFn { bcFnIp: Int64, bcFnArgc: Int64 },
-    -- Shared mutable cell. Holds an Id<Env> whose vars["v"] is the cell
-    -- value. Created by BOX_NEW for @local / @shared:locked bindings.
-    -- BG fibers see the same Env id (the pool is shared across exec!
-    -- recursion), so mutations through BOX_STORE propagate.
+    # Shared mutable cell. Holds an Id<Env> whose vars["v"] is the cell
+    # value. Created by BOX_NEW for @local / @shared:locked bindings.
+    # BG fibers see the same Env id (the pool is shared across exec!
+    # recursion), so mutations through BOX_STORE propagate.
     Boxed: Id<Env>,
-    -- Split stream handle. bufId references an Env in the shared pool
-    -- whose vars["b"] holds the materialized buffer list (Value.List).
-    -- cursor is the per-handle read position. CLONE creates a new
-    -- SplitStream with the same bufId and current cursor; NEXT reads
-    -- buf[cursor] and advances the handle's cursor (writeback to slot).
+    # Split stream handle. bufId references an Env in the shared pool
+    # whose vars["b"] holds the materialized buffer list (Value.List).
+    # cursor is the per-handle read position. CLONE creates a new
+    # SplitStream with the same bufId and current cursor; NEXT reads
+    # buf[cursor] and advances the handle's cursor (writeback to slot).
     SplitStream { splitBufId: Id<Env>, splitCursor: Int64 },
-    -- Rendezvous channel for ~T[INF] BG STREAM: producer fiber YIELDs
-    -- one item, consumer NEXTs. Channel cell vars: "v" holds the in-flight
-    -- value; "has" is TrueVal/FalseVal; "closed" is TrueVal/FalseVal so
-    -- the producer fiber can exit when the consumer drops the channel.
+    # Rendezvous channel for ~T[INF] BG STREAM: producer fiber YIELDs
+    # one item, consumer NEXTs. Channel cell vars: "v" holds the in-flight
+    # value; "has" is TrueVal/FalseVal; "closed" is TrueVal/FalseVal so
+    # the producer fiber can exit when the consumer drops the channel.
     Channel: Id<Env>,
 }
 
--- Pure helpers
+# Pure helpers
 
 FN boolVal(b: Bool) RETURNS Value ->
     IF b -> RETURN Value.TrueVal;
@@ -89,11 +89,11 @@ FN getStr(v: Value) RETURNS !String ->
     RETURN "";
 END
 
--- Key conversion for HashMap operations. String keys pass through; numeric
--- keys (Int64Val / Number) stringify so HashMap<Int64, V> and HashMap<F64, V>
--- share the env-backed string-keyed storage. Stringification is round-trip
--- stable for integers and is unique for finite floats, so semantics match
--- the Zig-side numericMapGet/Put.
+# Key conversion for HashMap operations. String keys pass through; numeric
+# keys (Int64Val / Number) stringify so HashMap<Int64, V> and HashMap<F64, V>
+# share the env-backed string-keyed storage. Stringification is round-trip
+# stable for integers and is unique for finite floats, so semantics match
+# the Zig-side numericMapGet/Put.
 FN keyAsStr(v: Value) RETURNS !String ->
     PARTIAL MATCH v START
         Value.Str AS s         -> RETURN "" + s;,

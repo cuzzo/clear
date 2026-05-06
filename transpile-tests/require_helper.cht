@@ -1,5 +1,5 @@
--- require_helper.cht — used by 50_require.cht
--- Tests that visibility is respected at import boundaries.
+# require_helper.cht — used by 50_require.cht
+# Tests that visibility is respected at import boundaries.
 
 PUB FN addPub(a: Float64, b: Float64) RETURNS Float64 ->
   RETURN a + b;

@@ -1,5 +1,5 @@
--- Test: @list with union elements containing string literals must not leak.
--- String literals stored in union fields may get heap-duped.
+# Test: @list with union elements containing string literals must not leak.
+# String literals stored in union fields may get heap-duped.
 
 UNION Val {
     Nil,

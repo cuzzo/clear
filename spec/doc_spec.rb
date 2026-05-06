@@ -8,10 +8,10 @@ require_relative "../src/backends/transpiler"
 # doesn't raise.
 #
 # To mark a code block as illustrative (not expected to compile),
-# add `-- ILLUSTRATIVE` as the first line inside the block:
+# add `# ILLUSTRATIVE` as the first line inside the block:
 #
 #   ```clear
-#   -- ILLUSTRATIVE
+#   # ILLUSTRATIVE
 #   x |> WHERE _.value > threshold;
 #   ```
 #
@@ -59,14 +59,14 @@ end
 def wrap_if_needed(code)
   return code if code.include?("FN main") || code.include?("FN f(")
 
-  lines = code.strip.lines.map(&:strip).reject { |l| l.start_with?("--") || l.empty? }
+  lines = code.strip.lines.map(&:strip).reject { |l| l.start_with?("#") || l.empty? }
   return code if lines.all? { |l| l.start_with?("STRUCT", "ENUM", "UNION", "EXTERN", "FN ", "PUB ") }
 
   "FN main() RETURNS Void ->\n#{code}\nRETURN;\nEND"
 end
 
 def illustrative?(code)
-  code.strip.lines.first&.strip&.start_with?("-- ILLUSTRATIVE")
+  code.strip.lines.first&.strip&.start_with?("# ILLUSTRATIVE")
 end
 
 RSpec.describe "Documentation code examples" do
@@ -82,7 +82,7 @@ RSpec.describe "Documentation code examples" do
       blocks.each_with_index do |block, idx|
         if illustrative?(block[:code])
           it "code block at line #{block[:line]} is illustrative (skipped)" do
-            # Marked with -- ILLUSTRATIVE
+            # Marked with # ILLUSTRATIVE
           end
         else
           it "code block at line #{block[:line]} transpiles without error" do

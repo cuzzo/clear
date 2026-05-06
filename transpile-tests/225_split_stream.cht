@@ -1,10 +1,10 @@
--- Split streams: ~?T[]@split — multiple handles can NEXT the same buffered sequence.
--- Each retained handle sees the same items in the same order.
+# Split streams: ~?T[]@split — multiple handles can NEXT the same buffered sequence.
+# Each retained handle sees the same items in the same order.
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: clone before consumption replays full sequence.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: clone before consumption replays full sequence.
+    # -------------------------------------------------------
     s: ~?Int64[] @split = BG STREAM {
         YIELD 1;
         YIELD 2;
@@ -31,9 +31,9 @@ FN main() RETURNS Void ->
     ASSERT b3 == 3, "split stream clone replays third item";
     ASSERT b4 == NIL, "split stream clone exhausts to NIL";
 
-    -- -------------------------------------------------------
-    -- Test 2: late retain starts from the source handle's current point.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: late retain starts from the source handle's current point.
+    # -------------------------------------------------------
     s2: ~?Int64[] @split = BG STREAM {
         YIELD 10;
         YIELD 20;

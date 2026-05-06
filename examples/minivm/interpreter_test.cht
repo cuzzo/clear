@@ -1,12 +1,12 @@
--- Tests for the minivm interpreter.
--- Covers tree-walk eval, bytecode exec, typed arrays, FFI, and struct field opcodes.
+# Tests for the minivm interpreter.
+# Covers tree-walk eval, bytecode exec, typed arrays, FFI, and struct field opcodes.
 
 REQUIRE "types.cht";
 REQUIRE "parser.cht";
 REQUIRE "debugger.cht";
 REQUIRE "interpreter.cht";
 
--- Test helpers: create fresh interpreter, run input, return result string.
+# Test helpers: create fresh interpreter, run input, return result string.
 
 FN evalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String EFFECTS REENTRANT ->
     val = runTest!(input, rootId, pool, penv);
@@ -21,16 +21,16 @@ FN evalSeqIn!(inputs: String[], readable: Bool, rootId: Id<Env>, MUTABLE pool: E
     RETURN prStr(result, readable);
 END
 
--- compileAndExec!: parse S-expr, compile to bytecode, execute.
--- Uses the tree-walker's eval! to run compile! (which is CLEAR code),
--- then extracts the result and runs it on exec!.
+# compileAndExec!: parse S-expr, compile to bytecode, execute.
+# Uses the tree-walker's eval! to run compile! (which is CLEAR code),
+# then extracts the result and runs it on exec!.
 
 FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS String EFFECTS REENTRANT ->
     tokenizeToEnv!(penv, input);
     penv["__rp"] = Value{ Number: 0.0 };
     ast = readFormEnv!(penv);
     compile!(ast, rootId, pool);
-    -- Read compiled bytecode from env (stored entry-by-entry)
+    # Read compiled bytecode from env (stored entry-by-entry)
     opCount = toInt(getNum(pool[rootId]?.vars["__bc_opN"] OR Value{ Number: 0.0 }));
     constCount = toInt(getNum(pool[rootId]?.vars["__bc_cN"] OR Value{ Number: 0.0 }));
     MUTABLE intOps: Int64[]@list = List[];
@@ -48,84 +48,84 @@ FN bcEvalIn!(input: String, readable: Bool, rootId: Id<Env>, MUTABLE pool: Env[5
 END
 
 FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void EFFECTS REENTRANT ->
-    -- Test 1: (10 - 4) * 3 = 18 (arithmetic + stack ops)
+    # Test 1: (10 - 4) * 3 = 18 (arithmetic + stack ops)
     MUTABLE ops1: Int64[]@list = List[];
     MUTABLE c1: Value[]@list = List[];
     c1.append(Value{ Number: 10.0 }); c1.append(Value{ Number: 4.0 }); c1.append(Value{ Number: 3.0 });
-    ops1.append(0); ops1.append(0);   -- LOAD_CONST 10
-    ops1.append(0); ops1.append(1);   -- LOAD_CONST 4
-    ops1.append(5);                   -- SUB -> 6
-    ops1.append(0); ops1.append(2);   -- LOAD_CONST 3
-    ops1.append(6);                   -- MUL -> 18
-    ops1.append(19);                  -- HALT
+    ops1.append(0); ops1.append(0);   # LOAD_CONST 10
+    ops1.append(0); ops1.append(1);   # LOAD_CONST 4
+    ops1.append(5);                   # SUB -> 6
+    ops1.append(0); ops1.append(2);   # LOAD_CONST 3
+    ops1.append(6);                   # MUL -> 18
+    ops1.append(19);                  # HALT
     ASSERT prStr(exec!(ops1, c1, rootId, pool), TRUE) == "18", "bc: (10-4)*3 = 18";
 
-    -- Test 2: if 1 < 2 then 10 else 20 (control flow)
+    # Test 2: if 1 < 2 then 10 else 20 (control flow)
     MUTABLE ops2: Int64[]@list = List[];
     MUTABLE c2: Value[]@list = List[];
     c2.append(Value{ Number: 1.0 }); c2.append(Value{ Number: 2.0 });
     c2.append(Value{ Number: 10.0 }); c2.append(Value{ Number: 20.0 });
-    ops2.append(0); ops2.append(0);     -- LOAD_CONST 1
-    ops2.append(0); ops2.append(1);     -- LOAD_CONST 2
-    ops2.append(9);                     -- LT
-    ops2.append(15); ops2.append(11);   -- JUMP_IF_FALSE -> 11
-    ops2.append(0); ops2.append(2);     -- LOAD_CONST 10 (then)
-    ops2.append(14); ops2.append(13);   -- JUMP -> 13
-    ops2.append(0); ops2.append(3);     -- LOAD_CONST 20 (else)
-    ops2.append(19);                    -- HALT
+    ops2.append(0); ops2.append(0);     # LOAD_CONST 1
+    ops2.append(0); ops2.append(1);     # LOAD_CONST 2
+    ops2.append(9);                     # LT
+    ops2.append(15); ops2.append(11);   # JUMP_IF_FALSE -> 11
+    ops2.append(0); ops2.append(2);     # LOAD_CONST 10 (then)
+    ops2.append(14); ops2.append(13);   # JUMP -> 13
+    ops2.append(0); ops2.append(3);     # LOAD_CONST 20 (else)
+    ops2.append(19);                    # HALT
     ASSERT prStr(exec!(ops2, c2, rootId, pool), TRUE) == "10", "bc: if 1<2 then 10 else 20";
 
-    -- Test 3: define x=5, native +(x, 3) -> 8 (env + native calls)
+    # Test 3: define x=5, native +(x, 3) -> 8 (env + native calls)
     MUTABLE ops3: Int64[]@list = List[];
     MUTABLE c3: Value[]@list = List[];
     c3.append(Value{ Number: 5.0 }); c3.append(Value{ Symbol: "x" }); c3.append(Value{ Number: 3.0 });
-    ops3.append(0); ops3.append(0);     -- LOAD_CONST 5
-    ops3.append(2); ops3.append(1);     -- STORE_NAME "x"
-    ops3.append(3);                     -- POP
-    ops3.append(1); ops3.append(1);     -- LOAD_NAME "x" -> 5
-    ops3.append(0); ops3.append(2);     -- LOAD_CONST 3
-    ops3.append(18); ops3.append(1); ops3.append(2); -- NATIVE_CALL +(id=1), argc=2
-    ops3.append(19);                    -- HALT
+    ops3.append(0); ops3.append(0);     # LOAD_CONST 5
+    ops3.append(2); ops3.append(1);     # STORE_NAME "x"
+    ops3.append(3);                     # POP
+    ops3.append(1); ops3.append(1);     # LOAD_NAME "x" -> 5
+    ops3.append(0); ops3.append(2);     # LOAD_CONST 3
+    ops3.append(18); ops3.append(1); ops3.append(2); # NATIVE_CALL +(id=1), argc=2
+    ops3.append(19);                    # HALT
     ASSERT prStr(exec!(ops3, c3, rootId, pool), TRUE) == "8", "bc: define x=5, x+3=8";
 
-    -- Test 4: STRUCT_FIELD - untyped struct (Vector), access field 1
-    -- struct = #(10, 20, 30), field[1] = 20
+    # Test 4: STRUCT_FIELD - untyped struct (Vector), access field 1
+    # struct = #(10, 20, 30), field[1] = 20
     MUTABLE ops4: Int64[]@list = List[];
     MUTABLE c4: Value[]@list = List[];
     MUTABLE sf4: Value[]@list = List[];
     sf4.append(Value{ Number: 10.0 }); sf4.append(Value{ Number: 20.0 }); sf4.append(Value{ Number: 30.0 });
     c4.append(Value{ Vector: sf4 });
-    ops4.append(0); ops4.append(0);   -- LOAD_CONST struct
-    ops4.append(63); ops4.append(1);  -- STRUCT_FIELD 1 -> 20
-    ops4.append(19);                  -- HALT
+    ops4.append(0); ops4.append(0);   # LOAD_CONST struct
+    ops4.append(63); ops4.append(1);  # STRUCT_FIELD 1 -> 20
+    ops4.append(19);                  # HALT
     ASSERT prStr(exec!(ops4, c4, rootId, pool), TRUE) == "20", "bc: STRUCT_FIELD untyped";
 
-    -- Test 5: TYPED_FIELD_I64 - typed i64 struct, access field 0
-    -- struct = [100, 200]:i64, field[0] = 100
+    # Test 5: TYPED_FIELD_I64 - typed i64 struct, access field 0
+    # struct = [100, 200]:i64, field[0] = 100
     MUTABLE ops5: Int64[]@list = List[];
     MUTABLE c5: Value[]@list = List[];
     MUTABLE si5: Int64[]@list = List[];
     si5.append(100_i64); si5.append(200_i64);
     c5.append(Value{ TypedI64Arr: si5 });
-    ops5.append(0); ops5.append(0);   -- LOAD_CONST typed i64 arr
-    ops5.append(64); ops5.append(0);  -- TYPED_FIELD_I64 0 -> 100
-    ops5.append(19);                  -- HALT
+    ops5.append(0); ops5.append(0);   # LOAD_CONST typed i64 arr
+    ops5.append(64); ops5.append(0);  # TYPED_FIELD_I64 0 -> 100
+    ops5.append(19);                  # HALT
     ASSERT prStr(exec!(ops5, c5, rootId, pool), TRUE) == "100", "bc: TYPED_FIELD_I64";
 
-    -- Test 6: TYPED_FIELD_F64 - typed f64 struct, access field 1
-    -- struct = [1.5, 2.5]:f64, field[1] = 2.5
+    # Test 6: TYPED_FIELD_F64 - typed f64 struct, access field 1
+    # struct = [1.5, 2.5]:f64, field[1] = 2.5
     MUTABLE ops6: Int64[]@list = List[];
     MUTABLE c6: Value[]@list = List[];
     MUTABLE sf6: Float64[]@list = List[];
     sf6.append(1.5); sf6.append(2.5);
     c6.append(Value{ TypedF64Arr: sf6 });
-    ops6.append(0); ops6.append(0);   -- LOAD_CONST typed f64 arr
-    ops6.append(65); ops6.append(1);  -- TYPED_FIELD_F64 1 -> 2.5
-    ops6.append(19);                  -- HALT
+    ops6.append(0); ops6.append(0);   # LOAD_CONST typed f64 arr
+    ops6.append(65); ops6.append(1);  # TYPED_FIELD_F64 1 -> 2.5
+    ops6.append(19);                  # HALT
     ASSERT prStr(exec!(ops6, c6, rootId, pool), TRUE) == "2", "bc: TYPED_FIELD_F64";
 
-    -- Test 7: Nested - untyped struct with typed i64 struct in field 1
-    -- outer = #("tag", [10, 20, 30]:i64), outer.field[1].field[2] = 30
+    # Test 7: Nested - untyped struct with typed i64 struct in field 1
+    # outer = #("tag", [10, 20, 30]:i64), outer.field[1].field[2] = 30
     MUTABLE ops7: Int64[]@list = List[];
     MUTABLE c7: Value[]@list = List[];
     MUTABLE si7: Int64[]@list = List[];
@@ -133,10 +133,10 @@ FN testBytecode!(rootId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void EF
     MUTABLE sf7: Value[]@list = List[];
     sf7.append(Value{ Str: "Point3D" }); sf7.append(Value{ TypedI64Arr: si7 });
     c7.append(Value{ Vector: sf7 });
-    ops7.append(0); ops7.append(0);   -- LOAD_CONST outer struct
-    ops7.append(63); ops7.append(1);  -- STRUCT_FIELD 1 -> TypedI64Arr [10,20,30]
-    ops7.append(64); ops7.append(2);  -- TYPED_FIELD_I64 2 -> 30
-    ops7.append(19);                  -- HALT
+    ops7.append(0); ops7.append(0);   # LOAD_CONST outer struct
+    ops7.append(63); ops7.append(1);  # STRUCT_FIELD 1 -> TypedI64Arr [10,20,30]
+    ops7.append(64); ops7.append(2);  # TYPED_FIELD_I64 2 -> 30
+    ops7.append(19);                  # HALT
     ASSERT prStr(exec!(ops7, c7, rootId, pool), TRUE) == "30", "bc: nested STRUCT_FIELD -> TYPED_FIELD_I64";
 
     RETURN;
@@ -147,36 +147,36 @@ FN main() RETURNS Void ->
     MUTABLE penv: HashMap<Value> = {};
     rootId = setupEnv!(pool);
 
-    -- Arithmetic
+    # Arithmetic
     ASSERT evalIn!("(+ 1 2)", TRUE, rootId, pool, penv) == "3", "(+ 1 2)";
     ASSERT evalIn!("(- 5 3)", TRUE, rootId, pool, penv) =="2", "(- 5 3)";
     ASSERT evalIn!("(* 3 4)", TRUE, rootId, pool, penv) =="12", "(* 3 4)";
     ASSERT evalIn!("(/ 10 2)", TRUE, rootId, pool, penv) =="5", "(/ 10 2)";
     ASSERT evalIn!("(+ (* 2 3) (- 10 4))", TRUE, rootId, pool, penv) =="12", "nested arithmetic";
 
-    -- Variables
+    # Variables
     ASSERT evalIn!("(def! a 10)", TRUE, rootId, pool, penv) =="10", "def! returns value";
     ASSERT evalSeqIn!(["(def! a 10)", "a"], TRUE, rootId, pool, penv) =="10", "def! is retrievable";
 
-    -- Closures
+    # Closures
     ASSERT evalIn!("(def! f (fn* (x) (+ x 1)))", TRUE, rootId, pool, penv) =="#<function>", "fn* creates function";
     ASSERT evalSeqIn!(["(def! a 10)", "(def! f (fn* (x) (+ x a)))", "(f 5)"], TRUE, rootId, pool, penv) =="15", "closure captures outer";
     ASSERT evalSeqIn!(["(def! add3 (fn* (a b c) (+ a (+ b c))))", "(add3 1 2 3)"], TRUE, rootId, pool, penv) =="6", "multi-param fn";
 
-    -- Let bindings
+    # Let bindings
     ASSERT evalIn!("(let* (b 2 c 3) (+ b c))", TRUE, rootId, pool, penv) =="5", "let* scoped bindings";
     ASSERT evalIn!("(let* (a 1 b (+ a 1)) b)", TRUE, rootId, pool, penv) =="2", "let* references earlier";
 
-    -- Conditionals
+    # Conditionals
     ASSERT evalIn!("(if true 7 8)", TRUE, rootId, pool, penv) =="7", "if true";
     ASSERT evalIn!("(if false 7 8)", TRUE, rootId, pool, penv) =="8", "if false";
     ASSERT evalIn!("(if nil 7 8)", TRUE, rootId, pool, penv) =="8", "if nil";
     ASSERT evalIn!("(if false 7)", TRUE, rootId, pool, penv) =="nil", "if without else";
 
-    -- Sequential evaluation
+    # Sequential evaluation
     ASSERT evalIn!("(do (def! d 6) 7 (+ d 8))", TRUE, rootId, pool, penv) =="14", "do returns last";
 
-    -- Comparison
+    # Comparison
     ASSERT evalIn!("(= 1 1)", TRUE, rootId, pool, penv) =="true", "= equal";
     ASSERT evalIn!("(= 1 2)", TRUE, rootId, pool, penv) =="false", "= unequal";
     ASSERT evalIn!("(> 2 1)", TRUE, rootId, pool, penv) =="true", "> comparison";
@@ -184,35 +184,35 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(<= 2 2)", TRUE, rootId, pool, penv) =="true", "<= equal";
     ASSERT evalIn!("(>= 3 2)", TRUE, rootId, pool, penv) =="true", ">= greater";
 
-    -- List operations
+    # List operations
     ASSERT evalIn!("(list 1 2 3)", FALSE, rootId, pool, penv) == "(1 2 3)", "list creates list";
     ASSERT evalIn!("(count (list 1 2 3))", TRUE, rootId, pool, penv) =="3", "count";
     ASSERT evalIn!("(empty? (list))", TRUE, rootId, pool, penv) =="true", "empty?";
     ASSERT evalIn!("(not false)", TRUE, rootId, pool, penv) =="true", "not";
     ASSERT evalIn!("(list? (list 1 2))", TRUE, rootId, pool, penv) =="true", "list?";
 
-    -- Recursion
+    # Recursion
     ASSERT evalSeqIn!(["(def! sumdown (fn* (n) (if (> n 0) (+ n (sumdown (- n 1))) 0)))", "(sumdown 6)"], TRUE, rootId, pool, penv) =="21", "sumdown";
     ASSERT evalSeqIn!(["(def! fib (fn* (n) (if (<= n 1) 1 (+ (fib (- n 1)) (fib (- n 2))))))", "(fib 4)"], TRUE, rootId, pool, penv) =="5", "fibonacci";
 
-    -- Scheme syntax: define, lambda, let, begin
+    # Scheme syntax: define, lambda, let, begin
     ASSERT evalIn!("(define x 42)", TRUE, rootId, pool, penv) =="42", "define";
     ASSERT evalSeqIn!(["(define x 42)", "x"], TRUE, rootId, pool, penv) =="42", "define retrievable";
     ASSERT evalSeqIn!(["(define inc (lambda (n) (+ n 1)))", "(inc 5)"], TRUE, rootId, pool, penv) =="6", "lambda";
     ASSERT evalIn!("(let ((a 3) (b 4)) (+ a b))", TRUE, rootId, pool, penv) =="7", "let";
     ASSERT evalIn!("(begin 1 2 3)", TRUE, rootId, pool, penv) =="3", "begin";
 
-    -- set!: mutable reassignment
+    # set!: mutable reassignment
     ASSERT evalSeqIn!(["(define x 1)", "(set! x 2)", "x"], TRUE, rootId, pool, penv) =="2", "set! reassigns";
     ASSERT evalSeqIn!(["(define x 10)", "(define inc! (lambda () (set! x (+ x 1))))", "(inc!)", "x"], TRUE, rootId, pool, penv) =="11", "set! in closure";
 
-    -- Smoke tests (full suite moved to run_tests.rb to avoid stack overflow)
+    # Smoke tests (full suite moved to run_tests.rb to avoid stack overflow)
     ASSERT evalIn!("(+ 1 2)", TRUE, rootId, pool, penv) == "3", "add";
     ASSERT evalIn!("(if true 1 2)", TRUE, rootId, pool, penv) == "1", "if";
     ASSERT evalSeqIn!(["(define f (lambda (x) (* x 2)))", "(f 21)"], TRUE, rootId, pool, penv) == "42", "lambda";
     ASSERT evalIn!("(try (raise \"x\" \"E\") (catch e \"ok\"))", FALSE, rootId, pool, penv) == "ok", "try/catch";
 
-    -- Typed values: Int64Val
+    # Typed values: Int64Val
     ASSERT evalIn!("42:i64", TRUE, rootId, pool, penv) == "42", "typed i64 literal";
     ASSERT evalIn!("(+ 10:i64 20:i64)", TRUE, rootId, pool, penv) == "30", "typed i64 add";
     ASSERT evalIn!("(= 42:i64 42)", TRUE, rootId, pool, penv) == "true", "i64 == float cross-type";
@@ -223,20 +223,20 @@ FN main() RETURNS Void ->
     ASSERT evalIn!("(* 3:i64 4:i64)", TRUE, rootId, pool, penv) == "12", "typed i64 mul";
     ASSERT evalIn!("(- 10:i64 3:i64)", TRUE, rootId, pool, penv) == "7", "typed i64 sub";
 
-    -- Typed arrays: TypedI64Arr
+    # Typed arrays: TypedI64Arr
     ASSERT evalIn!("(typed-list:i64 10 20 30)", TRUE, rootId, pool, penv) == "[10 20 30]:i64", "typed i64 array create";
     ASSERT evalIn!("(list-ref (typed-list:i64 10 20 30) 1)", TRUE, rootId, pool, penv) == "20", "typed array ref";
     ASSERT evalIn!("(type-of (list-ref (typed-list:i64 10 20 30) 0))", FALSE, rootId, pool, penv) == "Int64", "typed array element type";
     ASSERT evalIn!("(list-length (typed-list:i64 1 2 3 4))", TRUE, rootId, pool, penv) == "4", "typed array length";
-    -- Conversion
+    # Conversion
     ASSERT evalIn!("(list-ref (to-list (typed-list:i64 5 10)) 0)", TRUE, rootId, pool, penv) == "5", "to-list conversion";
     ASSERT evalIn!("(list-ref (to-typed:i64 (list 5 10)) 0)", TRUE, rootId, pool, penv) == "5", "to-typed conversion";
-    -- Interop: typed values in untyped operations
+    # Interop: typed values in untyped operations
     ASSERT evalIn!("(+ (list-ref (typed-list:i64 10 20) 0) 5)", TRUE, rootId, pool, penv) == "15", "typed arr elem + untyped";
 
-    -- list-ref on Value.List of strings must return an owned copy (UAF regression)
-    -- Bug: listRef returned items[idx] without COPY; evaled freed on evalList! exit
-    -- leaving a dangling pointer that crashed dupeUnionValue when the value was reused.
+    # list-ref on Value.List of strings must return an owned copy (UAF regression)
+    # Bug: listRef returned items[idx] without COPY; evaled freed on evalList! exit
+    # leaving a dangling pointer that crashed dupeUnionValue when the value was reused.
     ASSERT evalSeqIn!([
         "(define ws (split \"apple banana cherry\" \" \"))",
         "(define w (list-ref ws 0))",
@@ -245,27 +245,27 @@ FN main() RETURNS Void ->
         "(eq? w \"apple\")"
     ], TRUE, rootId, pool, penv) == "true", "list-ref string element is owned copy (UAF regression)";
 
-    -- FFI bridge: native CLEAR functions on typed arrays
+    # FFI bridge: native CLEAR functions on typed arrays
     ASSERT evalIn!("(native-sum (typed-list:i64 10 20 30))", TRUE, rootId, pool, penv) == "60", "FFI native-sum i64";
     ASSERT evalIn!("(type-of (native-sum (typed-list:i64 1 2 3)))", FALSE, rootId, pool, penv) == "Int64", "FFI returns Int64";
     ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 20)", TRUE, rootId, pool, penv) == "true", "FFI contains found";
     ASSERT evalIn!("(native-contains (typed-list:i64 10 20 30) 99)", TRUE, rootId, pool, penv) == "false", "FFI contains not found";
-    -- FFI f64
+    # FFI f64
     ASSERT evalIn!("(native-sum-f64 (typed-list:f64 1.5 2.5 3.0))", TRUE, rootId, pool, penv) == "7", "FFI native-sum-f64";
     ASSERT evalIn!("(native-dot (typed-list:f64 1 2 3) (typed-list:f64 4 5 6))", TRUE, rootId, pool, penv) == "32", "FFI native-dot";
-    -- Conversions
+    # Conversions
     ASSERT evalIn!("(type-of (int->float 42:i64))", FALSE, rootId, pool, penv) == "Float64", "int->float type";
     ASSERT evalIn!("(type-of (float->int 3.14))", FALSE, rootId, pool, penv) == "Int64", "float->int type";
     ASSERT evalIn!("(float->int 42.9)", TRUE, rootId, pool, penv) == "42", "float->int truncates";
 
-    -- Bytecode VM tests (includes struct field opcodes)
+    # Bytecode VM tests (includes struct field opcodes)
     testBytecode!(rootId, pool);
 
-    -- Typed structs: BLOCKED by compiler bug #2 (arena lifetime).
-    -- TypedI64Arr inside Pair{@indirect} gets freed when the special form handler returns.
-    -- The construction + access special forms are implemented but data doesn't survive.
-    -- Fix: PromotionPlan needs to promote Int64[]@list to heap when escaping via @indirect.
-    -- Tests disabled until compiler fix:
+    # Typed structs: BLOCKED by compiler bug #2 (arena lifetime).
+    # TypedI64Arr inside Pair{@indirect} gets freed when the special form handler returns.
+    # The construction + access special forms are implemented but data doesn't survive.
+    # Fix: PromotionPlan needs to promote Int64[]@list to heap when escaping via @indirect.
+    # Tests disabled until compiler fix:
 
     print("Interpreter tests PASSED!");
     RETURN;

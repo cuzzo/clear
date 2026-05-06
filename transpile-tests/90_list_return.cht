@@ -1,20 +1,20 @@
--- 90_list_return.cht — list escape safety: returning @list from frame-using functions
---
--- PROBLEM:
---   A function with uses_frame=true wraps its body in saveFrameMark/restoreFrameMark.
---   When it returns, the frame mark rewinds the arena, freeing the @list's backing buffer.
---   The caller would hold a dangling pointer.
---
--- FIX:
---   The compiler detects this pattern (list_return=true on ReturnNode) and emits:
---     try CheatLib.promoteList(T, rt, &vals);
---   before the return.  promoteList copies the backing buffer from the frame arena to
---   the GPA heap.  The caller's deinit uses heapAlloc() (annotator sets heap_list=true).
---
--- SETUP:
---   BigS has 130 slots (>128 threshold) → allocated in frame arena → uses_frame=true.
---   buildList creates a local BigS (triggering uses_frame=true) and also builds a list.
---   main calls buildList() and verifies the returned list contains correct values.
+# 90_list_return.cht — list escape safety: returning @list from frame-using functions
+#
+# PROBLEM:
+#   A function with uses_frame=true wraps its body in saveFrameMark/restoreFrameMark.
+#   When it returns, the frame mark rewinds the arena, freeing the @list's backing buffer.
+#   The caller would hold a dangling pointer.
+#
+# FIX:
+#   The compiler detects this pattern (list_return=true on ReturnNode) and emits:
+#     try CheatLib.promoteList(T, rt, &vals);
+#   before the return.  promoteList copies the backing buffer from the frame arena to
+#   the GPA heap.  The caller's deinit uses heapAlloc() (annotator sets heap_list=true).
+#
+# SETUP:
+#   BigS has 130 slots (>128 threshold) → allocated in frame arena → uses_frame=true.
+#   buildList creates a local BigS (triggering uses_frame=true) and also builds a list.
+#   main calls buildList() and verifies the returned list contains correct values.
 
 STRUCT Chunk5 { a: Float64, b: Float64, c: Float64, d: Float64, e: Float64 }
 STRUCT BigS {
@@ -26,9 +26,9 @@ STRUCT BigS {
   c26: Chunk5
 }
 
--- buildList creates a large local struct (→ frame arena, uses_frame=true)
--- and returns a @list built from it.  The compiler must emit promoteList
--- to copy the list's arena buffer to heap before the frame mark rewinds.
+# buildList creates a large local struct (→ frame arena, uses_frame=true)
+# and returns a @list built from it.  The compiler must emit promoteList
+# to copy the list's arena buffer to heap before the frame mark rewinds.
 FN buildList() RETURNS !Float64[]@list ->
   zero:  Chunk5 = Chunk5{ a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0 };
   first: Chunk5 = Chunk5{ a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0 };
@@ -48,7 +48,7 @@ FN buildList() RETURNS !Float64[]@list ->
 END
 
 FN main() RETURNS Void ->
-  -- Caller receives a heap-promoted list; deinit uses heapAlloc (no leak).
+  # Caller receives a heap-promoted list; deinit uses heapAlloc (no leak).
   result = buildList();
   ASSERT length(result) == 3_i64, "returned list has 3 elements";
   ASSERT result[0] == 1.0, "element 0 is correct";

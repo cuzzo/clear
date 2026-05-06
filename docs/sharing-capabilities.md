@@ -146,8 +146,8 @@ When multiple fibers need to access the same data, CLEAR must answer two questio
 ```ruby clear
 MUTABLE c = Counter{ value: 0 } @local;
 
-BG { c.value += 1; }            -- direct field access, no WITH block
-BG { print(c.value); }          -- direct read
+BG { c.value += 1; }            # direct field access, no WITH block
+BG { print(c.value); }          # direct read
 ```
 
 **What it does**: Heap-allocates the value and returns a bare `*T` pointer. No Mutex, no RwLock, no reference counting. Multiple fibers share the pointer by value copy.
@@ -160,7 +160,7 @@ BG { print(c.value); }          -- direct read
 
 ```ruby clear illustrative
 BG { @parallel -> c.value = 1; }
--- ERROR: @local variable cannot be used in @parallel block
+# ERROR: @local variable cannot be used in @parallel block
 ```
 
 ## @multiowned — Non-Atomic Reference Counting (Rc)
@@ -168,7 +168,7 @@ BG { @parallel -> c.value = 1; }
 ```ruby clear illustrative
 node = TreeNode{ left: NIL, right: NIL } @multiowned;
 
--- Multiple owners via WITH block:
+# Multiple owners via WITH block:
 WITH node AS val { print(val.left); }
 ```
 
@@ -191,8 +191,8 @@ WITH node AS val { print(val.left); }
 
 ```ruby clear illustrative
 BG { @parallel -> WITH node AS val { ... } }
--- ERROR: @multiowned (Rc) variable cannot be used in @parallel block —
--- Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.
+# ERROR: @multiowned (Rc) variable cannot be used in @parallel block —
+# Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.
 ```
 
 **When to use it**: Graphs, trees, and shared ownership patterns where all fibers run on the same scheduler and data is read-only. If you need mutation, use `@local`. If you need cross-scheduler sharing, use `@shared`.
@@ -202,8 +202,8 @@ BG { @parallel -> WITH node AS val { ... } }
 ```ruby clear illustrative
 config = AppConfig{ port: 8080 } @shared;
 
-BG { @parallel -> WITH config AS c { print(c.port); } }  -- OK
-BG { @parallel -> WITH config AS c { print(c.port); } }  -- OK
+BG { @parallel -> WITH config AS c { print(c.port); } }  # OK
+BG { @parallel -> WITH config AS c { print(c.port); } }  # OK
 ```
 
 **What it does**: Wraps the value in `Arc(T)` — an atomic reference-counted pointer. The refcount uses hardware atomic instructions (lock-prefixed CAS on x86), so it's safe to increment/decrement from any thread.
@@ -217,14 +217,14 @@ BG { @parallel -> WITH config AS c { print(c.port); } }  -- OK
 Sharing capabilities can be combined with sync capabilities for mutable cross-thread access:
 
 ```ruby clear illustrative
--- Arc + Mutex: one-line mutations auto-lock
+# Arc + Mutex: one-line mutations auto-lock
 MUTABLE counter = Counter{ value: 0 } @shared:locked;
-BG { @parallel -> counter.value += 1; }                             -- auto mutex
+BG { @parallel -> counter.value += 1; }                             # auto mutex
 
--- Arc + RwLock: cross-scheduler read-heavy access
+# Arc + RwLock: cross-scheduler read-heavy access
 MUTABLE config = Config{ port: 8080 } @shared:writeLocked;
-BG { @parallel -> WITH config AS c { print(c.port); } }            -- read lock
-BG { @parallel -> config.port = 9090; }                             -- auto write lock
+BG { @parallel -> WITH config AS c { print(c.port); } }            # read lock
+BG { @parallel -> config.port = 9090; }                             # auto write lock
 ```
 
 `@local` does not combine with `@locked` or `@writeLocked` — it's already a bare pointer with no wrapper. Mutation is direct.
@@ -256,7 +256,7 @@ The compiler automatically pins BG/DO blocks to the local scheduler when they ca
 
 To override auto-pinning for thread-safe types:
 ```ruby clear illustrative
-BG { @parallel -> ... }   -- distribute across schedulers
+BG { @parallel -> ... }   # distribute across schedulers
 ```
 
 For non-thread-safe types (`@local`, `@multiowned`), `@parallel` is a compile error.

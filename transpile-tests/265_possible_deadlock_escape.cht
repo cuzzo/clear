@@ -1,11 +1,11 @@
--- Test: POSSIBLE_DEADLOCK opt-out on same-name nested WITH compiles
--- and runs. Without the opt-out this would be a hard compile error
--- (the Phase 1 lexical nested-lock check). With the opt-out the
--- program compiles and the programmer is promising runtime discipline.
---
--- Here we dodge the actual deadlock by NOT re-entering the inner WITH
--- when the outer guard is held by this fiber — we just exercise the
--- parse/annotator path that accepts the marker.
+# Test: POSSIBLE_DEADLOCK opt-out on same-name nested WITH compiles
+# and runs. Without the opt-out this would be a hard compile error
+# (the Phase 1 lexical nested-lock check). With the opt-out the
+# program compiles and the programmer is promising runtime discipline.
+#
+# Here we dodge the actual deadlock by NOT re-entering the inner WITH
+# when the outer guard is held by this fiber — we just exercise the
+# parse/annotator path that accepts the marker.
 
 STRUCT Counter { value: Int64 }
 
@@ -14,10 +14,10 @@ FN main() RETURNS Void ->
 
     WITH EXCLUSIVE c AS outer {
         outer.value = 1;
-        -- The inner WITH is dead in practice (the outer already holds
-        -- the same mutex), but the opt-out lets this construct compile.
-        -- We guard it so the inner never runs and we don't self-deadlock
-        -- at runtime.
+        # The inner WITH is dead in practice (the outer already holds
+        # the same mutex), but the opt-out lets this construct compile.
+        # We guard it so the inner never runs and we don't self-deadlock
+        # at runtime.
         IF outer.value == 999 THEN
             WITH POSSIBLE_DEADLOCK EXCLUSIVE c AS inner {
                 inner.value = inner.value + 1;

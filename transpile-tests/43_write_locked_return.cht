@@ -18,6 +18,6 @@ FN main() RETURNS Void ->
         ASSERT inner.v == 100, "inner.v should be 100 after write";
     }
 
-    -- defer rwLockedDestroy runs here; no leak.
+    # defer rwLockedDestroy runs here; no leak.
     RETURN;
 END

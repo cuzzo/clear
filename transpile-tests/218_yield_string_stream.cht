@@ -1,9 +1,9 @@
--- Test: YIELD of frame-allocated strings in BG STREAM.
--- Generator dupes each frame string to the stream allocator before push.
--- Consumer (NEXT) owns the heap copy and cleans it up.
+# Test: YIELD of frame-allocated strings in BG STREAM.
+# Generator dupes each frame string to the stream allocator before push.
+# Consumer (NEXT) owns the heap copy and cleans it up.
 
 FN main() RETURNS Void ->
-    -- Test 1: YIELD of toString() (frame string from stdlib intrinsic).
+    # Test 1: YIELD of toString() (frame string from stdlib intrinsic).
     counter: ~String[INF] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE TRUE DO

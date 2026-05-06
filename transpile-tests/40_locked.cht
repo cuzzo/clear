@@ -1,28 +1,28 @@
 STRUCT Counter { value: Int64 }
 
--- Functions take plain Types, not Capabilities.
+# Functions take plain Types, not Capabilities.
 FN getVal(c: Counter) RETURNS Int64 ->
     RETURN c.value;
 END
 
 FN main() RETURNS Void ->
-    -- Create a heap-allocated mutex-protected Counter.
+    # Create a heap-allocated mutex-protected Counter.
     c = Counter{ value: 10 } @locked;
 
-    -- WITH EXCLUSIVE acquires the mutex for the duration of the block.
-    -- 'inner' is bound to *Counter (auto-deref in Zig).
+    # WITH EXCLUSIVE acquires the mutex for the duration of the block.
+    # 'inner' is bound to *Counter (auto-deref in Zig).
     WITH EXCLUSIVE c AS inner {
         ASSERT inner.value == 10, "inner.value should be 10";
 
-        -- Mutate through the pointer (auto-deref assignment).
+        # Mutate through the pointer (auto-deref assignment).
         inner.value = 42;
         ASSERT inner.value == 42, "inner.value should be 42 after mutation";
 
-        -- Pass inner.* (deref) to a plain function.
+        # Pass inner.* (deref) to a plain function.
         v = getVal(inner);
         ASSERT v == 42, "getVal should return 42";
     }
 
-    -- Lock is released; the testing allocator confirms no leaks on scope exit.
+    # Lock is released; the testing allocator confirms no leaks on scope exit.
     RETURN;
 END

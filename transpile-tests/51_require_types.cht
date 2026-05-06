@@ -1,25 +1,25 @@
--- 51_require_types: REQUIRE imports PUB STRUCT, UNION, and ENUM types.
+# 51_require_types: REQUIRE imports PUB STRUCT, UNION, and ENUM types.
 
 REQUIRE "require_types_helper.cht";
 
 FN main() RETURNS Void ->
-    -- Use imported STRUCT type
+    # Use imported STRUCT type
     p = Point{ x: 3.0, y: 4.0 };
     ASSERT p.x == 3.0, "Point.x should be 3.0";
     ASSERT p.y == 4.0, "Point.y should be 4.0";
 
-    -- Use imported function that returns imported STRUCT
+    # Use imported function that returns imported STRUCT
     p2 = makePoint(10.0, 20.0);
     ASSERT p2.x == 10.0, "makePoint x should be 10.0";
 
-    -- Use imported UNION type
+    # Use imported UNION type
     ok = Result{ Ok: 42.0 };
     PARTIAL MATCH ok START
         Result.Ok AS val -> ASSERT val == 42.0, "Result.Ok should be 42.0";,
         Result.Err -> ASSERT FALSE, "should not be Err";,
     END
 
-    -- Use imported ENUM type
+    # Use imported ENUM type
     c = Color.Red;
     PARTIAL MATCH c START
         Color.Red -> ASSERT TRUE, "color is red";,

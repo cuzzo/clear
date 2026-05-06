@@ -1,6 +1,6 @@
--- List in loop: tests that per-iteration frame marks allow arena reuse.
--- Without frame marks, 1000 iterations x ~16KB each would accumulate 16MB.
--- With frame marks, the arena stays constant across iterations.
+# List in loop: tests that per-iteration frame marks allow arena reuse.
+# Without frame marks, 1000 iterations x ~16KB each would accumulate 16MB.
+# With frame marks, the arena stays constant across iterations.
 
 FN main() RETURNS Void ->
     MUTABLE total: Float64 = 0.0;

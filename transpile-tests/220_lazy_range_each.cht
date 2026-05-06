@@ -1,39 +1,39 @@
--- Test: lazy range source with EACH pipeline operator.
---
--- (start..<end) |> EACH { body } should iterate without materializing
--- the range into a list. Uses LazyRange(T) in the Zig backend for
--- zero-allocation, pull-based iteration.
+# Test: lazy range source with EACH pipeline operator.
+#
+# (start..<end) |> EACH { body } should iterate without materializing
+# the range into a list. Uses LazyRange(T) in the Zig backend for
+# zero-allocation, pull-based iteration.
 
 FN main() RETURNS Void ->
-    -- Basic integer range EACH
+    # Basic integer range EACH
     MUTABLE sum: Int64 = 0;
     (0_i64 ..< 5) |> EACH {
         sum = sum + _;
     };
     ASSERT sum == 10, "0..5 sum should be 10";
 
-    -- Exclusive end: 0..<5 produces 0,1,2,3,4
+    # Exclusive end: 0..<5 produces 0,1,2,3,4
     MUTABLE count: Int64 = 0;
     (0_i64 ..< 10) |> EACH {
         count = count + 1;
     };
     ASSERT count == 10, "count of 0..<10 should be 10";
 
-    -- Variable end
+    # Variable end
     n: Int64 = 7;
     MUTABLE acc: Int64 = 0;
     (0_i64 ..< n) |> EACH {
         acc = acc + _;
     };
-    -- 0+1+2+3+4+5+6 = 21
+    # 0+1+2+3+4+5+6 = 21
     ASSERT acc == 21, "0..7 sum should be 21";
 
-    -- Non-zero start
+    # Non-zero start
     MUTABLE items: Int64 = 0;
     (3_i64 ..< 8) |> EACH {
         items = items + _;
     };
-    -- 3+4+5+6+7 = 25
+    # 3+4+5+6+7 = 25
     ASSERT items == 25, "3..8 sum should be 25";
 
     print("PASS");

@@ -1,5 +1,5 @@
--- Test: mutable reassignment of non-Copy union must clean up old value.
--- Without cleanup, the old value's heap data leaks.
+# Test: mutable reassignment of non-Copy union must clean up old value.
+# Without cleanup, the old value's heap data leaks.
 
 UNION Value { Nil, Str: String, List: Value[] }
 

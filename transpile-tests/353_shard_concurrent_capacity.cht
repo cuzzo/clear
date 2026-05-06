@@ -1,4 +1,4 @@
--- Small per-shard capacity exercises BoundedChannel back pressure.
+# Small per-shard capacity exercises BoundedChannel back pressure.
 
 FN main() RETURNS Void ->
     n = 256_i64;

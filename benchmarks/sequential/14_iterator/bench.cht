@@ -1,12 +1,12 @@
--- Iterator Benchmark — CLEAR
---
--- Compares zero-copy borrowed iteration vs raw indexed loop.
--- 1000 outer iterations × 10000-element Int64 array sum.
--- Total: 10M element reads.
---
--- The borrowed iterator (SliceIter) holds a BORROWED reference
--- to the array — no copies, no allocations during iteration.
--- This is the borrow system's performance stress test.
+# Iterator Benchmark — CLEAR
+#
+# Compares zero-copy borrowed iteration vs raw indexed loop.
+# 1000 outer iterations × 10000-element Int64 array sum.
+# Total: 10M element reads.
+#
+# The borrowed iterator (SliceIter) holds a BORROWED reference
+# to the array — no copies, no allocations during iteration.
+# This is the borrow system's performance stress test.
 
 STRUCT SliceIter {
     source: BORROWED Int64[],
@@ -26,7 +26,7 @@ FN advance(iter: SliceIter) RETURNS SliceIter ->
     RETURN SliceIter{ source: iter.source, pos: iter.pos + 1, len: iter.len };
 END
 
--- Benchmark 1: Borrowed iterator (zero-copy)
+# Benchmark 1: Borrowed iterator (zero-copy)
 FN benchBorrowed(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
     FOR outer IN (0_i64 ..< iters) DO
@@ -41,7 +41,7 @@ FN benchBorrowed(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->
     RETURN total;
 END
 
--- Benchmark 2: Raw indexed loop (baseline)
+# Benchmark 2: Raw indexed loop (baseline)
 FN benchRawLoop(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
     FOR outer IN (0_i64 ..< iters) DO
@@ -56,20 +56,20 @@ FN main() RETURNS Void ->
     n: Int64 = 10000;
     iters: Int64 = 1000;
 
-    -- Build data array
+    # Build data array
     MUTABLE data: Int64[10000]@list = [];
     FOR i IN (0_i64 ..< n) -> data.append(i %* 7 %+ 13);
 
-    -- Warm up
+    # Warm up
     x = benchRawLoop(data, n, 1);
 
-    -- Benchmark raw loop
+    # Benchmark raw loop
     t0 = timestampMs();
     result1 = benchRawLoop(data, n, iters);
     t1 = timestampMs();
     rawMs = t1 - t0;
 
-    -- Benchmark borrowed iterator
+    # Benchmark borrowed iterator
     t2 = timestampMs();
     result2 = benchBorrowed(data, n, iters);
     t3 = timestampMs();

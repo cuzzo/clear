@@ -1,6 +1,6 @@
--- MVCC L8: WITH SNAPSHOT read on a @versioned cell.
--- Single-cell read returns a Guard whose release is auto-deferred.
--- The alias binds the bare inner T (Group 2 strip).
+# MVCC L8: WITH SNAPSHOT read on a @versioned cell.
+# Single-cell read returns a Guard whose release is auto-deferred.
+# The alias binds the bare inner T (Group 2 strip).
 
 STRUCT Counter { value: Int64 }
 
@@ -11,7 +11,7 @@ FN main() RETURNS Void ->
         ASSERT view.value == 42, "WITH SNAPSHOT read: expected 42";
     }
 
-    -- Read again -- the cell is unchanged.
+    # Read again -- the cell is unchanged.
     WITH SNAPSHOT c AS view2 {
         ASSERT view2.value == 42, "WITH SNAPSHOT read repeat: expected 42";
     }

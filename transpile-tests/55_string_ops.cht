@@ -1,26 +1,26 @@
--- String operations: startsWith?, charAt, substr, toNumber, toInt
+# String operations: startsWith?, charAt, substr, toNumber, toInt
 
 FN main() RETURNS Void ->
-    -- startsWith?
+    # startsWith?
     ASSERT startsWith?("SET:1", "SET:"), "startsWith SET: prefix";
     ASSERT startsWith?("GET:42", "GET:"), "startsWith GET: prefix";
     ASSERT !startsWith?("QUIT", "SET:"), "startsWith negative";
     ASSERT startsWith?("", ""), "startsWith empty on empty";
     ASSERT startsWith?("hello", ""), "startsWith empty prefix";
 
-    -- charAt
+    # charAt
     line = "SET:1";
     ASSERT charAt(line, 0_i64) == "S", "charAt 0";
     ASSERT charAt(line, 3_i64) == ":", "charAt 3";
     ASSERT charAt(line, 4_i64) == "1", "charAt 4";
 
-    -- substr
+    # substr
     s = substr("SET:123", 4_i64, 3_i64);
     ASSERT s == "123", "substr extracts id";
     s2 = substr("hello world", 0_i64, 5_i64);
     ASSERT s2 == "hello", "substr from start";
 
-    -- toNumber and toInt
+    # toNumber and toInt
     n = toNumber("42.5") OR 0.0;
     ASSERT n == 42.5, "toNumber parses float";
     bad = toNumber("not_a_number") OR -1.0;

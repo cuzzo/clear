@@ -1,6 +1,6 @@
--- Bounded streams: ~T[N] — a fixed-size ordered stream of N concurrent BG fibers.
--- NEXT consumes items in spawn order (FIFO). Calling NEXT on the same stream
--- variable N times returns the N results; the Nth+1 call panics at runtime.
+# Bounded streams: ~T[N] — a fixed-size ordered stream of N concurrent BG fibers.
+# NEXT consumes items in spawn order (FIFO). Calling NEXT on the same stream
+# variable N times returns the N results; the Nth+1 call panics at runtime.
 
 FN double(x: Float64) RETURNS Float64 ->
     RETURN x * 2.0;
@@ -11,9 +11,9 @@ FN add(a: Float64, b: Float64) RETURNS Float64 ->
 END
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: Basic bounded stream — 3 concurrent BG fibers.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: Basic bounded stream — 3 concurrent BG fibers.
+    # -------------------------------------------------------
     stream: ~Float64[3] = [
         BG { 10.0; },
         BG { 20.0; },
@@ -28,10 +28,10 @@ FN main() RETURNS Void ->
     ASSERT r1 == 20.0, "bounded stream item 1";
     ASSERT r2 == 30.0, "bounded stream item 2";
 
-    -- -------------------------------------------------------
-    -- Test 2: Stream with captured outer variables.
-    -- Each BG block captures its own snapshot of outer vars.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: Stream with captured outer variables.
+    # Each BG block captures its own snapshot of outer vars.
+    # -------------------------------------------------------
     base: Float64 = 5.0;
     factor: Float64 = 3.0;
 
@@ -46,9 +46,9 @@ FN main() RETURNS Void ->
     ASSERT w0 == 10.0, "bounded stream: captured double(5)";
     ASSERT w1 == 8.0,  "bounded stream: captured add(5, 3)";
 
-    -- -------------------------------------------------------
-    -- Test 3: Single-element stream (degenerate case).
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: Single-element stream (degenerate case).
+    # -------------------------------------------------------
     solo: ~Float64[1] = [
         BG { 99.0; }
     ];

@@ -1,7 +1,7 @@
--- Test: IF x AS y optional binding syntax
+# Test: IF x AS y optional binding syntax
 
 FN main() RETURNS Void ->
-    -- Test 1: single bind, found case
+    # Test 1: single bind, found case
     str = "hello world";
     MUTABLE found_pos: Int64 = -1;
     IF str.indexOf("world") AS pos THEN
@@ -9,7 +9,7 @@ FN main() RETURNS Void ->
     END
     ASSERT found_pos == 6_i64, "indexOf found at 6";
 
-    -- Test 2: single bind, nil case (else branch taken)
+    # Test 2: single bind, nil case (else branch taken)
     MUTABLE hit: Bool = FALSE;
     IF str.indexOf("xyz") AS pos THEN
         hit = TRUE;

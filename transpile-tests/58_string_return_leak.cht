@@ -1,13 +1,13 @@
--- Memory leak test: functions that return strings built from concat
--- must not leak heap memory. The caller's frame should own the result.
+# Memory leak test: functions that return strings built from concat
+# must not leak heap memory. The caller's frame should own the result.
 
 FN buildGreeting(name: String) RETURNS !String ->
     RETURN "Hello, " + name + "!";
 END
 
 FN main() RETURNS Void ->
-    -- Call a string-returning function multiple times.
-    -- If each call leaks, the GPA will catch it.
+    # Call a string-returning function multiple times.
+    # If each call leaks, the GPA will catch it.
     a = buildGreeting("Alice");
     ASSERT a == "Hello, Alice!", "greeting Alice";
 

@@ -1,7 +1,7 @@
--- DISTINCT test: produces T[]@set of unique key values
+# DISTINCT test: produces T[]@set of unique key values
 
 FN main() RETURNS Void ->
-  -- Test 1: Basic DISTINCT on numbers -> Set membership
+  # Test 1: Basic DISTINCT on numbers -> Set membership
   nums: Int64[] = [1, 2, 1, 3, 1, 4, 1];
   unique = nums |> DISTINCT _;
 
@@ -12,7 +12,7 @@ FN main() RETURNS Void ->
   ASSERT unique.contains?(4_i64), "Should contain 4";
   ASSERT unique.contains?(5_i64) == FALSE, "Should not contain 5";
 
-  -- Test 2: DISTINCT preserves all unique values
+  # Test 2: DISTINCT preserves all unique values
   ordered: Int64[] = [3, 1, 2, 1, 3, 2];
   unique_ordered = ordered |> DISTINCT _;
 
@@ -21,19 +21,19 @@ FN main() RETURNS Void ->
   ASSERT unique_ordered.contains?(2_i64), "Should contain 2";
   ASSERT unique_ordered.contains?(3_i64), "Should contain 3";
 
-  -- Test 3: DISTINCT on already unique list
+  # Test 3: DISTINCT on already unique list
   already_unique: Int64[] = [5, 6, 7, 8];
   still_unique = already_unique |> DISTINCT _;
 
   ASSERT still_unique.length() == 4_i64, "Should have 4 items";
 
-  -- Test 4: DISTINCT on empty list
+  # Test 4: DISTINCT on empty list
   empty: Int64[] = [];
   empty_distinct = empty |> DISTINCT _;
 
   ASSERT empty_distinct.length() == 0_i64, "Should have 0 items";
 
-  -- Test 5: DISTINCT with all duplicates
+  # Test 5: DISTINCT with all duplicates
   all_same: Int64[] = [42, 42, 42, 42];
   one_item = all_same |> DISTINCT _;
 

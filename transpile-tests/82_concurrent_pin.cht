@@ -1,4 +1,4 @@
--- Test: CONCURRENT SELECT with parallel: TRUE — dispatches to least-loaded scheduler
+# Test: CONCURRENT SELECT with parallel: TRUE — dispatches to least-loaded scheduler
 STRUCT Work { value: Float64 }
 
 FN compute(w: Work) RETURNS Float64 ->

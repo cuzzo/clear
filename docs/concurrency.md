@@ -12,8 +12,8 @@ Spawn a fiber that runs concurrently and returns a Promise:
 
 ```ruby clear illustrative
 p = BG { expensive_computation(data); };
--- ... do other work ...
-result = NEXT p;  -- block until the fiber finishes
+# ... do other work ...
+result = NEXT p;  # block until the fiber finishes
 ```
 
 The last expression in the body becomes the promise's value. `NEXT` consumes the promise and returns the value.
@@ -49,10 +49,10 @@ By v0.2 `@stateMachine` and `@stack` will be options.  The compiler will warn yo
 
 ```ruby clear illustrative
 p = BG { @service ->
-    trainModel(dataset);  -- runs on its own OS thread
+    trainModel(dataset);  # runs on its own OS thread
 };
--- fiber continues concurrently
-result = NEXT p;  -- blocks fiber until OS thread finishes
+# fiber continues concurrently
+result = NEXT p;  # blocks fiber until OS thread finishes
 ```
 
 The OS thread gets its own Runtime with a 64 KB frame arena. No scheduler is involved - the thread runs independently until completion, then signals the Promise.
@@ -67,8 +67,8 @@ BG blocks capture outer variables **by value** (moved, not borrowed):
 
 ```ruby clear illustrative
 x = 42.0;
-p = BG { x + 1.0; };  -- x is moved into the fiber
--- x is no longer usable here (affine ownership)
+p = BG { x + 1.0; };  # x is moved into the fiber
+# x is no longer usable here (affine ownership)
 ```
 
 ### THEN Chains
@@ -102,16 +102,16 @@ result = BG {
     fetch("https://api.example.com/data1") AS r THEN parse(r),
     fetch("https://api.example.com/data2") AS r THEN parse(r)
 };
--- result = ~T[] -> this is only valid when all T are the same.
+# result = ~T[] -> this is only valid when all T are the same.
 ```
 
 
 **Error handling:** use `OR` before the `AS` binding. If a step returns `!T`, handle it inline:
 
 ```clear
--- ILLUSTRATIVE
+# ILLUSTRATIVE
 result = BG {
-    fetch(url) OR RAISE           -- propagate error to calle
+    fetch(url) OR RAISE           # propagate error to calle
       AS response THEN parse(response) OR default_value
       AS parsed THEN transform(parsed);
 };
@@ -125,13 +125,13 @@ result = BG {
 Execute multiple branches concurrently, wait for all to complete:
 
 ```clear
--- ILLUSTRATIVE
+# ILLUSTRATIVE
 DO {
     update_database(record),
     send_notification(user),
     log_event(event)
 }
--- All three are done here.
+# All three are done here.
 ```
 
 Branches are separated by commas. Each runs in its own fiber. The DO block waits for all branches before continuing. Returns `Void`.
@@ -141,7 +141,7 @@ Branches are separated by commas. Each runs in its own fiber. The DO block waits
 Each branch can have its own modifiers:
 
 ```clear
--- ILLUSTRATIVE
+# ILLUSTRATIVE
 DO {
     @large -> heavy_computation(),
     @pinned -> cache_local_work()
@@ -169,18 +169,18 @@ result: Float64 = NEXT p;
 Spawn a fiber that yields values over time:
 
 ```ruby clear illustrative
--- Open stream (finite)
+# Open stream (finite)
 s: ~Float64[?] = BG STREAM {
     YIELD 1.0;
     YIELD 4.0;
     YIELD 9.0;
 };
-v1 = NEXT s;  -- 1.0
-v2 = NEXT s;  -- 4.0
-v3 = NEXT s;  -- 9.0
-v4 = NEXT s;  -- NIL (exhausted)
+v1 = NEXT s;  # 1.0
+v2 = NEXT s;  # 4.0
+v3 = NEXT s;  # 9.0
+v4 = NEXT s;  # NIL (exhausted)
 
--- Infinite stream
+# Infinite stream
 counter: ~Float64[INF] = BG STREAM {
     MUTABLE i = 0.0;
     WHILE TRUE DO
@@ -188,8 +188,8 @@ counter: ~Float64[INF] = BG STREAM {
         i = i + 1.0;
     END
 };
-v1 = NEXT counter;  -- 0.0
-v2 = NEXT counter;  -- 1.0 (blocks until generator yields)
+v1 = NEXT counter;  # 0.0
+v2 = NEXT counter;  # 1.0 (blocks until generator yields)
 ```
 
 ## CONCURRENT — Parallel Pipelines
@@ -197,7 +197,7 @@ v2 = NEXT counter;  -- 1.0 (blocks until generator yields)
 Apply pipeline operators in parallel with a persistent worker pool:
 
 ```clear
--- ILLUSTRATIVE
+# ILLUSTRATIVE
 results = items |> CONCURRENT(workers: 8) SELECT transform(_);
 filtered = items |> CONCURRENT(workers: 4) WHERE predicate(_);
 items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
@@ -220,11 +220,11 @@ items |> CONCURRENT(workers: 2) EACH { _.value = 0.0; };
 ### Error Handling
 
 ```ruby clear illustrative
--- Skip failed items
+# Skip failed items
 results = items
   |> CONCURRENT(workers: 4) SELECT risky_fn(_) OR PRUNE;
 
--- Propagate first error
+# Propagate first error
 results = items
   |> CONCURRENT(workers: 4) SELECT risky_fn(_) OR RAISE;
 ```

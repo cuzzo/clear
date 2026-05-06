@@ -1,5 +1,5 @@
--- Test: function call temporaries returning unions must get cleanup.
--- Covers all allocator paths: frame (promoted), heap (COPY), and mixed.
+# Test: function call temporaries returning unions must get cleanup.
+# Covers all allocator paths: frame (promoted), heap (COPY), and mixed.
 
 UNION Val {
     Nil,
@@ -15,19 +15,19 @@ FN getStr(v: Val) RETURNS String ->
     RETURN "nil";
 END
 
--- Case 1: frame-allocated string promoted to heap via PromotionPlan
+# Case 1: frame-allocated string promoted to heap via PromotionPlan
 FN makeFromFrame!(a: String, b: String) RETURNS !Val ->
     RETURN Val{ Str: a + b };
 END
 
--- Case 2: heap-allocated via COPY
+# Case 2: heap-allocated via COPY
 FN makeFromHeap!() RETURNS !Val ->
     MUTABLE params: Val[]@list = List[];
     params.append(Val{ Str: "x" });
     RETURN Val.Lambda{ params: COPY params, body: Val{ Str: "body" }, envId: 0 };
 END
 
--- Case 3: pure value (no allocation) - should NOT get __hpt
+# Case 3: pure value (no allocation) - should NOT get __hpt
 FN makePure() RETURNS Val ->
     RETURN Val.Nil;
 END
@@ -37,15 +37,15 @@ FN wrap(v: Val) RETURNS String ->
 END
 
 FN main() RETURNS Void ->
-    -- Case 1: frame-promoted return as temp
+    # Case 1: frame-promoted return as temp
     s1 = wrap(makeFromFrame!("hel", "lo"));
     ASSERT s1 == "hello", "frame promoted temp";
 
-    -- Case 2: heap return as temp
+    # Case 2: heap return as temp
     s2 = wrap(makeFromHeap!());
-    ASSERT s2 == "nil", "heap temp";  -- Lambda has no Str, getStr returns "nil"
+    ASSERT s2 == "nil", "heap temp";  # Lambda has no Str, getStr returns "nil"
 
-    -- Case 3: pure return as temp (no leak expected)
+    # Case 3: pure return as temp (no leak expected)
     s3 = wrap(makePure());
     ASSERT s3 == "nil", "pure temp";
 

@@ -1,5 +1,5 @@
--- Test: MUTABLE string reassignment in WHILE loop (not FOR) has bounded frame.
--- Same pattern as test 190 but with WHILE to verify both loop types work.
+# Test: MUTABLE string reassignment in WHILE loop (not FOR) has bounded frame.
+# Same pattern as test 190 but with WHILE to verify both loop types work.
 
 FN main() RETURNS Void ->
     MUTABLE resp = "";

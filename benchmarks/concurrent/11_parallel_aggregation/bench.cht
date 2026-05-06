@@ -1,18 +1,18 @@
--- @leak: n = 10000000 -> n = 10000
--- Parallel Aggregation Benchmark — Distributed Histogram + Stats
---
--- Deterministic LCG generates 10M events. Each event is bucketed into
--- one of 1,000 categories. Two phases:
---
---   Phase 1 (SHARD): Build histogram via @sharded(32) map.
---     Uses explicit SHARD() to route by bucket key.
---     Zero locks, zero contention — true shared-nothing counting.
---
---   Phase 2 (Partial Aggregation): Compute stats over histogram values.
---     CONCURRENT SUM/MIN/MAX/AVERAGE with per-worker accumulators.
---
--- All languages use the same LCG with the same seed → identical results.
--- No I/O — pure parallel compute.
+# @leak: n = 10000000 -> n = 10000
+# Parallel Aggregation Benchmark — Distributed Histogram + Stats
+#
+# Deterministic LCG generates 10M events. Each event is bucketed into
+# one of 1,000 categories. Two phases:
+#
+#   Phase 1 (SHARD): Build histogram via @sharded(32) map.
+#     Uses explicit SHARD() to route by bucket key.
+#     Zero locks, zero contention — true shared-nothing counting.
+#
+#   Phase 2 (Partial Aggregation): Compute stats over histogram values.
+#     CONCURRENT SUM/MIN/MAX/AVERAGE with per-worker accumulators.
+#
+# All languages use the same LCG with the same seed → identical results.
+# No I/O — pure parallel compute.
 
 FN lcg(state: Int64) RETURNS Int64 ->
     RETURN state %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
     n = 10000000;
     buckets = 1000;
 
-    -- Pre-compute seeds (LCG is sequential so we must pre-compute).
+    # Pre-compute seeds (LCG is sequential so we must pre-compute).
     MUTABLE seeds: Int64[]@list = List[];
     MUTABLE seed: Int64 = 42;
     FOR i IN (0_i64 ..< n) DO
@@ -35,7 +35,7 @@ FN main() RETURNS Void ->
         seeds.append(seed);
     END
 
-    -- Phase 1: Build histogram via SHARD with integer keys — zero string allocation.
+    # Phase 1: Build histogram via SHARD with integer keys — zero string allocation.
     t0 = timestampMs();
     MUTABLE counts: HashMap<Int64, Int64>@sharded(32) = {};
     (0..<n) |> SHARD(absInt(seeds[_]) MOD buckets, counts) |> CONCURRENT(batch: 512) EACH {
@@ -43,7 +43,7 @@ FN main() RETURNS Void ->
     };
     shardMs = timestampMs() - t0;
 
-    -- Phase 2: Stats over histogram values (partial aggregation)
+    # Phase 2: Stats over histogram values (partial aggregation)
     t1 = timestampMs();
     vals = counts.values();
     total    = vals |> CONCURRENT SUM toFloat(_);

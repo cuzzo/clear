@@ -1,13 +1,13 @@
--- FSM Phase B2-WITH (Rc/Arc): single WITH EXCLUSIVE on Rc/Arc-wrapped
--- @locked values lowers to a 2-state FsmTask. The unwrap path uses
--- `.ctrl.data.*` to reach the inner Locked(T), then takes the
--- standard FSM lock acquire path.
+# FSM Phase B2-WITH (Rc/Arc): single WITH EXCLUSIVE on Rc/Arc-wrapped
+# @locked values lowers to a 2-state FsmTask. The unwrap path uses
+# `.ctrl.data.*` to reach the inner Locked(T), then takes the
+# standard FSM lock acquire path.
 
 STRUCT Counter { value: Int64 }
 
 FN main() RETURNS Void ->
-  -- 1. @shared:locked (Arc<Locked<T>>) — atomic refcount + mutex.
-  --    Two contending FSMs each increment.
+  # 1. @shared:locked (Arc<Locked<T>>) — atomic refcount + mutex.
+  #    Two contending FSMs each increment.
   c1 = Counter{ value: 0 } @shared:locked;
   s1: ~Void = BG { WITH EXCLUSIVE c1 AS inner { inner.value = inner.value + 1; } };
   s2: ~Void = BG { WITH EXCLUSIVE c1 AS inner { inner.value = inner.value + 1; } };
@@ -18,8 +18,8 @@ FN main() RETURNS Void ->
     ASSERT inner.value == 4, "1: 4 contending @shared:locked FSMs";
   }
 
-  -- 2. @multiowned:locked (Rc<Locked<T>>) — non-atomic refcount;
-  --    same-scheduler-only.
+  # 2. @multiowned:locked (Rc<Locked<T>>) — non-atomic refcount;
+  #    same-scheduler-only.
   c2 = Counter{ value: 100 } @multiowned:locked;
   q1: ~Void = BG { WITH EXCLUSIVE c2 AS inner { inner.value = inner.value + 1; } };
   q2: ~Void = BG { WITH EXCLUSIVE c2 AS inner { inner.value = inner.value + 1; } };
@@ -28,7 +28,7 @@ FN main() RETURNS Void ->
     ASSERT inner.value == 102, "2: 2 contending @multiowned:locked FSMs";
   }
 
-  -- 3. Pre-suspend local read inside the CS, on Arc-wrapped lock.
+  # 3. Pre-suspend local read inside the CS, on Arc-wrapped lock.
   c3 = Counter{ value: 1000 } @shared:locked;
   p3: ~Void = BG {
     delta = 5_i64;
@@ -41,7 +41,7 @@ FN main() RETURNS Void ->
     ASSERT inner.value == 1005, "3: pre-local read inside Arc-wrapped CS";
   }
 
-  -- 4. Heavy contention: 8 FSMs on @shared:locked.
+  # 4. Heavy contention: 8 FSMs on @shared:locked.
   c4 = Counter{ value: 0 } @shared:locked;
   r1: ~Void = BG { WITH EXCLUSIVE c4 AS inner { inner.value = inner.value + 1; } };
   r2: ~Void = BG { WITH EXCLUSIVE c4 AS inner { inner.value = inner.value + 1; } };

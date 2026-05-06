@@ -1,15 +1,15 @@
--- Thunk Phase 4d -- non-tail :THUNK lowers to a heap-CPS trampoline.
---
--- factorial is the canonical "simple recurrence" shape: zero or more
--- IF base cases followed by `RETURN expr <op> self_call(args)`. Phase 4c
--- detects the shape; Phase 4d emits a Frame-struct-based trampoline
--- inside the function body. Each recursive call allocates a child
--- frame on rt.heapAlloc(); the trampoline pops back through parent
--- pointers when each frame's Done value is computed.
---
--- The fiber stack stays at depth=1 -- recursion lives entirely on the
--- heap (one Frame per active call). Compare with plain EFFECTS REENTRANT
--- which would force the caller onto a 2 MB @service stack.
+# Thunk Phase 4d -- non-tail :THUNK lowers to a heap-CPS trampoline.
+#
+# factorial is the canonical "simple recurrence" shape: zero or more
+# IF base cases followed by `RETURN expr <op> self_call(args)`. Phase 4c
+# detects the shape; Phase 4d emits a Frame-struct-based trampoline
+# inside the function body. Each recursive call allocates a child
+# frame on rt.heapAlloc(); the trampoline pops back through parent
+# pointers when each frame's Done value is computed.
+#
+# The fiber stack stays at depth=1 -- recursion lives entirely on the
+# heap (one Frame per active call). Compare with plain EFFECTS REENTRANT
+# which would force the caller onto a 2 MB @service stack.
 
 FN factorial(n: Int64) RETURNS Int64
   EFFECTS REENTRANT:THUNK ->

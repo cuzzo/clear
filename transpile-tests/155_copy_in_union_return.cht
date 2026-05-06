@@ -1,5 +1,5 @@
--- Test: RETURN UnionType{ field: COPY expr } must not double-promote.
--- Bug: COPY heap-dupes the field, then promoteFields dupes again. First leaks.
+# Test: RETURN UnionType{ field: COPY expr } must not double-promote.
+# Bug: COPY heap-dupes the field, then promoteFields dupes again. First leaks.
 
 UNION Val {
     Nil,

@@ -1,12 +1,12 @@
--- Nested Lock Benchmark -- CLEAR
---
--- Bank transfer workload: 64 accounts, N workers doing random transfers.
--- Each transfer acquires two account locks (ordered by index to prevent deadlock).
--- Measures throughput and contention overhead of nested mutex acquisition.
---
--- Uses @shared:writeLocked Bank (Arc<RwLock>) to share the accounts list
--- across fibers (read lock only -- list is immutable after setup).
--- Individual accounts are @shared:locked (Arc<Mutex>) for transfer mutations.
+# Nested Lock Benchmark -- CLEAR
+#
+# Bank transfer workload: 64 accounts, N workers doing random transfers.
+# Each transfer acquires two account locks (ordered by index to prevent deadlock).
+# Measures throughput and contention overhead of nested mutex acquisition.
+#
+# Uses @shared:writeLocked Bank (Arc<RwLock>) to share the accounts list
+# across fibers (read lock only -- list is immutable after setup).
+# Individual accounts are @shared:locked (Arc<Mutex>) for transfer mutations.
 
 STRUCT Account { balance: Int64 }
 STRUCT Bank { accounts: Account@shared:locked[]@list }
@@ -35,13 +35,13 @@ FN main() RETURNS Void ->
 
                 IF a == b THEN b = (a + 1) MOD numAccounts; END
 
-                -- Order by index to prevent deadlock
+                # Order by index to prevent deadlock
                 MUTABLE lo = a;
                 MUTABLE hi = b;
                 IF a > b THEN lo = b; hi = a; END
 
-                -- Read lock on bank to access accounts list,
-                -- then exclusive locks on both accounts for transfer.
+                # Read lock on bank to access accounts list,
+                # then exclusive locks on both accounts for transfer.
                 WITH bank AS bk {
                     loAcct = bk.accounts[lo];
                     hiAcct = bk.accounts[hi];
@@ -60,14 +60,14 @@ FN main() RETURNS Void ->
     FOR i IN (0_i64 ..< nWorkers) -> NEXT futures[i];
     elapsed = timestampMs() - t0;
 
-    -- Verify conservation. Snapshot the per-account Arc handles out of
-    -- the bank's read lock first so the per-account WITH at the bottom
-    -- isn't lexically nested under WITH bank. (The naked-nested-WITH
-    -- lint conservatively flags any single-binding inner WITH while a
-    -- different binding is held; in this verification path workers have
-    -- already joined so no symmetric caller exists, but the lint can't
-    -- prove that. The snapshot pattern sidesteps the warning while
-    -- preserving the read-then-per-element-lock semantics.)
+    # Verify conservation. Snapshot the per-account Arc handles out of
+    # the bank's read lock first so the per-account WITH at the bottom
+    # isn't lexically nested under WITH bank. (The naked-nested-WITH
+    # lint conservatively flags any single-binding inner WITH while a
+    # different binding is held; in this verification path workers have
+    # already joined so no symmetric caller exists, but the lint can't
+    # prove that. The snapshot pattern sidesteps the warning while
+    # preserving the read-then-per-element-lock semantics.)
     acct_refs: Account@shared:locked[]@list = [];
     WITH bank AS bk {
         FOR i IN (0_i64 ..< numAccounts) -> acct_refs.append(bk.accounts[i]);

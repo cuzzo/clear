@@ -1,29 +1,29 @@
--- FSM Phase B2-IO (writeFile variant): a BG whose only suspending
--- call is `writeFile` lowers to a 2-state FsmTask. Setup opens the
--- file and submits an io_uring write tagged with FsmIoWaiter; the
--- resume fn yields WaitForLock and is woken by the CQE handler
--- (Scheduler.processCqes routes FSM-tagged completions to
--- fsm_ready_queue without spuriously incrementing active_tasks).
---
--- writeFile returns Void so there is no result-buffer ownership
--- transfer — the FSM body is leak-free.
+# FSM Phase B2-IO (writeFile variant): a BG whose only suspending
+# call is `writeFile` lowers to a 2-state FsmTask. Setup opens the
+# file and submits an io_uring write tagged with FsmIoWaiter; the
+# resume fn yields WaitForLock and is woken by the CQE handler
+# (Scheduler.processCqes routes FSM-tagged completions to
+# fsm_ready_queue without spuriously incrementing active_tasks).
+#
+# writeFile returns Void so there is no result-buffer ownership
+# transfer — the FSM body is leak-free.
 
 FN main() RETURNS Void ->
-  -- 1. Single FSM that writes a file and signals completion.
+  # 1. Single FSM that writes a file and signals completion.
   pw: ~Void = BG {
     writeFile("/tmp/fsm_writefile_test_1.txt", "Hello, FSM!");
   };
   NEXT pw;
 
-  -- Verify the file was actually written by reading it back from a
-  -- regular (top-level) call. readFile at top-level is stackful and
-  -- not part of this FSM-IO test surface.
+  # Verify the file was actually written by reading it back from a
+  # regular (top-level) call. readFile at top-level is stackful and
+  # not part of this FSM-IO test surface.
   body = readFile("/tmp/fsm_writefile_test_1.txt");
   ASSERT body == "Hello, FSM!", "1: writeFile FSM persisted content";
 
-  -- 2. Multiple FSM writeFile BGs run concurrently. Total elapsed
-  --    should be roughly that of a single write (not a sum) — the
-  --    point is they all complete and don't deadlock the scheduler.
+  # 2. Multiple FSM writeFile BGs run concurrently. Total elapsed
+  #    should be roughly that of a single write (not a sum) — the
+  #    point is they all complete and don't deadlock the scheduler.
   pa: ~Void = BG { writeFile("/tmp/fsm_writefile_test_a.txt", "A"); };
   pb: ~Void = BG { writeFile("/tmp/fsm_writefile_test_b.txt", "B"); };
   pc: ~Void = BG { writeFile("/tmp/fsm_writefile_test_c.txt", "C"); };

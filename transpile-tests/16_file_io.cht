@@ -2,12 +2,12 @@ FN main() RETURNS Void ->
   path = "./test_output.txt";
   content = "12345";
 
-  -- 1. Write
+  # 1. Write
   writeFile(path, content);
 
-  -- 2. Read
+  # 2. Read
   read_back = readFile(path);
 
-  -- 3. Verify
+  # 3. Verify
   ASSERT eql?(read_back, content), "File read should match written content";
 END

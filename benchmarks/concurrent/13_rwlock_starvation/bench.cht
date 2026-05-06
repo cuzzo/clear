@@ -1,15 +1,15 @@
--- RwLock Writer Starvation Benchmark -- CLEAR
---
--- Tests whether CLEAR's @shared:writeLocked (Arc<RwLock<T>>) starves writers
--- under heavy read contention.
---
--- Setup:
---   - N-1 reader fibers each hold read lock for ~busyWork(100), loop 2M times
---   - 1 writer fiber acquires exclusive lock, loops 1K times
---   - Measure: writer completion time, avg/max writer wait per acquire
---
--- CLEAR uses pthread_rwlock_t with PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP.
--- Writer-preferring: new readers block once a writer is waiting. No starvation.
+# RwLock Writer Starvation Benchmark -- CLEAR
+#
+# Tests whether CLEAR's @shared:writeLocked (Arc<RwLock<T>>) starves writers
+# under heavy read contention.
+#
+# Setup:
+#   - N-1 reader fibers each hold read lock for ~busyWork(100), loop 2M times
+#   - 1 writer fiber acquires exclusive lock, loops 1K times
+#   - Measure: writer completion time, avg/max writer wait per acquire
+#
+# CLEAR uses pthread_rwlock_t with PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP.
+# Writer-preferring: new readers block once a writer is waiting. No starvation.
 
 STRUCT Counter { value: Int64 }
 STRUCT WriterResult { doneMs: Int64, avgWaitMs: Int64, maxWaitMs: Int64 }
@@ -37,7 +37,7 @@ FN main() RETURNS Void ->
 
     t0 = timestampMs();
 
-    -- Spawn readers
+    # Spawn readers
     MUTABLE readers: ~Void[]@list = [];
     FOR r IN (0_i64 ..< nReaders) DO
         readers.append(BG { @parallel ->
@@ -51,7 +51,7 @@ FN main() RETURNS Void ->
         });
     END
 
-    -- Spawn writer - measure per-write latency
+    # Spawn writer - measure per-write latency
     writer = BG { @parallel ->
         MUTABLE maxWaitMs = 0_i64;
         MUTABLE totalWaitMs = 0_i64;
@@ -71,12 +71,12 @@ FN main() RETURNS Void ->
         WriterResult{ doneMs: writerDone, avgWaitMs: avgWaitMs, maxWaitMs: maxWaitMs };
     };
 
-    -- Wait for all
+    # Wait for all
     FOR r IN (0_i64 ..< nReaders) -> NEXT readers[r];
     result: WriterResult = NEXT writer;
     elapsed = timestampMs() - t0;
 
-    -- Read final value
+    # Read final value
     MUTABLE finalVal = 0_i64;
     WITH c AS inner {
         finalVal = inner.value;

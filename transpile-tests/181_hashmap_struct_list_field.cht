@@ -1,7 +1,7 @@
--- Test: struct with populated @list field stored in HashMap via a function.
--- The list backing buffer is frame-allocated. When HashMap.put replaces
--- the value, cleanup tries to free with heapAlloc -> "Invalid free".
--- This only triggers when the list has elements (empty lists have no backing).
+# Test: struct with populated @list field stored in HashMap via a function.
+# The list backing buffer is frame-allocated. When HashMap.put replaces
+# the value, cleanup tries to free with heapAlloc -> "Invalid free".
+# This only triggers when the list has elements (empty lists have no backing).
 
 STRUCT Item {
     name: String,
@@ -18,13 +18,13 @@ END
 FN main() RETURNS Void ->
     MUTABLE items: HashMap<Item> = {};
 
-    -- Store a struct with a populated list field
+    # Store a struct with a populated list field
     addItem!(items, "x", "first", "a");
 
-    -- Replace it - triggers cleanup of old value's frame-allocated list
+    # Replace it - triggers cleanup of old value's frame-allocated list
     addItem!(items, "x", "second", "b");
 
-    -- Verify replacement worked
+    # Verify replacement worked
     item = items["x"] OR Item{ name: "", tags: [] };
     ASSERT item.name == "second", "replaced value";
 

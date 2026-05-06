@@ -1,7 +1,7 @@
--- Test: TAP on ~T[INF] infinite streams
+# Test: TAP on ~T[INF] infinite streams
 
 FN main() RETURNS Void ->
-    -- TAP before LIMIT + EACH: side-effect observer passes stream through
+    # TAP before LIMIT + EACH: side-effect observer passes stream through
     counter: ~Int64[INF] = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE TRUE DO
@@ -13,7 +13,7 @@ FN main() RETURNS Void ->
     counter |> TAP { ASSERT _ > 0, "tap sees positive item"; } |> LIMIT 5 |> EACH { sum1 = sum1 + _; };
     ASSERT sum1 == 15, "TAP then LIMIT 5 then EACH: 1+2+3+4+5";
 
-    -- TAP + LIMIT + SUM
+    # TAP + LIMIT + SUM
     counter2: ~Int64[INF] = BG STREAM {
         MUTABLE j: Int64 = 1;
         WHILE TRUE DO
@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
     total = counter2 |> TAP { ASSERT _ > 0, "tap sees item"; } |> LIMIT 4 |> SUM _;
     ASSERT total == 10, "TAP then LIMIT 4 then SUM: 1+2+3+4";
 
-    -- WHERE before TAP before LIMIT: TAP sees only filtered items
+    # WHERE before TAP before LIMIT: TAP sees only filtered items
     counter3: ~Int64[INF] = BG STREAM {
         MUTABLE k: Int64 = 1;
         WHILE TRUE DO
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
     counter3 |> WHERE _ MOD 2 == 0 |> TAP { ASSERT _ MOD 2 == 0, "tap sees even"; } |> LIMIT 3 |> EACH { sum3 = sum3 + _; };
     ASSERT sum3 == 12, "WHERE evens then TAP then LIMIT 3 then EACH: 2+4+6";
 
-    -- SELECT before TAP before LIMIT
+    # SELECT before TAP before LIMIT
     counter4: ~Int64[INF] = BG STREAM {
         MUTABLE m: Int64 = 1;
         WHILE TRUE DO

@@ -1,6 +1,6 @@
--- Polymorphic WITH flow path: GUARD + ON GuardFail RETURN, and
--- RETURN from inside the WITH body. This must run through real Zig
--- runtime helpers, not only Ruby codegen specs.
+# Polymorphic WITH flow path: GUARD + ON GuardFail RETURN, and
+# RETURN from inside the WITH body. This must run through real Zig
+# runtime helpers, not only Ruby codegen specs.
 
 STRUCT Counter { value: Int64 }
 

@@ -1,16 +1,16 @@
--- Concurrent observable benchmark — CLEAR.
---
--- The pipeline `gen |> SUM _` heap-allocates an `*ObservableSum(i64)`
--- and spawns a CONSUMER fiber that pulls from `gen` and calls
--- `.add(item)` per emit. The consumer stays on the source scheduler
--- so stream wakeups remain local; cross-scheduler stream wakeups are
--- covered separately by runtime tests.
--- `NEXT running` parks main on the observable's WaitGroup and
--- wakes when the consumer publishes `.finish()`.
---
--- The metric is wall time for 2M producer->consumer->accumulator
--- emits. bench.go and bench.rs mirror this shape with channels:
--- one producer, one consumer sum, and a join.
+# Concurrent observable benchmark — CLEAR.
+#
+# The pipeline `gen |> SUM _` heap-allocates an `*ObservableSum(i64)`
+# and spawns a CONSUMER fiber that pulls from `gen` and calls
+# `.add(item)` per emit. The consumer stays on the source scheduler
+# so stream wakeups remain local; cross-scheduler stream wakeups are
+# covered separately by runtime tests.
+# `NEXT running` parks main on the observable's WaitGroup and
+# wakes when the consumer publishes `.finish()`.
+#
+# The metric is wall time for 2M producer->consumer->accumulator
+# emits. bench.go and bench.rs mirror this shape with channels:
+# one producer, one consumer sum, and a join.
 
 FN main() RETURNS Void ->
     n_writes: Int64 = 2_000_000_i64;

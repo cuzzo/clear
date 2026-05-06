@@ -1,21 +1,21 @@
--- 17b: MVCC vs RwLock under PURE READ stress (no writers).
---
--- Why this scenario: with NO writers, RwLock readers shouldn't have any
--- contention -- they all hold a shared mode. But the rwlock implementation
--- still has to atomically update the reader-count on the lock state cache
--- line on every acquire/release. With 32 readers on 32 cores, all 32 cores
--- contend for that one cache line via cache-coherence traffic. Throughput
--- is bottlenecked on the inter-core MESI protocol, not on actual work.
---
--- MVCC reads are pure local operations: an acquire-load of an immutable
--- pointer + a thread-local EBR pin (one store to a per-thread slot). No
--- inter-core write traffic. Throughput scales linearly with cores.
---
--- This is the cleanest 5-10x scenario. If it doesn't show that gap on
--- 32 cores, something is wrong with the EBR pin path or with the lock's
--- read fast path.
---
--- Workload: 32 readers x 200k iters; ZERO writers.
+# 17b: MVCC vs RwLock under PURE READ stress (no writers).
+#
+# Why this scenario: with NO writers, RwLock readers shouldn't have any
+# contention -- they all hold a shared mode. But the rwlock implementation
+# still has to atomically update the reader-count on the lock state cache
+# line on every acquire/release. With 32 readers on 32 cores, all 32 cores
+# contend for that one cache line via cache-coherence traffic. Throughput
+# is bottlenecked on the inter-core MESI protocol, not on actual work.
+#
+# MVCC reads are pure local operations: an acquire-load of an immutable
+# pointer + a thread-local EBR pin (one store to a per-thread slot). No
+# inter-core write traffic. Throughput scales linearly with cores.
+#
+# This is the cleanest 5-10x scenario. If it doesn't show that gap on
+# 32 cores, something is wrong with the EBR pin path or with the lock's
+# read fast path.
+#
+# Workload: 32 readers x 200k iters; ZERO writers.
 
 STRUCT Counter { value: Int64 }
 
@@ -24,7 +24,7 @@ FN main() RETURNS Void ->
     reads_per:  Int64 = 200000_i64;
     total_reads: Int64 = n_readers * reads_per;
 
-    -- ---------- Variant A: @shared:writeLocked (RwLock) ----------
+    # ---------- Variant A: @shared:writeLocked (RwLock) ----------
     MUTABLE c_rw = Counter{ value: 42_i64 } @shared:writeLocked;
 
     t0_rw = timestampMs();
@@ -46,7 +46,7 @@ FN main() RETURNS Void ->
     FOR r IN (0_i64 ..< n_readers) DO s_rw = s_rw + (NEXT rw_readers[r]); END
     elapsed_rw_ms = timestampMs() - t0_rw;
 
-    -- ---------- Variant B: @shared:versioned (MVCC) ----------
+    # ---------- Variant B: @shared:versioned (MVCC) ----------
     MUTABLE c_v = Counter{ value: 42_i64 } @shared:versioned;
 
     t0_v = timestampMs();
@@ -68,7 +68,7 @@ FN main() RETURNS Void ->
     FOR r IN (0_i64 ..< n_readers) DO s_v = s_v + (NEXT v_readers[r]); END
     elapsed_v_ms = timestampMs() - t0_v;
 
-    -- ---------- Report ----------
+    # ---------- Report ----------
     rw_ops_per_sec = (total_reads * 1000_i64) / elapsed_rw_ms;
     v_ops_per_sec  = (total_reads * 1000_i64) / elapsed_v_ms;
     speedup_x100 = (elapsed_rw_ms * 100_i64) / elapsed_v_ms;

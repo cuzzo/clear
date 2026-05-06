@@ -1,7 +1,7 @@
--- Test: MUTABLE string reassignment in loop (Pattern 5).
--- The frame string grows each iteration via concat. loopPreserveAndRewind
--- copies the value past the loop mark before rewind so it survives.
--- The loop mark is still active (bounded frame growth per iteration).
+# Test: MUTABLE string reassignment in loop (Pattern 5).
+# The frame string grows each iteration via concat. loopPreserveAndRewind
+# copies the value past the loop mark before rewind so it survives.
+# The loop mark is still active (bounded frame growth per iteration).
 
 FN main() RETURNS Void ->
     MUTABLE acc: String = "";

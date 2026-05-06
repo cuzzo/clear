@@ -1,14 +1,14 @@
--- Test: DISTINCT on stream types -> T[]@set
+# Test: DISTINCT on stream types -> T[]@set
 
 FN main() RETURNS Void ->
-    -- DISTINCT on dynamic range stream (~T[]): produces ~T[]@set:observable;
-    -- COLLECT joins the producer fiber and returns the final set.
+    # DISTINCT on dynamic range stream (~T[]): produces ~T[]@set:observable;
+    # COLLECT joins the producer fiber and returns the final set.
     s1: ~Int64[] = 1 ..< 6;
     u1 = s1 |> DISTINCT _ |> COLLECT;
     ASSERT u1.length() == 5_i64, "distinct range 1..5: 5 unique";
     ASSERT u1.contains?(3_i64), "contains 3";
 
-    -- DISTINCT on ~T[INF] with LIMIT: LIMIT strips tense, eager DISTINCT.
+    # DISTINCT on ~T[INF] with LIMIT: LIMIT strips tense, eager DISTINCT.
     counter: ~Int64[INF] = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE TRUE DO
@@ -22,7 +22,7 @@ FN main() RETURNS Void ->
     ASSERT u2.contains?(1_i64), "contains 1";
     ASSERT u2.contains?(2_i64), "contains 2";
 
-    -- DISTINCT after WHERE on ~T[INF]: WHERE+LIMIT strip tense, eager.
+    # DISTINCT after WHERE on ~T[INF]: WHERE+LIMIT strip tense, eager.
     counter2: ~Int64[INF] = BG STREAM {
         MUTABLE j: Int64 = 1;
         WHILE TRUE DO
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
     ASSERT u3.contains?(2_i64), "contains 2";
     ASSERT u3.contains?(4_i64), "contains 4";
 
-    -- DISTINCT on bounded stream (~T[N]): observable; COLLECT joins.
+    # DISTINCT on bounded stream (~T[N]): observable; COLLECT joins.
     s4: ~Int64[5] = [BG { 3; }, BG { 1; }, BG { 3; }, BG { 2; }, BG { 1; }];
     u4 = s4 |> DISTINCT _ |> COLLECT;
     ASSERT u4.length() == 3_i64, "3 unique values from bounded stream";

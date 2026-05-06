@@ -1,23 +1,23 @@
 STRUCT Node { id: Int64 }
 
--- Test: MOVE transfers the Rc handle without incrementing the ref count.
--- After MOVE, the source variable is consumed (cannot be used again).
--- The testing allocator verifies no leaks and no double-frees.
+# Test: MOVE transfers the Rc handle without incrementing the ref count.
+# After MOVE, the source variable is consumed (cannot be used again).
+# The testing allocator verifies no leaks and no double-frees.
 FN main() RETURNS Void ->
     a = Node{ id: 42 } @multiowned;
 
-    -- Default clone: both a and b own the Node (ref count = 2).
+    # Default clone: both a and b own the Node (ref count = 2).
     b = a;
     ASSERT b.id == 42, "clone: b.id should be 42";
 
-    -- MOVE: transfer a's handle to c without retain (ref count stays 2).
-    -- After this, a is consumed; only b and c are valid.
+    # MOVE: transfer a's handle to c without retain (ref count stays 2).
+    # After this, a is consumed; only b and c are valid.
     c = MOVE a;
     ASSERT c.id == 42, "move: c.id should be 42";
 
-    -- On scope exit (LIFO):
-    --   c's defer: if (!c_moved) rcRelease(Node, alloc, c)  -> count 2->1  (b still holds)
-    --   b's defer: if (!b_moved) rcRelease(Node, alloc, b)  -> count 1->0  (Node freed)
-    --   a's defer: if (!a_moved) ... a_moved=true, so skipped  (no double-free)
+    # On scope exit (LIFO):
+    #   c's defer: if (!c_moved) rcRelease(Node, alloc, c)  -> count 2->1  (b still holds)
+    #   b's defer: if (!b_moved) rcRelease(Node, alloc, b)  -> count 1->0  (Node freed)
+    #   a's defer: if (!a_moved) ... a_moved=true, so skipped  (no double-free)
     RETURN;
 END

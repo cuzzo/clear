@@ -1,53 +1,53 @@
--- Test: Phase 3 Collection Query Operators
--- Exercises FIND, ANY, ALL, COUNT pipeline operators.
+# Test: Phase 3 Collection Query Operators
+# Exercises FIND, ANY, ALL, COUNT pipeline operators.
 
 STRUCT Item { value: Float64, active: Bool }
 
 FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
-    -- COUNT: how many elements are greater than 3?
+    # COUNT: how many elements are greater than 3?
     big_count: Int64 = nums |> COUNT _ > 3.0;
     ASSERT big_count == 2, "COUNT > 3 should be 2";
 
-    -- COUNT: all elements match
+    # COUNT: all elements match
     pos_count: Int64 = nums |> COUNT _ > 0.0;
     ASSERT pos_count == 5, "COUNT > 0 should be 5";
 
-    -- COUNT: no elements match
+    # COUNT: no elements match
     zero_count: Int64 = nums |> COUNT _ > 100.0;
     ASSERT zero_count == 0, "COUNT > 100 should be 0";
 
-    -- ANY: is there any element > 4?
+    # ANY: is there any element > 4?
     has_big = nums |> ANY _ > 4.0;
     ASSERT has_big == TRUE, "ANY > 4 should be true";
 
-    -- ANY: no element > 100
+    # ANY: no element > 100
     has_huge = nums |> ANY _ > 100.0;
     ASSERT has_huge == FALSE, "ANY > 100 should be false";
 
-    -- ALL: are all elements > 0?
+    # ALL: are all elements > 0?
     all_pos = nums |> ALL _ > 0.0;
     ASSERT all_pos == TRUE, "ALL > 0 should be true";
 
-    -- ALL: not all elements > 3
+    # ALL: not all elements > 3
     all_gt3 = nums |> ALL _ > 3.0;
     ASSERT all_gt3 == FALSE, "ALL > 3 should be false";
 
-    -- FIND: first element > 3 (should find 4.0)
+    # FIND: first element > 3 (should find 4.0)
     found = nums |> FIND _ > 3.0;
     ASSERT found != NIL, "FIND > 3 should find something";
 
-    -- FIND: no match returns NIL
+    # FIND: no match returns NIL
     not_found = nums |> FIND _ > 100.0;
     ASSERT not_found == NIL, "FIND > 100 should return NIL";
 
-    -- Chained: WHERE then COUNT
+    # Chained: WHERE then COUNT
     evens: Float64[] = [2.0, 4.0, 6.0, 8.0];
     big_evens: Int64 = evens |> COUNT _ > 4.0;
     ASSERT big_evens == 2, "COUNT of evens > 4 should be 2";
 
-    -- ANY on struct array
+    # ANY on struct array
     items = [
         Item{ value: 10.0, active: TRUE },
         Item{ value: 20.0, active: FALSE }

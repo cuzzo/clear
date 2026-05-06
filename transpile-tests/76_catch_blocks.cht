@@ -1,4 +1,4 @@
--- CATCH blocks: multi-clause error handling at function bottom.
+# CATCH blocks: multi-clause error handling at function bottom.
 
 FN riskyOp(mode: String) RETURNS !String ->
     IF mode == "transient" THEN
@@ -11,7 +11,7 @@ FN riskyOp(mode: String) RETURNS !String ->
     RETURN "ok:" + mode;
 END
 
--- Function with CATCH blocks
+# Function with CATCH blocks
 FN handleWithCatch(mode: String) RETURNS !String ->
     result = riskyOp(mode) OR RAISE;
     RETURN result;
@@ -25,19 +25,19 @@ DEFAULT
 END
 
 FN main() RETURNS Void ->
-    -- Success case: no error, CATCH not triggered
+    # Success case: no error, CATCH not triggered
     r1 = handleWithCatch("ok");
     ASSERT r1 == "ok:ok", "success passes through";
 
-    -- Transient error: caught by CATCH Transient
+    # Transient error: caught by CATCH Transient
     r2 = handleWithCatch("transient");
     ASSERT r2 == "recovered-transient", "CATCH Transient";
 
-    -- Input/InvalidJson: caught by CATCH Input WITH(InvalidJson)
+    # Input/InvalidJson: caught by CATCH Input WITH(InvalidJson)
     r3 = handleWithCatch("input");
     ASSERT r3 == "recovered-invalid-json", "CATCH Input WITH(InvalidJson)";
 
-    -- NotFound: no specific CATCH, falls to DEFAULT
+    # NotFound: no specific CATCH, falls to DEFAULT
     r4 = handleWithCatch("notfound");
     ASSERT r4 == "recovered-default", "DEFAULT catches NotFound";
 

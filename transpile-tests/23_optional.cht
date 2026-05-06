@@ -1,12 +1,12 @@
 FN main() RETURNS Void ->
-    -- Optional with value
+    # Optional with value
     maybe_num: ?Int64 = 42;
     ASSERT maybe_num? == 42, "Optional should unwrap to 42";
 
-    -- Optional set to nil
+    # Optional set to nil
     empty: ?Int64 = NIL;
 
-    -- Conditional check (Zig handles null checks)
+    # Conditional check (Zig handles null checks)
     MUTABLE result = 0_i64;
     IF maybe_num? == 42 THEN
         result = 1_i64;

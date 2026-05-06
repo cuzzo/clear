@@ -1,5 +1,5 @@
--- Test: NEXT on ~T[]@list (await-all)
--- NEXT on a promise list awaits all promises and returns T[]@list.
+# Test: NEXT on ~T[]@list (await-all)
+# NEXT on a promise list awaits all promises and returns T[]@list.
 
 FN double(n: Int64) RETURNS Int64 -> RETURN n * 2; END
 
@@ -10,10 +10,10 @@ FN main() RETURNS Void ->
     futures.append(BG { double(3); });
     futures.append(BG { double(4); });
 
-    -- Await all: NEXT on the list returns Int64[]@list
+    # Await all: NEXT on the list returns Int64[]@list
     results: Int64[]@list = NEXT futures;
 
-    -- 1*2 + 2*2 + 3*2 + 4*2 = 2+4+6+8 = 20
+    # 1*2 + 2*2 + 3*2 + 4*2 = 2+4+6+8 = 20
     MUTABLE sum: Int64 = 0;
     FOR r IN results DO
         sum = sum + r;

@@ -1,10 +1,10 @@
 STRUCT Point { x: Int64 }
 
 FN main() RETURNS Void ->
-    -- Standard Frame allocation
+    # Standard Frame allocation
     p = Point{ x: 10 };
 
-    -- Assertion: Check value
+    # Assertion: Check value
     ASSERT p.x == 10, "Struct Initialization Failed";
 
     RETURN;

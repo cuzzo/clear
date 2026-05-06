@@ -1,16 +1,16 @@
--- Test: Linear File Resource (Phase 1)
--- Opens a file, reads its contents, asserts the expected value.
--- The compiler must auto-inject `defer f.close()` — no manual close needed.
+# Test: Linear File Resource (Phase 1)
+# Opens a file, reads its contents, asserts the expected value.
+# The compiler must auto-inject `defer f.close()` — no manual close needed.
 
 FN main() RETURNS Void ->
-    -- File::open is a static constructor that returns a linear File resource.
-    -- The compiler will emit: `defer f.close();` at this declaration site.
+    # File::open is a static constructor that returns a linear File resource.
+    # The compiler will emit: `defer f.close();` at this declaration site.
     f = File::open("testdata/fruits.csv");
 
-    -- Use the high-level readAll to get the file's contents.
+    # Use the high-level readAll to get the file's contents.
     contents = fileReadAll(f);
 
-    -- Verify we got something back.
+    # Verify we got something back.
     ASSERT contents.length() > 0, "File should have content";
 
     RETURN;

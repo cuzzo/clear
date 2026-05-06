@@ -1,6 +1,6 @@
--- Minimal reproducer: store COPY'd strings into HashMap in WHILE loop,
--- then read them back. Tests that loop frame rewind doesn't corrupt
--- heap-owned strings in the HashMap.
+# Minimal reproducer: store COPY'd strings into HashMap in WHILE loop,
+# then read them back. Tests that loop frame rewind doesn't corrupt
+# heap-owned strings in the HashMap.
 
 UNION Value { Nil, Str: String, Num: Float64 }
 

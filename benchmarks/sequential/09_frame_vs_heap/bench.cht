@@ -1,18 +1,18 @@
--- @leak: n = 1000000 -> n = 100000
--- Benchmark 21: Frame vs Heap Escape — The Memory Boundary Tax
---
--- Measures the cost of frame allocation (CLEAR's fast path) vs heap
--- promotion (the escape path). Both variants build millions of short-lived
--- strings in a loop. Variant A keeps data on the frame (rewound each
--- iteration). Variant B forces heap promotion by returning strings from
--- a helper function.
---
--- Expected: Frame path is significantly faster — no GPA lock, no free
--- list traversal, just a bump pointer reset per iteration.
+# @leak: n = 1000000 -> n = 100000
+# Benchmark 21: Frame vs Heap Escape — The Memory Boundary Tax
+#
+# Measures the cost of frame allocation (CLEAR's fast path) vs heap
+# promotion (the escape path). Both variants build millions of short-lived
+# strings in a loop. Variant A keeps data on the frame (rewound each
+# iteration). Variant B forces heap promotion by returning strings from
+# a helper function.
+#
+# Expected: Frame path is significantly faster — no GPA lock, no free
+# list traversal, just a bump pointer reset per iteration.
 
--- Variant A: Frame-local strings. Built and discarded each iteration.
--- The frame mark rewinds at the end of each loop iteration, so all
--- string data is freed in O(1) — zero GPA calls.
+# Variant A: Frame-local strings. Built and discarded each iteration.
+# The frame mark rewinds at the end of each loop iteration, so all
+# string data is freed in O(1) — zero GPA calls.
 FN benchFrame(n: Int64) RETURNS !Int64 ->
     MUTABLE total: Int64 = 0;
     FOR i IN (0_i64 ..< n) DO
@@ -22,15 +22,15 @@ FN benchFrame(n: Int64) RETURNS !Int64 ->
     RETURN total;
 END
 
--- Helper that returns a heap-promoted string (escape path).
+# Helper that returns a heap-promoted string (escape path).
 FN makeString(i: Int64) RETURNS !String ->
     result = "item-${i.toString()}-value";
     RETURN result;
 END
 
--- Variant B: Heap-promoted strings. Each iteration calls makeString
--- which promotes the string to heap on return. The caller frees it
--- via defer. Every iteration pays GPA alloc + free.
+# Variant B: Heap-promoted strings. Each iteration calls makeString
+# which promotes the string to heap on return. The caller frees it
+# via defer. Every iteration pays GPA alloc + free.
 FN benchHeap(n: Int64) RETURNS !Int64 ->
     MUTABLE total: Int64 = 0;
     FOR i IN (0_i64 ..< n) DO
@@ -43,17 +43,17 @@ END
 FN main() RETURNS Void ->
     n = 1000000;
 
-    -- Warm up
+    # Warm up
     benchFrame(1000);
     benchHeap(1000);
 
-    -- Benchmark Frame (fast path)
+    # Benchmark Frame (fast path)
     t0 = timestampMs();
     frameTotal = benchFrame(n);
     frameMs = timestampMs() - t0;
     frameRssKb = currentMemoryKb();
 
-    -- Benchmark Heap (escape path)
+    # Benchmark Heap (escape path)
     t1 = timestampMs();
     heapTotal = benchHeap(n);
     heapMs = timestampMs() - t1;
@@ -61,8 +61,8 @@ FN main() RETURNS Void ->
 
     ASSERT frameTotal == heapTotal, "both variants must produce same result";
 
-    -- BENCH_RESULT reports the frame (no-malloc) path — the primary metric.
-    -- Heap variant is secondary: shows escape overhead for reference.
+    # BENCH_RESULT reports the frame (no-malloc) path — the primary metric.
+    # Heap variant is secondary: shows escape overhead for reference.
     print("BENCH_RESULT: ${frameMs.toString()} ms");
     print("Frame vs Heap Escape (${n.toString()} iterations)");
     print("  Frame (no escape):  ${frameMs.toString()} ms  RSS ${frameRssKb.toString()} KB");

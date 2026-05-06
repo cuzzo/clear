@@ -1,5 +1,5 @@
--- Test: union/struct constructor returns with frame-arena data must be promoted.
--- PromotionPlan must handle StructLit/UnionVariantLit returns for union types.
+# Test: union/struct constructor returns with frame-arena data must be promoted.
+# PromotionPlan must handle StructLit/UnionVariantLit returns for union types.
 
 UNION Val {
     Nil,
@@ -7,12 +7,12 @@ UNION Val {
     Pair { car: String, cdr: String }
 }
 
--- Case 1: simple union constructor with frame string
+# Case 1: simple union constructor with frame string
 FN makeStr!(a: String, b: String) RETURNS !Val ->
     RETURN Val{ Str: a + b };
 END
 
--- Case 2: inline struct variant with frame strings
+# Case 2: inline struct variant with frame strings
 FN makePair!(a: String, b: String) RETURNS !Val ->
     RETURN Val.Pair{ car: a + b, cdr: b + a };
 END

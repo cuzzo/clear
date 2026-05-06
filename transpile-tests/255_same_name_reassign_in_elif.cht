@@ -1,12 +1,12 @@
 UNION Val { Nil, Num: Float64 }
 
--- Reassignment of a cleanup-needing binding inside ELSE_IF branches where
--- another sibling branch declares the same name: regression for the MIR
--- lowering's line-suffix rename vs `ReassignWithCleanup` / `SuppressCleanup`
--- name mismatch. Prior to the fix, the cleanup guard `<name>_moved` and the
--- reassignment cleanup `cleanup(..., &<name>)` both referenced the
--- unsuffixed original name while the decl lived under `<name>_L<line>`,
--- producing `use of undeclared identifier` in the emitted Zig.
+# Reassignment of a cleanup-needing binding inside ELSE_IF branches where
+# another sibling branch declares the same name: regression for the MIR
+# lowering's line-suffix rename vs `ReassignWithCleanup` / `SuppressCleanup`
+# name mismatch. Prior to the fix, the cleanup guard `<name>_moved` and the
+# reassignment cleanup `cleanup(..., &<name>)` both referenced the
+# unsuffixed original name while the decl lived under `<name>_L<line>`,
+# producing `use of undeclared identifier` in the emitted Zig.
 
 FN inner(n: Float64) RETURNS Val -> RETURN Val{ Num: n }; END
 

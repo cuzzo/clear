@@ -1,4 +1,4 @@
--- Phase 5: Generic Unions
+# Phase 5: Generic Unions
 
 UNION Option<T> { Some: T, None }
 UNION Result<T, E> { Ok: T, Err: E }
@@ -9,7 +9,7 @@ FN safeDivide(a: Float64, b: Float64) RETURNS Result<Float64, Bool> ->
 END
 
 FN main() RETURNS Void ->
-  -- Option<Float64> with a payload variant
+  # Option<Float64> with a payload variant
   opt = Option<Float64>{ Some: 42.0 };
   MUTABLE got = 0.0;
   PARTIAL MATCH opt START
@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
   END
   ASSERT got == 1.0;
 
-  -- Option<Float64> with unit variant
+  # Option<Float64> with unit variant
   none_val = Option<Float64>{ Some: 0.0 };
   MUTABLE got2 = 0.0;
   PARTIAL MATCH none_val START
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
   END
   ASSERT got2 == 10.0;
 
-  -- Result<Float64, Bool>: Ok path
+  # Result<Float64, Bool>: Ok path
   ok = safeDivide(10.0, 2.0);
   MUTABLE ok_matched = 0.0;
   PARTIAL MATCH ok START
@@ -36,7 +36,7 @@ FN main() RETURNS Void ->
   END
   ASSERT ok_matched == 1.0;
 
-  -- Result<Float64, Bool>: Err path
+  # Result<Float64, Bool>: Err path
   err = safeDivide(10.0, 0.0);
   MUTABLE err_matched = 0.0;
   PARTIAL MATCH err START

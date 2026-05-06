@@ -11,11 +11,11 @@ FN main() RETURNS Void ->
   ASSERT matrix[1][1] == 5, "matrix[1][1] should be 5";
   ASSERT matrix[1][2] == 6, "matrix[1][2] should be 6";
 
-  -- Mutation
+  # Mutation
   matrix[1][1] = 99;
   ASSERT matrix[1][1] == 99, "matrix[1][1] should be 99 after mutation";
 
-  -- Nesting another level
+  # Nesting another level
   MUTABLE cube: Float64[][][] = [[[1, 2]], [[3, 4]]];
   ASSERT cube.length() == 2, "Cube length should be 2";
   ASSERT cube[0].length() == 1, "Cube[0] length should be 1";

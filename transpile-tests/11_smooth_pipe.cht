@@ -5,11 +5,11 @@ END
 FN main() RETURNS Void ->
   start = 10_i64;
 
-  -- 1. Simple Pipe: double(10)
+  # 1. Simple Pipe: double(10)
   res1 = start |> double;
   ASSERT res1 == 20, "Simple pipe should double to 20";
 
-  -- 2. Chained Pipe: double(double(10))
+  # 2. Chained Pipe: double(double(10))
   res2 = start |> double |> double;
   ASSERT res2 == 40, "Chained pipe should double twice to 40";
 END

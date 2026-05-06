@@ -1,5 +1,5 @@
--- Test: SMASH inside TEST blocks.
--- Verifies that SMASH compiles and emits advisory output.
+# Test: SMASH inside TEST blocks.
+# Verifies that SMASH compiles and emits advisory output.
 
 FN process(n: Float64) RETURNS Float64 ->
     RETURN n * 2.0;

@@ -1,18 +1,18 @@
--- 92_var_mutated_sroa.cht
---
--- Verifies that MUTABLE variables that are both read and reassigned do NOT
--- get `_ = &name;` suppression in generated Zig.
---
--- Without `var_mutated` tracking the transpiler always emits `_ = &name;`
--- for every MUTABLE variable, which takes the address of the var and forces
--- it to stack memory — killing LLVM SROA for struct variables.
---
--- With `var_mutated` tracking:
---   * sum and v are both reassigned → var_mutated=true → no `_ = &` emitted
---   * LLVM can keep them in registers and apply SROA on Vec2 fields
---
--- Also verifies: MUTABLE vars that are read but NEVER reassigned still
--- get proper Zig emission (var keyword with _ = &name; suppression intact).
+# 92_var_mutated_sroa.cht
+#
+# Verifies that MUTABLE variables that are both read and reassigned do NOT
+# get `_ = &name;` suppression in generated Zig.
+#
+# Without `var_mutated` tracking the transpiler always emits `_ = &name;`
+# for every MUTABLE variable, which takes the address of the var and forces
+# it to stack memory — killing LLVM SROA for struct variables.
+#
+# With `var_mutated` tracking:
+#   * sum and v are both reassigned → var_mutated=true → no `_ = &` emitted
+#   * LLVM can keep them in registers and apply SROA on Vec2 fields
+#
+# Also verifies: MUTABLE vars that are read but NEVER reassigned still
+# get proper Zig emission (var keyword with _ = &name; suppression intact).
 
 STRUCT Vec2 { x: Float64, y: Float64 }
 
@@ -21,7 +21,7 @@ FN dot2(a: Vec2, b: Vec2) RETURNS !Float64 @nonReentrant ->
 END
 
 FN main() RETURNS Void ->
-  -- Mutable scalar: read AND reassigned (should have no _ = &sum suppression)
+  # Mutable scalar: read AND reassigned (should have no _ = &sum suppression)
   MUTABLE sum: Float64 = 0.0;
   MUTABLE i = 0_i64;
   WHILE i < 10 DO
@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
   END
   ASSERT sum > 0.0, "sum should be positive";
 
-  -- Mutable struct: reassigned in loop (should have no _ = &v suppression)
+  # Mutable struct: reassigned in loop (should have no _ = &v suppression)
   MUTABLE v: Vec2 = Vec2{ x: 0.0, y: 0.0 };
   MUTABLE j = 0_i64;
   WHILE j < 5 DO
@@ -42,7 +42,7 @@ FN main() RETURNS Void ->
   ASSERT v.x == 5.0, "v.x should be 5.0 after loop";
   ASSERT v.y == 6.0, "v.y should be 6.0 after loop";
 
-  -- Field mutation: also marks var as mutated
+  # Field mutation: also marks var as mutated
   MUTABLE p: Vec2 = Vec2{ x: 10.0, y: 20.0 };
   p.x = 99.0;
   ASSERT p.x == 99.0, "field mutation should work";

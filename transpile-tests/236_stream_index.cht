@@ -1,5 +1,5 @@
--- Test: INDEX on finite stream sources (~T[N]).
--- INDEX groups stream elements into a HashMap by key.
+# Test: INDEX on finite stream sources (~T[N]).
+# INDEX groups stream elements into a HashMap by key.
 
 STRUCT Item { category: String, score: Int64 }
 
@@ -8,7 +8,7 @@ FN makeItem(cat: String, s: Int64) RETURNS !Item ->
 END
 
 FN main() RETURNS Void ->
-    -- INDEX on bounded stream (~T[N])
+    # INDEX on bounded stream (~T[N])
     s1: ~Item[3] = [
         BG { makeItem("a", 10); },
         BG { makeItem("b", 20); },
@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
     ASSERT grouped["a"].length() == 2, "two 'a' items";
     ASSERT grouped["b"].length() == 1, "one 'b' item";
 
-    -- INDEX on bounded stream with WHERE pre-filter
+    # INDEX on bounded stream with WHERE pre-filter
     s2: ~Item[4] = [
         BG { makeItem("x", 1); },
         BG { makeItem("y", 2); },

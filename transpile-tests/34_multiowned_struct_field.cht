@@ -1,24 +1,24 @@
 STRUCT Node { id: Int64 }
 STRUCT Wrapper { inner: Node @multiowned }
 
--- Test: a struct with a @multiowned field correctly manages the Rc lifetime.
--- The testing allocator detects any leaks or double-frees.
+# Test: a struct with a @multiowned field correctly manages the Rc lifetime.
+# The testing allocator detects any leaks or double-frees.
 FN main() RETURNS Void ->
     n = Node{ id: 7 } @multiowned;
 
-    -- Storing n in the struct retains the Rc (count 1->2).
-    -- Both n and w.inner co-own the same Node.
+    # Storing n in the struct retains the Rc (count 1->2).
+    # Both n and w.inner co-own the same Node.
     w = Wrapper{ inner: n } @multiowned;
 
-    -- Verify the field is accessible through the struct.
+    # Verify the field is accessible through the struct.
     ASSERT w.inner.id == 7, "w.inner.id should be 7";
 
-    -- n is also still valid (shared ownership, not a move).
+    # n is also still valid (shared ownership, not a move).
     ASSERT n.id == 7, "n.id should still be 7";
 
-    -- Scope exit order (LIFO defers):
-    --   rcRelease(Node, w.data.inner)  -> count 2->1
-    --   rcRelease(Wrapper, w)          -> count 1->0  (Wrapper freed)
-    --   rcRelease(Node, n)             -> count 1->0  (Node freed)
+    # Scope exit order (LIFO defers):
+    #   rcRelease(Node, w.data.inner)  -> count 2->1
+    #   rcRelease(Wrapper, w)          -> count 1->0  (Wrapper freed)
+    #   rcRelease(Node, n)             -> count 1->0  (Node freed)
     RETURN;
 END

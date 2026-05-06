@@ -1,12 +1,12 @@
--- Test: pipeline loop fusion
--- WHERE/SELECT chains ending in a fold fuse into a single loop.
+# Test: pipeline loop fusion
+# WHERE/SELECT chains ending in a fold fuse into a single loop.
 
 FN test_where_sum() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
 
     result = data |> WHERE _ > 5.0 |> SUM _;
-    -- 6+7+8+9 = 30
+    # 6+7+8+9 = 30
     ASSERT result == 30.0, "WHERE + SUM fusion";
     RETURN;
 END
@@ -16,7 +16,7 @@ FN test_select_sum() RETURNS !Void ->
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
     result = data |> SELECT _ * 10.0 |> SUM _;
-    -- (1+2+3+4+5)*10 = 150
+    # (1+2+3+4+5)*10 = 150
     ASSERT result == 150.0, "SELECT + SUM fusion";
     RETURN;
 END
@@ -26,7 +26,7 @@ FN test_where_select_sum() RETURNS !Void ->
     FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i * 100));
 
     result = data |> WHERE _ > 300.0 |> SELECT _ * 2.0 |> SUM _;
-    -- values > 300: 400,500,600,700,800,900 -> doubled: 800+1000+1200+1400+1600+1800 = 7800
+    # values > 300: 400,500,600,700,800,900 -> doubled: 800+1000+1200+1400+1600+1800 = 7800
     ASSERT result == 7800.0, "WHERE + SELECT + SUM fusion";
     RETURN;
 END
@@ -36,7 +36,7 @@ FN test_where_select_reduce() RETURNS !Void ->
     FOR i IN (0_i64 ..< 6_i64) -> data.append(toFloat(i + 1_i64));
 
     result = data |> WHERE _ > 2.0 |> SELECT _ * _ |> REDUCE(0.0) acc + _;
-    -- values > 2: 3,4,5,6 -> squared: 9+16+25+36 = 86
+    # values > 2: 3,4,5,6 -> squared: 9+16+25+36 = 86
     ASSERT result == 86.0, "WHERE + SELECT + REDUCE fusion";
     RETURN;
 END
@@ -62,30 +62,30 @@ FN test_where_count() RETURNS !Void ->
 END
 
 FN test_select_then_where() RETURNS !Void ->
-    -- Regression: SELECT before WHERE must apply in order.
-    -- SELECT doubles first, then WHERE filters the doubled values.
+    # Regression: SELECT before WHERE must apply in order.
+    # SELECT doubles first, then WHERE filters the doubled values.
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
-    -- data = [1,2,3,4,5] -> SELECT *2 -> [2,4,6,8,10] -> WHERE >5 -> [6,8,10] -> SUM = 24
+    # data = [1,2,3,4,5] -> SELECT *2 -> [2,4,6,8,10] -> WHERE >5 -> [6,8,10] -> SUM = 24
     result = data |> SELECT _ * 2.0 |> WHERE _ > 5.0 |> SUM _;
     ASSERT result == 24.0, "SELECT then WHERE ordering";
     RETURN;
 END
 
 FN test_chained_selects() RETURNS !Void ->
-    -- Regression: multiple SELECTs must chain correctly.
+    # Regression: multiple SELECTs must chain correctly.
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 3_i64) -> data.append(toFloat(i + 1_i64));
 
-    -- data = [1,2,3] -> SELECT +10 -> [11,12,13] -> SELECT *2 -> [22,24,26] -> SUM = 72
+    # data = [1,2,3] -> SELECT +10 -> [11,12,13] -> SELECT *2 -> [22,24,26] -> SUM = 72
     result = data |> SELECT _ + 10.0 |> SELECT _ * 2.0 |> SUM _;
     ASSERT result == 72.0, "chained SELECTs";
     RETURN;
 END
 
 FN test_single_stage_unfused() RETURNS !Void ->
-    -- Single-stage pipelines should NOT attempt fusion
+    # Single-stage pipelines should NOT attempt fusion
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
@@ -97,7 +97,7 @@ END
 FN test_where_average() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
-    -- values > 5: 6,7,8,9 -> avg = 30/4 = 7.5
+    # values > 5: 6,7,8,9 -> avg = 30/4 = 7.5
     result = data |> WHERE _ > 5.0 |> AVERAGE _;
     ASSERT result == 7.5, "WHERE + AVERAGE fusion";
     RETURN;
@@ -106,7 +106,7 @@ END
 FN test_where_any() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i));
-    -- any > 3? yes (4)
+    # any > 3? yes (4)
     yes = data |> WHERE _ > 0.0 |> ANY _ > 3.0;
     ASSERT yes == TRUE, "WHERE + ANY fusion (true)";
     no = data |> WHERE _ > 0.0 |> ANY _ > 10.0;
@@ -117,7 +117,7 @@ END
 FN test_where_all() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
-    -- all > 0? yes (1,2,3,4,5)
+    # all > 0? yes (1,2,3,4,5)
     yes = data |> WHERE _ > 0.0 |> ALL _ > 0.0;
     ASSERT yes == TRUE, "WHERE + ALL fusion (true)";
     no = data |> WHERE _ > 0.0 |> ALL _ > 3.0;
@@ -128,7 +128,7 @@ END
 FN test_where_find() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
-    -- find first > 5 after filtering > 3
+    # find first > 5 after filtering > 3
     result = data |> WHERE _ > 3.0 |> FIND _ > 5.0;
     ASSERT result == 6.0, "WHERE + FIND fusion";
     RETURN;
@@ -137,18 +137,18 @@ END
 FN test_take_while_sum() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 10_i64) -> data.append(toFloat(i));
-    -- take while < 5, then sum: 0+1+2+3+4 = 10
+    # take while < 5, then sum: 0+1+2+3+4 = 10
     result = data |> TAKE_WHILE _ < 5.0 |> SUM _;
     ASSERT result == 10.0, "TAKE_WHILE + SUM fusion";
     RETURN;
 END
 
 FN test_long_chain() RETURNS !Void ->
-    -- 4-stage chain: WHERE + SELECT + WHERE + SUM
+    # 4-stage chain: WHERE + SELECT + WHERE + SUM
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 20_i64) -> data.append(toFloat(i));
-    -- filter > 5 -> [6..19], double -> [12..38], filter > 20 -> [22,24,26,28,30,32,34,36,38]
-    -- sum = 22+24+26+28+30+32+34+36+38 = 270
+    # filter > 5 -> [6..19], double -> [12..38], filter > 20 -> [22,24,26,28,30,32,34,36,38]
+    # sum = 22+24+26+28+30+32+34+36+38 = 270
     result = data |> WHERE _ > 5.0 |> SELECT _ * 2.0 |> WHERE _ > 20.0 |> SUM _;
     ASSERT result == 270.0, "4-stage WHERE+SELECT+WHERE+SUM";
     RETURN;
@@ -157,19 +157,19 @@ END
 FN test_select_average() RETURNS !Void ->
     MUTABLE data: Float64[]@list = [];
     FOR i IN (0_i64 ..< 4_i64) -> data.append(toFloat(i + 1_i64));
-    -- [1,2,3,4] -> *10 -> [10,20,30,40] -> avg = 25
+    # [1,2,3,4] -> *10 -> [10,20,30,40] -> avg = 25
     result = data |> SELECT _ * 10.0 |> AVERAGE _;
     ASSERT result == 25.0, "SELECT + AVERAGE fusion";
     RETURN;
 END
 
 FN test_capacity_list_sum() RETURNS !Void ->
-    -- Regression: T[N]@list (pre-initialized capacity) must iterate as ArrayList.
+    # Regression: T[N]@list (pre-initialized capacity) must iterate as ArrayList.
     MUTABLE data: Float64[20]@list = [];
     FOR i IN (0_i64 ..< 5_i64) -> data.append(toFloat(i + 1_i64));
 
     result = data |> SUM _;
-    -- 1+2+3+4+5 = 15
+    # 1+2+3+4+5 = 15
     ASSERT result == 15.0, "capacity list SUM";
     RETURN;
 END
@@ -179,13 +179,13 @@ FN test_capacity_list_where_sum() RETURNS !Void ->
     FOR i IN (0_i64 ..< 6_i64) -> data.append(toFloat(i + 1_i64));
 
     result = data |> WHERE _ > 3.0 |> SUM _;
-    -- 4+5+6 = 15
+    # 4+5+6 = 15
     ASSERT result == 15.0, "capacity list WHERE + SUM";
     RETURN;
 END
 
 FN test_pool_pipeline_sum() RETURNS !Void ->
-    -- Regression: T[N]@pool must support pipeline operators.
+    # Regression: T[N]@pool must support pipeline operators.
     STRUCT PItem { v: Float64 }
     MUTABLE pool: PItem[20]@pool = [];
     pool.insert(PItem{ v: 1.0 });
@@ -198,7 +198,7 @@ FN test_pool_pipeline_sum() RETURNS !Void ->
 END
 
 FN test_pool_for_iteration() RETURNS !Void ->
-    -- Regression: FOR item IN pool must iterate live slots.
+    # Regression: FOR item IN pool must iterate live slots.
     STRUCT PItem { v: Float64 }
     MUTABLE pool: PItem[20]@pool = [];
     pool.insert(PItem{ v: 10.0 });
@@ -210,7 +210,7 @@ FN test_pool_for_iteration() RETURNS !Void ->
     FOR item IN pool DO
         total = total + item.v;
     END
-    -- 10 + 30 = 40 (20 was removed)
+    # 10 + 30 = 40 (20 was removed)
     ASSERT total == 40.0, "FOR over pool skips dead slots";
     RETURN;
 END

@@ -1,8 +1,8 @@
--- AtomicPtr M3.13 follow-up (review item E): escape via RETURN.
--- Verifies @indirect:atomic survives a fn-return boundary -- the
--- M3.12 lifetime exemption (Arc-managed cells can escape) plus the
--- caller-side cleanup of the received cell. If cleanup classification
--- is wrong for received-via-return cells, this test surfaces a leak.
+# AtomicPtr M3.13 follow-up (review item E): escape via RETURN.
+# Verifies @indirect:atomic survives a fn-return boundary -- the
+# M3.12 lifetime exemption (Arc-managed cells can escape) plus the
+# caller-side cleanup of the received cell. If cleanup classification
+# is wrong for received-via-return cells, this test surfaces a leak.
 
 STRUCT Cfg { v: Int64 }
 

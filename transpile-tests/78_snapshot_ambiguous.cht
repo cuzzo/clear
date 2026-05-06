@@ -1,6 +1,6 @@
--- Ambiguous snapshot: two pipeline steps with different input types
--- feeding the same CATCH clause. Accessing snapshot should error.
--- (This test verifies the program compiles when snapshot is NOT accessed)
+# Ambiguous snapshot: two pipeline steps with different input types
+# feeding the same CATCH clause. Accessing snapshot should error.
+# (This test verifies the program compiles when snapshot is NOT accessed)
 
 STRUCT User { name: String }
 STRUCT Order { amount: Float64 }
@@ -15,14 +15,14 @@ FN checkOrder(o: Order) RETURNS !Order ->
     RETURN o;
 END
 
--- Two pipelines with different types: snapshot type is ambiguous
+# Two pipelines with different types: snapshot type is ambiguous
 FN processBoth(u: User, o: Order) RETURNS !String ->
     validUser = u |> checkUser;
     validOrder = o |> checkOrder;
     RETURN validUser.name;
 
 CATCH Input
-    -- NOT accessing snapshot here (would be ambiguous: User or Order?)
+    # NOT accessing snapshot here (would be ambiguous: User or Order?)
     RETURN "error";
 END
 

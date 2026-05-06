@@ -1,6 +1,6 @@
--- Test: functions with mixed return paths must not double-promote.
--- Bug: struct_promote is function-level, so RETURN Val{ Str: COPY s }
--- gets promoteFields even though COPY already heap-duped. Leaks.
+# Test: functions with mixed return paths must not double-promote.
+# Bug: struct_promote is function-level, so RETURN Val{ Str: COPY s }
+# gets promoteFields even though COPY already heap-duped. Leaks.
 
 UNION Val {
     Nil,
@@ -9,13 +9,13 @@ UNION Val {
 }
 
 FN convert!(token: String) RETURNS !Val ->
-    -- Path 1: frame string in union (needs promotion)
+    # Path 1: frame string in union (needs promotion)
     IF token == "nil" THEN RETURN Val.Nil; END
     IF charAt(token, 0) == "\"" THEN RETURN Val{ Str: substr(token, 1, token.length() - 2) }; END
-    -- Path 2: number (no promotion needed)
+    # Path 2: number (no promotion needed)
     n = toNumber(token) OR (0.0 - 999999.0);
     IF n != 0.0 - 999999.0 THEN RETURN Val{ Num: n }; END
-    -- Path 3: COPY string (already heap, must not double-promote)
+    # Path 3: COPY string (already heap, must not double-promote)
     RETURN Val{ Str: COPY token };
 END
 

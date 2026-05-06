@@ -1,36 +1,36 @@
--- @leak: n = 10000000 -> n = 10000
--- Benchmark: Pipeline Overhead — |> operators vs Handwritten Loops
---
--- Measures the abstraction cost of |> pipeline operators vs handwritten loops.
--- All |> pipelines fuse into a single pass (no intermediate allocations).
---
--- MEASURED RESULTS (x86-64, 10M elements x 20 iters, --optimized):
---
---   VARIANT                        | TIME  | vs C
---   C sum loop                     | ~47ms | 1.0x baseline
---   CLEAR sum loop                 | ~178ms| 3.8x (LLVM vs GCC vectorization)
---   CLEAR sum pipeline (|> SUM _)  | ~175ms| ~0 overhead
---   CLEAR 2-stage fused loop       | ~273ms| -
---   CLEAR 2-stage pipeline         | ~276ms| ~3ms overhead (checkYield)
---   CLEAR 4-stage fused loop       | ~338ms| -
---   CLEAR 4-stage pipeline         | ~411ms| ~73ms overhead (checkYield x 200M)
---
--- ANALYSIS:
---   Pipeline overhead = rt.checkYield() calls in every iteration for cooperative
---   scheduling. ~0.36ns/call. Not an abstraction tax -- the fused Zig code is
---   identical, just with a yield probe inserted.
---
---   LLVM vs GCC gap: CLEAR uses LLVM via Zig; C uses GCC. GCC vectorizes
---   conditional reductions more aggressively (54ms vs 338ms for 4-stage C).
---
--- HANDWRITTEN LOOP NOTE:
---   longFusedLoop uses && to write flat conditions (v > 200 && v*2 < 1500),
---   which LLVM can vectorize. A nested-if with intermediate variable (the
---   "natural" form) blocks LLVM vectorization and gives 962ms instead of 338ms.
+# @leak: n = 10000000 -> n = 10000
+# Benchmark: Pipeline Overhead — |> operators vs Handwritten Loops
+#
+# Measures the abstraction cost of |> pipeline operators vs handwritten loops.
+# All |> pipelines fuse into a single pass (no intermediate allocations).
+#
+# MEASURED RESULTS (x86-64, 10M elements x 20 iters, --optimized):
+#
+#   VARIANT                        | TIME  | vs C
+#   C sum loop                     | ~47ms | 1.0x baseline
+#   CLEAR sum loop                 | ~178ms| 3.8x (LLVM vs GCC vectorization)
+#   CLEAR sum pipeline (|> SUM _)  | ~175ms| ~0 overhead
+#   CLEAR 2-stage fused loop       | ~273ms| -
+#   CLEAR 2-stage pipeline         | ~276ms| ~3ms overhead (checkYield)
+#   CLEAR 4-stage fused loop       | ~338ms| -
+#   CLEAR 4-stage pipeline         | ~411ms| ~73ms overhead (checkYield x 200M)
+#
+# ANALYSIS:
+#   Pipeline overhead = rt.checkYield() calls in every iteration for cooperative
+#   scheduling. ~0.36ns/call. Not an abstraction tax -- the fused Zig code is
+#   identical, just with a yield probe inserted.
+#
+#   LLVM vs GCC gap: CLEAR uses LLVM via Zig; C uses GCC. GCC vectorizes
+#   conditional reductions more aggressively (54ms vs 338ms for 4-stage C).
+#
+# HANDWRITTEN LOOP NOTE:
+#   longFusedLoop uses && to write flat conditions (v > 200 && v*2 < 1500),
+#   which LLVM can vectorize. A nested-if with intermediate variable (the
+#   "natural" form) blocks LLVM vectorization and gives 962ms instead of 338ms.
 
 FN buildData(n: Int64) RETURNS !Float64[]@list ->
     MUTABLE data: Float64[]@list = [];
-    data.reserve(n); -- TODO: replace with Float64[n]@list once T[expr]@list supports runtime capacity
+    data.reserve(n); # TODO: replace with Float64[n]@list once T[expr]@list supports runtime capacity
 
     MUTABLE state: Int64 = 42;
     FOR i IN (0_i64 ..< n) DO
@@ -42,9 +42,9 @@ FN buildData(n: Int64) RETURNS !Float64[]@list ->
     RETURN data;
 END
 
--- ============================================================
--- Test 1: Zero-alloc — SUM pipeline vs handwritten sum loop
--- ============================================================
+# ============================================================
+# Test 1: Zero-alloc — SUM pipeline vs handwritten sum loop
+# ============================================================
 
 FN sumLoop(data: Float64[]) RETURNS Float64 ->
     MUTABLE sum: Float64 = 0.0;
@@ -56,9 +56,9 @@ FN sumPipeline(data: Float64[]) RETURNS Float64 ->
     RETURN data |> SUM _;
 END
 
--- ============================================================
--- Test 2: Multi-pass — fused loop vs chained pipeline
--- ============================================================
+# ============================================================
+# Test 2: Multi-pass — fused loop vs chained pipeline
+# ============================================================
 
 FN fusedLoop(data: Float64[]) RETURNS Float64 ->
     MUTABLE sum: Float64 = 0.0;
@@ -73,9 +73,9 @@ FN chainedPipeline(data: Float64[]) RETURNS !Float64 ->
     RETURN data |> WHERE _ > 500.0 |> SELECT _ * _ |> SUM _;
 END
 
--- ============================================================
--- Test 3: Long chain — 4-stage pipeline vs handwritten
--- ============================================================
+# ============================================================
+# Test 3: Long chain — 4-stage pipeline vs handwritten
+# ============================================================
 
 FN longFusedLoop(data: Float64[]) RETURNS Float64 ->
     MUTABLE sum: Float64 = 0.0;
@@ -97,7 +97,7 @@ FN main() RETURNS Void ->
     iters = 20;
     data = buildData(n);
 
-    -- ---- Test 1: SUM only (run multiple iters to accumulate measurable time) ----
+    # ---- Test 1: SUM only (run multiple iters to accumulate measurable time) ----
     warmS1 = sumLoop(data);
     warmS2 = sumPipeline(data);
     ASSERT warmS1 == warmS2, "sum results must match";
@@ -112,10 +112,10 @@ FN main() RETURNS Void ->
     FOR r IN (0_i64 ..< iters) -> accum += sumPipeline(data);
     sumPipeMs = timestampMs() - t1;
 
-    -- Memory snapshot after SUM tests (no intermediate allocs expected)
+    # Memory snapshot after SUM tests (no intermediate allocs expected)
     sumRssKb = currentMemoryKb();
 
-    -- ---- Test 2: WHERE + SELECT + SUM ----
+    # ---- Test 2: WHERE + SELECT + SUM ----
     warmF1 = fusedLoop(data);
     warmF2 = chainedPipeline(data);
     ASSERT warmF1 == warmF2, "fused results must match";
@@ -130,7 +130,7 @@ FN main() RETURNS Void ->
     chainMs = timestampMs() - t3;
     chainRssKb = currentMemoryKb();
 
-    -- ---- Test 3: Long chain (4-stage) ----
+    # ---- Test 3: Long chain (4-stage) ----
     warmL1 = longFusedLoop(data);
     warmL2 = longChainedPipeline(data);
     ASSERT warmL1 == warmL2, "long chain results must match";
@@ -145,8 +145,8 @@ FN main() RETURNS Void ->
 
     ASSERT accum != 0.0, "prevent dead code elimination";
 
-    -- ---- Report ----
-    -- BENCH_RESULT = handwritten sum loop (cross-language baseline)
+    # ---- Report ----
+    # BENCH_RESULT = handwritten sum loop (cross-language baseline)
     print("BENCH_RESULT: ${sumLoopMs.toString()} ms");
     print("Pipeline overhead (${n.toString()} elements x ${iters.toString()} iters)");
     print("  Sum loop (handwritten):       ${sumLoopMs.toString()} ms");

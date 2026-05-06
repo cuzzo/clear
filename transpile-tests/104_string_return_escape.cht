@@ -1,8 +1,8 @@
--- Test: strings returned from functions must survive callee frame rewind.
---
--- Without escape promotion, the returned []const u8 points into the callee's
--- frame arena region. The callee's defer restoreFrameMark rewinds that region,
--- so subsequent frame allocations in the caller overwrite the returned data.
+# Test: strings returned from functions must survive callee frame rewind.
+#
+# Without escape promotion, the returned []const u8 points into the callee's
+# frame arena region. The callee's defer restoreFrameMark rewinds that region,
+# so subsequent frame allocations in the caller overwrite the returned data.
 
 FN makeGreeting(name: String) RETURNS !String ->
     result = "Hello " + name;
@@ -15,11 +15,11 @@ FN makeLabel(prefix: String, value: Int64) RETURNS !String ->
 END
 
 FN main() RETURNS Void ->
-    -- Test 1: basic string return + overwrite
+    # Test 1: basic string return + overwrite
     greeting = makeGreeting("World");
 
-    -- Force frame allocations that reuse the same arena region.
-    -- Without promotion, these overwrite greeting's backing data.
+    # Force frame allocations that reuse the same arena region.
+    # Without promotion, these overwrite greeting's backing data.
     MUTABLE i: Int64 = 0;
     WHILE i < 5 DO
         junk = "XXXXXXXXXX" + i.toString();
@@ -28,12 +28,12 @@ FN main() RETURNS Void ->
 
     ASSERT greeting == "Hello World", "returned string must survive callee frame rewind";
 
-    -- Test 2: multiple returned strings coexist
+    # Test 2: multiple returned strings coexist
     a = makeLabel("item-", 1);
     b = makeLabel("item-", 2);
     c = makeLabel("item-", 3);
 
-    -- More frame churn
+    # More frame churn
     MUTABLE j: Int64 = 0;
     WHILE j < 5 DO
         junk2 = "YYYYYYYYYY" + j.toString();

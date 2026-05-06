@@ -1,7 +1,7 @@
--- Test: loop appends struct with String fields to outer list (Pattern 7).
--- Each iteration builds a struct with frame-arena strings. Appending to
--- outer list requires the string fields to be heap-promoted so the loop
--- mark rewind doesn't destroy them.
+# Test: loop appends struct with String fields to outer list (Pattern 7).
+# Each iteration builds a struct with frame-arena strings. Appending to
+# outer list requires the string fields to be heap-promoted so the loop
+# mark rewind doesn't destroy them.
 
 STRUCT Entry { id: Int64, name: String }
 

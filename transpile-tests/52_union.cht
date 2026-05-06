@@ -12,12 +12,12 @@ FN area(s: Shape) RETURNS Float64 ->
 END
 
 FN main() RETURNS Void ->
-  -- Unit variant (GetField syntax — no payload)
+  # Unit variant (GetField syntax — no payload)
   p: Shape = Shape.Point;
   a = area(p);
   ASSERT a == 0.0, "Union: unit variant Point has area 0";
 
-  -- Payload variant (StructLit syntax — same as structs)
+  # Payload variant (StructLit syntax — same as structs)
   c: Shape = Shape{ Circle: 5.0 };
   MUTABLE result = 0.0;
   PARTIAL MATCH c START
@@ -27,7 +27,7 @@ FN main() RETURNS Void ->
   END
   ASSERT result == 1.0, "Union: Circle variant matches correctly";
 
-  -- Result-style union (Ok path)
+  # Result-style union (Ok path)
   r: Result = Result{ Ok: 42.0 };
   MUTABLE got = 0.0;
   PARTIAL MATCH r START
@@ -37,7 +37,7 @@ FN main() RETURNS Void ->
   END
   ASSERT got == 1.0, "Union: Result.Ok matches";
 
-  -- Result-style union (Err path)
+  # Result-style union (Err path)
   e: Result = Result{ Err: 99.0 };
   MUTABLE got2 = 0.0;
   PARTIAL MATCH e START

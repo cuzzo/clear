@@ -1,37 +1,37 @@
--- Test: Phase 4 Numeric Aggregation Operators
--- Exercises SUM, AVERAGE, MIN, MAX pipeline operators.
+# Test: Phase 4 Numeric Aggregation Operators
+# Exercises SUM, AVERAGE, MIN, MAX pipeline operators.
 
 STRUCT Measurement { value: Float64 }
 
 FN main() RETURNS Void ->
     nums: Float64[] = [1.0, 2.0, 3.0, 4.0, 5.0];
 
-    -- SUM
+    # SUM
     total = nums |> SUM _;
     ASSERT total == 15.0, "SUM should be 15";
 
-    -- SUM on empty list returns 0
+    # SUM on empty list returns 0
     empty: Float64[] = [];
     empty_sum = empty |> SUM _;
     ASSERT empty_sum == 0.0, "SUM of empty list should be 0";
 
-    -- AVERAGE
+    # AVERAGE
     avg = nums |> AVERAGE _;
     ASSERT avg == 3.0, "AVERAGE should be 3";
 
-    -- AVERAGE on empty list returns 0
+    # AVERAGE on empty list returns 0
     empty_avg = empty |> AVERAGE _;
     ASSERT empty_avg == 0.0, "AVERAGE of empty list should be 0";
 
-    -- MIN
+    # MIN
     minimum = nums |> MIN _;
     ASSERT minimum == 1.0, "MIN should be 1";
 
-    -- MAX
+    # MAX
     maximum = nums |> MAX _;
     ASSERT maximum == 5.0, "MAX should be 5";
 
-    -- SUM of a struct field projection
+    # SUM of a struct field projection
     measurements = [
         Measurement{ value: 10.0 },
         Measurement{ value: 20.0 },
@@ -40,19 +40,19 @@ FN main() RETURNS Void ->
     field_sum = measurements |> SUM _.value;
     ASSERT field_sum == 60.0, "SUM of field should be 60";
 
-    -- AVERAGE of a struct field
+    # AVERAGE of a struct field
     field_avg = measurements |> AVERAGE _.value;
     ASSERT field_avg == 20.0, "AVERAGE of field should be 20";
 
-    -- MIN of a struct field
+    # MIN of a struct field
     field_min = measurements |> MIN _.value;
     ASSERT field_min == 10.0, "MIN of field should be 10";
 
-    -- MAX of a struct field
+    # MAX of a struct field
     field_max = measurements |> MAX _.value;
     ASSERT field_max == 30.0, "MAX of field should be 30";
 
-    -- Chained: WHERE then SUM (use intermediate binding to avoid ambiguous parse)
+    # Chained: WHERE then SUM (use intermediate binding to avoid ambiguous parse)
     big_nums: Float64[] = nums |> WHERE _ > 3.0;
     big_sum = big_nums |> SUM _;
     ASSERT big_sum == 9.0, "SUM of [4,5] should be 9";

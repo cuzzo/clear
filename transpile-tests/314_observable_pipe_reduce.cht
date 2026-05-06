@@ -1,9 +1,9 @@
--- Pipeline-terminal observable REDUCE-scalar.
---
--- A BG STREAM produces values; REDUCE folds them into a
--- `~Int64@observable` binding (heap-allocated `*ObservableReduce(i64)`)
--- using a user-supplied reducer body wrapped in a CAS loop.
--- NEXT joins the producer and returns the final accumulator.
+# Pipeline-terminal observable REDUCE-scalar.
+#
+# A BG STREAM produces values; REDUCE folds them into a
+# `~Int64@observable` binding (heap-allocated `*ObservableReduce(i64)`)
+# using a user-supplied reducer body wrapped in a CAS loop.
+# NEXT joins the producer and returns the final accumulator.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {
@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
         END
     };
 
-    -- Sum via REDUCE: 1 + 2 + 3 + 4 + 5 = 15
+    # Sum via REDUCE: 1 + 2 + 3 + 4 + 5 = 15
     running: ~Int64@observable = gen |> REDUCE(0_i64) acc + _;
     final = NEXT running;
 

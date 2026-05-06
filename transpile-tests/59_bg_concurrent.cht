@@ -1,6 +1,6 @@
--- BG concurrent integration tests.
--- Exercises: multiple concurrent fibers, outer-variable capture by value,
--- NEXT in reverse-spawn order, and BG inside a helper function.
+# BG concurrent integration tests.
+# Exercises: multiple concurrent fibers, outer-variable capture by value,
+# NEXT in reverse-spawn order, and BG inside a helper function.
 
 FN double(x: Float64) RETURNS Float64 ->
     RETURN x * 2.0;
@@ -11,13 +11,13 @@ FN add(a: Float64, b: Float64) RETURNS Float64 ->
 END
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: Three concurrent BG fibers, NEXT'd in reverse.
-    -- -------------------------------------------------------
-    -- Spawn in order a, b, c.  NEXT in reverse c, b, a.
-    -- The scheduler may run them all before any NEXT is called
-    -- (fast-path) or interleave them (slow-path).
-    -- Either way each promise must return exactly its own value.
+    # -------------------------------------------------------
+    # Test 1: Three concurrent BG fibers, NEXT'd in reverse.
+    # -------------------------------------------------------
+    # Spawn in order a, b, c.  NEXT in reverse c, b, a.
+    # The scheduler may run them all before any NEXT is called
+    # (fast-path) or interleave them (slow-path).
+    # Either way each promise must return exactly its own value.
 
     a: ~Float64 = BG { 10.0; };
     b: ~Float64 = BG { 20.0; };
@@ -31,29 +31,29 @@ FN main() RETURNS Void ->
     ASSERT rb == 20.0, "concurrent BG b";
     ASSERT rc == 30.0, "concurrent BG c";
 
-    -- -------------------------------------------------------
-    -- Test 2: Outer-variable capture by VALUE.
-    -- Mutating the outer variable after spawning must not
-    -- affect the fiber (fiber owns its own copy).
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: Outer-variable capture by VALUE.
+    # Mutating the outer variable after spawning must not
+    # affect the fiber (fiber owns its own copy).
+    # -------------------------------------------------------
     MUTABLE base: Float64 = 5.0;
     p: ~Float64 = BG { double(base); };
-    base = 99.0;          -- change outer copy after spawn
+    base = 99.0;          # change outer copy after spawn
     r_base: Float64 = NEXT p;
     ASSERT r_base == 10.0, "BG captures by value: mutation of outer does not affect fiber";
 
-    -- -------------------------------------------------------
-    -- Test 3: BG using a helper function with captured arg.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: BG using a helper function with captured arg.
+    # -------------------------------------------------------
     x: Float64 = 7.0;
     y: Float64 = 3.0;
     q: ~Float64 = BG { add(x, y); };
     r_sum: Float64 = NEXT q;
     ASSERT r_sum == 10.0, "BG with helper function call using two captured args";
 
-    -- -------------------------------------------------------
-    -- Test 4: Chained BG — result of one feeds the next.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 4: Chained BG — result of one feeds the next.
+    # -------------------------------------------------------
     step1: ~Float64 = BG { double(4.0); };
     v1: Float64 = NEXT step1;
     step2: ~Float64 = BG { double(v1); };

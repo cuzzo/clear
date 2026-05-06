@@ -1,7 +1,7 @@
--- Test: outer struct with String field reassigned inside a loop.
--- The struct is non-Copy (it contains a String). Each iteration replaces
--- the outer variable with a new struct containing a frame-allocated string.
--- The compiler must preserve the string across the loop mark rewind.
+# Test: outer struct with String field reassigned inside a loop.
+# The struct is non-Copy (it contains a String). Each iteration replaces
+# the outer variable with a new struct containing a frame-allocated string.
+# The compiler must preserve the string across the loop mark rewind.
 
 STRUCT Record { name: String, score: Int64 }
 

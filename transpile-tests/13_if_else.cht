@@ -9,10 +9,10 @@ FN main() RETURNS Void ->
     score = 0;
   END
 
-  -- Should be 110 since is_valid is true
+  # Should be 110 since is_valid is true
   ASSERT score == 110, "Score should be 110 after bonus";
 
-  -- Test else branch
+  # Test else branch
   MUTABLE low_score = 3;
   IF low_score > 5 THEN
     low_score = 999;

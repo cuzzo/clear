@@ -1,5 +1,5 @@
--- Bug: frame-allocated HashMap GIVE'd to TAKES HashMap param → alloc mismatch.
--- Same architectural cause as 277.
+# Bug: frame-allocated HashMap GIVE'd to TAKES HashMap param → alloc mismatch.
+# Same architectural cause as 277.
 
 FN consume!(TAKES m: HashMap<Int64>) RETURNS Int64 ->
     RETURN m.length();

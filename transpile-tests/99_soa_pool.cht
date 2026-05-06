@@ -1,30 +1,30 @@
--- Test: @pool:soa and T[N]@soa — Structure of Arrays layouts.
--- Both SOA pools and fixed SOA arrays use field-slice iteration
--- (no materialization for aggregates).
+# Test: @pool:soa and T[N]@soa — Structure of Arrays layouts.
+# Both SOA pools and fixed SOA arrays use field-slice iteration
+# (no materialization for aggregates).
 
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64 }
 
 FN main() RETURNS Void ->
-    -- Regular array (AOS baseline) for comparison.
+    # Regular array (AOS baseline) for comparison.
     entities = [
         Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 },
         Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 },
         Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 },
     ];
 
-    -- Same data in a SOA pool.
+    # Same data in a SOA pool.
     MUTABLE pool: Entity[100]@pool:soa = [];
     pool.insert(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
     pool.insert(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
     pool.insert(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
-    -- Same data in a fixed SOA array (T[N]@soa).
+    # Same data in a fixed SOA array (T[N]@soa).
     MUTABLE fixed: Entity[100]@soa = [];
     fixed.append(Entity{ x: 10, y: 20, vx: 1, vy: 2, health: 100 });
     fixed.append(Entity{ x: 30, y: 40, vx: 3, vy: 4, health: 200 });
     fixed.append(Entity{ x: 50, y: 60, vx: 5, vy: 6, health: 0 });
 
-    -- SUM
+    # SUM
     arr_sum = entities |> SUM _.health;
     pool_sum = pool |> SUM _.health;
     fixed_sum = fixed |> SUM _.health;
@@ -32,7 +32,7 @@ FN main() RETURNS Void ->
     ASSERT pool_sum == 300, "pool SUM health should be 300";
     ASSERT fixed_sum == 300, "fixed SUM health should be 300";
 
-    -- MIN
+    # MIN
     arr_min = entities |> MIN _.x;
     pool_min = pool |> MIN _.x;
     fixed_min = fixed |> MIN _.x;
@@ -40,7 +40,7 @@ FN main() RETURNS Void ->
     ASSERT pool_min == 10, "pool MIN x should be 10";
     ASSERT fixed_min == 10, "fixed MIN x should be 10";
 
-    -- MAX
+    # MAX
     arr_max = entities |> MAX _.y;
     pool_max = pool |> MAX _.y;
     fixed_max = fixed |> MAX _.y;
@@ -48,7 +48,7 @@ FN main() RETURNS Void ->
     ASSERT pool_max == 60, "pool MAX y should be 60";
     ASSERT fixed_max == 60, "fixed MAX y should be 60";
 
-    -- AVERAGE
+    # AVERAGE
     arr_avg = entities |> AVERAGE _.vx;
     pool_avg = pool |> AVERAGE _.vx;
     fixed_avg = fixed |> AVERAGE _.vx;
@@ -56,7 +56,7 @@ FN main() RETURNS Void ->
     ASSERT pool_avg == 3, "pool AVERAGE vx should be 3";
     ASSERT fixed_avg == 3, "fixed AVERAGE vx should be 3";
 
-    -- COUNT
+    # COUNT
     arr_cnt = entities |> COUNT _.health > 0;
     pool_cnt = pool |> COUNT _.health > 0;
     fixed_cnt = fixed |> COUNT _.health > 0;
@@ -64,7 +64,7 @@ FN main() RETURNS Void ->
     ASSERT pool_cnt == 2, "pool COUNT health > 0 should be 2";
     ASSERT fixed_cnt == 2, "fixed COUNT health > 0 should be 2";
 
-    -- ANY
+    # ANY
     arr_any = entities |> ANY _.health == 0;
     pool_any = pool |> ANY _.health == 0;
     fixed_any = fixed |> ANY _.health == 0;
@@ -72,7 +72,7 @@ FN main() RETURNS Void ->
     ASSERT pool_any == TRUE, "pool ANY health == 0 should be true";
     ASSERT fixed_any == TRUE, "fixed ANY health == 0 should be true";
 
-    -- ALL
+    # ALL
     arr_all = entities |> ALL _.x > 0;
     pool_all = pool |> ALL _.x > 0;
     fixed_all = fixed |> ALL _.x > 0;
@@ -80,30 +80,30 @@ FN main() RETURNS Void ->
     ASSERT pool_all == TRUE, "pool ALL x > 0 should be true";
     ASSERT fixed_all == TRUE, "fixed ALL x > 0 should be true";
 
-    -- WHERE (requires whole-struct reassembly for output)
+    # WHERE (requires whole-struct reassembly for output)
     arr_alive = entities |> WHERE _.health > 0;
     pool_alive = pool |> WHERE _.health > 0;
     ASSERT length(arr_alive) == 2, "arr WHERE health > 0 should have 2";
     ASSERT length(pool_alive) == 2, "pool WHERE health > 0 should have 2";
 
-    -- EACH: single constant field write
+    # EACH: single constant field write
     pool |> EACH { _.health = 42.0; };
     each_sum = pool |> SUM _.health;
     ASSERT each_sum == 126.0, "EACH set health=42, sum should be 126";
 
-    -- EACH: multiple field writes in one body
+    # EACH: multiple field writes in one body
     pool |> EACH { _.x = 1.0; _.y = 2.0; };
     each_sx = pool |> SUM _.x;
     each_sy = pool |> SUM _.y;
     ASSERT each_sx == 3.0, "EACH set x=1, sum should be 3";
     ASSERT each_sy == 6.0, "EACH set y=2, sum should be 6";
 
-    -- EACH: write with expression RHS (no field read)
+    # EACH: write with expression RHS (no field read)
     pool |> EACH { _.vx = 3.0 + 4.0; };
     each_vx = pool |> SUM _.vx;
     ASSERT each_vx == 21.0, "EACH set vx=7, sum should be 21";
 
-    -- EACH: alive-check -- remove one entity, EACH should skip dead slot
+    # EACH: alive-check -- remove one entity, EACH should skip dead slot
     pool.remove(pool.insert(Entity{ x: 0, y: 0, vx: 0, vy: 0, health: 0 }));
     pool |> EACH { _.vy = 10.0; };
     each_vy = pool |> SUM _.vy;

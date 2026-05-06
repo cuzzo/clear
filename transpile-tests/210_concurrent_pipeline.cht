@@ -1,24 +1,24 @@
--- Test: CONCURRENT pipeline operators.
---
--- Exercises: CONCURRENT SELECT, CONCURRENT EACH, BG + NEXT,
--- basic fiber dispatch and result collection.
+# Test: CONCURRENT pipeline operators.
+#
+# Exercises: CONCURRENT SELECT, CONCURRENT EACH, BG + NEXT,
+# basic fiber dispatch and result collection.
 
 FN double(x: Int64) RETURNS Int64 -> RETURN x * 2; END
 
 FN main() RETURNS Void ->
-    -- CONCURRENT SELECT: parallel map
+    # CONCURRENT SELECT: parallel map
     items: Int64[] = [1, 2, 3, 4, 5];
     doubled = items |> CONCURRENT(workers: 2) SELECT double(_);
     ASSERT doubled.length() == 5, "concurrent select length";
     ASSERT doubled[0] == 2, "concurrent select [0]";
     ASSERT doubled[4] == 10, "concurrent select [4]";
 
-    -- BG + NEXT: spawn fiber, collect result
+    # BG + NEXT: spawn fiber, collect result
     f = BG { double(21); };
     result = NEXT f;
     ASSERT result == 42, "bg + next";
 
-    -- CONCURRENT SELECT with larger workload (exercises worker pool)
+    # CONCURRENT SELECT with larger workload (exercises worker pool)
     MUTABLE big: Int64[]@list = [];
     FOR i IN (0_i64 ..< 100) -> big.append(i);
     mapped = big |> CONCURRENT(workers: 4) SELECT _ * 3;

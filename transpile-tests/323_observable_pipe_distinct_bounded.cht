@@ -1,14 +1,14 @@
--- Pipeline-terminal observable DISTINCT into ~T[N]@set:observable
--- (bounded source). The source `~Int64[5]` is a bounded stream of
--- exactly 5 items; DISTINCT folds them into a fixed-capacity
--- `*ObservableStreamSetBounded(i64, 5)` (= ObservableTerminal of
--- StreamSetBounded). Per-item: `acc.inner.submit(item)` (infallible
--- — no grow path, the [N]T buffer never relocates).
---
--- `NEXT running` waits for the producer to finish, then materializes
--- an owned ArrayListUnmanaged(i64) snapshot via the wrapper's
--- `materializeNext(alloc)`. The receiving binding owns the slice and
--- the standard list-cleanup path frees it at scope exit.
+# Pipeline-terminal observable DISTINCT into ~T[N]@set:observable
+# (bounded source). The source `~Int64[5]` is a bounded stream of
+# exactly 5 items; DISTINCT folds them into a fixed-capacity
+# `*ObservableStreamSetBounded(i64, 5)` (= ObservableTerminal of
+# StreamSetBounded). Per-item: `acc.inner.submit(item)` (infallible
+# — no grow path, the [N]T buffer never relocates).
+#
+# `NEXT running` waits for the producer to finish, then materializes
+# an owned ArrayListUnmanaged(i64) snapshot via the wrapper's
+# `materializeNext(alloc)`. The receiving binding owns the slice and
+# the standard list-cleanup path frees it at scope exit.
 
 FN main() RETURNS Void ->
     s: ~Int64[5] = [BG { 3_i64; }, BG { 1_i64; }, BG { 3_i64; }, BG { 2_i64; }, BG { 1_i64; }];
@@ -16,7 +16,7 @@ FN main() RETURNS Void ->
     running: ~Int64[5]@set:observable = s |> DISTINCT _;
     final = NEXT running;
 
-    -- 5 items, 3 unique -- {1, 2, 3}.
+    # 5 items, 3 unique -- {1, 2, 3}.
     ASSERT final.length() == 3_i64, "expected 3 unique values from bounded stream";
     print("ok");
     RETURN;

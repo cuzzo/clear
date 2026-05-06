@@ -1,6 +1,6 @@
--- Test: GIVE on an implicitly-copyable union variable
--- Verifies that GIVE on a Copy union (no heap variants) doesn't emit
--- an undeclared _moved guard. Copy unions have no cleanup plan entry.
+# Test: GIVE on an implicitly-copyable union variable
+# Verifies that GIVE on a Copy union (no heap variants) doesn't emit
+# an undeclared _moved guard. Copy unions have no cleanup plan entry.
 
 UNION SimpleValue { Nil, Number: Float64 }
 

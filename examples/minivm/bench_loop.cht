@@ -1,7 +1,7 @@
--- Benchmark: tight integer loop summing 0..9_999_999.
+# Benchmark: tight integer loop summing 0..9_999_999.
 
 FN main() RETURNS Void ->
-    -- Verify
+    # Verify
     MUTABLE s: Int64 = 0;
     MUTABLE i: Int64 = 0;
     WHILE i < 10000000 DO
@@ -11,7 +11,7 @@ FN main() RETURNS Void ->
     print("sum(0..9999999) = " + s.toString());
     ASSERT s == 49999995000000;
 
-    -- Timed: 3 iterations
+    # Timed: 3 iterations
     startMs = timestampMs();
     MUTABLE iter: Int64 = 0;
     WHILE iter < 3 DO

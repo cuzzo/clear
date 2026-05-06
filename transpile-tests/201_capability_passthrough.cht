@@ -1,16 +1,16 @@
--- P1.6 / P1.7 fixture: a caller's @shared:locked binding flows
--- transparently to bumpIt's bare param. Inside bumpIt, WITH POLYMORPHIC EXCLUSIVE
--- on the parameter works because:
---
---   - EscapeAnalysis.propagate_caller_sync! (P1.4) stamps the param's
---     SymbolEntry#sync to :locked AND #storage to :shared from main's
---     binding.
---   - The annotator defers param-level WITH validation (P1.7) until
---     after propagation, so the bare param at body-visit time doesn't
---     trigger the eager "requires @locked" error.
---   - mir_lowering reads sync and storage from the binding (P1.2 +
---     P1.7) so the emitted Zig knows to unwrap the Arc with
---     `c.ctrl.data.*.acquire()`.
+# P1.6 / P1.7 fixture: a caller's @shared:locked binding flows
+# transparently to bumpIt's bare param. Inside bumpIt, WITH POLYMORPHIC EXCLUSIVE
+# on the parameter works because:
+#
+#   - EscapeAnalysis.propagate_caller_sync! (P1.4) stamps the param's
+#     SymbolEntry#sync to :locked AND #storage to :shared from main's
+#     binding.
+#   - The annotator defers param-level WITH validation (P1.7) until
+#     after propagation, so the bare param at body-visit time doesn't
+#     trigger the eager "requires @locked" error.
+#   - mir_lowering reads sync and storage from the binding (P1.2 +
+#     P1.7) so the emitted Zig knows to unwrap the Arc with
+#     `c.ctrl.data.*.acquire()`.
 
 STRUCT Counter { value: Int64 }
 

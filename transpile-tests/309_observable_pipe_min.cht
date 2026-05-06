@@ -1,4 +1,4 @@
--- Pipeline-terminal observable MIN. Mirror of 308_observable_pipe_max.
+# Pipeline-terminal observable MIN. Mirror of 308_observable_pipe_max.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {

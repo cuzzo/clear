@@ -1,6 +1,6 @@
--- Atomics M1.7: cross-fiber correctness — 4 BGs each bumping 1000 times.
--- Without atomics this would lose updates (load+add+store race). With
--- @shared:atomic + fetchAdd, the count is exactly 4000.
+# Atomics M1.7: cross-fiber correctness — 4 BGs each bumping 1000 times.
+# Without atomics this would lose updates (load+add+store race). With
+# @shared:atomic + fetchAdd, the count is exactly 4000.
 
 FN bump_loop!(MUTABLE c: Int64, n: Int64) RETURNS Void REQUIRES c: ATOMIC ->
     MUTABLE i: Int64 = 0;

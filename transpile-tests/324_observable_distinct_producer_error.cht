@@ -1,19 +1,19 @@
--- A18: Producer-fiber error mid-stream for the COLLECTION-shape observable
--- (DISTINCT). 321 covers the scalar-shape SUM error path; this exercises
--- the StreamSet (with refcounted snapshots + heap-owned inner) cleanup
--- path. Invariants:
---
---   1. The consumer fiber's `defer ctx.acc.finish()` fires on the error
---      return path; the WaitGroup decrements and the joiner (NEXT) unblocks.
---   2. The cleanup template's `wait(); destroy()` runs at scope exit. For
---      collection inners, destroy() comptime-detects @hasDecl(Inner, "deinit")
---      and tears down the StreamSet's hashmap + buffer refcount before
---      freeing the wrapper.
---   3. NEXT returns the partial DISTINCT set — the unique items published
---      before the producer raised.
---
--- The "Task Crashed" log line for the failed BG fiber is expected
--- diagnostic output, not a failure.
+# A18: Producer-fiber error mid-stream for the COLLECTION-shape observable
+# (DISTINCT). 321 covers the scalar-shape SUM error path; this exercises
+# the StreamSet (with refcounted snapshots + heap-owned inner) cleanup
+# path. Invariants:
+#
+#   1. The consumer fiber's `defer ctx.acc.finish()` fires on the error
+#      return path; the WaitGroup decrements and the joiner (NEXT) unblocks.
+#   2. The cleanup template's `wait(); destroy()` runs at scope exit. For
+#      collection inners, destroy() comptime-detects @hasDecl(Inner, "deinit")
+#      and tears down the StreamSet's hashmap + buffer refcount before
+#      freeing the wrapper.
+#   3. NEXT returns the partial DISTINCT set — the unique items published
+#      before the producer raised.
+#
+# The "Task Crashed" log line for the failed BG fiber is expected
+# diagnostic output, not a failure.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {
@@ -28,7 +28,7 @@ FN main() RETURNS Void ->
     running: ~Int64[]@set:observable = gen |> DISTINCT _;
     final = NEXT running;
 
-    -- 0..3 mod 3 yields {0, 1, 2} — 3 unique items before the raise.
+    # 0..3 mod 3 yields {0, 1, 2} — 3 unique items before the raise.
     ASSERT final.length() == 3_i64, "partial distinct set should be {0,1,2}";
     print("ok");
     RETURN;

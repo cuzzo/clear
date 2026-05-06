@@ -1,8 +1,8 @@
--- Test: Union values appended to list — list cleanup frees variant heap data
---
--- When Value.List (containing a heap-promoted []Int64 slice) is appended
--- to an ArrayList, the ArrayList owns the copy. When the ArrayList is
--- cleaned up, it must recursively free each element's heap data.
+# Test: Union values appended to list — list cleanup frees variant heap data
+#
+# When Value.List (containing a heap-promoted []Int64 slice) is appended
+# to an ArrayList, the ArrayList owns the copy. When the ArrayList is
+# cleaned up, it must recursively free each element's heap data.
 
 UNION Value { Num: Float64, Items: Int64[] }
 

@@ -18,8 +18,8 @@ Fixed-size, stack-allocated. The size is part of the type.
 
 ```clear
 MUTABLE scores: Int64[5] = [10, 20, 30, 40, 50];
-x = scores[2];          -- 30
-scores[0] = 99;         -- mutation via index
+x = scores[2];          # 30
+scores[0] = 99;         # mutation via index
 ASSERT x == 30, "index access";
 ASSERT scores[0] == 99, "mutation via index";
 ```
@@ -36,8 +36,8 @@ Dynamic-size, heap-allocated. Backed by `std.ArrayListUnmanaged(T)`.
 MUTABLE users = List[];
 users.append("Alice");
 users.append("Bob");
-n = users.length();       -- 2
-name = users[0];           -- "Alice"
+n = users.length();       # 2
+name = users[0];           # "Alice"
 ```
 
 **When to use**: Size is unknown or grows over time. Elements accessed by index. The general-purpose dynamic array — equivalent to `Vec<T>` in Rust or `[]T` in Go.
@@ -50,7 +50,7 @@ name = users[0];           -- "Alice"
 
 ```clear
 MUTABLE items = List[];
-items.append(42.0);  -- type inferred as Float64[]@list
+items.append(42.0);  # type inferred as Float64[]@list
 ```
 
 ## Pools — `@pool`
@@ -64,16 +64,16 @@ MUTABLE enemies: Enemy[1000]@pool = [];
 id1: Id<Enemy> = enemies.insert(Enemy{ hp: 100, name: "Goblin" });
 id2: Id<Enemy> = enemies.insert(Enemy{ hp: 200, name: "Dragon" });
 
--- Access via handle — returns ?T (optional). Must use OR to unwrap:
+# Access via handle — returns ?T (optional). Must use OR to unwrap:
 goblin = enemies.get(id1) OR Enemy{ hp: 0, name: "none" };
 
--- Or via [] syntax (equivalent to .get):
+# Or via [] syntax (equivalent to .get):
 dragon = enemies[id2] OR Enemy{ hp: 0, name: "none" };
 
--- Remove: slot is freed, generation increments
+# Remove: slot is freed, generation increments
 enemies.remove(id1);
 
--- Stale handle returns null — OR provides a safe fallback:
+# Stale handle returns null — OR provides a safe fallback:
 gone = enemies.get(id1) OR Enemy{ hp: 0, name: "removed" };
 ```
 
@@ -142,13 +142,13 @@ Note: pools require a compile-time capacity `N`. All slots are pre-allocated up 
 Key-value maps. String-keyed by default, numeric-keyed with explicit `HashMap<K, V>`.
 
 ```clear
-MUTABLE scores: HashMap<Int64> = {};     -- String → Int64
+MUTABLE scores: HashMap<Int64> = {};     # String → Int64
 scores["alice"] = 100_i64;
 scores["bob"] = 200_i64;
-val = scores["alice"];                    -- 100
+val = scores["alice"];                    # 100
 scores.delete("bob");
-scores.contains?("alice");                 -- TRUE
-scores.count();                           -- 1
+scores.contains?("alice");                 # TRUE
+scores.count();                           # 1
 ```
 
 **When to use**: Lookup by key. The general-purpose associative container.
@@ -162,12 +162,12 @@ The `:soa` capability switches to **Structure of Arrays** layout: each field get
 ```clear
 STRUCT Entity { x: Float64, y: Float64, vx: Float64, vy: Float64, health: Float64, mana: Float64, name: String, level: Float64 }
 
--- AOS (default): each entity is 8 fields × 8 bytes = 64 bytes per cache line.
--- SUM _.health loads all 8 fields but uses only 1 — 87.5% wasted bandwidth.
+# AOS (default): each entity is 8 fields × 8 bytes = 64 bytes per cache line.
+# SUM _.health loads all 8 fields but uses only 1 — 87.5% wasted bandwidth.
 MUTABLE pool: Entity[10000]@pool = [];
 
--- SOA: health values are stored in a contiguous f64 array.
--- SUM _.health touches only that array — zero waste.
+# SOA: health values are stored in a contiguous f64 array.
+# SUM _.health touches only that array — zero waste.
 MUTABLE pool: Entity[10000]@pool:soa = [];
 ```
 
@@ -197,8 +197,8 @@ For operators that produce struct output (WHERE, FIND), structs are reassembled 
 `:soa` works on both `@pool` and `@list`:
 
 ```clear
-MUTABLE pool: Entity[10000]@pool:soa = [];   -- SOA pool (generational handles)
-MUTABLE items: Entity[]@list:soa = [];  -- SOA list (dense, indexed)
+MUTABLE pool: Entity[10000]@pool:soa = [];   # SOA pool (generational handles)
+MUTABLE items: Entity[]@list:soa = [];  # SOA list (dense, indexed)
 ```
 
 Same API as their non-SOA counterparts. The difference is invisible except in pipeline performance.
@@ -242,8 +242,8 @@ The `SHARD` pipeline operator partitions work so each fiber owns its shard exclu
 MUTABLE map: HashMap<String>@sharded(8) = {};
 n = 1000000;
 
--- SHARD routes each key to the scheduler that owns its shard.
--- CONCURRENT EACH runs one fiber per shard — zero locks, zero routing.
+# SHARD routes each key to the scheduler that owns its shard.
+# CONCURRENT EACH runs one fiber per shard — zero locks, zero routing.
 (0..<n) |> SHARD("key:${toString(_)}", map) |> CONCURRENT EACH {
     map[_] = "value";
 };
@@ -264,17 +264,17 @@ n = 1000000;
 `@sharded(N)` is a one-line declaration change. Functions don't need to know — a function that takes `HashMap<String>` seamlessly accepts `HashMap<String>@sharded(8)`:
 
 ```clear
--- One-line change: add @sharded(8) to the declaration
+# One-line change: add @sharded(8) to the declaration
 MUTABLE map: HashMap<String>@sharded(8) = {};
 
--- Functions: no @sharded needed in parameter types
+# Functions: no @sharded needed in parameter types
 FN doWork!(MUTABLE map: HashMap<String>, key: String) RETURNS !Void ->
     map[key] = "value";
 END
 
--- BG blocks: auto-pinned when they capture a @sharded map
+# BG blocks: auto-pinned when they capture a @sharded map
 BG { doWork!(map, "hello"); }
--- [Note] BG block auto-pinned — captures shared/locked resource.
+# [Note] BG block auto-pinned — captures shared/locked resource.
 ```
 
 The compiler handles everything:
@@ -296,7 +296,7 @@ For rare cases where multiple schedulers must read/write the same keys concurren
 
 ```clear
 MUTABLE sessions: HashMap<Session> @shared:writeLocked = {};
--- Arc<RwLock<HashMap>>: readers are parallel, writers are serialized
+# Arc<RwLock<HashMap>>: readers are parallel, writers are serialized
 ```
 
 This is CLEAR's escape hatch — it works like Java's `ConcurrentHashMap` but with explicit intent. The capability annotation makes the cost visible at the declaration site, and the compiler's capability audit will tell you if you're paying for it unnecessarily.

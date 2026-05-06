@@ -1,19 +1,19 @@
--- FFI CLOSE test: EXTERN STRUCT with RAII auto-cleanup.
---
--- Buffer has CLOSE "deinit" — when it goes out of scope,
--- CLEAR automatically emits defer buf.deinit().
+# FFI CLOSE test: EXTERN STRUCT with RAII auto-cleanup.
+#
+# Buffer has CLOSE "deinit" — when it goes out of scope,
+# CLEAR automatically emits defer buf.deinit().
 
 EXTERN STRUCT Buffer { data: String } CLOSE "deinit" FROM "native_resource";
 EXTERN FN createBuffer(content: String) RETURNS Buffer FROM "native_resource";
 EXTERN FN bufferLength(buf: Buffer) RETURNS Int64 FROM "native_resource";
 
 FN main() RETURNS Void ->
-    -- Buffer is auto-closed (deinit) when it leaves scope
+    # Buffer is auto-closed (deinit) when it leaves scope
     buf = createBuffer("hello world");
     len = bufferLength(buf);
     ASSERT len == 11, "buffer length should be 11";
 
-    -- No manual cleanup needed — defer buf.deinit() is auto-emitted
+    # No manual cleanup needed — defer buf.deinit() is auto-emitted
 
     print("FFI CLOSE test passed");
     RETURN;

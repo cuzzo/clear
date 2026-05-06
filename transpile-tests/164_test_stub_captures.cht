@@ -1,8 +1,8 @@
--- Test: STUB CAPTURES counts function calls.
--- Verifies the call counter increments correctly.
+# Test: STUB CAPTURES counts function calls.
+# Verifies the call counter increments correctly.
 
 FN sendAlert(msg: String) RETURNS Void ->
-    -- In production this would send a network alert
+    # In production this would send a network alert
     RETURN;
 END
 

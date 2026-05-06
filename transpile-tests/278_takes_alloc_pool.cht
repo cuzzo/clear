@@ -1,5 +1,5 @@
--- Bug: frame-allocated @pool GIVE'd to TAKES @pool param → alloc mismatch.
--- Same architectural cause as 277.
+# Bug: frame-allocated @pool GIVE'd to TAKES @pool param → alloc mismatch.
+# Same architectural cause as 277.
 
 STRUCT Env { x: Int64 }
 

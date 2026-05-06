@@ -34,8 +34,8 @@ RSpec.describe SemanticAnnotator do
         let(:code) { preamble + <<~FLUX
             FN test() ->
               a = 10;
-              b = a;    -- Copy
-              c = a;    -- 'a' should still be alive
+              b = a;    # Copy
+              c = a;    # 'a' should still be alive
             END
           FLUX
         }
@@ -48,8 +48,8 @@ RSpec.describe SemanticAnnotator do
         let(:code) { preamble + <<~FLUX
             FN test() ->
               a = Config { id: 1 };
-              b = a;    -- MOVE occurs here because Config is not primitive
-              c = a;    -- ERROR: Use after move
+              b = a;    # MOVE occurs here because Config is not primitive
+              c = a;    # ERROR: Use after move
             END
           FLUX
         }
@@ -62,9 +62,9 @@ RSpec.describe SemanticAnnotator do
         let(:code) { preamble + <<~FLUX
             FN test() ->
               MUTABLE a = Config { id: 1 };
-              b = a;                -- 'a' is moved
-              a = Config { id: 2 }; -- 'a' is reborn (live)
-              c = a;                -- Should be valid
+              b = a;                # 'a' is moved
+              a = Config { id: 2 }; # 'a' is reborn (live)
+              c = a;                # Should be valid
             END
           FLUX
         }
@@ -81,8 +81,8 @@ RSpec.describe SemanticAnnotator do
 
               FN test() ->
                 outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
-                x = outer.inner;  -- moves outer.inner
-                y = outer.inner;  -- ERROR: outer.inner is moved
+                x = outer.inner;  # moves outer.inner
+                y = outer.inner;  # ERROR: outer.inner is moved
               END
             FLUX
           }
@@ -98,8 +98,8 @@ RSpec.describe SemanticAnnotator do
 
               FN test() ->
                 outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
-                x = outer.inner;   -- moves outer.inner
-                y = outer.count;   -- OK: outer.count is still valid
+                x = outer.inner;   # moves outer.inner
+                y = outer.count;   # OK: outer.count is still valid
               END
             FLUX
           }
@@ -116,8 +116,8 @@ RSpec.describe SemanticAnnotator do
 
               FN test() ->
                 outer = Outer{ inner: Inner{ deep: Deep{ val: 1 } } };
-                x = outer.inner;       -- moves outer.inner
-                y = outer.inner.deep;  -- ERROR: outer.inner is moved, so outer.inner.deep is dead
+                x = outer.inner;       # moves outer.inner
+                y = outer.inner.deep;  # ERROR: outer.inner is moved, so outer.inner.deep is dead
               END
             FLUX
           }
@@ -132,8 +132,8 @@ RSpec.describe SemanticAnnotator do
 
               FN test() ->
                 p = Point{ x: 10, y: 20 };
-                a = p.x;  -- primitives copy
-                b = p.x;  -- still valid
+                a = p.x;  # primitives copy
+                b = p.x;  # still valid
               END
             FLUX
           }
@@ -150,7 +150,7 @@ RSpec.describe SemanticAnnotator do
 
               FN test() ->
                 p = Point{ x: 10, y: 20 };
-                copy = COPY p;  -- COPY creates independent value
+                copy = COPY p;  # COPY creates independent value
               END
             FLUX
           }
@@ -166,7 +166,7 @@ RSpec.describe SemanticAnnotator do
 
               FN test() ->
                 outer = Outer{ inner: Inner{ value: 42 }, count: 1 };
-                inner_copy = COPY outer.inner;  -- COPY nested struct
+                inner_copy = COPY outer.inner;  # COPY nested struct
               END
             FLUX
           }
@@ -212,8 +212,8 @@ RSpec.describe SemanticAnnotator do
 
             FN test() ->
               x = Config { id: 1 };
-              consume(x);   -- 'x' is moved into 'consume'
-              y = x;    -- ERROR: 'x' is dead
+              consume(x);   # 'x' is moved into 'consume'
+              y = x;    # ERROR: 'x' is dead
             END
           FLUX
         }
@@ -236,12 +236,12 @@ RSpec.describe SemanticAnnotator do
               x = Config { id: 1 };
 
               IF n > 10 THEN
-                consume(x); -- 'x' moved here
+                consume(x); # 'x' moved here
               ELSE
-                -- 'x' alive here
+                # 'x' alive here
               END
 
-              -- Merge: x is dead because it died in the THEN branch
+              # Merge: x is dead because it died in the THEN branch
               y = x;
             END
           FLUX
@@ -264,7 +264,7 @@ RSpec.describe SemanticAnnotator do
                 consume(x);
               END
 
-              -- x should definitely be dead
+              # x should definitely be dead
               y = x;
             END
           FLUX
@@ -280,8 +280,8 @@ RSpec.describe SemanticAnnotator do
           FN test() ->
             IF TRUE THEN
               x = Config { id: 1 };
-              -- x is unused and Affine
-              -- Should auto-drop here
+              # x is unused and Affine
+              # Should auto-drop here
             END
           END
         FLUX
@@ -302,8 +302,8 @@ RSpec.describe SemanticAnnotator do
               z = 1;
             ELSE
               x = Config { id: 1 };
-              -- x is unused and Affine
-              -- Should auto-drop here
+              # x is unused and Affine
+              # Should auto-drop here
             END
           END
         FLUX
@@ -322,8 +322,8 @@ RSpec.describe SemanticAnnotator do
       let(:code) { preamble + <<~FLUX
           FN test() ->
             a = Config { id: 1 };
-            b = 10; -- Primitive, no drop needed
-            -- 'a' is never moved. It must be dropped here.
+            b = 10; # Primitive, no drop needed
+            # 'a' is never moved. It must be dropped here.
           END
         FLUX
       }
@@ -348,7 +348,7 @@ RSpec.describe SemanticAnnotator do
             x = Config { id: 1 };
 
             WHILE TRUE DO
-              consume(x); -- Error: Moves 'x' in first iteration, 2nd iteration crashes
+              consume(x); # Error: Moves 'x' in first iteration, 2nd iteration crashes
             END
           END
         FLUX

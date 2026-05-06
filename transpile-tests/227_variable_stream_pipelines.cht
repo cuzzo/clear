@@ -1,11 +1,11 @@
--- Variable-backed finite stream pipeline matrix.
--- Covers the currently supported fused pipeline path for `s: ~T[] = 0 ..< n`
--- flowing into EACH, with fusible stages in front.
+# Variable-backed finite stream pipeline matrix.
+# Covers the currently supported fused pipeline path for `s: ~T[] = 0 ..< n`
+# flowing into EACH, with fusible stages in front.
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: SELECT + WHERE + EACH over variable-backed finite stream.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: SELECT + WHERE + EACH over variable-backed finite stream.
+    # -------------------------------------------------------
     s1: ~Int64[] = 0 ..< 8;
     MUTABLE acc1: Int64 = 0;
     s1 |> SELECT _ * 2 |> WHERE _ > 5 |> EACH {
@@ -13,9 +13,9 @@ FN main() RETURNS Void ->
     };
     ASSERT acc1 == 50, "variable stream select+where+each should sum to 50";
 
-    -- -------------------------------------------------------
-    -- Test 2: SKIP + EACH over variable-backed finite stream.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: SKIP + EACH over variable-backed finite stream.
+    # -------------------------------------------------------
     s2: ~Int64[] = 0 ..< 6;
     MUTABLE acc2: Int64 = 0;
     s2 |> SKIP 3 |> EACH {
@@ -23,9 +23,9 @@ FN main() RETURNS Void ->
     };
     ASSERT acc2 == 12, "variable stream skip+each should sum to 12";
 
-    -- -------------------------------------------------------
-    -- Test 3: TAKE_WHILE + EACH over variable-backed finite stream.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: TAKE_WHILE + EACH over variable-backed finite stream.
+    # -------------------------------------------------------
     s3: ~Int64[] = 0 ..< 10;
     MUTABLE acc3: Int64 = 0;
     s3 |> TAKE_WHILE _ < 4 |> EACH {

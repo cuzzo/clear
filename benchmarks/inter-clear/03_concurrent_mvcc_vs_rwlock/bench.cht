@@ -1,18 +1,18 @@
--- Read-heavy benchmark: @shared:writeLocked (RwLock) vs @shared:versioned (MVCC).
---
--- Workload: 32 reader fibers each do reads_per reads of a Counter struct,
--- plus 4 writer fibers each doing writes_per increments. With the bench
--- runner (CLEAR_THREADS=N), readers fan out across N OS threads; on a 32-core host
--- the 32 readers can saturate parallelism.
---
--- @shared:writeLocked = Arc<RwLock<Counter>>. Multiple readers can hold the
--- read lock concurrently; writers acquire exclusive. Each writer drains all
--- readers behind it (writer-preferring fairness in the parking-lot impl).
---
--- @shared:versioned = Arc<Versioned<Counter>>. Readers do an acquire-load of
--- the cell pointer + EBR pin (one mfence on x86 after the Jan 2026 enter()
--- relax). Writers run an update() closure that publishes a new version via
--- CAS and retires the old via EBR for deferred-free.
+# Read-heavy benchmark: @shared:writeLocked (RwLock) vs @shared:versioned (MVCC).
+#
+# Workload: 32 reader fibers each do reads_per reads of a Counter struct,
+# plus 4 writer fibers each doing writes_per increments. With the bench
+# runner (CLEAR_THREADS=N), readers fan out across N OS threads; on a 32-core host
+# the 32 readers can saturate parallelism.
+#
+# @shared:writeLocked = Arc<RwLock<Counter>>. Multiple readers can hold the
+# read lock concurrently; writers acquire exclusive. Each writer drains all
+# readers behind it (writer-preferring fairness in the parking-lot impl).
+#
+# @shared:versioned = Arc<Versioned<Counter>>. Readers do an acquire-load of
+# the cell pointer + EBR pin (one mfence on x86 after the Jan 2026 enter()
+# relax). Writers run an update() closure that publishes a new version via
+# CAS and retires the old via EBR for deferred-free.
 
 STRUCT Counter { value: Int64 }
 
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
     writes_per: Int64 = 1000_i64;
     total_reads: Int64 = 32_i64 * reads_per;
 
-    -- ───── Variant A: @shared:writeLocked (RwLock) ─────
+    # ───── Variant A: @shared:writeLocked (RwLock) ─────
     MUTABLE c_rw = Counter{ value: 0_i64 } @shared:writeLocked;
 
     t0_rw = timestampMs();
@@ -349,7 +349,7 @@ NEXT wrw1;
 t1_rw = timestampMs();
 elapsed_rw_ms = t1_rw - t0_rw;
 
--- ───── Variant B: @shared:versioned (MVCC) ─────
+# ───── Variant B: @shared:versioned (MVCC) ─────
 MUTABLE c_v = Counter{ value: 0_i64 } @shared:versioned;
 
 t0_v = timestampMs();

@@ -1,12 +1,12 @@
--- Pipeline-terminal observable SUM (Commits 1-5 of the wiring).
---
--- A BG STREAM produces values; SUM folds into a `~Int64@observable`
--- binding (heap-allocated `*ObservableSum(i64)`); NEXT joins the
--- producer and returns the final accumulator value.
---
--- Verifies the canonical user-facing form from
--- `docs/agents/observables.md` compiles end-to-end and produces
--- the correct sum.
+# Pipeline-terminal observable SUM (Commits 1-5 of the wiring).
+#
+# A BG STREAM produces values; SUM folds into a `~Int64@observable`
+# binding (heap-allocated `*ObservableSum(i64)`); NEXT joins the
+# producer and returns the final accumulator value.
+#
+# Verifies the canonical user-facing form from
+# `docs/agents/observables.md` compiles end-to-end and produces
+# the correct sum.
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {
@@ -20,7 +20,7 @@ FN main() RETURNS Void ->
     running: ~Int64@observable = gen |> SUM _;
     final = NEXT running;
 
-    -- 0 + 1 + ... + 99 = 4950
+    # 0 + 1 + ... + 99 = 4950
     ASSERT final == 4950_i64, "running sum mismatch";
     print("ok");
     RETURN;

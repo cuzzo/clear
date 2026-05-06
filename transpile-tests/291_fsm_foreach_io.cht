@@ -1,6 +1,6 @@
--- FSM ForEach with suspend in body. List iteration over a captured
--- list, sleeping per element. Verifies the recursive splitter
--- handles ForEach the way it handles ForRange.
+# FSM ForEach with suspend in body. List iteration over a captured
+# list, sleeping per element. Verifies the recursive splitter
+# handles ForEach the way it handles ForRange.
 
 FN main() RETURNS Void ->
   items = [10_i64, 20, 30];

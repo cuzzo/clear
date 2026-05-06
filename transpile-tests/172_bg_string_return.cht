@@ -1,14 +1,14 @@
--- Test: BG block returning a String value
--- Verifies that ~String is a Promise([]const u8), not a BoundedStream.
--- String is internally []const u8 (a fixed array) which previously
--- tripped the bounded_stream? check.
+# Test: BG block returning a String value
+# Verifies that ~String is a Promise([]const u8), not a BoundedStream.
+# String is internally []const u8 (a fixed array) which previously
+# tripped the bounded_stream? check.
 
 FN main() RETURNS Void ->
     p: ~String = BG { "hello"; };
     result = NEXT p;
     ASSERT result == "hello", "BG returns string";
 
-    -- BG with computed string
+    # BG with computed string
     x = 42;
     p2: ~String = BG { x.toString(); };
     result2 = NEXT p2;

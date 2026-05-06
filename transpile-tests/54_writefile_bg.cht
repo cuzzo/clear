@@ -3,7 +3,7 @@ FN doWrite(name: String, content: String) RETURNS !Void ->
 END
 
 FN main() RETURNS Void ->
-    -- writeFile from a BG fiber
+    # writeFile from a BG fiber
     p: ~Void = BG { doWrite("testdata/write_test_output.txt", "hello from BG fiber"); };
     NEXT p;
 

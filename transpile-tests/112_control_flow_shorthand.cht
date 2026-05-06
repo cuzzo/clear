@@ -1,4 +1,4 @@
--- Test: Control flow shorthand — IF/WHILE/FOR with -> single_statement;
+# Test: Control flow shorthand — IF/WHILE/FOR with -> single_statement;
 
 FN abs(x: Int64) RETURNS Int64 ->
     IF x < 0 -> RETURN 0 - x;
@@ -6,21 +6,21 @@ FN abs(x: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    -- IF shorthand
+    # IF shorthand
     ASSERT abs(-5) == 5, "IF shorthand in function";
     ASSERT abs(3) == 3, "IF shorthand passthrough";
 
-    -- WHILE shorthand
+    # WHILE shorthand
     MUTABLE i: Int64 = 0;
     WHILE i < 10 -> i += 1;
     ASSERT i == 10, "WHILE shorthand";
 
-    -- FOR shorthand
+    # FOR shorthand
     MUTABLE sum: Int64 = 0;
     FOR j IN (1_i64..=5_i64) -> sum += j;
     ASSERT sum == 15, "FOR shorthand";
 
-    -- Mixed: shorthand and longhand in same function
+    # Mixed: shorthand and longhand in same function
     MUTABLE count: Int64 = 0;
     WHILE count < 3 -> count += 1;
     IF count == 3 THEN

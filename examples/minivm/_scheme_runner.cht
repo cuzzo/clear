@@ -1,12 +1,12 @@
--- Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
--- with typed values, debugger, and FFI bridge for typed arrays.
+# Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
+# with typed values, debugger, and FFI bridge for typed arrays.
 
 REQUIRE "types.cht";
 REQUIRE "parser.cht";
 REQUIRE "debugger.cht";
 
--- FFI functions: native CLEAR functions callable from Scheme via typed arrays.
--- These operate on real Int64[] - no Value wrapping, no conversion.
+# FFI functions: native CLEAR functions callable from Scheme via typed arrays.
+# These operate on real Int64[] - no Value wrapping, no conversion.
 
 FN nativeSum(arr: Int64[]) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
@@ -32,7 +32,7 @@ FN nativeDot(a: Float64[], b: Float64[]) RETURNS Float64 ->
     RETURN total;
 END
 
--- FFI for typed structs: operate on raw Int64[] backing data
+# FFI for typed structs: operate on raw Int64[] backing data
 FN nativePointManhattan(a: Int64[], b: Int64[]) RETURNS Int64 ->
     MUTABLE dx: Int64 = a[0] - b[0];
     MUTABLE dy: Int64 = a[1] - b[1];
@@ -54,25 +54,25 @@ FN nativeContains(arr: Int64[], needle: Int64) RETURNS Bool ->
     END
     RETURN FALSE;
 END
---
--- Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
--- Each Env holds a HashMap<Value> for its local bindings.
--- Parent links stored as Value.EnvRef in vars["__p"].
--- Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
--- Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
+#
+# Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
+# Each Env holds a HashMap<Value> for its local bindings.
+# Parent links stored as Value.EnvRef in vars["__p"].
+# Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+# Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
--- Native function dispatch by numeric ID.
--- IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
---      10=list 11=list? 12=empty? 13=count 14=not 15=prn
---      16=vector 17=vector-ref 18=vector-set! 19=vector-length 20=vector?
---      21=cons 22=car 23=cdr 24=pair? 25=eq?
---      26=string-append 27=string-length 28=substring 29=string-ref
---      30=number->string 31=string->number 32=string? 33=display
---      34=list-ref 35=list-length 36=list-push 62=list-set!
+# Native function dispatch by numeric ID.
+# IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
+#      10=list 11=list? 12=empty? 13=count 14=not 15=prn
+#      16=vector 17=vector-ref 18=vector-set! 19=vector-length 20=vector?
+#      21=cons 22=car 23=cdr 24=pair? 25=eq?
+#      26=string-append 27=string-length 28=substring 29=string-ref
+#      30=number->string 31=string->number 32=string? 33=display
+#      34=list-ref 35=list-length 36=list-push 62=list-set!
 
 FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
-    -- Arithmetic
-    -- Modulo
+    # Arithmetic
+    # Modulo
     IF id == 37 THEN
         ia = toInt(getNum(evaled[1]));
         ib = toInt(getNum(evaled[2]));
@@ -81,7 +81,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Int64Val: modResult };
     END
     IF id == 1 THEN
-        -- + works on i64, f64, and strings
+        # + works on i64, f64, and strings
         PARTIAL MATCH evaled[1] START
             Value.Str AS s1 -> RETURN Value{ Str: s1 + getStr(evaled[2]) };,
             Value.Int64Val AS ia ->
@@ -108,13 +108,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
         RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) };
     END
-    -- Comparison
+    # Comparison
     IF id == 5 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     IF id == 6 THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
     IF id == 7 THEN RETURN boolVal(getNum(evaled[1]) > getNum(evaled[2])); END
     IF id == 8 THEN RETURN boolVal(getNum(evaled[1]) <= getNum(evaled[2])); END
     IF id == 9 THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
-    -- List
+    # List
     IF id == 10 THEN
         MUTABLE litems: Value[]@list = List[];
         FOR li IN (1_i64 ..< evaled.length()) ->
@@ -126,7 +126,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 13 THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
     IF id == 14 THEN RETURN boolVal(isTruthy?(evaled[1]) == FALSE); END
     IF id == 15 THEN print(prStr(evaled[1], TRUE)); RETURN Value.Nil; END
-    -- Vector
+    # Vector
     IF id == 16 THEN
         MUTABLE velems: Value[]@list = List[];
         FOR vi IN (1_i64 ..< evaled.length()) ->
@@ -137,13 +137,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     IF id == 18 THEN RETURN Value.Nil; END
     IF id == 19 THEN RETURN Value{ Number: toFloat(vecLen(evaled[1])) }; END
     IF id == 20 THEN RETURN boolVal(isVector?(evaled[1])); END
-    -- Pair
+    # Pair
     IF id == 21 THEN RETURN Value.Pair{ pairCar: COPY evaled[1], pairCdr: COPY evaled[2] }; END
     IF id == 22 THEN RETURN pairCar(evaled[1]); END
     IF id == 23 THEN RETURN pairCdr(evaled[1]); END
     IF id == 24 THEN RETURN boolVal(isPair?(evaled[1])); END
     IF id == 25 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
-    -- String
+    # String
     IF id == 26 THEN
         MUTABLE out = getStr(evaled[1]);
         FOR si IN (2_i64 ..< evaled.length()) DO
@@ -178,9 +178,9 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value.FalseVal;
     END
     IF id == 33 THEN print(prStr(evaled[1], FALSE)); RETURN Value.Nil; END
-    -- String stdlib: 38=startsWith?, 39=split, 40=indexOf, 41=contains?, 42=trim, 43=charAt, 44=substr
+    # String stdlib: 38=startsWith?, 39=split, 40=indexOf, 41=contains?, 42=trim, 43=charAt, 44=substr
     IF id == 38 THEN
-        -- startsWith?(str, prefix)
+        # startsWith?(str, prefix)
         s = getStr(evaled[1]);
         prefix = getStr(evaled[2]);
         IF prefix.length() == 0 THEN RETURN Value.TrueVal; END
@@ -188,7 +188,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN boolVal(substr(s, 0, prefix.length()) == prefix);
     END
     IF id == 39 THEN
-        -- split(str, delim) -> List of strings
+        # split(str, delim) -> List of strings
         s = getStr(evaled[1]);
         delim = getStr(evaled[2]);
         MUTABLE parts: Value[]@list = List[];
@@ -209,7 +209,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ List: parts };
     END
     IF id == 40 THEN
-        -- indexOf(str, needle) -> Int64 or -1
+        # indexOf(str, needle) -> Int64 or -1
         s = getStr(evaled[1]);
         needle = getStr(evaled[2]);
         MUTABLE idx: Int64 = 0;
@@ -222,7 +222,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Number: 0.0 - 1.0 };
     END
     IF id == 41 THEN
-        -- contains?: list membership OR string substring
+        # contains?: list membership OR string substring
         PARTIAL MATCH evaled[1] START
             Value.List AS celems ->
                 FOR ci IN (0_i64 ..< celems.length()) DO
@@ -247,7 +247,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
     END
     IF id == 42 THEN
-        -- trim: strip leading/trailing whitespace
+        # trim: strip leading/trailing whitespace
         s = getStr(evaled[1]);
         MUTABLE trimStart: Int64 = 0;
         WHILE trimStart < s.length() && (charAt(s, trimStart) == " " || charAt(s, trimStart) == "\n" || charAt(s, trimStart) == "\t" || charAt(s, trimStart) == "\r") DO
@@ -260,7 +260,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Str: substr(s, trimStart, trimEnd - trimStart) };
     END
     IF id == 48 THEN
-        -- endsWith?(str, suffix)
+        # endsWith?(str, suffix)
         s = getStr(evaled[1]);
         suffix = getStr(evaled[2]);
         IF suffix.length() == 0 THEN RETURN Value.TrueVal; END
@@ -268,7 +268,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN boolVal(substr(s, s.length() - suffix.length(), suffix.length()) == suffix);
     END
     IF id == 49 THEN
-        -- join(list, separator) -> string
+        # join(list, separator) -> string
         MUTABLE joined = "";
         sep = getStr(evaled[2]);
         PARTIAL MATCH evaled[1] START
@@ -281,20 +281,20 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
         RETURN Value{ Str: COPY joined };
     END
-    -- Math: 50-56
+    # Math: 50-56
     IF id == 50 THEN
         v = getNum(evaled[1]);
         IF v < 0.0 THEN RETURN Value{ Number: 0.0 - v }; END
         RETURN Value{ Number: v };
     END
     IF id == 51 THEN
-        -- min(a, b)
+        # min(a, b)
         a = getNum(evaled[1]); b = getNum(evaled[2]);
         IF a < b THEN RETURN Value{ Number: a }; END
         RETURN Value{ Number: b };
     END
     IF id == 52 THEN
-        -- max(a, b)
+        # max(a, b)
         a = getNum(evaled[1]); b = getNum(evaled[2]);
         IF a > b THEN RETURN Value{ Number: a }; END
         RETURN Value{ Number: b };
@@ -308,7 +308,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         maxVal = toInt(getNum(evaled[1]));
         RETURN Value{ Number: toFloat(randomInt(maxVal)) };
     END
-    -- File I/O: 45=readFile, 46=writeFile, 47=shell
+    # File I/O: 45=readFile, 46=writeFile, 47=shell
     IF id == 45 THEN
         path = getStr(evaled[1]);
         content = readFile(path);
@@ -326,12 +326,12 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Str: COPY output };
     END
     IF id == 44 THEN
-        -- toInt: truncate float to integer
+        # toInt: truncate float to integer
         truncated = toInt(getNum(evaled[1]));
         RETURN Value{ Number: toFloat(truncated) };
     END
     IF id == 43 THEN
-        -- substr(str, start, len) - CLEAR-style
+        # substr(str, start, len) - CLEAR-style
         s = getStr(evaled[1]);
         start = toInt(getNum(evaled[2]));
         MUTABLE len: Int64 = toInt(getNum(evaled[3]));
@@ -339,10 +339,10 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         IF len < 0 THEN len = 0; END
         RETURN Value{ Str: substr(s, start, len) };
     END
-    -- List operations: 34=list-ref, 35=list-length
+    # List operations: 34=list-ref, 35=list-length
     IF id == 34 THEN RETURN listRef(evaled[1], getInt(evaled[2])); END
     IF id == 35 THEN
-        -- list-length: works on lists, typed arrays, AND strings
+        # list-length: works on lists, typed arrays, AND strings
         PARTIAL MATCH evaled[1] START
             Value.Str AS s -> RETURN Value{ Number: toFloat(s.length()) };,
             Value.TypedI64Arr AS iarr -> RETURN Value{ Int64Val: iarr.length() };,
@@ -352,7 +352,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Number: toFloat(listLen(evaled[1])) };
     END
     IF id == 36 THEN
-        -- list-push: return new list with element appended (preserves typed arrays)
+        # list-push: return new list with element appended (preserves typed arrays)
         PARTIAL MATCH evaled[1] START
             Value.TypedI64Arr AS srcInts ->
                 MUTABLE newInts: Int64[]@list = List[];
@@ -383,7 +383,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value.Nil;
     END
 
-    -- String methods: 57=codepointCount, 58=bytes, 59=replace, 60=toUpper, 61=toLower
+    # String methods: 57=codepointCount, 58=bytes, 59=replace, 60=toUpper, 61=toLower
     IF id == 57 THEN
         s = getStr(evaled[1]);
         RETURN Value{ Int64Val: codepointCount(s) };
@@ -393,7 +393,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Int64Val: s.length() };
     END
     IF id == 59 THEN
-        -- replace(str, old, new)
+        # replace(str, old, new)
         s = getStr(evaled[1]);
         old = getStr(evaled[2]);
         new = getStr(evaled[3]);
@@ -408,7 +408,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN Value{ Str: lowercase(s) };
     END
     IF id == 62 THEN
-        -- list-set!: return new list with element at idx replaced (functional update)
+        # list-set!: return new list with element at idx replaced (functional update)
         setIdx = getInt(evaled[2]);
         newElem = COPY evaled[3];
         PARTIAL MATCH evaled[1] START
@@ -447,7 +447,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         RETURN COPY evaled[1];
     END
     IF id == 63 THEN
-        -- set-insert: add val to set (list) if not already present
+        # set-insert: add val to set (list) if not already present
         val = evaled[2];
         PARTIAL MATCH evaled[1] START
             Value.List AS selems ->
@@ -470,7 +470,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
     END
     IF id == 64 THEN
-        -- set-remove: remove val from set (list)
+        # set-remove: remove val from set (list)
         val = evaled[2];
         PARTIAL MATCH evaled[1] START
             Value.List AS relems ->
@@ -489,7 +489,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
         END
     END
     IF id == 65 THEN
-        -- parse-i64: parse decimal string directly to Int64 (avoids float64 precision loss)
+        # parse-i64: parse decimal string directly to Int64 (avoids float64 precision loss)
         s = getStr(evaled[1]);
         parsed = toInt(s) OR 0;
         RETURN Value{ Int64Val: parsed };
@@ -498,9 +498,9 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value @reentrant ->
     RETURN Value.Nil;
 END
 
--- Environment operations using Pool
+# Environment operations using Pool
 
--- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
+# envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
 FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool @reentrant ->
     IF pool[envId] AS env THEN
@@ -517,8 +517,8 @@ FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@po
     RETURN FALSE;
 END
 
--- eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
--- let body, lambda body) reassign ast/curEnv and continue instead of recursing.
+# eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
+# let body, lambda body) reassign ast/curEnv and continue instead of recursing.
 
 FN listRef(v: Value, idx: Int64) RETURNS Value ->
     PARTIAL MATCH v START
@@ -644,7 +644,7 @@ FN isSymbol?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
--- resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
+# resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
 FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
     PARTIAL MATCH v START
         Value.Tco AS tco ->
@@ -656,7 +656,7 @@ FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant
     RETURN COPY v;
 END
 
--- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
+# eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
 FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
     PARTIAL MATCH TAKES ast START
@@ -698,9 +698,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
-    -- Pipeline operations: special forms that call lambdas
+    # Pipeline operations: special forms that call lambdas
     IF formName == "list-where" THEN
-        -- (list-where list pred) -> filter (handles List and TypedI64Arr)
+        # (list-where list pred) -> filter (handles List and TypedI64Arr)
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         predVal = eval!(COPY items[2], envId, pool);
@@ -718,7 +718,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: filtered };
 
     ELSE_IF formName == "list-select" THEN
-        -- (list-select list fn) -> map (handles List, TypedI64Arr, TypedF64Arr)
+        # (list-select list fn) -> map (handles List, TypedI64Arr, TypedF64Arr)
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         fnVal = eval!(COPY items[2], envId, pool);
@@ -735,7 +735,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: mapped };
 
     ELSE_IF formName == "list-reduce" THEN
-        -- (list-reduce list init fn) -> fold (handles both List and TypedI64Arr)
+        # (list-reduce list init fn) -> fold (handles both List and TypedI64Arr)
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE acc: Value = eval!(COPY items[2], envId, pool);
@@ -782,7 +782,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: distinct };
 
     ELSE_IF formName == "list-orderby" THEN
-        -- (list-orderby list keyFn) -> sorted copy (insertion sort)
+        # (list-orderby list keyFn) -> sorted copy (insertion sort)
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(COPY items[2], envId, pool);
@@ -792,7 +792,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             elem = listRef(listVal, oi);
             sorted.append(COPY elem);
         END
-        -- Insertion sort by key
+        # Insertion sort by key
         MUTABLE si: Int64 = 1;
         IF sorted.length() > 0 THEN
                 WHILE si < sorted.length() DO
@@ -821,7 +821,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: sorted };
 
     ELSE_IF formName == "list-unnest" THEN
-        -- (list-unnest list fieldFn) -> flatten nested lists
+        # (list-unnest list fieldFn) -> flatten nested lists
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         fieldFn = eval!(COPY items[2], envId, pool);
@@ -854,7 +854,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: flat };
 
     ELSE_IF formName == "list-index" THEN
-        -- (list-index list keyFn) -> assoc list of (key . items[])
+        # (list-index list keyFn) -> assoc list of (key . items[])
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(COPY items[2], envId, pool);
@@ -866,14 +866,14 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[gi]);
                     MUTABLE gKey: Value = evalList!(kArgs, envId, pool);
                     gKey = resolveTco!(gKey, pool);
-                    -- Find existing group
+                    # Find existing group
                     MUTABLE found: Int64 = 0 - 1;
                     FOR fi IN (0_i64 ..< groups.length()) DO
                         groupPair = pairCar(groups[fi]);
                         IF valEqual?(groupPair, gKey) THEN found = fi; END
                     END
                     IF found >= 0 THEN
-                        -- Add to existing group (rebuild pair with appended list)
+                        # Add to existing group (rebuild pair with appended list)
                         existingList = pairCdr(groups[found]);
                         MUTABLE newGroupItems: Value[]@list = List[];
                         PARTIAL MATCH existingList START
@@ -883,7 +883,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         newGroupItems.append(COPY srcItems[gi]);
                         groups[found] = Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newGroupItems } };
                     ELSE
-                        -- New group
+                        # New group
                         MUTABLE newItems: Value[]@list = List[];
                         newItems.append(COPY srcItems[gi]);
                         groups.append(Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newItems } });
@@ -894,7 +894,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: groups };
 
     ELSE_IF formName == "assoc-get" THEN
-        -- (assoc-get alist key) -> value or error if not found
+        # (assoc-get alist key) -> value or error if not found
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         PARTIAL MATCH alist START
@@ -952,7 +952,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: rangeItems };
 
     ELSE_IF formName == "toList" THEN
-        -- Convert range/list to list (identity for lists, used with stream types)
+        # Convert range/list to list (identity for lists, used with stream types)
         IF items.length() > 1 THEN
             tlVal = eval!(COPY items[1], envId, pool);
             RETURN tlVal;
@@ -1115,7 +1115,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: taken };
 
     ELSE_IF formName == "assoc-set" THEN
-        -- (assoc-set alist key val) -> new alist with key set
+        # (assoc-set alist key val) -> new alist with key set
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         IF isError?(key) THEN RETURN key; END
@@ -1149,7 +1149,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: newPairs };
 
     ELSE_IF formName == "assoc-delete" THEN
-        -- (assoc-delete alist key) -> new alist without key
+        # (assoc-delete alist key) -> new alist without key
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         MUTABLE adPairs: Value[]@list = List[];
@@ -1164,7 +1164,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: adPairs };
 
     ELSE_IF formName == "assoc-contains?" THEN
-        -- (assoc-contains? alist key) -> bool
+        # (assoc-contains? alist key) -> bool
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         PARTIAL MATCH alist START
@@ -1177,12 +1177,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.FalseVal;
 
-    -- Debug introspection
+    # Debug introspection
     ELSE_IF formName == "env-keys" THEN
         RETURN Value{ Str: "(use :inspect <varname> to check specific variables)" };
 
     ELSE_IF formName == "type-of" THEN
-        -- (type-of expr) -> string describing the type
+        # (type-of expr) -> string describing the type
         val = eval!(COPY items[1], envId, pool);
         PARTIAL MATCH val START
             Value.Nil -> RETURN Value{ Str: "Nil" };,
@@ -1203,7 +1203,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ Str: "Unknown" };
 
     ELSE_IF formName == "typed-list:i64" THEN
-        -- (typed-list:i64 1 2 3) -> TypedI64Arr with raw Int64[] storage
+        # (typed-list:i64 1 2 3) -> TypedI64Arr with raw Int64[] storage
         MUTABLE typedItems: Int64[]@list = List[];
         FOR ti IN (1_i64 ..< items.length()) DO
             tval = eval!(COPY items[ti], envId, pool);
@@ -1212,9 +1212,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value{ TypedI64Arr: typedItems };
 
-    -- Typed struct: (cons 'Tag TypedI64Arr/TypedF64Arr/Vector)
+    # Typed struct: (cons 'Tag TypedI64Arr/TypedF64Arr/Vector)
     ELSE_IF formName == "typed-struct:i64" THEN
-        -- (typed-struct:i64 "Name" field1 field2 ...) -> Pair{Symbol(Name), TypedI64Arr}
+        # (typed-struct:i64 "Name" field1 field2 ...) -> Pair{Symbol(Name), TypedI64Arr}
         tagVal = eval!(COPY items[1], envId, pool);
         IF isError?(tagVal) THEN RETURN tagVal; END
         MUTABLE structData: Int64[]@list = List[];
@@ -1283,7 +1283,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value{ TypedF64Arr: convertedF };
 
-    -- Type conversion ops
+    # Type conversion ops
     ELSE_IF formName == "int->float" THEN
         val = eval!(COPY items[1], envId, pool);
         RETURN Value{ Number: toFloat(getInt(val)) };
@@ -1294,7 +1294,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ Int64Val: truncated };
 
     ELSE_IF formName == "to-typed:i64" THEN
-        -- (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
+        # (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE converted: Int64[]@list = List[];
@@ -1309,7 +1309,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ TypedI64Arr: converted };
 
     ELSE_IF formName == "to-list" THEN
-        -- (to-list typedArr) -> convert TypedI64Arr back to Value[] list
+        # (to-list typedArr) -> convert TypedI64Arr back to Value[] list
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
         PARTIAL MATCH arrVal START
@@ -1325,7 +1325,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN arrVal;
 
     ELSE_IF formName == "typed-push:i64" THEN
-        -- (typed-push:i64 arr val) -> new typed array with value appended
+        # (typed-push:i64 arr val) -> new typed array with value appended
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
         newVal = eval!(COPY items[2], envId, pool);
@@ -1341,7 +1341,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         newArr.append(getInt(newVal));
         RETURN Value{ TypedI64Arr: newArr };
 
-    -- FFI bridge: call native CLEAR functions with typed arrays
+    # FFI bridge: call native CLEAR functions with typed arrays
     ELSE_IF formName == "native-sum" THEN
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
@@ -1379,7 +1379,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    -- Sandboxed I/O: check __sandbox flag before file/shell ops
+    # Sandboxed I/O: check __sandbox flag before file/shell ops
     ELSE_IF formName == "sandboxed-read" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
@@ -1413,7 +1413,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ Str: COPY output };
 
     ELSE_IF formName == "source-line" THEN
-        -- (source-line N) -> track current CLEAR source line for error messages
+        # (source-line N) -> track current CLEAR source line for error messages
         lineVal = eval!(COPY items[1], envId, pool);
         IF pool[envId] AS env THEN env.vars["__source_line"] = lineVal; END
         RETURN Value.Nil;
@@ -1423,7 +1423,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-manhattan" THEN
-        -- (native-manhattan structA structB) -> Int64 manhattan distance
+        # (native-manhattan structA structB) -> Int64 manhattan distance
         aVal = eval!(COPY items[1], envId, pool);
         IF isError?(aVal) THEN RETURN aVal; END
         bVal = eval!(COPY items[2], envId, pool);
@@ -1442,7 +1442,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-translate" THEN
-        -- (native-translate struct dx dy) -> new TypedStructI64
+        # (native-translate struct dx dy) -> new TypedStructI64
         sVal = eval!(COPY items[1], envId, pool);
         IF isError?(sVal) THEN RETURN sVal; END
         dxVal = eval!(COPY items[2], envId, pool);
@@ -1474,7 +1474,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-set-break" THEN
-        -- (debug-set-break "fnName") -> register breakpoint
+        # (debug-set-break "fnName") -> register breakpoint
         bpName = eval!(COPY items[1], envId, pool);
         IF pool[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END
         RETURN Value.Nil;
@@ -1484,7 +1484,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF pool[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END
         RETURN Value.Nil;
 
-    -- Error introspection: special forms to avoid error propagation
+    # Error introspection: special forms to avoid error propagation
     ELSE_IF formName == "error?" THEN
         val = eval!(COPY items[1], envId, pool);
         RETURN boolVal(isError?(val));
@@ -1505,7 +1505,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(msg) THEN RETURN msg; END
         kind = eval!(COPY items[2], envId, pool);
         IF isError?(kind) THEN RETURN kind; END
-        -- Include source line in error message if tracked
+        # Include source line in error message if tracked
         srcLine = envGet!(envId, "__source_line", pool);
         MUTABLE errMsg: String = getStr(msg);
         IF getNum(srcLine) > 0.0 THEN
@@ -1515,7 +1515,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind) };
 
     ELSE_IF formName == "try" THEN
-        -- (try expr (catch e handler))
+        # (try expr (catch e handler))
         MUTABLE tryResult: Value = eval!(COPY items[1], envId, pool);
         PARTIAL MATCH tryResult START
             Value.Error AS e ->
@@ -1539,7 +1539,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN setVal;
 
     ELSE_IF formName == "vector-set!" THEN
-        -- (vector-set! var idx val) - copy-modify-store: get vector, rebuild with new slot, store back
+        # (vector-set! var idx val) - copy-modify-store: get vector, rebuild with new slot, store back
         vecName = getSymName(items[1]);
         idxVal = eval!(COPY items[2], envId, pool);
         IF isError?(idxVal) THEN RETURN idxVal; END
@@ -1563,7 +1563,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "list-remove-at!" THEN
-        -- list-remove-at! varname idx: removes element at idx, returns removed element
+        # list-remove-at! varname idx: removes element at idx, returns removed element
         lraName = getSymName(items[1]);
         lraIdx = getInt(eval!(COPY items[2], envId, pool));
         lraCurrent = envGet!(envId, lraName, pool);
@@ -1599,7 +1599,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
 
     ELSE_IF formName == "stream-next!" THEN
-        -- (stream-next! var) - advance stream: return head, update var to tail
+        # (stream-next! var) - advance stream: return head, update var to tail
         snName = getSymName(items[1]);
         snCurrent = envGet!(envId, snName, pool);
         PARTIAL MATCH snCurrent START
@@ -1697,10 +1697,10 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         f = evaled[0];
 
-        -- Debug: check breakpoints + step mode
+        # Debug: check breakpoints + step mode
         calledName = getSymName(items[0]);
         IF calledName.length() > 0 THEN
-            -- Build call description
+            # Build call description
             MUTABLE callDesc = calledName + "(";
             FOR ai IN (1_i64 ..< evaled.length()) DO
                 IF ai > 1 THEN callDesc = callDesc + ", "; END
@@ -1708,22 +1708,22 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             END
             callDesc = callDesc + ")";
 
-            -- Check if we should break: explicit breakpoint OR step mode
+            # Check if we should break: explicit breakpoint OR step mode
             bpKey = envGet!(envId, "__bp_" + calledName, pool);
             stepMode = getNum(envGet!(envId, "__dbg_step", pool));
             curDepth = getNum(envGet!(envId, "__dbg_depth", pool));
             targetDepth = getNum(envGet!(envId, "__dbg_target_depth", pool));
             MUTABLE shouldBreak = isTruthy?(bpKey);
 
-            -- Step-into: always break
+            # Step-into: always break
             IF stepMode == 1.0 THEN shouldBreak = TRUE; END
-            -- Step-over: break when depth <= target
+            # Step-over: break when depth <= target
             IF stepMode == 2.0 && curDepth <= targetDepth THEN shouldBreak = TRUE; END
-            -- Step-out: break when depth < target
+            # Step-out: break when depth < target
             IF stepMode == 3.0 && curDepth < targetDepth THEN shouldBreak = TRUE; END
 
             IF shouldBreak THEN
-                -- Push call stack
+                # Push call stack
                 oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
                 IF pool[envId] AS dbgEnv THEN
                     IF oldStack.length() > 0 THEN
@@ -1735,23 +1735,23 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
                 MUTABLE action = debugPause!(callDesc, envId, "", pool);
 
-                -- Handle inspect requests from debugger
+                # Handle inspect requests from debugger
                 WHILE action == 4 DO
                     inspAst = envGet!(envId, "__dbg_inspect", pool);
                     inspResult = eval!(COPY inspAst, envId, pool);
                     action = debugPause!(callDesc, envId, prStr(inspResult, TRUE), pool);
                 END
 
-                -- Set step mode based on debug action
+                # Set step mode based on debug action
                 IF pool[envId] AS dbgEnv2 THEN
                     dbgEnv2.vars["__dbg_step"] = Value{ Number: toFloat(action) };
                     dbgEnv2.vars["__dbg_target_depth"] = Value{ Number: curDepth };
-                    -- Restore stack
+                    # Restore stack
                     dbgEnv2.vars["__dbg_stack"] = Value{ Str: COPY oldStack };
                 END
             END
 
-            -- Track call depth for step-over/out
+            # Track call depth for step-over/out
             IF pool[envId] AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END
         END
 
@@ -1780,7 +1780,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     END
 END
 
--- runTest: tokenize + parse + eval
+# runTest: tokenize + parse + eval
 
 FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value @reentrant ->
     tokenizeToEnv!(penv, input);
@@ -1789,44 +1789,44 @@ FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABL
     RETURN eval!(COPY ast, envId, pool);
 END
 
--- Setup: create root env with all native functions registered.
--- Returns the root env Id.
+# Setup: create root env with all native functions registered.
+# Returns the root env Id.
 
 FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
     rootId: Id<Env> = pool.insert(Env{ vars: {} });
     IF pool[rootId] AS root THEN
-        -- Arithmetic: 1-4
+        # Arithmetic: 1-4
         root.vars["+"] = Value{ NativeFn: 1 };
         root.vars["-"] = Value{ NativeFn: 2 };
         root.vars["*"] = Value{ NativeFn: 3 };
         root.vars["/"] = Value{ NativeFn: 4 };
-        -- Comparison: 5-9
+        # Comparison: 5-9
         root.vars["="] = Value{ NativeFn: 5 };
         root.vars["<"] = Value{ NativeFn: 6 };
         root.vars[">"] = Value{ NativeFn: 7 };
         root.vars["<="] = Value{ NativeFn: 8 };
         root.vars[">="] = Value{ NativeFn: 9 };
-        -- List: 10-15
+        # List: 10-15
         root.vars["list"] = Value{ NativeFn: 10 };
         root.vars["list?"] = Value{ NativeFn: 11 };
         root.vars["empty?"] = Value{ NativeFn: 12 };
         root.vars["count"] = Value{ NativeFn: 13 };
         root.vars["not"] = Value{ NativeFn: 14 };
         root.vars["prn"] = Value{ NativeFn: 15 };
-        -- Vector: 16-20
+        # Vector: 16-20
         root.vars["vector"] = Value{ NativeFn: 16 };
         root.vars["vector-ref"] = Value{ NativeFn: 17 };
         root.vars["vector-set!"] = Value{ NativeFn: 18 };
         root.vars["vector-length"] = Value{ NativeFn: 19 };
         root.vars["vector?"] = Value{ NativeFn: 20 };
-        -- Pair: 21-24
+        # Pair: 21-24
         root.vars["cons"] = Value{ NativeFn: 21 };
         root.vars["car"] = Value{ NativeFn: 22 };
         root.vars["cdr"] = Value{ NativeFn: 23 };
         root.vars["pair?"] = Value{ NativeFn: 24 };
-        -- Symbol comparison: 25
+        # Symbol comparison: 25
         root.vars["eq?"] = Value{ NativeFn: 25 };
-        -- String: 26-33
+        # String: 26-33
         root.vars["string-append"] = Value{ NativeFn: 26 };
         root.vars["string-length"] = Value{ NativeFn: 27 };
         root.vars["substring"] = Value{ NativeFn: 28 };
@@ -1835,15 +1835,15 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
         root.vars["string->number"] = Value{ NativeFn: 31 };
         root.vars["string?"] = Value{ NativeFn: 32 };
         root.vars["display"] = Value{ NativeFn: 33 };
-        -- Modulo: 37
+        # Modulo: 37
         root.vars["modulo"] = Value{ NativeFn: 37 };
-        -- List access: 34=list-ref, 35=list-length, 36=list-push, 62=list-set!
+        # List access: 34=list-ref, 35=list-length, 36=list-push, 62=list-set!
         root.vars["list-ref"] = Value{ NativeFn: 34 };
         root.vars["list-length"] = Value{ NativeFn: 35 };
         root.vars["length"] = Value{ NativeFn: 35 };
         root.vars["list-push"] = Value{ NativeFn: 36 };
         root.vars["list-set!"] = Value{ NativeFn: 62 };
-        -- String stdlib: 38-42 + aliases
+        # String stdlib: 38-42 + aliases
         root.vars["startsWith?"] = Value{ NativeFn: 38 };
         root.vars["split"] = Value{ NativeFn: 39 };
         root.vars["indexOf"] = Value{ NativeFn: 40 };
@@ -1856,7 +1856,7 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
         root.vars["toFloat"] = Value{ NativeFn: 30 };
         root.vars["endsWith?"] = Value{ NativeFn: 48 };
         root.vars["join"] = Value{ NativeFn: 49 };
-        -- Math: 50-56
+        # Math: 50-56
         root.vars["abs"] = Value{ NativeFn: 50 };
         root.vars["min"] = Value{ NativeFn: 51 };
         root.vars["max"] = Value{ NativeFn: 52 };
@@ -1864,11 +1864,11 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
         root.vars["timestampMs"] = Value{ NativeFn: 54 };
         root.vars["random"] = Value{ NativeFn: 55 };
         root.vars["randomInt"] = Value{ NativeFn: 56 };
-        -- File I/O: 45-47
+        # File I/O: 45-47
         root.vars["readFile"] = Value{ NativeFn: 45 };
         root.vars["writeFile"] = Value{ NativeFn: 46 };
         root.vars["shell"] = Value{ NativeFn: 47 };
-        -- String methods: 57-61
+        # String methods: 57-61
         root.vars["codepointCount"] = Value{ NativeFn: 57 };
         root.vars["bytes"] = Value{ NativeFn: 58 };
         root.vars["replace"] = Value{ NativeFn: 59 };
@@ -1878,52 +1878,52 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env> ->
         root.vars["set-remove"] = Value{ NativeFn: 64 };
         root.vars["parse-i64"] = Value{ NativeFn: 65 };
     END
-    -- error?, error-message, error-kind, list-append! are special forms
+    # error?, error-message, error-kind, list-append! are special forms
     RETURN rootId;
 END
 
--- ============================================================================
--- Bytecode VM
--- ============================================================================
+# ============================================================================
+# Bytecode VM
+# ============================================================================
 
--- Opcodes: each instruction is an Int64 in the ops array.
--- Operands follow the opcode inline in ops.
---
--- Opcode table:
---   1  loadConst [idx]       push consts[idx]
---   2  loadName [idx]        push env lookup of consts[idx] (symbol string)
---   3  storeName [idx]       pop value, bind consts[idx] in current env
---   4  pop                   discard top of stack
---   5  dup                   duplicate top of stack
---  10  add                   pop b, pop a, push a+b
---  11  sub                   pop b, pop a, push a-b
---  12  mul                   pop b, pop a, push a*b
---  13  div                   pop b, pop a, push a/b
---  14  neg                   pop a, push -a
---  20  eq                    pop b, pop a, push a==b
---  21  lt                    pop b, pop a, push a<b
---  22  gt                    pop b, pop a, push a>b
---  23  lte                   pop b, pop a, push a<=b
---  24  gte                   pop b, pop a, push a>=b
---  30  not                   pop a, push !a
---  40  jump [offset]         unconditional jump to offset
---  41  jumpIfFalse [offset]  pop, jump if falsy
---  42  call [argc]           call function on stack with argc args
---  43  tailCall [argc]       tail call (reuse frame)
---  44  ret                   return top of stack to caller
---  50  makeList [count]      pop count items, push list
---  51  makeVec [count]       pop count items, push vector
---  52  cons                  pop cdr, pop car, push pair
---  53  car                   pop pair, push car
---  54  cdr                   pop pair, push cdr
---  60  makeClosure [idx]     push closure capturing consts[idx] (sub-Chunk index)
---  61  setName [idx]         pop value, set! consts[idx] in env chain
---  70  nativeCall [id, argc] call native fn by id with argc args
---  71  halt                  stop execution, top of stack is result
---  80  loadSlot [idx]        push slots[idx] (Commit 10)
---  81  storeSlot [idx]       pop, store in slots[idx] (Commit 10)
+# Opcodes: each instruction is an Int64 in the ops array.
+# Operands follow the opcode inline in ops.
+#
+# Opcode table:
+#   1  loadConst [idx]       push consts[idx]
+#   2  loadName [idx]        push env lookup of consts[idx] (symbol string)
+#   3  storeName [idx]       pop value, bind consts[idx] in current env
+#   4  pop                   discard top of stack
+#   5  dup                   duplicate top of stack
+#  10  add                   pop b, pop a, push a+b
+#  11  sub                   pop b, pop a, push a-b
+#  12  mul                   pop b, pop a, push a*b
+#  13  div                   pop b, pop a, push a/b
+#  14  neg                   pop a, push -a
+#  20  eq                    pop b, pop a, push a==b
+#  21  lt                    pop b, pop a, push a<b
+#  22  gt                    pop b, pop a, push a>b
+#  23  lte                   pop b, pop a, push a<=b
+#  24  gte                   pop b, pop a, push a>=b
+#  30  not                   pop a, push !a
+#  40  jump [offset]         unconditional jump to offset
+#  41  jumpIfFalse [offset]  pop, jump if falsy
+#  42  call [argc]           call function on stack with argc args
+#  43  tailCall [argc]       tail call (reuse frame)
+#  44  ret                   return top of stack to caller
+#  50  makeList [count]      pop count items, push list
+#  51  makeVec [count]       pop count items, push vector
+#  52  cons                  pop cdr, pop car, push pair
+#  53  car                   pop pair, push car
+#  54  cdr                   pop pair, push cdr
+#  60  makeClosure [idx]     push closure capturing consts[idx] (sub-Chunk index)
+#  61  setName [idx]         pop value, set! consts[idx] in env chain
+#  70  nativeCall [id, argc] call native fn by id with argc args
+#  71  halt                  stop execution, top of stack is result
+#  80  loadSlot [idx]        push slots[idx] (Commit 10)
+#  81  storeSlot [idx]       pop, store in slots[idx] (Commit 10)
 
--- A compiled bytecode chunk: flat instruction array + constant pool + source lines.
+# A compiled bytecode chunk: flat instruction array + constant pool + source lines.
 
 STRUCT Chunk {
     ops: Int64[]@list,
@@ -1931,7 +1931,7 @@ STRUCT Chunk {
     lines: Int64[]@list
 }
 
--- A call frame tracks the return point and base pointer for each function call.
+# A call frame tracks the return point and base pointer for each function call.
 
 STRUCT Frame {
     chunkIdx: Int64,
@@ -1940,11 +1940,11 @@ STRUCT Frame {
     envId: Id<Env>
 }
 
--- Bytecode loader: reads ops and consts from files written by Ruby compiler
+# Bytecode loader: reads ops and consts from files written by Ruby compiler
 
 FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[] ->
     raw = readFile(path) OR RAISE;
-    -- Split on commas using the interpreter's split function
+    # Split on commas using the interpreter's split function
     parts = split(raw, ",");
     MUTABLE ops: Int64[]@list = List[];
     FOR pi IN (0_i64 ..< parts.length()) DO
@@ -1961,7 +1961,7 @@ END
 FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Value[] ->
     raw = readFile(path) OR RAISE;
     MUTABLE consts: Value[]@list = List[];
-    -- Parse line by line
+    # Parse line by line
     MUTABLE lineStart: Int64 = 0;
     FOR ci IN (0_i64 ..< raw.length()) DO
         IF charAt(raw, ci) == "\n" THEN
@@ -1970,7 +1970,7 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Valu
             lineStart = ci + 1;
         END
     END
-    -- Last line (no trailing newline)
+    # Last line (no trailing newline)
     IF lineStart < raw.length() THEN
         line = substr(raw, lineStart, raw.length() - lineStart);
         consts.append(parseConstLine!(line, pool));
@@ -2008,32 +2008,32 @@ FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value ->
     RETURN Value.Nil;
 END
 
--- Chunk builder: emit helpers cannot take @list params (transpiler bug extracts .items).
--- Build bytecode by appending directly to ops/consts/lines arrays inline.
+# Chunk builder: emit helpers cannot take @list params (transpiler bug extracts .items).
+# Build bytecode by appending directly to ops/consts/lines arrays inline.
 
--- Bytecode dispatch loop. Executes ops using an operand stack.
--- Returns the value left on top of the stack at halt.
+# Bytecode dispatch loop. Executes ops using an operand stack.
+# Returns the value left on top of the stack at halt.
 
--- ============================================================================
--- Bytecode Compiler: AST (Value) -> ops/consts arrays
--- ============================================================================
--- compile! walks a parsed S-expression and returns a Value.Pair where:
---   car = Value.List of Value.Number (the ops, encoded as floats)
---   cdr = Value.List of Value (the constant pool)
--- The caller extracts these into Int64[]@list and Value[]@list for exec!.
+# ============================================================================
+# Bytecode Compiler: AST (Value) -> ops/consts arrays
+# ============================================================================
+# compile! walks a parsed S-expression and returns a Value.Pair where:
+#   car = Value.List of Value.Number (the ops, encoded as floats)
+#   cdr = Value.List of Value (the constant pool)
+# The caller extracts these into Int64[]@list and Value[]@list for exec!.
 
--- compile!: compiles a single S-expression into bytecode.
--- Returns Pair{List[ops as Numbers], List[consts]}.
--- Sub-expressions are compiled as loadConst (literals/results of eval!)
--- or loadName (symbols). @list can't be passed between functions, so
--- the compiler handles each form in one flat function.
--- The real compiler will be in Ruby (scheme_transpiler.rb).
+# compile!: compiles a single S-expression into bytecode.
+# Returns Pair{List[ops as Numbers], List[consts]}.
+# Sub-expressions are compiled as loadConst (literals/results of eval!)
+# or loadName (symbols). @list can't be passed between functions, so
+# the compiler handles each form in one flat function.
+# The real compiler will be in Ruby (scheme_transpiler.rb).
 
--- compileArg pattern (inlined - can't pass @list to functions):
--- Symbol -> loadName, List -> eval! + loadConst, Literal -> loadConst
+# compileArg pattern (inlined - can't pass @list to functions):
+# Symbol -> loadName, List -> eval! + loadConst, Literal -> loadConst
 
--- compile! stores results in pool env at __bc_ops and __bc_consts keys.
--- Caller reads them from pool[envId] after the call.
+# compile! stores results in pool env at __bc_ops and __bc_consts keys.
+# Caller reads them from pool[envId] after the call.
 
 FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void @reentrant ->
     MUTABLE ops: Value[]@list = List[];
@@ -2041,15 +2041,15 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
 
     IF isSymbol?(ast) THEN
         symName = getSymName(ast);
-        -- Check if this symbol has a slot assignment
+        # Check if this symbol has a slot assignment
         MUTABLE slotLookup = Value{ Number: 0.0 - 1.0 };
         IF pool[envId] AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR Value{ Number: 0.0 - 1.0 }; END
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
-            -- LOAD_SLOT
+            # LOAD_SLOT
             ops.append(Value{ Number: 20.0 }); ops.append(Value{ Number: toFloat(slotNum) });
         ELSE
-            -- LOAD_NAME
+            # LOAD_NAME
             cidx = consts.length(); consts.append(COPY ast);
             ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
         END
@@ -2153,7 +2153,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
     END
 
     ops.append(Value{ Number: 19.0 });
-    -- Store in env entry-by-entry (Value.Number is inline, survives arena free)
+    # Store in env entry-by-entry (Value.Number is inline, survives arena free)
     IF pool[envId] AS bcEnv THEN
         bcEnv.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
         FOR wi IN (0_i64 ..< ops.length()) DO
@@ -2167,11 +2167,11 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
     RETURN;
 END
 
--- ============================================================================
+# ============================================================================
 
--- Bytecode dispatch loop. Executes ops using a stack-pointer-based operand stack.
--- Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
--- Returns the value on top of the stack at halt.
+# Bytecode dispatch loop. Executes ops using a stack-pointer-based operand stack.
+# Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
+# Returns the value on top of the stack at halt.
 
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value @reentrant ->
     MUTABLE stack: Value[]@list = List[];
@@ -2180,15 +2180,15 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE ip: Int64 = 0;
     MUTABLE curEnv: Id<Env> = COPY envId;
     MUTABLE running = TRUE;
-    -- Typed stacks: avoid 40-byte Value union copies for typed arithmetic
+    # Typed stacks: avoid 40-byte Value union copies for typed arithmetic
     MUTABLE istack: Int64[] = [];
     MUTABLE isp: Int64 = 0;
     MUTABLE fstack: Float64[] = [];
     MUTABLE fsp: Int64 = 0;
-    -- Native typed slots: avoid Value wrapping for i64/f64 locals
+    # Native typed slots: avoid Value wrapping for i64/f64 locals
     MUTABLE islots: Int64[] = [];
     MUTABLE fslots: Float64[] = [];
-    -- Pre-allocate 64 slots and 64 typed stack/slot entries
+    # Pre-allocate 64 slots and 64 typed stack/slot entries
     FOR si IN (0_i64 ..< 64) DO slots.append(Value.Nil); END
     FOR si IN (0_i64 ..< 64) DO istack.append(0_i64); END
     FOR si IN (0_i64 ..< 64) DO fstack.append(0.0); END
@@ -2201,22 +2201,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         ip += 1;
 
         PARTIAL MATCH op START
-            0 ->  -- LOAD_CONST
+            0 ->  # LOAD_CONST
                 idx = ops[ip]; ip += 1;
                 pv = COPY consts[idx];
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            1 ->  -- LOAD_NAME
+            1 ->  # LOAD_NAME
                 idx = ops[ip]; ip += 1;
                 pv = envGet!(curEnv, getSymName(consts[idx]), pool);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            2 ->  -- STORE_NAME
+            2 ->  # STORE_NAME
                 idx = ops[ip]; ip += 1;
                 IF pool[curEnv] AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1]; END,
-            3 ->  -- POP
+            3 ->  # POP
                 sp -= 1;,
-            4 ->  -- ADD (polymorphic)
+            4 ->  # ADD (polymorphic)
                 PARTIAL MATCH stack[sp - 2] START
                     Value.Str AS s1 ->
                         pv = Value{ Str: s1 + getStr(stack[sp - 1]) };,
@@ -2229,58 +2229,58 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            5 ->  -- SUB
+            5 ->  # SUB
                 pv = Value{ Number: getNum(stack[sp - 2]) - getNum(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            6 ->  -- MUL
+            6 ->  # MUL
                 pv = Value{ Number: getNum(stack[sp - 2]) * getNum(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            7 ->  -- DIV
+            7 ->  # DIV
                 pv = Value{ Number: getNum(stack[sp - 2]) / getNum(stack[sp - 1]) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            8 ->  -- EQ
+            8 ->  # EQ
                 pv = boolVal(valEqual?(stack[sp - 2], stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            9 ->  -- LT
+            9 ->  # LT
                 pv = boolVal(getNum(stack[sp - 2]) < getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            10 -> -- GT
+            10 -> # GT
                 pv = boolVal(getNum(stack[sp - 2]) > getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            11 -> -- LTE
+            11 -> # LTE
                 pv = boolVal(getNum(stack[sp - 2]) <= getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            12 -> -- GTE
+            12 -> # GTE
                 pv = boolVal(getNum(stack[sp - 2]) >= getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            13 -> -- NOT
+            13 -> # NOT
                 sp -= 1;
                 pv = boolVal(isTruthy?(stack[sp]) == FALSE);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            14 -> -- JUMP
+            14 -> # JUMP
                 ip = ops[ip];,
-            15 -> -- JUMP_IF_FALSE
+            15 -> # JUMP_IF_FALSE
                 target = ops[ip]; ip += 1;
                 sp -= 1;
                 IF isTruthy?(stack[sp]) == FALSE THEN ip = target; END,
-            16 -> -- CALL [argc]
+            16 -> # CALL [argc]
                 argc = ops[ip]; ip += 1;
                 fnVal = stack[sp - argc - 1];
                 fnId = getNativeId(fnVal);
@@ -2321,7 +2321,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                     sp += 1;
                 END,
-            17 -> -- SET_NAME
+            17 -> # SET_NAME
                 idx = ops[ip]; ip += 1;
                 sp -= 1;
                 setVal = COPY stack[sp];
@@ -2329,7 +2329,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = COPY setVal;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            18 -> -- NATIVE_CALL [nid] [argc]
+            18 -> # NATIVE_CALL [nid] [argc]
                 nid = ops[ip]; ip += 1;
                 argc = ops[ip]; ip += 1;
                 MUTABLE nArgs: Value[]@list = List[];
@@ -2341,153 +2341,153 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = applyNative(nid, nArgs);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            19 -> -- HALT
+            19 -> # HALT
                 running = FALSE;,
-            20 -> -- LOAD_SLOT
+            20 -> # LOAD_SLOT
                 slotIdx = ops[ip]; ip += 1;
                 pv = slots[slotIdx];
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            21 -> -- STORE_SLOT
+            21 -> # STORE_SLOT
                 slotIdx = ops[ip]; ip += 1;
                 slots[slotIdx] = stack[sp - 1];,
-            22 -> -- ADD_I64 (istack)
+            22 -> # ADD_I64 (istack)
                 istack[isp - 2] = istack[isp - 2] + istack[isp - 1];
                 isp -= 1;,
-            23 -> -- SUB_I64 (istack)
+            23 -> # SUB_I64 (istack)
                 istack[isp - 2] = istack[isp - 2] - istack[isp - 1];
                 isp -= 1;,
-            24 -> -- MUL_I64 (istack)
+            24 -> # MUL_I64 (istack)
                 istack[isp - 2] = istack[isp - 2] * istack[isp - 1];
                 isp -= 1;,
-            25 -> -- LT_I64 (istack -> istack, 0/1)
+            25 -> # LT_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] < istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            26 -> -- EQ_I64 (istack -> istack, 0/1)
+            26 -> # EQ_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] == istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            27 -> -- INT_TO_F64 (istack -> fstack)
+            27 -> # INT_TO_F64 (istack -> fstack)
                 isp -= 1;
                 convFloat = toFloat(istack[isp]);
                 fstack[fsp] = convFloat;
                 fsp += 1;,
-            28 -> -- F64_TO_INT (fstack -> istack)
+            28 -> # F64_TO_INT (fstack -> istack)
                 fsp -= 1;
                 convInt = toInt(fstack[fsp]);
                 istack[isp] = convInt;
                 isp += 1;,
-            29 -> -- MOD_I64 (istack)
+            29 -> # MOD_I64 (istack)
                 ia = istack[isp - 2];
                 ib = istack[isp - 1];
                 IF ib != 0 THEN istack[isp - 2] = ia MOD ib; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            30 -> -- GTE_I64 (istack -> istack, 0/1)
+            30 -> # GTE_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] >= istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            31 -> -- GT_I64 (istack -> istack, 0/1)
+            31 -> # GT_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] > istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            32 -> -- LTE_I64 (istack -> istack, 0/1)
+            32 -> # LTE_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] <= istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            33 -> -- NEQ_I64 (istack -> istack, 0/1)
+            33 -> # NEQ_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] != istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            34 -> -- DIV_I64 (istack)
+            34 -> # DIV_I64 (istack)
                 ia = istack[isp - 2];
                 ib = istack[isp - 1];
                 MUTABLE divR: Int64 = 0;
                 IF ib != 0 THEN divR = toInt(toFloat(ia) / toFloat(ib)); END
                 istack[isp - 2] = divR;
                 isp -= 1;,
-            35 -> -- JUMP_BACK
+            35 -> # JUMP_BACK
                 ip = ops[ip];,
-            36 -> -- CONCAT
+            36 -> # CONCAT
                 s1 = prStr(stack[sp - 2], FALSE);
                 s2 = prStr(stack[sp - 1], FALSE);
                 pv = Value{ Str: s1 + s2 };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            37 -> -- DEFINE_FN
+            37 -> # DEFINE_FN
                 sexprIdx = ops[ip]; ip += 1;
                 nameIdx = ops[ip]; ip += 1;
                 sexprStr = getStr(consts[sexprIdx]);
                 MUTABLE defPenv: HashMap<Value> = {};
                 pv = runTest!(sexprStr, curEnv, pool, defPenv);,
-            38 -> -- LOAD_SLOT_I64 [slot] (slots -> istack)
+            38 -> # LOAD_SLOT_I64 [slot] (slots -> istack)
                 slotIdx = ops[ip]; ip += 1;
                 istack[isp] = getInt(slots[slotIdx]);
                 isp += 1;,
-            39 -> -- STORE_SLOT_I64 [slot] (istack -> slots)
+            39 -> # STORE_SLOT_I64 [slot] (istack -> slots)
                 slotIdx = ops[ip]; ip += 1;
                 isp -= 1;
                 slots[slotIdx] = Value{ Int64Val: istack[isp] };,
-            40 -> -- LOAD_CONST_I64 [idx] (consts -> istack)
+            40 -> # LOAD_CONST_I64 [idx] (consts -> istack)
                 idx = ops[ip]; ip += 1;
                 istack[isp] = getInt(consts[idx]);
                 isp += 1;,
-            41 -> -- JUMP_IF_FALSE_I (istack, 0=false)
+            41 -> # JUMP_IF_FALSE_I (istack, 0=false)
                 isp -= 1;
                 IF istack[isp] == 0 THEN ip = ops[ip]; ELSE ip += 1; END,
-            42 -> -- LOAD_SLOT_F64 [slot] (slots -> fstack)
+            42 -> # LOAD_SLOT_F64 [slot] (slots -> fstack)
                 slotIdx = ops[ip]; ip += 1;
                 fstack[fsp] = getNum(slots[slotIdx]);
                 fsp += 1;,
-            43 -> -- STORE_SLOT_F64 [slot] (fstack -> slots)
+            43 -> # STORE_SLOT_F64 [slot] (fstack -> slots)
                 slotIdx = ops[ip]; ip += 1;
                 fsp -= 1;
                 slots[slotIdx] = Value{ Number: fstack[fsp] };,
-            44 -> -- LOAD_CONST_F64 [idx] (consts -> fstack)
+            44 -> # LOAD_CONST_F64 [idx] (consts -> fstack)
                 idx = ops[ip]; ip += 1;
                 fstack[fsp] = getNum(consts[idx]);
                 fsp += 1;,
-            45 -> -- ADD_F64 (fstack)
+            45 -> # ADD_F64 (fstack)
                 fstack[fsp - 2] = fstack[fsp - 2] + fstack[fsp - 1];
                 fsp -= 1;,
-            46 -> -- SUB_F64 (fstack)
+            46 -> # SUB_F64 (fstack)
                 fstack[fsp - 2] = fstack[fsp - 2] - fstack[fsp - 1];
                 fsp -= 1;,
-            47 -> -- MUL_F64 (fstack)
+            47 -> # MUL_F64 (fstack)
                 fstack[fsp - 2] = fstack[fsp - 2] * fstack[fsp - 1];
                 fsp -= 1;,
-            48 -> -- DIV_F64 (fstack)
+            48 -> # DIV_F64 (fstack)
                 IF fstack[fsp - 1] != 0.0 THEN fstack[fsp - 2] = fstack[fsp - 2] / fstack[fsp - 1]; ELSE fstack[fsp - 2] = 0.0; END
                 fsp -= 1;,
-            49 -> -- LT_F64 (fstack -> istack, 0/1)
+            49 -> # LT_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] < fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            50 -> -- GT_F64 (fstack -> istack, 0/1)
+            50 -> # GT_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] > fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            51 -> -- LTE_F64 (fstack -> istack, 0/1)
+            51 -> # LTE_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] <= fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            52 -> -- GTE_F64 (fstack -> istack, 0/1)
+            52 -> # GTE_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] >= fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            53 -> -- EQ_F64 (fstack -> istack, 0/1)
+            53 -> # EQ_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] == fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            54 -> -- NEQ_F64 (fstack -> istack, 0/1)
+            54 -> # NEQ_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] != fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            55 -> -- I_TO_VAL (istack -> Value stack as Int64Val)
+            55 -> # I_TO_VAL (istack -> Value stack as Int64Val)
                 isp -= 1;
                 pv = Value{ Int64Val: istack[isp] };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            56 -> -- F_TO_VAL (fstack -> Value stack)
+            56 -> # F_TO_VAL (fstack -> Value stack)
                 fsp -= 1;
                 pv = Value{ Number: fstack[fsp] };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            57 -> -- BOOL_TO_VAL (istack 0/1 -> Value stack TrueVal/FalseVal)
+            57 -> # BOOL_TO_VAL (istack 0/1 -> Value stack TrueVal/FalseVal)
                 isp -= 1;
                 pv = boolVal(istack[isp] != 0);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            58 -> -- DEBUG_BREAK
+            58 -> # DEBUG_BREAK
                 print("--- debug break at ip=" + toString(ip) + " ---");
                 MUTABLE dbgRunning = TRUE;
                 WHILE dbgRunning DO
@@ -2522,7 +2522,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         END
                     ELSE_IF eql?(dbgCmd, ":ip") THEN
                         print("  ip=" + toString(ip) + " op=" + toString(ops[ip]));
-                        -- Show next 5 opcodes
+                        # Show next 5 opcodes
                         FOR di IN (0_i64 ..< 5) DO
                             IF ip + di < ops.length() THEN
                                 print("    ip+" + toString(di) + ": " + toString(ops[ip + di]));
@@ -2557,23 +2557,23 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         print("  unknown command. type :help for commands");
                     END
                 END,
-            59 -> -- LOAD_ISLOT [idx] (islots -> istack, no Value wrapping)
+            59 -> # LOAD_ISLOT [idx] (islots -> istack, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 istack[isp] = islots[slotIdx];
                 isp += 1;,
-            60 -> -- STORE_ISLOT [idx] (istack -> islots, no Value wrapping)
+            60 -> # STORE_ISLOT [idx] (istack -> islots, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 isp -= 1;
                 islots[slotIdx] = istack[isp];,
-            61 -> -- LOAD_FSLOT [idx] (fslots -> fstack, no Value wrapping)
+            61 -> # LOAD_FSLOT [idx] (fslots -> fstack, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 fstack[fsp] = fslots[slotIdx];
                 fsp += 1;,
-            62 -> -- STORE_FSLOT [idx] (fstack -> fslots, no Value wrapping)
+            62 -> # STORE_FSLOT [idx] (fstack -> fslots, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 fsp -= 1;
                 fslots[slotIdx] = fstack[fsp];,
-            63 -> -- STRUCT_FIELD [idx] (pop Value.Vector, push fields[idx])
+            63 -> # STRUCT_FIELD [idx] (pop Value.Vector, push fields[idx])
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
                 PARTIAL MATCH stack[sp] START
@@ -2582,7 +2582,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            64 -> -- TYPED_FIELD_I64 [idx] (pop TypedI64Arr, push Int64Val)
+            64 -> # TYPED_FIELD_I64 [idx] (pop TypedI64Arr, push Int64Val)
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
                 PARTIAL MATCH stack[sp] START
@@ -2591,7 +2591,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            65 -> -- TYPED_FIELD_F64 [idx] (pop TypedF64Arr, push Number)
+            65 -> # TYPED_FIELD_F64 [idx] (pop TypedF64Arr, push Number)
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
                 PARTIAL MATCH stack[sp] START

@@ -1,5 +1,5 @@
--- Test: try/catch pattern - Error matched, handleCatch returns Tco with
--- @indirect field containing frame-allocated string, eval resolves Tco.
+# Test: try/catch pattern - Error matched, handleCatch returns Tco with
+# @indirect field containing frame-allocated string, eval resolves Tco.
 
 UNION Value {
     Nil, TrueVal, FalseVal,

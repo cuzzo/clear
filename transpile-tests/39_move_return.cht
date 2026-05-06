@@ -1,8 +1,8 @@
 STRUCT Node { id: Int64 }
 
--- MOVE in a return transfers the local Rc handle to the caller without retain.
--- The local defer is suppressed (a_moved = true), so ref count stays at 1.
--- The caller receives count = 1 and is responsible for cleanup.
+# MOVE in a return transfers the local Rc handle to the caller without retain.
+# The local defer is suppressed (a_moved = true), so ref count stays at 1.
+# The caller receives count = 1 and is responsible for cleanup.
 FN makeNode(id_val: Int64) RETURNS !Node @multiowned ->
     n = Node{ id: id_val } @multiowned;
     RETURN MOVE n;
@@ -12,12 +12,12 @@ FN main() RETURNS Void ->
     n = makeNode(99);
     ASSERT n.id == 99, "id should be 99 after MOVE return";
 
-    -- Clone to verify sharing still works after a MOVE-return.
+    # Clone to verify sharing still works after a MOVE-return.
     n2 = n;
     ASSERT n2.id == 99, "clone of moved-returned node should be 99";
 
-    -- Scope exit:
-    --   n2's defer: rcRelease -> count 2->1
-    --   n's defer:  rcRelease -> count 1->0  (Node freed, no leak)
+    # Scope exit:
+    #   n2's defer: rcRelease -> count 2->1
+    #   n's defer:  rcRelease -> count 1->0  (Node freed, no leak)
     RETURN;
 END

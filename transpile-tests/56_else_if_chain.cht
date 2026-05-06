@@ -1,4 +1,4 @@
--- ELSE_IF chains and mutable string concatenation
+# ELSE_IF chains and mutable string concatenation
 
 FN dispatch(cmd: String) RETURNS String ->
     IF startsWith?(cmd, "SET:") THEN
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
     ASSERT dispatch("READY?") == "ok_ready", "dispatch READY";
     ASSERT dispatch("NOPE") == "err_unknown", "dispatch unknown";
 
-    -- Mutable string concatenation (building a response)
+    # Mutable string concatenation (building a response)
     MUTABLE resp = "";
     resp = resp + "line1\n";
     resp = resp + "line2\n";

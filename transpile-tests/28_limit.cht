@@ -1,7 +1,7 @@
 STRUCT Item { name: String, value: Int64 }
 
 FN main() RETURNS Void ->
-  -- Test 1: Basic LIMIT
+  # Test 1: Basic LIMIT
   nums: Int64[] = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
   first_three = nums |> LIMIT 3;
 
@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
   ASSERT first_three[1] == 2, "Second should be 2";
   ASSERT first_three[2] == 3, "Third should be 3";
 
-  -- Test 2: LIMIT larger than list size (should not crash)
+  # Test 2: LIMIT larger than list size (should not crash)
   small: Int64[] = [10_i64, 20_i64];
   limited = small |> LIMIT 100;
 
@@ -18,7 +18,7 @@ FN main() RETURNS Void ->
   ASSERT limited[0] == 10, "First should be 10";
   ASSERT limited[1] == 20, "Second should be 20";
 
-  -- Test 3: LIMIT with structs
+  # Test 3: LIMIT with structs
   items = [
     Item{ name: "a", value: 1_i64 },
     Item{ name: "b", value: 2_i64 },
@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
   ASSERT first_two[0].value == 1, "First value should be 1";
   ASSERT first_two[1].value == 2, "Second value should be 2";
 
-  -- Test 4: LIMIT 0 should return empty list
+  # Test 4: LIMIT 0 should return empty list
   zero_limit = nums |> LIMIT 0;
   ASSERT zero_limit.length() == 0, "Should have 0 items";
 END

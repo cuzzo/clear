@@ -1,18 +1,18 @@
--- BG body COPY of a captured @list, exercising the bug 258 fix:
--- `CheatLib.dupeValue` now recognizes ArrayList and allocates a fresh
--- buffer + recursively dupes elements. Before the fix, `dupeValue`
--- fell through to `return value` for any type with a deinit method,
--- producing a shallow copy that aliased the outer list's buffer.
---
--- The FreshHeapCopy capture path (Phase 2 of sync-boundary-unification)
--- is the user-visible trigger: writing `COPY items` inside the BG body
--- classifies the capture as FreshHeapCopy, so the BG ctx field gets a
--- `try CheatLib.dupeValue(@TypeOf(items), items, alloc)` init and a
--- corresponding cleanup.
---
--- Verifies independence by mutating the outer list AFTER the BG fiber
--- has been spawned. The fiber's snapshot (computed via COPY) must show
--- the pre-mutation state; the outer list shows the post-mutation state.
+# BG body COPY of a captured @list, exercising the bug 258 fix:
+# `CheatLib.dupeValue` now recognizes ArrayList and allocates a fresh
+# buffer + recursively dupes elements. Before the fix, `dupeValue`
+# fell through to `return value` for any type with a deinit method,
+# producing a shallow copy that aliased the outer list's buffer.
+#
+# The FreshHeapCopy capture path (Phase 2 of sync-boundary-unification)
+# is the user-visible trigger: writing `COPY items` inside the BG body
+# classifies the capture as FreshHeapCopy, so the BG ctx field gets a
+# `try CheatLib.dupeValue(@TypeOf(items), items, alloc)` init and a
+# corresponding cleanup.
+#
+# Verifies independence by mutating the outer list AFTER the BG fiber
+# has been spawned. The fiber's snapshot (computed via COPY) must show
+# the pre-mutation state; the outer list shows the post-mutation state.
 
 FN sumAll(items: Int64[]) RETURNS Int64 ->
     MUTABLE total: Int64 = 0_i64;

@@ -1,5 +1,5 @@
--- Test: Combined TEST THAT + STUB + BENCHMARK in one file.
--- Verifies all test framework features work together.
+# Test: Combined TEST THAT + STUB + BENCHMARK in one file.
+# Verifies all test framework features work together.
 
 FN multiply(a: Float64, b: Float64) RETURNS Float64 ->
     RETURN a * b;

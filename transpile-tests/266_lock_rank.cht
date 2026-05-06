@@ -1,7 +1,7 @@
--- Test: @locked(rank: N) / @writeLocked(rank: N) — Phase 3 DAG enforcement.
--- Ascending-rank acquires compile and run correctly; the rank check is
--- purely a compile-time proof that no LockCycle can form. Runtime
--- behavior is identical to the unranked case.
+# Test: @locked(rank: N) / @writeLocked(rank: N) — Phase 3 DAG enforcement.
+# Ascending-rank acquires compile and run correctly; the rank check is
+# purely a compile-time proof that no LockCycle can form. Runtime
+# behavior is identical to the unranked case.
 
 STRUCT A { x: Int64 }
 STRUCT B { y: Int64 }
@@ -12,8 +12,8 @@ FN main() RETURNS Void ->
     MUTABLE b = B{ y: 0 } @locked(rank: 2);
     MUTABLE d = D{ z: 0 } @writeLocked(rank: 3);
 
-    -- Strictly ascending: 1 -> 2 -> 3. Compile-time proof that
-    -- this acquire path is cycle-free.
+    # Strictly ascending: 1 -> 2 -> 3. Compile-time proof that
+    # this acquire path is cycle-free.
     WITH EXCLUSIVE a AS aa {
         WITH EXCLUSIVE b AS bb {
             WITH EXCLUSIVE d AS dd {

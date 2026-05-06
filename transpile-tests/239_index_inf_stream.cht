@@ -1,7 +1,7 @@
--- Test: INDEX on ~T[INF] streams with LIMIT (and optional WHERE)
+# Test: INDEX on ~T[INF] streams with LIMIT (and optional WHERE)
 
 FN main() RETURNS Void ->
-    -- INDEX on ~T[INF] with LIMIT: group integers by their string representation
+    # INDEX on ~T[INF] with LIMIT: group integers by their string representation
     c1: ~Int64[INF] = BG STREAM {
         MUTABLE i: Int64 = 0;
         WHILE TRUE DO
@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
     ASSERT grouped1["1"].length() == 3, "three 1s";
     ASSERT grouped1["2"].length() == 3, "three 2s";
 
-    -- INDEX on ~T[INF] with WHERE then LIMIT: only values < 2
+    # INDEX on ~T[INF] with WHERE then LIMIT: only values < 2
     c2: ~Int64[INF] = BG STREAM {
         MUTABLE j: Int64 = 0;
         WHILE TRUE DO

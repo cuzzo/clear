@@ -1,12 +1,12 @@
--- Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
--- with typed values, debugger, and FFI bridge for typed arrays.
+# Mal (Make-a-Lisp) Interpreter in CLEAR — Pool-based edition
+# with typed values, debugger, and FFI bridge for typed arrays.
 
 REQUIRE "types.cht";
 REQUIRE "parser.cht";
 REQUIRE "debugger.cht";
 
--- FFI functions: native CLEAR functions callable from Scheme via typed arrays.
--- These operate on real Int64[] - no Value wrapping, no conversion.
+# FFI functions: native CLEAR functions callable from Scheme via typed arrays.
+# These operate on real Int64[] - no Value wrapping, no conversion.
 
 FN nativeSum(arr: Int64[]) RETURNS Int64 ->
     MUTABLE total: Int64 = 0;
@@ -32,7 +32,7 @@ FN nativeDot(a: Float64[], b: Float64[]) RETURNS Float64 ->
     RETURN total;
 END
 
--- FFI for typed structs: operate on raw Int64[] backing data
+# FFI for typed structs: operate on raw Int64[] backing data
 FN nativePointManhattan(a: Int64[], b: Int64[]) RETURNS Int64 ->
     MUTABLE dx: Int64 = a[0] - b[0];
     MUTABLE dy: Int64 = a[1] - b[1];
@@ -54,28 +54,28 @@ FN nativeContains(arr: Int64[], needle: Int64) RETURNS Bool ->
     END
     RETURN FALSE;
 END
---
--- Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
--- Each Env holds a HashMap<Value> for its local bindings.
--- Parent links stored as Value.EnvRef in vars["__p"].
--- Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
--- Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
+#
+# Uses Env[50000]@pool for scoped environments instead of a flat HashMap.
+# Each Env holds a HashMap<Value> for its local bindings.
+# Parent links stored as Value.EnvRef in vars["__p"].
+# Lambda closures capture envId: Id<Env> directly; body stored as Value @indirect.
+# Parser uses HashMap<Value> with numeric keys (avoids frame-arena string issues).
 
--- Native function dispatch by numeric ID.
--- IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
---      10=list 11=list? 12=empty? 13=count 14=not 15=prn
---      16=vector 17=vector-ref 18=vector-set! 19=vector-length 20=vector?
---      21=cons 22=car 23=cdr 24=pair? 25=eq?
---      26=string-append 27=string-length 28=substring 29=string-ref
---      30=number->string 31=string->number 32=string? 33=display
---      34=list-ref 35=list-length 36=list-push 62=list-set!
+# Native function dispatch by numeric ID.
+# IDs: 1=+ 2=- 3=* 4=/ 5== 6=< 7=> 8=<= 9=>=
+#      10=list 11=list? 12=empty? 13=count 14=not 15=prn
+#      16=vector 17=vector-ref 18=vector-set! 19=vector-length 20=vector?
+#      21=cons 22=car 23=cdr 24=pair? 25=eq?
+#      26=string-append 27=string-length 28=substring 29=string-ref
+#      30=number->string 31=string->number 32=string? 33=display
+#      34=list-ref 35=list-length 36=list-push 62=list-set!
 
 FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
-    -- Arithmetic
-    -- Modulo. For Int64-valued operands, avoid the float round-trip:
-    -- toInt(toFloat(big)) loses precision past 2^53 and panics with
-    -- "integer part of floating point value out of bounds" for values
-    -- that occur naturally in wrap-arithmetic chains (`%* * %+`).
+    # Arithmetic
+    # Modulo. For Int64-valued operands, avoid the float round-trip:
+    # toInt(toFloat(big)) loses precision past 2^53 and panics with
+    # "integer part of floating point value out of bounds" for values
+    # that occur naturally in wrap-arithmetic chains (`%* * %+`).
     IF id == 37 THEN
         IF isInt64?(evaled[1]) && isInt64?(evaled[2]) THEN
             iam = getInt(evaled[1]);
@@ -91,7 +91,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ Int64Val: modResult };
     END
     IF id == 1 THEN
-        -- + works on i64, f64, and strings
+        # + works on i64, f64, and strings
         PARTIAL MATCH evaled[1] START
             Value.Str AS s1 -> RETURN Value{ Str: s1 + getStr(evaled[2]) };,
             Value.Int64Val AS ia ->
@@ -118,13 +118,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         END
         RETURN Value{ Number: getNum(evaled[1]) / getNum(evaled[2]) };
     END
-    -- Comparison
+    # Comparison
     IF id == 5 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
     IF id == 6 THEN RETURN boolVal(getNum(evaled[1]) < getNum(evaled[2])); END
     IF id == 7 THEN RETURN boolVal(getNum(evaled[1]) > getNum(evaled[2])); END
     IF id == 8 THEN RETURN boolVal(getNum(evaled[1]) <= getNum(evaled[2])); END
     IF id == 9 THEN RETURN boolVal(getNum(evaled[1]) >= getNum(evaled[2])); END
-    -- List
+    # List
     IF id == 10 THEN
         MUTABLE litems: Value[]@list = List[];
         FOR li IN (1_i64 ..< evaled.length()) ->
@@ -136,7 +136,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     IF id == 13 THEN RETURN Value{ Number: toFloat(listLen(evaled[1])) }; END
     IF id == 14 THEN RETURN boolVal(isTruthy?(evaled[1]) == FALSE); END
     IF id == 15 THEN print(prStr(evaled[1], TRUE)); RETURN Value.Nil; END
-    -- Vector
+    # Vector
     IF id == 16 THEN
         MUTABLE velems: Value[]@list = List[];
         FOR vi IN (1_i64 ..< evaled.length()) ->
@@ -147,13 +147,13 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     IF id == 18 THEN RETURN vecSetSlot(evaled[1], getInt(evaled[2]), evaled[3]); END
     IF id == 19 THEN RETURN Value{ Number: toFloat(vecLen(evaled[1])) }; END
     IF id == 20 THEN RETURN boolVal(isVector?(evaled[1])); END
-    -- Pair
+    # Pair
     IF id == 21 THEN RETURN Value.Pair{ pairCar: COPY evaled[1], pairCdr: COPY evaled[2] }; END
     IF id == 22 THEN RETURN pairCar(evaled[1]); END
     IF id == 23 THEN RETURN pairCdr(evaled[1]); END
     IF id == 24 THEN RETURN boolVal(isPair?(evaled[1])); END
     IF id == 25 THEN RETURN boolVal(valEqual?(evaled[1], evaled[2])); END
-    -- String
+    # String
     IF id == 26 THEN
         MUTABLE out = getStr(evaled[1]);
         FOR si IN (2_i64 ..< evaled.length()) DO
@@ -188,9 +188,9 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value.FalseVal;
     END
     IF id == 33 THEN print(prStr(evaled[1], FALSE)); RETURN Value.Nil; END
-    -- String stdlib: 38=startsWith?, 39=split, 40=indexOf, 41=contains?, 42=trim, 43=charAt, 44=substr
+    # String stdlib: 38=startsWith?, 39=split, 40=indexOf, 41=contains?, 42=trim, 43=charAt, 44=substr
     IF id == 38 THEN
-        -- startsWith?(str, prefix)
+        # startsWith?(str, prefix)
         s = getStr(evaled[1]);
         prefix = getStr(evaled[2]);
         IF prefix.length() == 0 THEN RETURN Value.TrueVal; END
@@ -198,7 +198,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN boolVal(substr(s, 0, prefix.length()) == prefix);
     END
     IF id == 39 THEN
-        -- split(str, delim) -> List of strings
+        # split(str, delim) -> List of strings
         s = getStr(evaled[1]);
         delim = getStr(evaled[2]);
         MUTABLE parts: Value[]@list = List[];
@@ -219,9 +219,9 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ List: parts };
     END
     IF id == 40 THEN
-        -- indexOf(str, needle) -> ?Int64: index when found, Nil when not.
-        -- CLEAR's indexOf returns an optional; consumers use IF ... AS bind
-        -- or `OR -1` fallback. Returning -1 inline broke the Nil-check path.
+        # indexOf(str, needle) -> ?Int64: index when found, Nil when not.
+        # CLEAR's indexOf returns an optional; consumers use IF ... AS bind
+        # or `OR -1` fallback. Returning -1 inline broke the Nil-check path.
         s = getStr(evaled[1]);
         needle = getStr(evaled[2]);
         MUTABLE idx: Int64 = 0;
@@ -234,7 +234,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value.Nil;
     END
     IF id == 41 THEN
-        -- contains?: list membership OR string substring
+        # contains?: list membership OR string substring
         PARTIAL MATCH evaled[1] START
             Value.List AS celems ->
                 FOR ci IN (0_i64 ..< celems.length()) DO
@@ -259,7 +259,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         END
     END
     IF id == 42 THEN
-        -- trim: strip leading/trailing whitespace
+        # trim: strip leading/trailing whitespace
         s = getStr(evaled[1]);
         MUTABLE trimStart: Int64 = 0;
         WHILE trimStart < s.length() && (charAt(s, trimStart) == " " || charAt(s, trimStart) == "\n" || charAt(s, trimStart) == "\t" || charAt(s, trimStart) == "\r") DO
@@ -272,7 +272,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ Str: substr(s, trimStart, trimEnd - trimStart) };
     END
     IF id == 48 THEN
-        -- endsWith?(str, suffix)
+        # endsWith?(str, suffix)
         s = getStr(evaled[1]);
         suffix = getStr(evaled[2]);
         IF suffix.length() == 0 THEN RETURN Value.TrueVal; END
@@ -280,7 +280,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN boolVal(substr(s, s.length() - suffix.length(), suffix.length()) == suffix);
     END
     IF id == 49 THEN
-        -- join(list, separator) -> string
+        # join(list, separator) -> string
         MUTABLE joined = "";
         sep = getStr(evaled[2]);
         PARTIAL MATCH evaled[1] START
@@ -293,20 +293,20 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         END
         RETURN Value{ Str: COPY joined };
     END
-    -- Math: 50-56
+    # Math: 50-56
     IF id == 50 THEN
         v = getNum(evaled[1]);
         IF v < 0.0 THEN RETURN Value{ Number: 0.0 - v }; END
         RETURN Value{ Number: v };
     END
     IF id == 51 THEN
-        -- min(a, b)
+        # min(a, b)
         a = getNum(evaled[1]); b = getNum(evaled[2]);
         IF a < b THEN RETURN Value{ Number: a }; END
         RETURN Value{ Number: b };
     END
     IF id == 52 THEN
-        -- max(a, b)
+        # max(a, b)
         a = getNum(evaled[1]); b = getNum(evaled[2]);
         IF a > b THEN RETURN Value{ Number: a }; END
         RETURN Value{ Number: b };
@@ -320,21 +320,21 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         maxVal = toInt(getNum(evaled[1]));
         RETURN Value{ Number: toFloat(randomInt(maxVal)) };
     END
-    -- File resource (path-as-handle): 112=fileOpen, 113=fileCreate,
-    -- 114=fileReadAll, 115=fileWrite. The VM doesn't track file
-    -- descriptors; File::open just stashes the path inside a Str so
-    -- fileReadAll / fileWrite can extract it later. The auto-injected
-    -- close from MIR::Cleanup (kind=:resource) is a no-op on Str.
+    # File resource (path-as-handle): 112=fileOpen, 113=fileCreate,
+    # 114=fileReadAll, 115=fileWrite. The VM doesn't track file
+    # descriptors; File::open just stashes the path inside a Str so
+    # fileReadAll / fileWrite can extract it later. The auto-injected
+    # close from MIR::Cleanup (kind=:resource) is a no-op on Str.
     IF id == 112 THEN
         path = getStr(evaled[1]);
         RETURN Value{ Str: COPY path };
     END
     IF id == 113 THEN
         path = getStr(evaled[1]);
-        -- Truncate-on-create: write empty content so the file exists
-        -- and is empty, matching File::create semantics. fileWrite
-        -- (114) re-truncates each call too, but pre-truncating means
-        -- File::create followed by no fileWrite leaves an empty file.
+        # Truncate-on-create: write empty content so the file exists
+        # and is empty, matching File::create semantics. fileWrite
+        # (114) re-truncates each call too, but pre-truncating means
+        # File::create followed by no fileWrite leaves an empty file.
         writeFile(path, "");
         RETURN Value{ Str: COPY path };
     END
@@ -352,14 +352,14 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         writeFile(path, content);
         RETURN Value.Nil;
     END
-    -- File I/O: 45=readFile, 46=writeFile, 47=shell
+    # File I/O: 45=readFile, 46=writeFile, 47=shell
     IF id == 45 THEN
         path = getStr(evaled[1]);
         content = readFile(path) OR "";
         IF content == "" THEN
-            -- readFile failed (file not found, perm denied, etc). Return a
-            -- Value.Error sentinel so OR RAISE / OR <fallback> sees an error
-            -- instead of crashing the scheduler with the unwrapped Zig error.
+            # readFile failed (file not found, perm denied, etc). Return a
+            # Value.Error sentinel so OR RAISE / OR <fallback> sees an error
+            # instead of crashing the scheduler with the unwrapped Zig error.
             RETURN Value.Error{ errMsg: "readFile failed", errKind: "NotFound", errType: "" };
         END
         RETURN Value{ Str: COPY content };
@@ -376,12 +376,12 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ Str: COPY output };
     END
     IF id == 44 THEN
-        -- toInt: truncate float to integer
+        # toInt: truncate float to integer
         truncated = toInt(getNum(evaled[1]));
         RETURN Value{ Number: toFloat(truncated) };
     END
     IF id == 43 THEN
-        -- substr(str, start, len) - CLEAR-style
+        # substr(str, start, len) - CLEAR-style
         s = getStr(evaled[1]);
         start = toInt(getNum(evaled[2]));
         MUTABLE len: Int64 = toInt(getNum(evaled[3]));
@@ -389,10 +389,10 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         IF len < 0 THEN len = 0; END
         RETURN Value{ Str: substr(s, start, len) };
     END
-    -- List operations: 34=list-ref, 35=list-length
+    # List operations: 34=list-ref, 35=list-length
     IF id == 34 THEN RETURN listRef(evaled[1], getInt(evaled[2])); END
     IF id == 35 THEN
-        -- list-length: works on lists, typed arrays, AND strings
+        # list-length: works on lists, typed arrays, AND strings
         PARTIAL MATCH evaled[1] START
             Value.Str AS s -> RETURN Value{ Number: toFloat(s.length()) };,
             Value.TypedI64Arr AS iarr -> RETURN Value{ Int64Val: iarr.length() };,
@@ -402,12 +402,12 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ Number: toFloat(listLen(evaled[1])) };
     END
     IF id == 36 THEN
-        -- list-push: return new list with element appended (preserves typed arrays)
+        # list-push: return new list with element appended (preserves typed arrays)
         PARTIAL MATCH evaled[1] START
-            -- The TypedI64Arr/TypedF64Arr variant payloads are slices
-            -- ([]i64, []f64), which don't have .append(). The List
-            -- variant is also stored as a slice once wrapped. Build a
-            -- fresh @list, copy elements over, append, and wrap.
+            # The TypedI64Arr/TypedF64Arr variant payloads are slices
+            # ([]i64, []f64), which don't have .append(). The List
+            # variant is also stored as a slice once wrapped. Build a
+            # fresh @list, copy elements over, append, and wrap.
             Value.TypedI64Arr AS srcInts ->
                 MUTABLE newInts: Int64[]@list = List[];
                 FOR li IN (0_i64 ..< srcInts.length()) DO
@@ -437,7 +437,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value.Nil;
     END
 
-    -- String methods: 57=codepointCount, 58=bytes, 59=replace, 60=toUpper, 61=toLower
+    # String methods: 57=codepointCount, 58=bytes, 59=replace, 60=toUpper, 61=toLower
     IF id == 57 THEN
         s = getStr(evaled[1]);
         RETURN Value{ Int64Val: codepointCount(s) };
@@ -447,7 +447,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ Int64Val: s.length() };
     END
     IF id == 59 THEN
-        -- replace(str, old, new)
+        # replace(str, old, new)
         s = getStr(evaled[1]);
         old = getStr(evaled[2]);
         new = getStr(evaled[3]);
@@ -462,7 +462,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ Str: lowercase(s) };
     END
     IF id == 62 THEN
-        -- list-set!: return new list with element at idx replaced (functional update)
+        # list-set!: return new list with element at idx replaced (functional update)
         setIdx = getInt(evaled[2]);
         newElem = COPY evaled[3];
         PARTIAL MATCH evaled[1] START
@@ -501,7 +501,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN COPY evaled[1];
     END
     IF id == 63 THEN
-        -- set-insert: add val to set (list) if not already present
+        # set-insert: add val to set (list) if not already present
         val = evaled[2];
         PARTIAL MATCH evaled[1] START
             Value.List AS selems ->
@@ -524,7 +524,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         END
     END
     IF id == 64 THEN
-        -- set-remove: remove val from set (list)
+        # set-remove: remove val from set (list)
         val = evaled[2];
         PARTIAL MATCH evaled[1] START
             Value.List AS relems ->
@@ -543,41 +543,41 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         END
     END
     IF id == 65 THEN
-        -- parse-i64: parse decimal string directly to Int64 (avoids float64 precision loss)
+        # parse-i64: parse decimal string directly to Int64 (avoids float64 precision loss)
         s = getStr(evaled[1]);
         parsed = toInt(s) OR 0;
         RETURN Value{ Int64Val: parsed };
     END
 
-    -- Stdlib string ops delegated to CheatLib (via compiler-emitted calls).
-    -- These natives let the VM reuse the Zig runtime's string functions
-    -- without reimplementing them in Scheme primitives.
+    # Stdlib string ops delegated to CheatLib (via compiler-emitted calls).
+    # These natives let the VM reuse the Zig runtime's string functions
+    # without reimplementing them in Scheme primitives.
     IF id == 100 THEN
-        -- lowercase(s)
+        # lowercase(s)
         s = getStr(evaled[1]);
         RETURN Value{ Str: COPY s.lowercase() };
     END
     IF id == 101 THEN
-        -- uppercase(s)
+        # uppercase(s)
         s = getStr(evaled[1]);
         RETURN Value{ Str: COPY s.uppercase() };
     END
     IF id == 102 THEN
-        -- replace(s, from, to)
+        # replace(s, from, to)
         s = getStr(evaled[1]);
         fromS = getStr(evaled[2]);
         toS = getStr(evaled[3]);
         RETURN Value{ Str: COPY s.replace(fromS, toS) };
     END
     IF id == 103 THEN
-        -- parseFloat(s) -> ?Float64 (returns Nil on parse failure)
+        # parseFloat(s) -> ?Float64 (returns Nil on parse failure)
         s = getStr(evaled[1]);
         parsed = s.toNumber();
         IF parsed AS f THEN RETURN Value{ Number: f }; END
         RETURN Value.Nil;
     END
     IF id == 104 THEN
-        -- countOccurrences(haystack, needle)
+        # countOccurrences(haystack, needle)
         haystack = getStr(evaled[1]);
         needle = getStr(evaled[2]);
         MUTABLE cnt: Int64 = 0;
@@ -598,34 +598,34 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ Int64Val: cnt };
     END
     IF id == 105 THEN
-        -- fileSize(path) -> Int64 (bytes) or -1 on error
+        # fileSize(path) -> Int64 (bytes) or -1 on error
         path = getStr(evaled[1]);
-        -- Use readFile + length as a portable fallback; real fstat isn't
-        -- exposed to the VM layer yet.
+        # Use readFile + length as a portable fallback; real fstat isn't
+        # exposed to the VM layer yet.
         contents = readFile(path);
         RETURN Value{ Int64Val: contents.length() };
     END
     IF id == 106 THEN
-        -- threadCount -> Int64. VM is single-threaded; always 1.
+        # threadCount -> Int64. VM is single-threaded; always 1.
         RETURN Value{ Int64Val: 1_i64 };
     END
     IF id == 107 THEN
-        -- list-pop: remove and return the last element, or Nil if empty.
+        # list-pop: remove and return the last element, or Nil if empty.
         PARTIAL MATCH evaled[1] START
             Value.List AS lst ->
                 IF lst.length() == 0 THEN RETURN Value.Nil; END
                 last = COPY lst[lst.length() - 1];
-                -- Note: VM Value.List is a value type; the caller keeps the
-                -- pre-pop list and can't observe the mutation. For tests that
-                -- only need the popped value, this is correct.
+                # Note: VM Value.List is a value type; the caller keeps the
+                # pre-pop list and can't observe the mutation. For tests that
+                # only need the popped value, this is correct.
                 RETURN last;,
             DEFAULT -> RETURN Value.Nil;
         END
         RETURN Value.Nil;
     END
     IF id == 108 THEN
-        -- iota(start, end): list [start, start+1, ..., end-1]. Supports
-        -- Zig's `0..N` range syntax lowered as MIR::IterRange.
+        # iota(start, end): list [start, start+1, ..., end-1]. Supports
+        # Zig's `0..N` range syntax lowered as MIR::IterRange.
         lo = getInt(evaled[1]);
         hi = getInt(evaled[2]);
         MUTABLE outList: Value[]@list = List[];
@@ -637,8 +637,8 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value{ List: outList };
     END
     IF id == 109 THEN
-        -- slice(lst, start, end): lst[start..end] (exclusive on end).
-        -- Supports List, TypedI64Arr, TypedF64Arr, and Str byte-slicing.
+        # slice(lst, start, end): lst[start..end] (exclusive on end).
+        # Supports List, TypedI64Arr, TypedF64Arr, and Str byte-slicing.
         PARTIAL MATCH evaled[1] START
             Value.List AS lst ->
                 MUTABLE s = getInt(evaled[2]);
@@ -680,9 +680,9 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         RETURN Value.Nil;
     END
     IF id == 111 THEN
-        -- pool-live-count(lst): returns count of non-Nil entries. The VM
-        -- models @pool as a list with removed slots set to Nil; the live
-        -- count is the count of non-Nil entries.
+        # pool-live-count(lst): returns count of non-Nil entries. The VM
+        # models @pool as a list with removed slots set to Nil; the live
+        # count is the count of non-Nil entries.
         PARTIAL MATCH evaled[1] START
             Value.List AS poolLst ->
                 MUTABLE pcount: Int64 = 0;
@@ -697,7 +697,7 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
         END
     END
     IF id == 110 THEN
-        -- slice-from(lst, start): lst[start..]. Same shape support as slice.
+        # slice-from(lst, start): lst[start..]. Same shape support as slice.
         PARTIAL MATCH evaled[1] START
             Value.List AS lst ->
                 MUTABLE s = getInt(evaled[2]);
@@ -734,9 +734,9 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     RETURN Value.Nil;
 END
 
--- Environment operations using Pool
+# Environment operations using Pool
 
--- envSet!: walk scope chain, update existing binding. Returns TRUE if found.
+# envSet!: walk scope chain, update existing binding. Returns TRUE if found.
 
 FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@pool) RETURNS Bool
   REQUIRES pool: LOCKED
@@ -760,8 +760,8 @@ FN envSet!(envId: Id<Env>, name: String, val: Value, MUTABLE pool: Env[50000]@po
     RETURN FALSE;
 END
 
--- eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
--- let body, lambda body) reassign ast/curEnv and continue instead of recursing.
+# eval: TCO trampoline loop. Tail positions (if branches, begin/do last expr,
+# let body, lambda body) reassign ast/curEnv and continue instead of recursing.
 
 FN listRef(v: Value, idx: Int64) RETURNS Value ->
     PARTIAL MATCH v START
@@ -907,7 +907,7 @@ FN isSymbol?(v: Value) RETURNS Bool ->
     RETURN FALSE;
 END
 
--- resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
+# resolveTco: if value is a Tco trampoline, evaluate it; otherwise return as-is.
 FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
   EFFECTS REENTRANT
@@ -922,7 +922,7 @@ FN resolveTco!(v: Value, MUTABLE pool: Env[50000]@pool) RETURNS Value
     RETURN COPY v;
 END
 
--- eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
+# eval: TCO trampoline. evalList! returns Value.Tco to signal tail call.
 
 FN evalOnce!(TAKES ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Value
   REQUIRES pool: LOCKED
@@ -973,9 +973,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     IF items.length() == 0 THEN RETURN Value.Nil; END
     formName = getSymName(items[0]);
 
-    -- Pipeline operations: special forms that call lambdas
+    # Pipeline operations: special forms that call lambdas
     IF formName == "list-where" THEN
-        -- (list-where list pred) -> filter (handles List and TypedI64Arr)
+        # (list-where list pred) -> filter (handles List and TypedI64Arr)
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         predVal = eval!(COPY items[2], envId, pool);
@@ -993,7 +993,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: filtered };
 
     ELSE_IF formName == "list-select" THEN
-        -- (list-select list fn) -> map (handles List, TypedI64Arr, TypedF64Arr)
+        # (list-select list fn) -> map (handles List, TypedI64Arr, TypedF64Arr)
         selectListVal = eval!(COPY items[1], envId, pool);
         IF isError?(selectListVal) THEN RETURN selectListVal; END
         fnVal = eval!(COPY items[2], envId, pool);
@@ -1010,7 +1010,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: mapped };
 
     ELSE_IF formName == "list-reduce" THEN
-        -- (list-reduce list init fn) -> fold (handles both List and TypedI64Arr)
+        # (list-reduce list init fn) -> fold (handles both List and TypedI64Arr)
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE acc: Value = eval!(COPY items[2], envId, pool);
@@ -1057,7 +1057,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: distinct };
 
     ELSE_IF formName == "list-orderby" THEN
-        -- (list-orderby list keyFn) -> sorted copy (insertion sort)
+        # (list-orderby list keyFn) -> sorted copy (insertion sort)
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(COPY items[2], envId, pool);
@@ -1067,7 +1067,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             elem = listRef(listVal, oi);
             sorted.append(COPY elem);
         END
-        -- Insertion sort by key
+        # Insertion sort by key
         MUTABLE si: Int64 = 1;
         IF sorted.length() > 0 THEN
                 WHILE si < sorted.length() DO
@@ -1096,7 +1096,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: sorted };
 
     ELSE_IF formName == "list-unnest" THEN
-        -- (list-unnest list fieldFn) -> flatten nested lists
+        # (list-unnest list fieldFn) -> flatten nested lists
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         fieldFn = eval!(COPY items[2], envId, pool);
@@ -1129,7 +1129,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: flat };
 
     ELSE_IF formName == "list-index" THEN
-        -- (list-index list keyFn) -> assoc list of (key . items[])
+        # (list-index list keyFn) -> assoc list of (key . items[])
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         keyFn = eval!(COPY items[2], envId, pool);
@@ -1141,14 +1141,14 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                     kArgs.append(COPY keyFn); kArgs.append(COPY srcItems[gi]);
                     MUTABLE gKey: Value = evalList!(kArgs, envId, pool);
                     gKey = resolveTco!(gKey, pool);
-                    -- Find existing group
+                    # Find existing group
                     MUTABLE found: Int64 = 0 - 1;
                     FOR fi IN (0_i64 ..< groups.length()) DO
                         groupPair = pairCar(groups[fi]);
                         IF valEqual?(groupPair, gKey) THEN found = fi; END
                     END
                     IF found >= 0 THEN
-                        -- Add to existing group (rebuild pair with appended list)
+                        # Add to existing group (rebuild pair with appended list)
                         existingList = pairCdr(groups[found]);
                         MUTABLE newGroupItems: Value[]@list = List[];
                         PARTIAL MATCH existingList START
@@ -1158,7 +1158,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
                         newGroupItems.append(COPY srcItems[gi]);
                         groups[found] = Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newGroupItems } };
                     ELSE
-                        -- New group
+                        # New group
                         MUTABLE newItems: Value[]@list = List[];
                         newItems.append(COPY srcItems[gi]);
                         groups.append(Value.Pair{ pairCar: COPY gKey, pairCdr: Value{ List: newItems } });
@@ -1169,7 +1169,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: groups };
 
     ELSE_IF formName == "assoc-get" THEN
-        -- (assoc-get alist key) -> value or error if not found
+        # (assoc-get alist key) -> value or error if not found
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         PARTIAL MATCH alist START
@@ -1227,7 +1227,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: rangeItems };
 
     ELSE_IF formName == "toList" THEN
-        -- Convert range/list to list (identity for lists, used with stream types)
+        # Convert range/list to list (identity for lists, used with stream types)
         IF items.length() > 1 THEN
             tlVal = eval!(COPY items[1], envId, pool);
             RETURN tlVal;
@@ -1390,7 +1390,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: taken };
 
     ELSE_IF formName == "assoc-set" THEN
-        -- (assoc-set alist key val) -> new alist with key set
+        # (assoc-set alist key val) -> new alist with key set
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         IF isError?(key) THEN RETURN key; END
@@ -1424,7 +1424,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: newPairs };
 
     ELSE_IF formName == "assoc-delete" THEN
-        -- (assoc-delete alist key) -> new alist without key
+        # (assoc-delete alist key) -> new alist without key
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         MUTABLE adPairs: Value[]@list = List[];
@@ -1439,7 +1439,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ List: adPairs };
 
     ELSE_IF formName == "assoc-contains?" THEN
-        -- (assoc-contains? alist key) -> bool
+        # (assoc-contains? alist key) -> bool
         alist = eval!(COPY items[1], envId, pool);
         key = eval!(COPY items[2], envId, pool);
         PARTIAL MATCH alist START
@@ -1452,12 +1452,12 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.FalseVal;
 
-    -- Debug introspection
+    # Debug introspection
     ELSE_IF formName == "env-keys" THEN
         RETURN Value{ Str: "(use :inspect <varname> to check specific variables)" };
 
     ELSE_IF formName == "type-of" THEN
-        -- (type-of expr) -> string describing the type
+        # (type-of expr) -> string describing the type
         val = eval!(COPY items[1], envId, pool);
         PARTIAL MATCH val START
             Value.Nil -> RETURN Value{ Str: "Nil" };,
@@ -1478,7 +1478,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ Str: "Unknown" };
 
     ELSE_IF formName == "typed-list:i64" THEN
-        -- (typed-list:i64 1 2 3) -> TypedI64Arr with raw Int64[] storage
+        # (typed-list:i64 1 2 3) -> TypedI64Arr with raw Int64[] storage
         MUTABLE typedItems: Int64[]@list = List[];
         FOR ti IN (1_i64 ..< items.length()) DO
             tval = eval!(COPY items[ti], envId, pool);
@@ -1487,9 +1487,9 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value{ TypedI64Arr: typedItems };
 
-    -- Typed struct: (cons 'Tag TypedI64Arr/TypedF64Arr/Vector)
+    # Typed struct: (cons 'Tag TypedI64Arr/TypedF64Arr/Vector)
     ELSE_IF formName == "typed-struct:i64" THEN
-        -- (typed-struct:i64 "Name" field1 field2 ...) -> Pair{Symbol(Name), TypedI64Arr}
+        # (typed-struct:i64 "Name" field1 field2 ...) -> Pair{Symbol(Name), TypedI64Arr}
         tagVal = eval!(COPY items[1], envId, pool);
         IF isError?(tagVal) THEN RETURN tagVal; END
         MUTABLE structData: Int64[]@list = List[];
@@ -1558,7 +1558,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value{ TypedF64Arr: convertedF };
 
-    -- Type conversion ops
+    # Type conversion ops
     ELSE_IF formName == "int->float" THEN
         val = eval!(COPY items[1], envId, pool);
         RETURN Value{ Number: toFloat(getInt(val)) };
@@ -1569,7 +1569,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ Int64Val: truncated };
 
     ELSE_IF formName == "to-typed:i64" THEN
-        -- (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
+        # (to-typed:i64 untypedList) -> convert Value[] list to Int64[]
         listVal = eval!(COPY items[1], envId, pool);
         IF isError?(listVal) THEN RETURN listVal; END
         MUTABLE converted: Int64[]@list = List[];
@@ -1584,7 +1584,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ TypedI64Arr: converted };
 
     ELSE_IF formName == "to-list" THEN
-        -- (to-list typedArr) -> convert TypedI64Arr back to Value[] list
+        # (to-list typedArr) -> convert TypedI64Arr back to Value[] list
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
         PARTIAL MATCH arrVal START
@@ -1600,7 +1600,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN arrVal;
 
     ELSE_IF formName == "typed-push:i64" THEN
-        -- (typed-push:i64 arr val) -> new typed array with value appended
+        # (typed-push:i64 arr val) -> new typed array with value appended
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
         newVal = eval!(COPY items[2], envId, pool);
@@ -1616,7 +1616,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         newArr.append(getInt(newVal));
         RETURN Value{ TypedI64Arr: newArr };
 
-    -- FFI bridge: call native CLEAR functions with typed arrays
+    # FFI bridge: call native CLEAR functions with typed arrays
     ELSE_IF formName == "native-sum" THEN
         arrVal = eval!(COPY items[1], envId, pool);
         IF isError?(arrVal) THEN RETURN arrVal; END
@@ -1654,7 +1654,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         RETURN Value.Nil;
 
-    -- Sandboxed I/O: check __sandbox flag before file/shell ops
+    # Sandboxed I/O: check __sandbox flag before file/shell ops
     ELSE_IF formName == "sandboxed-read" THEN
         sandbox = envGet!(envId, "__sandbox", pool);
         IF isTruthy?(sandbox) THEN
@@ -1688,7 +1688,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value{ Str: COPY output };
 
     ELSE_IF formName == "source-line" THEN
-        -- (source-line N) -> track current CLEAR source line for error messages
+        # (source-line N) -> track current CLEAR source line for error messages
         lineVal = eval!(COPY items[1], envId, pool);
         WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__source_line"] = lineVal; END }
         RETURN Value.Nil;
@@ -1698,7 +1698,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-manhattan" THEN
-        -- (native-manhattan structA structB) -> Int64 manhattan distance
+        # (native-manhattan structA structB) -> Int64 manhattan distance
         aVal = eval!(COPY items[1], envId, pool);
         IF isError?(aVal) THEN RETURN aVal; END
         bVal = eval!(COPY items[2], envId, pool);
@@ -1717,7 +1717,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "native-translate" THEN
-        -- (native-translate struct dx dy) -> new TypedStructI64
+        # (native-translate struct dx dy) -> new TypedStructI64
         sVal = eval!(COPY items[1], envId, pool);
         IF isError?(sVal) THEN RETURN sVal; END
         dxVal = eval!(COPY items[2], envId, pool);
@@ -1749,7 +1749,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "debug-set-break" THEN
-        -- (debug-set-break "fnName") -> register breakpoint
+        # (debug-set-break "fnName") -> register breakpoint
         bpName = eval!(COPY items[1], envId, pool);
         WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.TrueVal; END }
         RETURN Value.Nil;
@@ -1759,7 +1759,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         WITH EXCLUSIVE pool AS p { IF p[envId] AS env THEN env.vars["__bp_" + getStr(bpName)] = Value.Nil; END }
         RETURN Value.Nil;
 
-    -- Error introspection: special forms to avoid error propagation
+    # Error introspection: special forms to avoid error propagation
     ELSE_IF formName == "error?" THEN
         val = eval!(COPY items[1], envId, pool);
         RETURN boolVal(isError?(val));
@@ -1780,7 +1780,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         IF isError?(msg) THEN RETURN msg; END
         kind = eval!(COPY items[2], envId, pool);
         IF isError?(kind) THEN RETURN kind; END
-        -- Include source line in error message if tracked
+        # Include source line in error message if tracked
         srcLine = envGet!(envId, "__source_line", pool);
         MUTABLE errMsg: String = getStr(msg);
         IF getNum(srcLine) > 0.0 THEN
@@ -1790,7 +1790,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Error{ errMsg: COPY errMsg, errKind: COPY getStr(kind), errType: "" };
 
     ELSE_IF formName == "try" THEN
-        -- (try expr (catch e handler))
+        # (try expr (catch e handler))
         MUTABLE tryResult: Value = eval!(COPY items[1], envId, pool);
         PARTIAL MATCH tryResult START
             Value.Error AS e ->
@@ -1814,7 +1814,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN setVal;
 
     ELSE_IF formName == "vector-set!" THEN
-        -- (vector-set! var idx val) - copy-modify-store: get vector, rebuild with new slot, store back
+        # (vector-set! var idx val) - copy-modify-store: get vector, rebuild with new slot, store back
         vecName = getSymName(items[1]);
         idxVal = eval!(COPY items[2], envId, pool);
         IF isError?(idxVal) THEN RETURN idxVal; END
@@ -1838,7 +1838,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         RETURN Value.Nil;
 
     ELSE_IF formName == "list-remove-at!" THEN
-        -- list-remove-at! varname idx: removes element at idx, returns removed element
+        # list-remove-at! varname idx: removes element at idx, returns removed element
         lraName = getSymName(items[1]);
         lraIdx = getInt(eval!(COPY items[2], envId, pool));
         lraCurrent = envGet!(envId, lraName, pool);
@@ -1874,7 +1874,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
 
     ELSE_IF formName == "stream-next!" THEN
-        -- (stream-next! var) - advance stream: return head, update var to tail
+        # (stream-next! var) - advance stream: return head, update var to tail
         snName = getSymName(items[1]);
         snCurrent = envGet!(envId, snName, pool);
         PARTIAL MATCH snCurrent START
@@ -1983,10 +1983,10 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
         END
         f = evaled[0];
 
-        -- Debug: check breakpoints + step mode
+        # Debug: check breakpoints + step mode
         calledName = getSymName(items[0]);
         IF calledName.length() > 0 THEN
-            -- Build call description
+            # Build call description
             MUTABLE callDesc = calledName + "(";
             FOR ai IN (1_i64 ..< evaled.length()) DO
                 IF ai > 1 THEN callDesc = callDesc + ", "; END
@@ -1994,22 +1994,22 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
             END
             callDesc = callDesc + ")";
 
-            -- Check if we should break: explicit breakpoint OR step mode
+            # Check if we should break: explicit breakpoint OR step mode
             bpKey = envGet!(envId, "__bp_" + calledName, pool);
             stepMode = getNum(envGet!(envId, "__dbg_step", pool));
             curDepth = getNum(envGet!(envId, "__dbg_depth", pool));
             targetDepth = getNum(envGet!(envId, "__dbg_target_depth", pool));
             MUTABLE shouldBreak = isTruthy?(bpKey);
 
-            -- Step-into: always break
+            # Step-into: always break
             IF stepMode == 1.0 THEN shouldBreak = TRUE; END
-            -- Step-over: break when depth <= target
+            # Step-over: break when depth <= target
             IF stepMode == 2.0 && curDepth <= targetDepth THEN shouldBreak = TRUE; END
-            -- Step-out: break when depth < target
+            # Step-out: break when depth < target
             IF stepMode == 3.0 && curDepth < targetDepth THEN shouldBreak = TRUE; END
 
             IF shouldBreak THEN
-                -- Push call stack
+                # Push call stack
                 oldStack = getStr(envGet!(envId, "__dbg_stack", pool));
                 WITH EXCLUSIVE pool AS p {
                     IF p[envId] AS dbgEnv THEN
@@ -2023,25 +2023,25 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
 
                 MUTABLE action = debugPause!(callDesc, envId, "", pool);
 
-                -- Handle inspect requests from debugger
+                # Handle inspect requests from debugger
                 WHILE action == 4 DO
                     inspAst = envGet!(envId, "__dbg_inspect", pool);
                     inspResult = eval!(COPY inspAst, envId, pool);
                     action = debugPause!(callDesc, envId, prStr(inspResult, TRUE), pool);
                 END
 
-                -- Set step mode based on debug action
+                # Set step mode based on debug action
                 WITH EXCLUSIVE pool AS p {
                     IF p[envId] AS dbgEnv2 THEN
                         dbgEnv2.vars["__dbg_step"] = Value{ Number: toFloat(action) };
                         dbgEnv2.vars["__dbg_target_depth"] = Value{ Number: curDepth };
-                        -- Restore stack
+                        # Restore stack
                         dbgEnv2.vars["__dbg_stack"] = Value{ Str: COPY oldStack };
                     END
                 }
             END
 
-            -- Track call depth for step-over/out
+            # Track call depth for step-over/out
             WITH EXCLUSIVE pool AS p { IF p[envId] AS dbgEnv3 THEN dbgEnv3.vars["__dbg_depth"] = Value{ Number: curDepth + 1.0 }; END }
         END
 
@@ -2077,7 +2077,7 @@ FN evalList!(TAKES items: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool
     END
 END
 
--- runTest: tokenize + parse + eval
+# runTest: tokenize + parse + eval
 
 FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABLE penv: HashMap<Value>) RETURNS Value
   REQUIRES pool: LOCKED
@@ -2089,8 +2089,8 @@ FN runTest!(input: String, envId: Id<Env>, MUTABLE pool: Env[50000]@pool, MUTABL
     RETURN eval!(COPY ast, envId, pool);
 END
 
--- Setup: create root env with all native functions registered.
--- Returns the root env Id.
+# Setup: create root env with all native functions registered.
+# Returns the root env Id.
 
 FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
   REQUIRES pool: LOCKED
@@ -2098,38 +2098,38 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
     WITH EXCLUSIVE pool AS p {
         rootId: Id<Env> = p.insert(Env{ vars: {} });
         IF p[rootId] AS root THEN
-        -- Arithmetic: 1-4
+        # Arithmetic: 1-4
         root.vars["+"] = Value{ NativeFn: 1 };
         root.vars["-"] = Value{ NativeFn: 2 };
         root.vars["*"] = Value{ NativeFn: 3 };
         root.vars["/"] = Value{ NativeFn: 4 };
-        -- Comparison: 5-9
+        # Comparison: 5-9
         root.vars["="] = Value{ NativeFn: 5 };
         root.vars["<"] = Value{ NativeFn: 6 };
         root.vars[">"] = Value{ NativeFn: 7 };
         root.vars["<="] = Value{ NativeFn: 8 };
         root.vars[">="] = Value{ NativeFn: 9 };
-        -- List: 10-15
+        # List: 10-15
         root.vars["list"] = Value{ NativeFn: 10 };
         root.vars["list?"] = Value{ NativeFn: 11 };
         root.vars["empty?"] = Value{ NativeFn: 12 };
         root.vars["count"] = Value{ NativeFn: 13 };
         root.vars["not"] = Value{ NativeFn: 14 };
         root.vars["prn"] = Value{ NativeFn: 15 };
-        -- Vector: 16-20
+        # Vector: 16-20
         root.vars["vector"] = Value{ NativeFn: 16 };
         root.vars["vector-ref"] = Value{ NativeFn: 17 };
         root.vars["vector-set!"] = Value{ NativeFn: 18 };
         root.vars["vector-length"] = Value{ NativeFn: 19 };
         root.vars["vector?"] = Value{ NativeFn: 20 };
-        -- Pair: 21-24
+        # Pair: 21-24
         root.vars["cons"] = Value{ NativeFn: 21 };
         root.vars["car"] = Value{ NativeFn: 22 };
         root.vars["cdr"] = Value{ NativeFn: 23 };
         root.vars["pair?"] = Value{ NativeFn: 24 };
-        -- Symbol comparison: 25
+        # Symbol comparison: 25
         root.vars["eq?"] = Value{ NativeFn: 25 };
-        -- String: 26-33
+        # String: 26-33
         root.vars["string-append"] = Value{ NativeFn: 26 };
         root.vars["string-length"] = Value{ NativeFn: 27 };
         root.vars["substring"] = Value{ NativeFn: 28 };
@@ -2138,15 +2138,15 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
         root.vars["string->number"] = Value{ NativeFn: 31 };
         root.vars["string?"] = Value{ NativeFn: 32 };
         root.vars["display"] = Value{ NativeFn: 33 };
-        -- Modulo: 37
+        # Modulo: 37
         root.vars["modulo"] = Value{ NativeFn: 37 };
-        -- List access: 34=list-ref, 35=list-length, 36=list-push, 62=list-set!
+        # List access: 34=list-ref, 35=list-length, 36=list-push, 62=list-set!
         root.vars["list-ref"] = Value{ NativeFn: 34 };
         root.vars["list-length"] = Value{ NativeFn: 35 };
         root.vars["length"] = Value{ NativeFn: 35 };
         root.vars["list-push"] = Value{ NativeFn: 36 };
         root.vars["list-set!"] = Value{ NativeFn: 62 };
-        -- String stdlib: 38-42 + aliases
+        # String stdlib: 38-42 + aliases
         root.vars["startsWith?"] = Value{ NativeFn: 38 };
         root.vars["split"] = Value{ NativeFn: 39 };
         root.vars["indexOf"] = Value{ NativeFn: 40 };
@@ -2159,7 +2159,7 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
         root.vars["toFloat"] = Value{ NativeFn: 30 };
         root.vars["endsWith?"] = Value{ NativeFn: 48 };
         root.vars["join"] = Value{ NativeFn: 49 };
-        -- Math: 50-56
+        # Math: 50-56
         root.vars["abs"] = Value{ NativeFn: 50 };
         root.vars["min"] = Value{ NativeFn: 51 };
         root.vars["max"] = Value{ NativeFn: 52 };
@@ -2167,11 +2167,11 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
         root.vars["timestampMs"] = Value{ NativeFn: 54 };
         root.vars["random"] = Value{ NativeFn: 55 };
         root.vars["randomInt"] = Value{ NativeFn: 56 };
-        -- File I/O: 45-47
+        # File I/O: 45-47
         root.vars["readFile"] = Value{ NativeFn: 45 };
         root.vars["writeFile"] = Value{ NativeFn: 46 };
         root.vars["shell"] = Value{ NativeFn: 47 };
-        -- String methods: 57-61
+        # String methods: 57-61
         root.vars["codepointCount"] = Value{ NativeFn: 57 };
         root.vars["bytes"] = Value{ NativeFn: 58 };
         root.vars["replace"] = Value{ NativeFn: 59 };
@@ -2185,48 +2185,48 @@ FN setupEnv!(MUTABLE pool: Env[50000]@pool) RETURNS Id<Env>
     }
 END
 
--- ============================================================================
--- Bytecode VM
--- ============================================================================
+# ============================================================================
+# Bytecode VM
+# ============================================================================
 
--- Opcodes: each instruction is an Int64 in the ops array.
--- Operands follow the opcode inline in ops.
---
--- Opcode table:
---   1  loadConst [idx]       push consts[idx]
---   2  loadName [idx]        push env lookup of consts[idx] (symbol string)
---   3  storeName [idx]       pop value, bind consts[idx] in current env
---   4  pop                   discard top of stack
---   5  dup                   duplicate top of stack
---  10  add                   pop b, pop a, push a+b
---  11  sub                   pop b, pop a, push a-b
---  12  mul                   pop b, pop a, push a*b
---  13  div                   pop b, pop a, push a/b
---  14  neg                   pop a, push -a
---  20  eq                    pop b, pop a, push a==b
---  21  lt                    pop b, pop a, push a<b
---  22  gt                    pop b, pop a, push a>b
---  23  lte                   pop b, pop a, push a<=b
---  24  gte                   pop b, pop a, push a>=b
---  30  not                   pop a, push !a
---  40  jump [offset]         unconditional jump to offset
---  41  jumpIfFalse [offset]  pop, jump if falsy
---  42  call [argc]           call function on stack with argc args
---  43  tailCall [argc]       tail call (reuse frame)
---  44  ret                   return top of stack to caller
---  50  makeList [count]      pop count items, push list
---  51  makeVec [count]       pop count items, push vector
---  52  cons                  pop cdr, pop car, push pair
---  53  car                   pop pair, push car
---  54  cdr                   pop pair, push cdr
---  60  makeClosure [idx]     push closure capturing consts[idx] (sub-Chunk index)
---  61  setName [idx]         pop value, set! consts[idx] in env chain
---  70  nativeCall [id, argc] call native fn by id with argc args
---  71  halt                  stop execution, top of stack is result
---  80  loadSlot [idx]        push slots[idx] (Commit 10)
---  81  storeSlot [idx]       pop, store in slots[idx] (Commit 10)
+# Opcodes: each instruction is an Int64 in the ops array.
+# Operands follow the opcode inline in ops.
+#
+# Opcode table:
+#   1  loadConst [idx]       push consts[idx]
+#   2  loadName [idx]        push env lookup of consts[idx] (symbol string)
+#   3  storeName [idx]       pop value, bind consts[idx] in current env
+#   4  pop                   discard top of stack
+#   5  dup                   duplicate top of stack
+#  10  add                   pop b, pop a, push a+b
+#  11  sub                   pop b, pop a, push a-b
+#  12  mul                   pop b, pop a, push a*b
+#  13  div                   pop b, pop a, push a/b
+#  14  neg                   pop a, push -a
+#  20  eq                    pop b, pop a, push a==b
+#  21  lt                    pop b, pop a, push a<b
+#  22  gt                    pop b, pop a, push a>b
+#  23  lte                   pop b, pop a, push a<=b
+#  24  gte                   pop b, pop a, push a>=b
+#  30  not                   pop a, push !a
+#  40  jump [offset]         unconditional jump to offset
+#  41  jumpIfFalse [offset]  pop, jump if falsy
+#  42  call [argc]           call function on stack with argc args
+#  43  tailCall [argc]       tail call (reuse frame)
+#  44  ret                   return top of stack to caller
+#  50  makeList [count]      pop count items, push list
+#  51  makeVec [count]       pop count items, push vector
+#  52  cons                  pop cdr, pop car, push pair
+#  53  car                   pop pair, push car
+#  54  cdr                   pop pair, push cdr
+#  60  makeClosure [idx]     push closure capturing consts[idx] (sub-Chunk index)
+#  61  setName [idx]         pop value, set! consts[idx] in env chain
+#  70  nativeCall [id, argc] call native fn by id with argc args
+#  71  halt                  stop execution, top of stack is result
+#  80  loadSlot [idx]        push slots[idx] (Commit 10)
+#  81  storeSlot [idx]       pop, store in slots[idx] (Commit 10)
 
--- A compiled bytecode chunk: flat instruction array + constant pool + source lines.
+# A compiled bytecode chunk: flat instruction array + constant pool + source lines.
 
 STRUCT Chunk {
     ops: Int64[]@list,
@@ -2234,7 +2234,7 @@ STRUCT Chunk {
     lines: Int64[]@list
 }
 
--- A call frame tracks the return point and base pointer for each function call.
+# A call frame tracks the return point and base pointer for each function call.
 
 STRUCT Frame {
     chunkIdx: Int64,
@@ -2243,13 +2243,13 @@ STRUCT Frame {
     envId: Id<Env>
 }
 
--- Bytecode loader: reads ops and consts from files written by Ruby compiler
+# Bytecode loader: reads ops and consts from files written by Ruby compiler
 
 FN loadBytecodeOps!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Int64[]
   REQUIRES pool: LOCKED
 ->
     raw = readFile(path) OR RAISE;
-    -- Split on commas using the interpreter's split function
+    # Split on commas using the interpreter's split function
     parts = split(raw, ",");
     MUTABLE ops: Int64[]@list = List[];
     FOR pi IN (0_i64 ..< parts.length()) DO
@@ -2271,11 +2271,11 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Valu
     MUTABLE pos: Int64 = 0;
     n = raw.length();
     WHILE pos < n DO
-        -- S: records are length-prefixed: `S:<bytesize>:<exactly bytesize bytes>`.
-        -- The byte payload is read verbatim; it may contain any byte
-        -- (including \n). Other records are line-terminated.
+        # S: records are length-prefixed: `S:<bytesize>:<exactly bytesize bytes>`.
+        # The byte payload is read verbatim; it may contain any byte
+        # (including \n). Other records are line-terminated.
         IF pos + 1 < n && charAt(raw, pos) == "S" && charAt(raw, pos + 1) == ":" THEN
-            -- Find the colon after the length
+            # Find the colon after the length
             MUTABLE lenEnd: Int64 = pos + 2;
             WHILE lenEnd < n && charAt(raw, lenEnd) != ":" DO
                 lenEnd += 1;
@@ -2286,10 +2286,10 @@ FN loadBytecodeConsts!(path: String, MUTABLE pool: Env[50000]@pool) RETURNS Valu
             payload = substr(raw, payloadStart, payloadLen);
             consts.append(Value{ Str: COPY payload });
             pos = payloadStart + payloadLen;
-            -- Skip trailing record separator (if any)
+            # Skip trailing record separator (if any)
             IF pos < n && charAt(raw, pos) == "\n" THEN pos += 1; END
         ELSE
-            -- Line-terminated record
+            # Line-terminated record
             MUTABLE lineEnd: Int64 = pos;
             WHILE lineEnd < n && charAt(raw, lineEnd) != "\n" DO
                 lineEnd += 1;
@@ -2308,9 +2308,9 @@ FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
     IF line == "N" THEN RETURN Value.Nil; END
     IF startsWith?(line, "I:") THEN
         numStr = substr(line, 2, line.length() - 2);
-        -- Parse directly as Int64. toNumber + toInt round-trips through
-        -- Float64 and loses precision for ints >2^52 (e.g.
-        -- 4611686018427387903 rounds to 2^62 in Float64).
+        # Parse directly as Int64. toNumber + toInt round-trips through
+        # Float64 and loses precision for ints >2^52 (e.g.
+        # 4611686018427387903 rounds to 2^62 in Float64).
         intVal = toInt(numStr) OR 0_i64;
         RETURN Value{ Int64Val: intVal };
     END
@@ -2319,8 +2319,8 @@ FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
         n = toNumber(numStr) OR 0.0;
         RETURN Value{ Number: n };
     END
-    -- Note: `S:` records are handled inline by loadBytecodeConsts! (they are
-    -- length-prefixed, not line-terminated, so they never reach parseConstLine!).
+    # Note: `S:` records are handled inline by loadBytecodeConsts! (they are
+    # length-prefixed, not line-terminated, so they never reach parseConstLine!).
     IF startsWith?(line, "B:") THEN
         IF substr(line, 2, line.length() - 2) == "true" THEN RETURN Value.TrueVal; END
         RETURN Value.FalseVal;
@@ -2335,32 +2335,32 @@ FN parseConstLine!(line: String, MUTABLE pool: Env[50000]@pool) RETURNS Value
     RETURN Value.Nil;
 END
 
--- Chunk builder: emit helpers cannot take @list params (transpiler bug extracts .items).
--- Build bytecode by appending directly to ops/consts/lines arrays inline.
+# Chunk builder: emit helpers cannot take @list params (transpiler bug extracts .items).
+# Build bytecode by appending directly to ops/consts/lines arrays inline.
 
--- Bytecode dispatch loop. Executes ops using an operand stack.
--- Returns the value left on top of the stack at halt.
+# Bytecode dispatch loop. Executes ops using an operand stack.
+# Returns the value left on top of the stack at halt.
 
--- ============================================================================
--- Bytecode Compiler: AST (Value) -> ops/consts arrays
--- ============================================================================
--- compile! walks a parsed S-expression and returns a Value.Pair where:
---   car = Value.List of Value.Number (the ops, encoded as floats)
---   cdr = Value.List of Value (the constant pool)
--- The caller extracts these into Int64[]@list and Value[]@list for exec!.
+# ============================================================================
+# Bytecode Compiler: AST (Value) -> ops/consts arrays
+# ============================================================================
+# compile! walks a parsed S-expression and returns a Value.Pair where:
+#   car = Value.List of Value.Number (the ops, encoded as floats)
+#   cdr = Value.List of Value (the constant pool)
+# The caller extracts these into Int64[]@list and Value[]@list for exec!.
 
--- compile!: compiles a single S-expression into bytecode.
--- Returns Pair{List[ops as Numbers], List[consts]}.
--- Sub-expressions are compiled as loadConst (literals/results of eval!)
--- or loadName (symbols). @list can't be passed between functions, so
--- the compiler handles each form in one flat function.
--- The real compiler will be in Ruby (scheme_transpiler.rb).
+# compile!: compiles a single S-expression into bytecode.
+# Returns Pair{List[ops as Numbers], List[consts]}.
+# Sub-expressions are compiled as loadConst (literals/results of eval!)
+# or loadName (symbols). @list can't be passed between functions, so
+# the compiler handles each form in one flat function.
+# The real compiler will be in Ruby (scheme_transpiler.rb).
 
--- compileArg pattern (inlined - can't pass @list to functions):
--- Symbol -> loadName, List -> eval! + loadConst, Literal -> loadConst
+# compileArg pattern (inlined - can't pass @list to functions):
+# Symbol -> loadName, List -> eval! + loadConst, Literal -> loadConst
 
--- compile! stores results in pool env at __bc_ops and __bc_consts keys.
--- Caller reads them from pool[envId] after the call.
+# compile! stores results in pool env at __bc_ops and __bc_consts keys.
+# Caller reads them from pool[envId] after the call.
 
 FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS Void
   REQUIRES pool: LOCKED
@@ -2371,15 +2371,15 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
 
     IF isSymbol?(ast) THEN
         symName = getSymName(ast);
-        -- Check if this symbol has a slot assignment
+        # Check if this symbol has a slot assignment
         MUTABLE slotLookup = Value{ Number: 0.0 - 1.0 };
         WITH EXCLUSIVE pool AS p { IF p[envId] AS slotEnv THEN slotLookup = slotEnv.vars["__slot_" + symName] OR Value{ Number: 0.0 - 1.0 }; END }
         slotNum = toInt(getNum(slotLookup));
         IF slotNum >= 0 THEN
-            -- LOAD_SLOT
+            # LOAD_SLOT
             ops.append(Value{ Number: 20.0 }); ops.append(Value{ Number: toFloat(slotNum) });
         ELSE
-            -- LOAD_NAME
+            # LOAD_NAME
             cidx = consts.length(); consts.append(COPY ast);
             ops.append(Value{ Number: 1.0 }); ops.append(Value{ Number: toFloat(cidx) });
         END
@@ -2485,7 +2485,7 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
     END
 
     ops.append(Value{ Number: 19.0 });
-    -- Store in env entry-by-entry (Value.Number is inline, survives arena free)
+    # Store in env entry-by-entry (Value.Number is inline, survives arena free)
     WITH EXCLUSIVE pool AS p {
         IF p[envId] AS bcEnv THEN
             bcEnv.vars["__bc_opN"] = Value{ Number: toFloat(ops.length()) };
@@ -2501,11 +2501,11 @@ FN compile!(ast: Value, envId: Id<Env>, MUTABLE pool: Env[50000]@pool) RETURNS V
     RETURN;
 END
 
--- ============================================================================
+# ============================================================================
 
--- Bytecode dispatch loop. Executes ops using a stack-pointer-based operand stack.
--- Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
--- Returns the value on top of the stack at halt.
+# Bytecode dispatch loop. Executes ops using a stack-pointer-based operand stack.
+# Push: IF sp >= stack.length() THEN stack.append(val) ELSE stack[sp] = val END; sp += 1
+# Returns the value on top of the stack at halt.
 
 FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]@pool,
          entryIp: Int64, initCaps: Value[]) RETURNS Value
@@ -2518,75 +2518,75 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
     MUTABLE ip: Int64 = entryIp;
     MUTABLE curEnv: Id<Env> = COPY envId;
     MUTABLE running = TRUE;
-    -- Fiber return value: set by FIBER_RET opcode, read by caller.
+    # Fiber return value: set by FIBER_RET opcode, read by caller.
     MUTABLE fiberRetVal: Value = Value.Nil;
     MUTABLE fiberReturned = FALSE;
-    -- Typed stacks: avoid 40-byte Value union copies for typed arithmetic
+    # Typed stacks: avoid 40-byte Value union copies for typed arithmetic
     MUTABLE istack: Int64[] = [];
     MUTABLE isp: Int64 = 0;
     MUTABLE fstack: Float64[] = [];
     MUTABLE fsp: Int64 = 0;
-    -- Native typed slots: avoid Value wrapping for i64/f64 locals
+    # Native typed slots: avoid Value wrapping for i64/f64 locals
     MUTABLE islots: Int64[] = [];
     MUTABLE fslots: Float64[] = [];
-    -- Pre-allocate SLOT_COUNT slots/typed-stack/typed-slot entries.
-    -- SLOT_COUNT must match the stride used by BC_CALL save/restore below.
+    # Pre-allocate SLOT_COUNT slots/typed-stack/typed-slot entries.
+    # SLOT_COUNT must match the stride used by BC_CALL save/restore below.
     FOR si IN (0_i64 ..< 256) DO slots.append(Value.Nil); END
     FOR si IN (0_i64 ..< 256) DO istack.append(0_i64); END
     FOR si IN (0_i64 ..< 256) DO fstack.append(0.0); END
     FOR si IN (0_i64 ..< 256) DO islots.append(0_i64); END
     FOR si IN (0_i64 ..< 256) DO fslots.append(0.0); END
-    -- Load initial fiber captures into slots 0..N-1 (for spawned fibers).
+    # Load initial fiber captures into slots 0..N-1 (for spawned fibers).
     FOR ci IN (0_i64 ..< initCaps.length()) DO
         slots[ci] = COPY initCaps[ci];
     END
-    -- Call frame stack for BC_CALL/BC_RET helper function calls
+    # Call frame stack for BC_CALL/BC_RET helper function calls
     MUTABLE callRetIps: Int64[]@list = List[];
     MUTABLE callRetSps: Int64[]@list = List[];
     MUTABLE callRetSlotCounts: Int64[]@list = List[];
     MUTABLE callSavedSlots: Value[]@list = List[];
-    -- BG_SPAWN runs the inner exec! synchronously and pushes the result
-    -- in a Pair("__future__", result); AWAIT unwraps. Real fiber
-    -- spawning is gated on @local/@shared:locked indirection (Task #29)
-    -- so cross-fiber mutations are visible.
-    -- Weak-ref side tables. WEAK_NEW snapshots a Value into weakCells,
-    -- marks weakAlive[idx]=TRUE, registers the idx with the current
-    -- frame via weakOwnedFlat. BC_RET marks every idx allocated since
-    -- frameWkMarks.last() as dead, so weak refs created in a callee
-    -- become invalid when the callee returns -- matching Zig's drop-on-
-    -- frame-exit for @multiowned bindings.
+    # BG_SPAWN runs the inner exec! synchronously and pushes the result
+    # in a Pair("__future__", result); AWAIT unwraps. Real fiber
+    # spawning is gated on @local/@shared:locked indirection (Task #29)
+    # so cross-fiber mutations are visible.
+    # Weak-ref side tables. WEAK_NEW snapshots a Value into weakCells,
+    # marks weakAlive[idx]=TRUE, registers the idx with the current
+    # frame via weakOwnedFlat. BC_RET marks every idx allocated since
+    # frameWkMarks.last() as dead, so weak refs created in a callee
+    # become invalid when the callee returns -- matching Zig's drop-on-
+    # frame-exit for @multiowned bindings.
     MUTABLE weakCells: Value[]@list = List[];
     MUTABLE weakAlive: Bool[]@list = List[];
     MUTABLE weakOwnedFlat: Int64[]@list = List[];
     MUTABLE frameWkMarks: Int64[]@list = List[];
-    -- Real BG fiber tracking. BG_SPAWN appends the spawned fiber's
-    -- Promise to futureTable and pushes Value.Pair("__future__", id)
-    -- onto the value stack. AWAIT (op 83) reads the id, looks up the
-    -- Promise, and NEXTs it (blocking until the fiber completes).
-    -- Each exec! call has its own table -- spawned fibers can recurse
-    -- into exec! and each call has its own bookkeeping.
+    # Real BG fiber tracking. BG_SPAWN appends the spawned fiber's
+    # Promise to futureTable and pushes Value.Pair("__future__", id)
+    # onto the value stack. AWAIT (op 83) reads the id, looks up the
+    # Promise, and NEXTs it (blocking until the fiber completes).
+    # Each exec! call has its own table -- spawned fibers can recurse
+    # into exec! and each call has its own bookkeeping.
     MUTABLE futureTable: ~Value[]@list = List[];
-    -- Memoize resolved Promise values: `~T@shared` semantics in CLEAR
-    -- guarantee multi-NEXT idempotence, but BC stores plain `Promise(T)`
-    -- handles in futureTable. Promise.next() destroys its heap-allocated
-    -- Inner on the first call (zig/lib/data-structures.zig:505); a
-    -- second next() on the same handle reads `inner.wg.wait()` from
-    -- freed memory (UAF, then double-free of Inner on the second
-    -- destroy). DebugAllocator catches both -- the BC test runner
-    -- surfaces it as `free(): double free detected in tcache 2`.
-    -- Cache the resolved Value here so AWAIT (and the inf-stream drain
-    -- loop) can short-circuit on repeat consumption. Keyed by the
-    -- futureTable index as a string (HashMap<Int64> isn't a thing).
+    # Memoize resolved Promise values: `~T@shared` semantics in CLEAR
+    # guarantee multi-NEXT idempotence, but BC stores plain `Promise(T)`
+    # handles in futureTable. Promise.next() destroys its heap-allocated
+    # Inner on the first call (zig/lib/data-structures.zig:505); a
+    # second next() on the same handle reads `inner.wg.wait()` from
+    # freed memory (UAF, then double-free of Inner on the second
+    # destroy). DebugAllocator catches both -- the BC test runner
+    # surfaces it as `free(): double free detected in tcache 2`.
+    # Cache the resolved Value here so AWAIT (and the inf-stream drain
+    # loop) can short-circuit on repeat consumption. Keyed by the
+    # futureTable index as a string (HashMap<Int64> isn't a thing).
     MUTABLE futureResolved: HashMap<Value> = {};
-    -- Channel envIds + future indices for producer-fiber streams
-    -- (~T[INF] BG STREAM). STREAM_SPAWN populates; the exec! shutdown
-    -- loop closes each channel + drains the matching future so the
-    -- producer fiber sees closed=true on its next yield, terminates,
-    -- and joins cleanly before pool goes out of scope (otherwise the
-    -- fiber wakes up to a freed pool and segfaults). HashMap-keyed
-    -- stash so the storage survives the WHILE loop's frame-mark
-    -- rewinds (a parallel `Int64[]@list` was getting its first slot
-    -- clobbered after the first grow).
+    # Channel envIds + future indices for producer-fiber streams
+    # (~T[INF] BG STREAM). STREAM_SPAWN populates; the exec! shutdown
+    # loop closes each channel + drains the matching future so the
+    # producer fiber sees closed=true on its next yield, terminates,
+    # and joins cleanly before pool goes out of scope (otherwise the
+    # fiber wakes up to a freed pool and segfaults). HashMap-keyed
+    # stash so the storage survives the WHILE loop's frame-mark
+    # rewinds (a parallel `Int64[]@list` was getting its first slot
+    # clobbered after the first grow).
     MUTABLE streamChanByIdx: HashMap<Value> = {};
     MUTABLE streamFidByIdx: HashMap<Value> = {};
     MUTABLE streamCount: Int64 = 0_i64;
@@ -2597,22 +2597,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         ip += 1;
 
         PARTIAL MATCH op START
-            0 ->  -- LOAD_CONST
+            0 ->  # LOAD_CONST
                 idx = ops[ip]; ip += 1;
                 pv = COPY consts[idx];
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            1 ->  -- LOAD_NAME
+            1 ->  # LOAD_NAME
                 idx = ops[ip]; ip += 1;
                 pv = envGet!(curEnv, getSymName(consts[idx]), pool);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            2 ->  -- STORE_NAME
+            2 ->  # STORE_NAME
                 idx = ops[ip]; ip += 1;
                 WITH EXCLUSIVE pool AS p { IF p[curEnv] AS storeEnv THEN storeEnv.vars[getSymName(consts[idx])] = stack[sp - 1]; END },
-            3 ->  -- POP
+            3 ->  # POP
                 sp -= 1;,
-            4 ->  -- ADD (polymorphic)
+            4 ->  # ADD (polymorphic)
                 PARTIAL MATCH stack[sp - 2] START
                     Value.Str AS s1 ->
                         pv = Value{ Str: COPY (s1 + getStr(stack[sp - 1])) };,
@@ -2625,7 +2625,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            5 ->  -- SUB (polymorphic — Int64/Int64 stays integer)
+            5 ->  # SUB (polymorphic — Int64/Int64 stays integer)
                 IF isInt64?(stack[sp - 2]) && isInt64?(stack[sp - 1]) THEN
                     pv = Value{ Int64Val: getInt(stack[sp - 2]) - getInt(stack[sp - 1]) };
                 ELSE
@@ -2634,7 +2634,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            6 ->  -- MUL (polymorphic — Int64/Int64 stays integer)
+            6 ->  # MUL (polymorphic — Int64/Int64 stays integer)
                 IF isInt64?(stack[sp - 2]) && isInt64?(stack[sp - 1]) THEN
                     pv = Value{ Int64Val: getInt(stack[sp - 2]) * getInt(stack[sp - 1]) };
                 ELSE
@@ -2643,7 +2643,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            7 ->  -- DIV (polymorphic — Int64/Int64 stays integer division when divisor != 0)
+            7 ->  # DIV (polymorphic — Int64/Int64 stays integer division when divisor != 0)
                 IF isInt64?(stack[sp - 2]) && isInt64?(stack[sp - 1]) THEN
                     divIb = getInt(stack[sp - 1]);
                     IF divIb == 0 THEN pv = Value{ Int64Val: 0 };
@@ -2654,43 +2654,43 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            8 ->  -- EQ
+            8 ->  # EQ
                 pv = boolVal(valEqual?(stack[sp - 2], stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            9 ->  -- LT
+            9 ->  # LT
                 pv = boolVal(getNum(stack[sp - 2]) < getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            10 -> -- GT
+            10 -> # GT
                 pv = boolVal(getNum(stack[sp - 2]) > getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            11 -> -- LTE
+            11 -> # LTE
                 pv = boolVal(getNum(stack[sp - 2]) <= getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            12 -> -- GTE
+            12 -> # GTE
                 pv = boolVal(getNum(stack[sp - 2]) >= getNum(stack[sp - 1]));
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            13 -> -- NOT
+            13 -> # NOT
                 sp -= 1;
                 pv = boolVal(isTruthy?(stack[sp]) == FALSE);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            14 -> -- JUMP
+            14 -> # JUMP
                 ip = ops[ip];,
-            15 -> -- JUMP_IF_FALSE
+            15 -> # JUMP_IF_FALSE
                 target = ops[ip]; ip += 1;
                 sp -= 1;
                 IF isTruthy?(stack[sp]) == FALSE THEN ip = target; END,
-            16 -> -- CALL [argc]
+            16 -> # CALL [argc]
                 argc = ops[ip]; ip += 1;
                 fnVal = stack[sp - argc - 1];
                 fnId = getNativeId(fnVal);
@@ -2707,11 +2707,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 ELSE_IF isBCFn?(fnVal) THEN
                     PARTIAL MATCH fnVal START
                         Value.BCFn AS bcfn ->
-                            -- BC_CALL semantics inline: save frame, copy args
-                            -- (skip fnVal at sp-argc-1) into slots, jump.
-                            -- BCFn dispatch doesn't know caller's slot count
-                            -- here -- save the worst case (256). BC_RET
-                            -- reads it back from callRetSlotCounts.
+                            # BC_CALL semantics inline: save frame, copy args
+                            # (skip fnVal at sp-argc-1) into slots, jump.
+                            # BCFn dispatch doesn't know caller's slot count
+                            # here -- save the worst case (256). BC_RET
+                            # reads it back from callRetSlotCounts.
                             callRetIps.append(ip);
                             callRetSps.append(sp - argc - 1);
                             callRetSlotCounts.append(256_i64);
@@ -2764,7 +2764,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                     sp += 1;
                 END,
-            17 -> -- SET_NAME
+            17 -> # SET_NAME
                 idx = ops[ip]; ip += 1;
                 sp -= 1;
                 setVal = COPY stack[sp];
@@ -2772,7 +2772,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = COPY setVal;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            18 -> -- NATIVE_CALL [nid] [argc]
+            18 -> # NATIVE_CALL [nid] [argc]
                 nid = ops[ip]; ip += 1;
                 argc = ops[ip]; ip += 1;
                 MUTABLE nArgs: Value[]@list = List[];
@@ -2784,153 +2784,153 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = applyNative(nid, nArgs);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            19 -> -- HALT
+            19 -> # HALT
                 running = FALSE;,
-            20 -> -- LOAD_SLOT
+            20 -> # LOAD_SLOT
                 slotIdx = ops[ip]; ip += 1;
                 pv = COPY slots[slotIdx];
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            21 -> -- STORE_SLOT
+            21 -> # STORE_SLOT
                 slotIdx = ops[ip]; ip += 1;
                 slots[slotIdx] = COPY stack[sp - 1];,
-            22 -> -- ADD_I64 (istack)
+            22 -> # ADD_I64 (istack)
                 istack[isp - 2] = istack[isp - 2] + istack[isp - 1];
                 isp -= 1;,
-            23 -> -- SUB_I64 (istack)
+            23 -> # SUB_I64 (istack)
                 istack[isp - 2] = istack[isp - 2] - istack[isp - 1];
                 isp -= 1;,
-            24 -> -- MUL_I64 (istack)
+            24 -> # MUL_I64 (istack)
                 istack[isp - 2] = istack[isp - 2] * istack[isp - 1];
                 isp -= 1;,
-            25 -> -- LT_I64 (istack -> istack, 0/1)
+            25 -> # LT_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] < istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            26 -> -- EQ_I64 (istack -> istack, 0/1)
+            26 -> # EQ_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] == istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            27 -> -- INT_TO_F64 (istack -> fstack)
+            27 -> # INT_TO_F64 (istack -> fstack)
                 isp -= 1;
                 convFloat = toFloat(istack[isp]);
                 fstack[fsp] = convFloat;
                 fsp += 1;,
-            28 -> -- F64_TO_INT (fstack -> istack)
+            28 -> # F64_TO_INT (fstack -> istack)
                 fsp -= 1;
                 convInt = toInt(fstack[fsp]);
                 istack[isp] = convInt;
                 isp += 1;,
-            29 -> -- MOD_I64 (istack)
+            29 -> # MOD_I64 (istack)
                 ia = istack[isp - 2];
                 ib = istack[isp - 1];
                 IF ib != 0 THEN istack[isp - 2] = ia MOD ib; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            30 -> -- GTE_I64 (istack -> istack, 0/1)
+            30 -> # GTE_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] >= istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            31 -> -- GT_I64 (istack -> istack, 0/1)
+            31 -> # GT_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] > istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            32 -> -- LTE_I64 (istack -> istack, 0/1)
+            32 -> # LTE_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] <= istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            33 -> -- NEQ_I64 (istack -> istack, 0/1)
+            33 -> # NEQ_I64 (istack -> istack, 0/1)
                 IF istack[isp - 2] != istack[isp - 1] THEN istack[isp - 2] = 1_i64; ELSE istack[isp - 2] = 0_i64; END
                 isp -= 1;,
-            34 -> -- DIV_I64 (istack)
+            34 -> # DIV_I64 (istack)
                 ia = istack[isp - 2];
                 ib = istack[isp - 1];
                 MUTABLE divR: Int64 = 0;
                 IF ib != 0 THEN divR = toInt(toFloat(ia) / toFloat(ib)); END
                 istack[isp - 2] = divR;
                 isp -= 1;,
-            35 -> -- JUMP_BACK
+            35 -> # JUMP_BACK
                 ip = ops[ip];,
-            36 -> -- CONCAT
+            36 -> # CONCAT
                 s1 = prStr(stack[sp - 2], FALSE);
                 s2 = prStr(stack[sp - 1], FALSE);
                 pv = Value{ Str: COPY (s1 + s2) };
                 sp -= 2;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            37 -> -- DEFINE_FN
+            37 -> # DEFINE_FN
                 sexprIdx = ops[ip]; ip += 1;
                 nameIdx = ops[ip]; ip += 1;
                 sexprStr = getStr(consts[sexprIdx]);
                 MUTABLE defPenv: HashMap<Value> = {};
                 pv = runTest!(sexprStr, curEnv, pool, defPenv);,
-            38 -> -- LOAD_SLOT_I64 [slot] (slots -> istack)
+            38 -> # LOAD_SLOT_I64 [slot] (slots -> istack)
                 slotIdx = ops[ip]; ip += 1;
                 istack[isp] = getInt(slots[slotIdx]);
                 isp += 1;,
-            39 -> -- STORE_SLOT_I64 [slot] (istack -> slots)
+            39 -> # STORE_SLOT_I64 [slot] (istack -> slots)
                 slotIdx = ops[ip]; ip += 1;
                 isp -= 1;
                 slots[slotIdx] = Value{ Int64Val: istack[isp] };,
-            40 -> -- LOAD_CONST_I64 [idx] (consts -> istack)
+            40 -> # LOAD_CONST_I64 [idx] (consts -> istack)
                 idx = ops[ip]; ip += 1;
                 istack[isp] = getInt(consts[idx]);
                 isp += 1;,
-            41 -> -- JUMP_IF_FALSE_I (istack, 0=false)
+            41 -> # JUMP_IF_FALSE_I (istack, 0=false)
                 isp -= 1;
                 IF istack[isp] == 0 THEN ip = ops[ip]; ELSE ip += 1; END,
-            42 -> -- LOAD_SLOT_F64 [slot] (slots -> fstack)
+            42 -> # LOAD_SLOT_F64 [slot] (slots -> fstack)
                 slotIdx = ops[ip]; ip += 1;
                 fstack[fsp] = getNum(slots[slotIdx]);
                 fsp += 1;,
-            43 -> -- STORE_SLOT_F64 [slot] (fstack -> slots)
+            43 -> # STORE_SLOT_F64 [slot] (fstack -> slots)
                 slotIdx = ops[ip]; ip += 1;
                 fsp -= 1;
                 slots[slotIdx] = Value{ Number: fstack[fsp] };,
-            44 -> -- LOAD_CONST_F64 [idx] (consts -> fstack)
+            44 -> # LOAD_CONST_F64 [idx] (consts -> fstack)
                 idx = ops[ip]; ip += 1;
                 fstack[fsp] = getNum(consts[idx]);
                 fsp += 1;,
-            45 -> -- ADD_F64 (fstack)
+            45 -> # ADD_F64 (fstack)
                 fstack[fsp - 2] = fstack[fsp - 2] + fstack[fsp - 1];
                 fsp -= 1;,
-            46 -> -- SUB_F64 (fstack)
+            46 -> # SUB_F64 (fstack)
                 fstack[fsp - 2] = fstack[fsp - 2] - fstack[fsp - 1];
                 fsp -= 1;,
-            47 -> -- MUL_F64 (fstack)
+            47 -> # MUL_F64 (fstack)
                 fstack[fsp - 2] = fstack[fsp - 2] * fstack[fsp - 1];
                 fsp -= 1;,
-            48 -> -- DIV_F64 (fstack)
+            48 -> # DIV_F64 (fstack)
                 IF fstack[fsp - 1] != 0.0 THEN fstack[fsp - 2] = fstack[fsp - 2] / fstack[fsp - 1]; ELSE fstack[fsp - 2] = 0.0; END
                 fsp -= 1;,
-            49 -> -- LT_F64 (fstack -> istack, 0/1)
+            49 -> # LT_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] < fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            50 -> -- GT_F64 (fstack -> istack, 0/1)
+            50 -> # GT_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] > fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            51 -> -- LTE_F64 (fstack -> istack, 0/1)
+            51 -> # LTE_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] <= fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            52 -> -- GTE_F64 (fstack -> istack, 0/1)
+            52 -> # GTE_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] >= fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            53 -> -- EQ_F64 (fstack -> istack, 0/1)
+            53 -> # EQ_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] == fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            54 -> -- NEQ_F64 (fstack -> istack, 0/1)
+            54 -> # NEQ_F64 (fstack -> istack, 0/1)
                 IF fstack[fsp - 2] != fstack[fsp - 1] THEN istack[isp] = 1_i64; ELSE istack[isp] = 0_i64; END
                 fsp -= 2; isp += 1;,
-            55 -> -- I_TO_VAL (istack -> Value stack as Int64Val)
+            55 -> # I_TO_VAL (istack -> Value stack as Int64Val)
                 isp -= 1;
                 pv = Value{ Int64Val: istack[isp] };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            56 -> -- F_TO_VAL (fstack -> Value stack)
+            56 -> # F_TO_VAL (fstack -> Value stack)
                 fsp -= 1;
                 pv = Value{ Number: fstack[fsp] };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            57 -> -- BOOL_TO_VAL (istack 0/1 -> Value stack TrueVal/FalseVal)
+            57 -> # BOOL_TO_VAL (istack 0/1 -> Value stack TrueVal/FalseVal)
                 isp -= 1;
                 pv = boolVal(istack[isp] != 0);
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            58 -> -- DEBUG_BREAK
+            58 -> # DEBUG_BREAK
                 print("--- debug break at ip=" + toString(ip) + " ---");
                 MUTABLE dbgRunning = TRUE;
                 WHILE dbgRunning DO
@@ -2965,7 +2965,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         END
                     ELSE_IF eql?(dbgCmd, ":ip") THEN
                         print("  ip=" + toString(ip) + " op=" + toString(ops[ip]));
-                        -- Show next 5 opcodes
+                        # Show next 5 opcodes
                         FOR di IN (0_i64 ..< 5) DO
                             IF ip + di < ops.length() THEN
                                 print("    ip+" + toString(di) + ": " + toString(ops[ip + di]));
@@ -3000,23 +3000,23 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         print("  unknown command. type :help for commands");
                     END
                 END,
-            59 -> -- LOAD_ISLOT [idx] (islots -> istack, no Value wrapping)
+            59 -> # LOAD_ISLOT [idx] (islots -> istack, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 istack[isp] = islots[slotIdx];
                 isp += 1;,
-            60 -> -- STORE_ISLOT [idx] (istack -> islots, no Value wrapping)
+            60 -> # STORE_ISLOT [idx] (istack -> islots, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 isp -= 1;
                 islots[slotIdx] = istack[isp];,
-            61 -> -- LOAD_FSLOT [idx] (fslots -> fstack, no Value wrapping)
+            61 -> # LOAD_FSLOT [idx] (fslots -> fstack, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 fstack[fsp] = fslots[slotIdx];
                 fsp += 1;,
-            62 -> -- STORE_FSLOT [idx] (fstack -> fslots, no Value wrapping)
+            62 -> # STORE_FSLOT [idx] (fstack -> fslots, no Value wrapping)
                 slotIdx = ops[ip]; ip += 1;
                 fsp -= 1;
                 fslots[slotIdx] = fstack[fsp];,
-            63 -> -- STRUCT_FIELD [idx] (pop Value.Vector, push fields[idx])
+            63 -> # STRUCT_FIELD [idx] (pop Value.Vector, push fields[idx])
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
                 PARTIAL MATCH stack[sp] START
@@ -3025,7 +3025,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            64 -> -- TYPED_FIELD_I64 [idx] (pop TypedI64Arr, push Int64Val)
+            64 -> # TYPED_FIELD_I64 [idx] (pop TypedI64Arr, push Int64Val)
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
                 PARTIAL MATCH stack[sp] START
@@ -3034,7 +3034,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            65 -> -- TYPED_FIELD_F64 [idx] (pop TypedF64Arr, push Number)
+            65 -> # TYPED_FIELD_F64 [idx] (pop TypedF64Arr, push Number)
                 fieldIdx = ops[ip]; ip += 1;
                 sp -= 1;
                 PARTIAL MATCH stack[sp] START
@@ -3043,7 +3043,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            66 -> -- MAP_NEW: push new empty MapRef
+            66 -> # MAP_NEW: push new empty MapRef
                 MUTABLE newMapEnv: Env = Env{ vars: {} };
                 MUTABLE newMapIdHolder: ?Id<Env> = NIL;
                 WITH EXCLUSIVE pool AS p { newMapIdHolder = p.insert(newMapEnv); }
@@ -3051,7 +3051,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF newMapIdHolder AS newMapId THEN pv = Value{ MapRef: newMapId }; END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            67 -> -- MAP_PUT: pop map, key, value; insert; push Nil
+            67 -> # MAP_PUT: pop map, key, value; insert; push Nil
                 sp -= 1; mapPutVal = COPY stack[sp];
                 sp -= 1; mapPutKey = COPY stack[sp];
                 sp -= 1; mapPutRef = COPY stack[sp];
@@ -3067,7 +3067,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value.Nil;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            68 -> -- MAP_GET: pop map, key; push value or Nil
+            68 -> # MAP_GET: pop map, key; push value or Nil
                 sp -= 1; mapGetKey = COPY stack[sp];
                 sp -= 1; mapGetRef = COPY stack[sp];
                 PARTIAL MATCH mapGetRef START
@@ -3081,7 +3081,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            69 -> -- MAP_CONTAINS: pop map, key; push bool
+            69 -> # MAP_CONTAINS: pop map, key; push bool
                 sp -= 1; mapCKey = COPY stack[sp];
                 sp -= 1; mapCRef = COPY stack[sp];
                 PARTIAL MATCH mapCRef START
@@ -3095,7 +3095,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            70 -> -- MAP_DELETE: pop map, key; push Nil
+            70 -> # MAP_DELETE: pop map, key; push Nil
                 sp -= 1; mapDelKey = COPY stack[sp];
                 sp -= 1; mapDelRef = COPY stack[sp];
                 PARTIAL MATCH mapDelRef START
@@ -3110,7 +3110,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value.Nil;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            71 -> -- MAP_KEYS: pop map; push List of Str keys
+            71 -> # MAP_KEYS: pop map; push List of Str keys
                 sp -= 1; mapKRef = COPY stack[sp];
                 MUTABLE mapKeyList: Value[]@list = List[];
                 PARTIAL MATCH mapKRef START
@@ -3128,7 +3128,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value{ List: mapKeyList };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            72 -> -- MAP_LENGTH: pop map; push Int64Val(size)
+            72 -> # MAP_LENGTH: pop map; push Int64Val(size)
                 sp -= 1; mapLRef = COPY stack[sp];
                 MUTABLE mapLen: Int64 = 0;
                 PARTIAL MATCH mapLRef START
@@ -3143,7 +3143,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value{ Int64Val: mapLen };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            73 -> -- SET_INSERT: pop set, value; insert using prStr key; push Nil
+            73 -> # SET_INSERT: pop set, value; insert using prStr key; push Nil
                 sp -= 1; setInsVal = COPY stack[sp];
                 sp -= 1; setInsRef = COPY stack[sp];
                 PARTIAL MATCH setInsRef START
@@ -3159,7 +3159,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value.Nil;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            74 -> -- SET_CONTAINS: pop set, value; push bool
+            74 -> # SET_CONTAINS: pop set, value; push bool
                 sp -= 1; setChkVal = COPY stack[sp];
                 sp -= 1; setChkRef = COPY stack[sp];
                 PARTIAL MATCH setChkRef START
@@ -3174,7 +3174,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            75 -> -- SET_REMOVE: pop set, value; remove; push Nil
+            75 -> # SET_REMOVE: pop set, value; remove; push Nil
                 sp -= 1; setRmVal = COPY stack[sp];
                 sp -= 1; setRmRef = COPY stack[sp];
                 PARTIAL MATCH setRmRef START
@@ -3190,7 +3190,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value.Nil;
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            76 -> -- SET_TOLIST: pop set; push List of values
+            76 -> # SET_TOLIST: pop set; push List of values
                 sp -= 1; setTlRef = COPY stack[sp];
                 MUTABLE setTlList: Value[]@list = List[];
                 PARTIAL MATCH setTlRef START
@@ -3208,33 +3208,33 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value{ List: setTlList };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            77 -> -- BC_CALL [target_ip, argc, caller_slot_count]: save
-                  -- frame, copy args to slots, jump. caller_slot_count
-                  -- is the caller's @next_slot at emit time -- saving
-                  -- only that many slots (instead of the full 256)
-                  -- avoids quadratic-in-call-depth COPY work for
-                  -- functions that use few slots (e.g. recursive fib).
+            77 -> # BC_CALL [target_ip, argc, caller_slot_count]: save
+                  # frame, copy args to slots, jump. caller_slot_count
+                  # is the caller's @next_slot at emit time -- saving
+                  # only that many slots (instead of the full 256)
+                  # avoids quadratic-in-call-depth COPY work for
+                  # functions that use few slots (e.g. recursive fib).
                 bcCallIp = ops[ip]; ip += 1;
                 bcCallArgc = ops[ip]; ip += 1;
                 bcCallSlotN = ops[ip]; ip += 1;
-                -- Save return address, sp-before-args, and slot count
+                # Save return address, sp-before-args, and slot count
                 callRetIps.append(ip);
                 callRetSps.append(sp - bcCallArgc);
                 callRetSlotCounts.append(bcCallSlotN);
-                -- Save only the slots the caller actually uses.
+                # Save only the slots the caller actually uses.
                 FOR bci IN (0_i64 ..< bcCallSlotN) DO callSavedSlots.append(COPY slots[bci]); END
-                -- Mark Weak-cell ownership boundary; BC_RET will drop
-                -- cells allocated at indexes >= this mark.
+                # Mark Weak-cell ownership boundary; BC_RET will drop
+                # cells allocated at indexes >= this mark.
                 frameWkMarks.append(weakOwnedFlat.length());
-                -- Move args into slots 0..argc-1
+                # Move args into slots 0..argc-1
                 FOR bci IN (0_i64 ..< bcCallArgc) DO
                     slots[bci] = COPY stack[(sp - bcCallArgc) + bci];
                 END
                 sp -= bcCallArgc;
                 ip = bcCallIp;,
-            78 -> -- BC_RET: pop return value, restore frame, push return value
+            78 -> # BC_RET: pop return value, restore frame, push return value
                 sp -= 1; bcRetVal = COPY stack[sp];
-                -- Mark Weak cells allocated during this frame as dead.
+                # Mark Weak cells allocated during this frame as dead.
                 wkMarkLo = frameWkMarks[frameWkMarks.length() - 1];
                 FOR wkDi IN (wkMarkLo ..< weakOwnedFlat.length()) DO
                     weakAlive[weakOwnedFlat[wkDi]] = FALSE;
@@ -3244,24 +3244,24 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     weakOwnedFlat.pop();
                 END
                 frameWkMarks.pop();
-                -- Restore slots (count was pushed at BC_CALL time)
+                # Restore slots (count was pushed at BC_CALL time)
                 bcRetSlotN = callRetSlotCounts[callRetSlotCounts.length() - 1];
                 callRetSlotCounts.pop();
                 savedBase = (callSavedSlots.length() - bcRetSlotN);
                 FOR bci IN (0_i64 ..< bcRetSlotN) DO slots[bci] = COPY callSavedSlots[savedBase + bci]; END
                 FOR bci IN (0_i64 ..< bcRetSlotN) DO callSavedSlots.pop(); END
-                -- Restore ip and sp
+                # Restore ip and sp
                 retSp = callRetSps[callRetSps.length() - 1];
                 callRetSps.pop();
                 ip = callRetIps[callRetIps.length() - 1];
                 callRetIps.pop();
                 sp = retSp;
-                -- Push return value
+                # Push return value
                 IF sp >= stack.length() THEN stack.append(bcRetVal); ELSE stack[sp] = bcRetVal; END
                 sp += 1;,
-            79 -> -- BC_RET_VOID: restore frame, push Value.Nil so callers
-                  -- can uniformly POP the return value (the caller emits
-                  -- POP after every BC_CALL regardless of return type).
+            79 -> # BC_RET_VOID: restore frame, push Value.Nil so callers
+                  # can uniformly POP the return value (the caller emits
+                  # POP after every BC_CALL regardless of return type).
                 wkMarkLoV = frameWkMarks[frameWkMarks.length() - 1];
                 FOR wkDiV IN (wkMarkLoV ..< weakOwnedFlat.length()) DO
                     weakAlive[weakOwnedFlat[wkDiV]] = FALSE;
@@ -3271,13 +3271,13 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     weakOwnedFlat.pop();
                 END
                 frameWkMarks.pop();
-                -- Restore slots (count was pushed at BC_CALL time)
+                # Restore slots (count was pushed at BC_CALL time)
                 bcRetSlotNV = callRetSlotCounts[callRetSlotCounts.length() - 1];
                 callRetSlotCounts.pop();
                 savedBaseV = (callSavedSlots.length() - bcRetSlotNV);
                 FOR bci IN (0_i64 ..< bcRetSlotNV) DO slots[bci] = COPY callSavedSlots[savedBaseV + bci]; END
                 FOR bci IN (0_i64 ..< bcRetSlotNV) DO callSavedSlots.pop(); END
-                -- Restore ip and sp
+                # Restore ip and sp
                 retSpV = callRetSps[callRetSps.length() - 1];
                 callRetSps.pop();
                 ip = callRetIps[callRetIps.length() - 1];
@@ -3285,32 +3285,32 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp = retSpV;
                 IF sp >= stack.length() THEN stack.append(Value.Nil); ELSE stack[sp] = Value.Nil; END
                 sp += 1;,
-            80 -> -- MARK_MOVED [slot]: release this slot's ownership by
-                  -- replacing it with Nil. The next slot overwrite (via
-                  -- STORE_SLOT reassignment or BC_RET slot-restore) becomes
-                  -- a cleanup of Nil (no-op), so the heap pointer that was
-                  -- just moved into a return value or callee is freed
-                  -- exactly once — at the new owner, not at the old slot.
-                  -- Emitted by bc_emitter on MIR::MoveMark.
+            80 -> # MARK_MOVED [slot]: release this slot's ownership by
+                  # replacing it with Nil. The next slot overwrite (via
+                  # STORE_SLOT reassignment or BC_RET slot-restore) becomes
+                  # a cleanup of Nil (no-op), so the heap pointer that was
+                  # just moved into a return value or callee is freed
+                  # exactly once — at the new owner, not at the old slot.
+                  # Emitted by bc_emitter on MIR::MoveMark.
                 movedSlot = ops[ip]; ip += 1;
                 slots[movedSlot] = Value.Nil;,
-            81 -> -- FIBER_RET: terminate this exec! invocation. Pops the
-                  -- fiber's result value off the stack and exits. Used at
-                  -- the end of a BG body to return the fiber's value.
+            81 -> # FIBER_RET: terminate this exec! invocation. Pops the
+                  # fiber's result value off the stack and exits. Used at
+                  # the end of a BG body to return the fiber's value.
                 IF sp > 0 THEN
                     sp -= 1; fiberRetVal = COPY stack[sp];
                 END
                 fiberReturned = TRUE;
                 running = FALSE;,
-            82 -> -- BG_SPAWN [entry_ip] [argc]: spawn a real BG fiber that
-                  -- runs exec! from entry_ip with argc captures. The fiber
-                  -- runs concurrently with the caller's exec! loop on the
-                  -- same scheduler; pool's @shared:locked discipline
-                  -- propagates cross-fiber mutations safely.
-                  --
-                  -- The promise is stashed in futureTable; the value-stack
-                  -- entry is Value.Pair("__future__", Int64Val(id)). AWAIT
-                  -- (op 83) looks up the promise by id and NEXTs it.
+            82 -> # BG_SPAWN [entry_ip] [argc]: spawn a real BG fiber that
+                  # runs exec! from entry_ip with argc captures. The fiber
+                  # runs concurrently with the caller's exec! loop on the
+                  # same scheduler; pool's @shared:locked discipline
+                  # propagates cross-fiber mutations safely.
+                  #
+                  # The promise is stashed in futureTable; the value-stack
+                  # entry is Value.Pair("__future__", Int64Val(id)). AWAIT
+                  # (op 83) looks up the promise by id and NEXTs it.
                 bgEntry = ops[ip]; ip += 1;
                 bgArgc  = ops[ip]; ip += 1;
                 MUTABLE bgCaps: Value[]@list = List[];
@@ -3329,21 +3329,21 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            83 -> -- AWAIT: pop the top value and resolve any embedded futures.
-                  -- (a) Pair("__future__", id): NEXT futureTable[id], push value.
-                  -- (b) Value.List: each item that is a future Pair gets awaited;
-                  --     non-future items pass through. The result is a value list,
-                  --     used by `NEXT futures` (~T[]@list await-all).
-                  -- (c) Anything else: identity (legacy non-future callers).
+            83 -> # AWAIT: pop the top value and resolve any embedded futures.
+                  # (a) Pair("__future__", id): NEXT futureTable[id], push value.
+                  # (b) Value.List: each item that is a future Pair gets awaited;
+                  #     non-future items pass through. The result is a value list,
+                  #     used by `NEXT futures` (~T[]@list await-all).
+                  # (c) Anything else: identity (legacy non-future callers).
                 sp -= 1; awaitVal = COPY stack[sp];
                 PARTIAL MATCH awaitVal START
                     Value.Pair AS fp ->
                         pcar = COPY fp.pairCar;
-                        -- The marker is constructed as Value{ Symbol: "__future__" }
-                        -- in BG_SPAWN -- read it via getSymName, not getStr.
-                        -- (getStr returns "" for non-Str variants, so the old
-                        -- check silently fell through and AWAIT returned the
-                        -- bgFid Int64Val instead of the fiber's result.)
+                        # The marker is constructed as Value{ Symbol: "__future__" }
+                        # in BG_SPAWN -- read it via getSymName, not getStr.
+                        # (getStr returns "" for non-Str variants, so the old
+                        # check silently fell through and AWAIT returned the
+                        # bgFid Int64Val instead of the fiber's result.)
                         IF getSymName(pcar) == "__future__" THEN
                             fid = getInt(fp.pairCdr);
                             IF fid >= 0_i64 && fid < futureTable.length() THEN
@@ -3361,10 +3361,10 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                             pv = COPY fp.pairCdr;
                         END,
                     Value.List AS lstItems ->
-                        -- Await-all over a list of futures (~T[]@list). For each
-                        -- element, if it's a Pair("__future__", id) marker, look
-                        -- up the future and NEXT it; otherwise keep the element
-                        -- as-is. Returns a Value.List of resolved values.
+                        # Await-all over a list of futures (~T[]@list). For each
+                        # element, if it's a Pair("__future__", id) marker, look
+                        # up the future and NEXT it; otherwise keep the element
+                        # as-is. Returns a Value.List of resolved values.
                         MUTABLE awaitedList: Value[]@list = List[];
                         FOR aiAll IN (0_i64 ..< lstItems.length()) DO
                             aliVal = COPY lstItems[aiAll];
@@ -3396,34 +3396,34 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            84 -> -- VAL_TO_I64 (vstack Value -> istack Int64 via getInt)
+            84 -> # VAL_TO_I64 (vstack Value -> istack Int64 via getInt)
                 sp -= 1;
                 istack[isp] = getInt(stack[sp]);
                 isp += 1;,
-            85 -> -- VAL_TO_F64 (vstack Value -> fstack Float64 via getNum)
+            85 -> # VAL_TO_F64 (vstack Value -> fstack Float64 via getNum)
                 sp -= 1;
                 fstack[fsp] = getNum(stack[sp]);
                 fsp += 1;,
-            86 -> -- IS_ERR (pop vstack, push Value bool: TrueVal if Value.Error)
+            86 -> # IS_ERR (pop vstack, push Value bool: TrueVal if Value.Error)
                 sp -= 1;
                 pv = boolVal(isError?(stack[sp]));
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            87 -> -- PUSH_ERR (push Value.Error sentinel)
+            87 -> # PUSH_ERR (push Value.Error sentinel)
                 pv = Value.Error{ errMsg: "runtime error", errKind: "CheatError", errType: "" };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            88 -> -- RAISE_ERR (pop msg, kind, type; push Value.Error{...})
-                -- Stack order: ..., type, kind, msg  (msg is top)
+            88 -> # RAISE_ERR (pop msg, kind, type; push Value.Error{...})
+                # Stack order: ..., type, kind, msg  (msg is top)
                 sp -= 1; raiseMsg = getStr(COPY stack[sp]);
                 sp -= 1; raiseKind = getStr(COPY stack[sp]);
                 sp -= 1; raiseType = getStr(COPY stack[sp]);
                 pv = Value.Error{ errMsg: COPY raiseMsg, errKind: COPY raiseKind, errType: COPY raiseType };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            89 -> -- GET_ERR_KIND (peek top Value.Error, push Value.Str of its errKind)
-                -- Does NOT pop the error: the caller's code typically wants
-                -- both the kind dispatch and a chance to extract msg later.
+            89 -> # GET_ERR_KIND (peek top Value.Error, push Value.Str of its errKind)
+                # Does NOT pop the error: the caller's code typically wants
+                # both the kind dispatch and a chance to extract msg later.
                 getErrKindRef = COPY stack[sp - 1];
                 PARTIAL MATCH getErrKindRef START
                     Value.Error AS gek -> pv = Value{ Str: COPY gek.errKind };,
@@ -3431,7 +3431,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            108 -> -- GET_ERR_TYPE (peek top Value.Error, push Value.Str of errType)
+            108 -> # GET_ERR_TYPE (peek top Value.Error, push Value.Str of errType)
                 getErrTypeRef = COPY stack[sp - 1];
                 PARTIAL MATCH getErrTypeRef START
                     Value.Error AS get1 -> pv = Value{ Str: COPY get1.errType };,
@@ -3439,7 +3439,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            109 -> -- GET_ERR_MSG (peek top Value.Error, push Value.Str of errMsg)
+            109 -> # GET_ERR_MSG (peek top Value.Error, push Value.Str of errMsg)
                 getErrMsgRef = COPY stack[sp - 1];
                 PARTIAL MATCH getErrMsgRef START
                     Value.Error AS gem -> pv = Value{ Str: COPY gem.errMsg };,
@@ -3447,8 +3447,8 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            110 -> -- ERR_SET_KIND (top: error, just below: new_kind str). Pops kind,
-                   -- mutates error.errKind, leaves error on top. For OR EXIT.
+            110 -> # ERR_SET_KIND (top: error, just below: new_kind str). Pops kind,
+                   # mutates error.errKind, leaves error on top. For OR EXIT.
                 sp -= 1; eskKind = getStr(COPY stack[sp]);
                 eskRef = COPY stack[sp - 1];
                 PARTIAL MATCH eskRef START
@@ -3460,7 +3460,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         };,
                     DEFAULT -> PASS;
                 END,
-            111 -> -- ERR_SET_TYPE (pop new_type, mutate error.errType under it)
+            111 -> # ERR_SET_TYPE (pop new_type, mutate error.errType under it)
                 sp -= 1; estType = getStr(COPY stack[sp]);
                 estRef = COPY stack[sp - 1];
                 PARTIAL MATCH estRef START
@@ -3472,7 +3472,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         };,
                     DEFAULT -> PASS;
                 END,
-            112 -> -- ERR_SET_MSG (pop new_msg, mutate error.errMsg under it)
+            112 -> # ERR_SET_MSG (pop new_msg, mutate error.errMsg under it)
                 sp -= 1; esmMsg = getStr(COPY stack[sp]);
                 esmRef = COPY stack[sp - 1];
                 PARTIAL MATCH esmRef START
@@ -3484,17 +3484,17 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         };,
                     DEFAULT -> PASS;
                 END,
-            90 -> -- WRAP_ADD_I64 (istack, two's-complement wrap on overflow)
+            90 -> # WRAP_ADD_I64 (istack, two's-complement wrap on overflow)
                 istack[isp - 2] = istack[isp - 2] %+ istack[isp - 1];
                 isp -= 1;,
-            91 -> -- WRAP_SUB_I64 (istack, two's-complement wrap on overflow)
+            91 -> # WRAP_SUB_I64 (istack, two's-complement wrap on overflow)
                 istack[isp - 2] = istack[isp - 2] %- istack[isp - 1];
                 isp -= 1;,
-            92 -> -- WRAP_MUL_I64 (istack, two's-complement wrap on overflow)
+            92 -> # WRAP_MUL_I64 (istack, two's-complement wrap on overflow)
                 istack[isp - 2] = istack[isp - 2] %* istack[isp - 1];
                 isp -= 1;,
-            93 -> -- LIST_REMOVE_AT: pop list + idx, push (new_list, removed_elem)
-                  -- Caller storeback consumes new_list; removed elem stays as expr value.
+            93 -> # LIST_REMOVE_AT: pop list + idx, push (new_list, removed_elem)
+                  # Caller storeback consumes new_list; removed elem stays as expr value.
                 lraIdx = getInt(stack[sp - 1]);
                 lraSrc = COPY stack[sp - 2];
                 sp -= 2;
@@ -3516,8 +3516,8 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;
                 IF sp >= stack.length() THEN stack.append(lraRemoved); ELSE stack[sp] = lraRemoved; END
                 sp += 1;,
-            94 -> -- LIST_POP_LAST: pop list, push (shrunk_list, popped_elem).
-                  -- Empty list -> popped_elem is Value.Nil; shrunk_list is also empty.
+            94 -> # LIST_POP_LAST: pop list, push (shrunk_list, popped_elem).
+                  # Empty list -> popped_elem is Value.Nil; shrunk_list is also empty.
                 lplSrc = COPY stack[sp - 1];
                 sp -= 1;
                 MUTABLE lplNew: Value[]@list = List[];
@@ -3537,7 +3537,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 sp += 1;
                 IF sp >= stack.length() THEN stack.append(lplPopped); ELSE stack[sp] = lplPopped; END
                 sp += 1;,
-            95 -> -- MAP_VALUES: pop map; push List of Value values.
+            95 -> # MAP_VALUES: pop map; push List of Value values.
                 sp -= 1; mapVRef = COPY stack[sp];
                 MUTABLE mapValList: Value[]@list = List[];
                 PARTIAL MATCH mapVRef START
@@ -3555,9 +3555,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value{ List: mapValList };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            96 -> -- WEAK_NEW: pop value V, snapshot into a weak cell, push
-                  -- Value.Weak{idx}. Cell is registered with current frame
-                  -- so BC_RET marks it dead. Implements LINK x.
+            96 -> # WEAK_NEW: pop value V, snapshot into a weak cell, push
+                  # Value.Weak{idx}. Cell is registered with current frame
+                  # so BC_RET marks it dead. Implements LINK x.
                 sp -= 1; wkVal = COPY stack[sp];
                 wkIdxNew = weakCells.length();
                 weakCells.append(wkVal);
@@ -3566,9 +3566,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 pv = Value{ Weak: wkIdxNew };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            97 -> -- WEAK_RESOLVE: pop Value.Weak{idx}; if alive, push the
-                  -- cell value, else Nil. Identity on non-Weak values so
-                  -- RESOLVE on a value that wasn't LINK'd is a passthrough.
+            97 -> # WEAK_RESOLVE: pop Value.Weak{idx}; if alive, push the
+                  # cell value, else Nil. Identity on non-Weak values so
+                  # RESOLVE on a value that wasn't LINK'd is a passthrough.
                 sp -= 1; wkRs = COPY stack[sp];
                 PARTIAL MATCH wkRs START
                     Value.Weak AS wkRsIdx ->
@@ -3581,19 +3581,19 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            98 -> -- MAKE_BC_FN [ip] [argc]: push Value.BCFn{ip,argc} so the
-                  -- function can be passed as a value or stored in a slot.
-                  -- The CALL handler dispatches BCFn through inline BC_CALL
-                  -- semantics; no separate name lookup needed.
+            98 -> # MAKE_BC_FN [ip] [argc]: push Value.BCFn{ip,argc} so the
+                  # function can be passed as a value or stored in a slot.
+                  # The CALL handler dispatches BCFn through inline BC_CALL
+                  # semantics; no separate name lookup needed.
                 bcFnIp = ops[ip]; ip += 1;
                 bcFnArgc = ops[ip]; ip += 1;
                 pv = Value.BCFn{ bcFnIp: bcFnIp, bcFnArgc: bcFnArgc };
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            104 -> -- BOX_NEW: pop val, allocate single-cell Env in the
-                   -- shared pool, push Value.Boxed{envId}. BG fibers spawn
-                   -- with the same pool reference, so reads/writes through
-                   -- the same Boxed propagate.
+            104 -> # BOX_NEW: pop val, allocate single-cell Env in the
+                   # shared pool, push Value.Boxed{envId}. BG fibers spawn
+                   # with the same pool reference, so reads/writes through
+                   # the same Boxed propagate.
                 sp -= 1; bnVal = COPY stack[sp];
                 MUTABLE bnEnvVal: Env = Env{ vars: {} };
                 bnEnvVal.vars["v"] = COPY bnVal;
@@ -3603,9 +3603,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 IF bnIdHolder AS bnId THEN pv = Value{ Boxed: bnId }; END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            105 -> -- BOX_LOAD: pop Boxed (or any value — passthrough for
-                   -- non-Boxed so the same opcode is safe to emit for slots
-                   -- that only conditionally hold Boxed). Push cell value.
+            105 -> # BOX_LOAD: pop Boxed (or any value — passthrough for
+                   # non-Boxed so the same opcode is safe to emit for slots
+                   # that only conditionally hold Boxed). Push cell value.
                 sp -= 1; blRef = COPY stack[sp];
                 pv = COPY blRef;
                 PARTIAL MATCH blRef START
@@ -3623,8 +3623,8 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            106 -> -- BOX_STORE: pop Boxed (top), pop val, store val in cell.
-                   -- For non-Boxed top, drop both (no-op write).
+            106 -> # BOX_STORE: pop Boxed (top), pop val, store val in cell.
+                   # For non-Boxed top, drop both (no-op write).
                 sp -= 1; bsRef = COPY stack[sp];
                 sp -= 1; bsVal = COPY stack[sp];
                 PARTIAL MATCH bsRef START
@@ -3636,9 +3636,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         },
                     DEFAULT -> PASS;
                 END,
-            107 -> -- LIST_POP_FRONT [slot_idx]: read list at slot, pop head,
-                   -- store tail back into slot, push head (or Nil if empty).
-                   -- Used by NEXT on materialized BG STREAM lists.
+            107 -> # LIST_POP_FRONT [slot_idx]: read list at slot, pop head,
+                   # store tail back into slot, push head (or Nil if empty).
+                   # Used by NEXT on materialized BG STREAM lists.
                 lpfSlot = ops[ip]; ip += 1;
                 lpfList = COPY slots[lpfSlot];
                 pv = Value.Nil;
@@ -3656,12 +3656,12 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            113 -> -- SPLIT_STREAM_NEW: pop a Value.List, allocate a fresh
-                   -- buffer Env in the pool whose vars["b"] holds the list,
-                   -- push Value.SplitStream{bufId, cursor=0}. pool is
-                   -- @shared:locked here -- direct method calls on the
-                   -- Arc<Locked<Pool>> wrapper aren't valid; unwrap via
-                   -- WITH EXCLUSIVE.
+            113 -> # SPLIT_STREAM_NEW: pop a Value.List, allocate a fresh
+                   # buffer Env in the pool whose vars["b"] holds the list,
+                   # push Value.SplitStream{bufId, cursor=0}. pool is
+                   # @shared:locked here -- direct method calls on the
+                   # Arc<Locked<Pool>> wrapper aren't valid; unwrap via
+                   # WITH EXCLUSIVE.
                 sp -= 1; ssnBuf = COPY stack[sp];
                 MUTABLE ssnEnvIdHolder: ?Id<Env> = NIL;
                 WITH EXCLUSIVE pool AS p {
@@ -3678,9 +3678,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            114 -> -- SPLIT_STREAM_NEXT [slot_idx]: read the slot's SplitStream
-                   -- handle, fetch buf[cursor] from the buffer Env, advance
-                   -- the cursor in the slot (writeback), push the value or Nil.
+            114 -> # SPLIT_STREAM_NEXT [slot_idx]: read the slot's SplitStream
+                   # handle, fetch buf[cursor] from the buffer Env, advance
+                   # the cursor in the slot (writeback), push the value or Nil.
                 ssxSlot = ops[ip]; ip += 1;
                 ssxHandle = COPY slots[ssxSlot];
                 pv = Value.Nil;
@@ -3706,8 +3706,8 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            115 -> -- SPLIT_STREAM_CLONE: pop a SplitStream, push a new one
-                   -- with the same bufId and current cursor. Independent reader.
+            115 -> # SPLIT_STREAM_CLONE: pop a SplitStream, push a new one
+                   # with the same bufId and current cursor. Independent reader.
                 sp -= 1; sscSrc = COPY stack[sp];
                 pv = Value.Nil;
                 PARTIAL MATCH sscSrc START
@@ -3720,14 +3720,14 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            116 -> -- LOCK_ACQUIRE [slot_idx] [timeout_ms]: per-resource
-                   -- lock on slots[slot_idx]. The slot holds a Value.Boxed
-                   -- (envId); the lock state lives in pool[envId].vars["__locked"].
-                   -- Spin via cooperative sleep(1) until the field is Nil,
-                   -- then set TrueVal. ALWAYS pushes a result so the caller
-                   -- can dispatch deterministically: Value.TrueVal on success,
-                   -- Value.Error{errType=LockTimeout} on timeout. The bc_emitter
-                   -- checks IS_ERR to decide the success/error path.
+            116 -> # LOCK_ACQUIRE [slot_idx] [timeout_ms]: per-resource
+                   # lock on slots[slot_idx]. The slot holds a Value.Boxed
+                   # (envId); the lock state lives in pool[envId].vars["__locked"].
+                   # Spin via cooperative sleep(1) until the field is Nil,
+                   # then set TrueVal. ALWAYS pushes a result so the caller
+                   # can dispatch deterministically: Value.TrueVal on success,
+                   # Value.Error{errType=LockTimeout} on timeout. The bc_emitter
+                   # checks IS_ERR to decide the success/error path.
                 lockSlot = ops[ip]; ip += 1;
                 lockTimeoutMs = ops[ip]; ip += 1;
                 lockBoxVal = COPY slots[lockSlot];
@@ -3779,9 +3779,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(lockResult); ELSE stack[sp] = lockResult; END
                 sp += 1;,
-            117 -> -- LOCK_RELEASE [slot_idx]: clear the per-resource lock
-                   -- on the Box held in slots[slot_idx]. Idempotent when
-                   -- the slot isn't a Box (e.g., acquire-failed paths).
+            117 -> # LOCK_RELEASE [slot_idx]: clear the per-resource lock
+                   # on the Box held in slots[slot_idx]. Idempotent when
+                   # the slot isn't a Box (e.g., acquire-failed paths).
                 relSlot = ops[ip]; ip += 1;
                 relBoxVal = COPY slots[relSlot];
                 PARTIAL MATCH relBoxVal START
@@ -3793,22 +3793,22 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         },
                     DEFAULT -> PASS;
                 END,
-            118 -> -- SLEEP_MS: pop ms from istack, yield the current
-                   -- fiber for that many milliseconds. Cooperative
-                   -- yield point that lets other BG fibers progress.
+            118 -> # SLEEP_MS: pop ms from istack, yield the current
+                   # fiber for that many milliseconds. Cooperative
+                   # yield point that lets other BG fibers progress.
                 isp -= 1; sleepMs = istack[isp];
                 sleep(sleepMs);,
-            119 -> -- STREAM_SPAWN [entry_ip] [argc]: allocate a rendezvous
-                   -- channel, spawn a producer fiber that runs exec! from
-                   -- entry_ip with the channel as arg 0 followed by `argc`
-                   -- captures pulled from the value stack. Push
-                   -- Value.Channel{envId} onto the value stack.
-                   --
-                   -- The channel cell is initialized has=Nil, closed=Nil.
-                   -- Producer YIELD spins until has=Nil, then sets
-                   -- v=val, has=TrueVal. Consumer NEXT spins until
-                   -- has=TrueVal (or closed=TrueVal), takes v, sets
-                   -- has=Nil. Both block via cooperative sleep(1).
+            119 -> # STREAM_SPAWN [entry_ip] [argc]: allocate a rendezvous
+                   # channel, spawn a producer fiber that runs exec! from
+                   # entry_ip with the channel as arg 0 followed by `argc`
+                   # captures pulled from the value stack. Push
+                   # Value.Channel{envId} onto the value stack.
+                   #
+                   # The channel cell is initialized has=Nil, closed=Nil.
+                   # Producer YIELD spins until has=Nil, then sets
+                   # v=val, has=TrueVal. Consumer NEXT spins until
+                   # has=TrueVal (or closed=TrueVal), takes v, sets
+                   # has=Nil. Both block via cooperative sleep(1).
                 strmEntry = ops[ip]; ip += 1;
                 strmArgc  = ops[ip]; ip += 1;
                 MUTABLE strmEnv: Env = Env{ vars: {} };
@@ -3818,7 +3818,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 WITH EXCLUSIVE pool AS strmP { strmEnvIdHolder = strmP.insert(strmEnv); }
                 IF strmEnvIdHolder AS strmEid THEN
                     strmChan = Value{ Channel: strmEid };
-                    -- Build captures: [channel, ...argc captures from stack].
+                    # Build captures: [channel, ...argc captures from stack].
                     MUTABLE strmCaps: Value[]@list = List[];
                     strmCaps.append(COPY strmChan);
                     FOR strmI IN (0_i64 ..< strmArgc) DO
@@ -3828,8 +3828,8 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                     strmFut: ~Value = BG {
                         exec!(COPY ops, COPY consts, curEnv, pool, strmEntry, GIVE strmCaps);
                     };
-                    -- Stash the future so it isn't dropped (fiber keeps
-                    -- running until it self-terminates on STREAM_CLOSE).
+                    # Stash the future so it isn't dropped (fiber keeps
+                    # running until it self-terminates on STREAM_CLOSE).
                     sFid = futureTable.length();
                     futureTable.append(strmFut);
                     streamKey = streamCount.toString();
@@ -3842,11 +3842,11 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            120 -> -- STREAM_YIELD [chan_slot]: pop value from vstack, write
-                   -- to channel.v, set channel.has=TrueVal. Spin (sleep(1))
-                   -- until channel.has=Nil so the consumer has consumed
-                   -- the previous value. If channel.closed=TrueVal, drop
-                   -- the value and exit the producer fiber via FIBER_RET.
+            120 -> # STREAM_YIELD [chan_slot]: pop value from vstack, write
+                   # to channel.v, set channel.has=TrueVal. Spin (sleep(1))
+                   # until channel.has=Nil so the consumer has consumed
+                   # the previous value. If channel.closed=TrueVal, drop
+                   # the value and exit the producer fiber via FIBER_RET.
                 yldChanSlot = ops[ip]; ip += 1;
                 sp -= 1; yldVal = COPY stack[sp];
                 yldChanRef = COPY slots[yldChanSlot];
@@ -3894,19 +3894,19 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                         END
                     END
                     IF yldClosed THEN
-                        -- Consumer dropped the channel; terminate the
-                        -- producer fiber. The eventual FIBER_RET below
-                        -- exits the exec! loop cleanly.
+                        # Consumer dropped the channel; terminate the
+                        # producer fiber. The eventual FIBER_RET below
+                        # exits the exec! loop cleanly.
                         running = FALSE;
                         fiberReturned = TRUE;
                         fiberRetVal = Value.Nil;
                     END
                 END,
-            121 -> -- STREAM_NEXT [chan_slot]: spin until channel.has=TrueVal
-                   -- (or channel.closed=TrueVal). Take v, set has=Nil, push v.
-                   -- On closed && !has, push Nil to signal the consumer
-                   -- the stream is exhausted (rare in practice; consumers
-                   -- bound the read with LIMIT/REDUCE/etc.).
+            121 -> # STREAM_NEXT [chan_slot]: spin until channel.has=TrueVal
+                   # (or channel.closed=TrueVal). Take v, set has=Nil, push v.
+                   # On closed && !has, push Nil to signal the consumer
+                   # the stream is exhausted (rare in practice; consumers
+                   # bound the read with LIMIT/REDUCE/etc.).
                 nxtChanSlot = ops[ip]; ip += 1;
                 nxtChanRef = COPY slots[nxtChanSlot];
                 MUTABLE nxtEnvIdHolder: ?Id<Env> = NIL;
@@ -3955,9 +3955,9 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
                 END
                 IF sp >= stack.length() THEN stack.append(pv); ELSE stack[sp] = pv; END
                 sp += 1;,
-            122 -> -- STREAM_CLOSE [chan_slot]: set channel.closed=TrueVal.
-                   -- Wakes any waiting STREAM_YIELD (producer self-terminates)
-                   -- or STREAM_NEXT (consumer gets Nil). Idempotent.
+            122 -> # STREAM_CLOSE [chan_slot]: set channel.closed=TrueVal.
+                   # Wakes any waiting STREAM_YIELD (producer self-terminates)
+                   # or STREAM_NEXT (consumer gets Nil). Idempotent.
                 clsChanSlot = ops[ip]; ip += 1;
                 clsChanRef = COPY slots[clsChanSlot];
                 PARTIAL MATCH clsChanRef START
@@ -3974,14 +3974,14 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         END
     END
 
-    -- Drain producer-fiber streams. STREAM_CLOSE on each channel wakes
-    -- the producer's blocked YIELD (it sees closed=TrueVal and exits).
-    -- Then NEXT each future to join the fiber so the BG runtime can
-    -- reclaim its stack BEFORE pool goes out of scope. Without this,
-    -- the producer fiber wakes after main has returned and crashes
-    -- trying to acquire the (now-freed) pool mutex.
-    --
-    -- HashMap-keyed drain.
+    # Drain producer-fiber streams. STREAM_CLOSE on each channel wakes
+    # the producer's blocked YIELD (it sees closed=TrueVal and exits).
+    # Then NEXT each future to join the fiber so the BG runtime can
+    # reclaim its stack BEFORE pool goes out of scope. Without this,
+    # the producer fiber wakes after main has returned and crashes
+    # trying to acquire the (now-freed) pool mutex.
+    #
+    # HashMap-keyed drain.
     MUTABLE smI: Int64 = 0_i64;
     WHILE smI < streamCount DO
         smKey = smI.toString();
@@ -4010,7 +4010,7 @@ FN exec!(ops: Int64[], consts: Value[], envId: Id<Env>, MUTABLE pool: Env[50000]
         smI = smI + 1_i64;
     END
 
-    -- FIBER_RET landed: return the explicit fiber value.
+    # FIBER_RET landed: return the explicit fiber value.
     IF fiberReturned THEN RETURN fiberRetVal; END
     IF sp > 0 THEN
         RETURN COPY stack[sp - 1];

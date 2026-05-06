@@ -1,6 +1,6 @@
--- Inline struct variants in UNION declarations.
--- Variants can now carry multi-field payloads declared inline,
--- without requiring a separate STRUCT definition.
+# Inline struct variants in UNION declarations.
+# Variants can now carry multi-field payloads declared inline,
+# without requiring a separate STRUCT definition.
 
 UNION Shape {
   Circle    { radius: Float64 },
@@ -24,8 +24,8 @@ FN classify(s: Shape) RETURNS Float64 ->
   RETURN result;
 END
 
--- Exhaustive match with payload capture — subject is a function parameter
--- so Zig's compile-time analysis cannot statically prove the active tag.
+# Exhaustive match with payload capture — subject is a function parameter
+# so Zig's compile-time analysis cannot statically prove the active tag.
 FN extract_radius(s: Shape) RETURNS Float64 ->
   MUTABLE r = 0.0;
   MATCH s START
@@ -47,14 +47,14 @@ FN extract_event_x(ev: Event) RETURNS Float64 ->
 END
 
 FN main() RETURNS Void ->
-  -- Unit variant is unchanged
+  # Unit variant is unchanged
   ASSERT classify(Shape.Point) == 0.0, "Unit variant Point";
 
-  -- Inline struct variant construction and dispatch
+  # Inline struct variant construction and dispatch
   ASSERT classify(Shape.Circle{ radius: 5.0 }) == 1.0, "Inline struct Circle";
   ASSERT classify(Shape.Rectangle{ width: 3.0, height: 4.0 }) == 2.0, "Inline struct Rectangle";
 
-  -- PARTIAL MATCH with DEFAULT and AS binding — access fields on the captured payload
+  # PARTIAL MATCH with DEFAULT and AS binding — access fields on the captured payload
   MUTABLE got_radius = 0.0;
   MUTABLE c: Shape = Shape.Circle{ radius: 5.0 };
   PARTIAL MATCH c START
@@ -71,12 +71,12 @@ FN main() RETURNS Void ->
   END
   ASSERT got_w == 3.0, "Rectangle AS ri: ri.width = 3.0";
 
-  -- MATCH exhaustive with payload capture (via function parameter)
+  # MATCH exhaustive with payload capture (via function parameter)
   ASSERT extract_radius(Shape.Circle{ radius: 7.0 }) == 7.0, "MATCH Circle AS ci";
   ASSERT extract_radius(Shape.Rectangle{ width: 4.0, height: 9.0 }) == 4.0, "MATCH Rectangle AS ri";
   ASSERT extract_radius(Shape.Point) == 0.0, "MATCH Point unit";
 
-  -- Event union with multiple inline struct variants
+  # Event union with multiple inline struct variants
   ASSERT extract_event_x(Event.Click{ x: 10.0, y: 20.0 }) == 10.0, "Event.Click click.x";
   ASSERT extract_event_x(Event.KeyPress{ code: 65.0 }) == 65.0, "Event.KeyPress kp.code";
 END

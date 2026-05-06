@@ -1,21 +1,21 @@
--- Test: outer string reassigned by concatenating two outer (non-local) strings.
--- Both parts are outer vars, not in frame_local_names.
--- The concat is always frame-allocated; needs loopPreserveAndRewind.
--- After the loop, a longer arena allocation at the same position corrupts result
--- if not properly preserved.
+# Test: outer string reassigned by concatenating two outer (non-local) strings.
+# Both parts are outer vars, not in frame_local_names.
+# The concat is always frame-allocated; needs loopPreserveAndRewind.
+# After the loop, a longer arena allocation at the same position corrupts result
+# if not properly preserved.
 
 FN main() RETURNS Void ->
     MUTABLE prefix = "hello";
     MUTABLE suffix = "world";
     MUTABLE result = "";
     FOR i IN (1_i64 ..= 10) DO
-        tmp = i.toString();          -- frame local (forces mark_per_iter)
+        tmp = i.toString();          # frame local (forces mark_per_iter)
         result = prefix + "-" + suffix;
     END
-    -- After the loop the cursor is at F (rewound). Last iteration's tmp was "10"
-    -- (2 bytes at F+0). result is at F+2. A post-loop intToString of 3+ chars
-    -- (e.g. "100") writes to F+0..F+2, overlapping the result position.
-    overwrite = 100_i64.toString();  -- "100" overwrites F+0..F+2, corrupts result
+    # After the loop the cursor is at F (rewound). Last iteration's tmp was "10"
+    # (2 bytes at F+0). result is at F+2. A post-loop intToString of 3+ chars
+    # (e.g. "100") writes to F+0..F+2, overlapping the result position.
+    overwrite = 100_i64.toString();  # "100" overwrites F+0..F+2, corrupts result
     ASSERT overwrite == "100";
     ASSERT result == "hello-world", "result must survive loop frame rewind";
 

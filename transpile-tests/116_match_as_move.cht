@@ -1,14 +1,14 @@
--- Test: Union with heap slice variant — cleanup must recurse into elements
---
--- Reproduces the scheme interpreter leak pattern:
--- 1. makeInner() builds a list, promotes it, returns Value.List
--- 2. makeOuter() receives that Value.List (heap slice), puts it in
---    another list, promotes, returns Value.List
--- 3. Caller receives nested Value.List structure
--- 4. cleanup(Value) must free BOTH the outer and inner []Value slices
---
--- Without the fix, needsCleanup(Value) returns false for the List: []Value
--- variant, so cleanup skips recursion into elements and inner slices leak.
+# Test: Union with heap slice variant — cleanup must recurse into elements
+#
+# Reproduces the scheme interpreter leak pattern:
+# 1. makeInner() builds a list, promotes it, returns Value.List
+# 2. makeOuter() receives that Value.List (heap slice), puts it in
+#    another list, promotes, returns Value.List
+# 3. Caller receives nested Value.List structure
+# 4. cleanup(Value) must free BOTH the outer and inner []Value slices
+#
+# Without the fix, needsCleanup(Value) returns false for the List: []Value
+# variant, so cleanup skips recursion into elements and inner slices leak.
 
 UNION Value { Num: Float64, List: Value[] }
 
@@ -36,10 +36,10 @@ FN main() RETURNS Void ->
             ASSERT FALSE, "expected List";
     END
 
-    -- result cleanup must:
-    -- 1. See result is Value.List, enter slice cleanup
-    -- 2. Recurse into items[0] which is Value.List (inner)
-    -- 3. Free inner []Value slice
-    -- 4. Free outer []Value slice
+    # result cleanup must:
+    # 1. See result is Value.List, enter slice cleanup
+    # 2. Recurse into items[0] which is Value.List (inner)
+    # 3. Free inner []Value slice
+    # 4. Free outer []Value slice
     RETURN;
 END

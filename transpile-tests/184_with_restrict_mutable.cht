@@ -1,12 +1,12 @@
--- Test: WITH RESTRICT AS MUTABLE — mutable borrow of a plain local struct.
--- The alias is a pointer to the source; mutations write through.
+# Test: WITH RESTRICT AS MUTABLE — mutable borrow of a plain local struct.
+# The alias is a pointer to the source; mutations write through.
 
 STRUCT Point { x: Float64, y: Float64 }
 
 FN main() RETURNS Void ->
     MUTABLE p = Point{ x: 1.0, y: 2.0 };
 
-    -- Mutable borrow: ref is a pointer to p, mutations visible on p
+    # Mutable borrow: ref is a pointer to p, mutations visible on p
     WITH RESTRICT p AS MUTABLE ref {
         ref.x = 10.0;
         ref.y = 20.0;
@@ -14,7 +14,7 @@ FN main() RETURNS Void ->
     ASSERT p.x == 10.0;
     ASSERT p.y == 20.0;
 
-    -- Immutable borrow: read-only alias
+    # Immutable borrow: read-only alias
     WITH RESTRICT p AS ref {
         ASSERT ref.x == 10.0;
     }

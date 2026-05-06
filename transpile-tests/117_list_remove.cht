@@ -1,4 +1,4 @@
--- Test: list.remove(i) returns the removed element
+# Test: list.remove(i) returns the removed element
 
 FN main() RETURNS Void ->
     MUTABLE items: Float64[]@list = List[];

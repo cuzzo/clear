@@ -1,13 +1,13 @@
--- Pipeline-terminal observable COUNT.
---
--- A BG STREAM produces values; COUNT folds them by predicate into a
--- `~Int64@observable` binding (heap-allocated `*ObservableCount()`);
--- NEXT joins the producer and returns the count of matching items.
---
--- COUNT shares all of SUM's pipeline-terminal scaffolding (consumer
--- fiber, WaitGroup join, lock-free atomic accumulator); the only
--- per-terminal pieces are the Inner accumulator type (`AtomicCount`)
--- and the publish call (`acc.inner.inc()` gated on the predicate).
+# Pipeline-terminal observable COUNT.
+#
+# A BG STREAM produces values; COUNT folds them by predicate into a
+# `~Int64@observable` binding (heap-allocated `*ObservableCount()`);
+# NEXT joins the producer and returns the count of matching items.
+#
+# COUNT shares all of SUM's pipeline-terminal scaffolding (consumer
+# fiber, WaitGroup join, lock-free atomic accumulator); the only
+# per-terminal pieces are the Inner accumulator type (`AtomicCount`)
+# and the publish call (`acc.inner.inc()` gated on the predicate).
 
 FN main() RETURNS Void ->
     gen: ~?Int64[] = BG STREAM {
@@ -21,7 +21,7 @@ FN main() RETURNS Void ->
     running: ~Int64@observable = gen |> COUNT _ > 49_i64;
     final = NEXT running;
 
-    -- 0..99 has 50 values strictly greater than 49 (50..99)
+    # 0..99 has 50 values strictly greater than 49 (50..99)
     ASSERT final == 50_i64, "running count mismatch";
     print("ok");
     RETURN;

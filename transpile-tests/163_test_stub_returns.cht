@@ -1,5 +1,5 @@
--- Test: STUB RETURNS replaces function calls with mock values.
--- Verifies scoping: stubbed in one WHEN, real in another.
+# Test: STUB RETURNS replaces function calls with mock values.
+# Verifies scoping: stubbed in one WHEN, real in another.
 
 FN fetchData() RETURNS String ->
     RETURN "real network data";

@@ -1,15 +1,15 @@
--- WITH VIEW mid-fold across every scalar terminal. 304 covers SUM;
--- this exercises the wrapper.view() forward-to-inner.view() path on
--- COUNT / MAX / MIN / AVG / ANY / ALL / FIND / REDUCE so the
--- shape-uniform mid-fold reader is empirically tested for each.
---
--- Snapshots are in-flight values: the producer fiber races against
--- the WITH VIEW reader, so each snapshot lives somewhere in the
--- terminal's observable range (not the final value). Tests bound-check
--- with the loosest valid range and rely on NEXT to confirm convergence.
+# WITH VIEW mid-fold across every scalar terminal. 304 covers SUM;
+# this exercises the wrapper.view() forward-to-inner.view() path on
+# COUNT / MAX / MIN / AVG / ANY / ALL / FIND / REDUCE so the
+# shape-uniform mid-fold reader is empirically tested for each.
+#
+# Snapshots are in-flight values: the producer fiber races against
+# the WITH VIEW reader, so each snapshot lives somewhere in the
+# terminal's observable range (not the final value). Tests bound-check
+# with the loosest valid range and rely on NEXT to confirm convergence.
 
 FN main() RETURNS Void ->
-    -- COUNT
+    # COUNT
     g_count: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
@@ -21,19 +21,19 @@ FN main() RETURNS Void ->
     }
     ASSERT (NEXT r_count) == 10_i64, "COUNT final";
 
-    -- MAX
+    # MAX
     g_max: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
     r_max: ~Int64@observable = g_max |> MAX _;
     WITH VIEW r_max AS s {
-        -- snapshot is min_i64 (sentinel) until first item, else <= 9
+        # snapshot is min_i64 (sentinel) until first item, else <= 9
         ASSERT s <= 9_i64, "MAX view > 9";
     }
     ASSERT (NEXT r_max) == 9_i64, "MAX final";
 
-    -- MIN
+    # MIN
     g_min: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 100_i64;
         WHILE i > 0_i64 DO YIELD i; i = i - 1_i64; END
@@ -44,7 +44,7 @@ FN main() RETURNS Void ->
     }
     ASSERT (NEXT r_min) == 1_i64, "MIN final";
 
-    -- AVG
+    # AVG
     g_avg: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
@@ -56,15 +56,15 @@ FN main() RETURNS Void ->
     }
     ASSERT (NEXT r_avg) == 4.5, "AVG final";
 
-    -- ANY
+    # ANY
     g_any: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
     r_any: ~Bool@observable = g_any |> ANY _ > 5_i64;
     WITH VIEW r_any AS s {
-        -- s ∈ {false, true}; both are valid mid-fold (just exercise
-        -- the read; specific value depends on producer/reader race)
+        # s ∈ {false, true}; both are valid mid-fold (just exercise
+        # the read; specific value depends on producer/reader race)
         IF s THEN
             ASSERT s == TRUE, "ANY view dispatch";
         ELSE
@@ -73,33 +73,33 @@ FN main() RETURNS Void ->
     }
     ASSERT (NEXT r_any) == TRUE, "ANY final";
 
-    -- ALL
+    # ALL
     g_all: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 5_i64 DO YIELD i; i = i + 1_i64; END
     };
     r_all: ~Bool@observable = g_all |> ALL _ < 100_i64;
     WITH VIEW r_all AS s {
-        -- starts true (vacuous), stays true since all items < 100
+        # starts true (vacuous), stays true since all items < 100
         ASSERT s == TRUE, "ALL view should stay TRUE for this stream";
     }
     ASSERT (NEXT r_all) == TRUE, "ALL final";
 
-    -- FIND
+    # FIND
     g_find: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 0_i64;
         WHILE i < 10_i64 DO YIELD i; i = i + 1_i64; END
     };
     r_find: ~?Int64@observable = g_find |> FIND _ > 5_i64;
     WITH VIEW r_find AS s {
-        -- s is NIL or 6_i64
+        # s is NIL or 6_i64
         IF s != NIL THEN
             ASSERT s == 6_i64, "FIND view non-six";
         END
     }
     ASSERT (NEXT r_find) == 6_i64, "FIND final";
 
-    -- REDUCE
+    # REDUCE
     g_red: ~?Int64[] = BG STREAM {
         MUTABLE i: Int64 = 1_i64;
         WHILE i <= 5_i64 DO YIELD i; i = i + 1_i64; END

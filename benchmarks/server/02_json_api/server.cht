@@ -1,15 +1,15 @@
--- Benchmark 24: TCP JSON File Server -- CLEAR
---
--- Protocol (inline text, \r\n terminated):
---   SET:N  -> generate JSON file data/N.json, respond +OK\r\n
---   GET:N  -> read + parse JSON via std.json FFI, respond :SUM\r\n
---   QUIT   -> close connection
---   READY? -> respond +READY\r\n (health check)
---
--- JSON format: {"id":N,"data":[1,2,3,...,size]}
--- Size distribution: size(id) = ((id * 7 + 13) MOD 997) + 10
---
--- Pure FFI: all native Zig operations declared via EXTERN, no shim files.
+# Benchmark 24: TCP JSON File Server -- CLEAR
+#
+# Protocol (inline text, \r\n terminated):
+#   SET:N  -> generate JSON file data/N.json, respond +OK\r\n
+#   GET:N  -> read + parse JSON via std.json FFI, respond :SUM\r\n
+#   QUIT   -> close connection
+#   READY? -> respond +READY\r\n (health check)
+#
+# JSON format: {"id":N,"data":[1,2,3,...,size]}
+# Size distribution: size(id) = ((id * 7 + 13) MOD 997) + 10
+#
+# Pure FFI: all native Zig operations declared via EXTERN, no shim files.
 
 EXTERN STRUCT ParseOptions {} FROM "std.json";
 EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
@@ -48,21 +48,21 @@ FN handleClient!(client: TCPClient) RETURNS !Void ->
             MUTABLE resp = "";
             MUTABLE pos: Int64 = 0;
             WHILE pos < data.length() DO
-                -- Find end of line
+                # Find end of line
                 MUTABLE eol = pos;
                 WHILE eol < data.length() && charAt(data, eol) != "\r" && charAt(data, eol) != "\n" DO
                     eol += 1;
                 END
                 line = substr(data, pos, eol - pos);
 
-                -- Skip \r\n
+                # Skip \r\n
                 pos = eol;
                 WHILE pos < data.length() && (charAt(data, pos) == "\r" || charAt(data, pos) == "\n") DO
                     pos += 1;
                 END
 
                 IF line.length() == 0 THEN
-                    -- skip empty lines
+                    # skip empty lines
                 ELSE_IF startsWith?(line, "SET:") THEN
                     idStr = substr(line, 4, line.length() - 4);
                     id = toInt(toNumber(idStr) OR 0.0);
@@ -94,8 +94,8 @@ FN main() RETURNS Void ->
     server = TCPServer::listen(6390);
     print("CLEAR json-api listening on port 6390");
 
-    -- Cache pins BG fibers to the main scheduler, preventing fiber stealing
-    -- which corrupts epoll fd registration.
+    # Cache pins BG fibers to the main scheduler, preventing fiber stealing
+    # which corrupts epoll fd registration.
     MUTABLE cache: HashMap<Int64>@sharded(32):locked = {};
 
     MUTABLE tasks: ~Void[]@list = [];

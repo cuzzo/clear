@@ -1,8 +1,8 @@
--- Bug: frame-allocated @list GIVE'd to TAKES @list param → alloc mismatch.
--- Caller's lst lives on frame; callee's TAKES cleanup uses heapAlloc().
--- Detected by DebugAllocator as alignment 16 != 8 on free.
--- Architectural cause: escape_analysis lacks a "GIVE-to-TAKES" condition;
--- the source declaration is not promoted to heap.
+# Bug: frame-allocated @list GIVE'd to TAKES @list param → alloc mismatch.
+# Caller's lst lives on frame; callee's TAKES cleanup uses heapAlloc().
+# Detected by DebugAllocator as alignment 16 != 8 on free.
+# Architectural cause: escape_analysis lacks a "GIVE-to-TAKES" condition;
+# the source declaration is not promoted to heap.
 
 FN sum!(TAKES xs: Int64[]@list) RETURNS Int64 ->
     MUTABLE total: Int64 = 0_i64;
@@ -11,7 +11,7 @@ FN sum!(TAKES xs: Int64[]@list) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-    -- Frame-allocated source: this is the only thing the test exercises.
+    # Frame-allocated source: this is the only thing the test exercises.
     MUTABLE lst: Int64[]@list = List[];
     lst.append(10_i64); lst.append(20_i64); lst.append(30_i64);
     n: Int64 = sum!(GIVE lst);

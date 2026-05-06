@@ -1,7 +1,7 @@
--- FSM WITH whose CS body contains a suspend (sleep). The lock
--- must be held across runFn boundaries (lock_held ctx flag,
--- destroyTask err-path release), then released explicitly at end
--- of CS body before transitioning to the post-WITH continuation.
+# FSM WITH whose CS body contains a suspend (sleep). The lock
+# must be held across runFn boundaries (lock_held ctx flag,
+# destroyTask err-path release), then released explicitly at end
+# of CS body before transitioning to the post-WITH continuation.
 
 STRUCT Counter { value: Int64 }
 

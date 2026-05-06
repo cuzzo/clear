@@ -1,12 +1,12 @@
--- @leak: 100000 -> 1000
--- Dynamic Spawn Benchmark — CLEAR
---
--- Spawns 100K individual BG blocks, each does CPU-bound work (10K LCG
--- iterations).  Measures per-spawn overhead + parallel execution.
---
--- This is CLEAR's individual-spawn path — each BG block pays GPA alloc
--- for SpawnRequest + Fiber + Task.  For batch workloads, prefer
--- CONCURRENT(workers: N) which avoids per-item spawning.
+# @leak: 100000 -> 1000
+# Dynamic Spawn Benchmark — CLEAR
+#
+# Spawns 100K individual BG blocks, each does CPU-bound work (10K LCG
+# iterations).  Measures per-spawn overhead + parallel execution.
+#
+# This is CLEAR's individual-spawn path — each BG block pays GPA alloc
+# for SpawnRequest + Fiber + Task.  For batch workloads, prefer
+# CONCURRENT(workers: N) which avoids per-item spawning.
 
 FN doWork(seed: Int64) RETURNS Int64 ->
     MUTABLE x: Int64 = seed;

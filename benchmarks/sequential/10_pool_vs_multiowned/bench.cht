@@ -1,12 +1,12 @@
--- @leak: n = 5000000 -> n = 5000
--- Benchmark 22: Pool vs List — Insert + Iteration Cost
---
--- Both variants insert N structs, then iterate to sum a field.
--- Pool uses generational handles (insert returns Id<T>, extra safety).
--- List uses simple append (index-based, no generation check).
---
--- Measures the overhead of Pool's generational bookkeeping vs
--- List's simpler dense array.
+# @leak: n = 5000000 -> n = 5000
+# Benchmark 22: Pool vs List — Insert + Iteration Cost
+#
+# Both variants insert N structs, then iterate to sum a field.
+# Pool uses generational handles (insert returns Id<T>, extra safety).
+# List uses simple append (index-based, no generation check).
+#
+# Measures the overhead of Pool's generational bookkeeping vs
+# List's simpler dense array.
 
 STRUCT Entity { x: Int64, y: Int64, health: Int64 }
 
@@ -25,7 +25,7 @@ FN benchPool(n: Int64) RETURNS !Int64 ->
 END
 
 FN benchList(n: Int64) RETURNS !Int64 ->
-    -- Pre-allocate capacity to match C (malloc N*sizeof) and Go (make([]T, 0, N))
+    # Pre-allocate capacity to match C (malloc N*sizeof) and Go (make([]T, 0, N))
     MUTABLE items: Entity[5000000]@list = [];
 
     FOR i IN (0_i64 ..< n) -> items.append(Entity{ x: i, y: i * 2, health: 100 });
@@ -52,7 +52,7 @@ FN main() RETURNS Void ->
 
     ASSERT listSum == poolSum, "both must produce same health sum";
 
-    -- BENCH_RESULT = List (dense array, fast path)
+    # BENCH_RESULT = List (dense array, fast path)
     print("BENCH_RESULT: ${listMs.toString()} ms");
     print("Pool vs List (${n.toString()} entities, insert + sum health)");
     print("  List (dense):  ${listMs.toString()} ms  RSS ${listRssKb.toString()} KB");

@@ -1,6 +1,6 @@
--- SHARD + CONCURRENT EACH with a frame-allocating string key expression.
--- The producer must enqueue an owned key so workers do not observe rewound
--- frame memory.
+# SHARD + CONCURRENT EACH with a frame-allocating string key expression.
+# The producer must enqueue an owned key so workers do not observe rewound
+# frame memory.
 
 FN main() RETURNS Void ->
     n = 128_i64;

@@ -1,15 +1,15 @@
--- @leak: n = 10000 -> n = 100
--- Alloc Throughput Benchmark
---
--- All three languages allocate a 10000-element heap array per outer
--- iteration, fill it, sum it, and discard it. 10000 outer iterations.
--- Total: 10K alloc+free cycles, 100M element writes, 100M element reads.
---
--- Measures allocator throughput (dominant cost) + sequential fill+sum.
--- C: malloc/free. Rust: Vec::with_capacity. CLEAR: Float64[10000]@list.
---
--- Runner records TIGHT WHILE time (apples-to-apples vs C/Rust).
--- Regular FOR is printed as CLEAR overhead reference only.
+# @leak: n = 10000 -> n = 100
+# Alloc Throughput Benchmark
+#
+# All three languages allocate a 10000-element heap array per outer
+# iteration, fill it, sum it, and discard it. 10000 outer iterations.
+# Total: 10K alloc+free cycles, 100M element writes, 100M element reads.
+#
+# Measures allocator throughput (dominant cost) + sequential fill+sum.
+# C: malloc/free. Rust: Vec::with_capacity. CLEAR: Float64[10000]@list.
+#
+# Runner records TIGHT WHILE time (apples-to-apples vs C/Rust).
+# Regular FOR is printed as CLEAR overhead reference only.
 
 FN benchRegular(n: Int64) RETURNS !Float64 ->
     MUTABLE total: Float64 = 0.0;
@@ -40,19 +40,19 @@ END
 FN main() RETURNS Void ->
     n = 10000;
 
-    -- Warmup
+    # Warmup
     warmR = benchRegular(100);
     warmT = benchTight(100);
 
-    -- Primary measurement: TIGHT WHILE (apples-to-apples vs C malloc + Rust Vec)
+    # Primary measurement: TIGHT WHILE (apples-to-apples vs C malloc + Rust Vec)
     t0 = timestampMs();
     totalT = benchTight(n);
     tightMs = timestampMs() - t0;
 
-    -- Declare the primary result for runner.rb
+    # Declare the primary result for runner.rb
     print("BENCH_RESULT: ${tightMs.toString()} ms");
 
-    -- Regular FOR loops (CLEAR overhead reference, not cross-language comparison)
+    # Regular FOR loops (CLEAR overhead reference, not cross-language comparison)
     t1 = timestampMs();
     totalR = benchRegular(n);
     regularMs = timestampMs() - t1;

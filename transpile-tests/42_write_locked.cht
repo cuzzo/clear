@@ -1,35 +1,35 @@
 STRUCT Counter { value: Int64 }
 
--- Functions take plain Types, not Capabilities.
+# Functions take plain Types, not Capabilities.
 FN getVal(c: Counter) RETURNS Int64 ->
     RETURN c.value;
 END
 
 FN main() RETURNS Void ->
-    -- Create a heap-allocated RwLock-protected Counter.
+    # Create a heap-allocated RwLock-protected Counter.
     c = Counter{ value: 10 } @writeLocked;
 
-    -- WITH EXCLUSIVE acquires the write lock (exclusive access).
-    -- 'inner' is bound to *Counter (auto-deref in Zig).
+    # WITH EXCLUSIVE acquires the write lock (exclusive access).
+    # 'inner' is bound to *Counter (auto-deref in Zig).
     WITH EXCLUSIVE c AS inner {
         ASSERT inner.value == 10, "inner.value should be 10";
 
-        -- Mutate through the pointer (auto-deref assignment).
+        # Mutate through the pointer (auto-deref assignment).
         inner.value = 42;
         ASSERT inner.value == 42, "inner.value should be 42 after mutation";
 
-        -- Pass inner.* (deref) to a plain function.
+        # Pass inner.* (deref) to a plain function.
         v = getVal(inner);
         ASSERT v == 42, "getVal should return 42";
     }
 
-    -- WITH c (no keyword) auto-acquires the read lock (shared, read-only access).
+    # WITH c (no keyword) auto-acquires the read lock (shared, read-only access).
     WITH c AS inner {
         ASSERT inner.value == 42, "inner.value should still be 42 after read";
         v = getVal(inner);
         ASSERT v == 42, "getVal should return 42 from read guard";
     }
 
-    -- RwLock is released; the testing allocator confirms no leaks on scope exit.
+    # RwLock is released; the testing allocator confirms no leaks on scope exit.
     RETURN;
 END

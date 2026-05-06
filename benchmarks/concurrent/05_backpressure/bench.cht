@@ -1,12 +1,12 @@
--- @leak: 100000 -> 1000
--- Backpressure Benchmark — CLEAR
---
--- Producer (BG STREAM) generates 100,000 items lazily. Items flow
--- through a real BoundedChannel(capacity: 64): the producer fiber
--- blocks when all 64 slots are occupied, providing true back pressure.
--- Workers scale with threadCount(). Results are accumulated in a
--- @shared:locked struct — no result list is ever materialized.
--- Peak memory: O(capacity), not O(N).
+# @leak: 100000 -> 1000
+# Backpressure Benchmark — CLEAR
+#
+# Producer (BG STREAM) generates 100,000 items lazily. Items flow
+# through a real BoundedChannel(capacity: 64): the producer fiber
+# blocks when all 64 slots are occupied, providing true back pressure.
+# Workers scale with threadCount(). Results are accumulated in a
+# @shared:locked struct — no result list is ever materialized.
+# Peak memory: O(capacity), not O(N).
 
 STRUCT Acc { value: Int64 }
 

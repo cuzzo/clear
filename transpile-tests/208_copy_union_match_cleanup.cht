@@ -1,10 +1,10 @@
--- Test: COPY of non-Copy union consumed by PARTIAL MATCH TAKES gets proper cleanup.
--- d2 = COPY d; PARTIAL MATCH d2 ... must clean up d2 on non-AS paths (DEFAULT).
--- Bug: refine_moved_guards! eliminated d2's cleanup because dataflow said MOVED on all paths.
+# Test: COPY of non-Copy union consumed by PARTIAL MATCH TAKES gets proper cleanup.
+# d2 = COPY d; PARTIAL MATCH d2 ... must clean up d2 on non-AS paths (DEFAULT).
+# Bug: refine_moved_guards! eliminated d2's cleanup because dataflow said MOVED on all paths.
 
 UNION Data { Empty, Text: String }
 
--- AS case: n takes ownership, d2 cleanup suppressed
+# AS case: n takes ownership, d2 cleanup suppressed
 FN testAs() RETURNS !Void ->
     d = Data{ Text: "hello" };
     d2 = COPY d;
@@ -14,7 +14,7 @@ FN testAs() RETURNS !Void ->
     END
 END
 
--- DEFAULT case: d2 has heap data (Text), cleanup must fire for d2
+# DEFAULT case: d2 has heap data (Text), cleanup must fire for d2
 FN testDefault() RETURNS !Void ->
     d = Data{ Text: "world" };
     d2 = COPY d;
@@ -29,6 +29,6 @@ FN main() RETURNS Void ->
     testDefault();
 END
 
--- EXPECT
--- hello
--- default
+# EXPECT
+# hello
+# default

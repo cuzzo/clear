@@ -1,5 +1,5 @@
--- Test: Basic TEST/WHEN/TEST THAT framework.
--- Verifies the DSL structure works end-to-end.
+# Test: Basic TEST/WHEN/TEST THAT framework.
+# Verifies the DSL structure works end-to-end.
 
 FN double(x: Float64) RETURNS Float64 ->
     RETURN x * 2.0;

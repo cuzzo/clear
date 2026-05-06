@@ -1,5 +1,5 @@
--- S-expression parser for the Mal interpreter.
--- Tokenizes input strings into HashMap<Value> and reads S-expressions.
+# S-expression parser for the Mal interpreter.
+# Tokenizes input strings into HashMap<Value> and reads S-expressions.
 
 REQUIRE "types.cht";
 
@@ -10,7 +10,7 @@ FN readAtom(token: String) RETURNS Value ->
     IF token == "false" THEN RETURN Value.FalseVal; END
     IF charAt(token, 0) == "\"" THEN RETURN Value{ Str: substr(token, 1, token.length() - 2) }; END
 
-    -- Typed literals: 42:i64, 3.14:f64
+    # Typed literals: 42:i64, 3.14:f64
     IF contains?(token, ":i64") THEN
         numPart = substr(token, 0, token.length() - 4);
         n = toNumber(numPart) OR (0.0 - 999999.0);
@@ -30,10 +30,10 @@ FN readAtom(token: String) RETURNS Value ->
     RETURN Value{ Symbol: COPY token };
 END
 
--- Parser: tokenize into HashMap<Value> with numeric position tracking.
--- Tokens stored as Value.Str at keys "__t0", "__t1", etc.
--- Position and count stored as Value.Number at "__rp" and "__tc".
--- This avoids toString() inside WHILE loops for position updates.
+# Parser: tokenize into HashMap<Value> with numeric position tracking.
+# Tokens stored as Value.Str at keys "__t0", "__t1", etc.
+# Position and count stored as Value.Number at "__rp" and "__tc".
+# This avoids toString() inside WHILE loops for position updates.
 
 FN isWhitespace?(c: String) RETURNS Bool ->
     RETURN c == " " || c == "," || c == "\n" || c == "\t";
@@ -57,7 +57,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
         ELSE_IF c == ";" THEN
             WHILE i < len && charAt(str, i) != "\n" DO i += 1; END
         ELSE_IF c == "\"" THEN
-            -- String literal: scan for closing quote, extract with substr
+            # String literal: scan for closing quote, extract with substr
             start = i;
             i += 1;
             WHILE i < len && charAt(str, i) != "\"" DO
@@ -67,7 +67,7 @@ FN tokenizeToEnv!(MUTABLE penv: HashMap<Value>, str: String) RETURNS Void ->
             penv["__t" + count.toString()] = Value{ Str: COPY substr(str, start, i - start) };
             count += 1;
         ELSE
-            -- Symbol/number: scan to next delimiter, extract with substr
+            # Symbol/number: scan to next delimiter, extract with substr
             start = i;
             WHILE i < len && isDelimiter?(charAt(str, i)) == FALSE DO
                 i += 1;

@@ -1,15 +1,15 @@
--- Open streams: ~?T[] — a generator-backed stream; NEXT returns ?T (null when exhausted).
--- BG STREAM { YIELD x; } spawns a generator fiber that buffers values.
--- NEXT blocks until the generator completes, then pops one value per call.
+# Open streams: ~?T[] — a generator-backed stream; NEXT returns ?T (null when exhausted).
+# BG STREAM { YIELD x; } spawns a generator fiber that buffers values.
+# NEXT blocks until the generator completes, then pops one value per call.
 
 FN generate_squares(n: Float64) RETURNS Float64 ->
     RETURN n * n;
 END
 
 FN main() RETURNS Void ->
-    -- -------------------------------------------------------
-    -- Test 1: Simple number stream with three YIELD statements.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 1: Simple number stream with three YIELD statements.
+    # -------------------------------------------------------
     s: ~?Float64[] = BG STREAM {
         YIELD 1.0;
         YIELD 4.0;
@@ -26,9 +26,9 @@ FN main() RETURNS Void ->
     ASSERT v3 == 9.0, "open stream: third NEXT returns third yield";
     ASSERT v4 == NIL, "open stream: NEXT after exhaustion returns null";
 
-    -- -------------------------------------------------------
-    -- Test 2: Stream with a captured variable.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 2: Stream with a captured variable.
+    # -------------------------------------------------------
     base: Float64 = 10.0;
     s2: ~?Float64[] = BG STREAM {
         YIELD base;
@@ -43,9 +43,9 @@ FN main() RETURNS Void ->
     ASSERT u2 == 20.0, "stream with capture: second NEXT";
     ASSERT u3 == NIL,  "stream with capture: exhausted";
 
-    -- -------------------------------------------------------
-    -- Test 3: Bool stream.
-    -- -------------------------------------------------------
+    # -------------------------------------------------------
+    # Test 3: Bool stream.
+    # -------------------------------------------------------
     flags: ~?Bool[] = BG STREAM {
         YIELD TRUE;
         YIELD FALSE;

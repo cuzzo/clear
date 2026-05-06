@@ -3,7 +3,7 @@ STRUCT User { id: Int64 }
 FN main() RETURNS Void ->
     MUTABLE i = 0;
     WHILE i < 10 DO
-        -- This variable dies every iteration (stack allocated, no escape)
+        # This variable dies every iteration (stack allocated, no escape)
         u = User{ id: i };
         i = i + 1;
     END

@@ -1,17 +1,17 @@
--- Gradual typing M1.7 — end-to-end Auto inference for params.
---
--- The annotator runs Pass B (constraint collection) + Pass C
--- (unification) after the body walk populates type_info on every
--- constraint source. The Auto param `x` gets resolved from the
--- single call-site arg (literal 5 → Int64); the body then sees x
--- as Int64 and lowers normally.
---
--- v1 scope: Auto on params and locals resolves end-to-end when the
--- RHS / call-site evidence is concrete. Auto on RETURN typed in
--- terms of an Auto param requires body re-typing AFTER param
--- resolution (the iterate-to-fixpoint Pass A1+B+C loop documented
--- in gradual-typing.md §11). That iteration is M2; v1 requires the
--- return type to be concrete when the body uses Auto params.
+# Gradual typing M1.7 — end-to-end Auto inference for params.
+#
+# The annotator runs Pass B (constraint collection) + Pass C
+# (unification) after the body walk populates type_info on every
+# constraint source. The Auto param `x` gets resolved from the
+# single call-site arg (literal 5 → Int64); the body then sees x
+# as Int64 and lowers normally.
+#
+# v1 scope: Auto on params and locals resolves end-to-end when the
+# RHS / call-site evidence is concrete. Auto on RETURN typed in
+# terms of an Auto param requires body re-typing AFTER param
+# resolution (the iterate-to-fixpoint Pass A1+B+C loop documented
+# in gradual-typing.md §11). That iteration is M2; v1 requires the
+# return type to be concrete when the body uses Auto params.
 
 FN double(x: Auto) RETURNS Int64 ->
     RETURN x + x;

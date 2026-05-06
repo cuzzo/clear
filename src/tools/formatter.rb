@@ -13,7 +13,7 @@
 #       * unary `-` / `!` / `~` attach at expression-start positions
 #       * call/index attach: `foo(`, `foo[`, `)(`, `](`, `][`
 #       * type annotation `:` — no space before, one space after
-#   - Comment spacing: trailing `--` has 2 spaces before, 1 space after.
+#   - Comment spacing: trailing `#` has 2 spaces before, 1 space after.
 #   - FN one-liner expansion (§7): every FN becomes multi-line with body
 #     statements split on `;` boundaries.
 #   - STRUCT / UNION / ENUM (§3.8): one field/variant per line.
@@ -131,7 +131,7 @@ class Formatter::FormatLexer
       case
       when m = @s.scan(/[ \t]+/)             then push(:WS, m, sl, sc)
       when m = @s.scan(/\r?\n/)              then push(:NL, m, sl, sc)
-      when m = @s.scan(/--[^\n]*/)           then push(:COMMENT, m, sl, sc)
+      when m = @s.scan(/#[^\n]*/)            then push(:COMMENT, m, sl, sc)
       when m = @s.scan(/"""(?:.|\n)*?"""/m)  then push(:STRING, m, sl, sc)
       when @s.peek(1) == '"'
         raw = consume_string
@@ -1845,7 +1845,7 @@ class Formatter::Emitter
   end
 
   # Emit a line's tokens with canonical intra-line spacing.
-  # Comments get 2-space prefix if inline, 1 space after `--`.
+  # Comments get 2-space prefix if inline, 1 space after `#`.
   def format_line_body(line)
     buf = +""
     prev = nil  # previous emitted *code* token
@@ -1871,14 +1871,14 @@ class Formatter::Emitter
     buf
   end
 
-  # Normalize a `--...` comment: exactly one space after `--`, trailing
-  # whitespace stripped. `--` alone (empty comment) stays `--`.
+  # Normalize a `#...` comment: exactly one space after `#`, trailing
+  # whitespace stripped. `#` alone (empty comment) stays `#`.
   def canonicalize_comment(raw)
-    body = raw[2..].to_s
+    body = raw[1..].to_s
     body = body.rstrip
-    return '--' if body.empty?
+    return '#' if body.empty?
     body = body.sub(/\A\s+/, '')
-    "-- #{body}"
+    "# #{body}"
   end
 
   # Spacing decision between two adjacent code tokens A (prev) and B (cur).

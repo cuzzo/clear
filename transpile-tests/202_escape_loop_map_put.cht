@@ -1,6 +1,6 @@
--- Test: loop puts frame-allocated string keys/values into an outer HashMap (Pattern 6).
--- The key and value strings are built from frame arena each iteration.
--- They must be heap-promoted so the loop mark rewind doesn't destroy them.
+# Test: loop puts frame-allocated string keys/values into an outer HashMap (Pattern 6).
+# The key and value strings are built from frame arena each iteration.
+# They must be heap-promoted so the loop mark rewind doesn't destroy them.
 
 FN main() RETURNS Void ->
     MUTABLE m: HashMap<String, Int64> = {};

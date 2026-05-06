@@ -1,5 +1,5 @@
--- Minimal reproducer: parse-like chain creates heap Values,
--- eval-like chain consumes them. Should be zero leaks.
+# Minimal reproducer: parse-like chain creates heap Values,
+# eval-like chain consumes them. Should be zero leaks.
 
 UNION Value { Nil, Symbol: String, Number: Float64, List: Value[] }
 

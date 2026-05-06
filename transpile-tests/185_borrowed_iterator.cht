@@ -1,8 +1,8 @@
--- Test: Generic iterator with BORROWED field — stress test for borrow system.
---
--- SliceIter<T> borrows a T[] and iterates without copying.
--- Exercises: BORROWED struct field, generic structs, generic field access
--- type substitution, non_escaping propagation, and zero-copy iteration.
+# Test: Generic iterator with BORROWED field — stress test for borrow system.
+#
+# SliceIter<T> borrows a T[] and iterates without copying.
+# Exercises: BORROWED struct field, generic structs, generic field access
+# type substitution, non_escaping propagation, and zero-copy iteration.
 
 STRUCT SliceIter<T> {
     source: BORROWED T[],
@@ -22,7 +22,7 @@ FN advance(iter: SliceIter<String>) RETURNS SliceIter<String> ->
     RETURN SliceIter<String>{ source: iter.source, pos: iter.pos + 1, len: iter.len };
 END
 
--- Int64 iterator functions
+# Int64 iterator functions
 FN hasNextI(iter: SliceIter<Int64>) RETURNS Bool ->
     RETURN iter.pos < iter.len;
 END
@@ -36,7 +36,7 @@ FN advanceI(iter: SliceIter<Int64>) RETURNS SliceIter<Int64> ->
 END
 
 FN main() RETURNS Void ->
-    -- Pattern 1: iterate Int64 array — no @list, plain slice
+    # Pattern 1: iterate Int64 array — no @list, plain slice
     data: Int64[] = [100, 200, 300, 400];
     WITH BORROWED data AS ref {
         MUTABLE iter = SliceIter<Int64>{ source: ref, pos: 0, len: 4 };
@@ -48,7 +48,7 @@ FN main() RETURNS Void ->
         ASSERT sum == 1000;
     }
 
-    -- Pattern 2: iterate numbers — same generic struct, different type arg
+    # Pattern 2: iterate numbers — same generic struct, different type arg
     nums: Int64[] = [10, 20, 30, 40, 50];
     WITH BORROWED nums AS nref {
         MUTABLE iter = SliceIter<Int64>{ source: nref, pos: 0, len: 5 };
@@ -60,7 +60,7 @@ FN main() RETURNS Void ->
         ASSERT sum == 150;
     }
 
-    -- Pattern 3: data still usable after WITH block
+    # Pattern 3: data still usable after WITH block
     ASSERT data.length() == 4;
     ASSERT nums.length() == 5;
 

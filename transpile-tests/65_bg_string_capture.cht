@@ -1,6 +1,6 @@
--- BG block: capturing a string and using it in computation.
--- The captured string is heap-promoted (duped) for cross-fiber safety.
--- After use, the BG fiber frees the captured string; the result is new memory.
+# BG block: capturing a string and using it in computation.
+# The captured string is heap-promoted (duped) for cross-fiber safety.
+# After use, the BG fiber frees the captured string; the result is new memory.
 
 FN main() RETURNS Void ->
     greeting: String = "world";
@@ -10,7 +10,7 @@ FN main() RETURNS Void ->
     result: String = NEXT q;
     ASSERT result == "world!", "BG string capture: concat result";
 
-    -- Multiple string captures
+    # Multiple string captures
     a: String = "foo";
     b: String = "bar";
     r: ~String = BG {

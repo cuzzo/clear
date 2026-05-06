@@ -1,10 +1,10 @@
--- pdu: parallel recursive directory size calculator
---
--- Scans the current directory tree, summing apparent file sizes.
--- Uses a concurrent pipeline so independent entries can run in parallel.
---
--- Usage: ./pdu
--- Compare: du -sb . or diskus --apparent-size .
+# pdu: parallel recursive directory size calculator
+#
+# Scans the current directory tree, summing apparent file sizes.
+# Uses a concurrent pipeline so independent entries can run in parallel.
+#
+# Usage: ./pdu
+# Compare: du -sb . or diskus --apparent-size .
 
 FN entrySize(entry: String)
  RETURNS !Int64

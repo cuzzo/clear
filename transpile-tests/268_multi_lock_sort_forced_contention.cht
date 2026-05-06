@@ -1,16 +1,16 @@
--- Test: automatic multi-lock sort under FORCED reverse-order contention.
---
--- Both fibers hold their pair of locks for 50ms. The two fibers overlap
--- in time — fiber 1 starts acquiring while fiber 2 is still holding.
--- Without sort this is the classic AB/BA setup: fiber 1 holds a, waits
--- for b; fiber 2 holds b, waits for a → LockCycle detected at the
--- second acquire. With sort, both fibers resolve to the same global
--- pointer order, one waits for the other to finish, and both complete.
--- Total wall clock ~100ms.
---
--- Sibling of transpile-tests/264_multi_lock_sort.cht which covers the
--- uncontended happy path. This one specifically forces contention long
--- enough that a broken sort would be visible as a runtime error.
+# Test: automatic multi-lock sort under FORCED reverse-order contention.
+#
+# Both fibers hold their pair of locks for 50ms. The two fibers overlap
+# in time — fiber 1 starts acquiring while fiber 2 is still holding.
+# Without sort this is the classic AB/BA setup: fiber 1 holds a, waits
+# for b; fiber 2 holds b, waits for a → LockCycle detected at the
+# second acquire. With sort, both fibers resolve to the same global
+# pointer order, one waits for the other to finish, and both complete.
+# Total wall clock ~100ms.
+#
+# Sibling of transpile-tests/264_multi_lock_sort.cht which covers the
+# uncontended happy path. This one specifically forces contention long
+# enough that a broken sort would be visible as a runtime error.
 
 STRUCT Counter { value: Int64 }
 
@@ -23,7 +23,7 @@ FN main() RETURNS Void ->
     a = Counter{ value: 0 } @shared:locked;
     b = Counter{ value: 0 } @shared:locked;
 
-    -- Fiber 1: source order (a, b). Holds both for 200ms.
+    # Fiber 1: source order (a, b). Holds both for 200ms.
     t1 = BG {
         WITH EXCLUSIVE a AS x, EXCLUSIVE b AS y {
             napFor(50);
@@ -32,10 +32,10 @@ FN main() RETURNS Void ->
         }
     };
 
-    -- Fiber 2: REVERSED source order (b, a). Holds both for 200ms.
-    -- Without runtime pointer-sort this is the classic AB/BA LockCycle
-    -- setup; with sort both fibers resolve the same pointer ordering
-    -- and serialize.
+    # Fiber 2: REVERSED source order (b, a). Holds both for 200ms.
+    # Without runtime pointer-sort this is the classic AB/BA LockCycle
+    # setup; with sort both fibers resolve the same pointer ordering
+    # and serialize.
     t2 = BG {
         WITH EXCLUSIVE b AS y, EXCLUSIVE a AS x {
             napFor(50);
@@ -47,8 +47,8 @@ FN main() RETURNS Void ->
     NEXT t1;
     NEXT t2;
 
-    -- If either fiber had timed out or cycle-errored, the asserts below
-    -- would fail (values would be 0, 1, or 10 — not the full 2 / 20).
+    # If either fiber had timed out or cycle-errored, the asserts below
+    # would fail (values would be 0, 1, or 10 — not the full 2 / 20).
     WITH EXCLUSIVE a AS x { ASSERT x.value == 2, "a.value must be 2 (both fibers incremented)"; }
     WITH EXCLUSIVE b AS y { ASSERT y.value == 20, "b.value must be 20 (both fibers incremented)"; }
 

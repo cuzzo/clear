@@ -1,22 +1,22 @@
--- Test: LIMIT on all stream types.
--- ~T[N]:   LIMIT drains unconsumed promises via defer deinit.
--- ~T[]:    LIMIT on a range iterator (IntRange) — no heap cleanup needed.
--- ~T[INF]: LIMIT terminates the infinite generator after N items.
+# Test: LIMIT on all stream types.
+# ~T[N]:   LIMIT drains unconsumed promises via defer deinit.
+# ~T[]:    LIMIT on a range iterator (IntRange) — no heap cleanup needed.
+# ~T[INF]: LIMIT terminates the infinite generator after N items.
 
 FN main() RETURNS Void ->
-    -- LIMIT + EACH on bounded stream (~T[N])
+    # LIMIT + EACH on bounded stream (~T[N])
     s1: ~Int64[5] = [BG { 1; }, BG { 2; }, BG { 3; }, BG { 4; }, BG { 5; }];
     MUTABLE sum1: Int64 = 0;
     s1 |> LIMIT 3 |> EACH { sum1 = sum1 + _; };
     ASSERT sum1 == 6, "LIMIT 3 on ~T[5]: 1+2+3";
 
-    -- LIMIT + EACH on dynamic range stream (~T[])
+    # LIMIT + EACH on dynamic range stream (~T[])
     s2: ~Int64[] = 1 ..< 100;
     MUTABLE sum2: Int64 = 0;
     s2 |> LIMIT 4 |> EACH { sum2 = sum2 + _; };
     ASSERT sum2 == 10, "LIMIT 4 on ~T[]: 1+2+3+4";
 
-    -- LIMIT + EACH on infinite stream (~T[INF])
+    # LIMIT + EACH on infinite stream (~T[INF])
     counter: ~Int64[INF] = BG STREAM {
         MUTABLE i: Int64 = 1;
         WHILE TRUE DO
@@ -28,7 +28,7 @@ FN main() RETURNS Void ->
     counter |> LIMIT 5 |> EACH { sum3 = sum3 + _; };
     ASSERT sum3 == 15, "LIMIT 5 on ~T[INF]: 1+2+3+4+5";
 
-    -- LIMIT + SUM on infinite stream (~T[INF])
+    # LIMIT + SUM on infinite stream (~T[INF])
     counter2: ~Int64[INF] = BG STREAM {
         MUTABLE j: Int64 = 1;
         WHILE TRUE DO
@@ -39,7 +39,7 @@ FN main() RETURNS Void ->
     total = counter2 |> LIMIT 5 |> SUM _;
     ASSERT total == 15, "LIMIT 5 + SUM on ~T[INF]: 1+2+3+4+5";
 
-    -- LIMIT + COUNT on infinite stream
+    # LIMIT + COUNT on infinite stream
     counter3: ~Int64[INF] = BG STREAM {
         MUTABLE k: Int64 = 0;
         WHILE TRUE DO
@@ -50,7 +50,7 @@ FN main() RETURNS Void ->
     cnt = counter3 |> LIMIT 7 |> COUNT _ >= 0;
     ASSERT cnt == 7, "LIMIT 7 + COUNT on ~T[INF]";
 
-    -- WHERE before LIMIT on ~T[INF]: LIMIT counts filtered items
+    # WHERE before LIMIT on ~T[INF]: LIMIT counts filtered items
     counter4: ~Int64[INF] = BG STREAM {
         MUTABLE n: Int64 = 1;
         WHILE TRUE DO
@@ -62,7 +62,7 @@ FN main() RETURNS Void ->
     counter4 |> WHERE _ MOD 2 == 0 |> LIMIT 3 |> EACH { sum4 = sum4 + _; };
     ASSERT sum4 == 12, "WHERE evens then LIMIT 3: 2+4+6";
 
-    -- SELECT before LIMIT on ~T[INF]
+    # SELECT before LIMIT on ~T[INF]
     counter5: ~Int64[INF] = BG STREAM {
         MUTABLE m: Int64 = 1;
         WHILE TRUE DO
@@ -73,7 +73,7 @@ FN main() RETURNS Void ->
     total2 = counter5 |> SELECT _ * 10 |> LIMIT 4 |> SUM _;
     ASSERT total2 == 100, "SELECT *10 then LIMIT 4 SUM: 10+20+30+40";
 
-    -- SKIP before LIMIT on ~T[INF]
+    # SKIP before LIMIT on ~T[INF]
     counter6: ~Int64[INF] = BG STREAM {
         MUTABLE p: Int64 = 1;
         WHILE TRUE DO
@@ -85,7 +85,7 @@ FN main() RETURNS Void ->
     counter6 |> SKIP 5 |> LIMIT 3 |> EACH { sum5 = sum5 + _; };
     ASSERT sum5 == 21, "SKIP 5 then LIMIT 3: 6+7+8";
 
-    -- LIMIT before WHERE on ~T[INF]: LIMIT counts source items, WHERE filters among those
+    # LIMIT before WHERE on ~T[INF]: LIMIT counts source items, WHERE filters among those
     counter7: ~Int64[INF] = BG STREAM {
         MUTABLE q: Int64 = 1;
         WHILE TRUE DO

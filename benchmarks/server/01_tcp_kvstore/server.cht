@@ -1,12 +1,12 @@
--- TCP KV Store — Minimal RESP-compatible GET/SET/INCR server
---
--- DragonflyDB-style shared-nothing architecture: @sharded(128) HashMap
--- with per-shard locking.  BG fiber per client connection.
--- Supports pipelining via response batching (one tcpWrite per tcpRead).
---
--- Compared against DragonflyDB using redis-benchmark via runner.rb.
--- Test:    redis-cli -p 6390 SET foo bar / GET foo / INCR counter
--- Bench:   redis-benchmark -p 6390 -t set,get,incr -n 100000 -c 50 -P 16
+# TCP KV Store — Minimal RESP-compatible GET/SET/INCR server
+#
+# DragonflyDB-style shared-nothing architecture: @sharded(128) HashMap
+# with per-shard locking.  BG fiber per client connection.
+# Supports pipelining via response batching (one tcpWrite per tcpRead).
+#
+# Compared against DragonflyDB using redis-benchmark via runner.rb.
+# Test:    redis-cli -p 6390 SET foo bar / GET foo / INCR counter
+# Bench:   redis-benchmark -p 6390 -t set,get,incr -n 100000 -c 50 -P 16
 
 FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE counters: HashMap<Int64>) RETURNS !Void ->
     MUTABLE running: Bool = TRUE;
@@ -15,13 +15,13 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
         IF data.length() == 0 THEN
             running = FALSE;
         ELSE
-            -- Batch all responses into one string, write once at the end.
+            # Batch all responses into one string, write once at the end.
             MUTABLE resp = "";
             MUTABLE pos: Int64 = 0;
             WHILE pos < data.length() && running DO
                 MUTABLE ch = charAt(data, pos);
                 IF ch == "*" THEN
-                    -- RESP array: *N\r\n$L\r\nBULK\r\n...
+                    # RESP array: *N\r\n$L\r\nBULK\r\n...
                     pos += 1;
                     MUTABLE crPos = pos;
                     WHILE crPos < data.length() && charAt(data, crPos) != "\r" DO
@@ -56,7 +56,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                         ai += 1;
                     END
 
-                    -- Dispatch command — append to response buffer
+                    # Dispatch command — append to response buffer
                     IF arg0 == "SET" || arg0 == "set" THEN
                         store[arg1] = arg2;
                         resp = resp + "+OK\r\n";
@@ -88,7 +88,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                     ELSE_IF arg0 == "COMMAND" || arg0 == "command" THEN
                         resp = resp + "*0\r\n";
                     ELSE_IF arg0 == "CONFIG" || arg0 == "config" THEN
-                        -- CONFIG GET returns empty list; CONFIG SET returns OK
+                        # CONFIG GET returns empty list; CONFIG SET returns OK
                         IF arg1 == "SET" || arg1 == "set" THEN
                             resp = resp + "+OK\r\n";
                         ELSE
@@ -111,7 +111,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                 ELSE_IF ch == "\r" || ch == "\n" THEN
                     pos += 1;
                 ELSE
-                    -- Inline command: scan to \r or \n, extract with substr
+                    # Inline command: scan to \r or \n, extract with substr
                     MUTABLE cmdEnd = pos;
                     WHILE cmdEnd < data.length() && charAt(data, cmdEnd) != "\r" && charAt(data, cmdEnd) != "\n" DO
                         cmdEnd += 1;
@@ -133,7 +133,7 @@ FN handleClient!(client: TCPClient, MUTABLE store: HashMap<String>, MUTABLE coun
                     END
                 END
             END
-            -- Single write for ALL responses in this batch
+            # Single write for ALL responses in this batch
             IF resp.length() > 0 THEN
                 tcpWrite(client, resp);
             END

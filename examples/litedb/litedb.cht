@@ -1,5 +1,5 @@
--- LiteDB: Concurrent B-Tree Key-Value Store
--- Compiler stress test: @shared:locked, lambdas, REDUCE, DO blocks, ENUM.
+# LiteDB: Concurrent B-Tree Key-Value Store
+# Compiler stress test: @shared:locked, lambdas, REDUCE, DO blocks, ENUM.
 
 ENUM Op { Get, Put, Delete, Scan }
 
@@ -50,7 +50,7 @@ FN main() RETURNS Void ->
     MUTABLE nodes: Node[]@list = [];
     MUTABLE children: HashMap<Int64> = {};
 
-    -- Build B-tree: root(30) -> left(10,20), right(40)
+    # Build B-tree: root(30) -> left(10,20), right(40)
     MUTABLE lk0: Int64[]@list = [];
     MUTABLE lv0: String[]@list = [];
     lk0.append(10);
@@ -72,7 +72,7 @@ FN main() RETURNS Void ->
     children[childKey(2, 1)] = 1;
     MUTABLE root: Int64 = 2;
 
-    -- ENUM dispatch
+    # ENUM dispatch
     MUTABLE opName = "";
     PARTIAL MATCH Op.Scan START
         Op.Get -> opName = "get";,
@@ -82,43 +82,43 @@ FN main() RETURNS Void ->
     END
     ASSERT opName == "scan", "ENUM dispatch";
 
-    -- Tree structure
+    # Tree structure
     ASSERT nodes[root].isLeaf == FALSE, "root is internal";
     ASSERT nodes[root].keys[0] == 30, "root key 30";
     ASSERT nodes[0].keys[1] == 20, "left key 1 = 20";
     ASSERT nodes[1].keys[0] == 40, "right key 0 = 40";
 
-    -- Tree search: descend from root to find key 20
+    # Tree search: descend from root to find key 20
     cp = findKeyIndex(nodes[root].keys, 20);
     leafIdx = children[childKey(root, cp)] OR (0 - 1);
     ASSERT nodes[leafIdx].keys[1] == 20, "tree search: key 20";
 
-    -- Collect all keys for pipeline queries
+    # Collect all keys for pipeline queries
     MUTABLE allKeys: Int64[]@list = [];
     allKeys.append(10);
     allKeys.append(20);
     allKeys.append(40);
 
-    -- Lambda filter
+    # Lambda filter
     evenCount = scanWithFilter(allKeys, %(k: Int64) -> k MOD 2 == 0);
     ASSERT evenCount == 3, "lambda: 3 even (10,20,40)";
 
-    -- REDUCE pipeline
+    # REDUCE pipeline
     keySum = allKeys |> REDUCE(0_i64) acc + _;
     ASSERT keySum == 70, "REDUCE sum = 70";
 
-    -- WHERE + REDUCE
+    # WHERE + REDUCE
     evenSum = allKeys |> WHERE _ MOD 2 == 0 |> REDUCE(0_i64) acc + _;
     ASSERT evenSum == 70, "WHERE even REDUCE = 70 (all even)";
 
-    -- WHERE + SELECT + REDUCE: keys > 15, doubled
+    # WHERE + SELECT + REDUCE: keys > 15, doubled
     bigDoubled = allKeys |> WHERE _ > 15 |> SELECT _ * 2 |> REDUCE(0_i64) acc + _;
     ASSERT bigDoubled == 120, "WHERE>15 + SELECT*2 + REDUCE = 120 (20*2+40*2)";
 
-    -- @shared:locked concurrent access
+    # @shared:locked concurrent access
     stats = TreeStats{ insertCount: 0, searchCount: 0 } @shared:locked;
 
-    -- BG fibers with WITH EXCLUSIVE
+    # BG fibers with WITH EXCLUSIVE
     MUTABLE futures: ~Void[]@list = [];
     MUTABLE fi: Int64 = 0;
     WHILE fi < 4 DO
@@ -136,7 +136,7 @@ FN main() RETURNS Void ->
         ASSERT s.insertCount == 40, "4 BG fibers x 10 = 40";
     }
 
-    -- DO block: 4 concurrent branches
+    # DO block: 4 concurrent branches
     DO {
         WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; },
         WITH EXCLUSIVE stats AS s { s.searchCount = s.searchCount + 5; },
@@ -147,18 +147,18 @@ FN main() RETURNS Void ->
         ASSERT s.searchCount == 20, "DO: 4 x 5 = 20";
     }
 
-    -- ================================================================
-    -- Commit 5: @multiowned results + nested BG
-    -- ================================================================
+    # ================================================================
+    # Commit 5: @multiowned results + nested BG
+    # ================================================================
 
-    -- @multiowned: Rc-wrapped struct with list fields
+    # @multiowned: Rc-wrapped struct with list fields
     rs = makeResultSet(3);
     ASSERT rs.count == 3, "multiowned: 3 items";
-    -- Rc clone: both rs and rs2 share the same ResultSet
+    # Rc clone: both rs and rs2 share the same ResultSet
     rs2 = rs;
     ASSERT rs2.count == 3, "multiowned clone shares data";
 
-    -- Nested BG: outer BG spawns inner BG
+    # Nested BG: outer BG spawns inner BG
     outerP: ~Int64 = BG {
         innerP: ~Int64 = BG { 42; };
         innerResult = NEXT innerP;
@@ -167,33 +167,33 @@ FN main() RETURNS Void ->
     outerResult = NEXT outerP;
     ASSERT outerResult == 43, "nested BG: 42 + 1 = 43";
 
-    -- BG returning String (previously misclassified as BoundedStream)
+    # BG returning String (previously misclassified as BoundedStream)
     strP: ~String = BG { "litedb"; };
     strResult = NEXT strP;
     ASSERT strResult == "litedb", "BG returns string";
 
-    -- ================================================================
-    -- Commit 6: Verification summary
-    -- ================================================================
-    -- All features exercised:
-    --   ENUM Op with PARTIAL MATCH dispatch
-    --   STRUCT Node with Int64[]@list + String[]@list fields
-    --   Node[]@list (list of structs with nested lists)
-    --   Mutation through list[idx].field (needs_mut_ref)
-    --   Struct literal with @list fields (direct ArrayList move)
-    --   Field reassignment with pre-cleanup of old value
-    --   HashMap<Int64> for children index mapping
-    --   findKeyIndex helper (read-only list param)
-    --   scanWithFilter with FN(Int64)->Bool lambda parameter
-    --   Pipeline: REDUCE, WHERE+REDUCE, WHERE+SELECT+REDUCE
-    --   @shared:locked TreeStats (Arc<Mutex<T>>)
-    --   BG fibers with WITH EXCLUSIVE + promise list join
-    --   DO block with 4 concurrent branches
-    --   @multiowned ResultSet (Rc with list fields)
-    --   Nested BG (outer spawns inner)
-    --   BG returning String (~String promise)
+    # ================================================================
+    # Commit 6: Verification summary
+    # ================================================================
+    # All features exercised:
+    #   ENUM Op with PARTIAL MATCH dispatch
+    #   STRUCT Node with Int64[]@list + String[]@list fields
+    #   Node[]@list (list of structs with nested lists)
+    #   Mutation through list[idx].field (needs_mut_ref)
+    #   Struct literal with @list fields (direct ArrayList move)
+    #   Field reassignment with pre-cleanup of old value
+    #   HashMap<Int64> for children index mapping
+    #   findKeyIndex helper (read-only list param)
+    #   scanWithFilter with FN(Int64)->Bool lambda parameter
+    #   Pipeline: REDUCE, WHERE+REDUCE, WHERE+SELECT+REDUCE
+    #   @shared:locked TreeStats (Arc<Mutex<T>>)
+    #   BG fibers with WITH EXCLUSIVE + promise list join
+    #   DO block with 4 concurrent branches
+    #   @multiowned ResultSet (Rc with list fields)
+    #   Nested BG (outer spawns inner)
+    #   BG returning String (~String promise)
 
-    -- ENUM exhaustive check
+    # ENUM exhaustive check
     MUTABLE opCount: Int64 = 0;
     PARTIAL MATCH Op.Get START Op.Get -> opCount += 1;, DEFAULT -> opCount += 0; END
     PARTIAL MATCH Op.Put START Op.Put -> opCount += 1;, DEFAULT -> opCount += 0; END
