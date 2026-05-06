@@ -4636,11 +4636,11 @@ class MIRLowering
   end
 
   def lower_identifier(node)
-    # Pipeline bindings (@u, @v, @item, ...) are substituted by PipelineHost
+    # Pipeline bindings ($u, $v, $item, ...) are substituted by PipelineHost
     # before reaching the MIR lowering. If one arrives here it means it was
     # used outside its pipeline context (after the pipeline expression ended,
     # or in a pipeline that doesn't have a matching AS declaration).
-    if node.name.match?(/\A@[a-z]/)
+    if node.name.match?(/\A\$[a-z]/)
       line = node.token&.respond_to?(:line) ? node.token.line : "?"
       raise "line #{line}: Undefined pipeline binding '#{node.name}'. " \
             "Pipeline bindings must be declared with 'AS #{node.name}' " \
@@ -4736,8 +4736,8 @@ class MIRLowering
     # Error chain: expr OR handler
     return lower_or_rescue(node) if node.op == :OR_RESCUE
 
-    # Named pipeline binding (AS @v): passthrough to LHS value.
-    # The @v registration is handled by the pipeline host at the binding point.
+    # Named pipeline binding (AS $v): passthrough to LHS value.
+    # The $v registration is handled by the pipeline host at the binding point.
     return lower(node.left) if node.op == :BIND_VAR
 
     # String concat (2-part) uses std.mem.concat

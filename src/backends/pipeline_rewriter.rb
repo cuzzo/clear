@@ -102,10 +102,10 @@ class PipelineRewriter
     terminal = chain[:terminal]
     real_source = chain[:source]
 
-    # Named binding chains (source AS @u |> UNNEST ...) must reach the MIR
+    # Named binding chains (source AS $u |> UNNEST ...) must reach the MIR
     # lowering intact so lower_binding_chain can fuse them into nested loops
-    # with correct @u -> loop_var substitution. PipelineRewriter has no concept
-    # of named bindings and would emit @u as a raw identifier.
+    # with correct $u -> loop_var substitution. PipelineRewriter has no concept
+    # of named bindings and would emit $u as a raw identifier.
     return node if binding_source?(real_source)
 
     # Rewrite the source (it may contain nested pipelines in non-chain positions).
@@ -248,7 +248,7 @@ class PipelineRewriter
 
   # Returns true if the node is, or contains, a BIND_VAR-sourced pipeline.
   # These are handled by MIR lowering (lower_binding_chain) which performs
-  # correct @u -> loop_var substitution. PipelineRewriter must leave them alone.
+  # correct $u -> loop_var substitution. PipelineRewriter must leave them alone.
   def binding_source?(node)
     return true if node.is_a?(AST::BinaryOp) && node.op == :BIND_VAR
     return false unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH

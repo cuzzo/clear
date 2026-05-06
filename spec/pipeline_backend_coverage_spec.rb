@@ -206,8 +206,8 @@ RSpec.describe "pipeline backend coverage" do
 
     it "scopes optional named bindings" do
       expect(pipeline_host.with_optional_named_binding(nil, "__ignored") { pipeline_host.instance_variable_get(:@named_bindings).dup }).to eq({})
-      result = pipeline_host.with_optional_named_binding("@u", "__pipe_u") do
-        pipeline_host.send(:substitute_placeholders, id("@u")).name
+      result = pipeline_host.with_optional_named_binding("$u", "__pipe_u") do
+        pipeline_host.send(:substitute_placeholders, id("$u")).name
       end
       expect(result).to eq("__pipe_u")
       expect(pipeline_host.instance_variable_get(:@named_bindings)).to eq({})
@@ -220,8 +220,8 @@ RSpec.describe "pipeline backend coverage" do
       pipeline_host.instance_variable_set(:@join_param_map, { "left" => "__jl" })
       expect(pipeline_host.visit(id("left"))).to eq("__jl")
 
-      pipeline_host.instance_variable_set(:@named_bindings, { "@u" => "__pipe_u" })
-      expect(pipeline_host.visit(id("@u"))).to eq("__pipe_u")
+      pipeline_host.instance_variable_set(:@named_bindings, { "$u" => "__pipe_u" })
+      expect(pipeline_host.visit(id("$u"))).to eq("__pipe_u")
 
       pipeline_host.instance_variable_set(:@soa_rewrite_active, true)
       expect(pipeline_host.visit(AST::GetField.new(tok, id("_"), :x))).to eq("__soa_x[__soa_i]")
@@ -237,12 +237,12 @@ RSpec.describe "pipeline backend coverage" do
       pipeline_host.instance_variable_set(:@placeholder_name, "__it")
       pipeline_host.instance_variable_set(:@acc_placeholder, "__acc")
       pipeline_host.instance_variable_set(:@join_param_map, { "r" => "__jr" })
-      pipeline_host.instance_variable_set(:@named_bindings, { "@u" => "__pipe_u" })
+      pipeline_host.instance_variable_set(:@named_bindings, { "$u" => "__pipe_u" })
 
       expect(pipeline_host.send(:substitute_placeholders, AST::FuncCall.new(tok, "f", [id("_")])).args.first.name).to eq("__it")
       expect(pipeline_host.send(:substitute_placeholders, AST::MethodCall.new(tok, id("_"), "m", [id("acc")])).object.name).to eq("__it")
       expect(pipeline_host.send(:substitute_placeholders, AST::BinaryOp.new(tok, id("_"), :ADD, id("acc"))).right.name).to eq("__acc")
-      expect(pipeline_host.send(:substitute_placeholders, AST::GetIndex.new(tok, id("@u"), id("r"))).target.name).to eq("__pipe_u")
+      expect(pipeline_host.send(:substitute_placeholders, AST::GetIndex.new(tok, id("$u"), id("r"))).target.name).to eq("__pipe_u")
       expect(pipeline_host.send(:substitute_placeholders, AST::UnaryOp.new(tok, :NOT, id("_"))).right.name).to eq("__it")
       expect(pipeline_host.send(:substitute_placeholders, AST::StructLit.new(tok, "Box", { "x" => id("_") })).fields["x"].name).to eq("__it")
       expect(pipeline_host.send(:substitute_placeholders, AST::HashLit.new(tok, { "k" => id("_") })).pairs["k"].name).to eq("__it")

@@ -39,14 +39,14 @@ alive = entities
 
 Pipelines chain left to right. Each stage passes its result to the next.
 
-## Named Pipeline Bindings (`AS @v`)
+## Named Pipeline Bindings (`AS $v`)
 
-The `AS @v` syntax binds the current pipeline element to a named reference that persists across subsequent stages.
+The `AS $v` syntax binds the current pipeline element to a named reference that persists across subsequent stages.
 
 ```ruby clear illustrative
-bill = users AS @u
-  |> UNNEST @u.orders
-  |> SUM _.price * @u.discount;
+bill = users AS $u
+  |> UNNEST $u.orders
+  |> SUM _.price * $u.discount;
 ```
 
 ### Why bindings exist
@@ -54,89 +54,89 @@ bill = users AS @u
 Without a binding, `_` always refers to the *current* element - the item being iterated at the innermost level. After `UNNEST`, `_` becomes each inner element (an Order), and the outer element (the User) is no longer reachable.
 
 ```ruby clear illustrative
--- Without AS @u: @u is not available inside the fold.
+-- Without AS $u: $u is not available inside the fold.
 -- `_` after UNNEST is the Order, not the User.
 bill = users
   |> UNNEST _.orders
   |> SUM _.price;         -- can access order.price, but NOT user.discount
 ```
 
-`AS @u` captures the outer element before the `UNNEST` replaces `_`, keeping it accessible:
+`AS $u` captures the outer element before the `UNNEST` replaces `_`, keeping it accessible:
 
 ```ruby clear illustrative
-bill = users AS @u
-  |> UNNEST @u.orders     -- @u = the User; _ = each Order
-  |> SUM _.price * @u.discount;  -- cross-reference: order.price * user.discount
+bill = users AS $u
+  |> UNNEST $u.orders     -- $u = the User; _ = each Order
+  |> SUM _.price * $u.discount;  -- cross-reference: order.price * user.discount
 ```
 
 The compiler fuses this into a single nested loop with no intermediate allocations.
 
 ### Scope of a binding
 
-A binding created with `AS @v` is visible from the point of declaration to the end of the pipeline expression. It cannot be used after the pipeline terminates:
+A binding created with `AS $v` is visible from the point of declaration to the end of the pipeline expression. It cannot be used after the pipeline terminates:
 
 ```ruby clear illustrative
-bill = users AS @u
-  |> UNNEST @u.orders   -- @u is in scope
-  |> WHERE _.qty > 1    -- @u still in scope
-  |> SUM _.price * @u.discount;  -- @u still in scope
+bill = users AS $u
+  |> UNNEST $u.orders   -- $u is in scope
+  |> WHERE _.qty > 1    -- $u still in scope
+  |> SUM _.price * $u.discount;  -- $u still in scope
 
--- @u is not accessible here (out of scope after the pipeline ends)
+-- $u is not accessible here (out of scope after the pipeline ends)
 ```
 
-Multiple pipelines in the same function can each use their own `@u` - bindings are scoped to the pipeline expression, not the function.
+Multiple pipelines in the same function can each use their own `$u` - bindings are scoped to the pipeline expression, not the function.
 
-### Naming the inner element (AS @o)
+### Naming the inner element (AS $o)
 
 When you UNNEST and need a name for the inner element (instead of `_`), use a second binding after the UNNEST expression:
 
 ```ruby clear illustrative
-bill = users AS @u
-  |> UNNEST @u.orders AS @o    -- @u = User, @o = Order
-  |> SUM @o.price * @u.discount;
+bill = users AS $u
+  |> UNNEST $u.orders AS $o    -- $u = User, $o = Order
+  |> SUM $o.price * $u.discount;
 ```
 
-`AS @o` after the UNNEST expression binds the inner element. Both `@u` and `@o` are available in the fold.
+`AS $o` after the UNNEST expression binds the inner element. Both `$u` and `$o` are available in the fold.
 
 ### Supported combinations
 
-**UNNEST binding chains** - fold operators that work after `AS @u |> UNNEST`:
+**UNNEST binding chains** - fold operators that work after `AS $u |> UNNEST`:
 
 | Fold | Example |
 |---|---|
-| SUM | `|> SUM _.price * @u.discount` |
+| SUM | `|> SUM _.price * $u.discount` |
 | COUNT | `|> COUNT TRUE` |
 | AVERAGE | `|> AVERAGE _.price` |
 | MIN | `|> MIN _.price` |
 | MAX | `|> MAX _.price` |
 | ANY | `|> ANY _.price > 50.0` |
-| ALL | `|> ALL @u.discount > 0.0` |
+| ALL | `|> ALL $u.discount > 0.0` |
 | FIND | `|> FIND _.price > 10.0` (returns `?ElemType`) |
 
 Intermediate `WHERE` stages filter the inner elements before the fold:
 
 ```ruby clear illustrative
-total = users AS @u
-  |> UNNEST @u.orders
+total = users AS $u
+  |> UNNEST $u.orders
   |> WHERE _.qty > 1        -- filter inner elements
-  |> SUM _.price * @u.discount;
+  |> SUM _.price * $u.discount;
 ```
 
-`SELECT` is not supported in UNNEST binding chains (the inner projection would lose the `@u` context). Use field access in the fold expression instead.
+`SELECT` is not supported in UNNEST binding chains (the inner projection would lose the `$u` context). Use field access in the fold expression instead.
 
-**CONCURRENT binding** - `@u` is also accessible inside `CONCURRENT` stages that operate directly on the bound list (without an intermediate UNNEST):
+**CONCURRENT binding** - `$u` is also accessible inside `CONCURRENT` stages that operate directly on the bound list (without an intermediate UNNEST):
 
 | Operator | Example |
 |---|---|
-| CONCURRENT SELECT | `AS @u |> CONCURRENT SELECT @u.val * 2.0` |
-| CONCURRENT SUM | `AS @u |> CONCURRENT SUM @u.score` |
-| CONCURRENT COUNT | `AS @u |> CONCURRENT COUNT @u.active` |
-| CONCURRENT MIN | `AS @u |> CONCURRENT MIN @u.score` |
-| CONCURRENT MAX | `AS @u |> CONCURRENT MAX @u.score` |
-| CONCURRENT AVERAGE | `AS @u |> CONCURRENT AVERAGE @u.score` |
-| CONCURRENT WHERE | `AS @u |> CONCURRENT WHERE @u.score > 50.0` |
+| CONCURRENT SELECT | `AS $u |> CONCURRENT SELECT $u.val * 2.0` |
+| CONCURRENT SUM | `AS $u |> CONCURRENT SUM $u.score` |
+| CONCURRENT COUNT | `AS $u |> CONCURRENT COUNT $u.active` |
+| CONCURRENT MIN | `AS $u |> CONCURRENT MIN $u.score` |
+| CONCURRENT MAX | `AS $u |> CONCURRENT MAX $u.score` |
+| CONCURRENT AVERAGE | `AS $u |> CONCURRENT AVERAGE $u.score` |
+| CONCURRENT WHERE | `AS $u |> CONCURRENT WHERE $u.score > 50.0` |
 
-In all concurrent cases, `@u` resolves to the item being processed by the current worker.
+In all concurrent cases, `$u` resolves to the item being processed by the current worker.
 
 ## The `_` Variable
 

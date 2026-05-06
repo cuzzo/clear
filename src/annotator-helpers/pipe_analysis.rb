@@ -568,7 +568,7 @@ module PipeAnalysis
 
   def analyze_unnest_op(node)
     # UNNEST: list |> UNNEST _.arr (flatmap)
-    # Optional inner binding: UNNEST _.arr AS @o  parses as UNNEST BIND_VAR(_.arr, @o)
+    # Optional inner binding: UNNEST _.arr AS $o  parses as UNNEST BIND_VAR(_.arr, $o)
     # because :pipe_expression uses parse_expression(1) which consumes AS at prec 2.
     require_array_input!(node, "UNNEST")
     item_type = node.left.type_info.element_type.resolved
@@ -577,7 +577,7 @@ module PipeAnalysis
     inner_bind_name = nil
     expr = node.right.expression
     if expr.is_a?(AST::BinaryOp) && expr.op == :BIND_VAR
-      inner_bind_name = expr.right.name  # e.g. "@o"
+      inner_bind_name = expr.right.name  # e.g. "$o"
     end
 
     # Analyze the expression with '_' in scope
@@ -599,7 +599,7 @@ module PipeAnalysis
     node.storage = :frame
 
     # Promote inner binding to the outer scope so subsequent pipeline stages can see it.
-    # BIND_VAR was visited inside the temp scope, so @o was declared there and is now gone.
+    # BIND_VAR was visited inside the temp scope, so $o was declared there and is now gone.
     # Re-declare it in current_scope (the scope that persists after this method returns).
     if inner_bind_name
       current_scope.declare(inner_bind_name, nil, nested_element_type.to_s, false, false, nil, :stack)

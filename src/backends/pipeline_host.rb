@@ -28,19 +28,19 @@ class PipelineHost
     @soa_each_mode = false
     @soa_needed_fields = Set.new
     @mir_mode = false
-    # Named pipeline bindings: "@u" -> "__pipe_u" (persist across stages, cleared per-chain)
+    # Named pipeline bindings: "$u" -> "__pipe_u" (persist across stages, cleared per-chain)
     @named_bindings = {}
   end
 
   # Compute the Zig variable name for a CLEAR named pipeline binding.
-  # "@u" -> "__pipe_u", "@order" -> "__pipe_order"
+  # "$u" -> "__pipe_u", "$order" -> "__pipe_order"
   def pipe_binding_zig_name(clear_name)
-    "__pipe_#{clear_name.delete_prefix('@')}"
+    "__pipe_#{clear_name.delete_prefix('$')}"
   end
 
   # Conditional version of with_named_binding: registers the binding only
   # if a name is provided, otherwise just calls the block. Used at the
-  # CONCURRENT lowering site where `list AS @u |> ...` provides a name
+  # CONCURRENT lowering site where `list AS $u |> ...` provides a name
   # but plain `list |> ...` does not.
   def with_optional_named_binding(clear_name, zig_var, &blk)
     return blk.call if clear_name.nil?
@@ -87,7 +87,7 @@ class PipelineHost
       return @join_param_map[node.name]
     end
 
-    # Named pipeline binding: @u -> registered Zig var (e.g. "__pipe_u")
+    # Named pipeline binding: $u -> registered Zig var (e.g. "__pipe_u")
     if node.is_a?(AST::Identifier) && !@named_bindings.empty? && @named_bindings.key?(node.name)
       return @named_bindings[node.name]
     end
@@ -373,8 +373,8 @@ class PipelineHost
       return lower_range_reduce(range_chain[:source], range_chain[:stages], rhs, node) if range_chain
     end
 
-    # Binding-unnest chain: source AS @u |> UNNEST expr [AS @o] |> [stages] |> fold
-    # Must be fused into nested loops - materializing UNNEST would lose the @u context.
+    # Binding-unnest chain: source AS $u |> UNNEST expr [AS $o] |> [stages] |> fold
+    # Must be fused into nested loops - materializing UNNEST would lose the $u context.
     if (bchain = unwrap_binding_unnest_chain(node))
       return lower_binding_chain(bchain, node)
     end
@@ -1730,10 +1730,10 @@ class PipelineHost
   end
 
   # Detect a binding-unnest chain suitable for fused nested-loop generation:
-  #   BIND_VAR(source, @u) |> [BIND_VAR(]UNNEST(expr)[, @o)] |> [WHERE/SELECT] |> fold
+  #   BIND_VAR(source, $u) |> [BIND_VAR(]UNNEST(expr)[, $o)] |> [WHERE/SELECT] |> fold
   #
-  # Note: `UNNEST expr AS @o` parses as BIND_VAR(UnnestOp(expr), @o) because AS has
-  # higher precedence than |>. Both `|> UNNEST expr` and `|> UNNEST expr AS @o` are handled.
+  # Note: `UNNEST expr AS $o` parses as BIND_VAR(UnnestOp(expr), $o) because AS has
+  # higher precedence than |>. Both `|> UNNEST expr` and `|> UNNEST expr AS $o` are handled.
   #
   # Returns a hash with the chain components, or nil if the pattern doesn't match.
   def unwrap_binding_unnest_chain(node)
@@ -1756,7 +1756,7 @@ class PipelineHost
       end
     end
 
-    # cursor must now be: SMOOTH(BIND_VAR(source, @u), unnest_part)
+    # cursor must now be: SMOOTH(BIND_VAR(source, $u), unnest_part)
     return nil unless cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
     lhs = cursor.left
     rhs = cursor.right
@@ -1764,37 +1764,37 @@ class PipelineHost
     # Must be a UnnestOp
     return nil unless rhs.is_a?(AST::UnnestOp)
 
-    # Detect optional inner binding: `UNNEST expr AS @o` parses as
-    # UnnestOp(expression=BIND_VAR(expr, @o)) because :pipe_expression uses
+    # Detect optional inner binding: `UNNEST expr AS $o` parses as
+    # UnnestOp(expression=BIND_VAR(expr, $o)) because :pipe_expression uses
     # parse_expression(1) which consumes AS at prec 2 as part of the inner expr.
     unnest_expr = rhs.expression
     inner_binding = nil
     if unnest_expr.is_a?(AST::BinaryOp) && unnest_expr.op == :BIND_VAR
-      inner_binding = unnest_expr.right.name  # "@o"
+      inner_binding = unnest_expr.right.name  # "$o"
       unnest_expr   = unnest_expr.left        # the actual array expression
     end
 
-    # LHS must be a BIND_VAR (source AS @u)
+    # LHS must be a BIND_VAR (source AS $u)
     return nil unless lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
 
     {
       source:        lhs.left,
-      outer_binding: lhs.right.name,  # "@u"
-      unnest_expr:   unnest_expr,     # @u.orders (unwrapped from any BIND_VAR)
-      inner_binding: inner_binding,   # "@o" or nil
+      outer_binding: lhs.right.name,  # "$u"
+      unnest_expr:   unnest_expr,     # $u.orders (unwrapped from any BIND_VAR)
+      inner_binding: inner_binding,   # "$o" or nil
       stages:        stages,
       fold:          fold
     }
   end
 
   # Generate fused nested loops for a binding-unnest chain.
-  # Outer loop: source elements bound to @u (outer_zig).
+  # Outer loop: source elements bound to $u (outer_zig).
   # Inner loop: unnest expression elements (inner_zig).
   # Both bindings are visible in stage expressions and the fold.
   def lower_binding_chain(chain, smooth_node)
-    outer_name = chain[:outer_binding]          # "@u"
+    outer_name = chain[:outer_binding]          # "$u"
     outer_zig  = pipe_binding_zig_name(outer_name)  # "__pipe_u"
-    inner_name = chain[:inner_binding]          # "@o" or nil
+    inner_name = chain[:inner_binding]          # "$o" or nil
     inner_zig  = inner_name ? pipe_binding_zig_name(inner_name) : "__bc_inner"
     label      = next_pipe_label
 
@@ -1824,14 +1824,14 @@ class PipelineHost
 
     with_named_binding(outer_name, outer_zig) do
       source_mir = visit_mir(chain[:source])
-      unnest_mir = visit_mir(chain[:unnest_expr])  # @u already in @named_bindings
+      unnest_mir = visit_mir(chain[:unnest_expr])  # $u already in @named_bindings
 
       inner_block = lambda do
         acc_init, loop_body, post_inner, result_expr = lower_binding_fold(
           chain[:fold], chain[:stages], inner_zig, smooth_node, names)
 
         # When inner_name is nil the capture is the generated __bc_inner which
-        # the fold expression may not reference (e.g. ALL @u.discount > 0.0).
+        # the fold expression may not reference (e.g. ALL $u.discount > 0.0).
         # Detect actual usage by emitting the body to text and scanning for the
         # capture name, then suppress only if unused to avoid Zig errors.
         unless inner_name
@@ -1983,8 +1983,8 @@ class PipelineHost
     body = accum_stmts
     stages.reverse_each do |stage|
       if stage.is_a?(AST::SelectOp)
-        raise "SELECT is not supported in AS @v binding chains. " \
-              "Use WHERE to filter or name the projection with AS @o before the fold."
+        raise "SELECT is not supported in AS $v binding chains. " \
+              "Use WHERE to filter or name the projection with AS $o before the fold."
       end
       next unless stage.is_a?(AST::WhereOp)
       pred = with_pipeline_context(placeholder: placeholder) { visit_mir(stage.expression) }
@@ -2905,9 +2905,9 @@ class PipelineHost
     end
 
     # List-source CONCURRENT (Zig backend only -- BC handles lists via
-    # the BC short-circuit above). `list AS @u |> CONCURRENT ...` is
+    # the BC short-circuit above). `list AS $u |> CONCURRENT ...` is
     # supported: extract the binding name and run the callback body
-    # lowering with `@u` registered to resolve to `__item`.
+    # lowering with `$u` registered to resolve to `__item`.
     if @lowering.instance_variable_get(:@target) != :bc
       lhs_node = smooth_node.left
       bind_name = nil
@@ -2944,12 +2944,12 @@ class PipelineHost
       end
     end
 
-    # Detect `list AS @u |> CONCURRENT SELECT @u.field` -- thread the binding
-    # into the CONCURRENT worker body so @u resolves to ctx.items[__idx].
+    # Detect `list AS $u |> CONCURRENT SELECT $u.field` -- thread the binding
+    # into the CONCURRENT worker body so $u resolves to ctx.items[__idx].
     lhs = smooth_node.left
     prev_outer = @concurrent_outer_binding
     @concurrent_outer_binding = if lhs.is_a?(AST::BinaryOp) && lhs.op == :BIND_VAR
-      lhs.right.name   # "@u"
+      lhs.right.name   # "$u"
     end
 
     inner = conc_op.op
@@ -2976,10 +2976,10 @@ class PipelineHost
   # gets explicit isError checking because the standard SELECT auto-tries
   # failable expressions, which would propagate errors instead of skipping.
   #
-  # When `lhs` is `BIND_VAR(source, @u)`, register @u as an alias for the
+  # When `lhs` is `BIND_VAR(source, $u)`, register $u as an alias for the
   # pipeline iterator "it" and use the unwrapped source as the actual
-  # data source. This makes `users AS @u |> CONCURRENT SELECT @u.field`
-  # work — substitute_placeholders rewrites @u → it inside the inner
+  # data source. This makes `users AS $u |> CONCURRENT SELECT $u.field`
+  # work — substitute_placeholders rewrites $u → it inside the inner
   # expression at MIR-build time. Mirrors @concurrent_outer_binding's
   # role on the Zig path.
   def lower_concurrent_bc(lhs, conc_op, smooth_node)

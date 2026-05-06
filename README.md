@@ -19,9 +19,9 @@ It's designed to be:
 ### The *SMOOTH* operator
 
 ```ruby
-bill = users AS @u
-  |> UNNEST @u.orders
-  |> SUM _.price * @u.discount;
+bill = users AS $u
+  |> UNNEST $u.orders
+  |> SUM _.price * $u.discount;
 
 -- Fuses nested iteration with aggregation. No intermediate allocations.
 ```

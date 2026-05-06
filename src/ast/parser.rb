@@ -1614,8 +1614,8 @@ class Parser
     lhs = parse_unary
 
     while (op_token = current) && (op_prec = get_precedence(op_token)) && op_prec > precedence
-      # GUARD CLAUSE: AS is used as a keyword in CAST, and only binds if followed by an alias (@...)
-      if op_token.value == 'AS' && (peek.type == :TYPE_ID || peek.value[0] != '@')
+      # GUARD CLAUSE: AS is used as a keyword in CAST, and only binds if followed by an alias ($...)
+      if op_token.value == 'AS' && (peek.type == :TYPE_ID || peek.value[0] != '$')
         break
       end
 

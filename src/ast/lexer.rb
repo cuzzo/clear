@@ -86,7 +86,7 @@ class Lexer
       when @s.scan(/%/)
         add(:PERCENT, '%', start_col)
 
-      when @s.scan(/[a-zA-Z_@]\w*(!(?!=)|\?(?=\())?/)
+      when @s.scan(/[a-zA-Z_@$]\w*(!(?!=)|\?(?=\())?/)
         word = @s.matched
         if KEYWORDS.include?(word)
           add(:KEYWORD, word, start_col)

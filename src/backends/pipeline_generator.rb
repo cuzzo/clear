@@ -22,8 +22,8 @@ module PipelineGenerator
   # sources, individual operator methods handle each stage via materialization.
   # -------------------------------------------------------------------------
 
-  # When lower_concurrent detected `list AS @u |> CONCURRENT op`, this wraps
-  # the expression visit with @u -> placeholder substitution active.
+  # When lower_concurrent detected `list AS $u |> CONCURRENT op`, this wraps
+  # the expression visit with $u -> placeholder substitution active.
   def with_concurrent_outer_binding(placeholder, &blk)
     return blk.call unless @concurrent_outer_binding
     with_named_binding(@concurrent_outer_binding, placeholder) { blk.call }
@@ -1774,7 +1774,7 @@ module PipelineGenerator
     src_decl     = src_needs_cleanup ? "var pipe_src_list" : "const pipe_src_list"
 
     # For the worker body, items accessed via ctx.items (the context struct).
-    # If source was `list AS @u`, @u also resolves to ctx.items[__idx].
+    # If source was `list AS $u`, $u also resolves to ctx.items[__idx].
     inner_code = with_pipeline_context(placeholder: "ctx.items[__idx]") do
       with_fiber_capture_map({}) do
         with_concurrent_outer_binding("ctx.items[__idx]") { visit(inner_expr) }

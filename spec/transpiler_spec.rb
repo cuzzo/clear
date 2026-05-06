@@ -1811,9 +1811,9 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
-  # AS @v pipeline binding - happy path
+  # AS $v pipeline binding - happy path
   # ===========================================================================
-  describe "AS @v pipeline binding" do
+  describe "AS $v pipeline binding" do
     let(:struct_preamble) { <<~CLEAR }
       STRUCT Order { price: Float64, qty: Int64 }
       STRUCT User { name: String, orders: Order[]@list }
@@ -1826,42 +1826,42 @@ RSpec.describe ZigTranspiler do
         ];
     CLEAR
 
-    it "generates an outer for-loop with named capture for AS @u" do
-      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders |> SUM _.price; RETURN; END"
+    it "generates an outer for-loop with named capture for AS $u" do
+      src = struct_preamble + "_ = users AS $u |> UNNEST $u.orders |> SUM _.price; RETURN; END"
       zig = transpile(src)
       expect(zig).to match(/for.*\|__pipe_u\|/)
     end
 
     it "generates an inner for-loop over the unnested field" do
-      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders |> SUM _.price; RETURN; END"
+      src = struct_preamble + "_ = users AS $u |> UNNEST $u.orders |> SUM _.price; RETURN; END"
       zig = transpile(src)
       expect(zig).to match(/__pipe_u\.orders/)
     end
 
-    it "substitutes @u in the fold expression" do
-      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders |> SUM _.price; RETURN; END"
+    it "substitutes $u in the fold expression" do
+      src = struct_preamble + "_ = users AS $u |> UNNEST $u.orders |> SUM _.price; RETURN; END"
       zig = transpile(src)
-      # _.price should reference the inner loop variable, @u should be the outer
+      # _.price should reference the inner loop variable, $u should be the outer
       expect(zig).to include("__pipe_u")
-      expect(zig).not_to match(/@u/)   # no literal @u in output
+      expect(zig).not_to match(/\$u/)   # no literal $u in output
     end
 
-    it "generates explicit inner binding for UNNEST @u.orders AS @o" do
-      src = struct_preamble + "_ = users AS @u |> UNNEST @u.orders AS @o |> SUM @o.price; RETURN; END"
+    it "generates explicit inner binding for UNNEST $u.orders AS $o" do
+      src = struct_preamble + "_ = users AS $u |> UNNEST $u.orders AS $o |> SUM $o.price; RETURN; END"
       zig = transpile(src)
       expect(zig).to match(/for.*\|__pipe_u\|/)
       expect(zig).to match(/for.*\|__pipe_o\|/)
       expect(zig).to include("__pipe_o.price")
     end
 
-    it "WHERE stage filters using inner element, fold uses @u" do
+    it "WHERE stage filters using inner element, fold uses $u" do
       src = <<~CLEAR
         STRUCT Order { price: Float64, qty: Int64 }
         STRUCT User { name: String, discount: Float64, orders: Order[]@list }
         FN main() RETURNS Void ->
           ao: Order[] = [Order{ price: 10.0, qty: 2 }];
           us: User[] = [User{ name: "a", discount: 0.9, orders: ao }];
-          _ = us AS @u |> UNNEST @u.orders |> WHERE _.qty > 1 |> SUM _.price * @u.discount;
+          _ = us AS $u |> UNNEST $u.orders |> WHERE _.qty > 1 |> SUM _.price * $u.discount;
           RETURN;
         END
       CLEAR
@@ -1877,24 +1877,24 @@ RSpec.describe ZigTranspiler do
         FN main() RETURNS Void ->
           ao: Order[] = [Order{ price: 5.0, qty: 1 }];
           us: User[] = [User{ name: "x", orders: ao }];
-          cnt  = us AS @u |> UNNEST @u.orders |> COUNT TRUE;
-          any_ = us AS @u |> UNNEST @u.orders |> ANY _.price > 0.0;
-          all_ = us AS @u |> UNNEST @u.orders |> ALL _.qty > 0;
-          mn   = us AS @u |> UNNEST @u.orders |> MIN _.price;
-          mx   = us AS @u |> UNNEST @u.orders |> MAX _.price;
-          avg  = us AS @u |> UNNEST @u.orders |> AVERAGE _.price;
+          cnt  = us AS $u |> UNNEST $u.orders |> COUNT TRUE;
+          any_ = us AS $u |> UNNEST $u.orders |> ANY _.price > 0.0;
+          all_ = us AS $u |> UNNEST $u.orders |> ALL _.qty > 0;
+          mn   = us AS $u |> UNNEST $u.orders |> MIN _.price;
+          mx   = us AS $u |> UNNEST $u.orders |> MAX _.price;
+          avg  = us AS $u |> UNNEST $u.orders |> AVERAGE _.price;
           RETURN;
         END
       CLEAR
       expect { transpile(src) }.not_to raise_error
     end
 
-    it "CONCURRENT SELECT uses @u as the current element" do
+    it "CONCURRENT SELECT uses $u as the current element" do
       src = <<~CLEAR
         STRUCT SimpleUser { val: Float64 }
         FN main() RETURNS Void ->
           sus: SimpleUser[] = [SimpleUser{ val: 1.0 }, SimpleUser{ val: 2.0 }];
-          _ = sus AS @u |> CONCURRENT(workers: 2) SELECT @u.val * 2.0;
+          _ = sus AS $u |> CONCURRENT(workers: 2) SELECT $u.val * 2.0;
           RETURN;
         END
       CLEAR
@@ -1902,12 +1902,12 @@ RSpec.describe ZigTranspiler do
       expect(zig).to include("ctx.items[__idx].val")
     end
 
-    it "CONCURRENT SUM uses @u as the current element" do
+    it "CONCURRENT SUM uses $u as the current element" do
       src = <<~CLEAR
         STRUCT SimpleUser { val: Float64 }
         FN main() RETURNS Void ->
           sus: SimpleUser[] = [SimpleUser{ val: 1.0 }];
-          _ = sus AS @u |> CONCURRENT(workers: 1) SUM @u.val;
+          _ = sus AS $u |> CONCURRENT(workers: 1) SUM $u.val;
           RETURN;
         END
       CLEAR
@@ -1917,34 +1917,34 @@ RSpec.describe ZigTranspiler do
   end
 
   # ===========================================================================
-  # AS @v binding error cases
+  # AS $v binding error cases
   # ===========================================================================
-  describe "AS @v binding error cases" do
+  describe "AS $v binding error cases" do
     it "raises an error when a pipeline binding is used after the pipeline ends" do
       src = <<~CLEAR
         STRUCT Order { price: Float64 }
         STRUCT User { name: String, orders: Order[]@list }
         FN main() RETURNS Void ->
           users: User[] = [User{ name: "alice", orders: [Order{price: 10.0}] }];
-          total = users AS @u |> UNNEST @u.orders |> SUM _.price;
-          bad = @u.name;
+          total = users AS $u |> UNNEST $u.orders |> SUM _.price;
+          bad = $u.name;
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/Undefined pipeline binding '@u'/)
+      expect { transpile(src) }.to raise_error(/Undefined pipeline binding '\$u'/)
     end
 
-    it "raises an error when SELECT is used in an AS @v binding chain" do
+    it "raises an error when SELECT is used in an AS $v binding chain" do
       src = <<~CLEAR
         STRUCT Order { price: Float64 }
         STRUCT User { name: String, orders: Order[]@list }
         FN main() RETURNS Void ->
           users: User[] = [User{ name: "alice", orders: [Order{price: 10.0}] }];
-          total = users AS @u |> UNNEST @u.orders |> SELECT _.price |> SUM _;
+          total = users AS $u |> UNNEST $u.orders |> SELECT _.price |> SUM _;
           RETURN;
         END
       CLEAR
-      expect { transpile(src) }.to raise_error(/SELECT is not supported in AS @v binding chains/)
+      expect { transpile(src) }.to raise_error(/SELECT is not supported in AS \$v binding chains/)
     end
   end
 
