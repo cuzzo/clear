@@ -12,31 +12,34 @@
 # category of "wrong memory ordering" bugs is eliminated from the
 # language surface.
 
-STRUCT State { message: String }
+STRUCT State {
+  message: String
+}
 
 FN main() RETURNS Void ->
-    # @shared:locked = Arc<Mutex<State>>. All accesses are SC by
-    # construction. There is no ordering annotation to get wrong.
-    s = State{ message: "" } @shared:locked;
+  # @shared:locked = Arc<Mutex<State>>. All accesses are SC by
+  # construction. There is no ordering annotation to get wrong.
+  s = State{ message: "" } @shared: locked;
 
-    producer = BG {
-        WITH EXCLUSIVE s AS inner {
-            inner.message = "hello from producer";
-            # Mutex release here emits a full barrier. The consumer is
-            # guaranteed to see this write when it acquires the lock.
-        }
-    };
+  producer = BG {
+    WITH EXCLUSIVE s AS inner {
+      inner.message = "hello from producer";
+      # Mutex release here emits a full barrier. The consumer is
+      # guaranteed to see this write when it acquires the lock.
+    }
+  };
 
-    consumer = BG {
-        NEXT producer;   # wait for producer to finish
-        WITH s AS inner {
-            # Mutex acquire here emits a full barrier. Always sees the
-            # producer's write regardless of hardware memory model.
-            print(inner.message);
-        }
-    };
+  consumer = BG {
+    NEXT producer;
+    # wait for producer to finish
+    WITH s AS inner {
+      # Mutex acquire here emits a full barrier. Always sees the
+      # producer's write regardless of hardware memory model.
+      print(inner.message);
+    }
+  };
 
-    NEXT consumer;
+  NEXT consumer;
 END
 
 # Summary of memory ordering exposure per language:

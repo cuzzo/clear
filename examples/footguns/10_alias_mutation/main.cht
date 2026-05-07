@@ -15,52 +15,59 @@
 # The C "restrict lie" pattern cannot be expressed: the compiler never
 # assumes non-aliasing, and the language does not expose raw pointers.
 
-STRUCT Point { x: Int, y: Int }
+STRUCT Point {
+  x: Int,
+  y: Int
+}
 
 FN demonstrate_ownership() RETURNS Void ->
-    p1 = Point{ x: 1, y: 2 };
+  p1 = Point{ x: 1, y: 2 };
 
-    # GIVE transfers ownership; p1 is no longer valid after this.
-    # Using p1 after GIVE is a compile-time error.
-    # p2 = GIVE p1;
-    # print(p1.x.toString()); -- compile error: p1 was moved
+  # GIVE transfers ownership; p1 is no longer valid after this.
+  # Using p1 after GIVE is a compile-time error.
+  # p2 = GIVE p1;
+  # print(p1.x.toString()); -- compile error: p1 was moved
 
-    # Without GIVE, structs in CLEAR are implicitly copied for Copy types.
-    # Point has only Int fields (Copy), so assignment copies the value.
-    p2 = p1;       # copy: p2 is a fresh copy, p1 is still valid
-    # p2.x = 99; -- mutation requires MUTABLE declaration
+  # Without GIVE, structs in CLEAR are implicitly copied for Copy types.
+  # Point has only Int fields (Copy), so assignment copies the value.
+  p2 = p1;
+  # copy: p2 is a fresh copy, p1 is still valid
+  # p2.x = 99; -- mutation requires MUTABLE declaration
 
-    MUTABLE p3 = p1;    # mutable copy
-    p3.x = 99;
-    print("p1.x after p3.x=99: " + p1.x.toString()); # still 1, copy semantics
-    print("p3.x = " + p3.x.toString());               # 99
+  MUTABLE p3 = p1;
+  # mutable copy
+  p3.x = 99;
+  print("p1.x after p3.x=99: " + p1.x.toString());
+  # still 1, copy semantics
+  print("p3.x = " + p3.x.toString());
+  # 99
 END
 
 FN shared_mutation() RETURNS Void ->
-    # To share mutable state, declare it @shared:locked.
-    # Access requires WITH EXCLUSIVE (write) or WITH (read).
-    # You cannot hold a reference AND mutate simultaneously:
-    # the mutex enforces that at most one accessor holds the lock.
-    counter = 0 @shared:locked;
+  # To share mutable state, declare it @shared:locked.
+  # Access requires WITH EXCLUSIVE (write) or WITH (read).
+  # You cannot hold a reference AND mutate simultaneously:
+  # the mutex enforces that at most one accessor holds the lock.
+  counter = 0 @shared: locked;
 
-    writer = BG {
-        WITH EXCLUSIVE counter AS c {
-            c! = 42;
-            # Lock released here. No other accessor can read/write c
-            # while this block executes.
-        }
-    };
-
-    NEXT writer;
-
-    WITH counter AS c {
-        print("counter = " + c.toString()); # 42
+  writer = BG {
+    WITH EXCLUSIVE counter AS c {
+      c! = 42;
+      # Lock released here. No other accessor can read/write c
+      # while this block executes.
     }
+  };
+
+  NEXT writer;
+
+  WITH counter AS c {
+    print("counter = " + c.toString());  # 42
+  }
 END
 
 FN main() RETURNS Void ->
-    demonstrate_ownership();
-    shared_mutation();
+  demonstrate_ownership();
+  shared_mutation();
 END
 
 # Summary:

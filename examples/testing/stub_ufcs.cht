@@ -3,17 +3,21 @@
 #
 # Run: clear test examples/testing/stub_ufcs.cht
 
-STRUCT Client { host: String }
+STRUCT Client {
+  host: String
+}
 
 FN query(client: Client, sql: String) RETURNS String ->
-    RETURN "real database result";
+  RETURN "real database result";
 END
 
 FN execute(client: Client, sql: String) RETURNS Void ->
-    RETURN;
+  RETURN;
 END
 
-FN main() RETURNS Void -> RETURN; END
+FN main() RETURNS Void ->
+  RETURN;
+END
 
 TEST ClientStubs DO
   WHEN "stubbed query" DO

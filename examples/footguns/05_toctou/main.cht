@@ -6,60 +6,62 @@
 # one atomic region by construction, making the correct pattern the
 # natural one and the broken pattern visibly wrong.
 
-STRUCT Account { balance: Int64 }
+STRUCT Account {
+  balance: Int64
+}
 
 FN main() RETURNS Void ->
-    acct = Account{ balance: 100 } @shared:locked;
+  acct = Account{ balance: 100 } @shared: locked;
 
-    # ----------------------------------------------------------------
-    # BROKEN: check in one WITH, act in a separate WITH.
-    # The lock is released between the two blocks — a concurrent fiber
-    # can modify balance in the window, exactly as in C/Go/Rust.
-    #
-    # WITH acct AS a {
-    #     IF a.balance >= 80 THEN
-    #         -- lock released here; window opens
-    #     END
-    # }
-    # WITH EXCLUSIVE acct AS a {
-    #     a.balance = a.balance - 80;  -- acting on a stale check
-    # }
-    # ----------------------------------------------------------------
+  # ----------------------------------------------------------------
+  # BROKEN: check in one WITH, act in a separate WITH.
+  # The lock is released between the two blocks — a concurrent fiber
+  # can modify balance in the window, exactly as in C/Go/Rust.
+  #
+  # WITH acct AS a {
+  #     IF a.balance >= 80 THEN
+  #         -- lock released here; window opens
+  #     END
+  # }
+  # WITH EXCLUSIVE acct AS a {
+  #     a.balance = a.balance - 80;  -- acting on a stale check
+  # }
+  # ----------------------------------------------------------------
 
-    # CORRECT: check and act inside one WITH EXCLUSIVE block.
-    # The lock is held for the entire check+act, closing the window.
-    # This is the natural way to write it in CLEAR; the block structure
-    # makes the atomic scope explicit.
+  # CORRECT: check and act inside one WITH EXCLUSIVE block.
+  # The lock is held for the entire check+act, closing the window.
+  # This is the natural way to write it in CLEAR; the block structure
+  # makes the atomic scope explicit.
 
-    p1 = BG {
-        WITH EXCLUSIVE acct AS a {
-            IF a.balance >= 80 THEN
-                a.balance = a.balance - 80;
-                print("fiber 1 withdrew 80");
-            ELSE
-                print("fiber 1: insufficient funds");
-            END
-        }
-    };
-
-    p2 = BG {
-        WITH EXCLUSIVE acct AS a {
-            IF a.balance >= 80 THEN
-                a.balance = a.balance - 80;
-                print("fiber 2 withdrew 80");
-            ELSE
-                print("fiber 2: insufficient funds");
-            END
-        }
-    };
-
-    NEXT p1;
-    NEXT p2;
-
-    WITH acct AS a {
-        # Always 20: exactly one withdrawal succeeded.
-        print("balance = " + a.balance.str());
+  p1 = BG {
+    WITH EXCLUSIVE acct AS a {
+      IF a.balance >= 80 THEN
+        a.balance = a.balance - 80;
+        print("fiber 1 withdrew 80");
+      ELSE
+        print("fiber 1: insufficient funds");
+      END
     }
+  };
+
+  p2 = BG {
+    WITH EXCLUSIVE acct AS a {
+      IF a.balance >= 80 THEN
+        a.balance = a.balance - 80;
+        print("fiber 2 withdrew 80");
+      ELSE
+        print("fiber 2: insufficient funds");
+      END
+    }
+  };
+
+  NEXT p1;
+  NEXT p2;
+
+  WITH acct AS a {
+    # Always 20: exactly one withdrawal succeeded.
+    print("balance = " + a.balance.str());
+  }
 END
 
 # Note: CLEAR cannot prevent TOCTOU in general (e.g. filesystem races

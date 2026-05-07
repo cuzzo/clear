@@ -22,40 +22,42 @@
 # from two separate WITH blocks, with another fiber modifying it in between.
 # This is the TOCTOU pattern (see 05_toctou), not a memory ordering issue.
 
-STRUCT Payload { data: String }
+STRUCT Payload {
+  data: String
+}
 
 FN main() RETURNS Void ->
-    result = Payload{ data: "" } @shared:locked;
+  result = Payload{ data: "" } @shared: locked;
 
-    # Producer: writes data under the lock.
-    producer = BG {
-        WITH EXCLUSIVE result AS r {
-            r.data = "important result";
-            # Mutex release here is a full barrier on all architectures.
-        }
-    };
+  # Producer: writes data under the lock.
+  producer = BG {
+    WITH EXCLUSIVE result AS r {
+      r.data = "important result";
+      # Mutex release here is a full barrier on all architectures.
+    }
+  };
 
-    # Relay: waits for producer, then signals consumer.
-    # NEXT producer ensures all of producer's writes are visible before
-    # this fiber proceeds. The happens-before chain is preserved because
-    # NEXT is a synchronization point, not a plain channel forward.
-    relay = BG {
-        NEXT producer;
-        # Nothing to forward: the data lives in 'result'. Consumer
-        # will see it because WITH EXCLUSIVE issues a mutex acquire.
-    };
+  # Relay: waits for producer, then signals consumer.
+  # NEXT producer ensures all of producer's writes are visible before
+  # this fiber proceeds. The happens-before chain is preserved because
+  # NEXT is a synchronization point, not a plain channel forward.
+  relay = BG {
+    NEXT producer;
+    # Nothing to forward: the data lives in 'result'. Consumer
+    # will see it because WITH EXCLUSIVE issues a mutex acquire.
+  };
 
-    # Consumer: waits for relay, then reads data.
-    consumer = BG {
-        NEXT relay;
-        WITH result AS r {
-            # Mutex acquire here is a full barrier. Guaranteed to see
-            # the producer's write regardless of hardware memory model.
-            print("consumer saw: " + r.data);
-        }
-    };
+  # Consumer: waits for relay, then reads data.
+  consumer = BG {
+    NEXT relay;
+    WITH result AS r {
+      # Mutex acquire here is a full barrier. Guaranteed to see
+      # the producer's write regardless of hardware memory model.
+      print("consumer saw: " + r.data);
+    }
+  };
 
-    NEXT consumer;
+  NEXT consumer;
 END
 
 # Summary:

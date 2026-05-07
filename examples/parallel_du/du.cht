@@ -10,11 +10,11 @@ FN entrySize(entry: String)
  RETURNS !Int64
  EFFECTS REENTRANT
 ->
-  fullPath = substr(entry, 2, entry.length() - 2);
-  prefix = substr(entry, 0, 2);
+  fullPath = entry.substr(2, entry.length() - 2);
+  prefix = entry.substr(0, 2);
 
   IF prefix == "f:" THEN
-    RETURN fileSize(fullPath);
+    RETURN fullPath.fileSize();
   ELSE_IF prefix == "d:" THEN
     RETURN scanDir(fullPath);
   END
@@ -26,14 +26,14 @@ FN scanDir(path: String)
  RETURNS !Int64
  EFFECTS REENTRANT
 ->
-  entries = listAll(path)
+  entries = path.listAll()
     |> SELECT "${substr(_, 0, 2)}${path}/${substr(_, 2, _.length() - 2)}";
 
   children = entries
     |> CONCURRENT SELECT entrySize(_)
     |> REDUCE(0) acc + _;
 
-  RETURN fileSize(path) + children;
+  RETURN path.fileSize() + children;
 END
 
 FN main() RETURNS Void ->

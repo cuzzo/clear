@@ -4,18 +4,20 @@
 # Run: clear test examples/testing/basic_test.cht
 
 FN add(a: Float64, b: Float64) RETURNS Float64 ->
-    RETURN a + b;
+  RETURN a + b;
 END
 
 FN multiply(a: Float64, b: Float64) RETURNS Float64 ->
-    RETURN a * b;
+  RETURN a * b;
 END
 
 PRIVATE FN secret() RETURNS Float64 ->
-    RETURN 42.0;
+  RETURN 42.0;
 END
 
-FN main() RETURNS Void -> RETURN; END
+FN main() RETURNS Void ->
+  RETURN;
+END
 
 TEST Arithmetic DO
   WHEN "add" DO

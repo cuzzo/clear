@@ -16,82 +16,85 @@ EXTERN FN freeString(ptr: String, len: Int64) RETURNS Void FROM "http";
 
 # Page: a fetched page with its URL, title, and discovered links.
 STRUCT Page {
-    url: String,
-    title: String,
-    linkCount: Int64
+  url: String,
+  title: String,
+  linkCount: Int64
 }
 
 # Extract the <title>...</title> from HTML.
 FN extractTitle(html: String) RETURNS !String ->
-    startTag = indexOf(html, "<title>") OR -1;
-    IF startTag >= 0 THEN
-        titleStart = startTag + 7;
-        rest = substr(html, titleStart, html.length() - titleStart);
-        endTag = indexOf(rest, "</title>") OR -1;
-        IF endTag >= 0 THEN
-            RETURN substr(html, titleStart, endTag);
-        END
+  startTag = html.indexOf("<title>") OR -1;
+  IF startTag >= 0 THEN
+    titleStart = startTag + 7;
+    rest = html.substr(titleStart, html.length() - titleStart);
+    endTag = rest.indexOf("</title>") OR -1;
+    IF endTag >= 0 THEN
+      RETURN html.substr(titleStart, endTag);
     END
-    RETURN "Untitled";
+  END
+  RETURN "Untitled";
 END
 
 # Count <a href="..."> links in HTML.
 FN countLinks(html: String) RETURNS Int64 ->
-    RETURN countOccurrences(html, "href=");
+  RETURN html.countOccurrences("href=");
 END
 
 # Fetch a page and extract metadata.
-FN fetchPage(baseUrl: String, path: String) RETURNS !Page EFFECTS REENTRANT ->
-    url = baseUrl + path;
-    html = httpGet(url);
-    title = extractTitle(html);
-    links = countLinks(html);
-    RETURN Page{ url: COPY path, title: COPY title, linkCount: links };
+FN fetchPage(baseUrl: String, path: String)
+ RETURNS !Page
+ EFFECTS REENTRANT
+->
+  url = baseUrl + path;
+  html = httpGet(url);
+  title = extractTitle(html);
+  links = countLinks(html);
+  RETURN Page{ url: COPY path, title: COPY title, linkCount: links };
 END
 
 FN main() RETURNS Void ->
-    # Start the canned test server on port 19876
-    startTestServer(19876);
+  # Start the canned test server on port 19876
+  startTestServer(19_876);
 
-    # Give the server thread a moment to bind
-    # (cooperative scheduler: this is a no-op yield)
+  # Give the server thread a moment to bind
+  # (cooperative scheduler: this is a no-op yield)
 
-    baseUrl = "localhost:19876";
-    baseUrlAbout = COPY baseUrl;
-    baseUrlBlog = COPY baseUrl;
+  baseUrl = "localhost:19876";
+  baseUrlAbout = COPY baseUrl;
+  baseUrlBlog = COPY baseUrl;
 
-    # Fetch 3 pages concurrently using BG fibers
-    home: ~Page = BG { @service ->
-        fetchPage(baseUrl, "/");
-    };
-    about: ~Page = BG { @service ->
-        fetchPage(baseUrlAbout, "/about");
-    };
-    blog: ~Page = BG { @service ->
-        fetchPage(baseUrlBlog, "/blog");
-    };
+  # Fetch 3 pages concurrently using BG fibers
+  home: ~Page = BG {@service ->
+    fetchPage(baseUrl, "/");
+  };
+  about: ~Page = BG {@service ->
+    fetchPage(baseUrlAbout, "/about");
+  };
+  blog: ~Page = BG {@service ->
+    fetchPage(baseUrlBlog, "/blog");
+  };
 
-    # Await all results
-    homePage: Page = NEXT home;
-    aboutPage: Page = NEXT about;
-    blogPage: Page = NEXT blog;
+  # Await all results
+  homePage = NEXT home;
+  aboutPage = NEXT about;
+  blogPage = NEXT blog;
 
-    # Verify results
-    print("Home: ${homePage.title} (${homePage.linkCount.toString()} links)");
-    print("About: ${aboutPage.title} (${aboutPage.linkCount.toString()} links)");
-    print("Blog: ${blogPage.title} (${blogPage.linkCount.toString()} links)");
+  # Verify results
+  print("Home: ${homePage.title} (${homePage.linkCount.toString()} links)");
+  print("About: ${aboutPage.title} (${aboutPage.linkCount.toString()} links)");
+  print("Blog: ${blogPage.title} (${blogPage.linkCount.toString()} links)");
 
-    ASSERT homePage.title == "Home", "home title";
-    ASSERT aboutPage.title == "About", "about title";
-    ASSERT blogPage.title == "Blog", "blog title";
+  ASSERT homePage.title == "Home", "home title";
+  ASSERT aboutPage.title == "About", "about title";
+  ASSERT blogPage.title == "Blog", "blog title";
 
-    # Home has 2 links (about + blog), about has 1, blog has 2
-    ASSERT homePage.linkCount == 2, "home links";
-    ASSERT aboutPage.linkCount == 1, "about links";
-    ASSERT blogPage.linkCount == 2, "blog links";
+  # Home has 2 links (about + blog), about has 1, blog has 2
+  ASSERT homePage.linkCount == 2, "home links";
+  ASSERT aboutPage.linkCount == 1, "about links";
+  ASSERT blogPage.linkCount == 2, "blog links";
 
-    # Stop the test server
-    stopTestServer();
+  # Stop the test server
+  stopTestServer();
 
-    print("All crawler tests passed!");
+  print("All crawler tests passed!");
 END

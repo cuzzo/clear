@@ -22,8 +22,12 @@
 # CLEAR does NOT yet enforce lock-ordering or re-entrancy at compile time.
 # That is planned for STRICT EXTREME (v0.3 roadmap).
 
-STRUCT State { value: Int64 }
-STRUCT Account { balance: Int64 }
+STRUCT State {
+  value: Int64
+}
+STRUCT Account {
+  balance: Int64
+}
 
 # -------------------------------------------------------------------------
 # BROKEN 1: Re-entrant locking
@@ -71,80 +75,81 @@ STRUCT Account { balance: Int64 }
 # CORRECT: Resolve promises before acquiring locks
 # -------------------------------------------------------------------------
 FN correct_next_before_lock() RETURNS Void ->
-    s = State{ value: 0 } @locked;
+  s = State{ value: 0 } @locked;
 
-    producer = BG {
-        WITH EXCLUSIVE s AS inner {
-            inner.value = 42;
-        }
-    };
-
-    NEXT producer;  # wait for producer BEFORE acquiring the lock
-
-    WITH s AS inner {
-        print("value = " + inner.value.toString());  # 42
+  producer = BG {
+    WITH EXCLUSIVE s AS inner {
+      inner.value = 42;
     }
+  };
+
+  NEXT producer;
+  # wait for producer BEFORE acquiring the lock
+
+  WITH s AS inner {
+    print("value = " + inner.value.toString());  # 42
+  }
 END
 
 # -------------------------------------------------------------------------
 # CORRECT: Pass already-locked value to helpers (avoid re-entrancy)
 # -------------------------------------------------------------------------
 FN update_value(inner: State) RETURNS Void ->
-    # Receives the already-unlocked struct value — no lock needed.
-    inner.value = 2;
+  # Receives the already-unlocked struct value — no lock needed.
+  inner.value = 2;
 END
 
 FN correct_no_reentrant() RETURNS Void ->
-    s = State{ value: 0 } @locked;
+  s = State{ value: 0 } @locked;
 
-    t = BG {
-        WITH EXCLUSIVE s AS inner {
-            inner.value = 1;
-            update_value(inner);  # pass the value, not the lock
-        }
-    };
-
-    NEXT t;
-
-    WITH s AS inner {
-        print("final value = " + inner.value.toString());
+  t = BG {
+    WITH EXCLUSIVE s AS inner {
+      inner.value = 1;
+      update_value(inner);  # pass the value, not the lock
     }
+  };
+
+  NEXT t;
+
+  WITH s AS inner {
+    print("final value = " + inner.value.toString());
+  }
 END
 
 # -------------------------------------------------------------------------
 # CORRECT: Sequential locks — never hold two at once
 # -------------------------------------------------------------------------
 FN sequential_transfer() RETURNS Void ->
-    a = Account{ balance: 100 } @locked;
-    b = Account{ balance: 200 } @locked;
+  a = Account{ balance: 100 } @locked;
+  b = Account{ balance: 200 } @locked;
 
-    t = BG {
-        amount = 0;
-        WITH EXCLUSIVE a AS ra {
-            amount = ra.balance / 2;
-            ra.balance = ra.balance - amount;
-        }
-        # 'a' is unlocked here — no two locks held simultaneously
-        WITH EXCLUSIVE b AS rb {
-            rb.balance = rb.balance + amount;
-        }
-    };
+  t = BG {
+    amount = 0;
+    WITH EXCLUSIVE a AS ra {
+      amount = ra.balance / 2;
+      ra.balance = ra.balance - amount;
+    }
+    # 'a' is unlocked here — no two locks held simultaneously
+    WITH EXCLUSIVE b AS rb {
+      rb.balance = rb.balance + amount;
+    }
+  };
 
-    NEXT t;
+  NEXT t;
 
-    WITH a AS ra { print("a = " + ra.balance.toString()); }
-    WITH b AS rb { print("b = " + rb.balance.toString()); }
+  WITH a AS ra {print("a = " + ra.balance.toString());}
+  WITH b AS rb {print("b = " + rb.balance.toString());}
 END
 
 FN main() RETURNS Void ->
-    print("--- correct: NEXT before lock ---");
-    correct_next_before_lock();
+  print("--- correct: NEXT before lock ---");
+  correct_next_before_lock();
 
-    print("--- correct: no re-entrancy ---");
-    correct_no_reentrant();
+  print("--- correct: no re-entrancy ---");
+  correct_no_reentrant();
 
-    print("--- correct: sequential locks ---");
-    sequential_transfer();
+  print("--- correct: sequential locks ---");
+  sequential_transfer();
 END
 
 # Summary:
