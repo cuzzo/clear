@@ -646,6 +646,16 @@ class MIRLowering
     to_str = to.to_s
     return nil if from_str.end_with?("[]") && to_str.end_with?("[]")
     return nil if from_str =~ /\[\d+\]$/ && to_str == "Any[]"
+    # Fixed-size array (`T[N]`) -> typed slice (`T[]`): no cast needed.
+    # The downstream argument-position `MIR::ItemsAccess` handles the
+    # slice coercion via `<expr>[0..]`. Without this skip, the
+    # `mir_cast` fallback below wraps the identifier with
+    # `@as(std.ArrayListUnmanaged(T), <fixed>)`, which Zig rejects
+    # because a `[N]T` does not coerce to an ArrayList.
+    if from_str =~ /\A(.+)\[\d+\]\z/
+      from_elem = Regexp.last_match(1)
+      return nil if to_str == "#{from_elem}[]"
+    end
     return nil if from_str.start_with?("HashMap<") && to_str.start_with?("HashMap<")
     if to_str.start_with?("!")
       payload_type = to_str[1..]

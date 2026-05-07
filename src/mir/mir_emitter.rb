@@ -1268,7 +1268,13 @@ class MIREmitter
       # Slice coercion in the else branch: array literals ([N]T) need
       # `[0..]` to coerce to slice; runtime slices ([]T) are accepted
       # by `[0..]` too. ArrayList values match the .items branch.
-      "(if (@hasField(@TypeOf(#{inner}), \"items\")) #{inner}.items else #{inner}[0..])"
+      # `@constCast` strips the `const` qualifier that arises when the
+      # source is a `const fixed: [N]T = ...` binding (Zig's `const`
+      # bindings produce `*const [N]T` from `[0..]`, which doesn't
+      # coerce to a `[]T` slice param). CLEAR's annotator enforces
+      # immutability at the language level, so the slice contents are
+      # not mutated through a borrow-position param.
+      "(if (@hasField(@TypeOf(#{inner}), \"items\")) #{inner}.items else @constCast(#{inner}[0..]))"
     else
       "#{inner}.items"
     end

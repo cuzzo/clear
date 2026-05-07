@@ -1,0 +1,28 @@
+# Test: a fixed-size raw array (`Int64[N]`) can be passed to a function
+# whose parameter is a `Int64[]` slice.
+#
+# Previously the transpiler emitted an `@as(ArrayList(i64), <fixed
+# array>)` cast in the argument position, which Zig rejects because a
+# `[N]i64` is not an ArrayList. The fix is in the transpiler's call-
+# site path so fixed arrays decay to a slice (`fixed[0..]`) when the
+# parameter expects `[]T` / list / slice.
+
+FN sumFirstThree(values: Int64[]) RETURNS Int64 ->
+    RETURN values[0_i64] + values[1_i64] + values[2_i64];
+END
+
+FN main() RETURNS Void ->
+    fixed: Int64[5] = [1_i64, 2_i64, 3_i64, 4_i64, 5_i64];
+    total = sumFirstThree(fixed);
+    ASSERT total == 6_i64, "fixed array passed to slice-typed param";
+
+    # Also exercise via @list slice -- both shapes should call cleanly.
+    MUTABLE list: Int64[]@list = List[];
+    list.append(10_i64);
+    list.append(20_i64);
+    list.append(30_i64);
+    listTotal = sumFirstThree(list);
+    ASSERT listTotal == 60_i64, "@list passed to slice-typed param (control)";
+
+    RETURN;
+END
