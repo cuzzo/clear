@@ -14,38 +14,43 @@
 # char*. String indexing operates on codepoints, not raw bytes, and is
 # bounds-checked. There is no strncpy, strncat, or sprintf.
 
-STRUCT ByteBuffer { data: [Int] }
+STRUCT ByteBuffer {
+  data: Int64[]
+}
 
 FN safe_access() RETURNS Void ->
-    buf = [0, 0, 0, 0];   # 4-element list
+  MUTABLE buf: Int64[] = [0, 0, 0, 0];
+  # 4-element list
 
-    # Out-of-bounds access:
-    # val = buf[10];      -- runtime panic: index 10 out of bounds (len 4)
+  # Out-of-bounds access:
+  # val = buf[10];      -- runtime panic: index 10 out of bounds (len 4)
 
-    # Correct: iterate within bounds
-    i = 0;
-    WHILE i < buf.len() {
-        buf[i]! = i;
-        i = i + 1;
-    }
+  # Correct: iterate within bounds
+  MUTABLE i = 0;
+  WHILE i < buf.length() DO
+    buf[i] = i;
+    i = i + 1;
+  END
 
-    print("buf[0]=" + buf[0].toString());
-    print("buf[3]=" + buf[3].toString());
+  print("buf[0]=" + buf[0].toString());
+  print("buf[3]=" + buf[3].toString());
 END
 
 FN off_by_one() RETURNS Void ->
-    arr = [0, 1, 2, 3, 4, 5, 6, 7];   # 8 elements (indices 0-7)
+  arr: Int64[] = [0, 1, 2, 3, 4, 5, 6, 7];
+  # 8 elements (indices 0-7)
 
-    # arr[8] would panic: index 8 out of bounds (len 8)
-    # The C footgun (i <= 8 instead of i < 8) cannot silently succeed.
+  # arr[8] would panic: index 8 out of bounds (len 8)
+  # The C footgun (i <= 8 instead of i < 8) cannot silently succeed.
 
-    last = arr[arr.len() - 1];  # safe: always the last element
-    print("arr[7]=" + last.toString());
+  last = arr[arr.length() - 1];
+  # safe: always the last element
+  print("arr[7]=" + last.toString());
 END
 
 FN main() RETURNS Void ->
-    safe_access();
-    off_by_one();
+  safe_access();
+  off_by_one();
 END
 
 # Summary:

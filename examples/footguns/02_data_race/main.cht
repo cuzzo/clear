@@ -8,36 +8,38 @@
 # A raw mutable local cannot be captured by concurrent BG fibers at all:
 # the escape analysis sees the concurrent capture and requires @shared.
 
-STRUCT Counter { value: Int64 }
+STRUCT Counter {
+  value: Int64
+}
 
 FN main() RETURNS Void ->
-    # @shared:locked = Arc<Mutex<Counter>>. Mutation requires WITH EXCLUSIVE.
-    c = Counter{ value: 0 } @shared:locked;
+  # @shared:locked = Arc<Mutex<Counter>>. Mutation requires WITH EXCLUSIVE.
+  c = Counter{ value: 0 } @shared: locked;
 
-    p1 = BG {
-        REPEAT 1000000 TIMES
-            WITH EXCLUSIVE c AS inner {
-                inner.value = inner.value + 1;
-            }
-        END
-    };
+  p1 = BG {
+    FOR i IN (0 ..< 1_000_000) DO
+      WITH EXCLUSIVE c AS inner {
+        inner.value = inner.value + 1;
+      }
+    END
+  };
 
-    p2 = BG {
-        REPEAT 1000000 TIMES
-            WITH EXCLUSIVE c AS inner {
-                inner.value = inner.value + 1;
-            }
-        END
-    };
+  p2 = BG {
+    FOR i IN (0 ..< 1_000_000) DO
+      WITH EXCLUSIVE c AS inner {
+        inner.value = inner.value + 1;
+      }
+    END
+  };
 
-    NEXT p1;
-    NEXT p2;
+  NEXT p1;
+  NEXT p2;
 
-    WITH c AS inner {
-        # Always 2000000: WITH EXCLUSIVE serializes all mutations.
-        ASSERT inner.value == 2000000, "no data race";
-        print(inner.value.str());
-    }
+  WITH c AS inner {
+    # Always 2000000: WITH EXCLUSIVE serializes all mutations.
+    ASSERT inner.value == 2_000_000, "no data race";
+    print(inner.value.str());
+  }
 END
 
 # The broken version does not compile:

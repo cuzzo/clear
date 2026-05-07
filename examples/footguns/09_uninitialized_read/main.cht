@@ -13,34 +13,38 @@
 # (unlike Go). It enforces initialization through static analysis instead
 # of runtime overhead. The result is the same safety property at lower cost.
 
-STRUCT Triple { a: Int, b: Int, c: Int }
+STRUCT Triple {
+  a: Int64,
+  b: Int64,
+  c: Int64
+}
 
-FN conditional_sum(n: Int) RETURNS Int ->
-    # sum must be assigned on every path.
-    # In CLEAR there is no "declare without assign" — the assignment IS
-    # the declaration. A conditional that may not execute cannot leave
-    # sum uninitialized because sum doesn't exist until it's assigned.
-    sum = 0;
-    i = 0;
-    WHILE i < n {
-        sum = sum + i;
-        i = i + 1;
-    }
-    RETURN sum;
+FN conditional_sum(n: Int64) RETURNS Int64 ->
+  # sum must be assigned on every path.
+  # In CLEAR there is no "declare without assign" — the assignment IS
+  # the declaration. A conditional that may not execute cannot leave
+  # sum uninitialized because sum doesn't exist until it's assigned.
+  MUTABLE sum = 0;
+  MUTABLE i = 0;
+  WHILE i < n DO
+    sum = sum + i;
+    i = i + 1;
+  END
+  RETURN sum;
 END
 
 FN init_struct() RETURNS Triple ->
-    # Every field must be provided in the struct literal.
-    # Omitting a field is a compile-time error.
-    RETURN Triple{ a: 1, b: 2, c: 0 };
+  # Every field must be provided in the struct literal.
+  # Omitting a field is a compile-time error.
+  RETURN Triple{ a: 1, b: 2, c: 0 };
 END
 
 FN main() RETURNS Void ->
-    result = conditional_sum(0);
-    print("conditional_sum(0) = " + result.toString());
+  result = conditional_sum(0);
+  print("conditional_sum(0) = " + result.toString());
 
-    t = init_struct();
-    print("t.c = " + t.c.toString());
+  t = init_struct();
+  print("t.c = " + t.c.toString());
 END
 
 # Summary:

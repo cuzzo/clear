@@ -10,36 +10,37 @@
 # The scheduler also has a built-in timeout mechanism for BG blocks.
 
 FN fetch_result() RETURNS String ->
-    # Simulates work that completes and returns a value.
-    # In CLEAR, every BG block must terminate; there is no detach.
-    RETURN "result";
+  # Simulates work that completes and returns a value.
+  # In CLEAR, every BG block must terminate; there is no detach.
+  RETURN "result";
 END
 
 FN handle_request(id: Int64) RETURNS Void ->
-    # BG returns a promise. The promise MUST be awaited (NEXT).
-    # Dropping it without NEXT is a compile error:
-    #   "BG promise 'p' is never awaited — possible task leak"
-    p = BG { fetch_result() };
-    result = NEXT p;    # structured: scope waits here until fiber done
-    print("request " + id.str() + ": " + result);
+  # BG returns a promise. The promise MUST be awaited (NEXT).
+  # Dropping it without NEXT is a compile error:
+  #   "BG promise 'p' is never awaited — possible task leak"
+  p = BG {fetch_result();};
+  result = NEXT p;
+  # structured: scope waits here until fiber done
+  print("request " + id.str() + ": " + result);
 END
 
 FN main() RETURNS Void ->
-    REPEAT 5 TIMES
-        handle_request(1);
-    END
+  FOR i IN (0 ..< 5) DO
+    handle_request(1);
+  END
 
-    # ----------------------------------------------------------------
-    # The broken version does not compile:
-    #
-    # FN leaky() RETURNS Void ->
-    #     BG { long_running_work() };   -- ERROR: unawaited BG promise
-    # END                               -- "BG result is never used;
-    #                                   --  did you forget NEXT?"
-    #
-    # Even if you ignore the promise, the scheduler waits for the fiber
-    # before the enclosing function can return. Task leak is structurally
-    # impossible: the scope is the lifetime of all fibers in it.
+  # ----------------------------------------------------------------
+  # The broken version does not compile:
+  #
+  # FN leaky() RETURNS Void ->
+  #     BG { long_running_work() };   -- ERROR: unawaited BG promise
+  # END                               -- "BG result is never used;
+  #                                   --  did you forget NEXT?"
+  #
+  # Even if you ignore the promise, the scheduler waits for the fiber
+  # before the enclosing function can return. Task leak is structurally
+  # impossible: the scope is the lifetime of all fibers in it.
 
-    print("task_leak: CLEAR's structured concurrency prevents this");
+  print("task_leak: CLEAR's structured concurrency prevents this");
 END
