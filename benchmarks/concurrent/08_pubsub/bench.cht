@@ -9,46 +9,48 @@
 # Each subscriber CLONEs an independent cursor — zero message copying.
 # Compare to Go/Rust: publisher sends to 64 separate channels (N copies).
 
-STRUCT Msg { seed: Int64 }
+STRUCT Msg {
+  seed: Int64
+}
 
 FN processMessage(seed: Int64) RETURNS Int64 ->
-    MUTABLE x: Int64 = seed;
-    FOR i IN (0_i64 ..< 2000) -> x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
-    RETURN x;
+  MUTABLE x = seed;
+  FOR i IN (0 ..< 2000) -> x = x %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
+  RETURN x;
 END
 
 FN main() RETURNS Void ->
-    t0 = timestampMs();
+  t0 = timestampMs();
 
-    msgs: ~?Msg[] @split = BG STREAM {
-        FOR i IN (0 ..< 10000) -> YIELD Msg{ seed: i };
-    };
+  msgs: ~?Msg[]@split = BG STREAM {
+    FOR i IN (0 ..< 10_000) -> YIELD Msg{ seed: i };
+  };
 
-    MUTABLE futures: ~Int64[]@list = [];
-    FOR i IN (0 ..< 64) DO
-        subscriber_msgs: ~?Msg[] @split = CLONE msgs;
-        futures.append(BG {
-            @parallel ->
-            MUTABLE total: Int64 = 0;
-            WHILE NEXT subscriber_msgs AS m DO
-                total = total %+ processMessage(m.seed);
-            END
-            total;
-        });
-    END
+  MUTABLE futures: ~Int64[]@list = [];
+  FOR i IN (0 ..< 64) DO
+    subscriber_msgs: ~?Msg[]@split = CLONE msgs;
+    futures
+      .append(
+        BG {
+          @parallel -> MUTABLE total = 0;
+          WHILE NEXT subscriber_msgs AS m DO total = total %+ processMessage(m.seed);
+        END total;
+      }
+    );
+END
 
-    MUTABLE total: Int64 = 0;
-    FOR j IN (0 ..< 64) DO
-        result = NEXT futures[j];
-        total = total %+ result;
-    END
-    elapsed = timestampMs() - t0;
+MUTABLE total = 0;
+FOR j IN (0 ..< 64) DO
+  result = NEXT futures[j];
+  total = total %+ result;
+END
+elapsed = timestampMs() - t0;
 
-    checksum = total MOD 1000000000;
-    print("Checksum: ${checksum.toString()}");
-    print("Messages: 10000");
-    print("Subscribers: 64");
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("Time: ${elapsed.toString()} ms");
-    RETURN;
+checksum = total MOD 1_000_000_000;
+print("Checksum: ${checksum.toString()}");
+print("Messages: 10000");
+print("Subscribers: 64");
+print("BENCH_RESULT: ${elapsed.toString()} ms");
+print("Time: ${elapsed.toString()} ms");
+RETURN;
 END

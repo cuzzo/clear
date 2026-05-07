@@ -13,28 +13,28 @@
 # one producer, one consumer sum, and a join.
 
 FN main() RETURNS Void ->
-    n_writes: Int64 = 2_000_000_i64;
-    expected: Int64 = (n_writes * (n_writes - 1_i64)) / 2_i64;
+  n_writes = 2_000_000;
+  expected = (n_writes * (n_writes - 1)) / 2;
 
-    gen: ~?Int64[] = BG STREAM {
-        MUTABLE i: Int64 = 0_i64;
-        WHILE i < n_writes DO
-            YIELD i;
-            i = i + 1_i64;
-        END
-    };
+  gen: ~?Int64[] = BG STREAM {
+    MUTABLE i = 0;
+    WHILE i < n_writes DO
+      YIELD i;
+      i = i + 1;
+    END
+  };
 
-    t0 = timestampMs();
-    running: ~Int64@observable = gen |> SUM _;
-    final = NEXT running;
-    elapsed = timestampMs() - t0;
-    checksum: Int64 = final + (n_writes * 131_i64);
-    expected_checksum: Int64 = expected + (n_writes * 131_i64);
+  t0 = timestampMs();
+  running: ~Int64@observable = gen |> SUM _;
+  final = NEXT running;
+  elapsed = timestampMs() - t0;
+  checksum = final + (n_writes * 131);
+  expected_checksum = expected + (n_writes * 131);
 
-    ASSERT final == expected, "final mismatch";
-    ASSERT checksum == expected_checksum, "checksum mismatch";
-    print("CLEAR observable: ", final, " (sum 0..N-1) in ", elapsed, " ms");
-    print("BENCH_INFO: CLEAR stream_sum final=", final, " checksum=", checksum, " n=", n_writes);
-    print("BENCH_RESULT: ", elapsed, " ms");
-    RETURN;
+  ASSERT final == expected, "final mismatch";
+  ASSERT checksum == expected_checksum, "checksum mismatch";
+  print("CLEAR observable: ", final, " (sum 0..N-1) in ", elapsed, " ms");
+  print("BENCH_INFO: CLEAR stream_sum final=", final, " checksum=", checksum, " n=", n_writes);
+  print("BENCH_RESULT: ", elapsed, " ms");
+  RETURN;
 END

@@ -12,24 +12,28 @@
 # Compare to Go's atomic.AddInt64 which bounces the cache line across
 # cores under M:N scheduling (~15ns/op on 2 cores, worse on more).
 
-STRUCT Counter { value: Int64 }
+STRUCT Counter {
+  value: Int64
+}
 
 FN main() RETURNS Void ->
-    MUTABLE c = Counter{ value: 0 } @local;
+  MUTABLE c = Counter{ value: 0 } @local;
 
-    t0 = timestampMs();
-    MUTABLE futures: ~Void[]@list = [];
-    FOR i IN (0_i64 ..< 1024) DO
-        futures.append(BG {
-            FOR j IN (0_i64 ..< 10000) -> c.value += 1;
-        });
-    END
+  t0 = timestampMs();
+  MUTABLE futures: ~Void[]@list = [];
+  FOR i IN (0 ..< 1024) DO
+    futures.append(
+      BG {
+        FOR j IN (0 ..< 10_000) -> c.value += 1;
+      }
+    );
+  END
 
-    FOR k IN (0_i64 ..< 1024) -> NEXT futures[k];
-    elapsed = timestampMs() - t0;
+  FOR k IN (0 ..< 1024) -> NEXT futures[k];
+  elapsed = timestampMs() - t0;
 
-    print("Counter: ${c.value.toString()}");
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("Time: ${elapsed.toString()} ms");
-    RETURN;
+  print("Counter: ${c.value.toString()}");
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
 END

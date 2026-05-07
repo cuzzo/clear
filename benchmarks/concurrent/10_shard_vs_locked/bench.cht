@@ -18,40 +18,40 @@
 # Compare to Go (sync.Map) and Rust (dashmap).
 
 FN main() RETURNS Void ->
-    MUTABLE map: HashMap<String>@sharded(32) = {};
-    n = 10000000;
+  MUTABLE map: HashMap<String> @sharded(32) = {};
+  n = 10_000_000;
 
-    # Workload 1: Uniform SET (1M keys, partitioned)
-    t0 = timestampMs();
-    (0..<n) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
-        map[_] = "value";
-    };
-    setMs = timestampMs() - t0;
+  # Workload 1: Uniform SET (1M keys, partitioned)
+  t0 = timestampMs();
+  (0 ..< n)
+    |> SHARD("key:" + _.toString(), map)
+    |> CONCURRENT(batch: 128) EACH {map[_] = "value";};
+  setMs = timestampMs() - t0;
 
-    # Workload 2: Uniform GET (1M keys, all local, 100% hit)
-    t1 = timestampMs();
-    (0..<n) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
-        got = map[_] OR "";
-    };
-    getMs = timestampMs() - t1;
+  # Workload 2: Uniform GET (1M keys, all local, 100% hit)
+  t1 = timestampMs();
+  (0 ..< n)
+    |> SHARD("key:" + _.toString(), map)
+    |> CONCURRENT(batch: 128) EACH {got = map[_] OR "";};
+  getMs = timestampMs() - t1;
 
-    # Workload 3: Mixed — 200K SET (overwrite) + 800K GET
-    t2 = timestampMs();
-    (0..<(n / 5)) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
-        map[_] = "updated";
-    };
-    (0..<((n / 5) * 4)) |> SHARD("key:" + toString(_), map) |> CONCURRENT(batch: 128) EACH {
-        got = map[_] OR "";
-    };
-    mixMs = timestampMs() - t2;
+  # Workload 3: Mixed — 200K SET (overwrite) + 800K GET
+  t2 = timestampMs();
+  (0 ..< (n / 5))
+    |> SHARD("key:" + _.toString(), map)
+    |> CONCURRENT(batch: 128) EACH {map[_] = "updated";};
+  (0 ..< ((n / 5) * 4))
+    |> SHARD("key:" + _.toString(), map)
+    |> CONCURRENT(batch: 128) EACH {got = map[_] OR "";};
+  mixMs = timestampMs() - t2;
 
-    ASSERT map.count() > 0;
-    totalMs = setMs + getMs + mixMs;
-    print("BENCH_RESULT: ${totalMs.toString()} ms");
-    print("Keys: ${n.toString()}");
-    print("Shards: 32");
-    print("Set: ${setMs.toString()} ms");
-    print("Get: ${getMs.toString()} ms");
-    print("Mixed: ${mixMs.toString()} ms");
-    print("Verified: yes");
+  ASSERT map.count() > 0;
+  totalMs = setMs + getMs + mixMs;
+  print("BENCH_RESULT: ${totalMs.toString()} ms");
+  print("Keys: ${n.toString()}");
+  print("Shards: 32");
+  print("Set: ${setMs.toString()} ms");
+  print("Get: ${getMs.toString()} ms");
+  print("Mixed: ${mixMs.toString()} ms");
+  print("Verified: yes");
 END

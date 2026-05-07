@@ -9,28 +9,28 @@
 # CONCURRENT(workers: N) which avoids per-item spawning.
 
 FN doWork(seed: Int64) RETURNS Int64 ->
-    MUTABLE x: Int64 = seed;
-    FOR i IN (0_i64 ..< 10000) -> x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
-    RETURN x;
+  MUTABLE x = seed;
+  FOR i IN (0 ..< 10_000) -> x = x %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
+  RETURN x;
 END
 
 FN main() RETURNS Void ->
-    t0 = timestampMs();
-    MUTABLE futures: ~Int64[]@list = [];
-    FOR i IN (0_i64 ..< 100000) -> futures.append(BG { doWork(i); });
+  t0 = timestampMs();
+  MUTABLE futures: ~Int64[]@list = [];
+  FOR i IN (0 ..< 100_000) -> futures.append(BG {doWork(i);});
 
-    MUTABLE total: Int64 = 0;
-    FOR j IN (0_i64 ..< 100000) DO
-        result = NEXT futures[j];
-        total = total %+ result;
-    END
-    elapsed = timestampMs() - t0;
+  MUTABLE total = 0;
+  FOR j IN (0 ..< 100_000) DO
+    result = NEXT futures[j];
+    total = total %+ result;
+  END
+  elapsed = timestampMs() - t0;
 
-    checksum = total MOD 1000000000;
-    print("Checksum: ${checksum.toString()}");
-    print("Tasks: 100000");
-    print("Iterations: 10000");
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("Time: ${elapsed.toString()} ms");
-    RETURN;
+  checksum = total MOD 1_000_000_000;
+  print("Checksum: ${checksum.toString()}");
+  print("Tasks: 100000");
+  print("Iterations: 10000");
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
 END

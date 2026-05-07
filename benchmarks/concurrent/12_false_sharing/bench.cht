@@ -12,51 +12,50 @@
 # value is its own heap allocation with a control block, guaranteeing
 # cache line isolation without manual padding.
 
-STRUCT Counter { value: Int64 }
+STRUCT Counter {
+  value: Int64
+}
 
 FN main() RETURNS Void ->
-    workers = threadCount();
-    totalWork = 40000000_i64;
-    increments = totalWork / workers;
+  workers = threadCount();
+  totalWork = 40_000_000;
+  increments = totalWork / workers;
 
-    # Each worker gets its own @shared:locked counter (separate heap alloc)
-    MUTABLE counters: Counter@shared:locked[]@list = [];
-    FOR i IN (0_i64 ..< workers) DO
-        counters.append(Counter{ value: 0 } @shared:locked);
-    END
+  # Each worker gets its own @shared:locked counter (separate heap alloc)
+  MUTABLE counters: Counter@shared: locked[]@list = [];
+  FOR i IN (0 ..< workers) DO
+    counters.append(Counter{ value: 0 } @shared: locked);
+  END
 
-    t0 = timestampMs();
+  t0 = timestampMs();
 
-    MUTABLE futures: ~Void[]@list = [];
-    MUTABLE wi = 0_i64;
-    WHILE wi < workers DO
-        ref = counters[wi];
-        futures.append(BG { @standard:@parallel ->
-            FOR j IN (0_i64 ..< increments) DO
-                WITH EXCLUSIVE ref AS inner {
-                    inner.value = inner.value + 1;
-                }
-            END
-        });
-        wi += 1;
-    END
+  MUTABLE futures: ~Void[]@list = [];
+  MUTABLE wi = 0;
+  WHILE wi < workers DO
+    ref = counters[wi];
+    futures
+      .append(
+        BG {@standard: @parallel -> FOR j IN (0 ..< increments) DO WITH EXCLUSIVE ref AS inner {inner.value = inner.value + 1;} END}
+      );
+    wi += 1;
+  END
 
-    FOR i IN (0_i64 ..< workers) -> NEXT futures[i];
-    elapsed = timestampMs() - t0;
+  FOR i IN (0 ..< workers) -> NEXT futures[i];
+  elapsed = timestampMs() - t0;
 
-    # Verify
-    MUTABLE total = 0_i64;
-    FOR i IN (0_i64 ..< workers) DO
-        ref = counters[i];
-        WITH ref AS inner {
-            total = total + inner.value;
-        }
-    END
-    expected = workers * increments;
-    ASSERT total == expected, "total mismatch";
+  # Verify
+  MUTABLE total = 0;
+  FOR i IN (0 ..< workers) DO
+    ref = counters[i];
+    WITH ref AS inner {
+      total = total + inner.value;
+    }
+  END
+  expected = workers * increments;
+  ASSERT total == expected, "total mismatch";
 
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("False-sharing (${workers.toString()} threads x ${increments.toString()} iters)");
-    print("  @shared:locked (no false sharing): ${elapsed.toString()} ms");
-    print("  Total: ${total.toString()}");
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("False-sharing (${workers.toString()} threads x ${increments.toString()} iters)");
+  print("  @shared:locked (no false sharing): ${elapsed.toString()} ms");
+  print("  Total: ${total.toString()}");
 END

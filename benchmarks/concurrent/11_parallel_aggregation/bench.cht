@@ -15,54 +15,56 @@
 # No I/O — pure parallel compute.
 
 FN lcg(state: Int64) RETURNS Int64 ->
-    RETURN state %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
+  RETURN state %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
 END
 
 FN absInt(x: Int64) RETURNS Int64 ->
-    IF x < 0_i64 THEN RETURN 0_i64 - x; END
-    RETURN x;
+  IF x < 0 THEN
+    RETURN 0 - x;
+  END
+  RETURN x;
 END
 
 FN main() RETURNS Void ->
-    n = 10000000;
-    buckets = 1000;
+  n = 10_000_000;
+  buckets = 1000;
 
-    # Pre-compute seeds (LCG is sequential so we must pre-compute).
-    MUTABLE seeds: Int64[]@list = List[];
-    MUTABLE seed: Int64 = 42;
-    FOR i IN (0_i64 ..< n) DO
-        seed = lcg(seed);
-        seeds.append(seed);
-    END
+  # Pre-compute seeds (LCG is sequential so we must pre-compute).
+  MUTABLE seeds: Int64[]@list = List[];
+  MUTABLE seed = 42;
+  FOR i IN (0 ..< n) DO
+    seed = lcg(seed);
+    seeds.append(seed);
+  END
 
-    # Phase 1: Build histogram via SHARD with integer keys — zero string allocation.
-    t0 = timestampMs();
-    MUTABLE counts: HashMap<Int64, Int64>@sharded(32) = {};
-    (0..<n) |> SHARD(absInt(seeds[_]) MOD buckets, counts) |> CONCURRENT(batch: 512) EACH {
-        counts[_] = (counts[_] OR 0_i64) + 1_i64;
-    };
-    shardMs = timestampMs() - t0;
+  # Phase 1: Build histogram via SHARD with integer keys — zero string allocation.
+  t0 = timestampMs();
+  MUTABLE counts: HashMap<Int64, Int64> @sharded(32) = {};
+  (0 ..< n)
+    |> SHARD(absInt(seeds[_]) MOD buckets, counts)
+    |> CONCURRENT(batch: 512) EACH {counts[_] = (counts[_] OR 0) + 1;};
+  shardMs = timestampMs() - t0;
 
-    # Phase 2: Stats over histogram values (partial aggregation)
-    t1 = timestampMs();
-    vals = counts.values();
-    total    = vals |> CONCURRENT SUM toFloat(_);
-    highest  = vals |> CONCURRENT MAX toFloat(_);
-    lowest   = vals |> CONCURRENT MIN toFloat(_);
-    average  = vals |> CONCURRENT AVERAGE toFloat(_);
-    statsMs = timestampMs() - t1;
+  # Phase 2: Stats over histogram values (partial aggregation)
+  t1 = timestampMs();
+  vals = counts.values();
+  total = vals |> CONCURRENT SUM _.toFloat();
+  highest = vals |> CONCURRENT MAX _.toFloat();
+  lowest = vals |> CONCURRENT MIN _.toFloat();
+  average = vals |> CONCURRENT AVERAGE _.toFloat();
+  statsMs = timestampMs() - t1;
 
-    ASSERT total == toFloat(n), "total mismatch";
+  ASSERT total == n.toFloat(), "total mismatch";
 
-    totalMs = shardMs + statsMs;
-    print("BENCH_RESULT: ${totalMs.toString()} ms");
-    print("Events: ${n.toString()}");
-    print("Buckets: ${buckets.toString()}");
-    print("Shard histogram: ${shardMs.toString()} ms");
-    print("Aggregation: ${statsMs.toString()} ms");
-    print("Total: ${total.toString()}");
-    print("Max: ${highest.toString()}");
-    print("Min: ${lowest.toString()}");
-    print("Avg: ${average.toString()}");
-    print("Verified: yes");
+  totalMs = shardMs + statsMs;
+  print("BENCH_RESULT: ${totalMs.toString()} ms");
+  print("Events: ${n.toString()}");
+  print("Buckets: ${buckets.toString()}");
+  print("Shard histogram: ${shardMs.toString()} ms");
+  print("Aggregation: ${statsMs.toString()} ms");
+  print("Total: ${total.toString()}");
+  print("Max: ${highest.toString()}");
+  print("Min: ${lowest.toString()}");
+  print("Avg: ${average.toString()}");
+  print("Verified: yes");
 END

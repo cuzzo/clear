@@ -8,42 +8,44 @@
 # @shared:locked struct — no result list is ever materialized.
 # Peak memory: O(capacity), not O(N).
 
-STRUCT Acc { value: Int64 }
+STRUCT Acc {
+  value: Int64
+}
 
 FN processItem(val: Int64) RETURNS Int64 ->
-    MUTABLE x: Int64 = val;
-    FOR i IN (0_i64 ..< 5000) -> x = x %* 6364136223846793005 %+ 1442695040888963407;
-    RETURN x;
+  MUTABLE x = val;
+  FOR i IN (0 ..< 5000) -> x = x %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
+  RETURN x;
 END
 
 FN main() RETURNS Void ->
-    acc = Acc{ value: 0 } @shared:locked;
-    t0 = timestampMs();
+  acc = Acc{ value: 0 } @shared: locked;
+  t0 = timestampMs();
 
-    gen: ~?Int64[] = BG STREAM {
-        MUTABLE i: Int64 = 0;
-        WHILE i < 100000 DO
-            YIELD i;
-            i = i + 1;
-        END
-    };
+  gen: ~?Int64[] = BG STREAM {
+    MUTABLE i = 0;
+    WHILE i < 100_000 DO
+      YIELD i;
+      i = i + 1;
+    END
+  };
 
-    gen |> CONCURRENT(capacity: 64) EACH {
-        h = processItem(_);
-        WITH EXCLUSIVE acc AS a {
-            a.value = a.value %+ h;
-        }
-    };
-
-    WITH acc AS a {
-        checksum = a.value MOD 1000000000;
-        print("Checksum:", checksum);
+  gen |> CONCURRENT(capacity: 64) EACH {
+    h = processItem(_);
+    WITH EXCLUSIVE acc AS a {
+      a.value = a.value %+ h;
     }
+  };
 
-    elapsed = timestampMs() - t0;
-    print("Items: 100000");
-    print("Channel capacity: 64");
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("Time: ${elapsed.toString()} ms");
-    RETURN;
+  WITH acc AS a {
+    checksum = a.value MOD 1_000_000_000;
+    print("Checksum:", checksum);
+  }
+
+  elapsed = timestampMs() - t0;
+  print("Items: 100000");
+  print("Channel capacity: 64");
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
 END

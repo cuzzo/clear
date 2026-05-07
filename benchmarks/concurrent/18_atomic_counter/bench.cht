@@ -21,41 +21,44 @@
 #      should NOT yield, but if the compiler injects a yield-budget
 #      check the cost shows up here).
 
-FN bump_loop!(MUTABLE c: Int64, n: Int64) RETURNS Void REQUIRES c: ATOMIC ->
-    MUTABLE i: Int64 = 0;
-    WHILE i < n DO
-        c += 1;
-        i = i + 1;
-    END
-    RETURN;
+FN bump_loop!(MUTABLE c: Int64, n: Int64)
+ RETURNS Void
+ REQUIRES c: ATOMIC
+->
+  MUTABLE i = 0;
+  WHILE i < n DO
+    c += 1;
+    i = i + 1;
+  END
+  RETURN;
 END
 
 FN main() RETURNS Void ->
-    MUTABLE c: Int64 = 0 @shared:atomic;
+  MUTABLE c: Int64 = 0 @shared: atomic;
 
-    t0 = timestampMs();
-    bg1: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    bg2: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    bg3: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    bg4: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    bg5: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    bg6: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    bg7: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    bg8: ~Void = BG { bump_loop!(c, 1000000_i64); };
-    NEXT bg1;
-    NEXT bg2;
-    NEXT bg3;
-    NEXT bg4;
-    NEXT bg5;
-    NEXT bg6;
-    NEXT bg7;
-    NEXT bg8;
-    elapsed = timestampMs() - t0;
+  t0 = timestampMs();
+  bg1: ~Void = BG {bump_loop!(c, 1_000_000);};
+  bg2: ~Void = BG {bump_loop!(c, 1_000_000);};
+  bg3: ~Void = BG {bump_loop!(c, 1_000_000);};
+  bg4: ~Void = BG {bump_loop!(c, 1_000_000);};
+  bg5: ~Void = BG {bump_loop!(c, 1_000_000);};
+  bg6: ~Void = BG {bump_loop!(c, 1_000_000);};
+  bg7: ~Void = BG {bump_loop!(c, 1_000_000);};
+  bg8: ~Void = BG {bump_loop!(c, 1_000_000);};
+  NEXT bg1;
+  NEXT bg2;
+  NEXT bg3;
+  NEXT bg4;
+  NEXT bg5;
+  NEXT bg6;
+  NEXT bg7;
+  NEXT bg8;
+  elapsed = timestampMs() - t0;
 
-    final = c;
-    ASSERT final == 8000000_i64, "expected 8000000 (no lost updates)";
-    print("Counter: ${final.toString()}");
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("Time: ${elapsed.toString()} ms");
-    RETURN;
+  final = c;
+  ASSERT final == 8_000_000, "expected 8000000 (no lost updates)";
+  print("Counter: ${final.toString()}");
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
 END
