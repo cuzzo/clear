@@ -29,10 +29,10 @@ END
 # Benchmark 1: Borrowed iterator (zero-copy)
 FN benchBorrowed(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->
   MUTABLE total = 0;
-  FOR outer IN (0 ..< iters) DO
+  TIGHT FOR outer IN (0 ..< iters) DO
     WITH BORROWED data AS ref {
       MUTABLE iter = SliceIter{ source: ref, pos: 0, len: n };
-      WHILE iter.hasNext() DO
+      TIGHT WHILE iter.hasNext() DO
         total = total %+ iter.currentVal();
         iter = iter.advance();
       END
@@ -44,8 +44,8 @@ END
 # Benchmark 2: Raw indexed loop (baseline)
 FN benchRawLoop(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->
   MUTABLE total = 0;
-  FOR outer IN (0 ..< iters) DO
-    FOR i IN (0 ..< n) DO
+  TIGHT FOR outer IN (0 ..< iters) DO
+    TIGHT FOR i IN (0 ..< n) DO
       total = total %+ data[i];
     END
   END
@@ -58,7 +58,7 @@ FN main() RETURNS Void ->
 
   # Build data array
   MUTABLE data: Int64[10_000]@list = [];
-  FOR i IN (0 ..< n) -> data.append(i %* 7 %+ 13);
+  TIGHT FOR i IN (0 ..< n) -> data.append(i %* 7 %+ 13);
 
   # Warm up
   x = benchRawLoop(data, n, 1);

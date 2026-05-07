@@ -17,12 +17,12 @@ STRUCT Entity {
 FN benchPool(n: Int64) RETURNS !Int64 ->
   pool: Entity[5_000_000]@pool = [];
 
-  FOR i IN (0 ..< n) DO
+  TIGHT FOR i IN (0 ..< n) DO
     pool.insert(Entity{ x: i, y: i * 2, health: 100 });
   END
 
   MUTABLE sum = 0;
-  FOR entity IN pool DO
+  TIGHT FOR entity IN pool DO
     sum += entity.health;
   END
   RETURN sum;
@@ -32,10 +32,10 @@ FN benchList(n: Int64) RETURNS !Int64 ->
   # Pre-allocate capacity to match C (malloc N*sizeof) and Go (make([]T, 0, N))
   MUTABLE items: Entity[5_000_000]@list = [];
 
-  FOR i IN (0 ..< n) -> items.append(Entity{ x: i, y: i * 2, health: 100 });
+  TIGHT FOR i IN (0 ..< n) -> items.append(Entity{ x: i, y: i * 2, health: 100 });
 
   MUTABLE sum = 0;
-  FOR item IN items DO
+  TIGHT FOR item IN items DO
     sum += item.health;
   END
   RETURN sum;

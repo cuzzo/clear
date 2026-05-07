@@ -10,13 +10,13 @@ FN main() RETURNS Void ->
 
   # Insert phase: 1M integer key-value pairs
   t0 = timestampMs();
-  FOR i IN (0 ..< 1_000_000) -> m[i] = i + 0.0;
+  TIGHT FOR i IN (0 ..< 1_000_000) -> m[i] = i + 0.0;
   insertMs = timestampMs() - t0;
 
   # Lookup phase: sum all values to prevent dead-code elimination
   t1 = timestampMs();
   MUTABLE total = 0.0;
-  FOR j IN (0 ..< 1_000_000) -> total = total + (m[j] OR 0.0);
+  TIGHT FOR j IN (0 ..< 1_000_000) -> total = total + (m[j] OR 0.0);
   lookupMs = timestampMs() - t1;
 
   ASSERT total > 0.0, "total must be positive";

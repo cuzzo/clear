@@ -83,7 +83,7 @@ FN main() RETURNS Void ->
 
   # SOA layout via T[N]@soa (fixed-size SOA array)
   MUTABLE soa: Particle[100_000]@soa = [];
-  FOR i IN (0 ..< n) DO
+  TIGHT FOR i IN (0 ..< n) DO
     soa
       .append(
         Particle{
@@ -156,7 +156,7 @@ FN main() RETURNS Void ->
   END
 
   t0 = timestampMs();
-  FOR iter IN (0 ..< iterations) DO
+  TIGHT FOR iter IN (0 ..< iterations) DO
     soa |> EACH {_.x = _.x + _.vx; _.y = _.y + _.vy;};
   END
   soaMs = timestampMs() - t0;

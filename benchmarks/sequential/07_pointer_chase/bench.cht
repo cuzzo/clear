@@ -50,7 +50,7 @@ FN main() RETURNS Void ->
   MUTABLE id_list: Id<Node> [2_000_000]@list = [];
 
   # Phase 1: insert N nodes, record IDs in insertion order.
-  FOR i IN (0 ..< n_nodes) DO
+  TIGHT FOR i IN (0 ..< n_nodes) DO
     id = pool.insert(Node{ val: i });
     id_list.append(id);
   END
@@ -60,7 +60,7 @@ FN main() RETURNS Void ->
   MUTABLE cur_idx = 0;
   MUTABLE sum = 0;
   t1 = timestampMs();
-  FOR steps IN (0 ..< n_nodes) DO
+  TIGHT FOR steps IN (0 ..< n_nodes) DO
     IF pool[id_list[cur_idx]] AS n THEN
       sum = sum + n.val;
     END

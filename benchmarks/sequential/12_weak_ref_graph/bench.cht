@@ -30,7 +30,7 @@ FN main() RETURNS Void ->
 
   # Allocate N nodes as @multiowned (Rc) in a list
   MUTABLE nodes: Node@multiowned[]@list = [];
-  FOR i IN (0 ..< n_nodes) DO
+  TIGHT FOR i IN (0 ..< n_nodes) DO
     nodes.append(Node{ id: i } @multiowned);
   END
 
@@ -39,7 +39,7 @@ FN main() RETURNS Void ->
   # parents[i] = LINK to nodes[(i-1)/2] for i > 0
   MUTABLE parents: Node@link[]@list = [];
   parents.append(LINK nodes[0]);
-  FOR i IN (1 ..< n_nodes) DO
+  TIGHT FOR i IN (1 ..< n_nodes) DO
     parent_idx = (i - 1) / 2;
     parents.append(LINK nodes[parent_idx]);
   END
@@ -48,7 +48,7 @@ FN main() RETURNS Void ->
 
   # Phase 2: WALK -- resolve every parent back-pointer
   MUTABLE checksum = 0;
-  FOR i IN (0 ..< n_nodes) DO
+  TIGHT FOR i IN (0 ..< n_nodes) DO
     checksum = checksum + nodes[i].id;
 
     IF i > 0 THEN
