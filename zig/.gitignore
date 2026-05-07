@@ -1,1 +1,21 @@
 .build-*
+zig-out/
+.zig-cache/
+.clear-cache/
+.clear-transpile-cache/
+
+# Build artifacts at zig/ root (extension-less compiled binaries from
+# manual `zig build-exe foo.zig` or `clear build foo.cht` runs) crept
+# into history through 2026-05; 19 such files were removed in the
+# cleanup-binaries-and-dead-scheme branch. This rule ignores any
+# extension-less file at zig/ root by default. Subdirectories
+# (runtime/, lib/, experimental/, fiber-stack-check/, testdata/,
+# zig-old/) are unignored explicitly so their tracked contents stay
+# checked in.
+/[^./]*
+!/runtime/
+!/lib/
+!/experimental/
+!/fiber-stack-check/
+!/testdata/
+!/zig-old/
