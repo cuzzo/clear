@@ -13,78 +13,82 @@
 # Pure compute (no FFI, no onRootStack). Tests scheduler quality directly.
 
 FN heavyCompute(seed: Int64, n: Int64) RETURNS Int64 ->
-    MUTABLE x: Int64 = seed;
-    FOR i IN (0_i64 ..< n) DO
-        x = x %* 6364136223846793005_i64 %+ 1442695040888963407_i64;
-        x = x %* x %+ 1_i64;
-    END
-    IF x < 0 -> x = 0 - x;
-    RETURN x MOD 1000000000;
+  MUTABLE x = seed;
+  FOR i IN (0 ..< n) DO
+    x = x %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
+    x = x %* x %+ 1;
+  END
+  IF x < 0 -> x = 0 - x;
+  RETURN x MOD 1_000_000_000;
 END
 
 FN handleClient!(client: TCPClient) RETURNS !Void ->
-    MUTABLE running: Bool = TRUE;
-    WHILE running DO
-        data: String@raw = tcpRead(client);
-        IF data.length() == 0 THEN
-            running = FALSE;
-        ELSE
-            MUTABLE resp = "";
-            MUTABLE pos: Int64 = 0;
-            WHILE pos < data.length() DO
-                MUTABLE eol = pos;
-                WHILE eol < data.length() && charAt(data, eol) != "\r" && charAt(data, eol) != "\n" DO
-                    eol += 1;
-                END
-                line = substr(data, pos, eol - pos);
-                pos = eol;
-                WHILE pos < data.length() && (charAt(data, pos) == "\r" || charAt(data, pos) == "\n") DO
-                    pos += 1;
-                END
-
-                IF line.length() == 0 THEN
-                    # skip
-                ELSE_IF startsWith?(line, "WORK:") THEN
-                    rest: String@raw = substr(line, 5_i64, line.length() - 5);
-                    MUTABLE colonPos: Int64 = 0;
-                    WHILE colonPos < rest.length() && charAt(rest, colonPos) != ":" DO
-                        colonPos += 1;
-                    END
-                    idStr = substr(rest, 0_i64, colonPos);
-                    nStr = substr(rest, colonPos + 1, rest.length() - colonPos - 1);
-                    MUTABLE id = toInt(toNumber(idStr) OR 0.0);
-                    MUTABLE n = toInt(toNumber(nStr) OR 0.0);
-                    IF n < 1 THEN n = 1; END
-                    result = heavyCompute(id, n);
-                    resp = resp + ":${result.toString()}\r\n";
-                ELSE_IF line == "QUIT" THEN
-                    resp = resp + "+OK\r\n";
-                    running = FALSE;
-                ELSE_IF line == "READY?" THEN
-                    resp = resp + "+READY\r\n";
-                ELSE
-                    resp = resp + "-ERR unknown command\r\n";
-                END
-            END
-            IF resp.length() > 0 -> tcpWrite(client, resp);
+  MUTABLE running = TRUE;
+  WHILE running DO
+    data: String@raw = client.tcpRead();
+    IF data.empty?() THEN
+      running = FALSE;
+    ELSE
+      MUTABLE resp = "";
+      MUTABLE pos = 0;
+      WHILE pos < data.length() DO
+        MUTABLE eol = pos;
+        WHILE eol < data.length() && data.charAt(eol) != "\r" && data.charAt(eol) != "\n" DO
+          eol += 1;
         END
+        line = data.substr(pos, eol - pos);
+        pos = eol;
+        WHILE pos < data.length() && (data.charAt(pos) == "\r" || data.charAt(pos) == "\n") DO
+          pos += 1;
+        END
+
+        IF line.empty?() THEN
+          # skip
+        ELSE_IF line.startsWith?("WORK:") THEN
+          rest: String@raw = line.substr(5, line.length() - 5);
+          MUTABLE colonPos = 0;
+          WHILE colonPos < rest.length() && rest.charAt(colonPos) != ":" DO
+            colonPos += 1;
+          END
+          idStr = rest.substr(0, colonPos);
+          nStr = rest.substr(colonPos + 1, rest.length() - colonPos - 1);
+          MUTABLE id = (idStr.toNumber() OR 0.0).toInt();
+          MUTABLE n = (nStr.toNumber() OR 0.0).toInt();
+          IF n < 1 THEN
+            n = 1;
+          END
+          result = heavyCompute(id, n);
+          resp = resp + ":${result.toString()}\r\n";
+        ELSE_IF line == "QUIT" THEN
+          resp = resp + "+OK\r\n";
+          running = FALSE;
+        ELSE_IF line == "READY?" THEN
+          resp = resp + "+READY\r\n";
+        ELSE
+          resp = resp + "-ERR unknown command\r\n";
+        END
+      END
+      IF resp.any?() -> client.tcpWrite(resp);
     END
+  END
 END
 
 FN main() RETURNS Void ->
-    server = TCPServer::listen(6390);
-    print("CLEAR pathological server listening on port 6390");
+  server = TCPServer::listen(6390);
+  print("CLEAR pathological server listening on port 6390");
 
-    # Pin BG fibers to the main scheduler to prevent work-stealing
-    # which corrupts epoll fd registration.
-    MUTABLE pin: HashMap<Int64>@sharded(32):locked = {};
+  # Pin BG fibers to the main scheduler to prevent work-stealing
+  # which corrupts epoll fd registration.
+  MUTABLE pin: HashMap<Int64> @sharded(32): locked = {};
 
-    MUTABLE tasks: ~Void[]@list = [];
-    WHILE TRUE DO
-        client = accept(server);
-        tasks.append(BG {
-            n = pin.count();
-            handleClient!(client);
-        });
-    END
+  MUTABLE tasks: ~Void[]@list = [];
+  WHILE TRUE DO
+    client = server.accept();
+    tasks.append(
+      BG {
+        n = pin.count();
+        handleClient!(client);
+      }
+    );
+  END
 END

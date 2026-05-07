@@ -11,99 +11,107 @@
 #
 # Pure FFI: all native Zig operations declared via EXTERN, no shim files.
 
-EXTERN STRUCT ParseOptions {} FROM "std.json";
-EXTERN STRUCT JsonRecord { id: Int64, data: Int64[] };
-EXTERN STRUCT Parsed { value: JsonRecord } CLOSE "deinit" AS "Parsed(JsonRecord)" FROM "std.json";
-EXTERN FN parseFromSlice<T>(comptime: T, content: String, options: ParseOptions) RETURNS !Parsed EFFECTS :alloc:heap FROM "std.json";
+EXTERN STRUCT ParseOptions {
+} FROM "std.json";
+EXTERN STRUCT JsonRecord {
+  id: Int64,
+  data: Int64[]
+};
+EXTERN STRUCT Parsed {
+  value: JsonRecord
+} CLOSE "deinit" AS "Parsed(JsonRecord)" FROM "std.json";
+EXTERN FN parseFromSlice < T > (comptime: T, content: String, options: ParseOptions) RETURNS !Parsed EFFECTS: alloc: heap FROM "std.json";
 
 EXTERN FN mkdir(path: String, mode: UInt32) RETURNS Int64 FROM "std.c";
 
 FN sizeForId(id: Int64) RETURNS Int64 ->
-    RETURN ((id * 7 + 13) MOD 997) + 10;
+  RETURN ((id * 7 + 13) MOD 997) + 10;
 END
 
 FN generateJson(id: Int64) RETURNS !String ->
-    sz = sizeForId(id);
-    MUTABLE parts: String[]@list = [];
-    FOR i IN (1_i64 ..= sz) -> parts.append(i.toString());
-    RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
+  sz = sizeForId(id);
+  MUTABLE parts: String[]@list = [];
+  FOR i IN (1 ..= sz) -> parts.append(i.toString());
+  RETURN "{\"id\":${id.toString()},\"data\":[${join(parts, ",")}]}";
 END
 
 FN parseJsonArraySum(content: String) RETURNS !Int64 ->
-    parsed = parseFromSlice(JsonRecord, content, ParseOptions{}) OR RAISE;
-    MUTABLE sum: Int64 = 0;
-    FOR i IN (0_i64 ..< parsed.value.data.length()) DO
-        sum += parsed.value.data[i];
-    END
-    RETURN sum;
+  parsed = parseFromSlice(JsonRecord, content, ParseOptions{}) OR RAISE;
+  MUTABLE sum = 0;
+  FOR i IN (0 ..< parsed.value.data.length()) DO
+    sum += parsed.value.data[i];
+  END
+  RETURN sum;
 END
 
 FN handleClient!(client: TCPClient) RETURNS !Void ->
-    MUTABLE running: Bool = TRUE;
-    WHILE running DO
-        data: String@raw = tcpRead(client);
-        IF data.length() == 0 THEN
-            running = FALSE;
-        ELSE
-            MUTABLE resp = "";
-            MUTABLE pos: Int64 = 0;
-            WHILE pos < data.length() DO
-                # Find end of line
-                MUTABLE eol = pos;
-                WHILE eol < data.length() && charAt(data, eol) != "\r" && charAt(data, eol) != "\n" DO
-                    eol += 1;
-                END
-                line = substr(data, pos, eol - pos);
-
-                # Skip \r\n
-                pos = eol;
-                WHILE pos < data.length() && (charAt(data, pos) == "\r" || charAt(data, pos) == "\n") DO
-                    pos += 1;
-                END
-
-                IF line.length() == 0 THEN
-                    # skip empty lines
-                ELSE_IF startsWith?(line, "SET:") THEN
-                    idStr = substr(line, 4, line.length() - 4);
-                    id = toInt(toNumber(idStr) OR 0.0);
-                    json = generateJson(id);
-                    writeFile("data/${id.toString()}.json", json);
-                    resp = resp + "+OK\r\n";
-                ELSE_IF startsWith?(line, "GET:") THEN
-                    idStr = substr(line, 4, line.length() - 4);
-                    id = toInt(toNumber(idStr) OR 0.0);
-                    content = readFile("data/${id.toString()}.json");
-                    sum = parseJsonArraySum(content) OR RAISE;
-                    resp = resp + ":${sum.toString()}\r\n";
-                ELSE_IF line == "QUIT" THEN
-                    resp = resp + "+OK\r\n";
-                    running = FALSE;
-                ELSE_IF line == "READY?" THEN
-                    resp = resp + "+READY\r\n";
-                ELSE
-                    resp = resp + "-ERR unknown command\r\n";
-                END
-            END
-            IF resp.length() > 0 -> tcpWrite(client, resp);
+  MUTABLE running = TRUE;
+  WHILE running DO
+    data: String@raw = client.tcpRead();
+    IF data.empty?() THEN
+      running = FALSE;
+    ELSE
+      MUTABLE resp = "";
+      MUTABLE pos = 0;
+      WHILE pos < data.length() DO
+        # Find end of line
+        MUTABLE eol = pos;
+        WHILE eol < data.length() && data.charAt(eol) != "\r" && data.charAt(eol) != "\n" DO
+          eol += 1;
         END
+        line = data.substr(pos, eol - pos);
+
+        # Skip \r\n
+        pos = eol;
+        WHILE pos < data.length() && (data.charAt(pos) == "\r" || data.charAt(pos) == "\n") DO
+          pos += 1;
+        END
+
+        IF line.empty?() THEN
+          # skip empty lines
+        ELSE_IF line.startsWith?("SET:") THEN
+          idStr = line.substr(4, line.length() - 4);
+          id = (idStr.toNumber() OR 0.0).toInt();
+          json = generateJson(id);
+          ("data/${id.toString()}.json").writeFile(json);
+          resp = resp + "+OK\r\n";
+        ELSE_IF line.startsWith?("GET:") THEN
+          idStr = line.substr(4, line.length() - 4);
+          id = (idStr.toNumber() OR 0.0).toInt();
+          content = ("data/${id.toString()}.json").readFile();
+          sum = parseJsonArraySum(content) OR RAISE;
+          resp = resp + ":${sum.toString()}\r\n";
+        ELSE_IF line == "QUIT" THEN
+          resp = resp + "+OK\r\n";
+          running = FALSE;
+        ELSE_IF line == "READY?" THEN
+          resp = resp + "+READY\r\n";
+        ELSE
+          resp = resp + "-ERR unknown command\r\n";
+        END
+      END
+      IF resp.any?() -> client.tcpWrite(resp);
     END
+  END
 END
 
 FN main() RETURNS Void ->
-    mkdir("data", 0o755_u32);
-    server = TCPServer::listen(6390);
-    print("CLEAR json-api listening on port 6390");
+  mkdir("data", 0o755_u32);
+  server = TCPServer::listen(6390);
+  print("CLEAR json-api listening on port 6390");
 
-    # Cache pins BG fibers to the main scheduler, preventing fiber stealing
-    # which corrupts epoll fd registration.
-    MUTABLE cache: HashMap<Int64>@sharded(32):locked = {};
+  # Cache pins BG fibers to the main scheduler, preventing fiber stealing
+  # which corrupts epoll fd registration.
+  MUTABLE cache: HashMap<Int64> @sharded(32): locked = {};
 
-    MUTABLE tasks: ~Void[]@list = [];
-    WHILE TRUE DO
-        client = accept(server);
-        tasks.append(BG {
-            n = cache.count();
-            handleClient!(client);
-        });
-    END
+  MUTABLE tasks: ~Void[]@list = [];
+  WHILE TRUE DO
+    client = server.accept();
+    tasks.append(
+      BG {
+        n = cache.count();
+        handleClient!(client);
+      }
+    );
+  END
 END
