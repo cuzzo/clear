@@ -73,6 +73,13 @@ module FmtVerifier
     zig_source
       .gsub(%r{^\s*// CLR:\d+\n}, '')
       .gsub(%r{^\s*// CLEAR_PROFILE_TASK_SITE\b[^\n]*\n}, '')
+      # Lowering-emitted guard / temp identifiers carry a numeric ID
+      # that depends on AST node positions. Equivalent CLEAR programs
+      # whose AST shifted under fmt (predicate canonicalization,
+      # MUTABLE drop, etc) emit the same Zig logic with different IDs.
+      # Normalize the IDs to a placeholder so the byte-compare tracks
+      # semantics, not the lowerer's internal counter.
+      .gsub(/__([A-Za-z]\w*?)_(\d+)(_\d+)?\b/) { "__#{$1}_N#{$3}" }
   end
 
   # Verify every .cht file under `dir` (recursive). Useful for sweeping

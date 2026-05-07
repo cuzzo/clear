@@ -800,7 +800,17 @@ class Formatter::Emitter
     insert_nl(out)
 
     # Walk body tokens. Split `;` boundaries; outdent ELSE/ELSE_IF.
+    # Track BOTH bracket depth (`(`, `[`, `{`) AND keyword-block depth
+    # (`DO`/`THEN ... END`) so that a `;` belonging to an inner
+    # one-liner block (`IF cond THEN a; b; END`) doesn't get torn
+    # into separate lines. The inner block stays as the user wrote
+    # it; the outer expansion only inserts NLs at the FOR/WHILE/IF
+    # body level. ELSE/ELSE_IF outdent applies only at the OUTER
+    # level — block_depth must be zero. (Repro:
+    # benchmarks/concurrent/14_nested_lock pre-fix, where a nested
+    # `IF a > b THEN lo = b; hi = a; END` was getting shredded.)
     depth = 0
+    block_depth = 0
     j = term_idx + 1
     body_start = out.length
     while j < end_idx
@@ -812,13 +822,20 @@ class Formatter::Emitter
       if tj.type == :SYM && tj.raw == '{'      then depth += 1; out << tj; j += 1; next end
       if tj.type == :SYM && tj.raw == '}'      then depth -= 1; out << tj; j += 1; next end
 
-      if tj.type == :SYM && tj.raw == ';' && depth == 0
+      if tj.type == :KEYWORD
+        case tj.raw
+        when 'DO', 'THEN' then block_depth += 1
+        when 'END' then block_depth -= 1 if block_depth > 0
+        end
+      end
+
+      if tj.type == :SYM && tj.raw == ';' && depth.zero? && block_depth.zero?
         out << tj
         j += 1
         insert_nl(out)
         next
       end
-      if tj.type == :KEYWORD && %w[ELSE ELSE_IF].include?(tj.raw) && depth == 0
+      if tj.type == :KEYWORD && %w[ELSE ELSE_IF].include?(tj.raw) && depth.zero? && block_depth.zero?
         insert_nl(out)
         out << tj
         j += 1
@@ -1165,9 +1182,26 @@ class Formatter::Emitter
           out << phantom(:INDENT_OPEN)
           segments.each_with_index do |seg, k|
             insert_nl(out) if k > 0
+            # Strip NLs that are between segment tokens at the chain's
+            # top level — those are line breaks the user put between
+            # `.foo()` and `.bar()` that the renderer is about to
+            # supply itself. NLs nested inside the segment's argument
+            # list (`.foo(BG { @parallel -> ...\n... })`) must be
+            # preserved: they belong to the argument's own multi-line
+            # layout, not to the chain. Without this depth guard, the
+            # whole BG body collapsed onto one line.
+            # (Repro: benchmarks/concurrent/14_nested_lock pre-fix.)
+            seg_depth = 0
             (seg[:start]...seg[:end]).each do |j|
-              next if toks[j].type == :NL
-              out << toks[j]
+              t = toks[j]
+              if t.type == :SYM
+                case t.raw
+                when '(', '[', '{' then seg_depth += 1
+                when ')', ']', '}' then seg_depth -= 1
+                end
+              end
+              next if t.type == :NL && seg_depth.zero?
+              out << t
             end
           end
           out << phantom(:INDENT_CLOSE)
@@ -1409,7 +1443,7 @@ class Formatter::Emitter
         brace_idx = find_bg_brace(toks, i)
         if brace_idx
           close_idx = find_matching_close_brace(toks, brace_idx)
-          if close_idx && count_statements_in_block(toks, brace_idx, close_idx) >= 2
+          if close_idx && bg_body_needs_wrap?(toks, brace_idx, close_idx)
             i = emit_bg_do_wrapped(out, toks, i, brace_idx, close_idx)
             next
           end
@@ -1419,6 +1453,35 @@ class Formatter::Emitter
       i += 1
     end
     out
+  end
+
+  # A BG/DO body needs the multi-line wrap when it has 2+ statements
+  # at the top level OR when its single statement opens a nested block
+  # (`FOR ... DO ... END`, `IF ... THEN ... END`, etc). Without the
+  # second condition, a body like `BG { @parallel -> FOR ... DO ... END }`
+  # was being skipped by the wrap pass and ended up collapsed onto a
+  # single 600-char line by `collapse_newlines`. The DO/THEN check
+  # specifically targets that case while leaving short trivial bodies
+  # like `BG { @micro -> doWork(); }` inline.
+  def bg_body_needs_wrap?(toks, brace_idx, close_idx)
+    return true if count_statements_in_block(toks, brace_idx, close_idx) >= 2
+    body_has_top_level_block?(toks, brace_idx, close_idx)
+  end
+
+  def body_has_top_level_block?(toks, brace_idx, close_idx)
+    depth = 0
+    (brace_idx + 1 ... close_idx).each do |j|
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then depth += 1
+        when ')', ']', '}' then depth -= 1
+        end
+      elsif t.type == :KEYWORD && depth.zero? && %w[DO THEN].include?(t.raw)
+        return true
+      end
+    end
+    false
   end
 
   def find_bg_brace(toks, start)
@@ -1431,9 +1494,25 @@ class Formatter::Emitter
   end
 
   def count_statements_in_block(toks, open_brace, close_brace)
+    # Counts top-level `;` inside the BG/DO `{ ... }` body to decide
+    # whether it's a one-liner or needs the multi-line wrap.
+    #
+    # Treats `DO`/`THEN ... END` as nested (anything inside them is a
+    # single sub-statement at the BG level). Also treats a single
+    # top-level statement that opens a DO/THEN block — e.g.
+    # `FOR i IN ... DO ... END` or `IF cond THEN ... END` — as one
+    # statement: count it once even though it has no terminating `;`.
+    # Without this, BGs like
+    # `BG { @parallel -> FOR i IN ... DO a; b; END }` (single FOR at
+    # the BG level, multiple `;` inside its DO body) used to mis-count
+    # as multi-statement and trigger the wrap, which then collapsed
+    # the FOR's DO body into a 300-char mess.
+    # (Repro: benchmarks/concurrent/14_nested_lock pre-fix.)
     depth = 0
+    block_depth = 0
     count = 0
     has_tokens = false
+    saw_block_at_top = false
     (open_brace + 1 ... close_brace).each do |j|
       t = toks[j]
       if t.type == :SYM
@@ -1441,11 +1520,20 @@ class Formatter::Emitter
         when '(', '[', '{' then depth += 1
         when ')', ']', '}' then depth -= 1
         when ';'
-          if depth == 0
+          if depth.zero? && block_depth.zero?
             count += 1 if has_tokens
             has_tokens = false
+            saw_block_at_top = false
             next
           end
+        end
+      elsif t.type == :KEYWORD
+        case t.raw
+        when 'DO', 'THEN'
+          saw_block_at_top = true if depth.zero? && block_depth.zero?
+          block_depth += 1
+        when 'END'
+          block_depth -= 1 if block_depth > 0
         end
       end
       next if [:NL, :COMMENT].include?(t.type)
@@ -1464,6 +1552,7 @@ class Formatter::Emitter
     insert_nl(out)
 
     depth = 0
+    block_depth = 0
     j = brace_idx + 1
     j = skip_nls(toks, j)
     body_start = out.length
@@ -1474,13 +1563,24 @@ class Formatter::Emitter
         when '(', '[', '{' then depth += 1; out << t; j += 1; next
         when ')', ']', '}' then depth -= 1; out << t; j += 1; next
         when ';'
-          if depth == 0
+          # Insert NL on `;` only at the BG-level top — inside a
+          # `DO ... END` or `THEN ... END` block, leave the `;` to be
+          # handled by the inner block's own expansion (expand_then_do_blocks
+          # runs earlier in the pipeline). Without this guard, the FOR
+          # body in `BG { @parallel -> FOR i IN ... DO a; b; END }`
+          # would be torn apart.
+          if depth.zero? && block_depth.zero?
             out << t
             j += 1
             insert_nl(out)
             j += 1 if j < toks.length && toks[j].type == :NL
             next
           end
+        end
+      elsif t.type == :KEYWORD
+        case t.raw
+        when 'DO', 'THEN' then block_depth += 1
+        when 'END' then block_depth -= 1 if block_depth > 0
         end
       end
       out << t

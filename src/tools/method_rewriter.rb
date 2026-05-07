@@ -94,12 +94,33 @@ module MethodRewriter
           list = defs.is_a?(Array) ? defs : [defs]
           list.each do |d|
             next unless d.is_a?(Hash)
-            names << name if d[:is_method]
+            next unless d[:is_method]
+            # Skip stdlib functions whose Zig lowering is FSM-based
+            # (suspending I/O calls like readFile / writeFile / accept).
+            # Their MIR/FSM lowering reads the call's positional args
+            # at fixed indices via FsmOps; UFCS-rewriting moves the
+            # first arg into the receiver slot and the FSM lowerer
+            # crashes with "FsmOps arg index 0 out of range (0 args)."
+            # Detection is structural (`suspends: true` plus an
+            # `fsm_*` setup table) so we don't have to enumerate
+            # specific names.
+            next if fsm_lowered?(d)
+            names << name
           end
         end
       end
       names
     end
+  end
+
+  # True when an stdlib registry entry uses FSM lowering for I/O. Both
+  # markers must be present to count: `suspends: true` means the call
+  # yields, and the `fsm_*` keys carry the templates the FSM emitter
+  # reads. Either alone wouldn't be enough — `suspends: true` is also
+  # set on plain async helpers that don't go through FSM.
+  def fsm_lowered?(defn)
+    return false unless defn[:suspends]
+    defn.keys.any? { |k| k.to_s.start_with?("fsm_") }
   end
 
   # Post-order walk: collect edits for inner calls first so outer

@@ -912,6 +912,75 @@ RSpec.describe Formatter do
     end
   end
 
+  describe "BG body wrapping with nested DO/THEN blocks" do
+    # Found by FmtVerifier on benchmarks/concurrent/14_nested_lock.
+    # Three related fmt bugs that combined to crush the body of
+    # `BG { @parallel -> FOR i IN ... DO ...; ...; END }` onto one
+    # 600-char line:
+    #   1. count_statements_in_block didn't track DO/THEN/END
+    #      nesting, so inner `;` was mis-counted as multi-statement
+    #      at the BG level and triggered a wrong wrap.
+    #   2. expand_bg_do_blocks's wrap was skipped for single-statement
+    #      bodies even when the single statement was a multi-line
+    #      block (FOR/IF/WHILE), leaving the body inline.
+    #   3. expand_method_chains stripped ALL NLs from chain segments,
+    #      including those nested inside argument-position
+    #      `BG { ... }` blocks.
+
+    it "wraps BG body when single statement is a FOR block" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          task = BG { @parallel ->
+            FOR i IN (0 ..< 10) DO
+              MUTABLE a = i;
+              MUTABLE b = i + 1;
+            END
+          };
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to match(/FOR i IN .+ DO\n/)
+      expect(out).to match(/MUTABLE a = i;\n/)
+      expect(out).to match(/MUTABLE b = i \+ 1;\n/)
+    end
+
+    it "preserves NLs inside BG-arg of a method chain" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE futures: ~Void[]@list = [];
+          futures.append(BG {
+            FOR i IN (0 ..< 5) DO
+              MUTABLE x = i;
+              MUTABLE y = i;
+            END
+          });
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to match(/FOR i IN .+ DO\n/)
+      expect(out).to match(/MUTABLE x = i;\n/)
+      expect(out).to match(/MUTABLE y = i;\n/)
+    end
+
+    it "leaves inner one-liner IF intact when expanding outer FOR" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE a = 3;
+          MUTABLE b = 5;
+          MUTABLE lo = 0;
+          MUTABLE hi = 0;
+          FOR i IN (0 ..< 1) DO IF a > b THEN lo = b; hi = a; END END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("IF a > b THEN")
+      expect(out).to match(/IF a > b THEN\s+lo = b;\s+hi = a;\s+END/m)
+    end
+  end
+
   describe "MUTABLE never reassigned" do
     it "drops MUTABLE when the binding is read but never reassigned" do
       # The annotator only emits the MUTABLE-unused finding when the

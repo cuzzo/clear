@@ -353,4 +353,43 @@ RSpec.describe MethodRewriter do
       expect(out).not_to include("((state + 1)).toFloat()")
     end
   end
+
+  describe "skip stdlib functions whose lowering is FSM-based" do
+    # Found by FmtVerifier on benchmarks/concurrent/02_concurrent_search.
+    # `readFile` is `is_method: true` so the rewriter would turn
+    # `readFile(filepath)` into `filepath.readFile()`. But its
+    # lowering reads positional args via FsmOps templates
+    # (`fsm_setup` in std_lib.rb) and crashes with
+    # "FsmOps arg index 0 out of range (0 args)" once the first
+    # arg has moved into the receiver slot. Detection is structural:
+    # `suspends: true` AND any `fsm_*` template key.
+
+    it "leaves readFile in prefix form (FSM-lowered)" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          path = "data/foo.txt";
+          content = readFile(path);
+          print(content);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("readFile(path)")
+      expect(out).not_to include("path.readFile()")
+    end
+
+    it "still rewrites non-FSM is_method stdlib like length" do
+      # Sanity: only FSM-lowered entries are skipped, normal
+      # is_method ones still get UFCS-rewritten.
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          xs: Int64[] = [1_i64, 2_i64];
+          n = length(xs);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("xs.length()")
+    end
+  end
 end

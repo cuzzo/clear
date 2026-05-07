@@ -8,56 +8,73 @@
 # across fibers (read lock only -- list is immutable after setup).
 # Individual accounts are @shared:locked (Arc<Mutex>) for transfer mutations.
 
-STRUCT Account { balance: Int64 }
-STRUCT Bank { accounts: Account@shared:locked[]@list }
+STRUCT Account {
+  balance: Int64
+}
+STRUCT Bank {
+  accounts: Account@shared: locked[]@list
+}
 
 FN main() RETURNS Void ->
-    MUTABLE nWorkers = threadCount();
-    IF nWorkers < 2 THEN nWorkers = 2; END
-    numAccounts = 64_i64;
-    opsPerWorker = 500000_i64;
+  MUTABLE nWorkers = threadCount();
+  IF nWorkers < 2 THEN
+    nWorkers = 2;
+  END
+  numAccounts = 64;
+  opsPerWorker = 500_000;
 
-    MUTABLE accts: Account@shared:locked[]@list = [];
-    FOR i IN (0_i64 ..< numAccounts) DO
-        accts.append(Account{ balance: 1000 } @shared:locked);
-    END
-    bank = Bank{ accounts: accts } @shared:writeLocked;
+  MUTABLE accts: Account@shared: locked[]@list = [];
+  FOR i IN (0 ..< numAccounts) DO
+    accts.append(Account{ balance: 1000 } @shared: locked);
+  END
+  bank = Bank{ accounts: accts } @shared: writeLocked;
 
-    t0 = timestampMs();
+  t0 = timestampMs();
 
-    MUTABLE futures: ~Void[]@list = [];
-    MUTABLE w = 0_i64;
-    WHILE w < nWorkers DO
-        futures.append(BG { @parallel ->
-            FOR i IN (0_i64 ..< opsPerWorker) DO
-                MUTABLE a = randomInt(numAccounts);
-                MUTABLE b = randomInt(numAccounts);
+  MUTABLE futures: ~Void[]@list = [];
+  MUTABLE w = 0;
+  WHILE w < nWorkers DO
+    futures
+      .append(
+        BG {
+          @parallel ->
+            FOR i IN (0 ..< opsPerWorker) DO
+              MUTABLE a = randomInt(numAccounts);
+              MUTABLE b = randomInt(numAccounts);
 
-                IF a == b THEN b = (a + 1) MOD numAccounts; END
+              IF a == b THEN
+                b = (a + 1) MOD numAccounts;
+              END
 
-                # Order by index to prevent deadlock
-                MUTABLE lo = a;
-                MUTABLE hi = b;
-                IF a > b THEN lo = b; hi = a; END
+              # Order by index to prevent deadlock
+              MUTABLE lo = a;
+              MUTABLE hi = b;
+              IF a > b THEN
+                lo = b;
+                hi = a;
+              END
 
-                # Read lock on bank to access accounts list,
-                # then exclusive locks on both accounts for transfer.
-                WITH bank AS bk {
-                    loAcct = bk.accounts[lo];
-                    hiAcct = bk.accounts[hi];
-                    WITH EXCLUSIVE loAcct AS la, EXCLUSIVE hiAcct AS ha {
-                        IF la.balance > 0 THEN
-                            la.balance = la.balance - 1;
-                            ha.balance = ha.balance + 1;
-                        END
-                    }
-                }
+              # Read lock on bank to access accounts list,
+              # then exclusive locks on both accounts for transfer.
+              WITH bank AS bk {
+                loAcct = bk.accounts[lo];
+                hiAcct = bk.accounts[hi];
+                WITH
+                  EXCLUSIVE loAcct AS la,
+                  EXCLUSIVE hiAcct AS ha {
+                    IF la.balance > 0 THEN
+                      la.balance = la.balance - 1;
+                      ha.balance = ha.balance + 1;
+                    END
+                  }
+              }
             END
-        });
-        w += 1;
+          }
+        );
+      w += 1;
     END
 
-    FOR i IN (0_i64 ..< nWorkers) -> NEXT futures[i];
+    FOR i IN (0 ..< nWorkers) -> NEXT futures[i];
     elapsed = timestampMs() - t0;
 
     # Verify conservation. Snapshot the per-account Arc handles out of
@@ -68,16 +85,16 @@ FN main() RETURNS Void ->
     # already joined so no symmetric caller exists, but the lint can't
     # prove that. The snapshot pattern sidesteps the warning while
     # preserving the read-then-per-element-lock semantics.)
-    acct_refs: Account@shared:locked[]@list = [];
+    acct_refs: Account@shared: locked[]@list = [];
     WITH bank AS bk {
-        FOR i IN (0_i64 ..< numAccounts) -> acct_refs.append(bk.accounts[i]);
+      FOR i IN (0 ..< numAccounts) -> acct_refs.append(bk.accounts[i]);
     }
-    MUTABLE total = 0_i64;
-    FOR i IN (0_i64 ..< numAccounts) DO
-        a = acct_refs[i];
-        WITH a AS inner {
-            total = total + inner.balance;
-        }
+    MUTABLE total = 0;
+    FOR i IN (0 ..< numAccounts) DO
+      a = acct_refs[i];
+      WITH a AS inner {
+        total = total + inner.balance;
+      }
     END
     expected = numAccounts * 1000;
     ASSERT total == expected, "balance mismatch";
@@ -89,4 +106,4 @@ FN main() RETURNS Void ->
     print("  Total time:     ${elapsed.toString()} ms");
     print("  Ops/sec:        ${opsPerSec.toString()}");
     print("  Balance:        ${total.toString()} (expected ${expected.toString()})");
-END
+  END
