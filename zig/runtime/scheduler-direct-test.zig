@@ -77,7 +77,7 @@ test "Scheduler.submitResume on same scheduler is idempotent while queued" {
     sched.submitResume(parts.task);
     sched.submitResume(parts.task);
 
-    try std.testing.expect(parts.task.in_inbox.load(.acquire));
+    try std.testing.expectEqual(qs.IN_INBOX_IN_QUEUE, parts.task.in_inbox.load(.acquire));
     try std.testing.expectEqual(@as(usize, 1), sched.ready_queue.len());
 
     const popped = sched.ready_queue.pop();

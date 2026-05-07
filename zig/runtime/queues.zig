@@ -386,9 +386,33 @@ pub const Task = struct {
 
     // ── Group 2: cross-thread-touched atomics ───────────────────────────
     status: Atomic(TaskStatus) = Atomic(TaskStatus).init(.Ready),
-    /// Debug guard: set to true when inbox_link is pushed to an inbox,
-    /// cleared when drainInbox processes it. Detects double-push.
-    in_inbox: Atomic(bool) = Atomic(bool).init(false),
+    /// 3-state slot guard for the cross-scheduler submitResume race
+    /// against the .Finished destroy in run(). State machine:
+    ///   IDLE       (0) -- task is running OR not in any queue
+    ///   IN_QUEUE   (1) -- task is enqueued, waiting to be popped
+    ///   DESTROYING (2) -- run()'s .Finished branch claimed the slot;
+    ///                     no further submitResume push is permitted
+    ///
+    /// Transitions (all CAS):
+    ///   submitResume:  IDLE       -> IN_QUEUE
+    ///   run-loop pop:  IN_QUEUE   -> IDLE  (plain store; owner-only)
+    ///   run-loop yield (.Ready):  push only if state == IDLE
+    ///   run-loop destroy (.Finished):  IDLE -> DESTROYING
+    ///
+    /// If the destroy CAS fails because submitResume claimed
+    /// IN_QUEUE first, the task is now in some queue. The destroyer
+    /// skips destroy and returns to the run loop; the next pop will
+    /// observe status=.Finished with state=IDLE again and retry the
+    /// destroy CAS. No leak (task is either queued or currently
+    /// being destroyed) and no UAF (submitResume can never claim
+    /// after IDLE -> DESTROYING).
+    ///
+    /// This fix closes the cross-scheduler submitResume-after-Finished
+    /// race that surfaced as the SplitStream pubsub-hammer SEGV at
+    /// scheduler.zig run() destroy(task.base). VOPR + Loom regression
+    /// tests document the bug shape; with this state machine, both
+    /// suites enumerate zero failing schedules.
+    in_inbox: Atomic(u8) = Atomic(u8).init(IN_INBOX_IDLE),
     /// Tag identifying the kind of lock the task is parked on. detectCycle
     /// dispatches on this to look up the lock's CURRENT exclusive owner.
     ///   0 = not parked
@@ -472,3 +496,8 @@ pub const LOCK_KIND_NONE: u8 = 0;
 pub const LOCK_KIND_MUTEX: u8 = 1;
 pub const LOCK_KIND_RWLOCK_WRITE: u8 = 2;
 pub const LOCK_KIND_RWLOCK_SHARED: u8 = 3;
+
+/// Task.in_inbox states (see field doc above).
+pub const IN_INBOX_IDLE: u8 = 0;
+pub const IN_INBOX_IN_QUEUE: u8 = 1;
+pub const IN_INBOX_DESTROYING: u8 = 2;

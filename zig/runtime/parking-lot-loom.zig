@@ -199,7 +199,7 @@ const LoomHarness = struct {
             for (0..self.n_threads) |i| {
                 if (self.parked[i] and self.stub_tasks[i].status.load(.monotonic) == .Ready) {
                     self.parked[i] = false;
-                    self.stub_tasks[i].in_inbox.store(false, .release);
+                    self.stub_tasks[i].in_inbox.store(qs.IN_INBOX_IDLE, .release);
                 }
             }
             // Cleanup of stale `g_sched.lock_waiters` entries. The

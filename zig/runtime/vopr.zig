@@ -14,6 +14,7 @@
 const std = @import("std");
 const vs = @import("vopr-state.zig");
 const vi = @import("vopr-invariants.zig");
+const InvariantError = vi.InvariantError;
 const qs = @import("queues.zig");
 
 const VoprState = vs.VoprState;
@@ -115,12 +116,25 @@ fn executePopAndRun(state: *VoprState, sched: *SimScheduler, sched_idx: usize) v
             sim.steps_remaining = state.random.intRangeAtMost(u16, 1, 10);
             sim.will_do_io = false; // Don't block again
         } else {
-            // Task finished
+            // Task finished — mirrors scheduler.zig run() .Finished
+            // branch. Production CAS-claims in_inbox IDLE -> DESTROYING
+            // before destroying. If the CAS fails (a concurrent
+            // submitResume claimed IDLE -> IN_QUEUE first), production
+            // skips destroy and the next pop retries. We model the same
+            // here.
             task.status.store(.Finished, .release);
-            sched.active_tasks -|= 1;
-            state.total_finished += 1;
-            state.task_registry.put(state.allocator, task, .Finished) catch unreachable;
-            sim.alive = false;
+            const claim = task.in_inbox.cmpxchgStrong(qs.IN_INBOX_IDLE, qs.IN_INBOX_DESTROYING, .acq_rel, .acquire);
+            if (claim != null) {
+                // Concurrent submitResume holds the slot. Skip destroy.
+                // The task is queued elsewhere; next pop retries.
+                state.task_registry.put(state.allocator, task, .InQueue) catch unreachable;
+            } else {
+                sched.active_tasks -|= 1;
+                state.total_finished += 1;
+                state.task_registry.put(state.allocator, task, .Finished) catch unreachable;
+                sim.alive = false;
+                sim.destroyed = true;
+            }
         }
     } else {
         // Simulate shard access (30% chance). Both pinned and unpinned tasks
@@ -601,6 +615,119 @@ test "vopr: ready queue starves the older of two co-located cooperative tasks" {
     const ratio_threshold: u32 = 8;
     try std.testing.expect(a.pop_count * ratio_threshold >= b.pop_count);
     try std.testing.expect(b.pop_count * ratio_threshold >= a.pop_count);
+}
+
+/// Simulates `Scheduler.submitResume(task)` after the in_inbox state-
+/// machine fix. CAS-claims IDLE -> IN_QUEUE; on success, pushes the
+/// task to the target scheduler's resume_inbox (modeling the cross-
+/// scheduler SPSC-ring push). Returns true iff the push happened.
+fn simulateSubmitResume(state: *VoprState, target_sched: usize, task: *qs.Task) bool {
+    if (task.in_inbox.cmpxchgStrong(qs.IN_INBOX_IDLE, qs.IN_INBOX_IN_QUEUE, .acq_rel, .acquire) != null) {
+        return false;
+    }
+    state.schedulers[target_sched].resume_inbox.append(state.allocator, task) catch unreachable;
+    return true;
+}
+
+test "vopr: submitResume after .Finished destroy is rejected by in_inbox state machine" {
+    // Reproduces the bug class behind the SplitStream-pubsub-hammer
+    // crash ("Segmentation fault at scheduler.zig run() destroy(task.
+    // base)") and verifies the runtime fix:
+    //
+    //   FIX: Task.in_inbox is now a 3-state Atomic(u8)
+    //          IDLE / IN_QUEUE / DESTROYING
+    //        run()'s .Finished branch CAS-claims IDLE -> DESTROYING
+    //        before destroy. submitResume CAS-claims IDLE -> IN_QUEUE.
+    //        At most one CAS wins; once DESTROYING is set, every later
+    //        submitResume CAS fails and rejects the push.
+    //
+    // This test executes the production sequence end-to-end via the
+    // simulator: PopAndRun's .Finished branch performs the real CAS
+    // on Task.in_inbox; simulateSubmitResume performs the matching
+    // CAS. After the destroyer's CAS to DESTROYING, any later
+    // submitResume MUST be rejected -- if it isn't, the destroyed
+    // task reaches a queue and the DestroyedTaskReferenced invariant
+    // fires.
+    const allocator = std.testing.allocator;
+    var state = VoprState.init(13, allocator);
+    state.random = state.rng.random();
+    defer state.deinit();
+
+    state.initSchedulers(2);
+
+    try state.spawnTask(0, false);
+    state.tasks[0].?.steps_remaining = 1;
+    state.tasks[0].?.will_do_io = false;
+    const task = &state.tasks[0].?.task;
+
+    // Owner: pop + run + status=.Finished + CAS IDLE->DESTROYING.
+    executePopAndRun(&state, &state.schedulers[0], 0);
+    try std.testing.expect(state.tasks[0].?.destroyed);
+    try std.testing.expectEqual(qs.IN_INBOX_DESTROYING, task.in_inbox.load(.acquire));
+    try vi.checkAllSilent(&state);
+
+    // Stale wake: simulateSubmitResume mirrors the production
+    // submitResume CAS. Because in_inbox is now DESTROYING, the CAS
+    // MUST fail and the push MUST be skipped.
+    const pushed = simulateSubmitResume(&state, 0, task);
+    try std.testing.expect(!pushed);
+    try std.testing.expectEqual(@as(usize, 0), state.schedulers[0].resume_inbox.items.len);
+
+    // Invariant must hold: nothing references the destroyed task.
+    try vi.checkAllSilent(&state);
+}
+
+test "vopr: submitResume that wins the CAS race -- destroyer skips destroy" {
+    // The mirror-image case: submitResume's CAS IDLE -> IN_QUEUE
+    // succeeds BEFORE the destroyer's CAS attempt (the wake fired
+    // before the body finished its yield-to-scheduler hop). The
+    // destroyer's CAS IDLE -> DESTROYING then fails because in_inbox
+    // is IN_QUEUE. Production: the destroyer skips destroy and
+    // returns to the run loop; the next pop will retry .Finished
+    // with in_inbox back at IDLE.
+    //
+    // This test simulates that exact ordering: submitResume claims
+    // first, then PopAndRun reaches .Finished and observes the
+    // failed CAS. The task must remain alive (no destroy) and live
+    // in resume_inbox awaiting the next pop. The invariant must
+    // hold.
+    const allocator = std.testing.allocator;
+    var state = VoprState.init(17, allocator);
+    state.random = state.rng.random();
+    defer state.deinit();
+
+    state.initSchedulers(1);
+
+    try state.spawnTask(0, false);
+    state.tasks[0].?.steps_remaining = 1;
+    state.tasks[0].?.will_do_io = false;
+    const task = &state.tasks[0].?.task;
+
+    // Pop the task without going through executePopAndRun's .Finished
+    // path -- transition in_inbox to IDLE manually (simulating
+    // mid-task state, before body completion).
+    _ = state.schedulers[0].popNext().?;
+    task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+    state.task_registry.put(allocator, task, .Running) catch unreachable;
+
+    // Step 1: submitResume wins the CAS first.
+    const pushed = simulateSubmitResume(&state, 0, task);
+    try std.testing.expect(pushed);
+    try std.testing.expectEqual(qs.IN_INBOX_IN_QUEUE, task.in_inbox.load(.acquire));
+
+    // Step 2: body completes; .Finished branch tries CAS IDLE ->
+    // DESTROYING. It must fail and the destroy must be skipped.
+    task.status.store(.Finished, .release);
+    const claim = task.in_inbox.cmpxchgStrong(
+        qs.IN_INBOX_IDLE, qs.IN_INBOX_DESTROYING, .acq_rel, .acquire,
+    );
+    try std.testing.expect(claim != null); // CAS failed; destroy skipped
+
+    // The task must NOT be marked destroyed -- production would
+    // wait for the next pop to retry.
+    try std.testing.expect(!state.tasks[0].?.destroyed);
+    // Invariant holds: the queued task is alive, not destroyed.
+    try vi.checkAllSilent(&state);
 }
 
 test "vopr: stolen task with pending remote shard op triggers ShardConcurrentAccess" {

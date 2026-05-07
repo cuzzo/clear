@@ -82,6 +82,13 @@ pub const SimTask = struct {
     /// executePopAndRun call. Used by the cooperative-fairness scenario
     /// test to assert each co-located task gets CPU time.
     pop_count: u32 = 0,
+    /// True once executePopAndRun's `.Finished` branch has destroyed this
+    /// Task slot (mirrors `task_slab.destroy(task)` in production
+    /// scheduler.zig run loop). After this, ANY further reference to the
+    /// `*Task` pointer from a queue, inbox, or current_task field is a
+    /// use-after-free in production. The DestroyedTaskReferenced
+    /// invariant in vopr-invariants.zig catches this class.
+    destroyed: bool = false,
 };
 
 /// SimScheduler wraps a heap-allocated RunQueue.
@@ -102,6 +109,15 @@ pub const SimScheduler = struct {
     ticks_since_poll: u32,
     /// Pending remote shard ops queued to this scheduler (simulated SPSC inbox).
     pending_shard_ops: std.ArrayListUnmanaged(PendingShardOp) = .empty,
+    /// Cross-scheduler submitResume inbox. Models the SPSC ring that
+    /// wakeNext / wg.done / parking-lot wake paths push to when a task
+    /// running on another scheduler must be resumed. Drained by the
+    /// scheduler's run loop in production (drainChannels Resume tag);
+    /// in the simulator we treat it as a queue containing pending resume
+    /// requests. Models the cross-scheduler attack surface where the
+    /// production submitResume captures a *Task pointer that may already
+    /// be destroyed by the time it dereferences in drainChannels.
+    resume_inbox: std.ArrayListUnmanaged(*Task) = .empty,
 
     pub fn init(allocator: std.mem.Allocator, idx: u32) !SimScheduler {
         const rq = try allocator.create(RunQueue);
@@ -123,6 +139,7 @@ pub const SimScheduler = struct {
         self.yield_queue.deinit(allocator);
         self.poll_fds.deinit(allocator);
         self.pending_shard_ops.deinit(allocator);
+        self.resume_inbox.deinit(allocator);
         self.ready_queue.deinit();
         allocator.destroy(self.ready_queue);
     }

@@ -888,9 +888,17 @@ pub const Scheduler = struct {
     // 2. THE RESUME (Producer Side - Thread B, WaitGroup, etc)
     // ------------------------------------------------------------
     pub fn submitResume(self: *Scheduler, task: *Task) void {
-        // Double-push guard
-        if (task.in_inbox.load(.acquire)) return;
-        task.in_inbox.store(true, .release);
+        // CAS-claim the inbox slot. Three outcomes:
+        //   IDLE       -> IN_QUEUE  : we own the right to push
+        //   IN_QUEUE   (already)    : a concurrent submitResume already
+        //                             pushed; double-push guard
+        //   DESTROYING (already)    : run()'s .Finished branch claimed
+        //                             the slot; the task is being
+        //                             destroyed and we MUST NOT push
+        //                             (closes the use-after-free race
+        //                             surfaced by the SplitStream
+        //                             pubsub hammer).
+        if (task.in_inbox.cmpxchgStrong(qs.IN_INBOX_IDLE, qs.IN_INBOX_IN_QUEUE, .acq_rel, .acquire) != null) return;
 
         // Fast path: if resuming on the SAME scheduler we're running on,
         // push directly to the ready queue.  Skips the SPSC ring, the
@@ -1239,11 +1247,12 @@ pub const Scheduler = struct {
                 };
                 self.current_task = task;
 
-                // Clear the double-push guard now that the task is
-                // dequeued.  Keeping in_inbox true from submitResume
-                // until here prevents duplicate pushes via concurrent
-                // cross-thread resumes while the task sat in the queue.
-                task.in_inbox.store(false, .release);
+                // Transition IN_QUEUE -> IDLE now that the task is
+                // dequeued. Keeping in_inbox at IN_QUEUE from
+                // submitResume until here prevents duplicate pushes
+                // via concurrent cross-thread resumes while the task
+                // sat in the queue.
+                task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
 
                 // Set task identity for the control plane.
                 // If this task overflows its stack, __zig_alloc_segment
@@ -1271,31 +1280,54 @@ pub const Scheduler = struct {
 
                 switch (task.status.load(.acquire)) {
                     .Finished => {
-                        if (rt_profile.CLEAR_PROFILE) {
-                            fp_mod.recordFiberExit(task.profile_site_id, task.spawn_ns, fp_mod.nowNs());
-                        }
-                        _ = self.active_tasks.fetchSub(1, .monotonic);
-                        // Remove from lock_waiters before destroying to prevent stale pointer access.
-                        // A task can register itself there via registerLockWaiter and then complete
-                        // (e.g. after deadlock detection returns error.Deadlock) without being lazily
-                        // removed, because waiting_for_lock was already cleared by detectCycle.
-                        for (self.lock_waiters.items, 0..) |wt, idx| {
-                            if (wt == task) {
-                                _ = self.lock_waiters.swapRemove(idx);
-                                break;
+                        // Atomically claim the slot for destroy. CAS
+                        // IDLE -> DESTROYING. If a concurrent
+                        // submitResume claimed IDLE -> IN_QUEUE first,
+                        // the task is now sitting in some queue
+                        // (or SPSC ring); we do NOT destroy here. The
+                        // next pop will dequeue the task, see status
+                        // still .Finished and in_inbox back at IDLE,
+                        // and retry this branch with the CAS now
+                        // succeeding.
+                        //
+                        // This single CAS closes the cross-scheduler
+                        // submitResume-after-Finished UAF that
+                        // surfaced as the SplitStream pubsub-hammer
+                        // SEGV at destroy(task.base) below. See
+                        // queues.zig:Task.in_inbox doc and the
+                        // matching VOPR + Loom regression tests.
+                        if (task.in_inbox.cmpxchgStrong(qs.IN_INBOX_IDLE, qs.IN_INBOX_DESTROYING, .acq_rel, .acquire) != null) {
+                            // A concurrent submitResume holds the
+                            // slot. The task is queued elsewhere; the
+                            // next pop will reach this branch again
+                            // with in_inbox back at IDLE.
+                        } else {
+                            if (rt_profile.CLEAR_PROFILE) {
+                                fp_mod.recordFiberExit(task.profile_site_id, task.spawn_ns, fp_mod.nowNs());
                             }
+                            _ = self.active_tasks.fetchSub(1, .monotonic);
+                            // Remove from lock_waiters before destroying to prevent stale pointer access.
+                            // A task can register itself there via registerLockWaiter and then complete
+                            // (e.g. after deadlock detection returns error.Deadlock) without being lazily
+                            // removed, because waiting_for_lock was already cleared by detectCycle.
+                            for (self.lock_waiters.items, 0..) |wt, idx| {
+                                if (wt == task) {
+                                    _ = self.lock_waiters.swapRemove(idx);
+                                    break;
+                                }
+                            }
+                            // Compatibility no-op: tasks no longer own EBR slots.
+                            self.releaseTaskEbr(task);
+                            self.freeStack(task.base.stack);
+                            self.allocator.destroy(task.base);
+                            self.task_slab.destroy(task);
                         }
-                        // Compatibility no-op: tasks no longer own EBR slots.
-                        self.releaseTaskEbr(task);
-                        self.freeStack(task.base.stack);
-                        self.allocator.destroy(task.base);
-                        self.task_slab.destroy(task);
                     },
                     .Ready => {
                         // It yielded, but wants to run again. If a concurrent
                         // wake already queued it through submitResume, honor the
                         // in_inbox guard and avoid a duplicate enqueue.
-                        if (!task.in_inbox.load(.acquire)) {
+                        if (task.in_inbox.load(.acquire) == qs.IN_INBOX_IDLE) {
                             // Cooperative coopYield path goes to yield_queue
                             // (FIFO), so the just-yielded task does NOT win
                             // the next pop against tasks that yielded earlier.

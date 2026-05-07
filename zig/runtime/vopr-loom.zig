@@ -382,6 +382,14 @@ const LoomError = error{
     TaskDuplicated,
     PinnedStolen,
     StepLimitExceeded,
+    /// A `*Task` was pushed to the ready queue by a simulated
+    /// `submitResume` after the owner's `.Finished` destroy point.
+    /// In production this is a use-after-free: the slot's bytes are
+    /// slab free-list metadata by the time the dispatch loop pops
+    /// and dereferences it. Catches the cross-scheduler
+    /// submitResume-after-Finished race that the SplitStream pubsub
+    /// hammer surfaces statistically.
+    UafFinishedTaskInQueue,
 };
 
 fn countResults(h: *LoomHarness) usize {
@@ -806,6 +814,113 @@ fn scenarioIoWaiterPopVsSteal(h: *LoomHarness) !void {
     if (results + in_queue > 1) return LoomError.TaskDuplicated;
 }
 
+// -----------------------------------------------------------------------
+// Scenario 14: submitResume vs .Finished destroy (cross-scheduler UAF)
+//
+// Models the production race behind the SplitStream pubsub hammer
+// SEGV at scheduler.zig run() destroy(task.base):
+//
+//   Thread A (owner scheduler):
+//     pop task            (queue.pop)
+//     in_inbox.store(false, .release)         -- mirrors run() line 1248
+//     status.store(.Finished, .release)       -- task body finished
+//     mark `g_uaf_destroyed = true`           -- mirrors task_slab.destroy
+//
+//   Thread B (waker on another scheduler, captured *task earlier from a
+//             parking-lot waiter list / wg / stream):
+//     in_inbox.load(.acquire)                 -- production submitResume
+//     if !was_in_inbox: in_inbox.store(true, .release)
+//                       queue.push(task)      -- direct enqueue (same-sched
+//                                                fast path) or SPSC ring
+//
+// Loom enumerates every interleaving. The bug shape: B's queue.push
+// completes AFTER A's destroy mark. Production's drainChannels /
+// run-loop pop would later dereference the dangling slot.
+//
+// Invariant: if A reached the destroy mark, the queue must not contain
+// the task when both threads finish. Today, with submitResume lacking
+// any status / generation check, schedules where B's load happens
+// after A's in_inbox.store(false) but B's push happens after A's
+// destroy will leave the task queued -> UafFinishedTaskInQueue fires.
+//
+// A correct fix (e.g. submitResume CAS gating on status != .Finished,
+// or a generation check) would shrink the failing schedule space to
+// zero and let this test pass.
+// -----------------------------------------------------------------------
+
+// True after Thread A has executed the simulated `task_slab.destroy`.
+// SimAtomic so it shows up as a yield point in the harness's atomic
+// trace and so reads from B observe it under the harness's scheduling.
+var g_uaf_destroyed: qs.Atomic(bool) = qs.Atomic(bool).init(false);
+
+fn entryUafFinishOwner() callconv(.c) void {
+    const h = harness;
+    // pop -> in_inbox cleared -> body runs -> status .Finished -> destroy
+    if (h.queue.pop()) |task| {
+        // Mirrors scheduler.zig run() pop: transitions IN_QUEUE -> IDLE
+        // immediately after dequeue.
+        task.in_inbox.store(qs.IN_INBOX_IDLE, .release);
+        // Mirrors the task body running to completion + the .Finished
+        // store the run loop observes at line 1272.
+        task.status.store(.Finished, .release);
+        // Mirrors the .Finished branch's CAS-claim
+        // (IDLE -> DESTROYING). If the CAS succeeds, we can destroy.
+        // If it fails, a concurrent submitResume already pushed the
+        // task back into the queue and we MUST NOT destroy it -- the
+        // next pop will retry .Finished with in_inbox back at IDLE.
+        if (task.in_inbox.cmpxchgStrong(qs.IN_INBOX_IDLE, qs.IN_INBOX_DESTROYING, .acq_rel, .acquire) == null) {
+            // Successful CAS == authoritative right to destroy.
+            // Production: releaseTaskEbr / freeStack / destroy(task.base)
+            // / task_slab.destroy(task). Modeled here as the destroyed
+            // sentinel.
+            g_uaf_destroyed.store(true, .release);
+        }
+    }
+    h.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryUafSubmitResume() callconv(.c) void {
+    const h = harness;
+    const task = &h.stub_tasks[0];
+    // Mirrors scheduler.zig submitResume after the in_inbox state-
+    // machine fix: CAS IDLE -> IN_QUEUE. If the slot is already
+    // IN_QUEUE (concurrent submitter) or DESTROYING (owner is in the
+    // .Finished destroy path), the CAS fails and we MUST NOT push.
+    if (task.in_inbox.cmpxchgStrong(qs.IN_INBOX_IDLE, qs.IN_INBOX_IN_QUEUE, .acq_rel, .acquire) == null) {
+        h.queue.push(std.heap.c_allocator, task) catch {};
+    }
+    h.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn scenarioUafFinishVsSubmitResume(h: *LoomHarness) !void {
+    const task = h.initStubTask(0, false);
+    task.status.store(.Ready, .release);
+    // Pre-state: task is in the queue with in_inbox=IN_QUEUE (typical
+    // state for a resumed task awaiting dispatch). This sets up A's
+    // pop to transition IN_QUEUE -> IDLE, opening the window for B's
+    // submitResume to attempt its CAS.
+    task.in_inbox.store(qs.IN_INBOX_IN_QUEUE, .release);
+    h.queue.push(std.heap.c_allocator, task) catch unreachable;
+
+    // Reset destroyed flag for this schedule.
+    g_uaf_destroyed.store(false, .release);
+
+    try h.createThread(0, @intFromPtr(&entryUafFinishOwner));
+    try h.createThread(1, @intFromPtr(&entryUafSubmitResume));
+    try h.run();
+
+    // Invariant: if owner reached the destroy point, the queue must
+    // be empty. The state-machine CAS in the .Finished path
+    // guarantees that any post-destroy submitResume rejects its
+    // push (the slot transitioned to DESTROYING before any
+    // surviving submitResume CAS could succeed).
+    if (g_uaf_destroyed.load(.acquire) and h.queue.len() > 0) {
+        return LoomError.UafFinishedTaskInQueue;
+    }
+}
+
 // Scenario 15: REMOVED -- modeled two threads concurrently pushing to
 // the same RunQueue (IoWaiter + poll-wake). RunQueue is Chase-Lev:
 // push is owner-only, so concurrent push from two threads is not a
@@ -977,6 +1092,65 @@ test "loom: exhaustive io_uring IoWaiter pop vs steal" {
     else
         try runExhaustiveN(std.testing.allocator, &scenarioIoWaiterPopVsSteal, "iowaiter_pop_vs_steal", 14);
     std.debug.print("  iowaiter_pop_vs_steal: {d} interleavings OK\n", .{count});
+}
+
+test "loom: submitResume vs Finished destroy is race-free" {
+    // Op counts for this scenario (per thread):
+    //   entryUafFinishOwner:   7 pop + 1 in_inbox.store + 1 status.store
+    //                           + 1 in_inbox.cmpxchg + 1 destroyed.store
+    //                           = 11 ops
+    //   entryUafSubmitResume:  1 in_inbox.cmpxchg + 4 push = 5 ops
+    //
+    // Combined depth: 16. Depth 12 (4096 schedules) is plenty to cover
+    // the small interleaving window where B's CAS races A's pop+CAS.
+    //
+    // The bug shape: production submitResume formerly did
+    //   if (task.in_inbox.load) return; task.in_inbox.store(true);
+    // which is a load-then-store, NOT a CAS, with no synchronization
+    // against the .Finished destroy. This let `submitResume` push a
+    // *Task into a queue AFTER the owner's destroy(task.base) had
+    // freed the slot -- a use-after-free that surfaced as the
+    // SplitStream pubsub-hammer SEGV.
+    //
+    // FIX: in_inbox is now a 3-state Atomic(u8) (IDLE / IN_QUEUE /
+    // DESTROYING). submitResume CAS-claims IDLE -> IN_QUEUE. The
+    // .Finished branch CAS-claims IDLE -> DESTROYING. The two CAS
+    // attempts cannot both succeed: at most one wins. If submitResume
+    // wins, the destroyer skips destroy and the next pop retries
+    // .Finished with the task back at IDLE. If the destroyer wins,
+    // every later submitResume CAS fails (state is now DESTROYING).
+    // No double-push, no use-after-free.
+    //
+    // ASSERTION: zero failing schedules. If this test ever regresses
+    // to a non-zero failure count, the in_inbox state machine has
+    // been weakened.
+    const allocator = std.testing.allocator;
+    const depth: usize = if (build_options.coverage) 6 else 12;
+    const total: usize = @as(usize, 1) << depth;
+    var schedule: [16]u8 = undefined;
+    var failures: usize = 0;
+    var step_limits: usize = 0;
+    var first_fail_seed: ?usize = null;
+    for (0..total) |seed| {
+        for (0..depth) |bit| schedule[bit] = @intCast((seed >> @as(u4, @intCast(bit))) & 1);
+        var h = try LoomHarness.initExhaustive(allocator, schedule[0..depth]);
+        defer h.deinit();
+        harness = &h;
+        scenarioUafFinishVsSubmitResume(&h) catch |err| switch (err) {
+            LoomError.UafFinishedTaskInQueue => {
+                failures += 1;
+                if (first_fail_seed == null) first_fail_seed = seed;
+            },
+            LoomError.StepLimitExceeded => step_limits += 1,
+            else => return err,
+        };
+    }
+    std.debug.print(
+        "  uaf_finish_vs_submit_resume: {d}/{d} bad schedules ({d} step-limit). " ++
+            "First failing seed: {?}\n",
+        .{ failures, total, step_limits, first_fail_seed },
+    );
+    try std.testing.expectEqual(@as(usize, 0), failures);
 }
 
 test "loom: queue wraparound" {

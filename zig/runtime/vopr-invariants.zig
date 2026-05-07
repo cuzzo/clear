@@ -29,10 +29,27 @@ pub const InvariantError = error{
     LivenessViolation,
     EpollStatusViolation,
     ShardConcurrentAccess,
+    /// A *Task that was already destroyed (slab slot returned by
+    /// run()'s .Finished branch in scheduler.zig) is still reachable
+    /// from some scheduler queue, inbox, or current_task field.
+    /// Dereferencing it in production reads slab free-list metadata
+    /// (often a `0x7fff…` next-pointer) and SEGVs at e.g. the
+    /// `destroy(task.base)` line in run(). Bug shape: a wakeNext /
+    /// wg.done / stream-wake captures `*Task` and calls
+    /// `sched.submitResume(task)` after the task was finished+
+    /// destroyed by its owner -- submitResume has no generation
+    /// check, so it pushes the dangling pointer into the target
+    /// scheduler's ring or ready_queue.
+    DestroyedTaskReferenced,
 };
 
 /// Run all invariant checks.  Returns error on first violation.
+/// DestroyedTaskReferenced runs first because it gives the most-specific
+/// diagnosis for the cross-scheduler-submitResume-after-Finished bug
+/// class; the conservation check would otherwise fire for the same
+/// state with a less actionable message.
 pub fn checkAll(state: *VoprState) InvariantError!void {
+    try checkNoDestroyedReferences(state, true);
     // Combined conservation + duplicate + affinity + valid pointer check
     // (single walk over all queues, most efficient)
     try checkTaskConservationAndDuplicates(state);
@@ -45,6 +62,7 @@ pub fn checkAll(state: *VoprState) InvariantError!void {
 /// Silent variant for negative tests that intentionally construct an invalid
 /// state and only need the returned error, not the invariant diagnostic.
 pub fn checkAllSilent(state: *VoprState) InvariantError!void {
+    try checkNoDestroyedReferences(state, false);
     try checkTaskConservationAndDuplicates(state);
     try checkEpollSingleRegistration(state);
     try checkEpollStatusConsistency(state);
@@ -175,6 +193,20 @@ fn checkTaskConservationAndDuplicates(state: *VoprState) InvariantError!void {
             }
         }
 
+        // Walk resume_inbox (cross-scheduler submitResume model;
+        // mirrors production SPSC ring + same-scheduler fast path).
+        for (sched.resume_inbox.items) |task| {
+            if (!state.task_registry.contains(task)) {
+                std.debug.print("VOPR INVARIANT: invalid task pointer {*} in resume_inbox of sched {d}\n", .{ task, sched_idx });
+                return InvariantError.InvalidTaskPointer;
+            }
+            if (seen_map.contains(task)) {
+                std.debug.print("VOPR INVARIANT: duplicate task {*} in resume_inbox of sched {d}\n", .{ task, sched_idx });
+                return InvariantError.DuplicateTask;
+            }
+            seen_map.put(state.allocator, task, @intCast(sched_idx)) catch unreachable;
+        }
+
         // Walk yield_queue (cooperative-yield FIFO; mirrors production
         // Scheduler.yield_queue). Tasks here are owner-local and never
         // stolen, so they can't appear in any other scheduler's queues.
@@ -288,6 +320,85 @@ fn checkEpollStatusConsistency(state: *VoprState) InvariantError!void {
 }
 
 /// Check that no I/O-ready fd has been stalled for more than MAX_STALL_TICKS.
+/// Walk every queue, inbox, and current_task field. Any *Task whose
+/// SimTask.destroyed=true represents a dangling pointer in production —
+/// dereferencing it in the .Finished destroy sequence (or in
+/// drainChannels' Resume tag) reads slab free-list metadata and SEGVs.
+/// This catches the cross-scheduler submitResume-after-Finished class
+/// of UAF that the SplitStream pubsub hammer surfaces statistically.
+fn checkNoDestroyedReferences(state: *VoprState, print_diagnostic: bool) InvariantError!void {
+    for (state.schedulers[0..state.sched_count], 0..) |*sched, sched_idx| {
+        // ready_queue (Chase-Lev) — walk [top..bottom)
+        const t = sched.ready_queue.top.load(.monotonic);
+        const b = sched.ready_queue.bottom.load(.monotonic);
+        const size = b -% t;
+        if (size > 0 and size <= sched.ready_queue.getMask() + 1) {
+            var i = t;
+            while (i != b) : (i +%= 1) {
+                if (sched.ready_queue.getBuffer()[i & sched.ready_queue.getMask()].load(.monotonic)) |task| {
+                    if (state.getSimTask(task)) |sim| if (sim.destroyed) {
+                        if (print_diagnostic) std.debug.print(
+                            "VOPR INVARIANT: destroyed task {*} still in sched {d} ready_queue slot {d}\n",
+                            .{ task, sched_idx, i },
+                        );
+                        return InvariantError.DestroyedTaskReferenced;
+                    };
+                }
+            }
+        }
+        // pinned_queue
+        for (sched.pinned_queue.items) |task| {
+            if (state.getSimTask(task)) |sim| if (sim.destroyed) {
+                if (print_diagnostic) std.debug.print(
+                    "VOPR INVARIANT: destroyed task {*} still in sched {d} pinned_queue\n",
+                    .{ task, sched_idx },
+                );
+                return InvariantError.DestroyedTaskReferenced;
+            };
+        }
+        // yield_queue (cooperative-yield FIFO)
+        for (sched.yield_queue.items) |task| {
+            if (state.getSimTask(task)) |sim| if (sim.destroyed) {
+                if (print_diagnostic) std.debug.print(
+                    "VOPR INVARIANT: destroyed task {*} still in sched {d} yield_queue\n",
+                    .{ task, sched_idx },
+                );
+                return InvariantError.DestroyedTaskReferenced;
+            };
+        }
+        // resume_inbox (cross-scheduler submitResume model)
+        for (sched.resume_inbox.items) |task| {
+            if (state.getSimTask(task)) |sim| if (sim.destroyed) {
+                if (print_diagnostic) std.debug.print(
+                    "VOPR INVARIANT: destroyed task {*} still in sched {d} resume_inbox -- submitResume captured a stale *Task across the .Finished destroy\n",
+                    .{ task, sched_idx },
+                );
+                return InvariantError.DestroyedTaskReferenced;
+            };
+        }
+        // sleeping_queue
+        for (sched.sleeping_queue.items) |task| {
+            if (state.getSimTask(task)) |sim| if (sim.destroyed) {
+                if (print_diagnostic) std.debug.print(
+                    "VOPR INVARIANT: destroyed task {*} still in sched {d} sleeping_queue\n",
+                    .{ task, sched_idx },
+                );
+                return InvariantError.DestroyedTaskReferenced;
+            };
+        }
+        // current_task
+        if (sched.current_task) |task| {
+            if (state.getSimTask(task)) |sim| if (sim.destroyed) {
+                if (print_diagnostic) std.debug.print(
+                    "VOPR INVARIANT: destroyed task {*} is sched {d} current_task\n",
+                    .{ task, sched_idx },
+                );
+                return InvariantError.DestroyedTaskReferenced;
+            };
+        }
+    }
+}
+
 fn checkLiveness(state: *VoprState) InvariantError!void {
     var fd_iter = state.sim_fds.iterator();
     while (fd_iter.next()) |entry| {
