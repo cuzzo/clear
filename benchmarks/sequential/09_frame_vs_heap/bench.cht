@@ -14,60 +14,62 @@
 # The frame mark rewinds at the end of each loop iteration, so all
 # string data is freed in O(1) — zero GPA calls.
 FN benchFrame(n: Int64) RETURNS !Int64 ->
-    MUTABLE total: Int64 = 0;
-    FOR i IN (0_i64 ..< n) DO
-        s = "item-${i.toString()}-value";
-        total += s.length();
-    END
-    RETURN total;
+  MUTABLE total = 0;
+  FOR i IN (0 ..< n) DO
+    s = "item-${i.toString()}-value";
+    total += s.length();
+  END
+  RETURN total;
 END
 
 # Helper that returns a heap-promoted string (escape path).
 FN makeString(i: Int64) RETURNS !String ->
-    result = "item-${i.toString()}-value";
-    RETURN result;
+  result = "item-${i.toString()}-value";
+  RETURN result;
 END
 
 # Variant B: Heap-promoted strings. Each iteration calls makeString
 # which promotes the string to heap on return. The caller frees it
 # via defer. Every iteration pays GPA alloc + free.
 FN benchHeap(n: Int64) RETURNS !Int64 ->
-    MUTABLE total: Int64 = 0;
-    FOR i IN (0_i64 ..< n) DO
-        s = makeString(i);
-        total += s.length();
-    END
-    RETURN total;
+  MUTABLE total = 0;
+  FOR i IN (0 ..< n) DO
+    s = makeString(i);
+    total += s.length();
+  END
+  RETURN total;
 END
 
 FN main() RETURNS Void ->
-    n = 1000000;
+  n = 1_000_000;
 
-    # Warm up
-    benchFrame(1000);
-    benchHeap(1000);
+  # Warm up
+  benchFrame(1000);
+  benchHeap(1000);
 
-    # Benchmark Frame (fast path)
-    t0 = timestampMs();
-    frameTotal = benchFrame(n);
-    frameMs = timestampMs() - t0;
-    frameRssKb = currentMemoryKb();
+  # Benchmark Frame (fast path)
+  t0 = timestampMs();
+  frameTotal = benchFrame(n);
+  frameMs = timestampMs() - t0;
+  frameRssKb = currentMemoryKb();
 
-    # Benchmark Heap (escape path)
-    t1 = timestampMs();
-    heapTotal = benchHeap(n);
-    heapMs = timestampMs() - t1;
-    heapRssKb = currentMemoryKb();
+  # Benchmark Heap (escape path)
+  t1 = timestampMs();
+  heapTotal = benchHeap(n);
+  heapMs = timestampMs() - t1;
+  heapRssKb = currentMemoryKb();
 
-    ASSERT frameTotal == heapTotal, "both variants must produce same result";
+  ASSERT frameTotal == heapTotal, "both variants must produce same result";
 
-    # BENCH_RESULT reports the frame (no-malloc) path — the primary metric.
-    # Heap variant is secondary: shows escape overhead for reference.
-    print("BENCH_RESULT: ${frameMs.toString()} ms");
-    print("Frame vs Heap Escape (${n.toString()} iterations)");
-    print("  Frame (no escape):  ${frameMs.toString()} ms  RSS ${frameRssKb.toString()} KB");
-    print("  Heap  (promoted):   ${heapMs.toString()} ms  RSS ${heapRssKb.toString()} KB");
-    print("  Heap overhead:      ${(heapMs - frameMs).toString()} ms  (${((heapMs * 100 / frameMs) - 100).toString()}% slower)");
-    print("  Peak RSS (VmHWM):   ${peakMemoryKb().toString()} KB");
-    RETURN;
+  # BENCH_RESULT reports the frame (no-malloc) path — the primary metric.
+  # Heap variant is secondary: shows escape overhead for reference.
+  print("BENCH_RESULT: ${frameMs.toString()} ms");
+  print("Frame vs Heap Escape (${n.toString()} iterations)");
+  print("  Frame (no escape):  ${frameMs.toString()} ms  RSS ${frameRssKb.toString()} KB");
+  print("  Heap  (promoted):   ${heapMs.toString()} ms  RSS ${heapRssKb.toString()} KB");
+  print(
+    "  Heap overhead:      ${(heapMs - frameMs).toString()} ms  (${((heapMs * 100 / frameMs) - 100).toString()}% slower)"
+  );
+  print("  Peak RSS (VmHWM):   ${peakMemoryKb().toString()} KB");
+  RETURN;
 END

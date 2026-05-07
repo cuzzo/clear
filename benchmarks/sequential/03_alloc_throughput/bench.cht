@@ -12,56 +12,62 @@
 # Regular FOR is printed as CLEAR overhead reference only.
 
 FN benchRegular(n: Int64) RETURNS !Float64 ->
-    MUTABLE total: Float64 = 0.0;
-    FOR outer IN (0_i64 ..< n) DO
-        MUTABLE vals: Float64[10000]@list = [];
-        FOR inner IN (0_i64 ..< n) -> vals.append(inner + 0.0);
-        MUTABLE s: Float64 = 0.0;
-        FOR inner IN (0_i64 ..< vals.length()) -> s += vals[inner];
-        total = total + s;
-    END
-    RETURN total;
+  MUTABLE total = 0.0;
+  FOR outer IN (0 ..< n) DO
+    MUTABLE vals: Float64[10_000]@list = [];
+    FOR inner IN (0 ..< n) -> vals.append(inner + 0.0);
+    MUTABLE s = 0.0;
+    FOR inner IN (0 ..< vals.length()) -> s += vals[inner];
+    total = total + s;
+  END
+  RETURN total;
 END
 
 FN benchTight(n: Int64) RETURNS !Float64 ->
-    MUTABLE total: Float64 = 0.0;
-    FOR outer IN (0_i64 ..< n) DO
-        MUTABLE vals: Float64[10000]@list = [];
-        MUTABLE inner: Int64 = 0;
-        TIGHT WHILE inner < n DO vals.append(inner + 0.0); inner += 1; END
-        MUTABLE s: Float64 = 0.0;
-        inner = 0;
-        TIGHT WHILE inner < n DO s += vals[inner]; inner += 1; END
-        total = total + s;
+  MUTABLE total = 0.0;
+  FOR outer IN (0 ..< n) DO
+    MUTABLE vals: Float64[10_000]@list = [];
+    MUTABLE inner = 0;
+    TIGHT WHILE inner < n DO
+      vals.append(inner + 0.0);
+      inner += 1;
     END
-    RETURN total;
+    MUTABLE s = 0.0;
+    inner = 0;
+    TIGHT WHILE inner < n DO
+      s += vals[inner];
+      inner += 1;
+    END
+    total = total + s;
+  END
+  RETURN total;
 END
 
 FN main() RETURNS Void ->
-    n = 10000;
+  n = 10_000;
 
-    # Warmup
-    warmR = benchRegular(100);
-    warmT = benchTight(100);
+  # Warmup
+  warmR = benchRegular(100);
+  warmT = benchTight(100);
 
-    # Primary measurement: TIGHT WHILE (apples-to-apples vs C malloc + Rust Vec)
-    t0 = timestampMs();
-    totalT = benchTight(n);
-    tightMs = timestampMs() - t0;
+  # Primary measurement: TIGHT WHILE (apples-to-apples vs C malloc + Rust Vec)
+  t0 = timestampMs();
+  totalT = benchTight(n);
+  tightMs = timestampMs() - t0;
 
-    # Declare the primary result for runner.rb
-    print("BENCH_RESULT: ${tightMs.toString()} ms");
+  # Declare the primary result for runner.rb
+  print("BENCH_RESULT: ${tightMs.toString()} ms");
 
-    # Regular FOR loops (CLEAR overhead reference, not cross-language comparison)
-    t1 = timestampMs();
-    totalR = benchRegular(n);
-    regularMs = timestampMs() - t1;
+  # Regular FOR loops (CLEAR overhead reference, not cross-language comparison)
+  t1 = timestampMs();
+  totalR = benchRegular(n);
+  regularMs = timestampMs() - t1;
 
-    ASSERT totalT == totalR, "results must match";
-    ASSERT totalT > 0.0, "total must be positive";
+  ASSERT totalT == totalR, "results must match";
+  ASSERT totalT > 0.0, "total must be positive";
 
-    print("total = ${totalT.toString()}");
-    print("TIGHT WHILE: ${tightMs.toString()} ms  (vs C/Rust)");
-    print("Regular FOR: ${regularMs.toString()} ms  (CLEAR overhead reference, not measured by runner)");
-    RETURN;
+  print("total = ${totalT.toString()}");
+  print("TIGHT WHILE: ${tightMs.toString()} ms  (vs C/Rust)");
+  print("Regular FOR: ${regularMs.toString()} ms  (CLEAR overhead reference, not measured by runner)");
+  RETURN;
 END

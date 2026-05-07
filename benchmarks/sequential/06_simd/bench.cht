@@ -18,28 +18,31 @@
 # Result: CLEAR (LLVM auto-vec) is faster than C (GCC explicit AVX2).
 
 STRUCT Vec4 {
-    x: Float64,
-    y: Float64,
-    z: Float64,
-    w: Float64
+  x: Float64,
+  y: Float64,
+  z: Float64,
+  w: Float64
 }
 
 # Scalar dot product: 4 fmul + 3 fadd.
 # No SIMD equivalent exists in CLEAR today.
-FN dot4(a: Vec4, b: Vec4) RETURNS Float64 EFFECTS REENTRANT ->
-    RETURN a.x*b.x + a.y*b.y + a.z*b.z + a.w*b.w;
+FN dot4(a: Vec4, b: Vec4)
+ RETURNS Float64
+ EFFECTS REENTRANT
+->
+  RETURN a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
 END
 
 FN main() RETURNS Void ->
-    t0 = timestampMs();
-    MUTABLE sum: Float64 = 0.0;
-    FOR i IN (0_i64 ..< 100000000) DO
-        a = Vec4{ x: i+0.0, y: i+1.0, z: i+2.0, w: i+3.0 };
-        b = Vec4{ x: 1.0, y: 2.0, z: 3.0, w: 4.0 };
-        sum = sum + dot4(a, b);
-    END
-    ASSERT sum > 0.0, "sum must be positive";
-    elapsed = timestampMs() - t0;
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    RETURN;
+  t0 = timestampMs();
+  MUTABLE sum = 0.0;
+  FOR i IN (0 ..< 100_000_000) DO
+    a = Vec4{ x: i + 0.0, y: i + 1.0, z: i + 2.0, w: i + 3.0 };
+    b = Vec4{ x: 1.0, y: 2.0, z: 3.0, w: 4.0 };
+    sum = sum + dot4(a, b);
+  END
+  ASSERT sum > 0.0, "sum must be positive";
+  elapsed = timestampMs() - t0;
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  RETURN;
 END

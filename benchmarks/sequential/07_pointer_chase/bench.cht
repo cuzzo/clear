@@ -37,38 +37,40 @@
 #   chasing in the memory-bound regime. The cost is memory: pool slots are
 #   2× larger than raw C structs, and the scheduler adds fixed overhead.
 
-STRUCT Node { val: Int64 }
+STRUCT Node {
+  val: Int64
+}
 
 FN main() RETURNS Void ->
-    t0 = timestampMs();
-    n_nodes = 2000000_i64;
-    step    = 999983_i64;
+  t0 = timestampMs();
+  n_nodes = 2_000_000;
+  step = 999_983;
 
-    MUTABLE pool: Node[2000000]@pool = [];
-    MUTABLE id_list: Id<Node>[2000000]@list = [];
+  pool: Node[2_000_000]@pool = [];
+  MUTABLE id_list: Id<Node> [2_000_000]@list = [];
 
-    # Phase 1: insert N nodes, record IDs in insertion order.
-    FOR i IN (0_i64 ..< n_nodes) DO
-        id = pool.insert(Node{ val: i });
-        id_list.append(id);
+  # Phase 1: insert N nodes, record IDs in insertion order.
+  FOR i IN (0 ..< n_nodes) DO
+    id = pool.insert(Node{ val: i });
+    id_list.append(id);
+  END
+
+  # Phase 2: walk N steps via arithmetic permutation, accumulate sum.
+  # Time only this phase (mirrors C walk phase).
+  MUTABLE cur_idx = 0;
+  MUTABLE sum = 0;
+  t1 = timestampMs();
+  FOR steps IN (0 ..< n_nodes) DO
+    IF pool[id_list[cur_idx]] AS n THEN
+      sum = sum + n.val;
     END
+    cur_idx = (cur_idx + step) MOD n_nodes;
+  END
+  walkMs = timestampMs() - t1;
 
-    # Phase 2: walk N steps via arithmetic permutation, accumulate sum.
-    # Time only this phase (mirrors C walk phase).
-    MUTABLE cur_idx: Int64 = 0;
-    MUTABLE sum = 0;
-    t1 = timestampMs();
-    FOR steps IN (0_i64 ..< n_nodes) DO
-        IF pool[id_list[cur_idx]] AS n THEN
-            sum = sum + n.val;
-        END
-        cur_idx = (cur_idx + step) MOD n_nodes;
-    END
-    walkMs = timestampMs() - t1;
-
-    ASSERT sum > 0, "sum must be positive";
-    totalMs = timestampMs() - t0;
-    print("BENCH_RESULT: ${walkMs.toString()} ms");
-    print("Walk: ${walkMs.toString()} ms | Total: ${totalMs.toString()} ms");
-    RETURN;
+  ASSERT sum > 0, "sum must be positive";
+  totalMs = timestampMs() - t0;
+  print("BENCH_RESULT: ${walkMs.toString()} ms");
+  print("Walk: ${walkMs.toString()} ms | Total: ${totalMs.toString()} ms");
+  RETURN;
 END

@@ -6,22 +6,22 @@
 # C uses calloc/free for the bucket array. Rust uses heap via with_capacity.
 
 FN main() RETURNS Void ->
-    MUTABLE m: HashMap<Int64, Float64> = {};
+  MUTABLE m: HashMap<Int64, Float64> = {};
 
-    # Insert phase: 1M integer key-value pairs
-    t0 = timestampMs();
-    FOR i IN (0_i64 ..< 1000000) -> m[i] = i + 0.0;
-    insertMs = timestampMs() - t0;
+  # Insert phase: 1M integer key-value pairs
+  t0 = timestampMs();
+  FOR i IN (0 ..< 1_000_000) -> m[i] = i + 0.0;
+  insertMs = timestampMs() - t0;
 
-    # Lookup phase: sum all values to prevent dead-code elimination
-    t1 = timestampMs();
-    MUTABLE total = 0.0;
-    FOR j IN (0_i64 ..< 1000000) -> total = total + (m[j] OR 0.0);
-    lookupMs = timestampMs() - t1;
+  # Lookup phase: sum all values to prevent dead-code elimination
+  t1 = timestampMs();
+  MUTABLE total = 0.0;
+  FOR j IN (0 ..< 1_000_000) -> total = total + (m[j] OR 0.0);
+  lookupMs = timestampMs() - t1;
 
-    ASSERT total > 0.0, "total must be positive";
-    totalMs = insertMs + lookupMs;
-    print("BENCH_RESULT: ${totalMs.toString()} ms");
-    print("Insert: ${insertMs.toString()} ms | Lookup: ${lookupMs.toString()} ms | Total: ${totalMs.toString()} ms");
-    RETURN;
+  ASSERT total > 0.0, "total must be positive";
+  totalMs = insertMs + lookupMs;
+  print("BENCH_RESULT: ${totalMs.toString()} ms");
+  print("Insert: ${insertMs.toString()} ms | Lookup: ${lookupMs.toString()} ms | Total: ${totalMs.toString()} ms");
+  RETURN;
 END

@@ -29,17 +29,18 @@
 #   "natural" form) blocks LLVM vectorization and gives 962ms instead of 338ms.
 
 FN buildData(n: Int64) RETURNS !Float64[]@list ->
-    MUTABLE data: Float64[]@list = [];
-    data.reserve(n); # TODO: replace with Float64[n]@list once T[expr]@list supports runtime capacity
+  MUTABLE data: Float64[]@list = [];
+  data.reserve(n);
+  # TODO: replace with Float64[n]@list once T[expr]@list supports runtime capacity
 
-    MUTABLE state: Int64 = 42;
-    FOR i IN (0_i64 ..< n) DO
-        state = (state %* 6364136223846793005_i64 %+ (i %+ 1442695040888963407_i64));
-        MUTABLE val = toFloat(state MOD 1000);
-        IF val < 0.0 -> val = 0.0 - val;
-        data.append(val);
-    END
-    RETURN data;
+  MUTABLE state = 42;
+  FOR i IN (0 ..< n) DO
+    state = (state %* 6_364_136_223_846_793_005 %+ (i %+ 1_442_695_040_888_963_407));
+    MUTABLE val = (state MOD 1000).toFloat();
+    IF val < 0.0 -> val = 0.0 - val;
+    data.append(val);
+  END
+  RETURN data;
 END
 
 # ============================================================
@@ -47,13 +48,13 @@ END
 # ============================================================
 
 FN sumLoop(data: Float64[]) RETURNS Float64 ->
-    MUTABLE sum: Float64 = 0.0;
-    FOR i IN (0_i64 ..< data.length()) -> sum += data[i];
-    RETURN sum;
+  MUTABLE sum = 0.0;
+  FOR i IN (0 ..< data.length()) -> sum += data[i];
+  RETURN sum;
 END
 
 FN sumPipeline(data: Float64[]) RETURNS Float64 ->
-    RETURN data |> SUM _;
+  RETURN data |> SUM _;
 END
 
 # ============================================================
@@ -61,16 +62,19 @@ END
 # ============================================================
 
 FN fusedLoop(data: Float64[]) RETURNS Float64 ->
-    MUTABLE sum: Float64 = 0.0;
-    FOR i IN (0_i64 ..< data.length()) DO
-        v = data[i];
-        IF v > 500.0 -> sum += v * v;
-    END
-    RETURN sum;
+  MUTABLE sum = 0.0;
+  FOR i IN (0 ..< data.length()) DO
+    v = data[i];
+    IF v > 500.0 -> sum += v * v;
+  END
+  RETURN sum;
 END
 
 FN chainedPipeline(data: Float64[]) RETURNS !Float64 ->
-    RETURN data |> WHERE _ > 500.0 |> SELECT _ * _ |> SUM _;
+  RETURN data
+    |> WHERE _ > 500.0
+    |> SELECT _ * _
+    |> SUM _;
 END
 
 # ============================================================
@@ -78,84 +82,90 @@ END
 # ============================================================
 
 FN longFusedLoop(data: Float64[]) RETURNS Float64 ->
-    MUTABLE sum: Float64 = 0.0;
-    FOR i IN (0_i64 ..< data.length()) DO
-        v = data[i];
-        IF v > 200.0 && v * 2.0 < 1500.0 THEN
-            sum += v * 2.0;
-        END
+  MUTABLE sum = 0.0;
+  FOR i IN (0 ..< data.length()) DO
+    v = data[i];
+    IF v > 200.0 && v * 2.0 < 1500.0 THEN
+      sum += v * 2.0;
     END
-    RETURN sum;
+  END
+  RETURN sum;
 END
 
 FN longChainedPipeline(data: Float64[]) RETURNS !Float64 ->
-    RETURN data |> WHERE _ > 200.0 |> SELECT _ * 2.0 |> WHERE _ < 1500.0 |> SUM _;
+  RETURN data
+    |> WHERE _ > 200.0
+    |> SELECT _ * 2.0
+    |> WHERE _ < 1500.0
+    |> SUM _;
 END
 
 FN main() RETURNS Void ->
-    n = 10000000;
-    iters = 20;
-    data = buildData(n);
+  n = 10_000_000;
+  iters = 20;
+  data = buildData(n);
 
-    # ---- Test 1: SUM only (run multiple iters to accumulate measurable time) ----
-    warmS1 = sumLoop(data);
-    warmS2 = sumPipeline(data);
-    ASSERT warmS1 == warmS2, "sum results must match";
+  # ---- Test 1: SUM only (run multiple iters to accumulate measurable time) ----
+  warmS1 = sumLoop(data);
+  warmS2 = sumPipeline(data);
+  ASSERT warmS1 == warmS2, "sum results must match";
 
-    MUTABLE accum: Float64 = 0.0;
+  MUTABLE accum = 0.0;
 
-    t0 = timestampMs();
-    FOR r IN (0_i64 ..< iters) -> accum += sumLoop(data);
-    sumLoopMs = timestampMs() - t0;
+  t0 = timestampMs();
+  FOR r IN (0 ..< iters) -> accum += sumLoop(data);
+  sumLoopMs = timestampMs() - t0;
 
-    t1 = timestampMs();
-    FOR r IN (0_i64 ..< iters) -> accum += sumPipeline(data);
-    sumPipeMs = timestampMs() - t1;
+  t1 = timestampMs();
+  FOR r IN (0 ..< iters) -> accum += sumPipeline(data);
+  sumPipeMs = timestampMs() - t1;
 
-    # Memory snapshot after SUM tests (no intermediate allocs expected)
-    sumRssKb = currentMemoryKb();
+  # Memory snapshot after SUM tests (no intermediate allocs expected)
+  sumRssKb = currentMemoryKb();
 
-    # ---- Test 2: WHERE + SELECT + SUM ----
-    warmF1 = fusedLoop(data);
-    warmF2 = chainedPipeline(data);
-    ASSERT warmF1 == warmF2, "fused results must match";
+  # ---- Test 2: WHERE + SELECT + SUM ----
+  warmF1 = fusedLoop(data);
+  warmF2 = chainedPipeline(data);
+  ASSERT warmF1 == warmF2, "fused results must match";
 
-    t2 = timestampMs();
-    FOR r IN (0_i64 ..< iters) -> accum += fusedLoop(data);
-    fusedMs = timestampMs() - t2;
-    fusedRssKb = currentMemoryKb();
+  t2 = timestampMs();
+  FOR r IN (0 ..< iters) -> accum += fusedLoop(data);
+  fusedMs = timestampMs() - t2;
+  fusedRssKb = currentMemoryKb();
 
-    t3 = timestampMs();
-    FOR r IN (0_i64 ..< iters) -> accum += chainedPipeline(data);
-    chainMs = timestampMs() - t3;
-    chainRssKb = currentMemoryKb();
+  t3 = timestampMs();
+  FOR r IN (0 ..< iters) -> accum += chainedPipeline(data);
+  chainMs = timestampMs() - t3;
+  chainRssKb = currentMemoryKb();
 
-    # ---- Test 3: Long chain (4-stage) ----
-    warmL1 = longFusedLoop(data);
-    warmL2 = longChainedPipeline(data);
-    ASSERT warmL1 == warmL2, "long chain results must match";
+  # ---- Test 3: Long chain (4-stage) ----
+  warmL1 = longFusedLoop(data);
+  warmL2 = longChainedPipeline(data);
+  ASSERT warmL1 == warmL2, "long chain results must match";
 
-    t4 = timestampMs();
-    FOR r IN (0_i64 ..< iters) -> accum += longFusedLoop(data);
-    longFusedMs = timestampMs() - t4;
+  t4 = timestampMs();
+  FOR r IN (0 ..< iters) -> accum += longFusedLoop(data);
+  longFusedMs = timestampMs() - t4;
 
-    t5 = timestampMs();
-    FOR r IN (0_i64 ..< iters) -> accum += longChainedPipeline(data);
-    longChainMs = timestampMs() - t5;
+  t5 = timestampMs();
+  FOR r IN (0 ..< iters) -> accum += longChainedPipeline(data);
+  longChainMs = timestampMs() - t5;
 
-    ASSERT accum != 0.0, "prevent dead code elimination";
+  ASSERT accum != 0.0, "prevent dead code elimination";
 
-    # ---- Report ----
-    # BENCH_RESULT = handwritten sum loop (cross-language baseline)
-    print("BENCH_RESULT: ${sumLoopMs.toString()} ms");
-    print("Pipeline overhead (${n.toString()} elements x ${iters.toString()} iters)");
-    print("  Sum loop (handwritten):       ${sumLoopMs.toString()} ms");
-    print("  Sum pipeline (|> SUM _):      ${sumPipeMs.toString()} ms  overhead: ${(sumPipeMs - sumLoopMs).toString()} ms");
-    print("  Fused loop (2-stage):         ${fusedMs.toString()} ms");
-    print("  Chained pipeline (2-stage):   ${chainMs.toString()} ms  overhead: ${(chainMs - fusedMs).toString()} ms");
-    print("  Fused loop (4-stage):         ${longFusedMs.toString()} ms");
-    print("  Chained pipeline (4-stage):   ${longChainMs.toString()} ms  overhead: ${(longChainMs - longFusedMs).toString()} ms");
-    print("  Peak RSS: ${peakMemoryKb().toString()} KB");
+  # ---- Report ----
+  # BENCH_RESULT = handwritten sum loop (cross-language baseline)
+  print("BENCH_RESULT: ${sumLoopMs.toString()} ms");
+  print("Pipeline overhead (${n.toString()} elements x ${iters.toString()} iters)");
+  print("  Sum loop (handwritten):       ${sumLoopMs.toString()} ms");
+  print("  Sum pipeline (|> SUM _):      ${sumPipeMs.toString()} ms  overhead: ${(sumPipeMs - sumLoopMs).toString()} ms");
+  print("  Fused loop (2-stage):         ${fusedMs.toString()} ms");
+  print("  Chained pipeline (2-stage):   ${chainMs.toString()} ms  overhead: ${(chainMs - fusedMs).toString()} ms");
+  print("  Fused loop (4-stage):         ${longFusedMs.toString()} ms");
+  print(
+    "  Chained pipeline (4-stage):   ${longChainMs.toString()} ms  overhead: ${(longChainMs - longFusedMs).toString()} ms"
+  );
+  print("  Peak RSS: ${peakMemoryKb().toString()} KB");
 
-    RETURN;
+  RETURN;
 END

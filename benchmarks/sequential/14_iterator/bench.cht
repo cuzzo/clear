@@ -9,77 +9,77 @@
 # This is the borrow system's performance stress test.
 
 STRUCT SliceIter {
-    source: BORROWED Int64[],
-    pos: Int64,
-    len: Int64
+  source: BORROWED Int64[],
+  pos: Int64,
+  len: Int64
 }
 
-FN hasNext(iter: SliceIter) RETURNS Bool ->
-    RETURN iter.pos < iter.len;
+METHOD hasNext(iter: SliceIter) RETURNS Bool ->
+  RETURN iter.pos < iter.len;
 END
 
-FN currentVal(iter: SliceIter) RETURNS Int64 ->
-    RETURN iter.source[iter.pos];
+METHOD currentVal(iter: SliceIter) RETURNS Int64 ->
+  RETURN iter.source[iter.pos];
 END
 
-FN advance(iter: SliceIter) RETURNS SliceIter ->
-    RETURN SliceIter{ source: iter.source, pos: iter.pos + 1, len: iter.len };
+METHOD advance(iter: SliceIter) RETURNS SliceIter ->
+  RETURN SliceIter{ source: iter.source, pos: iter.pos + 1, len: iter.len };
 END
 
 # Benchmark 1: Borrowed iterator (zero-copy)
 FN benchBorrowed(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->
-    MUTABLE total: Int64 = 0;
-    FOR outer IN (0_i64 ..< iters) DO
-        WITH BORROWED data AS ref {
-            MUTABLE iter = SliceIter{ source: ref, pos: 0, len: n };
-            WHILE hasNext(iter) DO
-                total = total %+ currentVal(iter);
-                iter = advance(iter);
-            END
-        }
-    END
-    RETURN total;
+  MUTABLE total = 0;
+  FOR outer IN (0 ..< iters) DO
+    WITH BORROWED data AS ref {
+      MUTABLE iter = SliceIter{ source: ref, pos: 0, len: n };
+      WHILE iter.hasNext() DO
+        total = total %+ iter.currentVal();
+        iter = iter.advance();
+      END
+    }
+  END
+  RETURN total;
 END
 
 # Benchmark 2: Raw indexed loop (baseline)
 FN benchRawLoop(data: Int64[], n: Int64, iters: Int64) RETURNS Int64 ->
-    MUTABLE total: Int64 = 0;
-    FOR outer IN (0_i64 ..< iters) DO
-        FOR i IN (0_i64 ..< n) DO
-            total = total %+ data[i];
-        END
+  MUTABLE total = 0;
+  FOR outer IN (0 ..< iters) DO
+    FOR i IN (0 ..< n) DO
+      total = total %+ data[i];
     END
-    RETURN total;
+  END
+  RETURN total;
 END
 
 FN main() RETURNS Void ->
-    n: Int64 = 10000;
-    iters: Int64 = 1000;
+  n = 10_000;
+  iters = 1000;
 
-    # Build data array
-    MUTABLE data: Int64[10000]@list = [];
-    FOR i IN (0_i64 ..< n) -> data.append(i %* 7 %+ 13);
+  # Build data array
+  MUTABLE data: Int64[10_000]@list = [];
+  FOR i IN (0 ..< n) -> data.append(i %* 7 %+ 13);
 
-    # Warm up
-    x = benchRawLoop(data, n, 1);
+  # Warm up
+  x = benchRawLoop(data, n, 1);
 
-    # Benchmark raw loop
-    t0 = timestampMs();
-    result1 = benchRawLoop(data, n, iters);
-    t1 = timestampMs();
-    rawMs = t1 - t0;
+  # Benchmark raw loop
+  t0 = timestampMs();
+  result1 = benchRawLoop(data, n, iters);
+  t1 = timestampMs();
+  rawMs = t1 - t0;
 
-    # Benchmark borrowed iterator
-    t2 = timestampMs();
-    result2 = benchBorrowed(data, n, iters);
-    t3 = timestampMs();
-    iterMs = t3 - t2;
+  # Benchmark borrowed iterator
+  t2 = timestampMs();
+  result2 = benchBorrowed(data, n, iters);
+  t3 = timestampMs();
+  iterMs = t3 - t2;
 
-    ASSERT result1 == result2;
+  ASSERT result1 == result2;
 
-    print("BENCH_RESULT: ${iterMs.toString()} ms");
-    print("Iterator benchmark (${n.toString()} elements x ${iters.toString()} iters)");
-    print("  Iterator: ${iterMs.toString()} ms");
-    print("  Raw loop: ${rawMs.toString()} ms");
-    RETURN;
+  print("BENCH_RESULT: ${iterMs.toString()} ms");
+  print("Iterator benchmark (${n.toString()} elements x ${iters.toString()} iters)");
+  print("  Iterator: ${iterMs.toString()} ms");
+  print("  Raw loop: ${rawMs.toString()} ms");
+  RETURN;
 END
