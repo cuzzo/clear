@@ -11,7 +11,7 @@ STRUCT Account {
 }
 
 FN main() RETURNS Void ->
-  acct = Account{ balance: 100 } @shared: locked;
+  acct = Account{ balance: 100 } @shared:locked;
 
   # ----------------------------------------------------------------
   # BROKEN: check in one WITH, act in a separate WITH.

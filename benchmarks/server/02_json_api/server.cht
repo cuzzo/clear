@@ -102,7 +102,7 @@ FN main() RETURNS Void ->
 
   # Cache pins BG fibers to the main scheduler, preventing fiber stealing
   # which corrupts epoll fd registration.
-  MUTABLE cache: HashMap<Int64> @sharded(32): locked = {};
+  MUTABLE cache: HashMap<Int64> @sharded(32):locked = {};
 
   MUTABLE tasks: ~Void[]@list = [];
   WHILE TRUE DO

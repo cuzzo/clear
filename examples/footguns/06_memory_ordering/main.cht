@@ -19,7 +19,7 @@ STRUCT State {
 FN main() RETURNS Void ->
   # @shared:locked = Arc<Mutex<State>>. All accesses are SC by
   # construction. There is no ordering annotation to get wrong.
-  s = State{ message: "" } @shared: locked;
+  s = State{ message: "" } @shared:locked;
 
   producer = BG {
     WITH EXCLUSIVE s AS inner {

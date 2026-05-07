@@ -32,25 +32,28 @@ FN main() RETURNS Void ->
     futures
       .append(
         BG {
-          @parallel -> MUTABLE total = 0;
-          WHILE NEXT subscriber_msgs AS m DO total = total %+ processMessage(m.seed);
-        END total;
-      }
-    );
-END
+          @parallel ->
+            MUTABLE total = 0;
+            WHILE NEXT subscriber_msgs AS m DO
+              total = total %+ processMessage(m.seed);
+            END
+            total;
+        }
+      );
+  END
 
-MUTABLE total = 0;
-FOR j IN (0 ..< 64) DO
-  result = NEXT futures[j];
-  total = total %+ result;
-END
-elapsed = timestampMs() - t0;
+  MUTABLE total = 0;
+  FOR j IN (0 ..< 64) DO
+    result = NEXT futures[j];
+    total = total %+ result;
+  END
+  elapsed = timestampMs() - t0;
 
-checksum = total MOD 1_000_000_000;
-print("Checksum: ${checksum.toString()}");
-print("Messages: 10000");
-print("Subscribers: 64");
-print("BENCH_RESULT: ${elapsed.toString()} ms");
-print("Time: ${elapsed.toString()} ms");
-RETURN;
+  checksum = total MOD 1_000_000_000;
+  print("Checksum: ${checksum.toString()}");
+  print("Messages: 10000");
+  print("Subscribers: 64");
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Time: ${elapsed.toString()} ms");
+  RETURN;
 END

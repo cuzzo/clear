@@ -12,7 +12,7 @@ STRUCT Account {
   balance: Int64
 }
 STRUCT Bank {
-  accounts: Account@shared: locked[]@list
+  accounts: Account@shared:locked[]@list
 }
 
 FN main() RETURNS Void ->
@@ -23,11 +23,11 @@ FN main() RETURNS Void ->
   numAccounts = 64;
   opsPerWorker = 500_000;
 
-  MUTABLE accts: Account@shared: locked[]@list = [];
+  MUTABLE accts: Account@shared:locked[]@list = [];
   FOR i IN (0 ..< numAccounts) DO
-    accts.append(Account{ balance: 1000 } @shared: locked);
+    accts.append(Account{ balance: 1000 } @shared:locked);
   END
-  bank = Bank{ accounts: accts } @shared: writeLocked;
+  bank = Bank{ accounts: accts } @shared:writeLocked;
 
   t0 = timestampMs();
 
@@ -69,41 +69,42 @@ FN main() RETURNS Void ->
                   }
               }
             END
-          }
-        );
-      w += 1;
-    END
 
-    FOR i IN (0 ..< nWorkers) -> NEXT futures[i];
-    elapsed = timestampMs() - t0;
-
-    # Verify conservation. Snapshot the per-account Arc handles out of
-    # the bank's read lock first so the per-account WITH at the bottom
-    # isn't lexically nested under WITH bank. (The naked-nested-WITH
-    # lint conservatively flags any single-binding inner WITH while a
-    # different binding is held; in this verification path workers have
-    # already joined so no symmetric caller exists, but the lint can't
-    # prove that. The snapshot pattern sidesteps the warning while
-    # preserving the read-then-per-element-lock semantics.)
-    acct_refs: Account@shared: locked[]@list = [];
-    WITH bank AS bk {
-      FOR i IN (0 ..< numAccounts) -> acct_refs.append(bk.accounts[i]);
-    }
-    MUTABLE total = 0;
-    FOR i IN (0 ..< numAccounts) DO
-      a = acct_refs[i];
-      WITH a AS inner {
-        total = total + inner.balance;
-      }
-    END
-    expected = numAccounts * 1000;
-    ASSERT total == expected, "balance mismatch";
-    totalOps = nWorkers * opsPerWorker;
-    opsPerSec = totalOps * 1000 / elapsed;
-
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("Nested lock (${nWorkers.toString()} workers x ${opsPerWorker.toString()} ops)");
-    print("  Total time:     ${elapsed.toString()} ms");
-    print("  Ops/sec:        ${opsPerSec.toString()}");
-    print("  Balance:        ${total.toString()} (expected ${expected.toString()})");
+        }
+      );
+    w += 1;
   END
+
+  FOR i IN (0 ..< nWorkers) -> NEXT futures[i];
+  elapsed = timestampMs() - t0;
+
+  # Verify conservation. Snapshot the per-account Arc handles out of
+  # the bank's read lock first so the per-account WITH at the bottom
+  # isn't lexically nested under WITH bank. (The naked-nested-WITH
+  # lint conservatively flags any single-binding inner WITH while a
+  # different binding is held; in this verification path workers have
+  # already joined so no symmetric caller exists, but the lint can't
+  # prove that. The snapshot pattern sidesteps the warning while
+  # preserving the read-then-per-element-lock semantics.)
+  acct_refs: Account@shared:locked[]@list = [];
+  WITH bank AS bk {
+    FOR i IN (0 ..< numAccounts) -> acct_refs.append(bk.accounts[i]);
+  }
+  MUTABLE total = 0;
+  FOR i IN (0 ..< numAccounts) DO
+    a = acct_refs[i];
+    WITH a AS inner {
+      total = total + inner.balance;
+    }
+  END
+  expected = numAccounts * 1000;
+  ASSERT total == expected, "balance mismatch";
+  totalOps = nWorkers * opsPerWorker;
+  opsPerSec = totalOps * 1000 / elapsed;
+
+  print("BENCH_RESULT: ${elapsed.toString()} ms");
+  print("Nested lock (${nWorkers.toString()} workers x ${opsPerWorker.toString()} ops)");
+  print("  Total time:     ${elapsed.toString()} ms");
+  print("  Ops/sec:        ${opsPerSec.toString()}");
+  print("  Balance:        ${total.toString()} (expected ${expected.toString()})");
+END

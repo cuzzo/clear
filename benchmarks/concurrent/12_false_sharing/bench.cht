@@ -22,9 +22,9 @@ FN main() RETURNS Void ->
   increments = totalWork / workers;
 
   # Each worker gets its own @shared:locked counter (separate heap alloc)
-  MUTABLE counters: Counter@shared: locked[]@list = [];
+  MUTABLE counters: Counter@shared:locked[]@list = [];
   FOR i IN (0 ..< workers) DO
-    counters.append(Counter{ value: 0 } @shared: locked);
+    counters.append(Counter{ value: 0 } @shared:locked);
   END
 
   t0 = timestampMs();
@@ -35,27 +35,32 @@ FN main() RETURNS Void ->
     ref = counters[wi];
     futures
       .append(
-        BG {@standard: @parallel -> FOR j IN (0 ..< increments) DO WITH EXCLUSIVE ref AS inner {inner.value = inner.value + 1;} END}
-      );
-    wi += 1;
-  END
+        BG {
+          @standard:@parallel -> FOR j IN (0 ..< increments) DO
+            WITH EXCLUSIVE ref AS inner {inner.value = inner.value + 1;}
+          END
 
-  FOR i IN (0 ..< workers) -> NEXT futures[i];
-  elapsed = timestampMs() - t0;
+      }
+    );
+  wi += 1;
+END
 
-  # Verify
-  MUTABLE total = 0;
-  FOR i IN (0 ..< workers) DO
-    ref = counters[i];
-    WITH ref AS inner {
-      total = total + inner.value;
-    }
-  END
-  expected = workers * increments;
-  ASSERT total == expected, "total mismatch";
+FOR i IN (0 ..< workers) -> NEXT futures[i];
+elapsed = timestampMs() - t0;
 
-  print("BENCH_RESULT: ${elapsed.toString()} ms");
-  print("False-sharing (${workers.toString()} threads x ${increments.toString()} iters)");
-  print("  @shared:locked (no false sharing): ${elapsed.toString()} ms");
-  print("  Total: ${total.toString()}");
+# Verify
+MUTABLE total = 0;
+FOR i IN (0 ..< workers) DO
+  ref = counters[i];
+  WITH ref AS inner {
+    total = total + inner.value;
+  }
+END
+expected = workers * increments;
+ASSERT total == expected, "total mismatch";
+
+print("BENCH_RESULT: ${elapsed.toString()} ms");
+print("False-sharing (${workers.toString()} threads x ${increments.toString()} iters)");
+print("  @shared:locked (no false sharing): ${elapsed.toString()} ms");
+print("  Total: ${total.toString()}");
 END

@@ -41,7 +41,7 @@ FN main() RETURNS Void ->
   writeIters = 1000;
   workPerOp = 100;
 
-  c = Counter{ value: 0 } @shared: writeLocked;
+  c = Counter{ value: 0 } @shared:writeLocked;
 
   t0 = timestampMs();
 
@@ -52,52 +52,55 @@ FN main() RETURNS Void ->
       .append(
         BG {
           @parallel -> MUTABLE localSink = 0;
-          FOR i IN (0 ..< readIters) DO WITH c AS inner {localSink = localSink + inner.value; localSink = localSink + busyWork(
-            workPerOp
-          );} END
-        }
-      );
-  END
-
-  # Spawn writer - measure per-write latency
-  writer = BG {
-    @parallel ->
-      MUTABLE maxWaitMs = 0;
-      MUTABLE totalWaitMs = 0;
-      MUTABLE localSink = 0;
-      FOR i IN (0 ..< writeIters) DO
-        wt0 = timestampMs();
-        WITH EXCLUSIVE c AS inner {
-          waited = timestampMs() - wt0;
-          IF waited > maxWaitMs THEN
-            maxWaitMs = waited;
+          FOR i IN (0 ..< readIters) DO
+            WITH c AS inner {localSink = localSink + inner.value; localSink = localSink + busyWork(
+              workPerOp
+            );}
           END
-          totalWaitMs = totalWaitMs + waited;
-          inner.value = inner.value + 1;
-          localSink = localSink + busyWork(workPerOp);
-        }
-      END
-      writerDone = timestampMs() - t0;
-      avgWaitMs = totalWaitMs / writeIters;
-      WriterResult{ doneMs: writerDone, avgWaitMs: avgWaitMs, maxWaitMs: maxWaitMs };
-    };
 
-    # Wait for all
-    FOR r IN (0 ..< nReaders) -> NEXT readers[r];
-    result = NEXT writer;
-    elapsed = timestampMs() - t0;
+      }
+    );
+END
 
-    # Read final value
-    MUTABLE finalVal = 0;
-    WITH c AS inner {
-      finalVal = inner.value;
-    }
+# Spawn writer - measure per-write latency
+writer = BG {
+  @parallel ->
+    MUTABLE maxWaitMs = 0;
+    MUTABLE totalWaitMs = 0;
+    MUTABLE localSink = 0;
+    FOR i IN (0 ..< writeIters) DO
+      wt0 = timestampMs();
+      WITH EXCLUSIVE c AS inner {
+        waited = timestampMs() - wt0;
+        IF waited > maxWaitMs THEN
+          maxWaitMs = waited;
+        END
+        totalWaitMs = totalWaitMs + waited;
+        inner.value = inner.value + 1;
+        localSink = localSink + busyWork(workPerOp);
+      }
+    END
+    writerDone = timestampMs() - t0;
+    avgWaitMs = totalWaitMs / writeIters;
+    WriterResult{ doneMs: writerDone, avgWaitMs: avgWaitMs, maxWaitMs: maxWaitMs };
+};
 
-    print("BENCH_RESULT: ${elapsed.toString()} ms");
-    print("RwLock starvation (${nReaders.toString()} readers x ${readIters.toString()} iters)");
-    print("  Total time:     ${elapsed.toString()} ms");
-    print("  Writer done:    ${result.doneMs.toString()} ms");
-    print("  Avg write wait: ${result.avgWaitMs.toString()} ms");
-    print("  Max write wait: ${result.maxWaitMs.toString()} ms");
-    print("  Final value:    ${finalVal.toString()}");
-  END
+# Wait for all
+FOR r IN (0 ..< nReaders) -> NEXT readers[r];
+result = NEXT writer;
+elapsed = timestampMs() - t0;
+
+# Read final value
+MUTABLE finalVal = 0;
+WITH c AS inner {
+  finalVal = inner.value;
+}
+
+print("BENCH_RESULT: ${elapsed.toString()} ms");
+print("RwLock starvation (${nReaders.toString()} readers x ${readIters.toString()} iters)");
+print("  Total time:     ${elapsed.toString()} ms");
+print("  Writer done:    ${result.doneMs.toString()} ms");
+print("  Avg write wait: ${result.avgWaitMs.toString()} ms");
+print("  Max write wait: ${result.maxWaitMs.toString()} ms");
+print("  Final value:    ${finalVal.toString()}");
+END

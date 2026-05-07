@@ -19,7 +19,7 @@ FN processItem(val: Int64) RETURNS Int64 ->
 END
 
 FN main() RETURNS Void ->
-  acc = Acc{ value: 0 } @shared: locked;
+  acc = Acc{ value: 0 } @shared:locked;
   t0 = timestampMs();
 
   gen: ~?Int64[] = BG STREAM {

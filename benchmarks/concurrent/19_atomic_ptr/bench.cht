@@ -39,7 +39,7 @@ FN main() RETURNS Void ->
   writes = 5000;
 
   # ───── Variant A: @shared:writeLocked (RwLock) ─────
-  MUTABLE c_rw = Counter{ a: 0, b: 0 } @shared: writeLocked;
+  MUTABLE c_rw = Counter{ a: 0, b: 0 } @shared:writeLocked;
 
   t0_rw = timestampMs();
   MUTABLE rfutures_rw: ~Int64[]@list = [];
@@ -47,25 +47,35 @@ FN main() RETURNS Void ->
     rfutures_rw
       .append(
         BG {
-          @parallel -> MUTABLE s = 0;
-          MUTABLE j = 0;
-          MUTABLE viol = 0;
-          WHILE j < reads_per DO WITH c_rw AS v {s = s + v.a; IF v.b != v.a * 2 THEN viol = viol + 1; END} j = j + 1;
-        END viol;
-      }
-    );
-END
+          @parallel ->
+            MUTABLE s = 0;
+            MUTABLE j = 0;
+            MUTABLE viol = 0;
+            WHILE j < reads_per DO
+              WITH c_rw AS v {
+                s = s + v.a;
+                IF v.b != v.a * 2 THEN
+                  viol = viol + 1;
+                END
+              }
+              j = j + 1;
+            END
+            viol;
+        }
+      );
+  END
 
-w_rw: ~Void = BG {
-  @parallel ->
-    MUTABLE k = 0;
-    WHILE k < writes DO
-      WITH EXCLUSIVE c_rw AS v {
-        v.a = v.a + 1;
-        v.b = (v.a) * 2;
-      }
-      k = k + 1;
-    END
+  w_rw: ~Void = BG {
+    @parallel ->
+      MUTABLE k = 0;
+      WHILE k < writes DO
+        WITH EXCLUSIVE c_rw AS v {
+          v.a = v.a + 1;
+          v.b = (v.a) * 2;
+        }
+        k = k + 1;
+      END
+
   };
 
   NEXT w_rw;
@@ -76,7 +86,7 @@ w_rw: ~Void = BG {
   elapsed_rw = timestampMs() - t0_rw;
 
   # ───── Variant B: @shared:versioned (MVCC) ─────
-  MUTABLE c_v = Counter{ a: 0, b: 0 } @shared: versioned;
+  MUTABLE c_v = Counter{ a: 0, b: 0 } @shared:versioned;
 
   t0_v = timestampMs();
   MUTABLE rfutures_v: ~Int64[]@list = [];
@@ -84,26 +94,36 @@ w_rw: ~Void = BG {
     rfutures_v
       .append(
         BG {
-          @parallel -> MUTABLE s = 0;
-          MUTABLE j = 0;
-          MUTABLE viol = 0;
-          WHILE j < reads_per DO WITH SNAPSHOT c_v AS v {s = s + v.a; IF v.b != v.a * 2 THEN viol = viol + 1; END} j = j + 1;
-        END viol;
-      }
-    );
-END
-
-w_v: ~Void = BG {
-  @parallel ->
-    MUTABLE k = 0;
-    WHILE k < writes DO
-      WITH SNAPSHOT c_v AS MUTABLE v {
-          v.a = v.a + 1;
-          v.b = (v.a) * 2;
+          @parallel ->
+            MUTABLE s = 0;
+            MUTABLE j = 0;
+            MUTABLE viol = 0;
+            WHILE j < reads_per DO
+              WITH SNAPSHOT c_v AS v {
+                s = s + v.a;
+                IF v.b != v.a * 2 THEN
+                  viol = viol + 1;
+                END
+              }
+              j = j + 1;
+            END
+            viol;
         }
-        ON MvccConflict RAISE
-      k = k + 1;
-    END
+      );
+  END
+
+  w_v: ~Void = BG {
+    @parallel ->
+      MUTABLE k = 0;
+      WHILE k < writes DO
+        WITH SNAPSHOT c_v AS MUTABLE v {
+            v.a = v.a + 1;
+            v.b = (v.a) * 2;
+          }
+          ON MvccConflict RAISE
+        k = k + 1;
+      END
+
   };
 
   NEXT w_v;
@@ -114,7 +134,7 @@ w_v: ~Void = BG {
   elapsed_v = timestampMs() - t0_v;
 
   # ───── Variant C: @indirect:atomic (M3 AtomicPtr) ─────
-  MUTABLE c_ap = Counter{ a: 0, b: 0 } @indirect: atomic;
+  MUTABLE c_ap = Counter{ a: 0, b: 0 } @indirect:atomic;
 
   t0_ap = timestampMs();
   MUTABLE rfutures_ap: ~Int64[]@list = [];
@@ -122,25 +142,35 @@ w_v: ~Void = BG {
     rfutures_ap
       .append(
         BG {
-          @parallel -> MUTABLE s = 0;
-          MUTABLE j = 0;
-          MUTABLE viol = 0;
-          WHILE j < reads_per DO WITH SNAPSHOT c_ap AS v {s = s + v.a; IF v.b != v.a * 2 THEN viol = viol + 1; END} j = j + 1;
-        END viol;
-      }
-    );
-END
+          @parallel ->
+            MUTABLE s = 0;
+            MUTABLE j = 0;
+            MUTABLE viol = 0;
+            WHILE j < reads_per DO
+              WITH SNAPSHOT c_ap AS v {
+                s = s + v.a;
+                IF v.b != v.a * 2 THEN
+                  viol = viol + 1;
+                END
+              }
+              j = j + 1;
+            END
+            viol;
+        }
+      );
+  END
 
-w_ap: ~Void = BG {
-  @parallel ->
-    MUTABLE k = 0;
-    WHILE k < writes DO
-      WITH SNAPSHOT c_ap AS MUTABLE v {
-        v.a = v.a + 1;
-        v.b = (v.a) * 2;
-      }
-      k = k + 1;
-    END
+  w_ap: ~Void = BG {
+    @parallel ->
+      MUTABLE k = 0;
+      WHILE k < writes DO
+        WITH SNAPSHOT c_ap AS MUTABLE v {
+          v.a = v.a + 1;
+          v.b = (v.a) * 2;
+        }
+        k = k + 1;
+      END
+
   };
 
   NEXT w_ap;

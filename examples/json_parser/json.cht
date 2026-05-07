@@ -33,71 +33,72 @@ FN jsonToString(v: JsonValue)
  EFFECTS REENTRANT
 ->
   PARTIAL MATCH v START
-  JsonValue.Null -> RETURN "null";
-  ,
-  JsonValue.JBool AS b -> IF b THEN
-    RETURN "true";
-  END RETURN "false";
-  ,
-  JsonValue.JNum AS n -> RETURN n.toInt().toString();
-  ,
-  JsonValue.JStr AS s -> RETURN "\"" + s + "\"";
-  ,
-  JsonValue.JArray AS items ->
-    MUTABLE out = "[";
-    FOR i IN (0 ..< items.length()) DO
-      IF i > 0 THEN
-        out = out + ",";
+    JsonValue.Null -> RETURN "null";,
+    JsonValue.JBool AS b ->
+      IF b THEN
+        RETURN "true";
       END
-      out = out + jsonToString(items[i]);
-    END
-    RETURN out + "]";
-    ,
-    JsonValue.JObj ->
-      RETURN "{object}";
-      ,
-
+      RETURN "false";,
+    JsonValue.JNum AS n -> RETURN n.toInt().toString();,
+    JsonValue.JStr AS s -> RETURN "\"" + s + "\"";,
+    JsonValue.JArray AS items ->
+      MUTABLE out = "[";
+      FOR i IN (0 ..< items.length()) DO
+        IF i > 0 THEN
+          out = out + ",";
+        END
+        out = out + jsonToString(items[i]);
+      END
+      RETURN out + "]";,
+    JsonValue.JObj -> RETURN "{object}";,
     DEFAULT -> RETURN "?";
-    END
-    RETURN "?";
   END
+  RETURN "?";
+END
 
-  # =========================================================================
-  # Parser: returns JsonValue. Position communicated via penv["__jp"].
-  # =========================================================================
+# =========================================================================
+# Parser: returns JsonValue. Position communicated via penv["__jp"].
+# =========================================================================
 
-  FN skipWhitespace(json: String, pos: Int64) RETURNS !Int64 ->
-    MUTABLE p = pos;
-    WHILE p < json.length() DO
-      c = json.charAt(p);
-      IF c == " " || c == "\n" || c == "\r" || c == "\t" THEN
-        p += 1;
+FN skipWhitespace(json: String, pos: Int64) RETURNS !Int64 ->
+  MUTABLE p = pos;
+  WHILE p < json.length() DO
+    c = json.charAt(p);
+    IF c == " " || c == "\n" || c == "\r" || c == "\t" THEN
+      p += 1;
+    ELSE
+      RETURN p;
+    END
+  END
+  RETURN p;
+END
+
+FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS !String ->
+  # pos points at the opening "
+  MUTABLE p = pos + 1;
+  MUTABLE result = "";
+  WHILE p < json.length() DO
+    c = json.charAt(p);
+    IF c == "\"" THEN
+      penv["__jp"] = p + 1;
+      RETURN result;
+    ELSE_IF c == "\\" THEN
+      p += 1;
+      esc = json.charAt(p);
+      IF esc == "\"" THEN
+        result = result + "\"";
+      ELSE_IF esc == "\\" THEN
+        result = result + "\\";
+      ELSE_IF esc == "n" THEN
+        result = result + "\n";
+      ELSE_IF esc == "r" THEN
+        result = result + "\r";
+      ELSE_IF esc == "t" THEN
+        result = result + "\t";
+      ELSE_IF esc == "/" THEN
+        result = result + "/";
       ELSE
-        RETURN p;
-      END
-    END
-    RETURN p;
-  END
-
-  FN parseString!(json: String, pos: Int64, MUTABLE penv: HashMap<Int64>) RETURNS !String ->
-    # pos points at the opening "
-    MUTABLE p = pos + 1;
-    MUTABLE result = "";
-    WHILE p < json.length() DO
-      c = json.charAt(p);
-      IF c == "\"" THEN
-        penv["__jp"] = p + 1;
-        RETURN result;
-      ELSE_IF c == "\\" THEN
-        p += 1;
-        esc = json.charAt(p);
-        IF esc == "\"" THEN result = result + "\"";
-      ELSE_IF esc == "\\" THEN result = result + "\\";
-      ELSE_IF esc == "n" THEN result = result + "\n";
-      ELSE_IF esc == "r" THEN result = result + "\r";
-      ELSE_IF esc == "t" THEN result = result + "\t";
-      ELSE_IF esc == "/" THEN result = result + "/";
-      ELSE result = result + esc;
+        result = result + esc;
       END
       p += 1;
     ELSE
@@ -249,27 +250,23 @@ END
 
 FN jsonGet!(MUTABLE v: JsonValue, key: String) RETURNS !JsonValue ->
   PARTIAL MATCH v START
-  JsonValue.JObj AS map ->
-    raw = map[key] OR JsonValue.Null;
-    # COPY string values so caller owns an independent copy.
-    # Without COPY, both the map and the returned value share the same
-    # heap string pointer, causing a double-free when both are cleaned up.
-    PARTIAL MATCH raw START
-    JsonValue.JStr AS s -> RETURN JsonValue{ JStr: COPY s };
-    ,
-    JsonValue.JNum AS n -> RETURN JsonValue{ JNum: n };
-    ,
-    JsonValue.JBool AS b -> RETURN JsonValue{ JBool: b };
-    ,
-    JsonValue.Null -> RETURN JsonValue.Null;
-    ,
+    JsonValue.JObj AS map ->
+      raw = map[key] OR JsonValue.Null;
+      # COPY string values so caller owns an independent copy.
+      # Without COPY, both the map and the returned value share the same
+      # heap string pointer, causing a double-free when both are cleaned up.
+      PARTIAL MATCH raw START
+        JsonValue.JStr AS s -> RETURN JsonValue{ JStr: COPY s };,
+        JsonValue.JNum AS n -> RETURN JsonValue{ JNum: n };,
+        JsonValue.JBool AS b -> RETURN JsonValue{ JBool: b };,
+        JsonValue.Null -> RETURN JsonValue.Null;,
 
-  DEFAULT -> RETURN JsonValue.Null;
-  END,
-
-DEFAULT -> RETURN JsonValue.Null;
-END
-RETURN JsonValue.Null;
+      DEFAULT -> RETURN JsonValue.Null;
+      END
+    ,
+    DEFAULT -> RETURN JsonValue.Null;
+  END
+  RETURN JsonValue.Null;
 END
 
 # =========================================================================
@@ -283,142 +280,252 @@ FN main() RETURNS Void ->
 
   # Test 1: null
   r1 = parseValue!("null", 0, penv, 0);
-  PARTIAL MATCH r1 START JsonValue.Null -> passed += 1;
-  print("PASS: null");
-  ,
+  PARTIAL MATCH r1 START
+    JsonValue.Null ->
+      passed += 1;
+      print("PASS: null");,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: null");
+  END
 
-DEFAULT -> failed += 1;
-  print("FAIL: null");
-END
+  # Test 2: true
+  r2 = parseValue!("true", 0, penv, 0);
+  PARTIAL MATCH r2 START
+    JsonValue.JBool AS b ->
+      IF b THEN
+        passed += 1;
+        print("PASS: true");
+      ELSE
+        failed += 1;
+        print("FAIL: true");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: true");
+  END
 
-# Test 2: true
-r2 = parseValue!("true", 0, penv, 0);
-PARTIAL MATCH r2 START JsonValue.JBool AS b -> IF b THEN
-  passed += 1;
-  print("PASS: true");
-ELSE failed += 1;
-  print("FAIL: true");
-END, DEFAULT -> failed += 1; print("FAIL: true"); END
+  # Test 3: false
+  r3 = parseValue!("false", 0, penv, 0);
+  PARTIAL MATCH r3 START
+    JsonValue.JBool AS b ->
+      IF b == FALSE THEN
+        passed += 1;
+        print("PASS: false");
+      ELSE
+        failed += 1;
+        print("FAIL: false");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: false");
+  END
 
-# Test 3: false
-r3 = parseValue!("false", 0, penv, 0);
-PARTIAL MATCH r3 START JsonValue.JBool AS b -> IF b == FALSE THEN
-  passed += 1;
-  print("PASS: false");
-ELSE failed += 1;
-  print("FAIL: false");
-END, DEFAULT -> failed += 1; print("FAIL: false"); END
+  # Test 4: number
+  r4 = parseValue!("42", 0, penv, 0);
+  PARTIAL MATCH r4 START
+    JsonValue.JNum AS n ->
+      IF n == 42.0 THEN
+        passed += 1;
+        print("PASS: number 42");
+      ELSE
+        failed += 1;
+        print("FAIL: number 42");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: number 42");
+  END
 
-# Test 4: number
-r4 = parseValue!("42", 0, penv, 0);
-PARTIAL MATCH r4 START JsonValue.JNum AS n -> IF n == 42.0 THEN
-  passed += 1;
-  print("PASS: number 42");
-ELSE failed += 1;
-  print("FAIL: number 42");
-END, DEFAULT -> failed += 1; print("FAIL: number 42"); END
+  # Test 5: negative number
+  r5 = parseValue!("-7", 0, penv, 0);
+  PARTIAL MATCH r5 START
+    JsonValue.JNum AS n ->
+      IF n == 0.0 - 7.0 THEN
+        passed += 1;
+        print("PASS: number -7");
+      ELSE
+        failed += 1;
+        print("FAIL: number -7");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: number -7");
+  END
 
-# Test 5: negative number
-r5 = parseValue!("-7", 0, penv, 0);
-PARTIAL MATCH r5 START JsonValue.JNum AS n -> IF n == 0.0 - 7.0 THEN
-  passed += 1;
-  print("PASS: number -7");
-ELSE failed += 1;
-  print("FAIL: number -7");
-END, DEFAULT -> failed += 1; print("FAIL: number -7"); END
+  # Test 6: string
+  r6 = parseValue!("\"hello\"", 0, penv, 0);
+  PARTIAL MATCH r6 START
+    JsonValue.JStr AS s ->
+      IF s == "hello" THEN
+        passed += 1;
+        print("PASS: string hello");
+      ELSE
+        failed += 1;
+        print("FAIL: string hello got " + s);
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: string hello");
+  END
 
-# Test 6: string
-r6 = parseValue!("\"hello\"", 0, penv, 0);
-PARTIAL MATCH r6 START JsonValue.JStr AS s -> IF s == "hello" THEN
-  passed += 1;
-  print("PASS: string hello");
-ELSE failed += 1;
-  print("FAIL: string hello got " + s);
-END, DEFAULT -> failed += 1; print("FAIL: string hello"); END
+  # Test 7: string with escapes
+  r7 = parseValue!("\"line1\\nline2\"", 0, penv, 0);
+  PARTIAL MATCH r7 START
+    JsonValue.JStr AS s ->
+      IF s.length() == 11 THEN
+        passed += 1;
+        print("PASS: string escapes");
+      ELSE
+        failed += 1;
+        print("FAIL: string escapes len=" + s.length().toString());
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: string escapes");
+  END
 
-# Test 7: string with escapes
-r7 = parseValue!("\"line1\\nline2\"", 0, penv, 0);
-PARTIAL MATCH r7 START JsonValue.JStr AS s -> IF s.length() == 11 THEN
-  passed += 1;
-  print("PASS: string escapes");
-ELSE failed += 1;
-  print("FAIL: string escapes len=" + s.length().toString());
-END, DEFAULT -> failed += 1; print("FAIL: string escapes"); END
+  # Test 8: empty array
+  r8 = parseValue!("[]", 0, penv, 0);
+  PARTIAL MATCH r8 START
+    JsonValue.JArray AS items ->
+      IF items.empty?() THEN
+        passed += 1;
+        print("PASS: empty array");
+      ELSE
+        failed += 1;
+        print("FAIL: empty array");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: empty array");
+  END
 
-# Test 8: empty array
-r8 = parseValue!("[]", 0, penv, 0);
-PARTIAL MATCH r8 START JsonValue.JArray AS items -> IF items.empty?() THEN
-  passed += 1;
-  print("PASS: empty array");
-ELSE failed += 1;
-  print("FAIL: empty array");
-END, DEFAULT -> failed += 1; print("FAIL: empty array"); END
+  # Test 9: array of numbers
+  r9 = parseValue!("[1, 2, 3]", 0, penv, 0);
+  PARTIAL MATCH r9 START
+    JsonValue.JArray AS items ->
+      IF items.length() == 3 THEN
+        passed += 1;
+        print("PASS: array [1,2,3]");
+      ELSE
+        failed += 1;
+        print("FAIL: array [1,2,3] len=" + items.length().toString());
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: array [1,2,3]");
+  END
 
-# Test 9: array of numbers
-r9 = parseValue!("[1, 2, 3]", 0, penv, 0);
-PARTIAL MATCH r9 START JsonValue.JArray AS items -> IF items.length() == 3 THEN
-  passed += 1;
-  print("PASS: array [1,2,3]");
-ELSE failed += 1;
-  print("FAIL: array [1,2,3] len=" + items.length().toString());
-END, DEFAULT -> failed += 1; print("FAIL: array [1,2,3]"); END
+  # Test 10: nested array
+  r10 = parseValue!("[[1], [2, 3]]", 0, penv, 0);
+  PARTIAL MATCH r10 START
+    JsonValue.JArray AS items ->
+      IF items.length() == 2 THEN
+        passed += 1;
+        print("PASS: nested array");
+      ELSE
+        failed += 1;
+        print("FAIL: nested array");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: nested array");
+  END
 
-# Test 10: nested array
-r10 = parseValue!("[[1], [2, 3]]", 0, penv, 0);
-PARTIAL MATCH r10 START JsonValue.JArray AS items -> IF items.length() == 2 THEN
-  passed += 1;
-  print("PASS: nested array");
-ELSE failed += 1;
-  print("FAIL: nested array");
-END, DEFAULT -> failed += 1; print("FAIL: nested array"); END
+  # Test 11: empty object
+  r11 = parseValue!("{}", 0, penv, 0);
+  PARTIAL MATCH r11 START
+    JsonValue.JObj ->
+      passed += 1;
+      print("PASS: empty object");,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: empty object");
+  END
 
-# Test 11: empty object
-r11 = parseValue!("{}", 0, penv, 0);
-PARTIAL MATCH r11 START JsonValue.JObj -> passed += 1; print("PASS: empty object");, DEFAULT -> failed += 1; print(
-  "FAIL: empty object"
-); END
+  # Test 12: simple object
+  MUTABLE r12 = parseValue!("{\"name\": \"CLEAR\", \"version\": 1}", 0, penv, 0);
+  nameVal = jsonGet!(r12, "name");
+  PARTIAL MATCH nameVal START
+    JsonValue.JStr AS s ->
+      IF s == "CLEAR" THEN
+        passed += 1;
+        print("PASS: object.name");
+      ELSE
+        failed += 1;
+        print("FAIL: object.name got " + s);
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: object.name");
+  END
 
-# Test 12: simple object
-MUTABLE r12 = parseValue!("{\"name\": \"CLEAR\", \"version\": 1}", 0, penv, 0);
-nameVal = jsonGet!(r12, "name");
-PARTIAL MATCH nameVal START JsonValue.JStr AS s -> IF s == "CLEAR" THEN
-  passed += 1;
-  print("PASS: object.name");
-ELSE failed += 1;
-  print("FAIL: object.name got " + s);
-END, DEFAULT -> failed += 1; print("FAIL: object.name"); END
+  # Test 13: bool in object
+  MUTABLE r13 = parseValue!("{\"ok\": true}", 0, penv, 0);
+  boolVal = jsonGet!(r13, "ok");
+  PARTIAL MATCH boolVal START
+    JsonValue.JBool AS b ->
+      IF b THEN
+        passed += 1;
+        print("PASS: bool in object");
+      ELSE
+        failed += 1;
+        print("FAIL: bool in object");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: bool in object");
+  END
 
-# Test 13: bool in object
-MUTABLE r13 = parseValue!("{\"ok\": true}", 0, penv, 0);
-boolVal = jsonGet!(r13, "ok");
-PARTIAL MATCH boolVal START JsonValue.JBool AS b -> IF b THEN
-  passed += 1;
-  print("PASS: bool in object");
-ELSE failed += 1;
-  print("FAIL: bool in object");
-END, DEFAULT -> failed += 1; print("FAIL: bool in object"); END
+  # Test 14: mixed types in array
+  r14 = parseValue!("[1, \"two\", true, null]", 0, penv, 0);
+  PARTIAL MATCH r14 START
+    JsonValue.JArray AS items ->
+      IF items.length() == 4 THEN
+        passed += 1;
+        print("PASS: mixed array");
+      ELSE
+        failed += 1;
+        print("FAIL: mixed array");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: mixed array");
+  END
 
-# Test 14: mixed types in array
-r14 = parseValue!("[1, \"two\", true, null]", 0, penv, 0);
-PARTIAL MATCH r14 START JsonValue.JArray AS items -> IF items.length() == 4 THEN
-  passed += 1;
-  print("PASS: mixed array");
-ELSE failed += 1;
-  print("FAIL: mixed array");
-END, DEFAULT -> failed += 1; print("FAIL: mixed array"); END
+  # Test 15: whitespace handling
+  MUTABLE r15 = parseValue!("  {  \"key\"  :  \"value\"  }  ", 0, penv, 0);
+  wsVal = jsonGet!(r15, "key");
+  PARTIAL MATCH wsVal START
+    JsonValue.JStr AS s ->
+      IF s == "value" THEN
+        passed += 1;
+        print("PASS: whitespace");
+      ELSE
+        failed += 1;
+        print("FAIL: whitespace");
+      END
+    ,
+    DEFAULT ->
+      failed += 1;
+      print("FAIL: whitespace");
+  END
 
-# Test 15: whitespace handling
-MUTABLE r15 = parseValue!("  {  \"key\"  :  \"value\"  }  ", 0, penv, 0);
-wsVal = jsonGet!(r15, "key");
-PARTIAL MATCH wsVal START JsonValue.JStr AS s -> IF s == "value" THEN
-  passed += 1;
-  print("PASS: whitespace");
-ELSE failed += 1;
-  print("FAIL: whitespace");
-END, DEFAULT -> failed += 1; print("FAIL: whitespace"); END
-
-# Summary
-print("---");
-print("JSON Parser: ${passed.toString()} passed, ${failed.toString()} failed");
-ASSERT failed == 0;
+  # Summary
+  print("---");
+  print("JSON Parser: ${passed.toString()} passed, ${failed.toString()} failed");
+  ASSERT failed == 0;
 END

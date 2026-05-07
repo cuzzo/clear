@@ -76,7 +76,7 @@ END
 # =========================================================================
 
 FN main() RETURNS Void ->
-  MUTABLE map: HashMap<String> @shared: sharded(128): locked = {};
+  MUTABLE map: HashMap<String> @shared:sharded(128):locked = {};
   n = 1_000_000;
   workers = threadCount();
   chunk = n / workers;
@@ -92,108 +92,131 @@ FN main() RETURNS Void ->
     set_futures
       .append(
         BG {
-          @parallel -> FOR idx IN (start ..< start + cnt) DO map["key:${idx.toString()}"] = "value-${idx.toString()}";
-        END
-      }
-    );
-  wi += 1;
-END
-FOR si IN (0 ..< workers) -> NEXT set_futures[si];
-setMs = timestampMs() - t0;
+          @parallel ->
+            FOR idx IN (start ..< start + cnt) DO
+              map["key:${idx.toString()}"] = "value-${idx.toString()}";
+            END
 
-# Workload 2: Uniform GET
-t1 = timestampMs();
-MUTABLE get_futures: ~Int64[]@list = [];
-wi = 0;
-WHILE wi < workers DO
-  start = wi * chunk;
-  cnt = chunk;
-  get_futures
-    .append(
-      BG {
-        @parallel -> MUTABLE hits = 0;
-        FOR idx IN (start ..< start + cnt) DO got = map["key:${idx.toString()}"] OR "";
-        IF got.any?() THEN hits += 1;
-      END END hits;
-    }
-  );
-wi += 1;
-END
-MUTABLE total_hits = 0;
-FOR gi IN (0 ..< workers) -> total_hits += NEXT get_futures[gi];
-getMs = timestampMs() - t1;
+        }
+      );
+    wi += 1;
+  END
+  FOR si IN (0 ..< workers) -> NEXT set_futures[si];
+  setMs = timestampMs() - t0;
 
-# Workload 3: Zipfian GET
-hIntegral = hInt(n + 0.5, zipfSkew);
-hFraction = hFunc(1.5, zipfSkew) - 1.0;
-t2 = timestampMs();
-MUTABLE zipf_futures: ~Int64[]@list = [];
-wi = 0;
-WHILE wi < workers DO
-  seed = wi + 42;
-  cnt = chunk;
-  zipf_futures
-    .append(
-      BG {
-        @parallel -> MUTABLE hits = 0;
-        MUTABLE state = seed;
-        FOR idx IN (0 ..< cnt) DO k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
-        state = state %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
-        got = map["key:${k.toString()}"] OR "";
-        IF got.any?() THEN hits += 1;
-      END END hits;
-    }
-  );
-wi += 1;
-END
-MUTABLE zipf_hits = 0;
-FOR zi IN (0 ..< workers) -> zipf_hits += NEXT zipf_futures[zi];
-zipfMs = timestampMs() - t2;
+  # Workload 2: Uniform GET
+  t1 = timestampMs();
+  MUTABLE get_futures: ~Int64[]@list = [];
+  wi = 0;
+  WHILE wi < workers DO
+    start = wi * chunk;
+    cnt = chunk;
+    get_futures
+      .append(
+        BG {
+          @parallel ->
+            MUTABLE hits = 0;
+            FOR idx IN (start ..< start + cnt) DO
+              got = map["key:${idx.toString()}"] OR "";
+              IF got.any?() THEN
+                hits += 1;
+              END
+            END
+            hits;
+        }
+      );
+    wi += 1;
+  END
+  MUTABLE total_hits = 0;
+  FOR gi IN (0 ..< workers) -> total_hits += NEXT get_futures[gi];
+  getMs = timestampMs() - t1;
 
-# Workload 4: Mixed 80/20 (Zipfian)
-t3 = timestampMs();
-MUTABLE mix_futures: ~Int64[]@list = [];
-wi = 0;
-WHILE wi < workers DO
-  seed = wi + 99;
-  cnt = chunk;
-  mix_futures
-    .append(
-      BG {
-        @parallel -> MUTABLE hits = 0;
-        MUTABLE state = seed;
-        MUTABLE val: String = "";
-        FOR idx IN (0 ..< cnt) DO k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
-        state = state %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
-        MUTABLE decision = state MOD 100;
-        IF decision < 0 THEN decision = 0 - decision;
-      END IF decision < 80 THEN val = map["key:${k.toString()}"] OR "";
-      IF val.any?() THEN hits += 1;
-    END ELSE map["key:${k.toString()}"] = "updated-${idx.toString()}";
-  END END hits;
-}
-);
-wi += 1;
-END
-MUTABLE mix_hits = 0;
-FOR mi IN (0 ..< workers) -> mix_hits += NEXT mix_futures[mi];
-mixMs = timestampMs() - t3;
+  # Workload 3: Zipfian GET
+  hIntegral = hInt(n + 0.5, zipfSkew);
+  hFraction = hFunc(1.5, zipfSkew) - 1.0;
+  t2 = timestampMs();
+  MUTABLE zipf_futures: ~Int64[]@list = [];
+  wi = 0;
+  WHILE wi < workers DO
+    seed = wi + 42;
+    cnt = chunk;
+    zipf_futures
+      .append(
+        BG {
+          @parallel ->
+            MUTABLE hits = 0;
+            MUTABLE state = seed;
+            FOR idx IN (0 ..< cnt) DO
+              k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+              state = state %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
+              got = map["key:${k.toString()}"] OR "";
+              IF got.any?() THEN
+                hits += 1;
+              END
+            END
+            hits;
+        }
+      );
+    wi += 1;
+  END
+  MUTABLE zipf_hits = 0;
+  FOR zi IN (0 ..< workers) -> zipf_hits += NEXT zipf_futures[zi];
+  zipfMs = timestampMs() - t2;
 
-# Assert against workers*chunk, not n: integer division may drop a
-# remainder when n doesn't evenly divide workers (e.g. @leak n=1000 with
-# nproc=32 → chunk=31, 32*31=992 keys actually written, not 1000).
-ASSERT total_hits == workers * chunk, "GET hits must equal SET count";
-ASSERT zipf_hits > 0, "Zipf hits must be > 0";
-ASSERT mix_hits > 0, "Mixed hits must be > 0";
+  # Workload 4: Mixed 80/20 (Zipfian)
+  t3 = timestampMs();
+  MUTABLE mix_futures: ~Int64[]@list = [];
+  wi = 0;
+  WHILE wi < workers DO
+    seed = wi + 99;
+    cnt = chunk;
+    mix_futures
+      .append(
+        BG {
+          @parallel ->
+            MUTABLE hits = 0;
+            MUTABLE state = seed;
+            MUTABLE val: String = "";
+            FOR idx IN (0 ..< cnt) DO
+              k = zipfNext!(state, n, zipfSkew, hIntegral, hFraction);
+              state = state %* 6_364_136_223_846_793_005 %+ 1_442_695_040_888_963_407;
+              MUTABLE decision = state MOD 100;
+              IF decision < 0 THEN
+                decision = 0 - decision;
+              END
+              IF decision < 80 THEN
+                val = map["key:${k.toString()}"] OR "";
+                IF val.any?() THEN
+                  hits += 1;
+                END
+              ELSE
+                map["key:${k.toString()}"] = "updated-${idx.toString()}";
+              END
+            END
+            hits;
+        }
+      );
+    wi += 1;
+  END
+  MUTABLE mix_hits = 0;
+  FOR mi IN (0 ..< workers) -> mix_hits += NEXT mix_futures[mi];
+  mixMs = timestampMs() - t3;
 
-totalMs = setMs + getMs + zipfMs + mixMs;
-print("BENCH_RESULT: ${totalMs.toString()} ms");
-print("Keys: ${n.toString()}");
-print("Workers: ${workers.toString()}");
-print("Set: ${setMs.toString()} ms");
-print("Get: ${getMs.toString()} ms");
-print("Zipf: ${zipfMs.toString()} ms");
-print("Mixed: ${mixMs.toString()} ms");
-print("Verified: yes");
-RETURN;
+  # Assert against workers*chunk, not n: integer division may drop a
+  # remainder when n doesn't evenly divide workers (e.g. @leak n=1000 with
+  # nproc=32 → chunk=31, 32*31=992 keys actually written, not 1000).
+  ASSERT total_hits == workers * chunk, "GET hits must equal SET count";
+  ASSERT zipf_hits > 0, "Zipf hits must be > 0";
+  ASSERT mix_hits > 0, "Mixed hits must be > 0";
+
+  totalMs = setMs + getMs + zipfMs + mixMs;
+  print("BENCH_RESULT: ${totalMs.toString()} ms");
+  print("Keys: ${n.toString()}");
+  print("Workers: ${workers.toString()}");
+  print("Set: ${setMs.toString()} ms");
+  print("Get: ${getMs.toString()} ms");
+  print("Zipf: ${zipfMs.toString()} ms");
+  print("Mixed: ${mixMs.toString()} ms");
+  print("Verified: yes");
+  RETURN;
 END

@@ -1126,6 +1126,343 @@ RSpec.describe Formatter do
     end
   end
 
+  describe "`END` always opens a new line" do
+    # Repro from examples/json_parser/jsonToString JBool arm. An inner
+    # `IF ... END RETURN ...` left `END RETURN "false";` glued together
+    # because no walker forced a break between END and the trailing
+    # statement. The post-pass `nl_after_end` makes END a hard line
+    # boundary except when followed immediately by `)`, `]`, `}`, or `;`.
+
+    it "splits `END RETURN` after an inner IF inside a MATCH arm" do
+      src = <<~CLEAR
+        ENUM B { T, F }
+        FN main() RETURNS String ->
+          PARTIAL MATCH B.T START
+            B.T AS b ->
+              IF b == B.T THEN
+                RETURN "true";
+              END RETURN "false";,
+            B.F -> RETURN "no";
+          END
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expected = "      IF b == B.T THEN\n" \
+                 "        RETURN \"true\";\n" \
+                 "      END\n" \
+                 "      RETURN \"false\";,\n"
+      expect(out).to include(expected)
+      expect(out).not_to match(/END RETURN/)
+    end
+
+    it "leaves `END }` and `END );` alone (close-brackets stay attached)" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          futures.append(BG {
+            FOR i IN (0 ..< 5) DO
+              i;
+            END
+          });
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      # END followed by `}` keeps `}` on the next render line via
+      # CLOSE_LEADING; we just need to confirm we didn't insert a
+      # spurious blank line between END and `}` either.
+      expect(out).not_to match(/END\s+\n\s*\n\s*\}/)
+    end
+  end
+
+  describe "BG body with leading `@strategy ->` keeps indent balanced" do
+    # Repro from benchmarks/concurrent/09_kvstore. `BG { @parallel -> ... }`
+    # has a `->` whose OPEN_TERMINAL render rule raises body depth, but
+    # there's no END inside the BG to lower it back; only `}` closes,
+    # and that's a single -1. Without compensation, every statement
+    # after the BG ends up one column too deep, cascading off the
+    # enclosing FN body's indent.
+
+    it "lifts depth back to the BG's `{` level before `}`" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE futures: ~Int64[]@list = [];
+          futures.append(BG { @parallel ->
+            MUTABLE total: Int64 = 0;
+            WHILE total < 10 DO
+              total += 1;
+            END
+            total;
+          });
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      # The `}` (closes BG) sits at call-args body depth, `);` at FN
+      # body depth, `RETURN;` at FN body depth, last `END` at col 0.
+      expect(out).to match(/^    \}$/)
+      expect(out).to match(/^  \);$/)
+      expect(out).to match(/^  RETURN;$/)
+      expect(out).to match(/^END$/)
+    end
+  end
+
+  describe "multi-branch IF/ELSE_IF chain with same-line branch bodies" do
+    # Repro from examples/json_parser/parseString. Each branch is in
+    # one-liner form (`IF cond THEN stmt;`) but the IF/ELSE_IF/ELSE/END
+    # spans multiple source lines. The old layout staggered ELSE_IF
+    # below IF because IF's `;`-terminated line did not bump indent
+    # (THEN was mid-line, not OPEN_TERMINAL), then ELSE_IF outdented
+    # against the (already-low) depth.
+
+    it "expands each branch's inline body onto its own line" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE x = "";
+          IF x == "a" THEN x = "1";
+          ELSE_IF x == "b" THEN x = "2";
+          ELSE_IF x == "c" THEN x = "3";
+          ELSE x = "0";
+          END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expected = "  IF x == \"a\" THEN\n" \
+                 "    x = \"1\";\n" \
+                 "  ELSE_IF x == \"b\" THEN\n" \
+                 "    x = \"2\";\n" \
+                 "  ELSE_IF x == \"c\" THEN\n" \
+                 "    x = \"3\";\n" \
+                 "  ELSE\n" \
+                 "    x = \"0\";\n" \
+                 "  END\n"
+      expect(out).to include(expected)
+    end
+
+    it "leaves a single-arm one-liner alone" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE x = 0;
+          IF x == 1 THEN x = 2; END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      # Existing expand_if_while_for still expands true single-line
+      # one-liners — that's the established convention.
+      expect(out).to include("IF x == 1 THEN\n    x = 2;\n  END")
+    end
+  end
+
+  describe "capability chain with parenthesized argument" do
+    # Repro from benchmarks/concurrent/09_kvstore. `@sharded(8):locked`
+    # was rendering as `@sharded(8): locked` because the chain-detector
+    # didn't skip the `(...)` between segments — the walk-back hit `)`
+    # first and bailed.
+
+    it "keeps `:` flush after a `@cap(N)` segment" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE map: HashMap<String> @sharded(8):locked = {};
+          map["k"] = "v";
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("@sharded(8):locked")
+      expect(out).not_to include("@sharded(8): locked")
+    end
+
+    it "keeps `:` flush across a 3-segment chain with a paren arg" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE map: HashMap<String> @shared:sharded(128):locked = {};
+          map["k"] = "v";
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("@shared:sharded(128):locked")
+    end
+  end
+
+  describe "MATCH block layout" do
+    # Repro from examples/litedb. Multi-line MATCH was producing arms
+    # at the same column as `START` and END at column 0 because:
+    #   - `START` did not bump indent for the body
+    #   - the body never closed back to MATCH-level
+    #   - DEFAULT in arm position was outdenting like CATCH/DEFAULT in
+    #     a TRY block (it shouldn't — in MATCH it's a pattern at arm-
+    #     depth)
+    # New layout: arms at +1 from `MATCH ... START`, multi-statement
+    # arm bodies at +2 with the trailing `,` flush against the last
+    # `;`, END at MATCH-line indent. DEFAULT renders at arm-depth.
+
+    it "indents arms at +1 and END at the MATCH-line level" do
+      src = <<~CLEAR
+        ENUM Op { Get, Put }
+        FN main() RETURNS Void ->
+          MUTABLE n = "";
+          PARTIAL MATCH Op.Get START
+            Op.Get -> n = "g";,
+            Op.Put -> n = "p";
+          END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expected = "  PARTIAL MATCH Op.Get START\n" \
+                 "    Op.Get -> n = \"g\";,\n" \
+                 "    Op.Put -> n = \"p\";\n" \
+                 "  END\n"
+      expect(out).to include(expected)
+    end
+
+    it "expands a single-line MATCH into one-arm-per-line layout" do
+      src = <<~CLEAR
+        ENUM Op { Get, Put }
+        FN main() RETURNS Void ->
+          MUTABLE n = 0;
+          PARTIAL MATCH Op.Get START Op.Get -> n = 1;, DEFAULT -> n = 0; END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expected = "  PARTIAL MATCH Op.Get START\n" \
+                 "    Op.Get -> n = 1;,\n" \
+                 "    DEFAULT -> n = 0;\n" \
+                 "  END\n"
+      expect(out).to include(expected)
+    end
+
+    it "double-indents multi-statement arm bodies and lifts the comma" do
+      src = <<~CLEAR
+        ENUM Op { Get, Put }
+        FN main() RETURNS Void ->
+          MUTABLE x = 0;
+          MUTABLE y = 0;
+          PARTIAL MATCH Op.Get START
+            Op.Get ->
+              x = 1;
+              y = 2;,
+            Op.Put -> x = 3;
+          END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expected = "  PARTIAL MATCH Op.Get START\n" \
+                 "    Op.Get ->\n" \
+                 "      x = 1;\n" \
+                 "      y = 2;,\n" \
+                 "    Op.Put -> x = 3;\n" \
+                 "  END\n"
+      expect(out).to include(expected)
+      expect(out).not_to match(/y = 2;\n\s*,/)
+    end
+
+    it "renders DEFAULT in MATCH at arm-depth (no CATCH-style outdent)" do
+      src = <<~CLEAR
+        ENUM Op { Get, Put }
+        FN main() RETURNS Void ->
+          MUTABLE n = 0;
+          PARTIAL MATCH Op.Get START
+            Op.Get -> n = 1;,
+            DEFAULT ->
+              n = 0;
+              n = n + 1;
+          END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expected = "  PARTIAL MATCH Op.Get START\n" \
+                 "    Op.Get -> n = 1;,\n" \
+                 "    DEFAULT ->\n" \
+                 "      n = 0;\n" \
+                 "      n = n + 1;\n" \
+                 "  END\n"
+      expect(out).to include(expected)
+    end
+  end
+
+  describe "MATCH arm `;,` separator stays attached" do
+    # Repro from examples/litedb: `Op.Get -> opName = "get";,` was
+    # getting torn into `Op.Get -> opName = "get";` then a lone `,`
+    # on its own line because `;` at depth-0 forced a newline before
+    # the trailing comma was emitted.
+
+    it "keeps `;,` together inside a MATCH inside a FN body" do
+      src = <<~CLEAR
+        ENUM Op { Get, Put }
+        FN main() RETURNS Void ->
+          MUTABLE n = "";
+          PARTIAL MATCH Op.Get START
+            Op.Get -> n = "get";,
+            Op.Put -> n = "put";
+          END
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include(%(n = "get";,))
+      expect(out).not_to match(/;\n\s*,/)
+    end
+  end
+
+  describe "inline capability chain (`@cap:cap`)" do
+    # Repro from examples/litedb: `... @shared: locked` was rendering
+    # with a space after the `:` because the default `:` rule (no space
+    # before, space after) treated it like a type annotation. The chain
+    # form keeps every segment flush.
+
+    it "removes the space in `@shared:locked`" do
+      src = <<~CLEAR
+        STRUCT S { v: Int64 }
+        FN main() RETURNS Void ->
+          x = S{ v: 0 } @shared: locked;
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("@shared:locked;")
+      expect(out).not_to include("@shared: locked")
+    end
+
+    it "removes spaces across a 3-segment chain `@pool:shared:locked`" do
+      src = <<~CLEAR
+        STRUCT Env { v: Int64 }
+        FN main() RETURNS Void ->
+          MUTABLE pool: Env[10] @pool: shared: locked = [];
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("@pool:shared:locked")
+      expect(out).not_to include("@pool: shared")
+      expect(out).not_to include("shared: locked")
+    end
+
+    it "leaves a normal type annotation `: Type` alone" do
+      src = <<~CLEAR
+        STRUCT Box { v: Int64 }
+        FN take(b: Box) RETURNS Int64 -> RETURN b.v; END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("FN take(b: Box)")
+      expect(out).to include("v: Int64")
+    end
+
+    it "leaves a `REQUIRES x: LOCKED` clause alone" do
+      src = <<~CLEAR
+        STRUCT Counter { v: Int64 }
+        FN incr!(MUTABLE c: Counter) REQUIRES c: LOCKED -> RETURN; END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("REQUIRES c: LOCKED")
+    end
+  end
+
   describe "leading-comment internal whitespace" do
     # Found by FmtVerifier sweep on benchmarks/sequential/11_pipeline_overhead.
     # The original `canonicalize_comment` rule was "exactly one space after

@@ -34,7 +34,7 @@ FN bump_loop!(MUTABLE c: Int64, n: Int64)
 END
 
 FN main() RETURNS Void ->
-  MUTABLE c: Int64 = 0 @shared: atomic;
+  MUTABLE c: Int64 = 0 @shared:atomic;
 
   t0 = timestampMs();
   bg1: ~Void = BG {bump_loop!(c, 1_000_000);};

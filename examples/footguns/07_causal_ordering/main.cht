@@ -27,7 +27,7 @@ STRUCT Payload {
 }
 
 FN main() RETURNS Void ->
-  result = Payload{ data: "" } @shared: locked;
+  result = Payload{ data: "" } @shared:locked;
 
   # Producer: writes data under the lock.
   producer = BG {

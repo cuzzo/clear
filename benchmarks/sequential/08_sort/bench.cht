@@ -24,7 +24,7 @@ FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
   MUTABLE lo_stk: Int64[]@list = [];
   MUTABLE hi_stk: Int64[]@list = [];
   # Fill loop uses append → cannot be TIGHT (append calls rt.frameAlloc).
-  TIGHT FOR fill_i IN (0_i64 ..< 48) DO
+  TIGHT FOR fill_i IN (0 ..< 48) DO
     lo_stk.append(0);
     hi_stk.append(0);
   END
@@ -54,14 +54,14 @@ FN qsort!(MUTABLE arr: Float64[], n: Int64) RETURNS !Void ->
       tmp = arr[i]; arr[i] = arr[hi]; arr[hi] = tmp;
       pi = i;
 
-      left_size  = pi - lo;
+      left_size = pi - lo;
       right_size = hi - pi;
       IF left_size > right_size THEN
-        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1; sp += 1;
-        lo_stk[sp] = pi + 1; hi_stk[sp] = hi;       sp += 1;
+        lo_stk[sp] = lo; hi_stk[sp] = pi - 1; sp += 1;
+        lo_stk[sp] = pi + 1; hi_stk[sp] = hi; sp += 1;
       ELSE
-        lo_stk[sp] = pi + 1; hi_stk[sp] = hi;       sp += 1;
-        lo_stk[sp] = lo;       hi_stk[sp] = pi - 1; sp += 1;
+        lo_stk[sp] = pi + 1; hi_stk[sp] = hi; sp += 1;
+        lo_stk[sp] = lo; hi_stk[sp] = pi - 1; sp += 1;
       END
     END
   END
@@ -77,9 +77,13 @@ FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS Void
     MUTABLE lo = 0;
     TIGHT WHILE lo < n DO
       MUTABLE mid = lo + width;
-      IF mid > n THEN mid = n; END
+      IF mid > n THEN
+        mid = n;
+      END
       MUTABLE hi = lo + width + width;
-      IF hi > n THEN hi = n; END
+      IF hi > n THEN
+        hi = n;
+      END
 
       IF mid < hi THEN
         MUTABLE i = lo;
@@ -110,13 +114,13 @@ FN msort!(MUTABLE arr: Float64[], MUTABLE tmp: Float64[], n: Int64) RETURNS Void
 END
 
 FN main() RETURNS Void ->
-  n = 1000000_i64;
+  n = 1_000_000;
 
   # Build data: permutation of [0, N-1] via Knuth multiplicative hash
   MUTABLE arr: Float64[]@list = [];
   MUTABLE seed_i = 0;
   TIGHT WHILE seed_i < n DO
-    v = seed_i * 2654435761_i64 MOD n + 0.0;
+    v = seed_i * 2_654_435_761 MOD n + 0.0;
     arr.append(v);
     seed_i += 1;
   END
@@ -131,14 +135,14 @@ FN main() RETURNS Void ->
   # Refill for mergesort
   seed_i = 0;
   TIGHT WHILE seed_i < n DO
-    v = seed_i * 2654435761_i64 MOD n + 0.0;
+    v = seed_i * 2_654_435_761 MOD n + 0.0;
     arr[seed_i] = v;
     seed_i += 1;
   END
 
   # Mergesort (needs a temp buffer of the same size)
   MUTABLE tmp_arr: Float64[]@list = [];
-  TIGHT FOR ti IN (0_i64 ..< n) -> tmp_arr.append(0.0);
+  TIGHT FOR ti IN (0 ..< n) -> tmp_arr.append(0.0);
   t1 = timestampMs();
   msort!(arr, tmp_arr, n);
   msortMs = timestampMs() - t1;

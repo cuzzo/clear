@@ -72,7 +72,7 @@ class Formatter
     .. ..< ..<= ..= %* %+ %- !* !+ !-
   ].to_set.freeze
 
-  OPEN_TERMINAL   = %w[-> { THEN DO].freeze
+  OPEN_TERMINAL   = %w[-> { THEN DO START].freeze
   CLOSE_LEADING   = %w[END }].freeze
   OUTDENT_LEADING = %w[ELSE ELSE_IF CATCH DEFAULT].freeze
   BLANK_BEFORE    = %w[CATCH DEFAULT].freeze
@@ -268,6 +268,7 @@ class Formatter::Emitter
     toks = @tokens.reject { |t| t.type == :WS }
     toks = collapse_newlines(toks)
     toks = canonicalize_numerics(toks)
+    toks = expand_match_blocks(toks)
     toks = expand_fn_blocks(toks)
     toks = expand_then_do_blocks(toks)
     toks = expand_with_blocks(toks)
@@ -277,8 +278,38 @@ class Formatter::Emitter
     toks = expand_bg_do_blocks(toks)
     toks = expand_record_types(toks)
     toks = expand_call_args(toks)
+    toks = nl_after_end(toks)
     toks = collapse_newlines(toks)
     render(toks)
+  end
+
+  # `END` always opens a new line. Whatever follows (a continuation
+  # statement, an outer END, an `;`-less return-expression) belongs on
+  # its own line at the corresponding indent. Without this pass, an
+  # inner-IF inside a MATCH arm body emitted `END RETURN "false";`
+  # because no walker forced a break after END. (Repro:
+  # examples/json_parser/jsonToString JBool arm.) Excludes the case
+  # where END is followed by a close-bracket — `BG { ... END }` keeps
+  # the `}` on the next render line via CLOSE_LEADING anyway.
+  def nl_after_end(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      out << t
+      if t.type == :KEYWORD && t.raw == 'END'
+        k = i + 1
+        k += 1 while k < toks.length && [:COMMENT].include?(toks[k].type)
+        if k < toks.length
+          nxt = toks[k]
+          should_nl = !(nxt.type == :NL ||
+                       (nxt.type == :SYM && [')', ']', '}', ';'].include?(nxt.raw)))
+          insert_nl(out) if should_nl
+        end
+      end
+      i += 1
+    end
+    out
   end
 
   private
@@ -367,6 +398,284 @@ class Formatter::Emitter
     out
   end
 
+  # ---- MATCH layout (§3.7) ---------------------------------------------
+  #
+  # `[PARTIAL] MATCH expr START arm, arm, ..., DEFAULT -> stmt; END`
+  # — expand to multi-line form with arms one-per-line at MATCH+1 indent.
+  # Multi-statement arms (multiple `;` after `->`) put the body on its
+  # own lines at MATCH+2 indent. The body lifts back to arm-depth via a
+  # phantom INDENT_CLOSE before the trailing `,` (or before END for the
+  # last arm). DEFAULT in arm position is wrapped in INDENT_OPEN/CLOSE
+  # phantoms so its OUTDENT_LEADING render rule (used for CATCH/DEFAULT
+  # in TRY/CATCH) is canceled — in MATCH it is just an arm pattern at
+  # arm-depth.
+  def expand_match_blocks(toks)
+    out = []
+    i = 0
+    while i < toks.length
+      t = toks[i]
+      if t.type == :KEYWORD && t.raw == 'START' && match_block_start?(toks, i)
+        end_idx = find_match_block_end(toks, i)
+        if end_idx
+          i = emit_match_block(out, toks, i, end_idx)
+          next
+        end
+      end
+      out << t
+      i += 1
+    end
+    out
+  end
+
+  # True when the `START` keyword at `idx` belongs to a `MATCH ... START`
+  # construct (not `SYNC POLICY START`). Walks back at depth 0 and looks
+  # for `MATCH` before any statement boundary; returns false if it sees
+  # `POLICY` first.
+  def match_block_start?(toks, idx)
+    depth = 0
+    j = idx - 1
+    while j >= 0
+      t = toks[j]
+      if t.type == :KEYWORD
+        return true if t.raw == 'MATCH'
+        return false if t.raw == 'POLICY'
+        return false if %w[FN END THEN DO ELSE ELSE_IF CATCH].include?(t.raw)
+      end
+      if t.type == :SYM
+        case t.raw
+        when ')', ']', '}' then depth += 1
+        when '(', '[', '{'
+          depth -= 1
+          return false if depth < 0
+        when ';'
+          return false if depth.zero?
+        end
+      end
+      j -= 1
+    end
+    false
+  end
+
+  # Find the END that closes the MATCH block whose START is at `start_idx`.
+  # Tracks nested keyword blocks (anything that opens a matching END) and
+  # bracket depth so a stray `END` inside a nested IF/FOR isn't mistaken
+  # for the closer.
+  def find_match_block_end(toks, start_idx)
+    bdepth = 0
+    kdepth = 0
+    j = start_idx + 1
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then bdepth += 1
+        when ')', ']', '}' then bdepth -= 1
+        end
+      elsif bdepth.zero? && t.type == :KEYWORD
+        case t.raw
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+          kdepth += 1
+        when 'END'
+          return j if kdepth.zero?
+          kdepth -= 1
+        end
+      end
+      j += 1
+    end
+    nil
+  end
+
+  # Lay out a MATCH block from `start_idx` (`START`) to `end_idx` (`END`).
+  def emit_match_block(out, toks, start_idx, end_idx)
+    out << toks[start_idx]
+    insert_nl(out)
+
+    arms = scan_match_arms(toks, start_idx + 1, end_idx)
+    arms.each do |arm|
+      emit_match_arm(out, toks, arm)
+    end
+
+    out << toks[end_idx]
+    end_idx + 1
+  end
+
+  # Returns a list of arm hashes: { start:, end:, arrow:, sep:, multi: }.
+  # `start..end` covers the arm tokens (excluding the trailing separator).
+  # `sep` is the index of the separating `,` (or nil for the last arm).
+  # `arrow` is the index of the arm's top-level `->` (or nil for bare
+  # arms like `DEFAULT` followed by an unparenthesized expression).
+  # `multi` is true if the arm body has more than one statement or
+  # contains a nested keyword block (IF/FOR/WHILE/...).
+  def scan_match_arms(toks, start, stop)
+    arms = []
+    arm_start = skip_nls(toks, start)
+    return arms if arm_start >= stop
+
+    bdepth = 0
+    kdepth = 0
+    arrow_idx = nil
+    j = arm_start
+    while j < stop
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then bdepth += 1
+        when ')', ']', '}' then bdepth -= 1
+        when ','
+          if bdepth.zero? && kdepth.zero?
+            arms << build_match_arm(toks, arm_start, j, arrow_idx, j)
+            arm_start = skip_nls(toks, j + 1)
+            j = arm_start
+            arrow_idx = nil
+            next
+          end
+        end
+      elsif t.type == :OP && t.raw == '->' && bdepth.zero? && kdepth.zero?
+        arrow_idx ||= j
+      elsif t.type == :KEYWORD && bdepth.zero?
+        case t.raw
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+          kdepth += 1
+        when 'END'
+          kdepth -= 1 if kdepth.positive?
+        end
+      end
+      j += 1
+    end
+    arms << build_match_arm(toks, arm_start, stop, arrow_idx, nil) if arm_start < stop
+    arms
+  end
+
+  def build_match_arm(toks, s, e, arrow, sep)
+    body_end = sep || e
+    semi_count = 0
+    has_block = false
+    bdepth = 0
+    kdepth = 0
+    if arrow
+      ((arrow + 1)...body_end).each do |k|
+        t = toks[k]
+        if t.type == :SYM
+          case t.raw
+          when '(', '[', '{' then bdepth += 1
+          when ')', ']', '}' then bdepth -= 1
+          when ';'
+            semi_count += 1 if bdepth.zero? && kdepth.zero?
+          end
+        elsif t.type == :KEYWORD && bdepth.zero?
+          case t.raw
+          when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+            has_block = true if kdepth.zero?
+            kdepth += 1
+          when 'END'
+            kdepth -= 1 if kdepth.positive?
+          end
+        end
+      end
+    end
+    multi = semi_count > 1 || has_block
+    { start: s, end: e, body_end: body_end, arrow: arrow, sep: sep, multi: multi }
+  end
+
+  # Emit one arm: pattern, `->`, body, separator. Wraps DEFAULT in
+  # INDENT_OPEN/CLOSE phantoms to neutralize its OUTDENT_LEADING render
+  # rule. Multi-line arms emit body on its own lines at +1 indent and
+  # close the indent before the separator.
+  def emit_match_arm(out, toks, arm)
+    s, e, body_end, arrow, sep, multi =
+      arm[:start], arm[:end], arm[:body_end], arm[:arrow], arm[:sep], arm[:multi]
+
+    leader = first_code_at(toks, s, body_end)
+    cancel_outdent = leader && leader.type == :KEYWORD &&
+                     OUTDENT_LEADING.include?(leader.raw)
+
+    # KEEP_INDENT on the leader line tells render to skip its
+    # OUTDENT_LEADING outdent — DEFAULT in MATCH is an arm pattern, not
+    # a CATCH/TRY-style outdent.
+    out << phantom(:KEEP_INDENT) if cancel_outdent
+
+    if arrow && multi
+      copy_arm_tokens(out, toks, s, arrow + 1)
+      insert_nl(out)
+      emit_match_body(out, toks, arrow + 1, body_end)
+      # Drop trailing NL so the `,` (or INDENT_CLOSE) sits on the same
+      # line as the body's last `;`. Without this, the comma orphan-
+      # lands on its own line.
+      out.pop while out.last && out.last.type == :NL
+      out << phantom(:INDENT_CLOSE)
+      out << toks[sep] if sep
+    else
+      copy_arm_tokens(out, toks, s, body_end)
+      out << toks[sep] if sep
+    end
+
+    insert_nl(out)
+  end
+
+  def first_code_at(toks, s, e)
+    j = s
+    while j < e
+      t = toks[j]
+      return t unless [:NL, :COMMENT, :WS, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
+      j += 1
+    end
+    nil
+  end
+
+  def copy_arm_tokens(out, toks, s, e)
+    (s...e).each do |k|
+      t = toks[k]
+      next if t.type == :NL
+      out << t
+    end
+  end
+
+  # Emit a multi-statement arm body at +1 indent, splitting at `;` at
+  # depth 0. The arm-separator `,` (or the closing END for the last
+  # arm) is emitted by the caller, so we never look past `e` here.
+  # Preserves source NLs inside nested blocks so expand_then_do_blocks
+  # still sees the user's multi-line shape; collapses redundant NLs at
+  # arm-body top-level since `;` already inserts one.
+  def emit_match_body(out, toks, s, e)
+    bdepth = 0
+    kdepth = 0
+    j = skip_nls(toks, s)
+    while j < e
+      t = toks[j]
+      if t.type == :NL
+        # Collapse adjacent NLs but keep one. This preserves user line
+        # breaks (between END of a nested block and the next statement)
+        # without producing the orphan blank lines that arise from the
+        # source-NL after a `;` we just NL-terminated ourselves.
+        out << t unless out.last && out.last.type == :NL
+        j += 1
+        next
+      end
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then bdepth += 1; out << t; j += 1; next
+        when ')', ']', '}' then bdepth -= 1; out << t; j += 1; next
+        when ';'
+          if bdepth.zero? && kdepth.zero?
+            out << t
+            j += 1
+            insert_nl(out)
+            next
+          end
+        end
+      elsif t.type == :KEYWORD && bdepth.zero?
+        case t.raw
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN', 'START'
+          kdepth += 1
+        when 'END'
+          kdepth -= 1 if kdepth.positive?
+        end
+      end
+      out << t
+      j += 1
+    end
+  end
+
   # For each top-level `FN ... -> ... END` (or any nested FN), ensure that
   # the body is multi-line: a newline follows `->` and precedes `END`, and
   # statements in between are split on `;` boundaries.
@@ -426,7 +735,7 @@ class Formatter::Emitter
       # actually closes with END. Brace-terminated blocks (WITH/MATCH/
       # STRUCT/UNION/ENUM/BG) are handled by the `{`/`}` branches below.
       # Filter WITH (`CATCH Input WITH(...)`) is not a block opener.
-      if tj.type == :KEYWORD && %w[FN IF WHILE FOR TEST WHEN].include?(tj.raw)
+      if tj.type == :KEYWORD && %w[FN IF WHILE FOR TEST WHEN START].include?(tj.raw)
         if tj.raw == 'FN'
           j = emit_fn_block(out, toks, j)
           next
@@ -459,10 +768,7 @@ class Formatter::Emitter
       # skip exactly one following source NL (it's redundant with the one
       # I just inserted). Additional source NLs pass through as blank lines.
       if tj.type == :SYM && tj.raw == ';' && depth == 0
-        out << tj
-        j += 1
-        insert_nl(out)
-        j += 1 if j < toks.length && toks[j].type == :NL
+        j = emit_stmt_terminator(out, toks, j)
         next
       end
       # ELSE / ELSE_IF / CATCH / DEFAULT at this depth: ensure they start
@@ -718,17 +1024,22 @@ class Formatter::Emitter
     nil
   end
 
-  # Expand one-liner IF / WHILE / FOR blocks that use THEN or DO...END.
-  # Detects blocks where no newline appears between the opening keyword and
-  # the matching END, and expands them so the body is on its own line(s).
-  # Multi-line forms are left untouched.
+  # Expand IF / WHILE / FOR blocks where any branch has its body inline
+  # with the THEN/DO/ELSE keyword. Two triggers:
+  #   1. The whole construct fits on a single source line (`one_liner_end`
+  #      returns non-nil).
+  #   2. At least one branch's THEN/DO/ELSE is followed by inline body
+  #      tokens (multi-line IF/ELSE_IF chain where each branch is a
+  #      one-liner — repro from examples/json_parser/parseString).
+  # Already-multi-line forms (every branch already has its body on its
+  # own line) are left untouched.
   def expand_then_do_blocks(toks)
     out = []
     i = 0
     while i < toks.length
       t = toks[i]
       if t.type == :KEYWORD && %w[IF WHILE FOR].include?(t.raw)
-        end_idx = one_liner_end(toks, i)
+        end_idx = one_liner_end(toks, i) || branch_end_for_inline_expansion(toks, i)
         if end_idx
           i = expand_if_while_for(out, toks, i, end_idx)
         else
@@ -741,6 +1052,71 @@ class Formatter::Emitter
       end
     end
     out
+  end
+
+  # Returns the index of the matching END for the IF/WHILE/FOR at `start`
+  # iff at least one of its branches (THEN / ELSE / ELSE_IF / DO) is
+  # followed inline (no NL) by body code rather than NL, END, ELSE,
+  # or ELSE_IF. Otherwise nil.
+  def branch_end_for_inline_expansion(toks, start)
+    end_idx = matching_end(toks, start)
+    return nil unless end_idx
+    bdepth = 0
+    kdepth = 0
+    j = start + 1
+    while j < end_idx
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then bdepth += 1
+        when ')', ']', '}' then bdepth -= 1
+        end
+      elsif t.type == :KEYWORD && bdepth.zero?
+        case t.raw
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN'
+          kdepth += 1
+        when 'END'
+          kdepth -= 1 if kdepth.positive?
+        when 'THEN', 'DO', 'ELSE'
+          if kdepth.zero?
+            k = j + 1
+            k += 1 while k < end_idx && toks[k].type == :COMMENT
+            return end_idx if k < end_idx && toks[k].type != :NL &&
+                              !(toks[k].type == :KEYWORD &&
+                                %w[END ELSE ELSE_IF].include?(toks[k].raw))
+          end
+        end
+      end
+      j += 1
+    end
+    nil
+  end
+
+  # Find matching END for the IF/WHILE/FOR at `start` (no NL constraint).
+  # Returns nil if unmatched.
+  def matching_end(toks, start)
+    bdepth = 0
+    kdepth = 0
+    j = start + 1
+    while j < toks.length
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then bdepth += 1
+        when ')', ']', '}' then bdepth -= 1
+        end
+      elsif bdepth.zero? && t.type == :KEYWORD
+        case t.raw
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN'
+          kdepth += 1
+        when 'END'
+          return j if kdepth.zero?
+          kdepth -= 1
+        end
+      end
+      j += 1
+    end
+    nil
   end
 
   # Returns the index of the matching END if and only if no :NL appears
@@ -801,17 +1177,18 @@ class Formatter::Emitter
 
     # Walk body tokens. Split `;` boundaries; outdent ELSE/ELSE_IF.
     # Track BOTH bracket depth (`(`, `[`, `{`) AND keyword-block depth
-    # (`DO`/`THEN ... END`) so that a `;` belonging to an inner
-    # one-liner block (`IF cond THEN a; b; END`) doesn't get torn
-    # into separate lines. The inner block stays as the user wrote
-    # it; the outer expansion only inserts NLs at the FOR/WHILE/IF
-    # body level. ELSE/ELSE_IF outdent applies only at the OUTER
-    # level — block_depth must be zero. (Repro:
-    # benchmarks/concurrent/14_nested_lock pre-fix, where a nested
-    # `IF a > b THEN lo = b; hi = a; END` was getting shredded.)
+    # so that a `;` belonging to an inner one-liner block
+    # (`IF cond THEN a; b; END`) doesn't get torn into separate lines.
+    # block_depth tracks IF/WHILE/FOR/TEST/WHEN — the constructs that
+    # OPEN a new keyword block. THEN/DO/ELSE_IF do NOT bump it: they're
+    # mid-block markers in the SAME enclosing IF, and treating them as
+    # block-openers breaks multi-branch IF chains where each ELSE_IF's
+    # own THEN would falsely nest. (Repro: examples/json_parser
+    # parseString, where the IF/ELSE_IF chain staggered.)
     depth = 0
     block_depth = 0
     j = term_idx + 1
+    j += 1 while j < end_idx && toks[j].type == :NL
     body_start = out.length
     while j < end_idx
       tj = toks[j]
@@ -824,21 +1201,55 @@ class Formatter::Emitter
 
       if tj.type == :KEYWORD
         case tj.raw
-        when 'DO', 'THEN' then block_depth += 1
+        when 'IF', 'WHILE', 'FOR', 'TEST', 'WHEN', 'FN' then block_depth += 1
         when 'END' then block_depth -= 1 if block_depth > 0
         end
       end
 
-      if tj.type == :SYM && tj.raw == ';' && depth.zero? && block_depth.zero?
-        out << tj
+      if tj.type == :NL
+        # Collapse adjacent NLs but preserve user-written line breaks
+        # inside nested blocks so further passes still see structure.
+        out << tj unless out.last && out.last.type == :NL
         j += 1
-        insert_nl(out)
+        next
+      end
+
+      if tj.type == :SYM && tj.raw == ';' && depth.zero? && block_depth.zero?
+        j = emit_stmt_terminator(out, toks, j)
         next
       end
       if tj.type == :KEYWORD && %w[ELSE ELSE_IF].include?(tj.raw) && depth.zero? && block_depth.zero?
         insert_nl(out)
         out << tj
         j += 1
+        # `ELSE` with an inline body (`ELSE x = 0;`) — push body to its
+        # own line. ELSE_IF's body comes after THEN, handled below.
+        if tj.raw == 'ELSE'
+          k = j
+          k += 1 while k < end_idx && toks[k].type == :COMMENT
+          if k < end_idx && toks[k].type != :NL &&
+             !(toks[k].type == :KEYWORD && %w[END ELSE ELSE_IF].include?(toks[k].raw))
+            insert_nl(out)
+          end
+        end
+        next
+      end
+      # THEN/DO with an inline body (`IF c THEN s;` continuation in a
+      # multi-line chain) — push body onto its own line so the indent
+      # ladder doesn't stagger. (Repro: examples/json_parser
+      # parseString, where each `ELSE_IF cond THEN stmt;` was a one-
+      # liner in a multi-line chain, and the missing NL collapsed the
+      # whole ladder against the IF column.)
+      if tj.type == :KEYWORD && %w[THEN DO].include?(tj.raw) &&
+         depth.zero? && block_depth.zero?
+        out << tj
+        j += 1
+        k = j
+        k += 1 while k < end_idx && toks[k].type == :COMMENT
+        if k < end_idx && toks[k].type != :NL &&
+           !(toks[k].type == :KEYWORD && %w[END ELSE ELSE_IF].include?(toks[k].raw))
+          insert_nl(out)
+        end
         next
       end
       out << tj
@@ -1551,6 +1962,14 @@ class Formatter::Emitter
     end
     insert_nl(out)
 
+    # `BG { @parallel -> body }` — the leading `@xxx ->` is a strategy
+    # tag whose `->` opens body indent (OPEN_TERMINAL on `->`) but has
+    # no matching END inside the BG body; the `}` only closes the `{`.
+    # Without compensation the body's depth never unwinds and every
+    # statement after the BG ends up one column too deep. Detect that
+    # shape and emit a balancing INDENT_CLOSE before `}`.
+    needs_arrow_balance = bg_body_has_strategy_arrow?(toks, brace_idx, close_idx)
+
     depth = 0
     block_depth = 0
     j = brace_idx + 1
@@ -1570,10 +1989,7 @@ class Formatter::Emitter
           # body in `BG { @parallel -> FOR i IN ... DO a; b; END }`
           # would be torn apart.
           if depth.zero? && block_depth.zero?
-            out << t
-            j += 1
-            insert_nl(out)
-            j += 1 if j < toks.length && toks[j].type == :NL
+            j = emit_stmt_terminator(out, toks, j)
             next
           end
         end
@@ -1589,10 +2005,38 @@ class Formatter::Emitter
 
     if body_start < out.length
       out.pop while out.last && out.last.type == :NL && out.length > body_start
+      out << phantom(:INDENT_CLOSE) if needs_arrow_balance
       insert_nl(out)
     end
     out << toks[close_idx]
     close_idx + 1
+  end
+
+  # True if the BG/DO body opens with a strategy-tag arrow at top
+  # level (`@parallel ->`, `@micro ->`, ...). The `->` raises render
+  # depth via OPEN_TERMINAL but the body has no END to lower it back,
+  # so we need an explicit INDENT_CLOSE before `}`.
+  def bg_body_has_strategy_arrow?(toks, brace_idx, close_idx)
+    bdepth = 0
+    j = brace_idx + 1
+    j += 1 while j < close_idx && [:NL, :COMMENT].include?(toks[j].type)
+    while j < close_idx
+      t = toks[j]
+      if t.type == :SYM
+        case t.raw
+        when '(', '[', '{' then bdepth += 1
+        when ')', ']', '}' then bdepth -= 1
+        end
+      elsif t.type == :OP && t.raw == '->' && bdepth.zero?
+        return true
+      elsif t.type == :KEYWORD && bdepth.zero? &&
+            %w[FN IF WHILE FOR TEST WHEN START].include?(t.raw)
+        return false
+      end
+      return false if t.type == :SYM && t.raw == ';' && bdepth.zero?
+      j += 1
+    end
+    false
   end
 
   # ---- Pipeline forced wraps (§3.4, §3.7) --------------------------------
@@ -1833,6 +2277,26 @@ class Formatter::Emitter
     out << Formatter::FormatLexer::Token.new(:NL, "\n", 0, 0)
   end
 
+  # Emit `;` at index `j` as a statement terminator, then a newline.
+  # MATCH arms have the shape `Pat -> stmt;,` where the `,` is the
+  # arm separator — keep it on the same line as `;`. Without this,
+  # `;` forced a NL and the orphan `,` landed on its own line.
+  # Also handles the idempotent case where prior formatting already
+  # left a NL between `;` and `,`.
+  def emit_stmt_terminator(out, toks, j)
+    out << toks[j]  # `;`
+    j += 1
+    k = j
+    k += 1 while k < toks.length && toks[k].type == :NL
+    if k < toks.length && toks[k].type == :SYM && toks[k].raw == ','
+      out << toks[k]
+      j = k + 1
+    end
+    insert_nl(out)
+    j += 1 if j < toks.length && toks[j].type == :NL
+    j
+  end
+
   # ---- rendering ------------------------------------------------------
 
   # Walks the transformed token stream and produces the final string.
@@ -1848,6 +2312,7 @@ class Formatter::Emitter
     out = +""
     lines.each do |raw_line|
       half_indent = raw_line.any? { |t| t.type == :HALF_INDENT }
+      keep_indent = raw_line.any? { |t| t.type == :KEEP_INDENT }
       pre_delta, post_delta, line = split_indent_markers(raw_line)
       depth = [depth + pre_delta, 0].max
 
@@ -1865,7 +2330,7 @@ class Formatter::Emitter
       if first && CLOSE_LEADING.include?(first.raw)
         depth = [depth - 1, 0].max
         line_depth = depth
-      elsif first && OUTDENT_LEADING.include?(first.raw)
+      elsif !keep_indent && first && OUTDENT_LEADING.include?(first.raw)
         depth = [depth - 1, 0].max
         line_depth = depth
         outdent_leading = true
@@ -1907,6 +2372,8 @@ class Formatter::Emitter
         seen_code ? post -= 1 : pre -= 1
       elsif t.type == :HALF_INDENT
         # Marker only; consumed by render's half_indent flag.
+      elsif t.type == :KEEP_INDENT
+        # Marker only; consumed by render's keep_indent flag.
       else
         filtered << t
         seen_code = true if t.type != :COMMENT
@@ -2211,6 +2678,15 @@ class Formatter::Emitter
       return false
     end
 
+    # Inline capability chain (`@shared:locked`, `@pool:shared:locked`):
+    # no space after `:` when it chains off an `@cap` binding. The chain
+    # is `@cap (: ident)+` — walk back through alternating colons and
+    # identifiers; if the leftmost identifier starts with `@`, suppress
+    # the space between this `:` and the next ident.
+    if a.type == :SYM && a.raw == ':' && capability_chain_colon?(line, b_idx - 1)
+      return false
+    end
+
     # Tense sigils (`!` `?` `%` `~`) attach to following type / sigil.
     if a.type == :SYM && %w[! ? % ~].include?(a.raw)
       if b.type == :TYPE_ID
@@ -2234,6 +2710,63 @@ class Formatter::Emitter
 
     # Default: one space.
     true
+  end
+
+  # Walk back from a `:` at `colon_idx` through alternating
+  # `:identifier` segments. Returns true iff the chain bottoms out at
+  # a `@cap` VAR_ID (i.e., `@cap (: ident)+ :`). A segment may carry a
+  # parenthesized argument (`@sharded(8)`, `@shared:sharded(128):locked`);
+  # we skip a trailing `(...)` group before falling back to the ident.
+  # Used to decide whether a `:` belongs to an inline capability chain
+  # rather than a normal type annotation.
+  def capability_chain_colon?(line, colon_idx)
+    j = colon_idx
+    while j >= 0
+      t = line[j]
+      return false unless t.type == :SYM && t.raw == ':'
+      k = j - 1
+      while k >= 0 && [:NL, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(line[k].type)
+        k -= 1
+      end
+      return false if k < 0
+      # Skip a trailing `(...)` (e.g., `@sharded(8)`).
+      if line[k].type == :SYM && line[k].raw == ')'
+        k = skip_paren_group_back(line, k)
+        return false if k < 0
+        while k >= 0 && [:NL, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(line[k].type)
+          k -= 1
+        end
+        return false if k < 0
+      end
+      prev = line[k]
+      return true if prev.type == :VAR_ID && prev.raw.start_with?('@')
+      return false unless prev.type == :VAR_ID || prev.type == :TYPE_ID
+      j = k - 1
+      while j >= 0 && [:NL, :COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(line[j].type)
+        j -= 1
+      end
+    end
+    false
+  end
+
+  # Walk back from a `)` at `idx` to the matching `(`. Returns the index
+  # before the `(` (i.e., one to the left), or -1 if no match.
+  def skip_paren_group_back(line, idx)
+    depth = 0
+    j = idx
+    while j >= 0
+      t = line[j]
+      if t.type == :SYM
+        case t.raw
+        when ')' then depth += 1
+        when '('
+          depth -= 1
+          return j - 1 if depth.zero?
+        end
+      end
+      j -= 1
+    end
+    -1
   end
 
   # Scan back from `line[idx]` to determine whether the position is a

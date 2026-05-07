@@ -243,7 +243,7 @@ FN main() RETURNS Void ->
   # ================================================================
   # Concurrent tests: BG fibers add nodes/edges simultaneously
   # ================================================================
-  MUTABLE cNodes: HashMap<Node> @sharded(4): writeLocked = {};
+  MUTABLE cNodes: HashMap<Node> @sharded(4):writeLocked = {};
 
   # Concurrent node creation: 3 BG fibers each add a node
   p1 = BG {addNode!(cNodes, "x", "Xena");};

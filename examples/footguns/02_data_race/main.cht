@@ -14,7 +14,7 @@ STRUCT Counter {
 
 FN main() RETURNS Void ->
   # @shared:locked = Arc<Mutex<Counter>>. Mutation requires WITH EXCLUSIVE.
-  c = Counter{ value: 0 } @shared: locked;
+  c = Counter{ value: 0 } @shared:locked;
 
   p1 = BG {
     FOR i IN (0 ..< 1_000_000) DO

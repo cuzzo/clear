@@ -48,7 +48,7 @@ FN shared_mutation() RETURNS Void ->
   # Access requires WITH EXCLUSIVE (write) or WITH (read).
   # You cannot hold a reference AND mutate simultaneously:
   # the mutex enforces that at most one accessor holds the lock.
-  counter = 0 @shared: locked;
+  counter = 0 @shared:locked;
 
   writer = BG {
     WITH EXCLUSIVE counter AS c {
