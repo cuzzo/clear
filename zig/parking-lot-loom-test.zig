@@ -47,6 +47,10 @@ const tests = [_]Test{
     .{ .name = "parking timeout-atomic: parker/scanner handshake (4096 schedules)",          .func = &ploom.testTimeoutAtomicCoverage },
     .{ .name = "parking fsm-timeout-atomic: FsmTask parker/scanner handshake (4096 schedules)", .func = &ploom.testFsmTimeoutAtomicCoverage },
     .{ .name = "parking fsm-reuse-atomic: FsmTask slab reset vs stale scanner (256 schedules)", .func = &ploom.testFsmReuseAtomicCoverage },
+    .{ .name = "parking fsm-mutex loom: 2 FSM tasks acquire/release exhaustive (256 schedules)", .func = &ploom.testFsmMutexAcquireExhaustive },
+    .{ .name = "parking mixed-mutex loom: 1 stackful + 1 FSM exhaustive (256 schedules)",        .func = &ploom.testMixedMutexExhaustive },
+    .{ .name = "parking fsm-rwlock loom: 1 FSM writer + 1 FSM reader exhaustive (256 schedules)", .func = &ploom.testFsmRwlockWriterReader },
+    .{ .name = "parking fsm-rwlock loom: 1W+2R FSM 3^10 base-3 exhaustive (wake-on-undo guard)", .func = &ploom.testFsmRwlockOneWriterTwoReaders },
     .{ .name = "stream close-err-atomic: producer/consumer handshake on closed+err (4096 schedules)", .func = &ploom.testStreamCloseErrAtomicCoverage },
 };
 

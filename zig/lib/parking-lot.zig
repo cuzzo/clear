@@ -733,7 +733,36 @@ pub const ParkingMutex = struct {
                 return .Acquired;
             }
         }
-        _ = self.state.fetchOr(STATE_HAS_WAITERS, .release);
+        // Set HAS_WAITERS BEFORE pushing to the queue. The race we close
+        // here mirrors the stackful lockSlow rationale (line 869): an
+        // unlock that runs between our `recheck` above and our push to
+        // the waiter list would observe HAS_WAITERS=0 and return without
+        // taking queue_spin or waking anyone -- leaving us queued
+        // forever on a free lock. Setting HAS_WAITERS first means any
+        // concurrent unlock observes HAS_WAITERS=1 in its fetchAnd and
+        // takes the wake path.
+        //
+        // After fetchOr, double-check LOCKED. If the lock became free
+        // (the unlocker just released) AND the queue is empty (we hold
+        // queue_spin so no one else can push), we can safely acquire
+        // directly without parking. Without this check, this FSM path
+        // hangs whenever an unlocker sneaks in between recheck and
+        // fetchOr -- proven by the
+        // `parking fsm-mutex loom: 2 FSM tasks acquire/release` test.
+        const after_or = self.state.fetchOr(STATE_HAS_WAITERS, .acq_rel) | STATE_HAS_WAITERS;
+        if ((after_or & STATE_LOCKED) == 0 and self.waiters.isEmpty()) {
+            const target = STATE_LOCKED | (after_or & STATE_HAS_THREAD_SLEEPER);
+            if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
+                self.fsm_owner.store(fsm_task, .release);
+                self.spinReleaseQueue();
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, true);
+                }
+                return .Acquired;
+            }
+            // CAS lost — fall through to park.
+        }
 
         waiter.* = WaiterNode{
             .task = undefined,
@@ -1335,7 +1364,24 @@ pub const ParkingRwLock = struct {
                 return .Acquired;
             }
         }
-        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+        // Same lost-wake race as tryLockForFsm: an unlock between our
+        // recheck and our push would observe HAS_WAITERS=0 and skip the
+        // wake. Set HAS_WAITERS first, then double-check whether the
+        // writer just released. If the lock is now fully free (state ==
+        // HAS_WAITERS only) and the queue is empty, acquire directly.
+        const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
+        if (after_or == HAS_WAITERS_BIT and self.waiters.isEmpty()) {
+            if (self.state.cmpxchgStrong(after_or, WRITE_LOCKED_BIT, .acquire, .monotonic) == null) {
+                self.fsm_write_owner.store(fsm_task, .release);
+                self.spinReleaseQueue();
+                if (rt_profile.CLEAR_PROFILE) {
+                    self.hold_start_ns = lock_profile.now();
+                    lock_profile.recordAcquire(@intFromPtr(self), 0, true);
+                }
+                return .Acquired;
+            }
+            // CAS lost — fall through to park.
+        }
 
         waiter.* = WaiterNode{
             .task = undefined,
@@ -1421,7 +1467,27 @@ pub const ParkingRwLock = struct {
                 return .Acquired;
             }
         }
-        _ = self.state.fetchOr(HAS_WAITERS_BIT, .release);
+        // Same lost-wake race as tryLockForFsm / tryWriteLockForFsm: a
+        // writer's unlock between our recheck above and the fetchOr
+        // below would observe HAS_WAITERS=0 and skip the wake. Set
+        // HAS_WAITERS first, then check whether the writer just
+        // released. If state is HAS_WAITERS only (no writer, no
+        // readers) and the queue is empty (we hold queue_spin so no
+        // one else can push), acquire the read slot directly.
+        const after_or = self.state.fetchOr(HAS_WAITERS_BIT, .acq_rel) | HAS_WAITERS_BIT;
+        if (after_or == HAS_WAITERS_BIT and self.waiters.isEmpty()) {
+            // CAS to HAS_WAITERS + 1 reader. Strong CAS so a concurrent
+            // fast-path reader cannot race us into a corrupt state.
+            const target: u64 = HAS_WAITERS_BIT | 1;
+            if (self.state.cmpxchgStrong(after_or, target, .acquire, .monotonic) == null) {
+                self.spinReleaseQueue();
+                if (rt_profile.CLEAR_PROFILE) {
+                    lock_profile.recordReadAcquire(@intFromPtr(self), 0, true);
+                }
+                return .Acquired;
+            }
+            // CAS lost — fall through to park.
+        }
 
         waiter.* = WaiterNode{
             .task = undefined,

@@ -2160,6 +2160,525 @@ pub fn testFsmReuseAtomicCoverage() !void {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// FSM lock acquire/release coverage
+//
+// Existing FSM Loom coverage (testFsmTimeoutAtomicCoverage,
+// testFsmReuseAtomicCoverage) exercises only the parker/scanner field-
+// ordering protocol -- it never calls tryLockForFsm or wakeNext. The
+// stackful Loom suite has full acquire/release coverage but does not
+// exercise the FSM-side `tryLockForFsm` / `submitFsmResume` path that
+// `wakeNext` takes when an FSM is at the head of the wait queue. This
+// section closes that gap.
+//
+// Each test uses fiber stubs to drive the FSM lock-acquire flow. The
+// fiber:
+//   1. Calls tryLockForFsm (mutex) or tryReadLockForFsm /
+//      tryWriteLockForFsm (rwlock).
+//   2. On `.Acquired` -> runs CS, calls unlock.
+//   3. On `.Registered` -> polls the FsmTask's `waiting_for_lock`
+//      field; once `wakeNext` clears it (line 1005-1008 of
+//      parking-lot.zig for FSM), the lock has been transferred to this
+//      task. Run CS, unlock.
+//   4. On `.Error` -> deadlock/cycle; not expected in these clean
+//      tests.
+//
+// `harness.done[i]` is set last. The harness's MAX_STEPS guard plus
+// the explicit done-check after `h.run()` give us liveness: every
+// schedule must see all FSMs complete.
+// ─────────────────────────────────────────────────────────────────────
+
+// FSM mutex globals (kept separate from the stackful g_mutex/g_counter so
+// tests cannot leak state across runs even if a future test reorders).
+var g_fsm_mtx: ParkingMutex = .{};
+var g_fsm_mtx_counter: usize = 0;
+var g_fsm_lock_tasks: [3]fsm_mod.FsmTask = undefined;
+var g_fsm_lock_waiters: [3]qs.WaiterNode = undefined;
+
+fn fsmLockNoopResume(_: *fsm_mod.FsmTask) fsm_mod.YieldReason {
+    return .{ .Done = {} };
+}
+
+// Drives one FSM mutex acquire/CS/release cycle.
+fn fsmMutexSlotBody(slot: usize) void {
+    const t = &g_fsm_lock_tasks[slot];
+    const w = &g_fsm_lock_waiters[slot];
+
+    const r = g_fsm_mtx.tryLockForFsm(t, w, &g_sched);
+    switch (r) {
+        .Acquired => {
+            g_fsm_mtx_counter += 1;
+            g_fsm_mtx.unlock();
+        },
+        .Registered => {
+            // Park: poll waiting_for_lock until wakeNext clears it.
+            // wakeNext (parking-lot.zig:1005-1008) clears the FSM-side
+            // wait fields with .release before submitFsmResume publishes
+            // the wake -- our acquire-load chains those clears. Each
+            // load yields to the harness coordinator (SimAtomic).
+            while (t.waiting_for_lock.load(.acquire) != null) {
+                fc.__fiber.?.yield();
+            }
+            // Lock has been transferred. Run CS.
+            g_fsm_mtx_counter += 1;
+            g_fsm_mtx.unlock();
+        },
+        .Error => @panic("fsm-mutex-loom: unexpected lock error"),
+    }
+    harness.done[slot] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryFsmMutex0() callconv(.c) void { fsmMutexSlotBody(0); }
+fn entryFsmMutex1() callconv(.c) void { fsmMutexSlotBody(1); }
+
+fn fsmLockReset() void {
+    g_fsm_mtx = .{};
+    g_fsm_mtx_counter = 0;
+    g_fsm_lock_tasks[0] = .{ .resume_fn = &fsmLockNoopResume };
+    g_fsm_lock_tasks[1] = .{ .resume_fn = &fsmLockNoopResume };
+    g_fsm_lock_tasks[2] = .{ .resume_fn = &fsmLockNoopResume };
+}
+
+fn fsmMutexCheck() bool {
+    if (g_fsm_mtx_counter != 2) return false;
+    if (g_fsm_mtx.isLocked()) return false;
+    if (!g_fsm_mtx.waiters.isEmpty()) return false;
+    // Whole state must be 0: no LOCKED, no HAS_WAITERS. (Mirrors
+    // mutexCheckInvariants. fsm_owner is intentionally not cleared by
+    // unlock per parking-lot.zig:679-681; reuse depends on the lock
+    // gate, not the owner field.)
+    const tolerated: u64 = ParkingMutex.STATE_HAS_THREAD_SLEEPER;
+    if ((g_fsm_mtx.state.load(.monotonic) & ~tolerated) != 0) return false;
+    return true;
+}
+
+// Two FSM tasks contending on a ParkingMutex. Mirror of
+// testMutexAcquireExhaustive but exercising `tryLockForFsm` +
+// `wakeNext` FSM-grant transition.
+pub fn testFsmMutexAcquireExhaustive() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const depth: usize = if (build_options.coverage) 4 else 8;
+    const total_schedules: usize = @as(usize, 1) << depth;
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+        fsmLockReset();
+
+        try h.createThread(0, @intFromPtr(&entryFsmMutex0));
+        try h.createThread(1, @intFromPtr(&entryFsmMutex1));
+
+        h.run() catch |e| {
+            std.debug.print(
+                "\nfsm-mutex STEP_LIMIT sched {d}: {} | counter={d} mtx_state={d} t0.wfl={?*} t1.wfl={?*} t0.lock_waiter={?*} t1.lock_waiter={?*} done={any}\n",
+                .{
+                    sched_idx,
+                    e,
+                    g_fsm_mtx_counter,
+                    g_fsm_mtx.state.load(.monotonic),
+                    g_fsm_lock_tasks[0].waiting_for_lock.load(.monotonic),
+                    g_fsm_lock_tasks[1].waiting_for_lock.load(.monotonic),
+                    g_fsm_lock_tasks[0].lock_waiter.load(.monotonic),
+                    g_fsm_lock_tasks[1].lock_waiter.load(.monotonic),
+                    h.done[0..2],
+                },
+            );
+            failures += 1;
+            continue;
+        };
+
+        // Liveness: both FSMs must complete (caught earlier by MAX_STEPS,
+        // but explicit check makes the failure mode obvious).
+        if (!h.done[0] or !h.done[1]) {
+            std.debug.print(
+                "\nfsm-mutex LIVENESS sched {d}: done={any}\n",
+                .{ sched_idx, h.done[0..2] },
+            );
+            failures += 1;
+            continue;
+        }
+        if (!fsmMutexCheck()) {
+            std.debug.print(
+                "\nfsm-mutex INVARIANT sched {d}: counter={d} locked={} state={d}\n",
+                .{ sched_idx, g_fsm_mtx_counter, g_fsm_mtx.isLocked(), g_fsm_mtx.state.load(.monotonic) },
+            );
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} fsm-mutex schedules failed\n", .{ failures, total_schedules });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Mixed FSM + stackful mutex contention
+//
+// One stackful fiber takes ParkingMutex.lock(); one FSM-style fiber
+// takes ParkingMutex.tryLockForFsm. Exercises mixed-modality wakeNext
+// (a stackful waiter ahead of an FSM, and vice versa) which the pure-
+// stackful and pure-FSM tests above do not cover. Bug shape this would
+// catch: wakeNext that uses the wrong wake call (submitResume on an
+// FSM, or submitFsmResume on a stackful) -> silent lost wake -> hang.
+// ─────────────────────────────────────────────────────────────────────
+
+// Slot 0 is stackful; uses g_mutex / g_counter (the standard stackful
+// fixtures defined above, line 349-350). Slot 1 is FSM; uses
+// g_fsm_mtx_via_mixed below. Mixed test runs them on the SAME mutex --
+// so we use a dedicated mixed mutex to keep the fixtures independent.
+var g_mixed_mtx: ParkingMutex = .{};
+var g_mixed_counter: usize = 0;
+
+fn entryMixedStackfulMutex() callconv(.c) void {
+    g_mixed_mtx.lock() catch unreachable;
+    g_mixed_counter += 1;
+    g_mixed_mtx.unlock();
+    harness.done[0] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryMixedFsmMutex() callconv(.c) void {
+    const t = &g_fsm_lock_tasks[1];
+    const w = &g_fsm_lock_waiters[1];
+    const r = g_mixed_mtx.tryLockForFsm(t, w, &g_sched);
+    switch (r) {
+        .Acquired => {
+            g_mixed_counter += 1;
+            g_mixed_mtx.unlock();
+        },
+        .Registered => {
+            while (t.waiting_for_lock.load(.acquire) != null) {
+                fc.__fiber.?.yield();
+            }
+            g_mixed_counter += 1;
+            g_mixed_mtx.unlock();
+        },
+        .Error => @panic("mixed-mutex-loom: unexpected lock error"),
+    }
+    harness.done[1] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+pub fn testMixedMutexExhaustive() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const depth: usize = if (build_options.coverage) 4 else 8;
+    const total_schedules: usize = @as(usize, 1) << depth;
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+        g_mixed_mtx = .{};
+        g_mixed_counter = 0;
+        g_fsm_lock_tasks[1] = .{ .resume_fn = &fsmLockNoopResume };
+
+        try h.createThread(0, @intFromPtr(&entryMixedStackfulMutex));
+        try h.createThread(1, @intFromPtr(&entryMixedFsmMutex));
+
+        h.run() catch |e| {
+            std.debug.print("\nmixed-mutex STEP_LIMIT sched {d}: {}\n", .{ sched_idx, e });
+            failures += 1;
+            continue;
+        };
+
+        if (!h.done[0] or !h.done[1]) {
+            std.debug.print(
+                "\nmixed-mutex LIVENESS sched {d}: done={any}\n",
+                .{ sched_idx, h.done[0..2] },
+            );
+            failures += 1;
+            continue;
+        }
+        if (g_mixed_counter != 2 or g_mixed_mtx.isLocked() or !g_mixed_mtx.waiters.isEmpty()) {
+            std.debug.print(
+                "\nmixed-mutex INVARIANT sched {d}: counter={d} locked={} waiters_empty={}\n",
+                .{ sched_idx, g_mixed_counter, g_mixed_mtx.isLocked(), g_mixed_mtx.waiters.isEmpty() },
+            );
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} mixed-mutex schedules failed\n", .{ failures, total_schedules });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// FSM ParkingRwLock acquire/release coverage
+//
+// Mirrors the stackful rwlock tests but driving FSM-side
+// `tryWriteLockForFsm` / `tryReadLockForFsm`. Both single-writer-with-
+// reader and the 1W+2R fetchAdd-undo race scenarios.
+// ─────────────────────────────────────────────────────────────────────
+
+var g_fsm_rw: ParkingRwLock = .{};
+var g_fsm_rw_writer_counter: usize = 0;
+var g_fsm_rw_reader_obs: [3]i64 = .{ -1, -1, -1 };
+var g_fsm_rw_transient_wl: usize = 0;
+
+fn fsmRwReset() void {
+    g_fsm_rw = .{};
+    g_fsm_rw_writer_counter = 0;
+    g_fsm_rw_reader_obs = .{ -1, -1, -1 };
+    g_fsm_rw_transient_wl = 0;
+    g_fsm_lock_tasks[0] = .{ .resume_fn = &fsmLockNoopResume };
+    g_fsm_lock_tasks[1] = .{ .resume_fn = &fsmLockNoopResume };
+    g_fsm_lock_tasks[2] = .{ .resume_fn = &fsmLockNoopResume };
+}
+
+fn fsmRwWriterBody(slot: usize) void {
+    const t = &g_fsm_lock_tasks[slot];
+    const w = &g_fsm_lock_waiters[slot];
+    const r = g_fsm_rw.tryWriteLockForFsm(t, w, &g_sched);
+    switch (r) {
+        .Acquired => {
+            g_fsm_rw_writer_counter += 1;
+            g_fsm_rw.unlock();
+        },
+        .Registered => {
+            while (t.waiting_for_lock.load(.acquire) != null) {
+                fc.__fiber.?.yield();
+            }
+            g_fsm_rw_writer_counter += 1;
+            g_fsm_rw.unlock();
+        },
+        .Error => @panic("fsm-rw-writer: unexpected lock error"),
+    }
+    harness.done[slot] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn fsmRwReaderBody(slot: usize) void {
+    const t = &g_fsm_lock_tasks[slot];
+    const w = &g_fsm_lock_waiters[slot];
+    const r = g_fsm_rw.tryReadLockForFsm(t, w, &g_sched);
+    switch (r) {
+        .Acquired => {
+            // Same transient invariant as stackful rwWork's reader path:
+            // a reader must never observe write_locked while holding the
+            // read lock. If it does, wakeNext / wake-on-undo granted the
+            // read while a writer still held -- the FSM-path version of
+            // the bug fixed by the WRITE_LOCKED guard.
+            if (g_fsm_rw.isWriteLocked()) g_fsm_rw_transient_wl += 1;
+            g_fsm_rw_reader_obs[slot] = @as(i64, @intCast(g_fsm_rw_writer_counter));
+            g_fsm_rw.unlockShared();
+        },
+        .Registered => {
+            while (t.waiting_for_lock.load(.acquire) != null) {
+                fc.__fiber.?.yield();
+            }
+            // wakeNext for an FSM reader transferred the read slot to us.
+            if (g_fsm_rw.isWriteLocked()) g_fsm_rw_transient_wl += 1;
+            g_fsm_rw_reader_obs[slot] = @as(i64, @intCast(g_fsm_rw_writer_counter));
+            g_fsm_rw.unlockShared();
+        },
+        .Error => @panic("fsm-rw-reader: unexpected lock error"),
+    }
+    harness.done[slot] = true;
+    while (true) fc.__fiber.?.yield();
+}
+
+fn entryFsmRwWriter0() callconv(.c) void { fsmRwWriterBody(0); }
+fn entryFsmRwReader1() callconv(.c) void { fsmRwReaderBody(1); }
+fn entryFsmRwReader2() callconv(.c) void { fsmRwReaderBody(2); }
+
+fn fsmRwCheck(expected_writers: usize, reader_slots: []const usize) bool {
+    if (g_fsm_rw_writer_counter != expected_writers) return false;
+    if (g_fsm_rw.isWriteLocked()) return false;
+    if (g_fsm_rw.readerCount() != 0) return false;
+    if (!g_fsm_rw.waiters.isEmpty()) return false;
+    if (g_fsm_rw.write_owner.load(.monotonic) != null) return false;
+    if (g_fsm_rw.state.load(.monotonic) != 0) return false;
+    if (g_fsm_rw_transient_wl != 0) return false;
+    for (reader_slots) |s| {
+        const obs = g_fsm_rw_reader_obs[s];
+        if (obs < 0) return false;
+        if (obs > @as(i64, @intCast(expected_writers))) return false;
+    }
+    return true;
+}
+
+// FSM analog of testRwlockWriterReader: one FSM writer + one FSM reader.
+pub fn testFsmRwlockWriterReader() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const depth: usize = if (build_options.coverage) 4 else 8;
+    const total_schedules: usize = @as(usize, 1) << depth;
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast((sched_idx >> @as(u6, @intCast(bit))) & 1);
+        }
+        h.resetExhaustive(&schedule_buf);
+        fsmRwReset();
+
+        try h.createThread(0, @intFromPtr(&entryFsmRwWriter0));
+        try h.createThread(1, @intFromPtr(&entryFsmRwReader1));
+
+        h.run() catch |e| {
+            std.debug.print("\nfsm-rw-WR STEP_LIMIT sched {d}: {}\n", .{ sched_idx, e });
+            failures += 1;
+            continue;
+        };
+
+        if (!h.done[0] or !h.done[1]) {
+            std.debug.print(
+                "\nfsm-rw-WR LIVENESS sched {d}: done={any}\n",
+                .{ sched_idx, h.done[0..2] },
+            );
+            failures += 1;
+            continue;
+        }
+        if (!fsmRwCheck(1, &.{1})) {
+            std.debug.print(
+                "\nfsm-rw-WR INVARIANT sched {d}: wc={d} obs1={d} state={d}\n",
+                .{ sched_idx, g_fsm_rw_writer_counter, g_fsm_rw_reader_obs[1], g_fsm_rw.state.load(.monotonic) },
+            );
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} fsm-rw-WR schedules failed\n", .{ failures, total_schedules });
+        return error.LoomFailures;
+    }
+}
+
+// FSM analog of testRwlockOneWriterTwoReaders: 1 FSM writer + 2 FSM
+// readers. Specifically targets the wake-on-undo / WRITE_LOCKED-guard
+// scenario in tryReadLockForFsm: reader R_B fetchAdd-undoes while
+// writer W still holds, and the path must not falsely grant the read
+// slot to the queued reader R_A while WRITE_LOCKED is set. The
+// transient-write-lock counter (g_fsm_rw_transient_wl) is the
+// detector.
+pub fn testFsmRwlockOneWriterTwoReaders() !void {
+    const allocator = std.heap.c_allocator;
+
+    var ebr: ebr_mod.EbrContext = .{};
+    var stack_pool = fm.StackPool.init(allocator);
+    g_sched = try fp.Scheduler.init(allocator, &ebr, &stack_pool);
+
+    const depth: usize = if (build_options.coverage) 4 else 10;
+    var total_schedules: usize = 1;
+    {
+        var p: usize = 0;
+        while (p < depth) : (p += 1) total_schedules *= 3;
+    }
+    var schedule_buf: [depth]u8 = undefined;
+
+    var h = LoomHarness.initExhaustive(allocator, &schedule_buf);
+    defer h.deinit();
+    harness = &h;
+
+    var failures: usize = 0;
+
+    for (0..total_schedules) |sched_idx| {
+        var s = sched_idx;
+        for (0..depth) |bit| {
+            schedule_buf[bit] = @intCast(s % 3);
+            s /= 3;
+        }
+        h.resetExhaustive(&schedule_buf);
+        fsmRwReset();
+
+        try h.createThread(0, @intFromPtr(&entryFsmRwWriter0));
+        try h.createThread(1, @intFromPtr(&entryFsmRwReader1));
+        try h.createThread(2, @intFromPtr(&entryFsmRwReader2));
+
+        h.run() catch |e| {
+            std.debug.print("\nfsm-rw-1W2R STEP_LIMIT sched {d}: {}\n", .{ sched_idx, e });
+            failures += 1;
+            continue;
+        };
+
+        if (!h.done[0] or !h.done[1] or !h.done[2]) {
+            std.debug.print(
+                "\nfsm-rw-1W2R LIVENESS sched {d}: done={any}\n",
+                .{ sched_idx, h.done[0..3] },
+            );
+            failures += 1;
+            continue;
+        }
+        if (!fsmRwCheck(1, &.{ 1, 2 })) {
+            std.debug.print(
+                "\nfsm-rw-1W2R INVARIANT sched {d}: wc={d} obs1={d} obs2={d} transient_wl={d} state={d}\n",
+                .{ sched_idx, g_fsm_rw_writer_counter, g_fsm_rw_reader_obs[1], g_fsm_rw_reader_obs[2], g_fsm_rw_transient_wl, g_fsm_rw.state.load(.monotonic) },
+            );
+            failures += 1;
+        }
+    }
+
+    const final_b = g_sched.ready_queue.bottom.load(.monotonic);
+    g_sched.ready_queue.top.store(final_b, .monotonic);
+    g_sched.deinit();
+    stack_pool.deinit();
+    ebr.deinit(allocator);
+
+    if (failures > 0) {
+        std.debug.print("\n{d}/{d} fsm-rw-1W2R schedules failed\n", .{ failures, total_schedules });
+        return error.LoomFailures;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Stream(T) close/err atomic coverage
 //
 // Stream(T).Inner.closed became Atomic(bool) so push() / next() can
