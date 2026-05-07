@@ -16,6 +16,7 @@
 //   No allocator needed — the registry is a static array.
 
 const std = @import("std");
+const builtin = @import("builtin");
 const fc = @import("fiber-core.zig");
 const StackSize = fc.StackSize;
 
@@ -226,12 +227,33 @@ pub fn recordOverflow(fn_addr: usize, current_size: StackSize) void {
 /// overflow (upsize) and underflow (downsize) — it represents the
 /// control plane's best estimate for this task class.
 pub fn recommendSize(fn_addr: usize, requested: StackSize) StackSize {
-    if (fn_addr == 0) return requested;
+    // Floor every fiber stack at Large (64KB) under ThreadSanitizer.
+    // TSan's instrumentation roughly triples per-function frame size
+    // and inserts shadow-memory probes; with the default 16KB Standard
+    // tier, fibers running ordinary user code (no recursion) can
+    // overflow into the adjacent slab block and either stomp on
+    // neighboring Fiber/Task structs (manifesting as
+    // `destroy(task.base)` SEGV at high stack-region addresses) or
+    // corrupt TSan's shadow memory (manifesting as a crash inside
+    // tsan_rtl_access.cpp). Large (64KB) is enough headroom for the
+    // SplitStream pubsub hammer, parking-rwlock hammer, and other
+    // heavy concurrency tests under TSan; the slab allocator already
+    // supports the tier so this is a routing change, not new alloc.
+    //
+    // Non-TSan builds keep Standard (16KB) as the default; the
+    // control-plane upsize path still kicks in for genuinely deep
+    // user code.
+    const base = if (builtin.sanitize_thread)
+        @as(StackSize, @enumFromInt(@max(@intFromEnum(requested), @intFromEnum(StackSize.Large))))
+    else
+        requested;
 
-    const entry = findEntry(fn_addr) orelse return requested;
+    if (fn_addr == 0) return base;
+
+    const entry = findEntry(fn_addr) orelse return base;
     const rec_ord = entry.recommended.load(.acquire);
 
-    if (rec_ord == NO_RECOMMENDATION) return requested; // No recommendation yet.
+    if (rec_ord == NO_RECOMMENDATION) return base; // No recommendation yet.
 
     const rec: StackSize = @enumFromInt(rec_ord);
 
@@ -239,16 +261,16 @@ pub fn recommendSize(fn_addr: usize, requested: StackSize) StackSize {
     // Overflow pushes it up; underflow pushes it down.
     // Always honor it: if it's higher than requested, upsize;
     // if it's lower, downsize.  Both policies must be enabled.
-    if (@intFromEnum(rec) > @intFromEnum(requested)) {
-        return if (config.on_overflow == .upsize) rec else requested;
+    if (@intFromEnum(rec) > @intFromEnum(base)) {
+        return if (config.on_overflow == .upsize) rec else base;
     }
-    if (@intFromEnum(rec) < @intFromEnum(requested)) {
+    if (@intFromEnum(rec) < @intFromEnum(base)) {
         // Only honor a lower recommendation if it came from a downsize
         // (not from an overflow at a smaller tier).
-        return if (config.on_underflow == .downsize and entry.downsized.load(.acquire)) rec else requested;
+        return if (config.on_underflow == .downsize and entry.downsized.load(.acquire)) rec else base;
     }
 
-    return requested;
+    return base;
 }
 
 // ── OnUnderflow ──────────────────────────────────────────────────

@@ -12,8 +12,19 @@
 //   7. Distinct functions get independent entries
 
 const std = @import("std");
+const builtin = @import("builtin");
 const cp = @import("control-plane.zig");
 const StackSize = @import("fiber-core.zig").StackSize;
+
+/// Floor every stack-size expectation at Large under ThreadSanitizer.
+/// recommendSize() bumps the floor to Large under TSan to give
+/// instrumented frames + shadow-memory probes enough headroom; without
+/// this helper, every test below that expects Standard or smaller
+/// would fail in the TSan lane while still being correct in production.
+fn expectedSize(req: StackSize) StackSize {
+    if (!builtin.sanitize_thread) return req;
+    return @as(StackSize, @enumFromInt(@max(@intFromEnum(req), @intFromEnum(StackSize.Large))));
+}
 
 test "recordOverflow bumps Standard → Large" {
     cp.resetRegistry();
@@ -50,7 +61,8 @@ test "recommendSize returns requested if no overflow recorded" {
     cp.resetRegistry();
     const unknown_fn: usize = 0xBEEF_9999;
 
-    try std.testing.expectEqual(StackSize.Standard, cp.recommendSize(unknown_fn, .Standard));
+    // Under TSan the floor is Large; non-TSan keeps the requested size.
+    try std.testing.expectEqual(expectedSize(.Standard), cp.recommendSize(unknown_fn, .Standard));
     try std.testing.expectEqual(StackSize.Large, cp.recommendSize(unknown_fn, .Large));
 }
 
@@ -102,7 +114,7 @@ test "policy = ignore suppresses recording" {
     defer cp.config.on_overflow = saved;
 
     cp.recordOverflow(fn_addr, .Standard);
-    try std.testing.expectEqual(StackSize.Standard, cp.recommendSize(fn_addr, .Standard));
+    try std.testing.expectEqual(expectedSize(.Standard), cp.recommendSize(fn_addr, .Standard));
     try std.testing.expectEqual(@as(u32, 0), cp.getOverflowCount(fn_addr));
 }
 
@@ -110,7 +122,7 @@ test "fn_addr = 0 is ignored (no task context)" {
     cp.resetRegistry();
 
     cp.recordOverflow(0, .Standard);
-    try std.testing.expectEqual(StackSize.Standard, cp.recommendSize(0, .Standard));
+    try std.testing.expectEqual(expectedSize(.Standard), cp.recommendSize(0, .Standard));
 }
 
 // ═══════════════════════════════════════════════════════════════════
