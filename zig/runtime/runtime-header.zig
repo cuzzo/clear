@@ -604,6 +604,32 @@ pub const CheatLib = struct {
         }
     }
 
+    // First element, or null if empty. Backs CLEAR's `.first()` predicate.
+    pub fn firstOpt(container: anytype) ?ElementType(@TypeOf(container)) {
+        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        if (@hasField(@TypeOf(c), "items")) {
+            if (c.items.len == 0) return null;
+            return c.items[0];
+        } else {
+            if (c.len == 0) return null;
+            return c[0];
+        }
+    }
+
+    // Last element, or null if empty. Backs CLEAR's `.last()` predicate.
+    // Computed via the same shape-dispatch as firstOpt — works for both
+    // ArrayList (`.items`) and bare slices.
+    pub fn lastOpt(container: anytype) ?ElementType(@TypeOf(container)) {
+        const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;
+        if (@hasField(@TypeOf(c), "items")) {
+            if (c.items.len == 0) return null;
+            return c.items[c.items.len - 1];
+        } else {
+            if (c.len == 0) return null;
+            return c[c.len - 1];
+        }
+    }
+
     // Linear search over a slice or ArrayList for item equality.
     pub fn sliceContains(container: anytype, item: anytype) bool {
         const c = if (@typeInfo(@TypeOf(container)) == .optional) container.? else container;

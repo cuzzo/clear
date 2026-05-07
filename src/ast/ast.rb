@@ -547,6 +547,12 @@ module AST
     # {expr:, source:}). Checked in a debug-only wrapper after the
     # function body returns; panics on violation. See spec/with_post_spec.rb.
     attr_accessor :post_clauses
+    # True when declared via `METHOD name(...)` instead of `FN name(...)`.
+    # Purely a fmt directive: METHOD-flagged FNs have their prefix call
+    # sites (`foo(v, ...)`) rewritten to UFCS form (`v.foo(...)`) by
+    # `clear fmt`. Semantically identical to FN — same lookup, same
+    # call resolution, same UFCS at call sites at the language level.
+    attr_accessor :is_method
   end
   StructDef    = Struct.new(:token, :name, :fields, :visibility, :type_params) { include Locatable }
   VarDecl      = Struct.new(:token, :name, :type, :value, :mutable) do

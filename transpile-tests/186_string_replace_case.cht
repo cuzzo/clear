@@ -1,4 +1,4 @@
-# Test: replace, lowercase, uppercase string functions.
+# Test: replace, downcase, upcase string functions.
 
 FN main() RETURNS Void ->
     # replace: all occurrences
@@ -7,20 +7,20 @@ FN main() RETURNS Void ->
     ASSERT replace("no match", "xyz", "abc") == "no match";
     ASSERT replace("", "a", "b") == "";
 
-    # lowercase
-    ASSERT lowercase("Hello World") == "hello world";
-    ASSERT lowercase("ALLCAPS") == "allcaps";
-    ASSERT lowercase("already") == "already";
-    ASSERT lowercase("MiXeD123") == "mixed123";
+    # downcase
+    ASSERT "Hello World".downcase() == "hello world";
+    ASSERT "ALLCAPS".downcase() == "allcaps";
+    ASSERT "already".downcase() == "already";
+    ASSERT "MiXeD123".downcase() == "mixed123";
 
-    # uppercase
-    ASSERT uppercase("Hello World") == "HELLO WORLD";
-    ASSERT uppercase("alllower") == "ALLLOWER";
-    ASSERT uppercase("ALREADY") == "ALREADY";
-    ASSERT uppercase("MiXeD123") == "MIXED123";
+    # upcase
+    ASSERT "Hello World".upcase() == "HELLO WORLD";
+    ASSERT "alllower".upcase() == "ALLLOWER";
+    ASSERT "ALREADY".upcase() == "ALREADY";
+    ASSERT "MiXeD123".upcase() == "MIXED123";
 
     # chained
-    result = replace(lowercase("Hello WORLD"), "hello", "hi");
+    result = replace("Hello WORLD".downcase(), "hello", "hi");
     ASSERT result == "hi world";
 
     print("PASS");

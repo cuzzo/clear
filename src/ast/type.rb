@@ -380,6 +380,14 @@ class Type
     INT_TYPES.include?(resolved)
   end
 
+  def signed_integer?
+    SIGNED_INT_TYPES.include?(resolved)
+  end
+
+  def unsigned_integer?
+    UNSIGNED_INT_TYPES.include?(resolved)
+  end
+
   def float?
     FLOAT_TYPES.include?(resolved)
   end

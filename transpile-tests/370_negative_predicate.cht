@@ -1,0 +1,91 @@
+# .zero? / .positive? / .negative? cover all numeric widths via the
+# Int64/Float64 autocast paths. .negative? on unsigned is a CLEAR
+# compile error (caught in spec/numeric_predicates_spec.rb); this
+# transpile-test confirms the valid cases still work.
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST NumericPredicates DO
+  WHEN ".zero? on every numeric width" DO
+    TEST THAT "Int64" DO
+      n: Int64 = 0_i64;
+      ASSERT n.zero?();
+    END
+
+    TEST THAT "Int32" DO
+      n: Int32 = 0_i32;
+      ASSERT n.zero?();
+    END
+
+    TEST THAT "UInt32" DO
+      n: UInt32 = 0_u32;
+      ASSERT n.zero?();
+    END
+
+    TEST THAT "UInt64" DO
+      n: UInt64 = 0_u64;
+      ASSERT n.zero?();
+    END
+
+    TEST THAT "Float64" DO
+      f: Float64 = 0.0_f64;
+      ASSERT f.zero?();
+    END
+
+    TEST THAT "Float32" DO
+      f: Float32 = 0.0_f32;
+      ASSERT f.zero?();
+    END
+  END
+
+  WHEN ".positive? on signed and unsigned" DO
+    TEST THAT "Int32 positive" DO
+      n: Int32 = 5_i32;
+      ASSERT n.positive?();
+    END
+
+    TEST THAT "UInt32 positive" DO
+      n: UInt32 = 5_u32;
+      ASSERT n.positive?();
+    END
+
+    TEST THAT "UInt32 zero is not positive" DO
+      n: UInt32 = 0_u32;
+      not_pos = n.positive?();
+      ASSERT not_pos == FALSE;
+    END
+
+    TEST THAT "Float32 positive" DO
+      f: Float32 = 1.5_f32;
+      ASSERT f.positive?();
+    END
+  END
+
+  WHEN ".negative? on signed types and floats" DO
+    TEST THAT "Int64 negative" DO
+      n: Int64 = -1_i64;
+      ASSERT n.negative?();
+    END
+
+    TEST THAT "Int32 negative" DO
+      n: Int32 = -1_i32;
+      ASSERT n.negative?();
+    END
+
+    TEST THAT "Int64 positive is not negative" DO
+      n: Int64 = 5_i64;
+      not_neg = n.negative?();
+      ASSERT not_neg == FALSE;
+    END
+
+    TEST THAT "Float64 negative" DO
+      f: Float64 = -3.14_f64;
+      ASSERT f.negative?();
+    END
+
+    TEST THAT "Float32 negative" DO
+      f: Float32 = -2.5_f32;
+      ASSERT f.negative?();
+    END
+  END
+END

@@ -30,6 +30,7 @@ STD_LIB = {
     allocates: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
+    is_method: true,
   },
 
   "insert" => {
@@ -41,6 +42,7 @@ STD_LIB = {
     allocates: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
+    is_method: true,
   },
 
   "push" => {
@@ -52,6 +54,7 @@ STD_LIB = {
     allocates: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
+    is_method: true,
   },
 
   # Pre-allocate capacity without inserting elements. No-op if capacity already sufficient.
@@ -69,6 +72,7 @@ STD_LIB = {
     allocates: true,
     alloc: :receiver_storage,
     mutates_receiver: true,
+    is_method: true,
   },
 
   "remove" => {
@@ -78,7 +82,8 @@ STD_LIB = {
     zig: "{0}.orderedRemove(@intCast({1}))",
     bc: true,
     mutates_receiver: true,
-    borrows: :all,  # borrows list + index; returns owned element
+    borrows: :all,  # borrows list + index; returns owned element,
+    is_method: true,
   },
 
   # pop() — remove and return the last element, or null if empty.
@@ -89,13 +94,46 @@ STD_LIB = {
     bc: true,
     mutates_receiver: true,
     borrows: :all,
+    is_method: true,
+  },
+
+  # first() / last() — non-mutating peek at index 0 / index N-1, or NIL
+  # if the collection is empty. Backed by CheatLib.firstOpt / lastOpt
+  # so the same registry entry handles ArrayList and bare slices via
+  # comptime `@hasField` shape dispatch.
+  #
+  # Not registered in POOL_METHODS, SET_METHODS, or MAP_METHODS:
+  #   - HashMap and Set are unordered (hash iteration), so "first" /
+  #     "last" would be nondeterministic. Wait for @sorted variants.
+  #   - Pool is a slot allocator with ABA-safe handles, not a sequence;
+  #     a Pool's "first slot's value" is rarely what users want.
+  "first" => {
+    args: [:"Any[]"],
+    return: :infer_optional_element_type,
+    zig: "CheatLib.firstOpt({0})",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  "last" => {
+    args: [:"Any[]"],
+    return: :infer_optional_element_type,
+    zig: "CheatLib.lastOpt({0})",
+    bc: true,
+    borrows: :all,
+    is_method: true,
   },
 
 
   # 1. String.length()
   "length" => [
-    { args: [STRING_TYPE], return: :Int64, zig: "CheatLib.len({0})", bc: true, borrows: :all },
-    { args: [:"Any[]"], return: :Int64, zig: "CheatLib.len({0})", bc: true, borrows: :all }
+    { args: [STRING_TYPE], return: :Int64, zig: "CheatLib.len({0})", bc: true, borrows: :all,
+      is_method: true,
+    },
+    { args: [:"Any[]"], return: :Int64, zig: "CheatLib.len({0})", bc: true, borrows: :all,
+      is_method: true,
+    }
   ],
 
   # 2. String.substr(start, len)
@@ -105,12 +143,16 @@ STD_LIB = {
     { args: [{type: STRING_TYPE, sync: :raw}, :Int64, :Int64],
       return: {type: STRING_TYPE, sync: :raw},
       zig: "CheatLib.substrRaw({0}, {1}, {2})",
-      bc: true },
+      bc: true,
+        is_method: true,
+      },
     { args: [STRING_TYPE, :Int64, :Int64],
       return: STRING_TYPE, return_alloc: :frame,
       zig: "try CheatLib.substr({alloc}, {0}, {1}, {2})",
       bc: true,
-      allocates: true, alloc: :node_storage },
+      allocates: true, alloc: :node_storage,
+        is_method: true,
+      },
   ],
 
   # 3. String Equality
@@ -120,27 +162,46 @@ STD_LIB = {
     zig: "CheatLib.eql({0}, {1})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # toInt() (Overloaded)
   "toInt" => [
-    { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})", bc: true, can_fail: true, borrows: :all },
-    { args: [:Float64], return: :Int64, zig: "@intFromFloat({0})", bc: true },
-    { args: [:Int64], return: :Int64, zig: "{0}", bc: true }
+    { args: [STRING_TYPE], return: :Int64, zig: "try CheatLib.toInt({0})", bc: true, can_fail: true, borrows: :all,
+      is_method: true,
+    },
+    { args: [:Float64], return: :Int64, zig: "@intFromFloat({0})", bc: true,
+      is_method: true,
+    },
+    { args: [:Int64], return: :Int64, zig: "{0}", bc: true,
+      is_method: true,
+    }
   ],
 
   # toString() (Overloaded)
   "toString" => [
-    { args: [:Int64],   return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, {0})", bc: true, allocates: true, alloc: :node_storage },
-    { args: [:Float64], return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", bc: true, allocates: true, alloc: :node_storage },
-    { args: [STRING_TYPE], return: STRING_TYPE, return_alloc: :frame, zig: "{0}", bc: true }
+    { args: [:Int64],   return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, {0})", bc: true, allocates: true, alloc: :node_storage,
+      is_method: true,
+    },
+    { args: [:Float64], return: STRING_TYPE, return_alloc: :frame, zig: "try CheatLib.intToString({alloc}, @as(i64, @intFromFloat({0})))", bc: true, allocates: true, alloc: :node_storage,
+      is_method: true,
+    },
+    { args: [STRING_TYPE], return: STRING_TYPE, return_alloc: :frame, zig: "{0}", bc: true,
+      is_method: true,
+    }
   ],
 
   # toFloat() (Overloaded)
   "toFloat" => [
-    { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})", bc: true, can_fail: true, borrows: :all },
-    { args: [:Int64],      return: :Float64, zig: "@as(f64, @floatFromInt({0}))", bc: true },
-    { args: [:Float64],    return: :Float64, zig: "{0}", bc: true }
+    { args: [STRING_TYPE], return: :Float64, zig: "try std.fmt.parseFloat(f64, {0})", bc: true, can_fail: true, borrows: :all,
+      is_method: true,
+    },
+    { args: [:Int64],      return: :Float64, zig: "@as(f64, @floatFromInt({0}))", bc: true,
+      is_method: true,
+    },
+    { args: [:Float64],    return: :Float64, zig: "{0}", bc: true,
+      is_method: true,
+    }
   ],
 
   "toList" => [
@@ -176,12 +237,16 @@ STD_LIB = {
     { args: [{type: STRING_TYPE, sync: :raw}, :Int64],
       return: {type: STRING_TYPE, sync: :raw},
       zig: "CheatLib.charAt({0}, {1})",
-      bc: true },
+      bc: true,
+        is_method: true,
+      },
     { args: [STRING_TYPE, :Int64],
       return: STRING_TYPE, return_alloc: :frame,
       zig: "try CheatLib.charAtCodepoint({alloc}, {0}, {1})",
       bc: true,
-      allocates: true, alloc: :node_storage },
+      allocates: true, alloc: :node_storage,
+        is_method: true,
+      },
   ],
 
   # codepointCount(string) → Int64 — number of Unicode codepoints (O(n))
@@ -191,6 +256,7 @@ STD_LIB = {
     zig: "CheatLib.codepointCount({0})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # bytes(string) → Int64 — byte length (O(1), explicit intent)
@@ -200,6 +266,7 @@ STD_LIB = {
     zig: "CheatLib.len({0})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # toNumber(string) → ?Float64 — safe parse, returns null on failure
@@ -209,6 +276,7 @@ STD_LIB = {
     zig: "(std.fmt.parseFloat(f64, {0}) catch null)",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # 5. print()
@@ -286,6 +354,7 @@ STD_LIB = {
     fsm_state_finalize: [
       FO.defer_free_field("rf_buf"),
     ],
+    is_method: true,
   },
 
   # 5. Write File
@@ -320,7 +389,8 @@ STD_LIB = {
         "CheatHeader.fsmIoError",
         [FO.subf(FO.state("wf_waiter"), "result")]),
     ],
-    fsm_finish_value: nil,   # Void return
+    fsm_finish_value: nil,   # Void return,
+    is_method: true,
   },
 
   # 6. Read Line from stdin
@@ -353,6 +423,7 @@ STD_LIB = {
     bc: true,
     allocates: true,
     alloc: :node_storage,
+    is_method: true,
   },
 
   # 7. Join (String[] -> String)
@@ -363,6 +434,7 @@ STD_LIB = {
     bc: true,
     allocates: true,
     alloc: :node_storage,
+    is_method: true,
   },
 
   "trim" => {
@@ -372,6 +444,7 @@ STD_LIB = {
     zig: "std.mem.trim(u8, {0}, &std.ascii.whitespace)",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # startsWith("file.txt", "file") -> true
@@ -381,6 +454,7 @@ STD_LIB = {
     zig: "std.mem.startsWith(u8, {0}, {1})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # endsWith?("image.png", ".png") -> true
@@ -390,6 +464,7 @@ STD_LIB = {
     zig: "std.mem.endsWith(u8, {0}, {1})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # indexOf("hello world", "world") -> 6  (or nil if not found)
@@ -399,6 +474,7 @@ STD_LIB = {
     zig: "CheatLib.indexOf({0}, {1})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # replace("hello world", "world", "CLEAR") -> "hello CLEAR"
@@ -409,26 +485,34 @@ STD_LIB = {
     bc: true,
     allocates: true,
     alloc: :node_storage,
+    is_method: true,
   },
 
-  # lowercase("Hello") -> "hello"
-  "lowercase" => {
+  # "Hello".downcase() -> "hello"
+  # ASCII case-folding, allocates a new String on the frame arena.
+  # Named after Ruby (`.downcase` / `.upcase`) to stay consistent with
+  # the rest of the predicate/utility surface (`.empty?`, `.any?`,
+  # `.starts_with?`, `.zero?`). Zig helper retains the descriptive
+  # name `stringLowercase` since it operates on a Zig `[]const u8`.
+  "downcase" => {
     args: [STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringLowercase({alloc}, {0})",
     bc: true,
     allocates: true,
     alloc: :node_storage,
+    is_method: true,
   },
 
-  # uppercase("Hello") -> "HELLO"
-  "uppercase" => {
+  # "Hello".upcase() -> "HELLO"
+  "upcase" => {
     args: [STRING_TYPE],
     return: STRING_TYPE, return_alloc: :frame,
     zig: "try CheatLib.stringUppercase({alloc}, {0})",
     bc: true,
     allocates: true,
     alloc: :node_storage,
+    is_method: true,
   },
 
   # contains?("hello", "ll") -> true
@@ -438,13 +522,40 @@ STD_LIB = {
       return: :Bool,
       zig: "(std.mem.indexOf(u8, {0}, {1}) != null)",
       bc: true,
-      borrows: :all },
+      borrows: :all,
+        is_method: true,
+      },
     { args: [:"Any[]", :Any],
       return: :Bool,
       zig: "CheatLib.sliceContains({0}, {1})",
       bc: true,
-      borrows: :all },
+      borrows: :all,
+        is_method: true,
+      },
   ],
+
+  # starts_with?("hello", "he") -> true
+  # ends_with?("hello", "lo")   -> true
+  # Both are byte-level prefix/suffix checks via Zig stdlib. No
+  # allocation, no UTF-8 iteration — match the same shape as the
+  # String overload of contains?.
+  "starts_with?" => {
+    args: [STRING_TYPE, STRING_TYPE],
+    return: :Bool,
+    zig: "std.mem.startsWith(u8, {0}, {1})",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  "ends_with?" => {
+    args: [STRING_TYPE, STRING_TYPE],
+    return: :Bool,
+    zig: "std.mem.endsWith(u8, {0}, {1})",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
 
   # ---- Numeric predicates (ActiveSupport-style English-as-CLEAR) ----
   # Each is `is_method: true` so `clear fmt` rewrites prefix calls to
@@ -467,9 +578,20 @@ STD_LIB = {
   ],
 
   # n.negative? -> n < 0
+  #
+  # Numeric autocast lets a UInt receiver match either the Float64 or
+  # the Int64 entry (and the matcher picks Float64 because it's first).
+  # `u32_val < 0` is always false — values of unsigned types are >= 0
+  # by construction, so the call is a bug regardless of which overload
+  # matched. Tag BOTH entries with `reject_when: :unsigned_integer` so
+  # the reject fires whichever way autocast routes the call.
   "negative?" => [
-    { args: [:Float64], return: :Bool, zig: "({0} < 0.0)", bc: true, is_method: true },
-    { args: [:Int64],   return: :Bool, zig: "({0} < 0)",   bc: true, is_method: true },
+    { args: [:Float64], return: :Bool, zig: "({0} < 0.0)", bc: true, is_method: true,
+      reject_when: :unsigned_integer,
+      reject_error: ".negative?() is always false on unsigned integers — values of unsigned types are >= 0 by construction. Did you mean .zero?() or remove the check?" },
+    { args: [:Int64],   return: :Bool, zig: "({0} < 0)",   bc: true, is_method: true,
+      reject_when: :unsigned_integer,
+      reject_error: ".negative?() is always false on unsigned integers — values of unsigned types are >= 0 by construction. Did you mean .zero?() or remove the check?" },
   ],
 
   # n.even? -> (n & 1) == 0
@@ -504,6 +626,90 @@ STD_LIB = {
     bc: true,
     is_method: true,
   },
+
+  # ---- ActiveSupport-style optional / collection predicates ----
+  # `.nil?` / `.present?` are designed for `?T` receivers and lower
+  # to a direct null comparison. Calling them on a non-optional T is
+  # rejected by Zig at compile time ("cannot compare T to null") —
+  # not the friendliest diagnostic, but the predicate is by
+  # construction only meaningful on optionals.
+
+  # x.nil?  -> Bool — true iff the optional is null
+  "nil?" => {
+    args: [:Any],
+    return: :Bool,
+    zig: "({0} == null)",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  # x.present?  -> !x.nil?  (the not-null inverse)
+  "present?" => {
+    args: [:Any],
+    return: :Bool,
+    zig: "({0} != null)",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  # `.empty?` on collections — direct counterpart to `.length() == 0`.
+  # Strings: byte length. Lists: items length. The comptime
+  # @hasField branch chooses between bare `.len` (raw slices) and
+  # `.items.len` (ArrayList shape), so the same entry handles both
+  # CLEAR list shapes uniformly.
+  "empty?" => [
+    { args: [STRING_TYPE], return: :Bool,
+      zig: "({0}.len == 0)",
+      bc: true, borrows: :all, is_method: true },
+    { args: [:"Any[]"], return: :Bool,
+      zig: "((if (@hasField(@TypeOf({0}), \"items\")) {0}.items.len else {0}.len) == 0)",
+      bc: true, borrows: :all, is_method: true },
+  ],
+
+  # `.blank?` on optional collections — true if nil OR empty. Only
+  # meaningful on `?T` shapes (where it's distinct from `.empty?`,
+  # which would null-deref on a nil receiver). For non-optional
+  # collections users write `.empty?`; CLEAR avoids two predicates
+  # for the same check on the same shape.
+  #
+  # The comptime @hasField guard handles both String (`.len`) and
+  # ArrayList-shaped lists (`.items.len`) under the same Zig pattern.
+  "blank?" => {
+    args: [:Any],
+    return: :Bool,
+    zig: "({0} == null or (if (@hasField(@TypeOf(({0}).?), \"items\")) ({0}).?.items.len else ({0}).?.len) == 0)",
+    bc: true,
+    borrows: :all,
+    is_method: true,
+  },
+
+  # `.any?` — CLEAR's "has data" predicate. Distinct from Ruby's
+  # `.present?` because CLEAR reserves `.present?` for the not-nil
+  # check on `?T`. `.any?` answers "does this collection
+  # contain anything" and works uniformly on both bare and optional
+  # collections via the comptime null + shape dispatch.
+  #
+  # Behavior:
+  #   String / Any[]              -> length > 0
+  #   ?String / ?Any[]            -> not-nil AND unwrapped length > 0
+  #   HashMap (see MAP_METHODS)   -> count > 0
+  "any?" => [
+    { args: [STRING_TYPE], return: :Bool,
+      zig: "({0}.len > 0)",
+      bc: true, borrows: :all, is_method: true },
+    { args: [:"Any[]"], return: :Bool,
+      zig: "((if (@hasField(@TypeOf({0}), \"items\")) {0}.items.len else {0}.len) > 0)",
+      bc: true, borrows: :all, is_method: true },
+    # ?String / ?Any[] — accept-all optional via :Any so this overload
+    # fires when the receiver is nullable. The comptime guard inside
+    # the Zig pattern peeks the unwrapped shape (`.items.len` for
+    # ArrayList, `.len` for raw slice/string).
+    { args: [:Any], return: :Bool,
+      zig: "({0} != null and (if (@hasField(@TypeOf(({0}).?), \"items\")) ({0}).?.items.len else ({0}).?.len) > 0)",
+      bc: true, borrows: :all, is_method: true },
+  ],
 
   # max(a, b) -> larger value
   "max" => [
@@ -566,6 +772,7 @@ STD_LIB = {
     allocates: true,
     alloc: :heap,
     suspends: true,
+    is_method: true,
   },
 
   # Write a String to an open writable File resource (created via File::create).
@@ -578,6 +785,7 @@ STD_LIB = {
     can_fail: true,
     borrows: :all,
     suspends: true,
+    is_method: true,
   },
 
   # List all files in a directory. Returns a list of filenames (not full paths).
@@ -588,6 +796,7 @@ STD_LIB = {
     zig: "try CheatLib.listDir({alloc}, {0})",
     allocates: true,
     alloc: :node_storage,
+    is_method: true,
   },
 
   # List ALL entries (files + directories) with type prefix ("f:" or "d:").
@@ -598,6 +807,7 @@ STD_LIB = {
     zig: "try CheatLib.listAll({alloc}, {0})",
     allocates: true,
     alloc: :node_storage,
+    is_method: true,
   },
 
   # Get file size in bytes. Returns -1 on error.
@@ -608,6 +818,7 @@ STD_LIB = {
     zig: "CheatLib.fileSize({0})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # Count non-overlapping occurrences of needle in haystack.
@@ -618,6 +829,7 @@ STD_LIB = {
     zig: "CheatLib.countOccurrences({0}, {1})",
     bc: true,
     borrows: :all,
+    is_method: true,
   },
 
   # -------------------------------------------------------------------------
@@ -636,6 +848,7 @@ STD_LIB = {
     allocates: true,  # produces owned resource (TCPClient)
     borrows: :all,
     suspends: true,
+    is_method: true,
   },
 
   # Read up to 4096 bytes from a connected TCP client into a heap String.
@@ -648,6 +861,7 @@ STD_LIB = {
     allocates: true,
     alloc: :node_storage,
     suspends: true,
+    is_method: true,
   },
 
   # Write a String to a connected TCP client.
@@ -660,6 +874,7 @@ STD_LIB = {
     can_fail: true,
     borrows: :all,
     suspends: true,
+    is_method: true,
   },
 
   # -------------------------------------------------------------------------
@@ -812,13 +1027,15 @@ POOL_METHODS = {
       end
     },
     return_type: ->(obj_type) { Type.new(:"Id<#{obj_type.element_type.resolved}>") },
+    is_method: true,
   },
   "get" => {
     arity: 1, tag: :pool_method,
     bc: true,
     zig: "{0}.get({1})",
     return_type: ->(obj_type) { Type.new(:"?#{obj_type.element_type.resolved}") },
-    borrows: :all,  # returns borrowed pointer into pool storage
+    borrows: :all,  # returns borrowed pointer into pool storage,
+    is_method: true,
   },
   "remove" => {
     arity: 1, tag: :pool_method,
@@ -826,7 +1043,8 @@ POOL_METHODS = {
     zig: "{0}.remove({1})",
     mutates_receiver: true,
     return_type: ->(_) { :Void },
-    borrows: :all,  # pool frees the slot internally
+    borrows: :all,  # pool frees the slot internally,
+    is_method: true,
   },
   "length" => {
     arity: 0, tag: :pool_method,
@@ -834,6 +1052,7 @@ POOL_METHODS = {
     zig: "{0}.length()",
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
+    is_method: true,
   },
   "contains?" => {
     arity: 1, tag: :pool_method,
@@ -841,6 +1060,23 @@ POOL_METHODS = {
     zig: "({0}.get({1}) != null)",
     return_type: ->(_) { :Bool },
     borrows: :all,
+    is_method: true,
+  },
+  "empty?" => {
+    arity: 0, tag: :pool_method,
+    bc: true,
+    zig: "({0}.length() == 0)",
+    return_type: ->(_) { :Bool },
+    borrows: :all,
+    is_method: true,
+  },
+  "any?" => {
+    arity: 0, tag: :pool_method,
+    bc: true,
+    zig: "({0}.length() > 0)",
+    return_type: ->(_) { :Bool },
+    borrows: :all,
+    is_method: true,
   },
 }.freeze
 
@@ -861,6 +1097,7 @@ SET_METHODS = {
       end
     },
     return_type: ->(_) { :Void },
+    is_method: true,
   },
   "contains?" => {
     arity: 1, tag: :set_method,
@@ -868,6 +1105,7 @@ SET_METHODS = {
     bc: true,
     return_type: ->(_) { :Bool },
     borrows: :all,
+    is_method: true,
   },
   "remove" => {
     arity: 1, tag: :set_method,
@@ -876,7 +1114,8 @@ SET_METHODS = {
     alloc: :heap,
     mutates_receiver: true,
     return_type: ->(_) { :Void },
-    borrows: :all,  # set frees the element internally
+    borrows: :all,  # set frees the element internally,
+    is_method: true,
   },
   "length" => {
     arity: 0, tag: :set_method,
@@ -884,6 +1123,23 @@ SET_METHODS = {
     bc: true,
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
+    is_method: true,
+  },
+  "empty?" => {
+    arity: 0, tag: :set_method,
+    zig: "({0}.length() == 0)",
+    bc: true,
+    return_type: ->(_) { :Bool },
+    borrows: :all,
+    is_method: true,
+  },
+  "any?" => {
+    arity: 0, tag: :set_method,
+    zig: "({0}.length() > 0)",
+    bc: true,
+    return_type: ->(_) { :Bool },
+    borrows: :all,
+    is_method: true,
   },
 }.freeze
 
@@ -906,6 +1162,7 @@ MAP_METHODS = {
       end
     },
     return_type: ->(_) { :Void },
+    is_method: true,
   },
   "delete" => {
     arity: 1, tag: :map_method,
@@ -923,7 +1180,8 @@ MAP_METHODS = {
       end
     },
     return_type: ->(_) { :Void },
-    borrows: :all,  # map frees key+value internally
+    borrows: :all,  # map frees key+value internally,
+    is_method: true,
   },
   "contains?" => {
     arity: 1, tag: :map_method,
@@ -940,6 +1198,7 @@ MAP_METHODS = {
     },
     return_type: ->(_) { :Bool },
     borrows: :all,
+    is_method: true,
   },
   "count" => {
     arity: 0, tag: :map_method,
@@ -948,6 +1207,7 @@ MAP_METHODS = {
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
+    is_method: true,
   },
   "length" => {
     arity: 0, tag: :map_method,
@@ -956,6 +1216,7 @@ MAP_METHODS = {
     numeric_zig: "CheatLib.numericMapCount({key_zig}, {val_zig}, {0})",
     return_type: ->(_) { Type.new(:Int64) },
     borrows: :all,
+    is_method: true,
   },
   "keys" => {
     arity: 0, tag: :map_method, allocates: true,
@@ -966,7 +1227,29 @@ MAP_METHODS = {
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapKeys({key_zig}, {val_zig}, {alloc}, {0})",
     return_type: ->(_) { :"String[]" },
-    borrows: :all,  # borrows map; returns new owned list
+    borrows: :all,  # borrows map; returns new owned list,
+    is_method: true,
+  },
+  # `.any?` — true iff the map has at least one entry.
+  # Lowers to `count() > 0` because the count is an O(1) cached
+  # field on ArrayHashMap; querying keys/values would allocate.
+  "empty?" => {
+    arity: 0, tag: :map_method,
+    zig: "({0}.count() == 0)",
+    bc: true,
+    numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) == 0)",
+    return_type: ->(_) { :Bool },
+    borrows: :all,
+    is_method: true,
+  },
+  "any?" => {
+    arity: 0, tag: :map_method,
+    zig: "({0}.count() > 0)",
+    bc: true,
+    numeric_zig: "(CheatLib.numericMapCount({key_zig}, {val_zig}, {0}) > 0)",
+    return_type: ->(_) { :Bool },
+    borrows: :all,
+    is_method: true,
   },
   "values" => {
     arity: 0, tag: :map_method, allocates: true,
@@ -977,7 +1260,8 @@ MAP_METHODS = {
     sharded_alloc: :heap,
     numeric_zig: "try CheatLib.numericMapValues({key_zig}, {val_zig}, {alloc}, {0})",
     return_type: ->(obj_type) { :"#{obj_type.value_type.resolved}[]" },
-    borrows: :all,  # borrows map; returns new owned list
+    borrows: :all,  # borrows map; returns new owned list,
+    is_method: true,
   },
 }.freeze
 

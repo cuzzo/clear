@@ -230,7 +230,9 @@ RSpec.describe Formatter do
     CLEAR
     path = write("pipeline_cont.cht", src)
     out, _, _ = run_fmt("--stdout", path)
-    expect(out).to include("  entries = listAll(path)\n    |> SELECT _;\n")
+    # `listAll` is METHOD-flagged in stdlib; fmt rewrites the prefix
+    # call to UFCS, then preserves the pipeline continuation indent.
+    expect(out).to include("  entries = path.listAll()\n    |> SELECT _;\n")
     expect(out).to include("  RETURN entries\n    |> CONCURRENT SELECT _\n    |> REDUCE(0) acc + _;\n")
   end
 

@@ -1060,6 +1060,22 @@ module FunctionAnalysis
 
   # Finds the first intrinsic overload that matches the given arguments.
   # Returns nil if no overload matches.
+  # Maps `:reject_when` symbol values to a predicate over a CLEAR Type.
+  # Add new entries here when std_lib.rb introduces a new "this overload
+  # doesn't make sense for type-shape X" guard. Each predicate receives
+  # the receiver's resolved Type; returning true rejects the call.
+  REJECT_TYPE_PREDICATES = {
+    unsigned_integer: ->(t) { t.respond_to?(:unsigned_integer?) && t.unsigned_integer? },
+  }.freeze
+
+  def reject_arg_type_matches?(arg, kind)
+    pred = REJECT_TYPE_PREDICATES[kind]
+    return false unless pred
+    type = arg.respond_to?(:full_type) ? arg.full_type : nil
+    return false unless type.is_a?(Type)
+    pred.call(type)
+  end
+
   def find_matching_intrinsic(definitions, args)
     definitions.find do |config|
       next true if config[:args] == :Varargs  # Varargs accepts anything

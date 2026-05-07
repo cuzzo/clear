@@ -455,11 +455,11 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     END
     IF id == 60 THEN
         s = getStr(evaled[1]);
-        RETURN Value{ Str: uppercase(s) };
+        RETURN Value{ Str: s.upcase() };
     END
     IF id == 61 THEN
         s = getStr(evaled[1]);
-        RETURN Value{ Str: lowercase(s) };
+        RETURN Value{ Str: s.downcase() };
     END
     IF id == 62 THEN
         # list-set!: return new list with element at idx replaced (functional update)
@@ -553,14 +553,14 @@ FN applyNative(id: Int64, evaled: Value[]) RETURNS Value EFFECTS REENTRANT ->
     # These natives let the VM reuse the Zig runtime's string functions
     # without reimplementing them in Scheme primitives.
     IF id == 100 THEN
-        # lowercase(s)
+        # downcase(s)
         s = getStr(evaled[1]);
-        RETURN Value{ Str: COPY s.lowercase() };
+        RETURN Value{ Str: COPY s.downcase() };
     END
     IF id == 101 THEN
-        # uppercase(s)
+        # upcase(s)
         s = getStr(evaled[1]);
-        RETURN Value{ Str: COPY s.uppercase() };
+        RETURN Value{ Str: COPY s.upcase() };
     END
     IF id == 102 THEN
         # replace(s, from, to)

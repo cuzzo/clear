@@ -39,6 +39,8 @@
 
 require_relative '../ast/lexer'
 require_relative '../ast/parser'
+require_relative 'method_rewriter'
+require_relative 'predicate_rewriter'
 require 'strscan'
 require 'set'
 
@@ -91,7 +93,13 @@ class Formatter
 
   def format
     validate_parse!
-    tokens = FormatLexer.new(@source).tokenize
+    # Predicate canonicalization runs before METHOD-UFCS rewriting:
+    # `x == NIL` -> `x.nil?()` may produce a new prefix call site
+    # that MethodRewriter then converts to UFCS form. Doing them in
+    # the reverse order would miss the second pass.
+    rewritten = PredicateRewriter.rewrite(@source)
+    rewritten = MethodRewriter.rewrite(rewritten)
+    tokens = FormatLexer.new(rewritten).tokenize
     Emitter.new(tokens).emit
   end
 

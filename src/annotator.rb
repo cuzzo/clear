@@ -2508,6 +2508,19 @@ private
     end
     # Varargs functions skip verify_function_signature! (arity is flexible)
 
+    # 2b. Registry-driven reject predicates. `reject_when:` names a
+    # type-shape that the receiver must NOT have for this overload to
+    # be applicable. Used for "always nonsense" calls like
+    # `u32_val.negative?()` where Int64 autocast would otherwise mask
+    # the bug. Generic — keyed by symbol so std_lib.rb stays
+    # declarative and annotator.rb has no per-function logic.
+    if matched_def[:reject_when] && reject_arg_type_matches?(args.first, matched_def[:reject_when])
+      reason = matched_def[:reject_error] ||
+               "#{node.name}() is not valid for #{args.first.resolved_type}"
+      error!(node, reason)
+      return
+    end
+
     # 3. Resolve return type (may be dynamic via method call).
     # Dynamic resolver methods are named `infer_*` to avoid collisions with
     # Ruby Kernel conversion methods (Integer, String, Array, etc.).

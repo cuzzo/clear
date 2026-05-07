@@ -1,0 +1,95 @@
+# String predicates: starts_with? / ends_with? / contains?.
+# All three are byte-level via Zig stdlib (std.mem.startsWith /
+# std.mem.endsWith / std.mem.indexOf) — no allocation, no UTF-8.
+# `is_method: true` so `clear fmt` rewrites prefix calls to UFCS.
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST StringPredicates DO
+  WHEN "starts_with?" DO
+    TEST THAT "matching prefix" DO
+      ASSERT "hello".starts_with?("he");
+    END
+
+    TEST THAT "exact match" DO
+      ASSERT "hello".starts_with?("hello");
+    END
+
+    TEST THAT "empty prefix is always true" DO
+      ASSERT "hello".starts_with?("");
+    END
+
+    TEST THAT "non-matching prefix" DO
+      no = "hello".starts_with?("lo");
+      ASSERT no == FALSE;
+    END
+
+    TEST THAT "longer prefix than string" DO
+      no = "hi".starts_with?("hello");
+      ASSERT no == FALSE;
+    END
+
+    TEST THAT "empty string with non-empty prefix" DO
+      no = "".starts_with?("x");
+      ASSERT no == FALSE;
+    END
+  END
+
+  WHEN "ends_with?" DO
+    TEST THAT "matching suffix" DO
+      ASSERT "hello".ends_with?("lo");
+    END
+
+    TEST THAT "exact match" DO
+      ASSERT "hello".ends_with?("hello");
+    END
+
+    TEST THAT "empty suffix is always true" DO
+      ASSERT "hello".ends_with?("");
+    END
+
+    TEST THAT "non-matching suffix" DO
+      no = "hello".ends_with?("he");
+      ASSERT no == FALSE;
+    END
+
+    TEST THAT "longer suffix than string" DO
+      no = "hi".ends_with?("hello");
+      ASSERT no == FALSE;
+    END
+  END
+
+  WHEN "contains?" DO
+    # contains? already existed in the registry; covered here so
+    # the three predicates live together.
+    TEST THAT "needle in middle" DO
+      ASSERT "hello world".contains?("o w");
+    END
+
+    TEST THAT "needle at start matches contains?" DO
+      ASSERT "hello".contains?("he");
+    END
+
+    TEST THAT "needle at end matches contains?" DO
+      ASSERT "hello".contains?("lo");
+    END
+
+    TEST THAT "missing needle" DO
+      no = "hello".contains?("xyz");
+      ASSERT no == FALSE;
+    END
+
+    TEST THAT "empty needle is always true" DO
+      ASSERT "hello".contains?("");
+    END
+  END
+
+  WHEN "predicates compose" DO
+    TEST THAT "domain-name shape" DO
+      url = "https://example.com";
+      ASSERT url.starts_with?("https://");
+      ASSERT url.ends_with?(".com");
+      ASSERT url.contains?("example");
+    END
+  END
+END

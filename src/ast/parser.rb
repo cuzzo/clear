@@ -90,6 +90,7 @@ class Parser
   stmt(:KEYWORD, 'EXTERN')  { parse_extern_decl }
   stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
   stmt(:KEYWORD, 'FN')      { parse_function_def }
+  stmt(:KEYWORD, 'METHOD')  { parse_function_def(:package, is_method: true) }
   stmt(:KEYWORD, 'PUB')     { parse_visibility_decl(:pub) }
   stmt(:KEYWORD, 'PRIVATE') { parse_visibility_decl(:private) }
   stmt(:KEYWORD, 'IF') { parse_if_statement }
@@ -821,6 +822,8 @@ class Parser
     consume(:KEYWORD)  # consume PUB or PRIVATE
     if match?(:KEYWORD, 'FN')
       parse_function_def(visibility)
+    elsif match?(:KEYWORD, 'METHOD')
+      parse_function_def(visibility, is_method: true)
     elsif match?(:KEYWORD, 'STRUCT')
       parse_struct_def(visibility)
     elsif match?(:KEYWORD, 'ENUM')
@@ -828,7 +831,7 @@ class Parser
     elsif match?(:KEYWORD, 'UNION')
       parse_union_def(visibility)
     else
-      error!(current, "Expected FN, STRUCT, ENUM, or UNION after visibility modifier, got '#{current.value}'")
+      error!(current, "Expected FN, METHOD, STRUCT, ENUM, or UNION after visibility modifier, got '#{current.value}'")
     end
   end
 
@@ -1119,8 +1122,15 @@ class Parser
     end
   end
 
-  def parse_function_def(visibility = :package)
-    fn_token = consume(:KEYWORD, 'FN')
+  def parse_function_def(visibility = :package, is_method: false)
+    fn_token = if is_method
+      consume(:KEYWORD, 'METHOD')
+    elsif match?(:KEYWORD, 'METHOD')
+      is_method = true
+      consume(:KEYWORD, 'METHOD')
+    else
+      consume(:KEYWORD, 'FN')
+    end
     name = consume(:VAR_ID).value
     # Predicate suffix: FN name?(...) — ? is part of the function name
     if match?(:CHAR, '?')
@@ -1408,6 +1418,7 @@ class Parser
     node.return_type_token = return_type_token
     node.pre_clauses = pre_clauses unless pre_clauses.empty?
     node.post_clauses = post_clauses unless post_clauses.empty?
+    node.is_method = is_method
     node
   end
 

@@ -1,0 +1,91 @@
+# .first() and .last() return ?T — NIL when the list is empty,
+# otherwise the value at index 0 / index N-1. Replaces the
+# `IF xs.length() > 0 THEN xs[0]` idiom that the predicate
+# rewriter is now flagging via .any?().
+#
+# Pool / Set / HashMap don't get .first()/.last() yet — see the
+# rationale comment in std_lib.rb's "first" entry.
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST FirstLast DO
+  WHEN ".first() on Int64[]" DO
+    TEST THAT "non-empty list returns first value" DO
+      xs: Int64[] = [10_i64, 20_i64, 30_i64];
+      f: ?Int64 = xs.first();
+      ASSERT f.present?();
+      ASSERT f == 10_i64;
+    END
+
+    TEST THAT "empty list returns NIL" DO
+      xs: Int64[] = [];
+      f: ?Int64 = xs.first();
+      ASSERT f.nil?();
+    END
+
+    TEST THAT "single-element list returns that element" DO
+      xs: Int64[] = [42_i64];
+      f: ?Int64 = xs.first();
+      ASSERT f == 42_i64;
+    END
+  END
+
+  WHEN ".last() on Int64[]" DO
+    TEST THAT "non-empty list returns last value" DO
+      xs: Int64[] = [10_i64, 20_i64, 30_i64];
+      l: ?Int64 = xs.last();
+      ASSERT l.present?();
+      ASSERT l == 30_i64;
+    END
+
+    TEST THAT "empty list returns NIL" DO
+      xs: Int64[] = [];
+      l: ?Int64 = xs.last();
+      ASSERT l.nil?();
+    END
+
+    TEST THAT "single-element list — first == last" DO
+      xs: Int64[] = [42_i64];
+      f: ?Int64 = xs.first();
+      l: ?Int64 = xs.last();
+      ASSERT f == 42_i64;
+      ASSERT l == 42_i64;
+    END
+  END
+
+  WHEN ".first() / .last() on String[]" DO
+    TEST THAT "string list" DO
+      names: String[] = ["alice", "bob", "carol"];
+      f: ?String = names.first();
+      l: ?String = names.last();
+      ASSERT f.present?();
+      ASSERT l.present?();
+    END
+
+    TEST THAT "empty string list" DO
+      names: String[] = [];
+      f: ?String = names.first();
+      ASSERT f.nil?();
+    END
+  END
+
+  WHEN "non-mutating" DO
+    TEST THAT ".first() does not consume the list" DO
+      xs: Int64[] = [1_i64, 2_i64, 3_i64];
+      a: ?Int64 = xs.first();
+      b: ?Int64 = xs.first();
+      ASSERT a == 1_i64;
+      ASSERT b == 1_i64;
+      ASSERT xs.length() == 3_i64;
+    END
+
+    TEST THAT ".last() does not consume the list" DO
+      xs: Int64[] = [1_i64, 2_i64, 3_i64];
+      a: ?Int64 = xs.last();
+      b: ?Int64 = xs.last();
+      ASSERT a == 3_i64;
+      ASSERT b == 3_i64;
+      ASSERT xs.length() == 3_i64;
+    END
+  END
+END

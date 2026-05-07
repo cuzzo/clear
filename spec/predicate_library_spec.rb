@@ -61,6 +61,103 @@ RSpec.describe "predicate library — numeric" do
       expect { transpile(src) }.not_to raise_error
     end
 
+    it "compiles .zero?() / .positive?() on unsigned widths" do
+      # Numeric autocast funnels these through the Int64 overload; the
+      # emitted Zig (`val == 0`, `val > 0`) is valid for unsigned types.
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          a: UInt32 = 0_u32;
+          b: UInt64 = 7_u64;
+          ASSERT a.zero?();
+          ASSERT b.positive?();
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "rejects .negative?() on unsigned integers with a CLEAR error" do
+      # `u32_val < 0` is always false (and Zig itself would error on the
+      # comparison). The registry's `reject_when: :unsigned_integer`
+      # turns this into a CLEAR-level diagnostic so the user sees a
+      # sensible message instead of leaking the Zig error.
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          n: UInt32 = 5_u32;
+          ASSERT n.negative?();
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.to raise_error(CompilerError, /always false on unsigned/)
+    end
+
+    it "compiles s.starts_with?() / s.ends_with?() on String" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          s = "hello world";
+          ASSERT s.starts_with?("hello");
+          ASSERT s.ends_with?("world");
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "emits std.mem.startsWith / endsWith for the predicates" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          s = "hi";
+          a = s.starts_with?("h");
+          b = s.ends_with?("i");
+          RETURN;
+        END
+      CLEAR
+      out = transpile(src)
+      expect(out).to match(/std\.mem\.startsWith\(u8, /)
+      expect(out).to match(/std\.mem\.endsWith\(u8, /)
+    end
+
+    it "compiles xs.first() / xs.last() on Int64[]" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          xs: Int64[] = [10_i64, 20_i64];
+          f: ?Int64 = xs.first();
+          l: ?Int64 = xs.last();
+          RETURN;
+        END
+      CLEAR
+      expect { transpile(src) }.not_to raise_error
+    end
+
+    it "emits CheatLib.firstOpt / lastOpt for .first() / .last()" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          xs: Int64[] = [1_i64];
+          f: ?Int64 = xs.first();
+          l: ?Int64 = xs.last();
+          RETURN;
+        END
+      CLEAR
+      out = transpile(src)
+      expect(out).to include("CheatLib.firstOpt(xs)")
+      expect(out).to include("CheatLib.lastOpt(xs)")
+    end
+
+    it "rejects .negative?() on Byte / UInt8 / UInt16 / UInt64 too" do
+      # Verify the rejection covers the whole UNSIGNED_INT_TYPES set,
+      # not just UInt32.
+      %w[Byte UInt8 UInt16 UInt64].each do |t|
+        src = <<~CLEAR
+          FN main() RETURNS Void ->
+            n: #{t} = 0_u8;
+            ASSERT n.negative?();
+            RETURN;
+          END
+        CLEAR
+        expect { transpile(src) }.to raise_error(CompilerError, /unsigned/)
+      end
+    end
+
     it "compiles n.even?() / n.odd?()" do
       src = <<~CLEAR
         FN main() RETURNS Void ->

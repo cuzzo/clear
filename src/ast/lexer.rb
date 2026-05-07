@@ -7,7 +7,7 @@ class Lexer
   # We use a hash for O(1) lookups
   KEYWORDS = %w[
       MUTABLE
-      FN RETURN RETURNS USE
+      FN METHOD RETURN RETURNS USE
       IF THEN ELSE ELSE_IF END
       WHILE DO FOR IN BG NEXT BREAK CONTINUE
       CAST AS
