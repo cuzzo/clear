@@ -62,9 +62,9 @@ module MethodAnalysis
     # Arity check
     if defn[:arity] >= 0 && node.args.length != defn[:arity]
       if defn[:arity] == 0
-        error!(node, "#{type_label}.#{node.name} takes no arguments, got #{node.args.length}")
+        error!(node, :STDLIB_METHOD_NO_ARGS, label: type_label, method: node.name, got: node.args.length)
       else
-        error!(node, "#{type_label}.#{node.name} requires exactly #{defn[:arity]} argument#{'s' if defn[:arity] > 1}, got #{node.args.length}")
+        error!(node, :STDLIB_METHOD_ARITY, label: type_label, method: node.name, expected: defn[:arity], got: node.args.length)
       end
       return true
     end

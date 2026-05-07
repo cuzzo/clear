@@ -157,7 +157,7 @@ class SemanticAnnotator
     # P3.2: infer per-function effects (yield/alloc_heap/io/fail) and
     # propagate transitively through the call graph.
     EffectInference.analyze!(@fn_nodes)
-    err = ->(n, msg) { error!(n, msg) }
+    err = ->(n, msg) { error!(n, :EFFECT_INFERENCE_VIOLATION, message: msg) }
     warn = ->(n, msg) { note!(n, msg) }
     sig_lookup = ->(name) {
       @scope_stack.first.locals[name]&.type
@@ -302,13 +302,10 @@ private
       when :EXCLUSIVE
         next if syn
         storage = var_node.symbol&.storage
-        error!(d[:node],
-          "EXCLUSIVE capability requires a @locked or @writeLocked variable, " \
-          "got #{storage || 'unknown'}")
+        error!(d[:node], :WITH_EXCLUSIVE_NEEDS_LOCK_GOT, got: storage || 'unknown')
       when :write_locked_read
         next if syn == :write_locked
-        error!(d[:node],
-          "WITH #{var_node.name}: read access requires a @writeLocked variable")
+        error!(d[:node], :WITH_READ_NEEDS_WRITE_LOCK_NAME, name: var_node.name)
       end
     end
     @deferred_with_validations.clear
@@ -549,8 +546,7 @@ private
 
   def visit_RequireNode(node)
     unless @importer
-      error!(node, "REQUIRE is only supported when using the Importer. " \
-                   "Pass importer: and source_dir: to SemanticAnnotator.new.")
+      error!(node, :REQUIRE_NEEDS_IMPORTER, hint: "Pass importer: and source_dir: to SemanticAnnotator.new.")
     end
 
     mod = if node.kind == :package
@@ -721,7 +717,7 @@ private
     # 2. Validation & Lifetime
     has_mutable_param = node.params.any? { |p| p[:mutable] }
     if has_mutable_param && !node.name.end_with?("!")
-      error!(node, "Style Error: Function '#{node.name}' has MUTABLE parameters. Its name must end in '!'")
+      error!(node, :STYLE_MUTABLE_PARAM_NEEDS_BANG, name: node.name)
     end
     verify_lifetime!(node)
 
@@ -776,12 +772,10 @@ private
         # Both share `reentrant = :non_reentrant` (the bridge piggybacks
         # on the legacy codegen path), so suppress here for either.
         unless [:reentrant_not_logical, :reentrant_max_depth].include?(node.reentrance_kind)
-          error!(node, "Reentrancy Error: '#{node.name}' directly calls itself. " \
-                       "Use @reentrant (not @nonReentrant) for directly recursive functions.")
+          error!(node, :REENTRANCE_DIRECT_RECURSIVE, name: node.name, hint: "Use @reentrant (not @nonReentrant) for directly recursive functions.")
         end
       when nil
-        error!(node, "Reentrancy Error: '#{node.name}' calls itself recursively. " \
-                     "Add @reentrant to the function signature to allow this.")
+        error!(node, :REENTRANCE_INDIRECT_RECURSIVE, name: node.name, hint: "Add @reentrant to the function signature to allow this.")
       end
 
       # Tail call validation: if @reentrant:tailCall, verify the self-call is in tail position.
@@ -803,17 +797,15 @@ private
           # lowering can synthesize the trampoline body.
           node.thunk_plan = plan
         else
-          error!(node, "EFFECTS REENTRANT:THUNK on '#{node.name}' has non-tail recursion in " \
-                        "a shape this phase does not yet recognize. Supported: simple " \
-                        "recurrence (zero or more `IF base -> RETURN const;` followed by a final " \
-                        "`RETURN expr <op> #{node.name}(args);`). Wider shapes (multi-recursion, " \
-                        "arbitrary control flow with recursion) land in later sub-phases. For " \
-                        "now, declare ':TAIL_CALL' or use plain 'EFFECTS REENTRANT'.")
+          error!(node, :REENTRANCE_THUNK_NON_TAIL, name: node.name, hint: "a shape this phase does not yet recognize. Supported: simple " \
+                 "recurrence (zero or more `IF base -> RETURN const;` followed by a final " \
+                 "`RETURN expr <op> #{node.name}(args);`). Wider shapes (multi-recursion, " \
+                 "arbitrary control flow with recursion) land in later sub-phases. For " \
+                 "now, declare ':TAIL_CALL' or use plain 'EFFECTS REENTRANT'.")
         end
       end
     elsif node.tail_call
-      error!(node, "@reentrant:tailCall on '#{node.name}' but the function is not recursive. " \
-                   "Remove :tailCall - it only applies to self-recursive functions.")
+      error!(node, :REENTRANCE_TAIL_CALL_NOT_RECURSIVE, name: node.name, hint: "Remove :tailCall - it only applies to self-recursive functions.")
     elsif node.reentrance_kind == :reentrant_thunk
       # The "directly recursive" branch above is false here. The
       # function might still be MUTUALLY recursive (A calls B calls
@@ -950,9 +942,7 @@ private
     decls = program_node.statements.select { |s| s.is_a?(AST::SyncPolicyDecl) }
 
     if decls.size > 1
-      error!(decls[1],
-        "Only one SYNC POLICY block is allowed per program. " \
-        "The first one was declared earlier in this file.")
+      error!(decls[1], :SYNC_POLICY_DUPLICATE)
     end
 
     if decls.empty?
@@ -965,9 +955,7 @@ private
       s.is_a?(AST::FunctionDef) && s.name == "main"
     }
     unless has_main
-      error!(decl,
-        "SYNC POLICY may only be declared in the file containing `FN main`. " \
-        "Move the policy to the program's main file, or remove it here.")
+      error!(decl, :SYNC_POLICY_NEEDS_MAIN_FILE)
     end
 
     validate_sync_policy_body!(decl)
@@ -985,17 +973,12 @@ private
         next unless sel[:form] == :type
         name = sel[:name]
         if SYNC_POLICY_INLINE_ONLY_ERRORS.include?(name)
-          error!(sel[:token] || decl,
-            "`#{name}` must be handled in-line — SYNC POLICY defaults are not " \
-            "allowed for this error. Remove it from the policy and add an " \
-            "`ON #{name} ...` handler at the WITH site (use " \
-            "`WITH POLYMORPHIC POSSIBLE_#{name == :Deadlock ? "DEADLOCK" : "LOCK_CYCLE"} ...` " \
-            "if the static cycle check needs to be opted out).")
+          error!(sel[:token] || decl, :SYNC_POLICY_INLINE_ONLY,
+            name: name, escape: (name == :Deadlock ? "DEADLOCK" : "LOCK_CYCLE"))
         end
         unless SYNC_POLICY_REQUIRED_ERRORS.include?(name)
-          error!(sel[:token] || decl,
-            "`#{name}` is not a valid SYNC POLICY error. " \
-            "SYNC POLICY only handles: #{SYNC_POLICY_REQUIRED_ERRORS.join(', ')}.")
+          error!(sel[:token] || decl, :SYNC_POLICY_INVALID_ERROR,
+            name: name, required: SYNC_POLICY_REQUIRED_ERRORS.join(', '))
         end
         seen << name
       end
@@ -1006,21 +989,15 @@ private
       # here with form==:kind.
       (clause[:selectors] || []).each do |sel|
         next unless sel[:form] == :kind
-        error!(sel[:token] || decl,
-          "SYNC POLICY handlers must name a specific error type, not a kind. " \
-          "`ON #{sel[:name]} ...` (and the `RETRY(N) THEN` sugar that desugars " \
-          "to `ON Transient ...`) is rejected here. Use `ON LockTimeout ...`, " \
-          "`ON MvccConflict ...`, or `ON AtomicConflict ...` explicitly.")
+        error!(sel[:token] || decl, :SYNC_POLICY_NEEDS_TYPE_NOT_KIND, name: sel[:name])
       end
     end
 
     seen_set = seen.to_set
     missing = SYNC_POLICY_REQUIRED_ERRORS.reject { |e| seen_set.include?(e) }
     unless missing.empty?
-      error!(decl,
-        "SYNC POLICY must handle every required error " \
-        "(#{SYNC_POLICY_REQUIRED_ERRORS.join(', ')}). " \
-        "Missing: #{missing.join(', ')}.")
+      error!(decl, :SYNC_POLICY_INCOMPLETE,
+        required: SYNC_POLICY_REQUIRED_ERRORS.join(', '), missing: missing.join(', '))
     end
   end
 
@@ -1150,8 +1127,7 @@ private
       when :type
         type_sym = f[:value].to_sym
         unless AST.error_type?(type_sym)
-          error!(f[:token],
-                 "CATCH ... WITH(#{f[:value]}): error type '#{f[:value]}' is not registered.")
+          error!(f[:token], :CATCH_WITH_UNREGISTERED, name: f[:value])
         end
         filter_types << f[:value]
       when :message
@@ -1397,7 +1373,7 @@ private
       visit(b[:expr])
       ti = b[:expr].type_info
       unless ti&.optional?
-        error!(b[:expr], "IF ... AS binding requires an optional type, got '#{b[:expr].resolved_type}'")
+        error!(b[:expr], :IF_AS_NEEDS_OPTIONAL, got: b[:expr].resolved_type)
       end
       # Annotate each binding with the unwrapped type for use in lowering.
       unwrapped = ti.wrapped_type
@@ -1452,7 +1428,7 @@ private
     primitives = [:Float64, :Bool, :Byte, :Int64, :Float64, :String, :NIL, :BOOLEAN, :Any, :Void]
 
     if primitives.include?(expr_type)
-      error!(match_node, "MATCH struct pattern requires a struct type, got #{expr_type}")
+      error!(match_node, :MATCH_NEEDS_STRUCT_TYPE, got: expr_type)
     end
 
     schema = lookup_type_schema(expr_type)
@@ -1462,7 +1438,7 @@ private
 
       if schema
         unless schema.key?(f[:name])
-          error!(match_node, "MATCH struct pattern: field '#{f[:name]}' does not exist on type #{expr_type}")
+          error!(match_node, :MATCH_FIELD_UNKNOWN, field: f[:name], type: expr_type)
         end
       end
 
@@ -1484,7 +1460,7 @@ private
           val_type   = f[:value].resolved_type
           is_numeric_promo = (val_type == :Int64 && (field_type == :Float64 || field_type == :Float64))
           unless val_type == field_type || val_type == :Any || field_type == :Any || is_numeric_promo
-            error!(match_node, "MATCH struct pattern: field '#{f[:name]}' has type #{field_type}, but pattern value has type #{val_type}")
+            error!(match_node, :MATCH_FIELD_TYPE_MISMATCH, field: f[:name], declared: field_type, got: val_type)
           end
         end
       end
@@ -1600,7 +1576,7 @@ private
         if c[:kind] == :when
           visit(c[:value])
           unless c[:value].resolved_type == :Bool
-            error!(node, "WHEN condition must be Bool, got #{c[:value].resolved_type}")
+            error!(node, :WHEN_NEEDS_BOOL, got: c[:value].resolved_type)
           end
         elsif c[:kind] == :struct_pattern
           annotate_struct_pattern!(node, c[:value])
@@ -1621,13 +1597,13 @@ private
                  c[:value].resolved_type == :Any ||
                  base_match ||
                  string_match
-            error!(node, "MATCH case type #{c[:value].resolved_type} does not match expression type #{node.expr.resolved_type}")
+            error!(node, :MATCH_CASE_TYPE_MISMATCH, case: c[:value].resolved_type, expr: node.expr.resolved_type)
           end
 
           # Payload capture: `Shape.Circle AS r ->`
           if c[:binding]
             if is_enum
-              error!(node, "Cannot capture payload from enum variant: enums have no payload. Remove 'AS #{c[:binding]}'.")
+              error!(node, :MATCH_ENUM_CAPTURE, binding: c[:binding])
             elsif is_union
               variant_name = case c[:value]
                              when AST::GetField   then c[:value].field
@@ -1636,7 +1612,7 @@ private
               if variant_name
                 raw_payload = schema[:variants][variant_name]
                 if raw_payload.nil?
-                  error!(node, "Cannot bind 'AS #{c[:binding]}': '#{variant_name}' is a unit variant with no payload.")
+                  error!(node, :MATCH_UNIT_CAPTURE, binding: c[:binding], variant: variant_name)
                 elsif raw_payload.is_a?(Hash) && raw_payload[:kind] == :inline_struct
                   synthetic_type = :"#{type_name}_#{variant_name}"
                   current_scope.declare(c[:binding], nil, Type.new(synthetic_type), false, false, nil, :stack)
@@ -1687,7 +1663,7 @@ private
                 c[:destructure].fields.each do |f|
                   next unless f[:value] == :bind
                   unless payload_schema.key?(f[:name])
-                    error!(node, "MATCH destructure: field '#{f[:name]}' does not exist on variant #{variant_name}")
+                    error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f[:name], variant: variant_name)
                   end
                   field_def = payload_schema[f[:name]]
                   field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
@@ -1727,29 +1703,20 @@ private
       # must opt in to PARTIAL MATCH.
       unless is_enum || is_union
         type_label = expr_t.resolved
-        error!(node,
-          "MATCH requires an enum or union type, got '#{type_label}'. " \
-          "Use `PARTIAL MATCH` to match on non-discriminated types " \
-          "(WHEN guards, ranges, etc. require PARTIAL).")
+        error!(node, :MATCH_NEEDS_ENUM_OR_UNION, type: type_label)
       end
 
       # MATCH forbids DEFAULT — the whole point of an exhaustive MATCH is
       # that every variant is explicitly named. If you want a fallback,
       # write `PARTIAL MATCH`.
       if node.default_case
-        error!(node,
-          "MATCH cannot have a DEFAULT branch — every variant must be " \
-          "handled explicitly. If you want a catch-all, change to " \
-          "`PARTIAL MATCH` (which permits DEFAULT and WHEN guards).")
+        error!(node, :MATCH_FORBIDS_DEFAULT)
       end
 
       # MATCH forbids WHEN guards — they're runtime conditions that break
       # static exhaustiveness. Use `PARTIAL MATCH` for guard-style cases.
       if node.cases.any? { |c| c[:kind] == :when }
-        error!(node,
-          "MATCH cannot contain WHEN guards — every variant must be " \
-          "handled by an exact case. Use `PARTIAL MATCH` if you need " \
-          "WHEN guards.")
+        error!(node, :MATCH_FORBIDS_WHEN)
       end
 
       # Every variant must appear exactly once.
@@ -1766,11 +1733,8 @@ private
       missing = all_variants - covered
       unless missing.empty?
         type_label2 = is_enum ? "enum" : "union"
-        error!(node,
-          "MATCH on #{type_label2} '#{type_name}' is non-exhaustive: " \
-          "missing variants: #{missing.sort.join(', ')}. " \
-          "Either add cases for the missing variants, or change to " \
-          "`PARTIAL MATCH` to allow non-exhaustive matching.")
+        error!(node, :MATCH_NON_EXHAUSTIVE,
+          kind: type_label2, name: type_name, missing: missing.sort.join(', '))
       end
     end
 
@@ -1787,8 +1751,8 @@ private
     visit(node.end_expr)
     start_type = node.start_expr.resolved_type
     end_type   = node.end_expr.resolved_type
-    error!(node, "FOR range start must be Int64, got #{start_type}") unless start_type == :Int64
-    error!(node, "FOR range end must be Int64, got #{end_type}") unless end_type == :Int64
+    error!(node, :FOR_RANGE_START_NEEDS_INT64, got: start_type) unless start_type == :Int64
+    error!(node, :FOR_RANGE_END_NEEDS_INT64, got: end_type) unless end_type == :Int64
 
     # 2. Analyze body in new scope with loop variable declared as immutable Int64
     if current_fn_ctx then current_fn_ctx.loop_depth += 1 else @loop_depth += 1 end
@@ -1829,7 +1793,7 @@ private
       # FOR k IN map iterates over keys (strings)
       :String
     else
-      error!(node, "FOR ... IN requires an array, list, or map, got #{coll_type}")
+      error!(node, :FOR_IN_NEEDS_COLLECTION, got: coll_type)
     end
 
     elem_sym = elem_type.is_a?(Type) ? elem_type.resolved : elem_type
@@ -1856,7 +1820,7 @@ private
     visit(node.condition)
 
     if node.condition.resolved_type != :Bool
-      error!(node, "Condition must be a Boolean, got #{node.condition.resolved_type}")
+      error!(node, :CONDITION_NEEDS_BOOL, got: node.condition.resolved_type)
     end
 
     # Effect tracking: WHILE TRUE or any non-trivially-bounded loop.
@@ -1897,7 +1861,7 @@ private
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
             is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
             unless is_copy
-              error!(node, "Use of moved value '#{name}' in loop. The variable is moved in the first iteration and not available for the next.")
+              error!(node, :USE_OF_MOVED_IN_LOOP, name: name)
             end
           end
         end
@@ -1926,7 +1890,7 @@ private
     visit(node.condition)
     ti = node.condition.type_info
     unless ti&.optional?
-      error!(node.condition, "WHILE ... AS binding requires an optional type, got '#{node.condition.resolved_type}'")
+      error!(node.condition, :WHILE_AS_NEEDS_OPTIONAL, got: node.condition.resolved_type)
     end
 
     unwrapped = ti.wrapped_type
@@ -1946,7 +1910,7 @@ private
     if cond.is_a?(AST::MethodCall)
       recv = cond.object
       if recv.is_a?(AST::Identifier) && current_scope.is_immutable?(recv.name)
-        error!(node, "WHILE ... AS binding: '#{cond.name}' is called on immutable '#{recv.name}' -- the condition cannot advance and may loop forever. Declare '#{recv.name}' as MUTABLE or use a regular WHILE loop.")
+        error!(node, :WHILE_AS_IMMUTABLE_RECEIVER, method: cond.name, recv: recv.name, recv2: recv.name)
       end
     end
 
@@ -1972,7 +1936,7 @@ private
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
             is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
             unless is_copy
-              error!(node, "Use of moved value '#{name}' in loop.")
+              error!(node, :USE_OF_MOVED_IN_LOOP_SHORT, name: name)
             end
           end
         end
@@ -1992,14 +1956,14 @@ private
   # boundaries — nested lambdas/closures are separate compilation units.
   def visit_BreakNode(node)
     if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
-      error!(node, "BREAK must be used inside a loop")
+      error!(node, :BREAK_OUTSIDE_LOOP)
     end
     node.full_type = :Void
   end
 
   def visit_ContinueNode(node)
     if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
-      error!(node, "CONTINUE must be used inside a loop")
+      error!(node, :CONTINUE_OUTSIDE_LOOP)
     end
     node.full_type = :Void
   end
@@ -2007,7 +1971,7 @@ private
   def visit_Assert(node)
     visit(node.condition)
     if node.condition.resolved_type != :Bool
-       error!(node, "Assert condition must be Boolean")
+       error!(node, :ASSERT_NEEDS_BOOL)
     end
     # Optional: check message type if it exists
     node.full_type = :Void
@@ -2048,10 +2012,7 @@ private
     if kind_sym.nil?
       # Type-only form — require prior registration.
       unless AST.error_type?(type_sym)
-        error!(site_tok || node,
-               "Error type '#{type_name_str}' is not registered. The first RAISE / OR EXIT site " \
-               "that names a new type must provide a kind: use 'RAISE Kind, #{type_name_str}, \"msg\"' " \
-               "or similar.")
+        error!(site_tok || node, :ERROR_TYPE_NOT_REGISTERED, name: type_name_str)
         return
       end
       # Backfill the node with the registered kind so downstream
@@ -2066,13 +2027,11 @@ private
     first_site = conflict[:first_site]
     first_loc  = first_site ? " (first registered at line #{first_site.line})" : ""
     if conflict[:is_stdlib]
-      error!(site_tok || node,
-             "'#{type_name_str}' is reserved by the stdlib as kind '#{conflict[:existing_kind]}'. " \
-             "Pick a different type name.")
+      error!(site_tok || node, :ERROR_TYPE_RESERVED_BY_STDLIB,
+             name: type_name_str, kind: conflict[:existing_kind])
     else
-      error!(site_tok || node,
-             "'#{type_name_str}' is already mapped to kind '#{conflict[:existing_kind]}'#{first_loc}. " \
-             "Either use the same kind here, or pick a different type name.")
+      error!(site_tok || node, :ERROR_TYPE_KIND_CONFLICT,
+             name: type_name_str, kind: conflict[:existing_kind], first_loc: first_loc)
     end
   end
 
@@ -2093,7 +2052,7 @@ private
                                   expected.respond_to?(:payload_type) &&
                                   (expected.payload_type == :Void || expected.payload_type.nil?))
       if expected && !expected_void_compatible
-        error!(node, "Function expects return type #{expected}, got Void")
+        error!(node, :RETURN_VOID_FROM_TYPED, expected: expected)
       end
 
       node.full_type = :Void
@@ -2113,14 +2072,11 @@ private
     if (@with_block_depth || 0) > 0
       val = node.value
       if val.is_a?(AST::Identifier) && val.symbol&.non_escaping
-        error!(node, "Cannot RETURN '#{val.name}' from inside a WITH block. " \
-                     "WITH aliases are borrows of locked data and cannot escape their scope.")
+        error!(node, :RETURN_FROM_WITH_SCOPED, name: val.name, hint: "WITH aliases are borrows of locked data and cannot escape their scope.")
       elsif val.is_a?(AST::GetField) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
-        error!(node, "Cannot RETURN a field of a WITH-scoped binding. " \
-                     "Field access borrows from the locked data; the borrow cannot escape the WITH scope.")
+        error!(node, :RETURN_FIELD_FROM_WITH_SCOPED, hint: "Field access borrows from the locked data; the borrow cannot escape the WITH scope.")
       elsif val.is_a?(AST::GetIndex) && val.target.respond_to?(:symbol) && val.target.symbol&.non_escaping
-        error!(node, "Cannot RETURN an indexed access of a WITH-scoped binding. " \
-                     "Index access borrows from the locked data; the borrow cannot escape the WITH scope.")
+        error!(node, :RETURN_INDEX_FROM_WITH_SCOPED, hint: "Index access borrows from the locked data; the borrow cannot escape the WITH scope.")
       end
     end
     promote_to_expr_if!(node, node.value) if node.value.is_a?(AST::IfStatement)
@@ -2199,7 +2155,7 @@ private
     expected_is_auto = expected_obj.respond_to?(:auto?) && expected_obj.auto?
 
     if !actual_is_auto && !expected_is_auto && expected && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
-      error!(node, :RETURN_MISMATCH, type_display(expected), type_display(actual_full))
+      error!(node, :RETURN_MISMATCH, expected: type_display(expected), got: type_display(actual_full))
     elsif !actual_is_auto && !expected_is_auto && expected && expected != :Void && expected != :Any && actual != expected
       node.value.coerced_type = expected  # Don't coerce EXPLICIT returns
       check_prefixed_int_range!(node.value, expected)
@@ -2302,11 +2258,11 @@ private
     schema    = lookup_type_schema(type_name)
 
     unless schema
-      error!(node, :STATIC_UNKNOWN_TYPE, type_name)
+      error!(node, :STATIC_UNKNOWN_TYPE, type: type_name)
     end
 
     unless schema[:kind] == :resource
-      error!(node, :STATIC_NOT_RESOURCE, type_name)
+      error!(node, :STATIC_NOT_RESOURCE, type: type_name)
     end
 
     static_methods = schema[:static_methods] || {}
@@ -2329,19 +2285,19 @@ private
           category: :type, cascade: true
         )
       else
-        error!(node, :STATIC_UNKNOWN_METHOD, node.method_name, type_name, available)
+        error!(node, :STATIC_UNKNOWN_METHOD, method: node.method_name, type: type_name, available: available)
       end
     end
 
     expected_args = method_def[:args]
     if node.args.length != expected_args.length
-      error!(node, :STATIC_ARITY, type_name, node.method_name, expected_args.length, node.args.length)
+      error!(node, :STATIC_ARITY, type: type_name, method: node.method_name, expected: expected_args.length, got: node.args.length)
     end
 
     node.args.zip(expected_args).each_with_index do |(arg, expected), i|
       actual = arg.resolved_type
       unless expected == :Any || actual == :Any || is_safe_autocast?(actual, expected)
-        error!(node, :STATIC_ARG_TYPE, i + 1, type_name, node.method_name, expected, actual)
+        error!(node, :STATIC_ARG_TYPE, index: i + 1, type: type_name, method: node.method_name, expected: expected, got: actual)
       end
     end
 
@@ -2493,7 +2449,7 @@ private
     unless matched_def
       sigs = definitions.map { |d| format_intrinsic_args(d[:args]) }.join(" or ")
       arg_types = args.map { |a| a.resolved_type }.join(", ")
-      error!(node, "No overload for '#{node.name}' matches arguments (#{arg_types}).\nCandidates: #{sigs}")
+      error!(node, :INTRINSIC_NO_OVERLOAD, name: node.name, args: arg_types, candidates: sigs)
       return
     end
 
@@ -2517,7 +2473,7 @@ private
     if matched_def[:reject_when] && reject_arg_type_matches?(args.first, matched_def[:reject_when])
       reason = matched_def[:reject_error] ||
                "#{node.name}() is not valid for #{args.first.resolved_type}"
-      error!(node, reason)
+      error!(node, :INTRINSIC_REJECTED, message: reason)
       return
     end
 
@@ -2719,14 +2675,14 @@ private
           )
         end
 
-        return error!(node, msg) if fixes.empty?
+        return error!(node, :VARDECL_TYPE_MISMATCH_FIXABLE, message: msg) if fixes.empty?
         fixable!(node, message: msg, category: :type, level: :error,
                  fixes: fixes, raise_in_collector: false)
       end
     end
 
     final_type, error = node.value.coerce!(node.type)
-    error!(node, error) if error
+    error!(node, :TYPE_COERCION_FAILED, message: error) if error
 
     # M2.2 — empty `[]` / `{}` initializer with `: Auto`: coerce!
     # returns the Auto Type unchanged because Auto tolerates any
@@ -2760,7 +2716,7 @@ private
     node.resource_close_zig = resource_close
     node.type_info.is_resource = true if is_resource && node.type_info.respond_to?(:is_resource=)
 
-    Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, msg) }
+    Capabilities.validate!(node, node.type_info) { |n, msg| error!(n, :CAPABILITY_INVALID, message: msg) }
 
     node_sync = node.type_info&.sync
     node_layout = node.type_info&.layout
@@ -2911,12 +2867,12 @@ private
              when :ADD then :fetchAdd
              when :SUB then :fetchSub
              when :MUL, :DIV
-               error!(node, "Atomic primitives do not support `#{node.compound_op == :MUL ? "*=" : "/="}`. " \
-                            "Atomic ops are limited to load / store / fetch_add / fetch_sub. " \
-                            "For more complex updates, use compareAndSwap or switch to @shared:locked.")
+               op_str = node.compound_op == :MUL ? "*=" : "/="
+               error!(node, :ATOMIC_NO_MUL_DIV_COMPOUND, op: op_str, hint: "Atomic ops are limited to load / store / fetch_add / fetch_sub. " \
+                      "For more complex updates, use compareAndSwap or switch to @shared:locked.")
                nil
              else
-               error!(node, "Compound op #{node.compound_op} is not supported on @shared:atomic targets.")
+               error!(node, :ATOMIC_UNSUPPORTED_COMPOUND, op: node.compound_op)
                nil
              end
         node.auto_atomic_op = op if op
@@ -3130,7 +3086,7 @@ private
       visit_assignment_field(target, node)
 
     else
-      error!(node, "Invalid assignment target: #{target.class}")
+      error!(node, :INVALID_ASSIGNMENT_TARGET, got: target.class)
     end
 
     handle_assign_move(node)
@@ -3146,11 +3102,11 @@ private
 
     scope = current_scope
     if !scope.locals.key?(var_name)
-      error!(node, "Cannot assign to undefined variable '#{var_name}'")
+      error!(node, :ASSIGN_UNDEFINED_VAR, name: var_name)
     end
 
     if scope.is_immutable?(var_name)
-      error!(node, "Variable '#{var_name}' is immutable")
+      error!(node, :ASSIGN_VAR_IMMUTABLE, name: var_name)
     end
 
     validate_assignment_type(node, scope.resolve_type(var_name), node.value.resolved_type)
@@ -3169,7 +3125,7 @@ private
     if index_node.target.is_a?(AST::Identifier)
       var_name = index_node.target.name
       if current_scope.is_immutable?(var_name)
-        error!(assignment_node, "Cannot modify index of immutable list '#{var_name}'")
+        error!(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name)
       end
       mark_var_mutated(var_name)
     else
@@ -3229,7 +3185,7 @@ private
       var_name = field_node.target.name
       syn = field_node.target.symbol&.sync
       if current_scope.is_immutable?(var_name) && syn != :always_mutable
-        error!(assignment_node, "Cannot modify field of immutable struct '#{var_name}'")
+        error!(assignment_node, :ASSIGN_FIELD_IMMUTABLE_STRUCT, name: var_name)
       end
       mark_var_mutated(var_name)
 
@@ -3261,7 +3217,7 @@ private
     return if target_type == value_type
 
     if !is_safe_autocast?(value_type, target_type)
-      error!(node, "Type Mismatch: Cannot assign #{value_type} to #{target_type}")
+      error!(node, :TYPE_MISMATCH_ASSIGN, got: value_type, expected: target_type)
     else
       node.value.coerced_type = target_type
     end
@@ -3298,9 +3254,9 @@ private
       if target_type_info.map?
         index_type_info = node.index.type_info
         if target_type_info.numeric_map?
-          error!(node, "Numeric map keys must be a number type, got #{node.index.resolved_type}") unless index_type_info&.numeric?
+          error!(node, :NUMERIC_MAP_KEY_BAD, got: node.index.resolved_type) unless index_type_info&.numeric?
         else
-          error!(node, "Map keys must be Strings, got #{node.index.resolved_type}") unless index_type_info&.string?
+          error!(node, :STRING_MAP_KEY_BAD, got: node.index.resolved_type) unless index_type_info&.string?
         end
       end
 
@@ -3311,13 +3267,13 @@ private
       elem_t = target_type_info.tense_type.element_type
       node.full_type = Type.new(:"~#{elem_t.resolved}")
     elsif target_type_info.string? && !target_type_info.raw?
-      error!(node, "Cannot index String by integer. Use String@raw for byte access, or .codepoints() for iteration.")
+      error!(node, :STRING_INDEX_BY_INT)
     elsif node.target.metatype == :struct
       # Struct field access via index (rare legacy path)
       node.full_type = target_type_info.element_type
       node.container_borrow = true
     else
-      error!(node, "Unsupported Index")
+      error!(node, :UNSUPPORTED_INDEX)
     end
   end
 
@@ -3336,7 +3292,7 @@ private
       path.each do |seg|
         check = check.empty? ? seg.to_s : "#{check}.#{seg}"
         if @og.moved?(check)
-          error!(node, "Use of moved value '#{path.map(&:to_s).join(".")}'")
+          error!(node, :USE_OF_MOVED_PATH, path: path.map(&:to_s).join("."))
           break
         end
       end
@@ -3352,9 +3308,9 @@ private
 
     schema = lookup_type_schema(type)
     if schema.is_a?(Hash) && schema[:kind] == :enum
-      error!(node, :ENUM_FIELD_ACCESS, type)
+      error!(node, :ENUM_FIELD_ACCESS, enum: type)
     elsif schema.is_a?(Hash) && schema[:kind] == :union
-      error!(node, :UNION_FIELD_ACCESS, type)
+      error!(node, :UNION_FIELD_ACCESS, union: type)
     elsif schema && schema[node.field]
       field_type = schema[node.field]
       # SOA tracking: record field access on pipeline variable `_`
@@ -3374,7 +3330,7 @@ private
       end
       node.full_type = field_type
     else
-      error!(node, :ILLEGAL_FIELD_LOOKUP, node.field, type)
+      error!(node, :ILLEGAL_FIELD_LOOKUP, field: node.field, type: type)
     end
   end
 
@@ -3400,14 +3356,9 @@ private
   # pointing diagnostic instead of silently wrong codegen.
   def visit_CallSiteOverride(node)
     sigil = node.kind == :thunk ? "@thunk" : "@maxDepth"
-    error!(node,
-      "#{sigil}(#{node.n}) is parsed but not yet implemented. Per-call-site " \
-      "monomorphization (cloning the callee + rewriting recursive calls inside " \
-      "the clone so the depth counter / trampoline applies to internal recursion) " \
-      "lands in v0.3 alongside the broader monomorphization pass. For now, " \
-      "declare the variant on the function instead: " \
-      "#{node.kind == :thunk ? "'EFFECTS REENTRANT:THUNK'" : "'EFFECTS REENTRANT:MAX_DEPTH(#{node.n})'"} " \
-      "(call-site overrides will be a strictly additive feature when 4.1/4.2 land).")
+    variant_hint = node.kind == :thunk ? "'EFFECTS REENTRANT:THUNK'" : "'EFFECTS REENTRANT:MAX_DEPTH(#{node.n})'"
+    error!(node, :CALL_SITE_OVERRIDE_UNIMPLEMENTED,
+      sigil: sigil, n: node.n, variant_hint: variant_hint)
   end
 
   def visit_UnaryOp(node)
@@ -3450,7 +3401,7 @@ private
     # Simple check: Ensure all values match
     node.pairs.each do |k, v|
       if v.resolved_type != first_val_type
-        error!(node, "HashMap must have all values be the same type")
+        error!(node, :HASHMAP_MIXED_VALUES)
       end
     end
 
@@ -3463,14 +3414,14 @@ private
   def visit_StructLit(node)
     schema = lookup_type_schema(node.name.to_sym)
     if schema.nil?
-      error!(node, "Unknown struct type: '#{node.name}'")
+      error!(node, :UNKNOWN_STRUCT_TYPE, name: node.name)
     end
 
     # Union literal: Result{ Ok: 42 } or Option<Number>{ Some: 42.0 }
     # Reuses struct-literal syntax — no new parser changes required.
     if schema.is_a?(Hash) && schema[:kind] == :union
       if node.fields.length != 1
-        error!(node, "Union literal '#{node.name}' must specify exactly one variant, got #{node.fields.length}.")
+        error!(node, :UNION_LITERAL_VARIANT_COUNT, name: node.name, got: node.fields.length)
       end
 
       # Build type param substitution for generic unions
@@ -3478,15 +3429,15 @@ private
       union_subst = {}
       if node.type_args&.any?
         if union_type_params.nil? || union_type_params.empty?
-          error!(node, "Type Error: '#{node.name}' is not a generic type — remove the type arguments.")
+          error!(node, :GENERIC_NOT_GENERIC, type: node.name)
         end
         if node.type_args.length != union_type_params.length
-          error!(node, "Type Error: '#{node.name}' expects #{union_type_params.length} type argument(s), got #{node.type_args.length}.")
+          error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: union_type_params.length, got: node.type_args.length)
         end
         union_type_params.zip(node.type_args).each { |p, a| union_subst[p] = a.to_sym }
       elsif union_type_params&.any?
         params_hint = union_type_params.map(&:to_s).join(', ')
-        error!(node, "Type Error: '#{node.name}' is a generic type — type arguments are required (e.g., #{node.name}<#{params_hint}>).")
+        error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
       end
 
       variant_name, val_node = node.fields.first
@@ -3500,15 +3451,15 @@ private
             cascade: true
           )
         else
-          error!(node, :UNION_UNKNOWN_VARIANT, node.name, variant_name)
+          error!(node, :UNION_UNKNOWN_VARIANT, union: node.name, variant: variant_name)
         end
       end
       raw_expected = schema[:variants][variant_name]
       if raw_expected.nil?
-        error!(node, "Union variant '#{variant_name}' is a unit variant — use '#{node.name}.#{variant_name}' (no payload).")
+        error!(node, :UNION_VARIANT_IS_UNIT_NO_PAYLOAD, variant: variant_name, union: node.name, variant2: variant_name)
       end
       if raw_expected.is_a?(Hash) && raw_expected[:kind] == :inline_struct
-        error!(node, :UNION_INLINE_VARIANT_OLD_SYNTAX, node.name, variant_name, node.name, variant_name)
+        error!(node, :UNION_INLINE_VARIANT_OLD_SYNTAX, union: node.name, variant: variant_name, union2: node.name, variant2: variant_name)
       end
       # @indirect single-type payload: unwrap inner type for type-checking;
       # mark the value node so the transpiler heap-allocates it via create(*T).
@@ -3530,7 +3481,7 @@ private
       end
       actual = val_node.type_info
       unless expected_type.accepts?(actual)
-        error!(node, :UNION_PAYLOAD_MISMATCH, variant_name, expected_type.resolved, actual&.resolved)
+        error!(node, :UNION_PAYLOAD_MISMATCH, variant: variant_name, expected: expected_type.resolved, got: actual&.resolved)
       end
       # Move: union literal captures non-Copy values.
       move_if_not_copyable!(val_node)
@@ -3549,7 +3500,7 @@ private
         field_defaults = schema[:field_defaults] || {}
         missing = field_names.reject { |f| field_defaults.key?(f) }
         if missing.any?
-          error!(node, "Cannot use '#{node.name}{}' — field(s) #{missing.join(', ')} have no default values")
+          error!(node, :STRUCT_LITERAL_MISSING_FIELDS, name: node.name, fields: missing.join(', '))
         end
       end
       node.full_type = node.name.to_sym
@@ -3562,17 +3513,17 @@ private
     type_subst = {}
     if node.type_args&.any?
       if type_params.nil? || type_params.empty?
-        error!(node, "Type Error: '#{node.name}' is not a generic type — remove the type arguments.")
+        error!(node, :GENERIC_NOT_GENERIC, type: node.name)
       end
       if node.type_args.length != type_params.length
-        error!(node, "Type Error: '#{node.name}' expects #{type_params.length} type argument(s), got #{node.type_args.length}.")
+        error!(node, :GENERIC_WRONG_ARG_COUNT, type: node.name, expected: type_params.length, got: node.type_args.length)
       end
       type_params.zip(node.type_args).each do |param, arg|
         type_subst[param] = arg.to_sym
       end
     elsif type_params&.any?
       params_hint = type_params.map(&:to_s).join(', ')
-      error!(node, "Type Error: '#{node.name}' is a generic type — type arguments are required (e.g., #{node.name}<#{params_hint}>).")
+      error!(node, :GENERIC_MISSING_TYPE_ARGS, type: node.name, type2: node.name, hint: params_hint)
     end
 
     # Iterate Fields (Validation)
@@ -3591,7 +3542,7 @@ private
             category: :type, cascade: true
           )
         else
-          error!(node, "Struct '#{node.name}' has no field '#{field_name}'")
+          error!(node, :STRUCT_FIELD_UNRESOLVABLE, struct: node.name, field: field_name)
         end
       end
 
@@ -3625,7 +3576,7 @@ private
       # Simple Type Check
       if val_node.full_type != expected_type
         unless is_safe_autocast?(val_node.resolved_type, expected_type)
-          error!(node, "Field '#{field_name}' expected #{expected_type}, got #{val_node.resolved_type}")
+          error!(node, :FIELD_TYPE_MISMATCH, field: field_name, expected: expected_type, got: val_node.resolved_type)
         end
         val_node.coerced_type = expected_type
       end
@@ -3661,7 +3612,7 @@ private
     if !node.items.empty? && node.items.all? { |i| Type.new(i.resolved_type).future? }
       inner_types = node.items.map { |i| Type.new(i.resolved_type).tense_type.to_sym }.uniq
       if inner_types.size > 1
-        error!(node, "Bounded stream literal contains mixed promise types: #{inner_types.join(', ')}. All BG blocks must produce the same type.")
+        error!(node, :BOUNDED_STREAM_MIXED_TYPES, types: inner_types.join(', '))
       end
       node.full_type = :"~#{inner_types.first}[#{node.items.size}]"
       node.storage   = :stack
@@ -3700,7 +3651,7 @@ private
       node.items.each_with_index do |item, index|
         next if index == 0
         if item.resolved_type != base_type
-          error!(node, "List literal contains mixed types: First item is #{base_type}, item #{index+1} is #{item.resolved_type}")
+          error!(node, :LIST_LITERAL_MIXED_TYPES, base: base_type, index: index+1, got: item.resolved_type)
         end
       end
     end
@@ -3722,11 +3673,11 @@ private
     finish_type = node.finish.resolved_type
 
     unless Type.new(start_type).numeric?
-      error!(node, "Range start must be a numeric type, got #{start_type}")
+      error!(node, :RANGE_START_NEEDS_NUMERIC, got: start_type)
     end
 
     unless Type.new(finish_type).numeric?
-      error!(node, "Range end must be a numeric type, got #{finish_type}")
+      error!(node, :RANGE_END_NEEDS_NUMERIC, got: finish_type)
     end
 
     # Only coerce to Float64 when mixing int and float bounds.
@@ -3778,7 +3729,7 @@ private
       when :BOOLEAN then :Bool
       when :NIL then :NIL
       else
-        error!(node, "UNKNOWN LITERAL!")
+        error!(node, :UNKNOWN_LITERAL)
       end
   end
 
@@ -3804,7 +3755,7 @@ private
     result = Type.binary_op(node.op, node.left.type_info, node.right.type_info)
 
     if result.error
-      error!(node, "Type Error: #{result.error}")
+      error!(node, :TYPE_ERROR_GENERIC, message: result.error)
     end
 
     node.full_type = result.type
@@ -3924,7 +3875,7 @@ private
     # Handle OR BREAK: error-to-break coercion (valid only inside loops)
     if node.right.is_a?(AST::OrBreak)
       if (current_fn_ctx&.loop_depth || @loop_depth) <= 0
-        error!(node, "OR BREAK can only be used inside a WHILE loop")
+        error!(node, :OR_BREAK_OUTSIDE_WHILE)
       end
       if t_left_type.error_union?
         node.full_type = t_left_type.payload_type.resolved
@@ -3951,7 +3902,7 @@ private
 
       # Type check: RHS must be compatible with payload type
       unless payload_type.accepts?(t_right_type) || t_right_type.accepts?(payload_type)
-        error!(node, "Type mismatch in OR: expected #{payload_type.resolved}, got #{t_right_type.resolved}")
+        error!(node, :TYPE_MISMATCH_IN_OR, expected: payload_type.resolved, got: t_right_type.resolved)
       end
 
       # Result is the payload type (error is handled)
@@ -3963,7 +3914,7 @@ private
     if t_left_type.optional?
       wrapped = t_left_type.wrapped_type
       unless wrapped.accepts?(t_right_type) || t_right_type.accepts?(wrapped)
-        error!(node, "Type mismatch in OR: expected #{wrapped.resolved}, got #{t_right_type.resolved}")
+        error!(node, :TYPE_MISMATCH_IN_OR, expected: wrapped.resolved, got: t_right_type.resolved)
       end
       node.full_type = wrapped.resolved
       return
@@ -4027,17 +3978,12 @@ private
     # out BEFORE the generic primitive-cap rejection so the user gets a
     # message that names the right migration path.
     if ti.primitive? && node.sync == :atomic && node.layout == :indirect
-      error!(node,
-        "@indirect:atomic is for STRUCTS. For primitive type #{base_type}, " \
-        "use `@shared:atomic` (the v0.2 primitive-as-cell form). The atomic " \
-        "primitive already fits in a single CAS-able machine word; @indirect " \
-        "would add a pointless heap indirection.")
+      error!(node, :INDIRECT_ATOMIC_PRIMITIVE, type: base_type)
     end
 
     if ti.primitive? && (node.ownership || node.sync || node.layout) && !is_atomic_primitive
       cap_name = node.sync || node.ownership || node.layout
-      error!(node, "Capability @#{cap_name} cannot be applied to primitive type #{base_type}. " \
-                   "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
+      error!(node, :CAPABILITY_ON_PRIMITIVE, cap: cap_name, type: base_type, hint: "Wrap in a STRUCT (e.g. STRUCT Wrapper { value: #{base_type} }) and apply the capability to the struct.")
     end
 
     # AtomicPtr M3.4: `@atomic` alone on a STRUCT is invalid; the struct
@@ -4047,11 +3993,7 @@ private
     # cell. Catch BEFORE downstream emission tries to lower
     # `*CheatLib.Atomic(SomeStruct)`, which has no defined backing.
     if !ti.primitive? && node.sync == :atomic && node.layout != :indirect
-      error!(node,
-        "@atomic on a STRUCT requires @indirect (publishes whole-T snapshots " \
-        "via atomic pointer swap). Use `#{base_type}{...} @indirect:atomic` " \
-        "instead. (For primitive cells like `Int64@shared:atomic`, atomic " \
-        "alone is correct -- those fit in a single CAS-able machine word.)")
+      error!(node, :STRUCT_ATOMIC_NEEDS_INDIRECT, type: base_type)
     end
 
     # AtomicPtr M3.4: `@local:indirect:atomic` and `@multiowned:indirect:atomic`
@@ -4061,16 +4003,9 @@ private
     # hood is the only valid ownership for the AtomicPtr cell.
     if node.sync == :atomic && node.layout == :indirect
       if node.ownership == :local
-        error!(node,
-          "@local:indirect:atomic is disallowed -- atomic without cross-thread " \
-          "visibility is pointless. Drop @local; @indirect:atomic implies " \
-          "cross-thread sharing.")
+        error!(node, :LOCAL_INDIRECT_ATOMIC)
       elsif node.ownership == :multiowned
-        error!(node,
-          "@multiowned:indirect:atomic is disallowed -- Rc isn't thread-safe " \
-          "(non-atomic refcount), so it can't back a cross-thread atomic-ptr " \
-          "cell. Drop @multiowned; @indirect:atomic uses Arc internally for " \
-          "the published-value lifetime.")
+        error!(node, :MULTIOWNED_INDIRECT_ATOMIC)
       end
     end
 
@@ -4123,7 +4058,7 @@ private
     visit(node.value)
 
     unless node.value.is_a?(AST::Identifier)
-      error!(node, "MOVE can only be applied to a variable identifier")
+      error!(node, :MOVE_NEEDS_IDENTIFIER)
     end
 
     ti = node.value.type_info
@@ -4137,7 +4072,7 @@ private
 
     is_copy = ti&.implicitly_copyable? { |t| lookup_type_schema(t) } rescue false
     unless ti&.multiowned? || ti&.shared? || ti&.requires_move? || is_resource || !is_copy
-      error!(node, "GIVE cannot be applied to Copy types (#{node.value.resolved_type} is implicitly copyable)")
+      error!(node, :GIVE_ON_COPY_TYPE, type: node.value.resolved_type)
     end
 
     # Inherit the capability type so the VarDecl or ReturnNode can infer storage correctly
@@ -4164,7 +4099,7 @@ private
   def ensure_owned_value!(val_node, expected_type, container_desc = nil)
     # Non-escaping values (WITH block aliases) cannot be stored in containers
     if val_node.is_a?(AST::Identifier) && val_node.symbol&.non_escaping
-      error!(val_node, "Cannot store WITH-scoped '#{val_node.name}' into #{container_desc || 'a container'}. WITH bindings cannot escape their block.")
+      error!(val_node, :STORE_WITH_SCOPED_INTO_CONTAINER, name: val_node.name, container: container_desc || 'a container')
     end
     return nil if val_node.is_a?(AST::CopyNode)
     vti = val_node.type_info
@@ -4197,7 +4132,7 @@ private
     end
 
     if vti.string? && val_node.is_a?(AST::Identifier) && container_desc
-      error!(val_node, "Cannot store string variable '#{val_node.name}' into #{container_desc} without COPY. Strings are frame-arena managed; use COPY for heap ownership.")
+      error!(val_node, :STORE_STRING_NEEDS_COPY, name: val_node.name, container: container_desc)
     end
 
     nil
@@ -4262,7 +4197,7 @@ private
     ti = node.value.type_info
 
     unless ti&.any_rc?
-      error!(node, "LINK can only be applied to @shared or @multiowned variables, got '#{node.value.resolved_type}'")
+      error!(node, :LINK_NEEDS_SHARED_OR_MULTIOWNED, got: node.value.resolved_type)
     end
 
     # Result is the same base type with :link ownership
@@ -4278,7 +4213,7 @@ private
     ti = node.value.type_info
 
     unless ti&.link?
-      error!(node, "RESOLVE can only be applied to @link variables, got '#{node.value.resolved_type}'")
+      error!(node, :RESOLVE_NEEDS_LINK, got: node.value.resolved_type)
     end
 
     # RESOLVE returns ?T@multiowned or ?T@shared.
@@ -4294,7 +4229,7 @@ private
     visit(node.value)
     ti = node.value.type_info
     unless ti&.multiowned? || ti&.shared?
-      error!(node, "FREEZE can only be applied to @multiowned or @shared values, got '#{node.value.resolved_type}'")
+      error!(node, :FREEZE_NEEDS_OWNED, got: node.value.resolved_type)
     end
     base = ti.resolved.to_s.sub(/^\?/, '')
     result_type = Type.new(base.to_sym)
@@ -4312,7 +4247,7 @@ private
     if !node.value.is_a?(AST::Identifier) &&
        !node.value.is_a?(AST::GetField) &&
        !node.value.is_a?(AST::GetIndex)
-      error!(node, "GIVE can only be used on variables, fields, or array elements")
+      error!(node, :GIVE_BAD_TARGET)
     end
 
     # Mark the original as moved
@@ -4330,7 +4265,7 @@ private
     # Validate that the type is actually copyable
     type = node.value.type_info
     unless type&.copyable? { |name| lookup_type_schema(name) }
-      error!(node, "Cannot COPY non-copyable type '#{node.value.resolved_type}'")
+      error!(node, :COPY_NON_COPYABLE, type: node.value.resolved_type)
     end
 
     node.full_type = node.value.resolved_type
@@ -4341,11 +4276,11 @@ private
     type = node.value.type_info
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
-      error!(node, "Cannot CLONE WITH-scoped '#{root.name}'. WITH bindings are protected borrows; use COPY to return owned data.")
+      error!(node, :CLONE_WITH_SCOPED, name: root.name)
     end
 
     unless type&.split_open_stream? || type&.shared_promise? || type&.any_rc?
-      error!(node, "CLONE is only supported on @split streams, @shared promises, and owned shared handles, got '#{node.value.resolved_type}'")
+      error!(node, :CLONE_BAD_TARGET, got: node.value.resolved_type)
     end
 
     node.full_type = node.value.full_type
@@ -4357,10 +4292,10 @@ private
     visit(node.value)
     source_type = node.value.type_info
     source_type = Type.new(source_type) if source_type && !source_type.is_a?(Type)
-    error!(node, "SHARE requires a typed value") unless source_type
+    error!(node, :SHARE_NEEDS_TYPED) unless source_type
     root = get_root_object(node.value)
     if root.is_a?(AST::Identifier) && root.symbol&.non_escaping
-      error!(node, "Cannot SHARE WITH-scoped '#{root.name}'. WITH bindings are protected borrows; use COPY to return owned data.")
+      error!(node, :SHARE_WITH_SCOPED, name: root.name)
     end
 
     result = Type.new(source_type, ownership: :shared)
@@ -4386,7 +4321,7 @@ private
     # Validate that the target is actually an optional type
     type = node.target.type_info
     unless type&.optional?
-      error!(node, "Cannot unwrap non-optional type '#{node.target.resolved_type}' with '?'")
+      error!(node, :UNWRAP_NON_OPTIONAL, got: node.target.resolved_type)
     end
 
     # The result type is the wrapped type (without the ?)
@@ -4428,25 +4363,14 @@ private
       has_versioned_arm = node.arms.any? { |arm| arm[:family] == :VERSIONED }
       mut_cap = node.capabilities.find { |c| c[:alias_mutable] }
       if has_versioned_arm && mut_cap
-        error!(node,
-          "WITH MATCH with `AS MUTABLE` and a VERSIONED arm is not " \
-          "supported: writes through a Versioned read-snapshot don't " \
-          "commit (silent data loss in the VERSIONED arm; only the " \
-          "LOCKED arm would mutate the live cell). For transactional " \
-          "mutation on a versioned cell use:\n" \
-          "    WITH SNAPSHOT #{mut_cap[:var_node].respond_to?(:name) ? mut_cap[:var_node].name : 'cell'} AS MUTABLE va " \
-          "{ ... } ON MvccConflict <action>\n" \
-          "and keep WITH MATCH for read-side polymorphism.")
+        error!(node, :WITH_MATCH_VERSIONED_AS_MUTABLE,
+          name: (mut_cap[:var_node].respond_to?(:name) ? mut_cap[:var_node].name : 'cell'))
       end
       if node.capabilities.length > 1
         names = node.capabilities.map { |c|
           c[:var_node].respond_to?(:name) ? c[:var_node].name : "<expr>"
         }.join(", ")
-        error!(node,
-          "WITH MATCH with multiple cells (#{names}) is not yet " \
-          "supported: lower_with_match_block emits the per-arm prelude " \
-          "for the first capability only. Split into separate WITH " \
-          "MATCH blocks (one per cell) until multi-cell dispatch lands.")
+        error!(node, :WITH_MATCH_MULTI_CELL, names: names)
       end
     end
 
@@ -4624,12 +4548,7 @@ private
       @snapshot_txn_violations = prev_violations
       unless txn_violations.empty?
         kinds = txn_violations.map { |v| EffectTracker.display(v[:effect]) }.uniq.join(", ")
-        error!(node,
-          "WITH SNAPSHOT ... AS MUTABLE body must be pure for atomicity, " \
-          "but the body has #{kinds} effect(s). Yielding the fiber breaks " \
-          "the EBR pin and atomicity guarantees; IO can't be rolled back " \
-          "if the transaction aborts. Move the impure work outside the " \
-          "transaction (read state via WITH SNAPSHOT, do IO, then commit).")
+        error!(node, :WITH_SNAPSHOT_BODY_NOT_PURE, kinds: kinds)
       end
     end
 
@@ -4789,13 +4708,7 @@ private
   def retryable_with_fallible_body_error!(node, with_name, sources)
     detail = sources.first(3).join(", ")
     detail += ", ..." if sources.length > 3
-    error!(node,
-      "#{with_name} body must be non-fallible for atomicity, " \
-      "but it contains fallible work (#{detail}). Retryable synchronization " \
-      "bodies may run more than once and cannot safely propagate user " \
-      "failures from inside the update callback. Move fallible work outside " \
-      "the WITH body, store the result in a local, then commit only " \
-      "non-fallible mutations inside the WITH.")
+    error!(node, :WITH_RETRYABLE_FALLIBLE_BODY, with_name: with_name, detail: detail)
   end
 
   def validate_lock_error_clause!(node, expanded_capabilities)
@@ -4845,11 +4758,7 @@ private
         node.lock_error_clause = synth
         clause = synth
       else
-        error!(node,
-               "WITH SNAPSHOT ... AS MUTABLE has no `ON #{target_error}` " \
-               "handler and the SYNC POLICY does not provide one. " \
-               "Either add `ON #{target_error} ...` at this WITH, or extend " \
-               "the program SYNC POLICY (a complete policy is mandatory).")
+        error!(node, :WITH_SNAPSHOT_NEEDS_HANDLER, error: target_error)
       end
     end
 
@@ -4863,11 +4772,7 @@ private
         s[:form] == :type && s[:name] == :MvccConflict
       }
       if bad_selector
-        error!(node,
-          "`ON MvccConflict` isn't valid on `@indirect:atomic`. " \
-          "AtomicPtr.update raises `AtomicConflict` (after 256 CAS " \
-          "losses), not `MvccConflict`. Use `ON AtomicConflict ...` " \
-          "instead, or drop the handler to fall back to the SYNC POLICY.")
+        error!(node, :WITH_ATOMIC_HANDLER_WRONG_ERROR)
       end
     end
 
@@ -4882,9 +4787,8 @@ private
       c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
     }
     unless has_fallible
-      error!(node, "ON / RETRY clause requires a WITH capability that can fail " \
-                   "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). " \
-                   "The declared capabilities never produce a lock-acquire error.")
+      error!(node, :ON_RETRY_NEEDS_FALLIBLE_CAP, hint: "(EXCLUSIVE on @locked/@writeLocked, or read on @writeLocked). " \
+             "The declared capabilities never produce a lock-acquire error.")
     end
 
     resolve_error_selectors!(node, clause, is_snapshot_txn)
@@ -4935,12 +4839,8 @@ private
     return unless sym.sync == :atomic
     return unless sym.respond_to?(:layout) && sym.layout == :indirect
 
-    error!(assignment_node,
-      "`@indirect:atomic` requires `WITH SNAPSHOT #{root.name} AS MUTABLE x { x.#{field_name_for_msg(field_node)} = ...; }` for mutation. " \
-      "Atomic pointer swap publishes a new whole-T snapshot, not a per-field write -- " \
-      "the `WITH SNAPSHOT` block clones the snapshot, mutates the clone, and CAS-publishes it. " \
-      "(This is different from primitive `@shared:atomic` Int64/Float64/Bool, which use direct " \
-      "ops like `c += 1` because they fit in a single CAS-able machine word.)")
+    error!(assignment_node, :INDIRECT_ATOMIC_FIELD_WRITE,
+      name: root.name, field: field_name_for_msg(field_node))
   end
 
   # Pull the leaf field name out of a GetField chain for the error
@@ -4983,14 +4883,7 @@ private
       "this WITH"
     end
 
-    error!(node,
-      "Multi-object WITH cannot admit ATOMIC: `#{var_name}` " \
-      "is (or could be) `@atomic` / `@indirect:atomic`, which gives no " \
-      "atomicity across cells. Either narrow the binding's REQUIRES to a " \
-      "non-ATOMIC family (e.g. `LOCKED | VERSIONED`, or just `VERSIONED` " \
-      "for cross-cell MVCC transactions), or refactor to single-cell " \
-      "WITH blocks. Per design contract docs/agents/atomicptr.md §4 + " \
-      "docs/agents/true-synchronization-polymorphism.md.")
+    error!(node, :WITH_MULTI_OBJECT_ATOMIC, name: var_name)
   end
 
   # True-Sync-Polymorphism (#333): a capability is "sync-constrained"
@@ -5057,20 +4950,12 @@ private
           if synth
             arm[:lock_error_clauses] = [synth]
           else
-            error!(node,
-              "WITH SNAPSHOT ... AS MUTABLE MATCH: VERSIONED arm has no " \
-              "`ON MvccConflict` handler and the SYNC POLICY does not " \
-              "provide one. Either add `WHEN VERSIONED -> { ... } " \
-              "ON MvccConflict ...`, or extend the program SYNC POLICY.")
+            error!(node, :WITH_SNAPSHOT_MATCH_VERSIONED_NEEDS_HANDLER)
           end
         end
       when :ATOMIC
         unless clauses.empty?
-          error!(node,
-            "WITH SNAPSHOT ... AS MUTABLE MATCH: ATOMIC arm forbids " \
-            "conflict handlers (AtomicPtr.update retries until success -- " \
-            "Rust `rcu` semantics; there's no conflict path to handle). " \
-            "Drop the trailing handler clause from the ATOMIC arm.")
+          error!(node, :WITH_SNAPSHOT_MATCH_ATOMIC_FORBIDS_HANDLER)
         end
       end
     end
@@ -5133,16 +5018,13 @@ private
     if clause[:retries]
       non_transient = matched.reject { |t| AST.kind_of_type(t) == :Transient }
       unless non_transient.empty?
-        error!(clause[:token] || node,
-               "RETRY only targets Transient errors. Non-retryable types in selector: " \
-               "#{non_transient.join(', ')}")
+        error!(clause[:token] || node, :RETRY_ONLY_TRANSIENT, types: non_transient.join(', '))
       end
     end
 
     overlap = matched & possible
     if overlap.empty?
-      error!(node, "Selectors [#{matched.join(', ')}] do not match " \
-                   "any error the WITH acquire can produce (#{possible.join(', ')}).")
+      error!(node, :SELECTORS_NO_MATCH, matched: matched.join(', '), possible: "any error the WITH acquire can produce (#{possible.join(', ')}).")
     end
 
     clause[:matched_types] = overlap
@@ -5159,14 +5041,13 @@ private
       branch[:capture_analysis] = full_analysis
 
       if branch[:parallel]
-        error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.") if full_analysis.has_local
-        error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.") if full_analysis.has_rc
+        error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if full_analysis.has_local
+        error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if full_analysis.has_rc
       end
 
       if full_analysis.has_non_escaping_capture
-        error!(node, "DO block captures a WITH-scoped (BORROWED/RESTRICT) binding. " \
-                     "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
-                     "Move the DO block outside the WITH block, or use COPY to get an owned value.")
+        error!(node, :DO_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
+               "Move the DO block outside the WITH block, or use COPY to get an owned value.")
       end
 
       analysis = (!branch[:pinned] && !branch[:parallel] && full_analysis.has_shared) ? full_analysis : nil
@@ -5197,12 +5078,12 @@ private
     @stream_yield_types     = prev_yield_types
 
     if yield_types.empty?
-      error!(node, "BG STREAM block has no YIELD statements. Use BG { } for a plain promise.")
+      error!(node, :BG_STREAM_NO_YIELD)
     end
 
     elem_syms = yield_types.map(&:resolved).uniq
     if elem_syms.size > 1
-      error!(node, "BG STREAM block yields inconsistent types: #{elem_syms.join(', ')}. All YIELD expressions must produce the same type.")
+      error!(node, :BG_STREAM_INCONSISTENT_YIELD, types: elem_syms.join(', '))
     end
 
     node.full_type = :"~?#{elem_syms.first}[]"
@@ -5216,9 +5097,8 @@ private
     node.capture_analysis = stream_analysis
 
     if stream_analysis.has_non_escaping_capture
-      error!(node, "BG STREAM block captures a WITH-scoped (BORROWED/RESTRICT) binding. " \
-                   "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
-                   "Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.")
+      error!(node, :BG_STREAM_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
+             "Move the BG STREAM block outside the WITH block, or use COPY to get an owned value.")
     end
   end
 
@@ -5247,7 +5127,7 @@ private
 
   def visit_YieldExpr(node)
     unless @current_stream_context
-      error!(node, "YIELD can only be used inside a BG STREAM { } block.")
+      error!(node, :YIELD_OUTSIDE_BG_STREAM)
     end
     visit(node.expr)
     node.full_type = node.expr.full_type || :Void
@@ -5303,7 +5183,7 @@ private
     if node.arena_mode
       node.pinned = true
       if node.parallel
-        error!(node, "@arena cannot be combined with @parallel — arena memory is thread-local and cannot be stolen.")
+        error!(node, :BG_ARENA_AND_PARALLEL)
       end
     end
 
@@ -5314,16 +5194,15 @@ private
 
     # Validate: @local in @parallel, @rc in @parallel
     if node.parallel
-      error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.") if full_analysis.has_local
-      error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.") if full_analysis.has_rc
+      error!(node, :LOCAL_VAR_NOT_IN_PARALLEL) if full_analysis.has_local
+      error!(node, :MULTIOWNED_NOT_IN_PARALLEL) if full_analysis.has_rc
     end
 
     # WITH-scoped (BORROWED/RESTRICT) bindings cannot escape into fibers.
     # The fiber may outlive the WITH block, turning the alias into a dangling pointer.
     if full_analysis.has_non_escaping_capture
-      error!(node, "BG block captures a WITH-scoped (BORROWED/RESTRICT) binding. " \
-                   "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
-                   "Move the BG block outside the WITH block, or use COPY to get an owned value.")
+      error!(node, :BG_CAPTURES_WITH_SCOPED, hint: "WITH bindings are stack aliases that become invalid when the WITH block exits. " \
+             "Move the BG block outside the WITH block, or use COPY to get an owned value.")
     end
 
     # Auto-pin detection
@@ -5331,9 +5210,8 @@ private
 
     # Safety: pinned scope → child BG must also be pinned if it captures outer vars.
     if @current_bg_pinned && !node.pinned && captures_outer_variables?(node.body, locally_bound)
-      error!(node, "BG block inside @pinned scope captures local variables but is not @pinned. " \
-                   "Thread-local memory cannot escape to a stealable fiber. " \
-                   "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
+      error!(node, :BG_PINNED_CAPTURE_MISMATCH, hint: "Thread-local memory cannot escape to a stealable fiber. " \
+             "Add @pinned to this BG block, or avoid capturing variables from the pinned scope.")
     end
 
     # Auto-pin when shared state is captured (uses result from validate_fiber_captures!).
@@ -5399,7 +5277,7 @@ private
     promise_type = Type.new(node.expr.full_type || :Void)
 
     unless promise_type.future?
-      error!(node, "NEXT requires a future value (~T), got #{node.expr.full_type}")
+      error!(node, :NEXT_NEEDS_FUTURE, got: node.expr.full_type)
     end
 
     # NEXT awaits a promise/stream — always a fiber suspension point.
@@ -5530,7 +5408,7 @@ private
         true
       end
       if needs_move
-        error!(node, "Cannot move WITH-scoped '#{node.value.name}'. WITH bindings cannot escape their block.")
+        error!(node, :MOVE_WITH_SCOPED, name: node.value.name)
       end
     end
     if node.value.is_a?(AST::GetField) || node.value.is_a?(AST::GetIndex)
@@ -5546,7 +5424,7 @@ private
           if container
             source_name = root_variable_name(node.value)
             if source_name && @og[source_name]&.kind == :borrowed
-              error!(node, "Cannot move borrowed value from '#{source_name}' (container index is a borrow). Use COPY for an explicit deep-copy.")
+              error!(node, :MOVE_BORROWED_INDEX, source: source_name)
             end
           end
         end
@@ -5572,7 +5450,7 @@ private
     if !is_copy && (type_obj.requires_move? || rhs_info&.resource)
       # Cannot move a borrowed value (non-TAKES parameter).
       if @og[rhs_name]&.kind == :borrowed
-        error!(node, "Cannot move borrowed value '#{rhs_name}'. Parameters are implicit borrows unless TAKES.")
+        error!(node, :MOVE_BORROWED_PARAM, name: rhs_name)
       end
       lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : node.name.to_s
       # Track the move site at the RHS identifier's token so
@@ -5597,12 +5475,12 @@ private
 
     root_var = path.first.to_s
     borrowed_scope = lookup_scope_for(root_var)
-    error!(node, "Variable not found") if borrowed_scope.nil?
+    error!(node, :BORROWED_VAR_NOT_FOUND) if borrowed_scope.nil?
     return if borrowed_scope.is_immutable?(root_var)
 
     lhs_name = node.name.is_a?(AST::Identifier) ? node.name.name : "__borrow_#{root_var}"
     err = @og.borrow(lhs_name, root_var, mutable: node.mutable)
-    error!(node, "Lifetime Error: '#{root_var}' (or part of it) is already borrowed.") if err
+    error!(node, :LIFETIME_ALREADY_BORROWED, name: root_var) if err
   end
 
   # Returns the AST node of the argument the return value borrows from, or nil.
@@ -5661,7 +5539,7 @@ private
     return if path.nil?
     root_name = path.first.to_s
     unless @og.can_write?(root_name)
-      error!(node, "Lifetime Error: Cannot assign to '#{root_name}' because it is currently borrowed.")
+      error!(node, :ASSIGN_WHILE_BORROWED, name: root_name)
     end
   end
 
@@ -5706,25 +5584,25 @@ private
     then_result = if_node.then_result_type
 
     unless then_result
-      error!(if_node, "IF expression: THEN branch must end with a value expression")
+      error!(if_node, :IF_EXPR_THEN_NEEDS_VALUE)
     end
     unless else_result
       if if_node.else_branch.nil? || if_node.else_branch.empty?
-        error!(if_node, "IF used as expression requires an ELSE branch")
+        error!(if_node, :IF_EXPR_NEEDS_ELSE)
       else
-        error!(if_node, "IF expression: ELSE branch must end with a value expression")
+        error!(if_node, :IF_EXPR_ELSE_NEEDS_VALUE)
       end
     end
 
     t1 = then_result.string? ? :String : then_result.resolved
     t2 = else_result.string? ? :String : else_result.resolved
     unless t1 == t2 || t1 == :Any || t2 == :Any
-      error!(if_node, "IF expression branches have incompatible types: THEN returns #{t1}, ELSE returns #{t2}")
+      error!(if_node, :IF_EXPR_BRANCHES_INCOMPATIBLE, then_type: t1, else_type: t2)
     end
 
     result_type = (t1 == :Any) ? else_result : then_result
     unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
-      error!(if_node, "IF expression result type '#{result_type.resolved}' must be implicitly copyable (primitive, symbol, or rodata string). Use statement-IF with RETURN for heap-allocated values.")
+      error!(if_node, :IF_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
     end
 
     if_node.expr_mode = true
@@ -5739,7 +5617,7 @@ private
     # All case bodies must produce values
     case_types.each_with_index do |t, i|
       unless t
-        error!(match_node, "MATCH expression: every branch must end with a value expression")
+        error!(match_node, :MATCH_EXPR_BRANCH_NEEDS_VALUE)
       end
     end
 
@@ -5749,27 +5627,24 @@ private
     # already verified all variants are covered) so the implicit return
     # value is always defined.
     if !default_type && !match_node.exhaustive
-      error!(match_node,
-        "PARTIAL MATCH used in expression position requires a DEFAULT " \
-        "branch. Either add a DEFAULT case, or change to `MATCH` " \
-        "(which forces every variant to have an exact case).")
+      error!(match_node, :PARTIAL_MATCH_EXPR_NEEDS_DEFAULT)
     end
 
     all_types = case_types.compact
     all_types << default_type if default_type
 
     if all_types.empty?
-      error!(match_node, "MATCH expression must have at least one case")
+      error!(match_node, :MATCH_EXPR_NEEDS_CASE)
     end
 
     resolved_types = all_types.map { |t| t.string? ? :String : t.resolved }.uniq.reject { |t| t == :Any }
     if resolved_types.size > 1
-      error!(match_node, "MATCH expression branches have incompatible types: #{resolved_types.join(', ')}")
+      error!(match_node, :MATCH_EXPR_BRANCHES_INCOMPATIBLE, types: resolved_types.join(', '))
     end
 
     result_type = all_types.first
     unless result_type.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
-      error!(match_node, "MATCH expression result type '#{result_type.resolved}' must be implicitly copyable (primitive, symbol, or rodata string). Use statement-MATCH for heap-allocated values.")
+      error!(match_node, :MATCH_EXPR_RESULT_NOT_COPYABLE, type: result_type.resolved)
     end
 
     match_node.expr_mode = true
@@ -5793,7 +5668,7 @@ private
       when :affine
         t = Type.new(info.type)
         if t.future? && !t.stream? && !t.shared_promise? && !t.promise_list?
-          error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
+          error!(node, :PROMISE_NOT_CONSUMED, name: name)
         end
         drops << { name: name, type: info.type }
         og_drop(name)
@@ -5849,7 +5724,7 @@ private
       when :affine
         t = Type.new(info.type)
         if node && t.future? && !t.stream? && !t.shared_promise? && !t.promise_list?
-          error!(node, "Promise '#{name}' must be consumed before it goes out of scope. Use NEXT, COLLECT, or RETURN it.")
+          error!(node, :PROMISE_NOT_CONSUMED, name: name)
         end
         drops << { name: name, type: info.type }
         og_drop(name)
@@ -5925,7 +5800,7 @@ private
         fixable!(assign_node, message: msg, category: :escape,
                  level: :error, fixes: [fix], raise_in_collector: true)
       else
-        error!(assign_node, msg)
+        error!(assign_node, :ATOMIC_ESCAPE_ASSIGN, message: msg)
       end
     end
   end
@@ -5998,7 +5873,7 @@ private
       fixable!(return_node, message: msg, category: :escape,
                level: :error, fixes: [atomic_fix], raise_in_collector: true)
     else
-      error!(return_node, msg)
+      error!(return_node, :ATOMIC_ESCAPE_RETURN, message: msg)
     end
   end
 
@@ -6207,19 +6082,17 @@ private
     blessed_ids = blessed.map(&:object_id).to_set
 
     if blessed.empty?
-      error!(fn_node, "EFFECTS REENTRANT:TAIL_CALL on '#{fn_name}' requires at least one " \
-                       "RETURN that directly calls '#{fn_name}' in tail position " \
-                       "(e.g., RETURN #{fn_name}(...)). The recursive call cannot be " \
-                       "wrapped in an expression.")
+      error!(fn_node, :TAIL_CALL_NEEDS_RECURSIVE, fn: fn_name, hint: "RETURN that directly calls '#{fn_name}' in tail position " \
+             "(e.g., RETURN #{fn_name}(...)). The recursive call cannot be " \
+             "wrapped in an expression.")
     end
 
     all_self_calls.each do |call|
       next if blessed_ids.include?(call.object_id)
-      error!(call, "EFFECTS REENTRANT:TAIL_CALL: '#{fn_name}' is called in non-tail position. " \
-                    "All recursive self-calls must be the ENTIRE return expression (e.g., " \
-                    "RETURN #{fn_name}(...)). Non-tail recursion would consume the fiber " \
-                    "stack on every invocation. If recursion is genuinely non-tail, declare " \
-                    "':THUNK' instead -- it handles arbitrary recursion via a heap state-struct.")
+      error!(call, :TAIL_CALL_NOT_TAIL_POSITION, fn: fn_name, hint: "All recursive self-calls must be the ENTIRE return expression (e.g., " \
+             "RETURN #{fn_name}(...)). Non-tail recursion would consume the fiber " \
+             "stack on every invocation. If recursion is genuinely non-tail, declare " \
+             "':THUNK' instead -- it handles arbitrary recursion via a heap state-struct.")
     end
   end
 
@@ -6311,13 +6184,7 @@ private
   # `:NOT_LOGICAL` / `:MAX_DEPTH(N)`) on the callee.
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
     if can_smash
-      error!(node,
-        "`@canSmash` on BG/DO blocks is recognized but not yet supported by the " \
-        "compiler. The runtime has stack-hysteresis (page-guarded soft overflow " \
-        "detection) to protect fiber stacks, but the compiler does not yet wire " \
-        "that feature on. Use `@service` instead (spawns on a dedicated OS thread " \
-        "with a 2 MB pre-allocated stack); `@canSmash` is expected to be supported " \
-        "in v0.3.")
+      error!(node, :CAN_SMASH_NOT_SUPPORTED)
       return
     end
 
@@ -6338,11 +6205,10 @@ private
     if raw == :unbounded && user_size != :service
       mutual_md_callee = find_mutual_max_depth_callee(call_names)
       if mutual_md_callee
-        error!(node, "Stack safety: this fiber transitively calls '#{mutual_md_callee}' " \
-                     "which is `:MAX_DEPTH(N)` AND mutually recursive. Mutual depth-bounds " \
-                     "compose as a product across counters and can't be statically bounded; " \
-                     "the spawn site must be `@service` (OS thread). Either declare `@service` " \
-                     "explicitly or break the cycle (see `:THUNK` for unbounded-depth fibers).")
+        error!(node, :STACK_SAFETY_MUTUAL_RECURSION, callee: mutual_md_callee, hint: "which is `:MAX_DEPTH(N)` AND mutually recursive. Mutual depth-bounds " \
+               "compose as a product across counters and can't be statically bounded; " \
+               "the spawn site must be `@service` (OS thread). Either declare `@service` " \
+               "explicitly or break the cycle (see `:THUNK` for unbounded-depth fibers).")
         return
       end
     end
@@ -6356,11 +6222,10 @@ private
 
     # User-specified size too small
     if user_size && TIER_ORDER.fetch(user_size, 0) < TIER_ORDER.fetch(computed, 0)
-      error!(node, "Stack safety: @#{user_size} (#{EffectTracker::STACK_TIER_BUDGET[user_size]} bytes) " \
-                   "is too small for this fiber. Call-graph analysis requires at least @#{computed}. " \
-                   "Use @#{computed} (or @service for OS-thread). " \
-                   "(`@canSmash` is reserved for v0.3 -- runtime stack-hysteresis is implemented " \
-                   "but not yet wired through the compiler.)")
+      error!(node, :STACK_SAFETY_USER_SIZE_TOO_SMALL, size: user_size, budget: EffectTracker::STACK_TIER_BUDGET[user_size], hint: "is too small for this fiber. Call-graph analysis requires at least @#{computed}. " \
+             "Use @#{computed} (or @service for OS-thread). " \
+             "(`@canSmash` is reserved for v0.3 -- runtime stack-hysteresis is implemented " \
+             "but not yet wired through the compiler.)")
     end
   end
 
@@ -6438,7 +6303,7 @@ private
       )
     end
 
-    return error!(node, msg) if fixes.empty?
+    return error!(node, :STACK_NEEDS_SERVICE_FIXABLE, message: msg) if fixes.empty?
 
     fixable!(node, message: msg, category: :reentrance, level: :error,
              fixes: fixes, raise_in_collector: false)
@@ -6545,7 +6410,7 @@ private
     return if current_fn_ctx&.type_params&.include?(vti&.resolved)
     has_pointer = vti&.array? || vti&.string? || vti&.collection? || vti&.map?
     return if !has_pointer && !vti&.struct?
-    error!(val_node, "Cannot store borrowed value '#{borrowed_name}' into #{container_desc}. Use COPY for an explicit deep-copy.")
+    error!(val_node, :STORE_BORROWED_INTO_CONTAINER, name: borrowed_name, container: container_desc)
   end
   def og_set_live(name)  = (@og[name]&.state = :live)
   def og_drop(name)      = @og.drop(name)

@@ -162,7 +162,7 @@ module FunctionAnalysis
         args.each do |arg|
           ti = arg.type_info rescue nil
           if ti&.respond_to?(:soa?) && ti.soa?
-            error!(arg, "@soa collections cannot be passed to EXTERN FN — SOA memory layout is incompatible with C ABI. Materialize to a regular array first.")
+            error!(arg, :SOA_TO_EXTERN_FN)
           end
         end
         # Comptime params: extract type args from arguments in comptime positions.
@@ -266,7 +266,7 @@ module FunctionAnalysis
       node.full_type = func_type
 
     else
-      error!(node, "Cannot call '#{func_name}' - not a function")
+      error!(node, :NOT_A_FUNCTION, name: func_name)
     end
 
     # Tag calls that return collections (direct or via struct fields) so the
@@ -341,9 +341,9 @@ module FunctionAnalysis
     # A. Arity Check (Count)
     if given_args < min_args || given_args > max_args
       if min_args == max_args
-        error!(node, :ARITY_MISMATCH, node.name, min_args, given_args)
+        error!(node, :ARITY_MISMATCH, name: node.name, expected: min_args, got: given_args)
       else
-        error!(node, :ARITY_MISMATCH_RANGE, node.name, min_args, max_args, given_args)
+        error!(node, :ARITY_MISMATCH_RANGE, name: node.name, min: min_args, max: max_args, got: given_args)
       end
     end
 
@@ -377,7 +377,7 @@ module FunctionAnalysis
       if param[:mutable]
         # Rule 1: Must be a Variable (Identifier), not a literal/expression
         if !arg_node.is_a?(AST::Identifier)
-          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, i+1, param[:name])
+          error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_EXPRESSION, index: i+1, param: param[:name])
         end
 
         # Rule 2: The Variable being passed must be MUTABLE
@@ -421,8 +421,7 @@ module FunctionAnalysis
           arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
           is_copy = arg_ti&.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
           unless is_copy
-            error!(inner_node, "Cannot pass container index access to TAKES parameter. " \
-              "Index access returns a borrow. Use .remove(i) to take ownership, or COPY to deep-copy.")
+            error!(inner_node, :TAKES_NEEDS_OWNED_INDEX)
           end
         end
 
@@ -450,7 +449,7 @@ module FunctionAnalysis
         param_type_obj = expected_raw.is_a?(Type) ? expected_raw : nil
         unless param_type_obj&.link?
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node, "Cannot pass @link variable '#{arg_name}' to parameter '#{param[:name]}' — RESOLVE it first to get an optional strong reference.")
+          error!(arg_node, :LINK_NEEDS_RESOLVE_FOR_CALL, name: arg_name, param: param[:name])
         end
       end
 
@@ -471,10 +470,7 @@ module FunctionAnalysis
         elsif actual_type_obj.is_a?(Type) && actual_type_obj.fn_type? &&
               actual_type_obj.raw[:reentrant] && !expected_type_obj.raw[:reentrant]
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node,
-            "Reentrancy Error: '#{arg_name}' is @reentrant but parameter '#{param[:name]}' " \
-            "does not accept @reentrant functions. " \
-            "Declare the parameter type as 'FN(...) -> Type @reentrant' to allow this.")
+          error!(arg_node, :REENTRANT_FN_TO_NON_REENTRANT_PARAM, name: arg_name, param: param[:name])
         end
       end
 
@@ -488,9 +484,9 @@ module FunctionAnalysis
       if explicit_primitive_atomic_param?(expected_type_obj)
         unless atomic_cell_arg?(arg_node)
           arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-          error!(arg_node,
-            "Type Error: Argument #{i + 1} to '#{node.name}' expects an @atomic #{expected_type_obj.resolved} cell, " \
-            "but '#{arg_name}' is #{actual_type_obj.resolved}. Pass an @atomic binding, or change the parameter to bare #{expected_type_obj.resolved} to load a value.")
+          error!(arg_node, :ARG_NEEDS_ATOMIC_CELL,
+            index: i + 1, fn: node.name, expected: expected_type_obj.resolved,
+            name: arg_name, actual: actual_type_obj.resolved)
         end
         arg_node.atomic_borrow = true if arg_node.respond_to?(:atomic_borrow=)
       end
@@ -507,9 +503,8 @@ module FunctionAnalysis
           else
             " Use SHARE <expr> to create a shared handle."
           end
-          error!(arg_node,
-            "Type Error: Argument #{i + 1} to '#{node.name}' expects #{expected_type_obj} @shared, " \
-            "got #{actual_type_obj}.#{hint}")
+          error!(arg_node, :ARG_NEEDS_SHARED,
+            index: i + 1, fn: node.name, expected: expected_type_obj, actual: actual_type_obj, hint: hint)
         end
         match = true if expected_type_obj.resolved == actual_type_obj.resolved
       end
@@ -537,7 +532,7 @@ module FunctionAnalysis
 
       unless match
         arg_name = arg_node.respond_to?(:name) ? arg_node.name : "Expression"
-        error!(arg_node, :ARGUMENT_TYPE_ERROR, arg_name, i+1, expected, actual)
+        error!(arg_node, :ARGUMENT_TYPE_ERROR, fn: arg_name, index: i+1, expected: expected, got: actual)
       end
 
       # E. Check for Alias overlap (i.e. swap(x, x) -> ERROR!)
@@ -552,12 +547,8 @@ module FunctionAnalysis
         # 2. The paths overlap (e.g. "x" overlaps "x.child", "x" overlaps "x")
         if (is_mutable || prev[:mutable]) && paths_overlap?(current_path, prev[:path])
 
-          error!(
-            arg_node,
-            "Aliasing Error: Argument #{i+1} ('#{arg_node.name rescue 'arg'}') conflicts with argument #{prev_index+1}.\n" \
-            "Cannot pass the same variable defined at '#{current_path.first}' twice if one usage is MUTABLE.\n" \
-            "This violates exclusive mutability."
-          )
+          error!(arg_node, :ARG_ALIAS_CONFLICT,
+            index: i+1, name: (arg_node.name rescue 'arg'), other_index: prev_index+1, path: current_path.first)
         end
       end
 
@@ -627,7 +618,7 @@ module FunctionAnalysis
     return true if !arg_node.is_a?(AST::Identifier)
 
     if param[:mutable] && !@og.can_write?(arg_node.name)
-      error!(arg_node, "Lifetime Error: Cannot pass '#{arg_node.name}' as mutable argument because it is currently RESTRICTed.")
+      error!(arg_node, :MUTABLE_ARG_RESTRICTED, name: arg_node.name)
     end
 
     # Atomics M2.4 / M2.5: signature[:return][:lifetime] is now an
@@ -650,7 +641,7 @@ module FunctionAnalysis
     end
     return true unless base_paths.include?(:wildcard) || base_paths.include?(param[:name])
 
-    error!(arg_node, "Lifetime Error: param `#{param[:name]}` is mutable, must be RESTRICTed before it can be borrowed.")
+    error!(arg_node, :MUTABLE_PARAM_NEEDS_RESTRICT, name: param[:name])
   end
 
   # Atomics M2.4 / M2.5: validate `RETURNS <lifetime>:T`.
@@ -716,15 +707,9 @@ module FunctionAnalysis
       next unless families.is_a?(Set) && families.size > 1
       next unless families.include?(:ATOMIC)
       others = families - Set[:ATOMIC]
-      error!(node,
-        "Lifetime Error: function '#{node.name}' declares `RETURNS " \
-        "#{root_name}:T` AND `REQUIRES #{root_name}: ATOMIC | #{others.to_a.join(' | ')}`. " \
-        "The returned value's lifetime model differs by family: ATOMIC " \
-        "is a bare pointer to a scope-bounded cell (M2.2), while " \
-        "#{others.to_a.join(' / ')} is reference-counted via Arc. The " \
-        "compiler can't pick one lifetime story at the declaration site. " \
-        "Either split into two functions (one per family) or drop the " \
-        "ATOMIC family from REQUIRES.")
+      error!(node, :LIFETIME_RETURNS_REQUIRES_FAMILY_CONFLICT,
+        fn: node.name, name: root_name,
+        others: others.to_a.join(' | '), others_label: others.to_a.join(' / '))
     end
   end
 
@@ -734,7 +719,7 @@ module FunctionAnalysis
     param = node.params.find { |p| p[:name] == root_param_name }
 
     if param.nil?
-      error!(node, "Lifetime Error: Scoped lifetime '#{root_param_name}' is not a parameter.")
+      error!(node, :LIFETIME_ROOT_NOT_PARAM, name: root_param_name)
     end
 
     # Extract the resolved type name (Type objects from parse_type_annotation)
@@ -749,14 +734,14 @@ module FunctionAnalysis
       schema = current_scope.resolve_type_definition(current_type_name)
 
       if schema.nil?
-        error!(node, "Lifetime Error: Type '#{current_type_name}' is not a struct, cannot access field '#{field_name}'.")
+        error!(node, :LIFETIME_NOT_A_STRUCT, type: current_type_name, field: field_name)
       end
 
       # Check if the field exists in the schema
       next_type = schema[field_name] || schema[field_sym] # handle string/sym keys
 
       if next_type.nil?
-        error!(node, "Lifetime Error: Type '#{current_type_name}' has no field '#{field_name}'.")
+        error!(node, :LIFETIME_NO_FIELD, type: current_type_name, field: field_name)
       end
 
       # Advance to the next type name (Type objects carry the resolved name)
@@ -773,7 +758,7 @@ module FunctionAnalysis
           param_type_sym = param[:type].is_a?(Symbol) ? param[:type] : param[:type].to_sym rescue nil
           schema = lookup_type_schema(param_type_sym) if param_type_sym
           unless schema.is_a?(Hash) && !schema[:kind]
-            error!(node, "Type Error: DEFAULT can only be used for struct-type parameters, not '#{param[:type]}'")
+            error!(node, :DEFAULT_NEEDS_STRUCT_PARAM, type: param[:type])
           end
           # Validate all fields of the struct have defaults
           field_names = schema.keys.reject { |k| k.is_a?(Symbol) }
@@ -781,7 +766,7 @@ module FunctionAnalysis
             field_defaults = schema[:field_defaults] || {}
             missing = field_names.reject { |f| field_defaults.key?(f) }
             if missing.any?
-              error!(node, "Type Error: DEFAULT for '#{param[:name]}' requires '#{param[:type]}' to have defaults for all fields; missing: #{missing.join(', ')}")
+              error!(node, :DEFAULT_STRUCT_MISSING_DEFAULTS, name: param[:name], type: param[:type], missing: missing.join(', '))
             end
           end
           param[:default].full_type = param[:type].to_sym rescue param[:type]
@@ -790,7 +775,7 @@ module FunctionAnalysis
           def_type = param[:default].resolved_type
           param_type = param[:type]
           unless is_safe_autocast?(def_type, param_type)
-            error!(node, "Type Error: Default value for '#{param[:name]}' expects #{param_type}, got #{def_type}")
+            error!(node, :DEFAULT_VALUE_TYPE_MISMATCH, name: param[:name], expected: param_type, got: def_type)
           end
         end
       end
@@ -891,14 +876,14 @@ module FunctionAnalysis
       cap_name = cap[:name]
 
       if cap[:default]
-        error!(node, "Captures cannot have default values: '#{cap_name}'")
+        error!(node, :CAPTURE_NO_DEFAULT, name: cap_name)
       end
 
       if !current_scope.locals.key?(cap_name)
         # Check if it's in a higher scope
         owner_scope = lookup_scope_for(cap_name)
         if owner_scope.nil?
-           error!(node, "Cannot capture undefined variable '#{cap_name}'")
+           error!(node, :CAPTURE_UNDEFINED_VAR, name: cap_name)
         end
       else
         # Local capture
@@ -908,7 +893,7 @@ module FunctionAnalysis
       entry = owner_scope.locals[cap_name]
 
       if cap[:mutable] && !entry.mutable
-        error!(node, "Cannot capture immutable variable '#{cap_name}' as MUTABLE")
+        error!(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name)
       end
 
       # Mark the captured variable as used in its declaring scope.
@@ -944,7 +929,7 @@ module FunctionAnalysis
         (t.start_with?("Byte[") || t == "String") ? :String : r[:type]
       }.uniq.size
       if declared_return != :Any && normalized > 1
-        error!(node, "Ambiguous Return: Function returns multiple types #{found_returns}, specify :Any as type")
+        error!(node, :AMBIGUOUS_RETURN, types: found_returns)
       end
     end
   end
@@ -986,11 +971,7 @@ module FunctionAnalysis
     is_type_param = fn_type_params.include?(type_info&.resolved)
 
     unless has_lifetime || is_copyable || is_type_param
-      error!(
-        node,
-        "Cannot return borrowed value without COPY or a lifetime annotation.\n" \
-        "Type '#{node.full_type}' is not implicitly copyable."
-      )
+      error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, type: node.full_type)
     end
 
     return true unless has_lifetime
@@ -1021,12 +1002,8 @@ module FunctionAnalysis
       sources_msg = lifetime_paths.size == 1 ?
         "derived from: #{lifetime_paths.first}" :
         "derived from one of: #{lifetime_paths.join(' | ')}"
-      error!(
-        node,
-        "Lifetime Error:\n" \
-        "  Expected return #{sources_msg}\n" \
-        "  Actual return derived from:   #{actual_path.join('.')}"
-      )
+      error!(node, :RETURN_LIFETIME_MISMATCH,
+        sources_msg: sources_msg, actual: actual_path.join('.'))
     end
   end
 

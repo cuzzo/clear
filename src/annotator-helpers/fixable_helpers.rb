@@ -101,7 +101,7 @@ module FixableHelper
       )
     end
 
-    return error!(token, message) if fixes.empty?
+    return error!(token, :REGISTRY_MISMATCH_REJECTED, message: message) if fixes.empty?
 
     fixable!(token, message: message, category: :registry, level: :error, fixes: fixes)
   end
@@ -138,7 +138,7 @@ module FixableHelper
       )
     end
 
-    return error!(token, message) if fixes.empty?
+    return error!(token, :TYPO_SUGGESTION_REJECTED, message: message) if fixes.empty?
 
     fixable!(token, message: message, category: category, level: :error,
              fixes: fixes, raise_in_collector: cascade)
@@ -195,7 +195,7 @@ module FixableHelper
       )
     end
 
-    return error!(anchor, message) if fixes.empty?
+    return error!(anchor, :TYPO_SUGGESTION_REJECTED, message: message) if fixes.empty?
 
     fixable!(anchor, message: message, category: :type, level: :error,
              fixes: fixes, raise_in_collector: cascade)
@@ -218,8 +218,8 @@ module FixableHelper
   # diagnostic still surfaces.
   def emit_use_of_moved_error!(use_node, og_node)
     name = use_node.name.to_s
-    return error!(use_node, "Use of moved value '#{name}'") unless og_node
-    return error!(use_node, "Use of moved value '#{name}'") unless og_node.move_line && og_node.move_col
+    return error!(use_node, :USE_OF_MOVED_VALUE, name: name) unless og_node
+    return error!(use_node, :USE_OF_MOVED_VALUE, name: name) unless og_node.move_line && og_node.move_col
 
     fixes = []
     move_action = ownership_move_action_label(og_node.move_action)
@@ -313,12 +313,13 @@ module FixableHelper
   end
 
   def emit_int_overflow_error!(node, val, target_type, min, max)
+    overflow_kw = { val: val, type: target_type, min: min, max: max }
     msg = "Integer literal (#{val}) overflows #{target_type} (range #{min}..#{max})"
     tok = node.respond_to?(:token) ? node.token : nil
-    return error!(node, msg) unless tok && @source_code
+    return error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw) unless tok && @source_code
 
     best = smallest_fitting_int_type(val)
-    return error!(node, msg) unless best
+    return error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw) unless best
 
     line_text = @source_code.lines[tok.line - 1] || ''
 
@@ -358,7 +359,7 @@ module FixableHelper
       end
     end
 
-    error!(node, msg)
+    error!(node, :INT_LITERAL_OVERFLOW, **overflow_kw)
   end
 
   def emit_overflow_suffix_fix!(node, msg, tok, suffix_col, old_suffix, new_suffix, val)
@@ -428,7 +429,7 @@ module FixableHelper
   # column.
   def emit_immutable_assignment_error!(node, scope)
     fix = build_declare_mutable_fix(node.name, scope)
-    return error!(node, "Variable '#{node.name}' is immutable") unless fix
+    return error!(node, :IMMUTABLE_ASSIGNMENT, name: node.name) unless fix
     fixable!(node,
       message: "Variable '#{node.name}' is immutable",
       category: :ownership,
@@ -441,10 +442,10 @@ module FixableHelper
   # declare the passed variable MUTABLE at its binding site.
   def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name)
     fix = build_declare_mutable_fix(arg_node.name, scope)
-    msg = "Argument #{arg_idx} ('#{param_name}') is MUTABLE, but you passed immutable variable '#{arg_node.name}'."
-    return error!(arg_node, msg) unless fix
+    kw = { index: arg_idx, param: param_name, actual: arg_node.name }
+    return error!(arg_node, :IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw) unless fix
     fixable!(arg_node,
-      message: msg,
+      message: DiagnosticRegistry.format(:IMMUTABLE_ARG_PASSED_AS_MUTABLE, **kw),
       category: :ownership,
       level: :error,
       fixes: [fix],

@@ -504,7 +504,7 @@ module EffectTracker
         )]
         fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
       else
-        error!(fn_node, message)
+        error!(fn_node, :PURITY_VIOLATION, message: message)
       end
     end
   end
@@ -929,20 +929,20 @@ module EffectTracker
       # Don't descend into nested function definitions.
     when AST::FuncCall
       if node.respond_to?(:extern_call) && node.extern_call
-        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
+        error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
       fn = @fn_nodes[node.name]
       if fn&.reentrant == :reentrant
-        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
+        error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
       node.args&.each { |a| validate_tight_node!(a, loop_node) }
     when AST::MethodCall
       if node.respond_to?(:extern_call) && node.extern_call
-        error!(loop_node, "TIGHT loop cannot call EXTERN FN '#{node.name}' (opaque to scheduler)")
+        error!(loop_node, :TIGHT_CALLS_EXTERN_FN, name: node.name)
       end
       fn = @fn_nodes[node.name]
       if fn&.reentrant == :reentrant
-        error!(loop_node, "TIGHT loop cannot call @reentrant function '#{node.name}'")
+        error!(loop_node, :TIGHT_CALLS_REENTRANT_FN, name: node.name)
       end
       validate_tight_node!(node.respond_to?(:object) ? node.object : nil, loop_node)
       node.args&.each { |a| validate_tight_node!(a, loop_node) }
@@ -1010,8 +1010,7 @@ module EffectTracker
 
         if callee == fn_name
           @fn_direct_effects[fn_name]&.add(EffectTracker::REENTRANT)
-          error!(node, "Reentrancy Error: '#{fn_name}' is part of a mutually recursive call cycle. " \
-                       "Add @reentrant or @nonReentrant to the function signature.")
+          error!(node, :REENTRANCY_MUTUAL_CYCLE, name: fn_name)
           break
         end
 

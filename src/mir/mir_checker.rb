@@ -50,6 +50,7 @@
 #   BorrowChecker        -- MOVE_WHILE_BORROWED, ALIAS_VIOLATION
 
 require_relative "../ast/type"
+require_relative "../ast/diagnostic_registry"
 
 class MIRChecker
   attr_reader :errors
@@ -625,7 +626,17 @@ class MIRChecker
     end
   end
 
+  # Format an MIR-checker error string. The on-the-wire shape is
+  # preserved (`[KIND] fn::name -- msg`) so anyone reading checker
+  # output keeps their muscle memory. The kind, however, MUST be
+  # registered in DiagnosticRegistry — that's the unification point.
+  # Adding a new MIR check now requires adding a registry entry,
+  # which means `clear explain <CODE>` documents it for free.
   def error(kind, name, msg)
+    unless DiagnosticRegistry.known?(kind)
+      raise "Internal Compiler Error: unregistered MIR diagnostic code :#{kind}. " \
+            "Add an entry in src/ast/diagnostic_registry.rb (category: :mir)."
+    end
     "[#{kind}] #{@fn_name}::#{name} -- #{msg}"
   end
 

@@ -146,7 +146,7 @@ class Parser
   # The ':' char is already consumed by the time the primary body runs.
   primary(:CHAR, ':') do
     colon_tok = consume(:CHAR, ':')
-    error!(colon_tok, "Expected a symbol name (lowercase identifier) after ':'") unless match?(:VAR_ID)
+    error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON) unless match?(:VAR_ID)
     ident_tok = consume(:VAR_ID)
     AST::Literal.new(colon_tok, :SYMBOL, ident_tok.value, :stack)
   end
@@ -493,7 +493,7 @@ class Parser
       @pos += 1
       tok
     else
-      error!(current, "Expected a number, got #{current.value} (#{current.type})")
+      error!(current, :EXPECTED_NUMBER, value: current.value, type: current.type)
     end
   end
 
@@ -546,7 +546,7 @@ class Parser
       end
     end
 
-    error!(token, "Expected #{expected_value || expected_type}, got #{token.value} (#{token.type}) line #{token.line}")
+    error!(token, :PARSER_EXPECTED, expected: expected_value || expected_type, got: token.value, type: token.type, line: token.line)
   end
 
   # Insert `<expected>` at the end of the previous source line (right
@@ -831,7 +831,7 @@ class Parser
     elsif match?(:KEYWORD, 'UNION')
       parse_union_def(visibility)
     else
-      error!(current, "Expected FN, METHOD, STRUCT, ENUM, or UNION after visibility modifier, got '#{current.value}'")
+      error!(current, :VISIBILITY_BAD_KIND, got: current.value)
     end
   end
 
@@ -844,7 +844,7 @@ class Parser
     elsif match?(:KEYWORD, 'STRUCT')
       parse_extern_struct(tok)
     else
-      error!(current, "Expected FN or STRUCT after EXTERN, got '#{current.value}'")
+      error!(current, :EXTERN_BAD_KIND, got: current.value)
     end
   end
 
@@ -905,7 +905,7 @@ class Parser
         consume(:CHAR, ':')
         eff_name = consume(:VAR_ID).value.to_sym
         unless [:alloc, :safe].include?(eff_name)
-          error!(current, "Unknown effect ':#{eff_name}'. Valid effects: :alloc, :safe")
+          error!(current, :UNKNOWN_EFFECT, value: eff_name)
         end
         if eff_name == :safe
           effects[:safe] = true
@@ -913,7 +913,7 @@ class Parser
           consume(:CHAR, ':')
           qualifier = consume(:VAR_ID).value.to_sym
           unless [:frame, :heap].include?(qualifier)
-            error!(current, "Unknown alloc qualifier ':#{qualifier}'. Use :alloc:frame or :alloc:heap")
+            error!(current, :UNKNOWN_ALLOC_QUALIFIER, value: qualifier)
           end
           effects[:alloc] = qualifier
         else
@@ -1269,7 +1269,7 @@ class Parser
     #                                                             requires `!T` return)
     effects_decl, effects_span = parse_effects_decl
     if effects_decl && reentrant
-      error!(fn_token, "Function '#{name}' has both legacy '@reentrant' annotation and new 'EFFECTS REENTRANT' clause. Pick one.")
+      error!(fn_token, :REENTRANT_LEGACY_AND_NEW, name: name)
     end
 
     # 6. Parse zero or more `REQUIRES <name>: <KIND>` constraint clauses.
@@ -1284,7 +1284,7 @@ class Parser
     if early_requires_clauses && !early_requires_clauses.empty?
       early_requires_clauses.each do |k, v|
         if requires_clauses.key?(k)
-          error!(fn_token, "Function '#{name}' has duplicate REQUIRES clause for '#{k}'.")
+          error!(fn_token, :DUPLICATE_REQUIRES_CLAUSE, fn: name, name: k)
         end
         requires_clauses[k] = v
       end
@@ -1493,16 +1493,14 @@ class Parser
              end
       { reentrance: kind }
     else
-      error!(tok, "Unknown REQUIRES family or kind '#{tok.value}'. Expected a capability family " \
-                  "(#{REQUIRES_VALID_FAMILIES.to_a.join(', ')}) or a reentrance kind " \
-                  "(#{REQUIRES_REENTRANCE_KINDS.to_a.join(', ')}).")
+      error!(tok, :UNKNOWN_REQUIRES_FAMILY, name: tok.value, families: REQUIRES_VALID_FAMILIES.to_a.join(', '), kinds: REQUIRES_REENTRANCE_KINDS.to_a.join(', '))
     end
   end
 
   # Legacy thin wrapper: callers that only need families.
   def parse_requires_family
     res = parse_requires_family_or_reentrance
-    error!(current, "Expected capability family, got reentrance kind") unless res[:family]
+    error!(current, :EXPECTED_CAP_FAMILY) unless res[:family]
     res[:family]
   end
 
@@ -1530,10 +1528,10 @@ class Parser
         case kind_tok.value
         when 'NON_REENTRANT' then :non_reentrant
         else
-          error!(kind_tok, "Unknown REQUIRES kind '#{kind_tok.value}'. Valid: NON_REENTRANT.")
+          error!(kind_tok, :UNKNOWN_REQUIRES_KIND, value: kind_tok.value)
         end
       if out.key?(name_tok.value)
-        error!(name_tok, "Function '#{fn_name}' has duplicate REQUIRES clause for '#{name_tok.value}'.")
+        error!(name_tok, :DUPLICATE_REQUIRES_CLAUSE, fn: fn_name, name: name_tok.value)
       end
       out[name_tok.value] = kind
     end
@@ -1551,7 +1549,7 @@ class Parser
     eff_kw = consume(:KEYWORD, 'EFFECTS')
     eff_tok = consume(:TYPE_ID)
     unless eff_tok.value == 'REENTRANT'
-      error!(eff_tok, "Unknown effect '#{eff_tok.value}'. Function-level EFFECTS only accepts REENTRANT today.")
+      error!(eff_tok, :UNKNOWN_FN_EFFECT, value: eff_tok.value)
     end
     span_start = eff_kw
     span_end_tok = eff_tok # tail of `EFFECTS REENTRANT` so far
@@ -1586,12 +1584,14 @@ class Parser
            when 'NOT_LOGICAL' then :reentrant_not_logical
            when 'MAX_DEPTH'   then :reentrant_max_depth
            else
-             error!(variant_tok, "Unknown REENTRANT variant ':#{variant_tok.value}'. Valid: :TIGHT, :TIGHT:THUNK, :TIGHT:TAIL_CALL, :THUNK, :TAIL_CALL, :NOT_LOGICAL, :MAX_DEPTH(N).")
+             error!(variant_tok, :UNKNOWN_REENTRANT_VARIANT, value: variant_tok.value)
            end
     if tight && (kind == :reentrant_not_logical || kind == :reentrant_max_depth)
       label = kind == :reentrant_not_logical ? "NOT_LOGICAL" : "MAX_DEPTH"
-      error!(variant_tok, ":TIGHT:#{label} is invalid. " \
-        "#{label == 'MAX_DEPTH' ? 'MAX_DEPTH(N) implies TIGHT (the bounded depth replaces the yield-check); just write :MAX_DEPTH(N).' : 'NOT_LOGICAL has depth=1 by runtime assertion, so TIGHT is meaningless.'}")
+      explanation = label == 'MAX_DEPTH' ?
+        'MAX_DEPTH(N) implies TIGHT (the bounded depth replaces the yield-check); just write :MAX_DEPTH(N).' :
+        'NOT_LOGICAL has depth=1 by runtime assertion, so TIGHT is meaningless.'
+      error!(variant_tok, :INVALID_TIGHT_VARIANT, label: label, explanation: explanation)
     end
     span_end_tok = variant_tok
     max_depth_n = nil
@@ -1601,7 +1601,7 @@ class Parser
       n_lit = consume_number
       max_depth_n = n_lit.value.to_i
       if max_depth_n <= 0
-        error!(n_tok, ":MAX_DEPTH(N) requires a positive integer N (got #{max_depth_n}).")
+        error!(n_tok, :MAX_DEPTH_NONPOSITIVE, got: max_depth_n)
       end
       close_tok = consume(:CHAR, ')')
       span_end_tok = close_tok
@@ -1667,7 +1667,7 @@ class Parser
     when 'AS'
       rhs = parse_var_id
       unless rhs.is_a?(AST::Identifier)
-        error!(rhs, "Syntax Error: Expected identifier after 'AS', got #{rhs.class}")
+        error!(rhs, :EXPECTED_IDENT_AFTER_AS, got: rhs.class)
       end
       return AST::BinaryOp.new(op_token, lhs, :BIND_VAR, rhs)
 
@@ -1816,7 +1816,7 @@ class Parser
       n_lit = consume_number
       n = n_lit.value.to_i
       if n <= 0
-        error!(n_tok, "#{sigil_tok.value}(N) requires a positive integer N (got #{n}).")
+        error!(n_tok, :SIGIL_N_NONPOSITIVE, sigil: sigil_tok.value, count: n)
       end
       consume(:CHAR, ')')
       inner = parse_primary
@@ -1888,10 +1888,7 @@ class Parser
       name_tok = consume(:VAR_ID)
       # Bare multi-bind error: IF expr AS name && expr2 AS name2 THEN
       if match?(:CHAR, '&&')
-        error!(if_token,
-          "Syntax Error: Multiple optional bindings require parentheses around each binding.\n" \
-          "  Found: IF expr AS name && expr AS name THEN\n" \
-          "  Use:   IF (expr AS name) && (expr AS name) THEN")
+        error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
       end
       bindings = [{ expr: condition, name: name_tok.value, name_token: name_tok }]
       return parse_if_bind_body(if_token, bindings)
@@ -1966,10 +1963,7 @@ class Parser
   def validate_no_bare_bind!(node, if_token)
     return unless node.is_a?(AST::BinaryOp)
     if node.op == :BIND_VAR && !node.paren_bind
-      error!(if_token,
-        "Syntax Error: Multiple optional bindings require parentheses around each binding.\n" \
-        "  Found: IF expr AS name && expr AS name THEN\n" \
-        "  Use:   IF (expr AS name) && (expr AS name) THEN")
+      error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
     elsif node.op == :AND
       validate_no_bare_bind!(node.left,  if_token)
       validate_no_bare_bind!(node.right, if_token)
@@ -2212,7 +2206,7 @@ class Parser
       str_expr = parse_expression
       { form: :message, value: str_expr, token: tok }
     else
-      error!(current, "Expected a type name (e.g. ParseErr) or a string message inside CATCH WITH(...)")
+      error!(current, :CATCH_WITH_BAD_INNER)
     end
   end
 
@@ -2328,14 +2322,7 @@ class Parser
     return unless type.is_a?(Type) && type.auto?
     auto_tok = type.respond_to?(:auto_token) ? type.auto_token : nil
     anchor = auto_tok || field_tok
-    error!(
-      anchor,
-      "Auto is not allowed in #{context_label} field declarations. " \
-      "Field '#{field_name}' must have a concrete type. Cross-callsite " \
-      "field inference is intentionally not supported -- " \
-      "replace `Auto` with the field's actual type (e.g. Int64, " \
-      "String, Foo[], HashMap<String, Bar>)."
-    )
+    error!(anchor, :AUTO_NOT_ALLOWED_IN_FIELD, context: context_label, field: field_name)
   end
 
   def parse_primary
@@ -2345,7 +2332,7 @@ class Parser
     return parse_unary() if current.type == :CHAR && AST::UNARY_OPS.include?(current.value)
     lit = parse_lit(:stack)
     return parse_suffixes(lit) if !lit.nil?
-    error!(current, "Unexpected token #{current.value} (#{current.type}) line #{current.line}")
+    error!(current, :UNEXPECTED_TOKEN_LINE, value: current.value, type: current.type, line: current.line)
   end
 
   # Returns true if, starting from current position '<', the token stream matches
@@ -2650,14 +2637,7 @@ class Parser
     # "Expected TYPE_ID, got Auto" error.
     if match?(:KEYWORD, 'Auto')
       prefix_chars = "#{tense_prefix}#{error_prefix}#{optional_prefix}#{is_heap ? '%' : ''}"
-      error!(
-        current,
-        "`#{prefix_chars}Auto` is not supported. `Auto` cannot be combined with " \
-        "the prefix `#{prefix_chars}` -- the inferred type's wrapping is " \
-        "not defined yet. Use `Auto` alone (the inferencer will pick the " \
-        "concrete type) or write the wrapped type explicitly (e.g. " \
-        "`#{prefix_chars}Int64`, `#{prefix_chars}String`)."
-      )
+      error!(current, :AUTO_PREFIX_NOT_SUPPORTED, prefix: prefix_chars, prefix2: prefix_chars, prefix3: prefix_chars, prefix4: prefix_chars)
     end
 
     base = consume(:TYPE_ID).value
@@ -2745,7 +2725,7 @@ class Parser
         inner = "[INF]"
 
       else
-        error!(current, "Syntax Error: Expected ']', '*', '?', 'INF', or size in array type.")
+        error!(current, :ARRAY_TYPE_BAD)
       end
 
       # Allow multiple dimensions (e.g., Number[][][])
@@ -2758,7 +2738,7 @@ class Parser
           consume(:CHAR, ']')
           inner += "[#{size}]"
         else
-          error!(current, "Syntax Error: Expected ']' or size in array type.")
+          error!(current, :ARRAY_TYPE_EXPECTED_SIZE)
         end
       end
     end
@@ -2898,7 +2878,7 @@ class Parser
       expr = parse_expression(1)
       AST::AverageOp.new(previous, expr)
     else
-      error!(current, "Expected SELECT, WHERE, EACH, SUM, COUNT, MIN, MAX, or AVERAGE after CONCURRENT, got #{current.value.inspect}")
+      error!(current, :CONCURRENT_BAD_OP, got: current.value.inspect)
     end
   end
 
@@ -2936,7 +2916,7 @@ class Parser
     return result unless match?(:CHAR, ':')
     consume(:CHAR, ':')
     unless match?(:VAR_ID) && %w[sharded soa].include?(current.value)
-      error!(current, "Expected 'sharded(N)' or 'soa' after '#{cap_tok.value}:' — unknown modifier '#{current.value}'")
+      error!(current, :CAP_BAD_MODIFIER, cap: cap_tok.value, modifier: current.value)
     end
     mod_name = current.value
     consume(:VAR_ID)
@@ -2945,7 +2925,7 @@ class Parser
       count_tok = consume_number
       n = count_tok.value.to_i
       if n < 2
-        error!(count_tok, "@pool:sharded / @list:sharded requires N >= 2, got #{n}")
+        error!(count_tok, :SHARDED_TOO_FEW, count: n)
       end
       consume(:CHAR, ')')
       result[:shard_count] = n
@@ -2972,7 +2952,7 @@ class Parser
     while match?(:CHAR, ':')
       consume(:CHAR, ':')
       unless current.type == :VAR_ID || current.type == :INT64
-        error!(current, "Expected a capability modifier after ':'")
+        error!(current, :EXPECTED_CAP_AFTER_COLON)
       end
       # After ':', accept both 'locked' and '@locked' forms.
       tok = consume(:VAR_ID)
@@ -2989,61 +2969,61 @@ class Parser
   def apply_capability!(result, token, value = token.value)
     case value
     when "@multiowned"
-      error!(token, "Duplicate ownership") if result[:ownership]
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
       result[:ownership] = :multiowned
     when "@shared"
-      error!(token, "Duplicate ownership") if result[:ownership]
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
       result[:ownership] = :shared
     when "@split"
-      error!(token, "Duplicate ownership") if result[:ownership]
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
       result[:ownership] = :split
     when "@link"
-      error!(token, "Duplicate ownership") if result[:ownership]
+      error!(token, :DUPLICATE_OWNERSHIP_CAP) if result[:ownership]
       result[:ownership] = :link
     when "@locked"
-      error!(token, "Duplicate sync") if result[:sync]
+      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
       result[:sync] = :locked
     when "@writeLocked"
-      error!(token, "Duplicate sync") if result[:sync]
+      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
       result[:sync] = :write_locked
     when "@local"
-      error!(token, "Duplicate sync") if result[:sync]
+      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
       result[:sync] = :local
     when "@versioned"
-      error!(token, "Duplicate sync") if result[:sync]
+      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
       result[:sync] = :versioned
     when "@atomic"
-      error!(token, "Duplicate sync") if result[:sync]
+      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
       result[:sync] = :atomic
     when "@raw"
-      error!(token, "Duplicate sync") if result[:sync]
+      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
       result[:sync] = :raw
     when "@symbol"
-      error!(token, "Duplicate sync") if result[:sync]
+      error!(token, :DUPLICATE_SYNC_CAP) if result[:sync]
       result[:sync] = :symbol
     when "@indirect"
-      error!(token, "Duplicate layout") if result[:is_indirect]
+      error!(token, :DUPLICATE_LAYOUT_CAP) if result[:is_indirect]
       @last_indirect_consumed = true
       result[:is_indirect] = true
     when "@soa"
-      error!(token, "Duplicate soa") if result[:is_soa]
+      error!(token, :DUPLICATE_SOA_CAP) if result[:is_soa]
       result[:is_soa] = true
     when "@list"
-      error!(token, "Duplicate collection") if result[:collection]
+      error!(token, :DUPLICATE_COLLECTION_CAP) if result[:collection]
       result[:collection] = :list
     when "@pool"
-      error!(token, "Duplicate collection") if result[:collection]
+      error!(token, :DUPLICATE_COLLECTION_CAP) if result[:collection]
       result[:collection] = :pool
     when "@set"
-      error!(token, "Duplicate collection") if result[:collection]
+      error!(token, :DUPLICATE_COLLECTION_CAP) if result[:collection]
       result[:collection] = :set
     when "@sharded"
-      error!(token, "Duplicate shard count") if result[:shard_count]
+      error!(token, :DUPLICATE_SHARD_COUNT_CAP) if result[:shard_count]
       consume(:CHAR, '(')
       result[:shard_count] = consume_number.value.to_i
       consume(:CHAR, ')')
     when "@observable"
-      error!(token, "Duplicate observable") if result[:observable]
+      error!(token, :DUPLICATE_OBSERVABLE_CAP) if result[:observable]
       result[:observable] = true
       # A20: stash the token's location so I1's fixable error can
       # offer to delete the literal `@observable` (or `:observable`
@@ -3051,7 +3031,7 @@ class Parser
       # on type semantics; consumed by capabilities that need a span.
       result[:observable_token] = token
     else
-      error!(token, "Unknown capability modifier: #{value}")
+      error!(token, :UNKNOWN_CAPABILITY_MODIFIER, value: value)
     end
   end
 
@@ -3109,7 +3089,7 @@ class Parser
       capability = if match?(:KEYWORD) && current.value != 'AS'
         cap = consume(:KEYWORD).value.to_sym
         unless AST::CAPABILITIES.include?(cap)
-          error!(previous, "Unknown WITH capability: #{cap}")
+          error!(previous, :UNKNOWN_WITH_CAPABILITY, value: cap)
         end
         cap
       else
@@ -3132,7 +3112,7 @@ class Parser
       guard_expr = nil
       if match!(:KEYWORD, 'GUARD')
         unless alias_name
-          error!(previous, "WITH GUARD requires an AS alias so the guard can reference the unwrapped value")
+          error!(previous, :WITH_GUARD_REQUIRES_AS)
         end
         guard_expr = parse_expression
       end
@@ -3338,7 +3318,7 @@ class Parser
     end
 
     if arms.empty?
-      error!(current, "WITH MATCH requires at least one WHEN arm.")
+      error!(current, :WITH_MATCH_NO_WHEN)
     end
 
     arms
@@ -3363,7 +3343,7 @@ class Parser
     end
 
     if handlers.empty?
-      error!(current, "SYNC POLICY block must contain at least one ON / RETRY handler.")
+      error!(current, :SYNC_POLICY_NO_HANDLER)
     end
 
     consume(:KEYWORD, 'END')
@@ -3399,7 +3379,7 @@ class Parser
     consume(:CHAR, '(')
     tok = consume_number
     n = tok.value.to_i
-    error!(tok, "RETRY(N) requires N > 0, got #{n}") if n <= 0
+    error!(tok, :RETRY_N_NONPOSITIVE, got: n) if n <= 0
     consume(:CHAR, ')')
     consume(:KEYWORD, 'THEN')
     n
@@ -3420,7 +3400,7 @@ class Parser
 
   def parse_error_selector
     unless match?(:TYPE_ID)
-      error!(current, "Expected error selector: a kind like 'Transient' or a type like 'LockTimeout'")
+      error!(current, :EXPECTED_ERROR_SELECTOR)
     end
     tok = consume(:TYPE_ID)
     form = ERROR_KINDS.include?(tok.value) ? :kind : :type
@@ -3448,7 +3428,7 @@ class Parser
       consume(:CHAR, '}')
       { action: :block, body: body, token: tok }
     else
-      error!(current, "Expected RAISE, PASS, RETURN <expr>, EXIT \"msg\", or -> { ... } after error clause")
+      error!(current, :EXPECTED_AFTER_ERROR_CLAUSE)
     end
   end
 
@@ -3466,13 +3446,12 @@ class Parser
     while match?(:CHAR, ':')
       consume(:CHAR, ':')
       unless current.type == :VAR_ID
-        error!(current, "Expected a capability sigil after ':'")
+        error!(current, :EXPECTED_CAP_SIGIL_AFTER_COLON)
       end
       normalized = current.value.start_with?('@') ? current.value : "@#{current.value}"
       attrs = CAP_SIGIL_ATTRS[normalized]
       unless attrs
-        error!(current, "Unknown capability sigil '#{current.value}'. " \
-                        "Expected @multiowned, @shared, @locked, @writeLocked, @local, @versioned, @atomic, or @indirect")
+        error!(current, :UNKNOWN_CAPABILITY_SIGIL, value: current.value)
       end
       next_tok = consume(:VAR_ID)
       apply_cap_dim!(next_tok, attrs, dims)
@@ -3481,7 +3460,7 @@ class Parser
 
     # Reject T @cap1 @cap2 (must use : join, e.g. @shared:locked)
     if match?(:VAR_ID) && current.value.start_with?('@') && CAP_SIGIL_ATTRS.key?(current.value)
-      error!(current, "Cannot use two separate @ capabilities. Join with ':' instead (e.g., @shared:locked not @shared @locked).")
+      error!(current, :MIXED_AT_CAPABILITIES)
     end
 
     [dims[:ownership], dims[:sync], dims[:layout], dims[:lock_rank]]
@@ -3490,7 +3469,7 @@ class Parser
   def apply_cap_dim!(tok, attrs, dims)
     dim = attrs[:dim]
     if dims[dim]
-      error!(tok, "Duplicate #{dim} capability: already have @#{dims[dim]}, cannot add @#{attrs[:val]}")
+      error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: dims[dim], attempted: attrs[:val])
     end
     dims[dim] = attrs[:val]
   end
@@ -3504,7 +3483,7 @@ class Parser
     return unless match?(:CHAR, '(')
     consume(:CHAR, '(')
     unless match?(:VAR_ID, 'rank')
-      error!(current, "Expected 'rank' keyword inside @#{attrs[:val]}(...) arguments.")
+      error!(current, :EXPECTED_RANK_KEYWORD, sigil: attrs[:val])
     end
     consume(:VAR_ID, 'rank')
     consume(:CHAR, ':')
@@ -3514,7 +3493,7 @@ class Parser
     rank = -rank if neg
     consume(:CHAR, ')')
     if dims[:lock_rank]
-      error!(sigil_tok, "Duplicate rank on capability chain (already #{dims[:lock_rank]}, cannot also set #{rank}).")
+      error!(sigil_tok, :DUPLICATE_LOCK_RANK, current: dims[:lock_rank], attempted: rank)
     end
     dims[:lock_rank] = rank
   end
@@ -3565,11 +3544,10 @@ class Parser
       tok      = consume(:VAR_ID)
       cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
       attrs    = DO_BRANCH_SIGILS[cap_name]
-      error!(tok, "Unknown branch prefix #{tok.value.inspect}. " \
-                  "Expected @micro, @stack, @standard, @large, @xl, @service, @pinned, @parallel, or @canSmash") unless attrs
+      error!(tok, :UNKNOWN_BRANCH_PREFIX, value: tok.value.inspect) unless attrs
 
       if attrs[:stack_size]
-        error!(tok, "Duplicate stack size in branch prefix") if stack_size
+        error!(tok, :DUPLICATE_STACK_SIZE, kind: "branch") if stack_size
         stack_size = attrs[:stack_size]
       end
       pinned    = true if attrs[:pinned]
@@ -3625,10 +3603,10 @@ class Parser
       tok      = consume(:VAR_ID)
       cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
       attrs    = BG_SIGILS[cap_name]
-      error!(tok, "Unknown BG prefix #{tok.value.inspect}") unless attrs
+      error!(tok, :UNKNOWN_BG_PREFIX, value: tok.value.inspect) unless attrs
 
       if attrs[:stack_size]
-        error!(tok, "Duplicate stack size in BG prefix") if stack_size
+        error!(tok, :DUPLICATE_STACK_SIZE, kind: "BG") if stack_size
         stack_size = attrs[:stack_size]
         stack_size_token = tok
       end
@@ -3695,7 +3673,7 @@ class Parser
       end
 
       unless match?(:KEYWORD, 'THEN')
-        error!(current, "Expected THEN after AS binding in BG block, got #{current.value.inspect}")
+        error!(current, :EXPECTED_THEN_AFTER_AS_BG, got: current.value.inspect)
       end
 
       steps = [{ expr: expr, binding: binding_name }]
@@ -4022,7 +4000,7 @@ class Parser
       consume(:CHAR, ';')
       AST::StubDecl.new(tok, fn_name, :with, lambda_node)
     else
-      error!(kind_tok, "Expected RETURNS, CAPTURES, SEQUENCE, or WITH after STUB #{fn_name}")
+      error!(kind_tok, :STUB_BAD_AFTER, fn: fn_name)
     end
   end
 end

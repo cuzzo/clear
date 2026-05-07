@@ -1,90 +1,28 @@
+require_relative 'diagnostic_registry'
+
 module ErrorDefinitions
-  MESSAGES = {
-    # PARSER ERRORS
-    UNEXPECTED_TOKEN: "Unexpected token '%s' (%s). Expected an expression or statement.",
-    INVALID_ASSIGNMENT: "Invalid assignment target. You can only SET variables, fields, or indices.",
-    MISSING_CAST_TYPE: "Syntax Error: CAST expects a Type identifier after 'AS', got %s.",
-    UNKNOWN_OPERATOR: "Unknown operator '%s'.",
-
-    # COMPILER ERRORS
-    ILLEGAL_BREAK: "'BREAK' used outside of a loop.",
-    ILLEGAL_CONTINUE: "'CONTINUE' used outside of a loop.",
-
-    HEAP_PRIMITIVE: "VAR '%s' is a primitive. Cannot allocate on HEAP. Remove the `%` sigil to allocate on STACK.",
-    UNDEFINED_VAR: "Undefined variable '%s'.",
-    UNRECOGNIZED_LITERAL: "Unrecognized literal: %s",
-    IMMUTABLE_ASSIGNMENT: "Variable '%s' is immutable.",
-    VARIABLE_REBIND: "Cannot rebind immutable variable '%s'.",
-
-    NATIVE_CALL_ERROR: "native_call requires 'Class' and 'Method' string literals.",
-    MISSING_FIELD_VALUE: "Missing value for field '%s' in struct '%s'",
-    MISSING_REQUIRED_STRUCT_FIELD: "Missing required field '%s' in instantiation of '%s'",
-    VARIABLE_ASSIGNMENT_TYPE_ERROR: "Type Error: Variable '%s' declared as %s but assigned %s",
-    FIXED_ARRAY_SIZE_AS_DYNAMIC: "Cannot initialize fixed-array '%s' to an unknown size. You must TRUNCATE to a specific size, or use `[]` to create a dynamic array.",
-    FIXED_ARRAY_SIZE_MISMATCH: "Cannot initialize array of size %d to fixed-size '%s'",
-    SET_UNDECLARED_VAR: "Cannot SET '%s' because it has not been declared with VAR.",
-
-    IMMUTABLE_FIELD_ASSIGNMENT: "Cannot modify field '%s' of immutable object '%s'.",
-    IMMUTABLE_LIST_ASSIGNMENT: "Cannot modify index of immutable list '%s'.",
-    LIST_TYPE_MISMATCH: "List contains mixed types. Item %d is '%s', expected '%s'.",
-    ILLEGAL_FIELD_LOOKUP: "Type Error: Cannot determine struct type for field access '%s'. Object is '%s'.",
-    STRUCT_FIELD_UNRESOLVABLE: "Type Error: Struct '%s' has no field '%s'",
-    ENUM_UNKNOWN_VARIANT:      "Type Error: Enum '%s' has no variant '%s'.",
-    ENUM_FIELD_ACCESS:         "Type Error: '%s' is an enum type. Enum values do not have fields.",
-    UNION_UNKNOWN_VARIANT:     "Type Error: Union '%s' has no variant '%s'.",
-    UNION_PAYLOAD_MISMATCH:    "Type Error: Union variant '%s' expects %s, got %s.",
-    UNION_FIELD_ACCESS:        "Type Error: '%s' is a union type. Access variants with 'Type.Variant(payload)'.",
-    UNION_INLINE_VARIANT_NEEDS_BRACES:  "Type Error: '%s.%s' is an inline struct variant — use '%s.%s{ field: value }' to construct it.",
-    UNION_INLINE_VARIANT_OLD_SYNTAX:    "Type Error: '%s' variant '%s' has inline struct fields — use '%s.%s{ field: value }' instead.",
-    UNION_INLINE_VARIANT_UNKNOWN_FIELD: "Type Error: Union variant '%s.%s' has no field '%s'.",
-    UNION_INLINE_VARIANT_TYPE_MISMATCH: "Type Error: Union variant '%s.%s' field '%s' expects %s, got %s.",
-    UNION_INLINE_VARIANT_MISSING_FIELD: "Type Error: Union variant '%s.%s' is missing required field '%s'.",
-    UNION_INLINE_IN_GENERIC:            "Type Error: Inline struct variants are not supported in generic unions.",
-    UNION_METHOD_MISSING:               "Type Error: Union '%s' requires method '%s', but no function '%s' exists.",
-    UNION_METHOD_WRONG_ARITY:           "Type Error: Union '%s' method '%s' requires %d parameter(s), but function '%s' has %d.",
-    UNION_METHOD_PARAM_TYPE:            "Type Error: Union '%s' method '%s' parameter %d expects '%s', but function '%s' has '%s'.",
-    UNION_METHOD_RETURN_TYPE:           "Type Error: Union '%s' method '%s' requires return type '%s', but function '%s' returns '%s'.",
-    UNION_METHOD_WRONG_VISIBILITY:      "Type Error: Union '%s' method '%s' is declared %s but function '%s' is %s — visibility must match.",
-    UNION_METHOD_DUPLICATE:             "Type Error: Union '%s' declares method '%s' more than once.",
-    MATCH_ENUM_CAPTURE:        "Cannot capture payload from enum variant: enums have no payload. Remove 'AS %s'.",
-    MATCH_UNIT_CAPTURE:        "Cannot bind 'AS %s': '%s' is a unit variant with no payload.",
-
-    GENERIC_DUPLICATE_TYPE_PARAM: "Type Error: Duplicate type parameter '%s' in generic struct '%s'.",
-    GENERIC_TYPE_PARAM_SHADOWS_BUILTIN: "Type Error: Type parameter '%s' shadows built-in type '%s'.",
-    GENERIC_MISSING_TYPE_ARGS:    "Type Error: '%s' is a generic type — type arguments are required (e.g., %s<%s>).",
-    GENERIC_WRONG_ARG_COUNT:      "Type Error: '%s' expects %d type argument(s), got %d.",
-    GENERIC_UNKNOWN_TYPE_ARG:     "Type Error: Unknown type argument '%s'.",
-    GENERIC_NOT_GENERIC:          "Type Error: '%s' is not a generic type — remove the type arguments.",
-    GENERIC_FN_DUPLICATE_PARAM:   "Type Error: Duplicate type parameter '%s' in generic function '%s'.",
-    GENERIC_FN_PARAM_SHADOWS_BUILTIN: "Type Error: Type parameter '%s' in function '%s' shadows built-in type '%s'.",
-    GENERIC_FN_CANNOT_INFER:      "Type Error: Cannot infer type argument '%s' for '%s' — no parameter uses type '%s'.",
-    GENERIC_FN_CONFLICT:          "Type Error: Conflicting inference for '%s' in '%s': got '%s' and '%s'.",
-
-    # FUNCTION ERRORS
-    MISSING_FUNCTION: "Missing function '%s'.",
-    ARITY_MISMATCH: "Function '%s' expects %d arguments, got %d.",
-    ARITY_MISMATCH_RANGE: "Function '%s' expects between %d and %d arguments, got %d.",
-    ARGUMENT_TYPE_ERROR: "Type Error: Function '%s' argument %d expects %s, got %s",
-    PRIMITIVE_PASSED_AS_MUTABLE: "Parameter '%s' is MUTABLE but has primitive type '%s'. Primitives are passed by value, so mutating them locally has no effect on the caller.",
-    IMMUTABLE_ARG_PASSED_AS_MUTABLE: "Argument %d ('%s') is MUTABLE, but you passed immutable variable '%s'.",
-    IMMUTABLE_ARG_PASSED_AS_EXPRESSION: "Argument %d ('%s') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable.",
-    ILLEGAL_UPVALUE: "Cannot capture '%s' - undefined in outer scope.",
-    RETURN_MISMATCH: "Type Error: Function expected to return '%s', but returned '%s'",
-
-    # RESOURCE ERRORS
-    STATIC_UNKNOWN_TYPE:   "Type Error: Unknown type '%s'. Cannot perform '::' static method call.",
-    STATIC_NOT_RESOURCE:   "Type Error: '%s' does not support '::' static method calls. Only resource types have static constructors.",
-    STATIC_UNKNOWN_METHOD: "Type Error: No static method '%s' on '%s'. Available: %s.",
-    STATIC_ARITY:          "Type Error: '%s::%s' expects %d argument(s), got %d.",
-    STATIC_ARG_TYPE:       "Type Error: Argument %d to '%s::%s': expected %s, got %s.",
-  }
+  # Backward-compat view: the legacy `MESSAGES` hash now derives from
+  # the unified `DiagnosticRegistry`. Existing call sites that pass a
+  # Symbol code to `error!` continue to look up the same templates.
+  # Layer 3 will refactor the ~470 ad-hoc string sites to use registry
+  # codes too; until then both paths work.
+  MESSAGES = DiagnosticRegistry::DIAGNOSTICS.transform_values { |e| e[:template] }.freeze
 end
 
 module ErrorHelper
   include ErrorDefinitions
 
-  # usage: error(node, :CODE, arg1, arg2)
-  def error!(node_or_token, code_or_message, *args)
+  # usage:
+  #   error!(node, :CODE)                              # no args
+  #   error!(node, :CODE, key: value, key2: value2)    # named hash
+  #   error!(node, :CODE, arg1, arg2)                  # legacy positional
+  #   error!(node, "raw string")                       # legacy raw string
+  #
+  # Named-hash form is preferred for new code. The template uses Ruby's
+  # `%{name}` interpolation against the hash. Legacy positional args
+  # against `%s`/`%d` still work for the (shrinking) set of templates
+  # that haven't been migrated to named form yet.
+  def error!(node_or_token, code_or_message, *args, **kwargs)
     # 1. Extract the Token (works for AST Node or raw Token)
     token = node_or_token.respond_to?(:token) ? node_or_token.token : node_or_token
 
@@ -94,25 +32,36 @@ module ErrorHelper
       template = MESSAGES[code_or_message]
       raise "Internal Compiler Error: Unknown error code :#{code_or_message}" unless template
 
-      # B. Format the string using the passed args
-      # This uses Ruby's standard sprintf logic
-      begin
-        message = template % args
-      rescue ArgumentError
-        # Fallback if you passed the wrong number of arguments in code
-        message = template + " [Internal Args Error: #{args.inspect}]"
-      end
+      # B. Format the string. Named-hash form takes priority — if any
+      # kwargs were passed OR the template uses `%{name}` placeholders,
+      # interpolate via the hash. Positional form is the fallback.
+      message = format_diagnostic_template(template, args, kwargs)
     else
       # C. Legacy Support (Raw String)
       message = code_or_message
     end
 
     # 3. Raise the specific error class
-    # We assume 'self.class' has a method 'error_class' (see step 3)
-    # OR we just check the class name.
-    err_class = self.class.name.include?("Parser") ? ParserError : CompilerError
+    err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
 
     raise err_class.new(token, message, @source_code)
+  end
+
+  # Try the hash form first when applicable; fall back to positional;
+  # surface any internal mismatch as an "Internal Args Error" suffix.
+  def format_diagnostic_template(template, args, kwargs)
+    if !kwargs.empty? || template.include?("%{")
+      begin
+        return template % kwargs
+      rescue KeyError, ArgumentError => e
+        return template + " [Internal Args Error: #{e.message} kwargs=#{kwargs.inspect}]"
+      end
+    end
+    begin
+      template % args
+    rescue ArgumentError
+      template + " [Internal Args Error: #{args.inspect}]"
+    end
   end
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
@@ -156,7 +105,7 @@ module ErrorHelper
     if FixCollector.enabled?
       FixCollector.push(finding)
       return unless raise_in_collector
-      err_class = self.class.name.include?("Parser") ? ParserError : CompilerError
+      err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
       raise err_class.new(token, message, @source_code)
     end
 
@@ -166,7 +115,7 @@ module ErrorHelper
       tag = level == :warning ? "\e[33m[Warning]\e[0m" : "\e[36m[#{level.to_s.capitalize}]\e[0m"
       $stderr.puts "#{tag} #{message}#{loc}"
     when :error
-      err_class = self.class.name.include?("Parser") ? ParserError : CompilerError
+      err_class = self.class.name&.include?("Parser") ? ParserError : CompilerError
       raise err_class.new(token, message, @source_code)
     end
   end

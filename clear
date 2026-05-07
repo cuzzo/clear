@@ -1482,6 +1482,93 @@ when 'fmt', 'format'
     exit 1
   end
 
+when 'explain'
+  # `clear explain <CODE>` — Rust-style error documentation. Prints
+  # the registered diagnostic's category, severity, message template,
+  # summary, and (when set) cause / fix-hint / worked examples. With
+  # no argument, lists every registered code.
+  require_relative 'src/ast/diagnostic_registry'
+  require_relative 'src/ast/diagnostic_examples'
+  arg = ARGV[1]
+  if arg.nil? || arg.empty?
+    puts "Usage: clear explain <CODE>"
+    puts ""
+    puts "Registered diagnostic codes:"
+    puts ""
+    by_category = DiagnosticRegistry::DIAGNOSTICS.group_by { |_, e| e[:category] }
+    DiagnosticRegistry::CATEGORIES.each do |cat|
+      entries = by_category[cat] || []
+      next if entries.empty?
+      puts "  \e[1m#{cat}\e[0m"
+      entries.each do |code, entry|
+        puts "    #{code.to_s.ljust(40)} #{entry[:summary]}"
+      end
+      puts ""
+    end
+    exit 0
+  end
+
+  code = arg.to_sym
+  entry = DiagnosticRegistry.lookup(code)
+  unless entry
+    $stderr.puts "\e[31merror:\e[0m unknown diagnostic code '#{arg}'"
+    $stderr.puts "       run `clear explain` with no argument to list every registered code"
+    exit 2
+  end
+
+  sev = entry[:severity]
+  cat = entry[:category]
+  puts "\e[1m#{code}\e[0m  \e[90m[#{sev} / #{cat}]\e[0m"
+  puts ""
+  puts entry[:summary] if entry[:summary]
+  puts ""
+  puts "  Template: #{entry[:template]}"
+  if entry[:cause]
+    puts ""
+    puts "  Cause:"
+    entry[:cause].each_line { |ln| puts "    #{ln.chomp}" }
+  end
+  if entry[:fix_hint]
+    puts ""
+    puts "  Fix hint:"
+    entry[:fix_hint].each_line { |ln| puts "    #{ln.chomp}" }
+  end
+  if entry[:example_bad]
+    puts ""
+    puts "  Bad:"
+    entry[:example_bad].each_line { |ln| puts "    #{ln.chomp}" }
+  end
+  if entry[:example_good]
+    puts ""
+    puts "  Good:"
+    entry[:example_good].each_line { |ln| puts "    #{ln.chomp}" }
+  end
+
+  # Spec-pulled examples (loaded from `# @example_for: CODE` blocks
+  # in spec/error_emission_coverage_spec.rb and friends).
+  example = DiagnosticExamples.lookup(code)
+  if example
+    if example[:bad]
+      puts ""
+      puts "  Example (bad — triggers the error):"
+      example[:bad].each_line { |ln| puts "    #{ln.chomp}" }
+    end
+    if example[:fix] && !example[:fix].empty?
+      puts ""
+      puts "  Fix:"
+      example[:fix].each_line { |ln| puts "    #{ln.chomp}" }
+    end
+    if example[:good]
+      puts ""
+      puts "  Example (good — compiles cleanly):"
+      example[:good].each_line { |ln| puts "    #{ln.chomp}" }
+    end
+    rel = example[:file].sub(File.expand_path(__dir__) + '/', '')
+    puts ""
+    puts "  Source: #{rel}:#{example[:line]}"
+  end
+  exit 0
+
 when 'help', '--help', '-h', nil
   puts <<~HELP
     CLEAR Language Compiler
@@ -1504,6 +1591,8 @@ when 'help', '--help', '-h', nil
       clear fmt --check <path>...   Exit 1 if any file is not formatted
       clear fmt --stdout <file>     Print formatted output, do not write
       clear fmt --no-warn <path>    Suppress width warnings for >120-char lines
+      clear explain                 List every registered diagnostic code
+      clear explain <CODE>          Show docs for a specific diagnostic
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary

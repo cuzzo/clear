@@ -158,10 +158,8 @@ module ReentranceBridge
     variant_text = fn_node.reentrance_kind == :reentrant_not_logical ?
       "EFFECTS REENTRANT:NOT_LOGICAL" :
       "EFFECTS REENTRANT:MAX_DEPTH(#{fn_node.max_depth_n})"
-    error!(fn_node,
-      "#{variant_text} on '#{fn_node.name}' requires an error-union return type " \
-      "(`!T`) so callers can handle the runtime guard's `System #{err_name}`. " \
-      "Declared return type is '#{rt_str}'; change it to '#{suggested}'.")
+    error!(fn_node, :REENTRANT_NEEDS_FALLIBLE_RETURN,
+      variant_text: variant_text, fn: fn_node.name, err: err_name, rt: rt_str, suggested: suggested)
   end
 
   # Thunk Phase 4b: tail-recursive `:reentrant_thunk` functions
@@ -221,16 +219,7 @@ module ReentranceBridge
         "directly calls itself" :
         "is part of a mutually recursive call cycle (reachable from itself via #{thunk_cycle_members(name).sort.join(', ')})"
 
-      error!(fn_node,
-        "EFFECTS REENTRANT:NOT_LOGICAL on '#{name}' but the function " \
-        "#{cycle_desc} -- the runtime StackGuard would raise " \
-        "System UnexpectedRecursion on every call. NOT_LOGICAL is " \
-        "for functions the user asserts are NEVER reachable from " \
-        "themselves (e.g. a callback hook that mustn't recurse). " \
-        "For real recursion, declare 'EFFECTS REENTRANT:THUNK' " \
-        "(heap-CPS trampoline; depth = number of frames the heap " \
-        "can hold) or 'EFFECTS REENTRANT:MAX_DEPTH(N)' (bounded " \
-        "recursion; raises System MaxDepthExceeded above N).")
+      error!(fn_node, :REENTRANT_NOT_LOGICAL_BUT_RECURSIVE, name: name, cycle_desc: cycle_desc)
     end
   end
 
@@ -317,10 +306,7 @@ module ReentranceBridge
         next if try_stamp_mutual_thunk_plan!(fn_node)
         emit_mutual_thunk_unsupported!(fn_node)
       else
-        error!(fn_node,
-          "EFFECTS REENTRANT:THUNK on '#{name}' but the function is not recursive " \
-          "(neither direct nor mutual). Remove ':THUNK', or change to plain " \
-          "'EFFECTS REENTRANT' if recursion may appear via callees registered later.")
+        error!(fn_node, :REENTRANT_THUNK_NOT_RECURSIVE, name: name)
       end
     end
   end
@@ -484,7 +470,7 @@ module ReentranceBridge
       )
     end
 
-    return error!(fn_node, msg) if fixes.empty?
+    return error!(fn_node, :REENTRANT_MUTUAL_THUNK_UNSUPPORTED, message: msg) if fixes.empty?
 
     fixable!(fn_node, message: msg, category: :reentrance, level: :error,
              fixes: fixes, raise_in_collector: false)
@@ -704,9 +690,7 @@ module ReentranceBridge
     param_names = (fn_node.params || []).map { |p| p[:name] }.compact.to_set
     fn_node.requires_clauses.each do |bound_name, _kind|
       next if param_names.include?(bound_name)
-      error!(fn_node,
-        "Function '#{fn_node.name}' has 'REQUIRES #{bound_name}: NON_REENTRANT' " \
-        "but '#{bound_name}' is not a parameter of '#{fn_node.name}'.")
+      error!(fn_node, :REQUIRES_NON_REENTRANT_NOT_PARAM, fn: fn_node.name, name: bound_name)
     end
   end
 end

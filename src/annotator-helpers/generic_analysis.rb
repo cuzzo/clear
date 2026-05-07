@@ -29,10 +29,10 @@ module GenericAnalysis
     type_params.each do |param|
       param_sym = param.to_sym
       if seen[param_sym]
-        error!(node, "Type Error: Duplicate type parameter '#{param}' in generic #{kind} '#{node.name}'.")
+        error!(node, :GENERIC_DUP_TYPE_PARAM_KIND, param: param, kind: kind, name: node.name)
       end
       if BUILTIN_TYPES.include?(param_sym)
-        error!(node, "Type Error: Type parameter '#{param}' shadows built-in type '#{param}'.")
+        error!(node, :GENERIC_TYPE_PARAM_SHADOWS, param: param)
       end
       seen[param_sym] = true
     end
@@ -81,12 +81,12 @@ module GenericAnalysis
       primitive_atomic_param = type_obj.sync == :atomic && type_obj.primitive?
       has_sync_cap = type_obj.sync && !primitive_atomic_param && !%i[raw symbol].include?(type_obj.sync)
       if has_ownership_cap || has_sync_cap
-        error!(node, "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').")
+        error!(node, :FN_PARAM_NO_CAPABILITY)
       end
     end
 
     if type_obj.split? && !type_obj.stream?
-      error!(node, "@split is currently only supported on stream types.")
+      error!(node, :ATSPLIT_STREAM_ONLY)
     end
 
     # @list/@pool/@set require an array type.
@@ -96,13 +96,13 @@ module GenericAnalysis
     # by also checking tense_type.array?.
     inner_array = type_obj.tense? && type_obj.tense_type&.array?
     if type_obj.list_collection? && !type_obj.array? && !type_obj.promise_list? && !inner_array
-      error!(node, "Collection capability @list requires an array type (e.g. User[]@list or User[N]@list)")
+      error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@list', example: 'User[]@list or User[N]@list')
     end
     if type_obj.pool? && !type_obj.array? && !inner_array
-      error!(node, "Collection capability @pool requires an array type (e.g. User[]@pool or User[N]@pool)")
+      error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@pool', example: 'User[]@pool or User[N]@pool')
     end
     if type_obj.set_collection? && !type_obj.array? && !inner_array
-      error!(node, "Collection capability @set requires an array type (e.g. String[]@set)")
+      error!(node, :COLLECTION_NEEDS_ARRAY_TYPE, cap: '@set', example: 'String[]@set')
     end
 
     # `~T[]@observable` (without `@set`) silently miscompiled before --
@@ -114,9 +114,7 @@ module GenericAnalysis
     # (DISTINCT terminal). Plain array observables are not supported.
     if type_obj.tense? && type_obj.observable? && type_obj.tense_type&.array? &&
        !type_obj.set_collection?
-      error!(node, "@observable on `T[]` requires `@set` (e.g. `~T[]@set:observable` for DISTINCT). " \
-                   "Plain `~T[]@observable` is not a supported shape; the only collection " \
-                   "observable today is the DISTINCT terminal's `~T[]@set:observable`.")
+      error!(node, :OBSERVABLE_REQUIRES_SET)
     end
 
     # I2: sync / ownership wrappers on `~T@observable` are nonsensical.
@@ -157,24 +155,23 @@ module GenericAnalysis
         else
           "The observable's heap-pointer lifetime is owned by the producing scope (the producer fiber's `defer ctx.acc.finish()` plus the scope's `wait(); destroy()` cleanup assume exactly one owner). Sharing it via :#{offending_own} would race the producer's lifetime against the destroy and corrupt the WaitGroup bridge."
         end
-        error!(node, "@observable cannot be combined with #{labels.join(' / ')}. " \
-                     "#{explain} Drop the wrapper or pick a non-observable type.")
+        error!(node, :OBSERVABLE_NOT_COMBINABLE, labels: labels.join(' / '), explain: explain)
       end
     end
 
     # @soa requires a fixed-size array (or collection, which handles its own SOA).
     if type_obj.soa? && !type_obj.collection? && (!type_obj.array? || !type_obj.fixed?)
-      error!(node, "@soa requires a fixed-size array type (e.g. Particle[10000]@soa)")
+      error!(node, :SOA_NEEDS_FIXED_ARRAY)
     end
 
     # @sharded requires N >= 2.
     if type_obj.shard_count && type_obj.shard_count < 2
-      error!(node, "@sharded requires N >= 2, got #{type_obj.shard_count}")
+      error!(node, :SHARDED_NEEDS_2_PLUS, got: type_obj.shard_count)
     end
 
     # Pools require a fixed capacity: Entity[1000]@pool, not Entity[]@pool.
     if type_obj.pool? && !type_obj.fixed?
-      error!(node, "Pool requires a fixed capacity — use #{type_obj.element_type&.resolved}[N]@pool instead of []@pool")
+      error!(node, :POOL_NEEDS_FIXED_CAPACITY, element: type_obj.element_type&.resolved)
     end
 
     # Unwrap error-union and optional wrappers to get the inner type
@@ -196,17 +193,17 @@ module GenericAnalysis
       schema = lookup_type_schema(base_name)
 
       if schema.nil?
-        error!(node, "Type Error: Unknown type '#{base_name}'.")
+        error!(node, :UNKNOWN_TYPE, name: base_name)
       end
 
       unless schema.is_a?(Hash) && schema[:type_params]
-        error!(node, :GENERIC_NOT_GENERIC, base_name)
+        error!(node, :GENERIC_NOT_GENERIC, type: base_name)
       end
 
       expected = schema[:type_params].length
       actual   = inner.generic_args.length
       if actual != expected
-        error!(node, :GENERIC_WRONG_ARG_COUNT, base_name, expected, actual)
+        error!(node, :GENERIC_WRONG_ARG_COUNT, type: base_name, expected: expected, got: actual)
       end
 
       fn_tps = current_fn_ctx&.type_params || []
@@ -215,11 +212,11 @@ module GenericAnalysis
         next if fn_tps.include?(arg.resolved)  # Cache<T> in a generic fn — T is valid
         arg_schema = lookup_type_schema(arg.resolved)
         if arg_schema.nil?
-          error!(node, :GENERIC_UNKNOWN_TYPE_ARG, arg.resolved)
+          error!(node, :GENERIC_UNKNOWN_TYPE_ARG, type: arg.resolved)
         end
         if arg_schema.is_a?(Hash) && arg_schema[:type_params]&.any?
           params_hint = arg_schema[:type_params].map(&:to_s).join(', ')
-          error!(node, :GENERIC_MISSING_TYPE_ARGS, arg.resolved, arg.resolved, params_hint)
+          error!(node, :GENERIC_MISSING_TYPE_ARGS, type: arg.resolved, type2: arg.resolved, hint: params_hint)
         end
       end
 
@@ -230,7 +227,7 @@ module GenericAnalysis
       schema = lookup_type_schema(base_name)
       if schema.is_a?(Hash) && schema[:type_params]&.any?
         params_hint = schema[:type_params].map(&:to_s).join(', ')
-        error!(node, :GENERIC_MISSING_TYPE_ARGS, base_name, base_name, params_hint)
+        error!(node, :GENERIC_MISSING_TYPE_ARGS, type: base_name, type2: base_name, hint: params_hint)
       end
     end
   end
@@ -262,7 +259,7 @@ module GenericAnalysis
     enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     type_params.each do |tp|
       unless subst.key?(tp)
-        error!(node, :GENERIC_FN_CANNOT_INFER, tp, node.name, tp)
+        error!(node, :GENERIC_FN_CANNOT_INFER, param: tp, fn: node.name, type: tp)
       end
     end
     subst
@@ -292,10 +289,11 @@ module GenericAnalysis
     mismatch = shared_args.find { |arg| !same_shared_call_capability?(first[:type], arg[:type]) }
     return unless mismatch
 
-    error!(node,
-           "Type Error: polymorphic @shared parameters in '#{node.name}' must use the same synchronization capability. " \
-           "Parameter '#{first[:name]}' is #{shared_call_capability_display(first[:type])}, " \
-           "but parameter '#{mismatch[:name]}' is #{shared_call_capability_display(mismatch[:type])}.")
+    error!(node, :POLY_SHARED_INCONSISTENT,
+      fn: node.name,
+      first: first[:name], first_cap: shared_call_capability_display(first[:type]),
+      second: mismatch[:name], second_cap: shared_call_capability_display(mismatch[:type]),
+      hint: "")
   end
 
   # Recursively match param_type against actual_type to bind type params.
@@ -311,8 +309,7 @@ module GenericAnalysis
       end
       existing = subst[p_res]
       if existing && !same_generic_binding?(existing, actual_binding)
-        error!(node, :GENERIC_FN_CONFLICT, p_res, node.name,
-               generic_binding_source(existing), generic_binding_source(actual_binding))
+        error!(node, :GENERIC_FN_CONFLICT, param: p_res, fn: node.name, first: generic_binding_source(existing), second: generic_binding_source(actual_binding))
       end
       subst[p_res] = actual_binding
     elsif param_type.generic_instance? && actual_type.generic_instance? &&
@@ -480,10 +477,10 @@ module GenericAnalysis
   def validate_stream_type!(node)
     return unless node.type.is_a?(Type) && node.type.future?
     if node.type.multiowned?
-      error!(node, "~T@multiOwned is not valid. Promises span fiber boundaries, so the ref-count must be atomic. Use ~T@shared instead.")
+      error!(node, :RC_PROMISE_NEEDS_SHARED)
     end
     if node.type.split? && !node.type.open_stream?
-      error!(node, "@split is currently only valid on open streams (~?T[]).")
+      error!(node, :ATSPLIT_NEEDS_OPEN_STREAM)
     end
   end
 

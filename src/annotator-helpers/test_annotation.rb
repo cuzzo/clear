@@ -142,8 +142,7 @@ module TestAnnotation
 
       # Check if it's a known IO builtin
       if IO_BUILTINS.include?(name)
-        error!(test_that, "Strict test mode: '#{name}' is an IO function that must be " \
-                          "stubbed. Add STUB #{name} RETURNS <value>; to the WHEN block.")
+        error!(test_that, :STRICT_TEST_NEEDS_STUB, name: name)
         next
       end
 
@@ -152,8 +151,7 @@ module TestAnnotation
       if fn&.effects
         has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)
         if has_io
-          error!(test_that, "Strict test mode: '#{name}' has IO effects (#{fn.effects.to_a.join(', ')}). " \
-                            "Either stub '#{name}' or stub the IO functions it calls.")
+          error!(test_that, :STRICT_TEST_HAS_IO_EFFECTS, name: name, effects: fn.effects.to_a.join(', '))
         end
       end
 

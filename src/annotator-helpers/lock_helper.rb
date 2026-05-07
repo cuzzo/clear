@@ -54,9 +54,7 @@ module LockHelper
     if existing.nil?
       @lock_type_ranks[type_sym] = rank
     elsif existing != rank
-      error!(node,
-             "Inconsistent lock rank for type '#{type_sym}': previously declared as rank #{existing}, " \
-             "now rank #{rank}. All declarations of a ranked lock type must agree on the rank.")
+      error!(node, :LOCK_RANK_INCONSISTENT, type: type_sym, previous: existing, rank: rank)
     end
   end
 
@@ -97,11 +95,7 @@ module LockHelper
                               "(outer line #{outer_tok&.line}). Reviewer: verify this cannot actually self-acquire " \
                               "at runtime (distinct instances, sorted acquire, etc.).")
       else
-        error!(cap[:var_node],
-               "Nested lock re-acquire: '#{vn}' is already held by an enclosing WITH " \
-               "(outer line #{outer_tok&.line}). This is a structural self-deadlock. " \
-               "If you know the instances are distinct and ordered, mark the inner WITH as " \
-               "POSSIBLE_DEADLOCK.")
+        error!(cap[:var_node], :LOCK_NESTED_REACQUIRE, name: vn, outer_line: outer_tok&.line)
       end
     end
   end
@@ -126,14 +120,15 @@ module LockHelper
         held_rank = @lock_type_ranks[entry[:type]]
         next unless held_rank
         next if cap_rank > held_rank
-        msg = "Lock rank violation: acquiring ':#{lock_identity_of(cap)}' at rank #{cap_rank} while " \
-              "':#{entry[:type]}' (rank #{held_rank}) is held. Ranks must be strictly ascending along " \
-              "the acquire path to prove LockCycle freedom by construction."
         if escape
+          msg = "Lock rank violation: acquiring ':#{lock_identity_of(cap)}' at rank #{cap_rank} while " \
+                "':#{entry[:type]}' (rank #{held_rank}) is held. Ranks must be strictly ascending along " \
+                "the acquire path to prove LockCycle freedom by construction."
           note!(cap[:var_node], msg + " (POSSIBLE_#{escape[:kind].to_s.upcase} accepted.)")
         else
-          error!(cap[:var_node], msg + " If ordering is enforced by a different discipline, mark the " \
-                                       "inner WITH with POSSIBLE_LOCK_CYCLE.")
+          error!(cap[:var_node], :LOCK_RANK_VIOLATION,
+            cap: lock_identity_of(cap), cap_rank: cap_rank,
+            held: entry[:type], held_rank: held_rank)
         end
       end
     end
@@ -381,11 +376,7 @@ module LockHelper
       next unless reachable.empty?
 
       label = sel[:name].to_s
-      error!(sel[:token] || node,
-             "You are trying to handle `#{label}` which is not a possible error at " \
-             "this WITH. The static lock analysis proved it cannot fire. Remove the " \
-             "handler, or mark an upstream lock acquire with POSSIBLE_DEADLOCK / " \
-             "POSSIBLE_LOCK_CYCLE if you know a runtime path can reach it.")
+      error!(sel[:token] || node, :SELECTOR_NOT_POSSIBLE, label: label)
     end
   end
 
@@ -411,6 +402,6 @@ module LockHelper
           "Fix: acquire in a consistent order everywhere, or mark individual sites " \
           "POSSIBLE_DEADLOCK / POSSIBLE_LOCK_CYCLE if the ordering is programmer-enforced."
     anchor = sample&.site_token
-    error!(anchor || @current_fn_node || @program_node, msg)
+    error!(anchor || @current_fn_node || @program_node, :LOCK_CYCLE_DETECTED, message: msg)
   end
 end

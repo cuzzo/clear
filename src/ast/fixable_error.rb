@@ -17,6 +17,7 @@
 #                     | :registry
 
 require_relative "source_error"
+require_relative "diagnostic_registry"
 
 class Span
   attr_reader :file, :line, :col, :length
@@ -71,7 +72,9 @@ class FixableFinding
   # values (Hint, Information, Warning, Error). :error is the only
   # blocking level; everything else is advisory.
   LEVELS = [:hint, :info, :warning, :error].freeze
-  CATEGORIES = [:lint, :ownership, :capability, :escape, :type, :registry, :reentrance].freeze
+  # Delegated to the unified DiagnosticRegistry so a `category:` value
+  # accepted by `error!(:CODE, ...)` is also accepted by `fixable!`.
+  CATEGORIES = DiagnosticRegistry::CATEGORIES
 
   attr_reader :level, :message, :token, :category, :fixes
 

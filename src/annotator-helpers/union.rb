@@ -13,7 +13,7 @@ module UnionAnalysis
     seen_names = {}
     node.methods.each do |req|
       if seen_names.key?(req[:name])
-        error!(req[:token], :UNION_METHOD_DUPLICATE, union_name, req[:name])
+        error!(req[:token], :UNION_METHOD_DUPLICATE, union: union_name, method: req[:name])
       end
       seen_names[req[:name]] = true
     end
@@ -39,13 +39,13 @@ module UnionAnalysis
           @synthetic_fns << fn_node
           next
         else
-          error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
+          error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
         end
       end
 
       sig = local.type
       unless sig.is_a?(Hash) && sig.key?(:params)
-        error!(req_tok, :UNION_METHOD_MISSING, union_name, fn_name, fn_name)
+        error!(req_tok, :UNION_METHOD_MISSING, union: union_name, method: fn_name, fn: fn_name)
       end
 
       # Visibility check
@@ -53,15 +53,13 @@ module UnionAnalysis
         actual_vis = sig.visibility || :package
         unless actual_vis == req_vis
           vis_label = { pub: "PUB", private: "PRIVATE", package: "package" }
-          error!(req_tok, :UNION_METHOD_WRONG_VISIBILITY,
-                 union_name, fn_name, vis_label[req_vis], fn_name, vis_label[actual_vis])
+          error!(req_tok, :UNION_METHOD_WRONG_VISIBILITY, union: union_name, method: fn_name, declared_vis: vis_label[req_vis], fn: fn_name, fn_vis: vis_label[actual_vis])
         end
       end
 
       # Arity check
       if req[:params].length != sig.params.length
-        error!(req_tok, :UNION_METHOD_WRONG_ARITY,
-               union_name, fn_name, req[:params].length, fn_name, sig.params.length)
+        error!(req_tok, :UNION_METHOD_WRONG_ARITY, union: union_name, method: fn_name, expected_arity: req[:params].length, fn: fn_name, got_arity: sig.params.length)
       end
 
       # Parameter type checks
@@ -69,8 +67,7 @@ module UnionAnalysis
         req_t  = to_type(rp[:type]).resolved
         sig_t  = to_type(sig.params[i][:type]).resolved
         unless req_t == sig_t || req_t == :Any || sig_t == :Any
-          error!(req_tok, :UNION_METHOD_PARAM_TYPE,
-                 union_name, fn_name, i + 1, req_t, fn_name, sig_t)
+          error!(req_tok, :UNION_METHOD_PARAM_TYPE, union: union_name, method: fn_name, index: i + 1, expected: req_t, fn: fn_name, got: sig_t)
         end
       end
 
@@ -79,8 +76,7 @@ module UnionAnalysis
         req_ret = to_type(req[:return_type]).resolved
         sig_ret = to_type(sig.return_type).resolved
         unless req_ret == sig_ret || req_ret == :Any || sig_ret == :Any
-          error!(req_tok, :UNION_METHOD_RETURN_TYPE,
-                 union_name, fn_name, req_ret, fn_name, sig_ret)
+          error!(req_tok, :UNION_METHOD_RETURN_TYPE, union: union_name, method: fn_name, expected: req_ret, fn: fn_name, got: sig_ret)
         end
       end
     end
@@ -97,17 +93,12 @@ module UnionAnalysis
 
     if schema[:kind] == :enum
       unless schema[:variants].include?(node.field)
-        anchor = variant_anchor_from_getfield(node)
-        if anchor
-          emit_variant_typo!(
-            anchor, node.field, schema[:variants],
-            "Type Error: Enum '#{type_name}' has no variant '#{node.field}'.",
-            "variant of enum #{type_name}",
-            cascade: true
-          )
-        else
-          error!(node, :ENUM_UNKNOWN_VARIANT, type_name, node.field)
-        end
+        emit_variant_typo!(
+          variant_anchor_from_getfield(node), node.field, schema[:variants],
+          "Type Error: Enum '#{type_name}' has no variant '#{node.field}'.",
+          "variant of enum #{type_name}",
+          cascade: true
+        )
       end
       node.target.full_type = type_name
       node.full_type = type_name
@@ -116,21 +107,16 @@ module UnionAnalysis
 
     if schema[:kind] == :union
       unless schema[:variants].key?(node.field)
-        anchor = variant_anchor_from_getfield(node)
-        if anchor
-          emit_variant_typo!(
-            anchor, node.field, schema[:variants].keys,
-            "Type Error: Union '#{type_name}' has no variant '#{node.field}'.",
-            "variant of union #{type_name}",
-            cascade: true
-          )
-        else
-          error!(node, :UNION_UNKNOWN_VARIANT, type_name, node.field)
-        end
+        emit_variant_typo!(
+          variant_anchor_from_getfield(node), node.field, schema[:variants].keys,
+          "Type Error: Union '#{type_name}' has no variant '#{node.field}'.",
+          "variant of union #{type_name}",
+          cascade: true
+        )
       end
       var_data = schema[:variants][node.field]
       if var_data.is_a?(Hash) && var_data[:kind] == :inline_struct && !@match_pattern_context
-        error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, type_name, node.field, type_name, node.field)
+        error!(node, :UNION_INLINE_VARIANT_NEEDS_BRACES, union: type_name, variant: node.field, union2: type_name, variant2: node.field)
       end
       node.target.full_type = type_name
       node.full_type = type_name
@@ -145,31 +131,27 @@ module UnionAnalysis
   # Returns the variant data hash on success.
   def validate_union_schema!(node, schema)
     if schema.nil?
-      error!(node, "Unknown union type: '#{node.union_name}'")
+      error!(node, :UNION_TYPE_UNKNOWN, name: node.union_name)
     end
     unless schema.is_a?(Hash) && schema[:kind] == :union
-      error!(node, "Type Error: '#{node.union_name}' is not a union type.")
+      error!(node, :NOT_A_UNION_TYPE, name: node.union_name)
     end
     unless schema[:variants].key?(node.variant_name)
-      anchor = variant_anchor_from_unionlit(node, node.variant_name)
-      if anchor
-        emit_variant_typo!(
-          anchor, node.variant_name, schema[:variants].keys,
-          "Type Error: Union '#{node.union_name}' has no variant '#{node.variant_name}'.",
-          "variant of union #{node.union_name}",
-          cascade: true
-        )
-      else
-        error!(node, :UNION_UNKNOWN_VARIANT, node.union_name, node.variant_name)
-      end
+      emit_variant_typo!(
+        variant_anchor_from_unionlit(node, node.variant_name),
+        node.variant_name, schema[:variants].keys,
+        "Type Error: Union '#{node.union_name}' has no variant '#{node.variant_name}'.",
+        "variant of union #{node.union_name}",
+        cascade: true
+      )
     end
 
     var_data = schema[:variants][node.variant_name]
     unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
       if var_data.nil?
-        error!(node, "Union variant '#{node.variant_name}' is a unit variant — use '#{node.union_name}.#{node.variant_name}' (no fields).")
+        error!(node, :UNION_VARIANT_IS_UNIT_NO_FIELDS, variant: node.variant_name, union: node.union_name)
       else
-        error!(node, "Union variant '#{node.variant_name}' takes a single typed payload — use '#{node.union_name}{ #{node.variant_name}: value }' instead.")
+        error!(node, :UNION_VARIANT_NEEDS_PAYLOAD_OBJECT, variant: node.variant_name, union: node.union_name)
       end
     end
 
@@ -181,13 +163,13 @@ module UnionAnalysis
   def validate_union_fields!(node, expected_fields)
     node.fields.each_key do |fname|
       unless expected_fields.key?(fname)
-        error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, node.union_name, node.variant_name, fname)
+        error!(node, :UNION_INLINE_VARIANT_UNKNOWN_FIELD, union: node.union_name, variant: node.variant_name, field: fname)
       end
     end
 
     expected_fields.each_key do |fname|
       unless node.fields.key?(fname)
-        error!(node, :UNION_INLINE_VARIANT_MISSING_FIELD, node.union_name, node.variant_name, fname)
+        error!(node, :UNION_INLINE_VARIANT_MISSING_FIELD, union: node.union_name, variant: node.variant_name, field: fname)
       end
     end
 
@@ -204,9 +186,7 @@ module UnionAnalysis
       expected_type = expected_fields[fname]
       actual = val_node.type_info
       unless expected_type.accepts?(actual)
-        error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH,
-               node.union_name, node.variant_name, fname,
-               expected_type.resolved, actual&.resolved)
+        error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH, union: node.union_name, variant: node.variant_name, field: fname, expected: expected_type.resolved, got: actual&.resolved)
       end
       move_if_not_copyable!(val_node)
     end

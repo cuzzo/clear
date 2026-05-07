@@ -2095,7 +2095,7 @@ module TypeHelper
       if respond_to?(:emit_int_overflow_error!)
         emit_int_overflow_error!(node, val, t, min, max)
       else
-        error!(node, "Integer literal (#{val}) overflows #{t} (range #{min}..#{max})")
+        error!(node, :INT_LITERAL_OVERFLOW, val: val, type: t, min: min, max: max)
       end
     end
   end

@@ -21,7 +21,7 @@ module PipeAnalysis
       analyze_pipe_to_identifier(node)
     else
       # Case 3: Invalid RHS (e.g. 10 |> (expression))
-      error!(node, "Invalid pipe destination. Must be a Function Call or Identifier.")
+      error!(node, :PIPE_BAD_DESTINATION)
       node.full_type = :Any
     end
 
@@ -204,10 +204,7 @@ module PipeAnalysis
     lhs_t = node.left.type_info
     unless lhs_t&.future? && lhs_t&.observable?
       ty = lhs_t&.resolved || "<unknown>"
-      error!(node, "COLLECT requires a `~T@observable` source, got #{ty}. " \
-                   "Streaming aggregates produce observables when the source " \
-                   "is a tense stream; non-observable sources fold synchronously " \
-                   "and don't need COLLECT.")
+      error!(node, :COLLECT_NEEDS_OBSERVABLE, got: ty)
     end
     # Mark the source binding as consumed -- COLLECT is the explicit
     # join, equivalent to NEXT for the future-consume check.
@@ -256,7 +253,7 @@ module PipeAnalysis
       end
 
       if node.right.is_a?(AST::WhereOp) && node.right.expression.resolved_type != :Bool
-        error!(node.right, "WHERE clause must evaluate to Bool")
+        error!(node.right, :WHERE_NEEDS_BOOL)
       end
     end
 
@@ -306,7 +303,7 @@ module PipeAnalysis
     end
 
     unless node.right.expression.resolved_type == :Bool
-      error!(node.right, "TAKE_WHILE predicate must evaluate to Bool, got #{node.right.expression.resolved_type}")
+      error!(node.right, :TAKE_WHILE_NEEDS_BOOL, got: node.right.expression.resolved_type)
     end
 
     node.full_type = is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]"
@@ -322,7 +319,7 @@ module PipeAnalysis
     visit(node.right.size)
     size_type = node.right.size.resolved_type
     unless [:Int64, :Float64].include?(size_type)
-      error!(node.right.size, "WINDOW size must be a number, got #{size_type}")
+      error!(node.right.size, :WINDOW_SIZE_NEEDS_NUMBER, got: size_type)
     end
 
     # _ is a sub-slice of the same element type
@@ -354,11 +351,11 @@ module PipeAnalysis
 
     valid_keys = %w[size time]
     opts.each_key do |k|
-      error!(bw.token, "Unknown WINDOW option '#{k}', valid: #{valid_keys.join(', ')}") unless valid_keys.include?(k)
+      error!(bw.token, :WINDOW_BAD_OPTION, name: k, valid: valid_keys.join(', ')) unless valid_keys.include?(k)
     end
 
     unless opts.key?("size") || opts.key?("time")
-      error!(bw.token, "WINDOW requires at least one of size: or time:")
+      error!(bw.token, :WINDOW_NEEDS_SIZE_OR_TIME)
     end
 
     # Validate size
@@ -366,11 +363,11 @@ module PipeAnalysis
       visit(opts["size"])
       size_type = opts["size"].resolved_type
       unless [:Int64, :Float64].include?(size_type)
-        error!(opts["size"], "WINDOW size must be a number, got #{size_type}")
+        error!(opts["size"], :WINDOW_SIZE_NEEDS_NUMBER, got: size_type)
       end
       if opts["size"].is_a?(AST::Literal)
         v = opts["size"].value.to_f
-        error!(opts["size"], "WINDOW size must be > 0") if v <= 0
+        error!(opts["size"], :WINDOW_SIZE_NEEDS_POSITIVE) if v <= 0
       end
     end
 
@@ -378,11 +375,11 @@ module PipeAnalysis
     if opts["time"]
       visit(opts["time"])
       unless opts["time"].is_a?(AST::Literal) && opts["time"].type == :STRING
-        error!(opts["time"], "WINDOW time must be a string literal like '500ms' or '1s'")
+        error!(opts["time"], :WINDOW_TIME_NEEDS_STRING_LIT)
       end
       ns = parse_batch_window_time_ns(opts["time"].value)
-      error!(opts["time"], "WINDOW time format must be like '500ms', '1s', '2min', '1h', got '#{opts["time"].value}'") unless ns
-      error!(opts["time"], "WINDOW time must be > 0") if ns <= 0
+      error!(opts["time"], :WINDOW_TIME_BAD_FORMAT, got: opts["time"].value) unless ns
+      error!(opts["time"], :WINDOW_TIME_NEEDS_POSITIVE) if ns <= 0
     end
 
     # Determine input element type (works for arrays and all stream types)
@@ -396,7 +393,7 @@ module PipeAnalysis
     elsif left_ti&.element_type
       left_ti.element_type.resolved
     else
-      error!(node.left, "WINDOW(size:, time:) requires a collection or stream input")
+      error!(node.left, :WINDOW_NEEDS_COLLECTION_INPUT)
     end
 
     # _ is a batch: T[]
@@ -419,7 +416,7 @@ module PipeAnalysis
     visit(node.right.right_source)
     rhs_type_info = node.right.right_source.type_info
     unless node.right.right_source.metatype == :array || rhs_type_info&.collection?
-      error!(node.right.right_source, "JOIN right source must be a list, got #{node.right.right_source.resolved_type}")
+      error!(node.right.right_source, :JOIN_RIGHT_NEEDS_LIST, got: node.right.right_source.resolved_type)
     end
     right_type = rhs_type_info.element_type.resolved
 
@@ -428,7 +425,7 @@ module PipeAnalysis
     if key_expr.is_a?(AST::LambdaLit)
       # Lambda form: %(a, b) -> a.id == b.userId
       params = key_expr.params
-      error!(key_expr, "JOIN lambda must take exactly 2 parameters") unless params.size == 2
+      error!(key_expr, :JOIN_LAMBDA_ARITY) unless params.size == 2
       left_name  = params[0].is_a?(Hash) ? params[0][:name] : params[0].name
       right_name = params[1].is_a?(Hash) ? params[1][:name] : params[1].name
       with_new_scope do
@@ -437,7 +434,7 @@ module PipeAnalysis
         visit(key_expr.body)
       end
       unless key_expr.body.resolved_type == :Bool
-        error!(key_expr, "JOIN lambda must return Bool, got #{key_expr.body.resolved_type}")
+        error!(key_expr, :JOIN_LAMBDA_NEEDS_BOOL, got: key_expr.body.resolved_type)
       end
     else
       # Shared key form: _.field applied to both sides
@@ -558,7 +555,7 @@ module PipeAnalysis
     visit(node.right.count)
     count_type = node.right.count.resolved_type
     unless [:Int64, :Float64].include?(count_type)
-      error!(node.right.count, "LIMIT count must be a number, got #{count_type}")
+      error!(node.right.count, :LIMIT_COUNT_NEEDS_NUMBER, got: count_type)
     end
 
     # Result type is a materialized list of the element type
@@ -589,7 +586,7 @@ module PipeAnalysis
     # Check that the expression evaluates to an array type
     expr_type = Type.new(node.right.expression.full_type)
     unless expr_type.array?
-      error!(node.right.expression, "UNNEST requires an array expression, got #{node.right.expression.resolved_type}. Use SELECT instead for non-array fields.")
+      error!(node.right.expression, :UNNEST_NEEDS_ARRAY, got: node.right.expression.resolved_type)
     end
 
     # Result type is the element type of the nested array
@@ -692,7 +689,7 @@ module PipeAnalysis
       node.full_type = (sig == :Intrinsic) ? :Any : sig
     else
       # Not a Callable
-      error!(node, "Cannot pipe into non-callable '#{func_name}' (Resolved Type: #{sig})")
+      error!(node, :PIPE_NOT_CALLABLE, name: func_name, type: sig)
     end
   end
 
@@ -704,9 +701,9 @@ module PipeAnalysis
 
     if min_args < 1 || max_args > 1
       if min_args == max_args
-        error!(node, :ARITY_MISMATCH, func_name, min_args, 1)
+        error!(node, :ARITY_MISMATCH, name: func_name, expected: min_args, got: 1)
       else
-        error!(node, :ARITY_MISMATCH_RANGE, func_name, min_args, max_args, 1)
+        error!(node, :ARITY_MISMATCH_RANGE, name: func_name, min: min_args, max: max_args, got: 1)
       end
     end
 
@@ -718,7 +715,7 @@ module PipeAnalysis
 
       # Type.accepts? handles slice coercion (Number[3] -> Number[])
       unless is_safe_autocast?(actual, expected)
-        error!(node.left, :ARGUMENT_TYPE_ERROR, "Pipe Input", 1, param[:name], expected, actual)
+        error!(node.left, :ARGUMENT_TYPE_ERROR, fn: "Pipe Input '#{param[:name]}'", index: 1, expected: expected, got: actual)
       end
     end
 
@@ -740,7 +737,7 @@ module PipeAnalysis
     is_range  = finite_stream_source?(node.left)
 
     unless is_pool || is_list || is_array || is_range
-      error!(node.left, "Cannot EACH non-collection type #{node.left.resolved_type}. EACH requires an array, @list, @list:sharded(N), @pool, @pool:sharded(N), or a range")
+      error!(node.left, :EACH_NEEDS_COLLECTION, got: node.left.resolved_type)
       node.full_type = :Void
       return
     end
@@ -783,7 +780,7 @@ module PipeAnalysis
     visit(node.right.count)
     count_type = node.right.count.resolved_type
     unless [:Int64, :Float64].include?(count_type)
-      error!(node.right.count, "SKIP count must be a number, got #{count_type}")
+      error!(node.right.count, :SKIP_COUNT_NEEDS_NUMBER, got: count_type)
     end
 
     node.full_type = is_inf ? :"~#{item_type}[INF]" : :"#{item_type}[]"
@@ -800,7 +797,7 @@ module PipeAnalysis
     is_array = node.left.metatype == :array
 
     unless is_pool || is_list || is_array || is_range
-      error!(node.left, "Cannot TAP non-collection type #{node.left.resolved_type}.")
+      error!(node.left, :TAP_NEEDS_COLLECTION, got: node.left.resolved_type)
       node.full_type = :Void
       return
     end
@@ -840,7 +837,7 @@ module PipeAnalysis
     end
 
     unless node.right.expression.resolved_type == :Bool
-      error!(node.right, "FIND clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+      error!(node.right, :PIPE_CLAUSE_NEEDS_BOOL, clause: "FIND", got: node.right.expression.resolved_type)
     end
 
     node.full_type = :"?#{item_type}"
@@ -860,7 +857,7 @@ module PipeAnalysis
     end
 
     unless node.right.expression.resolved_type == :Bool
-      error!(node.right, "ANY clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+      error!(node.right, :PIPE_CLAUSE_NEEDS_BOOL, clause: "ANY", got: node.right.expression.resolved_type)
     end
 
     node.full_type = :Bool
@@ -880,7 +877,7 @@ module PipeAnalysis
     end
 
     unless node.right.expression.resolved_type == :Bool
-      error!(node.right, "ALL clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+      error!(node.right, :PIPE_CLAUSE_NEEDS_BOOL, clause: "ALL", got: node.right.expression.resolved_type)
     end
 
     node.full_type = :Bool
@@ -900,7 +897,7 @@ module PipeAnalysis
     end
 
     unless node.right.expression.resolved_type == :Bool
-      error!(node.right, "COUNT clause must evaluate to Bool, got #{node.right.expression.resolved_type}")
+      error!(node.right, :PIPE_CLAUSE_NEEDS_BOOL, clause: "COUNT", got: node.right.expression.resolved_type)
     end
 
     node.full_type = :Int64
@@ -928,7 +925,7 @@ module PipeAnalysis
 
     expr_type = node.right.expression.resolved_type
     unless Type.new(expr_type).numeric?
-      error!(node.right, "SUM requires a numeric expression, got #{expr_type}")
+      error!(node.right, :PIPE_NEEDS_NUMERIC, op: "SUM", got: expr_type)
     end
 
     node.full_type = sum_result_clear_type(expr_type)
@@ -949,7 +946,7 @@ module PipeAnalysis
 
     expr_type = node.right.expression.resolved_type
     unless Type.new(expr_type).numeric?
-      error!(node.right, "AVERAGE requires a numeric expression, got #{expr_type}")
+      error!(node.right, :PIPE_NEEDS_NUMERIC, op: "AVERAGE", got: expr_type)
     end
 
     node.full_type = :Float64
@@ -970,7 +967,7 @@ module PipeAnalysis
 
     expr_type = node.right.expression.resolved_type
     unless Type.new(expr_type).numeric?
-      error!(node.right, "MIN requires a numeric expression, got #{expr_type}")
+      error!(node.right, :PIPE_NEEDS_NUMERIC, op: "MIN", got: expr_type)
     end
 
     node.full_type = expr_type
@@ -991,7 +988,7 @@ module PipeAnalysis
 
     expr_type = node.right.expression.resolved_type
     unless Type.new(expr_type).numeric?
-      error!(node.right, "MAX requires a numeric expression, got #{expr_type}")
+      error!(node.right, :PIPE_NEEDS_NUMERIC, op: "MAX", got: expr_type)
     end
 
     node.full_type = expr_type
@@ -1109,7 +1106,7 @@ module PipeAnalysis
     elsif is_array || is_list
       lhs_type.element_type.resolved
     else
-      error!(smooth_node.left, "CONCURRENT EACH input must be a finite stream or collection, got #{smooth_node.left.resolved_type}")
+      error!(smooth_node.left, :CONCURRENT_EACH_BAD_INPUT, got: smooth_node.left.resolved_type)
       :Any
     end
 
@@ -1238,7 +1235,7 @@ module PipeAnalysis
     is_list  = lhs_type&.list_collection?
 
     unless is_range || is_array || is_list
-      error!(node.left, "SHARD input must be a range or collection, got #{node.left.resolved_type}")
+      error!(node.left, :SHARD_NEEDS_RANGE_OR_COLLECTION, got: node.left.resolved_type)
       node.full_type = :Void
       return
     end
@@ -1264,19 +1261,18 @@ module PipeAnalysis
     target_info = shard_op.target_map.type_info
     target_sync = shard_op.target_map.respond_to?(:symbol) ? shard_op.target_map.symbol&.sync : nil
     unless target_info&.sharded? && target_sync.nil?
-      error!(shard_op.target_map, "SHARD target must be a HashMap@sharded(N) without :locked. " \
-             "SHARD routes items to owning schedulers — :locked maps don't have ownership.")
+      error!(shard_op.target_map, :SHARD_TARGET_BAD, remediation: "SHARD routes items to owning schedulers — :locked maps don't have ownership.")
     end
 
     map_key_type = target_info&.key_type&.resolved
     if map_key_type == :String || map_key_type.nil?
       unless key_type == :String
-        error!(shard_op.key_expr, "SHARD key expression must evaluate to String for a String-keyed map, got #{key_type}")
+        error!(shard_op.key_expr, :SHARD_KEY_NEEDS_STRING, got: key_type)
       end
     else
       # Numeric-keyed map: key expression must match the map's key type
       unless Type.new(key_type).numeric?
-        error!(shard_op.key_expr, "SHARD key expression must evaluate to a numeric type for #{map_key_type}-keyed map, got #{key_type}")
+        error!(shard_op.key_expr, :SHARD_KEY_NEEDS_NUMERIC, map_key_type: map_key_type, got: key_type)
       end
     end
 
@@ -1292,12 +1288,12 @@ module PipeAnalysis
   def validate_positive_numeric_concurrent_option!(name, expr)
     visit(expr)
     unless [:Float64, :Int64].include?(expr.resolved_type)
-      error!(expr, "CONCURRENT #{name} must be a number, got #{expr.resolved_type}")
+      error!(expr, :CONCURRENT_OPT_NEEDS_NUMBER, name: name, got: expr.resolved_type)
     end
 
     literal_val = numeric_literal_value(expr)
     if literal_val && literal_val <= 0
-      error!(expr, "CONCURRENT #{name} must be greater than 0, got #{literal_val.to_i}")
+      error!(expr, :CONCURRENT_OPT_NEEDS_POSITIVE, name: name, got: literal_val.to_i)
     end
   end
 
@@ -1348,7 +1344,7 @@ module PipeAnalysis
     # Validate capacity option if present
     if (cap = options["capacity"])
       unless queue_backed_concurrent_source?(node)
-        error!(cap, "CONCURRENT capacity only applies to stream or sharded sources; use batch: N to control work chunking for collections")
+        error!(cap, :CONCURRENT_CAPACITY_BAD_INPUT)
       end
       validate_positive_numeric_concurrent_option!("capacity", cap)
     end
@@ -1363,7 +1359,7 @@ module PipeAnalysis
       is_bool = (par_val.is_a?(AST::Literal) && par_val.type == :BOOLEAN) ||
                 (par_val.is_a?(AST::Identifier) && %w[true false TRUE FALSE].include?(par_val.name))
       unless is_bool
-        error!(par_val, "CONCURRENT parallel must be a Bool (TRUE or FALSE), got #{par_val.class.name.split('::').last}")
+        error!(par_val, :CONCURRENT_PARALLEL_NEEDS_BOOL, got: par_val.class.name.split('::').last)
       end
     end
 
@@ -1372,14 +1368,14 @@ module PipeAnalysis
       valid = sz.is_a?(AST::Identifier) && VALID_CONCURRENT_SIZES.include?(sz.name)
       unless valid
         got = sz.is_a?(AST::Identifier) ? sz.name : sz.class.name.split("::").last
-        error!(sz, "CONCURRENT size must be one of #{VALID_CONCURRENT_SIZES.join(', ')}, got #{got}")
+        error!(sz, :CONCURRENT_SIZE_BAD_VALUE, valid: VALID_CONCURRENT_SIZES.join(', '), got: got)
       end
     end
 
     # Validate that only known option keys are used
     options.each_key do |key|
       unless VALID_CONCURRENT_OPTIONS.include?(key)
-        error!(conc, "Unknown CONCURRENT option '#{key}'. Valid options: #{VALID_CONCURRENT_OPTIONS.join(', ')}")
+        error!(conc, :CONCURRENT_UNKNOWN_OPTION, name: key, valid: VALID_CONCURRENT_OPTIONS.join(', '))
       end
     end
 
@@ -1447,7 +1443,7 @@ module PipeAnalysis
     when AST::AverageOp
       analyze_average_op(proxy)
     else
-      error!(conc, "CONCURRENT does not support #{conc.op.class.name.split('::').last}")
+      error!(conc, :CONCURRENT_BAD_FOLLOWING_OP, got: conc.op.class.name.split('::').last)
     end
 
     # Validate that OR PRUNE / OR RAISE is only used with error-returning expressions
@@ -1470,7 +1466,7 @@ module PipeAnalysis
                           inner_expr.left.error_union_type)
         unless is_error_union
           mod_name = modifier.is_a?(AST::OrPrune) ? "OR PRUNE" : "OR RAISE"
-          error!(modifier, "#{mod_name} requires the expression to return an error union (!T), but got #{inner_expr.left.resolved_type}")
+          error!(modifier, :MODIFIER_NEEDS_ERROR_UNION, name: mod_name, got: inner_expr.left.resolved_type)
         end
       end
     end
@@ -1507,7 +1503,7 @@ module PipeAnalysis
       analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
-      error!(node.right.op, "WHERE clause must evaluate to Bool")
+      error!(node.right.op, :WHERE_NEEDS_BOOL)
     end
 
     node.full_type = case node.right.op
@@ -1566,7 +1562,7 @@ module PipeAnalysis
       analyze_fiber_captures([node.right.op.expression], is_parallel: is_parallel)
 
     if node.right.op.is_a?(AST::WhereOp) && node.right.op.expression.resolved_type != :Bool
-      error!(node.right.op, "WHERE clause must evaluate to Bool")
+      error!(node.right.op, :WHERE_NEEDS_BOOL)
     end
 
     node.full_type = case node.right.op
@@ -1628,9 +1624,9 @@ module PipeAnalysis
                                lhs_type&.inf_stream? || lhs_type&.open_stream?)
     # SELECT uses "from" in error message for historical reasons
     if op_name == "SELECT"
-      error!(node.left, "Cannot SELECT from non-list type #{node.left.resolved_type}")
+      error!(node.left, :SELECT_NEEDS_LIST, got: node.left.resolved_type)
     else
-      error!(node.left, "Cannot #{op_name} non-list type #{node.left.resolved_type}")
+      error!(node.left, :PIPE_OP_NEEDS_LIST, op: op_name, got: node.left.resolved_type)
     end
   end
 

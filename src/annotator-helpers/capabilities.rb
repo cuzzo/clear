@@ -120,7 +120,7 @@ module CapabilityHelper
     allowed = [AST::Identifier, AST::GetField]
     allowed << AST::GetIndex if capability_type == :BORROWED
     unless allowed.any? { |t| var_node.is_a?(t) }
-      error!(var_node, "WITH #{capability_type} expects an identifier or field, got '#{var_node.class}'.")
+      error!(var_node, :WITH_CAP_BAD_TARGET, capability: capability_type, got: var_node.class)
     end
 
     case capability_type
@@ -137,7 +137,7 @@ module CapabilityHelper
           }
         else
           storage = cap_var_storage(var_node)
-          error!(node, "EXCLUSIVE capability requires a @locked or @writeLocked variable, got #{storage || 'unknown'}")
+          error!(node, :WITH_EXCLUSIVE_NEEDS_LOCK, got: storage || 'unknown')
         end
       end
 
@@ -150,13 +150,13 @@ module CapabilityHelper
           }
         else
           name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-          error!(node, "WITH #{name}: read access requires a @writeLocked variable")
+          error!(node, :WITH_READ_NEEDS_WRITE_LOCK, name: name)
         end
       end
 
     when :RESTRICT
       if var_node.respond_to?(:symbol) && var_node.symbol && !var_node.symbol.mutable
-        error!(node, "RESTRICT capability requires a mutable variable, but '#{var_node.name}' is immutable")
+        error!(node, :WITH_RESTRICT_NEEDS_MUTABLE, name: var_node.name)
       end
 
     when :BORROWED
@@ -179,7 +179,7 @@ module CapabilityHelper
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future?
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-        error!(node, "WITH MATERIALIZED VIEW requires a `~T` (tense) source, got #{t.resolved} for '#{name}'.")
+        error!(node, :WITH_MATERIALIZED_NEEDS_TENSE, got: t.resolved, name: name)
       end
 
     when :SNAPSHOT
@@ -204,22 +204,19 @@ module CapabilityHelper
         else
           "plain"
         end
-        error!(node, "WITH SNAPSHOT requires a @versioned or @indirect:atomic " \
-                     "variable. '#{name}' is #{actual}. Declare the binding as " \
-                     "`T@versioned` / `T@shared:versioned` for an MVCC cell, " \
-                     "or `T@indirect:atomic` for a lock-free atomic-pointer cell.")
+        error!(node, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC, name: name, actual: actual)
       end
 
     when :multiowned
       unless cap_var_storage(var_node) == :multiowned
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-        error!(node, "WITH #{name}: expected a @multiowned variable")
+        error!(node, :WITH_NEEDS_MULTIOWNED, name: name)
       end
 
     when :shared
       unless cap_var_storage(var_node) == :shared
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-        error!(node, "WITH #{name}: expected a @shared variable")
+        error!(node, :WITH_NEEDS_SHARED, name: name)
       end
 
     when :ATOMIC
@@ -235,13 +232,12 @@ module CapabilityHelper
         else
           name = var_node.respond_to?(:name) ? var_node.name : var_node.field
           actual = syn ? "@#{syn}" : (cap_var_storage(var_node) ? "@#{cap_var_storage(var_node)}" : "plain")
-          error!(node, "WITH ATOMIC requires an @shared:atomic variable. " \
-                       "'#{name}' is #{actual}, not @shared:atomic.")
+          error!(node, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, name: name, actual: actual)
         end
       end
 
     else
-      error!(node, "Unknown capability type: #{capability_type}")
+      error!(node, :UNKNOWN_WITH_CAP_TYPE, type: capability_type)
     end
   end
 
@@ -271,7 +267,7 @@ module CapabilityHelper
       )
     end
 
-    return error!(node, msg) if fixes.empty?
+    return error!(node, :CAPABILITY_VIOLATION_FIXABLE, message: msg) if fixes.empty?
     fixable!(node, message: msg, category: :capability, level: :error,
              fixes: fixes, raise_in_collector: false)
   end
@@ -292,12 +288,10 @@ module CapabilityHelper
 
       sibling_aliases = ctx[:sibling_aliases] || []
       if sibling_aliases.include?(node.name)
-        error!(node,
-          "WITH GUARD '#{own_alias}' references '#{node.name}', a sibling alias bound by the same WITH. " \
-          "Multi-object consistency for aliased objects is not supported: synchronized sources " \
-          "(locked, atomic, versioned) cannot provide a cross-object atomic snapshot, so a guard " \
-          "spanning multiple aliases would be checking values that are no longer consistent by the " \
-          "time the body runs. Each GUARD may only reference its own alias. " \
+        error!(node, :WITH_GUARD_REFS_SIBLING_ALIAS, own_alias: own_alias, name: node.name, remediation: # Trailing helper text follows the main message. Kept as
+          # a separate arg so the registered template stays
+          # parameterised — different surfaces can suggest different
+          # remediations.
           "Use an `IF` guard clause inside the WITH body for cross-alias checks.")
       else
         emit_typo_suggestion!(
@@ -327,12 +321,7 @@ module CapabilityHelper
           category: :type, cascade: true)
       end
       if rejected.include?(node.name)
-        error!(node,
-          "DEBUG_POST cannot reference synchronized parameter '#{node.name}'. " \
-          "The predicate runs after the function returns and any locks have " \
-          "been released; reading a synchronized field outside its lock is " \
-          "racy. Move the check inside a WITH block in the body, or assert " \
-          "against an unsynchronized snapshot value instead.")
+        error!(node, :DEBUG_POST_NEEDS_UNSYNC_PARAM, name: node.name)
       end
     end
   end
@@ -368,7 +357,7 @@ module CapabilityHelper
                         ["WITH GUARD clauses",
                          "Move the impure work before the WITH block and guard on the captured value."]
                       end
-      error!(call, "#{surface} must be pure, but '#{callee}' #{reason}. #{hint}")
+      error!(call, :PURE_FN_CANNOT_CALL_IMPURE, surface: surface, callee: callee, reason: reason, hint: hint)
     end
   end
 
@@ -398,9 +387,9 @@ module CapabilityHelper
     guarded = caps.select { |cap| cap[:guard_expr] }
     return if guarded.empty?
 
-    error!(node, "WITH GUARD is not supported with WITH MATCH yet.") if node.arms
+    error!(node, :WITH_GUARD_NOT_WITH_MATCH) if node.arms
     if node.snapshot_mode == :transaction
-      error!(node, "WITH GUARD is not supported on mutable SNAPSHOT transactions in this release.")
+      error!(node, :WITH_GUARD_NOT_ON_SNAPSHOT)
     end
 
     # Every participating capability must bind an alias so the guard can
@@ -408,7 +397,7 @@ module CapabilityHelper
     # change inside the body and silently invalidate the predicate.
     missing_alias = caps.reject { |c| c[:alias] }
     unless missing_alias.empty?
-      error!(node, "WITH GUARD requires every participating binding to have an AS alias so the guard can reference the unwrapped value.")
+      error!(node, :WITH_GUARD_ALL_BINDINGS_NEED_AS)
     end
 
     aliases = caps.map { |c| c[:alias] }.compact
@@ -425,7 +414,7 @@ module CapabilityHelper
 
         guard_type = gcap[:guard_expr].type_info
         unless guard_type && guard_type.resolved == :Bool
-          error!(gcap[:guard_expr], "WITH GUARD expression must return Bool, got #{guard_type || 'Unknown'}.")
+          error!(gcap[:guard_expr], :WITH_GUARD_EXPR_MUST_BE_BOOL, got: guard_type || 'Unknown')
         end
       end
     ensure
@@ -469,7 +458,7 @@ module CapabilityHelper
         )]
         fixable!(fn_node, message: message, category: :type, level: :error, fixes: fixes)
       else
-        error!(fn_node, message)
+        error!(fn_node, :PURITY_VIOLATION, message: message)
       end
     end
 
@@ -486,7 +475,7 @@ module CapabilityHelper
 
         pred_type = expr.type_info
         unless pred_type && pred_type.resolved == :Bool
-          error!(expr, "PRE expression must return Bool, got #{pred_type || 'Unknown'}.")
+          error!(expr, :PRE_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
         end
       end
     ensure
@@ -512,10 +501,7 @@ module CapabilityHelper
     has_catch = fn_node.respond_to?(:catch_clauses) && fn_node.catch_clauses.is_a?(Array) && fn_node.catch_clauses.any?
     has_default_catch = fn_node.respond_to?(:default_catch) && fn_node.default_catch.is_a?(Array) && fn_node.default_catch.any?
     if has_catch || has_default_catch
-      error!(fn_node,
-        "DEBUG_POST clauses cannot be combined with CATCH on the same function. " \
-        "Split into two functions (one with CATCH, one with DEBUG_POST that calls it), " \
-        "or move the assertion into a separate validation helper.")
+      error!(fn_node, :DEBUG_POST_NOT_WITH_CATCH)
     end
 
     param_names = (fn_node.params || []).map { |p| p[:name].to_s }
@@ -552,7 +538,7 @@ module CapabilityHelper
 
           pred_type = expr.type_info
           unless pred_type && pred_type.resolved == :Bool
-            error!(expr, "DEBUG_POST expression must return Bool, got #{pred_type || 'Unknown'}.")
+            error!(expr, :DEBUG_POST_EXPR_MUST_BE_BOOL, got: pred_type || 'Unknown')
           end
         end
       ensure
@@ -580,12 +566,7 @@ module CapabilityHelper
 
     names = mutated.map { |n| "'#{n}'" }.join(', ')
     is_or_are = mutated.length == 1 ? 'is' : 'are'
-    error!(node,
-      "WITH GUARD aliases cannot be MUTABLE and mutated inside the body: " \
-      "#{names} #{is_or_are} declared MUTABLE and mutated inside the WITH. " \
-      "Only MUTABLE objects that change inside the body are rejected because their value " \
-      "could be modified after the GUARD predicate evaluates, silently invalidating it. " \
-      "Drop the mutation, drop MUTABLE from the alias, or move the mutation outside the guarded WITH.")
+    error!(node, :WITH_GUARD_MUTABLE_MUTATED, names: names, verb: is_or_are)
   end
 
   def alias_mutated?(alias_name)
@@ -650,7 +631,7 @@ module CapabilityHelper
                          when storage == :shared        then :shared
                          else
                            name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-                           error!(node, "WITH #{name}: cannot infer capability; variable must be @multiowned, @shared, @locked, @writeLocked, @versioned, @shared:atomic, or another capability type")
+                           error!(node, :WITH_CANNOT_INFER_CAP, name: name)
                            :unknown
                          end
     end
@@ -693,7 +674,7 @@ module CapabilityHelper
       schema = lookup_type_schema(target_type)
 
       unless schema
-        error!(node, "Wildcard borrow '*' requires a struct type, but '#{var_node.target.name}' is #{target_type}")
+        error!(node, :BORROW_WILDCARD_NEEDS_STRUCT, name: var_node.target.name, type: target_type)
       end
 
       schema.each do |field_name, _|
@@ -852,9 +833,9 @@ module CapabilityHelper
                       elsif source_sym.sync == :locked then "@locked"
                       else "@writeLocked"
                       end
-          error!(cap[:var_node], "Cannot use WITH BORROWED on #{qualifier} variable '#{var_name}'. " \
-                                  "BORROWED guarantees the data is stable, but #{qualifier} data can be " \
-                                  "modified concurrently. Use WITH #{var_name} { } to access it safely instead.")
+          remediation = "BORROWED guarantees the data is stable, but #{qualifier} data can be " \
+                        "modified concurrently. Use WITH #{var_name} { } to access it safely instead."
+          error!(cap[:var_node], :WITH_BORROWED_ON_QUALIFIED_VAR, qualifier: qualifier, name: var_name, remediation: remediation)
         end
       end
       alias_name = cap[:alias] || var_name
@@ -942,10 +923,10 @@ module CapabilityHelper
 
     if is_parallel
       if analysis.has_local
-        error!(node, "@local variable cannot be used in @parallel block — it requires single-scheduler affinity.")
+        error!(node, :LOCAL_VAR_NOT_IN_PARALLEL)
       end
       if analysis.has_rc
-        error!(node, "@multiowned (Rc) variable cannot be used in @parallel block — Rc uses a non-atomic reference count. Use @shared (Arc) for cross-scheduler sharing.")
+        error!(node, :MULTIOWNED_NOT_IN_PARALLEL)
       end
     end
 
