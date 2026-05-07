@@ -41,6 +41,7 @@ require_relative '../ast/lexer'
 require_relative '../ast/parser'
 require_relative 'method_rewriter'
 require_relative 'predicate_rewriter'
+require_relative 'lint_fix_rewriter'
 require 'strscan'
 require 'set'
 
@@ -93,11 +94,16 @@ class Formatter
 
   def format
     validate_parse!
+    # Lint-fix pre-pass: drop unused MUTABLE keywords and redundant
+    # `: Type` annotations. Runs first so subsequent rewriters see
+    # the cleanest source. Falls back to the original on annotation
+    # failure (fmt must format files with errors).
+    rewritten = LintFixRewriter.rewrite(@source)
     # Predicate canonicalization runs before METHOD-UFCS rewriting:
     # `x == NIL` -> `x.nil?()` may produce a new prefix call site
     # that MethodRewriter then converts to UFCS form. Doing them in
     # the reverse order would miss the second pass.
-    rewritten = PredicateRewriter.rewrite(@source)
+    rewritten = PredicateRewriter.rewrite(rewritten)
     rewritten = MethodRewriter.rewrite(rewritten)
     tokens = FormatLexer.new(rewritten).tokenize
     Emitter.new(tokens).emit
@@ -1855,6 +1861,8 @@ class Formatter::Emitter
   # Emit a line's tokens with canonical intra-line spacing.
   # Comments get 2-space prefix if inline, 1 space after `#`.
   def format_line_body(line)
+    @generic_bracket_indices = compute_generic_bracket_indices(line)
+    @struct_lit_brace_indices = compute_struct_lit_brace_indices(line)
     buf = +""
     prev = nil  # previous emitted *code* token
     line.each_with_index do |t, idx|
@@ -1877,6 +1885,120 @@ class Formatter::Emitter
       prev = t
     end
     buf
+  end
+
+  # Pre-pass: identify which `<` / `>` tokens on this line are
+  # generic-type brackets (rather than comparison operators) so
+  # `needs_space?` can attach them tightly.
+  #
+  # A `<` is a generic open when:
+  #   - the previous code token is a TYPE_ID (`Foo<...>`), AND
+  #   - a matching `>` exists later on the line, AND
+  #   - the span between them contains only TYPE_IDs, `,`, sigils,
+  #     and nested `<>` pairs (no `(` `)` `[` `]` `{` `}` `=` etc).
+  #
+  # Returns a Set of token indices that are generic brackets (both
+  # opens and closes).
+  def compute_generic_bracket_indices(line)
+    set = Set.new
+    line.each_with_index do |t, i|
+      next unless t.type == :SYM && t.raw == '<'
+      prev = preceding_code_token(line, i)
+      next unless prev && prev.type == :TYPE_ID
+      close_idx = find_generic_close_idx(line, i + 1)
+      next unless close_idx
+      set << i
+      set << close_idx
+    end
+    set
+  end
+
+  # Walk forward from `start_idx` looking for the `>` that closes a
+  # generic span opened just before. Tracks nested `<>` depth. Returns
+  # the close index, or nil if anything that disqualifies the span as
+  # a generic appears (call/index/struct-lit brackets, `=`, etc).
+  def find_generic_close_idx(line, start_idx)
+    depth = 1
+    i = start_idx
+    while i < line.length
+      t = line[i]
+      if t.type == :SYM
+        case t.raw
+        when '<' then depth += 1
+        when '>'
+          depth -= 1
+          return i if depth.zero?
+        when '(', ')', '[', ']', '{', '}'
+          return nil
+        when '='
+          return nil
+        end
+      end
+      i += 1
+    end
+    nil
+  end
+
+  def preceding_code_token(line, idx)
+    j = idx - 1
+    while j >= 0
+      t = line[j]
+      return t unless [:COMMENT, :INDENT_OPEN, :INDENT_CLOSE].include?(t.type)
+      j -= 1
+    end
+    nil
+  end
+
+  # True when `line` contains a STRUCT / UNION / ENUM keyword at any
+  # depth before token index `idx`. Used to disambiguate struct-body
+  # `{` (`STRUCT Foo {`) from struct-literal `{` (`Foo{ ... }`).
+  def line_has_struct_decl_keyword?(line, idx)
+    line.first(idx).any? do |t|
+      t.type == :KEYWORD && %w[STRUCT UNION ENUM].include?(t.raw)
+    end
+  end
+
+  # Pre-pass: identify which `{` / `}` token indices on this line
+  # belong to a struct literal (`Foo{ field: v }`), as opposed to a
+  # block scope, hash literal, or struct-decl body.
+  #
+  # A `{` is a struct-literal open when:
+  #   - the previous code token is a TYPE_ID, AND
+  #   - the line does NOT introduce a STRUCT / UNION / ENUM
+  #     declaration (in which case `{` is the body open).
+  #
+  # The matching `}` is found by simple `{` / `}` brace counting.
+  def compute_struct_lit_brace_indices(line)
+    set = Set.new
+    line.each_with_index do |t, i|
+      next unless t.type == :SYM && t.raw == '{'
+      prev = preceding_code_token(line, i)
+      next unless prev && prev.type == :TYPE_ID
+      next if line_has_struct_decl_keyword?(line, i)
+      close_idx = find_matching_brace(line, i + 1)
+      next unless close_idx
+      set << i
+      set << close_idx
+    end
+    set
+  end
+
+  def find_matching_brace(line, start_idx)
+    depth = 1
+    i = start_idx
+    while i < line.length
+      t = line[i]
+      if t.type == :SYM
+        case t.raw
+        when '{' then depth += 1
+        when '}'
+          depth -= 1
+          return i if depth.zero?
+        end
+      end
+      i += 1
+    end
+    nil
   end
 
   # Normalize a `#...` comment: ensure AT LEAST one space after `#`,
@@ -1912,6 +2034,22 @@ class Formatter::Emitter
       return false if type_like_prev && in_type_context?(line, b_idx - 1)
     end
 
+    # Struct-literal brace padding override (`Foo{ field: v }`):
+    # add space after the `{` and before the matching `}`, EXCEPT
+    # when they're the empty pair `Foo{}`. Sits before the generic
+    # "no space inside brackets" rule below so the override wins.
+    if @struct_lit_brace_indices && !@struct_lit_brace_indices.empty?
+      a_idx = b_idx - 1
+      a_is_struct_open = a_idx >= 0 &&
+                         @struct_lit_brace_indices.include?(a_idx) &&
+                         line[a_idx]&.raw == '{'
+      b_is_struct_close = @struct_lit_brace_indices.include?(b_idx) &&
+                          b.type == :SYM && b.raw == '}'
+      empty_pair = a_is_struct_open && b_is_struct_close
+      return true if a_is_struct_open && !empty_pair
+      return true if b_is_struct_close && !empty_pair
+    end
+
     # No space inside opening/closing brackets.
     return false if a.type == :SYM && ['(', '[', '{'].include?(a.raw)
     return false if b.type == :SYM && [')', ']', '}'].include?(b.raw)
@@ -1931,6 +2069,36 @@ class Formatter::Emitter
     if b.type == :SYM && b.raw == '['
       return false if [:VAR_ID, :TYPE_ID].include?(a.type)
       return false if a.type == :SYM && [')', ']'].include?(a.raw)
+    end
+
+    # Struct literal attach: `Foo{ field: v }`. The TYPE_ID-then-`{`
+    # pattern is a struct literal UNLESS this line opens a STRUCT /
+    # UNION / ENUM declaration, in which case `{` is the body open
+    # and needs its leading space (`STRUCT Foo {`).
+    if b.type == :SYM && b.raw == '{' && a.type == :TYPE_ID &&
+       !line_has_struct_decl_keyword?(line, b_idx)
+      return false
+    end
+
+    # Generic-bracket attach: `Foo<T, U>`. Detected per-line by
+    # `compute_generic_bracket_indices`; the indices are stamped on
+    # `@generic_bracket_indices` while `format_line_body` runs.
+    if @generic_bracket_indices
+      a_idx = b_idx - 1
+      a_is_generic = a_idx >= 0 && @generic_bracket_indices.include?(a_idx)
+      b_is_generic = @generic_bracket_indices.include?(b_idx)
+      # `Foo<` — no space between the type and the generic-open `<`.
+      if b_is_generic && b.raw == '<'
+        return false
+      end
+      # `<Bar` — no space immediately inside the generic open.
+      if a_is_generic && a.raw == '<'
+        return false
+      end
+      # `Bar>` — no space before the generic close.
+      if b_is_generic && b.raw == '>'
+        return false
+      end
     end
 
     # No space before `,` or `;`.

@@ -290,6 +290,8 @@ RSpec.describe Formatter do
   end
 
   it "auto-inserts digit separators for decimal ints > 4 digits" do
+    # Type annotations dropped by LintFixRewriter (redundant with the
+    # literal RHS). Numeric separators still apply.
     src = <<~CLEAR
       FN main() RETURNS Int64 ->
         a: Int64 = 1000000;
@@ -301,10 +303,10 @@ RSpec.describe Formatter do
     CLEAR
     path = write("n_int.cht", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
-    expect(out).to include("a: Int64 = 1_000_000;")
-    expect(out).to include("b: Int64 = 12_345;")
-    expect(out).to include("c: Int64 = 1234;")
-    expect(out).to include("d: Int64 = 42;")
+    expect(out).to include("a = 1_000_000;")
+    expect(out).to include("b = 12_345;")
+    expect(out).to include("c = 1234;")
+    expect(out).to include("d = 42;")
   end
 
   it "auto-inserts digit separators for floats with >4 digits on either side" do
@@ -318,9 +320,9 @@ RSpec.describe Formatter do
     CLEAR
     path = write("n_float.cht", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
-    expect(out).to include("a: Float64 = 3.141_592_653_589_793;")
-    expect(out).to include("b: Float64 = 1_000_000.5;")
-    expect(out).to include("c: Float64 = 1.5;")
+    expect(out).to include("a = 3.141_592_653_589_793;")
+    expect(out).to include("b = 1_000_000.5;")
+    expect(out).to include("c = 1.5;")
   end
 
   it "preserves type suffixes through separator rewriting" do
@@ -331,11 +333,13 @@ RSpec.describe Formatter do
   end
 
   it "canonicalizes existing separators (1_0_0_0 -> 1000, 1000000 -> 1_000_000)" do
+    # `: Int64` annotations stripped by LintFixRewriter (redundant
+    # with the literal RHS). Numeric separator rules still apply.
     src = "FN main() RETURNS Int64 ->\n  a: Int64 = 1_0_0_0;\n  b: Int64 = 1000000;\n  RETURN a;\nEND\n"
     path = write("n_canon.cht", src)
     out, _, _ = run_fmt("--no-warn", "--stdout", path)
-    expect(out).to include("a: Int64 = 1000;")
-    expect(out).to include("b: Int64 = 1_000_000;")
+    expect(out).to include("a = 1000;")
+    expect(out).to include("b = 1_000_000;")
   end
 
   it "leaves hex / oct / bin literals untouched" do
@@ -477,10 +481,12 @@ RSpec.describe Formatter do
     end
 
     it "strips _f64 suffix on decimal literals (default-type elision)" do
+      # `: Float64` annotation also dropped by LintFixRewriter when
+      # the literal RHS already determines the type.
       src = "FN main() RETURNS Void ->\n  a: Float64 = 3.14_f64;\n  RETURN;\nEND\n"
       path = write("f64suffix.cht", src)
       out, _, _ = run_fmt("--no-warn", "--stdout", path)
-      expect(out).to include("a: Float64 = 3.14;")
+      expect(out).to include("a = 3.14;")
       expect(out).not_to include("_f64")
     end
 
@@ -903,6 +909,151 @@ RSpec.describe Formatter do
       toks = tokenize("a ... b").reject { |t| t.type == :WS }
       idx  = toks.length - 1   # position of `b`
       expect(em.send(:unary_context?, toks, idx)).to be_falsey
+    end
+  end
+
+  describe "MUTABLE never reassigned" do
+    it "drops MUTABLE when the binding is read but never reassigned" do
+      # The annotator only emits the MUTABLE-unused finding when the
+      # binding is actually READ. An entirely unused binding triggers
+      # the "unused variable" warning instead (different lint).
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          MUTABLE x = 5;
+          RETURN x;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("x = 5;")
+      expect(out).not_to include("MUTABLE")
+    end
+
+    it "keeps MUTABLE when the binding is later reassigned" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          MUTABLE x = 5;
+          x = 7;
+          RETURN x;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("MUTABLE x = 5;")
+    end
+  end
+
+  describe "redundant `: Type` annotations" do
+    it "drops `: Int64` when the literal RHS already determines it" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE total: Int64 = 0;
+          total = 5;
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("MUTABLE total = 0;")
+    end
+
+    it "drops `: Float64` when assigned a float literal" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE s: Float64 = 0.0;
+          s = 1.5;
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("MUTABLE s = 0.0;")
+    end
+
+    it "keeps decorated types (HashMap<K, V>) — not redundant" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE m: HashMap<Int64, Float64> = {};
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include(": HashMap<Int64, Float64>")
+    end
+  end
+
+  describe "generic-type bracket spacing" do
+    it "tightens `HashMap < T, U >` to `HashMap<T, U>`" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE m: HashMap < Int64, Float64 > = {};
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("HashMap<Int64, Float64>")
+    end
+
+    it "normalizes `HashMap< T,U >` (mixed spacing) to `HashMap<T, U>`" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          MUTABLE m: HashMap< Int64,Float64 > = {};
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("HashMap<Int64, Float64>")
+    end
+
+    it "leaves comparison `a < b` with spaces (not a generic)" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          a = 1;
+          b = 2;
+          IF a < b -> RETURN;
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("a < b")
+    end
+  end
+
+  describe "struct-literal brace attach + padding" do
+    it "attaches `Type` to `{` and pads inside" do
+      src = <<~CLEAR
+        STRUCT N {
+          val: Int64,
+        }
+        FN main() RETURNS Void ->
+          x = N { val: 5 };
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("N{ val: 5 }")
+    end
+
+    it "leaves STRUCT body declaration with space before `{`" do
+      src = <<~CLEAR
+        STRUCT Foo {
+          a: Int64,
+        }
+        FN main() RETURNS Void ->
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("STRUCT Foo {\n")
+    end
+
+    it "keeps empty struct literal tight (`Foo{}`)" do
+      src = <<~CLEAR
+        STRUCT Empty {}
+        FN main() RETURNS Void ->
+          x = Empty{};
+          RETURN;
+        END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("Empty{};")
+      expect(out).not_to include("Empty{ }")
     end
   end
 
