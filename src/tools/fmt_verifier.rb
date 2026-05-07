@@ -63,10 +63,16 @@ module FmtVerifier
   #   normalization) so these line numbers shift; the actual code
   #   doesn't change.
   #
-  # If we ever add other purely-cosmetic markers, normalize them here
-  # rather than poking at the comparison logic.
+  # - `// CLEAR_PROFILE_TASK_SITE ...` — task-site profiling metadata
+  #   that embeds line/column coordinates. Same shift, same non-
+  #   semantic delta.
+  #
+  # Rule of thumb: any comment line whose only purpose is "remember
+  # where the emitter was when it wrote this," normalize away.
   def normalize_for_compare(zig_source)
-    zig_source.gsub(%r{^// CLR:\d+\n}, '')
+    zig_source
+      .gsub(%r{^\s*// CLR:\d+\n}, '')
+      .gsub(%r{^\s*// CLEAR_PROFILE_TASK_SITE\b[^\n]*\n}, '')
   end
 
   # Verify every .cht file under `dir` (recursive). Useful for sweeping

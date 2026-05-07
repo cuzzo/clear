@@ -35,11 +35,40 @@ module LintFixRewriter
   def rewrite(source)
     ast, findings = annotate(source)
     return source unless ast
+    bg_names = collect_bg_referenced_names(ast)
     edits = []
-    edits.concat(mutable_unused_edits(findings))
+    edits.concat(mutable_unused_edits(findings, bg_names))
     edits.concat(redundant_type_annotation_edits(ast, source))
     return source if edits.empty?
     apply_edits(source, edits)
+  end
+
+  # Walk the AST collecting every Identifier name referenced inside a
+  # `BG { ... }` or `BG STREAM { ... }` block. The annotator's
+  # MUTABLE-never-reassigned check doesn't propagate "mutably borrowed
+  # via a callee" through BG captures, so a binding can be flagged as
+  # unused-MUTABLE even when a BG-captured call mutates it via a
+  # MUTABLE param. Dropping MUTABLE in that case breaks the next
+  # build (the param's mutability check fires at the call site).
+  # Skip those names defensively until the annotator is fixed.
+  def collect_bg_referenced_names(ast)
+    set = Set.new
+    walk_for_bg_names(ast, false, set)
+    set
+  end
+
+  def walk_for_bg_names(node, in_bg, set)
+    return if terminal?(node)
+    if node.is_a?(Array)
+      node.each { |n| walk_for_bg_names(n, in_bg, set) }
+      return
+    end
+    inside = in_bg || node.is_a?(AST::BgBlock) || node.is_a?(AST::BgStreamBlock)
+    if inside && node.is_a?(AST::Identifier) && node.respond_to?(:name)
+      set << node.name
+    end
+    return unless node.respond_to?(:each_pair)
+    node.each_pair { |_, v| walk_for_bg_names(v, inside, set) }
   end
 
   # Run the annotator with FixCollector enabled. Returns
@@ -65,9 +94,10 @@ module LintFixRewriter
 
   # ---- Rule 1: MUTABLE never reassigned ----
 
-  def mutable_unused_edits(findings)
+  def mutable_unused_edits(findings, bg_names)
     findings.flat_map do |finding|
       next [] unless mutable_unused_finding?(finding)
+      next [] if mentions_bg_referenced_name?(finding, bg_names)
       finding.fixes
              .select { |fx| fx.confidence == :auto }
              .flat_map(&:edits)
@@ -78,6 +108,17 @@ module LintFixRewriter
   def mutable_unused_finding?(finding)
     finding.respond_to?(:message) &&
       finding.message&.include?("is never reassigned")
+  end
+
+  # Pull the binding name out of the finding's message
+  # ("MUTABLE 'name' is never reassigned ...") and check it against
+  # the set of names referenced inside any BG block.
+  def mentions_bg_referenced_name?(finding, bg_names)
+    return false if bg_names.empty?
+    msg = finding.respond_to?(:message) ? finding.message.to_s : ""
+    m = msg.match(/MUTABLE '([^']+)'/)
+    return false unless m
+    bg_names.include?(m[1])
   end
 
   # Translate a Span/Edit (1-based line/col) into a flat byte-offset
@@ -159,7 +200,13 @@ module LintFixRewriter
     return true if t.respond_to?(:array?) && t.array?
     return true if t.respond_to?(:map?) && t.map?
     return true if t.respond_to?(:future?) && t.future?
-    return true if t.respond_to?(:any_sync?) && t.any_sync?
+    # Use `#sync` directly rather than `any_sync?` — the latter
+    # excludes `:raw` and `:symbol` (data-access modes, not locks),
+    # but for drop-the-annotation purposes ANY sync stamp changes
+    # semantics. `String@raw` uses byte indexing; `String` uses
+    # UTF-8 codepoint indexing — same resolved type, different
+    # behavior. Keep the annotation either way.
+    return true if t.respond_to?(:sync) && t.sync
     return true if t.respond_to?(:ownership) && t.ownership && t.ownership != :affine
     return true if t.respond_to?(:generic_instance?) && t.generic_instance?
     false

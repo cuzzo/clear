@@ -5706,6 +5706,16 @@ private
         next unless info.mutable
         next unless info.read || (info.reg&.respond_to?(:var_used) && info.reg.var_used)
         next if info.reg&.respond_to?(:var_mutated) && info.reg.var_mutated
+        # Also skip when the binding was passed as a MUTABLE arg to a
+        # callee — the binding's contents get mutated through the
+        # call, so the receiving function's MUTABLE-param signature
+        # forces the caller to keep MUTABLE on the local. function_analysis
+        # marks `info.mutated` (entry-level) for this case but
+        # intentionally does NOT set `info.reg.var_mutated` (which
+        # drives the Zig-level var/const choice). Without this skip,
+        # `clear fmt` strips MUTABLE here and the next build fails
+        # the param's mutability check at the call site.
+        next if info.respond_to?(:mutated) && info.mutated
 
         emit_mutable_unused_finding!(info.reg, name)
       end

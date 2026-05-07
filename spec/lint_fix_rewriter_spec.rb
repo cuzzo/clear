@@ -118,6 +118,68 @@ RSpec.describe LintFixRewriter do
     end
   end
 
+  describe "safety against false-positive MUTABLE drops" do
+    # The annotator's MUTABLE-never-reassigned lint doesn't propagate
+    # "mutably borrowed via callee" through BG-block captures —
+    # dropping MUTABLE there breaks the next compile (the param's
+    # mutability check fires at the call site). Defensively skip
+    # MUTABLE-drop for any binding whose name appears inside a BG
+    # block until the annotator is fixed.
+
+    it "keeps MUTABLE on a binding referenced inside a BG block" do
+      src = <<~CLEAR
+        FN bar(MUTABLE xs: Int64[]) RETURNS Void ->
+          xs.append(1);
+          RETURN;
+        END
+
+        FN main() RETURNS Void ->
+          MUTABLE arr: Int64[] = [1_i64, 2_i64];
+          MUTABLE tasks: ~Void[]@list = [];
+          tasks.append(BG { bar(arr); });
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("MUTABLE arr")
+    end
+
+    it "drops MUTABLE normally on bindings NOT referenced inside any BG block" do
+      src = <<~CLEAR
+        FN main() RETURNS Int64 ->
+          MUTABLE n = 42;
+          RETURN n;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("n = 42;")
+      expect(out).not_to include("MUTABLE")
+    end
+  end
+
+  describe "redundant `: Type` annotation drop — sync awareness" do
+    # `String@raw` and `String` resolve to the same base type but use
+    # different indexing (byte vs UTF-8 codepoint). Dropping
+    # `: String@raw` silently changes semantics. The rewriter's
+    # decoration check uses `#sync` directly rather than `any_sync?`
+    # (the latter excludes `:raw` since it's a data-access mode).
+
+    it "keeps `: String@raw` annotation (sync stamp = decoration)" do
+      src = <<~CLEAR
+        FN tcpRead(fd: Int64) RETURNS String@raw ->
+          RETURN "hi";
+        END
+        FN main() RETURNS Void ->
+          data: String@raw = tcpRead(0_i64);
+          print(data);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include(": String@raw")
+    end
+  end
+
   describe "both rules combined" do
     it "drops MUTABLE AND `: Type` independently when both apply" do
       src = <<~CLEAR
