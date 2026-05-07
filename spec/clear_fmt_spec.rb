@@ -906,6 +906,56 @@ RSpec.describe Formatter do
     end
   end
 
+  describe "leading-comment internal whitespace" do
+    # Found by FmtVerifier sweep on benchmarks/sequential/11_pipeline_overhead.
+    # The original `canonicalize_comment` rule was "exactly one space after
+    # `#`," which destroyed deliberate prose indentation in ASCII tables,
+    # code samples, and indented bullet lists. Now: ensure AT LEAST one
+    # space, preserve user-typed extra spaces.
+
+    it "preserves multi-space comment indentation" do
+      src = <<~CLEAR
+        # Section A
+        #   subitem 1
+        #   subitem 2
+
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("#   subitem 1")
+      expect(out).to include("#   subitem 2")
+    end
+
+    it "still inserts a space when the user wrote `#text` with no separator" do
+      src = <<~CLEAR
+        #notice
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("# notice")
+    end
+
+    it "preserves an ASCII table laid out via comment indent" do
+      src = <<~CLEAR
+        # COL A    | COL B
+        #   row 1  | x
+        #   row 2  | y
+
+        FN main() RETURNS Void -> RETURN; END
+      CLEAR
+      out = Formatter.format(src)
+      expect(out).to include("# COL A    | COL B")
+      expect(out).to include("#   row 1  | x")
+      expect(out).to include("#   row 2  | y")
+    end
+
+    it "leaves an empty `#` comment untouched" do
+      src = "# header\n#\n# more\nFN main() RETURNS Void -> RETURN; END\n"
+      out = Formatter.format(src)
+      expect(out).to include("\n#\n")
+    end
+  end
+
   it "is idempotent on the whole transpile-tests corpus" do
     root = File.expand_path("../transpile-tests", __dir__)
     files = Dir.glob(File.join(root, "**", "*.cht"))

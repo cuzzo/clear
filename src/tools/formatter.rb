@@ -1879,14 +1879,27 @@ class Formatter::Emitter
     buf
   end
 
-  # Normalize a `#...` comment: exactly one space after `#`, trailing
-  # whitespace stripped. `#` alone (empty comment) stays `#`.
+  # Normalize a `#...` comment: ensure AT LEAST one space after `#`,
+  # preserving additional spaces the user wrote. Trailing whitespace
+  # stripped. `#` alone stays `#`.
+  #
+  # Why preserve extra leading spaces? ASCII tables, indented prose,
+  # and code samples in comment bodies use leading whitespace as
+  # layout. Collapsing `#   row` to `# row` destroys alignment in
+  # tables like:
+  #
+  #   # COL_A   | COL_B
+  #   #   row1  | x
+  #   #   row2  | y
+  #
+  # User-typed indent is meaningful; only synthesize the missing
+  # first space when the user wrote `#text` with no separator.
   def canonicalize_comment(raw)
     body = raw[1..].to_s
     body = body.rstrip
     return '#' if body.empty?
-    body = body.sub(/\A\s+/, '')
-    "# #{body}"
+    return "# #{body}" unless body.start_with?(' ', "\t")
+    "##{body}"
   end
 
   # Spacing decision between two adjacent code tokens A (prev) and B (cur).
