@@ -1408,6 +1408,7 @@ when 'fmt', 'format'
   args = ARGV[1..] || []
   check_only = false
   to_stdout  = false
+  verify_mode = false
   paths = []
 
   warn_width = true
@@ -1415,13 +1416,37 @@ when 'fmt', 'format'
     case a
     when '--check' then check_only = true
     when '--stdout' then to_stdout = true
+    when '--verify' then verify_mode = true
     when '--no-warn' then warn_width = false
     when /\A-/ then error "Unknown flag for fmt: #{a}"
     else paths << a
     end
   end
 
-  error "Usage: clear fmt [--check|--stdout] <file.cht|dir>..." if paths.empty?
+  error "Usage: clear fmt [--check|--stdout|--verify] <file.cht|dir>..." if paths.empty?
+
+  # --verify: confirm fmt is semantics-preserving by transpiling the
+  # original AND the formatted source to Zig and comparing byte-for-byte.
+  # Useful for sweeping benchmarks/examples before applying fmt in bulk.
+  # Returns exit status = number of files where output differed (or
+  # transpilation raised). Does not write files.
+  if verify_mode
+    require_relative 'src/tools/fmt_verifier'
+    files = []
+    paths.each do |p|
+      if File.directory?(p)
+        files.concat(Dir.glob(File.join(p, '**', '*.cht')).sort)
+      elsif File.file?(p)
+        files << p
+      else
+        error "No such file or directory: #{p}"
+      end
+    end
+    error "No .cht files found" if files.empty?
+    results = files.map { |f| FmtVerifier.verify(f) }
+    fail_count = FmtVerifier.report(results)
+    exit(fail_count.zero? ? 0 : 3)
+  end
 
   files = []
   paths.each do |p|
