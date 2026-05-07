@@ -267,4 +267,90 @@ RSpec.describe MethodRewriter do
       expect(rw(src)).to include("xs.push(5, 7);")
     end
   end
+
+  describe "paren-wrapping the receiver to preserve precedence" do
+    # Found by FmtVerifier on benchmarks/sequential/11_pipeline_overhead.
+    # `toFloat(state MOD 1000)` was being rewritten to
+    # `state MOD 1000.toFloat()`, which Zig parses as
+    # `state MOD (1000.toFloat())` — integer mod silently became float
+    # mod. The first arg must be paren-wrapped when its top-level AST
+    # shape would bind looser than `.method()`.
+
+    it "wraps a binary-op first arg" do
+      # toFloat is `is_method: true` in stdlib; rewriter picks it up
+      # without a METHOD declaration in the source.
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          state: Int64 = 42;
+          val = toFloat(state MOD 1000);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("(state MOD 1000).toFloat()")
+      expect(out).not_to include("state MOD 1000.toFloat()")
+    end
+
+    it "wraps a unary-op first arg" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          n: Int64 = 5;
+          val = toFloat(-n);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("(-n).toFloat()")
+    end
+
+    it "does not wrap an identifier first arg" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          n: Int64 = 5;
+          val = toFloat(n);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("n.toFloat()")
+      expect(out).not_to include("(n).toFloat()")
+    end
+
+    it "does not wrap a method-chain first arg" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          xs: Int64[] = [1_i64, 2_i64];
+          n = toFloat(xs.length());
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("xs.length().toFloat()")
+      expect(out).not_to include("(xs.length()).toFloat()")
+    end
+
+    it "does not wrap a literal first arg" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          val = toFloat(42_i64);
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("42_i64.toFloat()").or include("42.toFloat()")
+    end
+
+    it "does not double-wrap an already-parenthesized first arg" do
+      src = <<~CLEAR
+        FN main() RETURNS Void ->
+          state: Int64 = 5;
+          val = toFloat((state + 1));
+          RETURN;
+        END
+      CLEAR
+      out = rw(src)
+      expect(out).to include("(state + 1).toFloat()")
+      expect(out).not_to include("((state + 1)).toFloat()")
+    end
+  end
 end

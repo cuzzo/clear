@@ -165,6 +165,15 @@ module MethodRewriter
     first = args_text[spans[0][0]...spans[0][1]].strip
     return nil if first.empty?
 
+    # Wrap the first arg in parens if its top-level AST node would
+    # bind looser than `.method()`. Without this, expressions like
+    # `toFloat(state MOD 1000)` would be rewritten to
+    # `state MOD 1000.toFloat()`, which Zig parses as
+    # `state MOD (1000.toFloat())` — a real semantics change.
+    # See spec/method_rewriter_spec.rb for the regression case.
+    first_arg_node = call.args[0]
+    first = "(#{first})" if needs_parens?(first_arg_node, first)
+
     rest_text = if spans.size > 1
       # Preserve whatever the user wrote between the first comma and
       # the closing `)` (sans leading whitespace). This keeps internal
@@ -183,6 +192,30 @@ module MethodRewriter
     end
 
     { start: start_off, len: close_off - start_off + 1, replacement: rewritten }
+  end
+
+  # True when the source text for `node` would mis-parse if placed
+  # immediately before `.method(...)`. Drives the paren wrap above.
+  #
+  # The check is structural (AST shape) with a textual safety net for
+  # node types we don't enumerate. Anything whose top is a binary or
+  # unary expression, a pipeline, a CAST, or similar must be wrapped.
+  # "Tight" AST shapes — Identifier, Literal, MethodCall, FuncCall,
+  # GetField, GetIndex, StructLit, ListLit — already bind tighter than
+  # `.method()` and need no wrap. If the source text is already
+  # paren-wrapped, no extra wrap either.
+  TIGHT_AST_TYPES = [
+    :Identifier, :Literal, :MethodCall, :FuncCall, :GetField,
+    :GetIndex, :StructLit, :ListLit, :HashLit, :StringLit
+  ].freeze
+
+  def needs_parens?(node, text)
+    stripped = text.strip
+    return false if stripped.start_with?('(') && stripped.end_with?(')')
+    return false unless node
+    type_name = node.class.name&.split('::')&.last&.to_sym
+    return false if TIGHT_AST_TYPES.include?(type_name)
+    true
   end
 
   # ---- Source / span helpers ----
