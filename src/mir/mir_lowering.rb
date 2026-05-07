@@ -19,10 +19,12 @@ require_relative "../backends/zig_type_mapper"
 require_relative "fsm_lowering"
 require_relative "fsm_transform"
 require_relative "thunk_transform"
+require_relative "test_lowering"
 
 class MIRLowering
   include ZigTypeMapper
   include FsmLowering
+  include TestLowering
 
   ZIG_PRIMITIVE_RE = /\A[uif]\d+\z/
 
@@ -4128,225 +4130,32 @@ class MIRLowering
     MIR::ScopeBlock.new(stmts)
   end
 
-  # ================================================================
-  # Test framework
-  # ================================================================
-
-  TEST_PREAMBLE = <<~ZIG.chomp
-    var da = std.heap.DebugAllocator(.{}){};
-        defer _ = da.deinit();
-        const allocator = da.allocator();
-        var global_ctx = EbrContext{};
-        defer global_ctx.deinit(allocator);
-        var rt = try Runtime.init(allocator, 128 * 1024 * 1024, &global_ctx);
-        defer rt.deinit();
-        rt.wireAllocator();
-  ZIG
-
-  def lower_test_block(node)
-    test_name = node.name
-    setup_mir = lower_body(node.setup)
-
-    preamble_iz = -> {
-      iz = MIR::InlineZig.new(TEST_PREAMBLE, "test_preamble")
-      iz.stdlib_def = { allocates: false, borrows: :all }
-      iz
-    }
-
-    tests = []
-    (node.whens || []).each do |when_block|
-      when_desc = when_block.description
-
-      prev_stubs = (@active_stubs || {}).dup
-      @active_stubs = prev_stubs.dup
-
-      stubs = when_block.setup.select { |s| s.is_a?(AST::StubDecl) }
-      non_stub_setup = when_block.setup.reject { |s| s.is_a?(AST::StubDecl) }
-      when_setup_mir = lower_body(non_stub_setup)
-      stub_mir = stubs.map { |s|
-        m = lower(s)
-        m.is_a?(Array) ? m : [m]
-      }.flatten.compact
-
-      (when_block.tests || []).each do |test_that|
-        full_name = "#{test_name}: #{when_desc}: #{test_that.description}"
-        # Scope @current_bindings to the synthesized test wrapper so
-        # lower_var_decl finds the cleanup entry MIRPass classified for
-        # locals declared inside the TEST THAT body (heap-allocated
-        # struct fields like `x = Client{ host: "..." }` would otherwise
-        # leak: their MIR::Drop never gets emitted).
-        prev_bindings = @current_bindings
-        synth_fn = test_that.synthetic_fn if test_that.respond_to?(:synthetic_fn)
-        @current_bindings = (synth_fn&.cleanup_bindings) || {}
-        body_mir = lower_body(test_that.body)
-        @current_bindings = prev_bindings
-        body = [preamble_iz.call] + stub_mir + setup_mir + when_setup_mir + body_mir
-        tests << MIR::TestDef.new(full_name, body)
-      end
-
-      (when_block.benchmarks || []).each do |b|
-        bench_name = "#{test_name}: #{when_desc}: benchmark"
-        bench_mir = lower(b)
-        body = [preamble_iz.call] + stub_mir + setup_mir + when_setup_mir + [bench_mir]
-        tests << MIR::TestDef.new(bench_name, body)
-      end
-      @active_stubs = prev_stubs
-    end
-
-    tests
-  end
-
-  def lower_assert_raises(node)
-    rt_name = @rt_name
-    kind = node.kind
-    # TEST-INFRA: ASSERT_RAISES expression assembled as raw Zig; not program memory.
-    expr_zig = emit_expr(lower(node.expression))
-    error_check = node.error_name ? " and !#{rt_name}.__error.matchesName(@intFromEnum(ErrorName.#{node.error_name}))" : ""
-    ar_code = <<~ZIG.chomp
-      {
-          if (#{expr_zig}) |_| {
-              @panic("ASSERT_RAISES: expected #{kind} error but none raised");
-          } else |_| {
-              if (!#{rt_name}.__error.matchesKind(.#{kind})#{error_check}) {
-                  @panic("ASSERT_RAISES: expected #{kind} error, got different kind");
-              }
-          }
-      }
-    ZIG
-    iz = MIR::InlineZig.new(ar_code, "assert_raises")
-    iz.stdlib_def = { allocates: false, borrows: :all }
-    iz
-  end
-
-  # Build the MIR replacement for a stubbed call site, or nil if `fn_name`
-  # is not currently stubbed. Shared between FuncCall (`receiver` is nil)
-  # and UFCS MethodCall (`receiver` is the object). Pure MIR composition
-  # -- no InlineZig escape hatch -- so the checker can see what's going
-  # on. Locals that would otherwise become "unused" after stub
-  # replacement get an explicit MIR::Suppress (`_ = &name;`).
-  def stub_intercept_for(fn_name, receiver, args)
-    stub_info = (@active_stubs || {})[fn_name]
-    return nil unless stub_info
-
-    call_inputs = [receiver, *args].compact
-    suppress_names = call_inputs.flat_map { |n| stub_local_idents(n) }.uniq
-    suppress_stmts = suppress_names.map { |nm| MIR::Suppress.new(nm) }
-
-    @stub_label_counter ||= 0
-    @stub_label_counter += 1
-    counter = @stub_label_counter
-
-    case stub_info[:kind]
-    when :returns
-      return MIR::Ident.new(stub_info[:var]) if suppress_stmts.empty?
-      label = "__stub_ret_#{counter}"
-      MIR::BlockExpr.new(label, suppress_stmts +
-        [MIR::BreakStmt.new(label, MIR::Ident.new(stub_info[:var]))])
-
-    when :captures
-      cnt = MIR::Ident.new(stub_info[:var])
-      inc = MIR::Set.new(cnt, MIR::BinOp.new("+", cnt, MIR::Lit.new("1")), false)
-      # Void block: no label needed because nothing breaks to it.
-      MIR::BlockExpr.new(nil, suppress_stmts + [inc])
-
-    when :sequence
-      label = "__stub_seq_#{counter}"
-      seq = MIR::Ident.new("#{stub_info[:var]}_seq")
-      idx = MIR::Ident.new("#{stub_info[:var]}_idx")
-      si  = "__stub_si_#{counter}"
-      MIR::BlockExpr.new(label, suppress_stmts + [
-        MIR::Let.new(si, idx, false, "usize", nil),
-        MIR::Set.new(idx, MIR::BinOp.new("+", idx, MIR::Lit.new("1")), false),
-        MIR::BreakStmt.new(label, MIR::IndexGet.new(seq, MIR::Ident.new(si))),
-      ])
-
-    when :with
-      args_mir = call_inputs.map { |a| lower(a) }
-      MIR::Call.new(stub_info[:var], args_mir, false)
-    end
-  end
-
-  # Names of local Identifiers reachable from a call-input AST node that
-  # need MIR::Suppress in a stub replacement (otherwise Zig flags them as
-  # unused). Only top-level Identifiers count -- nested expressions
-  # (FieldGet, FuncCall, literals, ...) are evaluated implicitly. Routes
-  # through @decl_zig_name_map / @fn_name_rename_map so suppressed names
-  # match the actual Zig var (cleanup-classification may suffix-rename
-  # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
-  def stub_local_idents(node)
-    return [] unless node.is_a?(AST::Identifier)
-    name = node.name
-    return [] unless name.is_a?(String)
-    decl = node.respond_to?(:symbol) ? node.symbol&.reg : nil
-    renamed = (@decl_zig_name_map && decl && @decl_zig_name_map[decl.object_id]) ||
-              (@fn_name_rename_map && @fn_name_rename_map[name]) ||
-              name
-    [renamed]
-  end
-
-  def lower_stub_decl(node)
-    fn_name = node.function_name
-    stub_var = "__stub_#{fn_name}"
-    @active_stubs ||= {}
-
-    case node.kind
-    when :returns
-      val = lower(node.value)
-      @active_stubs[fn_name] = { kind: :returns, var: stub_var }
-      MIR::Let.new(stub_var, val, false, nil, nil)
-    when :captures
-      cap_name = node.value
-      @active_stubs[fn_name] = { kind: :captures, var: cap_name }
-      MIR::Let.new(cap_name, MIR::Lit.new("0"), true, "i64", "_ = &#{cap_name};")
-    when :sequence
-      values = node.value
-      items_mir = if values.respond_to?(:items)
-        values.items.map { |v| lower(v) }
-      else
-        [lower(values)]
-      end
-      @active_stubs[fn_name] = { kind: :sequence, var: stub_var }
-      [
-        MIR::Let.new(
-          "#{stub_var}_seq",
-          MIR::ArrayInit.new("[]const u8", "_", items_mir),
-          false, nil, nil
-        ),
-        MIR::Let.new(
-          "#{stub_var}_idx",
-          MIR::Lit.new("0"),
-          true, "usize", "_ = &#{stub_var}_idx;"
-        ),
-      ]
-    when :with
-      val = lower(node.value)
-      @active_stubs[fn_name] = { kind: :with, var: stub_var }
-      MIR::Let.new(stub_var, val, false, nil, nil)
-    else
-      raise "MIRLowering: unhandled StubDecl kind: #{node.kind} for #{fn_name}"
-    end
-  end
-
-  def lower_benchmark(node)
-    MIR::Comment.new("benchmark lowering placeholder")
-  end
-
-  def lower_smash(node)
-    MIR::Comment.new("smash test placeholder")
-  end
-
-  def lower_profile(node)
-    MIR::Comment.new("profile placeholder")
-  end
+  # Test-framework MIR lowering (lower_test_block, lower_assert_raises,
+  # lower_stub_decl, lower_benchmark, lower_smash, lower_profile,
+  # stub_intercept_for, stub_local_idents, TEST_PREAMBLE) is mixed in
+  # from src/mir/test_lowering.rb (TestLowering module).
 
   def lower_require(node)
-    if node.kind == :package
+    # Stdlib packages auto-resolve to <repo>/stdlib/<name>/src/lib.cht
+    # and are inlined into single-binary builds (no separate .zig is
+    # produced for them). User-registered packages (--pkg name=...)
+    # keep the @import emission so an outer build.zig can orchestrate
+    # per-package compilation.
+    pkg_inline = node.kind == :package && @importer && @importer.stdlib_package?(node.path)
+
+    if node.kind == :package && !pkg_inline
       MIR::Import.new(node.namespace || node.path, "#{node.namespace || node.path}.zig", nil)
     else
-      # Local require: compile the module and inline the Zig body
+      # Local require / stdlib package: compile the module and inline
+      # the Zig body. Local uses compile_file (path); stdlib uses
+      # compile_package (name → resolved path).
       raise "MIRLowering: REQUIRE \"#{node.path}\" but no importer available" unless @importer
 
-      mod = @importer.compile_file(node.path, caller_dir: @source_dir)
+      mod = if pkg_inline
+        @importer.compile_package(node.path, caller_dir: @source_dir)
+      else
+        @importer.compile_file(node.path, caller_dir: @source_dir)
+      end
 
       # Merge schemas so downstream code can resolve imported types
       merge_module_schemas!(mod)
@@ -5539,6 +5348,14 @@ class MIRLowering
   end
 
   def lower_assert(node)
+    # Specialized lowering for `ASSERT a == b` — dispatch to one of
+    # Zig's stdlib testing helpers so failures get a structured diff
+    # instead of a bare `assertion failed` panic. Falls back to
+    # CheatLib.assert for non-equality conditions and for `!=`.
+    if (eq_lowering = try_lower_equality_assert(node))
+      return eq_lowering
+    end
+
     cond = lower(node.condition)
     # Parser's optional-pattern slot pushes the symbol :Any when no message
     # follows the assertion's condition. Normalize to "assertion failed"
@@ -5551,6 +5368,98 @@ class MIRLowering
     end
     msg = msg_str.gsub('"', '\\"')
     emit_builtin(:assert, [cond, MIR::Lit.new("\"#{msg}\"")])
+  end
+
+  # Detect `ASSERT a == b` and lower to the most specific Zig stdlib
+  # testing helper for the operand types. Returns nil if the assertion
+  # isn't a binary `==` (caller falls back to the generic
+  # CheatLib.assert path).
+  #
+  # Dispatch order (first match wins):
+  #   String  ==  String   -> std.testing.expectEqualStrings
+  #   Slice   ==  Slice     -> std.testing.expectEqualSlices(T, ...)
+  #   anything == anything  -> std.testing.expectEqualDeep
+  #
+  # All three return `error.TestExpectedEqual` on mismatch (no panic),
+  # which the surrounding test wrapper propagates via `try`. The
+  # diagnostic output (field-by-field for structs, length+index for
+  # slices, in-context highlight for strings) is rendered by Zig's
+  # stdlib.
+  def try_lower_equality_assert(node)
+    cond = node.condition
+    return nil unless cond.is_a?(AST::BinaryOp) && cond.op == :EQ
+
+    # When the user supplied an explicit message (`ASSERT a == b, "msg"`)
+    # they want that message in the failure output. Zig's stdlib testing
+    # helpers don't accept a custom message — the diff is the message —
+    # so fall back to CheatLib.assert when a message is present so we
+    # don't silently drop user-authored context.
+    raw = node.message
+    has_message = !(raw.nil? || raw == :Any || (raw.respond_to?(:empty?) && raw.empty?))
+    return nil if has_message
+
+    left  = cond.left
+    right = cond.right
+    left_zig  = emit_expr(lower(left))
+    right_zig = emit_expr(lower(right))
+
+    helper, extra_args = pick_equality_helper(left, right)
+    return nil unless helper
+
+    # Argument order matches the Zig stdlib convention: expected
+    # first, actual second. CLEAR doesn't distinguish, so we use
+    # left=expected, right=actual.
+    args = []
+    args.concat(extra_args)
+    args << left_zig
+    args << right_zig
+
+    code = "try std.testing.#{helper}(#{args.join(', ')});"
+    iz = MIR::InlineZig.new(code, "assert_eq_#{helper}")
+    iz.stdlib_def = { allocates: false, borrows: :all, can_fail: true }
+    iz
+  end
+
+  # Picks the most specific Zig stdlib equality helper for the given
+  # operands. Returns [helper_name, extra_prefix_args] or [nil, nil].
+  # Type info comes from the annotator's stamps; if neither operand
+  # has resolved type info we fall back to expectEqualDeep, which
+  # works on any equatable value.
+  def pick_equality_helper(left, right)
+    lt = type_info_for(left)
+    rt = type_info_for(right)
+
+    if (lt&.string? && (rt.nil? || rt.string?)) ||
+       (rt&.string? && (lt.nil? || lt.string?))
+      return ["expectEqualStrings", []]
+    end
+
+    # expectEqualSlices needs the element type as a comptime arg.
+    # Use it only when we can confidently render that type as Zig.
+    if (slice_elem = slice_element_zig_type(lt) || slice_element_zig_type(rt))
+      return ["expectEqualSlices", [slice_elem]]
+    end
+
+    ["expectEqualDeep", []]
+  end
+
+  def type_info_for(ast_node)
+    return nil unless ast_node.respond_to?(:type_info)
+    ast_node.type_info
+  end
+
+  # If `t` is a list/slice type whose element type renders cleanly to
+  # Zig, return the Zig element-type string. Otherwise nil — caller
+  # falls back to expectEqualDeep.
+  def slice_element_zig_type(t)
+    return nil unless t
+    return nil unless t.respond_to?(:array?) && t.array?
+    return nil if t.string?  # strings handled by expectEqualStrings
+    elem = t.respond_to?(:element_type) ? t.element_type : nil
+    return nil unless elem
+    elem.respond_to?(:zig_type) ? elem.zig_type : nil
+  rescue StandardError
+    nil
   end
 
   def lower_raise(node)

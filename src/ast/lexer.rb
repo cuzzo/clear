@@ -26,6 +26,7 @@ class Lexer
       STREAM YIELD
       TIGHT
       TEST THAT STUB BENCHMARK SMASH PROFILE ASSERT_RAISES CAPTURES SEQUENCE
+      PENDING BEFORE AFTER LET TAGS
     ].to_set
 
   def initialize(source)

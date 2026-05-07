@@ -1,0 +1,43 @@
+# Test: STUB SEQUENCE returns successive values from a list,
+# advancing a per-stub index on each call. Useful for simulating
+# call-count-dependent behavior — flaky API succeeding on retry,
+# paginated source returning batches then empty, monotonic clock,
+# etc. RSpec analogue: `allow(x).to receive(:y).and_return("a", "b", "c")`.
+
+FN fetchUser() RETURNS String ->
+    RETURN "real network user";
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST StubSequence DO
+  WHEN "single sequence" DO
+    STUB fetchUser SEQUENCE ["alice", "bob", "carol"];
+
+    TEST THAT "first call returns first value" DO
+      ASSERT fetchUser() == "alice";
+    END
+
+    TEST THAT "successive calls walk the sequence" DO
+      first  = fetchUser();
+      second = fetchUser();
+      third  = fetchUser();
+      ASSERT first == "alice", "first slot";
+      ASSERT second == "bob", "second slot";
+      ASSERT third == "carol", "third slot";
+    END
+
+    TEST THAT "index resets between TEST THAT bodies" DO
+      # Each TEST THAT lowers to its own Zig test block with its own
+      # __stub_fetchUser_idx, so the previous test's third call
+      # didn't leak into this one's first.
+      ASSERT fetchUser() == "alice";
+    END
+  END
+
+  WHEN "unstubbed" DO
+    TEST THAT "returns the real value" DO
+      ASSERT fetchUser() == "real network user";
+    END
+  END
+END

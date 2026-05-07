@@ -14,6 +14,7 @@ require_relative "mir/effect_inference"
 require_relative "mir/concurrency_checks"
 require_relative "annotator-helpers/generic_analysis"
 require_relative "annotator-helpers/capabilities"
+require_relative "annotator-helpers/test_annotation"
 require_relative "annotator-helpers/with_match_check"
 require_relative "annotator-helpers/fixable_helpers"
 require_relative "annotator-helpers/effects"
@@ -42,6 +43,7 @@ class SemanticAnnotator
   include MethodAnalysis
   include UnionAnalysis
   include LockHelper
+  include TestAnnotation
 
   attr_reader :scope_stack
 
@@ -2011,72 +2013,10 @@ private
     node.full_type = :Void
   end
 
-  def visit_TestBlock(node)
-    with_new_scope do
-      node.setup.each { |s| visit(s) }
-      node.whens.each { |w| visit_WhenBlock(w) }
-    end
-    node.full_type = :Void
-  end
-
-  def visit_WhenBlock(node)
-    node.setup.each { |s| visit(s) }
-
-    # Strict test mode: verify all IO functions are stubbed in this WHEN block.
-    if @strict_test
-      stubbed_fns = node.setup
-        .select { |s| s.is_a?(AST::StubDecl) }
-        .map { |s| s.function_name }
-        .to_set
-      node.tests.each { |t| validate_strict_io!(t, stubbed_fns) }
-    end
-
-    node.tests.each do |t|
-      with_new_scope(current_scope) do
-        visit_TestThat(t)
-      end
-    end
-    node.benchmarks.each { |b| visit(b) }
-    node.full_type = :Void
-  end
-
-  def visit_TestThat(node)
-    visit_stmts(node.body)
-    node.full_type = :Void
-  end
-
-  def visit_AssertRaises(node)
-    visit(node.expression)
-    node.full_type = :Void
-  end
-
-  def visit_BenchmarkStmt(node)
-    visit(node.expression)
-    node.full_type = :Void
-  end
-
-  def visit_SmashStmt(node)
-    visit(node.expression)
-    node.full_type = :Void
-  end
-
-  def visit_ProfileStmt(node)
-    visit(node.expression)
-    node.full_type = :Void
-  end
-
-  def visit_StubDecl(node)
-    # Visit the value for type checking if it's an expression.
-    visit(node.value) if node.value.respond_to?(:full_type)
-    # CAPTURES stubs declare a variable in the current scope.
-    if node.kind == :captures
-      cap_name = node.value  # the variable name string
-      # Declare as Int64 counter (tracks number of calls captured)
-      current_scope.declare(cap_name, node, :Int64, true, false, nil, :stack)
-      og_declare(cap_name, node, :Int64)
-    end
-    node.full_type = :Void
-  end
+  # Test-grammar visitors (visit_TestBlock, visit_WhenBlock,
+  # visit_TestThat, visit_AssertRaises, visit_BenchmarkStmt,
+  # visit_SmashStmt, visit_ProfileStmt, visit_StubDecl) are mixed in
+  # from annotator-helpers/test_annotation.rb.
 
   def visit_DieNode(node)
      # Usually takes an integer status code
@@ -6224,42 +6164,8 @@ private
   # In --strict mode, all IO functions (BLOCKING/EXTERN effects) must be
   # stubbed in test bodies. Walks the call chain transitively.
 
-  # Known IO builtins that don't appear in @fn_nodes (runtime-level).
-  IO_BUILTINS = %w[tcpRead tcpWrite accept connect readFile writeFile readLine readLinePrompt
-                   listDir listAll fileSize socketRead socketWrite socketClose].to_set.freeze
-
-  def validate_strict_io!(test_that, stubbed_fns)
-    calls = scan_for_calls(test_that.body).first
-    visited = Set.new
-    queue = calls.to_a.dup
-
-    until queue.empty?
-      name = queue.shift
-      next if visited.include?(name)
-      visited << name
-      next if stubbed_fns.include?(name)
-
-      # Check if it's a known IO builtin
-      if IO_BUILTINS.include?(name)
-        error!(test_that, "Strict test mode: '#{name}' is an IO function that must be " \
-                          "stubbed. Add STUB #{name} RETURNS <value>; to the WHEN block.")
-        next
-      end
-
-      # Check if it's a user function with BLOCKING/EXTERN effects
-      fn = @fn_nodes[name]
-      if fn&.effects
-        has_io = fn.effects.include?(:BLOCKING) || fn.effects.include?(:EXTERN)
-        if has_io
-          error!(test_that, "Strict test mode: '#{name}' has IO effects (#{fn.effects.to_a.join(', ')}). " \
-                            "Either stub '#{name}' or stub the IO functions it calls.")
-        end
-      end
-
-      # Continue down the call chain
-      (@call_graph[name] || []).each { |c| queue << c }
-    end
-  end
+  # IO_BUILTINS and validate_strict_io! moved to
+  # annotator-helpers/test_annotation.rb (TestAnnotation module).
 
   # ── Tail Call Validation ─────────────────────────────────────────
 

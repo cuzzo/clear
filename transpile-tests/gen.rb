@@ -107,8 +107,17 @@ class TestGenerator
     end
 
     error_name_enum = TestGenerator.emit_error_name_enum_block_scope
+    # Tag suffix on the OUTER test name. Inner CLEAR tests carry
+    # `#tag` markers in their own `test "..."` strings (from
+    # WHEN-block TAGS via TestLowering); we collect the union here
+    # and append to the outer name so Zig's `--test-filter "#tag"`
+    # selects the file. Granularity is file-level in v1 — Zig only
+    # filters the top-level test declaration, not the inner ones
+    # nested inside `const S = struct { ... }`. Per-WHEN filtering
+    # would require a custom Zig test runner.
+    tag_suffix = TestGenerator.collect_outer_tag_suffix(transpiled_body)
     <<~ZIG
-      test "#{filename}" {
+      test "#{filename}#{tag_suffix}" {
           #{preamble}
           #{error_name_enum}
           const S = struct {
@@ -143,6 +152,24 @@ class TestGenerator
       #{lines.join("\n")}
       };
     ZIG
+  end
+
+  # Scan the transpiled body for `#tag` markers in inner `test "..."`
+  # declarations (emitted by TestLowering for WHEN-block TAGS) and
+  # return a deduplicated, space-prefixed string suitable for
+  # appending to the outer test name. Empty string if no tags.
+  #
+  # File-level granularity: any tag used by any TEST THAT in the file
+  # appears on the outer wrapper, so `clear test --tag X` selects the
+  # whole file when X matches at all. Per-WHEN granularity is a v2
+  # follow-up that needs a custom Zig test runner.
+  def self.collect_outer_tag_suffix(transpiled_body)
+    tags = []
+    transpiled_body.scan(/test "[^"]*"/) do |test_decl|
+      test_decl.scan(/#(\w+)/) { |m| tags << m[0] }
+    end
+    return "" if tags.empty?
+    " " + tags.uniq.map { |t| "##{t}" }.join(" ")
   end
 
   # Per-test-block variant: emits inside a `test { ... }` scope plus a

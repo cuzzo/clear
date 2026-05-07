@@ -1,0 +1,51 @@
+# Test: STUB WITH replaces a function with a lambda — the most
+# expressive STUB form. The lambda receives the same args as the
+# stubbed function and computes a result. Useful when the stub's
+# answer should depend on its inputs (echo-style mocks, fakes that
+# track state via captured locals, fault-injection by predicate, etc.).
+
+FN compute(x: Int64, y: Int64) RETURNS Int64 ->
+    RETURN x * y;
+END
+
+FN format(prefix: String, value: Int64) RETURNS String ->
+    RETURN prefix;
+END
+
+FN main() RETURNS Void -> RETURN; END
+
+TEST StubWith DO
+  WHEN "lambda swaps the operation" DO
+    # Stub `compute` with a lambda that adds instead of multiplying.
+    STUB compute WITH %(x: Int64, y: Int64) -> x + y;
+
+    TEST THAT "uses lambda result, not real fn" DO
+      ASSERT compute(2, 3) == 5, "lambda computed 2+3, not 2*3";
+      ASSERT compute(10, 20) == 30, "lambda computed 10+20";
+    END
+
+    TEST THAT "lambda runs every call" DO
+      a = compute(1, 1);
+      b = compute(7, 7);
+      ASSERT a == 2;
+      ASSERT b == 14;
+    END
+  END
+
+  WHEN "lambda over different type signature" DO
+    # The stub's lambda receives the same args as the stubbed fn —
+    # `format(prefix: String, value: Int64) -> String`.
+    STUB format WITH %(prefix: String, value: Int64) -> prefix;
+
+    TEST THAT "ignores value, returns prefix verbatim" DO
+      ASSERT format("hello", 42) == "hello";
+      ASSERT format("world", 99) == "world";
+    END
+  END
+
+  WHEN "unstubbed compute" DO
+    TEST THAT "returns the real product" DO
+      ASSERT compute(3, 4) == 12, "real fn multiplies";
+    END
+  END
+END

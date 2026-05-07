@@ -16,23 +16,52 @@ class ModuleImporter
     :type_defs        # Zig type definitions (structs/unions/enums) for file-scope emission
   )
 
-  def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false)
+  # First-party stdlib packages live under <repo>/stdlib/<name>/src/lib.cht
+  # and are auto-resolvable as `REQUIRE "pkg:<name>"` without an explicit
+  # --pkg flag. Computed from this file's location: src/backends/importer.rb
+  # → ../../stdlib relative to __FILE__.
+  STDLIB_ROOT = File.expand_path('../../stdlib', __dir__)
+
+  def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
     @base_dir     = File.expand_path(base_dir)
     @module_cache = {}  # abs_path => CompiledModule
     @compiling    = Set.new  # abs_paths currently being compiled (cycle detection)
     # pkg_paths: { "name" => "/abs/path/to/lib.cht" } -- registered package sources.
     @pkg_paths    = pkg_paths.transform_keys(&:to_s)
+    @stdlib_root  = stdlib_root
   end
 
   # Compile a .cht package by name and return a CompiledModule.
-  # Looks up the source path from @pkg_paths.
+  # Resolution order:
+  #   1. Explicitly registered packages (via --pkg flag)
+  #   2. First-party stdlib at <stdlib_root>/<name>/src/lib.cht
   #
-  # @param pkg_name [String] Package name (e.g. "math")
+  # @param pkg_name [String] Package name (e.g. "math", "testing")
   def compile_package(pkg_name, caller_dir: @base_dir)
-    path = @pkg_paths[pkg_name.to_s]
-    raise "REQUIRE error: unknown package '#{pkg_name}'. " \
-          "Register it with --pkg #{pkg_name}=/path/to/lib.cht" unless path
+    path = @pkg_paths[pkg_name.to_s] || resolve_stdlib_package(pkg_name)
+    unless path
+      raise "REQUIRE error: unknown package '#{pkg_name}'. " \
+            "Register it with --pkg #{pkg_name}=/path/to/lib.cht " \
+            "or place it under #{@stdlib_root}/#{pkg_name}/src/lib.cht"
+    end
     compile_file(path, caller_dir: File.dirname(File.expand_path(path)))
+  end
+
+  def resolve_stdlib_package(pkg_name)
+    return nil unless @stdlib_root
+    candidate = File.join(@stdlib_root, pkg_name.to_s, 'src', 'lib.cht')
+    File.exist?(candidate) ? candidate : nil
+  end
+
+  # True if `pkg_name` resolves to a first-party stdlib package
+  # (lives under `<stdlib_root>/<name>/src/lib.cht`) rather than a
+  # user-registered package. The distinction matters at lowering
+  # time: stdlib packages must be inlined into single-binary builds
+  # (no separate .zig file is produced for them), whereas
+  # explicitly-registered packages are emitted as `@import("name.zig")`
+  # so an outer `build.zig` can orchestrate per-package compilation.
+  def stdlib_package?(pkg_name)
+    !@pkg_paths.key?(pkg_name.to_s) && !resolve_stdlib_package(pkg_name).nil?
   end
 
   # Compile a .cht file and return a CompiledModule (cached after first call).

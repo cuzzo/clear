@@ -3764,32 +3764,112 @@ class Parser
 
     setup = []
     whens = []
+    before_each = []
+    after_each = []
+    before_all = []
+    after_all = []
+    lets = []
 
     until match?(:KEYWORD, 'END')
       if match?(:KEYWORD, 'WHEN')
         whens << parse_when_block
+      elsif test_hook_match?('BEFORE', 'EACH')
+        before_each << parse_test_hook('BEFORE', 'EACH')
+      elsif test_hook_match?('AFTER', 'EACH')
+        after_each << parse_test_hook('AFTER', 'EACH')
+      elsif test_hook_match?('BEFORE', 'ALL')
+        before_all << parse_test_hook('BEFORE', 'ALL')
+      elsif test_hook_match?('AFTER', 'ALL')
+        after_all << parse_test_hook('AFTER', 'ALL')
+      elsif match?(:KEYWORD, 'LET')
+        lets << parse_let_binding
       else
         setup << parse_statement
       end
     end
     consume(:KEYWORD, 'END')
 
-    AST::TestBlock.new(tok, name, setup, whens)
+    block = AST::TestBlock.new(tok, name, setup, whens)
+    block.before_each = before_each
+    block.after_each = after_each
+    block.before_all = before_all
+    block.after_all = after_all
+    block.lets = lets
+    block
   end
 
-  # WHEN "description" DO ... END
+  # `LET <name> = <expr>;` — fixture declaration. Same shape as a
+  # var binding but stored on the enclosing TEST/WHEN block rather
+  # than emitted in setup, so lowering can inject a fresh evaluation
+  # at the top of every TEST THAT.
+  def parse_let_binding
+    tok = consume(:KEYWORD, 'LET')
+    name = consume(:VAR_ID).value
+    consume(:CHAR, '=')
+    expr = parse_expression
+    consume(:CHAR, ';')
+    AST::LetBinding.new(tok, name, expr)
+  end
+
+  # Match `BEFORE EACH` or `AFTER EACH` as a two-keyword sequence. Used by
+  # the test-block / when-block parsers; both share the same hook syntax.
+  def test_hook_match?(first, second)
+    match?(:KEYWORD, first) && @tokens[@pos + 1]&.value == second
+  end
+
+  # Parse `BEFORE EACH DO <stmts> END` (or AFTER EACH); returns the body
+  # statement array. The kind sequence (BEFORE/AFTER + EACH/ALL) is
+  # already validated by test_hook_match? at the call site.
+  def parse_test_hook(first, second)
+    consume(:KEYWORD, first)
+    consume(:KEYWORD, second)
+    consume(:KEYWORD, 'DO')
+    body = []
+    until match?(:KEYWORD, 'END')
+      body << parse_statement
+    end
+    consume(:KEYWORD, 'END')
+    body
+  end
+
+  # WHEN "description" [TAGS [tag1, tag2, ...]] DO ... END
   def parse_when_block
     tok = consume(:KEYWORD, 'WHEN')
     desc = consume(:STRING).value
+    tags = parse_when_tags  # [] if no TAGS clause
     consume(:KEYWORD, 'DO')
 
     setup = []
     tests = []
     benchmarks = []
+    before_each = []
+    after_each = []
+    before_all = []
+    after_all = []
+    lets = []
 
     until match?(:KEYWORD, 'END')
       if match?(:KEYWORD, 'TEST') && @tokens[@pos + 1]&.value == 'THAT'
         tests << parse_test_that
+      elsif match?(:KEYWORD, 'PENDING') &&
+            @tokens[@pos + 1]&.value == 'TEST' &&
+            @tokens[@pos + 2]&.value == 'THAT'
+        # PENDING TEST THAT "..." DO ... END  — type-checked but skipped
+        # at runtime via `return error.SkipZigTest;` in lowering.
+        consume(:KEYWORD, 'PENDING')
+        tt = parse_test_that
+        tt.pending = true
+        tests << tt
+      elsif test_hook_match?('BEFORE', 'EACH')
+        before_each << parse_test_hook('BEFORE', 'EACH')
+      elsif test_hook_match?('AFTER', 'EACH')
+        after_each << parse_test_hook('AFTER', 'EACH')
+      elsif test_hook_match?('BEFORE', 'ALL')
+        before_all << parse_test_hook('BEFORE', 'ALL')
+      elsif test_hook_match?('AFTER', 'ALL')
+        after_all << parse_test_hook('AFTER', 'ALL')
+      elsif match?(:KEYWORD, 'LET')
+        lets << parse_let_binding
       elsif match?(:KEYWORD, 'BENCHMARK')
         benchmarks << parse_benchmark_stmt
       elsif match?(:KEYWORD, 'SMASH')
@@ -3804,7 +3884,32 @@ class Parser
     end
     consume(:KEYWORD, 'END')
 
-    AST::WhenBlock.new(tok, desc, setup, tests, benchmarks)
+    block = AST::WhenBlock.new(tok, desc, setup, tests, benchmarks)
+    block.before_each = before_each
+    block.after_each = after_each
+    block.before_all = before_all
+    block.after_all = after_all
+    block.lets = lets
+    block.tags = tags
+    block
+  end
+
+  # `TAGS [tag1, tag2, ...]` — optional bracketed list of bare
+  # identifiers that lower to test-name suffixes. Returns [] when the
+  # clause is absent. Names are validated to be VAR_IDs (snake_case)
+  # so `--tag slow` filtering can match unambiguously; allowing
+  # arbitrary strings would invite typo-mismatches that pass silently.
+  def parse_when_tags
+    return [] unless match!(:KEYWORD, 'TAGS')
+    consume(:CHAR, '[')
+    names = []
+    until match?(:CHAR, ']')
+      tag_tok = consume(:VAR_ID)
+      names << tag_tok.value
+      break unless match!(:CHAR, ',')
+    end
+    consume(:CHAR, ']')
+    names
   end
 
   # TEST THAT "description" DO ... END
@@ -3896,7 +4001,8 @@ class Parser
       AST::StubDecl.new(tok, fn_name, :captures, var_name)
     elsif match?(:KEYWORD, 'SEQUENCE')
       consume(:KEYWORD, 'SEQUENCE')
-      values = parse_list_literal
+      bracket_tok, items = parse_comma_seq(:CHAR, '[', ']') { parse_expression }
+      values = AST::ListLit.new(bracket_tok, items, :stack)
       consume(:CHAR, ';')
       AST::StubDecl.new(tok, fn_name, :sequence, values)
     elsif match?(:KEYWORD, 'WITH')

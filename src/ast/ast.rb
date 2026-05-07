@@ -1052,10 +1052,43 @@ module AST
   # ── Test Framework ───────────────────────────────────────────────
 
   # TEST name DO setup... WHEN... END
-  TestBlock = Struct.new(:token, :name, :setup, :whens) { include Locatable }
+  TestBlock = Struct.new(:token, :name, :setup, :whens) do
+    include Locatable
+    # Hook bodies. Each is an Array of statement Arrays (multiple
+    # `BEFORE EACH DO ... END` blocks at the same level run in
+    # declaration order). TestLowering composes outer (TEST-level)
+    # hooks around the inner (WHEN-level) ones around each TEST THAT.
+    #
+    # `before_all` / `after_all` lower to dedicated Zig `test` blocks
+    # that run before / after the rest of the suite (Zig executes tests
+    # in declaration order). Each ALL block has its own runtime; state
+    # propagation to TEST THATs requires file-scope vars and is not
+    # yet supported in v1.
+    attr_accessor :before_each, :after_each, :before_all, :after_all
+    # LET fixtures (Array of AST::LetBinding) declared at the TEST
+    # level. Lowered as auto-injected declarations at the top of every
+    # TEST THAT body. Inheritable: WHEN-level LETs override by name.
+    attr_accessor :lets
+  end
 
   # WHEN "description" DO setup... TEST THAT... BENCHMARK... END
-  WhenBlock = Struct.new(:token, :description, :setup, :tests, :benchmarks) { include Locatable }
+  WhenBlock = Struct.new(:token, :description, :setup, :tests, :benchmarks) do
+    include Locatable
+    attr_accessor :before_each, :after_each, :before_all, :after_all
+    attr_accessor :lets
+    # Tags declared on the WHEN via `WHEN "..." TAGS [tag1, tag2] DO ...`.
+    # Array of bare-identifier strings; every TEST THAT inside this WHEN
+    # inherits these tags. Lowered as `#tag` suffixes on the emitted Zig
+    # test name so `clear test --tag slow` can use Zig's --test-filter.
+    attr_accessor :tags
+  end
+
+  # LET <name> = <expr>;  — fixture declaration valid inside TEST or
+  # WHEN bodies. Lowering injects a fresh evaluation of <expr> at the
+  # top of every TEST THAT in the enclosing block, so each test sees
+  # an independent value. WHEN-level LETs override TEST-level LETs of
+  # the same name (the inner declaration wins).
+  LetBinding = Struct.new(:token, :name, :expr) { include Locatable }
 
   # TEST THAT "description" DO body... END
   TestThat = Struct.new(:token, :description, :body) do
@@ -1066,6 +1099,11 @@ module AST
                                 # a regular FN body. mir_lowering reads
                                 # synthetic_fn.cleanup_bindings to scope its
                                 # @current_bindings while walking the body.
+    attr_accessor :pending      # true when declared `PENDING TEST THAT ...`.
+                                # The MIR lowering prepends
+                                # `return error.SkipZigTest;` to the body so
+                                # Zig's runner reports the test as skipped
+                                # rather than passing or failing.
   end
 
   # ASSERT_RAISES Kind, expr  OR  ASSERT_RAISES Kind, ErrorName, expr

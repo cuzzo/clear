@@ -861,8 +861,22 @@ when 'test'
   strict_mode = test_args.delete('--strict')
   frame_debug = test_args.delete('--debug-frame') || test_args.delete('--no-frame')
   test_args.delete('--mir')  # No-op: MIR is the only pipeline
+
+  # `--tag <name>` (repeatable). Translates to Zig's `--test-filter "#<name>"`
+  # — each WHEN-block's TAGS are encoded as ` #<name>` suffixes on the
+  # emitted Zig test name, so substring filtering selects tagged tests.
+  # Multiple --tag flags are OR'd (matches at least one).
+  tag_filters = []
+  while (idx = test_args.index('--tag'))
+    tag = test_args[idx + 1]
+    error "--tag requires a value (e.g. --tag slow)" unless tag
+    tag_filters << tag
+    test_args.delete_at(idx + 1)
+    test_args.delete_at(idx)
+  end
+
   source = test_args.first
-  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--debug-frame]" unless source
+  error "Usage: clear test <file.cht|directory> [--profile] [--strict] [--debug-frame] [--tag <name>]" unless source
   frame_env = frame_debug ? "CLEAR_FRAME_DEBUG=1 " : ""
 
   if File.directory?(source)
@@ -877,11 +891,15 @@ when 'test'
     current_test = nil
     last_completed_test = nil
     leak_seen = {}
+    # Each --tag becomes a `--test-filter "#<tag>"` (Zig's substring
+    # filter; multiple are OR'd, matching any-of semantics).
+    tag_filter_args = tag_filters.flat_map { |t| ['--test-filter', "\"##{t}\""] }
     zig_test_cmd = [
       ZIG, 'test',
       'all-tests.zig',
       *RUNTIME_FILES,
-      '-lc'
+      '-lc',
+      *tag_filter_args
     ].join(' ')
 
     zig_test_status = nil
@@ -993,10 +1011,19 @@ when 'test'
     tmp_zig = File.join(build_dir, tmp_name)
     File.write(tmp_zig, zig_code)
 
-    # Compile and run with zig test
+    # Compile and run with zig test. Tag filters: each --tag adds a
+    # `--test-filter "#<tag>"` (Zig's substring filter). When tag
+    # filters are present we drop the filename filter so the tag
+    # filter narrows the run; without tags we keep filename filtering
+    # as the default.
     cmd_parts = [ZIG, 'test']
     cmd_parts += [tmp_name, 'runtime/switch.S', 'runtime/onRoot.S']
-    cmd_parts += ['-lc', '--test-filter', "\"#{File.basename(source)}\""]
+    cmd_parts += ['-lc']
+    if tag_filters.empty?
+      cmd_parts += ['--test-filter', "\"#{File.basename(source)}\""]
+    else
+      tag_filters.each { |t| cmd_parts += ['--test-filter', "\"##{t}\""] }
+    end
     cmd = cmd_parts.join(' ')
     compile_output = `cd #{build_dir} && #{cmd} 2>&1`
     success = $?.success?

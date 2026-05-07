@@ -23,6 +23,7 @@
 !/manifesto/
 !/spec/
 !/src/
+!/stdlib/
 !/syntaxes/
 !/testdata/
 !/transpile-tests/

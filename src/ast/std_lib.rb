@@ -446,6 +446,65 @@ STD_LIB = {
       borrows: :all },
   ],
 
+  # ---- Numeric predicates (ActiveSupport-style English-as-CLEAR) ----
+  # Each is `is_method: true` so `clear fmt` rewrites prefix calls to
+  # UFCS form: `zero?(n)` -> `n.zero?()`. Designed for ergonomic
+  # `ASSERT n.between?(0, 100)` reads in tests AND idiomatic
+  # `IF count.positive? THEN ...` reads in app code.
+
+  # n.zero? -> n == 0. Float64 listed first so a Float64 receiver
+  # binds to the Float64 overload rather than autocasting through
+  # `@intFromFloat` to the Int64 overload (mirrors `abs`'s ordering).
+  "zero?" => [
+    { args: [:Float64], return: :Bool, zig: "({0} == 0.0)", bc: true, is_method: true },
+    { args: [:Int64],   return: :Bool, zig: "({0} == 0)",   bc: true, is_method: true },
+  ],
+
+  # n.positive? -> n > 0
+  "positive?" => [
+    { args: [:Float64], return: :Bool, zig: "({0} > 0.0)", bc: true, is_method: true },
+    { args: [:Int64],   return: :Bool, zig: "({0} > 0)",   bc: true, is_method: true },
+  ],
+
+  # n.negative? -> n < 0
+  "negative?" => [
+    { args: [:Float64], return: :Bool, zig: "({0} < 0.0)", bc: true, is_method: true },
+    { args: [:Int64],   return: :Bool, zig: "({0} < 0)",   bc: true, is_method: true },
+  ],
+
+  # n.even? -> (n & 1) == 0
+  "even?" => {
+    args: [:Int64], return: :Bool, zig: "(@mod({0}, 2) == 0)", bc: true, is_method: true,
+  },
+
+  # n.odd? -> (n & 1) != 0
+  "odd?" => {
+    args: [:Int64], return: :Bool, zig: "(@mod({0}, 2) != 0)", bc: true, is_method: true,
+  },
+
+  # n.between?(low, high) -> low <= n <= high (inclusive). Like Ruby
+  # Comparable#between?; chosen over an exclusive variant because
+  # half-open ranges are spelled differently elsewhere (`a..<b`).
+  "between?" => [
+    { args: [:Float64, :Float64, :Float64],
+      return: :Bool, zig: "(({0} >= {1}) and ({0} <= {2}))",
+      bc: true, is_method: true },
+    { args: [:Int64, :Int64, :Int64],
+      return: :Bool, zig: "(({0} >= {1}) and ({0} <= {2}))",
+      bc: true, is_method: true },
+  ],
+
+  # f.closeTo?(val, tol) -> |f - val| <= tol. Float-equality replacement
+  # for tests. `closeTo?(_, 0.0001)` is the canonical "approximately
+  # equal" check.
+  "closeTo?" => {
+    args: [:Float64, :Float64, :Float64],
+    return: :Bool,
+    zig: "(@abs({0} - {1}) <= {2})",
+    bc: true,
+    is_method: true,
+  },
+
   # max(a, b) -> larger value
   "max" => [
     { args: [:Int64, :Int64], return: :Int64, zig: "@max({0}, {1})", bc: true },
