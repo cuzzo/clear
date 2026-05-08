@@ -44,10 +44,13 @@ RSpec.describe "DiagnosticRegistry — call-site audit" do
   # MATCH_NON_EXHAUSTIVE). v2 fix B added a second such site
   # (emit_reentrant_error! takes `code:` so it can be reused for both
   # REENTRANCE_DIRECT_RECURSIVE and REENTRANCE_INDIRECT_RECURSIVE).
-  # Budget = 2 covers both helpers; static parser can't see that `code`
-  # always holds a real registry symbol at runtime.
+  # The USE_OF_MOVED_* rewrite added a third (emit_use_of_moved_in_loop_error!
+  # takes `code:` so it serves both USE_OF_MOVED_IN_LOOP and
+  # USE_OF_MOVED_IN_LOOP_SHORT). Budget = 3 covers all three helpers;
+  # the static parser can't see that `code` always holds a real
+  # registry symbol at runtime.
   EXCEPTIONS = {
-    'src/annotator-helpers/fixable_helpers.rb' => 2,
+    'src/annotator-helpers/fixable_helpers.rb' => 3,
   }.freeze
 
   def self.scan_raw_sites

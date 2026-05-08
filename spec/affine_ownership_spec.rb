@@ -54,7 +54,7 @@ RSpec.describe SemanticAnnotator do
           FLUX
         }
         it "raises error on use-after-move" do
-          expect { ast }.to raise_error(/Use of moved value 'a'/)
+          expect { ast }.to raise_error(/USE AFTER MOVE: You can't use `a`/)
         end
       end
 
@@ -87,7 +87,7 @@ RSpec.describe SemanticAnnotator do
             FLUX
           }
           it "raises error on use-after-move of sub-path" do
-            expect { ast }.to raise_error(/Use of moved value 'outer.inner'/)
+            expect { ast }.to raise_error(/USE AFTER MOVE: You can't use `outer\.inner`/)
           end
         end
 
@@ -122,7 +122,7 @@ RSpec.describe SemanticAnnotator do
             FLUX
           }
           it "raises error on accessing child of moved sub-path" do
-            expect { ast }.to raise_error(/Use of moved value 'outer.inner'/)
+            expect { ast }.to raise_error(/USE AFTER MOVE: You can't use `outer\.inner`/)
           end
         end
 
@@ -218,7 +218,7 @@ RSpec.describe SemanticAnnotator do
           FLUX
         }
         it "marks the variable as moved if the parameter specifies TAKES" do
-          expect { ast }.to raise_error(/Use of moved value 'x'/)
+          expect { ast }.to raise_error(/USE AFTER MOVE: You can't use `x`/)
         end
       end
 
@@ -247,7 +247,7 @@ RSpec.describe SemanticAnnotator do
           FLUX
         }
         it "invalidates the variable in the parent scope if it moved in ANY branch" do
-          expect { ast }.to raise_error(/Use of moved value 'x'/)
+          expect { ast }.to raise_error(/USE AFTER MOVE: You can't use `x`/)
         end
       end
 
@@ -270,7 +270,7 @@ RSpec.describe SemanticAnnotator do
           FLUX
         }
         it "consistently invalidates the variable" do
-          expect { ast }.to raise_error(/Use of moved value 'x'/)
+          expect { ast }.to raise_error(/USE AFTER MOVE: You can't use `x`/)
         end
       end
     end
@@ -357,7 +357,7 @@ RSpec.describe SemanticAnnotator do
       # This detects that the loop body moves 'x', implying 'x' must be available
       # at the start of every iteration, which it isn't after the first move.
       it "raises error if a loop body moves a variable defined outside the loop" do
-         expect { ast }.to raise_error(/Use of moved value 'x'/)
+         expect { ast }.to raise_error(/USE AFTER MOVE: You can't use `x`/)
       end
     end
   end

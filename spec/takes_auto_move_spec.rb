@@ -49,7 +49,7 @@ RSpec.describe "TAKES auto-move" do
             RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /moved/)
+    }.to raise_error(CompilerError, /USE AFTER MOVE/)
   end
 
   it "eliminates v cleanup when always consumed by TAKES" do

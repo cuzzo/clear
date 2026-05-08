@@ -349,46 +349,46 @@ RSpec.describe SemanticAnnotator do
       # File::open
       it "raises on use-after-move of File::open resource" do
         src = 'FN f() RETURNS !Void -> a = File::open("x"); b = a; fileWrite(a, "bad"); RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'a'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `a`/)
       end
 
       it "raises on double-move of File::open resource" do
         src = 'FN f() RETURNS !Void -> a = File::open("x"); b = a; c = a; RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'a'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `a`/)
       end
 
       # File::create
       it "raises on use-after-move of File::create resource" do
         src = 'FN f() RETURNS !Void -> a = File::create("x"); b = a; fileWrite(a, "bad"); RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'a'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `a`/)
       end
 
       # TCPServer
       it "raises on use-after-move of TCPServer resource" do
         src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); s2 = s; c = accept(s); RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 's'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `s`/)
       end
 
       it "raises on double-move of TCPServer resource" do
         src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); s2 = s; s3 = s; RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 's'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `s`/)
       end
 
       # TCPClient
       it "raises on use-after-move of TCPClient resource" do
         src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; d = tcpRead(c); RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'c'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `c`/)
       end
 
       it "raises on use-after-move when writing to moved TCPClient" do
         src = 'FN f() RETURNS !Void -> s = TCPServer::listen(0); c = accept(s); c2 = c; tcpWrite(c, "bad"); RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'c'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `c`/)
       end
 
       # TCPClient::connect
       it "raises on use-after-move of TCPClient::connect resource" do
         src = 'FN f() RETURNS !Void -> c = TCPClient::connect("127.0.0.1", 8080); c2 = c; tcpWrite(c, "bad"); RETURN; END'
-        expect { run(src) }.to raise_error(/Use of moved value 'c'/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE: You can't use `c`/)
       end
 
       # Normal use — should NOT raise
@@ -591,13 +591,13 @@ RSpec.describe SemanticAnnotator do
     describe "String ownership semantics" do
       it "raises on reuse of moved String (strings are non-Copy)" do
         src = 'FN f() RETURNS !Void -> x = "hello"; y = x; z = x; RETURN; END'
-        expect { run(src) }.to raise_error(/moved/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE/)
       end
 
       it "raises on String reuse after move" do
         src = 'FN f(s: String) RETURNS !Void -> RETURN; END
               FN g() RETURNS Void -> x = "hello"; y = x; f(x); RETURN; END'
-        expect { run(src) }.to raise_error(/moved/)
+        expect { run(src) }.to raise_error(/USE AFTER MOVE/)
       end
 
       it "does not raise on normal string assignment and use" do

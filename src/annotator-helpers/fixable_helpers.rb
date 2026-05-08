@@ -218,13 +218,12 @@ module FixableHelper
   # diagnostic still surfaces.
   def emit_use_of_moved_error!(use_node, og_node)
     name = use_node.name.to_s
-    return error!(use_node, :USE_OF_MOVED_VALUE, name: name) unless og_node
-    return error!(use_node, :USE_OF_MOVED_VALUE, name: name) unless og_node.move_line && og_node.move_col
+    unless og_node && og_node.move_line && og_node.move_col
+      msg = "USE AFTER MOVE: You can't use `#{name}`."
+      return error!(use_node, :USE_OF_MOVED_VALUE, message: msg)
+    end
 
     fixes = []
-    move_action = ownership_move_action_label(og_node.move_action)
-    move_suffix = move_action ? " by #{move_action}" : ""
-
     fixes << Fix.new(
       description: "Wrap the consuming reference with COPY at line #{og_node.move_line} " \
                    "(the original survives for the later use).",
@@ -264,25 +263,94 @@ module FixableHelper
       end
     end
 
+    consumer = consumer_source_text(og_node.move_line)
+    phrase   = ownership_active_phrase(og_node.move_action)
+    msg = if consumer
+      "USE AFTER MOVE: You can't use `#{name}`. `#{consumer}` #{phrase} (line #{og_node.move_line})."
+    else
+      "USE AFTER MOVE: You can't use `#{name}` — it #{phrase} (line #{og_node.move_line})."
+    end
+
     fixable!(use_node,
-      message: "Use of moved value '#{name}' (moved at line #{og_node.move_line}#{move_suffix})",
+      message: msg,
       category: :ownership,
       level: :error,
       fixes: fixes,
       raise_in_collector: true)
   end
 
-  def ownership_move_action_label(action)
-    case action
-    when :share then "SHARE"
-    when :give then "GIVE"
-    when :takes then "TAKES"
-    when :return then "RETURN"
-    when :next then "NEXT"
-    when :collect then "COLLECT"
-    when :capture then "capture"
-    else nil
+  # Loop-body use of a value that was moved on a prior iteration. The
+  # coda "Values can only be TAKEN once; subsequent iterations have
+  # nothing left to GIVE" is the canonical phrasing per WALKTHROUGH.md.
+  def emit_use_of_moved_in_loop_error!(node, name, og_node = nil, code: :USE_OF_MOVED_IN_LOOP)
+    consumer = og_node && og_node.move_line ? consumer_source_text(og_node.move_line) : nil
+    consumer_clause = consumer ? "`#{consumer}` already TOOK it. " : ""
+    msg = "USE AFTER MOVE: You can't use `#{name}` here — #{consumer_clause}" \
+          "Values can only be TAKEN once; subsequent iterations have nothing left to GIVE."
+    error!(node, code, message: msg)
+  end
+
+  # Sub-path use after the path's owner was consumed elsewhere. Uses
+  # passive voice ("was already TAKEN / GIVEN") because the subject of
+  # the sentence is the owner — what HAPPENED to it — not the consumer.
+  def emit_use_of_moved_path_error!(node, path, og_node = nil)
+    path_str = path.map(&:to_s).join('.')
+    root     = path.first.to_s
+    msg = if og_node && og_node.move_line
+      phrase = ownership_passive_phrase(og_node.move_action)
+      "USE AFTER MOVE: You can't use `#{path_str}`. Its owner `#{root}` #{phrase} on line #{og_node.move_line}."
+    else
+      "USE AFTER MOVE: You can't use `#{path_str}`. Its owner `#{root}` was already consumed elsewhere."
     end
+    error!(node, :USE_OF_MOVED_PATH, message: msg)
+  end
+
+  # Active form: subject is the consumer (e.g. "`process(GIVE msg)`
+  # already GAVE it away"). Used when we can quote the consumer site.
+  OWNERSHIP_ACTIVE_PHRASES = {
+    give:    "already GAVE it away",
+    takes:   "already TOOK it away",
+    return:  "already RETURNED it",
+    next:    "already consumed it via NEXT",
+    share:   "already SHARED it",
+    collect: "already COLLECTED it",
+    capture: "already captured it",
+    move:    "already MOVED it",
+  }.freeze
+
+  # Passive form: subject is the value (e.g. "its owner `b` was
+  # already TAKEN away"). Used by USE_OF_MOVED_PATH where we name the
+  # path's owner rather than the consumer.
+  OWNERSHIP_PASSIVE_PHRASES = {
+    give:    "was already GIVEN away",
+    takes:   "was already TAKEN away",
+    return:  "was already RETURNED",
+    next:    "was already consumed via NEXT",
+    share:   "was already SHARED",
+    collect: "was already COLLECTED",
+    capture: "was already captured",
+    move:    "was already MOVED",
+  }.freeze
+
+  def ownership_active_phrase(action)
+    OWNERSHIP_ACTIVE_PHRASES[action] || "already consumed it"
+  end
+
+  def ownership_passive_phrase(action)
+    OWNERSHIP_PASSIVE_PHRASES[action] || "was already consumed"
+  end
+
+  # Best-effort: extract the source-line text at the move site so the
+  # error can quote the consumer call (e.g. "process(GIVE msg)"). Falls
+  # back to nil when @source_code isn't set (programmatic use of the
+  # annotator) or the line is past EOF.
+  def consumer_source_text(line_num)
+    return nil unless @source_code && line_num
+    line = @source_code.lines[line_num - 1]
+    return nil unless line
+    text = line.strip
+    text = text.chomp(';').strip
+    text.empty? ? nil : text
   end
 
   # Type: `Integer literal N overflows T (range ...)`. When the

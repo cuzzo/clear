@@ -271,7 +271,7 @@ RSpec.describe "./clear fix", :integration do
     it "reports the move line and three candidate fixes" do
       path = write("m.cht", src)
       out, _, _ = run_fix("--dry-run", path)
-      expect(out).to match(/Use of moved value 'a' \(moved at line 5\)/)
+      expect(out).to match(/USE AFTER MOVE.*`a`.*line 5/)
       expect(out).to match(/Wrap the consuming reference with COPY at line 5/)
       expect(out).to match(/Change 'a' to `@multiowned`/)
       expect(out).to match(/Change 'a' to `@shared`/)

@@ -243,7 +243,7 @@ RSpec.describe "SHARE keyword" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /Use of moved value 'b'.*moved at line 4 by GIVE/m)
+    }.to raise_error(CompilerError, /USE AFTER MOVE.*`b`.*already GAVE.*line 4/m)
   end
 
   it "consumes a bare source passed through SHARE" do
@@ -258,7 +258,7 @@ RSpec.describe "SHARE keyword" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /Use of moved value 'b'.*moved at line 5 by SHARE/m)
+    }.to raise_error(CompilerError, /USE AFTER MOVE.*`b`.*already SHARED.*line 5/m)
   end
 
   it "reports the earlier SHARE site when sharing a consumed source again" do
@@ -273,7 +273,7 @@ RSpec.describe "SHARE keyword" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /Use of moved value 'b'.*moved at line 5 by SHARE/m)
+    }.to raise_error(CompilerError, /USE AFTER MOVE.*`b`.*already SHARED.*line 5/m)
   end
 
   it "does not consume the source when SHARE wraps COPY" do

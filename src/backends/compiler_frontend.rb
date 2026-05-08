@@ -34,7 +34,7 @@ class CompilerFrontend
     tokens = Lexer.new(cheat_code).tokenize
     ast    = Parser.new(tokens, cheat_code).parse
 
-    annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test)
+    annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
     annotator.annotate!(ast)
 
     PipelineRewriter.new(annotator).rewrite!(ast)

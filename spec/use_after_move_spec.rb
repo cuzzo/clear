@@ -26,7 +26,7 @@ RSpec.describe "Use-after-move detection" do
   # 1. v2 = v1 consumes v1. Using v1 after is an error.
   # =========================================================================
   it "raises on use after move via binding" do
-    expect_error(<<~CLEAR, /moved/)
+    expect_error(<<~CLEAR, /USE AFTER MOVE/)
       UNION Value { Num: Float64, List: Int64[] }
       FN makeList() RETURNS Value ->
           MUTABLE items: Int64[]@list = List[];
@@ -46,7 +46,7 @@ RSpec.describe "Use-after-move detection" do
   # 2. items.append(val) consumes val. Using val after is an error.
   # =========================================================================
   it "raises on use after move via append" do
-    expect_error(<<~CLEAR, /moved/)
+    expect_error(<<~CLEAR, /USE AFTER MOVE/)
       UNION Value { Num: Float64, List: Int64[] }
       FN main() RETURNS Void ->
           MUTABLE v = Value{ Num: 1.0 };
@@ -59,7 +59,7 @@ RSpec.describe "Use-after-move detection" do
   end
 
   it "reports TAKES when a method argument consumes a value" do
-    expect_error(<<~CLEAR, /Use of moved value 'item'.*moved at line 5 by TAKES/m)
+    expect_error(<<~CLEAR, /USE AFTER MOVE.*`item`.*already TOOK.*line 5/m)
       STRUCT Item { v: Int64 }
       FN main() RETURNS Void ->
           MUTABLE pool: Item[10]@pool = [];
@@ -71,19 +71,29 @@ RSpec.describe "Use-after-move detection" do
     CLEAR
   end
 
-  it "maps move actions to user-facing labels" do
+  it "maps move actions to user-facing phrases (active and passive forms)" do
     annotator = SemanticAnnotator.new
 
-    expect(annotator.send(:ownership_move_action_label, :return)).to eq("RETURN")
-    expect(annotator.send(:ownership_move_action_label, :collect)).to eq("COLLECT")
-    expect(annotator.send(:ownership_move_action_label, :capture)).to eq("capture")
+    # Active form is used by USE_OF_MOVED_VALUE — the consumer is the
+    # subject of the sentence ("`process(GIVE msg)` already GAVE it away").
+    expect(annotator.send(:ownership_active_phrase, :give)).to    eq("already GAVE it away")
+    expect(annotator.send(:ownership_active_phrase, :takes)).to   eq("already TOOK it away")
+    expect(annotator.send(:ownership_active_phrase, :return)).to  eq("already RETURNED it")
+    expect(annotator.send(:ownership_active_phrase, :share)).to   eq("already SHARED it")
+    expect(annotator.send(:ownership_active_phrase, :move)).to    eq("already MOVED it")
+    # Passive form is used by USE_OF_MOVED_PATH — the value (path's
+    # owner) is the subject ("its owner `b` was already TAKEN away").
+    expect(annotator.send(:ownership_passive_phrase, :give)).to   eq("was already GIVEN away")
+    expect(annotator.send(:ownership_passive_phrase, :takes)).to  eq("was already TAKEN away")
+    expect(annotator.send(:ownership_passive_phrase, :return)).to eq("was already RETURNED")
+    expect(annotator.send(:ownership_passive_phrase, :move)).to   eq("was already MOVED")
   end
 
   # =========================================================================
   # 3. Struct literal consumes captured variables.
   # =========================================================================
   it "raises on use after move via struct literal" do
-    expect_error(<<~CLEAR, /moved/)
+    expect_error(<<~CLEAR, /USE AFTER MOVE/)
       STRUCT Container { data: HashMap<Int64> }
       FN main() RETURNS Void ->
           MUTABLE m: HashMap<Int64> = {};
@@ -118,7 +128,7 @@ RSpec.describe "Use-after-move detection" do
   # 4b. TAKES fn(val) consumes val. Using val after is an error.
   # =========================================================================
   it "raises on use after move via TAKES" do
-    expect_error(<<~CLEAR, /moved/)
+    expect_error(<<~CLEAR, /USE AFTER MOVE/)
       FN consume(TAKES items: Int64[]) RETURNS Int64 ->
           RETURN items.length();
       END
@@ -150,7 +160,7 @@ RSpec.describe "Use-after-move detection" do
   # 6. Strings are owned (non-Copy). Assignment moves.
   # =========================================================================
   it "raises on reuse of moved string" do
-    expect_error(<<~CLEAR, /moved/)
+    expect_error(<<~CLEAR, /USE AFTER MOVE/)
       FN main() RETURNS Void ->
           s = "hello";
           s2 = s;
@@ -244,7 +254,7 @@ RSpec.describe "Use-after-move detection" do
   # ownership of the same pointer, which is an illegal state (double-free).
   # =========================================================================
   it "raises on use after move for union with @indirect struct variant" do
-    expect_error(<<~CLEAR, /moved/)
+    expect_error(<<~CLEAR, /USE AFTER MOVE/)
       UNION Value { Nil, Num: Float64, Lambda { body: Value @indirect, id: Int64 } }
       FN makeLambda!() RETURNS Value ->
           RETURN Value.Lambda{ body: Value{ Num: 42.0 }, id: 1 };

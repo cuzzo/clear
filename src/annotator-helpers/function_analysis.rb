@@ -431,7 +431,10 @@ module FunctionAnalysis
           node.args[i] = owned if owned
         end
 
-        move_if_not_copyable!(inner_node)
+        # `is_give` already had visit_GiveNode set the :give action;
+        # for plain TAKES (no GIVE wrapper) record :takes so the
+        # USE_OF_MOVED_VALUE diagnostic can phrase "TOOK it away".
+        move_if_not_copyable!(inner_node, action: is_give ? :give : :takes)
         inner_node.was_moved = true
         arg_node.was_moved = true
         # If ensure_owned_value! wrapped the arg in a fresh CopyNode (auto-COPY

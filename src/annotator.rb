@@ -1885,7 +1885,7 @@ private
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
             is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
             unless is_copy
-              error!(node, :USE_OF_MOVED_IN_LOOP, name: name)
+              emit_use_of_moved_in_loop_error!(node, name, @og&.[](name), code: :USE_OF_MOVED_IN_LOOP)
             end
           end
         end
@@ -1960,7 +1960,7 @@ private
             type_obj = var_type.is_a?(Type) ? var_type : Type.new(var_type.to_s)
             is_copy = type_obj.implicitly_copyable? { |t| lookup_type_schema(t) }
             unless is_copy
-              error!(node, :USE_OF_MOVED_IN_LOOP_SHORT, name: name)
+              emit_use_of_moved_in_loop_error!(node, name, @og&.[](name), code: :USE_OF_MOVED_IN_LOOP_SHORT)
             end
           end
         end
@@ -3325,7 +3325,7 @@ private
       path.each do |seg|
         check = check.empty? ? seg.to_s : "#{check}.#{seg}"
         if @og.moved?(check)
-          error!(node, :USE_OF_MOVED_PATH, path: path.map(&:to_s).join("."))
+          emit_use_of_moved_path_error!(node, path, @og[check])
           break
         end
       end
@@ -6447,14 +6447,23 @@ private
 
   # Mark an identifier as moved if its type is non-Copy.
   # Skips generic type params (can't determine copyability at annotation time).
-  def move_if_not_copyable!(node)
+  # Skips when the binding is already marked moved with a more-specific
+  # action (e.g., `:give` set by visit_GiveNode) — overwriting it with
+  # `:move` would destroy the action info that the
+  # USE_OF_MOVED_VALUE diagnostic uses to phrase "GAVE/TOOK/etc.".
+  def move_if_not_copyable!(node, action: :move)
     return unless node.is_a?(AST::Identifier)
     vt = node.type_info
     vt = Type.new(vt) if vt && !vt.is_a?(Type)
     return if vt.nil?
     return if current_fn_ctx&.type_params&.include?(vt.resolved)
     return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
-    og_set_moved(node.name, at_token: node.token, action: :move)
+    existing = @og&.nodes&.[](node.name)
+    if existing && existing.moved? && existing.move_action && existing.move_action != :move
+      node.was_moved = true
+      return
+    end
+    og_set_moved(node.name, at_token: node.token, action: action)
     node.was_moved = true
   end
 

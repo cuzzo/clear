@@ -1037,7 +1037,7 @@ RSpec.describe SemanticAnnotator do
             RETURN;
           END
         CLEAR
-        expect { run(src) }.to raise_error(SourceError, /Use of moved value 's'/)
+        expect { run(src) }.to raise_error(SourceError, /USE AFTER MOVE.*`s`/)
       end
 
       it "allows CLONE inside a BG block capture" do
