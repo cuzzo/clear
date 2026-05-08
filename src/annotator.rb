@@ -3459,7 +3459,17 @@ private
   def visit_StructLit(node)
     schema = lookup_type_schema(node.name.to_sym)
     if schema.nil?
-      error!(node, :UNKNOWN_STRUCT_TYPE, name: node.name)
+      tok = node.respond_to?(:token) ? node.token : nil
+      if tok
+        emit_typo_suggestion!(
+          tok, node.name, all_known_type_names,
+          "Unknown struct type '#{node.name}'",
+          "closest declared type",
+          category: :type, cascade: true
+        )
+      else
+        error!(node, :UNKNOWN_STRUCT_TYPE, name: node.name)
+      end
     end
 
     # Union literal: Result{ Ok: 42 } or Option<Number>{ Some: 42.0 }

@@ -193,7 +193,17 @@ module GenericAnalysis
       schema = lookup_type_schema(base_name)
 
       if schema.nil?
-        error!(node, :UNKNOWN_TYPE, name: base_name)
+        tok = node.respond_to?(:token) ? node.token : nil
+        if tok
+          emit_typo_suggestion!(
+            tok, base_name.to_s, all_known_type_names,
+            "Unknown type '#{base_name}'",
+            "closest declared type",
+            category: :type, cascade: true
+          )
+        else
+          error!(node, :UNKNOWN_TYPE, name: base_name)
+        end
       end
 
       unless schema.is_a?(Hash) && schema[:type_params]

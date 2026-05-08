@@ -272,6 +272,17 @@ module ScopeHelper
     nil
   end
 
+  # Every type name visible from the current scope (struct, enum, union,
+  # generic). Used by typo-suggestion fixes that need a candidate set.
+  def all_known_type_names
+    names = []
+    @scope_stack.each do |scope|
+      types = scope.instance_variable_get(:@types)
+      names.concat(types.keys.map(&:to_s)) if types
+    end
+    names.uniq
+  end
+
   def with_new_scope(scope = nil)
     new_scope = scope.nil? ? Scope.new : scope.dup
     # Atomics M2.6: stamp depth on the freshly pushed scope so

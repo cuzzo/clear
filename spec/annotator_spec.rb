@@ -1306,7 +1306,7 @@ RSpec.describe SemanticAnnotator do
         }
 
         it "raises an Unknown Struct error" do
-          expect { ast }.to raise_error(/Unknown struct type: 'Ghost'/)
+          expect { ast }.to raise_error(/Unknown struct type 'Ghost'/)
         end
       end
     end

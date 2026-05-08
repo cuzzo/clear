@@ -3612,14 +3612,26 @@ class Parser
     can_smash  = false
     stack_size = nil
 
+    # Enter the loop on a known sigil OR on a `@<typo>` token that the
+    # user clearly intended as a sigil (so the typo path can fire).
+    looks_like_sigil = current.type == :VAR_ID && current.value.start_with?('@')
     return { pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash } unless
-      current.type == :VAR_ID && DO_BRANCH_SIGILS.key?(current.value)
+      looks_like_sigil
 
     loop do
       tok      = consume(:VAR_ID)
       cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
       attrs    = DO_BRANCH_SIGILS[cap_name]
-      error!(tok, :UNKNOWN_BRANCH_PREFIX, value: tok.value.inspect) unless attrs
+      unless attrs
+        has_at = tok.value.start_with?('@')
+        candidates = has_at ? DO_BRANCH_SIGILS.keys : DO_BRANCH_SIGILS.keys.map { |k| k.sub(/^@/, '') }
+        emit_typo_suggestion!(
+          tok, tok.value, candidates,
+          "Unknown branch prefix #{tok.value.inspect}",
+          "closest DO branch sigil",
+          category: :type, cascade: true
+        )
+      end
 
       if attrs[:stack_size]
         error!(tok, :DUPLICATE_STACK_SIZE, kind: "branch") if stack_size
@@ -3672,14 +3684,26 @@ class Parser
     stack_size_token = nil
     can_smash_token  = nil
 
+    # Enter the loop on a known sigil OR on `@<typo>` that the user
+    # clearly intended as a BG sigil (so the typo path can fire).
+    looks_like_sigil = current.type == :VAR_ID && current.value.start_with?('@')
     return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: nil, can_smash_token: nil } unless
-      current.type == :VAR_ID && BG_SIGILS.key?(current.value)
+      looks_like_sigil
 
     loop do
       tok      = consume(:VAR_ID)
       cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
       attrs    = BG_SIGILS[cap_name]
-      error!(tok, :UNKNOWN_BG_PREFIX, value: tok.value.inspect) unless attrs
+      unless attrs
+        has_at = tok.value.start_with?('@')
+        candidates = has_at ? BG_SIGILS.keys : BG_SIGILS.keys.map { |k| k.sub(/^@/, '') }
+        emit_typo_suggestion!(
+          tok, tok.value, candidates,
+          "Unknown BG prefix #{tok.value.inspect}",
+          "closest BG body sigil",
+          category: :type, cascade: true
+        )
+      end
 
       if attrs[:stack_size]
         error!(tok, :DUPLICATE_STACK_SIZE, kind: "BG") if stack_size
