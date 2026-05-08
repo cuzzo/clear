@@ -3338,6 +3338,18 @@ private
         field_type = apply_type_subst(field_type, subst) if subst.any?
       end
       node.full_type = field_type
+    elsif schema.is_a?(Hash) && node.token
+      # Struct schema resolved but the requested field doesn't exist —
+      # emit a typo suggestion when one of the schema's fields is close
+      # to what the user typed. The bare error code stays as the
+      # fallback when no candidate is within Levenshtein threshold.
+      valid_fields = schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
+      emit_typo_suggestion!(
+        node.token, node.field, valid_fields,
+        "Struct '#{type}' has no field '#{node.field}'",
+        "field of #{type}",
+        category: :type, cascade: true
+      )
     else
       error!(node, :ILLEGAL_FIELD_LOOKUP, field: node.field, type: type)
     end

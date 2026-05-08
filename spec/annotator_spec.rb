@@ -969,7 +969,7 @@ RSpec.describe SemanticAnnotator do
         }
 
         it "raises a missing field error (from GetField visitor)" do
-          expect { ast }.to raise_error(/Cannot determine struct type/i)
+          expect { ast }.to raise_error(/no field 'z'/i)
         end
       end
     end

@@ -578,7 +578,7 @@ RSpec.describe SemanticAnnotator do
                 END
               END
             CLEAR
-          }.to raise_error(CompilerError, /Type Error/)
+          }.to raise_error(CompilerError, /no field 'diameter'/)
         end
       end
 
