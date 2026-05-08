@@ -38,10 +38,15 @@ RSpec.describe "DiagnosticRegistry — call-site audit" do
   #      `coerce!` returns a string from a data structure / method.
   #      Migrating requires those producers to switch to codes too.
   # Tranche 8 closed every exception by stamping an umbrella code on
-  # each pass-through site. The hash is intentionally empty: any new
-  # raw-string `error!` call is a regression. If a future legitimate
-  # case appears, add it here with a one-line justification.
-  EXCEPTIONS = {}.freeze
+  # each pass-through site. Tier 2 fixable! work added one site that
+  # passes a Symbol `code` as a variable (emit_match_partial_fix! takes
+  # `code:` so it can be reused for MATCH_NEEDS_ENUM_OR_UNION and
+  # MATCH_NON_EXHAUSTIVE). The audit's static parser can't tell that
+  # `code` always holds a real registry symbol at runtime, so the site
+  # is exempted with a budget of 1.
+  EXCEPTIONS = {
+    'src/annotator-helpers/fixable_helpers.rb' => 1,
+  }.freeze
 
   def self.scan_raw_sites
     sites = Hash.new(0)

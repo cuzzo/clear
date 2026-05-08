@@ -717,7 +717,7 @@ private
     # 2. Validation & Lifetime
     has_mutable_param = node.params.any? { |p| p[:mutable] }
     if has_mutable_param && !node.name.end_with?("!")
-      error!(node, :STYLE_MUTABLE_PARAM_NEEDS_BANG, name: node.name)
+      emit_style_mutable_param_needs_bang!(node)
     end
     verify_lifetime!(node)
 
@@ -1703,7 +1703,7 @@ private
       # must opt in to PARTIAL MATCH.
       unless is_enum || is_union
         type_label = expr_t.resolved
-        error!(node, :MATCH_NEEDS_ENUM_OR_UNION, type: type_label)
+        emit_match_partial_fix!(node, :MATCH_NEEDS_ENUM_OR_UNION, type: type_label)
       end
 
       # MATCH forbids DEFAULT — the whole point of an exhaustive MATCH is
@@ -1733,7 +1733,7 @@ private
       missing = all_variants - covered
       unless missing.empty?
         type_label2 = is_enum ? "enum" : "union"
-        error!(node, :MATCH_NON_EXHAUSTIVE,
+        emit_match_partial_fix!(node, :MATCH_NON_EXHAUSTIVE,
           kind: type_label2, name: type_name, missing: missing.sort.join(', '))
       end
     end
@@ -3217,7 +3217,7 @@ private
     return if target_type == value_type
 
     if !is_safe_autocast?(value_type, target_type)
-      error!(node, :TYPE_MISMATCH_ASSIGN, got: value_type, expected: target_type)
+      emit_type_mismatch_assign_error!(node, target_type, value_type)
     else
       node.value.coerced_type = target_type
     end
@@ -6194,7 +6194,7 @@ private
   # `:NOT_LOGICAL` / `:MAX_DEPTH(N)`) on the callee.
   def validate_fiber_stack!(node, call_names, user_size, can_smash)
     if can_smash
-      error!(node, :CAN_SMASH_NOT_SUPPORTED)
+      emit_can_smash_unsupported_error!(node)
       return
     end
 

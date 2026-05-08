@@ -1131,7 +1131,8 @@ class Parser
     else
       consume(:KEYWORD, 'FN')
     end
-    name = consume(:VAR_ID).value
+    name_tok = consume(:VAR_ID)
+    name = name_tok.value
     # Predicate suffix: FN name?(...) — ? is part of the function name
     if match?(:CHAR, '?')
       consume(:CHAR, '?')
@@ -1410,6 +1411,7 @@ class Parser
     node.requires = requires_clause
     node.reentrant_token = reentrant_token
     node.arrow_token = arrow_token
+    node.name_token = name_tok
     node.effects_decl = effects_decl
     node.effects_span = effects_span if effects_span
     node.max_depth_n = effects_span[:max_depth] if effects_span && effects_span[:max_depth]
@@ -3595,8 +3597,9 @@ class Parser
     can_smash  = false
     stack_size = nil
     stack_size_token = nil
+    can_smash_token  = nil
 
-    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: nil } unless
+    return { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: nil, can_smash_token: nil } unless
       current.type == :VAR_ID && BG_SIGILS.key?(current.value)
 
     loop do
@@ -3613,7 +3616,10 @@ class Parser
       pinned    = true if attrs[:pinned]
       parallel  = true if attrs[:parallel]
       arena     = true if attrs[:arena]
-      can_smash = true if attrs[:can_smash]
+      if attrs[:can_smash]
+        can_smash = true
+        can_smash_token = tok
+      end
 
       # More sigils chained with ':'?
       break unless match?(:CHAR, ':')
@@ -3621,7 +3627,7 @@ class Parser
     end
 
     consume(:ARROW, '->')
-    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: stack_size_token }
+    { pinned: pinned, parallel: parallel, stack_size: stack_size, arena: arena, can_smash: can_smash, stack_size_token: stack_size_token, can_smash_token: can_smash_token }
   end
 
   def parse_bg_block
@@ -3636,6 +3642,7 @@ class Parser
     node = AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel], prefix[:arena], prefix[:can_smash])
     node.open_brace_token = open_brace
     node.prefix_token = prefix[:stack_size_token]
+    node.can_smash_token = prefix[:can_smash_token]
     node
   end
 

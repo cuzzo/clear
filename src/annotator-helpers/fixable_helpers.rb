@@ -452,6 +452,210 @@ module FixableHelper
       raise_in_collector: true)
   end
 
+  # Capture: USE(MUTABLE x) where x is an immutable binding. :auto
+  # fix inserts MUTABLE at the captured binding's declaration. Same
+  # shape as emit_immutable_assignment_error! / emit_immutable_arg_error!.
+  def emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
+    fix = build_declare_mutable_fix(cap_name, owner_scope)
+    return error!(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name) unless fix
+    fixable!(node,
+      message: DiagnosticRegistry.format(:CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name),
+      category: :ownership,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # Type: function with multiple-typed RETURN branches and no explicit
+  # `RETURNS` annotation. :auto fix inserts `RETURNS :Any ` immediately
+  # before the function's `->` arrow so the compiler knows to accept
+  # the polymorphic return.
+  def emit_ambiguous_return_error!(fn_node, found_returns)
+    arrow = fn_node.respond_to?(:arrow_token) ? fn_node.arrow_token : nil
+    fix = nil
+    if arrow && arrow.respond_to?(:line) && arrow.respond_to?(:column)
+      fix = Fix.new(
+        description: "Insert `RETURNS :Any` so the function accepts the polymorphic return.",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 0),
+          replacement: 'RETURNS :Any '
+        )]
+      )
+    end
+    return error!(fn_node, :AMBIGUOUS_RETURN, types: found_returns) unless fix
+    fixable!(fn_node,
+      message: DiagnosticRegistry.format(:AMBIGUOUS_RETURN, types: found_returns),
+      category: :type,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # MATCH on a non-discriminated subject (or non-exhaustive cases) —
+  # both fixed by inserting `PARTIAL ` before the MATCH keyword. :auto
+  # confidence because PARTIAL MATCH is strictly a superset (allows
+  # DEFAULT, allows guards, doesn't require exhaustiveness).
+  def emit_match_partial_fix!(match_node, code, **kwargs)
+    tok = match_node.respond_to?(:token) ? match_node.token : nil
+    fix = nil
+    if tok && tok.respond_to?(:line)
+      fix = Fix.new(
+        description: "Replace `MATCH` with `PARTIAL MATCH` (relaxes exhaustiveness; allows DEFAULT and WHEN guards).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+          replacement: 'PARTIAL '
+        )]
+      )
+    end
+    return error!(match_node, code, **kwargs) unless fix
+    fixable!(match_node,
+      message: DiagnosticRegistry.format(code, **kwargs),
+      category: :type,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # Lifetime: returning a borrowed value without COPY or a `RETURNS x:T`
+  # annotation. :auto fix wraps the return value with `COPY ` — safe for
+  # values the compiler considers copy-eligible at runtime; user can
+  # decline and add a lifetime annotation instead.
+  def emit_return_borrowed_no_copy_error!(node)
+    fix = nil
+    if node.respond_to?(:token) && node.token
+      tok = node.token
+      fix = Fix.new(
+        description: "Wrap the returned value with `COPY ` so it doesn't borrow from the parameter.",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+          replacement: 'COPY '
+        )]
+      )
+    end
+    kw = { type: node.full_type }
+    return error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw) unless fix
+    fixable!(node,
+      message: DiagnosticRegistry.format(:RETURN_BORROWED_NO_COPY_OR_LIFETIME, **kw),
+      category: :lifetime,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # Capability: WITH RESTRICT on an immutable binding. :auto fix
+  # locates the declaration and inserts `MUTABLE ` at its column —
+  # same shape as emit_immutable_assignment_error!.
+  def emit_with_restrict_immutable_error!(node, var_node)
+    name = var_node.name
+    scope = (var_node.respond_to?(:symbol) && var_node.symbol&.scope) || current_scope
+    fix = build_declare_mutable_fix(name, scope)
+    return error!(node, :WITH_RESTRICT_NEEDS_MUTABLE, name: name) unless fix
+    fixable!(node,
+      message: DiagnosticRegistry.format(:WITH_RESTRICT_NEEDS_MUTABLE, name: name),
+      category: :capability,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # Style lint: a function with at least one MUTABLE param should end
+  # in `!`. :auto fix appends `!` immediately after the function name.
+  # Falls back to plain error! when the name token isn't available
+  # (e.g. synthesized fns).
+  def emit_style_mutable_param_needs_bang!(fn_node)
+    name = fn_node.name
+    name_tok = fn_node.respond_to?(:name_token) ? fn_node.name_token : nil
+    fix = nil
+    if name_tok && name_tok.respond_to?(:line) && name_tok.respond_to?(:column)
+      end_col = name_tok.column + name.length
+      fix = Fix.new(
+        description: "Append `!` to '#{name}' (signals that it takes a MUTABLE parameter).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: name_tok.line, col: end_col, length: 0),
+          replacement: '!'
+        )]
+      )
+    end
+    return error!(fn_node, :STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name) unless fix
+    fixable!(fn_node,
+      message: DiagnosticRegistry.format(:STYLE_MUTABLE_PARAM_NEEDS_BANG, name: name),
+      category: :lint,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # Reentrance: `@canSmash` on BG/DO is recognized but not yet
+  # implemented. :auto fix replaces the prefix sigil with `@service`
+  # (OS-thread spawn — supported today, same compile-time guarantee).
+  def emit_can_smash_unsupported_error!(node)
+    fix = nil
+    tok = node.respond_to?(:can_smash_token) ? node.can_smash_token : nil
+    if tok && tok.respond_to?(:line)
+      fix = Fix.new(
+        description: "Replace `@canSmash` with `@service` (OS-thread spawn — supported today).",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: tok.line, col: tok.column, length: tok.value.to_s.length),
+          replacement: '@service'
+        )]
+      )
+    end
+    return error!(node, :CAN_SMASH_NOT_SUPPORTED) unless fix
+    fixable!(node,
+      message: DiagnosticRegistry.format(:CAN_SMASH_NOT_SUPPORTED),
+      category: :reentrance,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # Type: `x: TargetType = some_value` where some_value's type doesn't
+  # match. :interactive fix wraps the value in `CAST(value AS TargetType)`
+  # — interactive because narrowing can lose data. Only offered when
+  # the value is a literal whose source span is precisely known
+  # (Literal nodes carry a token for the start; the value's textual
+  # length is known from the parsed token's value).
+  def emit_type_mismatch_assign_error!(node, target_type, value_type)
+    kw = { got: value_type, expected: target_type }
+    value = node.respond_to?(:value) ? node.value : nil
+    fix = build_cast_wrap_fix(value, target_type)
+    return error!(node, :TYPE_MISMATCH_ASSIGN, **kw) unless fix
+    fixable!(node,
+      message: DiagnosticRegistry.format(:TYPE_MISMATCH_ASSIGN, **kw),
+      category: :type,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # Helper: wrap a literal-or-identifier value with `CAST(... AS T)`.
+  # Returns a Fix or nil. Only handles values whose textual span we
+  # can compute exactly — Literal nodes (numeric / boolean / string)
+  # and bare Identifier references. Anything else (binary expr,
+  # function call) gets nil so the caller falls back to plain error!.
+  def build_cast_wrap_fix(value, target_type)
+    return nil unless value
+    return nil unless value.respond_to?(:token) && value.token
+    tok = value.token
+    target_name = target_type.respond_to?(:resolved) ? target_type.resolved : target_type
+    text_length = case value
+                  when AST::Literal
+                    tok.value.to_s.length
+                  when AST::Identifier
+                    value.name.to_s.length
+                  else
+                    nil
+                  end
+    return nil unless text_length
+    Fix.new(
+      description: "Wrap value with `CAST(... AS #{target_name})` (narrowing — verify it can't lose data).",
+      confidence: :interactive,
+      edits: [
+        Edit.new(span: Span.new(file: nil, line: tok.line, col: tok.column, length: 0),
+                 replacement: "CAST("),
+        Edit.new(span: Span.new(file: nil, line: tok.line, col: tok.column + text_length, length: 0),
+                 replacement: " AS #{target_name})"),
+      ]
+    )
+  end
+
   # Shared helper — returns a Fix that inserts `MUTABLE ` at the
   # declaration of `name` in `scope`. Returns nil when the declaration
   # isn't locatable or already carries `MUTABLE`.

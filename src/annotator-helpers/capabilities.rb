@@ -156,7 +156,7 @@ module CapabilityHelper
 
     when :RESTRICT
       if var_node.respond_to?(:symbol) && var_node.symbol && !var_node.symbol.mutable
-        error!(node, :WITH_RESTRICT_NEEDS_MUTABLE, name: var_node.name)
+        emit_with_restrict_immutable_error!(node, var_node)
       end
 
     when :BORROWED

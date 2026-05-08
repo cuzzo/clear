@@ -463,6 +463,7 @@ module AST
     attr_accessor :tail_call     # true if @reentrant:tailCall — compiler emits @call(.always_tail, ...)
     attr_accessor :reentrant_token   # Token for the legacy @reentrant annotation (drives `clear fix` span)
     attr_accessor :arrow_token       # Token for the `->` after the function header (drives REQUIRES insertion span)
+    attr_accessor :name_token        # Token for the function name itself (drives the `!`-suffix fix for STYLE_MUTABLE_PARAM_NEEDS_BANG)
     # Phase 4f.2: { start_tok:, end_tok: } pair covering the full
     # `EFFECTS REENTRANT[:VARIANT]` clause text. Used by `clear fix`
     # to swap variants (e.g., `:THUNK` -> plain or `:NOT_LOGICAL`).
@@ -991,7 +992,9 @@ module AST
     # Phase 4g: tokens that drive `clear fix` for stack-tier sigil
     # rewrites. open_brace_token = `{` (insert @service -> after);
     # prefix_token = the user's existing tier sigil (replace).
-    attr_accessor :open_brace_token, :prefix_token
+    # can_smash_token = the `@canSmash` sigil token specifically
+    # (drives the @canSmash -> @service auto-fix).
+    attr_accessor :open_brace_token, :prefix_token, :can_smash_token
   end
 
   # ThenChain: sequential chaining of steps inside a BG block fiber.

@@ -893,7 +893,7 @@ module FunctionAnalysis
       entry = owner_scope.locals[cap_name]
 
       if cap[:mutable] && !entry.mutable
-        error!(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name)
+        emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
       end
 
       # Mark the captured variable as used in its declaring scope.
@@ -929,7 +929,7 @@ module FunctionAnalysis
         (t.start_with?("Byte[") || t == "String") ? :String : r[:type]
       }.uniq.size
       if declared_return != :Any && normalized > 1
-        error!(node, :AMBIGUOUS_RETURN, types: found_returns)
+        emit_ambiguous_return_error!(node, found_returns)
       end
     end
   end
@@ -971,7 +971,7 @@ module FunctionAnalysis
     is_type_param = fn_type_params.include?(type_info&.resolved)
 
     unless has_lifetime || is_copyable || is_type_param
-      error!(node, :RETURN_BORROWED_NO_COPY_OR_LIFETIME, type: node.full_type)
+      emit_return_borrowed_no_copy_error!(node)
     end
 
     return true unless has_lifetime
