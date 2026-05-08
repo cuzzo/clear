@@ -48,7 +48,7 @@ RSpec.describe "Thunk Phase 4f.2 -- :NOT_LOGICAL" do
             RETURN n + 1;
           END
         CLEAR
-      }.to raise_error(/Unknown reentrant variant 'BOGUS'/)
+      }.to raise_error(/Unknown REENTRANT variant 'BOGUS'/)
     end
 
     it "saves an effects_span covering the full clause text" do

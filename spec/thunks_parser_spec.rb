@@ -68,7 +68,7 @@ RSpec.describe "Parser: EFFECTS REENTRANT clause" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(/Unknown reentrant variant 'WAFFLES'/)
+    }.to raise_error(/Unknown REENTRANT variant 'WAFFLES'/)
   end
 
   it "rejects a non-REENTRANT effect at function level" do

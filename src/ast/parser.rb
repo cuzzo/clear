@@ -1619,8 +1619,8 @@ class Parser
            else
              emit_typo_suggestion!(
                variant_tok, variant_tok.value, %w[THUNK TAIL_CALL NOT_LOGICAL MAX_DEPTH],
-               "Unknown reentrant variant '#{variant_tok.value}'",
-               "closest reentrant variant",
+               "Unknown REENTRANT variant '#{variant_tok.value}'",
+               "closest REENTRANT variant",
                category: :type, cascade: true
              )
            end
