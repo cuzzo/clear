@@ -3276,7 +3276,30 @@ private
   # ==========================================
   sig { params(node: AST::Assignment).returns(T.nilable(Symbol)) }
   def visit_Assignment(node)
+    # If the assignment target is a `@locked` / `@writeLocked` field
+    # write (e.g. `c.value = c.value + 1`), the auto-lock path emits
+    # a single lock acquire that covers BOTH the LHS write AND the
+    # RHS reads. Set the auto-lock context before visiting the RHS
+    # so visit_GetField's CAP_FIELD_NEEDS_WITH_EXCLUSIVE check skips
+    # the in-RHS read of the same `@locked` binding (it's safe under
+    # the auto-lock).
+    saved_auto_lock = @in_auto_locked_assign
+    target = node.name
+    if target.is_a?(AST::GetField) && target.target.is_a?(AST::Identifier)
+      # Symbol isn't stamped until visit_Identifier runs, so look up
+      # the binding's sync from the scope directly.
+      tname = target.target.name
+      tscope = lookup_scope_for(tname)
+      tsym = tscope&.locals&.[](tname)
+      sync = tsym&.sync
+      layout = tsym.respond_to?(:layout) ? tsym.layout : nil
+      if sync == :locked || sync == :write_locked || (sync == :atomic && layout == :indirect)
+        @in_auto_locked_assign = tname
+      end
+    end
+
     visit(node.value)
+    @in_auto_locked_assign = saved_auto_lock
 
     verify_unrestricted!(node)
     # Atomics M2.6: a tied-lifetime value flowing into a destination
@@ -3384,7 +3407,11 @@ private
 
   sig { params(field_node: AST::GetField, assignment_node: AST::Assignment).returns(T.nilable(Symbol)) }
   def visit_assignment_field(field_node, assignment_node)
-    # 1. Analyze field access
+    # 1. Analyze field access. Mark the GetField as an assignment LHS
+    # so visit_GetField's CAP_FIELD_NEEDS_WITH_* check skips it —
+    # field writes go through the auto-lock path below, not the
+    # WITH-required diagnostic that's meant for reads.
+    field_node.is_assignment_lhs = true
     visit(field_node)
 
     # AtomicPtr M3.10: bare `cfg.field = ...` on an `@indirect:atomic`
@@ -3411,7 +3438,7 @@ private
       var_name = field_node.target.name
       syn = field_node.target.symbol&.sync
       if current_scope.is_immutable?(var_name) && syn != :always_mutable
-        emit_immutable_field_assignment_error!(assignment_node, current_scope, var_name)
+        emit_immutable_field_assignment_error!(assignment_node, current_scope, var_name, field_node.field)
       end
       mark_var_mutated(var_name)
 
@@ -3533,6 +3560,45 @@ private
     if node.wildcard?
       node.full_type = :Void
       return
+    end
+
+    # Capability-wrapped bindings hide the inner T behind a lock /
+    # atomic cell. Direct field access on the outer binding skips the
+    # unwrap and produces a Zig-level "no field named X" since the
+    # wrapper type doesn't have the field. Catch this early with a
+    # CLEAR-level diagnostic that names the right WITH form.
+    # Skip when this GetField is the LHS of an assignment — field
+    # writes are handled by visit_assignment_field's auto-lock path
+    # (`assignment_node.auto_lock`), which emits the correct
+    # lock-acquire-and-release inline.
+    if node.target.is_a?(AST::Identifier) && !node.is_assignment_lhs
+      sym = node.target.symbol
+      if sym
+        sync   = sym.sync
+        layout = sym.respond_to?(:layout) ? sym.layout : nil
+        # Skip when this read is the RHS of an auto-locked assignment
+        # against the same binding — `c.val = c.val + 1` on `@locked`
+        # is fine because the LHS write's auto-lock covers the read.
+        in_auto_lock = @in_auto_locked_assign == node.target.name
+        # Skip when we're inside a WITH block — the WITH unwrap
+        # mechanism handles capability access (either via an `AS`
+        # alias whose own symbol is plain, or via the no-AS form
+        # which auto-unwraps the original name).
+        in_with_block = (@with_block_depth || 0) > 0
+        if sync == :locked && !in_auto_lock && !in_with_block
+          emit_cap_field_needs_with!(node,
+            :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
+            name: node.target.name, field: node.field, cap: "@locked")
+        elsif sync == :write_locked && !in_auto_lock && !in_with_block
+          emit_cap_field_needs_with!(node,
+            :CAP_FIELD_NEEDS_WITH_EXCLUSIVE, perm: "EXCLUSIVE",
+            name: node.target.name, field: node.field, cap: "@writeLocked")
+        elsif sync == :atomic && layout == :indirect && !in_with_block && !in_auto_lock
+          emit_cap_field_needs_with!(node,
+            :CAP_FIELD_NEEDS_WITH_SNAPSHOT, perm: "SNAPSHOT",
+            name: node.target.name, field: node.field, cap: "@indirect:atomic")
+        end
+      end
     end
 
     raw_schema = lookup_type_schema(type)
@@ -6715,8 +6781,8 @@ private
 
   sig { params(from: String, to: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(Set) }
   def og_move(from, to, at_token: nil, action: :move) = @og.transfer(from, to, at_token: at_token, action: action)
-  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(Set)) }
-  def og_set_moved(name, at_token: nil, action: :move) = @og.mark_moved(name, at_token: at_token, action: action)
+  sig { params(name: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(Set)) }
+  def og_set_moved(name, at_token: nil, action: :move, consumer_param_type: nil) = @og.mark_moved(name, at_token: at_token, action: action, consumer_param_type: consumer_param_type)
 
   sig { params(node: T.untyped).returns(T::Boolean) }
   def share_consumes_source?(node)
@@ -6735,8 +6801,13 @@ private
   # action (e.g., `:give` set by visit_GiveNode) — overwriting it with
   # `:move` would destroy the action info that the
   # USE_OF_MOVED_VALUE diagnostic uses to phrase "GAVE/TOOK/etc.".
-  sig { params(node: T.untyped, action: Symbol).returns(T.nilable(T::Boolean)) }
-  def move_if_not_copyable!(node, action: :move)
+  #
+  # `consumer_param_type` is recorded on the OG node at TAKES sites so
+  # the USE_OF_MOVED_VALUE fix-dropdown can skip suggesting an
+  # `@shared` / `@multiowned` upgrade when the consumer's parameter
+  # is a plain affine type that won't accept a refcounted handle.
+  sig { params(node: T.untyped, action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(T::Boolean)) }
+  def move_if_not_copyable!(node, action: :move, consumer_param_type: nil)
     return unless node.is_a?(AST::Identifier)
     vt = node.type_info
     vt = Type.new(vt) if vt && !vt.is_a?(Type)
@@ -6745,10 +6816,19 @@ private
     return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
     existing = @og&.nodes&.[](node.name)
     if existing && existing.moved? && existing.move_action && existing.move_action != :move
+      # An earlier visitor (typically visit_GiveNode) already stamped
+      # the move site with a more-specific action like `:give`. Don't
+      # overwrite the action — but DO backfill the consumer's
+      # parameter type when the call-arg loop has it and the earlier
+      # visitor didn't, so the use-after-move fix-dropdown can still
+      # filter `@shared` / `@multiowned` upgrades that won't help.
+      if consumer_param_type && existing.move_consumer_param_type.nil?
+        existing.move_consumer_param_type = consumer_param_type
+      end
       node.was_moved = true
       return
     end
-    og_set_moved(node.name, at_token: node.token, action: action)
+    og_set_moved(node.name, at_token: node.token, action: action, consumer_param_type: consumer_param_type)
     node.was_moved = true
   end
 

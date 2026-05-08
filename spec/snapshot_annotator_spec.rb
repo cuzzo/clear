@@ -220,4 +220,36 @@ RSpec.describe "WITH SNAPSHOT annotator validation" do
       expect { run(bad) }.to raise_error(/.+/)
     end
   end
+
+  # @example_for: WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC
+  # @fix: WITH SNAPSHOT only works on cells that publish stable
+  # @fix: snapshots. Add `@versioned` (MVCC: readers see a stable
+  # @fix: snapshot, writers retry on conflict) or `@indirect:atomic`
+  # @fix: (lock-free atomic-pointer cell — readers snapshot, writers
+  # @fix: CAS-publish) to the binding's declaration.
+  describe ":WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC — WITH SNAPSHOT on a plain binding" do
+    it "raises when the source has no @versioned / @indirect:atomic sigil" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT C { v: Int64 }
+          FN main!() RETURNS !Void ->
+            c = C{ v: 0 };
+            WITH SNAPSHOT c AS s { _ = s.v; }
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/WITH SNAPSHOT requires a @versioned or @indirect:atomic/i)
+    end
+
+    it "compiles when the source is @versioned" do
+      run(<<~CLEAR)
+        STRUCT C { v: Int64 }
+        FN main!() RETURNS !Void ->
+          c = C{ v: 0 } @versioned;
+          WITH SNAPSHOT c AS s { _ = s.v; }
+          RETURN;
+        END
+      CLEAR
+    end
+  end
 end

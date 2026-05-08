@@ -17,7 +17,7 @@ RSpec.describe "Tier 1 fixable findings" do
   def annotate(source)
     tokens = Lexer.new(source).tokenize
     ast = Parser.new(tokens, source).parse
-    SemanticAnnotator.new.annotate!(ast)
+    SemanticAnnotator.new(source_code: source).annotate!(ast)
     ast
   end
 
@@ -149,6 +149,19 @@ RSpec.describe "Tier 1 fixable findings" do
       expect(edits.size).to eq(2)
       expect(edits.first.replacement).to eq("CAST(")
       expect(edits.last.replacement).to eq(" AS Int64)")
+    end
+
+    it "places the closing edit AFTER a string literal's closing quote" do
+      # build_cast_wrap_fix must use the source-span length (including
+      # surrounding quotes), not the unquoted lexeme length. With src
+      # `  x = "hello";` the opening `"` is at col 7; the closing
+      # ` AS Int64)` must land at col 14 (right after the closing `"`),
+      # not col 12 (which is INSIDE the literal).
+      annotate(src) rescue nil
+      finding = FixCollector.drain.find { |f| f.category == :type && f.message =~ /Type [Mm]ismatch/ }
+      open_edit, close_edit = finding.fixes.first.edits
+      expect(open_edit.span.col).to eq(7)
+      expect(close_edit.span.col).to eq(14)
     end
 
     it "offers a CAST fix when the value is a bare Identifier" do

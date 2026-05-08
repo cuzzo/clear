@@ -440,7 +440,7 @@ RSpec.describe SemanticAnnotator do
               RETURN;
           END
         CLEAR
-      }.to raise_error(CompilerError, /Cannot modify field of immutable/)
+      }.to raise_error(CompilerError, /Cannot modify field 'val' of immutable object 'cfg'/)
     end
   end
 
@@ -954,6 +954,34 @@ RSpec.describe SemanticAnnotator do
       expect {
         ZigTranspiler.new.transpile(code)
       }.not_to output(/Variable 'c' is @local but never shared/).to_stderr
+    end
+
+    it "removes the @local on the lint-flagged binding when a prior @local is on the same line" do
+      require_relative "../src/ast/fixable_error"
+      src = counter_struct + <<~FLUX
+        FN f() RETURNS !Void ->
+            MUTABLE a = Counter{ value: 0 } @local; MUTABLE b = Counter{ value: 1 } @local;
+            p: ~Void = BG { a.value = a.value + 1; };
+            NEXT p;
+            RETURN;
+        END
+      FLUX
+      tokens = Lexer.new(src).tokenize
+      ast    = Parser.new(tokens, src).parse
+      ann    = SemanticAnnotator.new
+      ann.source_code = src
+      FixCollector.enable!
+      begin
+        ann.annotate!(ast) rescue nil
+        finding = FixCollector.drain.find { |f| f.message =~ /'b' is @local but never shared/ }
+        expect(finding).not_to be_nil
+        edit = finding.fixes.first.edits.first
+        decl_line = src.lines[edit.span.line - 1]
+        # The b @local sits AFTER the first @local (a's) on this line.
+        expect(edit.span.col).to be > decl_line.index('@local') + 1
+      ensure
+        FixCollector.disable!
+      end
     end
   end
 
@@ -2518,6 +2546,75 @@ RSpec.describe SemanticAnnotator do
         END
       FLUX
       expect { run(src) }.not_to raise_error
+    end
+  end
+
+  # ============================================================
+  # Annotated examples for `clear explain` / LSP hover.
+  # Each describe below pairs a failing form (the bad case) with a
+  # passing form (the good case), so DiagnosticExamples can pull
+  # both from the registry code's natural home spec.
+  # ============================================================
+
+  # @example_for: WITH_EXCLUSIVE_NEEDS_LOCK
+  # @fix: WITH EXCLUSIVE acquires a Mutex / RwLock. Add `@locked`
+  # @fix: (single-writer Mutex) or `@writeLocked` (RwLock — readers
+  # @fix: coexist via WITH READ; writers via WITH EXCLUSIVE) to the
+  # @fix: binding's declaration so the lock is there to acquire.
+  describe ":WITH_EXCLUSIVE_NEEDS_LOCK — WITH EXCLUSIVE on a non-lock binding" do
+    it "raises when the binding has no @locked / @writeLocked sigil" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT Counter { value: Float64 }
+          FN main!() RETURNS !Void ->
+            c = Counter{ value: 0 };
+            WITH EXCLUSIVE c AS x { _ = x.value; }
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/EXCLUSIVE capability requires a @locked or @writeLocked/)
+    end
+
+    it "compiles when the binding is @locked" do
+      run(<<~CLEAR)
+        STRUCT Counter { value: Float64 }
+        FN main!() RETURNS !Void ->
+          c = Counter{ value: 0 } @locked;
+          WITH EXCLUSIVE c AS x { _ = x.value; }
+          RETURN;
+        END
+      CLEAR
+    end
+  end
+
+  # @example_for: WITH_CANNOT_INFER_CAP
+  # @fix: Plain `WITH x` infers the capability from x's sigil. When
+  # @fix: x has no recognised capability, add one at its declaration
+  # @fix: (e.g. `@multiowned`, `@shared`, `@locked`, `@writeLocked`)
+  # @fix: so the WITH knows how to unwrap it.
+  describe ":WITH_CANNOT_INFER_CAP — plain WITH on a sigil-less binding" do
+    it "raises when the source has no capability to infer from" do
+      expect {
+        run(<<~CLEAR)
+          STRUCT Counter { value: Float64 }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 0 };
+            WITH c AS x { _ = x.value; }
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(/cannot infer capability/i)
+    end
+
+    it "compiles when the source carries `@multiowned`" do
+      run(<<~CLEAR)
+        STRUCT Counter { value: Float64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 0 } @multiowned;
+          WITH c { _ = c.value; }
+          RETURN;
+        END
+      CLEAR
     end
   end
 

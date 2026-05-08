@@ -148,7 +148,16 @@ module CapabilityHelper
           }
         else
           storage = cap_var_storage(var_node)
-          error!(node, :WITH_EXCLUSIVE_NEEDS_LOCK, got: storage || 'unknown')
+          name = var_node.respond_to?(:name) ? var_node.name : var_node.field
+          emit_with_cap_mismatch!(node, name, :WITH_EXCLUSIVE_NEEDS_LOCK,
+            [
+              { sigil: '@locked',
+                description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)." },
+              { sigil: '@writeLocked',
+                description: "Add `@writeLocked` to '#{name}' (RwLock — readers can coexist via WITH READ; writers via WITH EXCLUSIVE)." },
+            ],
+            confidence: :interactive,
+            got: storage || 'unknown')
         end
       end
 
@@ -161,7 +170,7 @@ module CapabilityHelper
           }
         else
           name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-          error!(node, :WITH_READ_NEEDS_WRITE_LOCK, name: name)
+          emit_with_read_needs_write_lock!(node, name, var_node)
         end
       end
 
@@ -190,7 +199,7 @@ module CapabilityHelper
       t = var_type.is_a?(Type) ? var_type : Type.new(var_type)
       unless t.future?
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-        error!(node, :WITH_MATERIALIZED_NEEDS_TENSE, got: t.resolved, name: name)
+        emit_with_materialized_needs_tense!(node, name, t.resolved)
       end
 
     when :SNAPSHOT
@@ -215,19 +224,35 @@ module CapabilityHelper
         else
           "plain"
         end
-        error!(node, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC, name: name, actual: actual)
+        emit_with_cap_mismatch!(node, name, :WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC,
+          [
+            { sigil: '@versioned',
+              description: "Add `@versioned` to '#{name}' (MVCC cell — readers see a stable snapshot; writers retry on conflict)." },
+            { sigil: '@indirect:atomic',
+              description: "Add `@indirect:atomic` to '#{name}' (lock-free atomic-pointer cell — readers snapshot, writers CAS-publish)." },
+          ],
+          confidence: :interactive,
+          name: name, actual: actual)
       end
 
     when :multiowned
       unless cap_var_storage(var_node) == :multiowned
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-        error!(node, :WITH_NEEDS_MULTIOWNED, name: name)
+        emit_with_cap_mismatch!(node, name, :WITH_NEEDS_MULTIOWNED,
+          [{ sigil: '@multiowned',
+             description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones via WITH)." }],
+          confidence: :auto,
+          name: name)
       end
 
     when :shared
       unless cap_var_storage(var_node) == :shared
         name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-        error!(node, :WITH_NEEDS_SHARED, name: name)
+        emit_with_cap_mismatch!(node, name, :WITH_NEEDS_SHARED,
+          [{ sigil: '@shared',
+             description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe to clone across fibers)." }],
+          confidence: :auto,
+          name: name)
       end
 
     when :ATOMIC
@@ -243,7 +268,11 @@ module CapabilityHelper
         else
           name = var_node.respond_to?(:name) ? var_node.name : var_node.field
           actual = syn ? "@#{syn}" : (cap_var_storage(var_node) ? "@#{cap_var_storage(var_node)}" : "plain")
-          error!(node, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC, name: name, actual: actual)
+          emit_with_cap_mismatch!(node, name, :WITH_ATOMIC_NEEDS_SHARED_ATOMIC,
+            [{ sigil: '@shared:atomic',
+               description: "Add `@shared:atomic` to '#{name}' (lock-free atomic primitive — `c.load()`, `c.fetchAdd(n)`, etc. via WITH ATOMIC)." }],
+            confidence: :auto,
+            name: name, actual: actual)
         end
       end
 
@@ -420,7 +449,7 @@ module CapabilityHelper
     # change inside the body and silently invalidate the predicate.
     missing_alias = caps.reject { |c| c[:alias] }
     unless missing_alias.empty?
-      error!(node, :WITH_GUARD_ALL_BINDINGS_NEED_AS)
+      emit_with_guard_all_bindings_need_as!(node, missing_alias)
     end
 
     aliases = caps.map { |c| c[:alias] }.compact
@@ -593,9 +622,8 @@ module CapabilityHelper
     mutated = mutable_caps.map { |c| c[:alias] }.select { |a| alias_mutated?(a) }
     return if mutated.empty?
 
-    names = mutated.map { |n| "'#{n}'" }.join(', ')
     is_or_are = mutated.length == 1 ? 'is' : 'are'
-    error!(node, :WITH_GUARD_MUTABLE_MUTATED, names: names, verb: is_or_are)
+    emit_with_guard_mutable_mutated!(node, mutated, is_or_are)
   end
 
   sig { params(alias_name: String).returns(T::Boolean) }
@@ -664,7 +692,7 @@ module CapabilityHelper
                          when storage == :shared        then :shared
                          else
                            name = var_node.respond_to?(:name) ? var_node.name : var_node.field
-                           error!(node, :WITH_CANNOT_INFER_CAP, name: name)
+                           emit_with_cannot_infer_cap!(node, name)
                            :unknown
                          end
     end
@@ -1331,11 +1359,12 @@ module CapabilityAudit
     return if fn_node.respond_to?(:visibility) && fn_node.visibility == :pub
 
     key = "#{current_fn_ctx&.name}:#{var_name}"
-    line = node.token&.line
+    line   = node.token&.line
+    column = node.token&.column
     ft = final_type.is_a?(Type) ? final_type : nil
     is_sharded = ft&.respond_to?(:sharded?) && ft.sharded?
     @capability_audit[key] = {
-      fn: current_fn_ctx&.name, var: var_name, line: line,
+      fn: current_fn_ctx&.name, var: var_name, line: line, column: column,
       sync: sync, ownership: own, storage: storage, sharded: is_sharded,
       mutated: false, captured_bg: false, captured_parallel: false
     }

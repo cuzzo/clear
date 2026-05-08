@@ -398,6 +398,10 @@ class AST::GetField
   def target; end
   sig { returns(T.untyped) }
   def field; end
+  sig { returns(T.untyped) }
+  def is_assignment_lhs; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def is_assignment_lhs=(value); end
 end
 
 class AST::GetIndex

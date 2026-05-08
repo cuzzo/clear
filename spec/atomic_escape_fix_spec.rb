@@ -95,6 +95,22 @@ RSpec.describe "Atomic-escape fixable finding (M2.8)" do
       decl_line = src.lines[1]
       expect(decl_line[edit.span.col - 1, edit.span.length]).to eq('@shared:atomic')
     end
+
+    it "targets the ESCAPING binding's sigil when a prior @shared:atomic is on the same line" do
+      multi_decl_src = <<~CLEAR
+        FN spawn() RETURNS ~Void ->
+          a: Int64 = 0_i64 @shared:atomic; counter: Int64 = 0_i64 @shared:atomic;
+          bg = BG { v = counter; print(v.toString()); };
+          RETURN bg;
+        END
+      CLEAR
+      fs = collect_findings(multi_decl_src)
+      fix = fs.find { |f| f.category == :escape }&.fixes&.first
+      expect(fix).not_to be_nil
+      decl_line = multi_decl_src.lines[1]
+      # Fix must target counter's sigil (the second occurrence), not a's.
+      expect(fix.edits.first.span.col).to eq(decl_line.rindex('@shared:atomic') + 1)
+    end
   end
 
   describe "store-into-long-lived: assigning a BG handle into a struct field" do

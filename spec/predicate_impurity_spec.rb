@@ -155,7 +155,7 @@ RSpec.describe "WITH GUARD structural errors" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(CompilerError, /WITH GUARD requires every participating binding to have an AS alias/)
+    }.to raise_error(CompilerError, /WITH GUARD requires every participating binding to have an .?AS.? alias/)
   end
 end
 

@@ -44,6 +44,11 @@ module DiagnosticExamples
   # New spec files using the convention should be added here.
   DEFAULT_SPEC_FILES = [
     File.expand_path("../../../spec/error_emission_coverage_spec.rb", __FILE__),
+    File.expand_path("../../../spec/capabilities_spec.rb", __FILE__),
+    File.expand_path("../../../spec/snapshot_annotator_spec.rb", __FILE__),
+    File.expand_path("../../../spec/with_view_spec.rb", __FILE__),
+    File.expand_path("../../../spec/with_guard_spec.rb", __FILE__),
+    File.expand_path("../../../spec/atomic_ptr_bare_mutation_spec.rb", __FILE__),
   ].freeze
 
   # Public entry point. Parses each spec file once, memoises results.
@@ -154,16 +159,18 @@ module DiagnosticExamples
 
   # Extract the first <<~CLEAR ... CLEAR heredoc body, mimicking
   # Ruby's tilde-heredoc indent strip. Returns nil if not found.
-  # The heredoc body starts on the line AFTER the `<<~CLEAR` marker
-  # and ends at the next line whose only non-whitespace is `CLEAR`.
+  # The heredoc body starts on the line AFTER the `<<~CLEAR` (or
+  # legacy `<<~FLUX`) marker and ends at the next line whose only
+  # non-whitespace is the matching marker name.
   def extract_heredoc(body)
-    return nil unless body =~ /<<~CLEAR\b/
+    return nil unless body =~ /<<~(CLEAR|FLUX)\b/
+    marker = T.must($~)[1]
     after = T.must($~).post_match
     # Skip the rest of the marker line (e.g. ` ) }.to raise_error(...)`).
     nl = after.index("\n")
     return nil unless nl
     after_lines = T.must(after[(nl + 1)..]).lines
-    end_idx = after_lines.index { |l| l =~ /^\s*CLEAR\s*$/ }
+    end_idx = after_lines.index { |l| l =~ /^\s*#{marker}\s*$/ }
     return nil unless end_idx
     raw_lines = after_lines[0...end_idx]
     nonempty = raw_lines.reject { |l| l.strip.empty? }

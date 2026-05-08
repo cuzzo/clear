@@ -943,7 +943,7 @@ RSpec.describe SemanticAnnotator do
         }
 
         it "raises an immutability error" do
-          expect { ast }.to raise_error(/Cannot modify field of immutable struct 'p'/)
+          expect { ast }.to raise_error(/Cannot modify field 'x' of immutable object 'p'/)
         end
       end
 

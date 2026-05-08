@@ -443,7 +443,16 @@ module FunctionAnalysis
         # `is_give` already had visit_GiveNode set the :give action;
         # for plain TAKES (no GIVE wrapper) record :takes so the
         # USE_OF_MOVED_VALUE diagnostic can phrase "TOOK it away".
-        move_if_not_copyable!(inner_node, action: is_give ? :give : :takes)
+        # Stash the param's declared type on the OG node so the
+        # use-after-move fix-dropdown can decide whether to offer an
+        # `@shared` / `@multiowned` upgrade — irrelevant when the
+        # consumer's parameter is plain affine and won't accept a
+        # refcounted handle anyway.
+        move_if_not_copyable!(
+          inner_node,
+          action: is_give ? :give : :takes,
+          consumer_param_type: param[:type],
+        )
         inner_node.was_moved = true
         arg_node.was_moved = true
         # If ensure_owned_value! wrapped the arg in a fresh CopyNode (auto-COPY

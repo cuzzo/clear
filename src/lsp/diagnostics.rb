@@ -37,7 +37,7 @@ module LSP
     # multi-byte characters.
     def from_finding(finding, source_text = nil)
       tok    = finding.token
-      length = token_length(tok)
+      length = token_length(tok, source_text)
       range  = Position.range_for(tok, length, source_text)
 
       {
@@ -59,23 +59,71 @@ module LSP
 
     # ---- internals ----
 
-    # The token's length in bytes. CLEAR tokens carry a `value` (the
-    # parsed lexeme); its byte size is the column-extent. Synthetic
-    # tokens may have an empty value — we floor at 1 so the squiggle
-    # is at least one character wide.
-    def token_length(tok)
-      val = tok.value
-      len = val.is_a?(String) ? val.bytesize : 1
-      len <= 0 ? 1 : len
+    # PARSED lexeme), so for STRING tokens it lacks the surrounding
+    # quotes and for numeric tokens it's an Integer/Float (whose
+    # `to_s` undershoots when the source had separators, a hex/oct/bin
+    # prefix, or a type suffix). When `source_text` is provided, scan
+    # the source line at tok.column to recover the true byte span;
+    # otherwise fall back to a quote-aware heuristic.
+    def token_length(tok, source_text = nil)
+      val = tok.respond_to?(:value) ? tok.value : nil
+      if source_text && tok.respond_to?(:line) && tok.line && tok.respond_to?(:column) && tok.column
+        line = source_text.lines[tok.line - 1]
+        if line
+          # Token columns are 1-based byte offsets; slice by bytes so
+          # multi-byte chars earlier on the line don't shift the index.
+          rest = line.byteslice(tok.column - 1, line.bytesize)
+          span = literal_span_in(rest)
+          return span if span
+        end
+      end
+      fallback_token_length(val)
+    end
+
+    # Scan a source slice (starting at the token's column) for the
+    # token's textual span. Returns nil when the slice doesn't begin
+    # with a recognizable literal — caller falls back.
+    def literal_span_in(rest)
+      return nil if rest.nil? || rest.empty?
+      if rest.start_with?('"""')
+        idx = rest.index('"""', 3)
+        return idx ? idx + 3 : nil
+      end
+      if rest.start_with?('"')
+        i = 1
+        while i < rest.length
+          ch = rest[i]
+          break if ch == '"'
+          i += 1 if ch == '\\' && i + 1 < rest.length
+          i += 1
+        end
+        return i + 1
+      end
+      m = rest.match(/\A[\d_a-zA-Z.]+/)
+      m ? m[0].length : nil
+    end
+
+    def fallback_token_length(val)
+      case val
+      when String
+        len = val.bytesize
+        len <= 0 ? 1 : len
+      when Integer, Float
+        len = val.to_s.length
+        len <= 0 ? 1 : len
+      else
+        1
+      end
     end
 
     # Try to recover the registry code from a finding's message. The
-    # registry stores templates with `%{name}` placeholders; we
-    # extract the literal-prefix of each template (everything before
-    # the first placeholder) and check if the message starts with it.
-    # First match wins. This is best-effort — exact backwards mapping
-    # is tricky because messages built via DiagnosticRegistry.format
-    # don't carry their code at the call site.
+    # registry stores templates with `%{name}` placeholders; we turn
+    # each template into an anchored regex (placeholders -> `.+?`) and
+    # match the message against it. Templates can share a literal
+    # prefix (e.g. CAP_FIELD_NEEDS_WITH_EXCLUSIVE / _SNAPSHOT both
+    # start with "Cannot read field '"), so a prefix-only match would
+    # mis-stamp; full-template matching disambiguates on the trailing
+    # literal segments.
     def code_for(finding)
       msg = finding.message.to_s
       return nil if msg.empty?
@@ -83,14 +131,29 @@ module LSP
       DiagnosticRegistry::DIAGNOSTICS.each do |code, entry|
         template = entry[:template]
         next unless template
-        prefix = template.split(/%\{[^}]+\}/, 2).first.to_s
-        # Skip umbrella templates like "%{message}" (prefix is empty).
-        next if prefix.empty?
-        # Strip trailing punctuation/whitespace for a slightly looser
-        # match — the template's prefix often ends mid-word.
-        return code.to_s if msg.start_with?(prefix)
+        # Skip umbrella templates whose body is a single placeholder
+        # (e.g. "%{message}") — they'd match anything.
+        next if template.start_with?('%{') && template.end_with?('}') && template.count('%') == 1
+        return code.to_s if msg.match?(template_regex(template))
       end
       nil
+    end
+
+    # Convert a registry template into an anchored regex: literal
+    # segments are escaped, `%{name}` placeholders become `.+?`, and
+    # `.` matches newlines so multi-line messages still match.
+    # Strip trailing punctuation/whitespace from the literal tail
+    # before anchoring — emitters sometimes drop the template's final
+    # `.` (e.g. "Undefined variable '%{name}'." -> message ends in
+    # `'doesNotExist'`).
+    def template_regex(template)
+      @template_regex_cache ||= {}
+      @template_regex_cache[template] ||= begin
+        parts = template.split(/(%\{[^}]+\})/)
+        body = parts.map { |p| p.start_with?('%{') ? '.+?' : Regexp.escape(p) }.join
+        body = body.sub(/(?:\\\.|\\!|\\\?|\s)+\z/, '')
+        Regexp.new('\A' + body + '[.!?\s]*\z', Regexp::MULTILINE)
+      end
     end
   end
 end

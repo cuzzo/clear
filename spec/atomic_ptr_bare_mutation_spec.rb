@@ -113,4 +113,42 @@ RSpec.describe "Bare mutation on @indirect:atomic (M3.10)" do
       }.not_to raise_error
     end
   end
+
+  # ============================================================
+  # Annotated examples for compound-op codes on `@shared:atomic`
+  # primitives. The atomic primitive lowering only accepts the ops
+  # that map to a single hardware fetch_* instruction.
+  # ============================================================
+
+  # @example_for: ATOMIC_NO_MUL_DIV_COMPOUND
+  # @fix: Multiply / divide have no single-instruction atomic form on
+  # @fix: any mainstream architecture. Use a compareAndSwap loop, or
+  # @fix: switch the binding from `@shared:atomic` to `@shared:locked`
+  # @fix: and do the math inside a `WITH EXCLUSIVE c AS x { ... }`
+  # @fix: block — the lock makes the read-modify-write atomic.
+  describe ":ATOMIC_NO_MUL_DIV_COMPOUND — `*=` / `/=` on @shared:atomic" do
+    it "raises on `c *= 2` against an @shared:atomic primitive" do
+      expect {
+        annotate(<<~CLEAR)
+          FN main!() RETURNS !Void ->
+            MUTABLE c: Int64 = 1 @shared:atomic;
+            c *= 2;
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /Atomic primitives do not support/)
+    end
+
+    it "compiles when the same op runs against an @shared:locked binding inside WITH EXCLUSIVE" do
+      annotate(<<~CLEAR)
+        STRUCT Counter { v: Int64 }
+        FN main!() RETURNS !Void ->
+          c = Counter{ v: 1 } @shared:locked;
+          WITH EXCLUSIVE c AS x { x.v = x.v * 2; }
+          RETURN;
+        END
+      CLEAR
+    end
+  end
+
 end

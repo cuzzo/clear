@@ -46,11 +46,16 @@ RSpec.describe "DiagnosticRegistry — call-site audit" do
   # REENTRANCE_DIRECT_RECURSIVE and REENTRANCE_INDIRECT_RECURSIVE).
   # The USE_OF_MOVED_* rewrite added a third (emit_use_of_moved_in_loop_error!
   # takes `code:` so it serves both USE_OF_MOVED_IN_LOOP and
-  # USE_OF_MOVED_IN_LOOP_SHORT). Budget = 3 covers all three helpers;
-  # the static parser can't see that `code` always holds a real
-  # registry symbol at runtime.
+  # USE_OF_MOVED_IN_LOOP_SHORT). Phase 2 of WITH-capability access added a
+  # fourth (emit_cap_field_needs_with! takes `code:` so it serves both
+  # CAP_FIELD_NEEDS_WITH_EXCLUSIVE and CAP_FIELD_NEEDS_WITH_SNAPSHOT).
+  # Phase 3 (WITH-CAP-NEEDS-X family) added a fifth
+  # (emit_with_cap_mismatch! takes `code:` so it serves all six
+  # WITH-CAP-NEEDS-X codes that share the insert-sigil fallback shape).
+  # Budget = 5 covers all five helpers; the static parser can't see
+  # that `code` always holds a real registry symbol at runtime.
   EXCEPTIONS = {
-    'src/annotator-helpers/fixable_helpers.rb' => 3,
+    'src/annotator-helpers/fixable_helpers.rb' => 5,
   }.freeze
 
   def self.scan_raw_sites

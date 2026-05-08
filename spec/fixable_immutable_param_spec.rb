@@ -9,7 +9,7 @@ require_relative "../src/backends/transpiler"
 # without `MUTABLE`, three errors can fire depending on the mutation
 # shape: ASSIGN_VAR_IMMUTABLE (`p = ...`), ASSIGN_INDEX_IMMUTABLE_LIST
 # (`p[i] = ...` — also fires for HashMap), and
-# ASSIGN_FIELD_IMMUTABLE_STRUCT (`p.field = ...`). All three now emit
+# IMMUTABLE_FIELD_ASSIGNMENT (`p.field = ...`). All three now emit
 # a FixableFinding whose :auto fix inserts `MUTABLE ` at the
 # parameter's declaration column in the function signature.
 RSpec.describe "Immutable param auto-fix" do
@@ -82,7 +82,7 @@ RSpec.describe "Immutable param auto-fix" do
     end
   end
 
-  describe "ASSIGN_FIELD_IMMUTABLE_STRUCT on a struct parameter" do
+  describe "IMMUTABLE_FIELD_ASSIGNMENT on a struct parameter" do
     let(:src) {
       <<~CLEAR
         STRUCT Point { x: Int64, y: Int64 }

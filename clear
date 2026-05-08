@@ -1626,10 +1626,17 @@ when 'explain'
 
   sev = entry[:severity]
   cat = entry[:category]
-  puts "\e[1m#{code}\e[0m  \e[90m[#{sev} / #{cat}]\e[0m"
+  pending_tag = entry[:pending] ? "  \e[33m[pending — not yet implemented]\e[0m" : ""
+  puts "\e[1m#{code}\e[0m  \e[90m[#{sev} / #{cat}]\e[0m#{pending_tag}"
   puts ""
   puts entry[:summary] if entry[:summary]
   puts ""
+  if entry[:pending]
+    puts "  \e[33mNote:\e[0m This code is reserved for a future feature. The"
+    puts "  \e[33m     \e[0m visitor that would fire it is intentionally a stub."
+    puts "  \e[33m     \e[0m See the cause/fix-hint below for the planned semantics."
+    puts ""
+  end
   puts "  Template: #{entry[:template]}"
   if entry[:cause]
     puts ""

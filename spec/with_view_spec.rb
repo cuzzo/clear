@@ -163,4 +163,59 @@ RSpec.describe "WITH VIEW (Phase 2.3)" do
       expect(stderr_capture.string).not_to match(/Auto-inferring.*LOCKED/)
     end
   end
+
+  # @example_for: WITH_MATERIALIZED_NEEDS_TENSE
+  # @fix: WITH MATERIALIZED VIEW snapshots a *tense* (`~T`) aggregate.
+  # @fix: Prefix the declared type with `~` so the binding becomes a
+  # @fix: tense source the WITH can sample at the boundary.
+  describe ":WITH_MATERIALIZED_NEEDS_TENSE — non-tense source for MATERIALIZED VIEW" do
+    it "raises when the source isn't `~T`" do
+      expect {
+        annotate(<<~CLEAR)
+          FN main() RETURNS Void ->
+              xs: Int64[3] = [1, 2, 3];
+              WITH MATERIALIZED VIEW xs AS s {
+                  ASSERT s != NIL, "ok";
+              }
+          END
+        CLEAR
+      }.to raise_error(/WITH MATERIALIZED VIEW requires a/)
+    end
+
+    it "compiles when the source is `~T`" do
+      annotate(<<~CLEAR)
+        FN viewer(xs: ~Float64) RETURNS ~Float64 ->
+            WITH MATERIALIZED VIEW xs AS s {
+                ASSERT s != NIL, "ok";
+            }
+            RETURN GIVE xs;
+        END
+      CLEAR
+    end
+
+    it "tense-prefix fix targets the binding under WITH MATERIALIZED VIEW, not a same-typed prior decl on the same line" do
+      require_relative "../src/ast/fixable_error"
+      FixCollector.enable!
+      begin
+        src = <<~CLEAR
+          FN main() RETURNS Void ->
+              y: Int64[] = [1_i64, 2_i64]; xs: Int64[] = [3_i64, 4_i64];
+              WITH MATERIALIZED VIEW xs AS s {
+                  ASSERT s != NIL, "ok";
+              }
+          END
+        CLEAR
+        tokens = Lexer.new(src).tokenize
+        ast = Parser.new(tokens, src).parse
+        SemanticAnnotator.new(source_code: src).annotate!(ast) rescue nil
+        finding = FixCollector.drain.find { |f| f.message =~ /MATERIALIZED VIEW requires/ }
+        expect(finding).not_to be_nil
+        edit = finding.fixes.first.edits.first
+        decl_line = "    y: Int64[] = [1_i64, 2_i64]; xs: Int64[] = [3_i64, 4_i64];"
+        expect(edit.span.col).to eq(decl_line.rindex("Int64") + 1)
+      ensure
+        FixCollector.disable!
+      end
+    end
+  end
 end

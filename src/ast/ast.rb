@@ -728,6 +728,12 @@ module AST
   end
   GetField     = Struct.new(:token, :target, :field) do
     include Locatable
+    # Set by visit_assignment_field before visiting this node so
+    # downstream checks (e.g. CAP_FIELD_NEEDS_WITH_EXCLUSIVE for
+    # `@locked` reads) can skip when this GetField is the LHS of an
+    # assignment — writes go through visit_assignment_field's
+    # auto-lock path instead.
+    attr_accessor :is_assignment_lhs
     def wildcard?; field == '*' end
     def name; target.name end
   end

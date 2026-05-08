@@ -20,6 +20,7 @@ class OwnershipGraph
 
   Node = Struct.new(:path, :kind, :state, :type_info, :scope_depth, :line,
                     :move_line, :move_col, :move_action,
+                    :move_consumer_param_type,
                     keyword_init: true) do
     def live?;    state == :live; end
     def moved?;   state == :moved; end
@@ -93,11 +94,11 @@ class OwnershipGraph
     invalidate(from, source)
   end
 
-  sig { params(path: String, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(Set)) }
-  def mark_moved(path, at_token: nil, action: :move)
+  sig { params(path: String, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(Set)) }
+  def mark_moved(path, at_token: nil, action: :move, consumer_param_type: nil)
     source = @nodes[path]
     return unless source
-    record_move_site(source, at_token, action)
+    record_move_site(source, at_token, action, consumer_param_type: consumer_param_type)
     invalidate(path, source)
   end
 
@@ -289,9 +290,10 @@ class OwnershipGraph
     end
   end
 
-  sig { params(node: OwnershipGraph::Node, at_token: T.nilable(Lexer::Token), action: Symbol).returns(T.nilable(Integer)) }
-  def record_move_site(node, at_token, action)
+  sig { params(node: OwnershipGraph::Node, at_token: T.nilable(Lexer::Token), action: Symbol, consumer_param_type: T.untyped).returns(T.nilable(Integer)) }
+  def record_move_site(node, at_token, action, consumer_param_type: nil)
     node.move_action = action
+    node.move_consumer_param_type = consumer_param_type if consumer_param_type
     return unless at_token
 
     node.move_line = at_token.line

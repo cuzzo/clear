@@ -57,6 +57,26 @@ RSpec.describe LSP::Diagnostics do
       expect(d[:code]).to match(/^[A-Z][A-Z0-9_]+$/)
     end
 
+    it "distinguishes diagnostics whose templates share a literal prefix" do
+      # CAP_FIELD_NEEDS_WITH_EXCLUSIVE and CAP_FIELD_NEEDS_WITH_SNAPSHOT
+      # both start with "Cannot read field '". A first-prefix-match
+      # strategy would mis-stamp every SNAPSHOT-form message with the
+      # EXCLUSIVE code, surfacing the wrong fix-link in the editor.
+      snapshot_msg =
+        "Cannot read field 'name' of @indirect:atomic binding 'cell' " \
+        "directly. Wrap with `WITH SNAPSHOT cell AS x { ... x.name ... }` " \
+        "to take a stable snapshot of the cell."
+      f = StubFinding.new(
+        level:    :error,
+        message:  snapshot_msg,
+        token:    Token.new(line: 1, column: 1, value: "name"),
+        category: :capability,
+        fixes:    [],
+      )
+      d = LSP::Diagnostics.from_finding(f)
+      expect(d[:code]).to eq("CAP_FIELD_NEEDS_WITH_SNAPSHOT")
+    end
+
     it "leaves code unset when no template prefix matches" do
       f = StubFinding.new(
         level:    :error,
@@ -80,6 +100,34 @@ RSpec.describe LSP::Diagnostics do
       d = LSP::Diagnostics.from_finding(f)
       expect(d[:range][:start][:character]).to eq(0)
       expect(d[:range][:end][:character]).to eq(1)
+    end
+
+    it "spans the surrounding quotes for a STRING-literal token" do
+      # `"hello"` in source; token.value is the unquoted "hello" (5 chars).
+      # The 7-byte source span (with quotes) is what the squiggle needs.
+      f = StubFinding.new(
+        level:    :error,
+        message:  "x",
+        token:    Token.new(line: 1, column: 1, value: "hello"),
+        category: :type,
+        fixes:    [],
+      )
+      d = LSP::Diagnostics.from_finding(f, %("hello"\n))
+      expect(d[:range][:end][:character] - d[:range][:start][:character]).to eq(7)
+    end
+
+    it "spans the parsed source for a numeric-literal token with separators" do
+      # `1_000_000` in source; token.value is the parsed Integer 1_000_000.
+      # Span must reflect the 9-char source slice, not 1.
+      f = StubFinding.new(
+        level:    :error,
+        message:  "x",
+        token:    Token.new(line: 1, column: 1, value: 1_000_000),
+        category: :type,
+        fixes:    [],
+      )
+      d = LSP::Diagnostics.from_finding(f, "1_000_000\n")
+      expect(d[:range][:end][:character] - d[:range][:start][:character]).to eq(9)
     end
 
     it "uses the source string to compute UTF-16 columns when present" do

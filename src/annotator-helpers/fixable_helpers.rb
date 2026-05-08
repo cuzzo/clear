@@ -249,19 +249,61 @@ module FixableHelper
       return error!(use_node, :USE_OF_MOVED_VALUE, message: msg)
     end
 
+    # Pick COPY vs CLONE for the consumer-site fix. CLEAR uses CLONE
+    # for shared / refcounted handles (`@shared`, `@multiowned`,
+    # `@split` streams) and COPY for plain affine values. Picking the
+    # wrong keyword would either compile-error (CLONE on plain T) or
+    # do something semantically different from what the user wants
+    # (deep-COPY on an Arc handle when a refcount bump suffices).
+    type = og_node.respond_to?(:type_info) ? og_node.type_info : nil
+    is_shared = type.respond_to?(:shared?)     ? type.shared?     : false
+    is_multi  = type.respond_to?(:multiowned?) ? type.multiowned? : false
+    is_split  = type.respond_to?(:split?)      ? type.split?      : false
+    use_clone = is_shared || is_multi || is_split
+
+    consumer_keyword = use_clone ? "CLONE" : "COPY"
+    consumer_descr = use_clone ?
+      "Wrap the consuming reference with CLONE at line #{og_node.move_line} (bumps the refcount; both bindings stay live)." :
+      "Wrap the consuming reference with COPY at line #{og_node.move_line} (the original survives for the later use)."
+
     fixes = []
     fixes << Fix.new(
-      description: "Wrap the consuming reference with COPY at line #{og_node.move_line} " \
-                   "(the original survives for the later use).",
+      description: consumer_descr,
       confidence: :interactive,
       edits: [Edit.new(
         span: Span.new(file: nil, line: og_node.move_line, col: og_node.move_col, length: name.length),
-        replacement: "(COPY #{name})"
+        replacement: "(#{consumer_keyword} #{name})"
       )]
     )
 
-    # Declaration-level `@multiowned` / `@shared` fixes — append after
-    # the value expression (before the statement-terminating `;`).
+    # Declaration-level capability-upgrade fixes — append after the
+    # value expression (before the statement-terminating `;`). Skip a
+    # capability the binding already carries (would be a no-op /
+    # syntactic error). `@split` is a separate sharing axis — neither
+    # `@multiowned` nor `@shared` is a meaningful upgrade for it.
+    candidate_caps = []
+    candidate_caps << '@multiowned' unless is_multi || is_split
+    candidate_caps << '@shared'     unless is_shared || is_split
+
+    # Phase 2: when the move was a function call (TAKES or explicit
+    # GIVE) into a parameter of plain affine T (no `@shared` /
+    # `@multiowned`), upgrading the binding to a refcounted handle
+    # WON'T fix the call — the function still demands a plain owned
+    # value and the use-after-move re-fires after the upgrade. Skip
+    # both upgrade fixes in that case so the dropdown doesn't dangle
+    # red herrings.
+    consumed_by_call = og_node.move_action == :takes || og_node.move_action == :give
+    if og_node.respond_to?(:move_consumer_param_type) && consumed_by_call
+      pt = og_node.move_consumer_param_type
+      pt = Type.new(pt) if pt && !pt.is_a?(Type)
+      param_admits_shared = pt && (pt.respond_to?(:shared?) ? pt.shared? : false)
+      param_admits_multi  = pt && (pt.respond_to?(:multiowned?) ? pt.multiowned? : false)
+      if pt && !param_admits_shared && !param_admits_multi
+        candidate_caps.delete('@shared')
+        candidate_caps.delete('@multiowned')
+      end
+    end
+
     scope = lookup_scope_for(name)
     decl = scope&.locals&.[](name)&.reg
     src = @source_code
@@ -271,11 +313,13 @@ module FixableHelper
       # Find the `;` that terminates the declaration (skip trailing
       # whitespace). Only suggest capability upgrades when the `;` is
       # on the same physical line as the declaration — multi-line
-      # value expressions would need a broader span calc.
-      semi_idx = line_text.index(';')
+      # value expressions would need a broader span calc. Search from
+      # the decl-name column so a prior statement's `;` on the same
+      # line is skipped.
+      semi_idx = line_text.index(';', decl.token.column - 1)
       if semi_idx
         insert_col = semi_idx + 1  # 1-based column at the `;`
-        ['@multiowned', '@shared'].each do |cap|
+        candidate_caps.each do |cap|
           fixes << Fix.new(
             description: "Change '#{name}' to `#{cap}` at its declaration " \
                          "(#{cap == '@multiowned' ? 'single-scheduler Rc; automatic clone on move' : 'atomic Arc; safe across fibers'}).",
@@ -444,8 +488,14 @@ module FixableHelper
 
     # Annotation form: scan the line for `: <target_type>` and replace
     # the type token (e.g., `x: Byte = 1000` -> `x: UInt16 = 1000`).
+    # Restrict the search to the slice BEFORE the literal and pick the
+    # LAST match so a prior decl with the same annotated type on the
+    # same line doesn't capture the fix.
     target_name = target_type.to_s
-    ann_match = line_text.match(/:\s*(#{Regexp.escape(target_name)})\b/)
+    prefix = line_text[0...(tok.column - 1)] || ''
+    last_match_start = T.let(nil, T.nilable(Integer))
+    prefix.scan(/:\s*(#{Regexp.escape(target_name)})\b/) { last_match_start = T.must(Regexp.last_match).begin(0) }
+    ann_match = last_match_start ? prefix.match(/:\s*(#{Regexp.escape(target_name)})\b/, last_match_start) : nil
     if ann_match
       ann_col = ann_match.begin(1) + 1  # 1-based column of the type name
       new_type = best.to_s
@@ -504,7 +554,9 @@ module FixableHelper
 
     if @source_code && line
       src_line = @source_code.lines[line - 1] || ''
-      idx = src_line.index('@local')
+      # Search from the decl-name column so a prior @local on the same
+      # line (a different binding) isn't picked.
+      idx = src_line.index('@local', (info[:column] || 1) - 1)
       if idx
         trail = (src_line[idx + 6] == ' ') ? 1 : 0
         lead  = (idx > 0 && src_line[idx - 1] == ' ') ? 1 : 0
@@ -584,14 +636,17 @@ module FixableHelper
   end
 
   # `x.field = ...` where x is an immutable binding. Mirrors the index
-  # variant; the fix is the same MUTABLE insertion.
-  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String).returns(T.untyped) }
-  def emit_immutable_field_assignment_error!(assignment_node, scope, var_name)
+  # variant; the fix is the same MUTABLE insertion. `field_name` is
+  # the specific field being assigned (`b.x = ...` -> "x"), used to
+  # produce a more pointed error message via IMMUTABLE_FIELD_ASSIGNMENT.
+  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String, field_name: String).returns(T.untyped) }
+  def emit_immutable_field_assignment_error!(assignment_node, scope, var_name, field_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(var_name, scope)
-    return error!(assignment_node, :ASSIGN_FIELD_IMMUTABLE_STRUCT, name: var_name) unless fix
+    kw = { name: var_name, field: field_name }
+    return error!(assignment_node, :IMMUTABLE_FIELD_ASSIGNMENT, **kw) unless fix
     fixable!(assignment_node,
-      message: DiagnosticRegistry.format(:ASSIGN_FIELD_IMMUTABLE_STRUCT, name: var_name),
+      message: DiagnosticRegistry.format(:IMMUTABLE_FIELD_ASSIGNMENT, **kw),
       category: :ownership,
       level: :error,
       fixes: [fix])
@@ -727,6 +782,236 @@ module FixableHelper
       fixes: [fix])
   end
 
+  # Capability: direct field access (`c.value`) on a `@locked` /
+  # `@writeLocked` / `@indirect:atomic` binding. :interactive fix
+  # wraps the offending source line with `WITH <perm> name AS alias`,
+  # rewriting `name.<field>` references on the line to `alias.<field>`.
+  # Bare `name` references (e.g. passing it as a function arg) are
+  # left alone — they still refer to the wrapper inside the WITH body.
+  #
+  # Limitations:
+  # - Single-line statements only. Multi-line expressions land back at
+  #   the plain `error!` path so the user does the wrap by hand.
+  # - The alias name (`name + "_v"`) might collide with an existing
+  #   binding; `:interactive` confidence so the user reviews.
+  # - The enclosing function may need `RETURNS !T` (the WITH acquire
+  #   can fail). The user's next compile catches that with its own
+  #   fixable error.
+  def emit_cap_field_needs_with!(node, code, name:, field:, cap:, perm:)
+    T.bind(self, SemanticAnnotator) rescue nil
+    kw = { name: name, field: field, cap: cap }
+    fixes = []
+    if @source_code && node.respond_to?(:token) && node.token
+      line_num = node.token.line
+      line_text = @source_code.lines[line_num - 1] || ''
+      body = line_text.chomp
+      indent = body[/\A\s*/] || ''
+      inner = body.lstrip
+      if !inner.empty? && !inner.include?("\n")
+        alias_name = "#{name}_v"
+        rewritten = inner.gsub(/\b#{Regexp.escape(name.to_s)}\.(?=\w)/, "#{alias_name}.")
+        new_line = "#{indent}WITH #{perm} #{name} AS #{alias_name} { #{rewritten} }"
+        fixes << Fix.new(
+          description: "Wrap with `WITH #{perm} #{name} AS #{alias_name} { ... }` " \
+                       "to acquire the #{cap} unwrap; access the inner value through #{alias_name}.",
+          confidence: :interactive,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: line_num, col: 1, length: body.length),
+            replacement: new_line
+          )]
+        )
+      end
+    end
+    return error!(node, code, **kw) if fixes.empty?
+    fixable!(node,
+      message: DiagnosticRegistry.format(code, **kw),
+      category: :capability,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
+  end
+
+  # Capability: `WITH GUARD` clause where one or more participating
+  # bindings have no AS alias. :auto fix that inserts ` AS <name>`
+  # right after each missing-alias var node. The proposed alias is
+  # the var's own name with `_v` appended (matches the convention used
+  # by emit_cap_field_needs_with!). Falls back to plain `error!`
+  # when no var token is locatable.
+  def emit_with_guard_all_bindings_need_as!(node, missing_caps)
+    T.bind(self, SemanticAnnotator) rescue nil
+    edits = []
+    missing_caps.each do |c|
+      vn = c[:var_node]
+      next unless vn.is_a?(AST::Identifier) && vn.respond_to?(:token) && vn.token
+      tok = vn.token
+      name = vn.name.to_s
+      # Insert just past the end of the var name.
+      edits << Edit.new(
+        span: Span.new(file: nil, line: tok.line, col: tok.column + name.length, length: 0),
+        replacement: " AS #{name}_v"
+      )
+    end
+    return error!(node, :WITH_GUARD_ALL_BINDINGS_NEED_AS) if edits.empty?
+    fix = Fix.new(
+      description: "Add `AS <alias>` to each binding so the GUARD predicate can read the unwrapped value.",
+      confidence: :auto,
+      edits: edits
+    )
+    fixable!(node,
+      message: DiagnosticRegistry.format(:WITH_GUARD_ALL_BINDINGS_NEED_AS),
+      category: :capability,
+      level: :error,
+      fixes: [fix],
+      raise_in_collector: true)
+  end
+
+  # Capability: `WITH GUARD` body mutates a MUTABLE alias (silent
+  # invalidation of the guard). :interactive fix offers to drop the
+  # `MUTABLE` keyword from each named alias's WITH-block declaration.
+  # The actual mutation site stays in place — the user reviews and
+  # decides whether dropping MUTABLE is the right call (vs removing
+  # the mutation, vs moving it outside the guarded WITH).
+  def emit_with_guard_mutable_mutated!(node, names, verb)
+    T.bind(self, SemanticAnnotator) rescue nil
+    src = @source_code
+    edits = []
+    if src && node.respond_to?(:token) && node.token
+      # Search the WITH block's lines for `MUTABLE <name>` and drop
+      # the keyword. The WITH header may span multiple lines, but
+      # `MUTABLE` will appear immediately before the alias name.
+      with_line = node.token.line
+      window_lines = src.lines[(with_line - 1)..(with_line + 8)] || []
+      names.each do |alias_name|
+        pat = /\bMUTABLE\s+#{Regexp.escape(alias_name)}\b/
+        window_lines.each_with_index do |line, off|
+          idx = line =~ pat
+          next unless idx
+          line_no = with_line + off
+          # 1-based column of the `MUTABLE` token.
+          mut_col = idx + 1
+          # The keyword is `MUTABLE` (7 chars) plus one trailing space.
+          edits << Edit.new(
+            span: Span.new(file: nil, line: line_no, col: mut_col, length: 'MUTABLE '.length),
+            replacement: ''
+          )
+          break  # only the first occurrence per name
+        end
+      end
+    end
+    names_str = names.map { |n| "'#{n}'" }.join(', ')
+    kw = { names: names_str, verb: verb }
+    return error!(node, :WITH_GUARD_MUTABLE_MUTATED, **kw) if edits.empty?
+    fix = Fix.new(
+      description: "Drop `MUTABLE` from #{names.size == 1 ? 'the alias' : 'each guarded alias'} so the GUARD predicate stays valid (the body only reads through the alias).",
+      confidence: :interactive,
+      edits: edits
+    )
+    fixable!(node,
+      message: DiagnosticRegistry.format(:WITH_GUARD_MUTABLE_MUTATED, **kw),
+      category: :capability,
+      level: :error,
+      fixes: [fix],
+      raise_in_collector: true)
+  end
+
+  # Capability: `WITH READ x` where x isn't `@writeLocked`. Two cases:
+  # - x is `@locked` -> :auto fix swaps `@locked` -> `@writeLocked` (so
+  #   concurrent readers can take WITH READ alongside WITH EXCLUSIVE
+  #   writers).
+  # - x has no sync (plain or otherwise) -> :auto fix inserts
+  #   `@writeLocked` at the declaration.
+  # Falls back to plain `error!` when no fix is locatable.
+  def emit_with_read_needs_write_lock!(node, name, var_node)
+    T.bind(self, SemanticAnnotator) rescue nil
+    syn = cap_var_sync(var_node)
+    fix = if syn == :locked
+      build_decl_cap_replace_fix(name, '@locked', '@writeLocked',
+        description: "Change `@locked` to `@writeLocked` on '#{name}' " \
+                     "so concurrent readers can take `WITH READ` alongside `WITH EXCLUSIVE` writers.",
+        confidence: :auto)
+    else
+      build_decl_cap_insert_fix(name, '@writeLocked',
+        description: "Add `@writeLocked` to '#{name}' (RwLock — readers via `WITH READ`; writers via `WITH EXCLUSIVE`).",
+        confidence: :auto)
+    end
+    return error!(node, :WITH_READ_NEEDS_WRITE_LOCK, name: name) unless fix
+    fixable!(node,
+      message: DiagnosticRegistry.format(:WITH_READ_NEEDS_WRITE_LOCK, name: name),
+      category: :capability,
+      level: :error,
+      fixes: [fix],
+      raise_in_collector: true)
+  end
+
+  # Capability: plain `WITH x` on a binding with no recognised
+  # capability. Surfaces 4 candidate sigils as :interactive options
+  # (multiowned / shared / locked / writeLocked). Each is shown with
+  # a one-line semantic difference. Falls through to plain `error!`
+  # when no fixes are locatable.
+  def emit_with_cannot_infer_cap!(node, name)
+    T.bind(self, SemanticAnnotator) rescue nil
+    candidates = [
+      { sigil: '@multiowned',
+        description: "Add `@multiowned` to '#{name}' (Rc — single-scheduler refcount; cheap clones)." },
+      { sigil: '@shared',
+        description: "Add `@shared` to '#{name}' (Arc — atomic refcount; safe across fibers)." },
+      { sigil: '@locked',
+        description: "Add `@locked` to '#{name}' (Mutex — single-writer EXCLUSIVE access)." },
+      { sigil: '@writeLocked',
+        description: "Add `@writeLocked` to '#{name}' (RwLock — readers via WITH READ; writers via WITH EXCLUSIVE)." },
+    ]
+    fixes = candidates.filter_map do |c|
+      build_decl_cap_insert_fix(name, c[:sigil], description: c[:description], confidence: :interactive)
+    end
+    return error!(node, :WITH_CANNOT_INFER_CAP, name: name) if fixes.empty?
+    fixable!(node,
+      message: DiagnosticRegistry.format(:WITH_CANNOT_INFER_CAP, name: name),
+      category: :capability,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
+  end
+
+  # Capability: `WITH MATERIALIZED VIEW c AS s` where c isn't tense
+  # (`~T`). The fix prefixes `~` to the type annotation on the
+  # declaration line. Only handles single-line decls with a `: T`
+  # annotation — bare-inferred declarations fall back to plain
+  # `error!`.
+  def emit_with_materialized_needs_tense!(node, name, got)
+    T.bind(self, SemanticAnnotator) rescue nil
+    scope = lookup_scope_for(name)
+    decl = scope&.locals&.[](name)&.reg
+    src = @source_code
+    fix = nil
+    if decl && decl.respond_to?(:token) && decl.token && src
+      dline = decl.token.line
+      line_text = src.lines[dline - 1] || ''
+      # Search from the decl-name column so a prior decl's `: TypeName`
+      # on the same line is skipped.
+      ann_match = line_text.match(/:\s*([A-Za-z_][\w]*)/, decl.token.column - 1)
+      if ann_match && !line_text.include?('~')
+        type_col = ann_match.begin(1) + 1  # 1-based
+        fix = Fix.new(
+          description: "Prefix the declared type with `~` so '#{name}' becomes a tense (`~T`) source. " \
+                       "MATERIALIZED VIEW snapshots a tense aggregate at the WITH boundary.",
+          confidence: :interactive,
+          edits: [Edit.new(
+            span: Span.new(file: nil, line: dline, col: type_col, length: 0),
+            replacement: '~'
+          )]
+        )
+      end
+    end
+    kw = { name: name, got: got }
+    return error!(node, :WITH_MATERIALIZED_NEEDS_TENSE, **kw) unless fix
+    fixable!(node,
+      message: DiagnosticRegistry.format(:WITH_MATERIALIZED_NEEDS_TENSE, **kw),
+      category: :capability,
+      level: :error,
+      fixes: [fix],
+      raise_in_collector: true)
+  end
+
   # Capability: WITH RESTRICT on an immutable binding. :auto fix
   # locates the declaration and inserts `MUTABLE ` at its column —
   # same shape as emit_immutable_assignment_error!.
@@ -819,6 +1104,38 @@ module FixableHelper
       fixes: [fix])
   end
 
+  # Source-span length of a Literal token, used to position the
+  # closing edit of a CAST wrap. `tok.value` is the PARSED value
+  # (string sans quotes, integer sans separators/prefix/suffix), so
+  # `tok.value.to_s.length` undershoots the actual source span for
+  # strings, hex/oct/bin ints, separator-bearing numbers, and
+  # suffixed numbers. Scan the source line forward from tok.column
+  # to recover the true span. Falls back to `tok.value.to_s.length`
+  # when @source_code is unavailable.
+  def literal_source_length(tok)
+    return tok.value.to_s.length unless @source_code
+    line = @source_code.lines[tok.line - 1]
+    return tok.value.to_s.length unless line
+    rest = line[(tok.column - 1)..]
+    return tok.value.to_s.length if rest.nil? || rest.empty?
+    if rest.start_with?('"""')
+      idx = rest.index('"""', 3)
+      return idx ? idx + 3 : tok.value.to_s.length
+    end
+    if rest.start_with?('"')
+      i = 1
+      while i < rest.length
+        ch = rest[i]
+        break if ch == '"'
+        i += 1 if ch == '\\' && i + 1 < rest.length
+        i += 1
+      end
+      return i + 1
+    end
+    m = rest.match(/\A[\d_a-zA-Z.]+/)
+    m ? m[0].length : tok.value.to_s.length
+  end
+
   # Helper: wrap a literal-or-identifier value with `CAST(... AS T)`.
   # Returns a Fix or nil. Only handles values whose textual span we
   # can compute exactly — Literal nodes (numeric / boolean / string)
@@ -833,7 +1150,7 @@ module FixableHelper
     target_name = target_type.respond_to?(:resolved) ? target_type.resolved : target_type
     text_length = case value
                   when AST::Literal
-                    tok.value.to_s.length
+                    literal_source_length(tok)
                   when AST::Identifier
                     value.name.to_s.length
                   else
@@ -850,6 +1167,78 @@ module FixableHelper
                  replacement: " AS #{target_name})"),
       ]
     )
+  end
+
+  # Shared helper — returns a Fix that inserts a capability sigil
+  # (`@locked`, `@shared`, ...) immediately before the `;` that
+  # terminates the declaration line of `name`. Used by every
+  # WITH-CAP-NEEDS-X fixable. Returns nil when:
+  #  - the binding has no scope-local decl (param / field / global)
+  #  - the decl line has no `;` (multi-line value expression)
+  #  - the sigil is already present (idempotency — would be a no-op)
+  def build_decl_cap_insert_fix(name, sigil, description: nil, confidence: :auto)
+    T.bind(self, SemanticAnnotator) rescue nil
+    scope = lookup_scope_for(name)
+    decl = scope&.locals&.[](name)&.reg
+    return nil unless decl && decl.respond_to?(:token) && decl.token
+    return nil unless @source_code
+    dline = decl.token.line
+    line_text = @source_code.lines[dline - 1] || ''
+    # Search from the decl-name column so a prior statement's `;` on
+    # the same line is skipped.
+    semi_idx = line_text.index(';', decl.token.column - 1)
+    return nil unless semi_idx
+    return nil if line_text.include?(sigil)
+    insert_col = semi_idx + 1
+    Fix.new(
+      description: description || "Add `#{sigil}` to '#{name}' at its declaration (line #{dline}).",
+      confidence: confidence,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: dline, col: insert_col, length: 0),
+        replacement: " #{sigil}"
+      )]
+    )
+  end
+
+  # Shared helper — replace an existing sigil on the declaration line.
+  # Returns nil when the old sigil isn't found on the line.
+  def build_decl_cap_replace_fix(name, old_sigil, new_sigil, description: nil, confidence: :auto)
+    T.bind(self, SemanticAnnotator) rescue nil
+    scope = lookup_scope_for(name)
+    decl = scope&.locals&.[](name)&.reg
+    return nil unless decl && decl.respond_to?(:token) && decl.token
+    return nil unless @source_code
+    dline = decl.token.line
+    line_text = @source_code.lines[dline - 1] || ''
+    idx = line_text.index(old_sigil)
+    return nil unless idx
+    Fix.new(
+      description: description || "Change `#{old_sigil}` to `#{new_sigil}` on '#{name}' (line #{dline}).",
+      confidence: confidence,
+      edits: [Edit.new(
+        span: Span.new(file: nil, line: dline, col: idx + 1, length: old_sigil.length),
+        replacement: new_sigil
+      )]
+    )
+  end
+
+  # Shared emit for the WITH-CAP-NEEDS-X family. `candidates` is an
+  # ordered list of `{sigil:, description:}` hashes; one Fix is
+  # generated per candidate via `build_decl_cap_insert_fix`. Falls
+  # back to plain `error!` (registry-formatted) when no candidate
+  # is locatable (e.g. WITH target is a GetField / param).
+  def emit_with_cap_mismatch!(node, name, code, candidates, confidence: :auto, **kw)
+    T.bind(self, SemanticAnnotator) rescue nil
+    fixes = candidates.filter_map do |c|
+      build_decl_cap_insert_fix(name, c[:sigil], description: c[:description], confidence: confidence)
+    end
+    return error!(node, code, **kw) if fixes.empty?
+    fixable!(node,
+      message: DiagnosticRegistry.format(code, **kw),
+      category: :capability,
+      level: :error,
+      fixes: fixes,
+      raise_in_collector: true)
   end
 
   # Shared helper — returns a Fix that inserts `MUTABLE ` at the
@@ -906,7 +1295,9 @@ module FixableHelper
     src_line = @source_code.lines[line_num - 1] || ''
     # The sigil chain is order-independent: `@shared:atomic` and
     # `@atomic:shared` parse to the same Type. Match either form.
-    match = src_line.match(/@(?:shared:atomic|atomic:shared)/)
+    # Search from the decl-name column so a prior decl's @shared:atomic
+    # sigil on the same line is skipped.
+    match = src_line.match(/@(?:shared:atomic|atomic:shared)/, reg.token.column - 1)
     return nil unless match
     start_col = match.begin(0) + 1   # 1-based column
 

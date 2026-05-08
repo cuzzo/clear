@@ -562,4 +562,152 @@ RSpec.describe "WITH GUARD clauses" do
     expect(zig).to include("CheatLib.polymorphicMutate(")
     expect(zig).not_to include("CheatLib.polymorphicMutateFlow(")
   end
+
+  # ============================================================
+  # Annotated examples for `clear explain` / LSP hover.
+  # ============================================================
+
+  # @example_for: WITH_GUARD_NOT_WITH_MATCH
+  # @fix: WITH MATCH dispatches per sync-family arm; WITH GUARD evaluates
+  # @fix: a single predicate after acquire. They aren't integrated yet.
+  # @fix: Move the predicate into a regular IF inside each arm body, or
+  # @fix: split the polymorphic dispatch and guarded acquire into two
+  # @fix: separate WITH blocks.
+  describe ":WITH_GUARD_NOT_WITH_MATCH — combining GUARD with MATCH" do
+    it "raises when a GUARD clause is attached to WITH ... MATCH" do
+      expect {
+        annotate(<<~CLEAR)
+          STRUCT Counter { value: Int64 }
+          FN poke(c: Counter) RETURNS Void
+            REQUIRES c: LOCKED
+          ->
+            WITH c AS x GUARD x.value > 0 MATCH
+              WHEN LOCKED -> { v = x.value; }
+            END
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WITH GUARD is not supported with WITH MATCH/)
+    end
+
+    it "compiles when GUARD is dropped (the body checks the predicate itself)" do
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN poke(c: Counter) RETURNS Void
+          REQUIRES c: LOCKED
+        ->
+          WITH c AS x MATCH
+            WHEN LOCKED -> { v = x.value; }
+          END
+        END
+      CLEAR
+    end
+  end
+
+  # @example_for: WITH_GUARD_ALL_BINDINGS_NEED_AS
+  # @fix: WITH GUARD's predicate runs against unwrapped values via the
+  # @fix: AS alias. Add `AS <name>` to every binding in the WITH clause
+  # @fix: so the predicate has something to reference.
+  describe ":WITH_GUARD_ALL_BINDINGS_NEED_AS — missing AS on a guarded binding" do
+    it "raises when a guarded WITH has another binding without AS" do
+      expect {
+        annotate(<<~CLEAR)
+          STRUCT Counter { value: Int64 }
+          FN main() RETURNS Void ->
+            a = Counter{ value: 1 } @shared:locked;
+            b = Counter{ value: 1 } @shared:locked;
+            WITH EXCLUSIVE a AS x GUARD x.value > 0,
+                 EXCLUSIVE b {
+              v = x.value;
+            }
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /WITH GUARD requires every participating binding/)
+    end
+
+    it "compiles when every binding carries an AS alias" do
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          a = Counter{ value: 1 } @shared:locked;
+          b = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE a AS x GUARD x.value > 0,
+               EXCLUSIVE b AS y GUARD y.value > 0 {
+            v = x.value + y.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    end
+  end
+
+  # @example_for: WITH_GUARD_EXPR_MUST_BE_BOOL
+  # @fix: GUARD predicates gate body execution: TRUE proceeds, FALSE
+  # @fix: raises GuardFail. Wrap the expression in a comparison or Bool
+  # @fix: method so it has a defined truth value.
+  describe ":WITH_GUARD_EXPR_MUST_BE_BOOL — non-Bool guard expression" do
+    it "raises when the GUARD predicate isn't Bool" do
+      expect {
+        annotate(<<~CLEAR)
+          STRUCT Counter { value: Int64 }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 1 } @shared:locked;
+            WITH EXCLUSIVE c AS x GUARD x.value {
+              v = x.value;
+            }
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /GUARD expression must return Bool/)
+    end
+
+    it "compiles when the GUARD predicate is Bool-typed" do
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE c AS x GUARD x.value > 0 {
+            v = x.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    end
+  end
+
+  # @example_for: WITH_GUARD_MUTABLE_MUTATED
+  # @fix: GUARD predicates evaluate ONCE on acquire. Mutating a MUTABLE
+  # @fix: alias inside the body would let the value drift past the
+  # @fix: predicate without a re-check. Drop MUTABLE from the alias if
+  # @fix: you only need to read, drop the body's mutation, or move the
+  # @fix: write outside the guarded WITH.
+  describe ":WITH_GUARD_MUTABLE_MUTATED — guarded MUTABLE alias mutated in body" do
+    it "raises when a MUTABLE guarded alias is mutated inside the body" do
+      expect {
+        annotate(<<~CLEAR)
+          STRUCT Counter { value: Int64 }
+          FN main() RETURNS Void ->
+            c = Counter{ value: 1 } @shared:locked;
+            WITH EXCLUSIVE c AS MUTABLE y GUARD y.value > 0 {
+              y.value = 2;
+            }
+            RETURN;
+          END
+        CLEAR
+      }.to raise_error(CompilerError, /declared MUTABLE and mutated/)
+    end
+
+    it "compiles when the guarded alias is NOT MUTABLE" do
+      annotate(<<~CLEAR)
+        STRUCT Counter { value: Int64 }
+        FN main() RETURNS Void ->
+          c = Counter{ value: 1 } @shared:locked;
+          WITH EXCLUSIVE c AS y GUARD y.value > 0 {
+            v = y.value;
+          }
+          RETURN;
+        END
+      CLEAR
+    end
+  end
 end

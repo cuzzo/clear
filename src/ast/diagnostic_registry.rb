@@ -28,6 +28,14 @@
 #   fix_hint:     (optional) Plain-text guidance for fixing it.
 #   example_bad:  (optional) CLEAR snippet that triggers this error.
 #   example_good: (optional) CLEAR snippet that doesn't.
+#   pending:      (optional, default false) Mark a code as
+#                 reserved for a future feature whose implementation
+#                 hasn't landed yet. The visitor that would fire it
+#                 is intentionally a stub. `clear explain` still
+#                 surfaces the entry (so docs can preview the planned
+#                 diagnostic) but the example/audit specs skip it —
+#                 we can't write a triggering snippet for an
+#                 unimplemented compiler check.
 #
 # `clear explain <CODE>` reads from this table. As entries are
 # enriched with cause / fix_hint / examples, the explain command
@@ -67,16 +75,6 @@ module DiagnosticRegistry
     # ===================================================================
     # CONTROL FLOW
     # ===================================================================
-    ILLEGAL_BREAK: {
-      severity: :error, category: :type,
-      template: "'BREAK' used outside of a loop.",
-      summary:  "BREAK only makes sense inside a FOR / WHILE loop body.",
-    },
-    ILLEGAL_CONTINUE: {
-      severity: :error, category: :type,
-      template: "'CONTINUE' used outside of a loop.",
-      summary:  "CONTINUE only makes sense inside a FOR / WHILE loop body.",
-    },
 
     # ===================================================================
     # MEMORY / STORAGE
@@ -104,11 +102,6 @@ module DiagnosticRegistry
       cause: "A binding declared without `MUTABLE` cannot be reassigned. CLEAR is immutable-by-default — `MUTABLE x = 0` is required to allow `x = 1`.",
       fix_hint: "Add `MUTABLE` at the binding's declaration site. `clear fix` offers this as an interactive fix when the declaration is locatable.",
     },
-    VARIABLE_REBIND: {
-      severity: :error, category: :ownership,
-      template: "Cannot rebind immutable variable '%{name}'.",
-      summary:  "Cannot redeclare a binding that is already in scope as immutable.",
-    },
     NATIVE_CALL_ERROR: {
       severity: :error, category: :registry,
       template: "native_call requires 'Class' and 'Method' string literals.",
@@ -118,21 +111,6 @@ module DiagnosticRegistry
     # ===================================================================
     # STRUCT FIELDS
     # ===================================================================
-    MISSING_FIELD_VALUE: {
-      severity: :error, category: :type,
-      template: "Missing value for field '%{field}' in struct '%{struct}'",
-      summary:  "Struct literal omits a required field.",
-    },
-    MISSING_REQUIRED_STRUCT_FIELD: {
-      severity: :error, category: :type,
-      template: "Missing required field '%{field}' in instantiation of '%{struct}'",
-      summary:  "Struct literal omits a required field (alternate phrasing).",
-    },
-    VARIABLE_ASSIGNMENT_TYPE_ERROR: {
-      severity: :error, category: :type,
-      template: "Type Error: Variable '%{name}' declared as %{declared} but assigned %{assigned}",
-      summary:  "Declared type does not accept the assigned value's type.",
-    },
     FIXED_ARRAY_SIZE_AS_DYNAMIC: {
       severity: :error, category: :type,
       template: "Cannot initialize fixed-array '%{name}' to an unknown size. You must TRUNCATE to a specific size, or use `[]` to create a dynamic array.",
@@ -147,16 +125,8 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Cannot modify field '%{field}' of immutable object '%{name}'.",
       summary:  "Field write through an immutable receiver is rejected.",
-    },
-    IMMUTABLE_LIST_ASSIGNMENT: {
-      severity: :error, category: :ownership,
-      template: "Cannot modify index of immutable list '%{name}'.",
-      summary:  "Indexed write through an immutable list is rejected.",
-    },
-    LIST_TYPE_MISMATCH: {
-      severity: :error, category: :type,
-      template: "List contains mixed types. Item %{index} is '%{got}', expected '%{expected}'.",
-      summary:  "List literal element types are inconsistent with the inferred element type.",
+      cause: "A struct field assignment (`p.field = v`) requires the receiver binding `p` to be declared MUTABLE. CLEAR is immutable-by-default; without `MUTABLE p = ...`, no field of `p` can be reassigned.",
+      fix_hint: "Add `MUTABLE` at the receiver's declaration. Capability-wrapped bindings (`@locked`, `@alwaysMutable`) also permit field writes through their unwrapping rules.",
     },
     ILLEGAL_FIELD_LOOKUP: {
       severity: :error, category: :type,
@@ -181,6 +151,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Type Error: '%{enum}' is an enum type. Enum values do not have fields.",
       summary:  "Field access on an enum value (enum variants carry no fields).",
+      cause: "Enum variants in CLEAR are tag-only — there's no payload to read. The set of enum values is fixed at declaration; `e.foo` would have nothing to return because variants carry no associated data.",
+      fix_hint: "Use the enum value directly (`e == %{enum}.SomeVariant`), or `MATCH e START %{enum}.A -> ..., %{enum}.B -> ... END` for per-variant logic. If you need per-variant data, define a UNION instead — variants there can carry payloads.",
     },
 
     # ===================================================================
@@ -190,76 +162,106 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Type Error: Union '%{union}' has no variant '%{variant}'.",
       summary:  "Reference to a variant that the union does not declare.",
+      cause: "Union variants are closed-set: every legal variant name appears in the UNION declaration. References to variants outside that set can't be type-checked or pattern-matched, so the compiler rejects them at the use site.",
+      fix_hint: "Either pick an existing variant of `%{union}` (check the declaration), or add `%{variant}` to the UNION definition if it's a new case. Watch for typos — the closest matching variant name is often what was intended.",
     },
     UNION_PAYLOAD_MISMATCH: {
       severity: :error, category: :type,
       template: "Type Error: Union variant '%{variant}' expects %{expected}, got %{got}.",
       summary:  "Union variant constructor passed a payload of the wrong type.",
+      cause: "Each union variant declares a payload type at the UNION definition. Constructors must pass a value matching that declared type so the variant tag and payload stay in sync — a `MATCH` on the variant later reads the payload as the declared type.",
+      fix_hint: "Pass a `%{expected}` for the payload, OR widen the declared payload type at the UNION definition if you legitimately want both types in this variant (consider a sibling variant for the alternative shape).",
     },
     UNION_FIELD_ACCESS: {
       severity: :error, category: :type,
       template: "Type Error: '%{union}' is a union type. Access variants with 'Type.Variant(payload)'.",
       summary:  "Field access on a union value (use variant pattern matching instead).",
+      cause: "Union values carry a tag plus a payload; the payload's shape depends on the active variant. A bare `u.field` can't be type-checked because different variants have different (or no) fields. CLEAR routes you through MATCH so the active variant is known.",
+      fix_hint: "Pattern-match: `MATCH u START %{union}.SomeVariant AS x -> use(x), END`. The AS-binding gives you a typed handle on the payload only when the matched variant is active.",
     },
     UNION_INLINE_VARIANT_NEEDS_BRACES: {
       severity: :error, category: :type,
       template: "Type Error: '%{union}.%{variant}' is an inline struct variant — use '%{union2}.%{variant2}{ field: value }' to construct it.",
       summary:  "Inline-struct variant constructor requires braces, not parens.",
+      cause: "Inline-struct variants carry named fields, not a single positional payload. Construction uses brace syntax (matching struct literals) so the field names are explicit at the construction site.",
+      fix_hint: "Switch from `%{union}.%{variant}(...)` to `%{union2}.%{variant2}{ field: value, ... }` — each field named explicitly.",
     },
     UNION_INLINE_VARIANT_OLD_SYNTAX: {
       severity: :error, category: :type,
       template: "Type Error: '%{union}' variant '%{variant}' has inline struct fields — use '%{union2}.%{variant2}{ field: value }' instead.",
       summary:  "Old paren-style construction of an inline-struct variant.",
+      cause: "Inline-struct variants migrated to brace-syntax construction; the old paren-style positional form was removed because it ambiguates field order across union evolution (adding a new field would silently shift positions).",
+      fix_hint: "Rewrite the construction site to use named braces: `%{union2}.%{variant2}{ field: value, ... }`. Field order doesn't matter; missing fields raise an explicit error.",
     },
     UNION_INLINE_VARIANT_UNKNOWN_FIELD: {
       severity: :error, category: :type,
       template: "Type Error: Union variant '%{union}.%{variant}' has no field '%{field}'.",
       summary:  "Inline-struct variant literal references a field the variant doesn't declare.",
+      cause: "Inline-struct variants are closed: their field set is fixed at the UNION definition. Constructors that name a field outside that set can't be checked, and silently dropping unknown fields would let typos pass.",
+      fix_hint: "Check the spelling against the declared fields of `%{union}.%{variant}`, drop the unknown field, or add it to the UNION's variant declaration if you need it.",
     },
     UNION_INLINE_VARIANT_TYPE_MISMATCH: {
       severity: :error, category: :type,
       template: "Type Error: Union variant '%{union}.%{variant}' field '%{field}' expects %{expected}, got %{got}.",
       summary:  "Inline-struct variant field receives a value of the wrong type.",
+      cause: "Each field on an inline-struct variant declares a type at the UNION definition. The construction site must supply a value matching that type so MATCH-based readers see the field as the declared type.",
+      fix_hint: "Pass a `%{expected}` for `%{field}`, CAST the value if narrowing is intended (`CAST(value AS %{expected})`), or widen the field's declared type at the UNION definition.",
     },
     UNION_INLINE_VARIANT_MISSING_FIELD: {
       severity: :error, category: :type,
       template: "Type Error: Union variant '%{union}.%{variant}' is missing required field '%{field}'.",
       summary:  "Inline-struct variant literal omits a required field.",
+      cause: "Inline-struct variants have no default values — every declared field is required at construction so MATCH readers can rely on the payload being fully populated.",
+      fix_hint: "Add `%{field}: <value>` to the variant literal. If the field is genuinely optional, declare it as `?T` in the UNION definition and pass NIL when absent.",
     },
     UNION_INLINE_IN_GENERIC: {
       severity: :error, category: :type,
       template: "Type Error: Inline struct variants are not supported in generic unions.",
       summary:  "Generic unions don't yet support inline-struct variants.",
+      cause: "Generic union variants currently support a single typed payload (`Variant: T`) so monomorphisation can substitute the payload type uniformly. Inline-struct variants would need per-instance field-type specialisation, which the monomorphiser doesn't yet handle.",
+      fix_hint: "Replace the inline-struct variant with a payload-typed variant whose payload is a separately-declared STRUCT (`STRUCT Foo { ... }; UNION U<T> { Bar: Foo, ... }`). The struct can still be generic via its own type parameter.",
     },
     UNION_METHOD_MISSING: {
       severity: :error, category: :type,
       template: "Type Error: Union '%{union}' requires method '%{method}', but no function '%{fn}' exists.",
       summary:  "Union METHOD-clause names a function that wasn't declared.",
+      cause: "A `METHOD` clause on a UNION attaches an externally-declared function as a method on the union type. The compiler resolves the function by name when the UNION is annotated; if no matching function is in scope at that point, the method binding can't be created.",
+      fix_hint: "Define `FN %{fn}(...) ...` somewhere visible to the UNION declaration (same module, or imported via REQUIRE), or correct the name in the METHOD clause if it's a typo.",
     },
     UNION_METHOD_WRONG_ARITY: {
       severity: :error, category: :type,
       template: "Type Error: Union '%{union}' method '%{method}' requires %{expected_arity} parameter(s), but function '%{fn}' has %{got_arity}.",
       summary:  "Method arity doesn't match the union's METHOD declaration.",
+      cause: "The METHOD clause declares the method's signature (param count, types, return type); the bound function must match exactly so callers can dispatch through the union without surprises. Arity mismatch breaks the contract.",
+      fix_hint: "Adjust `%{fn}` to take exactly %{expected_arity} parameter(s), OR change the METHOD declaration on the UNION to match the function's actual arity.",
     },
     UNION_METHOD_PARAM_TYPE: {
       severity: :error, category: :type,
       template: "Type Error: Union '%{union}' method '%{method}' parameter %{index} expects '%{expected}', but function '%{fn}' has '%{got}'.",
       summary:  "Method parameter type doesn't match the union's METHOD declaration.",
+      cause: "METHOD declarations specify each parameter's type; the bound function must match exactly so the union's method dispatch remains type-safe. A divergence here would let callers pass values the function won't accept.",
+      fix_hint: "Change `%{fn}`'s parameter %{index} to `%{expected}`, OR update the METHOD declaration to match the function's actual parameter type.",
     },
     UNION_METHOD_RETURN_TYPE: {
       severity: :error, category: :type,
       template: "Type Error: Union '%{union}' method '%{method}' requires return type '%{expected}', but function '%{fn}' returns '%{got}'.",
       summary:  "Method return type doesn't match the union's METHOD declaration.",
+      cause: "Callers of `u.%{method}()` see the return type declared on the UNION's METHOD clause; the bound function must return exactly that type so callers' downstream uses type-check. A mismatch would silently hand the caller a wrong-typed value.",
+      fix_hint: "Change `%{fn}`'s return type to `%{expected}`, OR update the METHOD declaration's return type to match the function.",
     },
     UNION_METHOD_WRONG_VISIBILITY: {
       severity: :error, category: :type,
       template: "Type Error: Union '%{union}' method '%{method}' is declared %{declared_vis} but function '%{fn}' is %{fn_vis} — visibility must match.",
       summary:  "Method visibility doesn't match the union's METHOD declaration.",
+      cause: "Union method visibility is declared on the METHOD clause and must match the underlying function's visibility. Allowing them to differ would let a private function leak as a public method (or vice-versa), breaking module boundaries.",
+      fix_hint: "Make the function's visibility match the METHOD declaration: change `FN %{fn}` to %{declared_vis}, OR change the METHOD declaration to %{fn_vis} so it matches the function.",
     },
     UNION_METHOD_DUPLICATE: {
       severity: :error, category: :type,
       template: "Type Error: Union '%{union}' declares method '%{method}' more than once.",
       summary:  "Two METHOD clauses on the same union name the same function.",
+      cause: "Each method name binds to exactly one function on a UNION. Two METHOD clauses with the same name would create dispatch ambiguity at every call site of `u.%{method}()`.",
+      fix_hint: "Drop one of the duplicate METHOD clauses, OR rename the second method on the UNION (and at its call sites) so each name is unique.",
     },
 
     # ===================================================================
@@ -361,6 +363,9 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Parameter '%{name}' is MUTABLE but has primitive type '%{type}'. Primitives are passed by value, so mutating them locally has no effect on the caller.",
       summary:  "Declaring a primitive-typed parameter `MUTABLE` is meaningless (pass-by-value).",
+      cause: "Reserved for a future warning: declaring a primitive-typed parameter `MUTABLE` is a footgun. CLEAR's `MUTABLE x: T` mutates the caller's binding through the parameter — but for primitives (Int64, Float64, Bool, etc.), the parameter is a copy and writes to it never reach the caller. The check would fire on `FN bump!(MUTABLE x: Int64) -> x = x + 1; END`, suggesting either dropping `MUTABLE` (if the local-only mutation is intentional) or returning the new value.",
+      fix_hint: "While the check isn't wired, ask: did you mean to mutate the caller's variable? If so, return the new value and assign at the call site. If the local-only mutation is intentional, drop `MUTABLE` from the parameter declaration.",
+      pending: true,
     },
     IMMUTABLE_ARG_PASSED_AS_MUTABLE: {
       severity: :error, category: :ownership,
@@ -371,11 +376,6 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Argument %{index} ('%{param}') is MUTABLE. You cannot pass a value/expression, you must pass a Mutable Variable.",
       summary:  "Callee's MUTABLE parameter requires a binding, not a temporary expression.",
-    },
-    ILLEGAL_UPVALUE: {
-      severity: :error, category: :ownership,
-      template: "Cannot capture '%{name}' - undefined in outer scope.",
-      summary:  "Lambda body references a name that doesn't exist in any enclosing scope.",
     },
     RETURN_MISMATCH: {
       severity: :error, category: :type,
@@ -727,51 +727,85 @@ module DiagnosticRegistry
       severity: :error, category: :capability,
       template: "WITH %{capability} expects an identifier or field, got '%{got}'.",
       summary:  "WITH-block capture target must be a binding name or field, not an arbitrary expression.",
+      cause: "WITH unwraps a *binding* (or a field path rooted at one). The acquire/unwrap dance — lock acquire, snapshot CAS, refcount bump — needs a stable name to operate on. A function call or arbitrary expression has no scope-tracked identity, so the unwrap can't be paired with a release at scope exit.",
+      fix_hint: "Bind the value to a local first, then take WITH on the local: `x = produce(); WITH EXCLUSIVE x { ... }`. For field paths, name the root binding directly (`WITH EXCLUSIVE c.field { ... }`).",
     },
     WITH_EXCLUSIVE_NEEDS_LOCK: {
       severity: :error, category: :capability,
       template: "EXCLUSIVE capability requires a @locked or @writeLocked variable, got %{got}",
       summary:  "WITH EXCLUSIVE only applies to bindings declared with `@locked` or `@writeLocked`.",
+      cause: "WITH EXCLUSIVE acquires a write lock — the binding must carry a lock to acquire. On a plain `T` there's nothing to lock, so the acquire would be a no-op or, worse, mask a missing-lock bug at runtime.",
+      fix_hint: "Either annotate the declaration with `@locked` (Mutex — single-writer EXCLUSIVE access) or `@writeLocked` (RwLock — readers via WITH READ; writers via WITH EXCLUSIVE), or drop WITH EXCLUSIVE if no lock is actually needed (the value can be used directly).",
     },
     WITH_READ_NEEDS_WRITE_LOCK: {
       severity: :error, category: :capability,
       template: "WITH %{name}: read access requires a @writeLocked variable",
       summary:  "Read-style WITH on a `@locked` (read-only) cell is rejected — use `@writeLocked` if reads need to coexist with writes.",
+      cause: "WITH READ takes a shared (reader) lock so multiple readers can coexist. A `@locked` Mutex has no reader/writer split — every acquire is exclusive — so WITH READ has nowhere to dispatch. Only `@writeLocked` (RwLock) supports the reader path.",
+      fix_hint: "Promote the binding from `@locked` to `@writeLocked` (RwLock — readers via WITH READ alongside writers via WITH EXCLUSIVE), OR keep `@locked` and switch the reader to WITH EXCLUSIVE (single-writer access; readers and writers serialize).",
     },
     WITH_RESTRICT_NEEDS_MUTABLE: {
       severity: :error, category: :capability,
       template: "RESTRICT capability requires a mutable variable, but '%{name}' is immutable",
       summary:  "WITH RESTRICT scopes mutable poisoning — the captured binding must itself be MUTABLE.",
+      cause: "WITH RESTRICT establishes an exclusive mutable borrow scope: writes through the alias are visible to the source, and the source can't be aliased elsewhere during the block. Both halves of that contract require the source binding to be mutable in the first place — there's nothing to RESTRICT on an immutable value.",
+      fix_hint: "Declare the binding with `MUTABLE` at its definition (`MUTABLE %{name} = ...`). If the binding is intentionally immutable, drop the RESTRICT and use `WITH BORROWED` (immutable read-through) instead.",
     },
     WITH_MATERIALIZED_NEEDS_TENSE: {
       severity: :error, category: :capability,
       template: "WITH MATERIALIZED VIEW requires a `~T` (tense) source, got %{got} for '%{name}'.",
       summary:  "MATERIALIZED VIEW snapshots a tense / observable source — the binding must have type `~T`.",
+      cause: "MATERIALIZED VIEW snapshots a *tense aggregate* (`~T`) at the WITH boundary — copying its current contents into an owned, locally-scoped value. On a non-tense source there's no snapshot semantics: the binding is already concrete, and the MATERIALIZED prefix has no effect to apply.",
+      fix_hint: "Prefix the declared type with `~` so the source is tense (`MUTABLE %{name}: ~T = ...`), OR drop the MATERIALIZED clause and use the source directly (no WITH needed for a non-tense aggregate).",
     },
     WITH_SNAPSHOT_NEEDS_VERSIONED_OR_ATOMIC: {
       severity: :error, category: :capability,
       template: "WITH SNAPSHOT requires a @versioned or @indirect:atomic variable. '%{name}' is %{actual}. Declare the binding as `T@versioned` / `T@shared:versioned` for an MVCC cell, or `T@indirect:atomic` for a lock-free atomic-pointer cell.",
       summary:  "WITH SNAPSHOT only works on MVCC cells (`@versioned`) or atomic-pointer cells (`@indirect:atomic`).",
+      cause: "WITH SNAPSHOT reads a stable view of a cell that publishes new values atomically. MVCC (`@versioned`) and AtomicPtr (`@indirect:atomic`) are the two sync families that maintain such snapshots; other bindings have no snapshot infrastructure, so the SNAPSHOT acquire has nothing to capture.",
+      fix_hint: "Add `@versioned` (MVCC — readers see a stable snapshot, writers retry on conflict) or `@indirect:atomic` (lock-free atomic pointer cell — readers snapshot, writers CAS-publish) to `%{name}`'s declaration. For non-snapshotted reads, use WITH EXCLUSIVE (locks) or direct access (refcounted handles) instead.",
+    },
+    CAP_FIELD_NEEDS_WITH_EXCLUSIVE: {
+      severity: :error, category: :capability,
+      template: "Cannot read field '%{field}' of %{cap} binding '%{name}' directly. Wrap with `WITH EXCLUSIVE %{name} AS x { ... x.%{field} ... }` to acquire the lock and unwrap the inner value.",
+      summary:  "Direct field access on a locked binding requires WITH EXCLUSIVE to acquire the lock first.",
+      cause: "`@locked` (Mutex) and `@writeLocked` (RwLock) bindings hide the inner T behind a lock. Reading `c.field` directly would skip the lock acquire — which is unsound — and the underlying type doesn't have the field anyway (it has `.ctrl`/`.data` and a lock). The compiler routes you through `WITH EXCLUSIVE` so the lock is acquired, the inner T is exposed via the alias, and the lock is released at scope end.",
+      fix_hint: "Wrap the access in a WITH EXCLUSIVE block: `WITH EXCLUSIVE c AS x { print(x.field.toString()); }`. Both `@locked` and `@writeLocked` bindings use WITH EXCLUSIVE — there's no separate read-only form on a Mutex, and `@writeLocked` reads still need the writer lock to safely access state.",
+    },
+    CAP_FIELD_NEEDS_WITH_SNAPSHOT: {
+      severity: :error, category: :capability,
+      template: "Cannot read field '%{field}' of %{cap} binding '%{name}' directly. Wrap with `WITH SNAPSHOT %{name} AS x { ... x.%{field} ... }` to take a stable snapshot of the cell.",
+      summary:  "Direct field access on an atomic-pointer cell requires WITH SNAPSHOT to read a stable T.",
+      cause: "`@indirect:atomic` is a CAS-published heap cell — the inner T can be swapped out by other fibers between reads. Direct field access `c.field` would race against publishers, and the underlying `*AtomicPtr(T)` type doesn't have the field anyway. WITH SNAPSHOT loads the current pointer once and binds the alias to that snapshot; the alias's view is stable for the body's duration.",
+      fix_hint: "Wrap the access in a WITH SNAPSHOT block: `WITH SNAPSHOT c AS x { print(x.field.toString()); }`. For mutating updates, use `WITH SNAPSHOT MUTABLE c AS x { x.field = ...; }` — the runtime CAS-publishes the modified clone at scope exit.",
     },
     WITH_NEEDS_MULTIOWNED: {
       severity: :error, category: :capability,
       template: "WITH %{name}: expected a @multiowned variable",
       summary:  "Inferred capability requires a `@multiowned` (Rc) binding.",
+      cause: "Plain `WITH x` infers the capability from `x`'s sigil. Inference resolved to `:multiowned` because the path expected a refcounted handle, but the binding doesn't carry `@multiowned` — there's no Rc to clone, so the unwrap can't proceed. (Defensive check: in practice this branch fires only if storage briefly looks like multiowned but the symbol no longer carries it.)",
+      fix_hint: "Annotate the declaration with `@multiowned` (Rc — single-scheduler refcount; cheap clones on WITH), OR pick a different capability whose semantics fit the binding (`@shared` for cross-fiber, `@locked` for mutable-shared).",
     },
     WITH_NEEDS_SHARED: {
       severity: :error, category: :capability,
       template: "WITH %{name}: expected a @shared variable",
       summary:  "Inferred capability requires a `@shared` (Arc) binding.",
+      cause: "Plain `WITH x` resolved to `:shared` (Arc) capability but the binding doesn't carry `@shared` — there's no atomic refcount to bump on WITH entry. (Defensive: like WITH_NEEDS_MULTIOWNED, fires only when storage briefly looks shared but the symbol disagrees.)",
+      fix_hint: "Annotate the declaration with `@shared` (Arc — atomic refcount; safe to clone across fibers), OR pick a different capability if the binding doesn't need cross-fiber sharing.",
     },
     WITH_ATOMIC_NEEDS_SHARED_ATOMIC: {
       severity: :error, category: :capability,
       template: "WITH ATOMIC requires an @shared:atomic variable. '%{name}' is %{actual}, not @shared:atomic.",
       summary:  "WITH ATOMIC needs a binding declared `T@shared:atomic`.",
+      cause: "WITH ATOMIC dispatches to lock-free atomic primitives (load, store, fetchAdd, ...) on a `@shared:atomic` cell. Other bindings don't have those primitives wired — the unwrap has no atomic-op surface to expose.",
+      fix_hint: "Add `@shared:atomic` to `%{name}`'s declaration so it lowers to a lock-free cell. For non-atomic shared mutation, use `@shared:locked` + `WITH EXCLUSIVE` instead.",
     },
     UNKNOWN_WITH_CAP_TYPE: {
       severity: :error, category: :capability,
       template: "Unknown capability type: %{type}",
       summary:  "Internal annotator error — WITH-block dispatch saw a capability tag it doesn't know.",
+      cause: "The annotator's WITH-block dispatch table doesn't have a handler for the capability tag `%{type}`. This is an internal compiler bug (or a stale build): every legal capability should have a corresponding dispatch arm. User code can't trigger this directly.",
+      fix_hint: "If you saw this from a user program, please report it as a compiler bug with the source snippet that triggered it. As a workaround, verify the capability sigil is one of: `@multiowned`, `@shared`, `@locked`, `@writeLocked`, `@versioned`, `@shared:atomic`, `@indirect:atomic`, `@local`.",
     },
     WITH_CANNOT_INFER_CAP: {
       severity: :error, category: :capability,
@@ -782,23 +816,31 @@ module DiagnosticRegistry
     # WITH GUARD specifics
     WITH_GUARD_NOT_WITH_MATCH: {
       severity: :error, category: :capability,
-      template: "WITH GUARD is not supported with WITH MATCH yet.",
+      template: "WITH GUARD is not supported with WITH MATCH yet. WITH MATCH dispatches per-arm based on the binding's sync family; GUARD evaluates a single predicate after acquire. The two haven't been integrated. Run the GUARD check before the WITH MATCH (in the surrounding scope), or split the polymorphic-dispatch and guard-predicate concerns into two separate blocks.",
       summary:  "WITH MATCH and WITH GUARD can't be combined in the current release.",
+      cause: "WITH MATCH switches the body shape based on the binding's sync family (LOCKED / ATOMIC / VERSIONED arms). WITH GUARD attaches a post-acquire predicate that aborts the body when false. The matching layer hasn't been wired through the per-arm preludes yet, so combining them is rejected.",
+      fix_hint: "Move the GUARD predicate to a regular `IF` at the top of the body (each WITH MATCH arm checks the predicate itself), or restructure so GUARD-checked bindings are acquired in a separate (non-MATCH) WITH block that nests inside or wraps the polymorphic block.",
     },
     WITH_GUARD_NOT_ON_SNAPSHOT: {
       severity: :error, category: :capability,
-      template: "WITH GUARD is not supported on mutable SNAPSHOT transactions in this release.",
+      template: "WITH GUARD is not supported on mutable SNAPSHOT transactions in this release. Read-only SNAPSHOT works (the guard runs against the snapshot view); MUTABLE SNAPSHOT is rejected because the transaction would have to retry on guard failure, which interacts with the MVCC commit retry loop.",
       summary:  "Mutable SNAPSHOT transactions don't support WITH GUARD yet.",
+      cause: "MUTABLE SNAPSHOT runs the body inside an MVCC retry loop — on commit-failure it re-executes the body. GUARD-failure also wants to abort the body, but its semantics (don't retry, don't commit) conflict with the MVCC retry contract.",
+      fix_hint: "Use read-only `WITH SNAPSHOT c AS s GUARD ...` (drop MUTABLE), check the predicate AFTER the SNAPSHOT block reads, or move the mutation into a separate non-snapshot path.",
     },
     WITH_GUARD_ALL_BINDINGS_NEED_AS: {
       severity: :error, category: :capability,
-      template: "WITH GUARD requires every participating binding to have an AS alias so the guard can reference the unwrapped value.",
+      template: "WITH GUARD requires every participating binding to have an `AS` alias so the guard predicate can read the unwrapped value. Add `AS <alias>` to each binding in the WITH clause.",
       summary:  "Each binding in a WITH GUARD must use `AS <name>` so the guard body can read it.",
+      cause: "WITH GUARD's predicate runs after each acquire and reads the unwrapped value. Without an AS alias, the unwrapped form has no name in scope — the predicate would have nothing to read.",
+      fix_hint: "Add `AS <name>` to every binding in the WITH clause: `WITH EXCLUSIVE c AS x EXCLUSIVE d AS y GUARD x.v + y.v > 0 { ... }`.",
     },
     WITH_GUARD_EXPR_MUST_BE_BOOL: {
       severity: :error, category: :capability,
       template: "WITH GUARD expression must return Bool, got %{got}.",
       summary:  "The guard predicate's type must be Bool.",
+      cause: "The GUARD predicate gates body execution: TRUE proceeds, FALSE raises GuardFail. A non-Bool expression has no defined truth value, so it's rejected at type-check.",
+      fix_hint: "Wrap the guard expression so it returns Bool (e.g. `x.v > 0`, `x.name == \"ready\"`, `x.flags.contains(.active)`). If you intended a side effect, move it before the WITH and only test a Bool inside GUARD.",
     },
     WITH_GUARD_REFS_SIBLING_ALIAS: {
       severity: :error, category: :capability,
@@ -811,18 +853,24 @@ module DiagnosticRegistry
       severity: :error, category: :capability,
       template: "WITH GUARD aliases cannot be MUTABLE and mutated inside the body: %{names} %{verb} declared MUTABLE and mutated inside the WITH. Only MUTABLE objects that change inside the body are rejected because their value could be modified after the GUARD predicate evaluates, silently invalidating it. Drop the mutation, drop MUTABLE from the alias, or move the mutation outside the guarded WITH.",
       summary:  "GUARD aliases mutated inside the body would silently invalidate the guard.",
+      cause: "GUARD predicates evaluate ONCE, immediately after acquire. If the body then mutates the alias, the post-mutation state may no longer satisfy the predicate — but the body keeps running because there's no re-check. To prevent silent invalidation, the compiler rejects the alias being both MUTABLE and mutated inside the body.",
+      fix_hint: "Pick one: (a) drop `MUTABLE` from the alias if you don't need to write through it; (b) drop the body's mutation if the read-only path is enough; (c) move the mutation outside the guarded WITH (acquire, check, release, then re-acquire MUTABLE for the write).",
     },
 
     # Borrow
     BORROW_WILDCARD_NEEDS_STRUCT: {
       severity: :error, category: :capability,
-      template: "Wildcard borrow '*' requires a struct type, but '%{name}' is %{type}",
+      template: "Wildcard borrow '*' requires a struct type, but '%{name}' is %{type}.",
       summary:  "`WITH BORROWED x.*` only applies to struct-typed targets — it expands to per-field borrows.",
+      cause: "`WITH BORROWED x.*` is sugar for `BORROWED x.field1 BORROWED x.field2 ...`. The wildcard expansion only makes sense on a struct (which has named fields). Lists, maps, primitives, etc. don't expand.",
+      fix_hint: "Borrow the whole binding instead: `WITH BORROWED %{name} { ... }`. For collections, iterate or index inside the body rather than borrowing each element.",
     },
     WITH_BORROWED_ON_QUALIFIED_VAR: {
       severity: :error, category: :capability,
       template: "Cannot use WITH BORROWED on %{qualifier} variable '%{name}'. %{remediation}",
       summary:  "WITH BORROWED rejected because the source binding is qualified in a way that conflicts.",
+      cause: "WITH BORROWED produces an immutable read-through alias. Some qualifier on the source (e.g. an `@indirect:atomic` cell, a tense source, a lock-only binding) requires going through that qualifier's unwrap — a plain BORROWED would skip the synchronisation or transformation the qualifier provides.",
+      fix_hint: "Use the unwrap form that matches the binding's qualifier: `WITH SNAPSHOT` for atomic / versioned cells, `WITH EXCLUSIVE` / `WITH READ` for locks, `WITH MATERIALIZED VIEW` for tense aggregates. The remediation in the message names the specific replacement.",
     },
 
     # PRE / DEBUG_POST
@@ -1079,6 +1127,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "%{name} requires the expression to return an error union (!T), but got %{got}",
       summary:  "Pipeline modifier (`RAISE`, `RECOVER`, etc.) needs an error-union-typed input.",
+      cause: "Pipeline modifiers like `RAISE`, `RECOVER`, `OR EXIT`, `OR RAISE` operate on the error half of an error-union (`!T`). On a plain `T` they have nothing to dispatch on — there's no error case to handle. CLEAR rejects them at compile time so the user catches the misuse early.",
+      fix_hint: "Either remove the modifier (the value is already plain T), make the upstream call fallible so it returns `!T` (e.g. mark the called fn `RETURNS !U`), or wrap the value with an explicit RAISE if you want to inject a failure.",
     },
 
     # ===================================================================
@@ -1126,6 +1176,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "IF ... AS binding requires an optional type, got '%{got}'",
       summary:  "`IF expr AS name THEN ...` requires `expr` to be optional (`?T`).",
+      cause: "`IF expr AS x` is the optional-narrowing form: when `expr` is `?T` and non-NIL, `x` is bound to the unwrapped `T` inside the THEN branch. On a plain `T` there's nothing to unwrap, so the AS binding has no defined meaning.",
+      fix_hint: "Drop the `AS x` clause and use `expr` directly (it's already non-optional), OR make the source optional by returning `?T` from a fallible lookup so the AS narrow has something to unwrap.",
     },
     MATCH_NEEDS_STRUCT_TYPE: {
       severity: :error, category: :type,
@@ -1225,6 +1277,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "WHILE ... AS binding requires an optional type, got '%{got}'",
       summary:  "`WHILE expr AS name DO ...` requires `expr` to be optional (`?T`).",
+      cause: "`WHILE expr AS x DO ...` loops while `expr` returns a non-NIL `?T`, binding the unwrapped `T` to `x` per iteration. On a plain non-optional `T`, the loop has no NIL termination signal — it would run forever — so the form is rejected.",
+      fix_hint: "Make the source fallible (e.g. `iter.next()` on a stream returns `?T`), OR use a regular `WHILE <bool-expr> DO ...` for non-optional looping.",
     },
     WHILE_AS_IMMUTABLE_RECEIVER: {
       severity: :error, category: :ownership,
@@ -1283,11 +1337,15 @@ module DiagnosticRegistry
       severity: :error, category: :capability,
       template: "Atomic primitives do not support `%{op}`. %{hint}",
       summary:  "Compound `*=` / `/=` not available on `@shared:atomic` targets.",
+      cause: "`@shared:atomic` lowers to single-instruction atomic primitives (load, store, fetchAdd, fetchSub, AND/OR/XOR). Multiplication and division have no single-instruction atomic form on any mainstream architecture, so they're rejected at compile time rather than silently lowered to a non-atomic load+op+store race.",
+      fix_hint: "Use a CAS loop via `c.compareAndSwap(old, new)` to update the cell atomically with an arbitrary computation, OR switch the binding from `@shared:atomic` to `@shared:locked` and do the math inside `WITH EXCLUSIVE c AS x { x.v *= 2; }` — the lock makes the read-modify-write atomic.",
     },
     ATOMIC_UNSUPPORTED_COMPOUND: {
       severity: :error, category: :capability,
       template: "Compound op %{op} is not supported on @shared:atomic targets.",
       summary:  "Compound op other than `+=` / `-=` / `&=` / `|=` / `^=` not available on `@shared:atomic`.",
+      cause: "`@shared:atomic` only accepts compound ops that map to a single hardware atomic primitive. The supported set is exactly: `+=` (fetchAdd), `-=` (fetchSub), `&=` (fetchAnd), `|=` (fetchOr), `^=` (fetchXor). Anything else would require a non-atomic read-modify-write. Defensive code path: the lexer currently only produces `+= -= *= /=`, so this branch is unreachable in user code today; kept as a safety net for any future compound-op token.",
+      fix_hint: "Either rewrite the op as a `compareAndSwap` loop (`c.compareAndSwap(old, new)`) — which atomically applies an arbitrary computation — OR switch the binding to `@shared:locked` and perform the op inside `WITH EXCLUSIVE c AS x { ... }` so the lock guarantees atomicity.",
     },
 
     # Assignment
@@ -1310,11 +1368,6 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "Cannot modify index of immutable list '%{name}'",
       summary:  "Indexed write on a list whose binding is not MUTABLE.",
-    },
-    ASSIGN_FIELD_IMMUTABLE_STRUCT: {
-      severity: :error, category: :ownership,
-      template: "Cannot modify field of immutable struct '%{name}'",
-      summary:  "Field write on a struct whose binding is not MUTABLE.",
     },
     TYPE_MISMATCH_ASSIGN: {
       severity: :error, category: :type,
@@ -1361,11 +1414,15 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Union literal '%{name}' must specify exactly one variant, got %{got}.",
       summary:  "Union literal `T{ Variant: ... }` must list exactly one variant.",
+      cause: "A union value carries exactly one active variant at a time. The `T{ Variant: payload }` literal produces a single value; listing multiple variants would imply two simultaneously-active variants, which the tagged-union representation can't express.",
+      fix_hint: "Pick the one variant you intend to construct: `%{name}{ Variant: payload }`. If you need a value that could be one of several variants, construct the appropriate one in a CONDITIONAL (`IF cond -> %{name}.A(x), ELSE %{name}.B(y) END`).",
     },
     UNION_VARIANT_IS_UNIT_NO_PAYLOAD: {
       severity: :error, category: :type,
       template: "Union variant '%{variant}' is a unit variant — use '%{union}.%{variant2}' (no payload).",
       summary:  "Tried to construct a unit variant with payload syntax.",
+      cause: "Unit variants (`Variant` declared without a `: T` clause in the UNION) carry no associated data. Calling them like a payloaded variant (`Type.Variant(x)`) would supply a value the variant has no slot for.",
+      fix_hint: "Drop the parentheses: `%{union}.%{variant2}` is the construction form for unit variants. If you need to carry data, declare the variant with a payload type (`%{variant}: T`) at the UNION definition.",
     },
     STRUCT_LITERAL_MISSING_FIELDS: {
       severity: :error, category: :type,
@@ -1419,61 +1476,85 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "OR BREAK can only be used inside a WHILE loop",
       summary:  "`expr OR BREAK` is only valid inside a WHILE loop body.",
+      cause: "`OR BREAK` is sugar for \"if the expression yielded NIL or an error, break out of the surrounding loop.\" Outside any loop there's nothing to break out of — the keyword has no target.",
+      fix_hint: "Wrap the expression in a `WHILE` loop if iteration is what you want, OR use a different fallback (`OR EXIT`, `OR RAISE`, `OR <default>`) that has a defined meaning at the current scope.",
     },
     TYPE_MISMATCH_IN_OR: {
       severity: :error, category: :type,
       template: "Type mismatch in OR: expected %{expected}, got %{got}",
       summary:  "Right-hand side of `OR` must match the optional/error-union's payload type.",
+      cause: "`expr OR fallback` substitutes the fallback when `expr` is NIL (optional case) or an error (error-union case). The fallback's type must match the payload type because both branches feed into the same downstream binding — without type alignment, the binding would have no determinable type.",
+      fix_hint: "Either change the fallback to produce a value of the expected payload type (e.g. `OR 0` when the payload is `Int64`), CAST it explicitly (`OR CAST(x AS PayloadT)`), or rewrite the LHS to widen its payload to a common type with the fallback.",
     },
     UNWRAP_NON_OPTIONAL: {
       severity: :error, category: :type,
       template: "Cannot unwrap non-optional type '%{got}' with '?'",
       summary:  "`expr?` only applies to optional types (`?T`).",
+      cause: "The `?` postfix is the optional-unwrap operator: it asserts non-NIL and yields the inner `T`. On a plain `T` it would be a no-op, but allowing it would mask later refactors that change the type — so the compiler rejects it explicitly.",
+      fix_hint: "Drop the trailing `?` (the value is already non-optional). If you intended to PROPAGATE failure, use `OR RAISE` / `OR EXIT` / `OR <default>` on a fallible source instead.",
     },
     IF_EXPR_THEN_NEEDS_VALUE: {
       severity: :error, category: :type,
       template: "IF expression: THEN branch must end with a value expression",
       summary:  "When IF is used as an expression, the THEN branch's last statement must be a value.",
+      cause: "`x = IF cond THEN ... END` is the expression form: every branch must yield a value because that value is what gets assigned to `x`. A THEN that ends in a statement (assignment, RETURN, side-effect call) has nothing to feed the assignment.",
+      fix_hint: "Make the last line of the THEN branch a value expression — drop the trailing `;` from a single-expression branch, or end with the value you want to bind. If you don't need a value, use the statement form: `IF cond THEN ... END;` (no surrounding assignment).",
     },
     IF_EXPR_NEEDS_ELSE: {
       severity: :error, category: :type,
       template: "IF used as expression requires an ELSE branch",
       summary:  "Expression-form IF must cover all paths via an ELSE.",
+      cause: "An expression-form IF must yield a value on every path. Without ELSE, the path where `cond` is false has no value to assign — the binding would be uninitialised. CLEAR rejects this at compile time so there's no NIL/garbage path.",
+      fix_hint: "Add an `ELSE -> <value>` arm. If the false case should fall through with NIL, declare the binding as `?T` and `ELSE -> NIL`. If only the true path matters and you want side-effects, use the statement form (`IF cond THEN ... END;`).",
     },
     IF_EXPR_ELSE_NEEDS_VALUE: {
       severity: :error, category: :type,
       template: "IF expression: ELSE branch must end with a value expression",
       summary:  "Expression-form IF's ELSE branch must end with a value.",
+      cause: "Same rule as THEN: every branch of an expression-form IF must yield the binding's value. An ELSE that ends in a statement leaves the false-path binding uninitialised.",
+      fix_hint: "End the ELSE branch with a value expression, or fall back to the statement form if the value is only needed on the true path.",
     },
     IF_EXPR_BRANCHES_INCOMPATIBLE: {
       severity: :error, category: :type,
       template: "IF expression branches have incompatible types: THEN returns %{then_type}, ELSE returns %{else_type}",
       summary:  "Expression-form IF needs both branches to produce the same type.",
+      cause: "The result of an expression-form IF feeds a single binding with a single declared type. Allowing the THEN and ELSE branches to produce different types would force the binding into an ad-hoc union — CLEAR requires the user to declare that union explicitly.",
+      fix_hint: "Pick one type and convert the other branch (e.g. `%{then_type}.toString()` if `%{else_type}` is String). For genuine variant data, define a UNION and have both branches construct different variants of it.",
     },
     IF_EXPR_RESULT_NOT_COPYABLE: {
       severity: :error, category: :type,
       template: "IF expression result type '%{type}' must be implicitly copyable (primitive, symbol, or rodata string). Use statement-IF with RETURN for heap-allocated values.",
       summary:  "Expression-form IF only supports implicitly-copyable result types.",
+      cause: "Expression-form IF lowers each branch into a load-and-yield sequence; the result must be a value the compiler can implicitly COPY (primitive, symbol, rodata string). Heap-owned values would need an explicit ownership decision per branch — handing them through expression-form IF would silently bypass the affine ownership rules.",
+      fix_hint: "Convert to the statement form with explicit ownership: `MUTABLE result; IF cond -> result = produce_owned(); ELSE -> result = other_owned(); END;` — or for fn returns, use `IF cond -> RETURN A; ELSE -> RETURN B; END` directly.",
     },
     MATCH_EXPR_BRANCH_NEEDS_VALUE: {
       severity: :error, category: :type,
       template: "MATCH expression: every branch must end with a value expression",
       summary:  "Expression-form MATCH needs every branch to end with a value.",
+      cause: "`x = MATCH subject START ... END` requires every arm to yield a value — the binding `x` reads from whichever arm matched. An arm ending in a statement (assignment, RETURN, side-effect) has nothing to feed the binding.",
+      fix_hint: "End each arm with a value expression. For arms that genuinely have nothing to return, switch to the statement form (`MATCH subject START ... END;` with no surrounding assignment), or yield NIL and declare the binding `?T`.",
     },
     MATCH_EXPR_NEEDS_CASE: {
       severity: :error, category: :type,
       template: "MATCH expression must have at least one case",
       summary:  "Expression-form MATCH with no cases would have no value.",
+      cause: "An expression-form MATCH with zero cases can never yield a value — there's no arm to dispatch to. The binding would be uninitialised on every path.",
+      fix_hint: "Add at least one `WHEN <pattern> -> <value>` arm. If the subject is genuinely unbounded and you want a catch-all, use `PARTIAL MATCH` with a `DEFAULT -> <value>`.",
     },
     MATCH_EXPR_BRANCHES_INCOMPATIBLE: {
       severity: :error, category: :type,
       template: "MATCH expression branches have incompatible types: %{types}",
       summary:  "Expression-form MATCH branches must produce the same type.",
+      cause: "The MATCH expression's binding has a single type; every arm must produce a value of that type. Allowing arms to produce different types would force an ad-hoc union — CLEAR requires that union to be declared explicitly.",
+      fix_hint: "Pick a common result type and convert each arm's value to it (`Int.toString(x)` to lift to String, etc.), or declare a UNION and have each arm construct the appropriate variant.",
     },
     MATCH_EXPR_RESULT_NOT_COPYABLE: {
       severity: :error, category: :type,
       template: "MATCH expression result type '%{type}' must be implicitly copyable (primitive, symbol, or rodata string). Use statement-MATCH for heap-allocated values.",
       summary:  "Expression-form MATCH only supports implicitly-copyable result types.",
+      cause: "Expression-form MATCH lowers each arm into a load-and-yield sequence; the result must be implicitly copyable (primitive, symbol, rodata string). Heap-owned values would need explicit ownership routing per arm — yielding them through expression-form MATCH would bypass affine ownership rules.",
+      fix_hint: "Use the statement form with explicit ownership: `MUTABLE result; MATCH subject START WHEN A -> result = produce_a(); WHEN B -> result = produce_b(); END;` — or RETURN directly from each arm if the value is the function's return.",
     },
 
     # Capability / MOVE / GIVE / COPY / SHARE / LINK / FREEZE / CLONE / RESOLVE
@@ -1521,11 +1602,17 @@ module DiagnosticRegistry
       severity: :error, category: :ownership,
       template: "GIVE can only be used on variables, fields, or array elements",
       summary:  "GIVE must name a place — not an expression result.",
+      cause: "Reserved for the field/index variants of GIVE (`GIVE b.field`, `GIVE arr[i]`). Today the broader `visit_MoveNode` rejects every non-Identifier with MOVE_NEEDS_IDENTIFIER, so this code never fires. Once `visit_MoveNode` is relaxed to admit field/index targets, GIVE_BAD_TARGET will fire for the genuinely-invalid cases (literals, expressions).",
+      fix_hint: "While the lookup-style GIVE isn't supported, bind the value to a variable first and `GIVE` the variable.",
+      pending: true,
     },
     COPY_NON_COPYABLE: {
       severity: :error, category: :ownership,
       template: "Cannot COPY non-copyable type '%{type}'",
       summary:  "Some types (e.g., closed streams, raw fds) deliberately have no COPY semantics.",
+      cause: "Reserved for resource types — `File`, `TCPClient`, `TCPServer`, raw fds, closed streams — that intentionally cannot be deep-copied. Today `visit_CopyNode` happily generates Zig code for any type, which produces broken behaviour for resources. Wiring this code requires extending `Type#copyable?` (or an equivalent registry on resource schemas) so the visitor can reject the truly non-copyable cases.",
+      fix_hint: "Use `CLONE` for shared / refcounted handles. For linear resources, transfer ownership via `GIVE` or pass through a borrow.",
+      pending: true,
     },
     CLONE_WITH_SCOPED: {
       severity: :error, category: :escape,
@@ -1827,16 +1914,22 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Type Error: '%{name}' is not a union type.",
       summary:  "Identifier referenced as a union but is something else.",
+      cause: "The construction site or MATCH subject treats `%{name}` as a UNION (`%{name}.Variant(...)` / `MATCH x START %{name}.A -> ...`). The compiler resolves `%{name}` to a struct, enum, or other non-union type — operations that demand a UNION can't apply.",
+      fix_hint: "Either change the syntax to match `%{name}`'s actual kind (struct literal `%{name}{ field: value }`, enum value `%{name}.Variant`), or import / declare a UNION named `%{name}` if that was the intent.",
     },
     UNION_VARIANT_IS_UNIT_NO_FIELDS: {
       severity: :error, category: :type,
       template: "Union variant '%{variant}' is a unit variant — use '%{union}.%{variant}' (no fields).",
       summary:  "Unit variant cannot accept inline-struct fields.",
+      cause: "Unit variants carry no payload at all. Brace-syntax construction (`%{union}.%{variant}{ field: ... }`) implies inline-struct fields the variant doesn't declare; allowing it would silently drop the supplied fields.",
+      fix_hint: "Drop the braces: `%{union}.%{variant}` is the construction form for unit variants. If the variant needs to carry data, declare it with an inline-struct or payload type at the UNION definition.",
     },
     UNION_VARIANT_NEEDS_PAYLOAD_OBJECT: {
       severity: :error, category: :type,
       template: "Union variant '%{variant}' takes a single typed payload — use '%{union}{ %{variant}: value }' instead.",
       summary:  "Single-payload variant cannot use the inline-struct '{ field: ... }' form.",
+      cause: "Variants come in three shapes: unit (no data), single-payload (`Variant: T`), and inline-struct (`Variant: { f: T, ... }`). A single-payload variant takes exactly one positional payload; the brace-with-fields form is reserved for inline-struct variants and would set fields the variant doesn't declare.",
+      fix_hint: "Use the colon form: `%{union}{ %{variant}: value }` (or shorthand `%{union}.%{variant}(value)` if the variant supports it). For per-field construction, redeclare the variant as an inline-struct at the UNION definition.",
     },
     REENTRANT_NEEDS_FALLIBLE_RETURN: {
       severity: :error, category: :reentrance,
@@ -1892,6 +1985,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Capability annotations are not allowed on function parameters. Use the plain type (e.g., 'Node' not 'Node @multiowned').",
       summary:  "FN-type parameter syntax disallows capability sigils.",
+      cause: "CLEAR functions take *types*, not capabilities. Capabilities are properties of bindings (the caller's local), unwrapped at the call site via WITH. Allowing `@multiowned` etc. on a parameter would conflate the type with the caller's wrapping — and would force every call site to wrap the value, even when the caller has a plain T.",
+      fix_hint: "Drop the sigil from the parameter type (e.g. `c: Counter` not `c: Counter @multiowned`). The caller wraps as needed (`WITH c { fn(c); }` for a multiowned binding). To require a sync family on the param, use `REQUIRES c: LOCKED` (or ATOMIC, VERSIONED) — that's the supported way to constrain capabilities.",
     },
     ATSPLIT_STREAM_ONLY: {
       severity: :error, category: :type,
@@ -1907,11 +2002,15 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "@observable on `T[]` requires `@set` (e.g. `~T[]@set:observable` for DISTINCT). Plain `~T[]@observable` is not a supported shape; the only collection observable today is the DISTINCT terminal's `~T[]@set:observable`.",
       summary:  "@observable on a list requires @set.",
+      cause: "Observable collections need the underlying shape to support efficient diff publication. The only currently-supported collection observable is the DISTINCT terminal, which requires `@set` shape (set membership = O(1) diff). Plain `T[]` observables aren't lowered yet — diff over duplicates would be ambiguous.",
+      fix_hint: "Add `@set` so the type is `~T[]@set:observable`. If you don't need set semantics (uniqueness), drop `@observable` and use a plain tense list (`~T[]`) — observers would need to compute their own diffs.",
     },
     OBSERVABLE_NOT_COMBINABLE: {
       severity: :error, category: :type,
       template: "@observable cannot be combined with %{labels}. %{explain} Drop the wrapper or pick a non-observable type.",
       summary:  "@observable rejects certain combined capabilities.",
+      cause: "@observable layers a publish/subscribe channel on top of a tense source — every write fans out to subscribers. Some other capabilities are incompatible because they impose a representation that the publish layer can't observe atomically (e.g., `@indirect:atomic` already CAS-publishes a different snapshot, `@locked` blocks subscribers).",
+      fix_hint: "Drop one of the conflicting wrappers (typically @observable if the consumer doesn't need diff feeds), OR pick a different sync model: `@versioned` cells get observable-like snapshots via WITH SNAPSHOT without the publish layer.",
     },
     SOA_NEEDS_FIXED_ARRAY: {
       severity: :error, category: :type,
@@ -1937,6 +2036,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Type Error: polymorphic @shared parameters in '%{fn}' must use the same synchronization capability. Parameter '%{first}' is %{first_cap}, but parameter '%{second}' is %{second_cap}.%{hint}",
       summary:  "Polymorphic @shared parameters disagree on synchronization capability.",
+      cause: "When a function takes multiple `@shared` parameters and dispatches polymorphically (via REQUIRES with multiple sync families), every shared param must agree on its sync family. Allowing them to diverge would force per-pair monomorphisation across families — the cross-product blows up combinatorially.",
+      fix_hint: "Pick one sync family across all `@shared` params (`%{first_cap}` or `%{second_cap}`), or restrict the function to a single concrete family by adding `REQUIRES p1: <family>, p2: <family>` with the same family for both. If the params genuinely belong to different families, split the function into separate specialised versions.",
     },
     RC_PROMISE_NEEDS_SHARED: {
       severity: :error, category: :type,
@@ -1977,11 +2078,15 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Type Error: Argument %{index} to '%{fn}' expects an @atomic %{expected} cell, but '%{name}' is %{actual}. Pass an @atomic binding, or change the parameter to bare %{expected} to load a value.",
       summary:  "Argument must be an @atomic cell binding (not a loaded value).",
+      cause: "The parameter is typed as `@atomic %{expected}` — a *cell* the function will perform atomic ops on (load, fetchAdd, ...). Passing a loaded value (a plain `%{expected}`) would force the function to operate on a stack copy, defeating the atomic semantics.",
+      fix_hint: "Pass the `@atomic` binding by name (e.g. `fn(c)` where `c: %{expected} @shared:atomic`), OR change the function's param to bare `%{expected}` if the loaded snapshot is enough (use `c.load()` at the call site).",
     },
     ARG_NEEDS_SHARED: {
       severity: :error, category: :type,
       template: "Type Error: Argument %{index} to '%{fn}' expects %{expected} @shared, got %{actual}.%{hint}",
       summary:  "Argument must be a @shared handle to be retained across boundaries.",
+      cause: "The function will retain the value past the call (typically because it spawns a fiber, stores into a shared container, or returns a borrow that outlives the param). Plain `%{actual}` is affine — handing it to such a function would lose the original; only `@shared` (Arc) handles can be cloned cheaply at the boundary.",
+      fix_hint: "Promote the binding to `@shared` at its declaration (`x = ... @shared`), then pass it directly. If you can't change the source, COPY before passing (`fn(COPY x)`), accepting the deep-copy cost. Alternatively, if the function doesn't actually need to retain the value, change its signature to take bare `%{expected}`.",
     },
     ARG_ALIAS_CONFLICT: {
       severity: :error, category: :ownership,
@@ -2052,6 +2157,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Ambiguous Return: Function returns multiple types %{types}, specify :Any as type",
       summary:  "Function has multiple return types of differing kinds without an :Any annotation.",
+      cause: "The function body has RETURN statements that yield different types (e.g. one returns Int64, another returns String). Without an explicit RETURNS annotation that admits the union — typically `:Any` — the inferred return type is ambiguous and callers can't be type-checked safely.",
+      fix_hint: "Either pick one return type and convert the others (`String.fromInt(x)` to lift Ints, etc.), declare `RETURNS :Any` to accept the polymorphic return (the auto-fix wires this in directly), or refactor to a UNION and have each branch return the appropriate variant.",
     },
     RETURN_BORROWED_NO_COPY_OR_LIFETIME: {
       severity: :error, category: :lifetime,
@@ -2121,6 +2228,8 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "CATCH ... WITH(%{name}): error type '%{name}' is not registered.",
       summary:  "CATCH ... WITH refers to an unregistered error type.",
+      cause: "Error types in CLEAR are registered the first time they appear in a `RAISE Kind, Name, ...` site. CATCH WITH(Name) selects against that registry — when the name has never been seen as a registered type, the selector has nothing to match.",
+      fix_hint: "Either register the type at its first RAISE site (`RAISE Transient, %{name}, \"msg\"`), import the module that defines it, or check the spelling against an already-registered name in the same scope.",
     },
     MATCH_NEEDS_ENUM_OR_UNION: {
       severity: :error, category: :type,
@@ -2146,16 +2255,22 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "Error type '%{name}' is not registered. The first RAISE / OR EXIT site that names a new type must provide a kind: use 'RAISE Kind, %{name}, \"msg\"' or similar.",
       summary:  "Error type was never registered with a kind.",
+      cause: "CLEAR's error registry binds a type name to a *kind* (Transient, Permanent, Internal, Reserved). The kind drives recovery semantics — RETRY targets Transient, OR EXIT exits on Permanent, etc. The first site that names a new type must declare the kind so the registry has it for every later use.",
+      fix_hint: "At the first RAISE site for `%{name}`, include the kind: `RAISE Transient, %{name}, \"description\"` (or Permanent / Internal). Subsequent RAISE / CATCH sites can omit the kind — the registered binding is reused.",
     },
     ERROR_TYPE_RESERVED_BY_STDLIB: {
       severity: :error, category: :type,
       template: "'%{name}' is reserved by the stdlib as kind '%{kind}'. Pick a different type name.",
       summary:  "Error type name conflicts with a stdlib-reserved one.",
+      cause: "The CLEAR stdlib pre-registers a fixed set of error type names (e.g. `IO`, `Allocator`, `Overflow`) bound to specific kinds. User-declared types can't shadow these because cross-module CATCH selectors would become ambiguous.",
+      fix_hint: "Rename the user-declared type (`MyIO`, `AppIO`, etc.) so it doesn't collide with the stdlib-reserved name. The stdlib type stays available under its canonical name.",
     },
     ERROR_TYPE_KIND_CONFLICT: {
       severity: :error, category: :type,
       template: "'%{name}' is already mapped to kind '%{kind}'%{first_loc}. Either use the same kind here, or pick a different type name.",
       summary:  "Same error type name registered with a different kind.",
+      cause: "Each error type name binds to exactly one kind. Allowing the same name to mean two different kinds would break recovery dispatch (CATCH WITH(`%{name}`) would have to know which kind the call site actually raised).",
+      fix_hint: "At this RAISE site, use the previously-registered kind (`%{kind}`), OR pick a fresh name for the variant that legitimately needs a different kind.",
     },
     CALL_SITE_OVERRIDE_UNIMPLEMENTED: {
       severity: :error, category: :type,
@@ -2166,21 +2281,29 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "@indirect:atomic is for STRUCTS. For primitive type %{type}, use `@shared:atomic` (the v0.2 primitive-as-cell form). The atomic primitive already fits in a single CAS-able machine word; @indirect would add a pointless heap indirection.",
       summary:  "@indirect:atomic is for structs; primitives use @shared:atomic.",
+      cause: "`@indirect:atomic` publishes whole-T snapshots via atomic pointer swap — every update CAS-publishes a fresh heap allocation. That's necessary for structs (which don't fit in a CAS word) but wasteful for primitives like `%{type}` that already fit in a single machine word and can be CAS'd directly.",
+      fix_hint: "Use `@shared:atomic` for primitive cells: `MUTABLE c: %{type} = 0 @shared:atomic;` — direct atomic ops (`c.load()`, `c += 1`) without heap indirection. Reserve `@indirect:atomic` for structs.",
     },
     STRUCT_ATOMIC_NEEDS_INDIRECT: {
       severity: :error, category: :type,
       template: "@atomic on a STRUCT requires @indirect (publishes whole-T snapshots via atomic pointer swap). Use `%{type}{...} @indirect:atomic` instead. (For primitive cells like `Int64@shared:atomic`, atomic alone is correct -- those fit in a single CAS-able machine word.)",
       summary:  "@atomic on a struct requires @indirect.",
+      cause: "Struct atomic semantics need to publish the whole T as a single atomic operation. Hardware CAS only works on machine-word-sized values — for any struct larger than that, you need pointer-level CAS, which means heap-allocating the struct and publishing the pointer. That's exactly what `@indirect:atomic` does.",
+      fix_hint: "Add `@indirect` to the sigil chain: `%{type}{...} @indirect:atomic` (or full form `%{type}{...} @shared:indirect:atomic`). Reads land in `WITH SNAPSHOT`; writes via `WITH SNAPSHOT MUTABLE`.",
     },
     LOCAL_INDIRECT_ATOMIC: {
       severity: :error, category: :type,
       template: "@local:indirect:atomic is disallowed -- atomic without cross-thread visibility is pointless. Drop @local; @indirect:atomic implies cross-thread sharing.",
       summary:  "@local with @indirect:atomic is contradictory.",
+      cause: "`@local` declares the binding lives entirely on the current thread/scheduler — no cross-thread visibility. But `@indirect:atomic` exists *specifically* to publish updates across threads. The two contradict: an atomic with no readers is paying for synchronisation hardware nobody can observe.",
+      fix_hint: "Drop `@local` — `@indirect:atomic` already implies the cross-thread sharing semantics you need. If the value is genuinely thread-local, use plain affine ownership (no atomic, no @local needed).",
     },
     MULTIOWNED_INDIRECT_ATOMIC: {
       severity: :error, category: :type,
       template: "@multiowned:indirect:atomic is disallowed -- Rc isn't thread-safe (non-atomic refcount), so it can't back a cross-thread atomic-ptr cell. Drop @multiowned; @indirect:atomic uses Arc internally for the published-value lifetime.",
       summary:  "@multiowned with @indirect:atomic is unsound (Rc isn't atomic).",
+      cause: "`@multiowned` is Rc — single-scheduler, non-atomic refcount. `@indirect:atomic` publishes pointers across threads, and the published values' refcounts must be atomic-safe so receivers can release them safely. Rc would race on the refcount; the combination is genuinely unsound.",
+      fix_hint: "Drop `@multiowned` — `@indirect:atomic` uses Arc internally for the published-value lifetime, so you get atomic-safe sharing for free. If you wanted explicit shared ownership for non-atomic uses, use `@shared` (Arc) instead of `@multiowned` (Rc).",
     },
     WITH_MATCH_VERSIONED_AS_MUTABLE: {
       severity: :error, category: :concurrency,
@@ -2238,11 +2361,15 @@ module DiagnosticRegistry
       severity: :error, category: :type,
       template: "RETRY only targets Transient errors. Non-retryable types in selector: %{types}",
       summary:  "RETRY clause must select Transient error types only.",
+      cause: "RETRY presumes the operation can succeed on a later attempt — only Transient-kind errors carry that promise. Permanent errors (a missing file, a parse error) won't change between attempts; Internal errors signal a bug rather than something to retry. The compiler rejects RETRY clauses that select non-Transient kinds so retry storms can't accidentally hide real bugs.",
+      fix_hint: "Drop the non-Transient selector(s) from the RETRY clause, OR change the recovery action: `OR RAISE` to propagate, `OR EXIT` to exit the program, `CATCH e WITH(...) { ... }` to handle each kind explicitly.",
     },
     PARTIAL_MATCH_EXPR_NEEDS_DEFAULT: {
       severity: :error, category: :type,
       template: "PARTIAL MATCH used in expression position requires a DEFAULT branch. Either add a DEFAULT case, or change to `MATCH` (which forces every variant to have an exact case).",
       summary:  "PARTIAL MATCH expression must have a DEFAULT branch.",
+      cause: "PARTIAL MATCH relaxes exhaustiveness — not every variant must have a case. In statement position that's fine (unmatched values fall through), but in expression position the binding needs a value on every path. Without a DEFAULT, an unmatched subject would leave the binding uninitialised.",
+      fix_hint: "Add `DEFAULT -> <value>` to cover the unmatched paths. If exhaustiveness is actually achievable, switch to plain `MATCH` (the compiler then verifies every variant has an arm at compile time and no DEFAULT is needed).",
     },
     CAN_SMASH_NOT_SUPPORTED: {
       severity: :error, category: :reentrance,
@@ -2367,6 +2494,15 @@ module DiagnosticRegistry
 
   def codes
     DIAGNOSTICS.keys
+  end
+
+  # True when the registry entry exists but is reserved for a future
+  # feature whose triggering visitor isn't implemented yet. Audit
+  # tooling skips these — we can't write a bad/good example for an
+  # unimplemented compiler check.
+  def pending?(code)
+    entry = DIAGNOSTICS[code]
+    !entry.nil? && entry[:pending] == true
   end
 
   # Format a registered code's template against `args`. Returns nil
