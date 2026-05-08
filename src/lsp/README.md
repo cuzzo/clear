@@ -350,11 +350,26 @@ binary end-to-end.
 
 ## VS Code
 
-A formal extension hasn't been published yet. If you want to set it
-up manually, the generic `vscode-languageserver-client` config with
-`cmd: ["bundle", "exec", "/path/to/bin/clear-lsp"]` and
-`documentSelector: [{ scheme: "file", language: "clear" }]` works.
-PRs welcome.
+The repo ships an in-tree VS Code extension at
+`.vscode/extensions/cheat-lang/`. From the repo root:
+
+```sh
+cd .vscode/extensions/cheat-lang
+npm install
+npm run compile
+```
+
+Reload your VS Code window once. Open a `.cht` file → squiggles,
+hover, and Ctrl+. quick-fix all light up. Full instructions and
+settings reference are in that extension's own README.
+
+## GitHub Codespaces
+
+`.devcontainer/devcontainer.json` provisions a full environment
+(Ruby 3.2, Node 22, Zig pinned to CI's version) and runs
+`bundle install` + builds the VS Code extension automatically.
+Click "Code → Codespaces → Create codespace on lsp" on GitHub and
+the LSP is ready as soon as the build finishes (~1-2 min cold).
 
 ## Out of scope (future work)
 

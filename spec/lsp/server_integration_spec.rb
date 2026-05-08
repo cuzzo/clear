@@ -38,10 +38,14 @@ RSpec.describe "clear-lsp end-to-end (binary)", :integration do
   end
 
   def drive(input_messages)
+    drive_with_args([], input_messages)
+  end
+
+  def drive_with_args(extra_args, input_messages)
     input = input_messages.map { |m| frame(m) }.join
     Timeout.timeout(5) do
       stdout, stderr, status = Open3.capture3(
-        "bundle", "exec", BIN_PATH,
+        "bundle", "exec", BIN_PATH, *extra_args,
         stdin_data: input,
         chdir:      REPO_ROOT,
       )
@@ -150,6 +154,18 @@ RSpec.describe "clear-lsp end-to-end (binary)", :integration do
     expect(md).to include("UNDEFINED_VAR")
     expect(md).to include("**Cause:**")
     expect(md).to include("**Fix:**")
+  end
+
+  it "accepts --stdio as a no-op (LSP clients pass it by default)" do
+    # vscode-languageclient appends --stdio when configured for stdio
+    # transport. Our binary must not reject it.
+    frames, _stderr, status = drive_with_args(["--stdio"], [
+      { jsonrpc: "2.0", id: 1, method: "initialize", params: {} },
+      { jsonrpc: "2.0", id: 2, method: "shutdown", params: nil },
+      { jsonrpc: "2.0", method: "exit", params: nil },
+    ])
+    expect(status.exitstatus).to eq(0)
+    expect(frames.find { |f| f["id"] == 1 }["result"]["serverInfo"]["name"]).to eq("clear-lsp")
   end
 
   it "rejects malformed --log-level with exit code 2" do

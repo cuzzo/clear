@@ -29,6 +29,17 @@ ARGV.each do |arg|
   elsif arg == "--help" || arg == "-h"
     puts "Usage: clear-lsp [--log-level=debug|info|warn|error]"
     exit 0
+  elsif arg == "--stdio"
+    # Some LSP clients (vscode-languageclient defaults among them)
+    # append `--stdio` to the spawn args when configured for stdio
+    # transport. We only support stdio anyway — accept the flag as
+    # a no-op so the client can connect without rejecting the
+    # binary as broken. Same intent for the other transport flags
+    # we'd never actually honour, but stdio is the one that gets
+    # passed in practice.
+    nil
+  elsif arg == "--node-ipc" || arg == "--pipe" || arg.start_with?("--socket=")
+    $stderr.puts "clear-lsp: only stdio transport is supported; ignoring #{arg.inspect}"
   else
     $stderr.puts "clear-lsp: unknown argument #{arg.inspect}"
     exit 2

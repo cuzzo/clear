@@ -1,0 +1,55 @@
+{
+  "name": "CLEAR Compiler",
+
+  // Microsoft's Ruby 3.2 base image — same minor as CI
+  // (.github/workflows/ci.yml's RUBY_VERSION).
+  "image": "mcr.microsoft.com/devcontainers/ruby:1-3.2",
+
+  // Node + npm for building the in-repo VS Code extension
+  // (.vscode/extensions/cheat-lang). Plus git so the workspace
+  // can interact with origin.
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": { "version": "22" },
+    "ghcr.io/devcontainers/features/git:1":  {}
+  },
+
+  // Runs once after the container is created. See setup.sh — installs
+  // gems, downloads the pinned Zig toolchain, and compiles the VS Code
+  // extension so the LSP is ready as soon as the user opens a .cht file.
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+
+  // Runs on every container start (including rebuilds and resumes from
+  // a stopped state). `bundle install` is idempotent and fast when the
+  // gems are already present; running it here means the LSP recovers
+  // automatically if the gem cache went missing between sessions.
+  "postStartCommand": "bundle install --quiet",
+
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "files.associations": {
+          "*.cht": "clear"
+        },
+        "[clear]": {
+          "editor.tabSize": 2,
+          "editor.insertSpaces": true,
+          "editor.detectIndentation": false
+        }
+      },
+      // Extensions from the marketplace that pair well with editing a
+      // Ruby + Zig + TypeScript multi-language repo. The in-repo
+      // .vscode/extensions/cheat-lang extension auto-loads from the
+      // workspace; no marketplace install needed for it.
+      "extensions": [
+        "rebornix.ruby",
+        "ziglang.vscode-zig"
+      ]
+    }
+  },
+
+  "remoteUser": "vscode",
+
+  // Reasonable defaults; bump when the project gains web servers or
+  // dashboards that need port forwarding.
+  "forwardPorts": []
+}
