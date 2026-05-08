@@ -2150,21 +2150,22 @@ class Parser
         break
       end
 
-      name = consume(:VAR_ID).value
+      name_tok = consume(:VAR_ID)
+      name = name_tok.value
 
       if match?(:CHAR, ':')
         consume(:CHAR, ':')
         # `_` as value means wildcard — ignore this field's value
         if current.type == :VAR_ID && current.value == '_'
           consume(:VAR_ID)
-          fields << { name: name, value: :wildcard }
+          fields << { name: name, value: :wildcard, name_token: name_tok }
         else
-          fields << { name: name, value: parse_expression }
+          fields << { name: name, value: parse_expression, name_token: name_tok }
         end
       else
         # Bare name: destructuring bind — extract field into a local variable.
         # { x, y } means bind subject.x to x, subject.y to y.
-        fields << { name: name, value: :bind }
+        fields << { name: name, value: :bind, name_token: name_tok }
       end
 
       match!(:CHAR, ',')  # optional comma between fields

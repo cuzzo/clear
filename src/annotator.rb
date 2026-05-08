@@ -1438,7 +1438,18 @@ private
 
       if schema
         unless schema.key?(f[:name])
-          error!(match_node, :MATCH_FIELD_UNKNOWN, field: f[:name], type: expr_type)
+          name_tok = f[:name_token]
+          if name_tok
+            valid_fields = schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
+            emit_typo_suggestion!(
+              name_tok, f[:name], valid_fields,
+              "MATCH struct pattern: field '#{f[:name]}' does not exist on type #{expr_type}",
+              "field of #{expr_type}",
+              category: :type, cascade: true
+            )
+          else
+            error!(match_node, :MATCH_FIELD_UNKNOWN, field: f[:name], type: expr_type)
+          end
         end
       end
 
@@ -1663,7 +1674,18 @@ private
                 c[:destructure].fields.each do |f|
                   next unless f[:value] == :bind
                   unless payload_schema.key?(f[:name])
-                    error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f[:name], variant: variant_name)
+                    name_tok = f[:name_token]
+                    if name_tok
+                      valid_fields = payload_schema.keys.reject { |k| k.is_a?(Symbol) || k.to_s.start_with?('_') }
+                      emit_typo_suggestion!(
+                        name_tok, f[:name], valid_fields,
+                        "MATCH destructure: field '#{f[:name]}' is not on variant #{variant_name}",
+                        "field of variant #{variant_name}",
+                        category: :type, cascade: true
+                      )
+                    else
+                      error!(node, :MATCH_DESTRUCTURE_FIELD_UNKNOWN, field: f[:name], variant: variant_name)
+                    end
                   end
                   field_def = payload_schema[f[:name]]
                   field_type = field_def.is_a?(Hash) ? field_def[:type] : field_def
