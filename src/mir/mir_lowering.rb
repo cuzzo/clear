@@ -984,10 +984,16 @@ class MIRLowering
     }.map { |p| p[:name] }.to_set
     @current_fn_mutable_scalar_params = mutable_scalar_params
 
-    # Collection params: already passed by pointer, skip & at recursive call sites
+    # Collection params: already passed by pointer, skip & at recursive
+    # call sites. Includes `MUTABLE xs: T[]@list` -- those are passed
+    # by pointer too (see the call-site routing below). Without this,
+    # forwarding a `MUTABLE @list` param to another `MUTABLE @list`
+    # callee adds a second `&`, producing `**ArrayList` which Zig's
+    # one-level method auto-deref can't unwrap.
     @current_fn_collection_params = (node.params || []).select { |p|
       p_type_obj = p[:type].is_a?(Type) ? p[:type] : Type.new(p[:type] || :Any)
-      p_type_obj.needs_pointer_passing?
+      p_type_obj.needs_pointer_passing? ||
+        (p[:mutable] && p_type_obj.list_collection?)
     }.map { |p| p[:name] }.to_set
 
     # All param names: used to distinguish params (slices) from locals (ArrayLists)
