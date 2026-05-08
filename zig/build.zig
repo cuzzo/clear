@@ -177,6 +177,8 @@ pub fn build(b: *std.Build) void {
 
     const test_files = [_]TestEntry{
         // Concurrency-sensitive — also run under TSan
+        .{ .path = "atomic-test.zig", .tsan = true },
+        .{ .path = "atomic-hammer-test.zig", .tsan = true, .hammer = true },
         .{ .path = "batch-window-test.zig", .tsan = true },
         .{ .path = "bounded-channel-test.zig", .tsan = true },
         .{ .path = "bounded-stream-test.zig", .tsan = true },
@@ -223,6 +225,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "routing-crash-test.zig", .tsan = true },
         .{ .path = "runtime-direct-test.zig", .tsan = true },
         .{ .path = "runtime-isolation-test.zig", .tsan = true },
+        .{ .path = "scheduler-test.zig", .tsan = true },
         .{ .path = "scheduler-direct-test.zig", .tsan = true },
         .{ .path = "semaphore-test.zig", .tsan = true },
         .{ .path = "sharded-list-test.zig", .tsan = true },
@@ -264,7 +267,7 @@ pub fn build(b: *std.Build) void {
         .{ .path = "arena-mode-test.zig" },
         .{ .path = "asm-test.zig" },
         .{ .path = "data-structures-test.zig" },
-        .{ .path = "fiber-control-tests.zig" },
+        .{ .path = "fiber-control-test.zig" },
         .{ .path = "fiber-memory-test.zig" },
         .{ .path = "frame-rewind-test.zig" },
         .{ .path = "frame-test.zig" },

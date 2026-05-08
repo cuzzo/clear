@@ -1,8 +1,8 @@
 const std = @import("std");
 
 pub const CLEAR_FRAME_DEBUG = false;
-pub const SimClock = @import("runtime/vopr-clock.zig").SimClock;
-pub const SimRandom = @import("runtime/vopr-random.zig").SimRandom;
+pub const SimClock = @import("runtime/testing/vopr-clock.zig").SimClock;
+pub const SimRandom = @import("runtime/testing/vopr-random.zig").SimRandom;
 
 const fv = @import("runtime/fsm-vopr.zig");
 const gate = @import("runtime/vopr-gate.zig");

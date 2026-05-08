@@ -12,10 +12,10 @@
 //   ./vopr --start 42 --seeds 1                           # reproduce a single seed
 
 const std = @import("std");
-const vs = @import("vopr-state.zig");
-const vi = @import("vopr-invariants.zig");
+const vs = @import("../vopr-state.zig");
+const vi = @import("../vopr-invariants.zig");
 const InvariantError = vi.InvariantError;
-const qs = @import("queues.zig");
+const qs = @import("../queues.zig");
 
 const VoprState = vs.VoprState;
 const SimScheduler = vs.SimScheduler;

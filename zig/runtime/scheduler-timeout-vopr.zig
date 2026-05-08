@@ -30,7 +30,7 @@ const observable = @import("../lib/observable.zig");
 const profile_lock = @import("profile-lock.zig");
 const fiber_profile = @import("fiber-profile.zig");
 const lock_profile = @import("lock-profile.zig");
-const SimClock = @import("vopr-clock.zig").SimClock;
+const SimClock = @import("testing/vopr-clock.zig").SimClock;
 
 const Task = qs.Task;
 const TaskStatus = qs.TaskStatus;

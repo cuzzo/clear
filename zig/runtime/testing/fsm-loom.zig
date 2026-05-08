@@ -21,15 +21,15 @@
 // Invocation: `zig build test` runs this through fsm-loom-test.zig.
 
 const std = @import("std");
-const fc = @import("fiber-core.zig");
-const fsm = @import("fsm.zig");
+const fc = @import("../fiber-core.zig");
+const fsm = @import("../fsm.zig");
 
 // Re-export SimAtomic so fsm.zig's Chase-Lev ops pick it up via
 // `@import("root").SimAtomic`. When this file is the root (direct
 // compilation via fsm-loom-test.zig wrapper), FsmRunQueue's atomic
 // operations become SimAtomic yield points.
-pub const SimAtomic = @import("vopr-atomic.zig").SimAtomic;
-pub const SimRing = @import("vopr-ring.zig").SimRing;
+pub const SimAtomic = @import("../vopr-atomic.zig").SimAtomic;
+pub const SimRing = @import("../vopr-ring.zig").SimRing;
 
 const Fiber = fc.Fiber;
 const Context = fc.Context;

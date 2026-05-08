@@ -26,16 +26,16 @@ pub const MAX_SITES: usize = 256;
 pub const SHORT_NS: u64 = 1_000_000;     // 1 ms
 pub const VSHORT_NS: u64 = 10_000;       // 10 us
 
-// Global lifetime stats.
-var total_fibers: u64 = 0;
-var short_fibers: u64 = 0;    // < 1ms
-var vshort_fibers: u64 = 0;   // < 10us
-var total_lifetime_ns: u64 = 0;
-var max_lifetime_ns: u64 = 0;
+// Global lifetime stats. Pub for inspection from runtime/fiber-profile-test.zig.
+pub var total_fibers: u64 = 0;
+pub var short_fibers: u64 = 0;    // < 1ms
+pub var vshort_fibers: u64 = 0;   // < 10us
+pub var total_lifetime_ns: u64 = 0;
+pub var max_lifetime_ns: u64 = 0;
 var mu: SpinLock = .{};
 
-// Per-scheduler fibers-run counter. Index = Scheduler.index.
-var sched_runs: [MAX_SCHEDULERS]u64 = [_]u64{0} ** MAX_SCHEDULERS;
+// Per-scheduler fibers-run counter. Index = Scheduler.index. Pub for tests.
+pub var sched_runs: [MAX_SCHEDULERS]u64 = [_]u64{0} ** MAX_SCHEDULERS;
 var sched_active: usize = 0;
 
 pub const DispatchKind = enum(u8) {
@@ -51,7 +51,7 @@ pub const TaskForm = enum(u8) {
     fsm = 2,
 };
 
-const Site = struct {
+pub const Site = struct {
     id: u32 = 0,
     dispatch: DispatchKind = .unknown,
     form: TaskForm = .unknown,
@@ -63,8 +63,8 @@ const Site = struct {
     sched_runs: [MAX_SCHEDULERS]u64 = [_]u64{0} ** MAX_SCHEDULERS,
 };
 
-var sites: [MAX_SITES]Site = [_]Site{.{}} ** MAX_SITES;
-var site_dropped: u64 = 0;
+pub var sites: [MAX_SITES]Site = [_]Site{.{}} ** MAX_SITES;
+pub var site_dropped: u64 = 0;
 
 pub fn resetForTest() void {
     mu.lock();
@@ -80,7 +80,7 @@ pub fn resetForTest() void {
     site_dropped = 0;
 }
 
-fn findSiteLocked(site_id: u32) ?*Site {
+pub fn findSiteLocked(site_id: u32) ?*Site {
     if (site_id == 0) return null;
     var idx: usize = @as(usize, site_id) % MAX_SITES;
     var probes: usize = 0;
@@ -117,44 +117,6 @@ pub inline fn recordSiteSpawn(site_id: u32, dispatch: DispatchKind, form: TaskFo
         if (site.dispatch == .unknown) site.dispatch = dispatch;
         if (site.form == .unknown) site.form = form;
     }
-}
-
-test "fiber profile records per-site scheduler attribution" {
-    resetForTest();
-    defer resetForTest();
-
-    recordSiteSpawn(7, .local, .fsm);
-    recordSchedulerRun(3);
-    recordSiteRun(7, 3);
-    recordFiberExit(7, 100, 2100);
-
-    try std.testing.expectEqual(@as(u64, 1), total_fibers);
-    try std.testing.expectEqual(@as(u64, 1), sched_runs[3]);
-    const site = findSiteLocked(7).?;
-    try std.testing.expectEqual(@as(u64, 1), site.spawns);
-    try std.testing.expectEqual(@as(u64, 1), site.runs);
-    try std.testing.expectEqual(@as(u64, 1), site.exits);
-    try std.testing.expectEqual(DispatchKind.local, site.dispatch);
-    try std.testing.expectEqual(TaskForm.fsm, site.form);
-    try std.testing.expectEqual(@as(u64, 1), site.sched_runs[3]);
-    try std.testing.expectEqual(@as(u64, 2000), site.total_lifetime_ns);
-}
-
-test "fiber profile handles site collisions and saturation" {
-    resetForTest();
-    defer resetForTest();
-
-    recordSiteSpawn(1, .local, .stack);
-    recordSiteSpawn(1 + MAX_SITES, .parallel, .fsm);
-    try std.testing.expect(findSiteLocked(1) != null);
-    try std.testing.expect(findSiteLocked(1 + MAX_SITES) != null);
-
-    var i: u32 = 2;
-    while (i <= MAX_SITES) : (i += 1) {
-        recordSiteSpawn(i, .local, .stack);
-    }
-    recordSiteSpawn(MAX_SITES + 2, .parallel, .fsm);
-    try std.testing.expectEqual(@as(u64, 2), site_dropped);
 }
 
 pub inline fn recordSiteRun(site_id: u32, sched_idx: usize) void {

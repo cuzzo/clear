@@ -14,7 +14,7 @@ const std = @import("std");
 pub const SimAtomic = @import("runtime/vopr-atomic.zig").SimAtomic;
 pub const SimRing = @import("runtime/vopr-ring.zig").SimRing;
 
-const vl = @import("runtime/vopr-loom.zig");
+const vl = @import("runtime/testing/vopr-loom.zig");
 
 pub fn main(init: std.process.Init.Minimal) !void {
     return vl.main(init);

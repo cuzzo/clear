@@ -13,8 +13,8 @@
 
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
-const SimClock = @import("vopr-clock.zig").SimClock;
-const SimRandom = @import("vopr-random.zig").SimRandom;
+const SimClock = @import("testing/vopr-clock.zig").SimClock;
+const SimRandom = @import("testing/vopr-random.zig").SimRandom;
 
 /// `compat.milliTimestamp()` MUST track `SimClock.advanceMs()` exactly.
 /// If it doesn't, the SimClock seam is silently disabled.

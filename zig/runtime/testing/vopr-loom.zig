@@ -61,13 +61,13 @@
 // 2x per extra bit, and the tests are fast.
 
 const std = @import("std");
-const fc = @import("fiber-core.zig");
-const qs = @import("queues.zig");
+const fc = @import("../fiber-core.zig");
+const qs = @import("../queues.zig");
 
 // Re-export SimAtomic so queues.zig picks it up via @import("root").SimAtomic
-pub const SimAtomic = @import("vopr-atomic.zig").SimAtomic;
+pub const SimAtomic = @import("../vopr-atomic.zig").SimAtomic;
 // Re-export SimRing so scheduler.zig picks it up via @import("root").SimRing
-pub const SimRing = @import("vopr-ring.zig").SimRing;
+pub const SimRing = @import("../vopr-ring.zig").SimRing;
 
 const Fiber = fc.Fiber;
 const Context = fc.Context;
@@ -75,9 +75,9 @@ const Stack = fc.Stack;
 const RunQueue = qs.RunQueue;
 const Task = qs.Task;
 const TaskStatus = qs.TaskStatus;
-const fp = @import("scheduler.zig");
-const EbrContext = @import("../lib/ebr.zig").EbrContext;
-const fm = @import("fiber-memory.zig");
+const fp = @import("../scheduler.zig");
+const EbrContext = @import("../../lib/ebr.zig").EbrContext;
+const fm = @import("../fiber-memory.zig");
 const build_options = @import("build_options");
 
 const MAX_THREADS = 4;

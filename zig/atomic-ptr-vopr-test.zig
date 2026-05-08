@@ -7,8 +7,8 @@
 const std = @import("std");
 
 pub const CLEAR_FRAME_DEBUG = false;
-pub const SimClock = @import("runtime/vopr-clock.zig").SimClock;
-pub const SimRandom = @import("runtime/vopr-random.zig").SimRandom;
+pub const SimClock = @import("runtime/testing/vopr-clock.zig").SimClock;
+pub const SimRandom = @import("runtime/testing/vopr-random.zig").SimRandom;
 // SimAtomic activates atomic-side fault injection for VOPR retry-body
 // coverage. The comptime `Atomic` alias in lib/atomic_ptr.zig (and any
 // other file using the `if (@hasDecl(root, "SimAtomic"))` seam) picks

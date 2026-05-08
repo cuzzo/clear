@@ -19,8 +19,8 @@
 const std = @import("std");
 
 pub const CLEAR_FRAME_DEBUG = false;
-pub const SimClock = @import("runtime/vopr-clock.zig").SimClock;
-pub const SimRandom = @import("runtime/vopr-random.zig").SimRandom;
+pub const SimClock = @import("runtime/testing/vopr-clock.zig").SimClock;
+pub const SimRandom = @import("runtime/testing/vopr-random.zig").SimRandom;
 // SimAtomic activates atomic fault injection for spin-retry coverage.
 // scheduler.zig's WaitGroup / Semaphore primitives use swap-based
 // spinlocks; the swap-fault knob (inject_swap_busy_fault) in

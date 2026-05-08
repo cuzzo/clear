@@ -9,7 +9,7 @@
 //!
 //! Usage in a VOPR test:
 //!
-//!     pub const SimClock = @import("runtime/vopr-clock.zig").SimClock;
+//!     pub const SimClock = @import("runtime/testing/vopr-clock.zig").SimClock;
 //!
 //!     test "VOPR scenario" {
 //!         SimClock.reset();

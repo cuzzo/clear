@@ -13,7 +13,7 @@
 //!
 //! Usage:
 //!
-//!     pub const SimRandom = @import("runtime/vopr-random.zig").SimRandom;
+//!     pub const SimRandom = @import("runtime/testing/vopr-random.zig").SimRandom;
 //!
 //!     test "VOPR scenario seed=N" {
 //!         SimRandom.seed(42);
