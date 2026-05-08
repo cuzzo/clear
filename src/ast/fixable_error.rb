@@ -23,8 +23,11 @@ require_relative "source_error"
 require_relative "diagnostic_registry"
 
 class Span
+    extend T::Sig
+
   attr_reader :file, :line, :col, :length
 
+  sig { params(file: NilClass, line: Integer, col: Integer, length: Integer).void }
   def initialize(file:, line:, col:, length:)
     @file = file
     @line = line
@@ -46,8 +49,11 @@ class Span
 end
 
 class Edit
+    extend T::Sig
+
   attr_reader :span, :replacement
 
+  sig { params(span: Span, replacement: String).void }
   def initialize(span:, replacement:)
     @span = span
     @replacement = replacement
@@ -83,6 +89,7 @@ class FixableFinding
 
   attr_reader :level, :message, :token, :category, :fixes
 
+  sig { params(level: Symbol, message: String, token: T.untyped, category: Symbol, fixes: T::Array[Fix]).void }
   def initialize(level:, message:, token:, category:, fixes:)
     raise ArgumentError, "bad level #{level.inspect}" unless LEVELS.include?(level)
     raise ArgumentError, "bad category #{category.inspect}" unless CATEGORIES.include?(category)
@@ -133,7 +140,7 @@ module FixCollector
     !@findings.nil?
   end
 
-  sig { params(finding: T.untyped).returns(T.untyped) }
+  sig { params(finding: FixableFinding).returns(T.untyped) }
   def self.push(finding)
     @findings << finding if @findings
   end

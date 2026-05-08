@@ -31,6 +31,7 @@ class BasicBlock
 
   attr_accessor :id, :stmts, :successors, :predecessors
 
+  sig { params(id: Integer).void }
   def initialize(id)
     @id = id
     @stmts = []
@@ -38,7 +39,7 @@ class BasicBlock
     @predecessors = []
   end
 
-  sig { params(block: T.untyped).returns(T.untyped) }
+  sig { params(block: BasicBlock).returns(T.untyped) }
   def add_successor(block)
     @successors << block unless @successors.include?(block)
     block.predecessors << self unless block.predecessors.include?(self)
@@ -54,6 +55,7 @@ class FunctionCFG
 
   attr_reader :blocks, :entry, :exit_block, :fn_name
 
+  sig { params(fn_name: String).void }
   def initialize(fn_name)
     @fn_name = fn_name
     @blocks = []
@@ -78,7 +80,7 @@ class FunctionCFG
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail.
   #   When provided, statements containing calls to these functions get an
   #   error edge to the exit block (models Zig try/error-unwind semantics).
-  sig { params(fn_node: T.untyped, can_fail_fns: T.untyped).returns(FunctionCFG) }
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String])).returns(FunctionCFG) }
   def self.build(fn_node, can_fail_fns: nil)
     cfg = new(fn_node.name)
     cfg.instance_variable_set(:@can_fail_fns, can_fail_fns)
@@ -90,7 +92,7 @@ class FunctionCFG
 
   private
 
-  sig { params(stmts: T.untyped, current_block: T.untyped, exit_target: T.untyped, cfg: T.untyped).returns(T.nilable(BasicBlock)) }
+  sig { params(stmts: Array, current_block: BasicBlock, exit_target: BasicBlock, cfg: FunctionCFG).returns(T.nilable(BasicBlock)) }
   def self.build_body(stmts, current_block, exit_target, cfg)
     stmts = [stmts] unless stmts.is_a?(Array)
     stmts.each do |stmt|
@@ -108,7 +110,7 @@ class FunctionCFG
         then_exit.add_successor(join_block) if then_exit
 
         if stmt.else_branch
-          else_exit = build_body(stmt.else_branch, else_block, exit_target, cfg)
+          else_exit = build_body(stmt.else_branch, T.must(else_block), exit_target, cfg)
           else_exit.add_successor(join_block) if else_exit
         end
 
@@ -227,7 +229,7 @@ class FunctionCFG
   # can_fail function. Used to determine whether an error edge is needed.
   # Checks node.can_fail (stamped by annotator on stdlib/static calls) and
   # can_fail_fns set (user-defined functions computed by compute_can_fail!).
-  sig { params(node: T.untyped, can_fail_fns: T.untyped).returns(T::Boolean) }
+  sig { params(node: T.untyped, can_fail_fns: T::Set[String]).returns(T::Boolean) }
   def self.stmt_can_fail?(node, can_fail_fns)
     return false unless node
     case node
@@ -322,6 +324,7 @@ class OwnershipDataflow
 
   attr_reader :block_in, :block_out, :point_states
 
+  sig { params(cfg: FunctionCFG, fn_node: AST::FunctionDef, schema_lookup: T.nilable(Proc)).void }
   def initialize(cfg, fn_node, schema_lookup: nil)
     @cfg = cfg
     @fn_node = fn_node
@@ -419,7 +422,7 @@ class OwnershipDataflow
   #      error unwind) -> no defer needed.
   #   3. Exception: MATCH TAKES unions that are moved on all paths still need
   #      a guard because non-AS branches don't extract ownership.
-  sig { params(fn_node: T.untyped, bindings: T.untyped).returns(Hash) }
+  sig { params(fn_node: AST::FunctionDef, bindings: T::Hash[String, Hash]).returns(T::Hash[String, Hash]) }
   def cleanup_decisions!(fn_node, bindings)
     summary = cleanup_summary
 
@@ -454,6 +457,7 @@ class OwnershipDataflow
   private
 
   # Returns true if the given variable is the subject of a MATCH TAKES statement.
+  sig { params(fn_node: AST::FunctionDef, var_name: String).returns(T::Boolean) }
   def match_takes_var?(fn_node, var_name)
     found = T.let(false, T::Boolean)
     AST.walk_body(fn_node.body) do |stmt|
@@ -468,7 +472,7 @@ class OwnershipDataflow
   # Build CFG + run dataflow for a function node. Returns the analysis.
   # @param can_fail_fns [Set<String>, nil] names of functions that can fail
   # @param schema_lookup [Proc, nil] type schema resolver for needs_explicit_cleanup
-  sig { params(fn_node: T.untyped, can_fail_fns: T.untyped, schema_lookup: T.untyped).returns(OwnershipDataflow) }
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.nilable(T::Set[String]), schema_lookup: T.nilable(Proc)).returns(OwnershipDataflow) }
   def self.analyze(fn_node, can_fail_fns: nil, schema_lookup: nil)
     cfg = FunctionCFG.build(fn_node, can_fail_fns: can_fail_fns)
     new(cfg, fn_node, schema_lookup: schema_lookup).analyze!
@@ -478,6 +482,7 @@ class OwnershipDataflow
 
   # TAKES params start as :owned (callee must clean them up).
   # TAKES params are always heap-allocated (caller passes heap ownership).
+  sig { returns(Hash) }
   def init_entry_state
     state = {}
     (@fn_node.params || []).each do |p|
@@ -491,6 +496,7 @@ class OwnershipDataflow
   end
 
   # Merge predecessor exit states. Variables present on any path are joined.
+  sig { params(block: BasicBlock).returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def join_predecessors(block)
     preds = block.predecessors
     return {} if preds.empty?
@@ -511,8 +517,9 @@ class OwnershipDataflow
   end
 
   # Join two OwnerEntry values (or nil for absent variables).
+  sig { params(a: T.nilable(OwnershipDataflow::OwnerEntry), b: T.nilable(OwnershipDataflow::OwnerEntry)).returns(T.any(OwnershipDataflow::OwnerEntry, Symbol)) }
   def join_entry(a, b)
-    return b if a.nil?
+    return T.must(b) if a.nil?
     return a if b.nil?
 
     a_st = a.is_a?(OwnerEntry) ? a.state : a
@@ -532,6 +539,7 @@ class OwnershipDataflow
     end
   end
 
+  sig { params(a: Symbol, b: Symbol).returns(Symbol) }
   def join_state(a, b)
     return b if a == UNINIT
     return a if b == UNINIT
@@ -541,6 +549,7 @@ class OwnershipDataflow
 
   # Process all statements in a block, updating the state map.
   # Stores per-statement snapshots in @point_states.
+  sig { params(block: BasicBlock, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def apply_transfer(block, state)
     block.stmts.each_with_index do |stmt, idx|
       transfer_stmt(stmt, state)
@@ -550,6 +559,7 @@ class OwnershipDataflow
   end
 
   # Transition a variable to :moved, preserving OwnerEntry metadata.
+  sig { params(state: T::Hash[String, T.untyped], name: String).returns(T.any(OwnershipDataflow::OwnerEntry, Symbol)) }
   def mark_moved!(state, name)
     existing = state[name]
     if existing.is_a?(OwnerEntry)
@@ -560,6 +570,7 @@ class OwnershipDataflow
   end
 
   # Create an OwnerEntry for a new declaration from its type info.
+  sig { params(node: T.untyped).returns(OwnershipDataflow::OwnerEntry) }
   def make_owner_entry(node)
     ti = Type.from_node(node)
     allocator = ti ? ((ti.provenance_alloc rescue nil) || (ti.heap_provenance? ? :heap : :frame)) : :frame
@@ -568,6 +579,7 @@ class OwnershipDataflow
   end
 
   # Transfer function for a single statement.
+  sig { params(stmt: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T.untyped) }
   def transfer_stmt(stmt, state)
     case stmt
     when AST::VarDecl
@@ -661,6 +673,7 @@ class OwnershipDataflow
   #   - List literal items: [a, b]
   #   - MoveNode: MOVE a
   # All other positions: only was_moved (set by annotator for TAKES/GIVE).
+  sig { params(node: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T::Array[String]) }
   def collect_binding_moves(node, state)
     return [] unless node
     step = DataflowStep.new(state: state, consumed: Set.new)
@@ -669,6 +682,7 @@ class OwnershipDataflow
   end
 
   # Recursively find ownership-transferring identifiers.
+  sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
   def collect_ownership_transfers(node, step)
     return unless node
 
@@ -733,6 +747,7 @@ class OwnershipDataflow
   # Collect only was_moved identifiers from an expression subtree.
   # Skips CopyNode children: COPY wraps a was_moved identifier but the
   # source is NOT consumed (the copy is what transfers ownership).
+  sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
   def collect_explicit_in(node, step)
     walk_expr_skip_copy(node) do |n|
       next unless n.is_a?(AST::Identifier) && n.was_moved
@@ -746,6 +761,7 @@ class OwnershipDataflow
 
   # Collect only explicitly moved identifiers (was_moved set by annotator).
   # Used for function calls where non-TAKES args are borrowed, not moved.
+  sig { params(node: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T::Array[String]) }
   def collect_explicit_moves(node, state)
     return [] unless node
     step = DataflowStep.new(state: state, consumed: Set.new)
@@ -760,12 +776,14 @@ class OwnershipDataflow
     step.consumed.to_a
   end
 
+  sig { params(node: T.untyped, step: OwnershipDataflow::DataflowStep).returns(T.untyped) }
   def collect_share_transfers_in(node, step)
     walk_expr(node) do |n|
       collect_share_transfer(n, step) if n.is_a?(AST::ShareNode)
     end
   end
 
+  sig { params(node: AST::ShareNode, step: OwnershipDataflow::DataflowStep).returns(T.nilable(Hash)) }
   def collect_share_transfer(node, step)
     source = node.value
     return if source.is_a?(AST::CopyNode)
@@ -784,6 +802,7 @@ class OwnershipDataflow
   # Collect resource captures from BG blocks nested in function/method call args.
   # Without this, the dataflow doesn't see ownership transfers via BG capture
   # when the BG block appears inside a MethodCall like tasks.append(BG { ... }).
+  sig { params(stmt: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T::Array[String]) }
   def collect_bg_captures_in_args(stmt, state)
     consumed = []
     args = stmt.args || []
@@ -793,6 +812,7 @@ class OwnershipDataflow
     consumed
   end
 
+  sig { params(expr: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry], consumed: Array).returns(T.nilable(Array)) }
   def _walk_bg_captures_in_expr(expr, state, consumed)
     return unless expr
     case expr
@@ -824,6 +844,7 @@ class OwnershipDataflow
   # of bug). Now there is one writer and three readers (this method,
   # MIRPass.insert_bg_give_suppress!, EscapeAnalysis), all reading the
   # same field.
+  sig { params(bg_node: T.untyped).returns(T::Array[String]) }
   def collect_bg_body_gives(bg_node)
     bg_node.capture_analysis&.move_mark_names&.to_a || []
   end
@@ -832,6 +853,7 @@ class OwnershipDataflow
   # Primitives, strings, enums, :Any, and RC types are Copy-like.
   # RC assignment is clone (rcRetain), not move. Only GIVE/MOVE transfers
   # ownership (handled by was_moved from the annotator).
+  sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
     ti = Type.from_node(ident)
     return true unless ti  # unknown type, assume Copy (safe)
@@ -853,6 +875,7 @@ class OwnershipDataflow
     ti.primitive? || ti.string? || ti.any? || ti.void? || (ti.any_rc? && !is_atomic_ptr)
   end
 
+  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
   def walk_expr(node, &block)
     return unless node
     yield node
@@ -897,6 +920,7 @@ class OwnershipDataflow
 
   # Like walk_expr but does NOT recurse into CopyNode. CopyNode wraps
   # was_moved identifiers for implicit copies -- the source is NOT consumed.
+  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
   def walk_expr_skip_copy(node, &block)
     return unless node
     yield node
@@ -939,6 +963,7 @@ class OwnershipDataflow
     end
   end
 
+  sig { params(state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T::Hash[String, OwnershipDataflow::OwnerEntry]) }
   def dup_state(state)
     state.dup
   end
@@ -961,6 +986,7 @@ class UseAfterMoveChecker
 
   attr_reader :errors
 
+  sig { params(fn_node: T.untyped, dataflow: T.untyped).void }
   def initialize(fn_node, dataflow)
     @fn_node = fn_node
     @dataflow = dataflow
@@ -988,7 +1014,7 @@ class UseAfterMoveChecker
   end
 
   # Convenience: build dataflow + run check in one call.
-  sig { params(fn_node: T.untyped, can_fail_fns: T.untyped, schema_lookup: T.untyped).returns(Array) }
+  sig { params(fn_node: AST::FunctionDef, can_fail_fns: T.untyped, schema_lookup: T.nilable(Proc)).returns(Array) }
   def self.check(fn_node, can_fail_fns: nil, schema_lookup: nil)
     df = OwnershipDataflow.analyze(fn_node, can_fail_fns: can_fail_fns, schema_lookup: schema_lookup)
     checker = new(fn_node, df)
@@ -999,6 +1025,7 @@ class UseAfterMoveChecker
   private
 
   # Check all read positions in a statement for use-after-move.
+  sig { params(stmt: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T.untyped) }
   def check_stmt_reads(stmt, state)
     case stmt
     when AST::VarDecl
@@ -1067,6 +1094,7 @@ class UseAfterMoveChecker
 
   # Check reads in function/method call arguments.
   # was_moved args are moves (not reads) -- skip them.
+  sig { params(call_node: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(Array) }
   def check_call_reads(call_node, state)
     (call_node.args || []).each do |arg|
       if arg.is_a?(AST::Identifier) && arg.was_moved
@@ -1087,6 +1115,7 @@ class UseAfterMoveChecker
   end
 
   # Recursively walk an expression, checking all Identifier reads.
+  sig { params(node: T.untyped, state: T::Hash[String, OwnershipDataflow::OwnerEntry]).returns(T.untyped) }
   def check_reads_in_expr(node, state)
     return unless node
 
@@ -1150,6 +1179,7 @@ class UseAfterMoveChecker
     end
   end
 
+  sig { params(node: AST::ShareNode, state: Hash).returns(T.untyped) }
   def check_share_reads(node, state)
     source = node.value
     if source.is_a?(AST::CopyNode)
@@ -1163,6 +1193,7 @@ class UseAfterMoveChecker
   end
 
   # Check a single identifier read against the ownership state.
+  sig { params(name: String, state: T::Hash[String, OwnershipDataflow::OwnerEntry], token: Lexer::Token).returns(T.nilable(T::Array[String])) }
   def check_identifier_read(name, state, token)
     entry = state[name]
     return unless entry  # not tracked (not in scope, or primitive)
@@ -1214,7 +1245,7 @@ module LoopFrameAnalysis
 
 
   # Entry point.  Call once per pass, after CleanupClassifier.
-  sig { params(fn_nodes: T.untyped).returns(Hash) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
   def self.analyze!(fn_nodes)
     fn_nodes.each_value do |fn|
       next unless fn.body
@@ -1225,7 +1256,7 @@ module LoopFrameAnalysis
 
   # ── recursive AST walk ────────────────────────────────────────────────────
 
-  sig { params(stmts: T.untyped).returns(T.nilable(Array)) }
+  sig { params(stmts: T.nilable(Array)).returns(T.nilable(Array)) }
   def self.walk_stmts!(stmts)
     return unless stmts.is_a?(Array)
     stmts.each { |s| walk_stmt!(s) }
@@ -1258,7 +1289,7 @@ module LoopFrameAnalysis
 
   # ── loop analysis ─────────────────────────────────────────────────────────
 
-  sig { params(loop_node: T.untyped, body: T.untyped).returns(T.nilable(Array)) }
+  sig { params(loop_node: T.untyped, body: Array).returns(T.nilable(Array)) }
   def self.process_loop!(loop_node, body)
     return if loop_node.tight  # tight loops suppress all frame marks
 
@@ -1295,7 +1326,7 @@ module LoopFrameAnalysis
   # ── helpers: local name / frame-decl collection ──────────────────────────
 
   # Collect names declared directly in body (stop at nested loop / fn boundaries).
-  sig { params(body: T.untyped).returns(Set) }
+  sig { params(body: Array).returns(T::Set[String]) }
   def self.collect_local_names(body)
     names = Set.new
     scan_direct(body) do |s|
@@ -1315,7 +1346,7 @@ module LoopFrameAnalysis
   # but location=nil (their storage field stays :stack after finalize_storage!).
   # Only includes types that actually make frame-arena allocations (collections,
   # strings) -- primitives like Int64 are excluded even when frame_provenance? is set.
-  sig { params(body: T.untyped, _local_names: T.untyped).returns(Array) }
+  sig { params(body: Array, _local_names: T::Set[String]).returns(Array) }
   def self.local_frame_decls(body, _local_names)
     decls = []
     scan_direct(body) do |s|
@@ -1337,7 +1368,7 @@ module LoopFrameAnalysis
 
   # Does var_name appear as a value arg to a mutates_receiver call on an outer
   # container anywhere in the loop body (including nested loops)?
-  sig { params(var_name: T.untyped, body: T.untyped, local_names: T.untyped).returns(T::Boolean) }
+  sig { params(var_name: String, body: Array, local_names: T::Set[String]).returns(T::Boolean) }
   def self.escapes_to_outer?(var_name, body, local_names)
     found = T.let(false, T::Boolean)
     AST.walk_body(body) do |node|
@@ -1363,7 +1394,7 @@ module LoopFrameAnalysis
   # Identity check via `ident.symbol.reg` (set by the annotator) is the
   # authoritative locality answer — no need to re-derive it from string-name
   # matching against a recomputed local_names set.
-  sig { params(body: T.untyped).returns(T.untyped) }
+  sig { params(body: Array).returns(T.untyped) }
   def self.promote_outer_mutations!(body)
     # Pre-collect the declaration AST nodes that live anywhere within this
     # loop's subtree. AST.walk_body is the existing deep walker; we only
@@ -1441,7 +1472,7 @@ module LoopFrameAnalysis
   # where outer_var is not a loop-local AND expr is frame-allocating (string concat,
   # toString, etc.). The MIR cleanup-before-reassign uses the field's declared
   # allocator (heap), so the new value must also be heap to avoid a mismatch.
-  sig { params(body: T.untyped, local_names: T.untyped).returns(T.untyped) }
+  sig { params(body: Array, local_names: T::Set[String]).returns(T.untyped) }
   def self.promote_outer_field_assigns!(body, local_names)
     AST.walk_body(body) do |node|
       next unless node.is_a?(AST::Assignment)
@@ -1504,7 +1535,7 @@ module LoopFrameAnalysis
   end
 
   # Promote a container Identifier's declaration to heap.
-  sig { params(ident_node: T.untyped).returns(T.untyped) }
+  sig { params(ident_node: AST::Identifier).returns(T.untyped) }
   def self.promote_to_heap!(ident_node)
     decl_node = ident_node.symbol&.reg
     return unless decl_node
@@ -1520,7 +1551,7 @@ module LoopFrameAnalysis
 
   # Walk DIRECT body: yield each stmt, recurse into if/match/with but STOP at
   # nested loops and function definitions.
-  sig { params(body: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(body: Array, block: T.untyped).returns(T.untyped) }
   def self.scan_direct(body, &block)
     return unless body.is_a?(Array)
     body.each do |s|
@@ -1548,7 +1579,7 @@ module LoopFrameAnalysis
   # DoBlock branches (which are Arrays of Hashes with :body keys).
   # AST.walk_body only recurses into control-flow nodes; pipeline BinaryOp
   # chains are not in that list, so ConcurrentOp nested inside them is missed.
-  sig { params(nodes: T.untyped, visited: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(nodes: T.untyped, visited: T::Set[Integer], block: T.untyped).returns(T.untyped) }
   def self.walk_all_nodes(nodes, visited = Set.new, &block)
     return unless nodes
     nodes = [nodes] unless nodes.is_a?(Array)
@@ -1573,7 +1604,7 @@ module LoopFrameAnalysis
 
   # Walk for pipeline nodes that carry a shard_context and update
   # key_allocates_frame / body_allocates_frame.
-  sig { params(body: T.untyped, fn_nodes: T.untyped).returns(Array) }
+  sig { params(body: Array, fn_nodes: T::Hash[String, T.untyped]).returns(Array) }
   def self.update_shard_contexts!(body, fn_nodes)
     walk_all_nodes(body) do |node|
       next unless node.respond_to?(:shard_context) && node.shard_context
@@ -1594,7 +1625,7 @@ module LoopFrameAnalysis
 
   # Returns true when expr is a call to a frame-allocating function
   # (uses_frame=true and NOT heap-promoted on return).
-  sig { params(expr: T.untyped, fn_nodes: T.untyped).returns(T::Boolean) }
+  sig { params(expr: T.untyped, fn_nodes: T::Hash[String, T.untyped]).returns(T::Boolean) }
   def self.key_allocates_frame?(expr, fn_nodes)
     case expr
     when AST::FuncCall
@@ -1637,13 +1668,14 @@ class BorrowChecker
 
   attr_reader :errors
 
-  sig { params(fn_node: T.untyped, schema_lookup: T.untyped).returns(Array) }
+  sig { params(fn_node: AST::FunctionDef, schema_lookup: Proc).returns(T::Array[String]) }
   def self.check(fn_node, schema_lookup:)
     checker = new(fn_node, schema_lookup: schema_lookup)
     checker.check!
     checker.errors
   end
 
+  sig { params(fn_node: T.untyped, schema_lookup: T.nilable(Proc)).void }
   def initialize(fn_node, schema_lookup:)
     @fn_name = fn_node.name
     @fn_node = fn_node
@@ -1654,12 +1686,13 @@ class BorrowChecker
 
   sig { returns(Array) }
   def check!
-    check_stmts(@fn_node.body || [])
+    T.must(check_stmts(@fn_node.body || []))
   end
 
   private
 
   # Extract the root variable name from a capability's var_node.
+  sig { params(var_node: AST::Identifier).returns(T.untyped) }
   def cap_source_name(var_node)
     case var_node
     when AST::Identifier then var_node.name.to_s
@@ -1669,15 +1702,18 @@ class BorrowChecker
     end
   end
 
+  sig { params(token: Lexer::Token).returns(String) }
   def line_info(token)
     token&.line ? " (line #{token.line})" : ""
   end
 
+  sig { params(stmts: T.nilable(Array)).returns(T.nilable(Array)) }
   def check_stmts(stmts)
     return unless stmts.is_a?(Array)
     stmts.each { |stmt| check_stmt(stmt) }
   end
 
+  sig { params(stmt: T.untyped).returns(T.untyped) }
   def check_stmt(stmt)
     case stmt
     when AST::WithBlock
@@ -1696,7 +1732,7 @@ class BorrowChecker
       # Standalone GIVE statement
       inner = stmt.value
       if inner.is_a?(AST::Identifier)
-        check_borrowed_move(inner.name.to_s, stmt.token)
+        check_borrowed_move(inner.name.to_s, T.must(stmt.token))
       end
 
     when AST::FuncCall, AST::MethodCall
@@ -1728,6 +1764,7 @@ class BorrowChecker
     end
   end
 
+  sig { params(stmt: AST::WithBlock).returns(T::Array[String]) }
   def handle_with_block(stmt)
     added = []
 
@@ -1772,6 +1809,7 @@ class BorrowChecker
 
   # Check if any identifier being moved in a binding RHS is currently borrowed.
   # Mirrors OwnershipDataflow#collect_binding_moves.
+  sig { params(expr: T.untyped, token: Lexer::Token).returns(T.nilable(Set)) }
   def check_binding_moves(expr, token)
     return unless expr
     moved = collect_moved_names(expr)
@@ -1779,6 +1817,7 @@ class BorrowChecker
   end
 
   # Check explicit moves (was_moved) in function/method call arguments.
+  sig { params(stmt: T.untyped, token: Lexer::Token).returns(Array) }
   def check_explicit_moves(stmt, token)
     walk_for_was_moved(stmt) do |ident|
       next if copy_type?(ident)
@@ -1786,6 +1825,7 @@ class BorrowChecker
     end
   end
 
+  sig { params(name: String, token: Lexer::Token).returns(T.nilable(T::Array[String])) }
   def check_borrowed_move(name, token)
     borrows = @active_borrows[name]
     return unless borrows&.any?
@@ -1796,12 +1836,14 @@ class BorrowChecker
 
   # Collect variable names being moved by an expression (binding RHS context).
   # Non-Copy identifiers in ownership-transferring positions are moves.
+  sig { params(node: T.untyped).returns(T::Set[String]) }
   def collect_moved_names(node)
     names = Set.new
     _collect_moves(node, names)
     names
   end
 
+  sig { params(node: T.untyped, names: T::Set[String]).returns(T.untyped) }
   def _collect_moves(node, names)
     return unless node
     case node
@@ -1839,6 +1881,7 @@ class BorrowChecker
     end
   end
 
+  sig { params(node: T.untyped, names: T::Set[String]).returns(T.untyped) }
   def _collect_was_moved(node, names)
     walk_for_was_moved(node) do |ident|
       next if copy_type?(ident)
@@ -1846,6 +1889,7 @@ class BorrowChecker
     end
   end
 
+  sig { params(node: AST::ShareNode, names: Set).returns(T.nilable(Hash)) }
   def _collect_share_moves(node, names)
     source = node.value
     return if source.is_a?(AST::CopyNode)
@@ -1862,6 +1906,7 @@ class BorrowChecker
   end
 
   # Walk expression tree for was_moved identifiers, skipping CopyNode.
+  sig { params(node: T.untyped, block: T.untyped).returns(T.untyped) }
   def walk_for_was_moved(node, &block)
     return unless node
     case node
@@ -1895,6 +1940,7 @@ class BorrowChecker
     end
   end
 
+  sig { params(ident: AST::Identifier).returns(T::Boolean) }
   def copy_type?(ident)
     ti = ident.type_info rescue nil
     return true unless ti

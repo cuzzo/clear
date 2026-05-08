@@ -102,7 +102,7 @@ module FiberCtxBuilder
   # `fresh_heap_id`       -- numeric id used to make dupe_var names unique
   #                          across multiple fiber blocks in the same
   #                          function. Default: 0.
-  sig { params(analysis: T.untyped, body_access_prefix: T.untyped, promoted_names: T.untyped, fresh_heap_alloc: T.untyped, fresh_heap_id: T.untyped).returns(FiberCtxBuilder::Result) }
+  sig { params(analysis: T.untyped, body_access_prefix: String, promoted_names: T::Hash[String, String], fresh_heap_alloc: T.nilable(String), fresh_heap_id: Integer).returns(FiberCtxBuilder::Result) }
   def self.build(analysis, body_access_prefix:, promoted_names: {},
                  fresh_heap_alloc: nil, fresh_heap_id: 0)
     captured = analysis&.captures || {}

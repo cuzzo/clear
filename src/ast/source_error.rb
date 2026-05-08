@@ -27,6 +27,7 @@ module ErrorHelper
   # `%{name}` interpolation against the hash. Legacy positional args
   # against `%s`/`%d` still work for the (shrinking) set of templates
   # that haven't been migrated to named form yet.
+  sig { params(node_or_token: T.untyped, code_or_message: T.untyped, args: T.untyped, kwargs: T.untyped).returns(T.untyped) }
   def error!(node_or_token, code_or_message, *args, **kwargs)
     T.bind(self, T.untyped) rescue nil
     # 1. Extract the Token (works for AST Node or raw Token)
@@ -58,7 +59,7 @@ module ErrorHelper
 
   # Try the hash form first when applicable; fall back to positional;
   # surface any internal mismatch as an "Internal Args Error" suffix.
-  sig { params(template: T.untyped, args: T.untyped, kwargs: T.untyped).returns(String) }
+  sig { params(template: String, args: T::Array[String], kwargs: T::Hash[Symbol, T.untyped]).returns(String) }
   def format_diagnostic_template(template, args, kwargs)
     T.bind(self, T.untyped) rescue nil
     if !kwargs.empty? || template.include?("%{")
@@ -76,7 +77,7 @@ module ErrorHelper
   end
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
-  sig { params(node_or_token: T.untyped, message: T.untyped).returns(T.nilable(Array)) }
+  sig { params(node_or_token: T.untyped, message: String).returns(T.nilable(T::Array[String])) }
   def note!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
@@ -87,7 +88,7 @@ module ErrorHelper
     $stderr.puts "\e[36m[Note]\e[0m #{message}#{loc}"
   end
 
-  sig { params(node_or_token: T.untyped, message: T.untyped).returns(Array) }
+  sig { params(node_or_token: T.untyped, message: String).returns(Array) }
   def warning!(node_or_token, message)
     T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
@@ -147,8 +148,11 @@ module ErrorHelper
 end
 
 class SourceError < StandardError
+    extend T::Sig
+
   attr_reader :token, :original_message, :source_code
 
+  sig { params(token: T.untyped, message: String, source_code: T.nilable(String)).void }
   def initialize(token, message, source_code)
     @token = token
     @original_message = message
@@ -161,6 +165,7 @@ class SourceError < StandardError
 
   private
 
+  sig { returns(String) }
   def build_message
     # Handle EOF or missing token
     if @token.nil? || @token.type == :EOF

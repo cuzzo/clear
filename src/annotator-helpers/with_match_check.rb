@@ -41,17 +41,17 @@ module WithMatchCheck
     LOCK_FREE:   Set[:lock_free].freeze,
   }.freeze
 
-  sig { params(family_set: T.untyped).returns(Set) }
+  sig { params(family_set: T.nilable(T::Set[Symbol])).returns(T::Set[Symbol]) }
   def self.admissible_axes(family_set)
     (family_set || []).flat_map { |f| (FAMILY_AXES[f] || Set.new).to_a }.to_set
   end
 
-  sig { params(family_set: T.untyped).returns(T::Boolean) }
+  sig { params(family_set: T.nilable(T::Set[Symbol])).returns(T::Boolean) }
   def self.poly_requires?(family_set)
     admissible_axes(family_set).size > 1
   end
 
-  sig { params(fn: T.untyped, error_handler: T.untyped, warn_handler: T.untyped, policy_handlers: T.untyped).returns(T.untyped) }
+  sig { params(fn: AST::FunctionDef, error_handler: Proc, warn_handler: T.nilable(Proc), policy_handlers: T.nilable(T::Array[Hash])).returns(T.nilable(Array)) }
   def self.check_function!(fn, error_handler, warn_handler: nil, policy_handlers: nil)
     return unless fn.respond_to?(:body) && fn.body
     requires_map = (fn.respond_to?(:requires) ? fn.requires : nil) || {}
@@ -82,7 +82,7 @@ module WithMatchCheck
       # error set and warn on errors that no handler covers (per-WITH
       # ON or program SYNC POLICY).
       warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
-                                         policy_handlers, warn_handler) unless node.arms
+                                         T.must(policy_handlers), T.must(warn_handler)) unless node.arms
 
       # Rule 1: WITH-on-param ⇒ REQUIRES-on-param.
       bound_params.each do |pname|
@@ -173,7 +173,7 @@ module WithMatchCheck
   # capability whose var_node is an Identifier referencing a param, add
   # the name. Field accesses (`pool.field`) and non-param locals are
   # skipped — they don't need REQUIRES.
-  sig { params(with_node: T.untyped, param_names: T.untyped).returns(Set) }
+  sig { params(with_node: AST::WithBlock, param_names: T::Set[String]).returns(T::Set[String]) }
   def self.collect_bound_param_names(with_node, param_names)
     out = Set.new
     (with_node.capabilities || []).each do |cap|
@@ -200,7 +200,7 @@ module WithMatchCheck
   # The check only runs for plain WITH (skipped for WITH MATCH, VIEW,
   # MATERIALIZED VIEW, SNAPSHOT — those have their own dispatch shapes;
   # WITH MATCH itself is being phased out in #332 in favor of POLYMORPHIC).
-  sig { params(node: T.untyped, bound_params: T.untyped, requires_map: T.untyped, fn: T.untyped, error_handler: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, Set], fn: AST::FunctionDef, error_handler: Proc).returns(T.untyped) }
   def self.enforce_polymorphic_iff_rule!(node, bound_params, requires_map,
                                          fn, error_handler)
     return if node.view_kind || node.snapshot_mode
@@ -214,7 +214,7 @@ module WithMatchCheck
     # leave the plain-WITH branch alone so the legacy LOCKED
     # auto-shim path (no REQUIRES + plain WITH) keeps working.
     has_universal_poly_param = bound_params.any? { |p|
-      !requires_map.key?(p) || (requires_map[p] && requires_map[p].empty?)
+      !requires_map.key?(p) || (requires_map[p]&.empty?)
     }
 
     if node.polymorphic && !has_poly_param && !has_universal_poly_param
@@ -227,7 +227,7 @@ module WithMatchCheck
     elsif !node.polymorphic && has_poly_param
       poly_param_examples = bound_params.select { |p| poly_requires?(requires_map[p]) }
       example = poly_param_examples.first
-      example_fams = (requires_map[example] || Set.new).to_a.join(' | ')
+      example_fams = (requires_map[T.must(example)] || Set.new).to_a.join(' | ')
       error_handler.call(node,
         "Plain WITH on the polymorphic parameter '#{example}' " \
         "(REQUIRES admits #{example_fams}) is not allowed. " \
@@ -244,7 +244,7 @@ module WithMatchCheck
   # @param fn [AST::FunctionDef]
   # @param sig_lookup [Proc] name → FunctionSignature (or nil)
   # @param error_handler [Proc] (node, msg) → raises CompilerError
-  sig { params(fn: T.untyped, sig_lookup: T.untyped, error_handler: T.untyped).returns(T.untyped) }
+  sig { params(fn: AST::FunctionDef, sig_lookup: Proc, error_handler: Proc).returns(T.nilable(Array)) }
   def self.check_call_sites!(fn, sig_lookup, error_handler)
     return unless fn.respond_to?(:body) && fn.body
 
@@ -341,7 +341,7 @@ module WithMatchCheck
   # admits {VERSIONED, ATOMIC}; LOCKED admits :LOCKED at the family
   # level (the storage-axis split between :locked / :write_locked is
   # below the family abstraction). Other families are exact-match.
-  sig { params(disjunction: T.untyped, arg_family: T.untyped).returns(T::Boolean) }
+  sig { params(disjunction: T::Set[Symbol], arg_family: Symbol).returns(T::Boolean) }
   def self.disjunction_admits?(disjunction, arg_family)
     (disjunction || []).any? { |f|
       next true if f == arg_family
@@ -376,7 +376,7 @@ module WithMatchCheck
     fam ? Set[fam] : Set.new
   end
 
-  sig { params(family_set: T.untyped).returns(Set) }
+  sig { params(family_set: Set).returns(Set) }
   def self.expand_snapshotted(family_set)
     return family_set unless family_set.include?(:SNAPSHOTTED)
     out = family_set - [:SNAPSHOTTED]
@@ -400,7 +400,7 @@ module WithMatchCheck
   # NOT included here -- those are surfaced via the static cycle
   # detector (lock_helper.rb) when a cycle is reachable, and they are
   # always inline-only (never defaulted by SYNC POLICY).
-  sig { params(family_set: T.untyped).returns(Set) }
+  sig { params(family_set: T.nilable(T::Set[Symbol])).returns(T::Set[Symbol]) }
   def self.errors_for_requires(family_set)
     admissible_axes(family_set)
       .flat_map { |axis| (AXIS_ERRORS[axis] || Set.new).to_a }
@@ -416,7 +416,7 @@ module WithMatchCheck
   # remainder is empty and no warning fires. The check exists so a
   # user-written partial-coverage scenario (or a future strict-mode
   # build) surfaces unhandled polymorphic errors at the WITH site.
-  sig { params(node: T.untyped, bound_params: T.untyped, requires_map: T.untyped, policy_handlers: T.untyped, warn_handler: T.untyped).returns(T.nilable(Set)) }
+  sig { params(node: AST::WithBlock, bound_params: T::Set[String], requires_map: T::Hash[String, Set], policy_handlers: T::Array[Hash], warn_handler: Proc).returns(T.nilable(Set)) }
   def self.warn_polymorphic_unhandled_errors!(node, bound_params, requires_map,
                                               policy_handlers, warn_handler)
     return unless warn_handler && node.polymorphic
@@ -440,7 +440,7 @@ module WithMatchCheck
   # array of `{ form: :type | :kind, name: Symbol }` entries; type
   # selectors contribute their literal name, kind selectors expand
   # via AST.types_for_kind.
-  sig { params(node: T.untyped, policy_handlers: T.untyped).returns(Set) }
+  sig { params(node: AST::WithBlock, policy_handlers: T.nilable(T::Array[Hash])).returns(T::Set[Symbol]) }
   def self.handled_error_set(node, policy_handlers)
     handled = Set.new
     [node.lock_error_clause, *(policy_handlers || [])].compact.each do |clause|
@@ -461,7 +461,7 @@ module WithMatchCheck
   # FuncCall is the LHS of a BinaryOp). AST.walk_body only iterates
   # statement-level nodes; we need the expression sub-tree too for
   # the universal-poly auto-borrow stamp.
-  sig { params(body: T.untyped).returns(Array) }
+  sig { params(body: Array).returns(Array) }
   def self.deep_funcalls(body)
     out = []
     stack = body.is_a?(Array) ? body.dup : [body]

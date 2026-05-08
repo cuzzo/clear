@@ -34,6 +34,7 @@ class Lexer
       PENDING BEFORE AFTER LET TAGS
     ].to_set
 
+  sig { params(source: String).void }
   def initialize(source)
     @s = StringScanner.new(source)
     @line = 1
@@ -41,7 +42,7 @@ class Lexer
     @tokens = []
   end
 
-  sig { returns(Array) }
+  sig { returns(T.nilable(Array)) }
   def tokenize
     until @s.eos?
       # 1. Snapshot start column before scanning
@@ -165,9 +166,10 @@ class Lexer
 
   private
 
+  sig { params(start_col: Integer).returns(T.untyped) }
   def read_interpolated_string(start_col)
     buffer = ""
-    chunk_start_col = start_col # Track where the *current* text buffer started
+    chunk_start_col = T.let(start_col, Integer) # Track where the *current* text buffer started
 
     loop do
       # Scan until we hit a quote, backslash, or interpolation start ($)
@@ -237,7 +239,7 @@ class Lexer
         expr_source = extract_balanced_brace_content
         sub_lexer = Lexer.new(expr_source)
         sub_tokens = sub_lexer.tokenize
-        sub_tokens.pop if sub_tokens.last.type == :EOF
+        T.must(sub_tokens).pop if T.must(sub_tokens).last.type == :EOF
         @tokens.concat(sub_tokens)
 
         # 5. Inject closer tokens: ) +
@@ -260,6 +262,7 @@ class Lexer
     end
   end
 
+  sig { returns(String) }
   def extract_balanced_brace_content
     content = ""
     depth = 1
@@ -292,12 +295,14 @@ class Lexer
     raise "Lexer Error: Unclosed interpolation %{...}"
   end
 
+  sig { params(type: Symbol, val: T.untyped, col: Integer).returns(Integer) }
   def add(type, val, col)
     @tokens << Token.new(type, val, @line, col)
     # Automatically update position based on the last matched string
     advance_pos(@s.matched)
   end
 
+  sig { params(str: String).returns(T.untyped) }
   def advance_pos(str)
     return unless str # Guard clause for safety
 
@@ -305,7 +310,7 @@ class Lexer
     if newlines > 0
       @line += newlines
       last_newline_index = str.rindex("\n")
-      @column = (str.length - last_newline_index)
+      @column = (str.length - T.must(last_newline_index))
     else
       @column += str.length
     end
@@ -319,6 +324,7 @@ class Lexer
   # matched text. Removes the trailing `_<suffix>` (passed in) first so
   # we don't strip the underscore that introduces the type suffix. Any
   # base prefix (`0x`, `0o`, `0b`) is preserved.
+  sig { params(matched: String, suffix: String).returns(String) }
   def strip_digit_separators(matched, suffix)
     body = matched.sub(/_#{Regexp.escape(suffix)}\z/, '')
     body.tr('_', '')
@@ -335,6 +341,7 @@ class Lexer
     'u64' => 0..((2**64) - 1),
   }.freeze
 
+  sig { params(val: Integer, suffix: String, start_col: Integer).returns(T.nilable(Integer)) }
   def add_prefixed_int(val, suffix, start_col)
     range = INT_SUFFIX_RANGES[suffix]
     raise "Lexer Error: Unknown numeric suffix '_#{suffix}' at line #{@line}:#{@column}" unless range || suffix == 'f32' || suffix == 'f64'

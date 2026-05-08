@@ -39,13 +39,16 @@ DRY_RUN = ENV["DRY_RUN"] == "1"
 # real-world contracts are <=4 (e.g. AST nodes that share an interface).
 WIDE_THRESHOLD = 4
 
-# Param types are widened to T.untyped by default. Return types remain
-# observation-tight. Rationale: a method observed only with one shape
-# of input is almost always too narrow (callers exercise sibling shapes
-# on un-tested paths), but its return type is determined entirely by
-# the body and is safer to lock down. Override with TIGHT_PARAMS=1 if
-# you want observation-tight params for a high-precision pass.
-LOOSE_PARAMS = ENV.fetch("TIGHT_PARAMS", "0") != "1"
+# Param types follow runtime observation when LOOSE_PARAMS=0 (default).
+# Rationale: with the TracePoint-based tracer, every call site's actual
+# bound parameter values are observed AFTER defaults are applied — so
+# optional `param = nil` defaults correctly show up as NilClass and
+# we sig them as T.nilable. The earlier prepend-based tracer captured
+# only caller-side `*args`, which missed defaulted-omitted params; that
+# motivated LOOSE_PARAMS=1 historically. With the new tracer we can
+# trust the data. Override LOOSE_PARAMS=1 to widen all params to
+# T.untyped (gate-only mode — adds sig blocks without type info).
+LOOSE_PARAMS = ENV.fetch("LOOSE_PARAMS", "0") == "1"
 
 # Body-nil-widening coverage threshold. When a method has at least this
 # many observed calls AND never returned nil in any of them, trust the
@@ -66,21 +69,18 @@ Dir.glob(File.join(OBS_DIR, "*.jsonl")).each do |file|
     key = [obs["klass"], obs["method"], obs["kind"].to_sym]
     rec = records[key] ||= {
       calls: 0,
-      params: [],
-      kw: {},
+      params_by_name: {},  # name => Set of class names
       returns: Set.new,
       raised: Set.new,
-      block_given_count: 0,
     }
     rec[:calls] += obs["calls"]
-    rec[:block_given_count] += obs["block_given_count"]
-    obs["params"].each_with_index do |slot, i|
-      rec[:params][i] ||= Set.new
-      slot.each { |c| rec[:params][i] << c }
-    end
-    obs["kw"].each do |k, v|
-      rec[:kw][k] ||= Set.new
-      v.each { |c| rec[:kw][k] << c }
+    # New format from TracePoint-based tracer: params keyed by name.
+    # Optional+keyword params are merged here (TracePoint sees them as
+    # local variables, indistinguishable; we recover the kind via Prism
+    # later when emitting).
+    (obs["params_by_name"] || {}).each do |name, classes|
+      rec[:params_by_name][name] ||= Set.new
+      classes.each { |c| rec[:params_by_name][name] << c }
     end
     obs["returns"].each { |c| rec[:returns] << c }
     obs["raised"].each { |c| rec[:raised] << c }
@@ -351,15 +351,12 @@ def fmt_type(class_set, allow_nilable: true)
     return has_nil && allow_nilable ? "T.nilable(#{base})" : base
   end
 
-  # AST::* and MIR::* are polymorphic hierarchies. A single observation
-  # of e.g. AST::FuncCall is almost certainly too narrow — callers pass
-  # AST::Identifier, AST::GetField, etc., on un-exercised paths. Widen
-  # to T.untyped to avoid Sorbet "method does not exist" errors at
-  # typed:true. Multi-class observations (already a union) stay as-is.
-  if others.size == 1 && (others.first.start_with?("AST::") || others.first.start_with?("MIR::"))
-    # T.nilable(T.untyped) is the same as T.untyped (Sorbet 5070).
-    return "T.untyped"
-  end
+  # Note: legacy `prepend`-based tracer missed defaulted-omitted args, so
+  # AST::*/MIR::* single-class observations were widened to T.untyped to
+  # avoid caller-side cascades. The TracePoint-based tracer captures
+  # actual bound values (post-default), so we trust the observation here.
+  # Sorbet's `srb tc -a` autofixer catches the few real polymorphism
+  # cases by inserting T.must at call sites — net win for typing density.
 
   if others.size > WIDE_THRESHOLD
     # T.nilable(T.untyped) is the same as T.untyped (Sorbet 5070).
@@ -551,17 +548,47 @@ records.each do |(klass, mname, kind), rec|
     # optional-positional, rest, required-keyword, optional-keyword,
     # keyword-rest, block. Required kws and optional kws can be
     # interleaved in the def, but the SIG must list keyreqs before
-    # optkeys regardless of source order.
-    params.requireds.each_with_index do |p, i|
-      slot = rec[:params][i] || Set.new
-      type = LOOSE_PARAMS ? "T.untyped" : fmt_type(slot)
+    # optkeys regardless of source order. Param values come from the
+    # TracePoint-based observation in rec[:params_by_name], keyed by
+    # the actual parameter name from Prism's `p.name`.
+    type_for_param = lambda do |name, has_nil_default = false|
+      slot = rec[:params_by_name][name.to_s] || Set.new
+      return "T.untyped" if LOOSE_PARAMS
+      # If a param has a nil default AND observation only ever saw
+      # NilClass, the TRUE contract is unknown (no caller passed a
+      # non-nil value, but the param accepts arbitrary types). Sig as
+      # T.untyped — wrapping NilClass in T.nilable would emit
+      # T.nilable(NilClass) which Sorbet treats as just NilClass and
+      # rejects assignments of any non-nil value (7013).
+      if has_nil_default && slot.size <= 1 && slot.include?("NilClass")
+        return "T.untyped"
+      end
+      fmt_type(slot)
+    end
+
+    # Optional params with `= nil` defaults must have T.nilable sigs;
+    # if the caller omits the kwarg the variable is nil at method
+    # entry, and Sorbet (7007) rejects sigs whose declared type
+    # doesn't include NilClass. Detect via Prism's NilNode default.
+    has_nil_default = lambda do |opt_node|
+      opt_node.respond_to?(:value) && opt_node.value.is_a?(Prism::NilNode)
+    end
+
+    nilable_wrap = lambda do |type|
+      return type if type.start_with?("T.nilable(") || type == "T.untyped"
+      "T.nilable(#{type})"
+    end
+
+    params.requireds.each do |p|
+      type = type_for_param.call(p.name)
       tight ||= !type.include?("T.untyped")
       loose ||= type.include?("T.untyped")
       sig_parts << "#{p.name}: #{type}"
     end
-    params.optionals.each_with_index do |p, i|
-      slot = rec[:params][params.requireds.size + i] || Set.new
-      type = LOOSE_PARAMS ? "T.untyped" : fmt_type(slot)
+    params.optionals.each do |p|
+      nil_default = has_nil_default.call(p)
+      type = type_for_param.call(p.name, nil_default)
+      type = nilable_wrap.call(type) if nil_default
       sig_parts << "#{p.name}: #{type}"
     end
     if params.rest
@@ -572,13 +599,12 @@ records.each do |(klass, mname, kind), rec|
       kw.is_a?(Prism::RequiredKeywordParameterNode)
     end
     keyreqs.each do |kw|
-      slot = rec[:kw][kw.name.to_s] || Set.new
-      type = LOOSE_PARAMS ? "T.untyped" : fmt_type(slot)
-      sig_parts << "#{kw.name}: #{type}"
+      sig_parts << "#{kw.name}: #{type_for_param.call(kw.name)}"
     end
     optkeys.each do |kw|
-      slot = rec[:kw][kw.name.to_s] || Set.new
-      type = LOOSE_PARAMS ? "T.untyped" : fmt_type(slot)
+      nil_default = has_nil_default.call(kw)
+      type = type_for_param.call(kw.name, nil_default)
+      type = nilable_wrap.call(type) if nil_default
       sig_parts << "#{kw.name}: #{type}"
     end
     if params.keyword_rest
@@ -653,11 +679,18 @@ records.each do |(klass, mname, kind), rec|
     else
       fmt_type(rec[:returns])
     end
-  # Always emit `returns(...)`. Don't use `void` based on observation —
-  # `void` returns Sorbet's VOID sentinel to callers, breaking any code
-  # that uses the result. A method observed always returning nil might
-  # still have callers that check the return value.
-  ret_clause = "returns(#{ret_type})"
+  # `initialize` must always be sigged as void per Sorbet's rules (3510).
+  # Ruby's `new` returns the instance regardless of what the body's last
+  # expression evaluates to, so observation of the literal last-expression
+  # class is meaningless here.
+  ret_clause = if mname.to_s == "initialize" && kind == :instance
+    "void"
+  else
+    # Always emit `returns(...)`. Don't use `void` based on observation —
+    # `void` returns Sorbet's VOID sentinel to callers, breaking any code
+    # that uses the result.
+    "returns(#{ret_type})"
+  end
 
   if ret_type.include?("T.untyped")
     stats[:loose_returns] += 1

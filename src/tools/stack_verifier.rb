@@ -11,6 +11,7 @@
 #   verifier.print_report(report)
 
 require "sorbet-runtime"
+require "stringio"
 
 class StackVerifier
     extend T::Sig
@@ -25,6 +26,7 @@ class StackVerifier
 
   attr_reader :binary_path, :module_prefix
 
+  sig { params(binary_path: String, module_prefix: T.nilable(String)).void }
   def initialize(binary_path, module_prefix = nil)
     @binary_path = binary_path
     @module_prefix = module_prefix || detect_prefix(binary_path)
@@ -63,7 +65,7 @@ class StackVerifier
   end
 
   # Full analysis: extract frame sizes, compare against tiers.
-  sig { params(fn_nodes: T.untyped, source_file: T.untyped).returns(Hash) }
+  sig { params(fn_nodes: T.nilable(Hash), source_file: T.nilable(String)).returns(Hash) }
   def analyze(fn_nodes: nil, source_file: nil)
     frames = extract_frame_sizes
     report = { functions: [], warnings: [], source_file: source_file }
@@ -124,7 +126,7 @@ class StackVerifier
     report
   end
 
-  sig { params(report: T.untyped, io: T.untyped).returns(T.nilable(Array)) }
+  sig { params(report: Hash, io: StringIO).returns(T.nilable(Array)) }
   def print_report(report, io: $stderr)
     return if report[:functions].empty?
 
@@ -153,7 +155,7 @@ class StackVerifier
   end
 
   # Returns true if any overflow errors were detected.
-  sig { params(report: T.untyped).returns(T.nilable(T::Boolean)) }
+  sig { params(report: Hash).returns(T.nilable(T::Boolean)) }
   def has_errors?(report)
     report[:warnings]&.any? { |w| w[:level] == :error }
   end
@@ -161,7 +163,7 @@ class StackVerifier
   # Verify that @reentrant:tailCall functions were actually TCO'd in the binary.
   # A TCO'd function should NOT contain a `call <self>` instruction - only `jmp`.
   # Returns array of { name:, tco_verified: bool, has_self_call: bool }
-  sig { params(fn_nodes: T.untyped).returns(Array) }
+  sig { params(fn_nodes: Hash).returns(Array) }
   def verify_tail_calls(fn_nodes)
     output = objdump_output
     return [] if output.empty?
@@ -294,7 +296,7 @@ class StackVerifier
   #                                  :reentrant, so this path only
   #                                  matters as a sanity check)
   # Functions that trampoline off the fiber stack are treated as leaf nodes.
-  sig { params(entry_addr: T.untyped, graph_data: T.untyped, fn_nodes: T.untyped).returns(Integer) }
+  sig { params(entry_addr: String, graph_data: Hash, fn_nodes: T.untyped).returns(Integer) }
   def deepest_path_cost(entry_addr, graph_data, fn_nodes: nil)
     frame_sizes = graph_data[:frame_sizes]
     call_graph  = graph_data[:call_graph]
@@ -385,7 +387,7 @@ class StackVerifier
   end
 
   # Map a byte cost to the smallest tier that fits.
-  sig { params(bytes: T.untyped).returns(Symbol) }
+  sig { params(bytes: Integer).returns(Symbol) }
   def cost_to_tier(bytes)
     if bytes <= TIER_BUDGET[:micro]
       :micro
@@ -399,7 +401,7 @@ class StackVerifier
   end
 
   # Print optimal tier report.
-  sig { params(results: T.untyped, io: T.untyped).returns(T.nilable(Array)) }
+  sig { params(results: Array, io: StringIO).returns(T.nilable(Array)) }
   def print_tier_report(results, io: $stderr)
     return if results.empty?
 
@@ -413,16 +415,19 @@ class StackVerifier
 
   private
 
+  sig { params(path: String).returns(String) }
   def detect_prefix(path)
     basename = File.basename(path).sub(/\.\w+$/, '')
     "._clear_tmp_#{basename}"
   end
 
+  sig { params(file: T.nilable(String), line: T.nilable(Integer)).returns(String) }
   def format_location(file, line)
     return "" unless file
     line ? "(#{File.basename(file)}:#{line}) " : "(#{File.basename(file)}) "
   end
 
+  sig { params(zig_name: String).returns(String) }
   def zig_to_clear_name(zig_name)
     name = zig_name.sub(/^#{Regexp.escape(@module_prefix)}\./, '')
     return "main" if name == "clearMain"

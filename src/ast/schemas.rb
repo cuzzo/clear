@@ -20,7 +20,10 @@ module Schemas
   # Frozen at the end of initialize so callers still see immutable shapes.
 
   class EnumSchema
+      extend T::Sig
+
     attr_reader :variants, :visibility
+    sig { params(variants: Set, visibility: Symbol).void }
     def initialize(variants:, visibility: :package)
       @variants = variants
       @visibility = visibility
@@ -54,7 +57,10 @@ module Schemas
   # itself a hash-as-struct that hasn't been extracted yet — that's a
   # smaller, per-variant scope and can wait.
   class UnionSchema
+      extend T::Sig
+
     attr_reader :variants, :type_params, :visibility
+    sig { params(variants: Hash, type_params: T.nilable(T::Array[Symbol]), visibility: Symbol).void }
     def initialize(variants:, type_params: nil, visibility: :package)
       @variants = variants
       @type_params = type_params
@@ -69,7 +75,10 @@ module Schemas
   # borrowed-set, generic type params, methods, EXTERN module, AS alias type,
   # visibility) live as named attrs rather than mixed Symbol keys in fields.
   class StructSchema
+      extend T::Sig
+
     attr_reader :fields, :field_defaults, :borrowed_fields, :type_params, :methods, :visibility, :extern_module, :as_type
+    sig { params(fields: Hash, field_defaults: T.nilable(T::Hash[String, T.untyped]), borrowed_fields: T.nilable(T::Set[String]), type_params: T.nilable(T::Array[Symbol]), methods: Hash, visibility: Symbol, extern_module: T.nilable(String), as_type: T.untyped).void }
     def initialize(fields: {}, field_defaults: nil, borrowed_fields: nil, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
       @fields = fields
       @field_defaults = field_defaults
@@ -109,7 +118,7 @@ module Schemas
     )
   end
 
-  sig { params(schema: T.untyped).returns(T.nilable(Schemas::UnionSchema)) }
+  sig { params(schema: T.nilable(Hash)).returns(T.nilable(Schemas::UnionSchema)) }
   def self.as_union_schema(schema)
     return schema if schema.is_a?(UnionSchema)
     return nil unless schema.is_a?(Hash) && schema[:kind] == :union
@@ -120,7 +129,7 @@ module Schemas
     )
   end
 
-  sig { params(schema: T.untyped).returns(T.untyped) }
+  sig { params(schema: T.nilable(Hash)).returns(T.untyped) }
   def self.as_resource_schema(schema)
     return schema if schema.is_a?(ResourceSchema)
     return nil unless schema.is_a?(Hash) && schema[:kind] == :resource

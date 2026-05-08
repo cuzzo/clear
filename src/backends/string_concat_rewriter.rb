@@ -16,13 +16,14 @@ require_relative "../ast/type"
 class StringConcatRewriter
     extend T::Sig
 
-  sig { params(ast: T.untyped).returns(Array) }
+  sig { params(ast: AST::Program).returns(Array) }
   def rewrite!(ast)
     ast.statements.each { |stmt| rewrite_in_node!(stmt) }
   end
 
   private
 
+  sig { params(node: T.untyped).returns(T.untyped) }
   def rewrite_in_node!(node)
     return node unless node
     rewrite_children!(node)
@@ -40,6 +41,7 @@ class StringConcatRewriter
     node
   end
 
+  sig { params(node: T.untyped).returns(T.untyped) }
   def rewrite_children!(node)
     case node
     when AST::FunctionDef
@@ -72,6 +74,7 @@ class StringConcatRewriter
   end
 
   # Is this a string + operation?
+  sig { params(node: T.untyped).returns(T.nilable(T::Boolean)) }
   def string_concat?(node)
     return true if node.is_a?(AST::StringConcat)
     return false unless node.is_a?(AST::BinaryOp)
@@ -79,6 +82,7 @@ class StringConcatRewriter
   end
 
   # Flatten chained string + into a flat list of parts.
+  sig { params(node: T.untyped).returns(Array) }
   def collect_parts(node)
     if node.is_a?(AST::StringConcat)
       node.parts

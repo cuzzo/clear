@@ -8,6 +8,16 @@
 #
 # See docs/clear-man.md for full documentation.
 
+# Set up Bundler so src/ files can `require "sorbet-runtime"` etc.
+# without relying on system gems. Soft-fails when Bundler isn't
+# available so end users running a vendored binary aren't blocked.
+begin
+  require "bundler/setup"
+rescue LoadError
+  # No Bundler: assume the required gems are on the default load path
+  # (e.g., installed at the system level or via a wrapper script).
+end
+
 require 'fileutils'
 require 'optparse'
 require 'digest'

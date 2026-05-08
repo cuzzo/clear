@@ -31,7 +31,7 @@ module PipelineGenerator
 
   # When lower_concurrent detected `list AS $u |> CONCURRENT op`, this wraps
   # the expression visit with $u -> placeholder substitution active.
-  sig { params(placeholder: T.untyped, blk: T.untyped).returns(String) }
+  sig { params(placeholder: String, blk: T.untyped).returns(String) }
   def with_concurrent_outer_binding(placeholder, &blk)
     T.bind(self, T.untyped) rescue nil
     return blk.call unless @concurrent_outer_binding
@@ -183,7 +183,7 @@ module PipelineGenerator
   # Pools and sharded lists materialise live items into a temporary buffer.
   # We always use rt.heapAlloc() for that buffer because the fiber frame is
   # small (4 KB) and running many pipeline ops in one function would overflow it.
-  sig { params(lhs_type: T.untyped, _alloc: T.untyped).returns(String) }
+  sig { params(lhs_type: T.untyped, _alloc: String).returns(String) }
   def build_pipe_items_block(lhs_type, _alloc)
     T.bind(self, T.untyped) rescue nil
     if lhs_type&.pool? && lhs_type&.sharded?
@@ -249,7 +249,7 @@ module PipelineGenerator
   # Visit a pipeline expression with placeholder + SOA rewrite enabled.
   # When the collection is @pool:soa, _.field accesses in the expression
   # are rewritten to __soa_field[__soa_i] (field-slice access).
-  sig { params(list_node: T.untyped, expr_node: T.untyped, placeholder: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, expr_node: T.untyped, placeholder: String).returns(String) }
   def visit_pipeline_expr(list_node, expr_node, placeholder = "it")
     T.bind(self, T.untyped) rescue nil
     lhs_t = list_node.type_info
@@ -282,10 +282,10 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, expression_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, expression_node: AST::Identifier).returns(String) }
   def transpile_where_filter(list_node, expression_node)
     T.bind(self, T.untyped) rescue nil
-    element_type_str = list_node.full_type.element_type.resolved.to_s
+    element_type_str = T.must(T.must(list_node.full_type).element_type).resolved.to_s
     expr_code = visit_pipeline_expr(list_node, expression_node)
 
     transpile_pipeline_macro(list_node, expression_node, res_type: element_type_str) do |alloc|
@@ -301,10 +301,10 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, expression_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, expression_node: AST::Identifier, smooth_node: T.any(AST::BinaryOp, OpenStruct)).returns(String) }
   def transpile_take_while(list_node, expression_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
-    element_type_str = list_node.full_type.element_type.resolved.to_s
+    element_type_str = T.must(T.must(list_node.full_type).element_type).resolved.to_s
     expr_code = visit_pipeline_expr(list_node, expression_node)
 
     transpile_pipeline_macro(list_node, smooth_node, res_type: element_type_str) do |alloc|
@@ -359,7 +359,7 @@ module PipelineGenerator
     (m[1].to_f * BATCH_WINDOW_TIME_NS[m[2]]).to_i.to_s
   end
 
-  sig { params(lhs: T.untyped, bw_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(lhs: AST::Identifier, bw_node: AST::BatchWindowOp, smooth_node: AST::BinaryOp).returns(String) }
   def transpile_batch_window(lhs, bw_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
     @bw_counter = (@bw_counter || 0) + 1
@@ -380,7 +380,7 @@ module PipelineGenerator
     elsif is_bounded
       lhs_type.stream_element_type.resolved
     else
-      lhs_type.element_type.resolved
+      T.must(T.must(lhs_type).element_type).resolved
     end
 
     elem_zig = transpile_type(elem_type.to_s)
@@ -613,11 +613,13 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, limit_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, limit_node: T.any(AST::LimitOp, OpenStruct), smooth_node: T.any(AST::BinaryOp, OpenStruct)).returns(String) }
   def transpile_limit(list_node, limit_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
-    element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
-    count_code = visit(limit_node.count)
+    element_zig_type = transpile_type(T.must(T.must(list_node.full_type).element_type).resolved.to_s)
+    # limit_node may be a real AST::LimitOp or an OpenStruct stand-in
+    # from tests; both expose `.count` dynamically.
+    count_code = visit(T.unsafe(limit_node).count)
 
     transpile_pipeline_macro(list_node, smooth_node, force_aos: true) do |alloc|
       <<~ZIG
@@ -631,10 +633,12 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, skip_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, skip_node: T.any(AST::SkipOp, OpenStruct), smooth_node: T.any(AST::BinaryOp, OpenStruct)).returns(String) }
   def transpile_skip(list_node, skip_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
-    count_code = visit(skip_node.count)
+    # skip_node may be a real AST::SkipOp or an OpenStruct stand-in
+    # from tests; both expose `.count` dynamically.
+    count_code = visit(T.unsafe(skip_node).count)
     my_label = next_pipe_label
     list_code = visit(list_node)
     @current_pipe_label = my_label
@@ -738,7 +742,7 @@ module PipelineGenerator
   #   - Regular array/list → sequential for loop
   #   - Plain pool         → sequential live-slot scan
   #   - Sharded pool       → N parallel fibers (one per shard, DO-block pattern)
-  sig { params(smooth_node: T.untyped).returns(String) }
+  sig { params(smooth_node: AST::BinaryOp).returns(String) }
   def transpile_each(smooth_node)
     T.bind(self, T.untyped) rescue nil
     lhs      = smooth_node.left
@@ -879,12 +883,12 @@ module PipelineGenerator
     ZIG
   end
 
-  sig { params(pool_node: T.untyped, body_code: T.untyped, pool_type: T.untyped).returns(String) }
+  sig { params(pool_node: AST::Identifier, body_code: String, pool_type: Type).returns(String) }
   def transpile_each_sharded_pool(pool_node, body_code, pool_type)
     T.bind(self, T.untyped) rescue nil
     n          = pool_type.shard_count
     pool_code  = visit(pool_node)
-    elem_zig   = pool_type.element_type.zig_type
+    elem_zig   = T.must(pool_type.element_type).zig_type
     rt_name    = @do_rt_name || "rt"
 
     @each_counter ||= 0
@@ -936,12 +940,12 @@ module PipelineGenerator
   end
 
   # Parallel EACH over @list:sharded(N) — dispatches N fibers, one per shard.
-  sig { params(list_node: T.untyped, body_code: T.untyped, list_type: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, body_code: String, list_type: Type).returns(String) }
   def transpile_each_sharded_list(list_node, body_code, list_type)
     T.bind(self, T.untyped) rescue nil
     n         = list_type.shard_count
     list_code = visit(list_node)
-    elem_zig  = list_type.element_type.zig_type
+    elem_zig  = T.must(list_type.element_type).zig_type
     rt_name   = @do_rt_name || "rt"
 
     @each_counter ||= 0
@@ -1018,7 +1022,7 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, any_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, any_node: T.untyped, smooth_node: T.untyped).returns(T.nilable(String)) }
   def transpile_any(list_node, any_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
     raise "transpile_any: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
@@ -1038,7 +1042,7 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, all_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, all_node: T.untyped, smooth_node: T.untyped).returns(T.nilable(String)) }
   def transpile_all(list_node, all_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
     raise "transpile_all: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
@@ -1058,7 +1062,7 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, count_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, count_node: T.untyped, smooth_node: T.untyped).returns(T.nilable(String)) }
   def transpile_count(list_node, count_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
     raise "transpile_count: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
@@ -1084,7 +1088,7 @@ module PipelineGenerator
   # Returns [min_sentinel, max_sentinel] for a given Zig numeric type.
   # min_sentinel is the initial value for a MIN accumulator (highest possible).
   # max_sentinel is the initial value for a MAX accumulator (lowest possible).
-  sig { params(zig_t: T.untyped, resolved_sym: T.untyped).returns(Array) }
+  sig { params(zig_t: String, resolved_sym: Symbol).returns(Array) }
   def agg_minmax_sentinels(zig_t, resolved_sym)
     T.bind(self, T.untyped) rescue nil
     if [:Float32, :Float64].include?(resolved_sym)
@@ -1098,7 +1102,7 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, sum_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, sum_node: T.untyped, smooth_node: T.untyped).returns(T.nilable(String)) }
   def transpile_sum(list_node, sum_node, smooth_node)
     # M8: observable destinations always route through
     # lower_range_fold_observable_default (the producer-fiber-spawn
@@ -1134,7 +1138,7 @@ module PipelineGenerator
   # in M8.
   OBS_DEST_GUARD_MSG = "observable_dest unexpected here -- should route through lower_range_fold_observable_default"
 
-  sig { params(list_node: T.untyped, avg_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, avg_node: AST::AverageOp, smooth_node: AST::BinaryOp).returns(String) }
   def transpile_average(list_node, avg_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
     raise "transpile_average: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
@@ -1152,12 +1156,12 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, min_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, min_node: AST::MinOp, smooth_node: AST::BinaryOp).returns(String) }
   def transpile_min(list_node, min_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
     raise "transpile_min: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, min_node.expression)
-    expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
+    expr_sym  = T.must(smooth_node.full_type).resolved  # exact type set by pipe_analysis
     acc_type  = transpile_type(smooth_node.full_type.to_s)
     min_init, _max_init = agg_minmax_sentinels(acc_type, expr_sym)
 
@@ -1174,12 +1178,12 @@ module PipelineGenerator
     end
   end
 
-  sig { params(list_node: T.untyped, max_node: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, max_node: AST::MaxOp, smooth_node: AST::BinaryOp).returns(String) }
   def transpile_max(list_node, max_node, smooth_node)
     T.bind(self, T.untyped) rescue nil
     raise "transpile_max: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, max_node.expression)
-    expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
+    expr_sym  = T.must(smooth_node.full_type).resolved  # exact type set by pipe_analysis
     acc_type  = transpile_type(smooth_node.full_type.to_s)
     _min_init, max_init = agg_minmax_sentinels(acc_type, expr_sym)
 
@@ -1200,7 +1204,7 @@ module PipelineGenerator
   # CONCURRENT modifier: parallel SELECT, WHERE, EACH
   # =========================================================
 
-  sig { params(smooth_node: T.untyped).returns(T.untyped) }
+  sig { params(smooth_node: AST::BinaryOp).returns(T.untyped) }
   def transpile_concurrent(smooth_node)
     T.bind(self, T.untyped) rescue nil
     lhs     = smooth_node.left
@@ -1796,7 +1800,7 @@ module PipelineGenerator
   # Returns the Zig spawn call for CONCURRENT workers.
   # CONCURRENT: submitSpawn — workers stay on the local scheduler (cache-local, SPSC-safe).
   # @parallel: spawnBest — distributes across schedulers (true multi-core parallelism).
-  sig { params(options: T.untyped, wg_var: T.untyped, ctx_type: T.untyped, ctx_var: T.untyped).returns(String) }
+  sig { params(options: Hash, wg_var: String, ctx_type: String, ctx_var: String).returns(String) }
   def concurrent_spawn_call(options, wg_var, ctx_type, ctx_var)
     T.bind(self, T.untyped) rescue nil
     parallel  = options["parallel"]
@@ -1812,7 +1816,7 @@ module PipelineGenerator
     end
   end
 
-  sig { params(options: T.untyped).returns(String) }
+  sig { params(options: Hash).returns(String) }
   def concurrent_batch_code(options)
     T.bind(self, T.untyped) rescue nil
     batch = options["batch"]
@@ -1834,7 +1838,7 @@ module PipelineGenerator
     [:default, expr]
   end
 
-  sig { params(list_node: T.untyped, select_op: T.untyped, id: T.untyped, workers_code: T.untyped, rt_name: T.untyped, options: T.untyped).returns(String) }
+  sig { params(list_node: T.untyped, select_op: AST::SelectOp, id: Integer, workers_code: String, rt_name: String, options: Hash).returns(String) }
   def transpile_concurrent_select(list_node, select_op, id, workers_code, rt_name, options = {})
     T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
@@ -1942,7 +1946,7 @@ module PipelineGenerator
     ZIG
   end
 
-  sig { params(list_node: T.untyped, where_op: T.untyped, id: T.untyped, workers_code: T.untyped, rt_name: T.untyped, options: T.untyped).returns(String) }
+  sig { params(list_node: T.untyped, where_op: AST::WhereOp, id: Integer, workers_code: String, rt_name: String, options: Hash).returns(String) }
   def transpile_concurrent_where(list_node, where_op, id, workers_code, rt_name, options = {})
     T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
@@ -2045,10 +2049,10 @@ module PipelineGenerator
     ZIG
   end
 
-  sig { params(list_node: T.untyped, each_op: T.untyped, id: T.untyped, workers_code: T.untyped, rt_name: T.untyped, options: T.untyped).returns(String) }
+  sig { params(list_node: AST::Identifier, each_op: AST::EachOp, id: Integer, workers_code: String, rt_name: String, options: Hash).returns(String) }
   def transpile_concurrent_each(list_node, each_op, id, workers_code, rt_name, options = {})
     T.bind(self, T.untyped) rescue nil
-    item_zig = transpile_type(list_node.type_info.element_type.resolved)
+    item_zig = transpile_type(T.must(T.must(list_node.type_info).element_type).resolved)
 
     list_code  = visit(list_node)
     lhs_type   = list_node.type_info
@@ -2136,7 +2140,7 @@ module PipelineGenerator
   # Zero contention during the parallel phase. Sequential O(N)
   # combine after WaitGroup.wait().
   #
-  sig { params(list_node: T.untyped, op_node: T.untyped, id: T.untyped, workers_code: T.untyped, rt_name: T.untyped, options: T.untyped, kind: T.untyped, smooth_node: T.untyped).returns(String) }
+  sig { params(list_node: T.untyped, op_node: T.untyped, id: Integer, workers_code: String, rt_name: String, options: Hash, kind: Symbol, smooth_node: T.nilable(AST::BinaryOp)).returns(String) }
   def transpile_concurrent_reduce(list_node, op_node, id, workers_code, rt_name, options, kind, smooth_node = nil)
     T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
@@ -2174,14 +2178,14 @@ module PipelineGenerator
       result_type  = "i64"
       result_init  = "0"
     when :min
-      expr_sym     = smooth_node ? smooth_node.full_type.resolved : :Float64
+      expr_sym     = smooth_node ? T.must(smooth_node.full_type).resolved : :Float64
       partial_type = smooth_node ? transpile_type(smooth_node.full_type.to_s) : "f64"
       partial_init, _ = agg_minmax_sentinels(partial_type, expr_sym)
       worker_body  = "const __v = #{expr_code}; if (__v < ctx.partial.*) ctx.partial.* = __v;"
       result_type  = partial_type
       result_init  = partial_init
     when :max
-      expr_sym     = smooth_node ? smooth_node.full_type.resolved : :Float64
+      expr_sym     = smooth_node ? T.must(smooth_node.full_type).resolved : :Float64
       partial_type = smooth_node ? transpile_type(smooth_node.full_type.to_s) : "f64"
       _, partial_init = agg_minmax_sentinels(partial_type, expr_sym)
       worker_body  = "const __v = #{expr_code}; if (__v > ctx.partial.*) ctx.partial.* = __v;"
@@ -2264,7 +2268,7 @@ module PipelineGenerator
     ZIG
   end
 
-  sig { params(kind: T.untyped, id: T.untyped).returns(T.untyped) }
+  sig { params(kind: Symbol, id: Integer).returns(T.untyped) }
   def combine_body_inline(kind, id)
     T.bind(self, T.untyped) rescue nil
     p = "__ccr#{id}_p"

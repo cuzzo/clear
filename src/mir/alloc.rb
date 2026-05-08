@@ -12,7 +12,7 @@ module AllocHelper
 
   # Downgrade :frame to :stack for struct literals inside loop bodies.
   # The OS stack reclaims them each iteration; LLVM can SROA the fields.
-  sig { params(node: T.untyped, storage: T.untyped).returns(Symbol) }
+  sig { params(node: T.untyped, storage: Symbol).returns(Symbol) }
   def downgrade_frame_to_stack(node, storage)
     T.bind(self, SemanticAnnotator) rescue nil
     return storage unless storage == :frame && (current_fn_ctx&.loop_depth || @loop_depth) > 0

@@ -24,6 +24,7 @@ class PipelineRewriter
   # to the pipeline_generator path.
   LIST_TERMINALS = [AST::UnnestOp, AST::DistinctOp].freeze
 
+  sig { params(annotator: T.nilable(SemanticAnnotator)).void }
   def initialize(annotator = nil)
     @annotator = annotator
     @var_counter = 0
@@ -46,11 +47,13 @@ class PipelineRewriter
 
   private
 
+  sig { params(prefix: String).returns(String) }
   def next_var(prefix = "__v")
     @var_counter += 1
     "#{prefix}#{@var_counter}"
   end
 
+  sig { params(node: T.untyped).returns(T.untyped) }
   def rewrite_children!(node)
     case node
     when AST::Program
@@ -98,6 +101,7 @@ class PipelineRewriter
     end
   end
 
+  sig { params(node: AST::BinaryOp).returns(T.untyped) }
   def rewrite_pipeline(node)
     source = node.left
     rhs = node.right
@@ -248,6 +252,7 @@ class PipelineRewriter
     node
   end
 
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def is_fusible?(node)
     FUSIBLE_STAGES.any? { |t| node.is_a?(t) }
   end
@@ -255,6 +260,7 @@ class PipelineRewriter
   # Returns true if the node is, or contains, a BIND_VAR-sourced pipeline.
   # These are handled by MIR lowering (lower_binding_chain) which performs
   # correct $u -> loop_var substitution. PipelineRewriter must leave them alone.
+  sig { params(node: T.untyped).returns(T::Boolean) }
   def binding_source?(node)
     return true if node.is_a?(AST::BinaryOp) && node.op == :BIND_VAR
     return false unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
@@ -263,6 +269,7 @@ class PipelineRewriter
     inner_src.is_a?(AST::BinaryOp) && inner_src.op == :BIND_VAR
   end
 
+  sig { params(node: AST::BinaryOp).returns(T::Hash[Symbol, T.untyped]) }
   def collect_chain(node)
     stages = []
     cursor = T.let(node, T.untyped)
@@ -296,6 +303,7 @@ class PipelineRewriter
     { source: cursor, stages: stages, terminal: terminal }
   end
 
+  sig { params(smooth_node: AST::BinaryOp, source: T.untyped, stages: Array, terminal: T.untyped).returns(T.untyped) }
   def fuse_pipeline(smooth_node, source, stages, terminal)
     # Generate unique variable names for this pipeline
     res_var = next_var("__res")
@@ -395,6 +403,7 @@ class PipelineRewriter
     block
   end
 
+  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(Array) }
   def build_init(terminal, res_var, token, smooth_node)
     case terminal
     when AST::SumOp, AST::CountOp
@@ -490,6 +499,7 @@ class PipelineRewriter
     end
   end
 
+  sig { params(stages: Array, terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, stage_inits: Array, res_type: T.nilable(Type)).returns(Array) }
   def build_recursive_body(stages, terminal, current_val, res_var, token, stage_inits = [], res_type = nil)
     if stages.empty?
       return build_terminal_action(terminal, current_val, res_var, token, res_type)
@@ -501,7 +511,7 @@ class PipelineRewriter
     case stage
     when AST::WhereOp
       pred = replace_placeholder(stage.expression, current_val)
-      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      then_branch = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, nil)
       if_stmt.full_type = :Void
       [if_stmt]
@@ -517,14 +527,14 @@ class PipelineRewriter
       sel_decl.instance_variable_set(:@var_used, true)
       sel_ident = AST::Identifier.new(stage.token, sel_var)
       sel_ident.full_type = stage.expression.full_type
-      rest = build_recursive_body(remaining, terminal, sel_ident, res_var, token, stage_inits, res_type)
+      rest = build_recursive_body(T.must(remaining), terminal, sel_ident, res_var, token, stage_inits, res_type)
       [sel_decl] + rest
     when AST::TapOp
       tap_body = stage.body.map { |s| replace_placeholder(s, current_val) }
-      tap_body + build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      tap_body + build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
     when AST::TakeWhileOp
       pred = replace_placeholder(stage.expression, current_val)
-      then_branch = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      then_branch = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       if_stmt = AST::IfStatement.new(stage.token, pred, then_branch, [AST::BreakNode.new(stage.token)])
       if_stmt.full_type = :Void
       [if_stmt]
@@ -553,7 +563,7 @@ class PipelineRewriter
       skip_if = AST::IfStatement.new(token, cond, [AST::ContinueNode.new(token)], nil)
       skip_if.full_type = :Void
 
-      rest = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      rest = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       [increment, skip_if] + rest
     when AST::LimitOp
       cnt_var = next_var("__lim_cnt")
@@ -580,13 +590,14 @@ class PipelineRewriter
       limit_if = AST::IfStatement.new(token, cond, [AST::BreakNode.new(token)], nil)
       limit_if.full_type = :Void
 
-      rest = build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      rest = build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
       [increment, limit_if] + rest
     else
-      build_recursive_body(remaining, terminal, current_val, res_var, token, stage_inits, res_type)
+      build_recursive_body(T.must(remaining), terminal, current_val, res_var, token, stage_inits, res_type)
     end
   end
 
+  sig { params(terminal: T.untyped, current_val: AST::Identifier, res_var: String, token: Lexer::Token, res_type: T.nilable(Type)).returns(Array) }
   def build_terminal_action(terminal, current_val, res_var, token, res_type = nil)
     res_ident = AST::Identifier.new(token, res_var)
     res_ident.full_type = res_type if res_type
@@ -703,6 +714,7 @@ class PipelineRewriter
     end
   end
 
+  sig { params(terminal: T.untyped, res_var: String, token: Lexer::Token, smooth_node: AST::BinaryOp).returns(T.any(AST::BinaryOp, AST::Identifier)) }
   def build_final_result(terminal, res_var, token, smooth_node)
     if terminal.is_a?(AST::AverageOp)
       sum_ident = AST::Identifier.new(token, "#{res_var}_sum")
@@ -720,12 +732,14 @@ class PipelineRewriter
     end
   end
 
+  sig { returns(Proc) }
   def schema_lookup
     @schema_lookup ||= ->(name) { @annotator&.lookup_type_schema(name) }
   end
 
   # Check if the RHS callee returns an error union (even if the SMOOTH
   # node's full_type was already unwrapped by a CATCH block).
+  sig { params(rhs: T.untyped).returns(T::Boolean) }
   def callee_returns_error?(rhs)
     ti = rhs.respond_to?(:type_info) ? rhs.type_info : nil
     return false unless ti
@@ -737,6 +751,7 @@ class PipelineRewriter
 
   # Returns true if the source requires the transpiler's pipeline_generator
   # (pool, sharded, or SOA collections need special iteration patterns).
+  sig { params(source: T.untyped).returns(T::Boolean) }
   def needs_transpiler_pipeline?(source)
     ti = source.respond_to?(:type_info) ? source.type_info : nil
     return false unless ti
@@ -753,6 +768,7 @@ class PipelineRewriter
     cursor.left = new_source
   end
 
+  sig { params(node: T.untyped, name: String, replacement: AST::Identifier).returns(T.untyped) }
   def replace_named_placeholder(node, name, replacement)
     return node unless node
     if node.is_a?(AST::Identifier) && node.name == name
@@ -770,6 +786,7 @@ class PipelineRewriter
     new_node
   end
 
+  sig { params(node: T.untyped, replacement: AST::Identifier).returns(T.untyped) }
   def replace_placeholder(node, replacement)
     return node unless node
     if node.is_a?(AST::Placeholder) || (node.is_a?(AST::Identifier) && node.name == "_")

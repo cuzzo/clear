@@ -14,7 +14,7 @@ module AST
   # Yields each statement node. Handles IfStatement, MatchStatement,
   # WhileLoop, ForRange, ForEach, and generic nodes with .body.
   # Adding a new control flow node type requires updating only this method.
-  sig { params(body: T.untyped, visitor: T.untyped).returns(T.nilable(Array)) }
+  sig { params(body: Array, visitor: T.untyped).returns(T.nilable(Array)) }
   def self.walk_body(body, &visitor)
     return unless body
     Array(body).each do |node|
@@ -117,7 +117,7 @@ module AST
   # one with one pass per function. Replaces the per-source-type
   # iteration that used to live in lower_bg_block, lower_do_block, and
   # the pipeline_host concurrent lowerings.
-  sig { params(body: T.untyped, block: T.untyped).returns(T.untyped) }
+  sig { params(body: Array, block: T.untyped).returns(T.untyped) }
   def self.each_capture_analysis(body, &block)
     each_bg_block(body) do |bg|
       yield bg.capture_analysis if bg.capture_analysis
@@ -207,11 +207,7 @@ module AST
 
     # Returns the Type object directly. Callers use type_info for rich access
     # and == / .to_s / Type.new(full_type) for interop.
-    # Widened to T.untyped because @type_object is sometimes a Symbol
-    # (raw type alias before annotation resolves it) and sometimes a
-    # FunctionSignature (FunctionDef / ExternFnDecl). Caller-side
-    # `is_a?(Type) ? : Type.new(...)` defensive patterns rely on this.
-    sig { returns(T.untyped) }
+    sig { returns(T.nilable(Type)) }
     def full_type
       @type_object
     end
@@ -391,12 +387,8 @@ module AST
     end
 
     # -- NEW PREFERRED ACCESSOR --
-    # Use this in new code to get the rich object.
-    # Widened to T.untyped because @type_object is sometimes a Symbol
-    # (raw type alias before annotation resolves it) — the defensive
-    # `Type.new(ti) if ti && !ti.is_a?(Type)` chain across promotion_plan
-    # / mir_pass / control_flow / annotator / mir_lowering relies on it.
-    sig { returns(T.untyped) }
+    # Use this in new code to get the rich object
+    sig { returns(T.nilable(Type)) }
     def type_info
       @type_object
     end
@@ -417,7 +409,7 @@ module AST
       @storage_override || (@type_object && (@type_object.provenance || :stack))
     end
 
-    sig { params(val: T.untyped).returns(T.nilable(Symbol)) }
+    sig { params(val: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
     def storage=(val)
       # Use a node-local override rather than mutating @type_object.provenance.
       # @type_object may be a shared Type (e.g. STRING_TYPE from std_lib, or the

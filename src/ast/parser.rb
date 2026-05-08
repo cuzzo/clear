@@ -21,6 +21,7 @@ class Parser
   @@primary_rules = {}
   @@suffix_rules = {}
 
+  sig { params(type: Symbol, value: String, node_class: T.nilable(Class), pattern: T.nilable(Array), inject: T::Array[TrueClass], block: T.untyped).returns(Proc) }
   def self.stmt(type, value, node_class = nil, pattern = nil, inject: [], &block)
     if pattern
       # If pattern provided, create a block that runs the engine
@@ -28,14 +29,15 @@ class Parser
         T.bind(self, Parser) rescue nil
         start_token = current
         args = process_pattern(pattern)
-        args.concat(inject)
-        node_class.new(start_token, *args)
+        T.must(args).concat(inject)
+        T.unsafe(node_class).new(start_token, *args)
       end
     else
       @@stmt_rules[[type, value]] = block
     end
   end
 
+  sig { params(type: Symbol, value: T.nilable(String), node_class: T.nilable(Class), pattern: T.nilable(Array), block: T.untyped).returns(Proc) }
   def self.primary(type, value=nil, node_class = nil, pattern = nil,  &block)
     if pattern
       # If pattern provided, create a block that runs the engine
@@ -43,17 +45,19 @@ class Parser
         T.bind(self, Parser) rescue nil
         start_token = current
         args = process_pattern(pattern)
-        node_class.new(start_token, *args)
+        T.unsafe(node_class).new(start_token, *args)
       end
     else
       @@primary_rules[[type, value]] = block
     end
   end
 
+  sig { params(type: Symbol, value: String, block: T.untyped).returns(Proc) }
   def self.suffix(type, value, &block)
     @@suffix_rules[[type, value]] = block
   end
 
+  sig { params(tokens: T::Array[Lexer::Token], source_code: String, gradual: T.untyped).void }
   def initialize(tokens, source_code = "", gradual: nil)
     @tokens = tokens
     @pos = 0
@@ -78,7 +82,7 @@ class Parser
   end
   self.gradual_mode = false
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(AST::Program)) }
   def parse
     stmts = []
     stmts << parse_statement() while current.type != :EOF
@@ -87,10 +91,12 @@ class Parser
 
   private
 
+  sig { returns(T.untyped) }
   def peek
     @tokens[@pos + 1] || Lexer::Token.new(:EOF, "", current.line, current.column)
   end
 
+  sig { params(n: Integer).returns(T.untyped) }
   def peek_at(n)
     @tokens[@pos + n]
   end
@@ -162,7 +168,7 @@ class Parser
     colon_tok = consume(:CHAR, ':')
     error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON) unless match?(:VAR_ID)
     ident_tok = consume(:VAR_ID)
-    AST::Literal.new(colon_tok, :SYMBOL, ident_tok.value, :stack)
+    AST::Literal.new(colon_tok, :SYMBOL, T.must(ident_tok).value, :stack)
   end
   primary(:BYTE) { T.bind(self, Parser); parse_literal(:BYTE, :stack) }
   primary(:PREFIXED_INT) { T.bind(self, Parser); parse_literal(:PREFIXED_INT, :stack) }
@@ -238,7 +244,7 @@ class Parser
       name_tok = consume(:VAR_ID)
       consume(:CHAR, ')')
       bind = AST::BinaryOp.new(name_tok, expr, :BIND_VAR,
-               AST::Identifier.new(name_tok, name_tok.value))
+               AST::Identifier.new(name_tok, T.must(name_tok).value))
       bind.paren_bind = true
       next parse_suffixes(bind)
     end
@@ -279,7 +285,7 @@ class Parser
     colon_token = consume(:DOUBLE_COLON, '::')
     method_token = consume(:VAR_ID)
     _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
-    AST::StaticCall.new(colon_token, lhs, method_token.value, args)
+    AST::StaticCall.new(colon_token, lhs, T.must(method_token).value, args)
   end
 
   # Dot Access: obj.field OR obj.method() OR EnumType.Variant
@@ -292,7 +298,7 @@ class Parser
       AST::GetField.new(star_token, lhs, '*')
     else
       name_token = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
-      name = name_token.value
+      name = T.must(name_token).value
 
       # Predicate suffix: name? followed by ( → method call with ? suffix
       if match?(:CHAR, '?') && peek_at(1)&.value == '('
@@ -354,7 +360,7 @@ class Parser
   suffix(:VAR_ID, '@multiowned') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -363,7 +369,7 @@ class Parser
   suffix(:VAR_ID, '@shared') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -372,7 +378,7 @@ class Parser
   suffix(:VAR_ID, '@locked') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -381,7 +387,7 @@ class Parser
   suffix(:VAR_ID, '@writeLocked') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, lock_rank = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
     cw.lock_rank = lock_rank
     cw
@@ -390,35 +396,35 @@ class Parser
   suffix(:VAR_ID, '@local') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@alwaysMutable') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@versioned') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@atomic') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@indirect') do |lhs|
     T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
-    ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
+    ownership, sync, layout, _ = parse_cap_join(T.must(token), CAP_SIGIL_ATTRS[T.must(token).value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
@@ -432,7 +438,7 @@ class Parser
         lhs.target.name[0] =~ /[A-Z]/
       tok = current
       _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
-        k = (current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)).value
+        k = (T.must(current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID))).value
         consume(:CHAR, ':')
         v = parse_expression
         [k, v]
@@ -443,13 +449,15 @@ class Parser
     end
   end
 
+  sig { params(type: Symbol, storage: Symbol).returns(T.untyped) }
   def parse_literal(type, storage)
     token = consume(type)
-    node = AST::Literal.new(token, type, token.value, storage)
+    node = AST::Literal.new(token, type, T.must(token).value, storage)
     parse_suffixes(node)
   end
 
   ## START PATTERN DSL
+  sig { params(pattern: Array).returns(T.nilable(Array)) }
   def process_pattern(pattern)
     captures = []
 
@@ -480,9 +488,10 @@ class Parser
     captures
   end
 
+  sig { params(item: Symbol).returns(T.untyped) }
   def run_action(item)
     # Convention: :UPPER_CASE is a Token Type to eat
-    return consume(item).value if item == item.upcase
+    return T.must(consume(item)).value if item == item.upcase
     # :pipe_expression → parse_expression with min precedence = |> (1)
     # Excludes |> (prec 1, since 1 > 1 is false) but includes OR (prec 2).
     return parse_expression(1) if item == :pipe_expression
@@ -491,6 +500,7 @@ class Parser
   end
 
   # Helpers for the literals (Keywords or Chars)
+  sig { params(val: String).returns(T.nilable(Lexer::Token)) }
   def consume_literal(val)
     if val == '_'
       consume(:UNDERSCORE)
@@ -501,6 +511,7 @@ class Parser
     end
   end
 
+  sig { params(val: String).returns(T.untyped) }
   def match_literal!(val)
     type = val.match?(/[a-zA-Z]/) ? :KEYWORD : :CHAR
     match!(type, val)
@@ -508,15 +519,18 @@ class Parser
   ## END PATTERN DSL
 
 
+  sig { returns(T.untyped) }
   def current
     @tokens[@pos]
   end
 
+  sig { returns(T.untyped) }
   def previous
     @tokens[@pos-1]
   end
 
   # Consume a numeric literal (either :NUMBER float or :INT64 integer).
+  sig { returns(Lexer::Token) }
   def consume_number
     if current.type == :NUMBER || current.type == :INT64
       tok = current
@@ -527,6 +541,7 @@ class Parser
     end
   end
 
+  sig { params(type: Symbol, value: T.nilable(String)).returns(T.nilable(Lexer::Token)) }
   def consume(type, value=nil)
     # 1. Capture the current token BEFORE moving the pointer
     token = current
@@ -564,6 +579,7 @@ class Parser
   #     an inline body on the same line as the condition).
   SYNTAX_TOKENS_AT_STATEMENT_END = %w[; THEN DO ->].freeze
 
+  sig { params(token: Lexer::Token, expected_type: Symbol, expected_value: T.nilable(String)).returns(T.untyped) }
   def emit_consume_error_with_fix(token, expected_type, expected_value)
     prev_tok = @pos > 0 ? @tokens[@pos - 1] : nil
 
@@ -619,11 +635,13 @@ class Parser
       fixes: [fix], raise_in_collector: true)
   end
 
+  sig { params(type: Symbol, val: T.nilable(String)).returns(T::Boolean) }
   def match?(type, val=nil)
     current.type == type && (val.nil? || current.value == val)
   end
 
   # Match and immediately eat
+  sig { params(type: Symbol, value: T.nilable(String)).returns(T.untyped) }
   def match!(type, value=nil)
     if match?(type, value)
       consume(type) # We already know it matches, so this is safe
@@ -632,6 +650,7 @@ class Parser
     end
   end
 
+  sig { returns(T.untyped) }
   def parse_statement
     # Keywordless bind/assign: x = ..., x: Type = ..., x.field = ..., x[0] = ...
     if current.type == :VAR_ID
@@ -649,6 +668,7 @@ class Parser
   # Speculatively parse `target [: Type] = expression ;` as a BindExpr or Assignment.
   # Returns nil (and backtracks) if no `=` follows the target, so we fall through to
   # expression-statement parsing (e.g. method calls like `foo();`).
+  sig { returns(T.untyped) }
   def try_parse_bind_or_assign
     saved_pos = @pos
     target_token = current
@@ -669,7 +689,7 @@ class Parser
       end
 
       op_token = consume(:COMPOUND_ASSIGN)
-      op_char = op_token.value[0]  # '+=' → '+', '-=' → '-', etc.
+      op_char = T.must(op_token).value[0]  # '+=' → '+', '-=' → '-', etc.
       op_sym = AST::OP_TO_OP_CODE[op_char] || op_char.to_sym
       rhs = parse_expression
       consume(:CHAR, ';')
@@ -713,6 +733,7 @@ class Parser
     end
   end
 
+  sig { returns(T.untyped) }
   def parse_tight_stmt
     tight_token = consume(:KEYWORD, 'TIGHT')
     if match?(:KEYWORD, 'FOR')
@@ -742,6 +763,7 @@ class Parser
     node
   end
 
+  sig { returns(AST::ReturnNode) }
   def parse_return
     ret_token = consume(:KEYWORD, 'RETURN')
     value = nil
@@ -780,6 +802,7 @@ class Parser
     AST::DieNode.new(die_token, status)
   end
 
+  sig { returns(T.nilable(Array)) }
   def parse_argument_list()
     parse_comma_seq(:CHAR, '(', ')') do
       takes = match!(:KEYWORD, 'TAKES')
@@ -802,7 +825,7 @@ class Parser
 
       if is_comptime
         consume(:CHAR, ':')
-        p_type = consume(:TYPE_ID).value.to_sym  # The type param name (T)
+        p_type = T.must(consume(:TYPE_ID)).value.to_sym  # The type param name (T)
         p_name = "comptime"
       else
         # Syntax: name=default: Type  (default before type annotation)
@@ -823,9 +846,10 @@ class Parser
      .last # always ignore the first token
   end
 
+  sig { returns(AST::RequireNode) }
   def parse_require
     tok = consume(:KEYWORD, 'REQUIRE')
-    raw = consume(:STRING).value
+    raw = T.must(consume(:STRING)).value
 
     if raw.start_with?("pkg:")
       # Package import: REQUIRE "pkg:math"  →  kind=:package, path="math"
@@ -843,12 +867,13 @@ class Parser
     end
 
     if match!(:KEYWORD, 'AS')
-      namespace = consume(:VAR_ID).value
+      namespace = T.must(consume(:VAR_ID)).value
     end
     match!(:CHAR, ';')
     AST::RequireNode.new(tok, path, namespace, kind)
   end
 
+  sig { params(visibility: Symbol).returns(T.untyped) }
   def parse_visibility_decl(visibility)
     consume(:KEYWORD)  # consume PUB or PRIVATE
     if match?(:KEYWORD, 'FN')
@@ -868,17 +893,19 @@ class Parser
 
   # EXTERN FN name(params) RETURNS type FROM "module_name";
   # EXTERN STRUCT Name { fields } FROM "module_name";
+  sig { returns(T.untyped) }
   def parse_extern_decl
     tok = consume(:KEYWORD, 'EXTERN')
     if match?(:KEYWORD, 'FN')
-      parse_extern_fn(tok)
+      parse_extern_fn(T.must(tok))
     elsif match?(:KEYWORD, 'STRUCT')
-      parse_extern_struct(tok)
+      parse_extern_struct(T.must(tok))
     else
       error!(current, :EXTERN_BAD_KIND, got: current.value)
     end
   end
 
+  sig { params(extern_tok: Lexer::Token).returns(T.nilable(AST::ExternFnDecl)) }
   def parse_extern_fn(extern_tok)
     consume(:KEYWORD, 'FN')
 
@@ -889,10 +916,10 @@ class Parser
 
     if match?(:TYPE_ID)
       # Could be TypeName<T>.method or just a TYPE_ID-named function
-      type_name = consume(:TYPE_ID).value
+      type_name = T.must(consume(:TYPE_ID)).value
       if match!(:CHAR, '<')
         loop do
-          owner_type_params << consume(:TYPE_ID).value.to_sym
+          owner_type_params << T.must(consume(:TYPE_ID)).value.to_sym
           break unless match!(:CHAR, ',')
         end
         consume(:CHAR, '>')
@@ -900,7 +927,7 @@ class Parser
       if match!(:CHAR, '.')
         # It's a method: TypeName<T>.methodName
         owner_type = type_name
-        name = consume(:VAR_ID).value
+        name = T.must(consume(:VAR_ID)).value
       else
         # TYPE_ID without dot — treat as function name (unusual but valid)
         name = type_name
@@ -908,11 +935,11 @@ class Parser
         owner_type_params = []
       end
     else
-      name = consume(:VAR_ID).value
+      name = T.must(consume(:VAR_ID)).value
       # Optional generic type params on the function: fnName<T>
       if match!(:CHAR, '<')
         loop do
-          fn_type_params << consume(:TYPE_ID).value.to_sym
+          fn_type_params << T.must(consume(:TYPE_ID)).value.to_sym
           break unless match!(:CHAR, ',')
         end
         consume(:CHAR, '>')
@@ -935,10 +962,10 @@ class Parser
       loop do
         consume(:CHAR, ':')
         eff_tok = consume(:VAR_ID)
-        eff_name = eff_tok.value.to_sym
+        eff_name = T.must(eff_tok).value.to_sym
         unless [:alloc, :safe].include?(eff_name)
           emit_typo_suggestion!(
-            eff_tok, eff_tok.value, %w[alloc safe],
+            eff_tok, T.must(eff_tok).value, %w[alloc safe],
             "Unknown effect ':#{eff_name}'",
             "closest effect",
             category: :type, cascade: true
@@ -949,10 +976,10 @@ class Parser
         elsif eff_name == :alloc && match?(:CHAR, ':')
           consume(:CHAR, ':')
           qual_tok = consume(:VAR_ID)
-          qualifier = qual_tok.value.to_sym
+          qualifier = T.must(qual_tok).value.to_sym
           unless [:frame, :heap].include?(qualifier)
             emit_typo_suggestion!(
-              qual_tok, qual_tok.value, %w[frame heap],
+              qual_tok, T.must(qual_tok).value, %w[frame heap],
               "Unknown alloc qualifier ':#{qualifier}'",
               "closest alloc qualifier",
               category: :type, cascade: true
@@ -967,7 +994,7 @@ class Parser
     end
 
     consume(:KEYWORD, 'FROM')
-    from_module = consume(:STRING).value
+    from_module = T.must(consume(:STRING)).value
     match!(:CHAR, ';')
     node = AST::ExternFnDecl.new(extern_tok, name, params, return_type, from_module, effects)
     node.owner_type = owner_type if owner_type
@@ -976,15 +1003,16 @@ class Parser
     node
   end
 
+  sig { params(extern_tok: Lexer::Token).returns(T.nilable(AST::ExternStructDecl)) }
   def parse_extern_struct(extern_tok)
     consume(:KEYWORD, 'STRUCT')
-    name = consume(:TYPE_ID).value
+    name = T.must(consume(:TYPE_ID)).value
 
     # Optional generic type params: EXTERN STRUCT Parsed<T> { ... }
     type_params = []
     if match!(:CHAR, '<')
       loop do
-        type_params << consume(:TYPE_ID).value.to_sym
+        type_params << T.must(consume(:TYPE_ID)).value.to_sym
         break unless match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -996,18 +1024,18 @@ class Parser
     # Optional: CLOSE "method" — register cleanup method for RAII
     close_method = nil
     if match!(:KEYWORD, 'CLOSE')
-      close_method = consume(:STRING).value
+      close_method = T.must(consume(:STRING)).value
     end
 
     # Optional: AS "ZigTypeExpr" — alias to parameterized Zig type (e.g. Parsed(JsonRecord))
     as_type = nil
     if match!(:KEYWORD, 'AS')
-      as_type = consume(:STRING).value
+      as_type = T.must(consume(:STRING)).value
     end
 
     from_module = nil
     if match!(:KEYWORD, 'FROM')
-      from_module = consume(:STRING).value
+      from_module = T.must(consume(:STRING)).value
     end
     match!(:CHAR, ';')
     node = AST::ExternStructDecl.new(extern_tok, name, fields, from_module)
@@ -1017,14 +1045,15 @@ class Parser
     node
   end
 
+  sig { params(visibility: Symbol).returns(T.nilable(AST::StructDef)) }
   def parse_struct_def(visibility = :package)
     tok = consume(:KEYWORD, 'STRUCT')
-    name = consume(:TYPE_ID).value
+    name = T.must(consume(:TYPE_ID)).value
     type_params = []
     if match?(:CHAR, '<')
       consume(:CHAR, '<')
       until match?(:CHAR, '>')
-        type_params << consume(:TYPE_ID).value
+        type_params << T.must(consume(:TYPE_ID)).value
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -1033,29 +1062,31 @@ class Parser
     AST::StructDef.new(tok, name, fields, visibility, type_params)
   end
 
+  sig { params(visibility: Symbol).returns(AST::EnumDef) }
   def parse_enum_def(visibility = :package)
     tok = consume(:KEYWORD, 'ENUM')
-    name = consume(:TYPE_ID).value
+    name = T.must(consume(:TYPE_ID)).value
     consume(:CHAR, '{')
     variants = []
     until match?(:CHAR, '}')
-      variants << consume(:TYPE_ID).value
+      variants << T.must(consume(:TYPE_ID)).value
       match!(:CHAR, ',')
     end
     consume(:CHAR, '}')
     AST::EnumDef.new(tok, name, variants, visibility)
   end
 
+  sig { params(visibility: Symbol).returns(T.nilable(AST::UnionDef)) }
   def parse_union_def(visibility = :package)
     tok = consume(:KEYWORD, 'UNION')
-    name = consume(:TYPE_ID).value
+    name = T.must(consume(:TYPE_ID)).value
 
     # Parse optional generic type parameters: UNION Option<T> { ... }
     type_params = []
     if match?(:CHAR, '<')
       consume(:CHAR, '<')
       until match?(:CHAR, '>')
-        type_params << consume(:TYPE_ID).value
+        type_params << T.must(consume(:TYPE_ID)).value
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -1077,9 +1108,9 @@ class Parser
           stub_vis = :private
         end
         fn_tok = consume(:KEYWORD, 'FN')
-        fn_name = consume(:VAR_ID).value
+        fn_name = T.must(consume(:VAR_ID)).value
         _, raw_params = parse_comma_seq(:CHAR, '(', ')') do
-          p_name = consume(:VAR_ID).value
+          p_name = T.must(consume(:VAR_ID)).value
           consume(:CHAR, ':')
           p_type = parse_type_annotation
           { name: p_name, type: p_type }
@@ -1098,7 +1129,7 @@ class Parser
         method_reqs << { token: fn_tok, name: fn_name, params: raw_params,
                          return_type: ret_type, body: default_body, visibility: stub_vis }
       else
-        var_name = consume(:TYPE_ID).value
+        var_name = T.must(consume(:TYPE_ID)).value
         if match?(:CHAR, '{')
           # Inline struct variant: Circle { radius: Number, color: String }
           # Supports @indirect on fields for recursive types.
@@ -1108,7 +1139,7 @@ class Parser
           indirect_fields = Set.new
           _, field_pairs = parse_comma_seq(:CHAR, '{', '}') do
             fname_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
-            fname = fname_tok.value
+            fname = T.must(fname_tok).value
             consume(:CHAR, ':')
             # Peek: will parse_type_annotation consume @indirect?
             ftype = parse_type_annotation
@@ -1116,7 +1147,7 @@ class Parser
             # We detect it was present by checking @last_indirect_consumed.
             indirect_fields << fname if @last_indirect_consumed
             @last_indirect_consumed = false
-            reject_auto_in_aggregate_field!(ftype, fname, fname_tok, "UNION inline-variant")
+            reject_auto_in_aggregate_field!(T.must(ftype), fname, fname_tok, "UNION inline-variant")
             [fname, ftype]
           end
           var_data = { kind: :inline_struct, fields: field_pairs.to_h }
@@ -1125,7 +1156,7 @@ class Parser
         elsif match!(:CHAR, ':')
           # Single-type payload: Data: Number  (or Data: Number @indirect)
           vtype = parse_type_annotation
-          reject_auto_in_aggregate_field!(vtype, var_name, nil, "UNION variant payload")
+          reject_auto_in_aggregate_field!(T.must(vtype), var_name, nil, "UNION variant payload")
           if @last_indirect_consumed
             @last_indirect_consumed = false
             vtype = { kind: :indirect_payload, type: vtype }
@@ -1148,6 +1179,7 @@ class Parser
   # Slice the source text spanning [start_tok, end_tok). Used to capture
   # the textual form of an expression we just parsed, so the runtime
   # error path can quote it back to the user (e.g. PRE clauses).
+  sig { params(start_tok: Lexer::Token, end_tok: Lexer::Token).returns(String) }
   def source_slice_between(start_tok, end_tok)
     return "" unless @source_code && start_tok && end_tok
     lines = @source_code.lines
@@ -1155,16 +1187,17 @@ class Parser
     el, ec = end_tok.line, end_tok.column
     return "" if sl < 1 || sl > lines.length
     if sl == el
-      lines[sl - 1][sc - 1, ec - sc].to_s.strip
+      T.must(lines[sl - 1])[sc - 1, ec - sc].to_s.strip
     else
       parts = []
-      parts << lines[sl - 1][sc - 1..]
+      parts << T.must(lines[sl - 1])[sc - 1..]
       ((sl + 1)..(el - 1)).each { |l| parts << lines[l - 1] }
-      parts << (lines[el - 1][0, ec - 1] || "")
+      parts << (T.must(lines[el - 1])[0, ec - 1] || "")
       parts.join.strip
     end
   end
 
+  sig { params(visibility: Symbol, is_method: T::Boolean).returns(T.nilable(AST::FunctionDef)) }
   def parse_function_def(visibility = :package, is_method: false)
     fn_token = if is_method
       consume(:KEYWORD, 'METHOD')
@@ -1175,7 +1208,7 @@ class Parser
       consume(:KEYWORD, 'FN')
     end
     name_tok = consume(:VAR_ID)
-    name = name_tok.value
+    name = T.must(name_tok).value
     # Predicate suffix: FN name?(...) — ? is part of the function name
     if match?(:CHAR, '?')
       consume(:CHAR, '?')
@@ -1187,7 +1220,7 @@ class Parser
     if match?(:CHAR, '<')
       consume(:CHAR, '<')
       until match?(:CHAR, '>')
-        type_params << consume(:TYPE_ID).value
+        type_params << T.must(consume(:TYPE_ID)).value
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -1265,7 +1298,7 @@ class Parser
 
       return_type_token = current
       return_type = parse_type_annotation()
-      return_type = mark_polymorphic_shared_type(return_type) if shared_return
+      return_type = mark_polymorphic_shared_type(T.must(return_type)) if shared_return
     end
 
     # 3.5. Parse optional REQUIRES clause: gates which sync families this
@@ -1293,7 +1326,7 @@ class Parser
     reentrant_token = nil
     if match?(:VAR_ID) && %w[@reentrant @nonReentrant].include?(current.value)
       cap_tok = consume(:VAR_ID)
-      reentrant = cap_tok.value == '@reentrant' ? :reentrant : :non_reentrant
+      reentrant = T.must(cap_tok).value == '@reentrant' ? :reentrant : :non_reentrant
       reentrant_token = cap_tok if reentrant == :reentrant
       # Check for :tailCall suffix
       if reentrant == :reentrant && match?(:CHAR, ':') && @tokens[@pos + 1]&.value == 'tailCall'
@@ -1494,24 +1527,25 @@ class Parser
   # capability-family `requires` hash.
   REQUIRES_REENTRANCE_KINDS = %w[NON_REENTRANT].to_set.freeze
 
+  sig { returns(T.nilable(Hash)) }
   def parse_requires_clause
     requires_hash = {}
     @last_requires_clauses = {}
 
     loop do
-      names = [consume(:VAR_ID).value]
+      names = [T.must(consume(:VAR_ID)).value]
       while match!(:CHAR, ',')
-        names << consume(:VAR_ID).value
+        names << T.must(consume(:VAR_ID)).value
       end
       consume(:CHAR, ':')
 
       families = Set.new
       reentrance_kinds = []
       first = parse_requires_family_or_reentrance
-      first[:family] ? (families << first[:family]) : reentrance_kinds << first[:reentrance]
+      T.must(first)[:family] ? (families << T.must(first)[:family]) : reentrance_kinds << T.must(first)[:reentrance]
       while match!(:CHAR, '|')
         nxt = parse_requires_family_or_reentrance
-        nxt[:family] ? (families << nxt[:family]) : reentrance_kinds << nxt[:reentrance]
+        T.must(nxt)[:family] ? (families << T.must(nxt)[:family]) : reentrance_kinds << T.must(nxt)[:reentrance]
       end
 
       names.each do |n|
@@ -1528,20 +1562,21 @@ class Parser
   # Returns { family: Symbol } or { reentrance: Symbol } based on the
   # token. Family kinds go into the capability `requires` hash; reentrance
   # kinds are forwarded into `requires_clauses`.
+  sig { returns(T.nilable(Hash)) }
   def parse_requires_family_or_reentrance
     tok = consume(:TYPE_ID)
-    if REQUIRES_VALID_FAMILIES.include?(tok.value)
-      { family: tok.value.to_sym }
-    elsif REQUIRES_REENTRANCE_KINDS.include?(tok.value)
-      kind = case tok.value
+    if REQUIRES_VALID_FAMILIES.include?(T.must(tok).value)
+      { family: T.must(tok).value.to_sym }
+    elsif REQUIRES_REENTRANCE_KINDS.include?(T.must(tok).value)
+      kind = case T.must(tok).value
              when 'NON_REENTRANT' then :non_reentrant
              end
       { reentrance: kind }
     else
       candidates = REQUIRES_VALID_FAMILIES.to_a + REQUIRES_REENTRANCE_KINDS.to_a
       emit_typo_suggestion!(
-        tok, tok.value, candidates,
-        "Unknown REQUIRES family '#{tok.value}' (valid: #{REQUIRES_VALID_FAMILIES.to_a.join(', ')}; kinds: #{REQUIRES_REENTRANCE_KINDS.to_a.join(', ')})",
+        tok, T.must(tok).value, candidates,
+        "Unknown REQUIRES family '#{T.must(tok).value}' (valid: #{REQUIRES_VALID_FAMILIES.to_a.join(', ')}; kinds: #{REQUIRES_REENTRANCE_KINDS.to_a.join(', ')})",
         "closest REQUIRES family/kind",
         category: :type, cascade: true
       )
@@ -1549,10 +1584,11 @@ class Parser
   end
 
   # Legacy thin wrapper: callers that only need families.
+  sig { returns(T.untyped) }
   def parse_requires_family
     res = parse_requires_family_or_reentrance
-    error!(current, :EXPECTED_CAP_FAMILY) unless res[:family]
-    res[:family]
+    error!(current, :EXPECTED_CAP_FAMILY) unless T.must(res)[:family]
+    T.must(res)[:family]
   end
 
   # Thunk Phase 1.2: parse zero or more `REQUIRES <name>: <KIND>` clauses
@@ -1568,6 +1604,7 @@ class Parser
   # families (LOCKED / VERSIONED / ACTOR / LOCK_FREE) with a comma-list,
   # this one handles the reentrancy constraint NON_REENTRANT with one
   # keyword per clause. Unifying them is a follow-up cleanup.
+  sig { params(fn_name: String).returns(T::Hash[String, Symbol]) }
   def parse_requires_clauses(fn_name)
     out = {}
     while match?(:KEYWORD, 'REQUIRES')
@@ -1576,20 +1613,20 @@ class Parser
       consume(:CHAR, ':')
       kind_tok = consume(:TYPE_ID)
       kind =
-        case kind_tok.value
+        case T.must(kind_tok).value
         when 'NON_REENTRANT' then :non_reentrant
         else
           emit_typo_suggestion!(
-            kind_tok, kind_tok.value, %w[NON_REENTRANT],
-            "Unknown REQUIRES kind '#{kind_tok.value}'",
+            kind_tok, T.must(kind_tok).value, %w[NON_REENTRANT],
+            "Unknown REQUIRES kind '#{T.must(kind_tok).value}'",
             "closest REQUIRES kind",
             category: :type, cascade: true
           )
         end
-      if out.key?(name_tok.value)
-        error!(name_tok, :DUPLICATE_REQUIRES_CLAUSE, fn: fn_name, name: name_tok.value)
+      if out.key?(T.must(name_tok).value)
+        error!(name_tok, :DUPLICATE_REQUIRES_CLAUSE, fn: fn_name, name: T.must(name_tok).value)
       end
-      out[name_tok.value] = kind
+      out[T.must(name_tok).value] = kind
     end
     out
   end
@@ -1600,14 +1637,15 @@ class Parser
   # THUNK, TAIL_CALL) parse as TYPE_IDs matched by value -- they are not
   # added to the lexer KEYWORD set because the only context they appear in
   # is right after the EFFECTS keyword.
+  sig { returns(T.nilable(Array)) }
   def parse_effects_decl
     return [nil, nil] unless match?(:KEYWORD, 'EFFECTS')
     eff_kw = consume(:KEYWORD, 'EFFECTS')
     eff_tok = consume(:TYPE_ID)
-    unless eff_tok.value == 'REENTRANT'
+    unless T.must(eff_tok).value == 'REENTRANT'
       emit_typo_suggestion!(
-        eff_tok, eff_tok.value, %w[REENTRANT],
-        "Unknown function effect '#{eff_tok.value}'",
+        eff_tok, T.must(eff_tok).value, %w[REENTRANT],
+        "Unknown function effect '#{T.must(eff_tok).value}'",
         "closest function effect",
         category: :type, cascade: true
       )
@@ -1639,15 +1677,15 @@ class Parser
     end
 
     variant_tok = consume(:TYPE_ID)
-    kind = case variant_tok.value
+    kind = case T.must(variant_tok).value
            when 'THUNK'       then :reentrant_thunk
            when 'TAIL_CALL'   then :reentrant_tail_call
            when 'NOT_LOGICAL' then :reentrant_not_logical
            when 'MAX_DEPTH'   then :reentrant_max_depth
            else
              emit_typo_suggestion!(
-               variant_tok, variant_tok.value, %w[THUNK TAIL_CALL NOT_LOGICAL MAX_DEPTH],
-               "Unknown REENTRANT variant '#{variant_tok.value}'",
+               variant_tok, T.must(variant_tok).value, %w[THUNK TAIL_CALL NOT_LOGICAL MAX_DEPTH],
+               "Unknown REENTRANT variant '#{T.must(variant_tok).value}'",
                "closest REENTRANT variant",
                category: :type, cascade: true
              )
@@ -1675,18 +1713,20 @@ class Parser
     [kind, { start_tok: span_start, end_tok: span_end_tok, max_depth: max_depth_n, tight: tight }]
   end
 
+  sig { params(stop_words: T::Array[String]).returns(T.nilable(Array)) }
   def parse_block_body(stop_words = ['END'])
     stmts = []
     types = stop_words.map { |w| Lexer::KEYWORDS.include?(w) ? :KEYWORD : :CHAR }
     stop_words = stop_words.zip(types)
     # Keep going until we hit a stop word (END, ELSE, CATCH, }, etc)
-    until stop_words.any? { |w, t| match?(t, w) } || match?(:EOF)
+    until stop_words.any? { |w, t| match?(T.must(t), w) } || match?(:EOF)
       stmt = parse_statement()
       stmts << stmt if stmt
     end
     stmts
   end
 
+  sig { params(precedence: Integer).returns(T.untyped) }
   def parse_expression(precedence = 0)
     lhs = parse_unary
 
@@ -1703,6 +1743,7 @@ class Parser
     lhs
   end
 
+  sig { params(token: Lexer::Token).returns(T.nilable(Integer)) }
   def get_precedence(token)
     return nil unless token.type == :CHAR || token.type == :KEYWORD || token.type == :SMOOTH || token.type == :OR_RESCUE || token.type == :RANGE_EXCL || token.type == :RANGE_INCL
 
@@ -1721,6 +1762,7 @@ class Parser
     end
   end
 
+  sig { params(lhs: T.untyped, op_token: Lexer::Token, op_prec: Integer).returns(T.untyped) }
   def parse_binary_op(lhs, op_token, op_prec)
     op_val = op_token.value
     
@@ -1767,6 +1809,7 @@ class Parser
     AST::BinaryOp.new(op_token, lhs, op_sym, rhs)
   end
 
+  sig { returns(T.untyped) }
   def parse_or_rescue
     # Syntax: ... OR RETURN
     if match!(:KEYWORD, 'RETURN')
@@ -1799,17 +1842,17 @@ class Parser
         message = parse_expression
       elsif match?(:TYPE_ID)
         first_tok = consume(:TYPE_ID)
-        first_is_kind = ERROR_KINDS.include?(first_tok.value)
+        first_is_kind = ERROR_KINDS.include?(T.must(first_tok).value)
         if first_is_kind
-          kind = first_tok.value.to_sym
+          kind = T.must(first_tok).value.to_sym
         else
-          error_name = first_tok.value
+          error_name = T.must(first_tok).value
         end
         if match?(:CHAR, ',')
           consume(:CHAR, ',')
           if first_is_kind && match?(:TYPE_ID)
             # Kind, Type[, "msg"]
-            error_name = consume(:TYPE_ID).value
+            error_name = T.must(consume(:TYPE_ID)).value
             if match?(:CHAR, ',')
               consume(:CHAR, ',')
               message = parse_expression
@@ -1860,6 +1903,7 @@ class Parser
     end
   end
 
+  sig { returns(T.untyped) }
   def parse_unary
     v = current.value
     if current.type == :CHAR && AST::UNARY_OPS.include?(v)
@@ -1882,11 +1926,11 @@ class Parser
       n_lit = consume_number
       n = n_lit.value.to_i
       if n <= 0
-        error!(n_tok, :SIGIL_N_NONPOSITIVE, sigil: sigil_tok.value, count: n)
+        error!(n_tok, :SIGIL_N_NONPOSITIVE, sigil: T.must(sigil_tok).value, count: n)
       end
       consume(:CHAR, ')')
       inner = parse_primary
-      return AST::CallSiteOverride.new(sigil_tok, sigil_tok.value.sub('@', '').to_sym, n, inner)
+      return AST::CallSiteOverride.new(sigil_tok, T.must(sigil_tok).value.sub('@', '').to_sym, n, inner)
     end
     parse_primary
   end
@@ -1895,6 +1939,7 @@ class Parser
   # to the current lhs — stop processing without consuming any tokens."
   SUFFIX_DECLINE = Object.new.freeze
 
+  sig { params(lhs: T.untyped).returns(T.untyped) }
   def parse_suffixes(lhs)
     loop do
       rule = @@suffix_rules[[current.type, current.value]]
@@ -1909,10 +1954,11 @@ class Parser
     lhs
   end
 
+  sig { returns(T.untyped) }
   def parse_var_id
     # 1. Base Case: Always start with an Identifier
     var_token = consume(:VAR_ID)
-    name = var_token.value
+    name = T.must(var_token).value
     node = AST::Identifier.new(var_token, name)
 
     # Predicate suffix: name? followed by ( → function call with ? suffix
@@ -1931,11 +1977,13 @@ class Parser
     return parse_suffixes(node)
   end
 
+  sig { returns(T.untyped) }
   def parse_if_statement
     if_token = consume(:KEYWORD, 'IF')
-    parse_if_chain(if_token)
+    parse_if_chain(T.must(if_token))
   end
 
+  sig { params(if_token: Lexer::Token).returns(T.untyped) }
   def parse_if_chain(if_token)
     condition = parse_expression
 
@@ -1956,7 +2004,7 @@ class Parser
       if match?(:CHAR, '&&')
         error!(if_token, :MULTIPLE_BINDINGS_NEED_PARENS)
       end
-      bindings = [{ expr: condition, name: name_tok.value, name_token: name_tok }]
+      bindings = [{ expr: condition, name: T.must(name_tok).value, name_token: name_tok }]
       return parse_if_bind_body(if_token, bindings)
     end
 
@@ -1989,6 +2037,7 @@ class Parser
     AST::IfStatement.new(if_token, condition, then_branch, else_branch)
   end
 
+  sig { params(if_token: Lexer::Token, bindings: T::Array[Hash]).returns(AST::IfBind) }
   def parse_if_bind_body(if_token, bindings)
     consume(:KEYWORD, 'THEN')
     then_branch = parse_block_body(['ELSE', 'ELSE_IF', 'END'])
@@ -2005,6 +2054,7 @@ class Parser
   # Returns Array of {expr:, name:, name_token:} if condition is fully paren-bind.
   # Returns nil if condition is not a paren-bind pattern.
   # Raises error if any bind in a && chain is bare (not paren-wrapped).
+  sig { params(node: T.untyped, if_token: Lexer::Token).returns(T.nilable(T::Array[Hash])) }
   def extract_paren_bindings(node, if_token)
     case node
     when AST::BinaryOp
@@ -2037,11 +2087,13 @@ class Parser
   end
 
   # Expression-position IF: each branch is a single expression (no semicolons).
+  sig { returns(AST::IfStatement) }
   def parse_if_expr
     if_token = consume(:KEYWORD, 'IF')
-    parse_if_chain_expr(if_token)
+    parse_if_chain_expr(T.must(if_token))
   end
 
+  sig { params(if_token: Lexer::Token).returns(AST::IfStatement) }
   def parse_if_chain_expr(if_token)
     condition = parse_expression
     consume(:KEYWORD, 'THEN')
@@ -2062,6 +2114,7 @@ class Parser
   end
 
   # Expression-position MATCH: each arm body is a single expression (no semicolons).
+  sig { params(partial: T::Boolean).returns(AST::MatchStatement) }
   def parse_match_expr(partial: false)
     tok = consume(:KEYWORD, 'MATCH')
     takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
@@ -2097,7 +2150,7 @@ class Parser
         destructure = nil
         if match?(:KEYWORD, 'AS')
           consume(:KEYWORD, 'AS')
-          binding = consume(:VAR_ID).value
+          binding = T.must(consume(:VAR_ID)).value
         elsif match?(:CHAR, '{')
           destructure = parse_struct_pattern
         end
@@ -2114,9 +2167,10 @@ class Parser
   # FOR var IN (start ..= end) DO body END   — range iteration
   # FOR var IN (start ..< end) DO body END   — range iteration
   # FOR var IN collection DO body END         — collection iteration
+  sig { returns(T.untyped) }
   def parse_for_range
     tok = consume(:KEYWORD, 'FOR')
-    var_name = consume(:VAR_ID).value
+    var_name = T.must(consume(:VAR_ID)).value
     consume(:KEYWORD, 'IN')
 
     # Ranges need parens for precedence; collections don't.
@@ -2146,6 +2200,7 @@ class Parser
     end
   end
 
+  sig { params(partial: T::Boolean).returns(AST::MatchStatement) }
   def parse_match_statement(partial: false)
     tok = consume(:KEYWORD, 'MATCH')
     takes = match?(:KEYWORD, 'TAKES') && consume(:KEYWORD, 'TAKES')
@@ -2184,7 +2239,7 @@ class Parser
         destructure = nil
         if match?(:KEYWORD, 'AS')
           consume(:KEYWORD, 'AS')
-          binding = consume(:VAR_ID).value
+          binding = T.must(consume(:VAR_ID)).value
         elsif match?(:CHAR, '{')
           # Union variant destructuring: Result.Ok{ value, count }
           destructure = parse_struct_pattern
@@ -2200,6 +2255,7 @@ class Parser
     AST::MatchStatement.new(tok, expr, cases, default_case, [], nil, !partial, !!takes)
   end
 
+  sig { returns(AST::StructPattern) }
   def parse_struct_pattern
     tok = consume(:CHAR, '{')
     fields = []
@@ -2214,7 +2270,7 @@ class Parser
       end
 
       name_tok = consume(:VAR_ID)
-      name = name_tok.value
+      name = T.must(name_tok).value
 
       if match?(:CHAR, ':')
         consume(:CHAR, ':')
@@ -2256,18 +2312,20 @@ class Parser
   # registered (type, kind) entry.
   # Parse a single CATCH item: a bare TYPE_ID that's either a kind (if
   # in ERROR_KINDS) or a type. Returns { form:, name:, token: }.
+  sig { returns(Hash) }
   def parse_catch_item
     tok = consume(:TYPE_ID)
-    form = ERROR_KINDS.include?(tok.value) ? :kind : :type
-    { form: form, name: tok.value, token: tok }
+    form = ERROR_KINDS.include?(T.must(tok).value) ? :kind : :type
+    { form: form, name: T.must(tok).value, token: tok }
   end
 
   # Parse a single CATCH WITH filter: a TYPE_ID (error type) or a
   # STRING literal (message). Returns { form:, value:, token: }.
+  sig { returns(T.nilable(Hash)) }
   def parse_catch_filter
     if match?(:TYPE_ID)
       tok = consume(:TYPE_ID)
-      { form: :type, value: tok.value, token: tok }
+      { form: :type, value: T.must(tok).value, token: tok }
     elsif match?(:STRING)
       tok = current
       str_expr = parse_expression
@@ -2277,6 +2335,7 @@ class Parser
     end
   end
 
+  sig { returns(AST::Raise) }
   def parse_raise_stmt
     tok = consume(:KEYWORD, 'RAISE')
 
@@ -2293,17 +2352,17 @@ class Parser
     end
 
     first_tok = consume(:TYPE_ID)
-    first_is_kind = ERROR_KINDS.include?(first_tok.value)
+    first_is_kind = ERROR_KINDS.include?(T.must(first_tok).value)
 
-    kind = first_is_kind ? first_tok.value.to_sym : nil
-    error_name = first_is_kind ? nil : first_tok.value
+    kind = first_is_kind ? T.must(first_tok).value.to_sym : nil
+    error_name = first_is_kind ? nil : T.must(first_tok).value
     message = nil
 
     if match?(:CHAR, ',')
       consume(:CHAR, ',')
       if first_is_kind && match?(:TYPE_ID)
         # Kind, Type[, "msg"]
-        error_name = consume(:TYPE_ID).value
+        error_name = T.must(consume(:TYPE_ID)).value
         if match?(:CHAR, ',')
           consume(:CHAR, ',')
           message = parse_expression
@@ -2318,6 +2377,7 @@ class Parser
     AST::Raise.new(tok, kind, error_name, message)
   end
 
+  sig { returns(T.untyped) }
   def parse_while_loop
     tok = consume(:KEYWORD, 'WHILE')
     condition = parse_expression
@@ -2329,12 +2389,12 @@ class Parser
       if match?(:ARROW, '->')
         consume(:ARROW, '->')
         stmt = parse_statement
-        return AST::WhileBindLoop.new(tok, condition, name_tok.value, name_tok, [stmt].compact, nil)
+        return AST::WhileBindLoop.new(tok, condition, T.must(name_tok).value, name_tok, [stmt].compact, nil)
       end
       consume(:KEYWORD, 'DO')
       body = parse_stmts_until_end
       consume(:KEYWORD, 'END')
-      return AST::WhileBindLoop.new(tok, condition, name_tok.value, name_tok, body, nil)
+      return AST::WhileBindLoop.new(tok, condition, T.must(name_tok).value, name_tok, body, nil)
     end
 
     # Shorthand: WHILE condition -> single_statement;
@@ -2350,14 +2410,16 @@ class Parser
     AST::WhileLoop.new(tok, condition, body)
   end
 
+  sig { returns(T.nilable(Array)) }
   def parse_stmts_until_end
     parse_block_body(['END'])
   end
 
+  sig { returns(T.nilable(Hash)) }
   def parse_struct_body
     _, pairs = parse_comma_seq(:CHAR, '{', '}') do
       name_tok = consume(:VAR_ID)
-      name = name_tok.value
+      name = T.must(name_tok).value
 
       # Syntax: name=default: Type  (default before type annotation)
       default_val = nil
@@ -2372,7 +2434,7 @@ class Parser
 
       type = parse_type_annotation()
 
-      reject_auto_in_aggregate_field!(type, name, name_tok, "STRUCT")
+      reject_auto_in_aggregate_field!(T.must(type), name, name_tok, "STRUCT")
 
       [name, { type: type, default: default_val, borrowed: borrowed }]
     end
@@ -2385,6 +2447,7 @@ class Parser
   # named aggregate is intentionally not supported; aggregate field
   # types must be concrete. The diagnostic points at the field's
   # declaration so the user can replace `Auto` with a real type.
+  sig { params(type: Type, field_name: String, field_tok: T.nilable(Lexer::Token), context_label: String).returns(T.untyped) }
   def reject_auto_in_aggregate_field!(type, field_name, field_tok, context_label)
     return unless type.is_a?(Type) && type.auto?
     auto_tok = type.respond_to?(:auto_token) ? type.auto_token : nil
@@ -2392,6 +2455,7 @@ class Parser
     error!(anchor, :AUTO_NOT_ALLOWED_IN_FIELD, context: context_label, field: field_name)
   end
 
+  sig { returns(T.untyped) }
   def parse_primary
     rule = @@primary_rules[[current.type, current.value]]
     rule ||= @@primary_rules[[current.type, nil]]
@@ -2406,6 +2470,7 @@ class Parser
   # a generic argument list followed by end_char. Kept as a token-level peek so
   # expression parsing can disambiguate `Pair<T>{...}` from `<`/`>`.
   # Used to disambiguate generic annotations from comparison operators.
+  sig { params(end_char: String).returns(T::Boolean) }
   def peek_generic_angle_params?(end_char)
     saved = @pos
     begin
@@ -2433,14 +2498,16 @@ class Parser
   end
 
   # Struct literal: Pair<Number>{ ... }
+  sig { returns(T::Boolean) }
   def peek_is_generic_struct_lit?
     peek_generic_angle_params?('{')
   end
 
+  sig { params(storage: Symbol).returns(T.untyped) }
   def parse_lit(storage)
     if match?(:TYPE_ID)
       type_token = consume(:TYPE_ID)
-      name = type_token.value
+      name = T.must(type_token).value
       # Collection constructor: List[] / Pool[] (with optional capabilities)
       # Element type is inferred from first append/insert.
       if %w[List Pool Set].include?(name) && match?(:CHAR, '[')
@@ -2453,7 +2520,7 @@ class Parser
           consume(:VAR_ID)
           is_soa = true
         elsif match?(:CHAR, ':')
-          dummy_tok = Lexer::Token.new(:VAR_ID, "@#{name.downcase}", type_token.line, type_token.column)
+          dummy_tok = Lexer::Token.new(:VAR_ID, "@#{name.downcase}", T.must(type_token).line, T.must(type_token).column)
           mods = parse_collection_modifiers!(dummy_tok)
           shard_count = mods[:shard_count]
           is_soa = mods[:soa]
@@ -2468,14 +2535,14 @@ class Parser
         consume(:CHAR, '<')
         type_args = []
         until match?(:CHAR, '>')
-          type_args << type_annotation_source(parse_type_annotation)
+          type_args << type_annotation_source(T.must(parse_type_annotation))
           match!(:CHAR, ',')
         end
         consume(:CHAR, '>')
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
           name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
           consume(:CHAR, ':'); v = parse_expression
-          [[name_tok.value, v], name_tok]
+          [[T.must(name_tok).value, v], name_tok]
         end
         lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage, type_args)
         lit.field_tokens = fields.each_with_object({}) { |(kv, t), h| h[kv.first] = t }
@@ -2485,7 +2552,7 @@ class Parser
         _, fields = parse_comma_seq(:CHAR, '{', '}') do
           name_tok = current.type == :TYPE_ID ? consume(:TYPE_ID) : consume(:VAR_ID)
           consume(:CHAR, ':'); v = parse_expression
-          [[name_tok.value, v], name_tok]
+          [[T.must(name_tok).value, v], name_tok]
         end
         lit = AST::StructLit.new(type_token, name, fields.map(&:first).to_h, storage)
         lit.field_tokens = fields.each_with_object({}) { |(kv, t), h| h[kv.first] = t }
@@ -2506,11 +2573,12 @@ class Parser
       return AST::HashLit.new(start_token, pairs.to_h, storage)
     elsif match?(:STRING)
       # TODO: Should only ever happen in parse_sigil
-      return AST::Literal.new(current, :STRING, consume(:STRING).value, storage)
+      return AST::Literal.new(current, :STRING, T.must(consume(:STRING)).value, storage)
     end
     return nil
   end
 
+  sig { returns(T.untyped) }
   def parse_sigil_construct
     percent_token = consume(:PERCENT)
     # % is now a no-op for storage: escape analysis and declared types determine heap vs stack.
@@ -2536,6 +2604,7 @@ class Parser
   # Otherwise `list |> REDUCE(0) acc + _ |> COLLECT` parses as
   # `list |> REDUCE(0) (acc + _ |> COLLECT)` -- COLLECT gets eaten by
   # the body and the chain breaks.
+  sig { returns(AST::ReduceOp) }
   def parse_reduce_op
     reduce_token = consume(:KEYWORD, 'REDUCE')
     consume(:CHAR, '(')
@@ -2546,6 +2615,7 @@ class Parser
   end
 
   # RECOVER(default_expr) — pipeline error recovery
+  sig { returns(AST::RecoverOp) }
   def parse_recover_op
     tok = consume(:KEYWORD, 'RECOVER')
     consume(:CHAR, '(')
@@ -2559,6 +2629,7 @@ class Parser
   # e.g., prices |> WINDOW(3) SUM(_) / 3.0
   # e.g., stream |> WINDOW(size: 100) SELECT process(_)
   # e.g., stream |> WINDOW(size: 100, time: '500ms') EACH { ... }
+  sig { returns(T.untyped) }
   def parse_window_op
     window_token = consume(:KEYWORD, 'WINDOW')
     consume(:CHAR, '(')
@@ -2569,7 +2640,7 @@ class Parser
         key_tok = consume(:VAR_ID)
         consume(:CHAR, ':')
         val = parse_expression
-        options[key_tok.value] = val
+        options[T.must(key_tok).value] = val
         break unless match?(:CHAR, ',')
         consume(:CHAR, ',')
       end
@@ -2587,6 +2658,7 @@ class Parser
   # JOIN(right_source) key_expr_or_lambda
   # e.g., users |> JOIN(orders) _.userId
   # e.g., users |> JOIN(orders) %(a, b) -> a.id == b.userId
+  sig { returns(AST::JoinOp) }
   def parse_join_op
     join_token = consume(:KEYWORD, 'JOIN')
     consume(:CHAR, '(')
@@ -2600,6 +2672,7 @@ class Parser
   # e.g., (0..<n) |> SHARD("key:" + _, map) |> CONCURRENT EACH { ... }
   # Routes items to owning schedulers by hashing the key expression.
   # `_` is the implicit item binding (same as SELECT/WHERE).
+  sig { returns(AST::ShardOp) }
   def parse_shard_op
     shard_token = consume(:KEYWORD, 'SHARD')
     consume(:CHAR, '(')
@@ -2613,6 +2686,7 @@ class Parser
   # Parses a function type annotation: FN(Type, ...) -> ReturnType
   # Parameter names are optional (documentation only): FN(n: Int64) -> Bool is the same as FN(Int64) -> Bool.
   # Returns a Type whose raw is { params: [...], return: { type: Type }, fn_type: true }.
+  sig { returns(Type) }
   def parse_fn_type_annotation
     consume(:KEYWORD, 'FN')
     consume(:CHAR, '(')
@@ -2645,6 +2719,7 @@ class Parser
     ))
   end
 
+  sig { returns(T.nilable(Type)) }
   def parse_type_annotation
     # Function type: FN(Type, ...) -> ReturnType
     return parse_fn_type_annotation if match?(:KEYWORD, 'FN')
@@ -2653,7 +2728,7 @@ class Parser
     # This is distinct from concrete `T @shared` Arc syntax.
     if match?(:KEYWORD, 'SHARED')
       consume(:KEYWORD, 'SHARED')
-      return mark_polymorphic_shared_type(parse_type_annotation)
+      return mark_polymorphic_shared_type(T.must(parse_type_annotation))
     end
 
     # Auto — gradual-typing placeholder. Resolved to a concrete type
@@ -2706,7 +2781,7 @@ class Parser
       error!(current, :AUTO_PREFIX_NOT_SUPPORTED, prefix: prefix_chars, prefix2: prefix_chars, prefix3: prefix_chars, prefix4: prefix_chars)
     end
 
-    base = consume(:TYPE_ID).value
+    base = T.must(consume(:TYPE_ID)).value
     inner = ""
 
     # Generic type arguments: Pair<Number> or Map<String, Number>.
@@ -2717,7 +2792,7 @@ class Parser
       consume(:CHAR, '<')
       type_args = []
       until match?(:CHAR, '>')
-        type_args << type_annotation_source(parse_type_annotation)
+        type_args << type_annotation_source(T.must(parse_type_annotation))
         match!(:CHAR, ',')
       end
       consume(:CHAR, '>')
@@ -2743,7 +2818,7 @@ class Parser
       end
       if is_elem_cap
         cap_tok = consume(:VAR_ID)
-        case cap_tok.value
+        case T.must(cap_tok).value
         when "@shared"     then elem_ownership = :shared
         when "@multiowned" then elem_ownership = :multiowned
         when "@locked"     then elem_sync = :locked
@@ -2754,7 +2829,7 @@ class Parser
         if match?(:CHAR, ':')
           consume(:CHAR, ':')
           sync_tok = consume(:VAR_ID)
-          case sync_tok.value
+          case T.must(sync_tok).value
           when "@locked", "locked"       then elem_sync = :locked
           when "@writeLocked", "writeLocked" then elem_sync = :write_locked
           end
@@ -2857,6 +2932,7 @@ class Parser
     t
   end
 
+  sig { params(type: Type).returns(Type) }
   def mark_polymorphic_shared_type(type)
     t = Type.new(type)
     t.ownership = :shared
@@ -2864,6 +2940,7 @@ class Parser
     t
   end
 
+  sig { params(type: Type).returns(String) }
   def type_annotation_source(type)
     t = type.is_a?(Type) ? type : Type.new(type)
     return "SHARED #{type_annotation_source(Type.new(t).tap { |inner| inner.ownership = :affine; inner.polymorphic_shared = false })}" if t.polymorphic_shared?
@@ -2893,6 +2970,7 @@ class Parser
   end
 
   # Parses `CONCURRENT(workers: N)? SELECT|WHERE|EACH ...`
+  sig { returns(AST::ConcurrentOp) }
   def parse_concurrent_op
     token = consume(:KEYWORD, 'CONCURRENT')
     options = {}
@@ -2902,16 +2980,17 @@ class Parser
         key_tok = consume(:VAR_ID)
         consume(:CHAR, ':')
         val = parse_expression
-        options[key_tok.value] = val
+        options[T.must(key_tok).value] = val
         break unless match?(:CHAR, ',')
         consume(:CHAR, ',')
       end
       consume(:CHAR, ')')
     end
-    inner_op = parse_concurrent_inner_op(token)
+    inner_op = parse_concurrent_inner_op(T.must(token))
     AST::ConcurrentOp.new(token, inner_op, options)
   end
 
+  sig { params(parent_token: Lexer::Token).returns(T.untyped) }
   def parse_concurrent_inner_op(parent_token)
     if match?(:KEYWORD, 'SELECT')
       consume(:KEYWORD, 'SELECT')
@@ -2950,6 +3029,7 @@ class Parser
 
   # Parses `EACH { stmts... }` — side-effect block over a collection.
   # `_` is the implicit item binding inside the body.
+  sig { returns(AST::EachOp) }
   def parse_each_op
     token = consume(:KEYWORD, 'EACH')
     consume(:CHAR, '{')
@@ -2958,6 +3038,7 @@ class Parser
     AST::EachOp.new(token, body)
   end
 
+  sig { returns(AST::TapOp) }
   def parse_tap_op
     token = consume(:KEYWORD, 'TAP')
     # TAP f -> single function call (short form)
@@ -3008,11 +3089,12 @@ class Parser
   # Returns nil if no capability token is present, or a Hash:
   #   { ownership:, sync:, collection:, is_soa:, is_indirect:, shard_count: }
   # No semantic validation — just token consumption and duplicate detection.
+  sig { returns(T.nilable(Hash)) }
   def parse_capabilities
     return nil unless match?(:VAR_ID) && CAPABILITY_TOKENS.include?(current.value)
 
     result = { ownership: nil, sync: nil, collection: nil, is_soa: false, is_indirect: false, shard_count: nil, observable: false }
-    apply_capability!(result, consume(:VAR_ID))
+    apply_capability!(result, T.must(consume(:VAR_ID)))
 
     # ':' chaining (e.g., @shared:locked, @soa:shared:locked, @list:soa)
     while match?(:CHAR, ':')
@@ -3022,8 +3104,8 @@ class Parser
       end
       # After ':', accept both 'locked' and '@locked' forms.
       tok = consume(:VAR_ID)
-      normalized_value = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
-      apply_capability!(result, tok, normalized_value)
+      normalized_value = T.must(tok).value.start_with?('@') ? T.must(tok).value : "@#{T.must(tok).value}"
+      apply_capability!(result, T.must(tok), normalized_value)
     end
 
     result
@@ -3032,6 +3114,7 @@ class Parser
   private
 
   # Apply a single capability token to the result hash. Detects duplicates.
+  sig { params(result: T::Hash[Symbol, T.untyped], token: Lexer::Token, value: String).returns(T.untyped) }
   def apply_capability!(result, token, value = token.value)
     case value
     when "@multiowned"
@@ -3110,7 +3193,7 @@ class Parser
 
   # parse_striped_modifier! removed — striped is now :sharded(N) @locked composition
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(AST::WithBlock)) }
   def parse_with_capability
     with_token = consume(:KEYWORD, 'WITH')
 
@@ -3119,7 +3202,7 @@ class Parser
     # generic capability-list parser so VIEW / MATERIALIZED don't have
     # to participate in the comma-separated capability grammar.
     if match?(:KEYWORD, 'VIEW') || match?(:KEYWORD, 'MATERIALIZED')
-      return parse_view_block(with_token)
+      return parse_view_block(T.must(with_token))
     end
 
     # MVCC L4: `WITH SNAPSHOT a AS [MUTABLE] alias [, SNAPSHOT b AS
@@ -3128,7 +3211,7 @@ class Parser
     # requires its own list shape (each cell prefixed by SNAPSHOT
     # rather than a single capability sigil for the whole list).
     if match?(:KEYWORD, 'SNAPSHOT')
-      return parse_snapshot_block(with_token)
+      return parse_snapshot_block(T.must(with_token))
     end
 
     # True-Sync-Polymorphism step 1: optional POLYMORPHIC marker
@@ -3175,10 +3258,10 @@ class Parser
     while match?(:KEYWORD) || match?(:VAR_ID) do
       capability = if match?(:KEYWORD) && current.value != 'AS'
         cap_tok = consume(:KEYWORD)
-        cap = cap_tok.value.to_sym
+        cap = T.must(cap_tok).value.to_sym
         unless AST::CAPABILITIES.include?(cap)
           emit_typo_suggestion!(
-            cap_tok, cap_tok.value, AST::CAPABILITIES.map(&:to_s),
+            cap_tok, T.must(cap_tok).value, AST::CAPABILITIES.map(&:to_s),
             "Unknown WITH capability '#{cap}'",
             "closest WITH capability",
             category: :capability, cascade: true
@@ -3199,7 +3282,7 @@ class Parser
         if match!(:KEYWORD, 'MUTABLE')
           alias_mutable = true
         end
-        alias_name = consume(:VAR_ID).value
+        alias_name = T.must(consume(:VAR_ID)).value
       end
 
       guard_expr = nil
@@ -3272,7 +3355,7 @@ class Parser
   # is read-only, `:transaction` if any cell is MUTABLE. Annotator-
   # side validation (L5) enforces ON Conflict presence when
   # `snapshot_mode == :transaction`.
-  sig { params(with_token: T.untyped).returns(T.untyped) }
+  sig { params(with_token: Lexer::Token).returns(T.nilable(AST::WithBlock)) }
   def parse_snapshot_block(with_token)
     capabilities = []
     any_mutable = T.let(false, T::Boolean)
@@ -3282,7 +3365,7 @@ class Parser
       consume(:KEYWORD, 'AS')
       alias_mutable = false
       alias_mutable = true if match!(:KEYWORD, 'MUTABLE')
-      alias_name = consume(:VAR_ID).value
+      alias_name = T.must(consume(:VAR_ID)).value
 
       capabilities << {
         capability: :SNAPSHOT,
@@ -3338,7 +3421,7 @@ class Parser
   # Builds an AST::WithBlock with view_kind = :view / :materialized_view
   # and a single capability entry { capability: :VIEW | :MATERIALIZED_VIEW,
   # var_node:, alias: }. The optional END after `}` is consumed if present.
-  sig { params(with_token: T.untyped).returns(T.untyped) }
+  sig { params(with_token: Lexer::Token).returns(AST::WithBlock) }
   def parse_view_block(with_token)
     view_kind = nil
     view_token = nil
@@ -3356,7 +3439,7 @@ class Parser
 
     var_node = parse_var_id
     consume(:KEYWORD, 'AS')
-    alias_name = consume(:VAR_ID).value
+    alias_name = T.must(consume(:VAR_ID)).value
 
     # Optional ARROW for the WITH ... AS s -> ... shape used in docs.
     # The brace form `{ body }` is canonical; the arrow form is sugar.
@@ -3392,7 +3475,7 @@ class Parser
   #
   # Returns an array of arm hashes. The terminating END is consumed by
   # the caller.
-  sig { returns(Array) }
+  sig { returns(T.nilable(Array)) }
   def parse_with_match_arms
     arms = []
     while match?(:KEYWORD, 'WHEN')
@@ -3427,7 +3510,7 @@ class Parser
   # exactly { LockTimeout, MvccConflict, AtomicConflict }, and must NOT
   # handle Deadlock or LockCycle (those are inline-only — see #325 for
   # the error message).
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(AST::SyncPolicyDecl)) }
   def parse_sync_policy_block
     sync_tok = consume(:KEYWORD, 'SYNC')
     consume(:KEYWORD, 'POLICY')
@@ -3459,12 +3542,12 @@ class Parser
       selectors = parse_error_selectors
       retries = match_optional_retry!
       action = parse_lock_action
-      action.merge(selectors: selectors, retries: retries)
+      T.must(action).merge(selectors: selectors, retries: retries)
     elsif match?(:KEYWORD, 'RETRY')
       retries = match_optional_retry!
       action = parse_lock_action
       # Sugar: `RETRY(N) THEN <action>` == `ON Transient RETRY(N) THEN <action>`.
-      action.merge(selectors: [{ form: :kind, name: :Transient, token: action[:token] }],
+      T.must(action).merge(selectors: [{ form: :kind, name: :Transient, token: T.must(action)[:token] }],
                    retries: retries)
     else
       nil
@@ -3504,12 +3587,12 @@ class Parser
       error!(current, :EXPECTED_ERROR_SELECTOR)
     end
     tok = consume(:TYPE_ID)
-    form = ERROR_KINDS.include?(tok.value) ? :kind : :type
-    { form: form, name: tok.value.to_sym, token: tok }
+    form = ERROR_KINDS.include?(T.must(tok).value) ? :kind : :type
+    { form: form, name: T.must(tok).value.to_sym, token: tok }
   end
 
   # Parse a single error-handler action: RAISE | PASS | RETURN expr | EXIT "msg" | -> { stmts }.
-  sig { returns(Hash) }
+  sig { returns(T.nilable(Hash)) }
   def parse_lock_action
     if match!(:KEYWORD, 'RAISE')
       { action: :raise, token: previous }
@@ -3540,7 +3623,7 @@ class Parser
   # Handles order-independent joins: @shared:locked and @locked:shared both work.
   # Parses a capability chain: @a:b:c (order-independent, max one per dimension).
   # Returns [ownership, sync, layout].
-  sig { params(tok: T.untyped, first_attrs: T.untyped).returns(Array) }
+  sig { params(tok: Lexer::Token, first_attrs: T::Hash[Symbol, Symbol]).returns(T.nilable(Array)) }
   def parse_cap_join(tok, first_attrs)
     dims = { ownership: nil, sync: nil, layout: nil, lock_rank: nil }
     apply_cap_dim!(tok, first_attrs, dims)
@@ -3567,8 +3650,8 @@ class Parser
         )
       end
       next_tok = consume(:VAR_ID)
-      apply_cap_dim!(next_tok, attrs, dims)
-      parse_lock_rank_arg!(next_tok, attrs, dims)
+      apply_cap_dim!(T.must(next_tok), attrs, dims)
+      parse_lock_rank_arg!(T.must(next_tok), attrs, dims)
     end
 
     # Reject T @cap1 @cap2 (must use : join, e.g. @shared:locked)
@@ -3579,19 +3662,19 @@ class Parser
     [dims[:ownership], dims[:sync], dims[:layout], dims[:lock_rank]]
   end
 
-  sig { params(tok: T.untyped, attrs: T.untyped, dims: T.untyped).returns(Symbol) }
+  sig { params(tok: Lexer::Token, attrs: T::Hash[Symbol, Symbol], dims: T::Hash[Symbol, T.nilable(Symbol)]).returns(T.nilable(Symbol)) }
   def apply_cap_dim!(tok, attrs, dims)
     dim = attrs[:dim]
-    if dims[dim]
-      error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: dims[dim], attempted: attrs[:val])
+    if dims[T.must(dim)]
+      error!(tok, :DUPLICATE_CAPABILITY_DIM, dim: dim, current: dims[T.must(dim)], attempted: attrs[:val])
     end
-    dims[dim] = attrs[:val]
+    dims[T.must(dim)] = attrs[:val]
   end
 
   # Parse an optional `(rank: N)` argument after @locked / @writeLocked.
   # The N is an integer; sign and magnitude are free. Duplicate rank on
   # the same capability chain is an error.
-  sig { params(sigil_tok: T.untyped, attrs: T.untyped, dims: T.untyped).returns(T.nilable(Integer)) }
+  sig { params(sigil_tok: Lexer::Token, attrs: T::Hash[Symbol, Symbol], dims: T::Hash[Symbol, T.nilable(Symbol)]).returns(T.nilable(Integer)) }
   def parse_lock_rank_arg!(sigil_tok, attrs, dims)
     return unless attrs[:dim] == :sync
     return unless attrs[:val] == :locked || attrs[:val] == :write_locked
@@ -3646,7 +3729,7 @@ class Parser
   # Returns { pinned: Bool, stack_size: Symbol|nil }.
   # Only enters the prefix parser when the first token is a known DO branch sigil.
   # After `:`, the next identifier is normalised (@ prepended if absent).
-  sig { returns(Hash) }
+  sig { returns(T.nilable(Hash)) }
   def parse_branch_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3661,14 +3744,14 @@ class Parser
 
     loop do
       tok      = consume(:VAR_ID)
-      cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
+      cap_name = T.must(tok).value.start_with?('@') ? T.must(tok).value : "@#{T.must(tok).value}"
       attrs    = DO_BRANCH_SIGILS[cap_name]
       unless attrs
-        has_at = tok.value.start_with?('@')
+        has_at = T.must(tok).value.start_with?('@')
         candidates = has_at ? DO_BRANCH_SIGILS.keys : DO_BRANCH_SIGILS.keys.map { |k| k.sub(/^@/, '') }
         emit_typo_suggestion!(
-          tok, tok.value, candidates,
-          "Unknown branch prefix #{tok.value.inspect}",
+          tok, T.must(tok).value, candidates,
+          "Unknown branch prefix #{T.must(tok).value.inspect}",
           "closest DO branch sigil",
           category: :type, cascade: true
         )
@@ -3690,7 +3773,7 @@ class Parser
     { pinned: pinned, parallel: parallel, stack_size: stack_size, can_smash: can_smash }
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(T.nilable(AST::DoBlock)) }
   def parse_do_block
     do_token = consume(:KEYWORD, 'DO')
     consume(:CHAR, '{')
@@ -3706,7 +3789,7 @@ class Parser
       else
         parse_expression
       end
-      branches << { body: [stmt].compact, pinned: prefix[:pinned], parallel: prefix[:parallel], stack_size: prefix[:stack_size], can_smash: prefix[:can_smash] }
+      branches << { body: [stmt].compact, pinned: T.must(prefix)[:pinned], parallel: T.must(prefix)[:parallel], stack_size: T.must(prefix)[:stack_size], can_smash: T.must(prefix)[:can_smash] }
       break unless match!(:CHAR, ',')
     end
 
@@ -3717,7 +3800,7 @@ class Parser
   # Parses an optional `@size_sigil ->` prefix at the very start of a BG body.
   # Returns { ..., stack_size_token: } where stack_size_token is the
   # token of the FIRST sigil that contributed a stack_size (or nil).
-  sig { returns(Hash) }
+  sig { returns(T.nilable(Hash)) }
   def parse_bg_prefix
     pinned     = T.let(false, T::Boolean)
     parallel   = T.let(false, T::Boolean)
@@ -3735,14 +3818,14 @@ class Parser
 
     loop do
       tok      = consume(:VAR_ID)
-      cap_name = tok.value.start_with?('@') ? tok.value : "@#{tok.value}"
+      cap_name = T.must(tok).value.start_with?('@') ? T.must(tok).value : "@#{T.must(tok).value}"
       attrs    = BG_SIGILS[cap_name]
       unless attrs
-        has_at = tok.value.start_with?('@')
+        has_at = T.must(tok).value.start_with?('@')
         candidates = has_at ? BG_SIGILS.keys : BG_SIGILS.keys.map { |k| k.sub(/^@/, '') }
         emit_typo_suggestion!(
-          tok, tok.value, candidates,
-          "Unknown BG prefix #{tok.value.inspect}",
+          tok, T.must(tok).value, candidates,
+          "Unknown BG prefix #{T.must(tok).value.inspect}",
           "closest BG body sigil",
           category: :type, cascade: true
         )
@@ -3774,21 +3857,21 @@ class Parser
   def parse_bg_block
     bg_token = consume(:KEYWORD, 'BG')
     if match?(:KEYWORD, 'STREAM')
-      return parse_bg_stream_block(bg_token)
+      return parse_bg_stream_block(T.must(bg_token))
     end
     open_brace = consume(:CHAR, '{')
     prefix = parse_bg_prefix
     body = parse_bg_then_body
     consume(:CHAR, '}')
-    node = AST::BgBlock.new(bg_token, body, nil, prefix[:stack_size], prefix[:pinned], prefix[:parallel], prefix[:arena], prefix[:can_smash])
+    node = AST::BgBlock.new(bg_token, body, nil, T.must(prefix)[:stack_size], T.must(prefix)[:pinned], T.must(prefix)[:parallel], T.must(prefix)[:arena], T.must(prefix)[:can_smash])
     node.open_brace_token = open_brace
-    node.prefix_token = prefix[:stack_size_token]
-    node.can_smash_token = prefix[:can_smash_token]
+    node.prefix_token = T.must(prefix)[:stack_size_token]
+    node.can_smash_token = T.must(prefix)[:can_smash_token]
     node
   end
 
   # Custom body parser for BG blocks that recognises THEN chains.
-  sig { returns(Array) }
+  sig { returns(T.nilable(Array)) }
   def parse_bg_then_body
     stmts = []
     until match?(:CHAR, '}') || match?(:EOF)
@@ -3819,7 +3902,7 @@ class Parser
       binding_name = nil
       if match?(:KEYWORD, 'AS')
         consume(:KEYWORD, 'AS')
-        binding_name = consume(:VAR_ID).value
+        binding_name = T.must(consume(:VAR_ID)).value
       end
 
       unless match?(:KEYWORD, 'THEN')
@@ -3833,7 +3916,7 @@ class Parser
         next_binding = nil
         if match?(:KEYWORD, 'AS')
           consume(:KEYWORD, 'AS')
-          next_binding = consume(:VAR_ID).value
+          next_binding = T.must(consume(:VAR_ID)).value
         end
         steps << { expr: next_expr, binding: next_binding }
       end
@@ -3845,7 +3928,7 @@ class Parser
     expr
   end
 
-  sig { params(bg_token: T.untyped).returns(T.untyped) }
+  sig { params(bg_token: Lexer::Token).returns(AST::BgStreamBlock) }
   def parse_bg_stream_block(bg_token)
     consume(:KEYWORD, 'STREAM')
     consume(:CHAR, '{')
@@ -3854,7 +3937,7 @@ class Parser
     AST::BgStreamBlock.new(bg_token, body, nil)
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::YieldExpr) }
   def parse_yield_expr
     tok = consume(:KEYWORD, 'YIELD')
     expr = parse_expression
@@ -3862,7 +3945,7 @@ class Parser
     AST::YieldExpr.new(tok, expr)
   end
 
-  sig { returns(T.untyped) }
+  sig { returns(AST::NextExpr) }
   def parse_next_expr
     tok = consume(:KEYWORD, 'NEXT')
     expr = parse_expression
@@ -3900,10 +3983,10 @@ class Parser
   # ── Test Framework Parsing ──────────────────────────────────────
 
   # TEST <name> DO ... END
-  sig { returns(T.untyped) }
+  sig { returns(AST::TestBlock) }
   def parse_test_block
     tok = consume(:KEYWORD, 'TEST')
-    name = consume(:TYPE_ID).value  # TestName is a TYPE_ID (capitalized)
+    name = T.must(consume(:TYPE_ID)).value  # TestName is a TYPE_ID (capitalized)
     consume(:KEYWORD, 'DO')
 
     setup = []
@@ -3946,10 +4029,10 @@ class Parser
   # var binding but stored on the enclosing TEST/WHEN block rather
   # than emitted in setup, so lowering can inject a fresh evaluation
   # at the top of every TEST THAT.
-  sig { returns(T.untyped) }
+  sig { returns(AST::LetBinding) }
   def parse_let_binding
     tok = consume(:KEYWORD, 'LET')
-    name = consume(:VAR_ID).value
+    name = T.must(consume(:VAR_ID)).value
     consume(:CHAR, '=')
     expr = parse_expression
     consume(:CHAR, ';')
@@ -3958,7 +4041,7 @@ class Parser
 
   # Match `BEFORE EACH` or `AFTER EACH` as a two-keyword sequence. Used by
   # the test-block / when-block parsers; both share the same hook syntax.
-  sig { params(first: T.untyped, second: T.untyped).returns(T::Boolean) }
+  sig { params(first: String, second: String).returns(T::Boolean) }
   def test_hook_match?(first, second)
     match?(:KEYWORD, first) && @tokens[@pos + 1]&.value == second
   end
@@ -3966,7 +4049,7 @@ class Parser
   # Parse `BEFORE EACH DO <stmts> END` (or AFTER EACH); returns the body
   # statement array. The kind sequence (BEFORE/AFTER + EACH/ALL) is
   # already validated by test_hook_match? at the call site.
-  sig { params(first: T.untyped, second: T.untyped).returns(Array) }
+  sig { params(first: String, second: String).returns(Array) }
   def parse_test_hook(first, second)
     consume(:KEYWORD, first)
     consume(:KEYWORD, second)
@@ -3980,10 +4063,10 @@ class Parser
   end
 
   # WHEN "description" [TAGS [tag1, tag2, ...]] DO ... END
-  sig { returns(T.untyped) }
+  sig { returns(AST::WhenBlock) }
   def parse_when_block
     tok = consume(:KEYWORD, 'WHEN')
-    desc = consume(:STRING).value
+    desc = T.must(consume(:STRING)).value
     tags = parse_when_tags  # [] if no TAGS clause
     consume(:KEYWORD, 'DO')
 
@@ -4054,7 +4137,7 @@ class Parser
     names = []
     until match?(:CHAR, ']')
       tag_tok = consume(:VAR_ID)
-      names << tag_tok.value
+      names << T.must(tag_tok).value
       break unless match!(:CHAR, ',')
     end
     consume(:CHAR, ']')
@@ -4062,11 +4145,11 @@ class Parser
   end
 
   # TEST THAT "description" DO ... END
-  sig { returns(T.untyped) }
+  sig { returns(AST::TestThat) }
   def parse_test_that
     tok = consume(:KEYWORD, 'TEST')
     consume(:KEYWORD, 'THAT')
-    desc = consume(:STRING).value
+    desc = T.must(consume(:STRING)).value
     consume(:KEYWORD, 'DO')
 
     body = []
@@ -4079,17 +4162,17 @@ class Parser
   end
 
   # ASSERT_RAISES Kind, expr;  OR  ASSERT_RAISES Kind, ErrorName, expr;
-  sig { returns(T.untyped) }
+  sig { returns(AST::AssertRaises) }
   def parse_assert_raises
     tok = consume(:KEYWORD, 'ASSERT_RAISES')
-    kind = consume(:TYPE_ID).value  # e.g., Input, System, Transient
+    kind = T.must(consume(:TYPE_ID)).value  # e.g., Input, System, Transient
 
     consume(:CHAR, ',')
 
     # Peek: if next is TYPE_ID followed by comma, it's ASSERT_RAISES Kind, ErrorName, expr
     error_name = nil
     if current.type == :TYPE_ID && @tokens[@pos + 1]&.type == :CHAR && @tokens[@pos + 1]&.value == ','
-      error_name = consume(:TYPE_ID).value
+      error_name = T.must(consume(:TYPE_ID)).value
       consume(:CHAR, ',')
     end
 
@@ -4100,7 +4183,7 @@ class Parser
   end
 
   # BENCHMARK expr x<N>;
-  sig { returns(T.untyped) }
+  sig { returns(AST::BenchmarkStmt) }
   def parse_benchmark_stmt
     tok = consume(:KEYWORD, 'BENCHMARK')
     expr = parse_expression
@@ -4117,7 +4200,7 @@ class Parser
   end
 
   # SMASH expr;
-  sig { returns(T.untyped) }
+  sig { returns(AST::SmashStmt) }
   def parse_smash_stmt
     tok = consume(:KEYWORD, 'SMASH')
     expr = parse_expression
@@ -4126,7 +4209,7 @@ class Parser
   end
 
   # PROFILE expr;
-  sig { returns(T.untyped) }
+  sig { returns(AST::ProfileStmt) }
   def parse_profile_stmt
     tok = consume(:KEYWORD, 'PROFILE')
     expr = parse_expression
@@ -4138,10 +4221,10 @@ class Parser
   # STUB fn CAPTURES var;
   # STUB fn SEQUENCE [values];
   # STUB fn WITH %(params) -> expr;
-  sig { returns(T.untyped) }
+  sig { returns(AST::StubDecl) }
   def parse_stub
     tok = consume(:KEYWORD, 'STUB')
-    fn_name = consume(:VAR_ID).value
+    fn_name = T.must(consume(:VAR_ID)).value
 
     kind_tok = current
     if match?(:KEYWORD, 'RETURNS')
@@ -4151,7 +4234,7 @@ class Parser
       AST::StubDecl.new(tok, fn_name, :returns, value)
     elsif match?(:KEYWORD, 'CAPTURES')
       consume(:KEYWORD, 'CAPTURES')
-      var_name = consume(:VAR_ID).value
+      var_name = T.must(consume(:VAR_ID)).value
       consume(:CHAR, ';')
       AST::StubDecl.new(tok, fn_name, :captures, var_name)
     elsif match?(:KEYWORD, 'SEQUENCE')

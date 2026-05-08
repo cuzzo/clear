@@ -77,27 +77,27 @@ module AST
     attr_reader :next_user_id, :stdlib_frozen
   end
 
-  sig { params(sym: T.untyped).returns(T::Boolean) }
+  sig { params(sym: T.nilable(Symbol)).returns(T::Boolean) }
   def self.error_kind?(sym)
     ERROR_KINDS.include?(sym)
   end
 
-  sig { params(sym: T.untyped).returns(T::Boolean) }
+  sig { params(sym: T.nilable(Symbol)).returns(T::Boolean) }
   def self.error_type?(sym)
     ERROR_TYPES.key?(sym)
   end
 
-  sig { params(sym: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(sym: Symbol).returns(T.nilable(Symbol)) }
   def self.kind_of_type(sym)
     ERROR_TYPES.dig(sym, :kind)
   end
 
-  sig { params(sym: T.untyped).returns(T.nilable(String)) }
+  sig { params(sym: Symbol).returns(T.nilable(String)) }
   def self.zig_name_of_type(sym)
     ERROR_TYPES.dig(sym, :zig_name)
   end
 
-  sig { params(sym: T.untyped).returns(T.untyped) }
+  sig { params(sym: Symbol).returns(T.untyped) }
   def self.id_of_type(sym)
     ERROR_TYPES.dig(sym, :id)
   end
@@ -111,7 +111,7 @@ module AST
   # Returns [existed?, conflict?]. conflict is a Hash
   #   { existing_kind:, given_kind:, first_site:, is_stdlib: }
   # or nil when registration succeeded (or was a no-op re-use).
-  sig { params(type_sym: T.untyped, kind_sym: T.untyped, site_token: T.untyped).returns(Array) }
+  sig { params(type_sym: Symbol, kind_sym: Symbol, site_token: T.untyped).returns(Array) }
   def self.register_type!(type_sym, kind_sym, site_token: nil)
     entry = ERROR_TYPES[type_sym]
     if entry.nil?
@@ -156,7 +156,7 @@ module AST
 
   # Returns the Array of error-type Symbols whose :kind == kind. Used by
   # the annotator to expand kind selectors into their member types.
-  sig { params(kind: T.untyped).returns(Array) }
+  sig { params(kind: Symbol).returns(T::Array[Symbol]) }
   def self.types_for_kind(kind)
     ERROR_TYPES.select { |_, meta| meta[:kind] == kind }.keys
   end

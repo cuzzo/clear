@@ -34,7 +34,7 @@ module ZigTypeMapper
 
   # Delegates to Type#zig_type for type-to-Zig conversion.
   # This keeps the transpiler interface stable while the logic lives in Type.
-  sig { params(type: T.untyped, is_param: T.untyped, is_field: T.untyped).returns(String) }
+  sig { params(type: T.untyped, is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   def transpile_type(type, is_param: false, is_field: false)
     # If already a Type, use it directly — avoids losing shard_count through round-trip.
     t = type.is_a?(Type) ? type : Type.new(type)

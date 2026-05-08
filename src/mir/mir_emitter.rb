@@ -29,6 +29,7 @@ class MIREmitter
 
   attr_accessor :rt_name
 
+  sig { void }
   def initialize
     @indent = 0
     @rt_name = "rt"
@@ -139,9 +140,9 @@ class MIREmitter
     when MIR::Conditional      then emit_conditional(node)
     when MIR::IfOptional       then emit_if_optional(node)
     when MIR::Comptime         then "comptime #{emit(node.expr)}"
-    when MIR::UnionVariantGet  then "#{paren_if_try(emit(node.object))}.#{node.variant}"
-    when MIR::ListItems        then "#{paren_if_try(emit(node.list))}.items"
-    when MIR::ListLength       then "#{paren_if_try(emit(node.expr))}.len"
+    when MIR::UnionVariantGet  then "#{paren_if_try(T.must(emit(node.object)))}.#{node.variant}"
+    when MIR::ListItems        then "#{paren_if_try(T.must(emit(node.list)))}.items"
+    when MIR::ListLength       then "#{paren_if_try(T.must(emit(node.expr)))}.len"
     when MIR::AddressOf        then "&#{emit(node.expr)}"
     when MIR::Deref            then "#{emit(node.expr)}.*"
     when MIR::OptionalUnwrap   then "#{emit(node.expr)}.?"
@@ -168,7 +169,7 @@ class MIREmitter
   # we only see them when a :bc-target lowering pipeline (e.g. bc_run.rb) still
   # routes through a Zig-producing lowering step that calls emit_expr. Fall
   # back to the Zig template from the registry so emission completes.
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: MIR::InlineBc).returns(String) }
   def emit_inline_bc_as_zig(node)
     entry = node.stdlib_def
     raise "emit_inline_bc_as_zig: node has no stdlib_def (:#{node.op})" unless entry && entry[:zig]
@@ -182,7 +183,7 @@ class MIREmitter
   # and use putDirect; otherwise pick sharded_zig (when the receiver
   # type is sharded/striped) or default zig. Substitutes positional
   # placeholders, allocator placeholders, and shard-direct identifiers.
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: MIR::ShardedMapPut).returns(String) }
   def emit_sharded_map_put(node)
     pattern = sharded_map_template(node).dup
     pattern = pattern
@@ -193,7 +194,7 @@ class MIREmitter
     sharded_map_substitute_common(pattern, node)
   end
 
-  sig { params(node: T.untyped).returns(String) }
+  sig { params(node: MIR::ShardedMapGet).returns(String) }
   def emit_sharded_map_get(node)
     pattern = sharded_map_template(node).dup
     pattern = pattern
@@ -212,12 +213,12 @@ class MIREmitter
     op[kind] or raise "ShardedMap: op has no :#{kind} template (op keys=#{op.keys})"
   end
 
-  sig { params(pattern: T.untyped, node: T.untyped).returns(String) }
+  sig { params(pattern: String, node: T.untyped).returns(String) }
   def sharded_map_substitute_common(pattern, node)
     if node.shard_idx
       pattern = pattern
-        .gsub("{shard_idx}", emit(node.shard_idx))
-        .gsub("{shard_key}", emit(node.shard_key))
+        .gsub("{shard_idx}", T.must(emit(node.shard_idx)))
+        .gsub("{shard_key}", T.must(emit(node.shard_key)))
     end
     pattern = pattern.gsub("{key_zig}", node.key_zig) if node.key_zig
     pattern = pattern.gsub("{val_zig}", node.val_zig) if node.val_zig
@@ -243,6 +244,7 @@ class MIREmitter
   private
 
   # Emit InlineZig, resolving allocator placeholders from the allocs field.
+  sig { params(node: MIR::InlineZig).returns(String) }
   def emit_inline_zig(node)
     code = node.code
     if node.allocs
@@ -266,6 +268,7 @@ class MIREmitter
   #   const <alias> = <guard>.get();
   #   _ = &<alias>;
   #   <body>
+  sig { params(node: MIR::SnapshotRead).returns(String) }
   def emit_snapshot_read(node)
     body = emit_body(node.body || [])
     parts = [
@@ -296,6 +299,7 @@ class MIREmitter
   # for `WITH POLYMORPHIC c AS x { body }` on a universally-polymorphic
   # parameter (no narrow REQUIRES). The runtime helper comptime-dispatches
   # to the right family-specific path; the body is a no-capture closure.
+  sig { params(node: MIR::PolymorphicMutate).returns(String) }
   def emit_polymorphic_mutate(node)
     body_zig = emit_body(node.body || [])
     <<~ZIG.rstrip
@@ -308,6 +312,7 @@ class MIREmitter
     ZIG
   end
 
+  sig { params(node: MIR::PolymorphicMutateFlow).returns(String) }
   def emit_polymorphic_mutate_flow(node)
     old_flow_alias = @flow_alias_zig
     @flow_alias_zig = node.alias_zig
@@ -349,11 +354,13 @@ class MIREmitter
     result
   end
 
+  sig { params(stmts: Array, return_kind: Symbol).returns(String) }
   def emit_body_flow(stmts, return_kind)
     return "" unless stmts
     stmts.filter_map { |s| emit_flow_stmt(s, return_kind) }.join("\n")
   end
 
+  sig { params(stmt: T.untyped, return_kind: Symbol).returns(T.nilable(String)) }
   def emit_flow_stmt(stmt, return_kind)
     case stmt
     when MIR::ReturnStmt
@@ -376,6 +383,7 @@ class MIREmitter
     end
   end
 
+  sig { params(stmts: Array).returns(T::Boolean) }
   def flow_body_terminates?(stmts)
     return false unless stmts && !stmts.empty?
     last = stmts.last
@@ -395,17 +403,20 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::PolymorphicMutateFlow).returns(T::Boolean) }
   def flow_always_exits?(node)
     body_exits = flow_body_terminates?(node.body || [])
     return body_exits unless node.guard_cond
     body_exits && flow_body_terminates?(node.guard_fail_body || [])
   end
 
+  sig { params(code: String, spaces: Integer).returns(String) }
   def indent_block(code, spaces)
     pad = " " * spaces
     code.to_s.lines.map { |line| line.strip.empty? ? line : "#{pad}#{line}" }.join.rstrip
   end
 
+  sig { params(node: MIR::SnapshotTransaction).returns(String) }
   def emit_snapshot_transaction(node)
     body_zig = emit_body(node.body || [])
     core = <<~ZIG.rstrip
@@ -429,6 +440,7 @@ class MIREmitter
 
   # `WITH SNAPSHOT a AS MUTABLE va, b AS MUTABLE vb, ... { body }`:
   # Multi-cell atomic transaction via versionedUpdateMulti.
+  sig { params(node: MIR::SnapshotMultiTxn).returns(String) }
   def emit_snapshot_multi_txn(node)
     body_zig = emit_body(node.body || [])
     core = <<~ZIG.rstrip
@@ -446,6 +458,7 @@ class MIREmitter
   # comptime if-else chain, one branch per family. The `unreachable`
   # else is added by the lowering (WithMatchCheck enforces arm
   # exhaustiveness); we emit exactly what mir_lowering passed in.
+  sig { params(node: MIR::WithMatchDispatch).returns(String) }
   def emit_with_match_dispatch(node)
     arm_strs = node.arms.each_with_index.map { |arm, i|
       head = i.zero? ? "if (comptime #{arm[:probe]})" : "else if (comptime #{arm[:probe]})"
@@ -464,6 +477,7 @@ class MIREmitter
   # the Zig error name so the same wrapper works for both families:
   # `UpdateRetriesExhausted` (Versioned bridge to MvccConflict) and
   # `AtomicConflict` (AtomicPtr bridge to AtomicConflict).
+  sig { params(core_call: String, conflict_action: String, retries: NilClass, zig_error_name: String).returns(String) }
   def wrap_conflict_handler(core_call, conflict_action, retries, zig_error_name = "UpdateRetriesExhausted")
     if retries
       <<~ZIG.rstrip
@@ -494,6 +508,7 @@ class MIREmitter
 
   # --- Top-level emitters ---
 
+  sig { params(node: MIR::Program).returns(String) }
   def emit_program(node)
     parts = node.items.filter_map { |item| emit(item) }
     out = []
@@ -509,6 +524,7 @@ class MIREmitter
     out.join
   end
 
+  sig { params(node: MIR::FnDef).returns(String) }
   def emit_fn_def(node)
     vis = node.visibility == :pub ? "pub " : ""
     comptime = (node.comptime_params || []).join(", ")
@@ -521,6 +537,7 @@ class MIREmitter
     "#{vis}fn #{node.name}(#{all_params}) #{ret} {\n#{body}\n}"
   end
 
+  sig { params(node: MIR::StructDef).returns(String) }
   def emit_struct_def(node)
     vis = node.visibility == :pub ? "pub " : ""
     fields = (node.fields || []).map { |f|
@@ -538,12 +555,14 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::EnumDef).returns(String) }
   def emit_enum_def(node)
     vis = node.visibility == :pub ? "pub " : ""
     variants = node.variants.join(", ")
     "#{vis}const #{node.name} = enum { #{variants} };"
   end
 
+  sig { params(node: MIR::UnionTypeDef).returns(String) }
   def emit_union_def(node)
     vis = node.visibility == :pub ? "pub " : ""
     fields = node.variants.map { |v|
@@ -556,16 +575,19 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::Import).returns(String) }
   def emit_import(node)
     base = "@import(\"#{node.module_path}\")"
     base = "#{base}.#{node.member}" if node.member
     "const #{node.alias_name} = #{base};"
   end
 
+  sig { params(node: MIR::TypeAlias).returns(String) }
   def emit_type_alias(node)
     "const #{node.name} = #{node.target};"
   end
 
+  sig { params(node: MIR::TestDef).returns(String) }
   def emit_test_def(node)
     body = emit_body(node.body)
     "test \"#{node.name}\" {\n#{body}\n}"
@@ -573,6 +595,7 @@ class MIREmitter
 
   # --- Statement emitters ---
 
+  sig { params(node: MIR::Let).returns(String) }
   def emit_let(node)
     if node.init.is_a?(MIR::FreezeExpr)
       buf  = "#{node.name}__buf"
@@ -587,10 +610,12 @@ class MIREmitter
     "#{kw} #{node.name}#{ann} = #{init};#{sup}"
   end
 
+  sig { params(node: MIR::Set).returns(String) }
   def emit_set(node)
     "#{emit(node.target)} = #{emit(node.value)};"
   end
 
+  sig { params(node: MIR::ReassignWithCleanup).returns(String) }
   def emit_reassign_cleanup(node)
     tmp = "__new_#{node.name}"
     val = emit(node.value)
@@ -600,6 +625,7 @@ class MIREmitter
     "{\nconst #{tmp} = #{val};\nCheatLib.cleanup(#{zt}, #{alloc}, &#{node.name});\n#{node.name} = #{tmp};\n}"
   end
 
+  sig { params(node: MIR::IfStmt).returns(String) }
   def emit_if_stmt(node)
     cond = emit(node.cond)
     then_body = emit_body(node.then_body)
@@ -611,6 +637,7 @@ class MIREmitter
     result
   end
 
+  sig { params(node: MIR::IfBindStmt).returns(String) }
   def emit_if_bind_stmt(node)
     then_body = emit_body(node.then_body)
     else_body = node.else_body && !node.else_body.empty? ? emit_body(node.else_body) : nil
@@ -638,6 +665,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::WhileStmt).returns(String) }
   def emit_while(node)
     cond = emit(node.cond)
     cap = node.capture ? " |#{node.capture}|" : ""
@@ -652,6 +680,7 @@ class MIREmitter
     "while (#{cond})#{upd}#{cap} {\n#{body}\n}"
   end
 
+  sig { params(node: MIR::ForStmt).returns(String) }
   def emit_for(node)
     iter = emit(node.iter)
     captures = [node.capture, node.index_capture].compact.join(", ")
@@ -659,6 +688,7 @@ class MIREmitter
     "for (#{iter}) |#{captures}| {\n#{body}\n}"
   end
 
+  sig { params(node: MIR::SwitchStmt).returns(String) }
   def emit_switch(node)
     subject = emit(node.subject)
     arms = node.arms.map { |arm|
@@ -672,6 +702,7 @@ class MIREmitter
     "switch (#{subject}) {\n    #{arms.join(",\n    ")},\n}"
   end
 
+  sig { params(node: MIR::IfChain).returns(String) }
   def emit_if_chain(node)
     parts = node.branches.map { |br|
       cond = emit(br[:cond])
@@ -686,10 +717,12 @@ class MIREmitter
     result
   end
 
+  sig { params(node: MIR::ReturnStmt).returns(String) }
   def emit_return(node)
     node.value ? "return #{emit(node.value)};" : "return;"
   end
 
+  sig { params(node: MIR::BreakStmt).returns(String) }
   def emit_break(node)
     parts = ["break"]
     parts << ":#{node.label}" if node.label
@@ -697,6 +730,7 @@ class MIREmitter
     "#{parts.join(' ')};"
   end
 
+  sig { params(node: MIR::IndexInsert).returns(String) }
   def emit_index_insert(node)
     map = emit(node.map)
     key = emit(node.key_expr)
@@ -721,6 +755,7 @@ class MIREmitter
     "}"
   end
 
+  sig { params(node: MIR::Sort).returns(String) }
   def emit_sort(node)
     et = node.elem_type
     items = emit(node.items_expr)
@@ -731,29 +766,33 @@ class MIREmitter
       "}.lessThan);"
   end
 
+  sig { params(node: MIR::ScopeBlock).returns(String) }
   def emit_scope_block(node)
     body = emit_body(node.body)
     "{\n#{body}\n}"
   end
 
+  sig { params(node: MIR::DeferStmt).returns(String) }
   def emit_defer(node)
-    body = T.must(emit(node.body))
-    if body.include?("\n") || body.start_with?("{")
+    body = emit(node.body)
+    if T.must(body).include?("\n") || T.must(body).start_with?("{")
       "defer #{body}"
     else
       "defer #{body};"
     end
   end
 
+  sig { params(node: MIR::ErrDeferStmt).returns(String) }
   def emit_errdefer(node)
-    body = T.must(emit(node.body))
-    if body.include?("\n") || body.start_with?("{")
+    body = emit(node.body)
+    if T.must(body).include?("\n") || T.must(body).start_with?("{")
       "errdefer #{body}"
     else
       "errdefer #{body};"
     end
   end
 
+  sig { params(node: MIR::ExprStmt).returns(String) }
   def emit_expr_stmt(node)
     code = emit(node.expr)
     node.discard ? "_ = #{code};" : "#{code};"
@@ -761,6 +800,7 @@ class MIREmitter
 
   # --- Memory operation emitters ---
 
+  sig { params(node: MIR::HeapCreate).returns(String) }
   def emit_heap_create(node)
     label = node.label || "__hc"
     init = emit(node.init)
@@ -773,24 +813,29 @@ class MIREmitter
     "}"
   end
 
+  sig { params(node: MIR::DupeSlice).returns(String) }
   def emit_dupe_slice(node)
     "try #{alloc_expr(node.alloc)}.dupe(u8, #{emit(node.source)})"
   end
 
+  sig { params(node: MIR::AllocSlice).returns(String) }
   def emit_alloc_slice(node)
     "try #{alloc_expr(node.alloc)}.alloc(#{node.elem_type}, #{emit(node.len)})"
   end
 
+  sig { params(node: MIR::FreeSlice).returns(String) }
   def emit_free_slice(node)
     "#{alloc_expr(node.alloc)}.free(#{emit(node.slice)})"
   end
 
+  sig { params(node: MIR::DestroyPtr).returns(String) }
   def emit_destroy_ptr(node)
     "#{alloc_expr(node.alloc)}.destroy(#{emit(node.ptr)})"
   end
 
   # Accepts either a Symbol (:heap/:frame/:cleanup, resolved via rt) or a MIR
   # expression node (used as the allocator directly, e.g. a parameter name).
+  sig { params(alloc: T.untyped).returns(T.nilable(String)) }
   def alloc_expr(alloc)
     alloc.is_a?(Symbol) ? alloc_zig(alloc) : emit(alloc)
   end
@@ -800,6 +845,7 @@ class MIREmitter
   # errdefer: false -> emits `defer cleanup(name)` with optional moved guard
   #                    based on entry[:has_moved_guard].
   # The caller (emit dispatch) decides which; this method applies the template.
+  sig { params(node: T.untyped, errdefer: T::Boolean).returns(String) }
   def emit_cleanup(node, errdefer: false)
     entry = node.cleanup_entry
     alloc = alloc_from_entry(entry)
@@ -945,10 +991,12 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::MoveMark).returns(String) }
   def emit_move_mark(node)
     "#{node.name}_moved = true;"
   end
 
+  sig { params(node: MIR::EscapePromote).returns(T.nilable(String)) }
   def emit_escape_promote(node)
     rt = node.rt_expr || "rt"
     case node.strategy
@@ -967,6 +1015,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::DeepCopy).returns(T.nilable(String)) }
   def emit_deep_copy(node)
     src = emit(node.source)
     alloc = node.alloc ? alloc_expr(node.alloc) : nil
@@ -1007,6 +1056,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::ContainerInit).returns(String) }
   def emit_container_init(node)
     case node.strategy
     when :pool, :list_capacity
@@ -1025,6 +1075,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::CapWrap).returns(T.nilable(String)) }
   def emit_cap_wrap(node)
     inner = emit(node.inner)
     alloc = alloc_zig(node.alloc)
@@ -1051,6 +1102,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::SharePromote).returns(String) }
   def emit_share_promote(node)
     source = emit(node.source)
     alloc = alloc_zig(node.alloc)
@@ -1067,49 +1119,59 @@ class MIREmitter
     ZIG
   end
 
+  sig { params(node: MIR::RcRetain).returns(String) }
   def emit_rc_retain(node)
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
   end
 
+  sig { params(node: MIR::RcDowngrade).returns(String) }
   def emit_rc_downgrade(node)
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
   end
 
+  sig { params(node: MIR::WeakUpgrade).returns(String) }
   def emit_weak_upgrade(node)
     "CheatLib.#{node.func}(#{node.zig_base}, #{emit(node.source)})"
   end
 
+  sig { params(node: MIR::FreezeExpr).returns(String) }
   def emit_freeze(node)
     "try CheatLib.freeze(#{node.zig_base}, rt.heapAlloc(), #{emit(node.inner)})"
   end
 
+  sig { params(node: MIR::MakeList).returns(String) }
   def emit_make_list(node)
     items = node.items.map { |i| emit(i) }.join(", ")
     items_expr = node.items.empty? ? "&.{}" : "&.{ #{items} }"
     "try CheatLib.makeList(#{node.elem_type}, #{alloc_zig(node.alloc)}, #{items_expr})"
   end
 
+  sig { params(node: MIR::FrameSave).returns(String) }
   def emit_frame_save(node)
     "const frame_mark = #{node.rt_expr}.saveFrameMark();"
   end
 
+  sig { params(node: MIR::FrameRestore).returns(String) }
   def emit_frame_restore(node)
     "defer #{node.rt_expr}.restoreFrameMark(frame_mark);"
   end
 
   # --- Expression emitters ---
 
+  sig { params(node: MIR::Call).returns(String) }
   def emit_call(node)
     args = node.args.map { |a| emit(a) }.join(", ")
     call = "#{node.callee}(#{args})"
     node.try_wrap ? "try #{call}" : call
   end
 
+  sig { params(node: MIR::TailCall).returns(String) }
   def emit_tail_call(node)
     args = node.args.map { |a| emit(a) }.join(", ")
     "@call(.always_tail, #{node.callee}, .{#{args}})"
   end
 
+  sig { params(node: MIR::MethodCall).returns(String) }
   def emit_method_call(node)
     recv = emit(node.receiver)
     args = node.args.map { |a| emit(a) }.join(", ")
@@ -1117,28 +1179,34 @@ class MIREmitter
     node.try_wrap ? "try #{call}" : call
   end
 
+  sig { params(node: MIR::FieldGet).returns(String) }
   def emit_field_get(node)
-    "#{paren_if_try(emit(node.object))}.#{node.field}"
+    "#{paren_if_try(T.must(emit(node.object)))}.#{node.field}"
   end
 
   # Parenthesize try-expressions to prevent Zig precedence issues where
   # `try X.field` parses as `try (X.field)` instead of `(try X).field`.
+  sig { params(expr: String).returns(String) }
   def paren_if_try(expr)
     expr.start_with?("try ") ? "(#{expr})" : expr
   end
 
+  sig { params(node: MIR::IndexGet).returns(String) }
   def emit_index_get(node)
     "#{emit(node.object)}[#{emit(node.index)}]"
   end
 
+  sig { params(node: MIR::BinOp).returns(String) }
   def emit_bin_op(node)
     "(#{emit(node.left)} #{node.op} #{emit(node.right)})"
   end
 
+  sig { params(node: MIR::UnaryOp).returns(String) }
   def emit_unary_op(node)
     "#{node.op}#{emit(node.operand)}"
   end
 
+  sig { params(node: MIR::StructInit).returns(String) }
   def emit_struct_init(node)
     fields = node.fields.map { |f| ".#{f[:name]} = #{emit(f[:value])}" }.join(", ")
     if node.zig_type
@@ -1148,11 +1216,13 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::ArrayInit).returns(String) }
   def emit_array_init(node)
     items = node.items.map { |i| emit(i) }.join(", ")
     "[#{node.count}]#{node.elem_type}{ #{items} }"
   end
 
+  sig { params(node: MIR::SliceExpr).returns(String) }
   def emit_slice_expr(node)
     target = emit(node.target)
     s = emit(node.start)
@@ -1165,17 +1235,20 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::BlockExpr).returns(String) }
   def emit_block_expr(node)
     body = emit_body(node.body)
     label_prefix = node.label ? "#{node.label}: " : ""
     "#{label_prefix}{\n#{body}\n}"
   end
 
+  sig { params(node: MIR::ConcatStr).returns(String) }
   def emit_concat(node)
     parts = node.parts.map { |p| emit(p) }.join(", ")
     "try std.mem.concat(#{alloc_zig(node.alloc)}, u8, &.{ #{parts} })"
   end
 
+  sig { params(node: MIR::Cast).returns(String) }
   def emit_cast(node)
     inner = emit(node.expr)
     # `@as(!T, ...)` and `@as(!?T, ...)` parse as `@as(boolean_not, ...)`
@@ -1207,6 +1280,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::TryCatch).returns(String) }
   def emit_try_catch(node)
     expr = emit(node.expr)
     catch_body = emit(node.catch_body)
@@ -1214,14 +1288,17 @@ class MIREmitter
     "(#{expr} catch#{cap} #{catch_body})"
   end
 
+  sig { params(node: MIR::Conditional).returns(String) }
   def emit_conditional(node)
     "(if (#{emit(node.cond)}) #{emit(node.then_val)} else #{emit(node.else_val)})"
   end
 
+  sig { params(node: MIR::IfOptional).returns(String) }
   def emit_if_optional(node)
     "(if (#{emit(node.optional)}) |#{node.capture}| #{emit(node.then_expr)} else #{emit(node.else_expr)})"
   end
 
+  sig { params(node: MIR::AllocatorRef).returns(String) }
   def emit_allocator_ref(node)
     # Use @rt_name (matches alloc_zig) so callers that swap rt_name
     # — e.g. lower_range_fold_observable's body-emit phase, which
@@ -1237,6 +1314,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::TypeSentinel).returns(T.untyped) }
   def emit_type_sentinel(node)
     t = node.zig_type.to_s
     case node.extreme
@@ -1253,6 +1331,7 @@ class MIREmitter
     end
   end
 
+  sig { params(node: MIR::RangeLit).returns(String) }
   def emit_range_lit(node)
     s = emit(node.start)
     e = emit(node.end_val)
@@ -1267,12 +1346,14 @@ class MIREmitter
     "@hasField(@TypeOf(#{emit(node.expr)}), \"#{node.field}\")"
   end
 
+  sig { params(node: MIR::LambdaExpr).returns(String) }
   def emit_lambda(node)
     fn = node.fn_def
     fn_zig = emit_fn_def(fn)
     "&(struct { #{fn_zig} }).#{fn.name}"
   end
 
+  sig { params(node: MIR::ItemsAccess).returns(String) }
   def emit_items_access(node)
     inner = emit(node.expr)
     if node.safe
@@ -1293,6 +1374,7 @@ class MIREmitter
 
   # --- Helpers ---
 
+  sig { params(stmts: Array).returns(String) }
   def emit_body(stmts)
     return "" unless stmts
     stmts.filter_map { |s|
@@ -1310,15 +1392,18 @@ class MIREmitter
     }.join("\n")
   end
 
+  sig { params(entry: T::Hash[Symbol, T.untyped]).returns(String) }
   def alloc_from_entry(entry)
     alloc_zig(entry[:alloc])
   end
 
+  sig { params(sym: Symbol).returns(String) }
   def alloc_from_sym(sym)
     alloc_zig(sym)
   end
 
   # Single source of truth: symbol -> Zig allocator expression.
+  sig { params(sym: Symbol).returns(String) }
   def alloc_zig(sym)
     rt = @rt_name || "rt"
     case sym
@@ -1329,6 +1414,7 @@ class MIREmitter
     end
   end
 
+  sig { params(name: String, body: String, guarded: T::Boolean, errdefer: T::Boolean).returns(String) }
   def guarded_defer(name, body, guarded, errdefer: false)
     kw = errdefer ? "errdefer" : "defer"
     if guarded
@@ -1344,6 +1430,7 @@ class MIREmitter
   # TAKES params arrive as *HashMap or *Pool from the call site's & wrapping).
   # CheatLib.cleanup expects *const T, so re-applying & would produce *const *T.
   # Pass +name+ directly in that case.
+  sig { params(name: String, zig_type: String, alloc: String, guarded: T::Boolean, errdefer: T::Boolean, via_pointer: T.nilable(T::Boolean)).returns(String) }
   def guarded_cleanup(name, zig_type, alloc, guarded, errdefer: false, via_pointer: false)
     kw = errdefer ? "errdefer" : "defer"
     arg = via_pointer ? name : "&#{name}"

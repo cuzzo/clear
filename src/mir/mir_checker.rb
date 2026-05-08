@@ -70,6 +70,7 @@ class MIRChecker
 
   attr_reader :errors
 
+  sig { params(fn_name: T.untyped).void }
   def initialize(fn_name: nil)
     @fn_name = fn_name
     @errors = []
@@ -81,7 +82,7 @@ class MIRChecker
   # and list literal that hasn't been hoisted yet.  Each phase task fixes a
   # category and re-enables the check for that category.  Once all violations
   # are resolved this parameter will be removed and the check always runs.
-  sig { params(fn_def: T.untyped, strict: T.untyped).returns(Array) }
+  sig { params(fn_def: MIR::FnDef, strict: T::Boolean).returns(T::Array[String]) }
   def check_fn!(fn_def, strict: false)
     @fn_name = fn_def.name
     @errors = []
@@ -140,7 +141,7 @@ class MIRChecker
     @errors
   end
 
-  sig { params(program: T.untyped, strict: T.untyped).returns(Array) }
+  sig { params(program: MIR::Program, strict: T::Boolean).returns(T::Array[String]) }
   def check_program!(program, strict: false)
     all_errors = []
     program.items.each do |item|
@@ -198,7 +199,7 @@ class MIRChecker
   # added here, NOT in the rendering code.
   class FsmStructureError < StandardError; end
 
-  sig { params(structure: T.untyped, source: T.untyped).returns(NilClass) }
+  sig { params(structure: T.nilable(MIR::FsmStructure), source: T.untyped).returns(NilClass) }
   def self.check_fsm_structure!(structure, source: nil)
     return unless structure
     captures = structure.captures || []
@@ -270,7 +271,7 @@ class MIRChecker
     nil
   end
 
-  sig { params(invariant: T.untyped, message: T.untyped, source: T.untyped).returns(String) }
+  sig { params(invariant: String, message: String, source: NilClass).returns(String) }
   def self.format_fsm_error(invariant, message, source)
     loc = source&.line ? " at line #{source.line}" : ""
     "[FSM checker]#{loc} #{invariant}: #{message}"
@@ -279,11 +280,13 @@ class MIRChecker
   private
 
   # Tree walker -- yields every node in the MIR tree.
+  sig { params(stmts: T.nilable(Array), block: T.untyped).returns(T.nilable(Array)) }
   def walk_mir(stmts, &block)
     return unless stmts.is_a?(Array)
     stmts.each { |s| walk_mir_node(s, &block) }
   end
 
+  sig { params(node: T.untyped, block: T.untyped).returns(T.nilable(Array)) }
   def walk_mir_node(node, &block)
     return unless node
     yield node
@@ -321,6 +324,7 @@ class MIRChecker
   end
 
   # HPT_LEAK: heap-returning call result discarded.
+  sig { params(node: T.untyped, leaks: T::Array[String]).returns(T.nilable(Array)) }
   def scan_expr_for_hpt_leak!(node, leaks)
     return unless node
     if node.is_a?(MIR::Call) && node.heap_provenance
@@ -345,13 +349,14 @@ class MIRChecker
   # Checks ALL allocator params (:alloc, :key_alloc, :val_alloc) against the
   # container's AllocMark. A frame-allocated key/value stored in a heap
   # container becomes a dangling pointer after frame rewind.
+  sig { params(inline_nodes: Array, allocs: T::Hash[String, Array]).returns(Array) }
   def verify_inline_alloc_contracts!(inline_nodes, allocs)
     inline_nodes.each do |iz|
       next unless iz.allocs
       target = iz.target_var
       next unless target && allocs.key?(target)
 
-      container_alloc = allocs[target].first.alloc
+      container_alloc = T.must(allocs[target]).first.alloc
 
       # Check primary allocator
       if iz.allocs.key?(:alloc)
@@ -387,6 +392,7 @@ class MIRChecker
   # mir_lowering's `@current_fn_collection_params` set. Defense in depth:
   # if lowering's `resolve_alloc_sym` or escape_analysis's Condition 9
   # ever regresses, this catches the resulting bad MIR before codegen.
+  sig { params(inline_nodes: Array, fn_def: MIR::FnDef).returns(T.nilable(Array)) }
   def verify_cross_frame_param_alloc!(inline_nodes, fn_def)
     return if fn_def.params.nil? || fn_def.params.empty?
 
@@ -427,12 +433,13 @@ class MIRChecker
   # insert_drop!) must have a corresponding AllocMark. A Cleanup with no AllocMark
   # is a compiler bug: the allocation event is invisible to the checker, so
   # ALLOC_CLEANUP_MISMATCH cannot fire even if the allocators diverge.
+  sig { params(allocs: T::Hash[String, Array], cleanups: T::Hash[String, Array], errdefer_destroy_names: Set).returns(T::Hash[String, Array]) }
   def verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names = Set.new)
     allocs.each do |name, alloc_marks|
       next unless cleanups.key?(name)
 
       alloc_sym   = alloc_marks.first.alloc
-      cleanup_sym = cleanups[name].first.cleanup_entry[:alloc]
+      cleanup_sym = T.must(cleanups[name]).first.cleanup_entry[:alloc]
 
       if alloc_sym != cleanup_sym
         @errors << error(:ALLOC_CLEANUP_MISMATCH, name,
@@ -493,6 +500,7 @@ class MIRChecker
     CheatLib.needsCleanup
   ].freeze
 
+  sig { params(zig_nodes: Array).returns(Array) }
   def verify_zig_contracts!(zig_nodes)
     zig_nodes.each do |node|
       next if node.stdlib_def
@@ -536,6 +544,7 @@ class MIRChecker
     concurrent_
   ].freeze
 
+  sig { params(zig_nodes: Array).returns(Array) }
   def verify_raw_justified!(zig_nodes)
     zig_nodes.each do |node|
       next unless node.is_a?(MIR::RawZig)
@@ -553,11 +562,13 @@ class MIRChecker
   # Post-lowering check: walks the MIR tree looking for loops that contain
   # frame AllocMarks or InlineZig with frame allocs but lack mark_per_iter.
   # Without per-iteration rewind, frame arena grows unboundedly across iterations.
+  sig { params(body: Array).returns(T.untyped) }
   def verify_frame_rewind!(body)
     return unless body.is_a?(Array)
     check_loop_rewind!(body)
   end
 
+  sig { params(stmts: T.nilable(Array)).returns(T.nilable(Array)) }
   def check_loop_rewind!(stmts)
     return unless stmts.is_a?(Array)
     stmts.each do |stmt|
@@ -598,6 +609,7 @@ class MIRChecker
   # emitted by the lowerer when mark_per_iter is true.
   # Uses the same traversal rules as body_has_frame_alloc? and check_loop_rewind!:
   # recurse into branches/blocks, stop at nested loops (they have their own restore).
+  sig { params(stmts: T.nilable(Array)).returns(T::Boolean) }
   def body_has_loop_restore?(stmts)
     return false unless stmts.is_a?(Array)
     stmts.any? do |s|
@@ -630,6 +642,7 @@ class MIRChecker
   # but stopping at nested loop and fiber/lambda boundaries.
   # Mirrors the same traversal used by check_loop_rewind! so both methods
   # see the same nodes -- no special-cased paths.
+  sig { params(stmts: T.nilable(Array)).returns(T::Boolean) }
   def body_has_frame_alloc?(stmts)
     return false unless stmts.is_a?(Array)
     stmts.any? do |s|
@@ -667,6 +680,7 @@ class MIRChecker
   # existing container's backing store under that container's own allocator.
   # The container's outer-scope rewind handles cleanup — per-iteration rewind
   # would corrupt accumulated data. Only NEW ephemeral objects need loop marks.
+  sig { params(expr: T.untyped).returns(T.nilable(T::Boolean)) }
   def expr_has_frame_alloc?(expr)
     return false unless expr
     case expr
@@ -689,6 +703,7 @@ class MIRChecker
   # registered in DiagnosticRegistry — that's the unification point.
   # Adding a new MIR check now requires adding a registry entry,
   # which means `clear explain <CODE>` documents it for free.
+  sig { params(kind: Symbol, name: String, msg: String).returns(String) }
   def error(kind, name, msg)
     unless DiagnosticRegistry.known?(kind)
       raise "Internal Compiler Error: unregistered MIR diagnostic code :#{kind}. " \
@@ -715,15 +730,18 @@ class MIRChecker
   # Called only when strict: true because the codebase still has open
   # violations that are fixed progressively in Phase 1-3 tasks.
 
+  sig { params(body: Array).returns(Array) }
   def verify_unhoisted_allocs!(body)
-    check_stmts_for_unhoisted(body)
+    T.must(check_stmts_for_unhoisted(body))
   end
 
+  sig { params(stmts: T.nilable(Array)).returns(T.nilable(Array)) }
   def check_stmts_for_unhoisted(stmts)
     return unless stmts.is_a?(Array)
     stmts.each { |s| check_stmt_for_unhoisted(s) }
   end
 
+  sig { params(node: T.untyped).returns(T.nilable(Array)) }
   def check_stmt_for_unhoisted(node)
     return unless node
     case node
@@ -782,6 +800,7 @@ class MIRChecker
   # allow_top: true  => expr itself may be an allocating node (it IS the Let.init)
   # allow_top: false => flag expr if it is an allocating node
   # In both cases, recurse into sub-expressions with allow_top: false.
+  sig { params(expr: T.untyped, allow_top: T::Boolean).returns(T.nilable(Array)) }
   def check_expr_for_unhoisted(expr, allow_top:)
     return unless expr
     # Cast is a transparent wrapper (no allocation itself). Propagate allow_top so
@@ -815,6 +834,7 @@ class MIRChecker
     each_sub_expr(expr) { |sub| check_expr_for_unhoisted(sub, allow_top: false) }
   end
 
+  sig { params(expr: T.untyped).returns(T::Boolean) }
   def allocating_expr?(expr)
     # Only flag HEAP allocations. Frame allocations are managed by the frame
     # arena and do not need AllocMark/Cleanup tracking. Matching mir_allocates?.

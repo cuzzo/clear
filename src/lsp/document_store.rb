@@ -28,18 +28,19 @@ module LSP
       def cached_version=(value);   @cached_version = value; end
     end
 
+    sig { void }
     def initialize
       @docs = {}
     end
 
     # didOpen — new document arrives.
-    sig { params(uri: T.untyped, text: T.untyped, version: T.untyped).returns(LSP::DocumentStore::Document) }
+    sig { params(uri: String, text: String, version: Integer).returns(LSP::DocumentStore::Document) }
     def open(uri, text, version)
       @docs[uri] = Document.new(uri: uri, text: text, version: version)
     end
 
     # didChange — full-sync replacement.
-    sig { params(uri: T.untyped, text: T.untyped, version: T.untyped).returns(T.nilable(LSP::DocumentStore::Document)) }
+    sig { params(uri: String, text: String, version: Integer).returns(T.nilable(LSP::DocumentStore::Document)) }
     def update(uri, text, version)
       doc = @docs[uri]
       return nil unless doc
@@ -52,22 +53,22 @@ module LSP
     end
 
     # didClose — drop the document.
-    sig { params(uri: T.untyped).returns(T.nilable(LSP::DocumentStore::Document)) }
+    sig { params(uri: String).returns(T.nilable(LSP::DocumentStore::Document)) }
     def close(uri)
       @docs.delete(uri)
     end
 
-    sig { params(uri: T.untyped).returns(T.untyped) }
+    sig { params(uri: String).returns(T.untyped) }
     def get(uri)
       @docs[uri]
     end
 
-    sig { params(uri: T.untyped).returns(String) }
+    sig { params(uri: String).returns(String) }
     def text(uri)
       @docs[uri]&.text
     end
 
-    sig { params(uri: T.untyped).returns(Integer) }
+    sig { params(uri: String).returns(Integer) }
     def version(uri)
       @docs[uri]&.version
     end

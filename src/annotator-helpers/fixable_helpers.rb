@@ -22,7 +22,7 @@ module FixableHelper
 
   # Lint: `MUTABLE 'x' is never reassigned`. :auto fix removes the
   # `MUTABLE ` prefix (8 chars) at the VarDecl's column.
-  sig { params(reg: T.untyped, name: T.untyped).returns(T.nilable(Array)) }
+  sig { params(reg: T.nilable(AST::VarDecl), name: String).returns(T.nilable(T::Array[String])) }
   def emit_mutable_unused_finding!(reg, name)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless reg && reg.token
@@ -55,11 +55,11 @@ module FixableHelper
   # Return the name with the smallest Levenshtein distance from `input`
   # over `candidates`, provided it's within `max_distance`. Returns nil
   # when no candidate is close enough (don't suggest wild guesses).
-  sig { params(input: T.untyped, candidates: T.untyped, max_distance: T.untyped).returns(T.nilable(String)) }
+  sig { params(input: T.untyped, candidates: T.untyped, max_distance: Integer).returns(T.untyped) }
   def closest_name(input, candidates, max_distance: 3)
     T.bind(self, SemanticAnnotator) rescue nil
     best = T.let(nil, T.untyped)
-    best_d = max_distance + 1
+    best_d = T.let(max_distance + 1, Integer)
     candidates.each do |cand|
       d = levenshtein(input.to_s, cand.to_s)
       if d < best_d
@@ -70,7 +70,7 @@ module FixableHelper
     best_d <= max_distance ? best : nil
   end
 
-  sig { params(a: T.untyped, b: T.untyped).returns(T.untyped) }
+  sig { params(a: String, b: String).returns(T.untyped) }
   def levenshtein(a, b)
     T.bind(self, SemanticAnnotator) rescue nil
     return b.length if a.empty?
@@ -80,7 +80,7 @@ module FixableHelper
       curr = [i + 1]
       b.each_char.with_index do |bc, j|
         cost = ac == bc ? 0 : 1
-        curr << [curr[j] + 1, prev[j + 1] + 1, prev[j] + cost].min
+        curr << [T.must(curr[j]) + 1, T.must(prev[j + 1]) + 1, T.must(prev[j]) + cost].min
       end
       prev = curr
     end
@@ -97,6 +97,7 @@ module FixableHelper
   #   message     — user-facing error message when no fix is applicable
   #   fix_label   — short description of what the replacement represents
   #                 (e.g. "closest known kind", "closest registered type")
+  sig { params(token: Lexer::Token, name: T.untyped, candidates: Array, message: String, fix_label: String).returns(T.untyped) }
   def emit_registry_mismatch!(token, name, candidates, message, fix_label)
     T.bind(self, SemanticAnnotator) rescue nil
     best = closest_name(name, candidates)
@@ -134,6 +135,7 @@ module FixableHelper
   #                 would have set); the finding is captured and THEN
   #                 the annotator raises. Pass `false` at sites where
   #                 the enclosing visitor can cleanly bail out.
+  sig { params(token: T.untyped, name: String, candidates: Array, message: String, fix_label: String, category: Symbol, cascade: T::Boolean).returns(T.untyped) }
   def emit_typo_suggestion!(token, name, candidates, message, fix_label,
                             category: :registry, cascade: true)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -171,7 +173,7 @@ module FixableHelper
       T.bind(self, SemanticAnnotator) rescue nil
   end
 
-  sig { params(line: T.untyped, col: T.untyped).returns(FixableHelper::AnchorToken) }
+  sig { params(line: Integer, col: Integer).returns(FixableHelper::AnchorToken) }
   def anchor_at(line, col)
     T.bind(self, SemanticAnnotator) rescue nil
     AnchorToken.new(line, col)
@@ -179,7 +181,7 @@ module FixableHelper
 
   # Given a Type.Variant style GetField, compute the token line/col of
   # the variant name (right after `target.` — length of target + 1).
-  sig { params(getfield_node: T.untyped).returns(T.untyped) }
+  sig { params(getfield_node: AST::GetField).returns(T.untyped) }
   def variant_anchor_from_getfield(getfield_node)
     T.bind(self, SemanticAnnotator) rescue nil
     tgt = getfield_node.target
@@ -190,7 +192,7 @@ module FixableHelper
   # For a UnionVariantLit `Union.Variant{...}`, the node's token is the
   # opening `{` — the variant name ends right before it, so the name's
   # start column is `token.column - variant_name.length`.
-  sig { params(node: T.untyped, variant_name: T.untyped).returns(T.untyped) }
+  sig { params(node: T.any(AST::StructLit, AST::UnionVariantLit), variant_name: String).returns(T.untyped) }
   def variant_anchor_from_unionlit(node, variant_name)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless node.token
@@ -200,6 +202,7 @@ module FixableHelper
   # Typo-suggestion wrapper that takes an (line, col, name, length)
   # instead of a Token. Used by migrations whose error token comes
   # from a synthesized anchor.
+  sig { params(anchor: FixableHelper::AnchorToken, name: String, candidates: T.untyped, message: String, fix_label: String, cascade: T::Boolean).returns(T.untyped) }
   def emit_variant_typo!(anchor, name, candidates, message, fix_label,
                          cascade: false)
     T.bind(self, SemanticAnnotator) rescue nil
@@ -237,6 +240,7 @@ module FixableHelper
   # When the move site isn't tracked (e.g., branch-merge paths, BG
   # captures), fall through to the plain `error!` so the legacy
   # diagnostic still surfaces.
+  sig { params(use_node: AST::Identifier, og_node: OwnershipGraph::Node).returns(T.untyped) }
   def emit_use_of_moved_error!(use_node, og_node)
     T.bind(self, SemanticAnnotator) rescue nil
     name = use_node.name.to_s
@@ -304,6 +308,7 @@ module FixableHelper
   # Loop-body use of a value that was moved on a prior iteration. The
   # coda "Values can only be TAKEN once; subsequent iterations have
   # nothing left to GIVE" is the canonical phrasing per WALKTHROUGH.md.
+  sig { params(node: T.any(AST::WhileBindLoop, AST::WhileLoop), name: String, og_node: T.nilable(OwnershipGraph::Node), code: Symbol).returns(T.untyped) }
   def emit_use_of_moved_in_loop_error!(node, name, og_node = nil, code: :USE_OF_MOVED_IN_LOOP)
     T.bind(self, SemanticAnnotator) rescue nil
     consumer = og_node && og_node.move_line ? consumer_source_text(og_node.move_line) : nil
@@ -316,6 +321,7 @@ module FixableHelper
   # Sub-path use after the path's owner was consumed elsewhere. Uses
   # passive voice ("was already TAKEN / GIVEN") because the subject of
   # the sentence is the owner — what HAPPENED to it — not the consumer.
+  sig { params(node: AST::GetField, path: Array, og_node: T.nilable(OwnershipGraph::Node)).returns(T.untyped) }
   def emit_use_of_moved_path_error!(node, path, og_node = nil)
     T.bind(self, SemanticAnnotator) rescue nil
     path_str = path.map(&:to_s).join('.')
@@ -356,13 +362,13 @@ module FixableHelper
     move:    "was already MOVED",
   }.freeze
 
-  sig { params(action: T.untyped).returns(T.untyped) }
+  sig { params(action: Symbol).returns(T.untyped) }
   def ownership_active_phrase(action)
     T.bind(self, SemanticAnnotator) rescue nil
     OWNERSHIP_ACTIVE_PHRASES[action] || "already consumed it"
   end
 
-  sig { params(action: T.untyped).returns(T.untyped) }
+  sig { params(action: Symbol).returns(T.untyped) }
   def ownership_passive_phrase(action)
     T.bind(self, SemanticAnnotator) rescue nil
     OWNERSHIP_PASSIVE_PHRASES[action] || "was already consumed"
@@ -372,7 +378,7 @@ module FixableHelper
   # error can quote the consumer call (e.g. "process(GIVE msg)"). Falls
   # back to nil when @source_code isn't set (programmatic use of the
   # annotator) or the line is past EOF.
-  sig { params(line_num: T.untyped).returns(T.untyped) }
+  sig { params(line_num: Integer).returns(T.untyped) }
   def consumer_source_text(line_num)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless @source_code && line_num
@@ -401,7 +407,7 @@ module FixableHelper
   SIGNED_ORDER    = [:Int8,  :Int16,  :Int32,  :Int64 ].freeze
   UNSIGNED_ORDER  = [:Byte,  :UInt16, :UInt32, :UInt64].freeze
 
-  sig { params(val: T.untyped).returns(T.untyped) }
+  sig { params(val: Integer).returns(T.untyped) }
   def smallest_fitting_int_type(val)
     T.bind(self, SemanticAnnotator) rescue nil
     order = val >= 0 ? UNSIGNED_ORDER : SIGNED_ORDER
@@ -412,6 +418,7 @@ module FixableHelper
     end
   end
 
+  sig { params(node: T.untyped, val: Integer, target_type: Symbol, min: Integer, max: Integer).returns(T.untyped) }
   def emit_int_overflow_error!(node, val, target_type, min, max)
     T.bind(self, SemanticAnnotator) rescue nil
     overflow_kw = { val: val, type: target_type, min: min, max: max }
@@ -486,7 +493,7 @@ module FixableHelper
   # declaration's source line and emit an :auto fix that removes it
   # (plus one adjacent space). Falls back to a plain stderr note when
   # source isn't available or the text isn't found on the line.
-  sig { params(info: T.untyped).returns(T.untyped) }
+  sig { params(info: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
   def emit_local_never_shared_finding!(info)
     T.bind(self, SemanticAnnotator) rescue nil
     name = info[:var]
@@ -531,7 +538,7 @@ module FixableHelper
   # Ownership: `Variable 'x' is immutable` on reassignment. :auto fix
   # locates the original declaration and inserts `MUTABLE ` at its
   # column.
-  sig { params(node: T.untyped, scope: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::BindExpr, scope: Scope).returns(T.untyped) }
   def emit_immutable_assignment_error!(node, scope)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(node.name, scope)
@@ -546,6 +553,7 @@ module FixableHelper
   # Ownership: `Argument i ('param') is MUTABLE, but you passed
   # immutable variable 'x'`. Same fix shape as the assignment case —
   # declare the passed variable MUTABLE at its binding site.
+  sig { params(arg_node: AST::Identifier, scope: Scope, arg_idx: Integer, param_name: String).returns(T.untyped) }
   def emit_immutable_arg_error!(arg_node, scope, arg_idx, param_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(arg_node.name, scope)
@@ -563,7 +571,7 @@ module FixableHelper
   # Same fix shape: insert MUTABLE at the binding's declaration. The
   # error code is named `_LIST` for historical reasons but the same
   # site fires for HashMap and any other indexable container.
-  sig { params(assignment_node: T.untyped, scope: T.untyped, var_name: T.untyped).returns(T.untyped) }
+  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String).returns(T.untyped) }
   def emit_immutable_index_assignment_error!(assignment_node, scope, var_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(var_name, scope)
@@ -577,7 +585,7 @@ module FixableHelper
 
   # `x.field = ...` where x is an immutable binding. Mirrors the index
   # variant; the fix is the same MUTABLE insertion.
-  sig { params(assignment_node: T.untyped, scope: T.untyped, var_name: T.untyped).returns(T.untyped) }
+  sig { params(assignment_node: AST::Assignment, scope: Scope, var_name: String).returns(T.untyped) }
   def emit_immutable_field_assignment_error!(assignment_node, scope, var_name)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(var_name, scope)
@@ -599,7 +607,7 @@ module FixableHelper
   # locatable (REENTRANCE_DIRECT_RECURSIVE for @nonReentrant fns,
   # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case). `hint` is
   # the human-readable migration text appended to the error template.
-  sig { params(fn_node: T.untyped, code: T.untyped, hint: T.untyped).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef, code: Symbol, hint: String).returns(T.untyped) }
   def emit_reentrant_error!(fn_node, code, hint:)
     T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
@@ -625,7 +633,7 @@ module FixableHelper
   # Capture: USE(MUTABLE x) where x is an immutable binding. :auto
   # fix inserts MUTABLE at the captured binding's declaration. Same
   # shape as emit_immutable_assignment_error! / emit_immutable_arg_error!.
-  sig { params(node: T.untyped, cap_name: T.untyped, owner_scope: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::FunctionDef, cap_name: String, owner_scope: Scope).returns(T.untyped) }
   def emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
     T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(cap_name, owner_scope)
@@ -641,7 +649,7 @@ module FixableHelper
   # `RETURNS` annotation. :auto fix inserts `RETURNS :Any ` immediately
   # before the function's `->` arrow so the compiler knows to accept
   # the polymorphic return.
-  sig { params(fn_node: T.untyped, found_returns: T.untyped).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef, found_returns: Array).returns(T.untyped) }
   def emit_ambiguous_return_error!(fn_node, found_returns)
     T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
@@ -668,7 +676,7 @@ module FixableHelper
   # both fixed by inserting `PARTIAL ` before the MATCH keyword. :auto
   # confidence because PARTIAL MATCH is strictly a superset (allows
   # DEFAULT, allows guards, doesn't require exhaustiveness).
-  sig { params(match_node: T.untyped, code: T.untyped, kwargs: T.untyped).returns(T.untyped) }
+  sig { params(match_node: AST::MatchStatement, code: Symbol, kwargs: T.untyped).returns(T.untyped) }
   def emit_match_partial_fix!(match_node, code, **kwargs)
     T.bind(self, SemanticAnnotator) rescue nil
     tok = match_node.token
@@ -722,7 +730,7 @@ module FixableHelper
   # Capability: WITH RESTRICT on an immutable binding. :auto fix
   # locates the declaration and inserts `MUTABLE ` at its column —
   # same shape as emit_immutable_assignment_error!.
-  sig { params(node: T.untyped, var_node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::WithBlock, var_node: AST::Identifier).returns(T.untyped) }
   def emit_with_restrict_immutable_error!(node, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     name = var_node.name
@@ -740,7 +748,7 @@ module FixableHelper
   # in `!`. :auto fix appends `!` immediately after the function name.
   # Falls back to plain error! when the name token isn't available
   # (e.g. synthesized fns).
-  sig { params(fn_node: T.untyped).returns(T.untyped) }
+  sig { params(fn_node: AST::FunctionDef).returns(T.untyped) }
   def emit_style_mutable_param_needs_bang!(fn_node)
     T.bind(self, SemanticAnnotator) rescue nil
     name = fn_node.name
@@ -797,7 +805,7 @@ module FixableHelper
   # the value is a literal whose source span is precisely known
   # (Literal nodes carry a token for the start; the value's textual
   # length is known from the parsed token's value).
-  sig { params(node: T.untyped, target_type: T.untyped, value_type: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped, target_type: T.untyped, value_type: Symbol).returns(T.untyped) }
   def emit_type_mismatch_assign_error!(node, target_type, value_type)
     T.bind(self, SemanticAnnotator) rescue nil
     kw = { got: value_type, expected: target_type }
@@ -847,7 +855,7 @@ module FixableHelper
   # Shared helper — returns a Fix that inserts `MUTABLE ` at the
   # declaration of `name` in `scope`. Returns nil when the declaration
   # isn't locatable or already carries `MUTABLE`.
-  sig { params(name: T.untyped, scope: T.untyped).returns(T.nilable(Fix)) }
+  sig { params(name: String, scope: Scope).returns(T.nilable(Fix)) }
   def build_declare_mutable_fix(name, scope)
     T.bind(self, SemanticAnnotator) rescue nil
     info = scope.locals[name]
@@ -886,7 +894,7 @@ module FixableHelper
   # wrap around the primitive). Returns nil when source isn't
   # atomic or the decl line text isn't locatable; the caller then
   # falls back to the plain `error!` path.
-  sig { params(source_sym: T.untyped, source_name: T.untyped).returns(T.nilable(Fix)) }
+  sig { params(source_sym: SymbolEntry, source_name: String).returns(T.nilable(Fix)) }
   def build_atomic_escape_migration_fix(source_sym, source_name)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil unless source_sym && source_sym.respond_to?(:sync) && source_sym.sync == :atomic
@@ -954,7 +962,7 @@ module FixableHelper
   #   1. Type appears in EVERY observed op's candidate list (intersection).
   #   2. Sum of per-op rank (default = 0, first alt = 1, ...) ascending.
   # Notes carried through from any op that has a note for that type.
-  sig { params(ops: T.untyped).returns(Array) }
+  sig { params(ops: T::Set[Symbol]).returns(T::Array[Array]) }
   def auto_rank_candidates(ops)
     T.bind(self, SemanticAnnotator) rescue nil
     return [] if ops.nil? || ops.empty?
@@ -989,7 +997,7 @@ module FixableHelper
   # Returns nil when the slot has no Auto token to replace (implicit
   # Auto under --gradual; for those the diagnostic still surfaces the
   # candidates as text but no auto-applicable fix).
-  sig { params(slot: T.untyped, type_sym: T.untyped, note: T.untyped, position: T.untyped).returns(T.untyped) }
+  sig { params(slot: AutoConstraintCollector::Slot, type_sym: Symbol, note: T.nilable(String), position: Integer).returns(T.untyped) }
   def build_auto_candidate_fix(slot, type_sym, note, position)
     T.bind(self, SemanticAnnotator) rescue nil
     auto_tok = auto_token_for(slot)
@@ -1010,7 +1018,7 @@ module FixableHelper
   # Build the diagnostic body listing the operator hints + ranked
   # candidates. Used by both the unresolved and ambiguity finding
   # builders when op_evidence is present.
-  sig { params(ops: T.untyped, candidates: T.untyped).returns(String) }
+  sig { params(ops: Set, candidates: Array).returns(String) }
   def build_auto_op_evidence_block(ops, candidates)
     T.bind(self, SemanticAnnotator) rescue nil
     return "" if candidates.empty?
@@ -1043,7 +1051,7 @@ module FixableHelper
   # key / value type into the binding's `Auto` slot, which holds the
   # whole container type). The caller emits one binding-level
   # finding per shape-tracked decl via `emit_auto_shape_resolved_finding!`.
-  sig { params(resolution: T.untyped).returns(T.untyped) }
+  sig { params(resolution: AutoUnifier::Resolution).returns(T.untyped) }
   def emit_auto_resolved_finding!(resolution)
     T.bind(self, SemanticAnnotator) rescue nil
     slot = resolution.slot
@@ -1070,7 +1078,7 @@ module FixableHelper
   # Partial map resolutions intentionally produce no resolved
   # finding here — the unresolved sub-slot's finding tells the
   # user what's missing.
-  sig { params(decl: T.untyped, slot: T.untyped).returns(T.untyped) }
+  sig { params(decl: T.untyped, slot: AutoConstraintCollector::Slot).returns(T.untyped) }
   def emit_auto_shape_resolved_finding!(decl, slot)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless decl && decl.type.is_a?(Type)
@@ -1090,7 +1098,7 @@ module FixableHelper
   # replaces the literal `Auto` keyword span with `type_str`. Empty
   # array if `auto_tok` is nil (implicit-Auto under `--gradual` —
   # there's no token span to edit).
-  sig { params(auto_tok: T.untyped, type_str: T.untyped).returns(Array) }
+  sig { params(auto_tok: T.nilable(Lexer::Token), type_str: String).returns(Array) }
   def build_auto_replace_fixes(auto_tok, type_str)
     T.bind(self, SemanticAnnotator) rescue nil
     return [] unless auto_tok
@@ -1114,7 +1122,7 @@ module FixableHelper
   # operator-derived candidates on top: when the body uses the
   # binding in operator expressions, those operators' default types
   # are offered as :interactive Fixes.
-  sig { params(ambiguity: T.untyped, op_evidence: T.untyped).returns(T.untyped) }
+  sig { params(ambiguity: AutoUnifier::Ambiguity, op_evidence: Hash).returns(T.untyped) }
   def emit_auto_ambiguity_finding!(ambiguity, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
     slot = ambiguity.slot
@@ -1122,7 +1130,7 @@ module FixableHelper
     observed = ambiguity.observed_types
     observed_strs = observed.map { |t| auto_type_source_form(t) }
 
-    message = build_auto_ambiguity_message(label, observed_strs, slot)
+    message = build_auto_ambiguity_message(T.must(label), observed_strs, slot)
 
     # M2.1: append operator-derived suggestions when present.
     ops = op_evidence[slot_id_for(slot)] || Set.new
@@ -1147,7 +1155,7 @@ module FixableHelper
   # specify a concrete type. M2.1: when the body uses the binding in
   # operator expressions, ranked candidate types per the
   # AUTO_OP_CANDIDATES table are offered as :interactive Fixes.
-  sig { params(slot: T.untyped, op_evidence: T.untyped).returns(T.untyped) }
+  sig { params(slot: AutoConstraintCollector::Slot, op_evidence: Hash).returns(T.untyped) }
   def emit_auto_unresolved_finding!(slot, op_evidence: {})
     T.bind(self, SemanticAnnotator) rescue nil
     label = auto_slot_label(slot)
@@ -1178,7 +1186,7 @@ module FixableHelper
 
   # Reverse-lookup helper: given a Slot struct, return its hash key
   # in the slots map (matches the IDs AutoConstraintCollector uses).
-  sig { params(slot: T.untyped).returns(T.untyped) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T.untyped) }
   def slot_id_for(slot)
     T.bind(self, SemanticAnnotator) rescue nil
     case slot.kind
@@ -1205,7 +1213,7 @@ module FixableHelper
     end
   end
 
-  sig { params(slot: T.untyped).returns(String) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(String)) }
   def auto_slot_label(slot)
     T.bind(self, SemanticAnnotator) rescue nil
     # M2.2: shape-tagged slots (forward-flow inference for empty
@@ -1239,7 +1247,7 @@ module FixableHelper
     end
   end
 
-  sig { params(slot: T.untyped).returns(T.nilable(Lexer::Token)) }
+  sig { params(slot: AutoConstraintCollector::Slot).returns(T.nilable(Lexer::Token)) }
   def auto_token_for(slot)
     T.bind(self, SemanticAnnotator) rescue nil
     # The cached `slot.auto_token` (captured at registration) is
@@ -1253,7 +1261,7 @@ module FixableHelper
     slot.auto_token
   end
 
-  sig { params(label: T.untyped, observed_strs: T.untyped, slot: T.untyped).returns(String) }
+  sig { params(label: String, observed_strs: Array, slot: AutoConstraintCollector::Slot).returns(String) }
   def build_auto_ambiguity_message(label, observed_strs, slot)
     T.bind(self, SemanticAnnotator) rescue nil
     types_list = observed_strs.join(', ')

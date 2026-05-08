@@ -111,7 +111,7 @@ class SymbolEntry
     @lifetime == :current_scope
   end
 
-  sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(value: T::Boolean).returns(T.nilable(Symbol)) }
   def non_escaping=(value)
     if value
       @lifetime = :current_scope
@@ -144,12 +144,13 @@ class SymbolEntry
   # empty Array of source SymbolEntries. Empty / nil input returns nil
   # (unconstrained), so callers can pass through the result of
   # collecting captured bindings without a guard.
-  sig { params(sources: T.untyped).returns(T.nilable(Hash)) }
+  sig { params(sources: T.nilable(T::Array[SymbolEntry])).returns(T.nilable(Hash)) }
   def self.tied_lifetime(sources)
     return nil if sources.nil? || sources.empty?
     { sources: sources.uniq }
   end
 
+  sig { params(reg: T.untyped, type: T.untyped, mutable: T.untyped, storage: Symbol, sync: T.nilable(Symbol), layout: T.nilable(Symbol), rebindable: T::Boolean, size: Integer, capabilities: T::Set[Symbol], valid: T::Boolean, invalid_reason: T.untyped, resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).void }
   def initialize(reg:, type:, mutable:, storage:, sync: nil, layout: nil, rebindable: false,
                  size: 0, capabilities: Set.new,
                  valid: true, invalid_reason: nil, resource: nil, close_zig: nil)

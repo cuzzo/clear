@@ -29,6 +29,7 @@ class FunctionSignature
   # checks survive cross-module flow.
   attr_accessor :requires
 
+  sig { params(params: T::Array[Hash], return_type: T.untyped, return_lifetime: T.untyped, visibility: T.nilable(Symbol), type_params: T.nilable(Array), reentrant: T::Boolean, extern: T::Boolean, module_alias: T.nilable(String), extern_effects: T.nilable(T::Hash[Symbol, T.untyped]), fn_type_params: T.nilable(T::Array[Symbol]), owner_type: T.nilable(String), owner_type_params: T.nilable(Array), intrinsic: T::Boolean, zig_pattern: T.nilable(String)).void }
   def initialize(params:, return_type:, return_lifetime: nil, visibility: nil,
                  type_params: nil, reentrant: false, extern: false,
                  module_alias: nil, extern_effects: nil,

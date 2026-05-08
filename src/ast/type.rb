@@ -44,7 +44,7 @@ class Type
 
   # Resolves the result type of a binary operation given two operand types.
   # Returns a BinaryOpResult with type, optional coercions, and storage.
-  sig { params(op: T.untyped, left_type: T.untyped, right_type: T.untyped).returns(BinaryOpResult) }
+  sig { params(op: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
   def self.binary_op(op, left_type, right_type)
     # Gradual-typing tolerance: if either operand is an unresolved
     # Auto, the body-validation pass would crash with
@@ -97,7 +97,7 @@ class Type
   # @param target_type [Type, Symbol, String] The declared/expected type
   # @return [String, nil] Error message or nil if coercion is valid
   #
-  sig { params(source_type: T.untyped, target_type: T.untyped).returns(T.nilable(String)) }
+  sig { params(source_type: Type, target_type: T.untyped).returns(T.nilable(String)) }
   def self.coerce_error(source_type, target_type)
     source = source_type.is_a?(Type) ? source_type : Type.new(source_type)
     target = target_type.is_a?(Type) ? target_type : Type.new(target_type)
@@ -121,7 +121,7 @@ class Type
 
   private
 
-  sig { params(t_left: T.untyped, t_right: T.untyped).returns(BinaryOpResult) }
+  sig { params(t_left: Symbol, t_right: Symbol).returns(BinaryOpResult) }
   def self.resolve_numeric_op(t_left, t_right)
     lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
     rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
@@ -156,7 +156,7 @@ class Type
     BinaryOpResult.new(type: :Float64)
   end
 
-  sig { params(t_left: T.untyped, t_right: T.untyped, left_type: T.untyped, right_type: T.untyped).returns(BinaryOpResult) }
+  sig { params(t_left: Symbol, t_right: Symbol, left_type: Type, right_type: Type).returns(BinaryOpResult) }
   def self.resolve_add_op(t_left, t_right, left_type, right_type)
     lt = t_left.is_a?(Type) ? t_left : Type.new(t_left)
     rt = t_right.is_a?(Type) ? t_right : Type.new(t_right)
@@ -181,7 +181,7 @@ class Type
     BinaryOpResult.new(error: "Cannot add types: #{t_left} and #{t_right}")
   end
 
-  sig { params(from_type: T.untyped, to_type: T.untyped).returns(T::Boolean) }
+  sig { params(from_type: Symbol, to_type: Symbol).returns(T::Boolean) }
   def self.safe_autocast?(from_type, to_type)
     return false if from_type.nil?
     from_t = from_type.is_a?(Type) ? from_type : Type.new(from_type)
@@ -195,6 +195,7 @@ class Type
 
   public
 
+  sig { params(raw_input: T.untyped, ownership: T.nilable(Symbol), sync: T.nilable(Symbol), layout: T.nilable(Symbol), location: T.nilable(Symbol), collection: T.nilable(Symbol), shard_count: T.nilable(Integer), stripe_count: T.untyped, observable: T.nilable(T::Boolean), observable_terminal: T.nilable(Symbol), auto: T::Boolean).void }
   def initialize(raw_input, ownership: nil, sync: nil, layout: nil, location: nil, collection: nil, shard_count: nil, stripe_count: nil, observable: nil, observable_terminal: nil, auto: false) # stripe_count kept for backwards compat (ignored)
     if raw_input.is_a?(Type)
       # Copy constructor: preserve all parsed state from the source type
@@ -319,7 +320,7 @@ class Type
   # ----------------------------------------------
   # Coercion helpers
   # ----------------------------------------------
-  sig { params(other_type: T.untyped).returns(T::Boolean) }
+  sig { params(other_type: Type).returns(T::Boolean) }
   def accepts?(other_type)
     # 0. Function type: must precede == shortcut (resolved strips fn signature to return type)
     return accepts_fn_type?(other_type) if fn_type?
@@ -360,7 +361,7 @@ class Type
   end
 
   # Used specifically to check if assigning an array too large to a fixed array
-  sig { params(other_type: T.untyped).returns(T.untyped) }
+  sig { params(other_type: Type).returns(T.untyped) }
   def array_overflow?(other_type)
     return false if !other_type.array? || !self.array?
     return false if self.base_type != other_type.base_type
@@ -845,7 +846,7 @@ class Type
   # call doesn't apply against the wrapper. Skip the resource path so the
   # cleanup classifier picks the rc/sync entry instead, which cascades
   # through the wrapper down to the inner shape's destruction.
-  sig { params(schema_lookup: T.untyped).returns(Array) }
+  sig { params(schema_lookup: T.nilable(Proc)).returns(Array) }
   def resolve_resource_close(schema_lookup = nil)
     return [false, nil] if any_rc?
     return [true, "{0}.deinit(rt.heapAlloc())"] if pool?
@@ -1092,7 +1093,7 @@ class Type
   def self.observable_wrappers
     @observable_wrappers ||= observable_terminals.transform_values { |e| e[:wrapper] }.freeze
   end
-  sig { params(tense_type: T.untyped).returns(String) }
+  sig { params(tense_type: Type).returns(String) }
   def observable_wrapper_zig(tense_type)
     # A2: a missing terminal stamp here means an upstream pass produced
     # an `~T@observable` Type without going through pipe_analysis's
@@ -1175,7 +1176,7 @@ class Type
     # even though String is internally []const u8 (a fixed array) - it's a Promise.
     !!(future? && (
       (tense_type.fixed? && !tense_type.string?) ||
-      ((oss = optional_stream_shape_type) && oss.fixed? && !oss.string?)
+      (optional_stream_shape_type&.fixed? && !T.must(optional_stream_shape_type).string?)
     ))
   end
 
@@ -1222,9 +1223,8 @@ class Type
   sig { returns(T.untyped) }
   def stream_element_type
     return nil unless bounded_stream?
-    oss = optional_stream_shape_type
-    if oss&.fixed?
-      Type.new(:"?#{T.must(oss.element_type).to_sym}")
+    if optional_stream_shape_type&.fixed?
+      Type.new(:"?#{T.must(T.must(optional_stream_shape_type).element_type).to_sym}")
     else
       tense_type.element_type
     end
@@ -1249,7 +1249,7 @@ class Type
     end
   end
 
-  sig { params(lookup_arg: T.untyped, lookup_block: T.untyped).returns(Integer) }
+  sig { params(lookup_arg: T.nilable(Proc), lookup_block: T.untyped).returns(Integer) }
   def slot_size(lookup_arg = nil, &lookup_block)
     resolver = lookup_arg || lookup_block
 
@@ -1297,7 +1297,7 @@ class Type
     !primitive?
   end
 
-  sig { params(lookup_arg: T.untyped, lookup_block: T.untyped).returns(T::Boolean) }
+  sig { params(lookup_arg: T.nilable(Proc), lookup_block: T.untyped).returns(T::Boolean) }
   def copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
     return true if string?  # Zig strings ([]const u8) are trivially copyable (pointer + length)
@@ -1322,7 +1322,7 @@ class Type
   # Implicitly copyable: used for branch merge and loop checks.
   # Same as copyable? but excludes user structs — structs need explicit COPY.
   # Primitives, strings, slices, enums, and unions are implicitly copyable.
-  sig { params(lookup_arg: T.untyped, lookup_block: T.untyped).returns(T::Boolean) }
+  sig { params(lookup_arg: T.nilable(Proc), lookup_block: T.untyped).returns(T::Boolean) }
   def implicitly_copyable?(lookup_arg = nil, &lookup_block)
     return true if primitive?
     # Pool Id<T> handles are u64 indices — always Copy.
@@ -1365,7 +1365,7 @@ class Type
   # Mirror of Zig's needsPromotion comptime predicate.
   # Returns true if this type contains frame-arena data that must be
   # duped to heap before returning from a function.
-  sig { params(schema_lookup: T.untyped).returns(T::Boolean) }
+  sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def needs_promotion?(schema_lookup = nil)
     return true if string? || list_collection? || (map? && !numeric_map?)
     if schema_lookup
@@ -1384,7 +1384,7 @@ class Type
   # Same as needs_promotion? but excludes bare strings (freed by
   # StringMap.freeUnionPayload inside collections, not at top level).
   # Plus: RC, NumericMap, Pool, Set.
-  sig { params(schema_lookup: T.untyped).returns(T::Boolean) }
+  sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def needs_cleanup?(schema_lookup = nil)
     return true if any_rc? || link? || list_collection? || map? || pool? ||
                    set_collection? || (string? && heap_provenance?) ||
@@ -1407,7 +1407,7 @@ class Type
   #
   # This is the ownership-aware version of needs_cleanup?. It answers:
   # "if this variable is :live at scope exit, must we emit a defer?"
-  sig { params(allocator: T.untyped, schema_lookup: T.untyped).returns(T::Boolean) }
+  sig { params(allocator: Symbol, schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def needs_explicit_cleanup?(allocator, schema_lookup = nil)
     return false if primitive? || void? || any?
     return false if implicitly_copyable?(schema_lookup)
@@ -1442,9 +1442,11 @@ class Type
   end
 
   # Check if collection elements have heap internals (RC, resource, etc.)
-  sig { params(schema_lookup: T.untyped).returns(T::Boolean) }
+  sig { params(schema_lookup: T.nilable(Proc)).returns(T::Boolean) }
   def elem_has_heap_internals?(schema_lookup = nil)
-    t = element_type
+    et = element_type
+    return false unless et
+    t = et.is_a?(Type) ? et : (Type.new(et) rescue nil)
     return false unless t
     return true if t.any_rc? || t.link? || t.any_sync? || t.resource?
     # Check struct/union element types via schema
@@ -1472,7 +1474,7 @@ class Type
   # :heap entry. With it here, the entry-derived allocator path is
   # self-consistent and the needs_heap_backing? guard becomes a defense-
   # in-depth backstop rather than the load-bearing path.
-  sig { params(schema_lookup: T.untyped).returns(Symbol) }
+  sig { params(schema_lookup: T.nilable(Proc)).returns(Symbol) }
   def cleanup_allocator(schema_lookup = nil)
     return :heap if heap_provenance? || map? || any_rc? || any_sync? ||
                      resource? || sharded? || striped? || link? ||
@@ -1522,13 +1524,13 @@ class Type
     t.is_a?(Type) ? t : (Type.new(t) rescue nil)
   end
 
-  sig { params(value: T.untyped).returns(Symbol) }
+  sig { params(value: Symbol).returns(Symbol) }
   def ownership=(value)
     @zig_type_cache = nil
     @ownership = value
   end
 
-  sig { params(value: T.untyped).returns(T.nilable(Symbol)) }
+  sig { params(value: T.nilable(Symbol)).returns(T.nilable(Symbol)) }
   def sync=(value)
     @zig_type_cache = nil
     @sync = value
@@ -1539,7 +1541,7 @@ class Type
 
   # Returns the Zig type string representation of this type.
   # Memoized for performance; cache is invalidated when location changes.
-  sig { params(is_param: T.untyped, is_field: T.untyped).returns(String) }
+  sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   def zig_type(is_param: false, is_field: false)
     return compute_zig_type(is_param: is_param, is_field: is_field) if is_param || is_field
     @zig_type_cache ||= compute_zig_type
@@ -1552,7 +1554,7 @@ class Type
   # @param current_storage [Symbol, nil] The current storage if already set
   # @return [Symbol] One of :stack, :frame, or :heap
   #
-  sig { params(size: T.untyped, current_storage: T.untyped).returns(Symbol) }
+  sig { params(size: Integer, current_storage: T.nilable(Symbol)).returns(Symbol) }
   def finalize_storage(size, current_storage = nil)
     # Frozen (compact buffer) always stays frozen
     return :frozen if frozen? || current_storage == :frozen
@@ -1622,6 +1624,7 @@ class Type
   end
 
   # Structural match for function/lambda types. Called by accepts? when self.fn_type?.
+  sig { params(other_type: Type).returns(T::Boolean) }
   def accepts_fn_type?(other_type)
     return true if other_type.is_a?(Type) && other_type.any?
     return false unless other_type.is_a?(Type) && other_type.fn_type?
@@ -1651,6 +1654,7 @@ class Type
   end
 
   # Promise/Stream coercion. Called by accepts? when self.future?.
+  sig { params(other_type: Type).returns(T::Boolean) }
   def accepts_future?(other_type)
     # ~T[]@list accepts [] or another ~T[]
     return true if promise_list? && (other_type.empty_list? || (other_type.future? && other_type.tense_type.dynamic?))
@@ -1676,22 +1680,23 @@ class Type
   end
 
   # Array coercion. Called by accepts? when self.array?.
+  sig { params(other_type: Type).returns(T::Boolean) }
   def accepts_array?(other_type)
     # Any[] accepts stream types for append/list intrinsic matching
-    et = T.must(element_type)
-    if et.any? && other_type.future?
+    if T.must(element_type).any? && other_type.future?
       return true if other_type.dynamic_stream? || other_type.promise_list? ||
                      other_type.bounded_stream? || other_type.open_stream? ||
                      other_type.inf_stream?
     end
     return false unless other_type.array?
     return true  if other_type.empty_list?
-    return false unless et.accepts?(other_type.element_type)
+    return false unless T.must(element_type).accepts?(T.must(other_type.element_type))
     return true  if dynamic? && other_type.fixed?
     return other_type.capacity <= capacity if fixed? && other_type.fixed?
     dynamic? && other_type.dynamic?
   end
 
+  sig { returns(T.nilable(Symbol)) }
   def parse_raw_input
     # FunctionSignature and Array raws are function signatures — no string parsing applies.
     # @resolved_cache is left nil and computed on-demand by the resolved() fallback.
@@ -1841,6 +1846,7 @@ class Type
     @resolved_cache = @raw.to_sym
   end
 
+  sig { params(str: String).returns(Array) }
   def strip_capability_suffix(str)
     return [str, nil, nil] unless str.include?("@")
 
@@ -1868,6 +1874,7 @@ class Type
 
   # Computes the Zig type string for this CHEAT type.
   # Handles: error unions, optionals, multiowned (Rc), pointers, arrays, hashmaps, primitives, structs.
+  sig { params(is_param: T::Boolean, is_field: T::Boolean).returns(String) }
   def compute_zig_type(is_param: false, is_field: false)
     # 0. Handle Tense types:
     #    ~T[N]              -> CheatLib.BoundedStream(T, N)

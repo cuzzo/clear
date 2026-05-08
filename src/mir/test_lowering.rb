@@ -42,7 +42,7 @@ module TestLowering
         rt.wireAllocator();
   ZIG
 
-  sig { params(node: T.untyped).returns(Array) }
+  sig { params(node: AST::TestBlock).returns(Array) }
   def lower_test_block(node)
     T.bind(self, MIRLowering) rescue nil
     ctx = TestBlockCtx.new(node, self)
@@ -61,7 +61,7 @@ module TestLowering
   # BEFORE ALL hooks, then each TEST THAT, then benchmarks, then
   # AFTER ALL hooks). Mutates @active_stubs around the body so
   # WHEN-local STUBs don't leak to sibling WHENs.
-  sig { params(when_block: T.untyped, ctx: T.untyped, tests: T.untyped).returns(Array) }
+  sig { params(when_block: AST::WhenBlock, ctx: TestLowering::TestBlockCtx, tests: Array).returns(T::Array[Array]) }
   def lower_when_block(when_block, ctx, tests)
     T.bind(self, MIRLowering) rescue nil
     when_desc = when_block.description
@@ -109,7 +109,7 @@ module TestLowering
 
       (when_block.benchmarks || []).each do |b|
         name = "#{ctx.test_name}: #{when_desc}: benchmark#{tag_suffix}"
-        body = [ctx.fresh_preamble] + stub_mir + ctx.setup_mir + when_setup_mir + [lower(b)]
+        body = [ctx.fresh_preamble] + stub_mir + ctx.setup_mir + T.must(when_setup_mir) + [lower(b)]
         tests << MIR::TestDef.new(name, body)
       end
 
@@ -124,7 +124,7 @@ module TestLowering
   # wrapper so cleanup classification finds locals, composes hooks
   # around the body, and prepends only the LET decls actually
   # referenced by the body or the active hook bodies (lazy).
-  sig { params(test_that: T.untyped, env: T.untyped).returns(T.untyped) }
+  sig { params(test_that: AST::TestThat, env: TestLowering::TestThatEnv).returns(MIR::TestDef) }
   def lower_test_that(test_that, env)
     T.bind(self, MIRLowering) rescue nil
     full_name = "#{env.ctx.test_name}: #{env.when_desc}: #{test_that.description}#{env.tag_suffix}"
@@ -197,6 +197,7 @@ module TestLowering
     attr_reader :test_block, :test_name, :setup_mir,
                 :test_before_each_mir, :test_after_each_mir
 
+    sig { params(test_block: AST::TestBlock, lowering: MIRLowering).void }
     def initialize(test_block, lowering)
       @test_block = test_block
       @test_name  = test_block.name
@@ -212,7 +213,7 @@ module TestLowering
     # context) for one Zig `test` block. Each call returns a new
     # MIR::InlineZig instance because downstream passes mutate the
     # stdlib_def hash.
-    sig { returns(T.untyped) }
+    sig { returns(MIR::InlineZig) }
     def fresh_preamble
       iz = MIR::InlineZig.new(TEST_PREAMBLE, "test_preamble")
       iz.stdlib_def = { allocates: false, borrows: :all }
@@ -225,11 +226,11 @@ module TestLowering
     # WHEN-level. Each ALL hook gets its own runtime (no shared
     # state with TEST THATs in v1 — file-scope-var promotion is a
     # deferred follow-up).
-    sig { params(bodies: T.untyped, name_kind: T.untyped, desc_prefix: T.untyped, tests: T.untyped).returns(Array) }
+    sig { params(bodies: T.nilable(T::Array[Array]), name_kind: String, desc_prefix: String, tests: Array).returns(T::Array[Array]) }
     def emit_all_hooks(bodies, name_kind, desc_prefix, tests)
       (bodies || []).each_with_index do |body, idx|
         name = "#{@test_name}: #{desc_prefix}#{name_kind}_#{idx + 1}"
-        tests << MIR::TestDef.new(name, [fresh_preamble] + @lowering.lower_body(body))
+        tests << MIR::TestDef.new(name, [fresh_preamble] + T.must(@lowering.lower_body(body)))
       end
     end
   end
@@ -249,7 +250,7 @@ module TestLowering
   # translates to `zig test --test-filter "#slow"` which uses Zig's
   # built-in substring filter — no custom test runner required.
   # Returns an empty string when there are no tags.
-  sig { params(tags: T.untyped).returns(String) }
+  sig { params(tags: T.nilable(T::Array[String])).returns(String) }
   def format_tag_suffix(tags)
     T.bind(self, MIRLowering) rescue nil
     return "" unless tags && !tags.empty?
@@ -262,7 +263,7 @@ module TestLowering
   # insertion order preserves declaration order for the surviving
   # entries: outer LETs occupy their original indices unless replaced
   # by an inner LET, which then takes the outer's slot.
-  sig { params(lets: T.untyped, base: T.untyped).returns(Hash) }
+  sig { params(lets: T.nilable(Array), base: T::Hash[String, T.untyped]).returns(T::Hash[String, T.untyped]) }
   def build_let_ast_map(lets, base: {})
     T.bind(self, MIRLowering) rescue nil
     out = base.dup
@@ -276,7 +277,7 @@ module TestLowering
   # RHS expressions depend on. Returns the names in source-declaration
   # order so the emitted Zig declarations resolve cleanly
   # (later LETs may reference earlier ones).
-  sig { params(let_ast_map: T.untyped, ast_subtrees: T.untyped).returns(Array) }
+  sig { params(let_ast_map: T::Hash[String, T.untyped], ast_subtrees: Array).returns(T::Array[String]) }
   def compute_used_let_names(let_ast_map, ast_subtrees)
     T.bind(self, MIRLowering) rescue nil
     return [] if let_ast_map.empty?
@@ -306,7 +307,7 @@ module TestLowering
 
   # Walk an AST subtree gathering names from AST::Identifier nodes
   # whose name appears in `name_set`. Adds to the `out` set.
-  sig { params(node: T.untyped, name_set: T.untyped, out: T.untyped).returns(T.untyped) }
+  sig { params(node: T.untyped, name_set: T::Hash[String, T.untyped], out: T::Set[String]).returns(T.untyped) }
   def collect_identifier_refs(node, name_set, out)
     T.bind(self, MIRLowering) rescue nil
     return if node.nil? || node.is_a?(Symbol) || node.is_a?(String) ||
@@ -322,7 +323,7 @@ module TestLowering
     node.each_pair { |_, v| collect_identifier_refs(v, name_set, out) } if node.respond_to?(:each_pair)
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::AssertRaises).returns(MIR::InlineZig) }
   def lower_assert_raises(node)
     T.bind(self, MIRLowering) rescue nil
     rt_name = @rt_name
@@ -352,7 +353,7 @@ module TestLowering
   # -- no InlineZig escape hatch -- so the checker can see what's going
   # on. Locals that would otherwise become "unused" after stub
   # replacement get an explicit MIR::Suppress (`_ = &name;`).
-  sig { params(fn_name: T.untyped, receiver: T.untyped, args: T.untyped).returns(T.untyped) }
+  sig { params(fn_name: String, receiver: T.untyped, args: Array).returns(T.untyped) }
   def stub_intercept_for(fn_name, receiver, args)
     T.bind(self, MIRLowering) rescue nil
     stub_info = (@active_stubs || {})[fn_name]
@@ -407,7 +408,7 @@ module TestLowering
   # through @decl_zig_name_map / @fn_name_rename_map so suppressed names
   # match the actual Zig var (cleanup-classification may suffix-rename
   # locals as `name_LN` to disambiguate same-name decls in distinct scopes).
-  sig { params(node: T.untyped).returns(Array) }
+  sig { params(node: T.untyped).returns(T::Array[String]) }
   def stub_local_idents(node)
     T.bind(self, MIRLowering) rescue nil
     return [] unless node.is_a?(AST::Identifier)
@@ -420,7 +421,7 @@ module TestLowering
     [renamed]
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::StubDecl).returns(T.untyped) }
   def lower_stub_decl(node)
     T.bind(self, MIRLowering) rescue nil
     fn_name = node.function_name
@@ -465,19 +466,19 @@ module TestLowering
     end
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::BenchmarkStmt).returns(MIR::Comment) }
   def lower_benchmark(node)
     T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("benchmark lowering placeholder")
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::SmashStmt).returns(MIR::Comment) }
   def lower_smash(node)
     T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("smash test placeholder")
   end
 
-  sig { params(node: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::ProfileStmt).returns(MIR::Comment) }
   def lower_profile(node)
     T.bind(self, MIRLowering) rescue nil
     MIR::Comment.new("profile placeholder")

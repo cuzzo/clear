@@ -27,6 +27,7 @@ class ModuleImporter
   # → ../../stdlib relative to __FILE__.
   STDLIB_ROOT = File.expand_path('../../stdlib', __dir__)
 
+  sig { params(base_dir: String, pkg_paths: Hash, use_mir: T::Boolean, stdlib_root: String).void }
   def initialize(base_dir: Dir.pwd, pkg_paths: {}, use_mir: false, stdlib_root: STDLIB_ROOT)
     @base_dir     = File.expand_path(base_dir)
     @module_cache = {}  # abs_path => CompiledModule
@@ -42,7 +43,7 @@ class ModuleImporter
   #   2. First-party stdlib at <stdlib_root>/<name>/src/lib.cht
   #
   # @param pkg_name [String] Package name (e.g. "math", "testing")
-  sig { params(pkg_name: T.untyped, caller_dir: T.untyped).returns(ModuleImporter::CompiledModule) }
+  sig { params(pkg_name: String, caller_dir: String).returns(T.nilable(ModuleImporter::CompiledModule)) }
   def compile_package(pkg_name, caller_dir: @base_dir)
     path = @pkg_paths[pkg_name.to_s] || resolve_stdlib_package(pkg_name)
     unless path
@@ -53,7 +54,7 @@ class ModuleImporter
     compile_file(path, caller_dir: File.dirname(File.expand_path(path)))
   end
 
-  sig { params(pkg_name: T.untyped).returns(T.nilable(String)) }
+  sig { params(pkg_name: String).returns(T.nilable(String)) }
   def resolve_stdlib_package(pkg_name)
     return nil unless @stdlib_root
     candidate = File.join(@stdlib_root, pkg_name.to_s, 'src', 'lib.cht')
@@ -67,16 +68,16 @@ class ModuleImporter
   # (no separate .zig file is produced for them), whereas
   # explicitly-registered packages are emitted as `@import("name.zig")`
   # so an outer `build.zig` can orchestrate per-package compilation.
-  sig { params(pkg_name: T.untyped).returns(T::Boolean) }
+  sig { params(pkg_name: String).returns(T.nilable(T::Boolean)) }
   def stdlib_package?(pkg_name)
-    !!(!@pkg_paths.key?(pkg_name.to_s) && !resolve_stdlib_package(pkg_name).nil?)
+    !@pkg_paths.key?(pkg_name.to_s) && !resolve_stdlib_package(pkg_name).nil?
   end
 
   # Compile a .cht file and return a CompiledModule (cached after first call).
   #
   # @param path [String] Relative or absolute path to the .cht file
   # @param caller_dir [String] Directory of the file issuing the REQUIRE
-  sig { params(path: T.untyped, caller_dir: T.untyped).returns(ModuleImporter::CompiledModule) }
+  sig { params(path: String, caller_dir: String).returns(T.nilable(ModuleImporter::CompiledModule)) }
   def compile_file(path, caller_dir: @base_dir)
     abs_path = File.expand_path(path, caller_dir)
 
@@ -104,17 +105,17 @@ class ModuleImporter
     Parser.gradual_mode = false
     begin
       tokens = Lexer.new(source).tokenize
-      ast    = Parser.new(tokens, source).parse
+      ast    = Parser.new(T.must(tokens), source).parse
     ensure
       Parser.gradual_mode = saved_gradual
     end
 
-    reject_auto_in_public_signatures!(ast, abs_path)
+    reject_auto_in_public_signatures!(T.must(ast), abs_path)
 
     annotator = SemanticAnnotator.new(importer: self, source_dir: source_dir)
-    annotator.annotate!(ast)
+    annotator.annotate!(T.must(ast))
 
-    mod = compile_module_mir(ast, annotator, source_dir)
+    mod = compile_module_mir(T.must(ast), annotator, source_dir)
 
     @module_cache[abs_path] = mod
     @compiling.delete(abs_path)
@@ -127,7 +128,7 @@ class ModuleImporter
   # (gradual-typing.md §7). The importer rejects with a diagnostic
   # that points the user at running `clear fix --apply` on the
   # imported module before re-importing.
-  sig { params(ast: T.untyped, abs_path: T.untyped).returns(Array) }
+  sig { params(ast: AST::Program, abs_path: String).returns(T.nilable(Array)) }
   def reject_auto_in_public_signatures!(ast, abs_path)
     rel_path = File.basename(abs_path)
     ast.statements.each do |stmt|
@@ -150,17 +151,18 @@ class ModuleImporter
             "inference is not supported. Compile '#{rel_path}' WITHOUT " \
             "`--gradual` (or with each Auto resolved via " \
             "`clear fix --apply`), then re-import."
-      raise CompilerError.new(stmt.token, msg, ast.respond_to?(:source_code) ? ast.source_code : nil)
+      raise CompilerError.new(stmt.token, msg, ast.respond_to?(:source_code) ? T.unsafe(ast).source_code : nil)
     end
   end
 
-  sig { params(t: T.untyped).returns(T::Boolean) }
+  sig { params(t: Type).returns(T::Boolean) }
   def auto_type?(t)
-    !!(t.is_a?(Type) && t.auto?)
+    t.is_a?(Type) && t.auto?
   end
 
   private
 
+  sig { params(ast: AST::Program, annotator: SemanticAnnotator, source_dir: String).returns(ModuleImporter::CompiledModule) }
   def compile_module_mir(ast, annotator, source_dir)
     require_relative "../mir/mir"
     require_relative "../mir/mir_lowering"
@@ -189,11 +191,16 @@ class ModuleImporter
     fn_sigs = {}
     ast.statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      fs = FunctionSignature.new(params: [], return_type: :Any)
-      fs.needs_rt = stmt.needs_rt
-      fs.can_fail = stmt.can_fail
-      fs.effects = stmt.effects
-      fn_sigs[stmt.name] = fs
+      sig = stmt.full_type
+      if sig.is_a?(FunctionSignature)
+        fn_sigs[stmt.name] = sig
+      else
+        fs = FunctionSignature.new(params: [], return_type: :Any)
+        fs.needs_rt = stmt.needs_rt
+        fs.can_fail = stmt.can_fail
+        fs.effects = stmt.effects
+        fn_sigs[stmt.name] = fs
+      end
     end
 
     moved_guard_info = {}
@@ -211,8 +218,8 @@ class ModuleImporter
 
     result = lowering.lower_module(ast)
     emitter = MIREmitter.new
-    zig_body = result[:items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
-    type_defs = result[:type_items].flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    zig_body = T.must(result[:items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
+    type_defs = T.must(result[:type_items]).flatten.filter_map { |item| emitter.emit(item) }.join("\n\n")
 
     CompiledModule.new(
       ast,

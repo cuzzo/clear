@@ -10,7 +10,7 @@ module UnionAnalysis
   # Validate that all required methods for a union type exist and have
   # compatible signatures. Synthesizes default functions for stubs with
   # default bodies that have no concrete override.
-  sig { params(node: T.untyped).returns(Array) }
+  sig { params(node: AST::UnionDef).returns(T.nilable(T::Array[Hash])) }
   def validate_union_methods!(node)
     T.bind(self, SemanticAnnotator) rescue nil
     union_name = node.name
@@ -90,7 +90,7 @@ module UnionAnalysis
 
   # Resolve enum or union variant access on a GetField node (TypeName.Variant).
   # Returns true if handled, false if the target is not an enum/union.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::GetField).returns(T.nilable(T::Boolean)) }
   def resolve_variant_access(node)
     T.bind(self, SemanticAnnotator) rescue nil
     return false unless node.target.is_a?(AST::Identifier)
@@ -137,7 +137,7 @@ module UnionAnalysis
   # Validate that a union type and variant exist, and that the variant
   # supports inline struct construction (not a unit or single-payload variant).
   # Returns the variant data hash on success.
-  sig { params(node: T.untyped, schema: T.untyped).returns(Hash) }
+  sig { params(node: AST::UnionVariantLit, schema: T.nilable(Hash)).returns(T.nilable(Hash)) }
   def validate_union_schema!(node, schema)
     T.bind(self, SemanticAnnotator) rescue nil
     if schema.nil?
@@ -146,17 +146,17 @@ module UnionAnalysis
     unless schema.is_a?(Hash) && schema[:kind] == :union
       error!(node, :NOT_A_UNION_TYPE, name: node.union_name)
     end
-    unless schema[:variants].key?(node.variant_name)
+    unless T.must(schema)[:variants].key?(node.variant_name)
       emit_variant_typo!(
         variant_anchor_from_unionlit(node, node.variant_name),
-        node.variant_name, schema[:variants].keys,
+        node.variant_name, T.must(schema)[:variants].keys,
         "Type Error: Union '#{node.union_name}' has no variant '#{node.variant_name}'.",
         "variant of union #{node.union_name}",
         cascade: true
       )
     end
 
-    var_data = schema[:variants][node.variant_name]
+    var_data = T.must(schema)[:variants][node.variant_name]
     unless var_data.is_a?(Hash) && var_data[:kind] == :inline_struct
       if var_data.nil?
         error!(node, :UNION_VARIANT_IS_UNIT_NO_FIELDS, variant: node.variant_name, union: node.union_name)
@@ -170,7 +170,7 @@ module UnionAnalysis
 
   # Validate fields of an inline struct union variant: check for unknown fields,
   # missing required fields, and type-check each field value.
-  sig { params(node: T.untyped, expected_fields: T.untyped).returns(Hash) }
+  sig { params(node: AST::UnionVariantLit, expected_fields: T::Hash[String, Type]).returns(T.nilable(Hash)) }
   def validate_union_fields!(node, expected_fields)
     T.bind(self, SemanticAnnotator) rescue nil
     node.fields.each_key do |fname|
@@ -197,8 +197,8 @@ module UnionAnalysis
 
       expected_type = expected_fields[fname]
       actual = val_node.type_info
-      unless expected_type.accepts?(actual)
-        error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH, union: node.union_name, variant: node.variant_name, field: fname, expected: expected_type.resolved, got: actual&.resolved)
+      unless T.must(expected_type).accepts?(actual)
+        error!(node, :UNION_INLINE_VARIANT_TYPE_MISMATCH, union: node.union_name, variant: node.variant_name, field: fname, expected: T.must(expected_type).resolved, got: actual&.resolved)
       end
       move_if_not_copyable!(val_node)
     end

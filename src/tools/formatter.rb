@@ -89,16 +89,17 @@ class Formatter
     ASSERT ASSERT_RAISES CAST
   ].to_set.freeze
 
-  sig { params(source: T.untyped).returns(String) }
+  sig { params(source: String).returns(T.nilable(String)) }
   def self.format(source)
     new(source).format
   end
 
+  sig { params(source: String).void }
   def initialize(source)
     @source = source
   end
 
-  sig { returns(String) }
+  sig { returns(T.nilable(String)) }
   def format
     validate_parse!
     # Lint-fix pre-pass: drop unused MUTABLE keywords and redundant
@@ -118,6 +119,7 @@ class Formatter
 
   private
 
+  sig { returns(T.nilable(AST::Program)) }
   def validate_parse!
     ts = ::Lexer.new(@source).tokenize
     ::Parser.new(ts, @source).parse
@@ -140,6 +142,7 @@ class Formatter::FormatLexer
 
   NUMERIC_SUFFIX_RE = /i8|i16|i32|i64|u8|u16|u32|u64|f32|f64/.freeze
 
+  sig { params(source: String).void }
   def initialize(source)
     @src = source
     @s = StringScanner.new(source)
@@ -148,7 +151,7 @@ class Formatter::FormatLexer
     @out  = []
   end
 
-  sig { returns(Array) }
+  sig { returns(T.nilable(Array)) }
   def tokenize
     until @s.eos?
       sl, sc = @line, @col
@@ -198,6 +201,7 @@ class Formatter::FormatLexer
   # Consume balanced `"..."` string including `\` escapes and `${...}`
   # interpolation (which may nest braces). Returns raw source text
   # (including the surrounding quotes). Advances the scanner.
+  sig { returns(String) }
   def consume_string
     start = @s.pos
     @s.getch # opening quote
@@ -236,11 +240,13 @@ class Formatter::FormatLexer
     @src.byteslice(start...@s.pos)
   end
 
+  sig { params(type: Symbol, raw: String, line: Integer, col: Integer).returns(Integer) }
   def push(type, raw, line, col)
     @out << Token.new(type, raw, line, col)
     advance(raw)
   end
 
+  sig { params(s: String).returns(Integer) }
   def advance(s)
     nl = s.count("\n")
     if nl > 0
@@ -276,6 +282,7 @@ class Formatter::Emitter
   # (toks, start, arrow_idx, po, pc) clump across 5 methods.
   FnSig = Data.define(:toks, :start, :arrow_idx, :po, :pc)
 
+  sig { params(tokens: Array).void }
   def initialize(tokens)
     @tokens = tokens
   end
@@ -308,7 +315,7 @@ class Formatter::Emitter
   # examples/json_parser/jsonToString JBool arm.) Excludes the case
   # where END is followed by a close-bracket — `BG { ... END }` keeps
   # the `}` on the next render line via CLOSE_LEADING anyway.
-  sig { params(toks: T.untyped).returns(Array) }
+  sig { params(toks: Array).returns(Array) }
   def nl_after_end(toks)
     out = []
     i = 0
@@ -342,6 +349,7 @@ class Formatter::Emitter
   # suffixes (`_i32`, `_f64`, ...) are preserved. Hex/oct/bin literals
   # are left untouched — convention there varies (groups of 4, 3, 8) and
   # we leave the user's choice in place.
+  sig { params(toks: Array).returns(Array) }
   def canonicalize_numerics(toks)
     toks.map do |t|
       next t unless t.type == :NUM
@@ -351,6 +359,7 @@ class Formatter::Emitter
 
   NUM_SUFFIX_TAIL_RE = /_(i8|i16|i32|i64|u8|u16|u32|u64|f32|f64)\z/.freeze
 
+  sig { params(raw: String).returns(String) }
   def canonicalize_numeric(raw)
     return raw if raw.start_with?('0x', '0o', '0b')
 
@@ -390,10 +399,12 @@ class Formatter::Emitter
     end
   end
 
+  sig { params(digits: String).returns(String) }
   def group_from_right(digits)
     digits.reverse.scan(/.{1,3}/).join('_').reverse
   end
 
+  sig { params(digits: String).returns(String) }
   def group_from_left(digits)
     digits.scan(/.{1,3}/).join('_')
   end
@@ -401,6 +412,7 @@ class Formatter::Emitter
   # ---- pre-passes on the token stream ---------------------------------
 
   # Collapse runs of 3+ consecutive :NL into 2.
+  sig { params(toks: Array).returns(Array) }
   def collapse_newlines(toks)
     out = []
     run = 0
@@ -427,6 +439,7 @@ class Formatter::Emitter
   # phantoms so its OUTDENT_LEADING render rule (used for CATCH/DEFAULT
   # in TRY/CATCH) is canceled — in MATCH it is just an arm pattern at
   # arm-depth.
+  sig { params(toks: Array).returns(Array) }
   def expand_match_blocks(toks)
     out = []
     i = 0
@@ -449,6 +462,7 @@ class Formatter::Emitter
   # construct (not `SYNC POLICY START`). Walks back at depth 0 and looks
   # for `MATCH` before any statement boundary; returns false if it sees
   # `POLICY` first.
+  sig { params(toks: Array, idx: Integer).returns(T::Boolean) }
   def match_block_start?(toks, idx)
     depth = 0
     j = idx - 1
@@ -478,6 +492,7 @@ class Formatter::Emitter
   # Tracks nested keyword blocks (anything that opens a matching END) and
   # bracket depth so a stray `END` inside a nested IF/FOR isn't mistaken
   # for the closer.
+  sig { params(toks: Array, start_idx: Integer).returns(T.nilable(Integer)) }
   def find_match_block_end(toks, start_idx)
     bdepth = 0
     kdepth = 0
@@ -504,6 +519,7 @@ class Formatter::Emitter
   end
 
   # Lay out a MATCH block from `start_idx` (`START`) to `end_idx` (`END`).
+  sig { params(out: Array, toks: Array, start_idx: Integer, end_idx: Integer).returns(Integer) }
   def emit_match_block(out, toks, start_idx, end_idx)
     out << toks[start_idx]
     insert_nl(out)
@@ -524,6 +540,7 @@ class Formatter::Emitter
   # arms like `DEFAULT` followed by an unparenthesized expression).
   # `multi` is true if the arm body has more than one statement or
   # contains a nested keyword block (IF/FOR/WHILE/...).
+  sig { params(toks: Array, start: Integer, stop: Integer).returns(Array) }
   def scan_match_arms(toks, start, stop)
     arms = []
     arm_start = skip_nls(toks, start)
@@ -564,6 +581,7 @@ class Formatter::Emitter
     arms
   end
 
+  sig { params(toks: Array, s: Integer, e: Integer, arrow: T.nilable(Integer), sep: T.nilable(Integer)).returns(Hash) }
   def build_match_arm(toks, s, e, arrow, sep)
     body_end = sep || e
     semi_count = 0
@@ -599,6 +617,7 @@ class Formatter::Emitter
   # INDENT_OPEN/CLOSE phantoms to neutralize its OUTDENT_LEADING render
   # rule. Multi-line arms emit body on its own lines at +1 indent and
   # close the indent before the separator.
+  sig { params(out: Array, toks: Array, arm: Hash).returns(Array) }
   def emit_match_arm(out, toks, arm)
     s, e, body_end, arrow, sep, multi =
       arm[:start], arm[:end], arm[:body_end], arm[:arrow], arm[:sep], arm[:multi]
@@ -630,6 +649,7 @@ class Formatter::Emitter
     insert_nl(out)
   end
 
+  sig { params(toks: Array, s: Integer, e: Integer).returns(T.untyped) }
   def first_code_at(toks, s, e)
     j = s
     while j < e
@@ -640,6 +660,7 @@ class Formatter::Emitter
     nil
   end
 
+  sig { params(out: Array, toks: Array, s: Integer, e: Integer).returns(Range) }
   def copy_arm_tokens(out, toks, s, e)
     (s...e).each do |k|
       t = toks[k]
@@ -654,6 +675,7 @@ class Formatter::Emitter
   # Preserves source NLs inside nested blocks so expand_then_do_blocks
   # still sees the user's multi-line shape; collapses redundant NLs at
   # arm-body top-level since `;` already inserts one.
+  sig { params(out: Array, toks: Array, s: Integer, e: Integer).returns(T.untyped) }
   def emit_match_body(out, toks, s, e)
     bdepth = 0
     kdepth = 0
@@ -697,6 +719,7 @@ class Formatter::Emitter
   # For each top-level `FN ... -> ... END` (or any nested FN), ensure that
   # the body is multi-line: a newline follows `->` and precedes `END`, and
   # statements in between are split on `;` boundaries.
+  sig { params(toks: Array).returns(Array) }
   def expand_fn_blocks(toks)
     out = []
     i = 0
@@ -714,6 +737,7 @@ class Formatter::Emitter
 
   # Emits a FN block starting at index `start` (token = 'FN') into `out`.
   # Returns the index after the matching `END`.
+  sig { params(out: Array, toks: Array, start: Integer).returns(Integer) }
   def emit_fn_block(out, toks, start)
     # Copy up to and including the `->` that ends the signature.
     arrow_idx = find_fn_arrow(toks, start)
@@ -814,6 +838,7 @@ class Formatter::Emitter
     j
   end
 
+  sig { params(toks: Array, j: Integer).returns(Integer) }
   def skip_nls(toks, j)
     j += 1 while j < toks.length && toks[j].type == :NL
     j
@@ -822,6 +847,7 @@ class Formatter::Emitter
   # Locate the opening/closing parens of the FN param list. Returns
   # [po, pc] (both may be nil for FNs with no parens, though in CLEAR
   # they are mandatory).
+  sig { params(toks: Array, fn_idx: Integer, arrow_idx: Integer).returns(Array) }
   def find_fn_parens(toks, fn_idx, arrow_idx)
     po = nil; pc = nil; depth = 0
     j = fn_idx + 1
@@ -845,6 +871,7 @@ class Formatter::Emitter
   # Wrap triggers (§3.1):
   #   (a) source already has NL between `(` and `)` (preserve wrap).
   #   (b) projected single-line length > 120 chars.
+  sig { params(sig: Formatter::Emitter::FnSig).returns(T::Boolean) }
   def should_wrap_fn_sig?(sig)
     return false unless sig.po && sig.pc
     return true if (sig.po + 1 ... sig.pc).any? { |j| sig.toks[j].type == :NL }
@@ -858,6 +885,7 @@ class Formatter::Emitter
   #     p2: T
   #   )
   #   RETURNS T ->
+  sig { params(out: Array, sig: Formatter::Emitter::FnSig).returns(T.untyped) }
   def emit_fn_signature_wrapped(out, sig)
     toks = sig.toks
     # Tokens from FN through and including `(`.
@@ -919,6 +947,7 @@ class Formatter::Emitter
 
   # True when the signature between `)` (pc) and `->` (arrow_idx) contains
   # at least one trigger keyword (REQUIRES or EFFECTS today).
+  sig { params(sig: Formatter::Emitter::FnSig).returns(T::Boolean) }
   def has_fn_signature_metadata?(sig)
     return false unless sig.pc && sig.arrow_idx
     (sig.pc + 1...sig.arrow_idx).any? do |j|
@@ -935,6 +964,7 @@ class Formatter::Emitter
   #
   # The `->` lands at FN-level (column 0) on its own line. Body indent
   # then opens at +1 from FN-level via OPEN_TERMINAL on `->`.
+  sig { params(out: Array, sig: Formatter::Emitter::FnSig).returns(Array) }
   def emit_fn_signature_metadata_wrapped(out, sig)
     toks = sig.toks
     # 1. Emit `FN name(...)`. Reuse existing param-wrapping rules so a
@@ -965,6 +995,7 @@ class Formatter::Emitter
   # Emit the FN keyword through to `)` only, wrapping params if the
   # existing rules say to. Mirrors emit_fn_signature_wrapped but stops at
   # `)` instead of running through `->`.
+  sig { params(out: Array, sig: Formatter::Emitter::FnSig).returns(Array) }
   def emit_fn_params_only_wrapped(out, sig)
     toks = sig.toks
     (sig.start..sig.po).each { |j| out << toks[j] }
@@ -1004,6 +1035,7 @@ class Formatter::Emitter
 
   # Split tokens between `)` and `->` into per-clause groups. Each clause
   # starts at one of FN_METADATA_KEYWORDS and runs until the next.
+  sig { params(toks: Array, start: Integer, stop: Integer).returns(Array) }
   def collect_fn_metadata_clauses(toks, start, stop)
     clauses = []
     current = nil
@@ -1020,6 +1052,7 @@ class Formatter::Emitter
     clauses
   end
 
+  sig { params(toks: Array, fn_idx: Integer).returns(T.nilable(Integer)) }
   def find_fn_arrow(toks, fn_idx)
     depth = 0
     j = fn_idx + 1
@@ -1055,6 +1088,7 @@ class Formatter::Emitter
   #      one-liner — repro from examples/json_parser/parseString).
   # Already-multi-line forms (every branch already has its body on its
   # own line) are left untouched.
+  sig { params(toks: Array).returns(Array) }
   def expand_then_do_blocks(toks)
     out = []
     i = 0
@@ -1080,6 +1114,7 @@ class Formatter::Emitter
   # iff at least one of its branches (THEN / ELSE / ELSE_IF / DO) is
   # followed inline (no NL) by body code rather than NL, END, ELSE,
   # or ELSE_IF. Otherwise nil.
+  sig { params(toks: Array, start: Integer).returns(T.nilable(Integer)) }
   def branch_end_for_inline_expansion(toks, start)
     end_idx = matching_end(toks, start)
     return nil unless end_idx
@@ -1116,6 +1151,7 @@ class Formatter::Emitter
 
   # Find matching END for the IF/WHILE/FOR at `start` (no NL constraint).
   # Returns nil if unmatched.
+  sig { params(toks: Array, start: Integer).returns(T.nilable(Integer)) }
   def matching_end(toks, start)
     bdepth = 0
     kdepth = 0
@@ -1144,6 +1180,7 @@ class Formatter::Emitter
   # Returns the index of the matching END if and only if no :NL appears
   # anywhere between `start` and that END (i.e., the whole construct is
   # a single source line). Otherwise nil.
+  sig { params(toks: Array, start: Integer).returns(T.nilable(Integer)) }
   def one_liner_end(toks, start)
     depth = 0
     j = start + 1
@@ -1172,6 +1209,7 @@ class Formatter::Emitter
   # Expand a one-liner `IF/WHILE/FOR ... THEN|DO ... END` between indices
   # `start` (keyword) and `end_idx` (matching END). Emits into `out` and
   # returns the index after END.
+  sig { params(out: Array, toks: Array, start: Integer, end_idx: Integer).returns(Integer) }
   def expand_if_while_for(out, toks, start, end_idx)
     # Find the THEN or DO terminator at depth 0.
     term_idx = nil
@@ -1297,6 +1335,7 @@ class Formatter::Emitter
   #       its own line at +1, ON moves to +1, body at +2.
   # Both triggers can combine. `CATCH Input WITH(...)` filter uses
   # `WITH(`; it is NOT a block WITH and we leave it alone.
+  sig { params(toks: Array).returns(Array) }
   def expand_with_blocks(toks)
     out = []
     i = 0
@@ -1312,6 +1351,7 @@ class Formatter::Emitter
     out
   end
 
+  sig { params(toks: Array, idx: Integer).returns(T::Boolean) }
   def with_is_block?(toks, idx)
     j = idx + 1
     while j < toks.length && [:NL, :COMMENT].include?(toks[j].type)
@@ -1321,6 +1361,7 @@ class Formatter::Emitter
     !(toks[j].type == :SYM && toks[j].raw == '(')
   end
 
+  sig { params(out: Array, toks: Array, start: Integer).returns(Integer) }
   def emit_with_block(out, toks, start)
     brace_idx = find_with_open_brace(toks, start)
     unless brace_idx
@@ -1425,6 +1466,7 @@ class Formatter::Emitter
     has_on ? on_end : close_idx + 1
   end
 
+  sig { params(toks: Array, start: Integer).returns(T.nilable(Integer)) }
   def find_with_open_brace(toks, start)
     depth = 0
     j = start + 1
@@ -1442,6 +1484,7 @@ class Formatter::Emitter
     nil
   end
 
+  sig { params(toks: Array, open_idx: Integer).returns(T.nilable(Integer)) }
   def find_matching_close_brace(toks, open_idx)
     depth = 0
     j = open_idx + 1
@@ -1465,6 +1508,7 @@ class Formatter::Emitter
   # clause (usually a NL), or `start` if no clause. Does NOT advance past
   # NLs that follow the final ON segment — those blank lines belong to
   # the enclosing scope.
+  sig { params(toks: Array, start: Integer).returns(Integer) }
   def consume_on_clause(toks, start)
     cursor = start
     loop do
@@ -1477,10 +1521,12 @@ class Formatter::Emitter
     cursor
   end
 
+  sig { params(raw: String).returns(T::Boolean) }
   def on_keyword?(raw)
     %w[ON RETRY POSSIBLE_DEADLOCK POSSIBLE_LOCK_CYCLE].include?(raw)
   end
 
+  sig { params(toks: Array, start: Integer).returns(Integer) }
   def consume_on_segment(toks, start)
     depth = 0
     j = start
@@ -1500,6 +1546,7 @@ class Formatter::Emitter
     j
   end
 
+  sig { params(type: Symbol).returns(Formatter::FormatLexer::Token) }
   def phantom(type)
     Formatter::FormatLexer::Token.new(type, '', 0, 0)
   end
@@ -1511,6 +1558,7 @@ class Formatter::Emitter
   # from the `CONCURRENT` line. Exact column alignment with CONCURRENT is
   # not reachable in a depth-based renderer, so +1 depth is the canonical
   # approximation.
+  sig { params(toks: Array).returns(Array) }
   def expand_concurrent_drops(toks)
     out = []
     i = 0
@@ -1546,6 +1594,7 @@ class Formatter::Emitter
     out
   end
 
+  sig { params(toks: Array, start: Integer).returns(T.untyped) }
   def skip_ws_nl(toks, start)
     j = start
     while j < toks.length && [:NL].include?(toks[j].type)
@@ -1554,6 +1603,7 @@ class Formatter::Emitter
     j < toks.length ? j : nil
   end
 
+  sig { params(toks: Array, open_idx: Integer, close_idx: Integer).returns(Integer) }
   def count_depth0_commas(toks, open_idx, close_idx)
     depth = 0
     n = 0
@@ -1569,6 +1619,7 @@ class Formatter::Emitter
     n
   end
 
+  sig { params(raw: String).returns(T::Boolean) }
   def pipeline_op_keyword?(raw)
     %w[EACH WHERE SELECT FIND ANY ALL COUNT SUM AVERAGE MIN MAX REDUCE
        ORDER_BY LIMIT SKIP UNNEST DISTINCT TAP TAKE_WHILE WINDOW JOIN SHARD].include?(raw)
@@ -1576,6 +1627,7 @@ class Formatter::Emitter
 
   # Stage ends at the next `|>` at the SAME depth, a `;`, or an unmatched
   # closing bracket. Inside nested `{}` / `()` the content is opaque.
+  sig { params(toks: Array, start: Integer).returns(Integer) }
   def find_concurrent_stage_end(toks, start)
     depth = 0
     j = start
@@ -1603,6 +1655,7 @@ class Formatter::Emitter
   # `.a().b().c()...` chains with 4+ segments OR total chain length > 80
   # chars wrap, one `.seg` per line at +1 from the receiver. A segment is
   # `.name` optionally followed by `(args)` or `[index]`.
+  sig { params(toks: Array).returns(Array) }
   def expand_method_chains(toks)
     out = []
     i = 0
@@ -1649,6 +1702,7 @@ class Formatter::Emitter
     out
   end
 
+  sig { params(toks: Array, i: Integer, out: Array).returns(T::Boolean) }
   def method_chain_start?(toks, i, out)
     return false unless toks[i].type == :SYM && toks[i].raw == '.'
     prev = last_nontrivial_in_out(out)
@@ -1657,6 +1711,7 @@ class Formatter::Emitter
       (prev.type == :SYM && [')', ']'].include?(prev.raw))
   end
 
+  sig { params(out: Array).returns(T.untyped) }
   def last_nontrivial_in_out(out)
     j = out.length - 1
     while j >= 0
@@ -1667,6 +1722,7 @@ class Formatter::Emitter
     j >= 0 ? out[j] : nil
   end
 
+  sig { params(toks: Array, start_idx: Integer).returns(Array) }
   def scan_chain_segments(toks, start_idx)
     segments = []
     i = start_idx
@@ -1689,6 +1745,7 @@ class Formatter::Emitter
     [segments, segments.last ? segments.last[:end] : start_idx]
   end
 
+  sig { params(toks: Array, open_idx: Integer).returns(Integer) }
   def skip_matched_brackets(toks, open_idx)
     opener = toks[open_idx].raw
     closer = (opener == '(') ? ')' : ']'
@@ -1708,6 +1765,7 @@ class Formatter::Emitter
     j
   end
 
+  sig { params(toks: Array, segments: Array).returns(Integer) }
   def chain_length_estimate(toks, segments)
     total = 0
     segments.each do |seg|
@@ -1730,10 +1788,12 @@ class Formatter::Emitter
   # own line at +1; closer on its own line back at the call column.
   # Processed bottom-up via recursive descent so an inner wrap can trigger
   # an outer wrap.
+  sig { params(toks: Array).returns(Array) }
   def expand_call_args(toks)
     process_call_arg_range(toks, 0, toks.length)
   end
 
+  sig { params(toks: Array, start: Integer, stop: Integer).returns(Array) }
   def process_call_arg_range(toks, start, stop)
     out = []
     prev_emitted = nil
@@ -1767,6 +1827,7 @@ class Formatter::Emitter
 
   # :paren, :struct_lit, or nil. `prev_emitted` is the last non-whitespace
   # non-marker token we emitted into `out` (context for the opener).
+  sig { params(toks: Array, idx: Integer, prev_emitted: T.nilable(Formatter::FormatLexer::Token)).returns(T.nilable(Symbol)) }
   def call_opener_kind(toks, idx, prev_emitted)
     t = toks[idx]
     return nil unless t.type == :SYM
@@ -1784,6 +1845,7 @@ class Formatter::Emitter
     nil
   end
 
+  sig { params(toks: Array, open_idx: Integer, opener: String, closer: String).returns(T.untyped) }
   def find_matching_paren_or_brace(toks, open_idx, opener, closer)
     depth = 0
     j = open_idx
@@ -1801,6 +1863,7 @@ class Formatter::Emitter
     nil
   end
 
+  sig { params(opener: String, inner: Array, closer: String, out: Array).returns(T::Boolean) }
   def call_args_need_wrap?(opener, inner, closer, out)
     return true if inner.any? { |t| t.type == :NL }
     prefix_len = current_line_length_in_out(out)
@@ -1810,6 +1873,7 @@ class Formatter::Emitter
 
   # Approximate the projected length of the current output line (tokens
   # since the last NL). Ignores indent markers and NLs.
+  sig { params(out: Array).returns(Integer) }
   def current_line_length_in_out(out)
     start = out.length - 1
     while start >= 0 && out[start].type != :NL
@@ -1820,6 +1884,7 @@ class Formatter::Emitter
     format_line_body(segment).length
   end
 
+  sig { params(out: Array, open_tok: Formatter::FormatLexer::Token, inner: Array, close_tok: Formatter::FormatLexer::Token).returns(Array) }
   def emit_wrapped_args(out, open_tok, inner, close_tok)
     # `{` is an OPEN_TERMINAL that the renderer already treats as +1
     # depth; `}` is CLOSE_LEADING that does -1. `(` and `)` are neither,
@@ -1867,6 +1932,7 @@ class Formatter::Emitter
   # when the body contains 2+ statements. Single-statement bodies stay
   # inline if they fit. Capability form `BG { @micro -> stmt }` is single
   # statement and stays inline.
+  sig { params(toks: Array).returns(Array) }
   def expand_bg_do_blocks(toks)
     out = []
     i = 0
@@ -1896,11 +1962,13 @@ class Formatter::Emitter
   # single 600-char line by `collapse_newlines`. The DO/THEN check
   # specifically targets that case while leaving short trivial bodies
   # like `BG { @micro -> doWork(); }` inline.
+  sig { params(toks: Array, brace_idx: Integer, close_idx: Integer).returns(T::Boolean) }
   def bg_body_needs_wrap?(toks, brace_idx, close_idx)
     return true if count_statements_in_block(toks, brace_idx, close_idx) >= 2
     body_has_top_level_block?(toks, brace_idx, close_idx)
   end
 
+  sig { params(toks: Array, brace_idx: Integer, close_idx: Integer).returns(T::Boolean) }
   def body_has_top_level_block?(toks, brace_idx, close_idx)
     depth = 0
     (brace_idx + 1 ... close_idx).each do |j|
@@ -1917,6 +1985,7 @@ class Formatter::Emitter
     false
   end
 
+  sig { params(toks: Array, start: Integer).returns(T.nilable(Integer)) }
   def find_bg_brace(toks, start)
     j = start + 1
     while j < toks.length && [:NL, :COMMENT].include?(toks[j].type)
@@ -1926,6 +1995,7 @@ class Formatter::Emitter
     nil
   end
 
+  sig { params(toks: Array, open_brace: Integer, close_brace: Integer).returns(Integer) }
   def count_statements_in_block(toks, open_brace, close_brace)
     # Counts top-level `;` inside the BG/DO `{ ... }` body to decide
     # whether it's a one-liner or needs the multi-line wrap.
@@ -1976,6 +2046,7 @@ class Formatter::Emitter
     count
   end
 
+  sig { params(out: Array, toks: Array, kw_idx: Integer, brace_idx: Integer, close_idx: Integer).returns(Integer) }
   def emit_bg_do_wrapped(out, toks, kw_idx, brace_idx, close_idx)
     # Emit BG/DO keyword through and including `{`, stripping any NLs.
     (kw_idx..brace_idx).each do |j|
@@ -2038,6 +2109,7 @@ class Formatter::Emitter
   # level (`@parallel ->`, `@micro ->`, ...). The `->` raises render
   # depth via OPEN_TERMINAL but the body has no END to lower it back,
   # so we need an explicit INDENT_CLOSE before `}`.
+  sig { params(toks: Array, brace_idx: Integer, close_idx: Integer).returns(T::Boolean) }
   def bg_body_has_strategy_arrow?(toks, brace_idx, close_idx)
     bdepth = 0
     j = brace_idx + 1
@@ -2073,6 +2145,7 @@ class Formatter::Emitter
   #     |> a
   #     |> RECOVER(default)    <-- +1 more
   #     |> b
+  sig { params(toks: Array).returns(Array) }
   def expand_pipelines(toks)
     chains = find_s_chains(toks)
     return toks if chains.empty?
@@ -2095,6 +2168,7 @@ class Formatter::Emitter
     out
   end
 
+  sig { params(toks: Array).returns(Array) }
   def find_s_chains(toks)
     chains = []
     i = 0
@@ -2132,6 +2206,7 @@ class Formatter::Emitter
     chains
   end
 
+  sig { params(toks: Array, chains: Array).returns(Hash) }
   def detect_recover_stages(toks, chains)
     result = {}
     chains.each do |c|
@@ -2154,6 +2229,7 @@ class Formatter::Emitter
   # §3.6 assignment drop: if the receiver line (`x = receiver` or
   # `x: T = receiver`) exceeds 80 chars, drop the RHS to its own line
   # at +1, chain at +2.
+  sig { params(out: Array, toks: Array, chain: Hash, recover_s: Hash).returns(Integer) }
   def emit_chain(out, toks, chain, recover_s)
     s_idxs  = chain[:s_idxs]
     end_idx = chain[:end_idx]
@@ -2189,6 +2265,7 @@ class Formatter::Emitter
   # chars, insert a NL + INDENT_OPEN right after the `=` so the receiver
   # drops onto its own line at +1. Returns true when applied (caller must
   # emit a matching INDENT_CLOSE after the chain).
+  sig { params(out: Array).returns(T::Boolean) }
   def maybe_drop_assignment_rhs(out)
     return false if current_line_length_in_out(out) <= 80
     eq_idx = find_assignment_eq_on_current_line(out)
@@ -2200,6 +2277,7 @@ class Formatter::Emitter
     true
   end
 
+  sig { params(out: Array).returns(Integer) }
   def find_assignment_eq_on_current_line(out)
     start = out.length - 1
     while start >= 0 && out[start].type != :NL
@@ -2221,6 +2299,7 @@ class Formatter::Emitter
   end
 
   # Split STRUCT / UNION / ENUM blocks so each field/variant is its own line.
+  sig { params(toks: Array).returns(Array) }
   def expand_record_types(toks)
     out = []
     i = 0
@@ -2236,6 +2315,7 @@ class Formatter::Emitter
     out
   end
 
+  sig { params(out: Array, toks: Array, start: Integer).returns(Integer) }
   def emit_record_type(out, toks, start)
     # Copy tokens until the opening `{`.
     j = start
@@ -2294,6 +2374,7 @@ class Formatter::Emitter
 
   # Ensure the last token in `out` is exactly one :NL. If the last token
   # is already :NL, leave it. Otherwise append a fresh :NL.
+  sig { params(out: Array).returns(T.nilable(Array)) }
   def insert_nl(out)
     return if out.last && out.last.type == :NL
     out << Formatter::FormatLexer::Token.new(:NL, "\n", 0, 0)
@@ -2305,6 +2386,7 @@ class Formatter::Emitter
   # `;` forced a NL and the orphan `,` landed on its own line.
   # Also handles the idempotent case where prior formatting already
   # left a NL between `;` and `,`.
+  sig { params(out: Array, toks: Array, j: Integer).returns(Integer) }
   def emit_stmt_terminator(out, toks, j)
     out << toks[j]  # `;`
     j += 1
@@ -2325,6 +2407,7 @@ class Formatter::Emitter
   # Maintains: indent depth, per-line buffers, last non-comment code token
   # (for spacing decisions). `:INDENT_OPEN` / `:INDENT_CLOSE` phantom tokens
   # adjust depth for forced wraps where no `{` / `END` drives the change.
+  sig { params(toks: Array).returns(String) }
   def render(toks)
     lines = tokens_to_lines(toks)
     lines = ensure_blank_before_catch(lines)
@@ -2382,6 +2465,7 @@ class Formatter::Emitter
   # appear before any code token adjust depth BEFORE the line renders
   # (pre_delta); markers that appear after code adjust depth after
   # (post_delta). Returns [pre_delta, post_delta, filtered_line].
+  sig { params(line: Array).returns(Array) }
   def split_indent_markers(line)
     pre = 0
     post = 0
@@ -2404,6 +2488,7 @@ class Formatter::Emitter
     [pre, post, filtered]
   end
 
+  sig { params(toks: Array).returns(Array) }
   def tokens_to_lines(toks)
     lines = []
     cur = []
@@ -2419,14 +2504,17 @@ class Formatter::Emitter
     lines
   end
 
+  sig { params(line: Array).returns(T.nilable(Formatter::FormatLexer::Token)) }
   def first_code(line)
     line.find { |t| t.type != :COMMENT }
   end
 
+  sig { params(line: Array).returns(T.nilable(Formatter::FormatLexer::Token)) }
   def last_code(line)
     line.reverse.find { |t| t.type != :COMMENT }
   end
 
+  sig { params(lines: Array).returns(Array) }
   def ensure_blank_before_catch(lines)
     out = []
     lines.each do |line|
@@ -2441,6 +2529,7 @@ class Formatter::Emitter
     out
   end
 
+  sig { params(lines: Array).returns(Array) }
   def drop_trailing_blanks(lines)
     lines = lines.dup
     lines.pop while lines.last && lines.last.empty?
@@ -2449,6 +2538,7 @@ class Formatter::Emitter
 
   # Emit a line's tokens with canonical intra-line spacing.
   # Comments get 2-space prefix if inline, 1 space after `#`.
+  sig { params(line: Array).returns(String) }
   def format_line_body(line)
     @generic_bracket_indices = compute_generic_bracket_indices(line)
     @struct_lit_brace_indices = compute_struct_lit_brace_indices(line)
@@ -2488,6 +2578,7 @@ class Formatter::Emitter
   #
   # Returns a Set of token indices that are generic brackets (both
   # opens and closes).
+  sig { params(line: Array).returns(Set) }
   def compute_generic_bracket_indices(line)
     set = Set.new
     line.each_with_index do |t, i|
@@ -2506,6 +2597,7 @@ class Formatter::Emitter
   # generic span opened just before. Tracks nested `<>` depth. Returns
   # the close index, or nil if anything that disqualifies the span as
   # a generic appears (call/index/struct-lit brackets, `=`, etc).
+  sig { params(line: Array, start_idx: Integer).returns(T.untyped) }
   def find_generic_close_idx(line, start_idx)
     depth = 1
     i = start_idx
@@ -2528,6 +2620,7 @@ class Formatter::Emitter
     nil
   end
 
+  sig { params(line: Array, idx: Integer).returns(T.nilable(Formatter::FormatLexer::Token)) }
   def preceding_code_token(line, idx)
     j = idx - 1
     while j >= 0
@@ -2541,6 +2634,7 @@ class Formatter::Emitter
   # True when `line` contains a STRUCT / UNION / ENUM keyword at any
   # depth before token index `idx`. Used to disambiguate struct-body
   # `{` (`STRUCT Foo {`) from struct-literal `{` (`Foo{ ... }`).
+  sig { params(line: Array, idx: Integer).returns(T::Boolean) }
   def line_has_struct_decl_keyword?(line, idx)
     line.first(idx).any? do |t|
       t.type == :KEYWORD && %w[STRUCT UNION ENUM].include?(t.raw)
@@ -2557,6 +2651,7 @@ class Formatter::Emitter
   #     declaration (in which case `{` is the body open).
   #
   # The matching `}` is found by simple `{` / `}` brace counting.
+  sig { params(line: Array).returns(Set) }
   def compute_struct_lit_brace_indices(line)
     set = Set.new
     line.each_with_index do |t, i|
@@ -2572,6 +2667,7 @@ class Formatter::Emitter
     set
   end
 
+  sig { params(line: Array, start_idx: Integer).returns(T.nilable(Integer)) }
   def find_matching_brace(line, start_idx)
     depth = 1
     i = start_idx
@@ -2605,6 +2701,7 @@ class Formatter::Emitter
   #
   # User-typed indent is meaningful; only synthesize the missing
   # first space when the user wrote `#text` with no separator.
+  sig { params(raw: String).returns(String) }
   def canonicalize_comment(raw)
     body = raw[1..].to_s
     body = body.rstrip
@@ -2614,6 +2711,7 @@ class Formatter::Emitter
   end
 
   # Spacing decision between two adjacent code tokens A (prev) and B (cur).
+  sig { params(a: Formatter::FormatLexer::Token, b: Formatter::FormatLexer::Token, line: Array, b_idx: Integer).returns(T::Boolean) }
   def needs_space?(a, b, line, b_idx)
     # Capability attach (§4): @X flush-attaches to a type token when the
     # position is a type context (struct field, param type, RETURNS type).
@@ -2741,6 +2839,7 @@ class Formatter::Emitter
   # we skip a trailing `(...)` group before falling back to the ident.
   # Used to decide whether a `:` belongs to an inline capability chain
   # rather than a normal type annotation.
+  sig { params(line: Array, colon_idx: Integer).returns(T::Boolean) }
   def capability_chain_colon?(line, colon_idx)
     j = colon_idx
     while j >= 0
@@ -2773,6 +2872,7 @@ class Formatter::Emitter
 
   # Walk back from a `)` at `idx` to the matching `(`. Returns the index
   # before the `(` (i.e., one to the left), or -1 if no match.
+  sig { params(line: Array, idx: Integer).returns(Integer) }
   def skip_paren_group_back(line, idx)
     depth = 0
     j = idx
@@ -2794,6 +2894,7 @@ class Formatter::Emitter
   # Scan back from `line[idx]` to determine whether the position is a
   # type-annotation context. Returns true if the nearest non-nested
   # separator is `:` or `RETURNS`; false for `=` / `,` / `;` / start.
+  sig { params(line: Array, idx: Integer).returns(T::Boolean) }
   def in_type_context?(line, idx)
     depth = 0
     j = idx
@@ -2824,6 +2925,7 @@ class Formatter::Emitter
   #
   # This is true when the previous non-comment token is one of a set of
   # keywords/symbols/operators that end an expression.
+  sig { params(line: Array, a_idx: Integer).returns(T::Boolean) }
   def unary_context?(line, a_idx)
     j = a_idx - 1
     while j >= 0

@@ -28,7 +28,7 @@ module GenericAnalysis
   # @param node   AST node (for location in error messages)
   # @param type_params Array<String> e.g. ["T", "K"]
   # @param kind   String — "struct", "union", or "function"
-  sig { params(node: T.untyped, type_params: T.untyped, kind: T.untyped).returns(Array) }
+  sig { params(node: T.untyped, type_params: T::Array[String], kind: String).returns(T.nilable(T::Array[String])) }
   def validate_type_param_list!(node, type_params, kind)
     T.bind(self, SemanticAnnotator) rescue nil
     seen = {}
@@ -67,7 +67,7 @@ module GenericAnalysis
   # Structural capabilities that are allowed on function parameters.
   STRUCTURAL_CAPABILITIES = %i[link].freeze
 
-  sig { params(node: T.untyped, type_obj: T.untyped, is_param: T.untyped).returns(T.nilable(Array)) }
+  sig { params(node: T.untyped, type_obj: T.untyped, is_param: T::Boolean).returns(T.nilable(T::Array[Type])) }
   def validate_type_annotation!(node, type_obj, is_param: false)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless type_obj.is_a?(Type)
@@ -261,7 +261,7 @@ module GenericAnalysis
   # @param actual_args  Array<AST node> — visited argument nodes
   # @param type_params  Array<Symbol>  — e.g. [:T, :K]
   # @return Hash — e.g. { T: :Number, K: :String }
-  sig { params(node: T.untyped, signature: T.untyped, actual_args: T.untyped, type_params: T.untyped).returns(Hash) }
+  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: Array, type_params: T::Array[Symbol]).returns(T.nilable(Hash)) }
   def infer_generic_type_args!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     subst = {}
@@ -285,7 +285,7 @@ module GenericAnalysis
     subst
   end
 
-  sig { params(node: T.untyped, signature: T.untyped, actual_args: T.untyped, type_params: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::FuncCall, signature: FunctionSignature, actual_args: Array, type_params: T::Array[Symbol]).returns(T.untyped) }
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
     shared_args = T.let([], T::Array[T.untyped])
@@ -321,7 +321,7 @@ module GenericAnalysis
 
   # Recursively match param_type against actual_type to bind type params.
   # Handles both direct uses (T) and nested generic uses (Cache<T>).
-  sig { params(node: T.untyped, param_type: T.untyped, actual_type: T.untyped, type_params: T.untyped, subst: T.untyped).returns(T.untyped) }
+  sig { params(node: AST::FuncCall, param_type: Type, actual_type: Type, type_params: T::Array[Symbol], subst: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
   def extract_type_bindings!(node, param_type, actual_type, type_params, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     p_res = param_type.resolved
@@ -352,7 +352,7 @@ module GenericAnalysis
   # Apply a substitution map to a type object.
   # e.g. apply_type_subst(Type(:T), { T: :Number }) → Type(:Number)
   #      apply_type_subst(Type(:"Cache<T>"), { T: :Number }) → Type(:"Cache<Number>")
-  sig { params(type_obj: T.untyped, subst: T.untyped).returns(Type) }
+  sig { params(type_obj: T.untyped, subst: T::Hash[Symbol, T.untyped]).returns(Type) }
   def apply_type_subst(type_obj, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     return Type.new(:Any) if type_obj.nil?
@@ -399,20 +399,20 @@ module GenericAnalysis
     end
   end
 
-  sig { params(type: T.untyped).returns(T.untyped) }
+  sig { params(type: Type).returns(T.untyped) }
   def generic_binding_value(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
     generic_type_has_capabilities?(t) ? Type.new(t) : t.resolved
   end
 
-  sig { params(type: T.untyped).returns(T::Boolean) }
+  sig { params(type: Type).returns(T::Boolean) }
   def generic_shared_family_param?(type)
     T.bind(self, SemanticAnnotator) rescue nil
-    !!(type.is_a?(Type) && type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/))
+    type.is_a?(Type) && type.polymorphic_shared? && type.resolved.to_s.match?(/\A[A-Z]\z/)
   end
 
-  sig { params(type: T.untyped).returns(Type) }
+  sig { params(type: Type).returns(Type) }
   def generic_shared_payload_binding(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? Type.new(type) : Type.new(type)
@@ -435,7 +435,7 @@ module GenericAnalysis
       l.elem_sync == r.elem_sync
   end
 
-  sig { params(left: T.untyped, right: T.untyped).returns(T::Boolean) }
+  sig { params(left: Type, right: Type).returns(T::Boolean) }
   def same_shared_call_capability?(left, right)
     T.bind(self, SemanticAnnotator) rescue nil
     l = left.is_a?(Type) ? left : Type.new(left)
@@ -446,7 +446,7 @@ module GenericAnalysis
       l.elem_sync == r.elem_sync
   end
 
-  sig { params(type: T.untyped).returns(T::Boolean) }
+  sig { params(type: Type).returns(T::Boolean) }
   def generic_type_has_capabilities?(type)
     T.bind(self, SemanticAnnotator) rescue nil
     type.ownership != :affine ||
@@ -484,7 +484,7 @@ module GenericAnalysis
     parts.join("")
   end
 
-  sig { params(type: T.untyped).returns(String) }
+  sig { params(type: Type).returns(String) }
   def shared_call_capability_display(type)
     T.bind(self, SemanticAnnotator) rescue nil
     t = type.is_a?(Type) ? type : Type.new(type)
@@ -503,7 +503,7 @@ module GenericAnalysis
 
   # Build a concrete copy of a generic function signature with all type params
   # replaced by their inferred concrete types.
-  sig { params(signature: T.untyped, subst: T.untyped).returns(FunctionSignature) }
+  sig { params(signature: FunctionSignature, subst: T::Hash[Symbol, T.untyped]).returns(FunctionSignature) }
   def substitute_type_params(signature, subst)
     T.bind(self, SemanticAnnotator) rescue nil
     FunctionSignature.new(

@@ -9,7 +9,14 @@
 # Ruby 3.2 + tapioca 0.19 incompat (`coerce_and_check_module_types`
 # crash on init) is resolved.
 
-class Token
+# Lexer::Token is a Struct(:type, :value, :line, :column) defined in
+# src/ast/lexer.rb. Re-declare under its canonical Lexer:: namespace
+# so autogen sigs that record `Lexer::Token` (from runtime) match what
+# the AST::Locatable RBI override exposes via `node.token`.
+class Lexer
+end
+
+class Lexer::Token
   sig { returns(Symbol) }
   def type; end
   sig { returns(T.untyped) }
@@ -19,6 +26,9 @@ class Token
   sig { returns(Integer) }
   def column; end
 end
+
+# Top-level alias: existing references in this RBI keep working.
+Token = Lexer::Token
 
 # AST::Locatable is mixed into AST nodes; declare Kernel methods so
 # Sorbet doesn't trip over `node.is_a?(...)`, `node.class`, etc. when

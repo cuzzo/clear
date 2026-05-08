@@ -27,7 +27,7 @@ module EscapeAnalysis
   # Fixed-point iteration over the call graph.
   # Writes fn.return_provenance = :heap on each discovered function.
   # Returns a frozen Set of function names.
-  sig { params(fn_nodes: T.untyped).returns(Set) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T::Set[String]) }
   def self.compute_heap_return_fns!(fn_nodes)
     heap_fns = fn_nodes.each_with_object(Set.new) do |(name, fn), s|
       s << name if fn&.return_provenance == :heap
@@ -80,16 +80,16 @@ module EscapeAnalysis
   # @param heap_fns       [Set]   function names with heap return_provenance (from E1)
   # @param promotion_plans [Hash] name -> PromotionClassifier plan hash
   # @return [Set<String>] BG-upgraded variable names (for insert_bg_escape_promote! filtering)
-  sig { params(fn_nodes: T.untyped, heap_fns: T.untyped, promotion_plans: T.untyped).returns(Set) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped], heap_fns: T::Set[String], promotion_plans: T::Hash[String, Hash]).returns(T::Set[String]) }
   def self.analyze!(fn_nodes, heap_fns:, promotion_plans: {})
     all_bg_upgraded = Set.new
 
     fn_nodes.each do |name, fn|
       next unless fn&.body
       plan   = promotion_plans[name]
-      result = per_fn_scan!(fn, heap_fns, plan, fn_nodes)
+      result = per_fn_scan!(fn, heap_fns, T.must(plan), fn_nodes)
 
-      all_bg_upgraded.merge(result[:bg_upgraded])
+      all_bg_upgraded.merge(T.must(result[:bg_upgraded]))
 
       # Stamp carry-return metadata so mark_heap_carry_call_sites! can run after.
       if result[:carry_return_vars]&.any?
@@ -100,7 +100,7 @@ module EscapeAnalysis
       # Remove always-escaped vars from promotion plan — no runtime MIR::Promote needed.
       if result[:always_escaped]&.any? && plan.is_a?(Hash) && plan[:var_promotes]
         escaped = result[:always_escaped]
-        plan[:var_promotes] = plan[:var_promotes].reject { |vp| escaped.include?(vp[:var]) }
+        plan[:var_promotes] = plan[:var_promotes].reject { |vp| T.must(escaped).include?(vp[:var]) }
       end
     end
 
@@ -110,6 +110,7 @@ module EscapeAnalysis
   # ── Private helpers ──────────────────────────────────────────────────────
 
   # E1 helper: check whether any return in fn's body yields a heap value.
+  sig { params(fn: AST::FunctionDef, fn_nodes: T::Hash[String, T.untyped], heap_fns: T::Set[String]).returns(T::Boolean) }
   private_class_method def self.fn_body_returns_heap?(fn, fn_nodes, heap_fns)
     returns = []
     AST.walk_body(fn.body) { |n| returns << n if n.is_a?(AST::ReturnNode) }
@@ -121,6 +122,7 @@ module EscapeAnalysis
   end
 
   # E1 helper: true if a return-position expression produces a heap-owned value.
+  sig { params(val: T.untyped, fn_nodes: T::Hash[String, T.untyped], heap_fns: T::Set[String]).returns(T::Boolean) }
   private_class_method def self.return_expr_is_heap?(val, fn_nodes, heap_fns)
     callee_name = case val
                   when AST::FuncCall   then val.name
@@ -157,6 +159,7 @@ module EscapeAnalysis
 
   # ── E2 private helpers ───────────────────────────────────────────────────
 
+  sig { params(fn: AST::FunctionDef, heap_fns: T::Set[String], plan: T::Hash[Symbol, T.untyped], fn_nodes: T::Hash[String, T.untyped]).returns(T::Hash[Symbol, Set]) }
   private_class_method def self.per_fn_scan!(fn, heap_fns, plan, fn_nodes = {})
     bg_upgraded    = Set.new
     always_escaped = Set.new
@@ -386,6 +389,7 @@ module EscapeAnalysis
   # passed as mutator arguments to heap-owned containers. Returns true if
   # any promotion happened — caller uses that to cascade-promote the
   # receiver container.
+  sig { params(node: T.untyped).returns(T::Boolean) }
   private_class_method def self.e2_promote_frame_concats!(node)
     return false unless node
     case node
@@ -418,6 +422,7 @@ module EscapeAnalysis
   end
 
   # Collect all ReturnNode descendants in body.
+  sig { params(body: Array).returns(Array) }
   private_class_method def self.e2_collect_returns(body)
     nodes = []
     AST.walk_body(body) { |n| nodes << n if n.is_a?(AST::ReturnNode) }
@@ -428,10 +433,12 @@ module EscapeAnalysis
   # nested in expressions (VarDecl/BindExpr/Assignment values, ReturnNode
   # values, struct/list/hash literal fields, control-flow conditions). Used
   # by Condition 8.
+  sig { params(body: Array, blk: T.untyped).returns(T.untyped) }
   private_class_method def self.e2_walk_calls(body, &blk)
     AST.walk_body(body) { |stmt| e2_walk_calls_in_expr(stmt, &blk) }
   end
 
+  sig { params(node: T.untyped, blk: T.untyped).returns(T.untyped) }
   private_class_method def self.e2_walk_calls_in_expr(node, &blk)
     return unless node
     case node
@@ -479,6 +486,7 @@ module EscapeAnalysis
   # with its own per-type filter, duplicating effort that
   # CaptureStrategy.classify already performs. Now there is one writer
   # (BgCaptureClassifier) and one reader (this method).
+  sig { params(fn: AST::FunctionDef).returns(T::Set[String]) }
   private_class_method def self.e2_bg_capture_names(fn)
     names = Set.new
     AST.each_bg_block(fn.body) do |bg|
@@ -489,6 +497,7 @@ module EscapeAnalysis
 
   # Find string variables reassigned inside loops that will have mark_per_iter.
   # Side effect: calls LoopFrameAnalysis.promote_value_to_heap! on each carry value.
+  sig { params(fn: AST::FunctionDef).returns(T::Set[String]) }
   private_class_method def self.e2_loop_carry_names!(fn)
     carry_names = Set.new
     AST.walk_body(fn.body) do |node|
@@ -551,6 +560,7 @@ module EscapeAnalysis
   end
 
   # Returns carry variable names that are directly returned (for heap_carry_return metadata).
+  sig { params(fn: AST::FunctionDef, carry_names: T::Set[String]).returns(T::Set[String]) }
   private_class_method def self.e2_carry_return_vars(fn, carry_names)
     return Set.new if carry_names.empty?
     ret_t = fn.return_type
@@ -572,6 +582,7 @@ module EscapeAnalysis
   end
 
   # True if a return-position expression references the named variable.
+  sig { params(node: T.untyped, var_name: String).returns(T::Boolean) }
   private_class_method def self.e2_return_refs?(node, var_name)
     case node
     when AST::Identifier then node.name == var_name
@@ -582,6 +593,7 @@ module EscapeAnalysis
   end
 
   # Find the first Identifier matching var_name across all return node values.
+  sig { params(return_nodes: Array, var_name: String).returns(T.untyped) }
   private_class_method def self.e2_find_return_ident(return_nodes, var_name)
     return_nodes.each do |ret|
       next unless ret.value
@@ -591,6 +603,7 @@ module EscapeAnalysis
     nil
   end
 
+  sig { params(node: T.untyped, var_name: String).returns(T.untyped) }
   private_class_method def self.e2_extract_ident(node, var_name)
     case node
     when AST::Identifier
@@ -603,6 +616,7 @@ module EscapeAnalysis
   end
 
   # Set both storage and provenance to :heap on a declaration node.
+  sig { params(node: T.untyped).returns(T.untyped) }
   private_class_method def self.e2_stamp_full!(node)
     node.storage = :heap if node.respond_to?(:storage=)
     ti = node.type_info rescue nil
@@ -610,6 +624,7 @@ module EscapeAnalysis
   end
 
   # Also stamp the SymbolEntry (scope entry) reached via the return identifier.
+  sig { params(return_nodes: Array, var_name: String).returns(Array) }
   private_class_method def self.e2_stamp_symbol_via_return_ident!(return_nodes, var_name)
     return_nodes.each do |ret|
       next unless ret.value
@@ -622,6 +637,7 @@ module EscapeAnalysis
   end
 
   # Extract the root Identifier from a field/index chain (for assign_escape LHS).
+  sig { params(node: T.untyped).returns(T.untyped) }
   private_class_method def self.e2_root_ident(node)
     case node
     when AST::GetField, AST::GetIndex then e2_root_ident(node.target)
@@ -638,7 +654,7 @@ module EscapeAnalysis
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
   # @param heap_fns [Set]   function names with heap return_provenance (from E1)
-  sig { params(fn_nodes: T.untyped, heap_fns: T.untyped).returns(Hash) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped], heap_fns: T::Set[String]).returns(T::Hash[String, T.untyped]) }
   def self.tag_transitive_provenance!(fn_nodes, heap_fns)
     fn_nodes.each do |_name, fn|
       next unless fn&.body
@@ -648,8 +664,7 @@ module EscapeAnalysis
           val = node.value
           callee_name = val.is_a?(AST::FuncCall) ? val.name.to_s : nil
           next unless callee_name && heap_fns.include?(callee_name)
-          ti = node.type_info
-          ti.provenance = :heap if ti.is_a?(Type)
+          T.must(node.type_info).provenance = :heap if node.type_info.is_a?(Type)
           if node.is_a?(AST::BindExpr) && node.mode == :assign
             decl = e3_find_decl(fn.body, node.name)
             decl.type_info.provenance = :heap if decl&.type_info.is_a?(Type)
@@ -681,7 +696,7 @@ module EscapeAnalysis
   # value. Params with declared sync (legacy) are not overwritten.
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
-  sig { params(fn_nodes: T.untyped).returns(T.untyped) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T.untyped) }
   def self.propagate_caller_sync!(fn_nodes)
     return if fn_nodes.empty?
 
@@ -744,13 +759,14 @@ module EscapeAnalysis
 
   # Walk every Locatable descendant (incl. expression sub-trees), record
   # FuncCalls.
+  sig { params(body: Array, callsites: T::Hash[String, Array]).returns(T.untyped) }
   private_class_method def self.collect_callsites_deep(body, callsites)
     stack = body.is_a?(Array) ? body.dup : [body]
     until stack.empty?
       node = stack.pop
       next unless node.is_a?(AST::Locatable)
       if node.is_a?(AST::FuncCall)
-        callsites[node.name.to_s] << { args: node.args }
+        T.must(callsites[node.name.to_s]) << { args: node.args }
       end
       next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
       node.class.members.each do |m|
@@ -766,6 +782,7 @@ module EscapeAnalysis
 
   # Most-general unifier: returns the single non-nil value when every
   # callsite's arg projects to the same value, else nil.
+  sig { params(sites: T::Array[Hash], idx: Integer, project: T.untyped).returns(T.nilable(Symbol)) }
   private_class_method def self.unify_caller_attr(sites, idx, &project)
     observed = sites.map do |site|
       arg = site[:args][idx]
@@ -779,11 +796,13 @@ module EscapeAnalysis
 
   # True when the param's declared type carried explicit sync (so the
   # entry.sync currently reflects an annotation, not a propagated value).
+  sig { params(param: T::Hash[Symbol, T.untyped]).returns(T.nilable(T::Boolean)) }
   private_class_method def self.param_sync_was_declared?(param)
     t = param[:type]
     t.is_a?(Type) && t.any_sync?
   end
 
+  sig { params(fn_node: AST::FunctionDef, param: T::Hash[Symbol, T.untyped], sync: Symbol).returns(T::Boolean) }
   private_class_method def self.param_accepts_caller_sync?(fn_node, param, sync)
     t = param[:type]
     return true if t.is_a?(Type) && (t.shared? || t.any_sync?)
@@ -814,7 +833,7 @@ module EscapeAnalysis
   # Replaces MIRPass#mark_heap_carry_call_sites!
   #
   # @param fn_nodes [Hash]  name -> AST::FunctionDef
-  sig { params(fn_nodes: T.untyped).returns(T.nilable(Hash)) }
+  sig { params(fn_nodes: T::Hash[String, T.untyped]).returns(T.nilable(Hash)) }
   def self.tag_carry_call_sites!(fn_nodes)
     carry_fns = fn_nodes.each_with_object(Set.new) do |(_, fn), s|
       s << fn.name.to_s if fn.respond_to?(:heap_carry_return) && fn.heap_carry_return
@@ -844,6 +863,7 @@ module EscapeAnalysis
     end
   end
 
+  sig { params(body: Array, var_name: String).returns(T.untyped) }
   private_class_method def self.e3_find_decl(body, var_name)
     return nil unless body
     body.each do |node|
@@ -855,6 +875,7 @@ module EscapeAnalysis
     nil
   end
 
+  sig { params(stmt: T.untyped).returns(Array) }
   private_class_method def self.e3_top_level_exprs(stmt)
     case stmt
     when AST::VarDecl, AST::BindExpr then [stmt.value]
@@ -869,6 +890,7 @@ module EscapeAnalysis
     end.compact
   end
 
+  sig { params(node: T.untyped, carry_fns: T::Set[String]).returns(T.nilable(Array)) }
   private_class_method def self.e3_mark_carry_expr!(node, carry_fns)
     return unless node
     case node

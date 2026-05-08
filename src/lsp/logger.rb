@@ -9,21 +9,23 @@ module LSP
 
     LEVELS = { debug: 0, info: 1, warn: 2, error: 3 }.freeze
 
+    sig { params(level: Symbol, io: IO).void }
     def initialize(level: :info, io: $stderr)
       @level = LEVELS.fetch(level)
       @io    = io
     end
 
-    sig { params(msg: T.untyped).returns(T.untyped) }
+    sig { params(msg: String).returns(T.untyped) }
     def debug(msg); log(:debug, msg); end
-    sig { params(msg: T.untyped).returns(T.untyped) }
+    sig { params(msg: String).returns(T.untyped) }
     def info(msg);  log(:info,  msg); end
     def warn(msg);  log(:warn,  msg); end
-    sig { params(msg: T.untyped).returns(IO) }
-    def error(msg); log(:error, msg); end
+    sig { params(msg: String).returns(IO) }
+    def error(msg); T.must(log(:error, msg)); end
 
     private
 
+    sig { params(level: Symbol, msg: String).returns(T.nilable(IO)) }
     def log(level, msg)
       return if LEVELS.fetch(level) < @level
       ts = Time.now.strftime("%H:%M:%S.%3N")

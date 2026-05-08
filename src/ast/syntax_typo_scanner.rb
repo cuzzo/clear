@@ -35,7 +35,7 @@ module SyntaxTypoScanner
     { match: '=>', replace: '->', label: 'arrow (use `->`, not `=>`)' },
   ].freeze
 
-  sig { params(source: T.untyped).returns(T.untyped) }
+  sig { params(source: String).returns(T.untyped) }
   def self.scan!(source)
     return unless FixCollector.enabled?
     return unless source && !source.empty?
@@ -56,7 +56,7 @@ module SyntaxTypoScanner
       end
 
       if in_triple
-        i, line, col = advance(source, i, line, col)
+        i, line, col = T.unsafe(advance(source, i, line, col))
         next
       end
 
@@ -76,7 +76,7 @@ module SyntaxTypoScanner
           i += 1; col += 1
           next
         end
-        i, line, col = advance(source, i, line, col)
+        i, line, col = T.unsafe(advance(source, i, line, col))
         next
       end
 
@@ -96,22 +96,22 @@ module SyntaxTypoScanner
       RULES.each do |r|
         pat = r[:match]
         next unless source[i, pat.length] == pat
-        if pat[0] =~ /[A-Za-z_]/ && i > 0 && source[i - 1] =~ /[A-Za-z0-9_]/
+        if T.must(pat)[0] =~ /[A-Za-z_]/ && i > 0 && source[i - 1] =~ /[A-Za-z0-9_]/
           next
         end
         emit_typo_finding!(line, col, r)
-        i += pat.length
-        col += pat.length
+        i += T.must(pat).length
+        col += T.must(pat).length
         matched = true
         break
       end
       next if matched
 
-      i, line, col = advance(source, i, line, col)
+      i, line, col = T.unsafe(advance(source, i, line, col))
     end
   end
 
-  sig { params(source: T.untyped, i: T.untyped, line: T.untyped, col: T.untyped).returns(Array) }
+  sig { params(source: String, i: Integer, line: Integer, col: Integer).returns(T::Array[Integer]) }
   def self.advance(source, i, line, col)
     if source[i] == "\n"
       [i + 1, line + 1, 1]
@@ -120,7 +120,7 @@ module SyntaxTypoScanner
     end
   end
 
-  sig { params(line: T.untyped, col: T.untyped, rule: T.untyped).returns(Array) }
+  sig { params(line: Integer, col: Integer, rule: Hash).returns(Array) }
   def self.emit_typo_finding!(line, col, rule)
     fix = Fix.new(
       description: "Replace `#{rule[:match]}` with `#{rule[:replace]}` — #{rule[:label]}.",

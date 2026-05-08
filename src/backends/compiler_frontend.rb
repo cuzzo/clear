@@ -35,20 +35,20 @@ class CompilerFrontend
   #
   # Returns a Result with the annotated+MIR-stamped AST and all metadata
   # needed by either the old transpiler or the MIR lowering path.
-  sig { params(cheat_code: T.untyped, importer: T.untyped, source_dir: T.untyped, strict_test: T.untyped).returns(CompilerFrontend::Result) }
+  sig { params(cheat_code: String, importer: ModuleImporter, source_dir: String, strict_test: T::Boolean).returns(T.nilable(CompilerFrontend::Result)) }
   def self.compile(cheat_code, importer:, source_dir:, strict_test: false)
     tokens = Lexer.new(cheat_code).tokenize
-    ast    = Parser.new(tokens, cheat_code).parse
+    ast    = Parser.new(T.must(tokens), cheat_code).parse
 
     annotator = SemanticAnnotator.new(importer: importer, source_dir: source_dir, strict_test: strict_test, source_code: cheat_code)
-    annotator.annotate!(ast)
+    annotator.annotate!(T.must(ast))
 
     PipelineRewriter.new(annotator).rewrite!(ast)
-    StringConcatRewriter.new.rewrite!(ast)
+    StringConcatRewriter.new.rewrite!(T.must(ast))
 
     schema_lookup = ->(name) { annotator.lookup_type_schema(name) }
     fn_nodes = {}
-    ast.statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
+    T.must(ast).statements.each { |s| fn_nodes[s.name] = s if s.is_a?(AST::FunctionDef) }
 
     # Synthesize a FunctionDef wrapper for every TEST THAT body so the
     # MIR pipeline (escape analysis, promotion, cleanup classification,
@@ -60,15 +60,15 @@ class CompilerFrontend
     # body array with the AST::TestThat so the inserted MIR nodes
     # appear at lower-time. The wrapper itself never reaches code
     # generation -- mir_lowering still walks the TestBlock directly.
-    synthesize_test_body_wrappers!(ast, fn_nodes)
+    synthesize_test_body_wrappers!(T.must(ast), fn_nodes)
 
     mir_pass = MIRPass.new(fn_nodes: fn_nodes, schema_lookup: schema_lookup)
-    mir_pass.transform!(ast)
+    mir_pass.transform!(T.must(ast))
 
     struct_schemas = {}
     enum_schemas = {}
     union_schemas = {}
-    ast.statements.each do |stmt|
+    T.must(ast).statements.each do |stmt|
       case stmt
       when AST::StructDef then struct_schemas[stmt.name.to_sym] = stmt.fields
       when AST::EnumDef   then enum_schemas[stmt.name.to_sym] = stmt.variants
@@ -77,21 +77,26 @@ class CompilerFrontend
     end
 
     fn_sigs = {}
-    ast.statements.each do |stmt|
+    T.must(ast).statements.each do |stmt|
       next unless stmt.is_a?(AST::FunctionDef)
-      fs = FunctionSignature.new(
-        params: stmt.params,
-        return_type: stmt.return_type || :Any,
-        return_lifetime: stmt.return_lifetime,
-        visibility: stmt.visibility,
-        type_params: stmt.type_params,
-        reentrant: stmt.reentrant == :reentrant
-      )
-      fs.needs_rt = stmt.needs_rt
-      fs.can_fail = stmt.can_fail
-      fs.effects = stmt.effects
-      fs.requires = stmt.requires
-      fn_sigs[stmt.name] = fs
+      sig = stmt.full_type
+      if sig.is_a?(FunctionSignature)
+        fn_sigs[stmt.name] = sig
+      else
+        fs = FunctionSignature.new(
+          params: stmt.params,
+          return_type: stmt.return_type || :Any,
+          return_lifetime: stmt.return_lifetime,
+          visibility: stmt.visibility,
+          type_params: stmt.type_params,
+          reentrant: stmt.reentrant == :reentrant
+        )
+        fs.needs_rt = stmt.needs_rt
+        fs.can_fail = stmt.can_fail
+        fs.effects = stmt.effects
+        fs.requires = stmt.requires
+        fn_sigs[stmt.name] = fs
+      end
     end
 
     # Include module-imported function signatures so MIRLowering can
@@ -117,7 +122,7 @@ class CompilerFrontend
   # wrapper never reaches code generation -- it only carries enough
   # shape for the analysis passes to walk the body as if it were a
   # real `FN __test_X() RETURNS Void -> ... END`.
-  sig { params(ast: T.untyped, fn_nodes: T.untyped).returns(Array) }
+  sig { params(ast: AST::Program, fn_nodes: T::Hash[String, T.untyped]).returns(Array) }
   def self.synthesize_test_body_wrappers!(ast, fn_nodes)
     counter = 0
     ast.statements.each do |stmt|

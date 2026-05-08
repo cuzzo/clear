@@ -11,7 +11,7 @@ module MethodAnalysis
   # Attempt to resolve a method call on a collection type (Pool, Set, or HashMap).
   # Returns true if handled, false if the caller should fall through to UFCS.
   # Dispatch is driven by COLLECTION_METHOD_CONFIGS keyed on Type#dispatch_key.
-  sig { params(node: T.untyped).returns(T::Boolean) }
+  sig { params(node: AST::MethodCall).returns(T.nilable(T::Boolean)) }
   def resolve_collection_method(node)
     T.bind(self, SemanticAnnotator) rescue nil
     obj_type = node.object.type_info
@@ -28,7 +28,7 @@ module MethodAnalysis
   #
   # @param matched_def [Hash] the STD_LIB definition that matched
   # @param args [Array] the resolved argument nodes
-  sig { params(matched_def: T.untyped, args: T.untyped).returns(T.nilable(Type)) }
+  sig { params(matched_def: T::Hash[Symbol, T.untyped], args: Array).returns(T.nilable(Type)) }
   def narrow_collection_type!(matched_def, args)
     T.bind(self, SemanticAnnotator) rescue nil
     return unless matched_def[:narrows_collection] && args.size >= 2
@@ -54,6 +54,7 @@ module MethodAnalysis
 
   private
 
+  sig { params(node: AST::MethodCall, obj_type: Type, registry: T::Hash[String, Hash], tag_field: Symbol, type_label: String).returns(T.nilable(T::Boolean)) }
   def resolve_typed_method(node, obj_type, registry, tag_field, type_label)
     T.bind(self, SemanticAnnotator) rescue nil
     defn = registry[node.name]
@@ -156,6 +157,7 @@ module MethodAnalysis
   # Look up the INDEX_OPS entry for a container type.
   # Returns the :get or :set sub-entry, or nil.
   # Dispatch is driven by Type#dispatch_key — add new indexable types there.
+  sig { params(type_info: Type, op: Symbol).returns(T.nilable(Hash)) }
   def resolve_index_op(type_info, op)
     T.bind(self, SemanticAnnotator) rescue nil
     return nil if type_info&.promise_list?

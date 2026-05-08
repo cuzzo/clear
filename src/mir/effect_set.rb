@@ -42,6 +42,7 @@ class EffectSet
 
   attr_reader :effects
 
+  sig { params(effects: T.untyped).void }
   def initialize(effects = nil)
     eff = effects ? Set.new(effects) : Set.new
     eff.each do |e|
@@ -56,7 +57,7 @@ class EffectSet
     @empty ||= new
   end
 
-  sig { params(effect: T.untyped).returns(T::Boolean) }
+  sig { params(effect: Symbol).returns(T::Boolean) }
   def include?(effect)
     @effects.include?(effect)
   end
@@ -65,12 +66,12 @@ class EffectSet
     @effects.empty?
   end
 
-  sig { params(other: T.untyped).returns(EffectSet) }
+  sig { params(other: EffectSet).returns(EffectSet) }
   def union(other)
     EffectSet.new(@effects | other.effects)
   end
 
-  sig { params(other: T.untyped).returns(T::Boolean) }
+  sig { params(other: EffectSet).returns(T::Boolean) }
   def ==(other)
     other.is_a?(EffectSet) && @effects == other.effects
   end

@@ -11,6 +11,7 @@ class Scope
   attr_accessor :depth   # Atomics M2.6: stack depth at scope creation; 0 for root
   attr_reader   :types
 
+  sig { void }
   def initialize
     @locals = {}
     @dependencies = {}
@@ -19,7 +20,7 @@ class Scope
     @depth = 0
   end
 
-  sig { params(name: T.untyped, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T.untyped, size: T.untyped, storage: T.untyped, capabilities: T.untyped, _borrowed_paths: T.untyped, sync: T.untyped, layout: T.untyped, resource: T.untyped, close_zig: T.untyped).returns(SymbolEntry) }
+  sig { params(name: String, reg: T.untyped, type: T.untyped, is_mutable: T.untyped, is_rebindable: T::Boolean, size: T.nilable(Integer), storage: Symbol, capabilities: Set, _borrowed_paths: Array, sync: T.nilable(Symbol), layout: T.nilable(Symbol), resource: T.nilable(T::Boolean), close_zig: T.nilable(String)).returns(SymbolEntry) }
   def declare(name, reg, type, is_mutable = true, is_rebindable = false, size = nil, storage = :stack, capabilities = Set.new, _borrowed_paths = [], sync: nil, layout: nil, resource: nil, close_zig: nil)
     @owned_names.add(name)
     entry = SymbolEntry.new(
@@ -73,6 +74,7 @@ class Scope
   # rationale and alternative options (B: shared boxed entries, C:
   # split scope-local vs global fields). Option A (this contract +
   # helper) is the current choice.
+  sig { params(original: Scope).returns(T::Hash[Symbol, Hash]) }
   def initialize_copy(original)
     super
 
@@ -109,7 +111,7 @@ class Scope
   # captured by `Scope.dup`.
   #
   # See the deep-copy contract on `Scope#initialize_copy` for why.
-  sig { params(fn: T.untyped).returns(Hash) }
+  sig { params(fn: AST::FunctionDef).returns(T::Hash[String, SymbolEntry]) }
   def self.live_param_syms(fn)
     return {} unless fn&.respond_to?(:params)
     (fn.params || []).each_with_object({}) do |p, h|
@@ -117,7 +119,7 @@ class Scope
     end
   end
 
-  sig { params(name: T.untyped, schema: T.untyped).returns(Hash) }
+  sig { params(name: Symbol, schema: T.untyped).returns(T::Hash[Symbol, T.untyped]) }
   def declare_type(name, schema)
     @types[name] = {
       schema: schema,
@@ -125,14 +127,14 @@ class Scope
     }
   end
 
-  sig { params(name: T.untyped).returns(T.untyped) }
+  sig { params(name: Symbol).returns(T.untyped) }
   def resolve_type_definition(name)
     entry = @types[name]
     entry ? entry[:schema] : nil
   end
 
   # Returns a Type carrying the variable's base type plus storage-derived capabilities.
-  sig { params(name: T.untyped).returns(Type) }
+  sig { params(name: String).returns(Type) }
   def resolve_full_type(name)
     entry = @locals[name]
     return Type.new(:Any) if entry.nil?
@@ -179,30 +181,30 @@ class Scope
     base_type
   end
 
-  sig { params(name: T.untyped).returns(T.untyped) }
+  sig { params(name: String).returns(T.untyped) }
   def resolve_type(name)
     entry = @locals[name]
     entry ? entry.type : :Any
   end
 
-  sig { params(name: T.untyped).returns(T.untyped) }
+  sig { params(name: String).returns(T.untyped) }
   def is_mutable?(name)
     entry = @locals[name]
     entry ? entry.mutable : true
   end
 
-  sig { params(name: T.untyped).returns(T::Boolean) }
+  sig { params(name: String).returns(T::Boolean) }
   def is_immutable?(name)
     !is_mutable?(name)
   end
 
-  sig { params(name: T.untyped).returns(T::Boolean) }
+  sig { params(name: String).returns(T::Boolean) }
   def is_restricted?(name)
     @locals[name]&.capabilities&.include?(:RESTRICT)
   end
 
   # Mark a variable as read (used as an r-value in user code).
-  sig { params(name: T.untyped).returns(T.untyped) }
+  sig { params(name: String).returns(T.untyped) }
   def mark_read(name)
     entry = @locals[name]
     return unless entry
@@ -212,7 +214,7 @@ class Scope
 
   # Returns the new SymbolEntry on success, nil if the binding wasn't found
   # in the cap's old_scope (caller is responsible for emitting a diagnostic).
-  sig { params(capability: T.untyped).returns(T.untyped) }
+  sig { params(capability: T::Hash[Symbol, T.untyped]).returns(T.untyped) }
   def declare_with_new_capability(capability)
     name = capability[:var_node].name
     local = capability[:old_scope].locals[name]
@@ -239,7 +241,7 @@ class Scope
     path
   end
 
-  sig { params(name: T.untyped).returns(T.untyped) }
+  sig { params(name: String).returns(T.untyped) }
   def check_validity!(name)
     entry = @locals[name]
     return unless entry
@@ -261,7 +263,7 @@ module ScopeHelper
     @scope_stack.last
   end
 
-  sig { params(name: T.untyped).returns(T.nilable(Scope)) }
+  sig { params(name: String).returns(T.nilable(Scope)) }
   def lookup_scope_for(name)
     # Search from Top (last) to Bottom (first)
     @scope_stack.reverse_each do |scope|
@@ -274,7 +276,7 @@ module ScopeHelper
   # Returns the scope where the name is found, or nil if undefined.
   # Checks current scope locals first, then falls back to lookup_scope_for
   # to find named functions used as values (fn-type references).
-  sig { params(name: T.untyped).returns(T.nilable(Scope)) }
+  sig { params(name: String).returns(T.nilable(Scope)) }
   def resolve_variable_scope(name)
     scope = current_scope
     if scope.locals.key?(name)
@@ -285,7 +287,7 @@ module ScopeHelper
     end
   end
 
-  sig { params(name: T.untyped).returns(T.untyped) }
+  sig { params(name: Symbol).returns(T.untyped) }
   def lookup_type_schema(name)
     # For generic instances like :"Pair<Number>", look up the base type ":Pair"
     base_name = name.to_s.sub(/<.*>$/, '').to_sym

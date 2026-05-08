@@ -25,7 +25,7 @@ module TestAnnotation
                    readLine readLinePrompt listDir listAll fileSize
                    socketRead socketWrite socketClose].to_set.freeze
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::TestBlock).returns(T.nilable(Symbol)) }
   def visit_TestBlock(node)
     T.bind(self, SemanticAnnotator) rescue nil
     with_new_scope do
@@ -37,7 +37,7 @@ module TestAnnotation
     node.full_type = :Void
   end
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::WhenBlock).returns(T.nilable(Symbol)) }
   def visit_WhenBlock(node)
     T.bind(self, SemanticAnnotator) rescue nil
     node.setup.each { |s| visit(s) }
@@ -98,7 +98,7 @@ module TestAnnotation
     (node.after_all   || []).each { |body| body.each { |s| visit(s) } }
   end
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::TestThat).returns(T.nilable(Symbol)) }
   def visit_TestThat(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit_stmts(node.body)
@@ -111,28 +111,28 @@ module TestAnnotation
     node.full_type = :Void
   end
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::BenchmarkStmt).returns(Symbol) }
   def visit_BenchmarkStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::SmashStmt).returns(Symbol) }
   def visit_SmashStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::ProfileStmt).returns(Symbol) }
   def visit_ProfileStmt(node)
     T.bind(self, SemanticAnnotator) rescue nil
     visit(node.expression)
     node.full_type = :Void
   end
 
-  sig { params(node: T.untyped).returns(Symbol) }
+  sig { params(node: AST::StubDecl).returns(Symbol) }
   def visit_StubDecl(node)
     T.bind(self, SemanticAnnotator) rescue nil
     # Visit the value for type checking if it's an expression.
@@ -154,7 +154,7 @@ module TestAnnotation
   # has been stubbed in the enclosing WHEN block. Both runtime-level
   # IO builtins (file/network) and user-defined functions whose
   # effect set includes :BLOCKING / :EXTERN qualify as IO.
-  sig { params(test_that: T.untyped, stubbed_fns: T.untyped).returns(T.untyped) }
+  sig { params(test_that: AST::TestThat, stubbed_fns: Set).returns(T.untyped) }
   def validate_strict_io!(test_that, stubbed_fns)
     T.bind(self, SemanticAnnotator) rescue nil
     calls = scan_for_calls(test_that.body).first
