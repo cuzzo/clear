@@ -68,7 +68,7 @@ RSpec.describe "Parser: EFFECTS REENTRANT clause" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(/Unknown REENTRANT variant ':WAFFLES'/)
+    }.to raise_error(/Unknown reentrant variant 'WAFFLES'/)
   end
 
   it "rejects a non-REENTRANT effect at function level" do
@@ -79,7 +79,7 @@ RSpec.describe "Parser: EFFECTS REENTRANT clause" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(/Function-level EFFECTS only accepts REENTRANT/)
+    }.to raise_error(/Unknown function effect 'HEAP'/)
   end
 
   it "rejects mixing legacy @reentrant with EFFECTS REENTRANT" do
@@ -202,7 +202,7 @@ RSpec.describe "Parser: REQUIRES NON_REENTRANT clause" do
           RETURN;
         END
       CLEAR
-    }.to raise_error(/Unknown REQUIRES (family or kind|kind) 'WAFFLES'/)
+    }.to raise_error(/Unknown REQUIRES (family|kind) 'WAFFLES'/)
   end
 
   it "rejects duplicate REQUIRES clauses for the same name" do

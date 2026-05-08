@@ -551,7 +551,7 @@ RSpec.describe "error emission coverage" do
           FN doIt() RETURNS Void EFFECTS BOGUS_KIND -> END
           FN main() RETURNS Void -> END
         CLEAR
-      }.to raise_error(ParserError, /Unknown effect/)
+      }.to raise_error(ParserError, /Unknown function effect/)
     end
 
     it "compiles when EFFECTS names REENTRANT" do

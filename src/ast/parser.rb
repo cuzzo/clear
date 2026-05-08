@@ -906,17 +906,29 @@ class Parser
     if match!(:KEYWORD, 'EFFECTS')
       loop do
         consume(:CHAR, ':')
-        eff_name = consume(:VAR_ID).value.to_sym
+        eff_tok = consume(:VAR_ID)
+        eff_name = eff_tok.value.to_sym
         unless [:alloc, :safe].include?(eff_name)
-          error!(current, :UNKNOWN_EFFECT, value: eff_name)
+          emit_typo_suggestion!(
+            eff_tok, eff_tok.value, %w[alloc safe],
+            "Unknown effect ':#{eff_name}'",
+            "closest effect",
+            category: :type, cascade: true
+          )
         end
         if eff_name == :safe
           effects[:safe] = true
         elsif eff_name == :alloc && match?(:CHAR, ':')
           consume(:CHAR, ':')
-          qualifier = consume(:VAR_ID).value.to_sym
+          qual_tok = consume(:VAR_ID)
+          qualifier = qual_tok.value.to_sym
           unless [:frame, :heap].include?(qualifier)
-            error!(current, :UNKNOWN_ALLOC_QUALIFIER, value: qualifier)
+            emit_typo_suggestion!(
+              qual_tok, qual_tok.value, %w[frame heap],
+              "Unknown alloc qualifier ':#{qualifier}'",
+              "closest alloc qualifier",
+              category: :type, cascade: true
+            )
           end
           effects[:alloc] = qualifier
         else
@@ -1498,7 +1510,13 @@ class Parser
              end
       { reentrance: kind }
     else
-      error!(tok, :UNKNOWN_REQUIRES_FAMILY, name: tok.value, families: REQUIRES_VALID_FAMILIES.to_a.join(', '), kinds: REQUIRES_REENTRANCE_KINDS.to_a.join(', '))
+      candidates = REQUIRES_VALID_FAMILIES.to_a + REQUIRES_REENTRANCE_KINDS.to_a
+      emit_typo_suggestion!(
+        tok, tok.value, candidates,
+        "Unknown REQUIRES family '#{tok.value}' (valid: #{REQUIRES_VALID_FAMILIES.to_a.join(', ')}; kinds: #{REQUIRES_REENTRANCE_KINDS.to_a.join(', ')})",
+        "closest REQUIRES family/kind",
+        category: :type, cascade: true
+      )
     end
   end
 
@@ -1533,7 +1551,12 @@ class Parser
         case kind_tok.value
         when 'NON_REENTRANT' then :non_reentrant
         else
-          error!(kind_tok, :UNKNOWN_REQUIRES_KIND, value: kind_tok.value)
+          emit_typo_suggestion!(
+            kind_tok, kind_tok.value, %w[NON_REENTRANT],
+            "Unknown REQUIRES kind '#{kind_tok.value}'",
+            "closest REQUIRES kind",
+            category: :type, cascade: true
+          )
         end
       if out.key?(name_tok.value)
         error!(name_tok, :DUPLICATE_REQUIRES_CLAUSE, fn: fn_name, name: name_tok.value)
@@ -1554,7 +1577,12 @@ class Parser
     eff_kw = consume(:KEYWORD, 'EFFECTS')
     eff_tok = consume(:TYPE_ID)
     unless eff_tok.value == 'REENTRANT'
-      error!(eff_tok, :UNKNOWN_FN_EFFECT, value: eff_tok.value)
+      emit_typo_suggestion!(
+        eff_tok, eff_tok.value, %w[REENTRANT],
+        "Unknown function effect '#{eff_tok.value}'",
+        "closest function effect",
+        category: :type, cascade: true
+      )
     end
     span_start = eff_kw
     span_end_tok = eff_tok # tail of `EFFECTS REENTRANT` so far
@@ -1589,7 +1617,12 @@ class Parser
            when 'NOT_LOGICAL' then :reentrant_not_logical
            when 'MAX_DEPTH'   then :reentrant_max_depth
            else
-             error!(variant_tok, :UNKNOWN_REENTRANT_VARIANT, value: variant_tok.value)
+             emit_typo_suggestion!(
+               variant_tok, variant_tok.value, %w[THUNK TAIL_CALL NOT_LOGICAL MAX_DEPTH],
+               "Unknown reentrant variant '#{variant_tok.value}'",
+               "closest reentrant variant",
+               category: :type, cascade: true
+             )
            end
     if tight && (kind == :reentrant_not_logical || kind == :reentrant_max_depth)
       label = kind == :reentrant_not_logical ? "NOT_LOGICAL" : "MAX_DEPTH"
