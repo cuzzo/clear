@@ -1622,6 +1622,28 @@ when 'explain'
   end
   exit 0
 
+when 'completions'
+  shell = ARGV[1]
+  unless shell && %w[bash zsh fish].include?(shell)
+    $stderr.puts "Usage: clear completions {bash|zsh|fish}"
+    $stderr.puts ""
+    $stderr.puts "Install (bash):"
+    $stderr.puts "  echo 'source <(clear completions bash)' >> ~/.bashrc"
+    $stderr.puts ""
+    $stderr.puts "Install (zsh):"
+    $stderr.puts "  mkdir -p ~/.zsh/completions"
+    $stderr.puts "  clear completions zsh > ~/.zsh/completions/_clear"
+    $stderr.puts "  # add to ~/.zshrc BEFORE 'compinit':"
+    $stderr.puts "  #   fpath=(~/.zsh/completions \\$fpath)"
+    $stderr.puts ""
+    $stderr.puts "Install (fish):"
+    $stderr.puts "  clear completions fish > ~/.config/fish/completions/clear.fish"
+    exit 1
+  end
+  require_relative 'src/tools/completions'
+  print Completions.script_for(shell)
+  exit 0
+
 when 'help', '--help', '-h', nil
   puts <<~HELP
     CLEAR Language Compiler
@@ -1646,6 +1668,7 @@ when 'help', '--help', '-h', nil
       clear fmt --no-warn <path>    Suppress width warnings for >120-char lines
       clear explain                 List every registered diagnostic code
       clear explain <CODE>          Show docs for a specific diagnostic
+      clear completions {bash|zsh|fish}  Print shell completions (see docs/completions.md)
 
     Commands:
       build    Transpile and compile a CLEAR program to a native binary
