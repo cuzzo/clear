@@ -1147,6 +1147,17 @@ when 'profile'
     system("perf stat -e cycles,instructions,branches,branch-misses,cache-references,cache-misses,L1-dcache-loads,L1-dcache-load-misses,LLC-loads,LLC-load-misses,page-faults -o #{perf_stat_file} env #{target_env} #{output} #{run_args.join(' ')} > /dev/null 2>&1")
   end
 
+  # Convert each runtime profile to pprof's gzipped protobuf so the
+  # `pprof` tool can render flamegraphs / call graphs / source views
+  # directly. Heap / lock / mvcc are encoded in pure Ruby; CPU defers
+  # to the standard `perf_to_profile` Go binary if it's on PATH.
+  require_relative 'src/tools/pprof_converter'
+  pprof_files = PprofConverter.convert_all(profile_dir)
+  if File.exist?(perf_data) && !pprof_files[:cpu]
+    hint "perf_to_profile not on PATH — skipping CPU pprof. Install: " \
+         "go install github.com/google/perf_data_converter/src/cmd/perf_to_profile@latest"
+  end
+
   puts ""
   puts "Profile data: #{profile_dir}/"
   puts "  Heap:     #{alloc_file} (#{File.exist?(alloc_file) ? "#{(File.size(alloc_file) / 1024.0).round(1)} KB" : 'not generated'})"
@@ -1156,6 +1167,11 @@ when 'profile'
   puts "  Syscalls: #{strace_file}" if File.exist?(strace_file)
   puts "  Counters: #{perf_stat_file}" if File.exist?(perf_stat_file)
   puts "  MVCC:     #{mvcc_file}" if File.exist?(mvcc_file)
+  if pprof_files.any?
+    puts ""
+    puts "pprof:    pprof -http=:8080 #{output} #{profile_dir}/<file>.pb.gz"
+    pprof_files.each { |kind, path| puts "  #{kind}:#{' ' * (8 - kind.to_s.length)}#{path}" }
+  end
 
 when 'doctor'
   require_relative 'src/tools/doctor'
