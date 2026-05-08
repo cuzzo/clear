@@ -1,0 +1,22 @@
+# In-callee `FOR x IN xs` over a borrowed `@list` parameter must
+# iterate the caller's current contents -- the iteration shape
+# (slice via `.items`, ArrayList via `xs.items`) is comptime-resolved
+# inside the callee, and any change to that path's emission must
+# keep this case working.
+
+FN sumDoubled(xs: Int64[]@list) RETURNS Int64 ->
+    MUTABLE total: Int64 = 0_i64;
+    FOR x IN xs DO
+        total = total + x * 2_i64;
+    END
+    RETURN total;
+END
+
+FN main() RETURNS Void ->
+    MUTABLE vals: Int64[]@list = List[];
+    vals.append(1_i64);
+    vals.append(2_i64);
+    vals.append(3_i64);
+    vals.append(4_i64);
+    ASSERT sumDoubled(vals) == 20_i64, "for-loop over borrowed @list iterates current items";
+END

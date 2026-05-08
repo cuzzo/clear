@@ -1,0 +1,30 @@
+# An `@list` argument passed to a callee declaring a plain `T[]`
+# slice parameter must continue to work via `.items` extraction.
+# Existing benchmarks (sumSq, sumAll variants) rely on this; the
+# test makes the contract explicit so a future call-site rework
+# can't quietly break it.
+
+FN sumSlice(xs: Int64[]) RETURNS Int64 ->
+    MUTABLE total: Int64 = 0_i64;
+    FOR x IN xs DO total = total + x; END
+    RETURN total;
+END
+
+FN lenSlice(xs: Int64[]) RETURNS Int64 ->
+    RETURN xs.length();
+END
+
+FN main() RETURNS Void ->
+    MUTABLE xs: Int64[]@list = List[];
+    xs.append(1_i64);
+    xs.append(2_i64);
+    xs.append(3_i64);
+    xs.append(4_i64);
+
+    ASSERT sumSlice(xs) == 10_i64, "@list -> []slice via .items, sum";
+    ASSERT lenSlice(xs) == 4_i64,  "@list -> []slice via .items, length";
+
+    # And a plain literal slice should also pass through unchanged.
+    fixed: Int64[4] = [10_i64, 20_i64, 30_i64, 40_i64];
+    ASSERT sumSlice(fixed) == 100_i64, "fixed [N] -> []slice continues to work (test 373)";
+END
