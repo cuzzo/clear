@@ -41,11 +41,13 @@ RSpec.describe "DiagnosticRegistry — call-site audit" do
   # each pass-through site. Tier 2 fixable! work added one site that
   # passes a Symbol `code` as a variable (emit_match_partial_fix! takes
   # `code:` so it can be reused for MATCH_NEEDS_ENUM_OR_UNION and
-  # MATCH_NON_EXHAUSTIVE). The audit's static parser can't tell that
-  # `code` always holds a real registry symbol at runtime, so the site
-  # is exempted with a budget of 1.
+  # MATCH_NON_EXHAUSTIVE). v2 fix B added a second such site
+  # (emit_reentrant_error! takes `code:` so it can be reused for both
+  # REENTRANCE_DIRECT_RECURSIVE and REENTRANCE_INDIRECT_RECURSIVE).
+  # Budget = 2 covers both helpers; static parser can't see that `code`
+  # always holds a real registry symbol at runtime.
   EXCEPTIONS = {
-    'src/annotator-helpers/fixable_helpers.rb' => 1,
+    'src/annotator-helpers/fixable_helpers.rb' => 2,
   }.freeze
 
   def self.scan_raw_sites

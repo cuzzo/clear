@@ -977,7 +977,7 @@ RSpec.describe SemanticAnnotator do
             RETURN fib(n - 1) + fib(n - 2);
           END
         CLEAR
-        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*fib.*@reentrant/)
+        expect { run(code) }.to raise_error(CompilerError, /Reentrancy Error.*fib.*EFFECTS REENTRANT/)
       end
 
       it "accepts a directly-recursive function marked @reentrant" do
@@ -997,7 +997,7 @@ RSpec.describe SemanticAnnotator do
             RETURN fib(n - 1) + fib(n - 2);
           END
         CLEAR
-        expect { run(code) }.to raise_error(CompilerError, /Use @reentrant.*not @nonReentrant/)
+        expect { run(code) }.to raise_error(CompilerError, /Replace `@nonReentrant` with `EFFECTS REENTRANT`/)
       end
 
       it "transpiles @reentrant function without a StackGuard prologue" do

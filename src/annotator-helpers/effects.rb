@@ -1010,7 +1010,24 @@ module EffectTracker
 
         if callee == fn_name
           @fn_direct_effects[fn_name]&.add(EffectTracker::REENTRANT)
-          error!(node, :REENTRANCY_MUTUAL_CYCLE, name: fn_name)
+          arrow = node.respond_to?(:arrow_token) ? node.arrow_token : nil
+          if arrow && arrow.respond_to?(:line) && arrow.respond_to?(:column)
+            fix = Fix.new(
+              description: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+              confidence: :auto,
+              edits: [Edit.new(
+                span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 0),
+                replacement: 'EFFECTS REENTRANT '
+              )]
+            )
+            fixable!(node,
+              message: DiagnosticRegistry.format(:REENTRANCY_MUTUAL_CYCLE, name: fn_name),
+              category: :reentrance,
+              level: :error,
+              fixes: [fix])
+          else
+            error!(node, :REENTRANCY_MUTUAL_CYCLE, name: fn_name)
+          end
           break
         end
 

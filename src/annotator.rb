@@ -772,10 +772,12 @@ private
         # Both share `reentrant = :non_reentrant` (the bridge piggybacks
         # on the legacy codegen path), so suppress here for either.
         unless [:reentrant_not_logical, :reentrant_max_depth].include?(node.reentrance_kind)
-          error!(node, :REENTRANCE_DIRECT_RECURSIVE, name: node.name, hint: "Use @reentrant (not @nonReentrant) for directly recursive functions.")
+          emit_reentrant_error!(node, :REENTRANCE_DIRECT_RECURSIVE,
+            hint: "Replace `@nonReentrant` with `EFFECTS REENTRANT` (directly recursive functions need a recursion budget).")
         end
       when nil
-        error!(node, :REENTRANCE_INDIRECT_RECURSIVE, name: node.name, hint: "Add @reentrant to the function signature to allow this.")
+        emit_reentrant_error!(node, :REENTRANCE_INDIRECT_RECURSIVE,
+          hint: "Add `EFFECTS REENTRANT` to the function signature to allow this.")
       end
 
       # Tail call validation: if @reentrant:tailCall, verify the self-call is in tail position.

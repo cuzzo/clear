@@ -478,6 +478,37 @@ module FixableHelper
       fixes: [fix])
   end
 
+  # Reentrance: a function is recursive (directly or transitively) but
+  # carries no EFFECTS REENTRANT declaration. :auto fix inserts
+  # `EFFECTS REENTRANT ` immediately before the function's `->`. The
+  # arrow_token's column is where the insertion lands; the fix is a
+  # zero-length insert.
+  #
+  # `code` selects the error code that fires when the fix isn't
+  # locatable (REENTRANCE_DIRECT_RECURSIVE for @nonReentrant fns,
+  # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case). `hint` is
+  # the human-readable migration text appended to the error template.
+  def emit_reentrant_error!(fn_node, code, hint:)
+    arrow = fn_node.respond_to?(:arrow_token) ? fn_node.arrow_token : nil
+    fix = nil
+    if arrow && arrow.respond_to?(:line) && arrow.respond_to?(:column)
+      fix = Fix.new(
+        description: "Add `EFFECTS REENTRANT` so the runtime knows to schedule this fn on a service stack.",
+        confidence: :auto,
+        edits: [Edit.new(
+          span: Span.new(file: nil, line: arrow.line, col: arrow.column, length: 0),
+          replacement: 'EFFECTS REENTRANT '
+        )]
+      )
+    end
+    return error!(fn_node, code, name: fn_node.name, hint: hint) unless fix
+    fixable!(fn_node,
+      message: DiagnosticRegistry.format(code, name: fn_node.name, hint: hint),
+      category: :reentrance,
+      level: :error,
+      fixes: [fix])
+  end
+
   # Capture: USE(MUTABLE x) where x is an immutable binding. :auto
   # fix inserts MUTABLE at the captured binding's declaration. Same
   # shape as emit_immutable_assignment_error! / emit_immutable_arg_error!.
