@@ -127,6 +127,33 @@ RSpec.describe Pprof::Profile do
     expect(ProtoTestDecoder.parse_packed_varints(location_bytes)).to eq([1])
   end
 
+  it 'emits a Mapping when one is registered, and Locations point at it' do
+    pb = described_class.new
+    pb.add_mapping(binary: '/path/to/litedb', build_id: 'abc123')
+    pb.add_sample_type('alloc_space', 'bytes')
+    fid = pb.add_function(name: 'foo', filename: 'foo.cht')
+    lid = pb.add_location(function_id: fid, line: 1, address: 0x100)
+    pb.add_sample([lid], [10])
+
+    decoded = ProtoTestDecoder.parse(pb.encode)
+    expect(decoded[3].length).to eq(1)            # one Mapping
+    mapping = ProtoTestDecoder.parse(decoded[3].first)
+    expect(mapping[1].first).to eq(1)             # Mapping.id
+    expect(mapping[7].first).to eq(1)             # has_functions = true
+    expect(mapping[8].first).to eq(1)             # has_filenames = true
+    expect(mapping[9].first).to eq(1)             # has_line_numbers = true
+
+    location = ProtoTestDecoder.parse(decoded[4].first)
+    expect(location[2].first).to eq(1)            # Location.mapping_id = 1
+  end
+
+  it 'omits the Mapping field entirely when none is registered' do
+    pb = described_class.new
+    pb.add_sample_type('count', 'samples')
+    decoded = ProtoTestDecoder.parse(pb.encode)
+    expect(decoded[3]).to be_empty
+  end
+
   it 'gzips the output with a valid gzip magic' do
     pb = described_class.new
     bytes = pb.encode_gzip

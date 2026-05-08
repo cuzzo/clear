@@ -56,6 +56,7 @@ module Pprof
       @locations  = []
       @samples    = []
       @sample_types = []
+      @mappings   = []               # one entry per binary
       @period_type  = nil
       @period       = 0
       @time_nanos     = (Time.now.to_f * 1e9).to_i
@@ -63,6 +64,8 @@ module Pprof
       @default_sample_type_idx = nil
       @next_func_id = 1
       @next_loc_id  = 1
+      @next_mapping_id = 1
+      @primary_mapping_id = 0
     end
 
     attr_writer :time_nanos, :duration_nanos, :period
@@ -91,6 +94,32 @@ module Pprof
       @default_sample_type_idx = intern(type)
     end
 
+    # Register the binary this profile is about. pprof uses the Mapping
+    # to display the binary name in the header (silences "Main binary
+    # filename not available") and to set has_functions/has_filenames/
+    # has_line_numbers flags so its UI knows symbolization is already
+    # done. memory_start/limit are 0 because we do not require pprof
+    # to load the binary itself — addr2line resolved everything at
+    # convert time. Returns the mapping id; the first call also sets
+    # the primary mapping that all Locations attach to by default.
+    def add_mapping(binary:, build_id: '')
+      mapping = {
+        id: @next_mapping_id,
+        memory_start: 0,
+        memory_limit: 0,
+        file_offset: 0,
+        filename_idx: intern(binary),
+        build_id_idx: intern(build_id),
+        has_functions: true,
+        has_filenames: true,
+        has_line_numbers: true,
+      }
+      @mappings << mapping
+      @next_mapping_id += 1
+      @primary_mapping_id = mapping[:id] if @primary_mapping_id.zero?
+      mapping[:id]
+    end
+
     # Returns the function id (1-based). Identical (name, system_name,
     # filename) tuples are deduplicated.
     def add_function(name:, filename: "", system_name: nil, start_line: 0)
@@ -111,10 +140,18 @@ module Pprof
     end
 
     # Returns the location id (1-based). One Line entry per call.
+    # Defaults to the primary Mapping (the binary this profile is for)
+    # so symbol metadata propagates without per-Location plumbing.
     def add_location(function_id:, line: 0, address: 0)
       id = @next_loc_id
       @next_loc_id += 1
-      @locations << { id: id, address: address, function_id: function_id, line_no: line }
+      @locations << {
+        id: id,
+        address: address,
+        function_id: function_id,
+        line_no: line,
+        mapping_id: @primary_mapping_id,
+      }
       id
     end
 
@@ -137,6 +174,9 @@ module Pprof
 
       # field 2: sample (repeated Sample)
       @samples.each { |s| buf << Wire.field_bytes(2, encode_sample(s)) }
+
+      # field 3: mapping (repeated Mapping)
+      @mappings.each { |m| buf << Wire.field_bytes(3, encode_mapping(m)) }
 
       # field 4: location (repeated Location)
       @locations.each { |loc| buf << Wire.field_bytes(4, encode_location(loc)) }
@@ -205,11 +245,26 @@ module Pprof
 
     def encode_location(loc)
       sub = Wire.field_varint(1, loc[:id])
+      sub += Wire.field_varint(2, loc[:mapping_id]) if loc[:mapping_id].to_i.positive?
       sub += Wire.field_varint(3, loc[:address]) if loc[:address].to_i.positive?
       line_buf = Wire.field_varint(1, loc[:function_id]) +
                  Wire.field_varint(2, loc[:line_no].to_i)
       sub += Wire.field_bytes(4, line_buf)
       sub
+    end
+
+    def encode_mapping(m)
+      buf = Wire.field_varint(1, m[:id])
+      buf += Wire.field_varint(2, m[:memory_start]) if m[:memory_start].positive?
+      buf += Wire.field_varint(3, m[:memory_limit]) if m[:memory_limit].positive?
+      buf += Wire.field_varint(4, m[:file_offset]) if m[:file_offset].positive?
+      buf += Wire.field_varint(5, m[:filename_idx])
+      buf += Wire.field_varint(6, m[:build_id_idx]) if m[:build_id_idx].positive?
+      buf += Wire.field_varint(7, 1) if m[:has_functions]
+      buf += Wire.field_varint(8, 1) if m[:has_filenames]
+      buf += Wire.field_varint(9, 1) if m[:has_line_numbers]
+      buf += Wire.field_varint(10, 1) if m[:has_inline_frames]
+      buf
     end
 
     def encode_function(f)

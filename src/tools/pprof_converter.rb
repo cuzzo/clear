@@ -73,6 +73,7 @@ module PprofConverter
     resolved = resolve_addrs(all_addrs, binary, profile_dir)
 
     pb = Pprof::Profile.new
+    pb.add_mapping(binary: binary.to_s) if binary
     pb.add_sample_type('alloc_objects', 'count')
     pb.add_sample_type('alloc_space',   'bytes')
     pb.add_sample_type('inuse_objects', 'count')
@@ -150,6 +151,7 @@ module PprofConverter
     resolved = resolve_addrs(all_addrs, binary, profile_dir)
 
     pb = Pprof::Profile.new
+    pb.add_mapping(binary: binary.to_s) if binary
     pb.add_sample_type('contentions',  'count')
     pb.add_sample_type('delay',        'nanoseconds')
     pb.add_sample_type('hold',         'nanoseconds')
@@ -207,6 +209,7 @@ module PprofConverter
     resolved = resolve_addrs(all_addrs, binary, profile_dir)
 
     pb = Pprof::Profile.new
+    pb.add_mapping(binary: binary.to_s) if binary
     pb.add_sample_type('reads',     'count')
     pb.add_sample_type('commits',   'count')
     pb.add_sample_type('retries',   'count')

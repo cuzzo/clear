@@ -1201,7 +1201,30 @@ when 'profile'
 
 when 'doctor'
   require_relative 'src/tools/doctor'
-  Doctor.run(ARGV[1])
+  # Parse flags: --cumulative shows cum bytes/count alongside flat;
+  # --focus=REGEX filters samples whose trace touches a function
+  # matching the pattern; --diff <before-dir> compares two profile
+  # runs and shows top deltas per section.
+  doctor_opts = { cumulative: false, focus: nil, diff: nil }
+  positional = []
+  i = 1
+  while i < ARGV.length
+    a = ARGV[i]
+    case a
+    when '--cumulative', '--cum'
+      doctor_opts[:cumulative] = true
+    when /\A--focus=(.+)\z/
+      doctor_opts[:focus] = Regexp.new($1)
+    when '--diff'
+      doctor_opts[:diff] = ARGV[i + 1]
+      i += 1
+      error "--diff requires a <before-profile-dir> argument" if doctor_opts[:diff].nil?
+    else
+      positional << a
+    end
+    i += 1
+  end
+  Doctor.run(positional.first, **doctor_opts)
 
 when 'fix'
   require_relative 'src/ast/lexer'

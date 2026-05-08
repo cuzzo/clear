@@ -100,6 +100,24 @@ its own row in lock-profile, and same for (cell, caller-trace) in
 mvcc-profile. Doctor aggregates rows back to one-per-lock for its
 existing diagnoses; pprof tree views show the per-caller breakdown.
 
+## Doctor flags built on this data
+
+`clear doctor` consumes the same profile dirs and grew three new
+flags that draw on the multi-frame trace data:
+
+```sh
+clear doctor foo.profile/ --cumulative           # rank functions by cum bytes
+clear doctor foo.profile/ --focus=intToString    # filter to traces that touch this function
+clear doctor old.profile/ --diff new.profile/    # perf-regression diff between two runs
+```
+
+`--cumulative` aggregates bytes/allocs across every frame in each
+trace, so a function high in the call stack accrues its callees'
+costs. `--focus=REGEX` keeps only sites whose trace touches a function
+matching the pattern. `--diff` reports per-function deltas in
+allocation, lock contention, and MVCC retries, with directional arrows
+and "newly contended" / "retries eliminated" annotations.
+
 ## Notes
 
 - We do not emit a Mapping message for the binary, so `pprof` prints

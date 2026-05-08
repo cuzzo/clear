@@ -27,12 +27,17 @@ module Doctor
     line&.sub(/\A# /, '')&.rstrip
   end
 
-  def run(profile_dir)
+  def run(profile_dir, cumulative: false, focus: nil, diff: nil)
+    if diff
+      return run_diff(diff, profile_dir, focus: focus)
+    end
+
     unless profile_dir && Dir.exist?(profile_dir)
-      $stderr.puts "\e[31merror:\e[0m Usage: clear doctor <profile-dir>"
+      $stderr.puts "\e[31merror:\e[0m Usage: clear doctor <profile-dir> [--cumulative] [--focus=REGEX] [--diff <before-dir>]"
       exit 1
     end
 
+    @opts = { cumulative: cumulative, focus: focus }
     perf_data = File.join(profile_dir, 'perf.data')
     binary = profile_dir.chomp('/').sub(/\.profile$/, '')
     binary = nil unless File.exist?(binary.to_s)
@@ -47,6 +52,19 @@ module Doctor
     section_syscalls(profile_dir)
     llc_miss_rate = section_hardware(profile_dir)
     section_freeze(profile_dir, sites, resolved, llc_miss_rate)
+  end
+
+  # Returns true if a sample's trace (function names, leaf-first) is
+  # touched by `@opts[:focus]`. With no focus regex, every sample
+  # passes. Used by section_heap / section_locks / section_mvcc when
+  # filtering top-N rows.
+  def focus_match?(funcs)
+    return true unless @opts && @opts[:focus]
+    funcs.any? { |f| f =~ @opts[:focus] }
+  end
+
+  def cumulative?
+    !!(@opts && @opts[:cumulative])
   end
 
   # ── Heap Profile ──
@@ -108,36 +126,87 @@ module Doctor
       end
     end
 
+    # Cumulative bytes per leaf function: for every sample, every
+    # frame in its trace (resolved to a function name) gets credit
+    # for the sample's bytes/allocs. A leaf alone gets only flat
+    # bytes; a function high in the stack accumulates its callees'
+    # bytes too. This answers "who is on the call path of the most
+    # bytes" not "who directly allocated the most bytes."
+    cum_bytes = Hash.new(0)
+    cum_allocs = Hash.new(0)
+    sites.each do |s|
+      seen = {} # one credit per (function, sample) so recursion doesn't double-count
+      s[:trace].each do |a|
+        f = resolved&.dig(a)&.dig(:func) || a
+        next if seen[f]
+        seen[f] = true
+        cum_bytes[f] += s[:bytes]
+        cum_allocs[f] += s[:allocs]
+      end
+    end
+
+    # --focus filters which sites contribute to the top-10 list. A
+    # site is kept if any function in its trace matches the regex.
+    if @opts && @opts[:focus]
+      sites = sites.select do |s|
+        funcs = s[:trace].map { |a| resolved&.dig(a)&.dig(:func) || a }
+        focus_match?(funcs)
+      end
+    end
+
     puts "=== Allocation Profile (#{total.to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,')} allocs) ==="
     puts ""
     if (warn = saturation_warning(alloc_file))
       puts "  *** #{warn}"
       puts ""
     end
-    puts "Top sites by bytes:"
-    sites.first(10).each_with_index do |s, i|
-      r = resolved&.dig(s[:addr])
-      func = r ? r[:func] : s[:addr]
-      loc = if r&.dig(:clear_line) then "(line #{r[:clear_line]})"
-            elsif r then "(#{r[:file].split('/').last})"
-            else "" end
-      avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
-      kb = s[:bytes] / 1024.0
-      leak = if s[:frees] == 0 && s[:allocs] > 0 && avg >= 16
-               "  (heap rc)"
-             elsif s[:frees] == 0 && s[:allocs] > 0
-               "  (arena)"
-             elsif s[:frees] > 0 && s[:frees] < s[:allocs]
-               "  ** LEAK ** (#{s[:allocs] - s[:frees]} unfreed)"
-             else
-               ""
-             end
-      if kb >= 1.0
-        puts "  #{i + 1}. %-25s %6.1f KB  (%s allocs, %d bytes avg)%s" % [
-          "#{func} #{loc}", kb, s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
-      else
-        puts "  #{i + 1}. %-25s %6d B   (%s allocs, %d bytes avg)%s" % [
-          "#{func} #{loc}", s[:bytes], s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
+    if @opts && @opts[:focus]
+      puts "Focus: /#{@opts[:focus].source}/"
+      puts ""
+    end
+    label = cumulative? ? "Top functions by cumulative bytes:" : "Top sites by bytes:"
+    puts label
+
+    if cumulative?
+      ranked = cum_bytes.sort_by { |_f, b| -b }.first(10)
+      ranked.each_with_index do |(func, bytes), i|
+        kb = bytes / 1024.0
+        ac = cum_allocs[func]
+        if kb >= 1.0
+          puts "  #{i + 1}. %-25s %6.1f KB cum  (on %s alloc paths)" %
+               [func, kb, ac.to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,')]
+        else
+          puts "  #{i + 1}. %-25s %6d B  cum  (on %s alloc paths)" %
+               [func, bytes, ac.to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,')]
+        end
+      end
+      puts ""
+      puts "  (\"cum\" = sum of bytes whose call path passes through this function)"
+    else
+      sites.first(10).each_with_index do |s, i|
+        r = resolved&.dig(s[:addr])
+        func = r ? r[:func] : s[:addr]
+        loc = if r&.dig(:clear_line) then "(line #{r[:clear_line]})"
+              elsif r then "(#{r[:file].split('/').last})"
+              else "" end
+        avg = s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0
+        kb = s[:bytes] / 1024.0
+        leak = if s[:frees] == 0 && s[:allocs] > 0 && avg >= 16
+                 "  (heap rc)"
+               elsif s[:frees] == 0 && s[:allocs] > 0
+                 "  (arena)"
+               elsif s[:frees] > 0 && s[:frees] < s[:allocs]
+                 "  ** LEAK ** (#{s[:allocs] - s[:frees]} unfreed)"
+               else
+                 ""
+               end
+        if kb >= 1.0
+          puts "  #{i + 1}. %-25s %6.1f KB  (%s allocs, %d bytes avg)%s" % [
+            "#{func} #{loc}", kb, s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
+        else
+          puts "  #{i + 1}. %-25s %6d B   (%s allocs, %d bytes avg)%s" % [
+            "#{func} #{loc}", s[:bytes], s[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,'), avg, leak]
+        end
       end
     end
     arena_count   = sites.first(10).count { |s| s[:frees] == 0 && s[:allocs] > 0 && (s[:allocs] > 0 ? s[:bytes] / s[:allocs] : 0) < 16 }
@@ -1164,5 +1233,297 @@ module Doctor
     puts "  Zig:         const frozen = try freeze(T, alloc, root_ptr);"
     puts "  CLEAR:       frozen = FREEZE expr"
     puts ""
+  end
+
+  # ── --diff: compare two profile runs ──
+  # Loads both profile dirs, aggregates by leaf function, and reports
+  # the largest deltas in alloc_space, lock contention, and MVCC
+  # commits. Doctor's per-site advice is layered on top: a site that
+  # newly trips "MVCC fit" gets called out, etc. Computes deltas
+  # ourselves rather than shelling to `pprof -base` so doctor stays
+  # self-contained and can attach commentary.
+  def run_diff(before_dir, after_dir, focus: nil)
+    before_dir = before_dir.to_s.chomp('/')
+    after_dir  = after_dir.to_s.chomp('/')
+    unless Dir.exist?(before_dir) && Dir.exist?(after_dir)
+      $stderr.puts "\e[31merror:\e[0m diff requires two existing profile directories"
+      $stderr.puts "  before: #{before_dir} (#{Dir.exist?(before_dir) ? 'ok' : 'MISSING'})"
+      $stderr.puts "  after:  #{after_dir}  (#{Dir.exist?(after_dir)  ? 'ok' : 'MISSING'})"
+      exit 1
+    end
+
+    @opts = { cumulative: false, focus: focus }
+    puts "=== Diff (before → after) ==="
+    puts "  before: #{before_dir}"
+    puts "  after:  #{after_dir}"
+    puts "  focus:  /#{focus.source}/" if focus
+    puts ""
+
+    diff_heap(before_dir, after_dir, focus)
+    diff_locks(before_dir, after_dir, focus)
+    diff_mvcc(before_dir, after_dir, focus)
+  end
+
+  # Parse alloc.txt and aggregate by leaf-function name across all
+  # rows that resolve to that function. Returns
+  # { func_name => { allocs:, bytes:, frees:, free_bytes: } }.
+  # `binary` is the path to use for addr2line resolution; pass the
+  # after-profile's binary so before/after addresses resolve through
+  # the same symbol table (ASLR / rebuild can shift addresses but the
+  # function name should stay stable for the same source).
+  def parse_alloc_for_diff(profile_dir, binary)
+    alloc_file = File.join(profile_dir, 'alloc.txt')
+    return {} unless File.exist?(alloc_file)
+
+    rows = File.readlines(alloc_file).reject { |l| l.start_with?('#') || l.strip.empty? }
+    leaves = []
+    parsed = rows.map do |l|
+      f = l.strip.split
+      next nil if f.size < 6
+      leaf = f[0].split(',').first
+      leaves << leaf
+      [leaf, { allocs: f[1].to_i, bytes: f[2].to_i,
+               frees: f[3].to_i, free_bytes: f[4].to_i }]
+    end.compact
+
+    # Resolve leaf addrs to function names if a binary is available.
+    # Otherwise fall back to keying by raw address — distinct leaves
+    # still diff against each other; the table just shows hex addrs
+    # in place of function names.
+    addr_to_func = {}
+    if binary && File.exist?(binary)
+      raw = IO.popen(['addr2line', '-e', binary, '-f'] + leaves.uniq, err: '/dev/null', &:read)
+      out_lines = raw.split("\n")
+      leaves.uniq.each_with_index do |a, i|
+        func = (out_lines[i * 2] || '?').strip.sub(/.*\./, '').sub(/__anon_\d+/, '')
+        # addr2line returns "??" for addresses not in this binary;
+        # fall back to the raw addr.
+        func = a if func == '??' || func.empty?
+        addr_to_func[a] = func
+      end
+    end
+
+    by_func = Hash.new { |h, k| h[k] = { allocs: 0, bytes: 0, frees: 0, free_bytes: 0 } }
+    parsed.each do |leaf, vals|
+      f = addr_to_func[leaf] || leaf
+      by_func[f][:allocs]      += vals[:allocs]
+      by_func[f][:bytes]       += vals[:bytes]
+      by_func[f][:frees]       += vals[:frees]
+      by_func[f][:free_bytes]  += vals[:free_bytes]
+    end
+    by_func
+  end
+
+  def diff_heap(before_dir, after_dir, focus)
+    # Use the after-dir's binary for both lookups — that's the user's
+    # current build. Falls back to the before-dir's binary if the
+    # after-dir doesn't have one.
+    binary = locate_diff_binary(after_dir, before_dir)
+    before = parse_alloc_for_diff(before_dir, binary)
+    after  = parse_alloc_for_diff(after_dir, binary)
+    return if before.empty? && after.empty?
+
+    funcs = (before.keys + after.keys).uniq
+    funcs.select! { |f| f =~ focus } if focus
+
+    deltas = funcs.map do |f|
+      b = before[f] || { bytes: 0, allocs: 0 }
+      a = after[f]  || { bytes: 0, allocs: 0 }
+      {
+        func: f,
+        before_bytes: b[:bytes], after_bytes: a[:bytes],
+        delta_bytes: a[:bytes] - b[:bytes],
+        before_allocs: b[:allocs], after_allocs: a[:allocs],
+        delta_allocs: a[:allocs] - b[:allocs],
+      }
+    end.reject { |d| d[:delta_bytes].zero? && d[:delta_allocs].zero? }
+       .sort_by { |d| -d[:delta_bytes].abs }
+
+    return if deltas.empty?
+
+    puts "=== Heap Δ (top by |Δ alloc_space|) ==="
+    puts ""
+    printf "  %-30s  %12s  %12s  %12s\n", "function", "before", "after", "Δ"
+    deltas.first(10).each do |d|
+      arrow = d[:delta_bytes].positive? ? "↑" : "↓"
+      puts "  %-30s  %12s  %12s  %s %12s" % [
+        d[:func],
+        bytes_pretty(d[:before_bytes]),
+        bytes_pretty(d[:after_bytes]),
+        arrow,
+        bytes_pretty(d[:delta_bytes].abs),
+      ]
+    end
+    new_funcs = deltas.select { |d| d[:before_bytes].zero? && d[:after_bytes].positive? }
+    if new_funcs.any?
+      puts ""
+      puts "  New allocation sites (cold → hot):"
+      new_funcs.first(5).each { |d| puts "    + #{d[:func]} (#{bytes_pretty(d[:after_bytes])})" }
+    end
+    gone_funcs = deltas.select { |d| d[:after_bytes].zero? && d[:before_bytes].positive? }
+    if gone_funcs.any?
+      puts ""
+      puts "  Eliminated allocation sites:"
+      gone_funcs.first(5).each { |d| puts "    - #{d[:func]} (was #{bytes_pretty(d[:before_bytes])})" }
+    end
+    puts ""
+  end
+
+  def parse_locks_for_diff(profile_dir)
+    lock_prof = File.join(profile_dir, 'locks.txt')
+    return {} unless File.exist?(lock_prof)
+    rows = File.readlines(lock_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
+    by_addr = Hash.new { |h, k| h[k] = { acquires: 0, contended: 0,
+                                          total_wait_ns: 0, total_hold_ns: 0,
+                                          read_acquires: 0, read_contended: 0,
+                                          read_total_wait_ns: 0 } }
+    rows.each do |l|
+      f = l.split("\t").map(&:strip)
+      f = l.strip.split if f.size < 11
+      next if f.size < 11
+      a = by_addr[f[0]]
+      a[:acquires]            += f[1].to_i
+      a[:contended]           += f[2].to_i
+      a[:total_wait_ns]       += f[3].to_i
+      a[:total_hold_ns]       += f[5].to_i
+      a[:read_acquires]       += f[7].to_i
+      a[:read_contended]      += f[8].to_i
+      a[:read_total_wait_ns]  += f[9].to_i
+    end
+    by_addr
+  end
+
+  def diff_locks(before_dir, after_dir, _focus)
+    before = parse_locks_for_diff(before_dir)
+    after  = parse_locks_for_diff(after_dir)
+    return if before.empty? && after.empty?
+
+    addrs = (before.keys + after.keys).uniq
+    deltas = addrs.map do |addr|
+      b = before[addr] || { contended: 0, read_contended: 0, total_wait_ns: 0, read_total_wait_ns: 0 }
+      a = after[addr]  || { contended: 0, read_contended: 0, total_wait_ns: 0, read_total_wait_ns: 0 }
+      bcont = b[:contended] + b[:read_contended]
+      acont = a[:contended] + a[:read_contended]
+      bwait = b[:total_wait_ns] + b[:read_total_wait_ns]
+      await = a[:total_wait_ns] + a[:read_total_wait_ns]
+      {
+        addr: addr,
+        before_cont: bcont, after_cont: acont, delta_cont: acont - bcont,
+        before_wait: bwait, after_wait: await, delta_wait: await - bwait,
+      }
+    end.reject { |d| d[:delta_cont].zero? && d[:delta_wait].zero? }
+       .sort_by { |d| -d[:delta_wait].abs }
+
+    return if deltas.empty?
+
+    puts "=== Lock Δ (top by |Δ wait_ns|) ==="
+    puts ""
+    printf "  %-14s  %12s  %12s  %12s  %s\n", "lock", "Δ contend", "Δ wait_ns", "before/after", "diagnosis"
+    deltas.first(10).each do |d|
+      diag = if d[:before_wait].zero? && d[:after_wait].positive?
+               "newly contended"
+             elsif d[:after_wait].zero? && d[:before_wait].positive?
+               "contention eliminated"
+             elsif d[:delta_wait].positive?
+               "regression"
+             else
+               "improved"
+             end
+      arrow = d[:delta_wait].positive? ? "↑" : "↓"
+      puts "  %-14s  %s %5d  %s %10d  %d/%d  %s" % [
+        d[:addr],
+        d[:delta_cont].positive? ? "↑" : "↓",
+        d[:delta_cont].abs,
+        arrow,
+        d[:delta_wait].abs,
+        d[:before_wait], d[:after_wait], diag,
+      ]
+    end
+    puts ""
+  end
+
+  def parse_mvcc_for_diff(profile_dir)
+    mvcc_prof = File.join(profile_dir, 'mvcc.txt')
+    return {} unless File.exist?(mvcc_prof)
+    rows = File.readlines(mvcc_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
+    by_addr = Hash.new { |h, k| h[k] = { reads: 0, commits: 0, retries: 0 } }
+    rows.each do |l|
+      f = l.split("\t").map(&:strip)
+      f = l.strip.split if f.size < 6
+      next if f.size < 6
+      a = by_addr[f[0]]
+      a[:reads]   += f[2].to_i
+      a[:commits] += f[3].to_i
+      a[:retries] += f[4].to_i
+    end
+    by_addr
+  end
+
+  def diff_mvcc(before_dir, after_dir, _focus)
+    before = parse_mvcc_for_diff(before_dir)
+    after  = parse_mvcc_for_diff(after_dir)
+    return if before.empty? && after.empty?
+
+    addrs = (before.keys + after.keys).uniq
+    deltas = addrs.map do |addr|
+      b = before[addr] || { reads: 0, commits: 0, retries: 0 }
+      a = after[addr]  || { reads: 0, commits: 0, retries: 0 }
+      {
+        addr: addr,
+        delta_commits: a[:commits] - b[:commits],
+        delta_retries: a[:retries] - b[:retries],
+        before_retries: b[:retries], after_retries: a[:retries],
+      }
+    end.reject { |d| d[:delta_commits].zero? && d[:delta_retries].zero? }
+       .sort_by { |d| -d[:delta_retries].abs }
+
+    return if deltas.empty?
+
+    puts "=== MVCC Δ (top by |Δ retries|) ==="
+    puts ""
+    printf "  %-14s  %12s  %12s  %s\n", "cell", "Δ commits", "Δ retries", "diagnosis"
+    deltas.first(10).each do |d|
+      diag = if d[:before_retries].zero? && d[:after_retries].positive?
+               "new retry storm"
+             elsif d[:after_retries].zero? && d[:before_retries].positive?
+               "retries eliminated"
+             elsif d[:delta_retries].positive?
+               "more contention"
+             else
+               "less contention"
+             end
+      arrow_c = d[:delta_commits].positive? ? "↑" : "↓"
+      arrow_r = d[:delta_retries].positive? ? "↑" : "↓"
+      puts "  %-14s  %s %10d  %s %10d  %s" % [
+        d[:addr],
+        arrow_c, d[:delta_commits].abs,
+        arrow_r, d[:delta_retries].abs,
+        diag,
+      ]
+    end
+    puts ""
+  end
+
+  # Find the binary to use for addr2line resolution in --diff mode.
+  # Prefers the after-dir's binary (the user's current build); falls
+  # back to the before-dir's binary if the after-dir is missing one
+  # (e.g. binary was deleted after profiling).
+  def locate_diff_binary(after_dir, before_dir)
+    [after_dir, before_dir].each do |dir|
+      bin = dir.to_s.chomp('/').sub(/\.profile$/, '')
+      return bin if File.exist?(bin)
+    end
+    nil
+  end
+
+  def bytes_pretty(n)
+    return "-" if n.zero?
+    if n.abs >= 1024 * 1024
+      "%.1f MB" % (n / (1024.0 * 1024.0))
+    elsif n.abs >= 1024
+      "%.1f KB" % (n / 1024.0)
+    else
+      "#{n} B"
+    end
   end
 end
