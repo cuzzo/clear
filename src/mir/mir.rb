@@ -61,7 +61,15 @@ module MIR
 
   # Function parameter.
   # Zig: name: zig_type
-  Param = Struct.new(:name, :zig_type) do
+  #
+  # `pointer_passed` is true when this parameter receives a pointer-to-T
+  # at the Zig level (MUTABLE collections that lower to `*ArrayList(...)`,
+  # or any param whose receiver gets `&` at the call site). Note that
+  # collection params lower to `anytype` for polymorphism, so we can't
+  # infer this from `zig_type` alone — the lowering pass tags it
+  # explicitly. Used by `MIRChecker#verify_cross_frame_param_alloc!`
+  # to reject `:frame` allocators on receivers that outlive this fn.
+  Param = Struct.new(:name, :zig_type, :pointer_passed) do
     include Emittable
   end
 

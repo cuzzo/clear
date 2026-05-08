@@ -3540,11 +3540,11 @@ class PipelineHost
       fd
     }
 
-    raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
+    raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque", false)
     params = [
-      MIR::Param.new("__rt", "*Runtime"),
+      MIR::Param.new("__rt", "*Runtime", false),
       raw_ctx,
-      MIR::Param.new("__item", Type.new(item_type).zig_type),
+      MIR::Param.new("__item", Type.new(item_type).zig_type, false),
     ]
 
     body = [MIR::Suppress.new("__rt")]
@@ -4043,12 +4043,12 @@ class PipelineHost
       fd
     }
 
-    raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque")
+    raw_ctx = MIR::Param.new("raw_ctx", "?*anyopaque", false)
     item_zig_ptr = "*#{Type.new(item_type).zig_type}"
     params = [
-      MIR::Param.new("__rt", "*Runtime"),
+      MIR::Param.new("__rt", "*Runtime", false),
       raw_ctx,
-      MIR::Param.new("__item", item_zig_ptr),
+      MIR::Param.new("__item", item_zig_ptr, false),
     ]
 
     body = [MIR::Suppress.new("__rt")]

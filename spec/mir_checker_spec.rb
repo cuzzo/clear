@@ -175,6 +175,93 @@ RSpec.describe MIRChecker do
   end
 
   # ===========================================================================
+  # CROSS_FRAME_PARAM_ALLOC -- allocator on a pointer-passed param must be heap
+  # ===========================================================================
+  #
+  # Pin for the test 380 UAF class. A `MUTABLE T[]@list` parameter is
+  # pointer-passed; its Zig type is `*ArrayList(T)`. Buffer growth via
+  # `.append` (an InlineZig op with `alloc: :receiver_storage`) must
+  # resolve to `:heap`, not `:frame`. If lowering's `resolve_alloc_sym`
+  # ever regresses, the checker catches it here independently.
+
+  describe "CROSS_FRAME_PARAM_ALLOC" do
+    # Helper: FnDef with one pointer-passed param.
+    def fn_with_ptr_param(body)
+      param = MIR::Param.new("items", "anytype", true)
+      MIR::FnDef.new("record", [param], "void", body, :pub, true, nil)
+    end
+
+    it "detects :frame allocator on a pointer-passed @list param" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :frame }
+      iz.target_var = "items"
+      body = [MIR::ExprStmt.new(iz, false)]
+      errors = checker.check_fn!(fn_with_ptr_param(body))
+      expect(errors.any? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") && e.include?("items") }).to be true
+    end
+
+    it "passes when the allocator on a pointer-passed param is :heap" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :heap }
+      iz.target_var = "items"
+      body = [MIR::ExprStmt.new(iz, false)]
+      errors = checker.check_fn!(fn_with_ptr_param(body))
+      expect(errors).to be_empty
+    end
+
+    it "ignores :frame allocator on a NON-pointer-passed local binding" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :frame }
+      iz.target_var = "local_list"
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::AllocMark.new("local_list", :frame),
+        MIR::ExprStmt.new(iz, false),
+      ]
+      # Plain locals: cross-frame doesn't apply. The other invariants may
+      # speak (alloc/cleanup match etc) but not this one.
+      errors = checker.check_fn!(fn_def("local_only", body))
+      expect(errors.none? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") }).to be true
+    end
+
+    it "fires for every :frame allocator key, not just :alloc" do
+      iz = MIR::InlineZig.new("try {target}.put({key_alloc}, {val_alloc}, {k}, {v})", "index_set")
+      iz.allocs = { key_alloc: :frame, val_alloc: :frame }
+      iz.target_var = "map"
+      param = MIR::Param.new("map", "anytype", true)
+      fn = MIR::FnDef.new("update", [param], "void", [MIR::ExprStmt.new(iz, false)], :pub, true, nil)
+      errors = checker.check_fn!(fn)
+      ksay = errors.select { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") }
+      expect(ksay.length).to eq(2)
+      expect(ksay.any? { |e| e.include?("key_alloc") }).to be true
+      expect(ksay.any? { |e| e.include?("val_alloc") }).to be true
+    end
+
+    it "no-ops on functions with empty params (no false positives)" do
+      iz = MIR::InlineZig.new("try {0}.append({alloc}, {1})", "intrinsic")
+      iz.allocs = { alloc: :frame }
+      iz.target_var = "anything"
+      body = [
+        MIR::FrameSave.new("rt"),
+        MIR::AllocMark.new("anything", :frame),
+        MIR::ExprStmt.new(iz, false),
+      ]
+      errors = checker.check_fn!(fn_def("paramless", body))
+      expect(errors.none? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") }).to be true
+    end
+
+    it "leaves slice (non-pointer-passed) params alone" do
+      param = MIR::Param.new("slice", "[]const TraceItem", false)
+      iz = MIR::InlineZig.new("for ({0}) |x| {{ ... }}", "iter")
+      iz.allocs = { alloc: :frame }
+      iz.target_var = "slice"
+      fn = MIR::FnDef.new("read_only", [param], "void", [MIR::ExprStmt.new(iz, false)], :pub, false, nil)
+      errors = checker.check_fn!(fn)
+      expect(errors.none? { |e| e.include?("CROSS_FRAME_PARAM_ALLOC") }).to be true
+    end
+  end
+
+  # ===========================================================================
   # FRAME_NO_REWIND -- scopes that frame-allocate must have rewind
   # ===========================================================================
 

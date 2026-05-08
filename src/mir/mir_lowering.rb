@@ -855,7 +855,7 @@ class MIRLowering
       methods = if deinit_stmts.any?
         deinit_fn = MIR::FnDef.new(
           "deinit",
-          [MIR::Param.new("self", "*@This()"), MIR::Param.new("alloc", "std.mem.Allocator")],
+          [MIR::Param.new("self", "*@This()", false), MIR::Param.new("alloc", "std.mem.Allocator", false)],
           "void",
           deinit_stmts,
           :pub
@@ -987,9 +987,20 @@ class MIRLowering
     # between its decl and the next same-name decl.
     @fn_name_rename_map   = {}    # original_name => disambiguated Zig name
 
-    # Mutable scalar params: Zig params are const, need shadow vars
+    # Mutable scalar params: Zig params are const, need shadow vars.
+    # Collections (MUTABLE @list / pool / etc.) are pointer-passed and
+    # mutated through the pointer — NOT scalar shadows. Exclude them
+    # explicitly: `transpile_type` returns "anytype" for MUTABLE @list
+    # which doesn't match the [] / * prefix check, so without this they
+    # incorrectly received the `_m_` rename. The rename then masked the
+    # original name from MIR-level checks (notably the new
+    # INV-CROSS-FRAME-PARAM-ALLOC verifier in mir_checker.rb).
     mutable_scalar_params = (node.params || []).select { |p|
-      p[:mutable] && !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
+      next false unless p[:mutable]
+      p_type_obj = p[:type].is_a?(Type) ? p[:type] : (Type.new(p[:type] || :Any) rescue nil)
+      next false if p_type_obj && (p_type_obj.collection? ||
+                                    (p_type_obj.respond_to?(:needs_pointer_passing?) && p_type_obj.needs_pointer_passing?))
+      !transpile_type(p[:type], is_param: true).start_with?("[]", "*")
     }.map { |p| p[:name] }.to_set
     @current_fn_mutable_scalar_params = mutable_scalar_params
 
@@ -1036,12 +1047,19 @@ class MIRLowering
       else
         transpile_type(param[:type], is_param: true)
       end
-      MIR::Param.new(p_name, zig_t)
+      # `pointer_passed`: this param's receiver is a pointer-to-T at the
+      # Zig level, so allocations made inside this function on its behalf
+      # outlive the function. Mirrors `@current_fn_collection_params`'s
+      # criteria so the MIR checker can independently verify the
+      # allocator-routing decision (see INV-CROSS-FRAME-PARAM-ALLOC).
+      pointer_passed = p_type_obj.needs_pointer_passing? ||
+                       (param[:mutable] && p_type_obj.list_collection?)
+      MIR::Param.new(p_name, zig_t, pointer_passed)
     }
 
     # Prepend rt param
     if fn_needs_rt
-      params_mir.unshift(MIR::Param.new("rt", "*Runtime"))
+      params_mir.unshift(MIR::Param.new("rt", "*Runtime", false))
     end
 
     # Comptime params
@@ -2048,10 +2066,13 @@ class MIRLowering
     fn_name = "_lambda_#{@lambda_counter}"
 
     params_list = sig.params || []
-    params_mir = [MIR::Param.new("_rt", "*Runtime")] + params_list.map { |p|
+    params_mir = [MIR::Param.new("_rt", "*Runtime", false)] + params_list.map { |p|
       p_type = p[:type]
       type_str = p_type.is_a?(Type) ? p_type.zig_type(is_param: true) : transpile_type(p_type || :Any, is_param: true)
-      MIR::Param.new(p[:name], type_str)
+      pt_obj = p_type.is_a?(Type) ? p_type : (Type.new(p_type) rescue nil)
+      pp = !!(pt_obj && (pt_obj.respond_to?(:needs_pointer_passing?) && pt_obj.needs_pointer_passing? ||
+                         (p[:mutable] && pt_obj.respond_to?(:list_collection?) && pt_obj.list_collection?)))
+      MIR::Param.new(p[:name], type_str, pp)
     }
 
     ret = sig.return_type || :Void

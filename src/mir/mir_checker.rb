@@ -33,6 +33,16 @@
 #     a primitive or Id<T> (with no sync/rc capability) is a compiler bug:
 #     value types that never own heap memory must not receive cleanup nodes.
 #
+#   INV-CROSS-FRAME-PARAM-ALLOC: When an InlineZig op targets a parameter
+#     that was pointer-passed into this function (MUTABLE collection param
+#     or any param whose Zig type is `*T`), its resolved allocator must
+#     NOT be `:frame`. Frame allocations are bounded by THIS function's
+#     mark/restore; the parameter's lifetime extends past that mark, so
+#     a frame alloc for it produces a buffer that dies before its owner.
+#     Cross-frame UAF — caught here even if mir_lowering's allocator-
+#     routing in `resolve_alloc_sym` regresses. Defense in depth on top
+#     of escape_analysis.rb's Condition 9 promotion. See test 380.
+#
 # THE MOMENT this checker adds logic outside these invariants, it is no
 # longer a gatekeeper -- it is ad-hoc patch code that gives false confidence.
 # Every new check must be justified by one of these invariants.
@@ -114,6 +124,7 @@ class MIRChecker
 
     hpt_leaks.each { |e| @errors << e }
     verify_inline_alloc_contracts!(inline_alloc_nodes, allocs)
+    verify_cross_frame_param_alloc!(inline_alloc_nodes, fn_def)
     verify_alloc_cleanup_match!(allocs, cleanups, errdefer_destroy_names)
     verify_zig_contracts!(all_zig_nodes)
     verify_raw_justified!(all_zig_nodes)
@@ -352,6 +363,43 @@ class MIRChecker
             "#{alloc_key} is :frame but container '#{target}' is :heap " \
             "(stored data will dangle after frame rewind)")
         end
+      end
+    end
+  end
+
+  # CROSS_FRAME_PARAM_ALLOC: an InlineZig op targeting a pointer-passed
+  # parameter must not use the `:frame` allocator. Pointer-passed params
+  # (MUTABLE collection / `*T` Zig type) carry a lifetime that extends
+  # past the current function's mark/restore -- a frame allocation here
+  # would die before the binding it serves, producing a cross-frame UAF.
+  #
+  # Independently re-derives "is this param pointer-passed?" from the
+  # MIR-level Zig type (prefix `*`) so the check is decoupled from
+  # mir_lowering's `@current_fn_collection_params` set. Defense in depth:
+  # if lowering's `resolve_alloc_sym` or escape_analysis's Condition 9
+  # ever regresses, this catches the resulting bad MIR before codegen.
+  def verify_cross_frame_param_alloc!(inline_nodes, fn_def)
+    return if fn_def.params.nil? || fn_def.params.empty?
+
+    # `pointer_passed` flag is set on MIR::Param at lowering time. Collection
+    # params lower to `anytype` (polymorphic) so we can't read pointer-pass
+    # status from the Zig type string alone — the lowering tags it explicitly.
+    pointer_passed = fn_def.params.each_with_object(Set.new) do |p, set|
+      set << p.name.to_s if p.respond_to?(:pointer_passed) && p.pointer_passed
+    end
+    return if pointer_passed.empty?
+
+    inline_nodes.each do |iz|
+      next unless iz.allocs
+      target = iz.target_var.to_s
+      next unless pointer_passed.include?(target)
+
+      iz.allocs.each do |alloc_key, alloc_sym|
+        next unless alloc_sym == :frame
+        @errors << error(:CROSS_FRAME_PARAM_ALLOC, target,
+          "operation #{alloc_key} is :frame but '#{target}' is a pointer-passed " \
+          "parameter (lifetime extends past this function's frame mark; " \
+          "buffer would dangle on return). Use :heap.")
       end
     end
   end
