@@ -109,6 +109,17 @@ RSpec.describe Doctor do
       expect(out).to include("new retry storm")
     end
 
+    it "supports --ignore as the inverse of --focus" do
+      File.write(File.join(@before, "alloc.txt"), "# alloc-profile v2\n")
+      File.write(File.join(@after,  "alloc.txt"), <<~ALLOC)
+        # alloc-profile v2
+        0xabc   50   500   0   0   500
+      ALLOC
+
+      out = capture_stdout { described_class.run(@after, diff: @before) }
+      expect(out).to include("New allocation sites")
+    end
+
     it "exits 1 when either dir does not exist" do
       old_stderr = $stderr
       $stderr = StringIO.new

@@ -1,5 +1,6 @@
 # typed: true
 require 'set'
+require 'stringio'
 
 # Analyzes a `clear profile` run. Reads heap/CPU/syscall/HW-counter/lock/MVCC
 # data from the .profile/ directory and prints actionable advice.
@@ -27,17 +28,22 @@ module Doctor
     line&.sub(/\A# /, '')&.rstrip
   end
 
-  def run(profile_dir, cumulative: false, focus: nil, diff: nil)
+  def run(profile_dir, cumulative: false, focus: nil, ignore: nil, peek: nil, diff: nil)
     if diff
       return run_diff(diff, profile_dir, focus: focus)
     end
 
     unless profile_dir && Dir.exist?(profile_dir)
-      $stderr.puts "\e[31merror:\e[0m Usage: clear doctor <profile-dir> [--cumulative] [--focus=REGEX] [--diff <before-dir>]"
+      $stderr.puts "\e[31merror:\e[0m Usage: clear doctor <profile-dir> [--cumulative] [--focus=REGEX] [--ignore=REGEX] [--peek=REGEX] [--diff <before-dir>]"
       exit 1
     end
 
-    @opts = { cumulative: cumulative, focus: focus }
+    @opts = { cumulative: cumulative, focus: focus, ignore: ignore, peek: peek }
+
+    if peek
+      return run_peek(profile_dir, peek)
+    end
+
     perf_data = File.join(profile_dir, 'perf.data')
     binary = profile_dir.chomp('/').sub(/\.profile$/, '')
     binary = nil unless File.exist?(binary.to_s)
@@ -54,11 +60,12 @@ module Doctor
     section_freeze(profile_dir, sites, resolved, llc_miss_rate)
   end
 
-  # Returns true if a sample's trace (function names, leaf-first) is
-  # touched by `@opts[:focus]`. With no focus regex, every sample
-  # passes. Used by section_heap / section_locks / section_mvcc when
-  # filtering top-N rows.
+  # Returns true if a sample's trace (function names, leaf-first)
+  # passes the focus/ignore filters. focus keeps only matches; ignore
+  # drops matches; both can compose. With no filters set, every
+  # sample passes.
   def focus_match?(funcs)
+    return false if @opts && @opts[:ignore] && funcs.any? { |f| f =~ @opts[:ignore] }
     return true unless @opts && @opts[:focus]
     funcs.any? { |f| f =~ @opts[:focus] }
   end
@@ -110,7 +117,17 @@ module Doctor
         func = lines_out[i * 2]&.strip || "?"
         file = lines_out[i * 2 + 1]&.strip || "?"
         clear_line = nil
-        if file =~ /:(\d+)/ && File.exist?(zig_source_path)
+        # Only walk transpiled.zig for CLR markers if the address
+        # actually came from the user's transpiled CLEAR file. Runtime
+        # and stdlib zig files have no CLR markers; treating them as
+        # user code led to runtime functions appearing at random
+        # source.cht lines. addr2line emits the build-time filename
+        # `._clear_tmp_<name>.zig` (the compile target), which is a
+        # content copy of profile_dir/transpiled.zig.
+        is_user_zig = File.exist?(zig_source_path) &&
+                      File.basename(file.sub(/:\d+\b.*\z/, ''))
+                          .match?(/\A\._clear_tmp_.*\.zig\z/)
+        if is_user_zig && file =~ /:(\d+)\b/
           zig_line = $1.to_i
           zig_lines_cache ||= File.readlines(zig_source_path)
           (zig_line - 1).downto(0) do |li|
@@ -122,7 +139,7 @@ module Doctor
           end
         end
         func = func.sub(/.*\./, '').sub(/__anon_\d+/, '')
-        resolved[addr] = { func: func, file: file, clear_line: clear_line }
+        resolved[addr] = { func: func, file: file, clear_line: clear_line, is_user_zig: is_user_zig }
       end
     end
 
@@ -145,9 +162,12 @@ module Doctor
       end
     end
 
-    # --focus filters which sites contribute to the top-10 list. A
-    # site is kept if any function in its trace matches the regex.
-    if @opts && @opts[:focus]
+    # --focus / --ignore filter which sites contribute to the top-10
+    # list. focus keeps a site if any function in its trace matches
+    # the regex; ignore drops one if any function matches. Both can
+    # compose; ignore wins on overlap (a site that would pass focus
+    # is dropped if it also matches ignore).
+    if @opts && (@opts[:focus] || @opts[:ignore])
       sites = sites.select do |s|
         funcs = s[:trace].map { |a| resolved&.dig(a)&.dig(:func) || a }
         focus_match?(funcs)
@@ -162,8 +182,11 @@ module Doctor
     end
     if @opts && @opts[:focus]
       puts "Focus: /#{@opts[:focus].source}/"
-      puts ""
     end
+    if @opts && @opts[:ignore]
+      puts "Ignore: /#{@opts[:ignore].source}/"
+    end
+    puts "" if @opts && (@opts[:focus] || @opts[:ignore])
     label = cumulative? ? "Top functions by cumulative bytes:" : "Top sites by bytes:"
     puts label
 
@@ -1233,6 +1256,91 @@ module Doctor
     puts "  Zig:         const frozen = try freeze(T, alloc, root_ptr);"
     puts "  CLEAR:       frozen = FREEZE expr"
     puts ""
+  end
+
+  # ── --peek: callers and callees of one function ──
+  # For sites whose leaf is `regex`, lists the unique callers (frames
+  # immediately above the leaf in each trace) and aggregates bytes
+  # per caller. For samples where `regex` matches a non-leaf frame,
+  # also lists what's directly below — the callees this function
+  # was on the path to. Mirrors `pprof -peek`'s shape.
+  def run_peek(profile_dir, regex)
+    unless profile_dir && Dir.exist?(profile_dir)
+      $stderr.puts "\e[31merror:\e[0m --peek requires a profile directory"
+      exit 1
+    end
+    binary = profile_dir.chomp('/').sub(/\.profile$/, '')
+    binary = nil unless File.exist?(binary.to_s)
+
+    sites, resolved = section_heap_silent(profile_dir, binary)
+    return if sites.nil? || sites.empty?
+
+    callers  = Hash.new { |h, k| h[k] = { bytes: 0, allocs: 0 } } # caller -> stats
+    callees  = Hash.new { |h, k| h[k] = { bytes: 0, allocs: 0 } } # callee -> stats
+    self_total = { bytes: 0, allocs: 0 }
+
+    sites.each do |s|
+      funcs = s[:trace].map { |a| resolved&.dig(a)&.dig(:func) || a }
+      idx = funcs.index { |f| f =~ regex }
+      next unless idx
+
+      self_total[:bytes]  += s[:bytes]
+      self_total[:allocs] += s[:allocs]
+
+      # Caller: the frame above (deeper in the stack) — leaf-first
+      # ordering means the caller is the next index. Stops at trace
+      # root.
+      if (caller_func = funcs[idx + 1])
+        callers[caller_func][:bytes]  += s[:bytes]
+        callers[caller_func][:allocs] += s[:allocs]
+      else
+        callers['<root>'][:bytes]  += s[:bytes]
+        callers['<root>'][:allocs] += s[:allocs]
+      end
+
+      # Callee: only if the matched function is non-leaf (idx > 0).
+      # The callee is the previous index (closer to leaf).
+      if idx > 0 && (callee_func = funcs[idx - 1])
+        callees[callee_func][:bytes]  += s[:bytes]
+        callees[callee_func][:allocs] += s[:allocs]
+      end
+    end
+
+    if self_total[:bytes].zero?
+      puts "No samples matched /#{regex.source}/."
+      return
+    end
+
+    puts "=== Peek /#{regex.source}/ ==="
+    puts ""
+    puts "  Self bytes:   %s (across %s allocations)" %
+         [bytes_pretty(self_total[:bytes]), self_total[:allocs].to_s.gsub(/(\d)(?=(\d{3})+$)/, '\\1,')]
+    puts ""
+
+    puts "  Callers (frames above /#{regex.source}/):"
+    callers.sort_by { |_f, v| -v[:bytes] }.first(10).each do |func, v|
+      puts "    %-30s  %12s  (%d allocs)" % [func, bytes_pretty(v[:bytes]), v[:allocs]]
+    end
+    puts ""
+
+    if callees.any?
+      puts "  Callees (frames below /#{regex.source}/, when matched non-leaf):"
+      callees.sort_by { |_f, v| -v[:bytes] }.first(10).each do |func, v|
+        puts "    %-30s  %12s  (%d allocs)" % [func, bytes_pretty(v[:bytes]), v[:allocs]]
+      end
+      puts ""
+    end
+  end
+
+  # Same parsing as section_heap but without the printout — used by
+  # run_peek so we can build caller/callee tables from the parsed sites.
+  def section_heap_silent(profile_dir, binary)
+    out = StringIO.new
+    real, $stdout = $stdout, out
+    sites, resolved = section_heap(profile_dir, binary)
+    [sites, resolved]
+  ensure
+    $stdout = real
   end
 
   # ── --diff: compare two profile runs ──

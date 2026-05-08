@@ -112,10 +112,21 @@ module PprofConverter
       r = resolved[addr] || {}
       func = r[:func] || addr
       file = r[:file] || ''
-      line = r[:clear_line] || 0
-      fid = pb.add_function(name: func, filename: clear_source_path(profile_dir, file), system_name: r[:func] || func)
+      # User-zig frames get clear_line into source.cht; runtime/stdlib
+      # frames get the Zig line itself, with their own filename so
+      # pprof -list resolves to the right file.
+      line = r[:is_user_zig] ? (r[:clear_line] || 0) : extract_zig_line(file)
+      filename = clear_source_path(profile_dir, file, is_user_zig: r[:is_user_zig])
+      fid = pb.add_function(name: func, filename: filename, system_name: r[:func] || func)
       idx[addr] = pb.add_location(function_id: fid, line: line, address: parse_addr(addr))
     end
+  end
+
+  # addr2line emits `path:line` for each address. Pull the trailing
+  # line number; returns 0 if absent.
+  def extract_zig_line(addr2line_file)
+    return 0 unless addr2line_file
+    addr2line_file =~ /:(\d+)\b/ ? Regexp.last_match(1).to_i : 0
   end
 
   # ── locks.txt → lock.pb.gz ────────────────────────────────────────
@@ -282,6 +293,12 @@ module PprofConverter
   # Mirrors `Doctor.section_heap`'s resolver: addr2line gives us the
   # Zig source line; we walk back to the nearest `// CLR:N` marker
   # the transpiler emits to recover the user-facing CLEAR source line.
+  #
+  # Only assign `clear_line` when the resolved Zig file is the user's
+  # transpiled.zig — otherwise the address was in runtime/stdlib Zig
+  # code where CLR markers don't exist, and we'd misattribute by
+  # walking back through transpiled.zig anyway. (Repro: `pprof -list
+  # entryWrapper` showed it pointing at random source.cht lines.)
   def resolve_addrs(addrs, binary, profile_dir)
     return {} if addrs.empty? || binary.nil?
     raw = IO.popen(['addr2line', '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)
@@ -295,7 +312,8 @@ module PprofConverter
       file = lines_out[i * 2 + 1]&.strip || '?'
       func = func.sub(/.*\./, '').sub(/__anon_\d+/, '')
       clear_line = nil
-      if zig_lines && file =~ /:(\d+)/
+      is_user_zig = zig_lines && file_is_transpiled_zig?(file, zig_path)
+      if is_user_zig && file =~ /:(\d+)\b/
         zig_line = $1.to_i
         (zig_line - 1).downto(0) do |li|
           break if li.negative? || li >= zig_lines.size
@@ -305,20 +323,45 @@ module PprofConverter
           end
         end
       end
-      out[addr] = { func: func, file: file, clear_line: clear_line }
+      out[addr] = { func: func, file: file, clear_line: clear_line, is_user_zig: !!is_user_zig }
     end
     out
+  end
+
+  # True if addr2line's `<file>:<line>` came from the user's
+  # transpiled CLEAR file (where CLR markers exist), not from
+  # runtime/stdlib. The build target's actual compile-time filename
+  # is `._clear_tmp_<name>.zig`, copied to `<profile_dir>/
+  # transpiled.zig` for inspection. addr2line emits the build-time
+  # path, so we match the basename pattern that signals user code.
+  # addr2line may append "(discriminator N)" or other metadata after
+  # the line number; strip that before extracting the basename.
+  def file_is_transpiled_zig?(addr2line_file, _zig_path)
+    return false unless addr2line_file
+    bare = addr2line_file.sub(/:\d+\b.*\z/, '')
+    File.basename(bare).match?(/\A\._clear_tmp_.*\.zig\z/)
   end
 
   def parse_addr(s)
     s.start_with?('0x') ? s.to_i(16) : s.to_i
   end
 
-  # Prefer the original `.cht` source path so pprof's `list` view
-  # shows CLEAR code, falling back to whatever addr2line returned.
-  def clear_source_path(profile_dir, addr2line_file)
-    cht = File.join(profile_dir, 'source.cht')
-    return cht if File.exist?(cht)
-    addr2line_file.to_s
+  # Pick the source file pprof's `list` view should show for this
+  # function. User-code (transpiled.zig with CLR markers) -> the
+  # original .cht source. Runtime/stdlib code -> the addr2line file
+  # path (which is a real .zig file pprof can read). Without this
+  # split, runtime functions like `entryWrapper` rendered against
+  # arbitrary .cht line numbers, badly misleading the user.
+  def clear_source_path(profile_dir, addr2line_file, is_user_zig: nil)
+    if is_user_zig.nil?
+      cht = File.join(profile_dir, 'source.cht')
+      return cht if File.exist?(cht)
+      return addr2line_file.to_s.sub(/:\d+\z/, '')
+    end
+    if is_user_zig
+      cht = File.join(profile_dir, 'source.cht')
+      return cht if File.exist?(cht)
+    end
+    addr2line_file.to_s.sub(/:\d+\z/, '')
   end
 end

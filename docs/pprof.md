@@ -108,6 +108,8 @@ flags that draw on the multi-frame trace data:
 ```sh
 clear doctor foo.profile/ --cumulative           # rank functions by cum bytes
 clear doctor foo.profile/ --focus=intToString    # filter to traces that touch this function
+clear doctor foo.profile/ --ignore=intToString   # drop traces that touch this function
+clear doctor foo.profile/ --peek=processRequest  # callers + callees of one function
 clear doctor old.profile/ --diff new.profile/    # perf-regression diff between two runs
 ```
 
