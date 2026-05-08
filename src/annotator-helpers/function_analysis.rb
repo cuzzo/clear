@@ -848,6 +848,7 @@ module FunctionAnalysis
       # Mark as a parameter so deferred WITH validation (P1.7) can
       # distinguish it from local bindings.
       param[:symbol].is_param = true
+      param[:symbol].param_decl_token = param[:name_token]
       # Atomics M1.6.5: stamp sync_families from the REQUIRES disjunction so
       # call-site effect resolution can detect polymorphic bindings (size > 1).
       if node.respond_to?(:requires) && node.requires

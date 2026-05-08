@@ -765,7 +765,8 @@ class Parser
         end
       end
 
-      p_name = consume(:VAR_ID).value unless is_comptime
+      name_tok = is_comptime ? nil : consume(:VAR_ID)
+      p_name = name_tok&.value
       p_type = :Any
       default_val = nil
 
@@ -787,7 +788,7 @@ class Parser
         end
       end
 
-      { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime }
+      { name: p_name, type: p_type, default: default_val, mutable: is_mutable, takes: takes, comptime: is_comptime, name_token: name_tok }
     end
      .last # always ignore the first token
   end

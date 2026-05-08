@@ -81,6 +81,11 @@ class SymbolEntry
                 :ownership_kind, # :value, :collection, :affine, :resource, :rc, :sync
                 :takes,          # true if parameter declared with TAKES (callee owns)
                 :is_param,       # true when entry was declared as a function parameter
+                :param_decl_token, # for is_param entries: the VAR_ID token at the
+                                   # param's position in the function signature.
+                                   # Used by build_declare_mutable_fix to point an
+                                   # auto-fix at the parameter when the body
+                                   # mutates it without `MUTABLE`.
                 :link_source,    # :shared or :multiowned — tracks which strong ref @link was created from
                 :lifetime,       # Atomics M2.1: nil | :current_scope | { source: SymbolEntry }
                 :borrowed_alias, # true only for BORROWED/RESTRICT aliases — fiber capture is stack-UAF

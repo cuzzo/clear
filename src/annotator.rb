@@ -3106,7 +3106,16 @@ private
     end
 
     if scope.is_immutable?(var_name)
-      error!(node, :ASSIGN_VAR_IMMUTABLE, name: var_name)
+      fix = build_declare_mutable_fix(var_name, scope)
+      if fix
+        fixable!(node,
+          message: DiagnosticRegistry.format(:ASSIGN_VAR_IMMUTABLE, name: var_name),
+          category: :ownership,
+          level: :error,
+          fixes: [fix])
+      else
+        error!(node, :ASSIGN_VAR_IMMUTABLE, name: var_name)
+      end
     end
 
     validate_assignment_type(node, scope.resolve_type(var_name), node.value.resolved_type)
@@ -3125,7 +3134,7 @@ private
     if index_node.target.is_a?(AST::Identifier)
       var_name = index_node.target.name
       if current_scope.is_immutable?(var_name)
-        error!(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name)
+        emit_immutable_index_assignment_error!(assignment_node, current_scope, var_name)
       end
       mark_var_mutated(var_name)
     else
@@ -3185,7 +3194,7 @@ private
       var_name = field_node.target.name
       syn = field_node.target.symbol&.sync
       if current_scope.is_immutable?(var_name) && syn != :always_mutable
-        error!(assignment_node, :ASSIGN_FIELD_IMMUTABLE_STRUCT, name: var_name)
+        emit_immutable_field_assignment_error!(assignment_node, current_scope, var_name)
       end
       mark_var_mutated(var_name)
 

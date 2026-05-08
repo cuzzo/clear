@@ -452,6 +452,32 @@ module FixableHelper
       raise_in_collector: true)
   end
 
+  # `x[i] = ...` or `m["k"] = ...` where x/m is an immutable binding.
+  # Same fix shape: insert MUTABLE at the binding's declaration. The
+  # error code is named `_LIST` for historical reasons but the same
+  # site fires for HashMap and any other indexable container.
+  def emit_immutable_index_assignment_error!(assignment_node, scope, var_name)
+    fix = build_declare_mutable_fix(var_name, scope)
+    return error!(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name) unless fix
+    fixable!(assignment_node,
+      message: DiagnosticRegistry.format(:ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name),
+      category: :ownership,
+      level: :error,
+      fixes: [fix])
+  end
+
+  # `x.field = ...` where x is an immutable binding. Mirrors the index
+  # variant; the fix is the same MUTABLE insertion.
+  def emit_immutable_field_assignment_error!(assignment_node, scope, var_name)
+    fix = build_declare_mutable_fix(var_name, scope)
+    return error!(assignment_node, :ASSIGN_FIELD_IMMUTABLE_STRUCT, name: var_name) unless fix
+    fixable!(assignment_node,
+      message: DiagnosticRegistry.format(:ASSIGN_FIELD_IMMUTABLE_STRUCT, name: var_name),
+      category: :ownership,
+      level: :error,
+      fixes: [fix])
+  end
+
   # Capture: USE(MUTABLE x) where x is an immutable binding. :auto
   # fix inserts MUTABLE at the captured binding's declaration. Same
   # shape as emit_immutable_assignment_error! / emit_immutable_arg_error!.
@@ -661,9 +687,19 @@ module FixableHelper
   # isn't locatable or already carries `MUTABLE`.
   def build_declare_mutable_fix(name, scope)
     info = scope.locals[name]
-    decl = info&.reg
-    return nil unless decl && decl.respond_to?(:token) && decl.token
-    tok = decl.token
+    return nil unless info
+    # Locals carry a reg whose token is the binding's first source position.
+    # Parameters have reg=nil but stash the VAR_ID token at decl time as
+    # `param_decl_token` (set by declare_and_verify_params) so we can still
+    # point a MUTABLE insertion at the signature.
+    tok = nil
+    decl = info.reg
+    if decl && decl.respond_to?(:token) && decl.token
+      tok = decl.token
+    elsif info.is_param && info.param_decl_token
+      tok = info.param_decl_token
+    end
+    return nil unless tok
     return nil if tok.respond_to?(:value) && tok.value == 'MUTABLE'
 
     Fix.new(
