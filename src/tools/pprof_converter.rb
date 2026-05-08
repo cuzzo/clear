@@ -52,9 +52,14 @@ module PprofConverter
     src = File.join(profile_dir, 'alloc.txt')
     return nil unless File.exist?(src)
 
+    # Each site's first column is now a comma-separated leaf-first
+    # stack trace (alloc-profile v2). v1 single-addr files still parse
+    # because `split(',')` on a no-comma string returns a one-element
+    # array.
     sites = parse_columns(src, 6).map do |f|
+      addrs = f[0].split(',')
       {
-        addr: f[0],
+        addrs: addrs,
         allocs: f[1].to_i,
         bytes: f[2].to_i,
         frees: f[3].to_i,
@@ -64,7 +69,8 @@ module PprofConverter
     end
     return nil if sites.empty?
 
-    resolved = resolve_addrs(sites.map { |s| s[:addr] }, binary, profile_dir)
+    all_addrs = sites.flat_map { |s| s[:addrs] }.uniq
+    resolved = resolve_addrs(all_addrs, binary, profile_dir)
 
     pb = Pprof::Profile.new
     pb.add_sample_type('alloc_objects', 'count')
@@ -74,32 +80,41 @@ module PprofConverter
     pb.set_period_type('space', 'bytes', 1)
     pb.default_sample_type = 'alloc_space'
 
+    # One Location per unique address, reused across samples whose
+    # traces share that frame. Saves a lot of bytes on hot leaves
+    # like `entryWrapper` that appear in every trace.
+    location_ids = build_location_index(pb, all_addrs, resolved, profile_dir)
+
     sites.each do |s|
-      r = resolved[s[:addr]] || {}
-      func = r[:func] || s[:addr]
-      file = r[:file] || ''
-      line = r[:clear_line] || 0
-      func_id = pb.add_function(name: func, filename: clear_source_path(profile_dir, file), system_name: r[:func] || func)
-      loc_id  = pb.add_location(
-        function_id: func_id,
-        line: line,
-        address: parse_addr(s[:addr]),
-      )
+      stack = s[:addrs].map { |a| location_ids[a] }
       pb.add_sample(
-        [loc_id],
+        stack,
         [
           s[:allocs],
           s[:bytes],
           [s[:allocs] - s[:frees], 0].max,
           [s[:bytes] - s[:free_bytes], 0].max,
         ],
-        addr: s[:addr]
+        addr: s[:addrs].first
       )
     end
 
     out = File.join(profile_dir, 'heap.pb.gz')
     pb.write_gzip(out)
     out
+  end
+
+  # Pre-build one Location per unique address so multi-frame samples
+  # can share frames. Returns { hex_addr => location_id }.
+  def build_location_index(pb, addrs, resolved, profile_dir)
+    addrs.each_with_object({}) do |addr, idx|
+      r = resolved[addr] || {}
+      func = r[:func] || addr
+      file = r[:file] || ''
+      line = r[:clear_line] || 0
+      fid = pb.add_function(name: func, filename: clear_source_path(profile_dir, file), system_name: r[:func] || func)
+      idx[addr] = pb.add_location(function_id: fid, line: line, address: parse_addr(addr))
+    end
   end
 
   # ── locks.txt → lock.pb.gz ────────────────────────────────────────

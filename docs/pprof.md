@@ -64,13 +64,27 @@ converter walks those back to the user's `.cht` line and stamps it
 onto each pprof Location, so `pprof -list <fn>` shows CLEAR source
 lines (not Zig).
 
+## Sampling
+
+Stack traces are captured on every alloc by default. For workloads
+where the per-alloc unwind cost matters, `--sample=N` records every
+Nth event and scales the captured values by N so doctor / pprof see
+estimated totals:
+
+```sh
+clear profile foo.cht --sample=100
+```
+
+Header records the chosen `sample_n` so consumers can rescale or
+flag the approximation.
+
 ## Notes
 
 - We do not emit a Mapping message for the binary, so `pprof` prints
   "Main binary filename not available" and skips its own symbolization.
   Function names still appear because we resolve via `addr2line` at
   conversion time.
-- Stack traces are single-frame (per-call-site), matching what the
-  runtime profile tables actually record. If multi-frame traces are
-  added to the runtime later, the converter just needs to thread them
-  into `Sample.location_id`.
+- alloc-profile is multi-frame as of v2 (`std.debug.captureCurrentStackTrace`
+  in the runtime, leaf-first comma-separated addrs in `alloc.txt`).
+  lock-profile and mvcc-profile are still single-frame; they will
+  follow the same shape in a future change.

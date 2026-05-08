@@ -61,18 +61,29 @@ module Doctor
     total_line = File.readlines(alloc_file).find { |l| l.include?('total_allocs') }
     total = total_line ? total_line.scan(/\d+/).last.to_i : 0
 
+    # alloc-profile v2: the first column may be a comma-separated
+    # leaf-first stack trace. We treat the leaf address as the
+    # primary site (matching v1 behaviour); the deeper frames are
+    # available in `:trace` for richer views below if a future
+    # caller wants them. v1 files (single addr, no comma) still parse
+    # because `split(',')` on a no-comma string returns a 1-element
+    # array.
     sites = lines.map do |line|
       parts = line.strip.split
       next nil if parts.size < 6
-      addr = parts[0]
-      { addr: addr, allocs: parts[1].to_i, bytes: parts[2].to_i,
+      trace = parts[0].split(',')
+      { addr: trace.first, trace: trace,
+        allocs: parts[1].to_i, bytes: parts[2].to_i,
         frees: parts[3].to_i, free_bytes: parts[4].to_i, live: parts[5].to_i }
     end.compact.sort_by { |s| -s[:bytes] }
 
     resolved = nil
     if binary
       resolved = {}
-      addrs = sites.map { |s| s[:addr] }
+      # Resolve every address that appears in any trace, not just
+      # the leaf, so callers can render full traces. uniq keeps the
+      # addr2line invocation small on hot leaves.
+      addrs = sites.flat_map { |s| s[:trace] }.uniq
       raw = IO.popen(['addr2line', '-e', binary, '-f'] + addrs, err: '/dev/null', &:read)
       lines_out = raw.split("\n")
       zig_source_path = File.join(profile_dir, 'transpiled.zig')

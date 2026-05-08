@@ -1072,6 +1072,12 @@ when 'profile'
   # are reported in the dump as a `# WARNING:` line. N must be a
   # power of two (the tables index via `& (N-1)`).
   profile_max = nil
+  # --sample=N: record every Nth event in alloc-profile. Captured
+  # values are scaled by N at record time so doctor / pprof see
+  # estimated totals. Default is no sampling (every event recorded).
+  # Useful for hot allocators where the unsampled stack-walk cost
+  # adds up; otherwise leave it off for accurate counts.
+  sample_n = nil
   clear_args = clear_args.reject do |arg|
     if arg =~ /\A--profile-max=(\d+)\z/
       profile_max = $1.to_i
@@ -1079,13 +1085,17 @@ when 'profile'
         error "--profile-max=#{profile_max} must be a positive power of two (e.g. 1024, 4096, 16384)"
       end
       true
+    elsif arg =~ /\A--sample=(\d+)\z/
+      sample_n = $1.to_i
+      error "--sample=#{sample_n} must be a positive integer" unless sample_n.positive?
+      true
     else
       false
     end
   end
 
   source = clear_args.first
-  error "Usage: clear profile <file.cht> [--profile-max=N] [-- args...]" unless source
+  error "Usage: clear profile <file.cht> [--profile-max=N] [--sample=N] [-- args...]" unless source
 
   source = File.expand_path(source)
   base_name = File.basename(source, '.cht')
@@ -1124,6 +1134,7 @@ when 'profile'
     "CLEAR_LOCK_PROFILE=#{lock_file}",
     "CLEAR_MVCC_PROFILE=#{mvcc_file}",
   ]
+  env_parts << "CLEAR_PROFILE_SAMPLE=#{sample_n}" if sample_n
   env_parts << "CLEAR_THREADS=#{ENV['CLEAR_THREADS']}" if ENV['CLEAR_THREADS']
   target_env = env_parts.join(' ')
 

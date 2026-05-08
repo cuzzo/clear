@@ -178,6 +178,37 @@ RSpec.describe PprofConverter do
       expect(values).to eq([1000, 40000, 800, 32000])
     end
 
+    it 'parses comma-separated multi-frame stack traces (alloc-profile v2)' do
+      File.write(File.join(@profile_dir, 'alloc.txt'), <<~PROF)
+        # alloc-profile v2 (multi-frame, comma-separated leaf-first)
+        0x401234,0x402000,0x403000   1000  40000  500  20000  500
+      PROF
+      out = described_class.convert_alloc(@profile_dir, nil)
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      decoded = ProtoTestDecoder.parse(bytes)
+      # Three Locations (one per unique addr), three Functions
+      expect(decoded[4].length).to eq(3)
+      expect(decoded[5].length).to eq(3)
+      sample = ProtoTestDecoder.parse(decoded[2].first)
+      stack = ProtoTestDecoder.parse_packed_varints(sample[1].first)
+      expect(stack.length).to eq(3)            # 3-frame trace in Sample.location_id
+    end
+
+    it 'shares Locations across samples that include the same frame' do
+      File.write(File.join(@profile_dir, 'alloc.txt'), <<~PROF)
+        # alloc-profile v2
+        0x10,0x20    100  1000  0  0  100
+        0x30,0x20    100  1000  0  0  100
+      PROF
+      out = described_class.convert_alloc(@profile_dir, nil)
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      decoded = ProtoTestDecoder.parse(bytes)
+      # 0x20 should be ONE Location/Function reused by both samples.
+      expect(decoded[4].length).to eq(3)       # 0x10, 0x20, 0x30
+      expect(decoded[5].length).to eq(3)
+      expect(decoded[2].length).to eq(2)
+    end
+
     it 'tags each sample with its source address as a label' do
       File.write(File.join(@profile_dir, 'alloc.txt'), <<~PROF)
         0xdeadbeef   1   16   0   0   1
