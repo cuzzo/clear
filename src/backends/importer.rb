@@ -1,3 +1,4 @@
+# typed: true
 require "set"
 
 class CircularDependencyError < StandardError; end
@@ -128,7 +129,7 @@ class ModuleImporter
       next if vis == :private
 
       offending = []
-      (stmt.params || []).each do |p|
+      stmt.params.each do |p|
         offending << "param '#{p[:name]}'" if auto_type?(p[:type])
       end
       offending << "return type" if auto_type?(stmt.return_type)

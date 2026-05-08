@@ -282,7 +282,7 @@ module GenericAnalysis
 
   def enforce_shared_family_call_sync!(node, signature, actual_args, type_params)
     T.bind(self, SemanticAnnotator) rescue nil
-    shared_args = []
+    shared_args = T.let([], T::Array[T.untyped])
     signature.params.each_with_index do |param, i|
       arg = actual_args[i]
       next unless arg
@@ -302,6 +302,7 @@ module GenericAnalysis
     return if shared_args.size < 2
 
     first = shared_args.first
+    return unless first
     mismatch = shared_args.find { |arg| !same_shared_call_capability?(first[:type], arg[:type]) }
     return unless mismatch
 

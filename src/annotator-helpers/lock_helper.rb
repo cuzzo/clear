@@ -261,6 +261,7 @@ module LockHelper
     stack = []
     sccs = []
     next_index = 0
+    w = T.let(nil, T.untyped)
 
     nodes.each do |root|
       next if index.key?(root)

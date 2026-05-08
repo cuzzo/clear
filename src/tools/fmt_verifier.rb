@@ -1,3 +1,4 @@
+# typed: true
 # Fmt-verifier — confirms `Formatter.format` is semantics-preserving for a
 # given CLEAR source by transpiling the original AND the formatted form to
 # Zig and comparing the outputs byte-for-byte.

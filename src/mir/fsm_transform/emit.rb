@@ -1,3 +1,4 @@
+# typed: true
 # fsm_transform/emit.rb -- state-machine emitter.
 #
 # Given a segment graph + liveness output + lowering context, builds
@@ -93,6 +94,7 @@ module FsmTransform
     #     resume_fn = the dispatch).
     #   - Wrapping in FsmGenericBody with shared spawn_setup.
     def build_fsm_unified(ctx, segment_specs, promoted_field_decls, lowering)
+      T.bind(self, T.untyped) rescue nil
       return nil if segment_specs.nil? || segment_specs.empty?
 
       id = ctx[:id]
@@ -198,6 +200,7 @@ module FsmTransform
     # (Yield / RegisterYield); non-suspend tails (Goto / LoopBack /
     # CondBranch / Done) map to the structural tail variants directly.
     def build_dispatch_tail(spec, k, all_specs)
+      T.bind(self, T.untyped) rescue nil
       tail = spec[:tail]
       desc = spec[:descriptor]
       next_step = spec[:index] + 1
@@ -283,6 +286,7 @@ module FsmTransform
     # `liveness` is the Liveness analysis result; promoted_field_decls
     # are derived from cross_segment_vars.
     def build_recursive(ctx, segments, liveness, lowering)
+      T.bind(self, T.untyped) rescue nil
       return nil if segments.nil? || segments.empty?
 
       id = ctx[:id]
@@ -635,6 +639,7 @@ module FsmTransform
     # bare identifier so it's robust against that case.
     def check_fsm_cleanup_invariant!(seg_codes, segments, liveness,
                                      captured, conservative_promoted)
+      T.bind(self, T.untyped) rescue nil
       forbidden = (liveness && liveness.cross_segment_vars || {}).keys.dup
       forbidden.concat((captured || {}).keys)
       forbidden.concat(conservative_promoted || [])
@@ -680,6 +685,7 @@ module FsmTransform
     # Returns nil on metadata / error-arm failure (caller falls
     # back to stackful).
     def expand_lock_segment(spec, ctx, capture_map, lowering, base_idx)
+      T.bind(self, T.untyped) rescue nil
       tail      = spec[:tail]
       with_node = tail.with_node
       cap       = tail.cap
@@ -812,6 +818,7 @@ module FsmTransform
     # SuspendResolvers (which lowers under the surrounding fiber
     # capture-map).
     def build_segment_descriptor(seg, ctx, lowering, capture_map, sp_idx: nil)
+      T.bind(self, T.untyped) rescue nil
       tail = seg.tail
       return nil unless tail.is_a?(Segments::IoSuspend) ||
                         tail.is_a?(Segments::NextSuspend)
@@ -841,6 +848,7 @@ module FsmTransform
     # unreachable from index 0 fall back to a follow-up scan
     # (rare).
     def compute_sp_indices(segments)
+      T.bind(self, T.untyped) rescue nil
       out = {}
       counter = 1
       visited = {}
@@ -879,6 +887,7 @@ module FsmTransform
     # Shared spawn/init/break setup. Identical across all FSM
     # body shapes.
     def build_spawn_setup(ctx, lowering)
+      T.bind(self, T.untyped) rescue nil
       is_local_pin = (ctx[:pin_mode] == true || ctx[:pin_mode] == :local)
       is_default_local = (ctx[:pin_mode].nil? || ctx[:pin_mode] == false) && !ctx[:parallel]
       is_local_dispatch = is_local_pin || is_default_local
@@ -920,6 +929,7 @@ module FsmTransform
     end
 
     def profile_dispatch_id(dispatch)
+      T.bind(self, T.untyped) rescue nil
       case dispatch
       when :local, true then 1
       when :parallel then 2
@@ -929,6 +939,7 @@ module FsmTransform
     end
 
     def bg_profile_site_comment(ctx, dispatch, form)
+      T.bind(self, T.untyped) rescue nil
       "// CLEAR_PROFILE_TASK_SITE id=#{ctx[:profile_site_id]} kind=BG line=#{ctx[:profile_line]} column=#{ctx[:profile_column]} dispatch=#{dispatch} form=#{form}"
     end
   end

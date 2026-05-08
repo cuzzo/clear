@@ -1,3 +1,4 @@
+# typed: true
 require_relative "position"
 require_relative "../ast/diagnostic_registry"
 

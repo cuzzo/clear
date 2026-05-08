@@ -1,3 +1,4 @@
+# typed: true
 require_relative "mir"
 require_relative "capture_strategy"
 

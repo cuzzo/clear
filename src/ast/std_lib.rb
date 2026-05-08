@@ -1,3 +1,4 @@
+# typed: true
 require_relative "../mir/fsm_ops"
 
 STRING_TYPE = :String

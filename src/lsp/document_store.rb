@@ -1,3 +1,4 @@
+# typed: true
 module LSP
   # In-memory store of open documents. The LSP advertises full-sync
   # mode (`textDocumentSync: 1`) so `didChange` notifications carry

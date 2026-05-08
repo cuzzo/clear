@@ -1,3 +1,4 @@
+# typed: true
 # Infrastructure for `clear fix` (Phase A).
 #
 # A FixableFinding is a compiler-produced diagnostic with one or more

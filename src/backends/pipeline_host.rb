@@ -1,3 +1,4 @@
+# typed: true
 require "set"
 require_relative "./pipeline_generator"
 require_relative "./zig_type_mapper"
@@ -1756,7 +1757,7 @@ class PipelineHost
     return nil unless node.is_a?(AST::BinaryOp) && node.op == :SMOOTH
 
     stages = []
-    cursor = node
+    cursor = T.let(node, T.untyped)
     while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
       rhs = cursor.right
       if rhs.is_a?(AST::SelectOp)   || rhs.is_a?(AST::WhereOp)     ||
@@ -1785,10 +1786,11 @@ class PipelineHost
     # Terminal must be a fold op
     fold = node.right
     return nil unless RANGE_FOLD_OPS.any? { |t| fold.is_a?(t) }
-    cursor = node.left
+    cursor = T.let(node.left, T.untyped)
 
     # Collect optional intermediate WHERE/SELECT stages (in chain order)
     stages = []
+    rhs = T.let(nil, T.untyped)
     while cursor.is_a?(AST::BinaryOp) && cursor.op == :SMOOTH
       rhs = cursor.right
       if rhs.is_a?(AST::WhereOp) || rhs.is_a?(AST::SelectOp)
@@ -2074,9 +2076,9 @@ class PipelineHost
     elem_zig = elem_t.zig_type
 
     initial_capture = "__each_item"
-    item_var    = initial_capture
+    item_var    = T.let(initial_capture, T.untyped)
     item_counter = 0
-    item_used   = false
+    item_used   = T.let(false, T::Boolean)
     outer_stmts = []
     stage_stmts = []
 
@@ -2687,8 +2689,9 @@ class PipelineHost
       terminal = FOLD_OP_OBSERVABLE_TERMINAL[fold_op.class]
       if terminal.nil?
         raise CompilerError.new(
+          range_lit.token,
           "lower_range_fold: observable_dest set but no terminal registered for #{fold_op.class.name}",
-          range_lit.location,
+          nil,
         )
       end
       return lower_range_fold_observable_default(
@@ -3547,7 +3550,7 @@ class PipelineHost
       MIR::Param.new("__item", Type.new(item_type).zig_type, false),
     ]
 
-    body = [MIR::Suppress.new("__rt")]
+    body = T.let([MIR::Suppress.new("__rt")], T::Array[T.untyped])
     if caps.specs.empty?
       body << MIR::Suppress.new("raw_ctx")
     else
@@ -3967,7 +3970,7 @@ class PipelineHost
   end
 
   def target_rooted_at_placeholder?(target)
-    cur = target
+    cur = T.let(target, T.untyped)
     while cur
       case cur
       when AST::Identifier
@@ -4051,7 +4054,7 @@ class PipelineHost
       MIR::Param.new("__item", item_zig_ptr, false),
     ]
 
-    body = [MIR::Suppress.new("__rt")]
+    body = T.let([MIR::Suppress.new("__rt")], T::Array[T.untyped])
     if caps.specs.empty?
       body << MIR::Suppress.new("raw_ctx")
     else

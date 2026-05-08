@@ -1,3 +1,4 @@
+# typed: true
 module LSP
   # Converts CLEAR's 1-based (line, column, length) tokens to LSP's
   # 0-based (line, character) positions. The two coordinate systems

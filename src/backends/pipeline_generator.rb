@@ -1,3 +1,4 @@
+# typed: true
 # Generates Zig code for pipeline operators (|>) that need special
 # iteration patterns: pool, sharded, SOA sources, and CONCURRENT.
 #
@@ -12,6 +13,7 @@ module PipelineGenerator
   # Unique label for each pipeline block -- prevents Zig label collisions
   # when pipelines are chained (e.g., a |> SELECT |> WHERE).
   def next_pipe_label
+    T.bind(self, T.untyped) rescue nil
     @pipe_label_counter = (@pipe_label_counter || 0) + 1
     "__pblk#{@pipe_label_counter}"
   end
@@ -25,6 +27,7 @@ module PipelineGenerator
   # When lower_concurrent detected `list AS $u |> CONCURRENT op`, this wraps
   # the expression visit with $u -> placeholder substitution active.
   def with_concurrent_outer_binding(placeholder, &blk)
+    T.bind(self, T.untyped) rescue nil
     return blk.call unless @concurrent_outer_binding
     with_named_binding(@concurrent_outer_binding, placeholder) { blk.call }
   end
@@ -33,6 +36,7 @@ module PipelineGenerator
   # pipeline visits (chained pipelines, SHARD bodies, etc.) don't leak state.
   # Any keyword argument overrides the corresponding state for the block's duration.
   def with_pipeline_context(placeholder: nil, acc: nil, soa: :inherit, shard_map: nil, shard_idx: nil, shard_key: nil, shard_hash: nil)
+    T.bind(self, T.untyped) rescue nil
     prev_placeholder = @placeholder_name
     prev_acc         = @acc_placeholder
     prev_shard_map   = @shard_direct_map
@@ -80,6 +84,7 @@ module PipelineGenerator
   # buffer before iteration so all pipeline ops work correctly.
   # For @list:sharded(N): flattens all shard slices into a frame buffer.
   def transpile_pipeline_macro(list_node, storage_node, init: nil, res_type: nil, force_aos: false)
+    T.bind(self, T.untyped) rescue nil
     my_label = next_pipe_label
     list_code = visit(list_node)  # may recurse for chained pipelines
     @current_pipe_label = my_label  # restore after inner pipeline may have changed it
@@ -173,6 +178,7 @@ module PipelineGenerator
   # We always use rt.heapAlloc() for that buffer because the fiber frame is
   # small (4 KB) and running many pipeline ops in one function would overflow it.
   def build_pipe_items_block(lhs_type, _alloc)
+    T.bind(self, T.untyped) rescue nil
     if lhs_type&.pool? && lhs_type&.sharded?
       n = lhs_type.shard_count
       elem_zig = lhs_type.element_type.zig_type
@@ -237,6 +243,7 @@ module PipelineGenerator
   # When the collection is @pool:soa, _.field accesses in the expression
   # are rewritten to __soa_field[__soa_i] (field-slice access).
   def visit_pipeline_expr(list_node, expr_node, placeholder = "it")
+    T.bind(self, T.untyped) rescue nil
     lhs_t = list_node.type_info
     is_soa = (lhs_t&.pool? || lhs_t&.list_collection?) && lhs_t&.soa?
     prev_soa_active = @soa_rewrite_active
@@ -253,6 +260,7 @@ module PipelineGenerator
   end
 
   def transpile_select_projection(list_node, expression_node)
+    T.bind(self, T.untyped) rescue nil
     expr_code = visit_pipeline_expr(list_node, expression_node)
 
     transpile_pipeline_macro(list_node, expression_node, res_type: expression_node.full_type) do |alloc|
@@ -267,6 +275,7 @@ module PipelineGenerator
   end
 
   def transpile_where_filter(list_node, expression_node)
+    T.bind(self, T.untyped) rescue nil
     element_type_str = list_node.full_type.element_type.resolved.to_s
     expr_code = visit_pipeline_expr(list_node, expression_node)
 
@@ -284,6 +293,7 @@ module PipelineGenerator
   end
 
   def transpile_take_while(list_node, expression_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     element_type_str = list_node.full_type.element_type.resolved.to_s
     expr_code = visit_pipeline_expr(list_node, expression_node)
 
@@ -300,6 +310,7 @@ module PipelineGenerator
   end
 
   def transpile_window(list_node, window_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     size_code = visit(window_node.size)
     expr_type_str = (window_node.expression.full_type || window_node.expression.resolved_type).to_s
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
@@ -329,6 +340,7 @@ module PipelineGenerator
   BATCH_WINDOW_TIME_NS = { 'ms' => 1_000_000, 's' => 1_000_000_000, 'min' => 60_000_000_000, 'h' => 3_600_000_000_000 }.freeze
 
   def batch_window_timeout_ns(bw_node)
+    T.bind(self, T.untyped) rescue nil
     return "0" unless bw_node.options["time"]
     str = bw_node.options["time"].value
     m = /\A(\d+(?:\.\d+)?)(ms|s|min|h)\z/.match(str)
@@ -337,6 +349,7 @@ module PipelineGenerator
   end
 
   def transpile_batch_window(lhs, bw_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     @bw_counter = (@bw_counter || 0) + 1
     id = @bw_counter
 
@@ -455,6 +468,7 @@ module PipelineGenerator
   end
 
   def transpile_join(list_node, join_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     left_zig  = transpile_type(list_node.full_type.element_type.resolved.to_s)
     right_src = visit(join_node.right_source)
     right_type_info = join_node.right_source.type_info
@@ -518,6 +532,7 @@ module PipelineGenerator
   end
 
   def transpile_index_grouping(list_node, expression_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 
     expr_code = with_pipeline_context(placeholder: "it") { visit(expression_node) }
@@ -542,6 +557,7 @@ module PipelineGenerator
   end
 
   def transpile_reduce(list_node, reduce_node)
+    T.bind(self, T.untyped) rescue nil
     acc_type = transpile_type(reduce_node.full_type)
     initial_code = visit(reduce_node.initial_value)
 
@@ -560,6 +576,7 @@ module PipelineGenerator
   end
 
   def transpile_order_by(list_node, order_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 
     key_expr_a = with_pipeline_context(placeholder: "a") { visit(order_node.expression) }
@@ -585,6 +602,7 @@ module PipelineGenerator
   end
 
   def transpile_limit(list_node, limit_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
     count_code = visit(limit_node.count)
 
@@ -601,6 +619,7 @@ module PipelineGenerator
   end
 
   def transpile_skip(list_node, skip_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     count_code = visit(skip_node.count)
     my_label = next_pipe_label
     list_code = visit(list_node)
@@ -620,6 +639,7 @@ module PipelineGenerator
   # TAP: side-effect observer — iterates collection, runs body, returns original.
   # Unlike EACH (which returns void), TAP passes the collection through.
   def transpile_tap(smooth_node)
+    T.bind(self, T.untyped) rescue nil
     lhs     = smooth_node.left
     tap_op  = smooth_node.right
     my_label = next_pipe_label
@@ -645,6 +665,7 @@ module PipelineGenerator
   end
 
   def transpile_unnest(list_node, unnest_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     inner_element_type = unnest_node.full_type.element_type.resolved.to_s
     inner_zig_type = transpile_type(inner_element_type)
 
@@ -668,6 +689,7 @@ module PipelineGenerator
   end
 
   def transpile_distinct(list_node, distinct_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     element_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
 
     expr_code = with_pipeline_context(placeholder: "it") { visit(distinct_node.expression) }
@@ -703,6 +725,7 @@ module PipelineGenerator
   #   - Plain pool         → sequential live-slot scan
   #   - Sharded pool       → N parallel fibers (one per shard, DO-block pattern)
   def transpile_each(smooth_node)
+    T.bind(self, T.untyped) rescue nil
     lhs      = smooth_node.left
     each_op  = smooth_node.right
     lhs_type = lhs.type_info
@@ -777,6 +800,7 @@ module PipelineGenerator
   end
 
   def transpile_each_pool(pool_node, body_code)
+    T.bind(self, T.untyped) rescue nil
     pool_code = visit(pool_node)
     <<~ZIG.chomp
       {
@@ -791,6 +815,7 @@ module PipelineGenerator
   end
 
   def transpile_each_set(set_node, body_code)
+    T.bind(self, T.untyped) rescue nil
     set_code = visit(set_node)
     <<~ZIG.chomp
       {
@@ -805,6 +830,7 @@ module PipelineGenerator
   end
 
   def transpile_each_soa_list(list_node, body_code)
+    T.bind(self, T.untyped) rescue nil
     list_code = visit(list_node)
     field_slices = @soa_needed_fields.map { |f|
       "const __soa_#{f} = __soa_src.data.items(.#{f});"
@@ -821,6 +847,7 @@ module PipelineGenerator
   end
 
   def transpile_each_soa_pool(pool_node, body_code)
+    T.bind(self, T.untyped) rescue nil
     pool_code = visit(pool_node)
     field_slices = @soa_needed_fields.map { |f|
       "const __soa_#{f} = __soa_src.data.items(.#{f});"
@@ -838,6 +865,7 @@ module PipelineGenerator
   end
 
   def transpile_each_sharded_pool(pool_node, body_code, pool_type)
+    T.bind(self, T.untyped) rescue nil
     n          = pool_type.shard_count
     pool_code  = visit(pool_node)
     elem_zig   = pool_type.element_type.zig_type
@@ -893,6 +921,7 @@ module PipelineGenerator
 
   # Parallel EACH over @list:sharded(N) — dispatches N fibers, one per shard.
   def transpile_each_sharded_list(list_node, body_code, list_type)
+    T.bind(self, T.untyped) rescue nil
     n         = list_type.shard_count
     list_code = visit(list_node)
     elem_zig  = list_type.element_type.zig_type
@@ -950,6 +979,7 @@ module PipelineGenerator
   # =========================================================
 
   def transpile_find(list_node, find_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_find: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     elem_zig_type = transpile_type(list_node.full_type.element_type.resolved.to_s)
     expr_code = visit_pipeline_expr(list_node, find_node.expression)
@@ -972,6 +1002,7 @@ module PipelineGenerator
   end
 
   def transpile_any(list_node, any_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_any: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, any_node.expression)
 
@@ -990,6 +1021,7 @@ module PipelineGenerator
   end
 
   def transpile_all(list_node, all_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_all: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, all_node.expression)
 
@@ -1008,6 +1040,7 @@ module PipelineGenerator
   end
 
   def transpile_count(list_node, count_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_count: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, count_node.expression)
 
@@ -1032,6 +1065,7 @@ module PipelineGenerator
   # min_sentinel is the initial value for a MIN accumulator (highest possible).
   # max_sentinel is the initial value for a MAX accumulator (lowest possible).
   def agg_minmax_sentinels(zig_t, resolved_sym)
+    T.bind(self, T.untyped) rescue nil
     if [:Float32, :Float64].include?(resolved_sym)
       ["std.math.floatMax(#{zig_t})", "-std.math.floatMax(#{zig_t})"]
     elsif [:Int8, :Int16, :Int32, :Int64].include?(resolved_sym)
@@ -1051,6 +1085,7 @@ module PipelineGenerator
     # variant from before producer-spawn landed) is unreachable today
     # and was removed; if a future change re-routes an observable
     # source through `pipe_items`, the assertion below will catch it.
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_sum: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
 
     expr_code = visit_pipeline_expr(list_node, sum_node.expression)
@@ -1078,6 +1113,7 @@ module PipelineGenerator
   OBS_DEST_GUARD_MSG = "observable_dest unexpected here -- should route through lower_range_fold_observable_default"
 
   def transpile_average(list_node, avg_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_average: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, avg_node.expression)
 
@@ -1094,6 +1130,7 @@ module PipelineGenerator
   end
 
   def transpile_min(list_node, min_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_min: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, min_node.expression)
     expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
@@ -1114,6 +1151,7 @@ module PipelineGenerator
   end
 
   def transpile_max(list_node, max_node, smooth_node)
+    T.bind(self, T.untyped) rescue nil
     raise "transpile_max: #{OBS_DEST_GUARD_MSG}" if smooth_node.observable_dest
     expr_code = visit_pipeline_expr(list_node, max_node.expression)
     expr_sym  = smooth_node.full_type.resolved  # exact type set by pipe_analysis
@@ -1138,6 +1176,7 @@ module PipelineGenerator
   # =========================================================
 
   def transpile_concurrent(smooth_node)
+    T.bind(self, T.untyped) rescue nil
     lhs     = smooth_node.left
     conc    = smooth_node.right   # ConcurrentOp
     inner   = conc.op
@@ -1197,6 +1236,7 @@ module PipelineGenerator
   end
 
   def bounded_stream_source_setup(list_node, id)
+    T.bind(self, T.untyped) rescue nil
     if list_node.is_a?(AST::Identifier) && list_node.type_info&.bounded_stream?
       source_name = visit(list_node)
       {
@@ -1213,6 +1253,7 @@ module PipelineGenerator
   end
 
   def transpile_concurrent_bounded_select(stream_node, select_op, id, workers_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
 
@@ -1295,6 +1336,7 @@ module PipelineGenerator
   end
 
   def transpile_concurrent_bounded_where(stream_node, where_op, id, workers_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
@@ -1376,6 +1418,7 @@ module PipelineGenerator
   end
 
   def transpile_concurrent_bounded_each(stream_node, each_op, id, workers_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     stream_ti = stream_node.type_info
     n = stream_ti.stream_capacity
     item_zig = transpile_type(stream_ti.stream_element_type.resolved)
@@ -1437,6 +1480,7 @@ module PipelineGenerator
   # Returns { setup, src_name } where src_name is the Zig expression to take &src_name.
   # For identifier sources no temp var is needed; for expressions one is created.
   def stream_concurrent_source_setup(stream_node, id)
+    T.bind(self, T.untyped) rescue nil
     source_code = visit(stream_node)
     if stream_node.is_a?(AST::Identifier)
       { setup: "", src_name: source_code }
@@ -1450,6 +1494,7 @@ module PipelineGenerator
   # Workers each maintain a local result list; merged after wg.wait().
   # Result order is non-deterministic (work-stealing).
   def transpile_concurrent_stream_select(stream_node, select_op, id, workers_code, capacity_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
 
@@ -1546,6 +1591,7 @@ module PipelineGenerator
 
   # CONCURRENT WHERE on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
   def transpile_concurrent_stream_where(stream_node, where_op, id, workers_code, capacity_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
@@ -1641,6 +1687,7 @@ module PipelineGenerator
 
   # CONCURRENT EACH on ~T[] / ~T[INF]: BoundedChannel feeder + N worker fibers.
   def transpile_concurrent_stream_each(stream_node, each_op, conc_op, id, workers_code, capacity_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     stream_ti  = stream_node.type_info
     is_inf  = stream_ti&.inf_stream?
     is_open = stream_ti&.open_stream?
@@ -1724,6 +1771,7 @@ module PipelineGenerator
   # CONCURRENT: submitSpawn — workers stay on the local scheduler (cache-local, SPSC-safe).
   # @parallel: spawnBest — distributes across schedulers (true multi-core parallelism).
   def concurrent_spawn_call(options, wg_var, ctx_type, ctx_var)
+    T.bind(self, T.untyped) rescue nil
     parallel  = options["parallel"]
     size_node = options["size"]
     size_sym  = size_node ? size_node.name.downcase.to_sym : nil
@@ -1738,6 +1786,7 @@ module PipelineGenerator
   end
 
   def concurrent_batch_code(options)
+    T.bind(self, T.untyped) rescue nil
     batch = options["batch"]
     batch ? visit(batch) : "1"
   end
@@ -1745,6 +1794,7 @@ module PipelineGenerator
   # Inspect the expression for OR PRUNE / OR RAISE error policy
   # Returns [:prune, inner_expr], [:raise, inner_expr], or [:default, expr]
   def extract_concurrent_error_policy(expr)
+    T.bind(self, T.untyped) rescue nil
     if expr.is_a?(AST::BinaryOp) && expr.op == :OR_RESCUE
       if expr.right.is_a?(AST::OrPrune)
         return [:prune, expr.left]
@@ -1756,6 +1806,7 @@ module PipelineGenerator
   end
 
   def transpile_concurrent_select(list_node, select_op, id, workers_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(select_op.expression)
 
@@ -1862,6 +1913,7 @@ module PipelineGenerator
   end
 
   def transpile_concurrent_where(list_node, where_op, id, workers_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
     policy, inner_expr = extract_concurrent_error_policy(where_op.expression)
 
@@ -1963,6 +2015,7 @@ module PipelineGenerator
   end
 
   def transpile_concurrent_each(list_node, each_op, id, workers_code, rt_name, options = {})
+    T.bind(self, T.untyped) rescue nil
     item_zig = transpile_type(list_node.type_info.element_type.resolved)
 
     list_code  = visit(list_node)
@@ -2052,6 +2105,7 @@ module PipelineGenerator
   # combine after WaitGroup.wait().
   #
   def transpile_concurrent_reduce(list_node, op_node, id, workers_code, rt_name, options, kind, smooth_node = nil)
+    T.bind(self, T.untyped) rescue nil
     @current_pipe_label = next_pipe_label
     item_zig = transpile_type(list_node.type_info.element_type.resolved)
 
@@ -2178,6 +2232,7 @@ module PipelineGenerator
   end
 
   def combine_body_inline(kind, id)
+    T.bind(self, T.untyped) rescue nil
     p = "__ccr#{id}_p"
     r = "__ccr#{id}_result"
     case kind
@@ -2195,6 +2250,7 @@ module PipelineGenerator
 
   def visit_Placeholder(node)
     # Return the name of the loop variable
+    T.bind(self, T.untyped) rescue nil
     @placeholder_name || (raise "Use of '_' outside of SELECT context")
   end
 end

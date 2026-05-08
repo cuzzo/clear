@@ -1,3 +1,4 @@
+# typed: true
 require_relative "../ast/type"
 
 # Pass C: Escape Promotion Planning
@@ -51,7 +52,7 @@ module PromotionClassifier
 
     var_promotes = []
     handled_fields = Set.new
-    struct_promote = nil
+    struct_promote = T.let(nil, T.untyped)
     promote_return_ids = Set.new
 
     return_nodes.each do |ret_node|
@@ -168,8 +169,9 @@ module PromotionClassifier
       next false if ret.value.symbol&.takes
       ti = ret.value.type_info
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      next true if ti&.needs_escape_promotion? && !ti&.string? && !ti&.heap_provenance?
-      next true if schema_lookup && ti && !ti.string? && !ti.heap_provenance? &&
+      next false unless ti.is_a?(Type)
+      next true if ti.needs_escape_promotion? && !ti.string? && !ti.heap_provenance?
+      next true if schema_lookup && !ti.string? && !ti.heap_provenance? &&
                    struct_has_promotable_fields?(ti, schema_lookup)
       false
     end
@@ -300,6 +302,7 @@ module CleanupClassifier
 
       field_ti = stmt.name.type_info rescue nil
       field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+      field_ti = nil unless field_ti.is_a?(Type)
 
       # Auto-lock string fields: locked/always_mutable structs heap-dupe
       # string fields, so overwriting needs explicit free of the old value.
@@ -310,7 +313,7 @@ module CleanupClassifier
 
       # Heap struct string fields: heap-allocated structs dupe their string
       # fields to heap at creation. Overwriting without freeing the old leaks.
-      if field_ti&.string? && !field_ti&.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
+      if field_ti&.string? && !field_ti.needs_cleanup?(schema_lookup) && target_node.is_a?(AST::Identifier)
         target_entry = bindings[target_node.name.to_s]
         if target_entry && target_entry[:alloc] == :heap
           stmt.field_pre_cleanup = { zig_type: "[]const u8", alloc: :heap }
@@ -336,7 +339,7 @@ module CleanupClassifier
     promoted = Set.new
     fn_nodes.each { |name, fn| promoted << name if fn.return_provenance == :heap }
 
-    changed = true
+    changed = T.let(true, T::Boolean)
     while changed
       changed = false
       fn_nodes.each do |name, fn|
@@ -344,7 +347,7 @@ module CleanupClassifier
         next unless fn.body
         if body_calls_promoted?(fn.body, promoted)
           promoted << name
-          changed = true
+          changed = T.let(true, T::Boolean)
         end
       end
     end
@@ -352,7 +355,7 @@ module CleanupClassifier
   end
 
   private_class_method def self.body_calls_promoted?(body, promoted)
-    found = false
+    found = T.let(false, T::Boolean)
     AST.walk_body(body) do |node|
       if node.is_a?(AST::ReturnNode) && node.value.is_a?(AST::FuncCall) && promoted.include?(node.value.name)
         found = true
@@ -403,7 +406,7 @@ module CleanupClassifier
       when AST::WhileLoop
         walk_expression_bg_bodies(stmt.do_branch, promoted_fns, schema_lookup, bindings)
       when AST::MatchStatement
-        stmt.cases&.each { |c| walk_expression_bg_bodies(c[:body], promoted_fns, schema_lookup, bindings) }
+        stmt.cases.each { |c| walk_expression_bg_bodies(c[:body], promoted_fns, schema_lookup, bindings) }
         walk_expression_bg_bodies(stmt.default_case, promoted_fns, schema_lookup, bindings)
       when AST::WithBlock
         walk_expression_bg_bodies(stmt.body, promoted_fns, schema_lookup, bindings)
@@ -420,9 +423,9 @@ module CleanupClassifier
       val = stmt.value
       result << val.body if val.is_a?(AST::BgBlock) && val.body
     when AST::MethodCall
-      stmt.args&.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
+      stmt.args.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
     when AST::FuncCall
-      stmt.args&.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
+      stmt.args.each { |a| result << a.body if a.is_a?(AST::BgBlock) && a.body }
     end
     result
   end
@@ -499,11 +502,12 @@ module CleanupClassifier
 
       source_ti = node.expr.type_info
       source_ti = Type.new(source_ti) if source_ti && !source_ti.is_a?(Type)
+      source_ti = nil unless source_ti.is_a?(Type)
       union_lookup = source_ti&.generic_instance? ? source_ti.generic_base : source_ti&.resolved
       schema = schema_lookup.call(union_lookup) rescue nil
       next unless (schema = Schemas.as_union_schema(schema))
 
-      (node.cases || []).each do |c|
+      node.cases.each do |c|
         next unless c[:binding]
         variant_name = case c[:value]
                        when AST::GetField then c[:value].field
@@ -530,7 +534,7 @@ module CleanupClassifier
           # pointer in the union). No AS binding cleanup needed.
           next
         else
-          pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type || :Any)
+          pt = variant_type.is_a?(Type) ? variant_type : Type.new(variant_type)
           if pt.array? && !pt.string?
             elem_zig = pt.element_type ? (Type.new(pt.element_type).zig_type rescue pt.element_type.to_s) : "UNKNOWN"
             bindings[c[:binding]] = {
@@ -563,9 +567,10 @@ module CleanupClassifier
       next if cond.is_a?(AST::ResolveNode)
       ti = cond.type_info
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
+      ti = nil unless ti.is_a?(Type)
       inner_ti = ti&.wrapped_type
       next unless inner_ti
-      inner_ti = Type.new(inner_ti) if inner_ti && !inner_ti.is_a?(Type)
+      inner_ti = Type.new(inner_ti) unless inner_ti.is_a?(Type)
       e = classify_binding(node.binding_name.to_s, inner_ti, node, promoted_fns, schema_lookup)
       next unless e
       e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
@@ -586,9 +591,10 @@ module CleanupClassifier
         next if expr.is_a?(AST::ResolveNode)
         ti = expr.type_info
         ti = Type.new(ti) if ti && !ti.is_a?(Type)
+        ti = nil unless ti.is_a?(Type)
         inner_ti = ti&.wrapped_type
         next unless inner_ti
-        inner_ti = Type.new(inner_ti) if inner_ti && !inner_ti.is_a?(Type)
+        inner_ti = Type.new(inner_ti) unless inner_ti.is_a?(Type)
         e = classify_binding(b[:name].to_s, inner_ti, node, promoted_fns, schema_lookup)
         next unless e
         e[:zig_type] ||= (Type.new(inner_ti.resolved).zig_type rescue inner_ti.resolved.to_s)
@@ -837,7 +843,7 @@ module CleanupClassifier
         fval = struct_lit.fields[k.to_s] || struct_lit.fields[k]
         fval_ti = fval&.type_info
         fval_ti = Type.new(fval_ti) if fval_ti && !fval_ti.is_a?(Type)
-        next false if fval_ti&.rodata?
+        next false if fval_ti.is_a?(Type) && fval_ti.rodata?
       end
       true
     end

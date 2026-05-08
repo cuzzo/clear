@@ -1,3 +1,4 @@
+# typed: true
 # src/mir_pass.rb - MIR transformation pass
 #
 # Runs after annotation. Classifies cleanup bindings, stamps fn.cleanup_bindings,
@@ -202,12 +203,12 @@ class MIRPass
       when AST::ForRange, AST::ForEach
         walk_for_bg_captures(stmt.body, bindings)
       when AST::MatchStatement
-        stmt.cases&.each { |c| walk_for_bg_captures(c[:body], bindings) }
+        stmt.cases.each { |c| walk_for_bg_captures(c[:body], bindings) }
         walk_for_bg_captures(stmt.default_case, bindings)
       when AST::WithBlock
         walk_for_bg_captures(stmt.body, bindings)
       when AST::DoBlock
-        stmt.branches&.each { |b| walk_for_bg_captures(b[:body], bindings) }
+        stmt.branches.each { |b| walk_for_bg_captures(b[:body], bindings) }
       when AST::BgBlock, AST::BgStreamBlock
         walk_for_bg_captures(stmt.body, bindings)
       end
@@ -302,14 +303,14 @@ class MIRPass
     when AST::ForRange, AST::ForEach
       stmt.body = transform_body(stmt.body, ctx) if stmt.body
     when AST::MatchStatement
-      stmt.cases&.each { |c| c[:body] = transform_body(c[:body], ctx) if c[:body] }
+      stmt.cases.each { |c| c[:body] = transform_body(c[:body], ctx) if c[:body] }
       if stmt.default_case
         stmt.default_case = transform_body(stmt.default_case, ctx)
       end
     when AST::WithBlock
       stmt.body = transform_body(stmt.body, ctx) if stmt.body
     when AST::DoBlock
-      stmt.branches&.each do |b|
+      stmt.branches.each do |b|
         b[:body] = transform_body(b[:body], ctx) if b[:body]
       end
     when AST::BgBlock, AST::BgStreamBlock
@@ -326,7 +327,7 @@ class MIRPass
         val.body = transform_body(val.body, ctx.with(bindings: bg_inner_bindings(val, ctx.bindings)))
       end
     when AST::MethodCall, AST::FuncCall
-      stmt.args&.each do |a|
+      stmt.args.each do |a|
         if a.is_a?(AST::BgBlock) && a.body
           a.body = transform_body(a.body, ctx.with(bindings: bg_inner_bindings(a, ctx.bindings)))
         end
@@ -416,7 +417,7 @@ class MIRPass
   def body_has_bg_escape_promotes?(stmts)
     return false unless stmts.is_a?(Array)
     stmts.any? do |stmt|
-      found = false
+      found = T.let(false, T::Boolean)
       AST.each_bg_block(stmt) do |bg|
         captured = bg.capture_analysis&.captures
         next unless captured&.any?
@@ -451,12 +452,12 @@ class MIRPass
       when AST::ForRange, AST::ForEach
         annotate_bg_exits_in_body!(stmt.body)
       when AST::MatchStatement
-        stmt.cases&.each { |c| annotate_bg_exits_in_body!(c[:body]) }
+        stmt.cases.each { |c| annotate_bg_exits_in_body!(c[:body]) }
         annotate_bg_exits_in_body!(stmt.default_case)
       when AST::WithBlock
         annotate_bg_exits_in_body!(stmt.body)
       when AST::DoBlock
-        stmt.branches&.each { |b| annotate_bg_exits_in_body!(b[:body]) }
+        stmt.branches.each { |b| annotate_bg_exits_in_body!(b[:body]) }
       end
     end
   end
@@ -466,7 +467,7 @@ class MIRPass
     return unless body.is_a?(Array)
 
     # Walk backward past MIR marker nodes to find the last real expression.
-    last_expr = nil
+    last_expr = T.let(nil, T.untyped)
     body.reverse_each do |stmt|
       next if stmt.is_a?(MIR::Alloc) || stmt.is_a?(MIR::Drop) ||
               stmt.is_a?(MIR::SuppressCleanup) || stmt.is_a?(MIR::Return) ||
@@ -749,9 +750,9 @@ class MIRPass
     return unless stmt.expr.is_a?(AST::Identifier) && stmt.expr.was_moved
 
     src_entry = bindings[stmt.expr.name.to_s]
-    has_as_cleanup = false
+    has_as_cleanup = T.let(false, T::Boolean)
 
-    stmt.cases&.each do |c|
+    stmt.cases.each do |c|
       next unless c[:binding]
       as_entry = bindings[c[:binding].to_s]
       next unless as_entry && as_entry[:needs_cleanup]
@@ -824,7 +825,7 @@ class MIRPass
     # :container_promote only fires for !string? values.
     val_ti = stmt.value.type_info rescue nil
     return unless val_ti
-    val_ti = Type.new(val_ti) if val_ti && !val_ti.is_a?(Type)
+    val_ti = Type.new(val_ti) unless val_ti.is_a?(Type)
     return unless val_ti.needs_promotion?(@schema_lookup) && !val_ti.string?
 
     # Annotate directly on Assignment node (no MIR::Promote needed).

@@ -1,3 +1,4 @@
+# typed: true
 # src/mir_lowering.rb - Lowers annotated AST (post-MIRPass) into MIR tree
 #
 # Pipeline: Parse -> Annotate -> MIRPass -> Lower -> Emit
@@ -440,7 +441,7 @@ class MIRLowering
       # Some lowerings (e.g. union with helpers) return arrays of nodes
       nodes = lowered.is_a?(::Array) ? lowered : [lowered]
       nodes.each_with_index do |n, i|
-        items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+        items << MIR::Comment.new("CLR:#{line}") if i == 0
         items << n
       end
     end
@@ -463,20 +464,20 @@ class MIRLowering
         next if stmt.visibility == :private
         lowered = lower(stmt)
         next unless lowered
-        line = stmt.token&.line
+        line = stmt.token.line
         nodes = lowered.is_a?(::Array) ? lowered : [lowered]
         nodes.each_with_index do |n, i|
-          fn_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+          fn_items << MIR::Comment.new("CLR:#{line}") if i == 0
           fn_items << n
         end
       when AST::StructDef, AST::EnumDef, AST::UnionDef
         next if stmt.visibility == :private
         lowered = lower(stmt)
         next unless lowered
-        line = stmt.token&.line
+        line = stmt.token.line
         nodes = lowered.is_a?(::Array) ? lowered : [lowered]
         nodes.each_with_index do |n, i|
-          type_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+          type_items << MIR::Comment.new("CLR:#{line}") if i == 0
           type_items << n
         end
       when AST::RequireNode
@@ -486,10 +487,10 @@ class MIRLowering
       when AST::ExternFnDecl, AST::ExternStructDecl
         lowered = lower(stmt)
         next unless lowered
-        line = stmt.token&.line
+        line = stmt.token.line
         nodes = lowered.is_a?(::Array) ? lowered : [lowered]
         nodes.each_with_index do |n, i|
-          fn_items << MIR::Comment.new("CLR:#{line}") if line && i == 0
+          fn_items << MIR::Comment.new("CLR:#{line}") if i == 0
           fn_items << n
         end
       end
@@ -686,6 +687,7 @@ class MIRLowering
   # (TAKES params) to avoid deferring type resolution to the emitter.
   def build_drop_entry!(entry, ti, source_node)
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
+    ti = nil unless ti.is_a?(Type)
 
     zig_type = case entry[:kind]
     when :heap_slice
@@ -1496,18 +1498,18 @@ class MIRLowering
       when AST::BindExpr
         if stmt.mode == :assign
           alloc = infer_catch_value_allocator(stmt.value)
-          reassigns << { name: stmt.name.to_s, alloc: alloc, line: (stmt.token&.line || 0) } if alloc
+          reassigns << { name: stmt.name.to_s, alloc: alloc, line: stmt.token.line } if alloc
         end
       when AST::Assignment
         if stmt.name.is_a?(AST::Identifier)
           alloc = infer_catch_value_allocator(stmt.value)
-          reassigns << { name: stmt.name.name.to_s, alloc: alloc, line: (stmt.token&.line || 0) } if alloc
+          reassigns << { name: stmt.name.name.to_s, alloc: alloc, line: stmt.token.line } if alloc
         end
       when AST::IfStatement
         walk_catch_body_for_reassigns(stmt.then_branch, reassigns)
         walk_catch_body_for_reassigns(stmt.else_branch, reassigns)
       when AST::MatchStatement
-        stmt.cases&.each { |c| walk_catch_body_for_reassigns(c[:body], reassigns) }
+        stmt.cases.each { |c| walk_catch_body_for_reassigns(c[:body], reassigns) }
         walk_catch_body_for_reassigns(stmt.default_case, reassigns)
       end
     end
@@ -3208,10 +3210,10 @@ class MIRLowering
     else
       cells_tuple = ".{ " + snap_caps.map { |c| emit_expr(lower(c[:var_node])) }.join(", ") + " }"
       alias_decls = snap_caps.each_with_index.map { |c, i|
-        var_node   = c[:var_node]
-        var_name   = with_cap_var_name(var_node)
-        alias_name = c[:alias] || var_name
-        safe_alias = zig_safe_name(alias_name)
+        var_node   = T.let(c[:var_node], T.untyped)
+        var_name   = T.let(with_cap_var_name(var_node), T.untyped)
+        alias_name = T.let(c[:alias] || var_name, T.untyped)
+        safe_alias = T.let(zig_safe_name(alias_name), T.untyped)
         "const #{safe_alias} = views[#{i}]; _ = &#{safe_alias};"
       }.join("\n            ")
       # Multi-cell SNAPSHOT is Versioned-only -- AtomicPtr multi-cell
@@ -3519,7 +3521,7 @@ class MIRLowering
         caps.specs.map { |s| ".#{s.name} = #{s.init_value_zig}" }).join(", ")
 
       # Lower branch body to MIR nodes (for checker visibility) and emit Zig code.
-      branch_mir = nil
+      branch_mir = T.let(nil, T.untyped)
       body_code = with_fiber_capture_map(caps.capture_map,
                                          capture_symbols: caps.capture_symbols,
                                          rt_override: "__rt") do
@@ -3665,7 +3667,7 @@ class MIRLowering
     # Save outer @pending_stmts: hoists from fiber body (e.g. auto-COPY string fields in
     # OR fallback struct literals) must be emitted INSIDE the fiber's run function, not in
     # the outer function where Zig's inner-function capture rules would reject them.
-    run_body = nil
+    run_body = T.let(nil, T.untyped)
     prev_fiber_pending = @pending_stmts
     @pending_stmts = []
     stmt_code, result_line = with_fiber_capture_map(caps.capture_map,
@@ -3973,7 +3975,7 @@ class MIRLowering
     @current_stream_is_inf = is_inf
 
     # Lower stream body to MIR nodes (for checker visibility) and build Zig strings.
-    stream_run_body = nil
+    stream_run_body = T.let(nil, T.untyped)
     body_code = with_fiber_capture_map(caps.capture_map,
                                        capture_symbols: caps.capture_symbols,
                                        rt_override: "__rt") do
@@ -4051,7 +4053,7 @@ class MIRLowering
   def lower_next_expr(node, alloc_sym = :frame)
     promise_type = Type.new(node.expr.full_type || :Void)
 
-    if promise_type&.promise_list?
+    if promise_type.promise_list?
       # NEXT on ~T[]@list: iterate the promise list, await each promise, collect results.
       # alloc_sym determines whether results are heap- or frame-allocated (caller passes
       # decl_alloc from the enclosing VarDecl so the allocator matches the cleanup plan).
@@ -4090,7 +4092,7 @@ class MIRLowering
     # `heapAlloc()` unconditionally -- the StreamSet's internal buffers
     # live on the heap, and the receiving CLEAR binding's cleanup runs
     # via the standard list-cleanup path with the same allocator.
-    if promise_type&.observable? && promise_type.tense_type&.array?
+    if promise_type.observable? && promise_type.tense_type&.array?
       inner = lower(node.expr)
       return MIR::MethodCall.new(inner, "materializeNext",
         [MIR::InlineZig.new("#{@rt_name}.heapAlloc()", "obs_alloc")], true)
@@ -6087,16 +6089,18 @@ class MIRLowering
     if node.name.is_a?(AST::GetField) && !node.field_pre_cleanup
       field_ti = node.name.type_info rescue nil
       field_ti = Type.new(field_ti) if field_ti && !field_ti.is_a?(Type)
+      field_ti = nil unless field_ti.is_a?(Type)
       sl = ->(name) { @struct_schemas&.dig(name) || @union_schemas&.dig(name) }
       if field_ti&.needs_cleanup?(sl)
         result.needs_field_cleanup = true
       elsif field_ti&.string?
         # String fields on heap-allocated structs need cleanup
-        root = node.name.target
+        root = T.let(node.name.target, T.untyped)
         root = root.target while root.is_a?(AST::GetField)
         if root.is_a?(AST::Identifier)
           root_ti = root.type_info rescue nil
           root_ti = Type.new(root_ti) if root_ti && !root_ti.is_a?(Type)
+          root_ti = nil unless root_ti.is_a?(Type)
           result.needs_field_cleanup = true if root_ti&.heap_provenance?
         end
       end
@@ -6202,7 +6206,7 @@ class MIRLowering
       key_zig = (kind == :numeric_map) ? receiver_type.key_type&.zig_type : nil
       val_zig = (kind == :numeric_map) ? receiver_type.value_type&.zig_type : nil
       template_kind = if shard_direct then :shard_direct_zig
-                      elsif (receiver_type&.sharded? || receiver_type&.striped?) && op[:sharded_zig]
+                      elsif (receiver_type.sharded? || receiver_type.striped?) && op[:sharded_zig]
                         :sharded_zig
                       else :zig
                       end
@@ -6235,7 +6239,7 @@ class MIRLowering
     shard_direct = @shard_context && target_var == @shard_context[:map] && op[:shard_direct_zig]
     zig = if shard_direct
       op[:shard_direct_zig]
-    elsif (receiver_type&.sharded? || receiver_type&.striped?) && op[:sharded_zig]
+    elsif (receiver_type.sharded? || receiver_type.striped?) && op[:sharded_zig]
       op[:sharded_zig]
     else
       op[:zig]
@@ -6263,8 +6267,8 @@ class MIRLowering
         unless val_ti&.string?
           zig_type = node.container_promote_zig_type
           if zig_type
-            val_zig = emit_expr(val)
-            new_zig = apply_container_promote_zig(val_zig, rt_name, zig_type)
+            promote_val_zig = emit_expr(val)
+            new_zig = apply_container_promote_zig(promote_val_zig, rt_name, zig_type)
             val = MIR::InlineZig.new(new_zig, "index_promote")
             val.stdlib_def = { allocates: true }
           end
@@ -6373,11 +6377,11 @@ class MIRLowering
       fpc = node.field_pre_cleanup
       if fpc
         alloc_sym = fpc[:alloc] || :heap
-        stmts = [
+        stmts = T.let([
           MIR::Let.new("__old", get_field, false, nil, nil),
           MIR::Set.new(get_field, value),
           len_guard.call("__old", alloc_sym),
-        ]
+        ], T::Array[T.untyped])
         return MIR::ScopeBlock.new(stmts)
       else
         return MIR::Set.new(get_field, value)
@@ -6390,11 +6394,11 @@ class MIRLowering
     value = hoist_alloc(lower(node.value), node.value)
     @locked_unwrap_map = prev_locked
     alias_field = MIR::FieldGet.new(MIR::Ident.new(alias_var), field)
-    stmts = [
+    stmts = T.let([
       MIR::Let.new(guard_var, MIR::MethodCall.new(MIR::Ident.new(zig_var), acquire_method, [], false), true, nil, nil),
       MIR::DeferStmt.new(MIR::MethodCall.new(MIR::Ident.new(guard_var), "release", [], false)),
       MIR::Let.new(alias_var, MIR::MethodCall.new(MIR::Ident.new(guard_var), "get", [], false), false, nil, nil),
-    ]
+    ], T::Array[T.untyped])
     fpc = node.field_pre_cleanup
     if fpc
       alloc_sym = fpc[:alloc] || :heap
@@ -6833,7 +6837,7 @@ class MIRLowering
     if node.promote_ret_wrap == :var && ret_field_promote && value
       rt = MIR::Ident.new(rt_name)
       zig_type = ret_field_promote[:zig_type]
-      stmts = [MIR::Let.new("__ret", value, true, nil, nil)]
+      stmts = T.let([MIR::Let.new("__ret", value, true, nil, nil)], T::Array[T.untyped])
       # AllocMark documents that CheatLib.promote/promoteDeep will heap-allocate
       # fields of __ret.  Phase 4 will replace this frame+promote pattern with a
       # direct HeapCreate so the AllocMark reflects an actual upfront allocation.
@@ -6875,10 +6879,10 @@ class MIRLowering
       stmts << MIR::ReturnStmt.new(MIR::Ident.new("__ret"))
       MIR::ScopeBlock.new(stmts)
     elsif node.promote_ret_wrap == :const && value
-      stmts = [
+      stmts = T.let([
         MIR::Let.new("__ret", value, false, nil, nil),
         MIR::ReturnStmt.new(MIR::Ident.new("__ret"))
-      ]
+      ], T::Array[T.untyped])
       MIR::ScopeBlock.new(stmts)
     elsif needs_string_dupe && value
       ret_type = node.value.full_type ? Type.new(node.value.full_type) : nil
@@ -7022,6 +7026,7 @@ class MIRLowering
 
   def collect_identifier_names(nodes)
     names = Set.new
+    traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type

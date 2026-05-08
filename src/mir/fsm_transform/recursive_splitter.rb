@@ -1,3 +1,4 @@
+# typed: true
 # fsm_transform/recursive_splitter.rb -- recursive segment-graph
 # splitter for FSM-eligible BG bodies.
 #
@@ -47,6 +48,7 @@ module FsmTransform
       attr_reader :segments, :synthetic_fields
 
       def initialize
+        T.bind(self, T.untyped) rescue nil
         @segments = []
         @synthetic_fields = []
         @alias_overrides_for = {}
@@ -58,6 +60,7 @@ module FsmTransform
       # alias (e.g. `inner` -> `(__ctx.c.ctrl.data.*.data)`) is in
       # the capture_map when each CS segment is rendered.
       def alias_overrides_for(idx)
+        T.bind(self, T.untyped) rescue nil
         @alias_overrides_for[idx]
       end
 
@@ -65,6 +68,7 @@ module FsmTransform
       # Any segment filled / pushed inside the block gets tagged
       # with the merged overrides.
       def with_alias_overrides(overrides, &blk)
+        T.bind(self, T.untyped) rescue nil
         prev = @current_alias_overrides
         @current_alias_overrides = (prev || {}).merge(overrides || {})
         blk.call
@@ -73,6 +77,7 @@ module FsmTransform
       end
 
       def stamp_overrides(idx)
+        T.bind(self, T.untyped) rescue nil
         return if @current_alias_overrides.nil? || @current_alias_overrides.empty?
         @alias_overrides_for[idx] = @current_alias_overrides.dup
       end
@@ -81,6 +86,7 @@ module FsmTransform
       # synthesis (e.g. ForRange's iter / user var). The unified
       # emit reads these and adds them to extra_ctx_fields.
       def add_synthetic_field(decl)
+        T.bind(self, T.untyped) rescue nil
         @synthetic_fields << decl unless @synthetic_fields.include?(decl)
       end
 
@@ -88,6 +94,7 @@ module FsmTransform
       # index. Callers MUST call `fill(idx, segment)` before the
       # builder is finalized.
       def reserve_index
+        T.bind(self, T.untyped) rescue nil
         idx = @segments.length
         @segments << :placeholder
         idx
@@ -95,6 +102,7 @@ module FsmTransform
 
       # Fill a previously-reserved index with the actual segment.
       def fill(idx, stmts, tail)
+        T.bind(self, T.untyped) rescue nil
         @segments[idx] = Segments::Segment.new(idx, stmts, tail)
         stamp_overrides(idx)
         idx
@@ -102,12 +110,14 @@ module FsmTransform
 
       # Allocate + fill in one step. Returns the index.
       def push(stmts, tail)
+        T.bind(self, T.untyped) rescue nil
         idx = reserve_index
         fill(idx, stmts, tail)
         idx
       end
 
       def finalize
+        T.bind(self, T.untyped) rescue nil
         unfilled = @segments.each_with_index.select { |s, _| s == :placeholder }
         if unfilled.any?
           raise "RecursiveSplitter: unfilled segments at indices " \
@@ -126,6 +136,7 @@ module FsmTransform
     # (loop / if conditions are lowered to Zig text at split time
     # since they appear in CondBranch tails as raw Zig).
     def split(body, lowering, ctx: nil)
+      T.bind(self, T.untyped) rescue nil
       return nil if contains_unsupported?(body)
 
       builder = Builder.new
@@ -173,6 +184,7 @@ module FsmTransform
     # produced (or `after_idx` if `stmts` is empty / has no
     # control-flow that needs splitting).
     def emit_stmts(stmts, after_idx, builder, lowering)
+      T.bind(self, T.untyped) rescue nil
       return after_idx if stmts.nil? || stmts.empty?
 
       # Find the first stmt that introduces a split (suspends or
@@ -216,6 +228,7 @@ module FsmTransform
     # Suspend with pre-stmts in the same segment. The pre's locals
     # live in the same Zig fn as the descriptor's setup_stmts.
     def emit_suspend_with_pre(susp_tail, pre, after_idx, builder)
+      T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
       tail =
         case susp_tail
@@ -239,6 +252,7 @@ module FsmTransform
     # suspends and control-flow constructs whose subtree contains a
     # suspend (including a WithBlock with a lock-suspending cap).
     def stmt_introduces_split?(stmt)
+      T.bind(self, T.untyped) rescue nil
       return true if Segments.classify_suspend(stmt)
       case stmt
       when AST::WhileLoop, AST::WhileBindLoop
@@ -259,6 +273,7 @@ module FsmTransform
     # a lock-suspending capability counts as a suspend even if its CS
     # body is straight-line.
     def contains_suspend_anywhere?(stmts)
+      T.bind(self, T.untyped) rescue nil
       Array(stmts).any? do |stmt|
         next true if Segments.classify_suspend(stmt)
         case stmt
@@ -281,6 +296,7 @@ module FsmTransform
     # FSM lock-acquire protocol (EXCLUSIVE / write_locked_read).
     # Plain @read caps don't suspend.
     def with_lock_suspend?(with_node)
+      T.bind(self, T.untyped) rescue nil
       caps = with_node.capabilities || []
       caps.any? { |c|
         c[:capability] == :EXCLUSIVE || c[:capability] == :write_locked_read
@@ -296,6 +312,7 @@ module FsmTransform
     #     the legacy path or stackful.
     #   * try/catch around suspends: not supported.
     def contains_unsupported?(body)
+      T.bind(self, T.untyped) rescue nil
       Array(body).any? do |stmt|
         case stmt
         when AST::WithBlock
@@ -323,6 +340,7 @@ module FsmTransform
     # could synthesize a non-lock leading cap (e.g. @multiowned)
     # for which we don't have a uniform acquire protocol.
     def with_unsupported?(with_node)
+      T.bind(self, T.untyped) rescue nil
       caps = with_node.capabilities || []
       if with_lock_suspend?(with_node)
         unsuspending = caps.any? { |c|
@@ -337,6 +355,7 @@ module FsmTransform
     # ineligible -- the suspend protocol assumes scalar Promise(T)
     # with a `.inner.result` field. Streams have a different shape.
     def stmt_unsupported_suspend?(stmt)
+      T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
       return false unless sus.is_a?(Segments::NextSuspend)
       ft = sus.promise_ast.full_type
@@ -355,6 +374,7 @@ module FsmTransform
 
     # Dispatch to the appropriate fragment emitter.
     def emit_pivot(stmt, after_idx, builder, lowering)
+      T.bind(self, T.untyped) rescue nil
       sus = Segments.classify_suspend(stmt)
       return emit_suspend(sus, after_idx, builder) if sus
 
@@ -378,6 +398,7 @@ module FsmTransform
     # The tail's next_index is set to after_idx so the resume
     # transitions to wherever this fragment exits.
     def emit_suspend(susp_tail, after_idx, builder)
+      T.bind(self, T.untyped) rescue nil
       idx = builder.reserve_index
       tail =
         case susp_tail
@@ -402,6 +423,7 @@ module FsmTransform
     #   cond_seg: [], CondBranch(cond_zig, body_entry, after_idx)
     #   body_segs (recursive): exit to cond_seg's index
     def emit_while_fragment(while_stmt, after_idx, builder, lowering)
+      T.bind(self, T.untyped) rescue nil
       cond_idx = builder.reserve_index
 
       body_stmts = while_stmt.do_branch.is_a?(Array) ?
@@ -428,6 +450,7 @@ module FsmTransform
     #   body_segs: exit to incr_seg
     #   incr_seg: [ctx.__for_X += 1; ctx.var = ctx.__for_X], Goto(cond)
     def emit_for_range_fragment(for_stmt, after_idx, builder, lowering)
+      T.bind(self, T.untyped) rescue nil
       var_name = for_stmt.var_name
       iter_var = "__for_#{builder.segments.length}"
       type_zig = "i64"
@@ -472,13 +495,13 @@ module FsmTransform
     # collection = one new branch on Type#fsm_foreach_descriptor.
     # The splitter never inspects the type directly.
     def emit_for_each_fragment(for_stmt, after_idx, builder, lowering)
+      T.bind(self, T.untyped) rescue nil
       coll_ast = for_stmt.collection
       coll_type = coll_ast.full_type
       ct = coll_type.is_a?(Type) ? coll_type : (coll_type ? Type.new(coll_type) : nil)
       raise UnsupportedShape, "ForEach without resolved coll type" if ct.nil?
 
-      desc = ct.respond_to?(:fsm_foreach_descriptor) ?
-               ct.fsm_foreach_descriptor : nil
+      desc = ct.is_a?(Type) ? ct.fsm_foreach_descriptor : nil
       if desc.nil?
         raise UnsupportedShape, "ForEach over #{ct.inspect} not supported in FSM"
       end
@@ -491,7 +514,7 @@ module FsmTransform
       # Per-shape var type comes from the descriptor (e.g. map's
       # bound var is the KEY type, not the element/value type).
       elem_zig = desc[:var_zig_type] || begin
-        elem_t = ct.respond_to?(:element_type) ? ct.element_type : nil
+        elem_t = ct.is_a?(Type) ? ct.element_type : nil
         elem_t ? Type.new(elem_t).zig_type : "anyopaque"
       end
       ctx_var = "__FSM_CTX.#{var_name}"
@@ -516,6 +539,7 @@ module FsmTransform
     def emit_for_each_iterator(for_stmt, after_idx, builder, lowering,
                                coll_zig, var_name, ctx_var, elem_zig,
                                counter, desc, ct)
+      T.bind(self, T.untyped) rescue nil
       iter_field = "__feiter_#{counter}"
       has_field  = "__fehas_#{counter}"
       init_method     = desc[:init_method]
@@ -562,6 +586,7 @@ module FsmTransform
     def emit_for_each_indexed(for_stmt, after_idx, builder, lowering,
                               coll_zig, var_name, ctx_var, elem_zig,
                               counter, slice_suffix)
+      T.bind(self, T.untyped) rescue nil
       iter_var = "__feidx_#{counter}"
       builder.add_synthetic_field("#{iter_var}: usize = 0,")
       builder.add_synthetic_field("#{var_name}: #{elem_zig} = undefined,")
@@ -592,6 +617,7 @@ module FsmTransform
     # is false.
     def emit_for_each_pool(for_stmt, after_idx, builder, lowering,
                            coll_zig, var_name, ctx_var, elem_zig, counter)
+      T.bind(self, T.untyped) rescue nil
       iter_var = "__feidx_#{counter}"
       builder.add_synthetic_field("#{iter_var}: usize = 0,")
       builder.add_synthetic_field("#{var_name}: #{elem_zig} = undefined,")
@@ -627,6 +653,7 @@ module FsmTransform
     # IF fragment: pre + CondBranch to then-entry / else-entry. Both
     # branches Goto to after_idx (the convergence point).
     def emit_if_fragment(if_stmt, after_idx, builder, lowering)
+      T.bind(self, T.untyped) rescue nil
       then_branch = if_stmt.then_branch.is_a?(Array) ?
                       if_stmt.then_branch : [if_stmt.then_branch]
       else_branch = if_stmt.else_branch
@@ -672,6 +699,7 @@ module FsmTransform
     # recursive emit_stmts in a with_fiber_capture_map that adds
     # alias_name -> alias_data_ref entries.
     def emit_with_fragment(with_stmt, after_idx, builder, lowering)
+      T.bind(self, T.untyped) rescue nil
       caps = with_stmt.capabilities || []
       raise UnsupportedShape, "WITH with no capabilities" if caps.empty?
 
@@ -722,6 +750,7 @@ module FsmTransform
     # provides .lower (AST -> MIR) and emit_expr (MIR -> Zig text);
     # we chain them. May return nil if the lowering fails.
     def lower_to_zig(ast_expr, lowering)
+      T.bind(self, T.untyped) rescue nil
       return nil if ast_expr.nil?
       mir = lowering.lower(ast_expr)
       return nil if mir.nil?
@@ -736,6 +765,7 @@ module FsmTransform
     # an order where the entry isn't at index 0 (it can happen when
     # post-segments are emitted before the body that flows into them).
     def renumber_with_entry(segments, entry)
+      T.bind(self, T.untyped) rescue nil
       mapping = { entry => 0 }
       next_id = 1
       segments.each_with_index do |_, i|
@@ -752,6 +782,7 @@ module FsmTransform
     end
 
     def remap_tail(tail, mapping)
+      T.bind(self, T.untyped) rescue nil
       case tail
       when Segments::Done
         tail

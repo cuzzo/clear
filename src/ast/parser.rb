@@ -1,3 +1,4 @@
+# typed: true
 require_relative "./ast"
 require_relative "./lexer"
 require_relative "./error_registry"
@@ -20,6 +21,7 @@ class Parser
     if pattern
       # If pattern provided, create a block that runs the engine
       @@stmt_rules[[type, value]] = lambda do
+        T.bind(self, Parser) rescue nil
         start_token = current
         args = process_pattern(pattern)
         args.concat(inject)
@@ -34,6 +36,7 @@ class Parser
     if pattern
       # If pattern provided, create a block that runs the engine
       @@primary_rules[[type, value]] = lambda do
+        T.bind(self, Parser) rescue nil
         start_token = current
         args = process_pattern(pattern)
         node_class.new(start_token, *args)
@@ -80,7 +83,7 @@ class Parser
   private
 
   def peek
-    @tokens[@pos + 1] || Token.new(:EOF, "", current.line, current.column)
+    @tokens[@pos + 1] || Lexer::Token.new(:EOF, "", current.line, current.column)
   end
 
   def peek_at(n)
@@ -88,44 +91,46 @@ class Parser
   end
 
   # COMMANDS
-  stmt(:KEYWORD, 'REQUIRE') { parse_require }
-  stmt(:KEYWORD, 'EXTERN')  { parse_extern_decl }
+  stmt(:KEYWORD, 'REQUIRE') { T.bind(self, Parser); parse_require }
+  stmt(:KEYWORD, 'EXTERN')  { T.bind(self, Parser); parse_extern_decl }
   stmt(:KEYWORD, 'MUTABLE', AST::VarDecl, ['MUTABLE', :VAR_ID, {':' => :type_annotation}, '=', :expression, ';'], inject: [true])
-  stmt(:KEYWORD, 'FN')      { parse_function_def }
-  stmt(:KEYWORD, 'METHOD')  { parse_function_def(:package, is_method: true) }
-  stmt(:KEYWORD, 'PUB')     { parse_visibility_decl(:pub) }
-  stmt(:KEYWORD, 'PRIVATE') { parse_visibility_decl(:private) }
-  stmt(:KEYWORD, 'IF') { parse_if_statement }
-  stmt(:KEYWORD, 'STRUCT') { parse_struct_def }
-  stmt(:KEYWORD, 'ENUM')   { parse_enum_def }
-  stmt(:KEYWORD, 'UNION')  { parse_union_def }
-  stmt(:KEYWORD, 'WHILE') { parse_while_loop }
-  stmt(:KEYWORD, 'FOR') { parse_for_range }
-  stmt(:KEYWORD, 'TIGHT') { parse_tight_stmt }
-  stmt(:KEYWORD, 'RETURN') { parse_return }
+  stmt(:KEYWORD, 'FN')      { T.bind(self, Parser); parse_function_def }
+  stmt(:KEYWORD, 'METHOD')  { T.bind(self, Parser); parse_function_def(:package, is_method: true) }
+  stmt(:KEYWORD, 'PUB')     { T.bind(self, Parser); parse_visibility_decl(:pub) }
+  stmt(:KEYWORD, 'PRIVATE') { T.bind(self, Parser); parse_visibility_decl(:private) }
+  stmt(:KEYWORD, 'IF') { T.bind(self, Parser); parse_if_statement }
+  stmt(:KEYWORD, 'STRUCT') { T.bind(self, Parser); parse_struct_def }
+  stmt(:KEYWORD, 'ENUM')   { T.bind(self, Parser); parse_enum_def }
+  stmt(:KEYWORD, 'UNION')  { T.bind(self, Parser); parse_union_def }
+  stmt(:KEYWORD, 'WHILE') { T.bind(self, Parser); parse_while_loop }
+  stmt(:KEYWORD, 'FOR') { T.bind(self, Parser); parse_for_range }
+  stmt(:KEYWORD, 'TIGHT') { T.bind(self, Parser); parse_tight_stmt }
+  stmt(:KEYWORD, 'RETURN') { T.bind(self, Parser); parse_return }
   stmt(:KEYWORD, 'ASSERT', AST::Assert, ['ASSERT', :expression, {',' => :STRING}, ';'])
-  stmt(:KEYWORD, 'ASSERT_RAISES') { parse_assert_raises }
-  stmt(:KEYWORD, 'TEST') { parse_test_block }
-  stmt(:KEYWORD, 'STUB') { parse_stub }
-  stmt(:KEYWORD, 'BENCHMARK') { parse_benchmark_stmt }
-  stmt(:KEYWORD, 'SMASH') { parse_smash_stmt }
-  stmt(:KEYWORD, 'PROFILE') { parse_profile_stmt }
-  stmt(:KEYWORD, 'RAISE') { parse_raise_stmt }
-  stmt(:KEYWORD, 'EXIT') { parse_exit }
-  stmt(:KEYWORD, 'DIE') { parse_die }
+  stmt(:KEYWORD, 'ASSERT_RAISES') { T.bind(self, Parser); parse_assert_raises }
+  stmt(:KEYWORD, 'TEST') { T.bind(self, Parser); parse_test_block }
+  stmt(:KEYWORD, 'STUB') { T.bind(self, Parser); parse_stub }
+  stmt(:KEYWORD, 'BENCHMARK') { T.bind(self, Parser); parse_benchmark_stmt }
+  stmt(:KEYWORD, 'SMASH') { T.bind(self, Parser); parse_smash_stmt }
+  stmt(:KEYWORD, 'PROFILE') { T.bind(self, Parser); parse_profile_stmt }
+  stmt(:KEYWORD, 'RAISE') { T.bind(self, Parser); parse_raise_stmt }
+  stmt(:KEYWORD, 'EXIT') { T.bind(self, Parser); parse_exit }
+  stmt(:KEYWORD, 'DIE') { T.bind(self, Parser); parse_die }
   stmt(:KEYWORD, 'BREAK', AST::BreakNode, ['BREAK', ';'])
   stmt(:KEYWORD, 'CONTINUE', AST::ContinueNode, ['CONTINUE', ';'])
-  stmt(:KEYWORD, 'WITH') { parse_with_capability }
-  stmt(:KEYWORD, 'SYNC') { parse_sync_policy_block }
-  stmt(:KEYWORD, 'DO')   { parse_do_block }
-  stmt(:KEYWORD, 'BG')   { parse_bg_block }
-  stmt(:KEYWORD, 'YIELD') { parse_yield_expr }
-  stmt(:KEYWORD, 'MATCH') { parse_match_statement }
+  stmt(:KEYWORD, 'WITH') { T.bind(self, Parser); parse_with_capability }
+  stmt(:KEYWORD, 'SYNC') { T.bind(self, Parser); parse_sync_policy_block }
+  stmt(:KEYWORD, 'DO')   { T.bind(self, Parser); parse_do_block }
+  stmt(:KEYWORD, 'BG')   { T.bind(self, Parser); parse_bg_block }
+  stmt(:KEYWORD, 'YIELD') { T.bind(self, Parser); parse_yield_expr }
+  stmt(:KEYWORD, 'MATCH') { T.bind(self, Parser); parse_match_statement }
   stmt(:KEYWORD, 'PARTIAL') do
+    T.bind(self, Parser) rescue nil
     consume(:KEYWORD, 'PARTIAL')
     parse_match_statement(partial: true)
   end
   stmt(:KEYWORD, 'PASS') do
+    T.bind(self, Parser) rescue nil
     tok = consume(:KEYWORD, 'PASS')
     match!(:CHAR, ';')  # optional semicolon — PASS may appear bare before a ','
     AST::PassStmt.new(tok)
@@ -133,40 +138,42 @@ class Parser
 
 
   # IF and MATCH as expressions: x = IF cond THEN a ELSE b END
-  primary(:KEYWORD, 'IF')    { parse_if_expr }
-  primary(:KEYWORD, 'MATCH') { parse_match_expr }
+  primary(:KEYWORD, 'IF')    { T.bind(self, Parser); parse_if_expr }
+  primary(:KEYWORD, 'MATCH') { T.bind(self, Parser); parse_match_expr }
   primary(:KEYWORD, 'PARTIAL') do
+    T.bind(self, Parser) rescue nil
     consume(:KEYWORD, 'PARTIAL')
     parse_match_expr(partial: true)
   end
 
   # Primaries
-  primary(:NUMBER) { parse_literal(:NUMBER, :stack) }
-  primary(:INT64) { parse_literal(:INT64, :stack) }
-  primary(:STRING) { parse_literal(:STRING, :stack) }
+  primary(:NUMBER) { T.bind(self, Parser); parse_literal(:NUMBER, :stack) }
+  primary(:INT64) { T.bind(self, Parser); parse_literal(:INT64, :stack) }
+  primary(:STRING) { T.bind(self, Parser); parse_literal(:STRING, :stack) }
   # Symbol literal: :identifier — only valid in expression position.
   # The ':' char is already consumed by the time the primary body runs.
   primary(:CHAR, ':') do
+    T.bind(self, Parser) rescue nil
     colon_tok = consume(:CHAR, ':')
     error!(colon_tok, :EXPECTED_SYMBOL_AFTER_COLON) unless match?(:VAR_ID)
     ident_tok = consume(:VAR_ID)
     AST::Literal.new(colon_tok, :SYMBOL, ident_tok.value, :stack)
   end
-  primary(:BYTE) { parse_literal(:BYTE, :stack) }
-  primary(:PREFIXED_INT) { parse_literal(:PREFIXED_INT, :stack) }
-  primary(:INT8)    { parse_literal(:INT8,    :stack) }
-  primary(:INT16)   { parse_literal(:INT16,   :stack) }
-  primary(:INT32)   { parse_literal(:INT32,   :stack) }
-  primary(:UINT16)  { parse_literal(:UINT16,  :stack) }
-  primary(:UINT32)  { parse_literal(:UINT32,  :stack) }
-  primary(:UINT64)  { parse_literal(:UINT64,  :stack) }
-  primary(:FLOAT32) { parse_literal(:FLOAT32, :stack) }
-  primary(:VAR_ID) { parse_var_id }
+  primary(:BYTE) { T.bind(self, Parser); parse_literal(:BYTE, :stack) }
+  primary(:PREFIXED_INT) { T.bind(self, Parser); parse_literal(:PREFIXED_INT, :stack) }
+  primary(:INT8)    { T.bind(self, Parser); parse_literal(:INT8,    :stack) }
+  primary(:INT16)   { T.bind(self, Parser); parse_literal(:INT16,   :stack) }
+  primary(:INT32)   { T.bind(self, Parser); parse_literal(:INT32,   :stack) }
+  primary(:UINT16)  { T.bind(self, Parser); parse_literal(:UINT16,  :stack) }
+  primary(:UINT32)  { T.bind(self, Parser); parse_literal(:UINT32,  :stack) }
+  primary(:UINT64)  { T.bind(self, Parser); parse_literal(:UINT64,  :stack) }
+  primary(:FLOAT32) { T.bind(self, Parser); parse_literal(:FLOAT32, :stack) }
+  primary(:VAR_ID) { T.bind(self, Parser); parse_var_id }
 
-  primary(:KEYWORD, 'TRUE') { t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, true) }
-  primary(:KEYWORD, 'FALSE') { t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, false) }
-  primary(:KEYWORD, 'NIL') { t = consume(:KEYWORD); AST::Literal.new(t, :NIL, nil) }
-  primary(:KEYWORD, 'DEFAULT') { t = consume(:KEYWORD, 'DEFAULT'); AST::DefaultLit.new(t) }
+  primary(:KEYWORD, 'TRUE') { T.bind(self, Parser); t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, true) }
+  primary(:KEYWORD, 'FALSE') { T.bind(self, Parser); t = consume(:KEYWORD); AST::Literal.new(t, :BOOLEAN, false) }
+  primary(:KEYWORD, 'NIL') { T.bind(self, Parser); t = consume(:KEYWORD); AST::Literal.new(t, :NIL, nil) }
+  primary(:KEYWORD, 'DEFAULT') { T.bind(self, Parser); t = consume(:KEYWORD, 'DEFAULT'); AST::DefaultLit.new(t) }
   primary(:KEYWORD, 'CAST', AST::Cast, ['CAST', '(', :expression, 'AS', :type_annotation, ')'])
   primary(:KEYWORD, 'COPY', AST::Copy, ['COPY', :expression])
   primary(:KEYWORD, 'MOVE', AST::MoveNode, ['MOVE', :expression])
@@ -177,9 +184,9 @@ class Parser
   primary(:KEYWORD, 'LINK', AST::LinkNode, ['LINK', :expression])
   primary(:KEYWORD, 'RESOLVE', AST::ResolveNode, ['RESOLVE', :expression])
   primary(:KEYWORD, 'FREEZE', AST::FreezeNode, ['FREEZE', :expression])
-  primary(:KEYWORD, 'BG')   { parse_bg_block }
-  primary(:KEYWORD, 'NEXT') { parse_next_expr }
-  primary(:PERCENT, '%') { parse_sigil_construct }
+  primary(:KEYWORD, 'BG')   { T.bind(self, Parser); parse_bg_block }
+  primary(:KEYWORD, 'NEXT') { T.bind(self, Parser); parse_next_expr }
+  primary(:PERCENT, '%') { T.bind(self, Parser); parse_sigil_construct }
   primary(:KEYWORD, 'REQUIRE', AST::Require, ['REQUIRE', :STRING])
 
   # Pipeline operators use :pipe_expression (min precedence 2) so their
@@ -188,14 +195,14 @@ class Parser
   primary(:KEYWORD, 'SELECT', AST::SelectOp, ['SELECT', :pipe_expression])
   primary(:KEYWORD, 'WHERE', AST::WhereOp, ['WHERE', :pipe_expression])
   primary(:KEYWORD, 'INDEX', AST::IndexOp, ['INDEX', :pipe_expression])
-  primary(:KEYWORD, 'REDUCE') { parse_reduce_op }
+  primary(:KEYWORD, 'REDUCE') { T.bind(self, Parser); parse_reduce_op }
   primary(:KEYWORD, 'ORDER_BY', AST::OrderByOp, ['ORDER_BY', :pipe_expression])
   primary(:KEYWORD, 'LIMIT', AST::LimitOp, ['LIMIT', :pipe_expression])
   primary(:KEYWORD, 'SKIP', AST::SkipOp, ['SKIP', :pipe_expression])
   primary(:KEYWORD, 'UNNEST', AST::UnnestOp, ['UNNEST', :pipe_expression])
   primary(:KEYWORD, 'DISTINCT', AST::DistinctOp, ['DISTINCT', :pipe_expression])
-  primary(:KEYWORD, 'EACH')  { parse_each_op }
-  primary(:KEYWORD, 'TAP')   { parse_tap_op }
+  primary(:KEYWORD, 'EACH')  { T.bind(self, Parser); parse_each_op }
+  primary(:KEYWORD, 'TAP')   { T.bind(self, Parser); parse_tap_op }
   primary(:KEYWORD, 'FIND',    AST::FindOp,    ['FIND',    :pipe_expression])
   primary(:KEYWORD, 'ANY',     AST::AnyOp,     ['ANY',     :pipe_expression])
   primary(:KEYWORD, 'ALL',     AST::AllOp,     ['ALL',     :pipe_expression])
@@ -205,17 +212,18 @@ class Parser
   primary(:KEYWORD, 'MIN',     AST::MinOp,     ['MIN',     :pipe_expression])
   primary(:KEYWORD, 'MAX',     AST::MaxOp,     ['MAX',     :pipe_expression])
   primary(:KEYWORD, 'TAKE_WHILE', AST::TakeWhileOp, ['TAKE_WHILE', :pipe_expression])
-  primary(:KEYWORD, 'RECOVER') { parse_recover_op }
+  primary(:KEYWORD, 'RECOVER') { T.bind(self, Parser); parse_recover_op }
   # COLLECT: pipe-terminal that joins a `~T@observable` (blocking)
   # and returns the underlying T. Takes no expression argument.
   primary(:KEYWORD, 'COLLECT', AST::CollectOp, ['COLLECT'])
-  primary(:KEYWORD, 'WINDOW') { parse_window_op }
-  primary(:KEYWORD, 'JOIN') { parse_join_op }
-  primary(:KEYWORD, 'SHARD') { parse_shard_op }
-  primary(:KEYWORD, 'CONCURRENT') { parse_concurrent_op }
+  primary(:KEYWORD, 'WINDOW') { T.bind(self, Parser); parse_window_op }
+  primary(:KEYWORD, 'JOIN') { T.bind(self, Parser); parse_join_op }
+  primary(:KEYWORD, 'SHARD') { T.bind(self, Parser); parse_shard_op }
+  primary(:KEYWORD, 'CONCURRENT') { T.bind(self, Parser); parse_concurrent_op }
 
   # Expression Grouping
   primary(:CHAR, '(') do
+    T.bind(self, Parser) rescue nil
     consume(:CHAR, '(')
     expr = parse_expression
     # (expr AS name): optional binding group used in IF (expr AS name) && ...
@@ -235,6 +243,7 @@ class Parser
 
   # Array Indexing: arr[index]
   suffix(:CHAR, '[') do |lhs|
+    T.bind(self, Parser) rescue nil
     start_token = consume(:CHAR, '[')
     first = parse_expression
     if first.is_a?(AST::RangeLit)
@@ -261,6 +270,7 @@ class Parser
 
   # Static Call: TypeName::method(args)
   suffix(:DOUBLE_COLON, '::') do |lhs|
+    T.bind(self, Parser) rescue nil
     colon_token = consume(:DOUBLE_COLON, '::')
     method_token = consume(:VAR_ID)
     _, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
@@ -269,6 +279,7 @@ class Parser
 
   # Dot Access: obj.field OR obj.method() OR EnumType.Variant
   suffix(:CHAR, '.') do |lhs|
+    T.bind(self, Parser) rescue nil
     dot_token = consume(:CHAR, '.')
 
     if match?(:CHAR, '*')
@@ -297,6 +308,7 @@ class Parser
 
   # Functor/Call: myVar()
   suffix(:CHAR, '(') do |lhs|
+    T.bind(self, Parser) rescue nil
     start_token, args = parse_comma_seq(:CHAR, '(', ')') { parse_expression }
     # FIX: Pass 'lhs' (the node), not 'lhs.name'
     AST::FuncCall.new(start_token, lhs, args)
@@ -304,6 +316,7 @@ class Parser
 
   # Optional Unwrap: maybe_value?
   suffix(:CHAR, '?') do |lhs|
+    T.bind(self, Parser) rescue nil
     q_token = consume(:CHAR, '?')
     AST::OptionalUnwrap.new(q_token, lhs)
   end
@@ -334,6 +347,7 @@ class Parser
   }.freeze
 
   suffix(:VAR_ID, '@multiowned') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -342,6 +356,7 @@ class Parser
   end
 
   suffix(:VAR_ID, '@shared') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -350,6 +365,7 @@ class Parser
   end
 
   suffix(:VAR_ID, '@locked') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -358,6 +374,7 @@ class Parser
   end
 
   suffix(:VAR_ID, '@writeLocked') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, lock_rank = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     cw = AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -366,30 +383,35 @@ class Parser
   end
 
   suffix(:VAR_ID, '@local') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@alwaysMutable') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@versioned') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@atomic') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
   end
 
   suffix(:VAR_ID, '@indirect') do |lhs|
+    T.bind(self, Parser) rescue nil
     token = consume(:VAR_ID)
     ownership, sync, layout, _ = parse_cap_join(token, CAP_SIGIL_ATTRS[token.value])
     AST::CapabilityWrap.new(token, lhs, ownership, sync, layout)
@@ -400,6 +422,7 @@ class Parser
   # Returns SUFFIX_DECLINE (without consuming '{') for any other lhs, so callers
   # like parse_with_capability that legitimately follow an expression with '{' are unaffected.
   suffix(:CHAR, '{') do |lhs|
+    T.bind(self, Parser) rescue nil
     if !@suppress_struct_lit && lhs.is_a?(AST::GetField) && lhs.target.is_a?(AST::Identifier) &&
         lhs.target.name[0] =~ /[A-Z]/
       tok = current
@@ -2041,7 +2064,7 @@ class Parser
     consume(:KEYWORD, 'START')
 
     cases = []
-    default_case = nil
+    default_case = T.let(nil, T.untyped)
 
     until match?(:KEYWORD, 'END') || match?(:EOF)
       if match?(:KEYWORD, 'DEFAULT')
@@ -2125,7 +2148,7 @@ class Parser
     consume(:KEYWORD, 'START')
 
     cases = []
-    default_case = nil
+    default_case = T.let(nil, T.untyped)
 
     until match?(:KEYWORD, 'END') || match?(:EOF)
       if match?(:KEYWORD, 'DEFAULT')
@@ -2175,7 +2198,7 @@ class Parser
   def parse_struct_pattern
     tok = consume(:CHAR, '{')
     fields = []
-    partial = false
+    partial = T.let(false, T::Boolean)
 
     until match?(:CHAR, '}') || match?(:EOF)
       # `...` means "ignore all remaining fields" (partial match)
@@ -2950,7 +2973,7 @@ class Parser
   # Returns { shard_count:, soa: } hash with parsed values.
   # Raises a ParserError if the syntax is malformed or N < 2.
   def parse_collection_modifiers!(cap_tok)
-    result = { shard_count: nil, soa: false }
+    result = T.let({ shard_count: nil, soa: false }, T::Hash[Symbol, T.untyped])
     return result unless match?(:CHAR, ':')
     consume(:CHAR, ':')
     unless match?(:VAR_ID) && %w[sharded soa].include?(current.value)
@@ -3245,7 +3268,7 @@ class Parser
   # `snapshot_mode == :transaction`.
   def parse_snapshot_block(with_token)
     capabilities = []
-    any_mutable = false
+    any_mutable = T.let(false, T::Boolean)
     loop do
       snapshot_tok = consume(:KEYWORD, 'SNAPSHOT')
       var_node = parse_var_id
@@ -3606,10 +3629,10 @@ class Parser
   # Only enters the prefix parser when the first token is a known DO branch sigil.
   # After `:`, the next identifier is normalised (@ prepended if absent).
   def parse_branch_prefix
-    pinned     = false
-    parallel   = false
-    can_smash  = false
-    stack_size = nil
+    pinned     = T.let(false, T::Boolean)
+    parallel   = T.let(false, T::Boolean)
+    can_smash  = T.let(false, T::Boolean)
+    stack_size = T.let(nil, T.untyped)
 
     # Enter the loop on a known sigil OR on a `@<typo>` token that the
     # user clearly intended as a sigil (so the typo path can fire).
@@ -3675,13 +3698,13 @@ class Parser
   # Returns { ..., stack_size_token: } where stack_size_token is the
   # token of the FIRST sigil that contributed a stack_size (or nil).
   def parse_bg_prefix
-    pinned     = false
-    parallel   = false
-    arena      = false
-    can_smash  = false
-    stack_size = nil
-    stack_size_token = nil
-    can_smash_token  = nil
+    pinned     = T.let(false, T::Boolean)
+    parallel   = T.let(false, T::Boolean)
+    arena      = T.let(false, T::Boolean)
+    can_smash  = T.let(false, T::Boolean)
+    stack_size = T.let(nil, T.untyped)
+    stack_size_token = T.let(nil, T.untyped)
+    can_smash_token  = T.let(nil, T.untyped)
 
     # Enter the loop on a known sigil OR on `@<typo>` that the user
     # clearly intended as a BG sigil (so the typo path can fire).

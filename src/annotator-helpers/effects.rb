@@ -206,7 +206,7 @@ module EffectTracker
     # Propagate: if foo calls bar, foo inherits bar's effects
     # (with context promotion for SUSPENDS family, plus Atomics M1.6.5
     # ?-form resolution from per-call-site arg families).
-    changed = true
+    changed = T.let(true, T::Boolean)
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
@@ -372,14 +372,14 @@ module EffectTracker
       end
     end
 
-    changed = true
+    changed = T.let(true, T::Boolean)
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
         next if needs_rt[fn_name]
         if callees.any? { |c| needs_rt[c] }
           needs_rt[fn_name] = true
-          changed = true
+          changed = T.let(true, T::Boolean)
         end
       end
     end
@@ -413,14 +413,14 @@ module EffectTracker
       end
     end
 
-    changed = true
+    changed = T.let(true, T::Boolean)
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
         next if can_fail[fn_name]
         if callees.any? { |c| can_fail[c] }
           can_fail[fn_name] = true
-          changed = true
+          changed = T.let(true, T::Boolean)
         end
       end
     end
@@ -455,7 +455,7 @@ module EffectTracker
     # `explicit_return_type` stamp, this method, the diagnostic hint
     # helper) stays in place so the migration can be picked up
     # incrementally, and the flag flipped once the tree is clean.
-    return unless FALLIBLE_RETURNS_ENFORCE
+    return unless T.unsafe(FALLIBLE_RETURNS_ENFORCE)
 
     @fn_nodes.each do |name, fn_node|
       next unless fn_node.can_fail
@@ -548,6 +548,7 @@ module EffectTracker
   # convention (*Runtime, params) !return — mark it needs_rt=true and can_fail=true.
   def mark_fn_value_references!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
+    traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -705,6 +706,7 @@ module EffectTracker
   # the body directly calls a fn-variable / fn-pointer (opaque call graph).
   def classify_bg_spawn_form!(program_node)
     T.bind(self, SemanticAnnotator) rescue nil
+    traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -872,7 +874,7 @@ module EffectTracker
 
     # Phase 2: propagate :unbounded through call graph.
     # Any function that transitively calls an :unbounded function is also :unbounded.
-    changed = true
+    changed = T.let(true, T::Boolean)
     while changed
       changed = false
       @call_graph.each do |fn_name, callees|
@@ -881,7 +883,7 @@ module EffectTracker
         next if fn.stack_tier == :unbounded
         if callees.any? { |c| @fn_nodes[c]&.stack_tier == :unbounded }
           fn.stack_tier = :unbounded
-          changed = true
+          changed = T.let(true, T::Boolean)
         end
       end
     end
@@ -996,8 +998,9 @@ module EffectTracker
   def scan_for_calls(node)
     T.bind(self, SemanticAnnotator) rescue nil
     calls    = Set.new
-    has_fnptr = [false]
+    has_fnptr = T.let([false], T::Array[T::Boolean])
 
+    traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -1076,7 +1079,8 @@ module EffectTracker
   # Does not descend into nested FunctionDef nodes.
   def scan_for_raises(body)
     T.bind(self, SemanticAnnotator) rescue nil
-    found = [false]
+    found = T.let([false], T::Array[T::Boolean])
+    traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       return if found[0]
       case n

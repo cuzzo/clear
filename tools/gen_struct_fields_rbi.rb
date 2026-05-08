@@ -56,6 +56,11 @@ PER_CLASS_POLICY = {
   # Other AST nodes' :name fields can be GetIndex / GetField / etc., so
   # they stay T.untyped until per-call narrowing is feasible.
   ['AST::Identifier', :name] => 'String',
+  # LambdaLit's body is a single expression (parse_expression), not an
+  # Array — overriding the global :body => T::Array policy.
+  ['AST::LambdaLit', :body] => 'T.untyped',
+  # HashLit's pairs is a Hash (constructed via pairs.to_h), not an Array.
+  ['AST::HashLit', :pairs] => 'T::Hash[T.untyped, T.untyped]',
 }.freeze
 DEFAULT_TYPE = 'T.untyped'
 

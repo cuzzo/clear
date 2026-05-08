@@ -1,3 +1,4 @@
+# typed: true
 require_relative 'diagnostic_registry'
 
 module ErrorDefinitions
@@ -23,6 +24,7 @@ module ErrorHelper
   # against `%s`/`%d` still work for the (shrinking) set of templates
   # that haven't been migrated to named form yet.
   def error!(node_or_token, code_or_message, *args, **kwargs)
+    T.bind(self, T.untyped) rescue nil
     # 1. Extract the Token (works for AST Node or raw Token)
     # node_or_token is either an AST::Locatable node (has .token method)
     # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
@@ -53,6 +55,7 @@ module ErrorHelper
   # Try the hash form first when applicable; fall back to positional;
   # surface any internal mismatch as an "Internal Args Error" suffix.
   def format_diagnostic_template(template, args, kwargs)
+    T.bind(self, T.untyped) rescue nil
     if !kwargs.empty? || template.include?("%{")
       begin
         return template % kwargs
@@ -69,6 +72,7 @@ module ErrorHelper
 
   # Non-fatal compiler note (printed to stderr, does not halt compilation).
   def note!(node_or_token, message)
+    T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
     # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
     # respond_to?(:token) distinguishes them — both token shapes lack it.
@@ -78,6 +82,7 @@ module ErrorHelper
   end
 
   def warning!(node_or_token, message)
+    T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
     # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
     # respond_to?(:token) distinguishes them — both token shapes lack it.
@@ -105,6 +110,7 @@ module ErrorHelper
   # captured; the annotator then raises so the collector gets a clean
   # snapshot of what was diagnosed before the cascade would start.
   def fixable!(node_or_token, message:, category:, level: :warning, fixes:, raise_in_collector: false)
+    T.bind(self, T.untyped) rescue nil
     # node_or_token is either an AST::Locatable node (has .token method)
     # or a token-shape value (Lexer::Token or FixableHelper::AnchorToken).
     # respond_to?(:token) distinguishes them — both token shapes lack it.

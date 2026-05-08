@@ -117,7 +117,7 @@ module CapabilityHelper
   def validate_capability(node, capability_type, var_node)
     T.bind(self, SemanticAnnotator) rescue nil
     var_type = var_node.full_type
-    allowed = [AST::Identifier, AST::GetField]
+    allowed = T.let([AST::Identifier, AST::GetField], T::Array[Class])
     allowed << AST::GetIndex if capability_type == :BORROWED
     unless allowed.any? { |t| var_node.is_a?(t) }
       error!(var_node, :WITH_CAP_BAD_TARGET, capability: capability_type, got: var_node.class)
@@ -744,7 +744,10 @@ module CapabilityHelper
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       current_scope.locals[alias_name].non_escaping = true
       og_declare(alias_name, nil, inner_type)
-      current_scope.declare_with_new_capability(cap)
+      unless current_scope.declare_with_new_capability(cap)
+        error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
+               capability: cap[:capability], name: cap[:var_node].name)
+      end
     elsif (syn || deferred_param) && !is_field
       # The WITH alias represents the unwrapped inner value for the
       # lifetime of the lock. Its type must be the bare data shape — no
@@ -759,9 +762,15 @@ module CapabilityHelper
       current_scope.declare(alias_name, nil, inner_type, true, false, nil, :stack)
       current_scope.locals[alias_name].non_escaping = true
       og_declare(alias_name, nil, inner_type)
-      current_scope.declare_with_new_capability(cap)
+      unless current_scope.declare_with_new_capability(cap)
+        error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
+               capability: cap[:capability], name: cap[:var_node].name)
+      end
     else
-      current_scope.declare_with_new_capability(cap)
+      unless current_scope.declare_with_new_capability(cap)
+        error!(cap[:var_node], :WITH_CAP_BINDING_LOST,
+               capability: cap[:capability], name: cap[:var_node].name)
+      end
     end
     # Register borrows and create alias bindings for RESTRICT and BORROWED.
     if cap[:capability] == :RESTRICT
@@ -913,6 +922,7 @@ module CapabilityHelper
     keyword_init: true
   ) do
     def pin_reason; has_sharded ? :sharded : :shared; end
+      T.bind(self, SemanticAnnotator) rescue nil
   end
 
   # Single walk over a fiber body that computes ALL capture properties at once.
@@ -981,6 +991,9 @@ module CapabilityHelper
   # One recursive walk that checks each outer-scope identifier for ALL properties.
   def _unified_capture_walk(nodes, locally_bound, result, is_parallel)
     T.bind(self, SemanticAnnotator) rescue nil
+    name = T.let(nil, T.untyped)
+    info = T.let(nil, T.untyped)
+    key  = T.let(nil, T.untyped)
     nodes.each do |node|
       next unless node.is_a?(AST::Locatable)
 

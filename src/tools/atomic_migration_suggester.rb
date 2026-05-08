@@ -1,3 +1,4 @@
+# typed: true
 require_relative "migration_suggester_helpers"
 
 # Atomics M1.9 + M1.10: static eligibility detector for the

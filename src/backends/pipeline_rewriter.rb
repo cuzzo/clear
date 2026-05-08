@@ -1,3 +1,4 @@
+# typed: true
 require_relative "../ast/ast"
 require_relative "../ast/std_lib"
 
@@ -48,9 +49,9 @@ class PipelineRewriter
   def rewrite_children!(node)
     case node
     when AST::Program
-      node.statements&.map! { |s| rewrite!(s) }
+      node.statements.map! { |s| rewrite!(s) }
     when AST::FunctionDef
-      node.body&.map! { |s| rewrite!(s) }
+      node.body.map! { |s| rewrite!(s) }
     when AST::VarDecl, AST::BindExpr
       node.value = rewrite!(node.value) if node.value
     when AST::Assignment
@@ -63,7 +64,7 @@ class PipelineRewriter
       node.else_branch&.map! { |s| rewrite!(s) }
     when AST::MatchStatement
       node.expr = rewrite!(node.expr)
-      (node.cases || []).each { |c| c[:body]&.map! { |s| rewrite!(s) } }
+      node.cases.each { |c| c[:body]&.map! { |s| rewrite!(s) } }
       node.default_case.map! { |s| rewrite!(s) } if node.default_case
     when AST::WhileLoop
       node.condition = rewrite!(node.condition)
@@ -71,23 +72,23 @@ class PipelineRewriter
     when AST::ForRange
       node.start_expr = rewrite!(node.start_expr)
       node.end_expr = rewrite!(node.end_expr)
-      node.body&.map! { |s| rewrite!(s) }
+      node.body.map! { |s| rewrite!(s) }
     when AST::ForEach
       node.collection = rewrite!(node.collection)
-      node.body&.map! { |s| rewrite!(s) }
+      node.body.map! { |s| rewrite!(s) }
     when AST::BinaryOp
       node.left = rewrite!(node.left)
       node.right = rewrite!(node.right)
     when AST::UnaryOp
       node.right = rewrite!(node.right)
     when AST::FuncCall, AST::MethodCall
-      node.args&.map! { |a| rewrite!(a) }
+      node.args.map! { |a| rewrite!(a) }
     when AST::StructLit
       node.fields.each { |k, v| node.fields[k] = rewrite!(v) }
     when AST::ListLit
-      node.items&.map! { |i| rewrite!(i) }
+      node.items.map! { |i| rewrite!(i) }
     when AST::BlockExpr
-      node.body&.map! { |s| rewrite!(s) }
+      node.body.map! { |s| rewrite!(s) }
       node.result = rewrite!(node.result)
     end
   end
@@ -259,7 +260,7 @@ class PipelineRewriter
 
   def collect_chain(node)
     stages = []
-    cursor = node
+    cursor = T.let(node, T.untyped)
     terminal = nil
 
     # Identify the terminal operation.

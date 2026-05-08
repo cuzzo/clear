@@ -1,3 +1,4 @@
+# typed: true
 require_relative "../backends/transpiler"  # loads Lexer, Parser, SemanticAnnotator, FixCollector
 
 module LSP

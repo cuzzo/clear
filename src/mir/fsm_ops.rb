@@ -1,3 +1,4 @@
+# typed: true
 # fsm_ops.rb -- Structured MIR operations for FSM stdlib templates.
 #
 # Replaces the Zig-text :fsm_setup / :fsm_finish_block /

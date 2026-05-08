@@ -419,7 +419,9 @@ module FunctionAnalysis
         if inner_node.container_borrow
           arg_ti = inner_node.type_info
           arg_ti = Type.new(arg_ti) if arg_ti && !arg_ti.is_a?(Type)
-          is_copy = arg_ti&.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
+          is_copy = arg_ti.is_a?(Type) ?
+            (arg_ti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
+            true
           unless is_copy
             error!(inner_node, :TAKES_NEEDS_OWNED_INDEX)
           end
@@ -1004,7 +1006,7 @@ module FunctionAnalysis
 
     actual_path = get_path_to_root(node)
     if actual_path.nil?
-      error!("Lifetime Error: Lifetime '#{lifetime_paths.join(', ')}' specified on return, but returned value is not associated.")
+      error!(node, :RETURN_LIFETIME_NOT_ASSOCIATED, sources: lifetime_paths.join(', '))
     end
 
     # Multi-source semantics: returned value derives from EXACTLY one

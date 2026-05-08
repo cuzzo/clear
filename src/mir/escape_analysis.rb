@@ -1,3 +1,4 @@
+# typed: true
 # src/escape_analysis.rb - Single pre-pass escape analysis for CLEAR compiler.
 #
 # Determines which declarations require heap allocation before CleanupClassifier
@@ -27,7 +28,7 @@ module EscapeAnalysis
       s << name if fn&.return_provenance == :heap
     end
 
-    changed = true
+    changed = T.let(true, T::Boolean)
     while changed
       changed = false
       fn_nodes.each do |name, fn|
@@ -122,7 +123,7 @@ module EscapeAnalysis
     return heap_fns.include?(callee_name) if callee_name
 
     if val.is_a?(AST::GetField)
-      root = val
+      root = T.let(val, T.untyped)
       root = root.target while root.is_a?(AST::GetField) || root.is_a?(AST::GetIndex)
       if root.is_a?(AST::Identifier) && root.symbol
         decl     = root.symbol.reg
@@ -141,7 +142,8 @@ module EscapeAnalysis
     if val.is_a?(AST::Identifier)
       ti = val.type_info
       ti = ti.is_a?(Type) ? ti : (ti ? (Type.new(ti) rescue nil) : nil)
-      return !!(ti&.needs_escape_promotion? && !ti&.string? && !ti&.heap_provenance?)
+      return false unless ti.is_a?(Type)
+      return !!(ti.needs_escape_promotion? && !ti.string? && !ti.heap_provenance?)
     end
 
     false
@@ -382,7 +384,7 @@ module EscapeAnalysis
     return false unless node
     case node
     when AST::BinaryOp
-      promoted = false
+      promoted = T.let(false, T::Boolean)
       if node.op == :ADD && node.string_concat
         node.storage = :heap
         ti = node.type_info
@@ -397,12 +399,12 @@ module EscapeAnalysis
       node.parts&.each { |p| e2_promote_frame_concats!(p) }
       true
     when AST::StructLit, AST::UnionVariantLit
-      promoted = false
+      promoted = T.let(false, T::Boolean)
       node.fields&.each_value { |v| promoted |= e2_promote_frame_concats!(v) }
       promoted
     when AST::ListLit
-      promoted = false
-      node.items&.each { |it| promoted |= e2_promote_frame_concats!(it) }
+      promoted = T.let(false, T::Boolean)
+      node.items.each { |it| promoted |= e2_promote_frame_concats!(it) }
       promoted
     else
       false
@@ -429,11 +431,11 @@ module EscapeAnalysis
     case node
     when AST::FuncCall
       yield node
-      node.args&.each { |a| e2_walk_calls_in_expr(a, &blk) }
+      node.args.each { |a| e2_walk_calls_in_expr(a, &blk) }
     when AST::MethodCall
       yield node
       e2_walk_calls_in_expr(node.object, &blk)
-      node.args&.each { |a| e2_walk_calls_in_expr(a, &blk) }
+      node.args.each { |a| e2_walk_calls_in_expr(a, &blk) }
     when AST::VarDecl, AST::BindExpr, AST::Assignment
       e2_walk_calls_in_expr(node.value, &blk)
     when AST::ReturnNode
@@ -453,7 +455,7 @@ module EscapeAnalysis
     when AST::StructLit
       node.fields&.each_value { |v| e2_walk_calls_in_expr(v, &blk) }
     when AST::ListLit
-      node.items&.each { |i| e2_walk_calls_in_expr(i, &blk) }
+      node.items.each { |i| e2_walk_calls_in_expr(i, &blk) }
     when AST::IfStatement
       e2_walk_calls_in_expr(node.condition, &blk)
     when AST::WhileLoop
@@ -686,7 +688,7 @@ module EscapeAnalysis
 
     max_iters = 8
     max_iters.times do
-      changed = false
+      changed = T.let(false, T::Boolean)
       fn_nodes.each do |callee_name, callee_fn|
         next unless callee_fn&.params
         sites = callsites[callee_name]
@@ -739,7 +741,7 @@ module EscapeAnalysis
       node = stack.pop
       next unless node.is_a?(AST::Locatable)
       if node.is_a?(AST::FuncCall)
-        callsites[node.name.to_s] << { args: (node.args || []) }
+        callsites[node.name.to_s] << { args: node.args }
       end
       next if node.is_a?(AST::FunctionDef) || node.is_a?(AST::LambdaLit)
       node.class.members.each do |m|
@@ -865,14 +867,14 @@ module EscapeAnalysis
         ti = node.type_info rescue nil
         ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
       end
-      node.args&.each { |a| e3_mark_carry_expr!(a, carry_fns) }
+      node.args.each { |a| e3_mark_carry_expr!(a, carry_fns) }
     when AST::MethodCall
       if carry_fns.include?(node.name.to_s)
         ti = node.type_info rescue nil
         ti.provenance = :heap if ti.is_a?(Type) && !ti.heap_provenance?
       end
       e3_mark_carry_expr!(node.object, carry_fns)
-      node.args&.each { |a| e3_mark_carry_expr!(a, carry_fns) }
+      node.args.each { |a| e3_mark_carry_expr!(a, carry_fns) }
     when AST::BinaryOp
       e3_mark_carry_expr!(node.left, carry_fns)
       e3_mark_carry_expr!(node.right, carry_fns)

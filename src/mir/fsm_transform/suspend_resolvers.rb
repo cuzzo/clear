@@ -1,3 +1,4 @@
+# typed: true
 # fsm_transform/suspend_resolvers.rb -- per-suspend-kind resolvers.
 #
 # Each resolver turns a Segments::*Suspend tail into a uniform
@@ -24,6 +25,7 @@ module FsmTransform
     # `lowering` provides .lower(ast_node) and is used inside the
     # caller's capture-map context (set up via with_fiber_capture_map).
     def resolve(seg, ctx, lowering, susp_idx: nil)
+      T.bind(self, T.untyped) rescue nil
       case seg.tail
       when Segments::IoSuspend
         resolve_io(seg.tail, ctx, lowering)
@@ -49,6 +51,7 @@ module FsmTransform
     #   result_var / result_zig_type: from the call's return type +
     #                                   the bound name in the body stmt
     def resolve_io(io_tail, ctx, lowering)
+      T.bind(self, T.untyped) rescue nil
       stdlib_def = io_tail.stdlib_def
       raise ArgumentError, "IoSuspend missing stdlib_def" unless stdlib_def
 
@@ -134,6 +137,7 @@ module FsmTransform
     # work will make this fully MIR-shaped (catch is already a MIR
     # expression form).
     def resolve_next(next_tail, ctx, lowering, susp_idx:)
+      T.bind(self, T.untyped) rescue nil
       id = ctx[:id]
       sp_field = "sp_#{susp_idx}"
       promise_expr_mir = lowering.lower(next_tail.promise_ast)

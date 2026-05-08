@@ -1,3 +1,4 @@
+# typed: true
 # Rule-driven scanner that detects common operator typos in CLEAR
 # source (e.g. `s>` meant `|>`, `=>` meant `->`) and emits FixableFinding
 # entries via FixCollector. Runs as a PRE-PARSE pass in `clear fix`;
@@ -34,12 +35,12 @@ module SyntaxTypoScanner
     return unless FixCollector.enabled?
     return unless source && !source.empty?
 
-    i = 0
+    i = T.let(0, Integer)
     len = source.length
-    line = 1
-    col = 1
-    in_single = false  # inside "..."
-    in_triple = false  # inside """..."""
+    line = T.let(1, Integer)
+    col = T.let(1, Integer)
+    in_single = T.let(false, T::Boolean)  # inside "..."
+    in_triple = T.let(false, T::Boolean)  # inside """..."""
 
     while i < len
       # Triple-quoted string boundary
@@ -86,7 +87,7 @@ module SyntaxTypoScanner
       # char is an identifier char (e.g. `s>`), require the preceding
       # char to be a non-identifier so we don't flag `selectors>` or
       # similar valid identifiers.
-      matched = false
+      matched = T.let(false, T::Boolean)
       RULES.each do |r|
         pat = r[:match]
         next unless source[i, pat.length] == pat

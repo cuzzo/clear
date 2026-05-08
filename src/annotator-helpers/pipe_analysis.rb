@@ -1178,13 +1178,15 @@ module PipeAnalysis
     return unless each_op.is_a?(AST::EachOp)
 
     # Collect all GetIndex nodes that target a @sharded map
-    sharded_accesses = []
+    sharded_accesses = T.let([], T::Array[T.untyped])
     walk_for_sharded_access(each_op.body, sharded_accesses)
 
     return if sharded_accesses.empty?
 
     # At this point, sharded_accesses should all target one map (multi-map handled upstream).
-    map_name = sharded_accesses.first[:map_name]
+    first_access = sharded_accesses.first
+    return unless first_access
+    map_name = first_access[:map_name]
     # Find the map's scope entry to get shard_count
     scope = lookup_scope_for(map_name)
     return unless scope
@@ -1204,7 +1206,7 @@ module PipeAnalysis
     key_expr = this_map_accesses.first[:key_expr]
 
     # Build a synthetic map identifier node for the shard_context
-    map_ident = AST::Identifier.new(sharded_accesses.first[:map_token], map_name)
+    map_ident = AST::Identifier.new(first_access[:map_token], map_name)
     map_ident.full_type = map_type
 
     each_op = conc.op

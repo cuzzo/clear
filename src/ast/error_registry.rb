@@ -1,3 +1,4 @@
+# typed: true
 module AST
   # Single source of truth for CLEAR error kinds and types.
   #

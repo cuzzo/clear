@@ -1,3 +1,4 @@
+# typed: true
 # src/compiler_frontend.rb - Shared compilation front-end
 #
 # Extracts the common pipeline shared by transpile(), transpile_mir(),
@@ -78,7 +79,7 @@ class CompilerFrontend
         fn_sigs[stmt.name] = sig
       else
         fs = FunctionSignature.new(
-          params: stmt.params || [],
+          params: stmt.params,
           return_type: stmt.return_type || :Any,
           return_lifetime: stmt.return_lifetime,
           visibility: stmt.visibility,

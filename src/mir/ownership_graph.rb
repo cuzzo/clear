@@ -1,3 +1,4 @@
+# typed: true
 # ownership_graph.rb — Ownership graph for CLEAR's affine type system.
 #
 # Nodes: variables and field paths (e.g., "x", "x.child", "x.child.name")

@@ -1,3 +1,4 @@
+# typed: true
 require 'set'
 
 # Analyzes a `clear profile` run. Reads heap/CPU/syscall/HW-counter/lock/MVCC

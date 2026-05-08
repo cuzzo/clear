@@ -1,3 +1,4 @@
+# typed: true
 module ZigTypeMapper
   ZIG_OPS = {
     :ADD => "+",

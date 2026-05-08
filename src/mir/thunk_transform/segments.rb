@@ -1,3 +1,4 @@
+# typed: true
 # thunk_transform/segments.rb -- Tail variants for the THUNK CPS
 # segment graph.
 #

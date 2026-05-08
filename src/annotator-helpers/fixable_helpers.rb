@@ -161,7 +161,9 @@ module FixableHelper
   # through to the legacy error path in non-collector mode.
   AnchorToken = Struct.new(:line, :column) do
     def type; :ANCHOR; end
+      T.bind(self, SemanticAnnotator) rescue nil
     def value; nil; end
+      T.bind(self, SemanticAnnotator) rescue nil
   end
 
   def anchor_at(line, col)
@@ -295,6 +297,7 @@ module FixableHelper
   # coda "Values can only be TAKEN once; subsequent iterations have
   # nothing left to GIVE" is the canonical phrasing per WALKTHROUGH.md.
   def emit_use_of_moved_in_loop_error!(node, name, og_node = nil, code: :USE_OF_MOVED_IN_LOOP)
+    T.bind(self, SemanticAnnotator) rescue nil
     consumer = og_node && og_node.move_line ? consumer_source_text(og_node.move_line) : nil
     consumer_clause = consumer ? "`#{consumer}` already TOOK it. " : ""
     msg = "USE AFTER MOVE: You can't use `#{name}` here — #{consumer_clause}" \
@@ -306,6 +309,7 @@ module FixableHelper
   # passive voice ("was already TAKEN / GIVEN") because the subject of
   # the sentence is the owner — what HAPPENED to it — not the consumer.
   def emit_use_of_moved_path_error!(node, path, og_node = nil)
+    T.bind(self, SemanticAnnotator) rescue nil
     path_str = path.map(&:to_s).join('.')
     root     = path.first.to_s
     msg = if og_node && og_node.move_line
@@ -345,10 +349,12 @@ module FixableHelper
   }.freeze
 
   def ownership_active_phrase(action)
+    T.bind(self, SemanticAnnotator) rescue nil
     OWNERSHIP_ACTIVE_PHRASES[action] || "already consumed it"
   end
 
   def ownership_passive_phrase(action)
+    T.bind(self, SemanticAnnotator) rescue nil
     OWNERSHIP_PASSIVE_PHRASES[action] || "was already consumed"
   end
 
@@ -357,6 +363,7 @@ module FixableHelper
   # back to nil when @source_code isn't set (programmatic use of the
   # annotator) or the line is past EOF.
   def consumer_source_text(line_num)
+    T.bind(self, SemanticAnnotator) rescue nil
     return nil unless @source_code && line_num
     line = @source_code.lines[line_num - 1]
     return nil unless line
@@ -543,6 +550,7 @@ module FixableHelper
   # error code is named `_LIST` for historical reasons but the same
   # site fires for HashMap and any other indexable container.
   def emit_immutable_index_assignment_error!(assignment_node, scope, var_name)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(var_name, scope)
     return error!(assignment_node, :ASSIGN_INDEX_IMMUTABLE_LIST, name: var_name) unless fix
     fixable!(assignment_node,
@@ -555,6 +563,7 @@ module FixableHelper
   # `x.field = ...` where x is an immutable binding. Mirrors the index
   # variant; the fix is the same MUTABLE insertion.
   def emit_immutable_field_assignment_error!(assignment_node, scope, var_name)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(var_name, scope)
     return error!(assignment_node, :ASSIGN_FIELD_IMMUTABLE_STRUCT, name: var_name) unless fix
     fixable!(assignment_node,
@@ -575,6 +584,7 @@ module FixableHelper
   # REENTRANCE_INDIRECT_RECURSIVE for the no-marker case). `hint` is
   # the human-readable migration text appended to the error template.
   def emit_reentrant_error!(fn_node, code, hint:)
+    T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
     fix = nil
     if arrow
@@ -599,6 +609,7 @@ module FixableHelper
   # fix inserts MUTABLE at the captured binding's declaration. Same
   # shape as emit_immutable_assignment_error! / emit_immutable_arg_error!.
   def emit_capture_immutable_as_mutable_error!(node, cap_name, owner_scope)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = build_declare_mutable_fix(cap_name, owner_scope)
     return error!(node, :CAPTURE_IMMUTABLE_AS_MUTABLE, name: cap_name) unless fix
     fixable!(node,
@@ -613,6 +624,7 @@ module FixableHelper
   # before the function's `->` arrow so the compiler knows to accept
   # the polymorphic return.
   def emit_ambiguous_return_error!(fn_node, found_returns)
+    T.bind(self, SemanticAnnotator) rescue nil
     arrow = fn_node.arrow_token
     fix = nil
     if arrow
@@ -638,6 +650,7 @@ module FixableHelper
   # confidence because PARTIAL MATCH is strictly a superset (allows
   # DEFAULT, allows guards, doesn't require exhaustiveness).
   def emit_match_partial_fix!(match_node, code, **kwargs)
+    T.bind(self, SemanticAnnotator) rescue nil
     tok = match_node.token
     fix = nil
     if tok
@@ -663,6 +676,7 @@ module FixableHelper
   # values the compiler considers copy-eligible at runtime; user can
   # decline and add a lifetime annotation instead.
   def emit_return_borrowed_no_copy_error!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = nil
     if node.token
       tok = node.token
@@ -688,6 +702,7 @@ module FixableHelper
   # locates the declaration and inserts `MUTABLE ` at its column —
   # same shape as emit_immutable_assignment_error!.
   def emit_with_restrict_immutable_error!(node, var_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     name = var_node.name
     scope = (var_node.symbol&.scope) || current_scope
     fix = build_declare_mutable_fix(name, scope)
@@ -704,6 +719,7 @@ module FixableHelper
   # Falls back to plain error! when the name token isn't available
   # (e.g. synthesized fns).
   def emit_style_mutable_param_needs_bang!(fn_node)
+    T.bind(self, SemanticAnnotator) rescue nil
     name = fn_node.name
     name_tok = fn_node.name_token
     fix = nil
@@ -730,6 +746,7 @@ module FixableHelper
   # implemented. :auto fix replaces the prefix sigil with `@service`
   # (OS-thread spawn — supported today, same compile-time guarantee).
   def emit_can_smash_unsupported_error!(node)
+    T.bind(self, SemanticAnnotator) rescue nil
     fix = nil
     tok = node.respond_to?(:can_smash_token) ? node.can_smash_token : nil
     if tok
@@ -757,6 +774,7 @@ module FixableHelper
   # (Literal nodes carry a token for the start; the value's textual
   # length is known from the parsed token's value).
   def emit_type_mismatch_assign_error!(node, target_type, value_type)
+    T.bind(self, SemanticAnnotator) rescue nil
     kw = { got: value_type, expected: target_type }
     value = node.value
     fix = build_cast_wrap_fix(value, target_type)
@@ -774,6 +792,7 @@ module FixableHelper
   # and bare Identifier references. Anything else (binary expr,
   # function call) gets nil so the caller falls back to plain error!.
   def build_cast_wrap_fix(value, target_type)
+    T.bind(self, SemanticAnnotator) rescue nil
     return nil unless value
     return nil unless value.token
     tok = value.token

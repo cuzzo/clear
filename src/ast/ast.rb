@@ -1,3 +1,4 @@
+# typed: true
 require_relative "type"
 require_relative "schemas"
 
@@ -40,10 +41,10 @@ module AST
     when VarDecl, BindExpr, Assignment, ReturnNode
       _expr_each_bg_block_recursive(node.value, &block)
     when FuncCall
-      node.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      node.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
     when MethodCall
       _expr_each_bg_block_recursive(node.object, &block)
-      node.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      node.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
     end
   end
 
@@ -54,10 +55,10 @@ module AST
       yield expr
       each_bg_block(expr.body, &block)
     when FuncCall
-      expr.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      expr.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
     when MethodCall
       _expr_each_bg_block_recursive(expr.object, &block)
-      expr.args&.each { |a| _expr_each_bg_block_recursive(a, &block) }
+      expr.args.each { |a| _expr_each_bg_block_recursive(a, &block) }
     end
   end
 
@@ -75,10 +76,10 @@ module AST
     when VarDecl, BindExpr, Assignment
       _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     when FuncCall
-      stmt.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
     when MethodCall
       _expr_each_bg_block_shallow(stmt.object, &block)
-      stmt.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      stmt.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
     when ReturnNode
       _expr_each_bg_block_shallow(stmt.value, &block) if stmt.respond_to?(:value)
     end
@@ -91,10 +92,10 @@ module AST
       yield expr
       # Stop here -- do not descend into BG body.
     when FuncCall
-      expr.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      expr.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
     when MethodCall
       _expr_each_bg_block_shallow(expr.object, &block)
-      expr.args&.each { |a| _expr_each_bg_block_shallow(a, &block) }
+      expr.args.each { |a| _expr_each_bg_block_shallow(a, &block) }
     end
   end
 
@@ -112,7 +113,7 @@ module AST
     end
     walk_body(body) do |node|
       if node.is_a?(DoBlock)
-        node.branches&.each do |b|
+        node.branches.each do |b|
           yield b[:capture_analysis] if b[:capture_analysis]
         end
       end
@@ -135,10 +136,10 @@ module AST
     when ReturnNode
       _expr_each_concurrent_capture(node.value, &block) if node.respond_to?(:value)
     when FuncCall
-      node.args&.each { |a| _expr_each_concurrent_capture(a, &block) }
+      node.args.each { |a| _expr_each_concurrent_capture(a, &block) }
     when MethodCall
       _expr_each_concurrent_capture(node.object, &block)
-      node.args&.each { |a| _expr_each_concurrent_capture(a, &block) }
+      node.args.each { |a| _expr_each_concurrent_capture(a, &block) }
     end
   end
 
@@ -246,6 +247,7 @@ module AST
     # @return [Symbol] The storage location
     #
     def finalize_storage!(final_type, &schema_lookup)
+      T.bind(self, T.untyped) rescue nil
       # Calculate slot size
       type_obj = Type.new(final_type)
       @slot_size = type_obj.slot_size(&schema_lookup)
@@ -956,7 +958,7 @@ module AST
   DoBlock           = Struct.new(:token, :branches) do
     include Locatable
     include HasBodies
-    def child_bodies = (branches || []).filter_map { |b| b[:body] }
+    def child_bodies = branches.filter_map { |b| b[:body] }
   end
 
   # BgBlock: background execution — spawns a fiber and returns a linear Promise (~T).
@@ -1032,7 +1034,7 @@ module AST
     include Locatable
     include HasBodies
     def child_bodies
-      bodies = (cases || []).filter_map { |c| c[:body] }
+      bodies = cases.filter_map { |c| c[:body] }
       bodies << default_case if default_case
       bodies
     end

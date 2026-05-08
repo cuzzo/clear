@@ -1,3 +1,4 @@
+# typed: true
 # frozen_string_literal: true
 
 # CaptureStrategy -- classifies how a BG (and other fiber-like) capture

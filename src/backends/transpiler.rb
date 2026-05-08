@@ -1,3 +1,4 @@
+# typed: true
 #! /usr/bin/env ruby
 
 require 'bundler/setup' # so `bundle exec` not needed

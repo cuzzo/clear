@@ -126,7 +126,7 @@ class FunctionCFG
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)
 
-        body_exit = build_body(stmt.body || [], body_block, exit_target, cfg)
+        body_exit = build_body(stmt.body, body_block, exit_target, cfg)
         body_exit&.add_successor(current_block)    # loop back
         body_exit&.add_successor(after_block)      # done
 
@@ -136,7 +136,7 @@ class FunctionCFG
         current_block.stmts << stmt
         join_block = cfg.new_block
 
-        (stmt.cases || []).each do |c|
+        stmt.cases.each do |c|
           case_block = cfg.new_block
           current_block.add_successor(case_block)
           case_exit = build_body(c[:body] || [], case_block, exit_target, cfg)
@@ -157,14 +157,14 @@ class FunctionCFG
         after_block = cfg.new_block
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)  # WITH can fail to acquire
-        body_exit = build_body(stmt.body || [], body_block, exit_target, cfg)
+        body_exit = build_body(stmt.body, body_block, exit_target, cfg)
         body_exit.add_successor(after_block) if body_exit
         current_block = after_block
 
       when AST::DoBlock
         current_block.stmts << stmt
         join_block = cfg.new_block
-        (stmt.branches || []).each do |b|
+        stmt.branches.each do |b|
           branch_block = cfg.new_block
           current_block.add_successor(branch_block)
           branch_exit = build_body(b[:body] || [], branch_block, exit_target, cfg)
@@ -179,7 +179,7 @@ class FunctionCFG
         after_block = cfg.new_block
         current_block.add_successor(body_block)
         current_block.add_successor(after_block)
-        build_body(stmt.body || [], body_block, exit_target, cfg)
+        build_body(stmt.body, body_block, exit_target, cfg)
         # BG body runs in separate fiber -- no fall-through back to parent
         current_block = after_block
 
@@ -1437,7 +1437,7 @@ module LoopFrameAnalysis
     return unless node
     ti = node.type_info rescue nil
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    return unless ti&.string?
+    return unless ti.is_a?(Type) && ti.string?
     return if ti.heap_provenance?  # already heap
     case node
     when AST::BinaryOp
@@ -1809,7 +1809,7 @@ class BorrowChecker
     if source.is_a?(AST::Identifier)
       ti = source.type_info rescue nil
       ti = Type.new(ti) if ti && !ti.is_a?(Type)
-      return if ti&.shared?
+      return if ti.is_a?(Type) && ti.shared?
       names << source.name.to_s
       return
     end

@@ -1,3 +1,4 @@
+# typed: true
 require_relative "../ast/ast"
 require_relative "../ast/type"
 
@@ -37,7 +38,7 @@ class StringConcatRewriter
   def rewrite_children!(node)
     case node
     when AST::FunctionDef
-      node.body&.map!.with_index { |s, _| rewrite_in_node!(s) }
+      node.body.map!.with_index { |s, _| rewrite_in_node!(s) }
     when AST::VarDecl, AST::BindExpr
       node.value = rewrite_in_node!(node.value) if node.value
     when AST::Assignment
@@ -48,18 +49,18 @@ class StringConcatRewriter
       node.then_branch&.map! { |s| rewrite_in_node!(s) }
       node.else_branch&.map! { |s| rewrite_in_node!(s) }
     when AST::MatchStatement
-      (node.cases || []).each { |c| c[:body]&.map! { |s| rewrite_in_node!(s) } }
+      node.cases.each { |c| c[:body]&.map! { |s| rewrite_in_node!(s) } }
       node.default_case.map! { |s| rewrite_in_node!(s) } if node.default_case
     when AST::WhileLoop
       b = node.do_branch
       b.map! { |s| rewrite_in_node!(s) } if b.is_a?(Array)
     when AST::ForRange, AST::ForEach
-      node.body&.map! { |s| rewrite_in_node!(s) }
+      node.body.map! { |s| rewrite_in_node!(s) }
     when AST::BinaryOp
       node.left = rewrite_in_node!(node.left) if node.left
       node.right = rewrite_in_node!(node.right) if node.right
     when AST::FuncCall, AST::MethodCall
-      node.args&.map! { |a| rewrite_in_node!(a) }
+      node.args.map! { |a| rewrite_in_node!(a) }
     when AST::StructLit
       node.fields.each { |k, v| node.fields[k] = rewrite_in_node!(v) }
     end

@@ -1,3 +1,4 @@
+# typed: true
 # Typed schemas for declared types stored in Scope.
 #
 # Replaces the hash-as-struct pattern where every type's schema was a
@@ -10,9 +11,16 @@
 # Until all kinds (struct, union, resource) move out of Hash, callers
 # may see EITHER a typed schema or a Hash, and must handle both.
 module Schemas
-  EnumSchema = Data.define(:variants, :visibility) do
+  # Plain classes (not Data.define) so Sorbet's 4010 doesn't fire on
+  # the kwarg-only initialize signatures we need for default values.
+  # Frozen at the end of initialize so callers still see immutable shapes.
+
+  class EnumSchema
+    attr_reader :variants, :visibility
     def initialize(variants:, visibility: :package)
-      super
+      @variants = variants
+      @visibility = visibility
+      freeze
     end
   end
 
@@ -21,9 +29,17 @@ module Schemas
   # Used for the 3 hand-written runtime types (File, TCPServer, TCPClient)
   # and EXTERN STRUCT ... CLOSE forms, which can carry generic type params,
   # an extern module name, and an AS alias.
-  ResourceSchema = Data.define(:close_zig, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility) do
+  class ResourceSchema
+    attr_reader :close_zig, :static_methods, :fields, :type_params, :extern_module, :as_type, :visibility
     def initialize(close_zig:, static_methods: {}, fields: {}, type_params: nil, extern_module: nil, as_type: nil, visibility: :package)
-      super
+      @close_zig = close_zig
+      @static_methods = static_methods
+      @fields = fields
+      @type_params = type_params
+      @extern_module = extern_module
+      @as_type = as_type
+      @visibility = visibility
+      freeze
     end
   end
 
@@ -33,9 +49,13 @@ module Schemas
   # struct variants. The variant-level Hash (inline_struct shape) is
   # itself a hash-as-struct that hasn't been extracted yet — that's a
   # smaller, per-variant scope and can wait.
-  UnionSchema = Data.define(:variants, :type_params, :visibility) do
+  class UnionSchema
+    attr_reader :variants, :type_params, :visibility
     def initialize(variants:, type_params: nil, visibility: :package)
-      super
+      @variants = variants
+      @type_params = type_params
+      @visibility = visibility
+      freeze
     end
   end
 
@@ -44,9 +64,18 @@ module Schemas
   # produced by the parser, kept here unflattened for now. Metadata (defaults,
   # borrowed-set, generic type params, methods, EXTERN module, AS alias type,
   # visibility) live as named attrs rather than mixed Symbol keys in fields.
-  StructSchema = Data.define(:fields, :field_defaults, :borrowed_fields, :type_params, :methods, :visibility, :extern_module, :as_type) do
+  class StructSchema
+    attr_reader :fields, :field_defaults, :borrowed_fields, :type_params, :methods, :visibility, :extern_module, :as_type
     def initialize(fields: {}, field_defaults: nil, borrowed_fields: nil, type_params: nil, methods: {}, visibility: :package, extern_module: nil, as_type: nil)
-      super
+      @fields = fields
+      @field_defaults = field_defaults
+      @borrowed_fields = borrowed_fields
+      @type_params = type_params
+      @methods = methods
+      @visibility = visibility
+      @extern_module = extern_module
+      @as_type = as_type
+      freeze
     end
   end
 

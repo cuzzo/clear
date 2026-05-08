@@ -42,6 +42,10 @@ end
 
 class AST::BgBlock
   sig { returns(T.untyped) }
+  def can_smash_token; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def can_smash_token=(value); end
+  sig { returns(T.untyped) }
   def capture_analysis; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def capture_analysis=(value); end
@@ -346,6 +350,10 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def inferred_effects=(value); end
   sig { returns(T.untyped) }
+  def is_method; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def is_method=(value); end
+  sig { returns(T.untyped) }
   def max_depth_n; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def max_depth_n=(value); end
@@ -358,9 +366,21 @@ class AST::FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutual_thunk_plan=(value); end
   sig { returns(T.untyped) }
+  def name_token; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def name_token=(value); end
+  sig { returns(T.untyped) }
   def needs_rt; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def needs_rt=(value); end
+  sig { returns(T.untyped) }
+  def post_clauses; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def post_clauses=(value); end
+  sig { returns(T.untyped) }
+  def pre_clauses; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def pre_clauses=(value); end
   sig { returns(T.untyped) }
   def reentrance_kind; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -547,7 +567,34 @@ class AST::StructLit
   def field_tokens=(value); end
 end
 
+class AST::TestBlock
+  sig { returns(T.untyped) }
+  def after_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_all=(value); end
+  sig { returns(T.untyped) }
+  def after_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_each=(value); end
+  sig { returns(T.untyped) }
+  def before_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_all=(value); end
+  sig { returns(T.untyped) }
+  def before_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_each=(value); end
+  sig { returns(T.untyped) }
+  def lets; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def lets=(value); end
+end
+
 class AST::TestThat
+  sig { returns(T.untyped) }
+  def pending; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def pending=(value); end
   sig { returns(T.untyped) }
   def synthetic_fn; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -570,6 +617,33 @@ class AST::VarDecl
   def mir_binding_entry; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_binding_entry=(value); end
+end
+
+class AST::WhenBlock
+  sig { returns(T.untyped) }
+  def after_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_all=(value); end
+  sig { returns(T.untyped) }
+  def after_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_each=(value); end
+  sig { returns(T.untyped) }
+  def before_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_all=(value); end
+  sig { returns(T.untyped) }
+  def before_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_each=(value); end
+  sig { returns(T.untyped) }
+  def lets; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def lets=(value); end
+  sig { returns(T.untyped) }
+  def tags; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def tags=(value); end
 end
 
 class AST::WhileBindLoop
@@ -675,6 +749,10 @@ class BasicBlock
 end
 
 class BgBlock
+  sig { returns(T.untyped) }
+  def can_smash_token; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def can_smash_token=(value); end
   sig { returns(T.untyped) }
   def capture_analysis; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1116,6 +1194,10 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def inferred_effects=(value); end
   sig { returns(T.untyped) }
+  def is_method; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def is_method=(value); end
+  sig { returns(T.untyped) }
   def max_depth_n; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def max_depth_n=(value); end
@@ -1128,9 +1210,21 @@ class FunctionDef
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutual_thunk_plan=(value); end
   sig { returns(T.untyped) }
+  def name_token; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def name_token=(value); end
+  sig { returns(T.untyped) }
   def needs_rt; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def needs_rt=(value); end
+  sig { returns(T.untyped) }
+  def post_clauses; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def post_clauses=(value); end
+  sig { returns(T.untyped) }
+  def pre_clauses; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def pre_clauses=(value); end
   sig { returns(T.untyped) }
   def reentrance_kind; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1561,9 +1655,17 @@ class SymbolEntry
   sig { params(value: T.untyped).returns(T.untyped) }
   def mutable=(value); end
   sig { returns(T.untyped) }
+  def mutated; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def mutated=(value); end
+  sig { returns(T.untyped) }
   def ownership_kind; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def ownership_kind=(value); end
+  sig { returns(T.untyped) }
+  def param_decl_token; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def param_decl_token=(value); end
   sig { returns(T.untyped) }
   def poly_borrow_target; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1622,7 +1724,60 @@ class SymbolEntry
   def valid=(value); end
 end
 
+class TestBlock
+  sig { returns(T.untyped) }
+  def after_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_all=(value); end
+  sig { returns(T.untyped) }
+  def after_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_each=(value); end
+  sig { returns(T.untyped) }
+  def before_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_all=(value); end
+  sig { returns(T.untyped) }
+  def before_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_each=(value); end
+  sig { returns(T.untyped) }
+  def lets; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def lets=(value); end
+end
+
+class TestBlockCtx
+  sig { returns(T.untyped) }
+  def setup_mir; end
+  sig { returns(T.untyped) }
+  def test_after_each_mir; end
+  sig { returns(T.untyped) }
+  def test_before_each_mir; end
+  sig { returns(T.untyped) }
+  def test_block; end
+  sig { returns(T.untyped) }
+  def test_name; end
+end
+
+class TestLowering::TestBlockCtx
+  sig { returns(T.untyped) }
+  def setup_mir; end
+  sig { returns(T.untyped) }
+  def test_after_each_mir; end
+  sig { returns(T.untyped) }
+  def test_before_each_mir; end
+  sig { returns(T.untyped) }
+  def test_block; end
+  sig { returns(T.untyped) }
+  def test_name; end
+end
+
 class TestThat
+  sig { returns(T.untyped) }
+  def pending; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def pending=(value); end
   sig { returns(T.untyped) }
   def synthetic_fn; end
   sig { params(value: T.untyped).returns(T.untyped) }
@@ -1630,6 +1785,10 @@ class TestThat
 end
 
 class Type
+  sig { returns(T.untyped) }
+  def auto_token; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def auto_token=(value); end
   sig { returns(T.untyped) }
   def capacity; end
   sig { returns(T.untyped) }
@@ -1679,6 +1838,10 @@ class Type
   sig { params(value: T.untyped).returns(T.untyped) }
   def ownership=(value); end
   sig { returns(T.untyped) }
+  def polymorphic_shared; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def polymorphic_shared=(value); end
+  sig { returns(T.untyped) }
   def provenance; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def provenance=(value); end
@@ -1719,6 +1882,33 @@ class VarDecl
   def mir_binding_entry; end
   sig { params(value: T.untyped).returns(T.untyped) }
   def mir_binding_entry=(value); end
+end
+
+class WhenBlock
+  sig { returns(T.untyped) }
+  def after_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_all=(value); end
+  sig { returns(T.untyped) }
+  def after_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def after_each=(value); end
+  sig { returns(T.untyped) }
+  def before_all; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_all=(value); end
+  sig { returns(T.untyped) }
+  def before_each; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def before_each=(value); end
+  sig { returns(T.untyped) }
+  def lets; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def lets=(value); end
+  sig { returns(T.untyped) }
+  def tags; end
+  sig { params(value: T.untyped).returns(T.untyped) }
+  def tags=(value); end
 end
 
 class WhileBindLoop

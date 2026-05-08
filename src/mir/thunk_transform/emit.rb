@@ -1,3 +1,4 @@
+# typed: true
 # thunk_transform/emit.rb -- Zig codegen for the simple-recurrence
 # THUNK shape detected by Phase 4c.
 #
@@ -76,6 +77,7 @@ module ThunkTransform
     # Returns a String -- inserted into the function via a single
     # MIR::RawZig node.
     def emit_trampoline(fn_node, lowering)
+      T.bind(self, T.untyped) rescue nil
       plan = fn_node.thunk_plan
       raise ArgumentError, "fn '#{fn_node.name}' has no thunk_plan" if plan.nil?
       ret_zig = ret_zig_type(fn_node, lowering)
@@ -159,6 +161,7 @@ module ThunkTransform
     # Lines that handle "frame finished -- return or pop to parent".
     # Same shape for both base case and combine branches.
     def return_or_pop_lines(_ret_zig)
+      T.bind(self, T.untyped) rescue nil
       <<~ZIG.chomp
                             if (current.parent) |p| {
                                 p.child_result = result;
@@ -174,16 +177,19 @@ module ThunkTransform
     # MIRLowering (mirrors fsm_transform/recursive_splitter.rb's
     # pattern).
     def render_expr(ast_expr, lowering)
+      T.bind(self, T.untyped) rescue nil
       mir = lowering.lower(ast_expr)
       lowering.send(:emit_expr, mir)
     end
 
     def param_zig_type(param, _lowering)
+      T.bind(self, T.untyped) rescue nil
       type = param[:type]
       type.respond_to?(:zig_type) ? type.zig_type : type.to_s
     end
 
     def ret_zig_type(fn_node, _lowering)
+      T.bind(self, T.untyped) rescue nil
       rt = fn_node.return_type
       return "void" if rt.nil?
       rt.respond_to?(:zig_type) ? rt.zig_type : rt.to_s
@@ -203,6 +209,7 @@ module ThunkTransform
     # fix; this guard fails loudly so the extension can't ship the
     # leak silently.
     def assert_non_fallible_ret!(fn_node, ret_zig)
+      T.bind(self, T.untyped) rescue nil
       return unless ret_zig.start_with?("!")
       raise "INTERNAL: THUNK trampoline for '#{fn_node.name}' has fallible " \
             "return type (#{ret_zig.inspect}). The current codegen frees " \
@@ -219,6 +226,7 @@ module ThunkTransform
     # identifiers as their bare Zig names; we substitute them here
     # via a word-boundary regex sweep.
     def qualify_params(zig_text, fn_node)
+      T.bind(self, T.untyped) rescue nil
       out = zig_text.dup
       (fn_node.params || []).each do |p|
         name = p[:name]
@@ -254,6 +262,7 @@ module ThunkTransform
     # different starting variant). Callers reach the cycle through
     # the public fn name they actually call.
     def emit_mutual_trampoline(fn_node, lowering)
+      T.bind(self, T.untyped) rescue nil
       mtp = fn_node.mutual_thunk_plan
       raise ArgumentError, "fn '#{fn_node.name}' has no mutual_thunk_plan" if mtp.nil?
 
@@ -295,6 +304,7 @@ module ThunkTransform
     # params; emit base cases (early returns) and the tail
     # transition that overwrites `current` with the partner variant.
     def emit_mutual_arm(cf, _mtp, ret_zig, lowering)
+      T.bind(self, T.untyped) rescue nil
       own_plan = cf.mutual_thunk_plan.own_plan
 
       base_branches = own_plan.base_cases.map { |bc|
@@ -328,6 +338,7 @@ module ThunkTransform
     end
 
     def find_cycle_member(cf, name)
+      T.bind(self, T.untyped) rescue nil
       cf.mutual_thunk_plan.cycle_fns.find { |x| x.name == name } or
         raise "thunk: cycle member '#{name}' not found for '#{cf.name}'"
     end
@@ -335,6 +346,7 @@ module ThunkTransform
     # Mutual variant: bare param refs become `f.<name>` (the switch
     # capture binds the active variant's payload to `f`).
     def qualify_with_f(zig_text, cf)
+      T.bind(self, T.untyped) rescue nil
       out = zig_text.dup
       (cf.params || []).each do |p|
         name = p[:name]
@@ -346,6 +358,7 @@ module ThunkTransform
     # Phase 4d's stub for the legacy entry; kept so future wider-
     # shape passes have a consistent name.
     def build(segments, liveness, lowering, ctx)
+      T.bind(self, T.untyped) rescue nil
       _ = segments
       _ = liveness
       _ = lowering

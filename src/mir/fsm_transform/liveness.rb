@@ -1,3 +1,4 @@
+# typed: true
 # fsm_transform/liveness.rb -- live-variable analysis across
 # segment boundaries.
 #

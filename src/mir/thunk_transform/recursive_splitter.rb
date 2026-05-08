@@ -1,3 +1,4 @@
+# typed: true
 # thunk_transform/recursive_splitter.rb -- AST -> segment graph
 # splitter for `:reentrant_thunk` function bodies.
 #
@@ -83,6 +84,7 @@ module ThunkTransform
     # caller still errors -- pattern detection alone doesn't make
     # the function compilable.
     def split(body, fn_name, lowering)
+      T.bind(self, T.untyped) rescue nil
       _ = lowering # Phase 4c does pure AST inspection; no lowering needed yet.
       return nil if body.nil? || body.empty?
 
@@ -128,6 +130,7 @@ module ThunkTransform
     # call to ANY cycle member, or if the final return isn't a
     # direct call to a partner.
     def split_mutual(body, fn_name, partner_names, lowering)
+      T.bind(self, T.untyped) rescue nil
       _ = lowering
       return nil if body.nil? || body.empty?
       cycle = (Array(partner_names) + [fn_name]).map(&:to_s).to_set
@@ -159,6 +162,7 @@ module ThunkTransform
     # where neither cond nor expr contains ANY call to a cycle member
     # (self or partner). The cycle set includes the current fn name.
     def match_mutual_base_case(stmt, cycle_names)
+      T.bind(self, T.untyped) rescue nil
       return nil unless stmt.is_a?(AST::IfStatement)
       return nil if stmt.else_branch && !stmt.else_branch.empty?
       then_b = stmt.then_branch || []
@@ -173,14 +177,16 @@ module ThunkTransform
     # `partner_fn(args...)` directly (not nested), where partner_fn is
     # one of the named partners. Returns { name:, args: } or nil.
     def match_tail_mutual_call(node, partner_names)
+      T.bind(self, T.untyped) rescue nil
       return nil unless node.is_a?(AST::FuncCall)
       partners = Array(partner_names).map(&:to_s).to_set
       return nil unless partners.include?(node.name.to_s)
-      { name: node.name.to_s, args: node.args || [] }
+      { name: node.name.to_s, args: node.args }
     end
 
     # Like contains_self_call? but for a SET of fn names.
     def contains_any_call?(node, names_set)
+      T.bind(self, T.untyped) rescue nil
       return false if node.nil?
       names = names_set.is_a?(Set) ? names_set : Array(names_set).map(&:to_s).to_set
       if node.is_a?(AST::FuncCall) && names.include?(node.name.to_s)
@@ -199,6 +205,7 @@ module ThunkTransform
     # block IF forms parse to AST::IfStatement; the body is a
     # single-element list with the RETURN.
     def match_base_case(stmt, fn_name)
+      T.bind(self, T.untyped) rescue nil
       return nil unless stmt.is_a?(AST::IfStatement)
       return nil if stmt.else_branch && !stmt.else_branch.empty?
       then_b = stmt.then_branch || []
@@ -220,6 +227,7 @@ module ThunkTransform
     SUPPORTED_OPS = [:ADD, :SUB, :MUL, :DIV].freeze
 
     def match_recursive_combine(expr, fn_name)
+      T.bind(self, T.untyped) rescue nil
       return nil unless expr.is_a?(AST::BinaryOp)
       return nil unless SUPPORTED_OPS.include?(expr.op)
 
@@ -238,13 +246,15 @@ module ThunkTransform
     # If `node` is exactly `fn_name(args...)`, return its args.
     # Returns nil otherwise (including for nested self-calls).
     def direct_self_call(node, fn_name)
+      T.bind(self, T.untyped) rescue nil
       return nil unless node.is_a?(AST::FuncCall) && node.name == fn_name
-      node.args || []
+      node.args
     end
 
     # Recursive subtree walk: returns true iff any AST::FuncCall
     # whose name == fn_name appears anywhere under `node`.
     def contains_self_call?(node, fn_name)
+      T.bind(self, T.untyped) rescue nil
       return false if node.nil?
       return true if node.is_a?(AST::FuncCall) && node.name == fn_name
       if node.respond_to?(:each_pair)

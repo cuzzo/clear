@@ -1,3 +1,4 @@
+# typed: true
 require_relative "rpc"
 require_relative "logger"
 require_relative "document_store"
@@ -55,7 +56,7 @@ module LSP
       exit_code = 1
       Kernel.exit(exit_code)
     rescue => e
-      @logger.error("fatal: #{e.class}: #{e.message}\n  #{e.backtrace.first(5).join("\n  ")}")
+      @logger.error("fatal: #{e.class}: #{e.message}\n  #{T.must(e.backtrace).first(5).join("\n  ")}")
       Kernel.exit(1)
     end
 
@@ -64,9 +65,9 @@ module LSP
     # via `exit` notification — but tests use it to step past the
     # debounce window deterministically.
     def flush_pending!
-      threads = nil
+      threads = T.let(nil, T.nilable(T::Array[Thread]))
       @timer_mutex.synchronize { threads = @timers.values.dup }
-      threads.each(&:join)
+      T.must(threads).each(&:join)
     end
 
     private

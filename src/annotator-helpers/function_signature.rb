@@ -1,3 +1,4 @@
+# typed: true
 # Structured representation of a function's external interface.
 # Replaces the plain Hash that was previously used for function signatures.
 #

@@ -1,3 +1,4 @@
+# typed: true
 require "set"
 require_relative "./symbol_entry"
 
@@ -195,10 +196,12 @@ class Scope
     entry.reg&.tap { |r| r.var_used = true if r.respond_to?(:var_used=) }
   end
 
+  # Returns the new SymbolEntry on success, nil if the binding wasn't found
+  # in the cap's old_scope (caller is responsible for emitting a diagnostic).
   def declare_with_new_capability(capability)
     name = capability[:var_node].name
     local = capability[:old_scope].locals[name]
-    error!("Cannot add capability: #{name}") if local.nil?
+    return nil if local.nil?
     local = local.dup
     # Whole-variable or field restriction: add capability marker.
     # Borrow conflict detection is handled by the OwnershipGraph.
@@ -208,7 +211,7 @@ class Scope
 
   def get_path_to_root(node)
     path = []
-    curr = node
+    curr = T.let(node, T.untyped)
     while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
       if curr.is_a?(AST::GetField)
         path.unshift(curr.field.to_sym)

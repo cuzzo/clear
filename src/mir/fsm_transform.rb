@@ -1,3 +1,4 @@
+# typed: true
 # fsm_transform.rb -- Universal CPS transform for FSM-eligible BG bodies.
 #
 # Per CLAUDE.md Invariant 13, FSM emission is ONE general transform.
@@ -53,6 +54,7 @@ module FsmTransform
   #   :inner_zig, :is_void, :arena_init_flag, :id, :bg_rt,
   #   :ctx_type, :promise_zig, :blk_label, :capture_fields
   def transform(bg_block, ctx, lowering)
+    T.bind(self, T.untyped) rescue nil
     suspend_points = bg_block.fsm_suspend_points || []
 
     # The recursive splitter + Emit.build_recursive is the SOLE
@@ -127,8 +129,10 @@ module FsmTransform
   # segment boundaries resolve via the capture_map. Returns
   # `[{ name:, zig_type: }, ...]` (deduped on name).
   def collect_body_locals(stmts)
+    T.bind(self, T.untyped) rescue nil
     out = []
     seen = {}
+    visit = T.let(nil, T.untyped)
     visit = lambda do |node|
       case node
       when Array
@@ -174,10 +178,9 @@ module FsmTransform
           # type (map's `k` is the KEY type, not element_type which
           # is the value type). Falls back to element_type for
           # collections that don't set var_zig_type.
-          desc = ct.respond_to?(:fsm_foreach_descriptor) ?
-                   ct.fsm_foreach_descriptor : nil
+          desc = ct.is_a?(Type) ? ct.fsm_foreach_descriptor : nil
           elem_zig = (desc && desc[:var_zig_type]) || begin
-            elem_t = ct&.respond_to?(:element_type) ? ct.element_type : nil
+            elem_t = ct.is_a?(Type) ? ct.element_type : nil
             elem_t ? Type.new(elem_t).zig_type : "anyopaque"
           end
           seen[node.var_name] = true
@@ -203,6 +206,7 @@ module FsmTransform
   # purely linear bodies skip this and let Liveness over-promote
   # nothing.
   def body_needs_conservative?(stmts)
+    T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
       case s
       when AST::WithBlock then true
@@ -223,6 +227,7 @@ module FsmTransform
   end
 
   def contains_suspend_anywhere?(stmts)
+    T.bind(self, T.untyped) rescue nil
     Array(stmts).any? do |s|
       next true if Segments.classify_suspend(s)
       case s
@@ -242,6 +247,7 @@ module FsmTransform
   # ctx_field_decls. Used by collect_body_locals to avoid
   # double-declaring the result var.
   def suspend_value?(value)
+    T.bind(self, T.untyped) rescue nil
     return true if value.is_a?(AST::NextExpr)
     return false unless value.is_a?(AST::FuncCall) || value.is_a?(AST::MethodCall)
     md = value.matched_stdlib_def
@@ -249,6 +255,7 @@ module FsmTransform
   end
 
   def local_entry(name, type_obj)
+    T.bind(self, T.untyped) rescue nil
     return nil if name.nil?
     t = type_obj ? Type.new(type_obj) : nil
     zig_t = t ? t.zig_type : "anyopaque"

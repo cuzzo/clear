@@ -1,3 +1,4 @@
+# typed: true
 # src/mir_emitter.rb -- MIR -> Zig template engine.
 #
 # CONTRACT: This file is a pure template engine. Each MIR node type maps to

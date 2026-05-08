@@ -1,3 +1,4 @@
+# typed: true
 require "json"
 
 module LSP
@@ -26,6 +27,7 @@ module LSP
     # nil at EOF (clean shutdown). Raises FramingError on malformed
     # frames.
     def read_message(io)
+      T.bind(self, T.untyped) rescue nil
       headers = read_headers(io)
       return nil if headers.nil?  # EOF before any header line
 
@@ -45,6 +47,7 @@ module LSP
 
     # Write `msg` (a Hash) as an LSP frame to `io`.
     def write_message(io, msg)
+      T.bind(self, T.untyped) rescue nil
       body = JSON.generate(msg)
       io.write("Content-Length: #{body.bytesize}\r\n\r\n#{body}")
       io.flush
@@ -56,8 +59,9 @@ module LSP
     # of lowercased header names → values, or nil at EOF before any
     # header line was read.
     def read_headers(io)
+      T.bind(self, T.untyped) rescue nil
       headers = {}
-      first = true
+      first = T.let(true, T::Boolean)
       loop do
         line = io.gets
         return nil if line.nil? && first

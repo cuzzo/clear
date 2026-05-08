@@ -1,3 +1,4 @@
+# typed: true
 module LSP
   # Stderr logger. LSP clients display the server's stderr — never
   # write log output to stdout (that's reserved for JSON-RPC frames).

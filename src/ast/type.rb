@@ -1,3 +1,4 @@
+# typed: true
 require_relative "../annotator-helpers/function_signature"
 
 # Result struct for binary operation type resolution
@@ -361,7 +362,7 @@ class Type
 
   INT_TYPE_MAX = {
     Byte: 255, UInt8: 255, UInt16: 65_535, UInt32: 4_294_967_295,
-    UInt64: 18_446_744_073_709_551_615,
+    UInt64: (2**64) - 1,
     Int8: 127, Int16: 32_767, Int32: 2_147_483_647, Int64: 9_223_372_036_854_775_807,
   }.freeze
   INT_TYPE_MIN = {
@@ -1012,18 +1013,22 @@ class Type
     # internal "BYPASS at <ruby caller>" debug raise.
     if @observable_terminal.nil?
       raise CompilerError.new(
+        nil,
         "Internal: Type#observable_wrapper_zig called on `#{self.to_s}` " \
         "without an observable_terminal stamp. The terminal kind " \
         "(:sum / :count / :max / :min / :avg / :any / :all / :find / :reduce / :distinct) " \
         "is set by pipe_analysis's mark_observable_terminal! at fold-pipe analysis " \
         "time; reaching here means an `@observable` Type was constructed by a path " \
         "that bypasses that analyzer.",
+        nil,
       )
     end
     builder = self.class.observable_wrappers[@observable_terminal] or
       raise CompilerError.new(
+        nil,
         "Internal: unknown observable terminal kind #{@observable_terminal.inspect}. " \
         "Add an entry to Type.observable_terminals in src/ast/type.rb.",
+        nil,
       )
     builder.call(tense_type)
   end
@@ -1719,8 +1724,8 @@ class Type
     return [str, nil, nil] unless str.include?("@")
 
     base, *caps = str.gsub(/\s+/, "").split("@")
-    ownership = nil
-    sync = nil
+    ownership = T.let(nil, T.nilable(Symbol))
+    sync = T.let(nil, T.nilable(Symbol))
     caps.flat_map { |cap| cap.split(":") }.each do |cap|
       case cap
       when "shared" then ownership = :shared
@@ -2062,6 +2067,7 @@ module TypeHelper
   # unary negations (e.g. -200). Errors if the value does not fit in the effective
   # target type. No-op for non-integer or non-literal nodes.
   def check_prefixed_int_range!(node, effective_type)
+    T.bind(self, SemanticAnnotator) rescue nil
     val = if node.is_a?(AST::Literal) && (node.type == :PREFIXED_INT || node.type == :INT64)
       node.value
     elsif node.is_a?(AST::UnaryOp) && node.op == :SUB &&

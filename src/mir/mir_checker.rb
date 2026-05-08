@@ -1,3 +1,4 @@
+# typed: true
 # mir_checker.rb -- Post-lowering MIR verification.
 #
 # THE INVARIANTS THIS CHECKER ENFORCES (and nothing else):

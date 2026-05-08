@@ -1,3 +1,4 @@
+# typed: true
 require_relative "ast/source_error"
 require_relative "ast/fixable_error"
 require_relative "ast/scope"
@@ -1513,7 +1514,7 @@ private
     # Auto-TAKES: when ALL cases have AS bindings and the DEFAULT doesn't use
     # the source, the source can be consumed. This prevents heap data sharing
     # between source and extracted binding (double-free/leak).
-    auto_takes = false
+    auto_takes = T.let(false, T.untyped)
     if !node.takes && is_union && node.expr.is_a?(AST::Identifier)
       # Check if any AS case extracts a non-Copy payload that would share
       # heap ownership with the source. Strings are Copy in CLEAR, so
@@ -1543,8 +1544,9 @@ private
         # Check DEFAULT doesn't reference the source value.
         # walk_body only visits statement-level nodes; we need to check
         # expression sub-trees too (e.g. RETURN input; has input inside).
-        default_refs_source = false
+        default_refs_source = T.let(false, T::Boolean)
         if node.default_case
+          check_refs = T.let(nil, T.untyped)
           check_refs = lambda { |n|
             next unless n
             if n.is_a?(AST::Identifier) && n.name == source_name
@@ -2177,7 +2179,7 @@ private
     # resolved decl gets re-validated downstream.
     actual_is_auto = actual_full.respond_to?(:auto?) && actual_full.auto?
     expected_obj   = expected.is_a?(Type) ? expected : (expected ? Type.new(expected) : nil)
-    expected_is_auto = expected_obj.respond_to?(:auto?) && expected_obj.auto?
+    expected_is_auto = expected_obj.is_a?(Type) && expected_obj.auto?
 
     if !actual_is_auto && !expected_is_auto && expected && expected != :Void && expected != :Any && !return_type_compatible?(actual_full, expected)
       error!(node, :RETURN_MISMATCH, expected: type_display(expected), got: type_display(actual_full))
@@ -2607,9 +2609,10 @@ private
       # one of the two via `||=` (H7).
       if target_t.observable_terminal && target_t.observable_terminal != pipe_terminal
         raise CompilerError.new(
+          node.token,
           "Observable terminal mismatch: LHS stamped #{target_t.observable_terminal.inspect}, " \
           "pipe analyzer produced #{pipe_terminal.inspect}",
-          node.location,
+          nil,
         )
       end
       target_t.observable_terminal = pipe_terminal
@@ -2622,9 +2625,10 @@ private
       if node.full_type.is_a?(Type) && node.full_type.observable?
         if node.full_type.observable_terminal && node.full_type.observable_terminal != pipe_terminal
           raise CompilerError.new(
+            node.token,
             "Observable terminal mismatch on full_type: stamped " \
             "#{node.full_type.observable_terminal.inspect}, pipe produced #{pipe_terminal.inspect}",
-            node.location,
+            nil,
           )
         end
         node.full_type.observable_terminal = pipe_terminal
@@ -3023,7 +3027,7 @@ private
     # Get the first argument (object for MethodCall, first arg for FuncCall)
     first_arg = if value_node.is_a?(AST::MethodCall)
       value_node.object
-    elsif value_node.args&.any?
+    elsif value_node.args.any?
       value_node.args.first
     end
     return unless first_arg.is_a?(AST::Identifier)
@@ -3074,7 +3078,7 @@ private
   # doesn't bottom out at one. Used to attribute receiver mutation back to
   # the declared binding.
   def chain_root_name(node)
-    curr = node
+    curr = T.let(node, T.untyped)
     while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
       curr = curr.target
     end
@@ -3320,7 +3324,7 @@ private
     path = get_path_to_root(node)
     if path
       # Check root, then progressively longer sub-paths
-      check = ""
+      check = T.let("", String)
       path.each do |seg|
         check = check.empty? ? seg.to_s : "#{check}.#{seg}"
         if @og.moved?(check)
@@ -3585,7 +3589,7 @@ private
     node.fields.each do |field_name, val_node|
       visit(val_node) # Resolve value type
 
-      raw_expected = schema[field_name]
+      raw_expected = T.let(schema[field_name], T.untyped)
       if raw_expected.nil?
         valid_fields = schema.keys.reject { |k| k == :borrowed_fields || k.to_s.start_with?('_') }
         name_tok = node.field_tokens&.[](field_name)
@@ -3605,11 +3609,11 @@ private
       field_is_borrowed = schema[:borrowed_fields]&.include?(field_name)
 
       # Apply type param substitution (e.g., T → Number, T[] → String[])
-      expected_type = if type_subst.any?
+      expected_type = T.let(if type_subst.any?
         apply_type_subst(raw_expected, type_subst)
       else
         raw_expected
-      end
+      end, T.untyped)
 
       # BORROWED fields accept borrowed values — skip ownership checks.
       # Non-borrowed fields require owned data.
@@ -3620,9 +3624,9 @@ private
       # The struct is a temporary - rodata strings are valid for the call's
       # lifetime. The callee dupes strings it needs to escape.
       is_call_arg = node.instance_variable_get(:@is_call_arg)
-      owned = unless field_is_borrowed || is_call_arg
+      owned = T.let(unless field_is_borrowed || is_call_arg
         ensure_owned_value!(val_node, expected_type, "#{node.name}.#{field_name}")
-      end
+      end, T.untyped)
       if owned
         node.fields[field_name] = owned
         val_node = owned
@@ -4598,7 +4602,7 @@ private
       finalize_scope(node)
     end
     if is_snapshot_txn_body
-      txn_violations = @snapshot_txn_violations || []
+      txn_violations = @snapshot_txn_violations
       @inside_snapshot_txn -= 1
       @snapshot_txn_violations = prev_violations
       unless txn_violations.empty?
@@ -4703,6 +4707,7 @@ private
 
   def retryable_with_fallible_sources(nodes)
     sources = []
+    visit_fallible = T.let(nil, T.untyped)
     visit_fallible = lambda do |n|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -4727,7 +4732,7 @@ private
         visit_fallible.call(n.object)
         n.args.each { |arg| visit_fallible.call(arg) }
       when AST::StaticCall
-        sources << n.name.to_s if retryable_with_call_fallible?(n)
+        sources << n.method_name.to_s if retryable_with_call_fallible?(n)
         n.args.each { |arg| visit_fallible.call(arg) }
       when AST::FreezeNode
         sources << "FREEZE"
@@ -5199,7 +5204,7 @@ private
     prev_bg_pinned = @current_bg_pinned
     @current_bg_pinned = node.pinned
 
-    last_type = :Void
+    last_type = T.let(:Void, T.untyped)
     node.body.each do |expr|
       visit(expr)
       last_type = expr.respond_to?(:full_type) ? (expr.full_type || :Void) : :Void
@@ -5217,7 +5222,7 @@ private
     # is the success type.
     last_type_str = last_type.to_s
     if last_type_str.start_with?('!')
-      last_type = last_type_str[1..].to_sym
+      last_type = T.must(last_type_str[1..]).to_sym
     end
     node.full_type = :"~#{last_type}"
 
@@ -5299,7 +5304,7 @@ private
     # Error propagation: if a step returns !T and has an AS binding, the
     # binding type is T (unwrapped). The error propagates to the BG result
     # via try/errdefer in the generated Zig code.
-    last_type = :Void
+    last_type = T.let(:Void, T.untyped)
     node.steps.each do |step|
       visit(step[:expr])
       step_type = step[:expr].respond_to?(:full_type) ? (step[:expr].full_type || :Void) : :Void
@@ -5414,7 +5419,7 @@ private
   end
 
   def get_root_object(node)
-    curr = node
+    curr = T.let(node, T.untyped)
     while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
       curr = curr.target
     end
@@ -5425,6 +5430,7 @@ private
   # Used by the WHILE loop moved-value check to skip variables not referenced in the body.
   def collect_body_identifier_names(nodes)
     names = Set.new
+    traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -5473,7 +5479,9 @@ private
       if node.is_a?(AST::Assignment) && node.value.is_a?(AST::GetIndex)
         vti = node.value.type_info
         vti = Type.new(vti) if vti && !vti.is_a?(Type)
-        is_copy = vti&.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true
+        is_copy = vti.is_a?(Type) ?
+          (vti.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil } rescue true) :
+          true
         unless is_copy
           container = find_container_source(node.value)
           if container
@@ -5812,7 +5820,7 @@ private
 
   def get_path_to_root(node)
     path = []
-    curr = node
+    curr = T.let(node, T.untyped)
     while curr.is_a?(AST::GetField) || curr.is_a?(AST::GetIndex)
       path.unshift(curr.is_a?(AST::GetField) ? curr.field.to_sym : :*)
       curr = curr.target
@@ -5924,7 +5932,7 @@ private
     # `@shared:locked`. Picks the first atomic source whose
     # decl-line text we can locate; the rest fall through to the
     # plain error path.
-    atomic_fix = nil
+    atomic_fix = T.let(nil, T.untyped)
     sources.each_with_index do |source, idx|
       name = source_names[idx] || lookup_source_name(source) || "(unnamed)"
       f = build_atomic_escape_migration_fix(source, name)
@@ -6171,7 +6179,7 @@ private
       node.each { |n| collect_self_calls(n, fn_name, out) }
     when AST::FuncCall
       out << node if node.name == fn_name
-      (node.args || []).each { |a| collect_self_calls(a, fn_name, out) }
+      node.args.each { |a| collect_self_calls(a, fn_name, out) }
     else
       node.each_pair { |_, v| collect_self_calls(v, fn_name, out) } if node.respond_to?(:each_pair)
     end
@@ -6207,6 +6215,7 @@ private
   # based on the functions they call (transitively via call graph).
 
   def assign_fiber_stack_tiers!(program_node)
+    traverse = T.let(nil, T.untyped)
     traverse = lambda do |n|
       case n
       when nil, Symbol, String, Integer, Float, TrueClass, FalseClass, Type
@@ -6215,8 +6224,8 @@ private
       when Hash
         n.each_value { |v| traverse.call(v) }
       when AST::BgBlock
-        calls = scan_for_calls(n.body).first
-        raw = max_tier_for_calls(calls)
+        calls = T.let(scan_for_calls(n.body).first, T.untyped)
+        raw = T.let(max_tier_for_calls(calls), T.untyped)
         n.computed_stack_tier = (raw == :unbounded) ? :service : raw
         validate_fiber_stack!(n, calls, n.stack_size, n.can_smash)
         n.body.each { |s| traverse.call(s) }
@@ -6440,7 +6449,7 @@ private
 
     ti = node.type_info
     ti = Type.new(ti) if ti && !ti.is_a?(Type)
-    return false if ti&.shared?
+    return false if ti.is_a?(Type) && ti.shared?
 
     true
   end
@@ -6455,7 +6464,7 @@ private
     return unless node.is_a?(AST::Identifier)
     vt = node.type_info
     vt = Type.new(vt) if vt && !vt.is_a?(Type)
-    return if vt.nil?
+    return unless vt.is_a?(Type)
     return if current_fn_ctx&.type_params&.include?(vt.resolved)
     return if vt.implicitly_copyable? { |t| lookup_type_schema(t) rescue nil }
     existing = @og&.nodes&.[](node.name)

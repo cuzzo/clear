@@ -1,3 +1,4 @@
+# typed: true
 # Single source of truth for compiler-emitted diagnostics.
 #
 # Before this file existed, `MESSAGES` (in source_error.rb) held just
@@ -2049,6 +2050,16 @@ module DiagnosticRegistry
       severity: :error, category: :lifetime,
       template: "Lifetime Error: Expected return %{sources_msg}; actual return derived from: %{actual}",
       summary:  "Returned value's lifetime path doesn't match any declared `RETURNS x:T` source.",
+    },
+    RETURN_LIFETIME_NOT_ASSOCIATED: {
+      severity: :error, category: :lifetime,
+      template: "Lifetime Error: Lifetime '%{sources}' specified on return, but returned value is not associated.",
+      summary:  "Function declares a lifetime source on its return, but the returned value's path can't be traced to that source.",
+    },
+    WITH_CAP_BINDING_LOST: {
+      severity: :error, category: :capability,
+      template: "Cannot add capability '%{capability}' to '%{name}': binding not found in its declaring scope.",
+      summary:  "Capability target binding is missing from the scope it was declared in.",
     },
     WITH_EXCLUSIVE_NEEDS_LOCK_GOT: {
       severity: :error, category: :concurrency,

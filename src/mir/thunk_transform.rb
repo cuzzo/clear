@@ -1,3 +1,4 @@
+# typed: true
 # thunk_transform.rb -- CPS transform for `EFFECTS REENTRANT:THUNK`
 # functions.
 #

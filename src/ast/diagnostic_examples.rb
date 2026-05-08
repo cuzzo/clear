@@ -1,3 +1,4 @@
+# typed: true
 require_relative "diagnostic_registry"
 
 # DiagnosticExamples — pulls canonical bad/good CLEAR snippets from
@@ -68,32 +69,33 @@ module DiagnosticExamples
 
   def scan_file(path, out)
     lines = File.readlines(path)
-    i = 0
+    i = T.let(0, Integer)
     while i < lines.length
-      m = lines[i].match(/^\s*#\s*@example_for:\s*([A-Z][A-Z0-9_]+)\s*$/)
+      m = T.must(lines[i]).match(/^\s*#\s*@example_for:\s*([A-Z][A-Z0-9_]+)\s*$/)
       unless m
         i += 1
         next
       end
-      code = m[1].to_sym
-      fix_lines = []
+      code = T.must(m[1]).to_sym
+      fix_lines = T.let([], T::Array[String])
       j = i + 1
       # Collect contiguous @fix: lines (and any blank/comment lines).
       while j < lines.length
-        if lines[j] =~ /^\s*#\s*@fix:\s?(.*)$/
+        line_j = T.must(lines[j])
+        if line_j =~ /^\s*#\s*@fix:\s?(.*)$/
           fix_lines << $1.rstrip
           j += 1
-        elsif lines[j] =~ /^\s*#/ || lines[j].strip.empty?
+        elsif line_j =~ /^\s*#/ || line_j.strip.empty?
           j += 1
         else
           break
         end
       end
-      if j < lines.length && (dm = lines[j].match(/^(\s*)describe\b/))
-        desc_indent = dm[1].length
+      if j < lines.length && (dm = T.must(lines[j]).match(/^(\s*)describe\b/))
+        desc_indent = T.must(dm[1]).length
         desc_end = find_block_end(lines, j, desc_indent)
         if desc_end
-          block = lines[j..desc_end]
+          block = T.must(lines[j..desc_end])
           out[code] = {
             bad:  extract_first_heredoc_in_it(block, expecting_raise: true),
             fix:  fix_lines.join("\n"),
@@ -156,11 +158,11 @@ module DiagnosticExamples
   # and ends at the next line whose only non-whitespace is `CLEAR`.
   def extract_heredoc(body)
     return nil unless body =~ /<<~CLEAR\b/
-    after = $'
+    after = T.must($~).post_match
     # Skip the rest of the marker line (e.g. ` ) }.to raise_error(...)`).
     nl = after.index("\n")
     return nil unless nl
-    after_lines = after[(nl + 1)..].lines
+    after_lines = T.must(after[(nl + 1)..]).lines
     end_idx = after_lines.index { |l| l =~ /^\s*CLEAR\s*$/ }
     return nil unless end_idx
     raw_lines = after_lines[0...end_idx]

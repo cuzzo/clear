@@ -1,3 +1,4 @@
+# typed: true
 require 'set'
 require_relative '../ast/lexer'
 require_relative '../ast/parser'

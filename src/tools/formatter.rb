@@ -1,3 +1,4 @@
+# typed: true
 # CLEAR source formatter.
 #
 # Status: v1.1.

@@ -1,3 +1,4 @@
+# typed: true
 # src/mir.rb - Comprehensive MIR (Mid-level IR) for CLEAR -> Zig compilation
 #
 # Every program construct is represented as an MIR node. The emitter

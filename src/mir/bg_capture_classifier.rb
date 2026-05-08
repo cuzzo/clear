@@ -1,3 +1,4 @@
+# typed: true
 require_relative "capture_strategy"
 require_relative "../ast/scope"
 

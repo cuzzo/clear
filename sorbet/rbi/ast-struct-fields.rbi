@@ -412,7 +412,7 @@ end
 class AST::HashLit
   sig { returns(Token) }
   def token; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T::Hash[T.untyped, T.untyped]) }
   def pairs; end
   sig { returns(T.untyped) }
   def storage; end
@@ -474,7 +474,7 @@ class AST::LambdaLit
   def params; end
   sig { returns(T::Array[T.untyped]) }
   def captures; end
-  sig { returns(T::Array[T.untyped]) }
+  sig { returns(T.untyped) }
   def body; end
   sig { returns(T.untyped) }
   def storage; end

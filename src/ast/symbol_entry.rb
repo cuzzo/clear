@@ -1,3 +1,4 @@
+# typed: true
 # Typed scope entry for Scope.locals.
 # Each entry tracks a variable/function binding with its type, storage, and metadata.
 # Back-references its owning Scope via `scope` for state operations.
