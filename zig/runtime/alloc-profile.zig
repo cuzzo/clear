@@ -13,6 +13,7 @@
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
 const SpinLock = @import("profile-lock.zig").SpinLock;
+const profile_trace = @import("profile-trace.zig");
 
 // Profile-table size; shared default with lock-profile / mvcc-profile.
 // `clear profile --profile-max=N` injects the override into the
@@ -29,8 +30,8 @@ else
 // — comfortably small relative to the Large (60 KB) profile-build
 // fiber stacks. The trace buffer at the call site is `[16]usize` ==
 // 128 B on the recorder's stack; the FP walk reads but doesn't push
-// new frames.
-pub const MAX_FRAMES: u8 = 16;
+// new frames. Shared with lock/mvcc via profile_trace.MAX_FRAMES.
+pub const MAX_FRAMES: u8 = profile_trace.MAX_FRAMES;
 
 const Site = struct {
     // The captured stack, leaf-first. addrs[0] is closest to the alloc
@@ -113,17 +114,8 @@ fn findSlot(addrs: []const usize) ?*Site {
     return null;
 }
 
-// Capture a stack trace starting one frame above the caller (so the
-// recorder itself does not appear in the trace). The buffer lives on
-// the caller's stack -- 128 B at MAX_FRAMES=16. Returns the actual
-// number of frames written into `addrs`.
-fn captureFromHere(first_addr: usize, addrs: *[MAX_FRAMES]usize) u8 {
-    const trace = std.debug.captureCurrentStackTrace(
-        .{ .first_address = first_addr },
-        addrs,
-    );
-    return @intCast(@min(trace.return_addresses.len, MAX_FRAMES));
-}
+// Stack capture is delegated to profile_trace.captureFromHere so the
+// FP-unwind logic stays in one place across all three profile recorders.
 
 pub fn totalAllocs() u64 {
     return total_allocs;
@@ -135,7 +127,7 @@ pub fn totalBytes() u64 {
 
 pub fn recordAlloc(ret_addr: usize, size: usize) void {
     var trace_buf: [MAX_FRAMES]usize = undefined;
-    const n = captureFromHere(ret_addr, &trace_buf);
+    const n = profile_trace.captureFromHere(ret_addr, &trace_buf);
 
     mu.lock();
     defer mu.unlock();
@@ -162,7 +154,7 @@ pub fn recordAlloc(ret_addr: usize, size: usize) void {
 
 pub fn recordFree(ret_addr: usize, size: usize) void {
     var trace_buf: [MAX_FRAMES]usize = undefined;
-    const n = captureFromHere(ret_addr, &trace_buf);
+    const n = profile_trace.captureFromHere(ret_addr, &trace_buf);
 
     mu.lock();
     defer mu.unlock();

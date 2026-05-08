@@ -1072,12 +1072,18 @@ when 'profile'
   # are reported in the dump as a `# WARNING:` line. N must be a
   # power of two (the tables index via `& (N-1)`).
   profile_max = nil
-  # --sample=N: record every Nth event in alloc-profile. Captured
-  # values are scaled by N at record time so doctor / pprof see
-  # estimated totals. Default is no sampling (every event recorded).
-  # Useful for hot allocators where the unsampled stack-walk cost
-  # adds up; otherwise leave it off for accurate counts.
+  # --sample=N: record every Nth event in the runtime profile tables.
+  # Captured values are scaled by N at record time so doctor / pprof
+  # see estimated totals. Default is no sampling for alloc-profile;
+  # auto-bumped to 100 for lock+mvcc when --sync-callstacks is on
+  # (see below) unless the user passes their own --sample value.
   sample_n = nil
+  # --sync-callstacks: turn on per-record stack capture in lock-profile
+  # and mvcc-profile. Off by default because the FP walk costs ~100-500ns
+  # per record and uncontended mutex acquire / MVCC commit fast paths
+  # are 10-50ns; the trace can dominate. Enable when investigating
+  # caller-attribution for a specific lock or cell.
+  sync_callstacks = false
   clear_args = clear_args.reject do |arg|
     if arg =~ /\A--profile-max=(\d+)\z/
       profile_max = $1.to_i
@@ -1089,13 +1095,21 @@ when 'profile'
       sample_n = $1.to_i
       error "--sample=#{sample_n} must be a positive integer" unless sample_n.positive?
       true
+    elsif arg == '--sync-callstacks'
+      sync_callstacks = true
+      true
     else
       false
     end
   end
 
+  # When --sync-callstacks is on but no explicit --sample was given,
+  # default to 100 so the per-record cost stays manageable. Users can
+  # set --sample=1 to opt in to full capture at the full cost.
+  sample_n = 100 if sync_callstacks && sample_n.nil?
+
   source = clear_args.first
-  error "Usage: clear profile <file.cht> [--profile-max=N] [--sample=N] [-- args...]" unless source
+  error "Usage: clear profile <file.cht> [--profile-max=N] [--sample=N] [--sync-callstacks] [-- args...]" unless source
 
   source = File.expand_path(source)
   base_name = File.basename(source, '.cht')
@@ -1135,6 +1149,7 @@ when 'profile'
     "CLEAR_MVCC_PROFILE=#{mvcc_file}",
   ]
   env_parts << "CLEAR_PROFILE_SAMPLE=#{sample_n}" if sample_n
+  env_parts << "CLEAR_PROFILE_SYNC_CALLSTACKS=1" if sync_callstacks
   env_parts << "CLEAR_THREADS=#{ENV['CLEAR_THREADS']}" if ENV['CLEAR_THREADS']
   target_env = env_parts.join(' ')
 

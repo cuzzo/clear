@@ -239,6 +239,46 @@ RSpec.describe PprofConverter do
       # contentions, delay, hold, acquisitions
       expect(values).to eq([5 + 2, 50000 + 10000, 200000, 100 + 50])
     end
+
+    it 'parses caller_trace = "-" as no trace (sync-callstacks off)' do
+      tab = "\t"
+      content = "# lock-profile v3\n" \
+                "0x500#{tab}100#{tab}5#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}-\n"
+      File.write(File.join(@profile_dir, 'locks.txt'), content)
+      out = described_class.convert_locks(@profile_dir, nil)
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      decoded = ProtoTestDecoder.parse(bytes)
+      sample = ProtoTestDecoder.parse(decoded[2].first)
+      stack = ProtoTestDecoder.parse_packed_varints(sample[1].first)
+      expect(stack.length).to eq(1)             # only the lock-pointer leaf
+    end
+
+    it 'parses caller_trace as multi-frame stack (sync-callstacks on)' do
+      tab = "\t"
+      content = "# lock-profile v3\n" \
+                "0x500#{tab}100#{tab}5#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0" \
+                "#{tab}0xC1,0xC2,0xC3\n"
+      File.write(File.join(@profile_dir, 'locks.txt'), content)
+      out = described_class.convert_locks(@profile_dir, nil)
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      decoded = ProtoTestDecoder.parse(bytes)
+      sample = ProtoTestDecoder.parse(decoded[2].first)
+      stack = ProtoTestDecoder.parse_packed_varints(sample[1].first)
+      # leaf (lock 0x500) + 3 caller frames
+      expect(stack.length).to eq(4)
+    end
+
+    it 'emits a separate sample per (lock, caller-trace) row' do
+      tab = "\t"
+      content = "# lock-profile v3\n" \
+                "0x500#{tab}40#{tab}2#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0xA\n" \
+                "0x500#{tab}10#{tab}1#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0#{tab}0xB\n"
+      File.write(File.join(@profile_dir, 'locks.txt'), content)
+      out = described_class.convert_locks(@profile_dir, nil)
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      decoded = ProtoTestDecoder.parse(bytes)
+      expect(decoded[2].length).to eq(2)        # one Sample per (lock,caller) row
+    end
   end
 
   describe '.convert_mvcc' do
@@ -261,6 +301,20 @@ RSpec.describe PprofConverter do
       PROF
       out = described_class.convert_mvcc(@profile_dir, nil)
       expect(out).to eq(File.join(@profile_dir, 'mvcc.pb.gz'))
+    end
+
+    it 'parses caller_trace as multi-frame stack (sync-callstacks on)' do
+      tab = "\t"
+      content = "# mvcc-profile v2\n" \
+                "0x700#{tab}64#{tab}1000#{tab}50#{tab}5#{tab}0#{tab}3#{tab}0xC1,0xC2,0xC3\n"
+      File.write(File.join(@profile_dir, 'mvcc.txt'), content)
+      out = described_class.convert_mvcc(@profile_dir, nil)
+      bytes = Zlib::GzipReader.new(StringIO.new(File.binread(out))).read
+      decoded = ProtoTestDecoder.parse(bytes)
+      sample = ProtoTestDecoder.parse(decoded[2].first)
+      stack = ProtoTestDecoder.parse_packed_varints(sample[1].first)
+      # leaf (cell 0x700) + 3 caller frames
+      expect(stack.length).to eq(4)
     end
   end
 

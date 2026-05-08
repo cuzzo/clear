@@ -125,18 +125,29 @@ module PprofConverter
     src = File.join(profile_dir, 'locks.txt')
     return nil unless File.exist?(src)
 
-    locks = parse_columns(src, 11).map do |f|
+    # lock-profile v3 adds an optional 12th column for the caller
+    # trace ('-' = empty; comma-separated leaf-first when present).
+    # We tab-split because the trace field can contain commas; older
+    # whitespace-only files still parse via the fallback split.
+    locks = parse_tabbed_columns(src, 11).map do |f|
+      trace_field = f[11]
+      caller_trace = (trace_field.nil? || trace_field == '-') ? [] : trace_field.split(',')
       {
         addr: f[0], acquires: f[1].to_i, contended: f[2].to_i,
         total_wait_ns: f[3].to_i, max_wait_ns: f[4].to_i,
         total_hold_ns: f[5].to_i, max_hold_ns: f[6].to_i,
         read_acquires: f[7].to_i, read_contended: f[8].to_i,
         read_total_wait_ns: f[9].to_i, read_max_wait_ns: f[10].to_i,
+        caller_trace: caller_trace,
       }
     end.reject { |l| l[:acquires].zero? && l[:read_acquires].zero? }
     return nil if locks.empty?
 
-    resolved = resolve_addrs(locks.map { |l| l[:addr] }, binary, profile_dir)
+    # Each row already carries its own (lock, caller-trace) identity;
+    # we keep them as-is so pprof renders one Sample per row. The
+    # leaf of every trace is the lock pointer, then the caller frames.
+    all_addrs = locks.flat_map { |l| [l[:addr]] + l[:caller_trace] }.uniq
+    resolved = resolve_addrs(all_addrs, binary, profile_dir)
 
     pb = Pprof::Profile.new
     pb.add_sample_type('contentions',  'count')
@@ -146,17 +157,13 @@ module PprofConverter
     pb.set_period_type('contentions', 'count', 1)
     pb.default_sample_type = 'delay'
 
+    location_ids = build_location_index(pb, all_addrs, resolved, profile_dir)
+
     locks.each do |l|
-      r = resolved[l[:addr]] || {}
-      func = r[:func] || l[:addr]
-      func_id = pb.add_function(name: func, filename: clear_source_path(profile_dir, r[:file]))
-      loc_id  = pb.add_location(
-        function_id: func_id,
-        line: r[:clear_line] || 0,
-        address: parse_addr(l[:addr]),
-      )
+      stack = [location_ids[l[:addr]]] +
+              l[:caller_trace].map { |a| location_ids[a] }.compact
       pb.add_sample(
-        [loc_id],
+        stack,
         [
           l[:contended] + l[:read_contended],
           l[:total_wait_ns] + l[:read_total_wait_ns],
@@ -181,17 +188,23 @@ module PprofConverter
     src = File.join(profile_dir, 'mvcc.txt')
     return nil unless File.exist?(src)
 
-    cells = parse_columns(src, 6).map do |f|
+    # mvcc-profile v2 adds an optional 8th column for the caller
+    # trace; same shape as lock-profile v3.
+    cells = parse_tabbed_columns(src, 6).map do |f|
+      trace_field = f[7]
+      caller_trace = (trace_field.nil? || trace_field == '-') ? [] : trace_field.split(',')
       {
         addr: f[0], struct_size: f[1].to_i, reads: f[2].to_i,
         commits: f[3].to_i, retries: f[4].to_i,
         update_failures: f[5].to_i,
         multi_commits: (f[6] || 0).to_i,
+        caller_trace: caller_trace,
       }
     end.reject { |c| c[:reads].zero? && c[:commits].zero? }
     return nil if cells.empty?
 
-    resolved = resolve_addrs(cells.map { |c| c[:addr] }, binary, profile_dir)
+    all_addrs = cells.flat_map { |c| [c[:addr]] + c[:caller_trace] }.uniq
+    resolved = resolve_addrs(all_addrs, binary, profile_dir)
 
     pb = Pprof::Profile.new
     pb.add_sample_type('reads',     'count')
@@ -201,18 +214,14 @@ module PprofConverter
     pb.set_period_type('operations', 'count', 1)
     pb.default_sample_type = 'commits'
 
+    location_ids = build_location_index(pb, all_addrs, resolved, profile_dir)
+
     cells.each do |c|
-      r = resolved[c[:addr]] || {}
-      func = r[:func] || c[:addr]
-      func_id = pb.add_function(name: func, filename: clear_source_path(profile_dir, r[:file]))
-      loc_id  = pb.add_location(
-        function_id: func_id,
-        line: r[:clear_line] || 0,
-        address: parse_addr(c[:addr]),
-      )
+      stack = [location_ids[c[:addr]]] +
+              c[:caller_trace].map { |a| location_ids[a] }.compact
       cow_bytes = c[:struct_size] * (c[:commits] + c[:retries])
       pb.add_sample(
-        [loc_id],
+        stack,
         [c[:reads], c[:commits], c[:retries], cow_bytes],
         struct_size: c[:struct_size],
         addr: c[:addr]
@@ -249,6 +258,19 @@ module PprofConverter
     File.readlines(path).each_with_object([]) do |line, acc|
       next if line.start_with?('#') || line.strip.empty?
       f = line.strip.split
+      acc << f if f.size >= min_cols
+    end
+  end
+
+  # lock-profile and mvcc-profile use TAB separators so the optional
+  # caller_trace field can carry commas without a column-count
+  # ambiguity. Older single-tab-or-whitespace files still parse via
+  # the fallback. Filters rows shorter than `min_cols`.
+  def parse_tabbed_columns(path, min_cols)
+    File.readlines(path).each_with_object([]) do |line, acc|
+      next if line.start_with?('#') || line.strip.empty?
+      f = line.split("\t").map(&:strip)
+      f = line.strip.split if f.size < min_cols
       acc << f if f.size >= min_cols
     end
   end

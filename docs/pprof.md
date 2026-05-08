@@ -66,10 +66,10 @@ lines (not Zig).
 
 ## Sampling
 
-Stack traces are captured on every alloc by default. For workloads
-where the per-alloc unwind cost matters, `--sample=N` records every
-Nth event and scales the captured values by N so doctor / pprof see
-estimated totals:
+Stack traces for **alloc-profile** are captured on every alloc by
+default. For workloads where the per-alloc unwind cost matters,
+`--sample=N` records every Nth event and scales the captured values
+by N so doctor / pprof see estimated totals:
 
 ```sh
 clear profile foo.cht --sample=100
@@ -78,13 +78,37 @@ clear profile foo.cht --sample=100
 Header records the chosen `sample_n` so consumers can rescale or
 flag the approximation.
 
+## Stack traces for lock and mvcc profiles
+
+`--sync-callstacks` (off by default) turns on per-record stack
+capture in lock-profile and mvcc-profile, so pprof's tree/flame
+views and per-caller attribution work for these profiles too:
+
+```sh
+clear profile foo.cht --sync-callstacks            # auto-bumps --sample to 100
+clear profile foo.cht --sync-callstacks --sample=1  # full capture, full cost
+```
+
+Off by default because the FP walk costs ~100-500ns per record.
+Uncontended mutex acquire is ~10-20ns and MVCC commit fast paths
+are ~20-50ns, so the trace can dominate the operation it's measuring.
+When the flag is set without an explicit `--sample`, we auto-default
+to `--sample=100` to keep the cost manageable.
+
+With `--sync-callstacks` on, each (lock, caller-trace) pair becomes
+its own row in lock-profile, and same for (cell, caller-trace) in
+mvcc-profile. Doctor aggregates rows back to one-per-lock for its
+existing diagnoses; pprof tree views show the per-caller breakdown.
+
 ## Notes
 
 - We do not emit a Mapping message for the binary, so `pprof` prints
   "Main binary filename not available" and skips its own symbolization.
   Function names still appear because we resolve via `addr2line` at
   conversion time.
-- alloc-profile is multi-frame as of v2 (`std.debug.captureCurrentStackTrace`
-  in the runtime, leaf-first comma-separated addrs in `alloc.txt`).
-  lock-profile and mvcc-profile are still single-frame; they will
-  follow the same shape in a future change.
+- alloc-profile captures stacks unconditionally (multi-frame v2,
+  comma-separated leaf-first in `alloc.txt`).
+- lock-profile (v3) and mvcc-profile (v2) capture stacks only when
+  `--sync-callstacks` is on. The 12th column of `locks.txt` and the
+  8th column of `mvcc.txt` carry `-` (off) or comma-separated leaf-
+  first addrs (on). Tab-separated to allow commas in the trace field.

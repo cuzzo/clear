@@ -507,20 +507,53 @@ module Doctor
     return unless File.exist?(lock_prof)
 
     rows = File.readlines(lock_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
-    locks = rows.map do |l|
-      f = l.split
-      # Columns: addr acquires contended total_wait max_wait total_hold max_hold
-      #          read_acquires read_contended read_total_wait read_max_wait
+    # Columns: addr acquires contended total_wait max_wait total_hold max_hold
+    #          read_acquires read_contended read_total_wait read_max_wait
+    #          [caller_trace]   <-- v3, optional. `-` for empty; comma-
+    #                                separated leaf-first when present.
+    # With --sync-callstacks on, multiple rows can share the same `addr`
+    # (one per (lock, caller-trace) pair). We aggregate by addr to
+    # preserve the "one row per mutex" view; the trace data is kept on
+    # the row for future caller-aware drilldowns.
+    rows_parsed = rows.map do |l|
+      f = l.split("\t").map(&:strip)
+      # tab-split for v3 (caller_trace can contain `,`). Older v1/v2
+      # files use whitespace-only separators; fall back to whitespace
+      # split when the tab-split produced too few fields.
+      f = l.strip.split if f.size < 11
       next nil if f.size < 11
+      trace_field = f[11]
+      trace = (trace_field.nil? || trace_field == '-') ? [] : trace_field.split(',')
       {
         addr: f[0], acquires: f[1].to_i, contended: f[2].to_i,
         total_wait_ns: f[3].to_i, max_wait_ns: f[4].to_i,
         total_hold_ns: f[5].to_i, max_hold_ns: f[6].to_i,
         read_acquires: f[7].to_i, read_contended: f[8].to_i,
         read_total_wait_ns: f[9].to_i, read_max_wait_ns: f[10].to_i,
+        trace: trace,
       }
-    end.compact.reject { |c| c[:acquires] == 0 && c[:read_acquires] == 0 }
-        .sort_by { |c| -c[:total_hold_ns] }
+    end.compact
+
+    # Aggregate (lock, trace) rows back to a single row per lock so
+    # the existing "Top locks" view keeps its meaning. Counters sum;
+    # max_* fields take the larger across rows.
+    locks = rows_parsed.group_by { |r| r[:addr] }.map do |addr, group|
+      {
+        addr: addr,
+        acquires: group.sum { |r| r[:acquires] },
+        contended: group.sum { |r| r[:contended] },
+        total_wait_ns: group.sum { |r| r[:total_wait_ns] },
+        max_wait_ns: group.map { |r| r[:max_wait_ns] }.max,
+        total_hold_ns: group.sum { |r| r[:total_hold_ns] },
+        max_hold_ns: group.map { |r| r[:max_hold_ns] }.max,
+        read_acquires: group.sum { |r| r[:read_acquires] },
+        read_contended: group.sum { |r| r[:read_contended] },
+        read_total_wait_ns: group.sum { |r| r[:read_total_wait_ns] },
+        read_max_wait_ns: group.map { |r| r[:read_max_wait_ns] }.max,
+        traces: group.map { |r| r[:trace] }.reject(&:empty?),
+      }
+    end.reject { |c| c[:acquires] == 0 && c[:read_acquires] == 0 }
+       .sort_by { |c| -c[:total_hold_ns] }
 
     return if locks.empty?
 
@@ -743,19 +776,41 @@ module Doctor
     return unless File.exist?(mvcc_prof)
 
     rows = File.readlines(mvcc_prof).reject { |l| l.start_with?('#') || l.strip.empty? }
-    cells = rows.map do |l|
-      f = l.split
+    # Columns (mvcc-profile v2): addr struct_size reads commits retries
+    #   update_failures multi_commits [caller_trace]
+    # caller_trace is `-` when --sync-callstacks is off, comma-separated
+    # leaf-first when on. Pre-v2 files don't have the column; we treat
+    # missing as empty.
+    rows_parsed = rows.map do |l|
+      f = l.split("\t").map(&:strip)
+      f = l.strip.split if f.size < 6
       next nil if f.size < 6
+      trace_field = f[7]
+      trace = (trace_field.nil? || trace_field == '-') ? [] : trace_field.split(',')
       {
         addr: f[0], struct_size: f[1].to_i, reads: f[2].to_i,
         commits: f[3].to_i, retries: f[4].to_i,
         update_failures: f[5].to_i,
-        # AtomicPtr M3.16: optional 7th column for multi-cell commits.
-        # Older mvcc.txt files (pre-M3.16) won't have it; treat as 0.
         multi_commits: (f[6] || 0).to_i,
+        trace: trace,
       }
-    end.compact.reject { |c| c[:reads] == 0 && c[:commits] == 0 }
-        .sort_by { |c| -(c[:reads] + c[:commits]) }
+    end.compact
+
+    # Aggregate (cell, trace) rows back to one row per cell so the
+    # existing diagnoses (COW thrash, MVCC misuse) keep their meaning.
+    cells = rows_parsed.group_by { |r| r[:addr] }.map do |addr, group|
+      {
+        addr: addr,
+        struct_size: group.first[:struct_size],
+        reads: group.sum { |r| r[:reads] },
+        commits: group.sum { |r| r[:commits] },
+        retries: group.sum { |r| r[:retries] },
+        update_failures: group.sum { |r| r[:update_failures] },
+        multi_commits: group.sum { |r| r[:multi_commits] },
+        traces: group.map { |r| r[:trace] }.reject(&:empty?),
+      }
+    end.reject { |c| c[:reads] == 0 && c[:commits] == 0 }
+       .sort_by { |c| -(c[:reads] + c[:commits]) }
 
     return if cells.empty?
 

@@ -1,10 +1,13 @@
 // mvcc-profile.zig — `Versioned(T)` cell telemetry: reads, commits,
 // retries, COW byte volume.
 //
-// Zero overhead when CLEAR_PROFILE == false. Per-cell stats are keyed
-// by cell address (open-addressed hash like alloc-profile and
-// lock-profile). Counters are plain u64; the same relaxed-tearing
-// rationale as the sibling profile modules applies.
+// Zero overhead when CLEAR_PROFILE == false. Default keying: cell pointer
+// (one row per Versioned cell). With `clear profile --sync-callstacks`,
+// each (cell, caller-trace) pair becomes its own row, so the dump shows
+// which call site reads/commits which cell. The flag is off by default
+// because the FP walk costs ~100-500ns per record; an MVCC commit fast
+// path is ~20-50ns, so the trace can dominate. `--sample=N` composes
+// (record every Nth event, scale by N at record time).
 //
 // Why MVCC needs its own profile (not lock-profile): MVCC has no
 // lock. The interesting numbers are different:
@@ -23,6 +26,7 @@
 const std = @import("std");
 const compat = @import("../lib/compat.zig");
 const SpinLock = @import("profile-lock.zig").SpinLock;
+const profile_trace = @import("profile-trace.zig");
 
 // Profile-table size, shared across alloc-profile / lock-profile /
 // mvcc-profile via a single root-level override knob. Default 1024
@@ -56,6 +60,12 @@ pub const CellStats = struct {
                                 // here: 0 for fast-path-success, N for
                                 // contended commits.
     update_failures: u64 = 0,   // returned UpdateRetriesExhausted (gave up)
+
+    // Caller stack captured at first record into this slot. Empty
+    // (caller_trace_count == 0) when --sync-callstacks is off, in
+    // which case the slot's identity is just `addr`. Leaf-first.
+    caller_trace: [profile_trace.MAX_FRAMES]usize = [_]usize{0} ** profile_trace.MAX_FRAMES,
+    caller_trace_count: u8 = 0,
 };
 
 var stats: [MAX_CELLS]CellStats = [_]CellStats{.{}} ** MAX_CELLS;
@@ -67,28 +77,80 @@ var mu: SpinLock = .{};
 // Plain u64; same relaxed-tearing rationale as the per-cell counters.
 var dropped_samples: u64 = 0;
 
-fn findSlot(addr: usize, struct_size: u32) ?*CellStats {
-    const hash = addr *% 0x9E3779B97F4A7C15;
+// Sample stride snapshot. Read once on first record call (under `mu`,
+// no atomic needed) and reused thereafter. 0 = uninitialized sentinel.
+var sample_n: u64 = 0;
+var sample_counter: u64 = 0;
+
+fn ensureSampleN() void {
+    if (sample_n != 0) return;
+    sample_n = profile_trace.sampleStride();
+}
+
+fn hashKey(addr: usize, trace: []const usize) usize {
+    var h: usize = addr *% 0x9E3779B97F4A7C15;
+    for (trace) |a| {
+        h ^= a;
+        h *%= 0x9E3779B97F4A7C15;
+    }
+    return h;
+}
+
+fn keyMatches(slot: *const CellStats, addr: usize, trace: []const usize) bool {
+    if (slot.addr != addr) return false;
+    if (slot.caller_trace_count != trace.len) return false;
+    for (trace, 0..) |a, i| {
+        if (slot.caller_trace[i] != a) return false;
+    }
+    return true;
+}
+
+fn findSlot(addr: usize, struct_size: u32, trace: []const usize) ?*CellStats {
+    const hash = hashKey(addr, trace);
     var idx: usize = @intCast(hash & (MAX_CELLS - 1));
     var probes: usize = 0;
     while (probes < MAX_CELLS) : (probes += 1) {
-        if (stats[idx].addr == addr) return &stats[idx];
-        if (stats[idx].addr == 0) {
-            stats[idx].addr = addr;
-            stats[idx].struct_size = struct_size;
-            return &stats[idx];
+        const slot = &stats[idx];
+        if (slot.addr == 0 and slot.caller_trace_count == 0) {
+            slot.addr = addr;
+            slot.struct_size = struct_size;
+            const n: u8 = @intCast(@min(trace.len, profile_trace.MAX_FRAMES));
+            for (0..n) |i| slot.caller_trace[i] = trace[i];
+            slot.caller_trace_count = n;
+            return slot;
         }
+        if (keyMatches(slot, addr, trace)) return slot;
         idx = (idx + 1) & (MAX_CELLS - 1);
     }
     dropped_samples += 1;
-    return null; // table saturated -- bump CLEAR_PROFILE_MAX_TABLE_ENTRIES
+    return null;
 }
 
-pub inline fn recordRead(addr: usize, struct_size: u32) void {
+fn captureCallerTrace(
+    ret_addr: usize,
+    buf: *[profile_trace.MAX_FRAMES]usize,
+) []const usize {
+    if (!profile_trace.syncCallstacksEnabled()) return &.{};
+    const n = profile_trace.captureFromHere(ret_addr, buf);
+    return buf[0..n];
+}
+
+fn shouldSample() bool {
+    sample_counter +%= 1;
+    return sample_n <= 1 or (sample_counter % sample_n) == 0;
+}
+
+pub noinline fn recordRead(addr: usize, struct_size: u32) void {
+    var trace_buf: [profile_trace.MAX_FRAMES]usize = undefined;
+    const trace = captureCallerTrace(@returnAddress(), &trace_buf);
+
     mu.lock();
     defer mu.unlock();
-    if (findSlot(addr, struct_size)) |s| {
-        s.reads += 1;
+    ensureSampleN();
+    if (!shouldSample()) return;
+
+    if (findSlot(addr, struct_size, trace)) |s| {
+        s.reads += sample_n;
     }
 }
 
@@ -96,15 +158,21 @@ pub inline fn recordRead(addr: usize, struct_size: u32) void {
 /// CAS failures inside the update before the eventual success
 /// (0 for fast-path commits). `committed` distinguishes a winning
 /// commit from a bailed-out UpdateRetriesExhausted.
-pub inline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, committed: bool) void {
+pub noinline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, committed: bool) void {
+    var trace_buf: [profile_trace.MAX_FRAMES]usize = undefined;
+    const trace = captureCallerTrace(@returnAddress(), &trace_buf);
+
     mu.lock();
     defer mu.unlock();
-    if (findSlot(addr, struct_size)) |s| {
-        s.retries += retries;
+    ensureSampleN();
+    if (!shouldSample()) return;
+
+    if (findSlot(addr, struct_size, trace)) |s| {
+        s.retries += retries * sample_n;
         if (committed) {
-            s.commits += 1;
+            s.commits += sample_n;
         } else {
-            s.update_failures += 1;
+            s.update_failures += sample_n;
         }
     }
 }
@@ -116,11 +184,17 @@ pub inline fn recordUpdate(addr: usize, struct_size: u32, retries: u64, committe
 /// "upgrade @shared:versioned -> @indirect:atomic" suggestion
 /// (multi-cell commits forbid the upgrade because AtomicPtr has
 /// no multi-pointer CAS).
-pub inline fn recordMultiCommit(addr: usize, struct_size: u32) void {
+pub noinline fn recordMultiCommit(addr: usize, struct_size: u32) void {
+    var trace_buf: [profile_trace.MAX_FRAMES]usize = undefined;
+    const trace = captureCallerTrace(@returnAddress(), &trace_buf);
+
     mu.lock();
     defer mu.unlock();
-    if (findSlot(addr, struct_size)) |s| {
-        s.multi_commits += 1;
+    ensureSampleN();
+    if (!shouldSample()) return;
+
+    if (findSlot(addr, struct_size, trace)) |s| {
+        s.multi_commits += sample_n;
     }
 }
 
@@ -132,8 +206,12 @@ pub fn dumpToEnvFile() void {
     mu.lock();
     defer mu.unlock();
 
-    var buf: [256]u8 = undefined;
-    _ = compat.writeAllFd(fd, "# mvcc-profile v1\n") catch return;
+    var buf: [4096]u8 = undefined;
+    _ = compat.writeAllFd(fd, "# mvcc-profile v2\n") catch return;
+    if (sample_n > 1) {
+        const sw = std.fmt.bufPrint(&buf, "# sample_n: {d}\n", .{sample_n}) catch return;
+        _ = compat.writeAllFd(fd, sw) catch return;
+    }
     if (dropped_samples > 0) {
         const warn = std.fmt.bufPrint(&buf,
             "# WARNING: {d} samples dropped (cap={d}; rebuild with `clear profile --profile-max=N`)\n",
@@ -141,16 +219,32 @@ pub fn dumpToEnvFile() void {
         _ = compat.writeAllFd(fd, warn) catch return;
     }
     _ = compat.writeAllFd(fd,
-        "# addr\tstruct_size\treads\tcommits\tretries\tupdate_failures\tmulti_commits\n")
+        "# addr\tstruct_size\treads\tcommits\tretries\tupdate_failures\tmulti_commits\tcaller_trace\n")
     catch return;
 
     for (&stats) |*s| {
-        if (s.addr == 0) continue;
+        if (s.addr == 0 and s.caller_trace_count == 0) continue;
         if (s.reads == 0 and s.commits == 0 and s.update_failures == 0 and s.multi_commits == 0) continue;
-        const line = std.fmt.bufPrint(&buf,
-            "0x{x}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\n",
+
+        const head = std.fmt.bufPrint(&buf,
+            "0x{x}\t{d}\t{d}\t{d}\t{d}\t{d}\t{d}\t",
             .{ s.addr, s.struct_size, s.reads, s.commits, s.retries, s.update_failures, s.multi_commits })
         catch continue;
-        _ = compat.writeAllFd(fd, line) catch return;
+        _ = compat.writeAllFd(fd, head) catch return;
+
+        if (s.caller_trace_count == 0) {
+            _ = compat.writeAllFd(fd, "-\n") catch return;
+        } else {
+            var pos: usize = 0;
+            var i: u8 = 0;
+            while (i < s.caller_trace_count) : (i += 1) {
+                const sep = if (i == 0) "" else ",";
+                const slc = std.fmt.bufPrint(buf[pos..], "{s}0x{x}", .{ sep, s.caller_trace[i] }) catch break;
+                pos += slc.len;
+            }
+            const tail = std.fmt.bufPrint(buf[pos..], "\n", .{}) catch continue;
+            pos += tail.len;
+            _ = compat.writeAllFd(fd, buf[0..pos]) catch return;
+        }
     }
 }
