@@ -329,6 +329,47 @@ module EscapeAnalysis
       end
     end
 
+    # ── Condition 9: MUTABLE @list arg crosses a frame boundary ──
+    # When a `@list` is passed to a MUTABLE @list parameter, the callee
+    # treats the receiver as pointer-passed (see needs_pointer_passing?
+    # + the call-site routing in mir_lowering.rb). Inside the callee,
+    # any `.append` allocates the growth buffer; if the receiver's
+    # storage is :frame, the `:receiver_storage` resolver picks the
+    # callee's frameAlloc(). The buffer's lifetime is then bounded by
+    # the *callee's* frame mark (rewound on return), and the caller's
+    # `items.items.ptr` is dangling -- subsequent allocations corrupt
+    # the buffer or the next `.append` segfaults.
+    #
+    # Promote the caller's binding to :heap at the decl so the buffer
+    # outlives any frame, and the cleanup uses heapAlloc consistently.
+    e2_walk_calls(fn.body) do |call|
+      callee_name = call.name.to_s
+      callee_fn = fn_nodes[callee_name] || fn_nodes[callee_name.to_sym]
+      next unless callee_fn&.respond_to?(:params) && callee_fn.params
+
+      args = call.args || []
+      callee_fn.params.each_with_index do |param, idx|
+        next unless param[:mutable]
+        param_t = param[:type]
+        param_t = param_t.is_a?(Type) ? param_t : (Type.new(param_t) rescue nil)
+        next unless param_t && param_t.list_collection?
+
+        arg = args[idx]
+        next unless arg.is_a?(AST::Identifier) && arg.symbol
+
+        next if [:heap, :multiowned, :shared].include?(arg.symbol.storage)
+
+        ti = arg.symbol.type
+        ti = ti.is_a?(Type) ? ti : (Type.new(ti) rescue nil)
+        next unless ti && ti.list_collection?
+
+        arg.symbol.storage = :heap
+        decl = arg.symbol.reg
+        decl.storage = :heap if decl.respond_to?(:storage=)
+        ti.provenance = :heap if ti.respond_to?(:provenance=) && !ti.heap_provenance?
+      end
+    end
+
     { bg_upgraded: bg_upgraded, always_escaped: always_escaped, carry_return_vars: carry_ret_vars }
   end
 

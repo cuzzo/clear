@@ -1,0 +1,74 @@
+# Test: a helper function that does `.append` on a `MUTABLE T[]@list`
+# parameter must allocate the list's growth buffer with a long-lived
+# allocator -- not the helper's own frame allocator.
+#
+# Previously, `append` resolved its allocator via `:receiver_storage`,
+# which read the receiver binding's storage tag (`:frame` for default
+# locals) and emitted `rt.frameAlloc()`. Inside a helper, that's the
+# *helper's* frame mark. The helper's `defer rt.restoreFrameMark()`
+# rewinds those bytes on return -- the caller's `items.items.ptr` is
+# now dangling. Subsequent allocations in the caller advance the
+# bump arena past the freed bytes; the next `.append` in the helper
+# then writes through a dangling pointer to deallocated memory.
+#
+# Repro pattern:
+#   1. Caller declares `MUTABLE items: T[]@list = List[]` (frame).
+#   2. Caller calls a helper that `.append`s a struct.
+#   3. Caller does any `frameAlloc`-using work (e.g. `.toString` /
+#      string concat) so the bump position advances past the freed
+#      buffer bytes.
+#   4. Caller calls the helper again. The buffer has length 1,
+#      capacity > 1 (no grow needed), so `.append` writes to a
+#      dangling `items[1]` pointer -- segfault.
+#
+# Fix: when a helper receives a pointer-passed `@list` parameter,
+# `.append` must use the heap allocator (or any allocator whose
+# lifetime outlives the function call). The `:receiver_storage`
+# resolver at the helper's call site should treat pointer-passed
+# `@list` receivers as heap-stored.
+
+STRUCT TraceItem {
+    step: Int64,
+    kind: Int64,
+    slot: Int64,
+    iBefore: Int64,
+    iAfter: Int64,
+    fBefore: Float64,
+    fAfter: Float64,
+    ip: Int64,
+}
+
+FN record!(MUTABLE items: TraceItem[]@list, step: Int64) RETURNS !Void ->
+    items.append(TraceItem{
+        step: step, kind: 1_i64, slot: 0_i64,
+        iBefore: 0_i64, iAfter: step,
+        fBefore: 0.0, fAfter: 0.0, ip: step * 100_i64
+    });
+    RETURN;
+END
+
+FN burnFrame!(value: Int64) RETURNS !String ->
+    s1 = value.toString() OR "?";
+    s2 = (value * 2_i64).toString() OR "?";
+    s3 = (value + 1000_i64).toString() OR "?";
+    RETURN s1 + ":" + s2 + ":" + s3;
+END
+
+FN main!() RETURNS !Void ->
+    MUTABLE items: TraceItem[]@list = List[];
+    record!(items, 1_i64);
+    junk1 = burnFrame!(42_i64);
+    junk2 = burnFrame!(43_i64);
+    junk3 = burnFrame!(44_i64);
+    record!(items, 2_i64);
+    junk4 = burnFrame!(45_i64);
+    record!(items, 3_i64);
+
+    ASSERT items.length() == 3_i64, "len";
+    ASSERT items[0_i64].step == 1_i64, "first.step (UAF site)";
+    ASSERT items[0_i64].kind == 1_i64, "first.kind";
+    ASSERT items[0_i64].iAfter == 1_i64, "first.iAfter";
+    ASSERT items[1_i64].step == 2_i64, "second.step";
+    ASSERT items[2_i64].step == 3_i64, "third.step";
+    RETURN;
+END

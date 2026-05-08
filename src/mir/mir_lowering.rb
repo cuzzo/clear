@@ -567,10 +567,22 @@ class MIRLowering
       # after the Identifier was annotated (Identifier.storage may be stale).
       needs_heap ||= if node.is_a?(AST::MethodCall)
         obj = node.object
-        obj.storage == :heap || obj.symbol&.reg&.storage == :heap
+        obj.storage == :heap || obj.symbol&.reg&.storage == :heap ||
+          # Pointer-passed `@list` parameter: the receiver crosses a frame
+          # boundary into this function. The caller's frame allocator is
+          # not reachable here -- using *this* function's frameAlloc for
+          # buffer growth would tie the buffer's lifetime to the callee's
+          # frame mark, which gets rewound on return. The caller's
+          # `items.items.ptr` would then be dangling, and a subsequent
+          # `.append` writes through it. Force heap here so the buffer
+          # outlives any frame; the matching escape-promote on the
+          # caller's binding (escape_analysis.rb Condition 9) ensures
+          # the cleanup uses heapAlloc too.
+          (obj.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(obj.name))
       elsif node.mutates_receiver
         first = node.args&.first
-        first&.storage == :heap || first&.symbol&.reg&.storage == :heap
+        first&.storage == :heap || first&.symbol&.reg&.storage == :heap ||
+          (first.is_a?(AST::Identifier) && @current_fn_collection_params&.include?(first.name))
       end
       needs_heap ||= (node.storage == :heap)
       needs_heap ? :heap : :frame
