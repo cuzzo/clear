@@ -1,0 +1,28 @@
+# Test: a `@list` argument can be mutated by a callee that declares
+# the parameter as `MUTABLE xs: T[]@list`. Previously, `T[]@list`
+# parameters lowered to `[]T` slices regardless of MUTABLE, so any
+# `.append`/`.pop` inside the callee failed compilation:
+#
+#   no field or member function named 'append' in '[]i64'
+#
+# The fix is in `src/ast/type.rb`'s `compute_zig_type`: a MUTABLE
+# `@list` (or any `@list`) parameter must lower to a pointer to the
+# underlying ArrayListUnmanaged so methods like `.append` resolve.
+
+FN pushTwice!(MUTABLE xs: Int64[]@list, value: Int64) RETURNS !Void ->
+    xs.append(value);
+    xs.append(value + 1_i64);
+    RETURN;
+END
+
+FN main!() RETURNS !Void ->
+    MUTABLE xs: Int64[]@list = List[];
+    pushTwice!(xs, 10_i64);
+    pushTwice!(xs, 20_i64);
+    ASSERT xs.length() == 4_i64, "list length after appends";
+    ASSERT xs[0_i64] == 10_i64, "first appended";
+    ASSERT xs[1_i64] == 11_i64, "second appended";
+    ASSERT xs[2_i64] == 20_i64, "third appended";
+    ASSERT xs[3_i64] == 21_i64, "fourth appended";
+    RETURN;
+END

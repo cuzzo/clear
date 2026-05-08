@@ -1516,9 +1516,34 @@ class MIRLowering
       # CopyNode/MoveNode wrappers (a COPY into a borrow param is NOT a take).
       takes = a.respond_to?(:was_moved) && a.was_moved
       arg = hoist_alloc(lower(a), a, err_cleanup: takes)
-      # Array/List args: convert to slice via .items (skip strings - already []const u8)
+      # Array/List args: convert to slice via .items (skip strings - already []const u8).
+      #
+      # Exception: when the callee declares `MUTABLE xs: T[]@list`, pass
+      # the caller's ArrayList by pointer (`&xs`) instead of `xs.items`.
+      # `.items` is a slice view -- it cannot grow the buffer or update
+      # the caller's `len`, so any `.append`/`.pop` inside the callee
+      # would silently fail to propagate back. Pointer-pass mirrors the
+      # treatment of `@map`/`@pool` mutable params and lets Zig's
+      # auto-deref handle the in-callee `xs.append(...)` / `xs.items`
+      # access uniformly.
       ti = a.type_info
-      if ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
+      callee_param = nil
+      if callee_sig
+        params_list = callee_sig.respond_to?(:params) ? callee_sig.params : (callee_sig[:params] || [])
+        callee_param = params_list[idx]
+      end
+      callee_wants_mutable_list =
+        callee_param && callee_param[:mutable] &&
+        callee_param[:type].respond_to?(:list_collection?) &&
+        callee_param[:type].list_collection?
+
+      if callee_wants_mutable_list && a.is_a?(AST::Identifier)
+        if @current_fn_collection_params&.include?(a.name) || @current_bg_pointer_captures&.include?(a.name)
+          arg
+        else
+          MIR::AddressOf.new(arg)
+        end
+      elsif ti&.array? && !ti&.string? && !ti&.pool? && !a.is_a?(AST::CopyNode) && !a.is_a?(AST::MoveNode)
         MIR::ItemsAccess.new(arg, true)
       elsif ti.is_a?(Type) && Type.new(ti).needs_pointer_passing?
         # Skip & for params already received as pointers (prevents double-& in recursive calls)
